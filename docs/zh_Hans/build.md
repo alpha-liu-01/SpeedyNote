@@ -14,12 +14,7 @@
 
 ```shell
 git clone https://github.com/alpha-liu-01/SpeedyNote.git
-```
-
-如果可以的话，您也可以使用`ssh`拉取。
-
-```shell
-git clone git@github.com:alpha-liu-01/SpeedyNote.git
+git submodule update --init --recursive
 ```
 
 当然，您也可以尝试使用`浅层拉取`，加上`--depth 1`参数，不再赘述。如果您有一个趁手的编辑器，或者是集成开发工具，便是更好。

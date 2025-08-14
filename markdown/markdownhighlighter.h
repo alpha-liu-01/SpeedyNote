@@ -29,7 +29,6 @@
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
-#include <QWidget>
 
 #ifdef QT_QUICK_LIB
 #include <QQuickTextDocument>
@@ -227,9 +226,6 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
     void clearDirtyBlocks();
     void setHighlightingOptions(const HighlightingOptions options);
     void initHighlightingRules();
-    
-    // Dark mode support
-    bool isDarkMode() const;
 
    Q_SIGNALS:
     void highlightingFinished();

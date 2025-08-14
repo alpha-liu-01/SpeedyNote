@@ -1,0 +1,3 @@
+[submodule "markdown"]
+	path = markdown
+	url = https://github.com/pbek/qmarkdowntextedit.git
