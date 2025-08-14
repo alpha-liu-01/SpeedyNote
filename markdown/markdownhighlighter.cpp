@@ -1,3 +1,4 @@
+
 /*
  * MIT License
  *
@@ -27,7 +28,6 @@
 
 #include "markdownhighlighter.h"
 
-#include <QApplication>
 #include <QDebug>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
@@ -192,18 +192,7 @@ void MarkdownHighlighter::initTextFormats(int defaultFontSize) {
 
     // set character formats for headlines
     format = QTextCharFormat();
-    
-    // Detect dark mode by checking if any highlighter instance has a dark background
-    bool isDarkMode = false;
-    if (QApplication::instance()) {
-        // Check the application's default palette
-        QPalette palette = QApplication::palette();
-        isDarkMode = palette.color(QPalette::Window).lightness() < 128;
-    }
-    
-    // Use bright blue for dark mode, dark blue for light mode
-    QColor headingColor = isDarkMode ? QColor(102, 204, 255) : QColor(2, 69, 150);
-    format.setForeground(headingColor);
+    format.setForeground(QColor(2, 69, 150));
     format.setFontWeight(QFont::Bold);
     format.setFontPointSize(defaultFontSize * 1.6);
     _formats[H1] = format;
@@ -2928,20 +2917,5 @@ void MarkdownHighlighter::setHighlightingOptions(
     const HighlightingOptions options) {
     _highlightingOptions = options;
 }
-
-/**
- * Detects if the application is in dark mode by checking the parent widget's palette
- */
-bool MarkdownHighlighter::isDarkMode() const {
-    if (!document()) return false;
-    
-    QWidget *parentWidget = qobject_cast<QWidget*>(document()->parent());
-    if (!parentWidget) return false;
-    
-    // Check if the window background is dark
-    return parentWidget->palette().color(QPalette::Window).lightness() < 128;
-}
-
-
 
 #undef MH_SUBSTR
