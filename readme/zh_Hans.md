@@ -48,14 +48,6 @@ wget -O- https://apt.speedynote.org/speedynote-release-key.gpg | sudo gpg --dear
 ```
 这一行命令来直接安装SpeedyNote。并在后续直接用`sudo apt update && sudo apt upgrade` 来更新。
 
-# 图片
-
----
-
-![main](https://i.imgur.com/5PY0LhO.png)
-
-![acer](https://i.imgur.com/f7CrRvN.jpeg)
-
 # 已知特性和缺陷
 
 --- 
@@ -129,18 +121,6 @@ SOFTWARE.
 # 构建
 
 ---
-
-#### Windows
-
-请访问[Windows构建文档](../docs/zh_Hans/SpeedyNote_Windows_Build_zh-Hans.md)
-
-
-
-#### Darwin
-
-请访问[macOS构建文档](../docs/zh_Hans/SpeedyNote_Darwin_Build_zh-Hans.md)
-
-
 
 #### Linux
 
