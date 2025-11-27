@@ -32,7 +32,7 @@
 #### Windows
 
 直接安装自解压程序即可。Windows 7/8
-用户请使用Legacy版本 [32-bit Version built with Qt5](https://www.speedynote.org)
+用户请使用Legacy版本。
 
 #### Mac OS
 
