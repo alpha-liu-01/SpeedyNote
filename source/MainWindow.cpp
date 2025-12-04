@@ -1233,6 +1233,12 @@ void MainWindow::setupUi() {
 }
 
 MainWindow::~MainWindow() {
+    // ✅ MEMORY SAFETY: Wait for any pending async save to complete
+    // This prevents the async task from running after MainWindow is destroyed
+    // (even though it captures data by value, this ensures clean shutdown)
+    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
+        concurrentSaveFuture.waitForFinished();
+    }
 
     saveButtonMappings();  // ✅ Save on exit, as backup
     

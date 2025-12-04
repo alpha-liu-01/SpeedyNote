@@ -5342,14 +5342,26 @@ void InkCanvas::insertPageIntoCache(int pageNumber, const QPixmap &pixmap) {
     // This avoids the save-invalidate-reload cycle by keeping fresh data in memory
     QMutexLocker locker(&noteCacheMutex);
     
+    // ✅ MEMORY SAFETY: First remove this page from access order to prevent self-eviction
+    // This also ensures the access order stays in sync with cache state
+    noteCacheAccessOrder.removeAll(pageNumber);
+    
     // Ensure cache doesn't exceed limit (evict LRU if needed)
     if (noteCache.count() >= 6 && !noteCache.contains(pageNumber)) {
         // LRU eviction: remove the least recently used page
-        if (!noteCacheAccessOrder.isEmpty()) {
+        bool evicted = false;
+        while (!noteCacheAccessOrder.isEmpty() && !evicted) {
             int pageToEvict = noteCacheAccessOrder.takeFirst();
-            noteCache.remove(pageToEvict);
-        } else {
-            // Fallback if access order is somehow empty
+            // ✅ SAFETY: Only evict if the page is actually in cache
+            // (handles edge case where access order is out of sync)
+            if (noteCache.contains(pageToEvict)) {
+                noteCache.remove(pageToEvict);
+                evicted = true;
+            }
+        }
+        
+        // Fallback if access order was empty or out of sync
+        if (!evicted && noteCache.count() >= 6) {
             auto keys = noteCache.keys();
             if (!keys.isEmpty()) {
                 noteCache.remove(keys.first());
@@ -5358,11 +5370,10 @@ void InkCanvas::insertPageIntoCache(int pageNumber, const QPixmap &pixmap) {
     }
     
     // Insert or update the page in cache
-    // QCache takes ownership of the pointer
+    // QCache takes ownership of the pointer and deletes old value if key exists
     noteCache.insert(pageNumber, new QPixmap(pixmap));
     
-    // Update LRU order (move to end = most recently used)
-    noteCacheAccessOrder.removeAll(pageNumber);
+    // Add to end of access order (most recently used)
     noteCacheAccessOrder.append(pageNumber);
 }
 
