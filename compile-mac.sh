@@ -313,7 +313,7 @@ create_app_bundle() {
         # Extract version from CMakeLists.txt
         local VERSION=$(grep "project(SpeedyNote VERSION" CMakeLists.txt | sed -n 's/.*VERSION \([0-9.]*\).*/\1/p')
         if [[ -z "$VERSION" ]]; then
-            VERSION="0.11.1"
+            VERSION="0.11.2"
         fi
         
         # Create Info.plist
@@ -590,7 +590,7 @@ EOF
     # Get version from CMakeLists.txt or use default
     VERSION=$(grep "project(SpeedyNote VERSION" CMakeLists.txt | sed -n 's/.*VERSION \([0-9.]*\).*/\1/p')
     if [[ -z "$VERSION" ]]; then
-        VERSION="0.11.1"
+        VERSION="0.11.2"
     fi
     
     DMG_NAME="SpeedyNote_v${VERSION}_macOS.dmg"

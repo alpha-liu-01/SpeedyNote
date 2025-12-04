@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="0.11.1"
+PKGVER="0.11.2"
 PKGREL="1"
 MAINTAINER="SpeedyNote Team <speedynote@example.com>"
 DESCRIPTION="A fast note-taking application with PDF annotation support and controller input"
