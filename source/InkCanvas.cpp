@@ -4390,8 +4390,8 @@ void InkCanvas::removeHighlightAtSelection() {
         return; // No selection
     }
     
-    // Get the combined bounding box of the selection
-    QRectF selectionBoundingBox;
+    // Build the list of individual text box rects from the current selection
+    QList<QRectF> selectionRects;
     int selectionPage = -1;
     
     for (int i = 0; i < selectedTextBoxes.size(); ++i) {
@@ -4411,27 +4411,23 @@ void InkCanvas::removeHighlightAtSelection() {
                 selectionPage = pageNumber;
             }
             
-            QRectF bbox = textBox->boundingBox();
-            if (selectionBoundingBox.isNull()) {
-                selectionBoundingBox = bbox;
-            } else {
-                selectionBoundingBox = selectionBoundingBox.united(bbox);
-            }
+            // Store the individual text box rect
+            selectionRects.append(textBox->boundingBox());
         }
     }
     
-    if (selectionPage == -1) {
+    if (selectionPage == -1 || selectionRects.isEmpty()) {
         return;
     }
     
-    // Remove highlights that intersect with the selection
+    // Remove highlights whose actual text box rects intersect with the selection's rects
     bool removed = false;
     QStringList removedHighlightIds; // Track IDs for cascade deletion of notes
     
     for (int i = persistentHighlights.size() - 1; i >= 0; --i) {
         const TextHighlight &highlight = persistentHighlights[i];
         if (highlight.pageNumber == selectionPage && 
-            highlight.boundingBox.intersects(selectionBoundingBox)) {
+            doTextBoxRectsOverlap(highlight.textBoxRects, selectionRects)) {
             // Track this highlight's ID for note cleanup
             if (!highlight.markdownWindowId.isEmpty()) {
                 removedHighlightIds.append(highlight.id);
@@ -4445,7 +4441,7 @@ void InkCanvas::removeHighlightAtSelection() {
     for (const QString &highlightId : removedHighlightIds) {
         for (int i = markdownNotes.size() - 1; i >= 0; --i) {
             if (markdownNotes[i].highlightId == highlightId) {
-                qDebug() << "Cascade deleting orphaned note:" << markdownNotes[i].id;
+                // qDebug() << "Cascade deleting orphaned note:" << markdownNotes[i].id;
                 markdownNotes.removeAt(i);
             }
         }
@@ -4469,14 +4465,37 @@ void InkCanvas::removeHighlightAtSelection() {
     }
 }
 
+// Helper to check if any text box rects refer to the SAME text box (not just geometric overlap)
+// This prevents false positives when different rows have geometrically overlapping bounding boxes
+// due to text box heights being larger than line spacing.
+bool InkCanvas::doTextBoxRectsOverlap(const QList<QRectF> &rects1, const QList<QRectF> &rects2) const {
+    // Tolerance for floating point comparison (text boxes from the same source should match exactly or very closely)
+    const qreal tolerance = 2.0;
+    
+    // Check if any rect from rects1 is approximately equal to any rect from rects2
+    // (i.e., they represent the SAME text box, not just geometrically overlapping ones)
+    for (const QRectF &rect1 : rects1) {
+        for (const QRectF &rect2 : rects2) {
+            // Check if rectangles are approximately the same (same text box)
+            if (qAbs(rect1.x() - rect2.x()) < tolerance &&
+                qAbs(rect1.y() - rect2.y()) < tolerance &&
+                qAbs(rect1.width() - rect2.width()) < tolerance &&
+                qAbs(rect1.height() - rect2.height()) < tolerance) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Check if the current selection overlaps with any persistent highlight
 bool InkCanvas::isSelectionHighlighted() const {
     if (selectedTextBoxes.isEmpty()) {
         return false;
     }
     
-    // Get the combined bounding box of the selection
-    QRectF selectionBoundingBox;
+    // Build the list of individual text box rects from the current selection
+    QList<QRectF> selectionRects;
     int selectionPage = -1;
     
     for (int i = 0; i < selectedTextBoxes.size(); ++i) {
@@ -4496,23 +4515,19 @@ bool InkCanvas::isSelectionHighlighted() const {
                 selectionPage = pageNumber;
             }
             
-            QRectF bbox = textBox->boundingBox();
-            if (selectionBoundingBox.isNull()) {
-                selectionBoundingBox = bbox;
-            } else {
-                selectionBoundingBox = selectionBoundingBox.united(bbox);
-            }
+            // Store the individual text box rect
+            selectionRects.append(textBox->boundingBox());
         }
     }
     
-    if (selectionPage == -1) {
+    if (selectionPage == -1 || selectionRects.isEmpty()) {
         return false;
     }
     
-    // Check if any highlight intersects with the selection
+    // Check if any highlight's actual text box rects match the selection's rects
     for (const TextHighlight &highlight : persistentHighlights) {
         if (highlight.pageNumber == selectionPage && 
-            highlight.boundingBox.intersects(selectionBoundingBox)) {
+            doTextBoxRectsOverlap(highlight.textBoxRects, selectionRects)) {
             return true;
         }
     }
@@ -4556,8 +4571,8 @@ QString InkCanvas::addMarkdownNoteFromSelection() {
     // Check if selection is already highlighted
     TextHighlight *existingHighlight = nullptr;
     
-    // Get the combined bounding box of the selection
-    QRectF selectionBoundingBox;
+    // Build the list of individual text box rects from the current selection
+    QList<QRectF> selectionRects;
     int selectionPage = -1;
     
     for (int i = 0; i < selectedTextBoxes.size(); ++i) {
@@ -4577,20 +4592,16 @@ QString InkCanvas::addMarkdownNoteFromSelection() {
                 selectionPage = pageNumber;
             }
             
-            QRectF bbox = textBox->boundingBox();
-            if (selectionBoundingBox.isNull()) {
-                selectionBoundingBox = bbox;
-            } else {
-                selectionBoundingBox = selectionBoundingBox.united(bbox);
-            }
+            // Store the individual text box rect
+            selectionRects.append(textBox->boundingBox());
         }
     }
     
-    // Find existing highlight that intersects with the selection
-    if (selectionPage != -1) {
+    // Find existing highlight whose actual text box rects intersect with the selection's rects
+    if (selectionPage != -1 && !selectionRects.isEmpty()) {
         for (int i = 0; i < persistentHighlights.size(); ++i) {
             if (persistentHighlights[i].pageNumber == selectionPage && 
-                persistentHighlights[i].boundingBox.intersects(selectionBoundingBox)) {
+                doTextBoxRectsOverlap(persistentHighlights[i].textBoxRects, selectionRects)) {
                 existingHighlight = &persistentHighlights[i];
                 break;
             }

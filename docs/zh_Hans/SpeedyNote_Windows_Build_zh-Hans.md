@@ -2,9 +2,9 @@
 
 ### 您需要准备的东西
 
-- Windows 10 1809+ 或者 Windows 11
+- Windows 10 1809+ 或者 Windows 11 (x86_64) / Windows 11 (arm64)
 
-- MSYS2 官方的 AMD64版
+- MSYS2
 
 - InnoSetup
 
@@ -24,7 +24,7 @@
 
 ```bash
 pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-pkgconf
-pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools
+pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw-w64-clang-x86_64-qt6-declarative mingw-w64-clang-x86_64-qt6-translations
 pacman -S mingw-w64-clang-x86_64-poppler mingw-w64-clang-x86_64-poppler-qt6
 pacman -S mingw-w64-clang-x86_64-SDL2
 ```

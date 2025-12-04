@@ -598,6 +598,9 @@ private:
     void showPdfTextSelectionMenu(const QPoint &position); // Show context menu for PDF text selection
     QList<Poppler::TextBox*> getTextBoxesInSelection(const QPointF &start, const QPointF &end); // Get text boxes in selection area
     
+    // Helper to check if individual text box rects truly overlap (not just bounding boxes)
+    bool doTextBoxRectsOverlap(const QList<QRectF> &rects1, const QList<QRectF> &rects2) const;
+    
     // Intelligent PDF cache helper methods
     void renderPdfPageToCache(int pageNumber); // Render a single page and add to cache
     void renderPdfPageToCacheThreadSafe(int pageNumber, Poppler::Document* sharedDocument); // Thread-safe render with separate document instance
