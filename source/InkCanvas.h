@@ -174,8 +174,9 @@ public:
     QString getDisplayPath() const; // ✅ Get display path (.spn package or folder)
     void syncSpnPackage(); // ✅ Sync changes back to .spn file
     
-    // ✅ Cache invalidation helper
+    // ✅ Cache management helpers
     void invalidateBothPagesCache(int pageNumber); // Invalidate both pages of a combined canvas
+    void insertPageIntoCache(int pageNumber, const QPixmap &pixmap); // Insert a page directly into cache (for smooth page switching)
 
     void setLastActivePage(int page) { lastActivePage = page; }
     int getLastActivePage() const { return lastActivePage; }

@@ -1750,6 +1750,12 @@ void MainWindow::saveCurrentPageConcurrent() {
     
     if (saveFolder.isEmpty()) return;
     
+    // ✅ OPTIMIZATION: Wait for any previous save to complete first
+    // This prevents too many concurrent saves from piling up
+    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
+        concurrentSaveFuture.waitForFinished();
+    }
+    
     // Create a copy of the buffer for concurrent saving
     QPixmap bufferCopy = canvas->getBuffer();
     
@@ -1792,60 +1798,65 @@ void MainWindow::saveCurrentPageConcurrent() {
         }
     }
     
-    // Run the save operation concurrently
-    concurrentSaveFuture = QtConcurrent::run([saveFolder, pageNumber, bufferCopy, notebookId, isCombinedCanvas, singlePageHeight]() {
-        if (isCombinedCanvas) {
-            // Split the combined canvas and save both halves
-            int bufferWidth = bufferCopy.width();
-            
-            // Save current page (top half)
+    // ✅ OPTIMIZATION: Split buffer and populate cache IMMEDIATELY (main thread, fast memory ops)
+    // This eliminates the save-invalidate-reload cycle - new page can use cached data instantly
+    int bufferWidth = bufferCopy.width();
+    QPixmap topPagePixmap, bottomPagePixmap;
+    
+    if (isCombinedCanvas) {
+        // Split into top and bottom halves
+        topPagePixmap = bufferCopy.copy(0, 0, bufferWidth, singlePageHeight);
+        bottomPagePixmap = bufferCopy.copy(0, singlePageHeight, bufferWidth, singlePageHeight);
+        
+        // Populate cache immediately - this makes data available for the next combined canvas
+        canvas->insertPageIntoCache(pageNumber, topPagePixmap);
+        canvas->insertPageIntoCache(pageNumber + 1, bottomPagePixmap);
+    } else {
+        // Single page - cache the whole buffer
+        canvas->insertPageIntoCache(pageNumber, bufferCopy);
+    }
+    
+    // Mark as not edited BEFORE async save starts (data is safe in cache now)
+    canvas->setEdited(false);
+    
+    // ✅ OPTIMIZATION: Run disk I/O asynchronously - page switch proceeds immediately
+    // The cache already has fresh data, so loadPage() won't need to wait for disk
+    if (isCombinedCanvas) {
+        concurrentSaveFuture = QtConcurrent::run([saveFolder, pageNumber, topPagePixmap, bottomPagePixmap, notebookId]() {
+            // Save top page (current page)
             QString currentFilePath = saveFolder + QString("/%1_%2.png").arg(notebookId).arg(pageNumber, 5, 10, QChar('0'));
-            QPixmap currentPageBuffer = bufferCopy.copy(0, 0, bufferWidth, singlePageHeight);
-            QImage currentImage(currentPageBuffer.size(), QImage::Format_ARGB32);
+            QImage currentImage(topPagePixmap.size(), QImage::Format_ARGB32);
             currentImage.fill(Qt::transparent);
             {
                 QPainter painter(&currentImage);
-                painter.drawPixmap(0, 0, currentPageBuffer);
+                painter.drawPixmap(0, 0, topPagePixmap);
             }
             currentImage.save(currentFilePath, "PNG");
             
-            // Save next page (bottom half) - DIRECT SAVE like top half
-            // ✅ FIX: Don't merge, just save directly to properly handle erasure/deletion
-            // The buffer already contains the complete state of both pages after loading
+            // Save bottom page (next page)
             int nextPageNumber = pageNumber + 1;
             QString nextFilePath = saveFolder + QString("/%1_%2.png").arg(notebookId).arg(nextPageNumber, 5, 10, QChar('0'));
-            QPixmap nextPageBuffer = bufferCopy.copy(0, singlePageHeight, bufferWidth, singlePageHeight);
-            QImage nextImage(nextPageBuffer.size(), QImage::Format_ARGB32);
+            QImage nextImage(bottomPagePixmap.size(), QImage::Format_ARGB32);
             nextImage.fill(Qt::transparent);
             {
                 QPainter painter(&nextImage);
-                painter.drawPixmap(0, 0, nextPageBuffer);
+                painter.drawPixmap(0, 0, bottomPagePixmap);
             }
             nextImage.save(nextFilePath, "PNG");
-        } else {
-            // Standard single page save
+        });
+    } else {
+        concurrentSaveFuture = QtConcurrent::run([saveFolder, pageNumber, bufferCopy, notebookId]() {
             QString filePath = saveFolder + QString("/%1_%2.png").arg(notebookId).arg(pageNumber, 5, 10, QChar('0'));
-            
             QImage image(bufferCopy.size(), QImage::Format_ARGB32);
             image.fill(Qt::transparent);
             QPainter painter(&image);
             painter.drawPixmap(0, 0, bufferCopy);
             image.save(filePath, "PNG");
-        }
-    });
-    
-    // ✅ CRITICAL: Wait for save to complete, then invalidate cache
-    // This ensures files are fully written before cache tries to reload them
-    concurrentSaveFuture.waitForFinished();
-    
-    // Invalidate cache after saving
-    if (isCombinedCanvas) {
-        // Always invalidate both pages to ensure they're reloaded from disk as single pages
-        canvas->invalidateBothPagesCache(pageNumber);
+        });
     }
     
-    // Mark as not edited since we're saving
-    canvas->setEdited(false);
+    // ✅ NO waitForFinished() - page switch proceeds immediately!
+    // ✅ NO invalidateBothPagesCache() - cache already has fresh data!
 }
 
 void MainWindow::selectBackground() {
@@ -8121,6 +8132,12 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
 #endif
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+    // ✅ OPTIMIZATION: Wait for any pending async save to complete before closing
+    // This ensures data saved during page switching is fully written to disk
+    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
+        concurrentSaveFuture.waitForFinished();
+    }
+    
     // Auto-save all tabs before closing the program
     if (canvasStack) {
         for (int i = 0; i < canvasStack->count(); ++i) {
@@ -8746,12 +8763,9 @@ void MainWindow::loadMouseDialMappings() {
 
 void MainWindow::onAutoScrollRequested(int direction)
 {
-    // If there's a pending concurrent save, wait for it to complete before autoscrolling
-    // This ensures that content is saved before switching pages
-    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
-        // Wait for the save to complete (this should be very fast since it's just file I/O)
-        concurrentSaveFuture.waitForFinished();
-    }
+    // ✅ OPTIMIZATION: No need to wait for concurrent save anymore!
+    // saveCurrentPageConcurrent() now populates cache immediately before async disk I/O,
+    // so loadPage() will find fresh data in cache without waiting for disk writes
     
     if (direction > 0) {
         goToNextPage();

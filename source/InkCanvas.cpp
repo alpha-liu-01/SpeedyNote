@@ -2210,8 +2210,10 @@ void InkCanvas::saveToFile(int pageNumber) {
         }
         nextImage.save(nextFilePath, "PNG");
         
-        // ❌ REMOVED: Cache updates here are redundant since cache gets invalidated after save
-        // Cache will be reloaded fresh from disk when needed
+        // ✅ OPTIMIZATION: Populate cache with split pages to avoid reload from disk
+        // This eliminates the save-invalidate-reload cycle for smooth page switching
+        insertPageIntoCache(pageNumber, currentPageBuffer);
+        insertPageIntoCache(nextPageNumber, nextPageBuffer);
         
     } else {
         // Standard single page save
@@ -2222,8 +2224,8 @@ void InkCanvas::saveToFile(int pageNumber) {
         painter.drawPixmap(0, 0, buffer);
         image.save(filePath, "PNG");
         
-        // ❌ REMOVED: Cache updates here are redundant since cache gets invalidated after save
-        // Cache will be reloaded fresh from disk when needed
+        // ✅ OPTIMIZATION: Populate cache with saved page
+        insertPageIntoCache(pageNumber, buffer);
     }
     
     edited = false;
@@ -3236,22 +3238,11 @@ void InkCanvas::updateInertiaScroll() {
 void InkCanvas::onAutoSaveTimeout() {
     // ✅ Perform incremental auto-save to reduce page-switch burden
     if (edited && !saveFolder.isEmpty()) {
-        // Check if this is a combined canvas to determine if cache invalidation is needed
-        bool isCombinedCanvas = false;
-        if (!backgroundImage.isNull() && buffer.height() >= backgroundImage.height() * 1.8) {
-            isCombinedCanvas = true;
-        } else if (buffer.height() > 1400) { // Fallback heuristic for tall buffers
-            isCombinedCanvas = true;
-        }
-        
         saveToFile(lastActivePage);
         saveCombinedWindowsForPage(lastActivePage);
         
-        // ✅ CACHE FIX: Invalidate cache after auto-save (just like manual save does)
-        // This ensures that navigating to previous/next combined pages shows the auto-saved edits
-        if (isCombinedCanvas) {
-            invalidateBothPagesCache(lastActivePage);
-        }
+        // ✅ OPTIMIZATION: No need to invalidate cache - saveToFile() now populates cache
+        // with fresh data directly, eliminating the save-invalidate-reload cycle
         
         edited = false;
         
@@ -5344,6 +5335,35 @@ void InkCanvas::invalidateBothPagesCache(int pageNumber) {
     
     noteCache.remove(pageNumber + 1);
     noteCacheAccessOrder.removeAll(pageNumber + 1);
+}
+
+void InkCanvas::insertPageIntoCache(int pageNumber, const QPixmap &pixmap) {
+    // ✅ OPTIMIZATION: Insert a page directly into cache for smooth page switching
+    // This avoids the save-invalidate-reload cycle by keeping fresh data in memory
+    QMutexLocker locker(&noteCacheMutex);
+    
+    // Ensure cache doesn't exceed limit (evict LRU if needed)
+    if (noteCache.count() >= 6 && !noteCache.contains(pageNumber)) {
+        // LRU eviction: remove the least recently used page
+        if (!noteCacheAccessOrder.isEmpty()) {
+            int pageToEvict = noteCacheAccessOrder.takeFirst();
+            noteCache.remove(pageToEvict);
+        } else {
+            // Fallback if access order is somehow empty
+            auto keys = noteCache.keys();
+            if (!keys.isEmpty()) {
+                noteCache.remove(keys.first());
+            }
+        }
+    }
+    
+    // Insert or update the page in cache
+    // QCache takes ownership of the pointer
+    noteCache.insert(pageNumber, new QPixmap(pixmap));
+    
+    // Update LRU order (move to end = most recently used)
+    noteCacheAccessOrder.removeAll(pageNumber);
+    noteCacheAccessOrder.append(pageNumber);
 }
 
 QList<PictureWindow*> InkCanvas::loadPictureWindowsForPage(int pageNumber) {
