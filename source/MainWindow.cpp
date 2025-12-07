@@ -1776,17 +1776,6 @@ void MainWindow::saveCurrentPageConcurrent() {
         isCombinedCanvas = true;
     }
     
-    // Save windows using the appropriate strategy (this must be done on the main thread)
-    if (isCombinedCanvas) {
-        // Use combined window saving logic for cross-page coordinate adjustments
-        canvas->saveCombinedWindowsForPage(pageNumber);
-    } else {
-        // Use standard single-page window saving (pictures only)
-        if (canvas->getPictureManager()) {
-            canvas->getPictureManager()->saveWindowsForPage(pageNumber);
-        }
-    }
-    
     // ✅ Get notebook ID from JSON metadata before concurrent operation
     QString notebookId = canvas->getNotebookId();
     if (notebookId.isEmpty()) {
@@ -1824,6 +1813,20 @@ void MainWindow::saveCurrentPageConcurrent() {
     
     // Mark as not edited BEFORE async save starts (data is safe in cache now)
     canvas->setEdited(false);
+    
+    // ✅ OPTIMIZATION: Defer window save to next event loop iteration
+    // This allows the page switch to complete first, making the UI feel more responsive
+    // The window data is still valid because we haven't returned from this function yet
+    QTimer::singleShot(0, this, [this, canvas, pageNumber, isCombinedCanvas]() {
+        if (!canvas) return;
+        if (isCombinedCanvas) {
+            canvas->saveCombinedWindowsForPage(pageNumber);
+        } else {
+            if (canvas->getPictureManager()) {
+                canvas->getPictureManager()->saveWindowsForPage(pageNumber);
+            }
+        }
+    });
     
     // ✅ OPTIMIZATION: Run disk I/O asynchronously - page switch proceeds immediately
     // The cache already has fresh data, so loadPage() won't need to wait for disk
@@ -3274,6 +3277,13 @@ void MainWindow::switchTab(int index) {
     }
 
     if (index >= 0 && index < canvasStack->count()) {
+        // ✅ OPTIMIZATION: Flush any pending metadata save from the previous tab
+        // before switching to ensure data is persisted
+        InkCanvas *prevCanvas = currentCanvas();
+        if (prevCanvas) {
+            prevCanvas->flushPendingMetadataSave();
+        }
+        
         canvasStack->setCurrentIndex(index);
         
         // Ensure the tab list selection is properly set and styled
@@ -8167,6 +8177,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 // ✅ Save last accessed page for each canvas
                 int currentPage = getCurrentPageForCanvas(canvas);
                 canvas->setLastAccessedPage(currentPage);
+                
+                // ✅ OPTIMIZATION: Flush any pending deferred metadata save immediately
+                // (setLastAccessedPage triggers a deferred save, but app is closing)
+                canvas->flushPendingMetadataSave();
             }
         }
         

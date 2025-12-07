@@ -2,6 +2,8 @@
 #include <QPalette>
 #include <QApplication>
 #include <QDebug>
+#include <QSet>
+#include <QMap>
 
 MarkdownNotesSidebar::MarkdownNotesSidebar(QWidget *parent)
     : QWidget(parent)
@@ -118,10 +120,59 @@ void MarkdownNotesSidebar::clearNotes() {
 }
 
 void MarkdownNotesSidebar::loadNotesForPages(const QList<MarkdownNoteData> &notes) {
-    clearNotes();
+    // ✅ OPTIMIZATION: Reuse existing widgets instead of destroy+recreate
+    // This avoids expensive widget construction during rapid page switches
     
+    // Build a set of note IDs we need to display
+    QSet<QString> newNoteIds;
+    QMap<QString, const MarkdownNoteData*> noteDataMap;
     for (const MarkdownNoteData &note : notes) {
-        addNote(note);
+        newNoteIds.insert(note.id);
+        noteDataMap[note.id] = &note;
+    }
+    
+    // Track which existing widgets to keep
+    QSet<QString> existingNoteIds;
+    for (MarkdownNoteEntry *entry : noteEntries) {
+        existingNoteIds.insert(entry->getNoteId());
+    }
+    
+    // Remove widgets that are no longer needed
+    QList<MarkdownNoteEntry*> entriesToRemove;
+    for (MarkdownNoteEntry *entry : noteEntries) {
+        if (!newNoteIds.contains(entry->getNoteId())) {
+            entriesToRemove.append(entry);
+        }
+    }
+    for (MarkdownNoteEntry *entry : entriesToRemove) {
+        noteEntries.removeOne(entry);
+        scrollLayout->removeWidget(entry);
+        entry->deleteLater();
+    }
+    
+    // Update existing widgets and add new ones
+    for (const MarkdownNoteData &note : notes) {
+        if (existingNoteIds.contains(note.id)) {
+            // Update existing widget (very fast - just updates data)
+            for (MarkdownNoteEntry *entry : noteEntries) {
+                if (entry->getNoteId() == note.id) {
+                    entry->setNoteData(note);
+                    break;
+                }
+            }
+        } else {
+            // Create new widget only for truly new notes
+            addNote(note);
+        }
+    }
+    
+    // Update visibility
+    if (noteEntries.isEmpty()) {
+        scrollArea->hide();
+        emptyLabel->show();
+    } else {
+        emptyLabel->hide();
+        scrollArea->show();
     }
 }
 

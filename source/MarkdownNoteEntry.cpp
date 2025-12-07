@@ -144,16 +144,38 @@ void MarkdownNoteEntry::updatePreview() {
 }
 
 void MarkdownNoteEntry::setNoteData(const MarkdownNoteData &data) {
+    // ✅ OPTIMIZATION: Only update fields that have actually changed
+    // This avoids expensive QMarkdownTextEdit re-parsing when content is the same
+    
+    bool titleChanged = (noteData.title != data.title);
+    bool contentChanged = (noteData.content != data.content);
+    bool colorChanged = (noteData.color != data.color);
+    bool highlightLinkChanged = (noteData.highlightId != data.highlightId);
+    
+    // Update the stored data
     noteData = data;
-    titleEdit->setText(data.title.isEmpty() ? tr("Untitled Note") : data.title);
-    // Ensure cursor starts at beginning to show the start of text
-    titleEdit->setCursorPosition(0);
-    titleEdit->deselect();
-    editor->setPlainText(data.content);
-    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
-                                  .arg(data.color.name()));
-    highlightLinkButton->setVisible(!data.highlightId.isEmpty());
-    updatePreview();
+    
+    // Only update UI elements that have changed
+    if (titleChanged) {
+        titleEdit->setText(data.title.isEmpty() ? tr("Untitled Note") : data.title);
+        titleEdit->setCursorPosition(0);
+        titleEdit->deselect();
+    }
+    
+    if (contentChanged) {
+        // This is the expensive operation - only do it when content actually changed
+        editor->setPlainText(data.content);
+        updatePreview();
+    }
+    
+    if (colorChanged) {
+        colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
+                                      .arg(data.color.name()));
+    }
+    
+    if (highlightLinkChanged) {
+        highlightLinkButton->setVisible(!data.highlightId.isEmpty());
+    }
 }
 
 QString MarkdownNoteEntry::getTitle() const {

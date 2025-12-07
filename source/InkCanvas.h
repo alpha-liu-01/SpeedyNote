@@ -455,6 +455,8 @@ public:
     // ✅ New unified JSON metadata system
     void loadNotebookMetadata();
     void saveNotebookMetadata();
+    void saveNotebookMetadataDeferred(); // ✅ OPTIMIZATION: Deferred save with debouncing
+    void flushPendingMetadataSave(); // ✅ Force immediate save if pending
     void setLastAccessedPage(int pageNumber);
     int getLastAccessedPage() const;
     QString getPdfPath() const; // ✅ Get PDF path from JSON metadata
@@ -506,6 +508,10 @@ private:
     // Auto-save timer (incremental saves to reduce page-switch burden)
     QTimer* autoSaveTimer = nullptr; // Timer for periodic auto-save
     int autoSaveInterval = 10000; // Auto-save interval in milliseconds (default 10 seconds)
+    
+    // Deferred metadata save timer (debounce rapid page switches)
+    QTimer* metadataSaveTimer = nullptr; // Timer for debouncing metadata saves
+    bool metadataSavePending = false; // True if there's a pending metadata save
     qreal inertiaPanX = 0.0; // Smooth pan X with sub-pixel precision
     qreal inertiaPanY = 0.0; // Smooth pan Y with sub-pixel precision
     QPointF lastTouchVelocity; // Last measured velocity for inertia
@@ -621,6 +627,7 @@ private slots:
     void cacheAdjacentNotePages(); // Cache adjacent note pages after delay
     void updateInertiaScroll(); // Update inertia scrolling animation
     void onAutoSaveTimeout(); // Perform auto-save when timer expires
+    void onMetadataSaveTimeout(); // Perform deferred metadata save when timer expires
 };
 
 #endif // INKCANVAS_H

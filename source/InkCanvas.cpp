@@ -122,6 +122,12 @@ InkCanvas::InkCanvas(QWidget *parent)
     autoSaveTimer->setSingleShot(true);
     autoSaveTimer->setInterval(autoSaveInterval);
     connect(autoSaveTimer, &QTimer::timeout, this, &InkCanvas::onAutoSaveTimeout);
+    
+    // Initialize metadata save timer (single-shot, debounces rapid page switches)
+    metadataSaveTimer = new QTimer(this);
+    metadataSaveTimer->setSingleShot(true);
+    metadataSaveTimer->setInterval(1000); // 1 second debounce delay
+    connect(metadataSaveTimer, &QTimer::timeout, this, &InkCanvas::onMetadataSaveTimeout);
 }
 
 InkCanvas::~InkCanvas() {
@@ -195,6 +201,15 @@ InkCanvas::~InkCanvas() {
     }
     if (autoSaveTimer) {
         autoSaveTimer->stop();
+        // Timer will be deleted automatically as child of this
+    }
+    if (metadataSaveTimer) {
+        metadataSaveTimer->stop();
+        // Flush any pending metadata save before destruction
+        if (metadataSavePending) {
+            saveNotebookMetadata();
+            metadataSavePending = false;
+        }
         // Timer will be deleted automatically as child of this
     }
     
@@ -5726,9 +5741,38 @@ void InkCanvas::saveNotebookMetadata() {
     syncSpnPackage();
 }
 
+void InkCanvas::saveNotebookMetadataDeferred() {
+    // ✅ OPTIMIZATION: Debounce rapid metadata saves during page switching
+    // Instead of saving immediately, schedule a save after a short delay
+    // If another save is requested before the timer fires, restart the timer
+    if (!metadataSaveTimer) return;
+    
+    metadataSavePending = true;
+    metadataSaveTimer->start(); // Restart timer (resets the 1 second delay)
+}
+
+void InkCanvas::flushPendingMetadataSave() {
+    // Force immediate save if there's a pending deferred save
+    if (metadataSavePending && metadataSaveTimer) {
+        metadataSaveTimer->stop();
+        saveNotebookMetadata();
+        metadataSavePending = false;
+    }
+}
+
+void InkCanvas::onMetadataSaveTimeout() {
+    // Timer fired - perform the actual metadata save
+    if (metadataSavePending) {
+        saveNotebookMetadata();
+        metadataSavePending = false;
+    }
+}
+
 void InkCanvas::setLastAccessedPage(int pageNumber) {
     lastAccessedPage = pageNumber;
-    saveNotebookMetadata(); // Auto-save when page changes
+    // ✅ OPTIMIZATION: Use deferred save to avoid blocking on every page flip
+    // The metadata will be saved after 1 second of no page changes
+    saveNotebookMetadataDeferred();
 }
 
 int InkCanvas::getLastAccessedPage() const {
