@@ -3,7 +3,6 @@
 #include <QApplication>
 #include <QDebug>
 #include <QSet>
-#include <QMap>
 
 MarkdownNotesSidebar::MarkdownNotesSidebar(QWidget *parent)
     : QWidget(parent)
@@ -125,10 +124,8 @@ void MarkdownNotesSidebar::loadNotesForPages(const QList<MarkdownNoteData> &note
     
     // Build a set of note IDs we need to display
     QSet<QString> newNoteIds;
-    QMap<QString, const MarkdownNoteData*> noteDataMap;
     for (const MarkdownNoteData &note : notes) {
         newNoteIds.insert(note.id);
-        noteDataMap[note.id] = &note;
     }
     
     // Track which existing widgets to keep
