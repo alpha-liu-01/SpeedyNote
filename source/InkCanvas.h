@@ -269,6 +269,11 @@ public:
     void setPictureSelectionMode(bool enabled);
     bool isPictureSelectionMode() const;
     void setPictureWindowEditMode(bool enabled);
+    
+    // Combined canvas helpers for picture window page determination
+    bool isCombinedCanvasMode() const;
+    int getSinglePageHeight() const;
+    int getPageNumberForCanvasY(int canvasY) const; // Returns correct page for Y coordinate
 
     // PDF text selection and link functionality
     void setPdfTextSelectionEnabled(bool enabled) { 

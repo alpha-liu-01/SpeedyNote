@@ -5487,9 +5487,14 @@ void InkCanvas::saveCombinedWindowsForPage(int pageNumber) {
         }
         
         // Save current page windows (top half)
+        // ✅ ALWAYS save even if empty - clears stale cache entries
         pictureManager->saveWindowsForPageSeparately(pageNumber, currentPagePictureWindows);
         
         // Save next page windows (bottom half, with adjusted coordinates)
+        // ✅ CROSS-PAGE MOVE FIX: ALWAYS save to both pages, even if list is empty
+        // When a window moves from bottom→top, nextPagePictureWindows becomes empty
+        // We MUST still call saveWindowsForPageSeparately to clear the stale cache entry
+        // Otherwise the old clone remains and causes duplication
         if (!nextPagePictureWindows.isEmpty()) {
             // Temporarily adjust coordinates for saving
             for (PictureWindow* window : nextPagePictureWindows) {
@@ -5497,8 +5502,11 @@ void InkCanvas::saveCombinedWindowsForPage(int pageNumber) {
                 rect.moveTop(rect.y() - singlePageHeight); // Move to top half coordinates
                 window->setCanvasRect(rect);
             }
-            pictureManager->saveWindowsForPageSeparately(pageNumber + 1, nextPagePictureWindows);
-            // Restore original coordinates
+        }
+        // Save page N+1 (even if empty - to clear stale cache)
+        pictureManager->saveWindowsForPageSeparately(pageNumber + 1, nextPagePictureWindows);
+        // Restore original coordinates if we adjusted them
+        if (!nextPagePictureWindows.isEmpty()) {
             for (PictureWindow* window : nextPagePictureWindows) {
                 QRect rect = window->getCanvasRect();
                 rect.moveTop(rect.y() + singlePageHeight); // Move back to bottom half
@@ -5542,6 +5550,47 @@ void InkCanvas::setPictureWindowEditMode(bool enabled) {
     
     // When a picture window enters edit mode, disable pan for touch/stylus interactions
     // This allows the picture window to handle touch events without interference
+}
+
+// ✅ Combined canvas helpers for picture window page determination
+bool InkCanvas::isCombinedCanvasMode() const {
+    // Combined mode if buffer is roughly double a single page height
+    if (!backgroundImage.isNull() && buffer.height() >= backgroundImage.height() * 1.8) {
+        return true;
+    }
+    // Fallback heuristic for tall buffers without PDF
+    if (buffer.height() > 1400) {
+        return true;
+    }
+    return false;
+}
+
+int InkCanvas::getSinglePageHeight() const {
+    if (!backgroundImage.isNull() && buffer.height() >= backgroundImage.height() * 1.8) {
+        return backgroundImage.height() / 2;
+    }
+    if (buffer.height() > 1400) {
+        return buffer.height() / 2;
+    }
+    // Not in combined mode - return full buffer height
+    return buffer.height();
+}
+
+int InkCanvas::getPageNumberForCanvasY(int canvasY) const {
+    int primaryPage = lastActivePage;
+    
+    if (!isCombinedCanvasMode()) {
+        return primaryPage;  // Single page mode - always the current page
+    }
+    
+    int singlePageHeight = getSinglePageHeight();
+    
+    // If Y is in bottom half, it belongs to the next page
+    if (canvasY >= singlePageHeight) {
+        return primaryPage + 1;
+    }
+    
+    return primaryPage;
 }
 
 // Canvas coordinate conversion methods
