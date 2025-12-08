@@ -3361,6 +3361,11 @@ void MainWindow::switchTab(int index) {
                 loadBookmarks();
             }
             
+            // ✅ Exit search mode when switching tabs (search results are document-specific)
+            if (markdownNotesSidebar && markdownNotesSidebar->isInSearchMode()) {
+                markdownNotesSidebar->exitSearchMode();
+            }
+            
             // ✅ Refresh markdown notes if sidebar is visible
             if (markdownNotesSidebarVisible) {
                 loadMarkdownNotesForCurrentPage();
@@ -7925,7 +7930,16 @@ void MainWindow::onHighlightDoubleClicked(const QString &highlightId) {
 }
 
 void MainWindow::loadMarkdownNotesForCurrentPage() {
-    if (!currentCanvas() || !markdownNotesSidebar) return;
+    if (!markdownNotesSidebar) return;
+    
+    // Handle case when no canvas is available (all tabs closed)
+    if (!currentCanvas()) {
+        if (markdownNotesSidebar->isInSearchMode()) {
+            markdownNotesSidebar->exitSearchMode();
+        }
+        markdownNotesSidebar->clearNotes();
+        return;
+    }
     
     int currentPage = getCurrentPageForCanvas(currentCanvas());
     int secondPage = -1;
