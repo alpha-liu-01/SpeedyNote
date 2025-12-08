@@ -233,6 +233,21 @@ public:
         QMutexLocker locker(&pdfCacheMutex);
         pdfCache.clear(); 
     }
+    
+    // ✅ OPTIMIZATION: Invalidate only specific page(s) from PDF cache
+    // Use this instead of clearPdfCache() when only specific pages are affected (e.g., adding highlight)
+    void invalidatePdfPageCache(int pageNumber) {
+        QMutexLocker locker(&pdfCacheMutex);
+        // Combined canvas (N-1, N) shows page N on bottom half
+        // Combined canvas (N, N+1) shows page N on top half
+        // So we need to invalidate both cache entries
+        if (pageNumber > 0) {
+            pdfCache.remove(pageNumber - 1);
+            pdfCacheAccessOrder.removeAll(pageNumber - 1);
+        }
+        pdfCache.remove(pageNumber);
+        pdfCacheAccessOrder.removeAll(pageNumber);
+    }
     void clearNoteCache() { 
         {
             QMutexLocker locker(&noteCacheMutex);
@@ -636,6 +651,7 @@ private:
 private slots:
     void processPendingTextSelection(); // Process pending text selection updates (throttled to 60 FPS)
     void cacheAdjacentPages(); // Cache adjacent pages after delay
+    void cacheAdjacentPagesImmediately(); // Cache adjacent pages immediately (for highlight changes)
     void cacheAdjacentNotePages(); // Cache adjacent note pages after delay
     void updateInertiaScroll(); // Update inertia scrolling animation
     void onAutoSaveTimeout(); // Perform auto-save when timer expires
