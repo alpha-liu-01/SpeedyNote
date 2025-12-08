@@ -99,6 +99,16 @@ PictureWindow* PictureWindowManager::createPictureWindow(const QRect &rect, cons
     currentWindows.append(window);
     // qDebug() << "  Added to current windows list. Total windows:" << currentWindows.size();
     
+    // ✅ MEMORY LEAK FIX: Also add to combinedTempWindows in combined mode
+    // In combined mode, combinedTempWindows tracks temporary windows for cleanup
+    // When user switches pages, setCombinedWindows() cleans up via combinedTempWindows
+    // If we don't add here, the window will be orphaned when currentWindows is replaced
+    // NOTE: Use isCombinedCanvasMode() instead of checking isEmpty(), because
+    // combinedTempWindows might be empty if the page had no existing windows
+    if (canvas && canvas->isCombinedCanvasMode()) {
+        combinedTempWindows.append(window);
+    }
+    
     // Window is invisible - will be rendered by canvas
     // qDebug() << "  Picture window created (invisible, rendered by canvas)";
     
@@ -106,7 +116,13 @@ PictureWindow* PictureWindowManager::createPictureWindow(const QRect &rect, cons
     if (canvas) {
         canvas->setEdited(true);
         int currentPage = canvas->getLastActivePage();
-        cacheUpdatedPages.remove(currentPage); // Clear cache flag to force re-clone
+        
+        // ✅ COMBINED CANVAS FIX: Clear cache flags for BOTH pages
+        // When creating on bottom half, the new window belongs to page N+1
+        // We must clear both flags to ensure saveCombinedWindowsForPage updates both caches
+        cacheUpdatedPages.remove(currentPage);
+        cacheUpdatedPages.remove(currentPage + 1);
+        
         canvas->update(); // Trigger repaint to show the new picture
     }
     

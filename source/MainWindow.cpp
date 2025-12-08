@@ -1814,19 +1814,18 @@ void MainWindow::saveCurrentPageConcurrent() {
     // Mark as not edited BEFORE async save starts (data is safe in cache now)
     canvas->setEdited(false);
     
-    // ✅ OPTIMIZATION: Defer window save to next event loop iteration
-    // This allows the page switch to complete first, making the UI feel more responsive
-    // The window data is still valid because we haven't returned from this function yet
-    QTimer::singleShot(0, this, [this, canvas, pageNumber, isCombinedCanvas]() {
-        if (!canvas) return;
-        if (isCombinedCanvas) {
-            canvas->saveCombinedWindowsForPage(pageNumber);
-        } else {
-            if (canvas->getPictureManager()) {
-                canvas->getPictureManager()->saveWindowsForPage(pageNumber);
-            }
+    // ✅ BUG FIX: Save window data IMMEDIATELY, not deferred
+    // The previous deferred save (QTimer::singleShot) caused a race condition:
+    // By the time the deferred save ran, currentWindows had been replaced with
+    // the NEW page's windows, but the save was called for the OLD page number.
+    // This caused windows from the new page to be incorrectly saved to the old page's cache.
+    if (isCombinedCanvas) {
+        canvas->saveCombinedWindowsForPage(pageNumber);
+    } else {
+        if (canvas->getPictureManager()) {
+            canvas->getPictureManager()->saveWindowsForPage(pageNumber);
         }
-    });
+    }
     
     // ✅ OPTIMIZATION: Run disk I/O asynchronously - page switch proceeds immediately
     // The cache already has fresh data, so loadPage() won't need to wait for disk
