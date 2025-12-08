@@ -173,6 +173,7 @@ public:
     QString getSaveFolder() const { return saveFolder; }
     QString getDisplayPath() const; // ✅ Get display path (.spn package or folder)
     void syncSpnPackage(); // ✅ Sync changes back to .spn file
+    void syncSpnPackageDeferred(); // ✅ OPTIMIZATION: Deferred sync with debouncing
     
     // ✅ Cache management helpers
     void invalidateBothPagesCache(int pageNumber); // Invalidate both pages of a combined canvas
@@ -462,6 +463,7 @@ public:
     void saveNotebookMetadata();
     void saveNotebookMetadataDeferred(); // ✅ OPTIMIZATION: Deferred save with debouncing
     void flushPendingMetadataSave(); // ✅ Force immediate save if pending
+    void flushPendingSpnSync(); // ✅ Force immediate .spn sync if pending
     void setLastAccessedPage(int pageNumber);
     int getLastAccessedPage() const;
     QString getPdfPath() const; // ✅ Get PDF path from JSON metadata
@@ -517,6 +519,10 @@ private:
     // Deferred metadata save timer (debounce rapid page switches)
     QTimer* metadataSaveTimer = nullptr; // Timer for debouncing metadata saves
     bool metadataSavePending = false; // True if there's a pending metadata save
+    
+    // ✅ OPTIMIZATION: Deferred .spn package sync (avoids expensive re-pack on every save)
+    QTimer* spnSyncTimer = nullptr; // Timer for debouncing .spn sync
+    bool spnSyncPending = false; // True if there's a pending .spn sync
     qreal inertiaPanX = 0.0; // Smooth pan X with sub-pixel precision
     qreal inertiaPanY = 0.0; // Smooth pan Y with sub-pixel precision
     QPointF lastTouchVelocity; // Last measured velocity for inertia
@@ -633,6 +639,7 @@ private slots:
     void updateInertiaScroll(); // Update inertia scrolling animation
     void onAutoSaveTimeout(); // Perform auto-save when timer expires
     void onMetadataSaveTimeout(); // Perform deferred metadata save when timer expires
+    void onSpnSyncTimeout(); // ✅ Perform deferred .spn package sync when timer expires
 };
 
 #endif // INKCANVAS_H

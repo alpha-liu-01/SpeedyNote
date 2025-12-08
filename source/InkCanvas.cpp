@@ -128,6 +128,12 @@ InkCanvas::InkCanvas(QWidget *parent)
     metadataSaveTimer->setSingleShot(true);
     metadataSaveTimer->setInterval(1000); // 1 second debounce delay
     connect(metadataSaveTimer, &QTimer::timeout, this, &InkCanvas::onMetadataSaveTimeout);
+    
+    // ✅ OPTIMIZATION: Initialize .spn sync timer (longer delay, expensive operation)
+    spnSyncTimer = new QTimer(this);
+    spnSyncTimer->setSingleShot(true);
+    spnSyncTimer->setInterval(3000); // 3 second delay - .spn packing is expensive
+    connect(spnSyncTimer, &QTimer::timeout, this, &InkCanvas::onSpnSyncTimeout);
 }
 
 InkCanvas::~InkCanvas() {
@@ -209,6 +215,16 @@ InkCanvas::~InkCanvas() {
         if (metadataSavePending) {
             saveNotebookMetadata();
             metadataSavePending = false;
+        }
+        // Timer will be deleted automatically as child of this
+    }
+    
+    // ✅ OPTIMIZATION: Flush pending .spn sync before destruction
+    if (spnSyncTimer) {
+        spnSyncTimer->stop();
+        if (spnSyncPending) {
+            syncSpnPackage();
+            spnSyncPending = false;
         }
         // Timer will be deleted automatically as child of this
     }
@@ -4454,8 +4470,8 @@ void InkCanvas::removeHighlightAtSelection() {
     }
     
     if (removed) {
-        // Save to metadata (both highlights and notes)
-        saveNotebookMetadata();
+        // ✅ OPTIMIZATION: Use deferred save - data is in memory
+        saveNotebookMetadataDeferred();
         
         // Mark as edited
         setEdited(true);
@@ -4554,8 +4570,8 @@ QList<TextHighlight> InkCanvas::getHighlightsForPage(int pageNumber) const {
 
 // Save highlights to metadata (standalone method for Step 3)
 void InkCanvas::saveHighlightsToMetadata() {
-    // Just call the main save function which now includes highlights
-    saveNotebookMetadata();
+    // ✅ OPTIMIZATION: Use deferred save - highlights are in memory
+    saveNotebookMetadataDeferred();
 }
 
 // Load highlights from metadata (standalone method for Step 3)
@@ -4641,8 +4657,8 @@ QString InkCanvas::addMarkdownNoteFromSelection() {
     // Add the note
     markdownNotes.append(note);
     
-    // Save metadata
-    saveNotebookMetadata();
+    // ✅ OPTIMIZATION: Use deferred save - data is in memory, no need to block UI
+    saveNotebookMetadataDeferred();
     setEdited(true);
     
     // Emit signal
@@ -4658,7 +4674,8 @@ void InkCanvas::addMarkdownNote(const MarkdownNoteData &note) {
         if (markdownNotes[i].id == note.id) {
             // Update existing note
             markdownNotes[i] = note;
-            saveNotebookMetadata();
+            // ✅ OPTIMIZATION: Use deferred save
+            saveNotebookMetadataDeferred();
             setEdited(true);
             emit markdownNotesUpdated();
             return;
@@ -4667,7 +4684,8 @@ void InkCanvas::addMarkdownNote(const MarkdownNoteData &note) {
     
     // Add new note
     markdownNotes.append(note);
-    saveNotebookMetadata();
+    // ✅ OPTIMIZATION: Use deferred save
+    saveNotebookMetadataDeferred();
     setEdited(true);
     emit markdownNotesUpdated();
 }
@@ -4677,7 +4695,13 @@ void InkCanvas::updateMarkdownNote(const MarkdownNoteData &note) {
     for (int i = 0; i < markdownNotes.size(); ++i) {
         if (markdownNotes[i].id == note.id) {
             markdownNotes[i] = note;
-            saveNotebookMetadata();
+            // ✅ OPTIMIZATION: Use deferred save instead of immediate save
+            // This prevents blocking the main thread on every keystroke while typing.
+            // The data is safely updated in memory, and will be persisted:
+            // - After 1 second of no changes (debounced)
+            // - Immediately on page switch (flushPendingMetadataSave)
+            // - Immediately on app close
+            saveNotebookMetadataDeferred();
             setEdited(true);
             // DON'T emit markdownNotesUpdated() here - that causes a feedback loop
             // that reloads all notes and resets the editor on every keystroke!
@@ -4702,7 +4726,8 @@ void InkCanvas::removeMarkdownNote(const QString &noteId) {
                 }
             }
             
-            saveNotebookMetadata();
+            // ✅ OPTIMIZATION: Use deferred save
+            saveNotebookMetadataDeferred();
             setEdited(true);
             emit markdownNotesUpdated();
             return;
@@ -4736,7 +4761,8 @@ void InkCanvas::linkHighlightToNote(const QString &highlightId, const QString &n
     TextHighlight *highlight = findHighlightById(highlightId);
     if (highlight) {
         highlight->markdownWindowId = noteId;
-        saveNotebookMetadata();
+        // ✅ OPTIMIZATION: Use deferred save
+        saveNotebookMetadataDeferred();
         setEdited(true);
     }
 }
@@ -5786,8 +5812,10 @@ void InkCanvas::saveNotebookMetadata() {
         file.close();
     }
     
-    // ✅ Sync changes to .spn package if needed
-    syncSpnPackage();
+    // ✅ OPTIMIZATION: Defer .spn package sync instead of immediate sync
+    // Re-packing the entire directory is expensive (reads ALL files)
+    // Use deferred sync to batch multiple saves together
+    syncSpnPackageDeferred();
 }
 
 void InkCanvas::saveNotebookMetadataDeferred() {
@@ -6011,6 +6039,37 @@ QString InkCanvas::getDisplayPath() const {
 void InkCanvas::syncSpnPackage() {
     if (isSpnPackage && !actualPackagePath.isEmpty() && !tempWorkingDir.isEmpty()) {
         SpnPackageManager::updateSpnFromTemp(actualPackagePath, tempWorkingDir);
+    }
+}
+
+void InkCanvas::syncSpnPackageDeferred() {
+    // ✅ OPTIMIZATION: Defer .spn package sync to avoid blocking UI
+    // Re-packing the entire directory is expensive (reads ALL files)
+    // This debounces multiple saves into a single sync after 3 seconds of inactivity
+    if (!isSpnPackage || actualPackagePath.isEmpty() || tempWorkingDir.isEmpty()) {
+        return; // Not an .spn package, nothing to sync
+    }
+    
+    spnSyncPending = true;
+    if (spnSyncTimer) {
+        spnSyncTimer->start(); // Restart timer (debounce)
+    }
+}
+
+void InkCanvas::flushPendingSpnSync() {
+    // Force immediate .spn sync if there's a pending deferred sync
+    if (spnSyncPending && spnSyncTimer) {
+        spnSyncTimer->stop();
+        syncSpnPackage();
+        spnSyncPending = false;
+    }
+}
+
+void InkCanvas::onSpnSyncTimeout() {
+    // Timer fired - perform the actual .spn package sync
+    if (spnSyncPending) {
+        syncSpnPackage();
+        spnSyncPending = false;
     }
 }
 

@@ -1518,6 +1518,11 @@ void MainWindow::switchPage(int pageNumber) {
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
 
+    // ✅ NOTE: Don't flush pending metadata save here!
+    // Markdown notes are stored in memory (markdownNotes list) and sidebar reads from memory.
+    // Flushing causes a blocking disk write that freezes the UI.
+    // The deferred save will happen automatically after 1 second of inactivity, or on app close.
+
     if (currentCanvas()->isEdited()){
         saveCurrentPageConcurrent(); // Use concurrent saving for smoother page flipping
     }
@@ -1591,6 +1596,8 @@ void MainWindow::switchPage(int pageNumber) {
 void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
+
+    // ✅ NOTE: Don't flush pending metadata save here - see comment in switchPage()
 
     if (currentCanvas()->isEdited()){
         saveCurrentPageConcurrent(); // Use concurrent saving for smoother page flipping
@@ -8180,6 +8187,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 // ✅ OPTIMIZATION: Flush any pending deferred metadata save immediately
                 // (setLastAccessedPage triggers a deferred save, but app is closing)
                 canvas->flushPendingMetadataSave();
+                
+                // ✅ OPTIMIZATION: Flush any pending deferred .spn package sync
+                // This ensures the .spn package is updated before closing
+                canvas->flushPendingSpnSync();
             }
         }
         
