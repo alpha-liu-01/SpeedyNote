@@ -4401,8 +4401,9 @@ void InkCanvas::addHighlightFromSelection() {
     // Mark as edited
     setEdited(true);
     
-    // Clear PDF cache and refresh current page to show new highlight immediately
-    clearPdfCache();
+    // ✅ OPTIMIZATION: Only invalidate the specific page(s) affected by the highlight
+    // Instead of clearPdfCache() which clears ALL pages, causing re-render on next page switch
+    invalidatePdfPageCache(highlightPage);
     refreshCurrentPdfPage();
 }
 
@@ -4476,8 +4477,9 @@ void InkCanvas::removeHighlightAtSelection() {
         // Mark as edited
         setEdited(true);
         
-        // Clear PDF cache and refresh current page to remove highlight immediately
-        clearPdfCache();
+        // ✅ OPTIMIZATION: Only invalidate the specific page(s) affected
+        // Instead of clearPdfCache() which clears ALL pages
+        invalidatePdfPageCache(selectionPage);
         refreshCurrentPdfPage();
         
         // Emit signal to update UI (note list needs to refresh)
@@ -4938,6 +4940,15 @@ void InkCanvas::refreshCurrentPdfPage() {
     
     // Refresh display
     update();
+    
+    // ✅ OPTIMIZATION: Trigger immediate async caching of adjacent pages
+    // When highlights are added/removed, invalidatePdfPageCache() clears pages N-1 and N.
+    // refreshCurrentPdfPage() only re-renders page N (current).
+    // Without this, page N-1 remains empty in cache, causing a freeze when user scrolls backward.
+    // Use QTimer::singleShot(0) to run after current event processing completes (non-blocking).
+    QTimer::singleShot(0, this, [this]() {
+        cacheAdjacentPagesImmediately();
+    });
 }
 
 void InkCanvas::renderPdfPageToCache(int pageNumber) {
@@ -5182,6 +5193,78 @@ void InkCanvas::cacheAdjacentPages() {
             }
             
             // Apply same render hints as main document for consistency
+            threadDocument->setRenderHint(Poppler::Document::Antialiasing, true);
+            threadDocument->setRenderHint(Poppler::Document::TextAntialiasing, true);
+            threadDocument->setRenderHint(Poppler::Document::TextHinting, true);
+            threadDocument->setRenderHint(Poppler::Document::TextSlightHinting, true);
+            
+            // Render using the thread-local document instance
+            renderPdfPageToCacheThreadSafe(pageNum, threadDocument.get());
+        });
+        
+        watcher->setFuture(future);
+    }
+}
+
+// ✅ OPTIMIZATION: Immediately cache adjacent pages after highlight changes
+// Unlike cacheAdjacentPages() which has a 1-second delay, this runs immediately
+// to ensure pages are cached before user can scroll to them.
+void InkCanvas::cacheAdjacentPagesImmediately() {
+    if (!pdfDocument || currentCachedPage < 0) {
+        return;
+    }
+    
+    int targetPage = currentCachedPage;
+    int prevPage = targetPage - 1;
+    int nextPage = targetPage + 1;
+    
+    // Create list of pages to cache asynchronously
+    QList<int> pagesToCache;
+    
+    // Add pages that need caching (thread-safe check)
+    {
+        QMutexLocker locker(&pdfCacheMutex);
+        // Priority: previous page (for backward scroll after highlight creation)
+        if (isValidPageNumber(prevPage) && !pdfCache.contains(prevPage)) {
+            pagesToCache.append(prevPage);
+        }
+        
+        // Also cache next page for forward scroll
+        if (isValidPageNumber(nextPage) && !pdfCache.contains(nextPage)) {
+            pagesToCache.append(nextPage);
+        }
+    }
+    
+    if (pagesToCache.isEmpty()) {
+        return; // All adjacent pages already cached
+    }
+    
+    // Get PDF path for async rendering
+    QString pdfFilePath = this->pdfPath;
+    if (pdfFilePath.isEmpty()) {
+        return;
+    }
+    
+    // Cache pages asynchronously using QtConcurrent
+    for (int pageNum : pagesToCache) {
+        QFutureWatcher<void> *watcher = new QFutureWatcher<void>(this);
+        
+        // Track the watcher for cleanup
+        activePdfWatchers.append(watcher);
+        
+        connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher]() {
+            activePdfWatchers.removeOne(watcher);
+            watcher->deleteLater();
+        });
+        
+        // Each thread gets its own document instance for true parallel rendering
+        QFuture<void> future = QtConcurrent::run([this, pageNum, pdfFilePath]() {
+            std::unique_ptr<Poppler::Document> threadDocument = Poppler::Document::load(pdfFilePath);
+            if (!threadDocument || threadDocument->isLocked()) {
+                return;
+            }
+            
+            // Apply same render hints as main document
             threadDocument->setRenderHint(Poppler::Document::Antialiasing, true);
             threadDocument->setRenderHint(Poppler::Document::TextAntialiasing, true);
             threadDocument->setRenderHint(Poppler::Document::TextHinting, true);
