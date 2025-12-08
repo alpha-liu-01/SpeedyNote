@@ -784,6 +784,14 @@ void MainWindow::setupUi() {
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeleted, this, &MainWindow::onMarkdownNoteDeleted);
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::highlightLinkClicked, this, &MainWindow::onHighlightLinkClicked);
     
+    // Set up note provider for search functionality
+    markdownNotesSidebar->setNoteProvider([this]() -> QList<MarkdownNoteData> {
+        if (currentCanvas()) {
+            return currentCanvas()->getAllMarkdownNotes();
+        }
+        return QList<MarkdownNoteData>();
+    });
+    
     // 🌟 Horizontal Tab Bar (like modern web browsers)
     tabList = new QListWidget(this);
     tabList->setFlow(QListView::LeftToRight);  // Make it horizontal
@@ -7782,6 +7790,12 @@ void MainWindow::toggleMarkdownNotesSidebar() {
 }
 
 void MainWindow::onMarkdownNotesUpdated() {
+    // Auto-exit search mode when a new note is created
+    // so the user can see and edit the new note
+    if (markdownNotesSidebar) {
+        markdownNotesSidebar->onNewNoteCreated();
+    }
+    
     // Auto-open the sidebar if it's not visible (so user sees the note they just created)
     if (!markdownNotesSidebarVisible) {
         toggleMarkdownNotesSidebar();
@@ -7915,15 +7929,20 @@ void MainWindow::loadMarkdownNotesForCurrentPage() {
     
     int currentPage = getCurrentPageForCanvas(currentCanvas());
     int secondPage = -1;
+    int totalPages = 1;
     
     // Check if combined canvas is active (second page visible)
     if (currentCanvas()->isPdfLoadedFunc()) {
+        totalPages = currentCanvas()->getTotalPdfPages();
         // Get the second page if in combined mode
         // For now, we'll just check currentPage + 1
-        if (currentPage + 1 < currentCanvas()->getTotalPdfPages()) {
+        if (currentPage + 1 < totalPages) {
             secondPage = currentPage + 1;
         }
     }
+    
+    // ✅ Update sidebar with current page info for search functionality
+    markdownNotesSidebar->setCurrentPageInfo(currentPage, totalPages);
     
     // Get notes for the current page(s)
     QList<MarkdownNoteData> notes = currentCanvas()->getMarkdownNotesForPages(currentPage, secondPage);

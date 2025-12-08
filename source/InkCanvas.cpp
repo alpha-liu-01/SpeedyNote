@@ -4756,6 +4756,10 @@ QList<MarkdownNoteData> InkCanvas::getMarkdownNotesForPages(int page1, int page2
     return pageNotes;
 }
 
+QList<MarkdownNoteData> InkCanvas::getAllMarkdownNotes() const {
+    return markdownNotes;
+}
+
 // Link a highlight to a markdown note
 void InkCanvas::linkHighlightToNote(const QString &highlightId, const QString &noteId) {
     TextHighlight *highlight = findHighlightById(highlightId);

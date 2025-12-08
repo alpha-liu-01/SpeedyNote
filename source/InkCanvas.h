@@ -316,6 +316,7 @@ public:
     void removeMarkdownNote(const QString &noteId); // Remove a markdown note
     MarkdownNoteData* findMarkdownNote(const QString &noteId); // Find a note by ID
     QList<MarkdownNoteData> getMarkdownNotesForPages(int page1, int page2 = -1) const; // Get notes for page(s) in combined canvas
+    QList<MarkdownNoteData> getAllMarkdownNotes() const; // Get all notes in the notebook
     void linkHighlightToNote(const QString &highlightId, const QString &noteId); // Link a highlight to a note
     TextHighlight* findHighlightById(const QString &highlightId); // Find a highlight by ID
     void handleHighlightDoubleClick(const QString &highlightId); // Handle double-click on highlight
