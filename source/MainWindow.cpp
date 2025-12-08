@@ -94,7 +94,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote Beta 0.11.2"));
+    setWindowTitle(tr("SpeedyNote Beta 0.11.3"));
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux
@@ -783,6 +783,14 @@ void MainWindow::setupUi() {
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteContentChanged, this, &MainWindow::onMarkdownNoteContentChanged);
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeleted, this, &MainWindow::onMarkdownNoteDeleted);
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::highlightLinkClicked, this, &MainWindow::onHighlightLinkClicked);
+    
+    // Set up note provider for search functionality
+    markdownNotesSidebar->setNoteProvider([this]() -> QList<MarkdownNoteData> {
+        if (currentCanvas()) {
+            return currentCanvas()->getAllMarkdownNotes();
+        }
+        return QList<MarkdownNoteData>();
+    });
     
     // 🌟 Horizontal Tab Bar (like modern web browsers)
     tabList = new QListWidget(this);
@@ -1518,6 +1526,11 @@ void MainWindow::switchPage(int pageNumber) {
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
 
+    // ✅ NOTE: Don't flush pending metadata save here!
+    // Markdown notes are stored in memory (markdownNotes list) and sidebar reads from memory.
+    // Flushing causes a blocking disk write that freezes the UI.
+    // The deferred save will happen automatically after 1 second of inactivity, or on app close.
+
     if (currentCanvas()->isEdited()){
         saveCurrentPageConcurrent(); // Use concurrent saving for smoother page flipping
     }
@@ -1591,6 +1604,8 @@ void MainWindow::switchPage(int pageNumber) {
 void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
+
+    // ✅ NOTE: Don't flush pending metadata save here - see comment in switchPage()
 
     if (currentCanvas()->isEdited()){
         saveCurrentPageConcurrent(); // Use concurrent saving for smoother page flipping
@@ -1776,17 +1791,6 @@ void MainWindow::saveCurrentPageConcurrent() {
         isCombinedCanvas = true;
     }
     
-    // Save windows using the appropriate strategy (this must be done on the main thread)
-    if (isCombinedCanvas) {
-        // Use combined window saving logic for cross-page coordinate adjustments
-        canvas->saveCombinedWindowsForPage(pageNumber);
-    } else {
-        // Use standard single-page window saving (pictures only)
-        if (canvas->getPictureManager()) {
-            canvas->getPictureManager()->saveWindowsForPage(pageNumber);
-        }
-    }
-    
     // ✅ Get notebook ID from JSON metadata before concurrent operation
     QString notebookId = canvas->getNotebookId();
     if (notebookId.isEmpty()) {
@@ -1824,6 +1828,19 @@ void MainWindow::saveCurrentPageConcurrent() {
     
     // Mark as not edited BEFORE async save starts (data is safe in cache now)
     canvas->setEdited(false);
+    
+    // ✅ BUG FIX: Save window data IMMEDIATELY, not deferred
+    // The previous deferred save (QTimer::singleShot) caused a race condition:
+    // By the time the deferred save ran, currentWindows had been replaced with
+    // the NEW page's windows, but the save was called for the OLD page number.
+    // This caused windows from the new page to be incorrectly saved to the old page's cache.
+    if (isCombinedCanvas) {
+        canvas->saveCombinedWindowsForPage(pageNumber);
+    } else {
+        if (canvas->getPictureManager()) {
+            canvas->getPictureManager()->saveWindowsForPage(pageNumber);
+        }
+    }
     
     // ✅ OPTIMIZATION: Run disk I/O asynchronously - page switch proceeds immediately
     // The cache already has fresh data, so loadPage() won't need to wait for disk
@@ -3274,6 +3291,13 @@ void MainWindow::switchTab(int index) {
     }
 
     if (index >= 0 && index < canvasStack->count()) {
+        // ✅ OPTIMIZATION: Flush any pending metadata save from the previous tab
+        // before switching to ensure data is persisted
+        InkCanvas *prevCanvas = currentCanvas();
+        if (prevCanvas) {
+            prevCanvas->flushPendingMetadataSave();
+        }
+        
         canvasStack->setCurrentIndex(index);
         
         // Ensure the tab list selection is properly set and styled
@@ -7766,6 +7790,12 @@ void MainWindow::toggleMarkdownNotesSidebar() {
 }
 
 void MainWindow::onMarkdownNotesUpdated() {
+    // Auto-exit search mode when a new note is created
+    // so the user can see and edit the new note
+    if (markdownNotesSidebar) {
+        markdownNotesSidebar->onNewNoteCreated();
+    }
+    
     // Auto-open the sidebar if it's not visible (so user sees the note they just created)
     if (!markdownNotesSidebarVisible) {
         toggleMarkdownNotesSidebar();
@@ -7899,15 +7929,20 @@ void MainWindow::loadMarkdownNotesForCurrentPage() {
     
     int currentPage = getCurrentPageForCanvas(currentCanvas());
     int secondPage = -1;
+    int totalPages = 1;
     
     // Check if combined canvas is active (second page visible)
     if (currentCanvas()->isPdfLoadedFunc()) {
+        totalPages = currentCanvas()->getTotalPdfPages();
         // Get the second page if in combined mode
         // For now, we'll just check currentPage + 1
-        if (currentPage + 1 < currentCanvas()->getTotalPdfPages()) {
+        if (currentPage + 1 < totalPages) {
             secondPage = currentPage + 1;
         }
     }
+    
+    // ✅ Update sidebar with current page info for search functionality
+    markdownNotesSidebar->setCurrentPageInfo(currentPage, totalPages);
     
     // Get notes for the current page(s)
     QList<MarkdownNoteData> notes = currentCanvas()->getMarkdownNotesForPages(currentPage, secondPage);
@@ -8167,6 +8202,14 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 // ✅ Save last accessed page for each canvas
                 int currentPage = getCurrentPageForCanvas(canvas);
                 canvas->setLastAccessedPage(currentPage);
+                
+                // ✅ OPTIMIZATION: Flush any pending deferred metadata save immediately
+                // (setLastAccessedPage triggers a deferred save, but app is closing)
+                canvas->flushPendingMetadataSave();
+                
+                // ✅ OPTIMIZATION: Flush any pending deferred .spn package sync
+                // This ensures the .spn package is updated before closing
+                canvas->flushPendingSpnSync();
             }
         }
         

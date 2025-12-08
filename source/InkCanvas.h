@@ -173,6 +173,7 @@ public:
     QString getSaveFolder() const { return saveFolder; }
     QString getDisplayPath() const; // ✅ Get display path (.spn package or folder)
     void syncSpnPackage(); // ✅ Sync changes back to .spn file
+    void syncSpnPackageDeferred(); // ✅ OPTIMIZATION: Deferred sync with debouncing
     
     // ✅ Cache management helpers
     void invalidateBothPagesCache(int pageNumber); // Invalidate both pages of a combined canvas
@@ -269,6 +270,11 @@ public:
     void setPictureSelectionMode(bool enabled);
     bool isPictureSelectionMode() const;
     void setPictureWindowEditMode(bool enabled);
+    
+    // Combined canvas helpers for picture window page determination
+    bool isCombinedCanvasMode() const;
+    int getSinglePageHeight() const;
+    int getPageNumberForCanvasY(int canvasY) const; // Returns correct page for Y coordinate
 
     // PDF text selection and link functionality
     void setPdfTextSelectionEnabled(bool enabled) { 
@@ -310,6 +316,7 @@ public:
     void removeMarkdownNote(const QString &noteId); // Remove a markdown note
     MarkdownNoteData* findMarkdownNote(const QString &noteId); // Find a note by ID
     QList<MarkdownNoteData> getMarkdownNotesForPages(int page1, int page2 = -1) const; // Get notes for page(s) in combined canvas
+    QList<MarkdownNoteData> getAllMarkdownNotes() const; // Get all notes in the notebook
     void linkHighlightToNote(const QString &highlightId, const QString &noteId); // Link a highlight to a note
     TextHighlight* findHighlightById(const QString &highlightId); // Find a highlight by ID
     void handleHighlightDoubleClick(const QString &highlightId); // Handle double-click on highlight
@@ -455,6 +462,9 @@ public:
     // ✅ New unified JSON metadata system
     void loadNotebookMetadata();
     void saveNotebookMetadata();
+    void saveNotebookMetadataDeferred(); // ✅ OPTIMIZATION: Deferred save with debouncing
+    void flushPendingMetadataSave(); // ✅ Force immediate save if pending
+    void flushPendingSpnSync(); // ✅ Force immediate .spn sync if pending
     void setLastAccessedPage(int pageNumber);
     int getLastAccessedPage() const;
     QString getPdfPath() const; // ✅ Get PDF path from JSON metadata
@@ -506,6 +516,14 @@ private:
     // Auto-save timer (incremental saves to reduce page-switch burden)
     QTimer* autoSaveTimer = nullptr; // Timer for periodic auto-save
     int autoSaveInterval = 10000; // Auto-save interval in milliseconds (default 10 seconds)
+    
+    // Deferred metadata save timer (debounce rapid page switches)
+    QTimer* metadataSaveTimer = nullptr; // Timer for debouncing metadata saves
+    bool metadataSavePending = false; // True if there's a pending metadata save
+    
+    // ✅ OPTIMIZATION: Deferred .spn package sync (avoids expensive re-pack on every save)
+    QTimer* spnSyncTimer = nullptr; // Timer for debouncing .spn sync
+    bool spnSyncPending = false; // True if there's a pending .spn sync
     qreal inertiaPanX = 0.0; // Smooth pan X with sub-pixel precision
     qreal inertiaPanY = 0.0; // Smooth pan Y with sub-pixel precision
     QPointF lastTouchVelocity; // Last measured velocity for inertia
@@ -621,6 +639,8 @@ private slots:
     void cacheAdjacentNotePages(); // Cache adjacent note pages after delay
     void updateInertiaScroll(); // Update inertia scrolling animation
     void onAutoSaveTimeout(); // Perform auto-save when timer expires
+    void onMetadataSaveTimeout(); // Perform deferred metadata save when timer expires
+    void onSpnSyncTimeout(); // ✅ Perform deferred .spn package sync when timer expires
 };
 
 #endif // INKCANVAS_H

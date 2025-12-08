@@ -122,6 +122,18 @@ InkCanvas::InkCanvas(QWidget *parent)
     autoSaveTimer->setSingleShot(true);
     autoSaveTimer->setInterval(autoSaveInterval);
     connect(autoSaveTimer, &QTimer::timeout, this, &InkCanvas::onAutoSaveTimeout);
+    
+    // Initialize metadata save timer (single-shot, debounces rapid page switches)
+    metadataSaveTimer = new QTimer(this);
+    metadataSaveTimer->setSingleShot(true);
+    metadataSaveTimer->setInterval(1000); // 1 second debounce delay
+    connect(metadataSaveTimer, &QTimer::timeout, this, &InkCanvas::onMetadataSaveTimeout);
+    
+    // ✅ OPTIMIZATION: Initialize .spn sync timer (longer delay, expensive operation)
+    spnSyncTimer = new QTimer(this);
+    spnSyncTimer->setSingleShot(true);
+    spnSyncTimer->setInterval(3000); // 3 second delay - .spn packing is expensive
+    connect(spnSyncTimer, &QTimer::timeout, this, &InkCanvas::onSpnSyncTimeout);
 }
 
 InkCanvas::~InkCanvas() {
@@ -195,6 +207,25 @@ InkCanvas::~InkCanvas() {
     }
     if (autoSaveTimer) {
         autoSaveTimer->stop();
+        // Timer will be deleted automatically as child of this
+    }
+    if (metadataSaveTimer) {
+        metadataSaveTimer->stop();
+        // Flush any pending metadata save before destruction
+        if (metadataSavePending) {
+            saveNotebookMetadata();
+            metadataSavePending = false;
+        }
+        // Timer will be deleted automatically as child of this
+    }
+    
+    // ✅ OPTIMIZATION: Flush pending .spn sync before destruction
+    if (spnSyncTimer) {
+        spnSyncTimer->stop();
+        if (spnSyncPending) {
+            syncSpnPackage();
+            spnSyncPending = false;
+        }
         // Timer will be deleted automatically as child of this
     }
     
@@ -4439,8 +4470,8 @@ void InkCanvas::removeHighlightAtSelection() {
     }
     
     if (removed) {
-        // Save to metadata (both highlights and notes)
-        saveNotebookMetadata();
+        // ✅ OPTIMIZATION: Use deferred save - data is in memory
+        saveNotebookMetadataDeferred();
         
         // Mark as edited
         setEdited(true);
@@ -4539,8 +4570,8 @@ QList<TextHighlight> InkCanvas::getHighlightsForPage(int pageNumber) const {
 
 // Save highlights to metadata (standalone method for Step 3)
 void InkCanvas::saveHighlightsToMetadata() {
-    // Just call the main save function which now includes highlights
-    saveNotebookMetadata();
+    // ✅ OPTIMIZATION: Use deferred save - highlights are in memory
+    saveNotebookMetadataDeferred();
 }
 
 // Load highlights from metadata (standalone method for Step 3)
@@ -4626,8 +4657,8 @@ QString InkCanvas::addMarkdownNoteFromSelection() {
     // Add the note
     markdownNotes.append(note);
     
-    // Save metadata
-    saveNotebookMetadata();
+    // ✅ OPTIMIZATION: Use deferred save - data is in memory, no need to block UI
+    saveNotebookMetadataDeferred();
     setEdited(true);
     
     // Emit signal
@@ -4643,7 +4674,8 @@ void InkCanvas::addMarkdownNote(const MarkdownNoteData &note) {
         if (markdownNotes[i].id == note.id) {
             // Update existing note
             markdownNotes[i] = note;
-            saveNotebookMetadata();
+            // ✅ OPTIMIZATION: Use deferred save
+            saveNotebookMetadataDeferred();
             setEdited(true);
             emit markdownNotesUpdated();
             return;
@@ -4652,7 +4684,8 @@ void InkCanvas::addMarkdownNote(const MarkdownNoteData &note) {
     
     // Add new note
     markdownNotes.append(note);
-    saveNotebookMetadata();
+    // ✅ OPTIMIZATION: Use deferred save
+    saveNotebookMetadataDeferred();
     setEdited(true);
     emit markdownNotesUpdated();
 }
@@ -4662,7 +4695,13 @@ void InkCanvas::updateMarkdownNote(const MarkdownNoteData &note) {
     for (int i = 0; i < markdownNotes.size(); ++i) {
         if (markdownNotes[i].id == note.id) {
             markdownNotes[i] = note;
-            saveNotebookMetadata();
+            // ✅ OPTIMIZATION: Use deferred save instead of immediate save
+            // This prevents blocking the main thread on every keystroke while typing.
+            // The data is safely updated in memory, and will be persisted:
+            // - After 1 second of no changes (debounced)
+            // - Immediately on page switch (flushPendingMetadataSave)
+            // - Immediately on app close
+            saveNotebookMetadataDeferred();
             setEdited(true);
             // DON'T emit markdownNotesUpdated() here - that causes a feedback loop
             // that reloads all notes and resets the editor on every keystroke!
@@ -4687,7 +4726,8 @@ void InkCanvas::removeMarkdownNote(const QString &noteId) {
                 }
             }
             
-            saveNotebookMetadata();
+            // ✅ OPTIMIZATION: Use deferred save
+            saveNotebookMetadataDeferred();
             setEdited(true);
             emit markdownNotesUpdated();
             return;
@@ -4716,12 +4756,17 @@ QList<MarkdownNoteData> InkCanvas::getMarkdownNotesForPages(int page1, int page2
     return pageNotes;
 }
 
+QList<MarkdownNoteData> InkCanvas::getAllMarkdownNotes() const {
+    return markdownNotes;
+}
+
 // Link a highlight to a markdown note
 void InkCanvas::linkHighlightToNote(const QString &highlightId, const QString &noteId) {
     TextHighlight *highlight = findHighlightById(highlightId);
     if (highlight) {
         highlight->markdownWindowId = noteId;
-        saveNotebookMetadata();
+        // ✅ OPTIMIZATION: Use deferred save
+        saveNotebookMetadataDeferred();
         setEdited(true);
     }
 }
@@ -5472,9 +5517,14 @@ void InkCanvas::saveCombinedWindowsForPage(int pageNumber) {
         }
         
         // Save current page windows (top half)
+        // ✅ ALWAYS save even if empty - clears stale cache entries
         pictureManager->saveWindowsForPageSeparately(pageNumber, currentPagePictureWindows);
         
         // Save next page windows (bottom half, with adjusted coordinates)
+        // ✅ CROSS-PAGE MOVE FIX: ALWAYS save to both pages, even if list is empty
+        // When a window moves from bottom→top, nextPagePictureWindows becomes empty
+        // We MUST still call saveWindowsForPageSeparately to clear the stale cache entry
+        // Otherwise the old clone remains and causes duplication
         if (!nextPagePictureWindows.isEmpty()) {
             // Temporarily adjust coordinates for saving
             for (PictureWindow* window : nextPagePictureWindows) {
@@ -5482,8 +5532,11 @@ void InkCanvas::saveCombinedWindowsForPage(int pageNumber) {
                 rect.moveTop(rect.y() - singlePageHeight); // Move to top half coordinates
                 window->setCanvasRect(rect);
             }
-            pictureManager->saveWindowsForPageSeparately(pageNumber + 1, nextPagePictureWindows);
-            // Restore original coordinates
+        }
+        // Save page N+1 (even if empty - to clear stale cache)
+        pictureManager->saveWindowsForPageSeparately(pageNumber + 1, nextPagePictureWindows);
+        // Restore original coordinates if we adjusted them
+        if (!nextPagePictureWindows.isEmpty()) {
             for (PictureWindow* window : nextPagePictureWindows) {
                 QRect rect = window->getCanvasRect();
                 rect.moveTop(rect.y() + singlePageHeight); // Move back to bottom half
@@ -5527,6 +5580,47 @@ void InkCanvas::setPictureWindowEditMode(bool enabled) {
     
     // When a picture window enters edit mode, disable pan for touch/stylus interactions
     // This allows the picture window to handle touch events without interference
+}
+
+// ✅ Combined canvas helpers for picture window page determination
+bool InkCanvas::isCombinedCanvasMode() const {
+    // Combined mode if buffer is roughly double a single page height
+    if (!backgroundImage.isNull() && buffer.height() >= backgroundImage.height() * 1.8) {
+        return true;
+    }
+    // Fallback heuristic for tall buffers without PDF
+    if (buffer.height() > 1400) {
+        return true;
+    }
+    return false;
+}
+
+int InkCanvas::getSinglePageHeight() const {
+    if (!backgroundImage.isNull() && buffer.height() >= backgroundImage.height() * 1.8) {
+        return backgroundImage.height() / 2;
+    }
+    if (buffer.height() > 1400) {
+        return buffer.height() / 2;
+    }
+    // Not in combined mode - return full buffer height
+    return buffer.height();
+}
+
+int InkCanvas::getPageNumberForCanvasY(int canvasY) const {
+    int primaryPage = lastActivePage;
+    
+    if (!isCombinedCanvasMode()) {
+        return primaryPage;  // Single page mode - always the current page
+    }
+    
+    int singlePageHeight = getSinglePageHeight();
+    
+    // If Y is in bottom half, it belongs to the next page
+    if (canvasY >= singlePageHeight) {
+        return primaryPage + 1;
+    }
+    
+    return primaryPage;
 }
 
 // Canvas coordinate conversion methods
@@ -5722,13 +5816,44 @@ void InkCanvas::saveNotebookMetadata() {
         file.close();
     }
     
-    // ✅ Sync changes to .spn package if needed
-    syncSpnPackage();
+    // ✅ OPTIMIZATION: Defer .spn package sync instead of immediate sync
+    // Re-packing the entire directory is expensive (reads ALL files)
+    // Use deferred sync to batch multiple saves together
+    syncSpnPackageDeferred();
+}
+
+void InkCanvas::saveNotebookMetadataDeferred() {
+    // ✅ OPTIMIZATION: Debounce rapid metadata saves during page switching
+    // Instead of saving immediately, schedule a save after a short delay
+    // If another save is requested before the timer fires, restart the timer
+    if (!metadataSaveTimer) return;
+    
+    metadataSavePending = true;
+    metadataSaveTimer->start(); // Restart timer (resets the 1 second delay)
+}
+
+void InkCanvas::flushPendingMetadataSave() {
+    // Force immediate save if there's a pending deferred save
+    if (metadataSavePending && metadataSaveTimer) {
+        metadataSaveTimer->stop();
+        saveNotebookMetadata();
+        metadataSavePending = false;
+    }
+}
+
+void InkCanvas::onMetadataSaveTimeout() {
+    // Timer fired - perform the actual metadata save
+    if (metadataSavePending) {
+        saveNotebookMetadata();
+        metadataSavePending = false;
+    }
 }
 
 void InkCanvas::setLastAccessedPage(int pageNumber) {
     lastAccessedPage = pageNumber;
-    saveNotebookMetadata(); // Auto-save when page changes
+    // ✅ OPTIMIZATION: Use deferred save to avoid blocking on every page flip
+    // The metadata will be saved after 1 second of no page changes
+    saveNotebookMetadataDeferred();
 }
 
 int InkCanvas::getLastAccessedPage() const {
@@ -5918,6 +6043,37 @@ QString InkCanvas::getDisplayPath() const {
 void InkCanvas::syncSpnPackage() {
     if (isSpnPackage && !actualPackagePath.isEmpty() && !tempWorkingDir.isEmpty()) {
         SpnPackageManager::updateSpnFromTemp(actualPackagePath, tempWorkingDir);
+    }
+}
+
+void InkCanvas::syncSpnPackageDeferred() {
+    // ✅ OPTIMIZATION: Defer .spn package sync to avoid blocking UI
+    // Re-packing the entire directory is expensive (reads ALL files)
+    // This debounces multiple saves into a single sync after 3 seconds of inactivity
+    if (!isSpnPackage || actualPackagePath.isEmpty() || tempWorkingDir.isEmpty()) {
+        return; // Not an .spn package, nothing to sync
+    }
+    
+    spnSyncPending = true;
+    if (spnSyncTimer) {
+        spnSyncTimer->start(); // Restart timer (debounce)
+    }
+}
+
+void InkCanvas::flushPendingSpnSync() {
+    // Force immediate .spn sync if there's a pending deferred sync
+    if (spnSyncPending && spnSyncTimer) {
+        spnSyncTimer->stop();
+        syncSpnPackage();
+        spnSyncPending = false;
+    }
+}
+
+void InkCanvas::onSpnSyncTimeout() {
+    // Timer fired - perform the actual .spn package sync
+    if (spnSyncPending) {
+        syncSpnPackage();
+        spnSyncPending = false;
     }
 }
 

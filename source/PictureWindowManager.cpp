@@ -99,6 +99,16 @@ PictureWindow* PictureWindowManager::createPictureWindow(const QRect &rect, cons
     currentWindows.append(window);
     // qDebug() << "  Added to current windows list. Total windows:" << currentWindows.size();
     
+    // ✅ MEMORY LEAK FIX: Also add to combinedTempWindows in combined mode
+    // In combined mode, combinedTempWindows tracks temporary windows for cleanup
+    // When user switches pages, setCombinedWindows() cleans up via combinedTempWindows
+    // If we don't add here, the window will be orphaned when currentWindows is replaced
+    // NOTE: Use isCombinedCanvasMode() instead of checking isEmpty(), because
+    // combinedTempWindows might be empty if the page had no existing windows
+    if (canvas && canvas->isCombinedCanvasMode()) {
+        combinedTempWindows.append(window);
+    }
+    
     // Window is invisible - will be rendered by canvas
     // qDebug() << "  Picture window created (invisible, rendered by canvas)";
     
@@ -106,7 +116,13 @@ PictureWindow* PictureWindowManager::createPictureWindow(const QRect &rect, cons
     if (canvas) {
         canvas->setEdited(true);
         int currentPage = canvas->getLastActivePage();
-        cacheUpdatedPages.remove(currentPage); // Clear cache flag to force re-clone
+        
+        // ✅ COMBINED CANVAS FIX: Clear cache flags for BOTH pages
+        // When creating on bottom half, the new window belongs to page N+1
+        // We must clear both flags to ensure saveCombinedWindowsForPage updates both caches
+        cacheUpdatedPages.remove(currentPage);
+        cacheUpdatedPages.remove(currentPage + 1);
+        
         canvas->update(); // Trigger repaint to show the new picture
     }
     
@@ -1032,8 +1048,24 @@ void PictureWindowManager::updatePermanentCacheForWindow(PictureWindow *modified
 
     for (PictureWindow *cachedWindow : cachedWindows) {
         if (cachedWindow && cachedWindow->getImagePath() == imagePath) {
+            // Get the rect from the modified window
+            QRect newRect = modifiedWindow->getCanvasRect();
+            
+            // ✅ COMBINED CANVAS FIX: Adjust Y coordinate for bottom-half windows
+            // In combined mode, bottom-half windows have Y += singlePageHeight
+            // But the cache stores normalized coordinates (Y relative to single page)
+            if (canvas && canvas->isCombinedCanvasMode()) {
+                int singlePageHeight = canvas->getSinglePageHeight();
+                int primaryPage = canvas->getLastActivePage();
+                
+                // If this window is on the bottom half (next page), adjust Y coordinate
+                if (pageNumber == primaryPage + 1 && newRect.top() >= singlePageHeight) {
+                    newRect.moveTop(newRect.top() - singlePageHeight);
+                }
+            }
+            
             // Update the permanent cached window's position/size
-            cachedWindow->setCanvasRect(modifiedWindow->getCanvasRect());
+            cachedWindow->setCanvasRect(newRect);
             break;
         }
     }
@@ -1047,13 +1079,20 @@ void PictureWindowManager::connectWindowSignals(PictureWindow *window) {
         // The canvas handles its own updates more efficiently during movement
         if (canvas) {
             canvas->setEdited(true);
-            int currentPage = canvas->getLastActivePage();
-            cacheUpdatedPages.remove(currentPage); // Clear cache flag to force re-clone
             
-            // ✅ USER MODIFICATION FIX: Update permanent cache even during combined mode
-            updatePermanentCacheForWindow(window, currentPage);
+            int primaryPage = canvas->getLastActivePage();
+            
+            // ✅ CROSS-PAGE MOVE FIX: Clear cache flags for BOTH pages in combined mode
+            // When a window moves across the page boundary (top↔bottom), we must:
+            // 1. Remove it from the old page's cache
+            // 2. Add it to the new page's cache
+            // Clearing both flags ensures saveCombinedWindowsForPage rebuilds both caches correctly
+            cacheUpdatedPages.remove(primaryPage);
+            cacheUpdatedPages.remove(primaryPage + 1);
 
-            saveWindowsForPage(currentPage);
+            // ✅ Use saveCombinedWindowsForPage for proper coordinate handling
+            // This rebuilds both page caches based on current Y positions
+            canvas->saveCombinedWindowsForPage(primaryPage);
         }
     });
     connect(window, &PictureWindow::windowResized, this, [this, window](PictureWindow*) {
@@ -1061,12 +1100,16 @@ void PictureWindowManager::connectWindowSignals(PictureWindow *window) {
         // The canvas handles its own updates more efficiently during resize
         if (canvas) {
             canvas->setEdited(true);
-            int currentPage = canvas->getLastActivePage();
-            cacheUpdatedPages.remove(currentPage); // Clear cache flag to force re-clone
             
-            // ✅ USER MODIFICATION FIX: Update permanent cache even during combined mode
-            updatePermanentCacheForWindow(window, currentPage);
-            saveWindowsForPage(currentPage);
+            int primaryPage = canvas->getLastActivePage();
+            
+            // ✅ CROSS-PAGE MOVE FIX: Clear cache flags for BOTH pages in combined mode
+            // Resizing could also cause the window to cross the page boundary
+            cacheUpdatedPages.remove(primaryPage);
+            cacheUpdatedPages.remove(primaryPage + 1);
+            
+            // ✅ Use saveCombinedWindowsForPage for proper coordinate handling
+            canvas->saveCombinedWindowsForPage(primaryPage);
         }
     });
     connect(window, &PictureWindow::windowInteracted, this, [this, window](PictureWindow*) {
