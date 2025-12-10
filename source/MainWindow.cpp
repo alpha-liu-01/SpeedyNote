@@ -5998,6 +5998,8 @@ void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
             break;
             
         case StylusButtonAction::HoldLasso:
+            // Clear any in-progress lasso selection before disabling
+            canvas->clearInProgressLasso();
             canvas->setRopeToolMode(*previousRopeTool);
             updateRopeToolButtonState();
             // Restore straight line if it was active before

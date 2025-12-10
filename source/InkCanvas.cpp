@@ -1247,7 +1247,18 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
         // Side buttons (MiddleButton, RightButton) can generate TabletPress while hovering
         // and should not initiate drawing
         Qt::MouseButton pressedButton = event->button();
-        if (pressedButton != Qt::LeftButton && pressedButton != Qt::NoButton) {
+        Qt::MouseButtons allButtons = event->buttons();
+        
+        // Check if this is a side button press (not pen tip touching surface)
+        // Case 1: button() explicitly reports a side button
+        // Case 2: button() is NoButton but buttons() shows side button without LeftButton
+        //         (this happens on some drivers when side button pressed while hovering)
+        bool isSideButtonOnly = (pressedButton != Qt::LeftButton && pressedButton != Qt::NoButton);
+        bool isHoverWithSideButton = (pressedButton == Qt::NoButton && 
+                                       (allButtons & (Qt::MiddleButton | Qt::RightButton)) &&
+                                       !(allButtons & Qt::LeftButton));
+        
+        if (isSideButtonOnly || isHoverWithSideButton) {
             // This is a side button press while hovering - don't start drawing
             event->accept();
             return;
@@ -3455,6 +3466,22 @@ void InkCanvas::cancelRopeSelection() {
         
         // Update the restored area
         update(updateRect.adjusted(-5, -5, 5, 5));
+    }
+}
+
+void InkCanvas::clearInProgressLasso() {
+    // Clear any in-progress lasso drawing state without completing the selection
+    // This is used when disabling lasso mode via stylus button
+    if (selectingWithRope || !lassoPathPoints.isEmpty()) {
+        QRectF updateRect = lassoPathPoints.boundingRect();
+        lassoPathPoints.clear();
+        selectingWithRope = false;
+        movingSelection = false;
+        drawing = false;
+        // Refresh the area where the lasso path was being drawn
+        if (!updateRect.isEmpty()) {
+            update(updateRect.toRect().adjusted(-10, -10, 10, 10));
+        }
     }
 }
 

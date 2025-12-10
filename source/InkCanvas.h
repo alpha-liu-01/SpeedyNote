@@ -281,6 +281,7 @@ public:
     void cancelRopeSelection(); // Cancel the current rope tool selection
     void copyRopeSelection(); // Copy the current rope tool selection
     void copyRopeSelectionToClipboard(); // Copy the current rope tool selection to clipboard
+    void clearInProgressLasso(); // Clear any in-progress lasso drawing without completing it
     
     PictureWindowManager* getPictureManager() const { return pictureManager; }
     
