@@ -3599,6 +3599,9 @@ void InkCanvas::clearPdfTextSelection() {
     
     // Refresh display
     update();
+    
+    // Notify that text selection was cleared (for stylus button delayed disable)
+    emit pdfTextSelectionCleared();
 }
 
 QString InkCanvas::getSelectedPdfText() const {

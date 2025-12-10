@@ -726,10 +726,15 @@ private:
     bool previousTextSelectionModeA = false;
     bool previousTextSelectionModeB = false;
     
+    // Text selection delayed disable (for stylus button hold)
+    bool textSelectionPendingDisable = false; // True when waiting for text selection interaction to complete
+    bool textSelectionWasButtonA = false; // Track which button enabled text selection
+    
     void enableStylusButtonMode(Qt::MouseButton button);
     void disableStylusButtonMode(Qt::MouseButton button);
     void handleStylusButtonPress(Qt::MouseButtons buttons);
     void handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton);
+    void onPdfTextSelectionCleared(); // Called when text selection is cleared, auto-disables if pending
     
     // Event filter for scrollbar hover detection and dial container drag
     bool eventFilter(QObject *obj, QEvent *event) override;

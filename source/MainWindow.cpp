@@ -3630,6 +3630,7 @@ void MainWindow::addNewTab() {
     connect(newCanvas, &InkCanvas::earlySaveRequested, this, &MainWindow::onEarlySaveRequested);
     connect(newCanvas, &InkCanvas::markdownNotesUpdated, this, &MainWindow::onMarkdownNotesUpdated);
     connect(newCanvas, &InkCanvas::highlightDoubleClicked, this, &MainWindow::onHighlightDoubleClicked);
+    connect(newCanvas, &InkCanvas::pdfTextSelectionCleared, this, &MainWindow::onPdfTextSelectionCleared);
     
     // Install event filter to detect mouse movement for scrollbar visibility
     newCanvas->setMouseTracking(true);
@@ -5940,6 +5941,8 @@ void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
             break;
             
         case StylusButtonAction::HoldTextSelection:
+            // Clear any pending disable from previous interaction
+            textSelectionPendingDisable = false;
             canvas->setPdfTextSelectionEnabled(true);
             updatePdfTextSelectButtonState();
             break;
@@ -6015,6 +6018,14 @@ void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
             break;
             
         case StylusButtonAction::HoldTextSelection:
+            // Check if there's an active text selection that needs interaction
+            if (canvas->hasSelectedPdfText()) {
+                // Delay the disable - keep text selection mode on until user completes interaction
+                textSelectionPendingDisable = true;
+                textSelectionWasButtonA = (button == stylusButtonAQt);
+                // Don't disable yet, don't clear activeFlag - wait for onPdfTextSelectionCleared
+                return; // Exit without disabling
+            }
             canvas->setPdfTextSelectionEnabled(*previousTextSelection);
             updatePdfTextSelectButtonState();
             break;
@@ -6022,6 +6033,30 @@ void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
         default:
             break;
     }
+}
+
+void MainWindow::onPdfTextSelectionCleared() {
+    // Called when text selection is cleared (after menu action or tap outside)
+    // If we were waiting to disable text selection mode, do it now
+    if (!textSelectionPendingDisable) {
+        return; // Not waiting for disable
+    }
+    
+    textSelectionPendingDisable = false;
+    
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    // Determine which button's settings to use
+    bool *previousTextSelection = textSelectionWasButtonA ? 
+        &previousTextSelectionModeA : &previousTextSelectionModeB;
+    bool *activeFlag = textSelectionWasButtonA ?
+        &stylusButtonAActive : &stylusButtonBActive;
+    
+    // Now complete the disable
+    *activeFlag = false;
+    canvas->setPdfTextSelectionEnabled(*previousTextSelection);
+    updatePdfTextSelectButtonState();
 }
 
 void MainWindow::handleStylusButtonPress(Qt::MouseButtons buttons) {

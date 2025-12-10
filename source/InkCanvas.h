@@ -123,6 +123,7 @@ signals:
     void ropeSelectionCompleted(const QPoint &position); // Signal emitted when rope tool selection is completed
     void pdfLinkClicked(int targetPage); // Signal emitted when a PDF link is clicked
     void pdfTextSelected(const QString &text); // Signal emitted when PDF text is selected
+    void pdfTextSelectionCleared(); // Signal emitted when PDF text selection is cleared (after menu action or tap outside)
     void pdfLoaded(); // Signal emitted when a PDF is loaded
     void autoScrollRequested(int direction); // Signal for autoscrolling to next/prev page
     void earlySaveRequested(); // Signal for proactive save before autoscroll threshold
@@ -319,6 +320,7 @@ public:
     bool isPdfTextSelectionEnabled() const { return pdfTextSelectionEnabled; }
     void clearPdfTextSelection(); // Clear current PDF text selection
     QString getSelectedPdfText() const; // Get currently selected PDF text
+    bool hasSelectedPdfText() const { return !selectedTextBoxes.isEmpty(); } // Check if text is selected
     
     // Persistent text highlight management
     void addHighlightFromSelection(); // Add a persistent highlight from current selection
