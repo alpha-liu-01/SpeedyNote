@@ -3311,6 +3311,52 @@ void MainWindow::switchTab(int index) {
         InkCanvas *prevCanvas = currentCanvas();
         if (prevCanvas) {
             prevCanvas->flushPendingMetadataSave();
+            
+            // ✅ SAFETY: Clean up any active stylus button modes on the previous canvas
+            // This prevents state inconsistency when switching tabs while holding a stylus button
+            if (stylusButtonAActive) {
+                // Restore previous state on old canvas before switching
+                switch (stylusButtonAAction) {
+                    case StylusButtonAction::HoldStraightLine:
+                        prevCanvas->setStraightLineMode(previousStraightLineModeA);
+                        break;
+                    case StylusButtonAction::HoldLasso:
+                        prevCanvas->clearInProgressLasso();
+                        prevCanvas->setRopeToolMode(previousRopeToolModeA);
+                        break;
+                    case StylusButtonAction::HoldEraser:
+                        prevCanvas->setTool(previousToolBeforeStylusA);
+                        break;
+                    case StylusButtonAction::HoldTextSelection:
+                        prevCanvas->setPdfTextSelectionEnabled(previousTextSelectionModeA);
+                        break;
+                    default:
+                        break;
+                }
+                stylusButtonAActive = false;
+            }
+            if (stylusButtonBActive) {
+                switch (stylusButtonBAction) {
+                    case StylusButtonAction::HoldStraightLine:
+                        prevCanvas->setStraightLineMode(previousStraightLineModeB);
+                        break;
+                    case StylusButtonAction::HoldLasso:
+                        prevCanvas->clearInProgressLasso();
+                        prevCanvas->setRopeToolMode(previousRopeToolModeB);
+                        break;
+                    case StylusButtonAction::HoldEraser:
+                        prevCanvas->setTool(previousToolBeforeStylusB);
+                        break;
+                    case StylusButtonAction::HoldTextSelection:
+                        prevCanvas->setPdfTextSelectionEnabled(previousTextSelectionModeB);
+                        break;
+                    default:
+                        break;
+                }
+                stylusButtonBActive = false;
+            }
+            // Clear any pending text selection disable
+            textSelectionPendingDisable = false;
         }
         
         canvasStack->setCurrentIndex(index);
