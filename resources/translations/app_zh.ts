@@ -945,12 +945,12 @@ Continue?</source>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1214"/>
         <source>Detect Button A</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">检测按键A</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1214"/>
         <source>Detect Button B</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">检测按键B</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1220"/>
@@ -959,34 +959,38 @@ Continue?</source>
 The button you press will be assigned to &apos;%1&apos;.
 
 Press Cancel to abort.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">在你的数位板上，按住一个手写笔侧键。
+
+你按下的按键将会被分配到 &apos;%1&apos;。
+
+按 取消 来打断。</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1223"/>
         <location filename="../../source/ControlPanelDialog.cpp" line="1297"/>
         <source>Button A</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">按键A</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1223"/>
         <location filename="../../source/ControlPanelDialog.cpp" line="1297"/>
         <source>Button B</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">按键B</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1229"/>
         <source>Waiting for stylus button press...</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">正在等待手写笔按键输入...</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1295"/>
         <source>Button Detected</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">检测到按键</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1296"/>
         <source>Stylus button successfully detected and assigned to %1.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">手写笔按键已成功检测到，并映射到 %1。</translation>
     </message>
     <message>
         <source>Version 0.9.1</source>
