@@ -4420,25 +4420,17 @@ void InkCanvas::showPdfTextSelectionMenu(const QPoint &position) {
         clearPdfTextSelection();
     });
     
-    // Track if an action was triggered (to distinguish from menu dismissed by clicking outside)
-    bool *actionTriggered = new bool(false);
-    
-    // Connect to all actions to track if one was triggered
-    for (QAction *action : contextMenu->actions()) {
-        if (!action->isSeparator()) {
-            connect(action, &QAction::triggered, this, [actionTriggered]() {
-                *actionTriggered = true;
-            });
-        }
-    }
-    
-    // When menu is about to hide, check if it was dismissed without action
-    connect(contextMenu, &QMenu::aboutToHide, this, [this, actionTriggered]() {
-        if (!*actionTriggered) {
-            // Menu was dismissed without selecting an action (clicked outside)
-            clearPdfTextSelection();
-        }
-        delete actionTriggered; // Clean up the flag
+    // When menu is about to hide, clear selection if it still exists
+    // (Actions that handle selection already call clearPdfTextSelection,
+    // but if user clicks outside to dismiss, we need to clear it here)
+    connect(contextMenu, &QMenu::aboutToHide, this, [this]() {
+        // Use a short delay to allow action handlers to run first
+        QTimer::singleShot(0, this, [this]() {
+            // Only clear if there's still a selection (wasn't already cleared by an action)
+            if (!selectedTextBoxes.isEmpty()) {
+                clearPdfTextSelection();
+            }
+        });
     });
     
     // Show the menu at the specified position
