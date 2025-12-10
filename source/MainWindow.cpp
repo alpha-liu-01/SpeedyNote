@@ -5918,6 +5918,9 @@ void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
                 updateRopeToolButtonState();
             }
             canvas->setStraightLineMode(true);
+            // Reset start point to current position if pen is already on surface
+            // This fixes race condition when stylus button and pen tip touch happen simultaneously
+            canvas->resetStraightLineStartPoint();
             updateStraightLineButtonState();
             break;
             

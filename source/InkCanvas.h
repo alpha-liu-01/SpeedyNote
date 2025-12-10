@@ -197,6 +197,9 @@ public:
     // Straight line mode toggle
     void setStraightLineMode(bool enabled) { straightLineMode = enabled; }
     bool isStraightLineMode() const { return straightLineMode; }
+    
+    // Reset straight line start point to current position (used when enabling via stylus button)
+    void resetStraightLineStartPoint();
 
     // Rope tool mode toggle
     void setRopeToolMode(bool enabled) { ropeToolMode = enabled; }

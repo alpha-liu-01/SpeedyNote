@@ -2182,6 +2182,14 @@ void InkCanvas::setTool(ToolType tool) {
     }
 }
 
+void InkCanvas::resetStraightLineStartPoint() {
+    // If currently drawing (pen tip on surface), update the start point to current position
+    // This is used when straight line mode is enabled via stylus button while already drawing
+    if (drawing) {
+        straightLineStartPoint = lastPoint;
+    }
+}
+
 void InkCanvas::setSaveFolder(const QString &folderPath) {
     // ✅ Handle .spn packages by extracting to temporary directory
     if (SpnPackageManager::isSpnPackage(folderPath)) {
