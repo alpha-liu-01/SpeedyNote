@@ -117,6 +117,13 @@ InkCanvas::InkCanvas(QWidget *parent)
     inertiaTimer->setInterval(16); // ~60 FPS
     connect(inertiaTimer, &QTimer::timeout, this, &InkCanvas::updateInertiaScroll);
     
+    // Initialize touch panning timeout timer (Linux fix for stuck isTouchPanning state)
+    // If no touch events arrive within 200ms, assume touch gesture ended abnormally
+    touchPanningTimeoutTimer = new QTimer(this);
+    touchPanningTimeoutTimer->setSingleShot(true);
+    touchPanningTimeoutTimer->setInterval(200); // 200ms timeout
+    connect(touchPanningTimeoutTimer, &QTimer::timeout, this, &InkCanvas::resetTouchPanningState);
+    
     // Initialize auto-save timer (single-shot, triggered after first edit)
     autoSaveTimer = new QTimer(this);
     autoSaveTimer->setSingleShot(true);
@@ -2846,6 +2853,12 @@ bool InkCanvas::event(QEvent *event) {
         event->type() == QEvent::TouchUpdate || 
         event->type() == QEvent::TouchEnd) {
         
+        // ✅ LINUX FIX: Restart timeout timer on every touch event
+        // This ensures we detect when touch events stop arriving unexpectedly
+        if (touchPanningTimeoutTimer && event->type() != QEvent::TouchEnd) {
+            touchPanningTimeoutTimer->start(); // Restart the 200ms timeout
+        }
+        
         QTouchEvent *touchEvent = static_cast<QTouchEvent*>(event);
         const QList<QTouchEvent::TouchPoint> touchPoints = touchEvent->points();
         
@@ -3125,6 +3138,11 @@ bool InkCanvas::event(QEvent *event) {
         }
         
         if (event->type() == QEvent::TouchEnd) {
+            // ✅ LINUX FIX: Stop timeout timer - TouchEnd received properly
+            if (touchPanningTimeoutTimer && touchPanningTimeoutTimer->isActive()) {
+                touchPanningTimeoutTimer->stop();
+            }
+            
             isPanning = false;
             lastPinchScale = 1.0;
             activeTouchPoints = 0;
@@ -3264,6 +3282,29 @@ void InkCanvas::updateInertiaScroll() {
     
     // Use setPanWithTouchScroll for efficient rendering during inertia
     setPanWithTouchScroll(newPanX, newPanY);
+}
+
+void InkCanvas::resetTouchPanningState() {
+    // ✅ LINUX FIX: Reset touch panning state if no touch events arrived within timeout
+    // This handles cases where TouchEnd event is lost or delayed on Linux
+    if (isTouchPanning && !inertiaTimer->isActive()) {
+        // Only reset if not in inertia scroll (inertia should complete naturally)
+        qDebug() << "Touch panning timeout - resetting stuck isTouchPanning state";
+        
+        isTouchPanning = false;
+        isPanning = false;
+        activeTouchPoints = 0;
+        
+        // Clear cached frame to force full redraw
+        cachedFrame = QPixmap();
+        cachedFrameOffset = QPoint(0, 0);
+        
+        // Notify MainWindow that touch panning ended
+        emit touchPanningChanged(false);
+        
+        // Force a full repaint to show any pending changes
+        update();
+    }
 }
 
 void InkCanvas::onAutoSaveTimeout() {

@@ -523,6 +523,10 @@ private:
     int touchPanStartX = 0; // Pan X value when touch gesture started
     int touchPanStartY = 0; // Pan Y value when touch gesture started
     
+    // Touch panning timeout (Linux fix for stuck isTouchPanning state)
+    QTimer* touchPanningTimeoutTimer = nullptr; // Timer to reset isTouchPanning if no events arrive
+    void resetTouchPanningState(); // Called by timeout timer to clear stuck state
+    
     // Inertia scrolling (momentum scrolling)
     QTimer* inertiaTimer = nullptr; // Timer for inertia animation
     qreal inertiaVelocityX = 0.0; // Current inertia velocity X
