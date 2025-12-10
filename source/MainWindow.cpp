@@ -4446,16 +4446,31 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 // Ignore tablet event errors to prevent crashes
             }
         }
-#ifdef Q_OS_LINUX
-        // Handle tablet press/release as fallback for palm rejection
-        // (proximity events may not be reliable on some Wayland compositors)
+        // Handle tablet press/release for stylus button mapping
         else if (event->type() == QEvent::TabletPress) {
-            onStylusProximityEnter(); // Treat press as "stylus is active"
+            QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
+#ifdef Q_OS_LINUX
+            onStylusProximityEnter(); // Treat press as "stylus is active" for palm rejection
+#endif
+            // Handle stylus side button press (not just tip)
+            Qt::MouseButtons buttons = tabletEvent->buttons();
+            if ((buttons & Qt::MiddleButton) || (buttons & Qt::RightButton)) {
+                handleStylusButtonPress(buttons);
+            }
         }
         else if (event->type() == QEvent::TabletRelease) {
-            onStylusProximityLeave(); // Treat release as "stylus may be leaving"
-        }
+            QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
+#ifdef Q_OS_LINUX
+            onStylusProximityLeave(); // Treat release as "stylus may be leaving" for palm rejection
 #endif
+            // Handle stylus side button release
+            Qt::MouseButton releasedButton = tabletEvent->button();
+            Qt::MouseButtons remainingButtons = tabletEvent->buttons();
+            if (releasedButton == Qt::MiddleButton || releasedButton == Qt::RightButton ||
+                stylusButtonAActive || stylusButtonBActive) {
+                handleStylusButtonRelease(remainingButtons, releasedButton);
+            }
+        }
         // Handle mouse button press events for forward/backward navigation
         else if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -5810,6 +5825,224 @@ bool MainWindow::event(QEvent *event) {
 }
 #endif
 
+// ==================== Stylus Button Mapping ====================
+
+void MainWindow::setStylusButtonAAction(StylusButtonAction action) {
+    stylusButtonAAction = action;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonBAction(StylusButtonAction action) {
+    stylusButtonBAction = action;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonAQt(Qt::MouseButton button) {
+    stylusButtonAQt = button;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonBQt(Qt::MouseButton button) {
+    stylusButtonBQt = button;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::saveStylusButtonSettings() {
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("stylusButtonAAction", static_cast<int>(stylusButtonAAction));
+    settings.setValue("stylusButtonBAction", static_cast<int>(stylusButtonBAction));
+    settings.setValue("stylusButtonAQt", static_cast<int>(stylusButtonAQt));
+    settings.setValue("stylusButtonBQt", static_cast<int>(stylusButtonBQt));
+}
+
+void MainWindow::loadStylusButtonSettings() {
+    QSettings settings("SpeedyNote", "App");
+    stylusButtonAAction = static_cast<StylusButtonAction>(
+        settings.value("stylusButtonAAction", static_cast<int>(StylusButtonAction::None)).toInt());
+    stylusButtonBAction = static_cast<StylusButtonAction>(
+        settings.value("stylusButtonBAction", static_cast<int>(StylusButtonAction::None)).toInt());
+    stylusButtonAQt = static_cast<Qt::MouseButton>(
+        settings.value("stylusButtonAQt", static_cast<int>(Qt::MiddleButton)).toInt());
+    stylusButtonBQt = static_cast<Qt::MouseButton>(
+        settings.value("stylusButtonBQt", static_cast<int>(Qt::RightButton)).toInt());
+}
+
+void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    StylusButtonAction action = StylusButtonAction::None;
+    bool *activeFlag = nullptr;
+    ToolType *previousTool = nullptr;
+    bool *previousStraightLine = nullptr;
+    bool *previousRopeTool = nullptr;
+    bool *previousTextSelection = nullptr;
+    
+    // Determine which button and its settings
+    if (button == stylusButtonAQt) {
+        action = stylusButtonAAction;
+        activeFlag = &stylusButtonAActive;
+        previousTool = &previousToolBeforeStylusA;
+        previousStraightLine = &previousStraightLineModeA;
+        previousRopeTool = &previousRopeToolModeA;
+        previousTextSelection = &previousTextSelectionModeA;
+    } else if (button == stylusButtonBQt) {
+        action = stylusButtonBAction;
+        activeFlag = &stylusButtonBActive;
+        previousTool = &previousToolBeforeStylusB;
+        previousStraightLine = &previousStraightLineModeB;
+        previousRopeTool = &previousRopeToolModeB;
+        previousTextSelection = &previousTextSelectionModeB;
+    } else {
+        return; // Unknown button
+    }
+    
+    if (action == StylusButtonAction::None || *activeFlag) {
+        return; // No action configured or already active
+    }
+    
+    // Save current state before enabling
+    *previousTool = canvas->getCurrentTool();
+    *previousStraightLine = canvas->isStraightLineMode();
+    *previousRopeTool = canvas->isRopeToolMode();
+    *previousTextSelection = canvas->isPdfTextSelectionEnabled();
+    
+    *activeFlag = true;
+    
+    // Enable the requested mode
+    switch (action) {
+        case StylusButtonAction::HoldStraightLine:
+            // Disable rope tool if active (they're mutually exclusive)
+            if (canvas->isRopeToolMode()) {
+                canvas->setRopeToolMode(false);
+                updateRopeToolButtonState();
+            }
+            canvas->setStraightLineMode(true);
+            updateStraightLineButtonState();
+            break;
+            
+        case StylusButtonAction::HoldLasso:
+            // Disable straight line if active (they're mutually exclusive)
+            if (canvas->isStraightLineMode()) {
+                canvas->setStraightLineMode(false);
+                updateStraightLineButtonState();
+            }
+            canvas->setRopeToolMode(true);
+            updateRopeToolButtonState();
+            break;
+            
+        case StylusButtonAction::HoldEraser:
+            canvas->setTool(ToolType::Eraser);
+            updateToolButtonStates();
+            break;
+            
+        case StylusButtonAction::HoldTextSelection:
+            canvas->setPdfTextSelectionEnabled(true);
+            updatePdfTextSelectButtonState();
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    StylusButtonAction action = StylusButtonAction::None;
+    bool *activeFlag = nullptr;
+    ToolType *previousTool = nullptr;
+    bool *previousStraightLine = nullptr;
+    bool *previousRopeTool = nullptr;
+    bool *previousTextSelection = nullptr;
+    
+    // Determine which button and its settings
+    if (button == stylusButtonAQt) {
+        action = stylusButtonAAction;
+        activeFlag = &stylusButtonAActive;
+        previousTool = &previousToolBeforeStylusA;
+        previousStraightLine = &previousStraightLineModeA;
+        previousRopeTool = &previousRopeToolModeA;
+        previousTextSelection = &previousTextSelectionModeA;
+    } else if (button == stylusButtonBQt) {
+        action = stylusButtonBAction;
+        activeFlag = &stylusButtonBActive;
+        previousTool = &previousToolBeforeStylusB;
+        previousStraightLine = &previousStraightLineModeB;
+        previousRopeTool = &previousRopeToolModeB;
+        previousTextSelection = &previousTextSelectionModeB;
+    } else {
+        return; // Unknown button
+    }
+    
+    if (!*activeFlag) {
+        return; // Was not active
+    }
+    
+    *activeFlag = false;
+    
+    // Restore previous state
+    switch (action) {
+        case StylusButtonAction::HoldStraightLine:
+            canvas->setStraightLineMode(*previousStraightLine);
+            updateStraightLineButtonState();
+            // Restore rope tool if it was active before
+            if (*previousRopeTool) {
+                canvas->setRopeToolMode(true);
+                updateRopeToolButtonState();
+            }
+            break;
+            
+        case StylusButtonAction::HoldLasso:
+            canvas->setRopeToolMode(*previousRopeTool);
+            updateRopeToolButtonState();
+            // Restore straight line if it was active before
+            if (*previousStraightLine) {
+                canvas->setStraightLineMode(true);
+                updateStraightLineButtonState();
+            }
+            break;
+            
+        case StylusButtonAction::HoldEraser:
+            canvas->setTool(*previousTool);
+            updateToolButtonStates();
+            break;
+            
+        case StylusButtonAction::HoldTextSelection:
+            canvas->setPdfTextSelectionEnabled(*previousTextSelection);
+            updatePdfTextSelectButtonState();
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void MainWindow::handleStylusButtonPress(Qt::MouseButtons buttons) {
+    // Check if any configured stylus button is now pressed
+    if ((buttons & stylusButtonAQt) && stylusButtonAAction != StylusButtonAction::None) {
+        enableStylusButtonMode(stylusButtonAQt);
+    }
+    if ((buttons & stylusButtonBQt) && stylusButtonBAction != StylusButtonAction::None) {
+        enableStylusButtonMode(stylusButtonBQt);
+    }
+}
+
+void MainWindow::handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton) {
+    // Check if a configured stylus button was released
+    if (releasedButton == stylusButtonAQt || !(buttons & stylusButtonAQt)) {
+        if (stylusButtonAActive) {
+            disableStylusButtonMode(stylusButtonAQt);
+        }
+    }
+    if (releasedButton == stylusButtonBQt || !(buttons & stylusButtonBQt)) {
+        if (stylusButtonBActive) {
+            disableStylusButtonMode(stylusButtonBQt);
+        }
+    }
+}
+
 void MainWindow::setTemporaryDialMode(DialMode mode) {
     if (temporaryDialMode == None) {
         temporaryDialMode = currentDialMode;
@@ -6428,6 +6661,9 @@ void MainWindow::loadUserSettings() {
     palmRejectionEnabled = settings.value("palmRejectionEnabled", false).toBool();
     palmRejectionDelayMs = settings.value("palmRejectionDelayMs", 500).toInt();
 #endif
+    
+    // Load stylus button settings
+    loadStylusButtonSettings();
     
     // Initialize default background settings if they don't exist
     if (!settings.contains("defaultBackgroundStyle")) {

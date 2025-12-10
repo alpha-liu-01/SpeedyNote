@@ -73,6 +73,15 @@ private:
     QSpinBox *palmRejectionDelaySpinBox;
 #endif
 
+    // Stylus button mapping widgets
+    QComboBox *stylusButtonACombo;
+    QComboBox *stylusButtonBCombo;
+    QPushButton *detectButtonAButton;
+    QPushButton *detectButtonBButton;
+    QLabel *stylusButtonALabel;
+    QLabel *stylusButtonBLabel;
+    void detectStylusButton(bool isButtonA);
+
     QWidget *controllerMappingTab;
     QPushButton *reconnectButton;
     QLabel *controllerStatusLabel;

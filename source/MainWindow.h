@@ -94,6 +94,15 @@ enum class ControllerAction {
     NextPage
 };
 
+// Stylus button actions (hold-to-enable style)
+enum class StylusButtonAction {
+    None,
+    HoldStraightLine,    // Enable straight line mode while held
+    HoldLasso,           // Enable lasso/rope tool while held
+    HoldEraser,          // Enable eraser while held
+    HoldTextSelection    // Enable PDF text selection while held
+};
+
 static QString actionToString(ControllerAction action) {
     switch (action) {
         case ControllerAction::ToggleFullscreen: return "Toggle Fullscreen";
@@ -213,6 +222,23 @@ public:
     int getPalmRejectionDelay() const { return palmRejectionDelayMs; }
     void setPalmRejectionDelay(int delayMs);
 #endif
+
+    // Stylus side button mapping settings
+    StylusButtonAction stylusButtonAAction = StylusButtonAction::None;
+    StylusButtonAction stylusButtonBAction = StylusButtonAction::None;
+    Qt::MouseButton stylusButtonAQt = Qt::MiddleButton; // Which Qt button maps to "Button A"
+    Qt::MouseButton stylusButtonBQt = Qt::RightButton;  // Which Qt button maps to "Button B"
+    
+    StylusButtonAction getStylusButtonAAction() const { return stylusButtonAAction; }
+    StylusButtonAction getStylusButtonBAction() const { return stylusButtonBAction; }
+    Qt::MouseButton getStylusButtonAQt() const { return stylusButtonAQt; }
+    Qt::MouseButton getStylusButtonBQt() const { return stylusButtonBQt; }
+    void setStylusButtonAAction(StylusButtonAction action);
+    void setStylusButtonBAction(StylusButtonAction action);
+    void setStylusButtonAQt(Qt::MouseButton button);
+    void setStylusButtonBQt(Qt::MouseButton button);
+    void saveStylusButtonSettings();
+    void loadStylusButtonSettings();
 
     // Theme settings
     QColor customAccentColor;
@@ -687,6 +713,23 @@ private:
     void onStylusProximityLeave(); // Called when stylus leaves proximity or releases
     void restoreTouchGestureMode(); // Called by timer to restore original mode
 #endif
+    
+    // Stylus button state tracking (hold-to-enable)
+    bool stylusButtonAActive = false;
+    bool stylusButtonBActive = false;
+    ToolType previousToolBeforeStylusA = ToolType::Pen;
+    ToolType previousToolBeforeStylusB = ToolType::Pen;
+    bool previousStraightLineModeA = false;
+    bool previousStraightLineModeB = false;
+    bool previousRopeToolModeA = false;
+    bool previousRopeToolModeB = false;
+    bool previousTextSelectionModeA = false;
+    bool previousTextSelectionModeB = false;
+    
+    void enableStylusButtonMode(Qt::MouseButton button);
+    void disableStylusButtonMode(Qt::MouseButton button);
+    void handleStylusButtonPress(Qt::MouseButtons buttons);
+    void handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton);
     
     // Event filter for scrollbar hover detection and dial container drag
     bool eventFilter(QObject *obj, QEvent *event) override;
