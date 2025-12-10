@@ -1243,6 +1243,16 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
     bool isErasing = (currentTool == ToolType::Eraser);
 
     if (event->type() == QEvent::TabletPress) {
+        // Only start drawing if this is a pen tip press (LeftButton), not a side button press
+        // Side buttons (MiddleButton, RightButton) can generate TabletPress while hovering
+        // and should not initiate drawing
+        Qt::MouseButton pressedButton = event->button();
+        if (pressedButton != Qt::LeftButton && pressedButton != Qt::NoButton) {
+            // This is a side button press while hovering - don't start drawing
+            event->accept();
+            return;
+        }
+        
         drawing = true;
         lastPoint = event->position(); // Logical widget coordinates
         if (straightLineMode) {
@@ -1405,7 +1415,12 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
             }
         }
     } else if (event->type() == QEvent::TabletRelease) {
-        if (straightLineMode && !isErasing) {
+        // Only process drawing completion if we were actually drawing (pen tip was on surface)
+        // Side button releases should not trigger drawing completion
+        Qt::MouseButton releasedButton = event->button();
+        bool isTipRelease = (releasedButton == Qt::LeftButton || releasedButton == Qt::NoButton);
+        
+        if (isTipRelease && drawing && straightLineMode && !isErasing) {
             // Draw the final line on release with the current pressure
             qreal pressure = event->pressure();
             
@@ -1424,7 +1439,7 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
             if (!edited){
                 edited = true;
             }
-        } else if (straightLineMode && isErasing) {
+        } else if (isTipRelease && drawing && straightLineMode && isErasing) {
             // For erasing in straight line mode, most of the work is done during movement
             // Just ensure one final erasing pass from start to end point
             qreal pressure = qMax(event->pressure(), 0.5);
@@ -1439,7 +1454,10 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
             }
         }
         
-        drawing = false;
+        // Only clear drawing flag on tip release, not side button release
+        if (isTipRelease) {
+            drawing = false;
+        }
         
         // ✅ AUTO-SAVE: Start timer when stroke ends (debouncing pattern)
         // Timer will be reset if user starts drawing again before it fires
