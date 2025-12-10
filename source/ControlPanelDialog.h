@@ -66,6 +66,12 @@ private:
     
     // Wayland DPI scale override
     QDoubleSpinBox *waylandDpiScaleSpinBox;
+    
+#ifdef Q_OS_LINUX
+    // Palm rejection settings (Linux only)
+    QCheckBox *palmRejectionCheckbox;
+    QSpinBox *palmRejectionDelaySpinBox;
+#endif
 
     QWidget *controllerMappingTab;
     QPushButton *reconnectButton;

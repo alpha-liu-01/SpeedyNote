@@ -280,6 +280,51 @@ void ControlPanelDialog::createPerformanceTab() {
     layout->addWidget(waylandDpiLabel);
     layout->addWidget(waylandDpiScaleSpinBox);
     layout->addWidget(noteWaylandDpi);
+    
+#ifdef Q_OS_LINUX
+    // Palm rejection settings (Linux only - Windows has built-in palm rejection)
+    layout->addSpacing(15);
+    
+    QLabel *palmRejectionSectionLabel = new QLabel(tr("Palm Rejection (Linux Only)"));
+    palmRejectionSectionLabel->setStyleSheet("font-weight: bold; margin-top: 10px;");
+    layout->addWidget(palmRejectionSectionLabel);
+    
+    palmRejectionCheckbox = new QCheckBox(tr("Disable touch gestures when stylus is active"));
+    palmRejectionCheckbox->setChecked(mainWindowRef->isPalmRejectionEnabled());
+    layout->addWidget(palmRejectionCheckbox);
+    
+    QHBoxLayout *palmDelayLayout = new QHBoxLayout();
+    QLabel *palmDelayLabel = new QLabel(tr("Restore delay:"));
+    palmRejectionDelaySpinBox = new QSpinBox();
+    palmRejectionDelaySpinBox->setRange(0, 5000);
+    palmRejectionDelaySpinBox->setSingleStep(100);
+    palmRejectionDelaySpinBox->setSuffix(" ms");
+    palmRejectionDelaySpinBox->setValue(mainWindowRef->getPalmRejectionDelay());
+    palmRejectionDelaySpinBox->setEnabled(palmRejectionCheckbox->isChecked());
+    palmDelayLayout->addWidget(palmDelayLabel);
+    palmDelayLayout->addWidget(palmRejectionDelaySpinBox);
+    palmDelayLayout->addStretch();
+    layout->addLayout(palmDelayLayout);
+    
+    QLabel *palmRejectionNote = new QLabel(tr("When enabled, touch gestures are temporarily disabled while the stylus is hovering or touching the screen. "
+                                              "After the stylus leaves, touch gestures are restored after the specified delay. "
+                                              "This helps prevent accidental palm touches while writing."));
+    palmRejectionNote->setWordWrap(true);
+    palmRejectionNote->setStyleSheet("color: gray; font-size: 10px;");
+    layout->addWidget(palmRejectionNote);
+    
+    // Connect checkbox to enable/disable delay spinbox
+    connect(palmRejectionCheckbox, &QCheckBox::toggled, palmRejectionDelaySpinBox, &QSpinBox::setEnabled);
+    
+    // Apply settings immediately when changed
+    connect(palmRejectionCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
+        mainWindowRef->setPalmRejectionEnabled(checked);
+    });
+    
+    connect(palmRejectionDelaySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        mainWindowRef->setPalmRejectionDelay(value);
+    });
+#endif
 
     layout->addStretch();
 

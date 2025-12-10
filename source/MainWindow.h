@@ -203,6 +203,17 @@ public:
     void setTouchGestureMode(TouchGestureMode mode);
     void cycleTouchGestureMode(); // Cycle through: Disabled -> YAxisOnly -> Full -> Disabled
 
+#ifdef Q_OS_LINUX
+    // Palm rejection settings (Linux only - Windows has built-in palm rejection)
+    bool palmRejectionEnabled = false;
+    int palmRejectionDelayMs = 500; // Default 500ms delay before restoring touch gestures
+    
+    bool isPalmRejectionEnabled() const { return palmRejectionEnabled; }
+    void setPalmRejectionEnabled(bool enabled);
+    int getPalmRejectionDelay() const { return palmRejectionDelayMs; }
+    void setPalmRejectionDelay(int delayMs);
+#endif
+
     // Theme settings
     QColor customAccentColor;
     bool useCustomAccentColor = false;
@@ -666,6 +677,17 @@ private:
     bool scrollbarsVisible = false;
     QTimer *scrollbarHideTimer = nullptr;
     
+#ifdef Q_OS_LINUX
+    // Palm rejection internal state
+    bool palmRejectionActive = false; // Whether we're currently suppressing touch gestures
+    TouchGestureMode palmRejectionOriginalMode = TouchGestureMode::Full; // Original mode before suppression
+    QTimer *palmRejectionTimer = nullptr; // Timer for delayed restore
+    
+    void onStylusProximityEnter(); // Called when stylus enters proximity or touches
+    void onStylusProximityLeave(); // Called when stylus leaves proximity or releases
+    void restoreTouchGestureMode(); // Called by timer to restore original mode
+#endif
+    
     // Event filter for scrollbar hover detection and dial container drag
     bool eventFilter(QObject *obj, QEvent *event) override;
     
@@ -698,6 +720,9 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;  // New: Handle keyboard shortcuts
     void tabletEvent(QTabletEvent *event) override; // Handle pen hover for tooltips
+#ifdef Q_OS_LINUX
+    bool event(QEvent *event) override; // Handle tablet proximity events for palm rejection
+#endif
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override; // Handle Windows theme changes
 #endif

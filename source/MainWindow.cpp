@@ -726,6 +726,13 @@ void MainWindow::setupUi() {
         scrollbarsVisible = false;
     });
     
+#ifdef Q_OS_LINUX
+    // Create timer for palm rejection restore delay
+    palmRejectionTimer = new QTimer(this);
+    palmRejectionTimer->setSingleShot(true);
+    connect(palmRejectionTimer, &QTimer::timeout, this, &MainWindow::restoreTouchGestureMode);
+#endif
+    
     // panXSlider->setFixedHeight(30);
     // panYSlider->setFixedWidth(30);
 
@@ -1272,6 +1279,14 @@ MainWindow::~MainWindow() {
         localServer->close();
         localServer = nullptr;
     }
+    
+#ifdef Q_OS_LINUX
+    // Stop palm rejection timer to prevent callback during destruction
+    if (palmRejectionTimer) {
+        palmRejectionTimer->stop();
+        palmRejectionTimer->disconnect();
+    }
+#endif
     
     // Use static cleanup method for consistent cleanup
     cleanupSharedResources();
@@ -4431,6 +4446,16 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 // Ignore tablet event errors to prevent crashes
             }
         }
+#ifdef Q_OS_LINUX
+        // Handle tablet press/release as fallback for palm rejection
+        // (proximity events may not be reliable on some Wayland compositors)
+        else if (event->type() == QEvent::TabletPress) {
+            onStylusProximityEnter(); // Treat press as "stylus is active"
+        }
+        else if (event->type() == QEvent::TabletRelease) {
+            onStylusProximityLeave(); // Treat release as "stylus may be leaving"
+        }
+#endif
         // Handle mouse button press events for forward/backward navigation
         else if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -5694,6 +5719,97 @@ void MainWindow::cycleTouchGestureMode() {
     }
 }
 
+#ifdef Q_OS_LINUX
+void MainWindow::setPalmRejectionEnabled(bool enabled) {
+    palmRejectionEnabled = enabled;
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("palmRejectionEnabled", enabled);
+    
+    // If disabling while active, restore the original mode immediately
+    if (!enabled && palmRejectionActive) {
+        if (palmRejectionTimer && palmRejectionTimer->isActive()) {
+            palmRejectionTimer->stop();
+        }
+        restoreTouchGestureMode();
+    }
+}
+
+void MainWindow::setPalmRejectionDelay(int delayMs) {
+    palmRejectionDelayMs = qBound(0, delayMs, 5000); // Clamp to 0-5000ms
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("palmRejectionDelayMs", palmRejectionDelayMs);
+}
+
+void MainWindow::onStylusProximityEnter() {
+    if (!palmRejectionEnabled || !canvasStack) {
+        return;
+    }
+    
+    // Stop any pending restore timer
+    if (palmRejectionTimer && palmRejectionTimer->isActive()) {
+        palmRejectionTimer->stop();
+    }
+    
+    // If not already suppressing, save current mode and disable touch gestures
+    if (!palmRejectionActive) {
+        // Don't interfere if touch gestures are already disabled
+        if (touchGestureMode == TouchGestureMode::Disabled) {
+            return;
+        }
+        
+        palmRejectionOriginalMode = touchGestureMode;
+        palmRejectionActive = true;
+        
+        // Temporarily disable touch gestures on all canvases
+        for (int i = 0; i < canvasStack->count(); ++i) {
+            InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
+            if (canvas) {
+                canvas->setTouchGestureMode(TouchGestureMode::Disabled);
+            }
+        }
+    }
+}
+
+void MainWindow::onStylusProximityLeave() {
+    if (!palmRejectionEnabled || !palmRejectionActive) {
+        return;
+    }
+    
+    // Start timer to restore touch gestures after delay
+    if (palmRejectionTimer) {
+        palmRejectionTimer->setInterval(palmRejectionDelayMs);
+        palmRejectionTimer->start();
+    }
+}
+
+void MainWindow::restoreTouchGestureMode() {
+    if (!palmRejectionActive || !canvasStack) {
+        return;
+    }
+    
+    palmRejectionActive = false;
+    
+    // Restore original touch gesture mode to all canvases
+    for (int i = 0; i < canvasStack->count(); ++i) {
+        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
+        if (canvas) {
+            canvas->setTouchGestureMode(palmRejectionOriginalMode);
+        }
+    }
+}
+
+bool MainWindow::event(QEvent *event) {
+    // Handle tablet proximity events for palm rejection
+    if (event->type() == QEvent::TabletEnterProximity) {
+        onStylusProximityEnter();
+    } else if (event->type() == QEvent::TabletLeaveProximity) {
+        onStylusProximityLeave();
+    }
+    
+    return QMainWindow::event(event);
+}
+#endif
+
 void MainWindow::setTemporaryDialMode(DialMode mode) {
     if (temporaryDialMode == None) {
         temporaryDialMode = currentDialMode;
@@ -6306,6 +6422,12 @@ void MainWindow::loadUserSettings() {
     updateButtonIcon(touchGesturesButton, "hand");
     touchGesturesButton->style()->unpolish(touchGesturesButton);
     touchGesturesButton->style()->polish(touchGesturesButton);
+    
+#ifdef Q_OS_LINUX
+    // Load palm rejection settings (Linux only)
+    palmRejectionEnabled = settings.value("palmRejectionEnabled", false).toBool();
+    palmRejectionDelayMs = settings.value("palmRejectionDelayMs", 500).toInt();
+#endif
     
     // Initialize default background settings if they don't exist
     if (!settings.contains("defaultBackgroundStyle")) {
