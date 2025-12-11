@@ -7606,7 +7606,7 @@ void MainWindow::updateToolbarLayout() {
     // < 1090 and >= 930: Single row without centering (left spacer removed, buttons can use full width)
     // < 930: Two-row layout
     const int centeringThreshold = 1090;
-    const int twoRowThreshold = 930;
+    const int twoRowThreshold = 956;
     
     bool shouldBeTwoRows = windowWidth < twoRowThreshold;
     bool shouldBeCentered = windowWidth >= centeringThreshold;
