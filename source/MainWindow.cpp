@@ -8105,12 +8105,18 @@ void MainWindow::toggleOutlineSidebar() {
         }
     }
     
-    // Reposition floating tabs after sidebar visibility change
-    positionLeftSidebarTabs();
-    positionDialToolbarTab();
-    if (dialContainer && dialContainer->isVisible()) {
-        positionDialContainer();
+    // Force layout update and reposition floating tabs after sidebar visibility change
+    if (centralWidget() && centralWidget()->layout()) {
+        centralWidget()->layout()->invalidate();
+        centralWidget()->layout()->activate();
     }
+    QTimer::singleShot(0, this, [this]() {
+        positionLeftSidebarTabs();
+        positionDialToolbarTab();
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
 }
 
 void MainWindow::onOutlineItemClicked(QTreeWidgetItem *item, int column) {
@@ -8384,12 +8390,18 @@ void MainWindow::toggleBookmarksSidebar() {
         loadBookmarks(); // Refresh bookmarks when opening
     }
     
-    // Reposition floating tabs after sidebar visibility change
-    positionLeftSidebarTabs();
-    positionDialToolbarTab();
-    if (dialContainer && dialContainer->isVisible()) {
-        positionDialContainer();
+    // Force layout update and reposition floating tabs after sidebar visibility change
+    if (centralWidget() && centralWidget()->layout()) {
+        centralWidget()->layout()->invalidate();
+        centralWidget()->layout()->activate();
     }
+    QTimer::singleShot(0, this, [this]() {
+        positionLeftSidebarTabs();
+        positionDialToolbarTab();
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
 }
 
 void MainWindow::onBookmarkItemClicked(QTreeWidgetItem *item, int column) {
@@ -8523,11 +8535,15 @@ void MainWindow::toggleMarkdownNotesSidebar() {
         currentCanvas()->update();
     }
     
-    // Reposition dial toolbar tab and dial container if visible
-    positionDialToolbarTab();
-    if (dialContainer && dialContainer->isVisible()) {
-        positionDialContainer();
-    }
+    // Reposition dial toolbar tab and dial container after layout settles
+    // Use a short delay to ensure the layout has fully completed
+    QTimer::singleShot(0, this, [this]() {
+        positionDialToolbarTab();
+        positionLeftSidebarTabs();  // Also reposition left tabs for consistency
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
 }
 
 void MainWindow::onMarkdownNotesUpdated() {
