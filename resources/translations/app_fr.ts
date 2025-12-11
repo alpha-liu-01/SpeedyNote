@@ -1339,139 +1339,139 @@ This will overwrite your current configuration.</source>
 <context>
     <name>InkCanvas</name>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="1744"/>
+        <location filename="../../source/InkCanvas.cpp" line="1910"/>
         <source>Select Image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="1745"/>
+        <location filename="../../source/InkCanvas.cpp" line="1911"/>
         <source>Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="1863"/>
+        <location filename="../../source/InkCanvas.cpp" line="2029"/>
         <source>Image Pasted</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="1864"/>
+        <location filename="../../source/InkCanvas.cpp" line="2030"/>
         <source>Image from clipboard pasted successfully.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4352"/>
+        <location filename="../../source/InkCanvas.cpp" line="4534"/>
         <source>Copy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4417"/>
+        <location filename="../../source/InkCanvas.cpp" line="4599"/>
         <source>Cancel</source>
         <translation type="unfinished">Annuler</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="3571"/>
-        <location filename="../../source/InkCanvas.cpp" line="6441"/>
+        <location filename="../../source/InkCanvas.cpp" line="3753"/>
+        <location filename="../../source/InkCanvas.cpp" line="6623"/>
         <source>Clipboard Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="3572"/>
+        <location filename="../../source/InkCanvas.cpp" line="3754"/>
         <source>Failed to access clipboard for copying rope selection.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="3580"/>
+        <location filename="../../source/InkCanvas.cpp" line="3762"/>
         <source>Copied to Clipboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="3581"/>
+        <location filename="../../source/InkCanvas.cpp" line="3763"/>
         <source>Selected area has been copied to clipboard.
 
 You can now paste it on other pages or tabs using the picture paste feature.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4367"/>
+        <location filename="../../source/InkCanvas.cpp" line="4549"/>
         <source>Remove Highlight</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4375"/>
+        <location filename="../../source/InkCanvas.cpp" line="4557"/>
         <source>Add Notes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4390"/>
+        <location filename="../../source/InkCanvas.cpp" line="4572"/>
         <source>Highlight and Add Notes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4405"/>
+        <location filename="../../source/InkCanvas.cpp" line="4587"/>
         <source>Add Highlight</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="4762"/>
+        <location filename="../../source/InkCanvas.cpp" line="4944"/>
         <source>Note for: </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6442"/>
+        <location filename="../../source/InkCanvas.cpp" line="6624"/>
         <source>Failed to access system clipboard.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6449"/>
+        <location filename="../../source/InkCanvas.cpp" line="6631"/>
         <source>No Clipboard Data</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6450"/>
+        <location filename="../../source/InkCanvas.cpp" line="6632"/>
         <source>No data found in clipboard.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6486"/>
+        <location filename="../../source/InkCanvas.cpp" line="6668"/>
         <source>No Image in Clipboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6487"/>
+        <location filename="../../source/InkCanvas.cpp" line="6669"/>
         <source>No image data found in clipboard.
 
 Please copy an image to the clipboard first.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6493"/>
+        <location filename="../../source/InkCanvas.cpp" line="6675"/>
         <source>Image Too Large</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6494"/>
+        <location filename="../../source/InkCanvas.cpp" line="6676"/>
         <source>The clipboard image is too large (max 8192x8192 pixels).
 
 Please use a smaller image.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6506"/>
+        <location filename="../../source/InkCanvas.cpp" line="6688"/>
         <source>No Notebook Open</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6507"/>
+        <location filename="../../source/InkCanvas.cpp" line="6689"/>
         <source>Please save your notebook as a SpeedyNote Package (.spn) file before pasting images.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6540"/>
+        <location filename="../../source/InkCanvas.cpp" line="6722"/>
         <source>Save Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6541"/>
+        <location filename="../../source/InkCanvas.cpp" line="6723"/>
         <source>Failed to save clipboard image to notebook.
 
 Path: %1</source>
@@ -2492,47 +2492,47 @@ Click the Save button to save your notebook first.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6804"/>
+        <location filename="../../source/MainWindow.cpp" line="6807"/>
         <source>File Not Found</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6804"/>
+        <location filename="../../source/MainWindow.cpp" line="6807"/>
         <source>The PDF file could not be found:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6970"/>
+        <location filename="../../source/MainWindow.cpp" line="6973"/>
         <source>Different PDF Linked</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6971"/>
+        <location filename="../../source/MainWindow.cpp" line="6974"/>
         <source>This notebook folder is already linked to a different PDF file.
 
 Do you want to replace the link with the new PDF?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8150"/>
-        <location filename="../../source/MainWindow.cpp" line="8442"/>
+        <location filename="../../source/MainWindow.cpp" line="8180"/>
+        <location filename="../../source/MainWindow.cpp" line="8478"/>
         <source>Page %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8290"/>
+        <location filename="../../source/MainWindow.cpp" line="8320"/>
         <source>Copy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8299"/>
+        <location filename="../../source/MainWindow.cpp" line="8329"/>
         <source>Copy to Clipboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../old/MainWindow.cpp" line="4389"/>
-        <location filename="../../source/MainWindow.cpp" line="8308"/>
+        <location filename="../../source/MainWindow.cpp" line="8338"/>
         <source>Delete</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2544,89 +2544,89 @@ Do you want to replace the link with the new PDF?</source>
         <location filename="../../source/MainWindow.cpp" line="2530"/>
         <location filename="../../source/MainWindow.cpp" line="2722"/>
         <location filename="../../source/MainWindow.cpp" line="2811"/>
-        <location filename="../../source/MainWindow.cpp" line="8317"/>
+        <location filename="../../source/MainWindow.cpp" line="8347"/>
         <source>Cancel</source>
         <translation type="unfinished">Annuler</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8751"/>
+        <location filename="../../source/MainWindow.cpp" line="8771"/>
         <source>Bookmark %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8775"/>
+        <location filename="../../source/MainWindow.cpp" line="8795"/>
         <source>Remove Bookmark</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="8777"/>
+        <location filename="../../source/MainWindow.cpp" line="8797"/>
         <source>Add Bookmark</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9000"/>
+        <location filename="../../source/MainWindow.cpp" line="9020"/>
         <source>This notebook was last accessed on page %1.
 
 Would you like to go directly to page %1, or start from page 1?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9003"/>
+        <location filename="../../source/MainWindow.cpp" line="9023"/>
         <source>Last Accessed Page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9007"/>
+        <location filename="../../source/MainWindow.cpp" line="9027"/>
         <source>Go to Page %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9008"/>
+        <location filename="../../source/MainWindow.cpp" line="9028"/>
         <source>Start from Page 1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9028"/>
+        <location filename="../../source/MainWindow.cpp" line="9048"/>
         <source>Invalid Package</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9029"/>
+        <location filename="../../source/MainWindow.cpp" line="9049"/>
         <source>The selected file is not a valid SpeedyNote package.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9082"/>
+        <location filename="../../source/MainWindow.cpp" line="9102"/>
         <source>File Exists</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9083"/>
+        <location filename="../../source/MainWindow.cpp" line="9103"/>
         <source>A file with this name already exists. Please choose a different name.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9093"/>
+        <location filename="../../source/MainWindow.cpp" line="9113"/>
         <source>Creation Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9094"/>
+        <location filename="../../source/MainWindow.cpp" line="9114"/>
         <source>Failed to create the SpeedyNote package. Please check file permissions.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9132"/>
+        <location filename="../../source/MainWindow.cpp" line="9152"/>
         <source>Package Created</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9133"/>
+        <location filename="../../source/MainWindow.cpp" line="9153"/>
         <source>New SpeedyNote package &apos;%1&apos; has been created successfully!</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9471"/>
+        <location filename="../../source/MainWindow.cpp" line="9491"/>
         <source>Mouse Dial: %1</source>
         <translation type="unfinished"></translation>
     </message>
