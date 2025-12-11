@@ -94,6 +94,15 @@ enum class ControllerAction {
     NextPage
 };
 
+// Stylus button actions (hold-to-enable style)
+enum class StylusButtonAction {
+    None,
+    HoldStraightLine,    // Enable straight line mode while held
+    HoldLasso,           // Enable lasso/rope tool while held
+    HoldEraser,          // Enable eraser while held
+    HoldTextSelection    // Enable PDF text selection while held
+};
+
 static QString actionToString(ControllerAction action) {
     switch (action) {
         case ControllerAction::ToggleFullscreen: return "Toggle Fullscreen";
@@ -202,6 +211,34 @@ public:
     TouchGestureMode getTouchGestureMode() const;
     void setTouchGestureMode(TouchGestureMode mode);
     void cycleTouchGestureMode(); // Cycle through: Disabled -> YAxisOnly -> Full -> Disabled
+
+#ifdef Q_OS_LINUX
+    // Palm rejection settings (Linux only - Windows has built-in palm rejection)
+    bool palmRejectionEnabled = false;
+    int palmRejectionDelayMs = 500; // Default 500ms delay before restoring touch gestures
+    
+    bool isPalmRejectionEnabled() const { return palmRejectionEnabled; }
+    void setPalmRejectionEnabled(bool enabled);
+    int getPalmRejectionDelay() const { return palmRejectionDelayMs; }
+    void setPalmRejectionDelay(int delayMs);
+#endif
+
+    // Stylus side button mapping settings
+    StylusButtonAction stylusButtonAAction = StylusButtonAction::None;
+    StylusButtonAction stylusButtonBAction = StylusButtonAction::None;
+    Qt::MouseButton stylusButtonAQt = Qt::MiddleButton; // Which Qt button maps to "Button A"
+    Qt::MouseButton stylusButtonBQt = Qt::RightButton;  // Which Qt button maps to "Button B"
+    
+    StylusButtonAction getStylusButtonAAction() const { return stylusButtonAAction; }
+    StylusButtonAction getStylusButtonBAction() const { return stylusButtonBAction; }
+    Qt::MouseButton getStylusButtonAQt() const { return stylusButtonAQt; }
+    Qt::MouseButton getStylusButtonBQt() const { return stylusButtonBQt; }
+    void setStylusButtonAAction(StylusButtonAction action);
+    void setStylusButtonBAction(StylusButtonAction action);
+    void setStylusButtonAQt(Qt::MouseButton button);
+    void setStylusButtonBQt(Qt::MouseButton button);
+    void saveStylusButtonSettings();
+    void loadStylusButtonSettings();
 
     // Theme settings
     QColor customAccentColor;
@@ -492,6 +529,10 @@ private:
     QPushButton *exportPdfButton; // Button to export annotated PDF
     QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
     QPushButton *toggleTabBarButton;
+    
+    // Overflow menu for infrequently used actions
+    QPushButton *overflowMenuButton;
+    QMenu *overflowMenu;
 
     QMap<InkCanvas*, int> pageMap;
     
@@ -521,16 +562,18 @@ private:
     // PDF Outline Sidebar
     QWidget *outlineSidebar;       // Container for PDF outline
     QTreeWidget *outlineTree;      // Tree widget for PDF bookmarks/outline
-    QPushButton *toggleOutlineButton; // Button to toggle outline sidebar
+    QPushButton *toggleOutlineButton; // Floating tab button to toggle outline sidebar
     bool outlineSidebarVisible = false;
     
     // Bookmarks Sidebar
     QWidget *bookmarksSidebar;     // Container for bookmarks
     QTreeWidget *bookmarksTree;    // Tree widget for bookmarks
-    QPushButton *toggleBookmarksButton; // Button to toggle bookmarks sidebar
+    QPushButton *toggleBookmarksButton; // Floating tab button to toggle bookmarks sidebar
     QPushButton *toggleBookmarkButton; // Button to add/remove current page bookmark
     QPushButton *touchGesturesButton; // Touch gestures toggle button
     bool bookmarksSidebarVisible = false;
+    
+    void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
     QMap<int, QString> bookmarks;  // Map of page number to bookmark title
     QPushButton *jumpToPageButton; // Button to jump to a specific page
     
@@ -538,6 +581,12 @@ private:
     MarkdownNotesSidebar *markdownNotesSidebar;  // Sidebar for markdown notes
     QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
     bool markdownNotesSidebarVisible = false;
+
+    // Dial Mode Toolbar (vertical, right side)
+    QWidget *dialToolbar = nullptr;           // Foldable vertical toolbar for dial mode buttons
+    QPushButton *dialToolbarToggle = nullptr; // Floating tab button to fold/unfold the dial toolbar
+    bool dialToolbarExpanded = true;          // Track expanded/collapsed state
+    void positionDialToolbarTab();            // Position the floating tab at the edge of the toolbar
 
     QWidget *dialContainer = nullptr;  // ✅ Floating dial container
     QDial *pageDial = nullptr;  // ✅ The dial itself
@@ -666,6 +715,39 @@ private:
     bool scrollbarsVisible = false;
     QTimer *scrollbarHideTimer = nullptr;
     
+#ifdef Q_OS_LINUX
+    // Palm rejection internal state
+    bool palmRejectionActive = false; // Whether we're currently suppressing touch gestures
+    TouchGestureMode palmRejectionOriginalMode = TouchGestureMode::Full; // Original mode before suppression
+    QTimer *palmRejectionTimer = nullptr; // Timer for delayed restore
+    
+    void onStylusProximityEnter(); // Called when stylus enters proximity or touches
+    void onStylusProximityLeave(); // Called when stylus leaves proximity or releases
+    void restoreTouchGestureMode(); // Called by timer to restore original mode
+#endif
+    
+    // Stylus button state tracking (hold-to-enable)
+    bool stylusButtonAActive = false;
+    bool stylusButtonBActive = false;
+    ToolType previousToolBeforeStylusA = ToolType::Pen;
+    ToolType previousToolBeforeStylusB = ToolType::Pen;
+    bool previousStraightLineModeA = false;
+    bool previousStraightLineModeB = false;
+    bool previousRopeToolModeA = false;
+    bool previousRopeToolModeB = false;
+    bool previousTextSelectionModeA = false;
+    bool previousTextSelectionModeB = false;
+    
+    // Text selection delayed disable (for stylus button hold)
+    bool textSelectionPendingDisable = false; // True when waiting for text selection interaction to complete
+    bool textSelectionWasButtonA = false; // Track which button enabled text selection
+    
+    void enableStylusButtonMode(Qt::MouseButton button);
+    void disableStylusButtonMode(Qt::MouseButton button);
+    void handleStylusButtonPress(Qt::MouseButtons buttons);
+    void handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton);
+    void onPdfTextSelectionCleared(); // Called when text selection is cleared, auto-disables if pending
+    
     // Event filter for scrollbar hover detection and dial container drag
     bool eventFilter(QObject *obj, QEvent *event) override;
     
@@ -682,7 +764,7 @@ private:
     QHBoxLayout *controlLayoutFirstRow = nullptr;
     QHBoxLayout *controlLayoutSecondRow = nullptr;
     void updateToolbarLayout();
-    void createSingleRowLayout();
+    void createSingleRowLayout(bool centered = true);
     void createTwoRowLayout();
     
     // Helper function for tab text eliding
@@ -698,6 +780,9 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;  // New: Handle keyboard shortcuts
     void tabletEvent(QTabletEvent *event) override; // Handle pen hover for tooltips
+#ifdef Q_OS_LINUX
+    bool event(QEvent *event) override; // Handle tablet proximity events for palm rejection
+#endif
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override; // Handle Windows theme changes
 #endif

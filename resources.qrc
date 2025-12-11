@@ -84,6 +84,8 @@
     <file>resources/icons/mainicon.png</file>
     <file>resources/icons/settings.png</file>
     <file>resources/icons/settings_reversed.png</file>
+    <file>resources/icons/menu.png</file>
+    <file>resources/icons/menu_reversed.png</file>
     <file>resources/icons/scroll.png</file>
     <file>resources/icons/scroll_reversed.png</file>
     <file>resources/icons/markdown.png</file>

@@ -123,6 +123,7 @@ signals:
     void ropeSelectionCompleted(const QPoint &position); // Signal emitted when rope tool selection is completed
     void pdfLinkClicked(int targetPage); // Signal emitted when a PDF link is clicked
     void pdfTextSelected(const QString &text); // Signal emitted when PDF text is selected
+    void pdfTextSelectionCleared(); // Signal emitted when PDF text selection is cleared (after menu action or tap outside)
     void pdfLoaded(); // Signal emitted when a PDF is loaded
     void autoScrollRequested(int direction); // Signal for autoscrolling to next/prev page
     void earlySaveRequested(); // Signal for proactive save before autoscroll threshold
@@ -197,9 +198,21 @@ public:
     // Straight line mode toggle
     void setStraightLineMode(bool enabled) { straightLineMode = enabled; }
     bool isStraightLineMode() const { return straightLineMode; }
+    
+    // Reset straight line start point to current position (used when enabling via stylus button)
+    void resetStraightLineStartPoint();
 
     // Rope tool mode toggle
-    void setRopeToolMode(bool enabled) { ropeToolMode = enabled; }
+    void setRopeToolMode(bool enabled) { 
+        ropeToolMode = enabled;
+#ifdef Q_OS_WIN
+        // Clear auto-disable flag when mode is manually set to avoid incorrect auto-disable
+        // from a previous Windows stylus hover lasso operation
+        if (enabled) {
+            windowsLassoNeedsAutoDisable = false;
+        }
+#endif
+    }
     bool isRopeToolMode() const { return ropeToolMode; }
 
     void loadPdfPreviewAsync(int pageNumber);  // ✅ Load a quick preview of the PDF page
@@ -278,6 +291,7 @@ public:
     void cancelRopeSelection(); // Cancel the current rope tool selection
     void copyRopeSelection(); // Copy the current rope tool selection
     void copyRopeSelectionToClipboard(); // Copy the current rope tool selection to clipboard
+    void clearInProgressLasso(); // Clear any in-progress lasso drawing without completing it
     
     PictureWindowManager* getPictureManager() const { return pictureManager; }
     
@@ -315,6 +329,7 @@ public:
     bool isPdfTextSelectionEnabled() const { return pdfTextSelectionEnabled; }
     void clearPdfTextSelection(); // Clear current PDF text selection
     QString getSelectedPdfText() const; // Get currently selected PDF text
+    bool hasSelectedPdfText() const { return !selectedTextBoxes.isEmpty(); } // Check if text is selected
     
     // Persistent text highlight management
     void addHighlightFromSelection(); // Add a persistent highlight from current selection
@@ -401,6 +416,15 @@ private:
     QPolygonF lassoPathPoints; // Points of the lasso selection in LOGICAL WIDGET coordinates
     bool selectingWithRope = false; // True if currently drawing the lasso
     bool movingSelection = false; // True if currently moving the selection
+    
+#ifdef Q_OS_WIN
+    // Windows-specific: Track if we're in stylus hover mode (side button pressed while hovering)
+    // On Windows, stylus side buttons only work while hovering, not when pen tip touches screen
+    bool windowsStylusHoverDrawing = false;
+    bool windowsHoverWasStraightLine = false;  // True if hover mode was for straight line
+    bool windowsHoverWasLasso = false;         // True if hover mode was for lasso
+    bool windowsLassoNeedsAutoDisable = false; // True if lasso mode should auto-disable after interaction
+#endif
     bool selectionJustCopied = false; // True if selection was just copied and hasn't been moved yet
     bool selectionAreaCleared = false; // True if the selection area has been cleared from the buffer
     QPainterPath selectionMaskPath; // Path used to clear the selection area from buffer
@@ -522,6 +546,10 @@ private:
     QPoint cachedFrameOffset; // Offset of cached frame during panning
     int touchPanStartX = 0; // Pan X value when touch gesture started
     int touchPanStartY = 0; // Pan Y value when touch gesture started
+    
+    // Touch panning timeout (Linux fix for stuck isTouchPanning state)
+    QTimer* touchPanningTimeoutTimer = nullptr; // Timer to reset isTouchPanning if no events arrive
+    void resetTouchPanningState(); // Called by timeout timer to clear stuck state
     
     // Inertia scrolling (momentum scrolling)
     QTimer* inertiaTimer = nullptr; // Timer for inertia animation

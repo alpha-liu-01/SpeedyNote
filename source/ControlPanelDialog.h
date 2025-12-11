@@ -66,6 +66,21 @@ private:
     
     // Wayland DPI scale override
     QDoubleSpinBox *waylandDpiScaleSpinBox;
+    
+#ifdef Q_OS_LINUX
+    // Palm rejection settings (Linux only)
+    QCheckBox *palmRejectionCheckbox;
+    QSpinBox *palmRejectionDelaySpinBox;
+#endif
+
+    // Stylus button mapping widgets
+    QComboBox *stylusButtonACombo;
+    QComboBox *stylusButtonBCombo;
+    QPushButton *detectButtonAButton;
+    QPushButton *detectButtonBButton;
+    QLabel *stylusButtonALabel;
+    QLabel *stylusButtonBLabel;
+    void detectStylusButton(bool isButtonA);
 
     QWidget *controllerMappingTab;
     QPushButton *reconnectButton;

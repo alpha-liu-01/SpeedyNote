@@ -53,6 +53,7 @@ private:
     void setupStarredTab();
     void populateRecentGrid();
     void populateStarredGrid();
+    void resizeGridButtons();  // Resize existing buttons without repopulating
     void clearRecentGrid();
     void clearStarredGrid();
     void clearPixmapCache();
@@ -101,6 +102,7 @@ protected:
     
     // Layout optimization
     int lastCalculatedWidth;
+    int lastColumnCount;  // Track column count to prevent flickering
     
     // Managers
     RecentNotebooksManager *notebookManager;
@@ -111,9 +113,14 @@ protected:
     // Pixmap cache to prevent memory leaks from repeated image loading
     mutable QHash<QString, QPixmap> pixmapCache;
     
+    // Helper to crop blank margins from thumbnail images
+    QPixmap cropBlankMargins(const QPixmap &pixmap) const;
+    
     static const int GRID_COLUMNS = 4;
-    static const int BUTTON_SIZE = 200;
-    static const int COVER_HEIGHT = 150;
+    static const int MIN_BUTTON_WIDTH = 180;
+    static const int MAX_BUTTON_WIDTH = 400;
+    static const int BUTTON_HEIGHT = 240;
+    static const int COVER_HEIGHT = 180;
 };
 
 #endif // LAUNCHERWINDOW_H

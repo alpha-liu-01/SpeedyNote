@@ -94,7 +94,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote Beta 0.11.3"));
+    setWindowTitle(tr("SpeedyNote Beta 0.12.0"));
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux
@@ -232,7 +232,7 @@ void MainWindow::setupUi() {
     connect(clearPdfButton, &QPushButton::clicked, this, &MainWindow::clearPdf);
 
     pdfTextSelectButton = new QPushButton(this);
-    pdfTextSelectButton->setFixedSize(26, 30);
+    pdfTextSelectButton->setFixedSize(36, 36);
     pdfTextSelectButton->setStyleSheet(buttonStyle);
     pdfTextSelectButton->setToolTip(tr("Toggle PDF Text Selection"));
     pdfTextSelectButton->setProperty("selected", false); // Initially disabled
@@ -289,30 +289,79 @@ void MainWindow::setupUi() {
 
     toggleTabBarButton = new QPushButton(this);
     toggleTabBarButton->setToolTip(tr("Show/Hide Tab Bar"));
-    toggleTabBarButton->setFixedSize(26, 30);
+    toggleTabBarButton->setFixedSize(36, 36);
     toggleTabBarButton->setStyleSheet(buttonStyle);
     toggleTabBarButton->setProperty("selected", true); // Initially visible
     
     // PDF Outline Toggle Button
+    // PDF Outline Toggle - Floating tab on left side (created here, positioned later)
     toggleOutlineButton = new QPushButton(this);
+    toggleOutlineButton->setObjectName("outlineSidebarTab");
     toggleOutlineButton->setToolTip(tr("Show/Hide PDF Outline"));
-    toggleOutlineButton->setFixedSize(26, 30);
-    toggleOutlineButton->setStyleSheet(buttonStyle);
-    toggleOutlineButton->setProperty("selected", false); // Initially hidden
-    updateButtonIcon(toggleOutlineButton, "outline");
+    toggleOutlineButton->setFixedSize(28, 80);
+    toggleOutlineButton->setCursor(Qt::PointingHandCursor);
+    toggleOutlineButton->setProperty("selected", false);
+    toggleOutlineButton->setIcon(loadThemedIcon("outline"));
+    toggleOutlineButton->setIconSize(QSize(18, 18));
+    toggleOutlineButton->raise();
     
-    // Bookmarks Toggle Button
+    // Bookmarks Toggle - Floating tab on left side (below outline tab)
     toggleBookmarksButton = new QPushButton(this);
+    toggleBookmarksButton->setObjectName("bookmarksSidebarTab");
     toggleBookmarksButton->setToolTip(tr("Show/Hide Bookmarks"));
-    toggleBookmarksButton->setFixedSize(26, 30);
-    toggleBookmarksButton->setStyleSheet(buttonStyle);
-    toggleBookmarksButton->setProperty("selected", false); // Initially hidden
-    updateButtonIcon(toggleBookmarksButton, "bookmark");
+    toggleBookmarksButton->setFixedSize(28, 80);
+    toggleBookmarksButton->setCursor(Qt::PointingHandCursor);
+    toggleBookmarksButton->setProperty("selected", false);
+    toggleBookmarksButton->setIcon(loadThemedIcon("bookmark"));
+    toggleBookmarksButton->setIconSize(QSize(18, 18));
+    toggleBookmarksButton->raise();
+    
+    // Apply floating tab styling for left sidebar tabs (using isDarkMode() to get current theme)
+    {
+        bool isDark = isDarkMode();
+        QString tabBg = isDark ? "#3A3A3A" : "#EAEAEA";
+        QString tabHover = isDark ? "#4A4A4A" : "#DADADA";
+        QString tabBorder = isDark ? "#555555" : "#CCCCCC";
+        
+        QString outlineStyle = QString(
+            "QPushButton#outlineSidebarTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-left: none;"
+            "  border-top-right-radius: 8px;"
+            "  border-bottom-right-radius: 8px;"
+            "}"
+            "QPushButton#outlineSidebarTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#outlineSidebarTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBg, tabBorder, tabHover);
+        toggleOutlineButton->setStyleSheet(outlineStyle);
+        
+        QString bookmarksStyle = QString(
+            "QPushButton#bookmarksSidebarTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-left: none;"
+            "  border-top-right-radius: 8px;"
+            "  border-bottom-right-radius: 8px;"
+            "}"
+            "QPushButton#bookmarksSidebarTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#bookmarksSidebarTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBg, tabBorder, tabHover);
+        toggleBookmarksButton->setStyleSheet(bookmarksStyle);
+    }
     
     // Add/Remove Bookmark Toggle Button
     toggleBookmarkButton = new QPushButton(this);
     toggleBookmarkButton->setToolTip(tr("Add/Remove Bookmark"));
-    toggleBookmarkButton->setFixedSize(26, 30);
+    toggleBookmarkButton->setFixedSize(36, 36);
     toggleBookmarkButton->setStyleSheet(buttonStyle);
     toggleBookmarkButton->setProperty("selected", false); // For toggle state styling
     updateButtonIcon(toggleBookmarkButton, "star");
@@ -320,7 +369,7 @@ void MainWindow::setupUi() {
     // Markdown Notes Toggle Button
     toggleMarkdownNotesButton = new QPushButton(this);
     toggleMarkdownNotesButton->setToolTip(tr("Show/Hide Markdown Notes"));
-    toggleMarkdownNotesButton->setFixedSize(26, 30);
+    toggleMarkdownNotesButton->setFixedSize(36, 36);
     toggleMarkdownNotesButton->setStyleSheet(buttonStyle);
     toggleMarkdownNotesButton->setProperty("selected", false); // Initially hidden
     // Try "note" icon, fallback to text if icon doesn't exist
@@ -330,7 +379,7 @@ void MainWindow::setupUi() {
     // Touch Gestures Toggle Button
     touchGesturesButton = new QPushButton(this);
     touchGesturesButton->setToolTip(tr("Cycle Touch Gestures (Off/Y-Only/Full)"));
-    touchGesturesButton->setFixedSize(26, 30);
+    touchGesturesButton->setFixedSize(36, 36);
     touchGesturesButton->setStyleSheet(buttonStyle);
     touchGesturesButton->setProperty("selected", touchGestureMode != TouchGestureMode::Disabled); // For toggle state styling
     touchGesturesButton->setProperty("yAxisOnly", touchGestureMode == TouchGestureMode::YAxisOnly); // For Y-only styling
@@ -347,7 +396,7 @@ void MainWindow::setupUi() {
     
     
     saveButton = new QPushButton(this);
-    saveButton->setFixedSize(26, 30);
+    saveButton->setFixedSize(36, 36);
     QIcon saveIcon(loadThemedIcon("save"));  // Path to your icon in resources
     saveButton->setIcon(saveIcon);
     saveButton->setStyleSheet(buttonStyle);
@@ -364,7 +413,7 @@ void MainWindow::setupUi() {
 
     fullscreenButton = new QPushButton(this);
     fullscreenButton->setIcon(loadThemedIcon("fullscreen"));  // Load from resources
-    fullscreenButton->setFixedSize(26, 30);
+    fullscreenButton->setFixedSize(36, 36);
     fullscreenButton->setToolTip(tr("Toggle Fullscreen"));
     fullscreenButton->setStyleSheet(buttonStyle);
 
@@ -374,7 +423,7 @@ void MainWindow::setupUi() {
     // Use the darkMode variable already declared at the beginning of setupUi()
 
     redButton = new QPushButton(this);
-    redButton->setFixedSize(16, 30);  // Half width
+    redButton->setFixedSize(24, 36);  // Color button
     QString redIconPath = darkMode ? ":/resources/icons/pen_light_red.png" : ":/resources/icons/pen_dark_red.png";
     QIcon redIcon(redIconPath);
     redButton->setIcon(redIcon);
@@ -387,7 +436,7 @@ void MainWindow::setupUi() {
     });
     
     blueButton = new QPushButton(this);
-    blueButton->setFixedSize(16, 30);  // Half width
+    blueButton->setFixedSize(24, 36);  // Color button
     QString blueIconPath = darkMode ? ":/resources/icons/pen_light_blue.png" : ":/resources/icons/pen_dark_blue.png";
     QIcon blueIcon(blueIconPath);
     blueButton->setIcon(blueIcon);
@@ -400,7 +449,7 @@ void MainWindow::setupUi() {
     });
 
     yellowButton = new QPushButton(this);
-    yellowButton->setFixedSize(16, 30);  // Half width
+    yellowButton->setFixedSize(24, 36);  // Color button
     QString yellowIconPath = darkMode ? ":/resources/icons/pen_light_yellow.png" : ":/resources/icons/pen_dark_yellow.png";
     QIcon yellowIcon(yellowIconPath);
     yellowButton->setIcon(yellowIcon);
@@ -413,7 +462,7 @@ void MainWindow::setupUi() {
     });
 
     greenButton = new QPushButton(this);
-    greenButton->setFixedSize(16, 30);  // Half width
+    greenButton->setFixedSize(24, 36);  // Color button
     QString greenIconPath = darkMode ? ":/resources/icons/pen_light_green.png" : ":/resources/icons/pen_dark_green.png";
     QIcon greenIcon(greenIconPath);
     greenButton->setIcon(greenIcon);
@@ -426,7 +475,7 @@ void MainWindow::setupUi() {
     });
 
     blackButton = new QPushButton(this);
-    blackButton->setFixedSize(16, 30);  // Half width
+    blackButton->setFixedSize(24, 36);  // Color button
     QString blackIconPath = darkMode ? ":/resources/icons/pen_light_black.png" : ":/resources/icons/pen_dark_black.png";
     QIcon blackIcon(blackIconPath);
     blackButton->setIcon(blackIcon);
@@ -439,7 +488,7 @@ void MainWindow::setupUi() {
     });
 
     whiteButton = new QPushButton(this);
-    whiteButton->setFixedSize(16, 30);  // Half width
+    whiteButton->setFixedSize(24, 36);  // Color button
     QString whiteIconPath = darkMode ? ":/resources/icons/pen_light_white.png" : ":/resources/icons/pen_dark_white.png";
     QIcon whiteIcon(whiteIconPath);
     whiteButton->setIcon(whiteIcon);
@@ -507,19 +556,19 @@ void MainWindow::setupUi() {
 
     // ✅ Individual tool buttons
     penToolButton = new QPushButton(this);
-    penToolButton->setFixedSize(26, 30);
+    penToolButton->setFixedSize(36, 36);
     penToolButton->setStyleSheet(buttonStyle);
     penToolButton->setToolTip(tr("Pen Tool"));
     connect(penToolButton, &QPushButton::clicked, this, &MainWindow::setPenTool);
 
     markerToolButton = new QPushButton(this);
-    markerToolButton->setFixedSize(26, 30);
+    markerToolButton->setFixedSize(36, 36);
     markerToolButton->setStyleSheet(buttonStyle);
     markerToolButton->setToolTip(tr("Marker Tool"));
     connect(markerToolButton, &QPushButton::clicked, this, &MainWindow::setMarkerTool);
 
     eraserToolButton = new QPushButton(this);
-    eraserToolButton->setFixedSize(26, 30);
+    eraserToolButton->setFixedSize(36, 36);
     eraserToolButton->setStyleSheet(buttonStyle);
     eraserToolButton->setToolTip(tr("Eraser Tool"));
     connect(eraserToolButton, &QPushButton::clicked, this, &MainWindow::setEraserTool);
@@ -534,7 +583,7 @@ void MainWindow::setupUi() {
 
     // Initialize straight line toggle button
     straightLineToggleButton = new QPushButton(this);
-    straightLineToggleButton->setFixedSize(26, 30);
+    straightLineToggleButton->setFixedSize(36, 36);
     straightLineToggleButton->setStyleSheet(buttonStyle);
     straightLineToggleButton->setToolTip(tr("Toggle Straight Line Mode"));
     straightLineToggleButton->setProperty("selected", false); // Initially disabled
@@ -554,7 +603,7 @@ void MainWindow::setupUi() {
     });
     
     ropeToolButton = new QPushButton(this);
-    ropeToolButton->setFixedSize(26, 30);
+    ropeToolButton->setFixedSize(36, 36);
     ropeToolButton->setStyleSheet(buttonStyle);
     ropeToolButton->setToolTip(tr("Toggle Rope Tool Mode"));
     ropeToolButton->setProperty("selected", false); // Initially disabled
@@ -575,7 +624,7 @@ void MainWindow::setupUi() {
     
     // Insert Picture Button
     insertPictureButton = new QPushButton(this);
-    insertPictureButton->setFixedSize(26, 30);
+    insertPictureButton->setFixedSize(36, 36);
     insertPictureButton->setStyleSheet(buttonStyle);
     insertPictureButton->setToolTip(tr("Insert Picture"));
     insertPictureButton->setProperty("selected", false); // Initially disabled
@@ -659,6 +708,10 @@ void MainWindow::setupUi() {
     panYSlider = new QScrollBar(Qt::Vertical, this);
     panYSlider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     
+    // Hide panYSlider permanently (keep for internal use but not user interaction)
+    panYSlider->setVisible(false);
+    panYSlider->setEnabled(false);
+    
     // Set scrollbar styling
     QString scrollBarStyle = R"(
         QScrollBar {
@@ -722,9 +775,16 @@ void MainWindow::setupUi() {
     scrollbarHideTimer->setInterval(200); // Hide after 0.2 seconds
     connect(scrollbarHideTimer, &QTimer::timeout, this, [this]() {
         panXSlider->setVisible(false);
-        panYSlider->setVisible(false);
+        // panYSlider stays hidden permanently
         scrollbarsVisible = false;
     });
+    
+#ifdef Q_OS_LINUX
+    // Create timer for palm rejection restore delay
+    palmRejectionTimer = new QTimer(this);
+    palmRejectionTimer->setSingleShot(true);
+    connect(palmRejectionTimer, &QTimer::timeout, this, &MainWindow::restoreTouchGestureMode);
+#endif
     
     // panXSlider->setFixedHeight(30);
     // panYSlider->setFixedWidth(30);
@@ -1076,25 +1136,68 @@ void MainWindow::setupUi() {
         });
     });
 
+    // ========================================
+    // Overflow Menu for infrequently used actions
+    // ========================================
+    overflowMenuButton = new QPushButton(this);
+    overflowMenuButton->setObjectName("overflowMenuButton");
+    overflowMenuButton->setFixedSize(30, 30);
+    overflowMenuButton->setToolTip(tr("More Actions"));
+    overflowMenuButton->setIcon(loadThemedIcon("menu"));  // Will use menu icon
+    overflowMenuButton->setCursor(Qt::PointingHandCursor);
+    overflowMenuButton->setStyleSheet(buttonStyle);
+    
+    overflowMenu = new QMenu(this);
+    overflowMenu->setObjectName("overflowMenu");
+    
+    // Add actions to the overflow menu
+    QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Manage PDF"));
+    connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
+    
+    QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
+    connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportAnnotatedPdf);
+    
+    overflowMenu->addSeparator();
+    
+    QAction *zoom50Action = overflowMenu->addAction(tr("Zoom 50%"));
+    connect(zoom50Action, &QAction::triggered, this, [this]() { zoom50Button->click(); });
+    
+    QAction *zoomResetAction = overflowMenu->addAction(tr("Zoom Reset"));
+    connect(zoomResetAction, &QAction::triggered, this, [this]() { dezoomButton->click(); });
+    
+    QAction *zoom200Action = overflowMenu->addAction(tr("Zoom 200%"));
+    connect(zoom200Action, &QAction::triggered, this, [this]() { zoom200Button->click(); });
+    
+    overflowMenu->addSeparator();
+    
+    QAction *jumpToPageAction = overflowMenu->addAction(tr("Jump to Page..."));
+    connect(jumpToPageAction, &QAction::triggered, this, &MainWindow::showJumpToPageDialog);
+    
+    QAction *openControlPanelAction = overflowMenu->addAction(loadThemedIcon("settings"), tr("Settings"));
+    connect(openControlPanelAction, &QAction::triggered, this, [this]() {
+        openControlPanelButton->click();
+    });
+    
+    // Connect button to show menu
+    connect(overflowMenuButton, &QPushButton::clicked, this, [this]() {
+        // Position menu below the button
+        QPoint pos = overflowMenuButton->mapToGlobal(QPoint(0, overflowMenuButton->height()));
+        overflowMenu->exec(pos);
+    });
+
     QHBoxLayout *controlLayout = new QHBoxLayout;
     
-    controlLayout->addWidget(toggleOutlineButton);
-    controlLayout->addWidget(toggleBookmarksButton);
-    controlLayout->addWidget(toggleBookmarkButton);
+    // Left stretch to center the main buttons
+    controlLayout->addStretch();
+    
+    // Centered buttons - toggle and utility
+    controlLayout->addWidget(toggleTabBarButton);
     controlLayout->addWidget(toggleMarkdownNotesButton);
     controlLayout->addWidget(touchGesturesButton);
-    controlLayout->addWidget(toggleTabBarButton);
-    controlLayout->addWidget(selectFolderButton);
-
-
-    controlLayout->addWidget(loadPdfButton);
-    controlLayout->addWidget(clearPdfButton);
     controlLayout->addWidget(pdfTextSelectButton);
-    // controlLayout->addWidget(backgroundButton);
     controlLayout->addWidget(saveButton);
-    controlLayout->addWidget(exportPdfButton);
-    controlLayout->addWidget(openControlPanelButton);
-    controlLayout->addWidget(openRecentNotebooksButton); // Add button to layout
+    
+    // Color buttons
     controlLayout->addWidget(redButton);
     controlLayout->addWidget(blueButton);
     controlLayout->addWidget(yellowButton);
@@ -1102,39 +1205,45 @@ void MainWindow::setupUi() {
     controlLayout->addWidget(blackButton);
     controlLayout->addWidget(whiteButton);
     controlLayout->addWidget(customColorButton);
-    controlLayout->addWidget(straightLineToggleButton);
-    controlLayout->addWidget(ropeToolButton); // Add rope tool button to layout
-    controlLayout->addWidget(insertPictureButton); // Add picture button to layout
-    controlLayout->addWidget(thicknessButton);
-    controlLayout->addWidget(jumpToPageButton);
-    controlLayout->addWidget(dialToggleButton);
-    controlLayout->addWidget(fastForwardButton);
-    // controlLayout->addWidget(channelSelector);
-    controlLayout->addWidget(btnPageSwitch);
-    controlLayout->addWidget(btnPannScroll);
-    controlLayout->addWidget(btnZoom);
-    controlLayout->addWidget(btnThickness);
-
-    controlLayout->addWidget(btnTool);
-    controlLayout->addWidget(btnPresets);
-    controlLayout->addWidget(addPresetButton);
-    // Removed dialModeSelector widget - no longer needed
     
-    // controlLayout->addWidget(toolSelector);
+    // Tool buttons
+    controlLayout->addWidget(penToolButton);
+    controlLayout->addWidget(markerToolButton);
+    controlLayout->addWidget(eraserToolButton);
+    controlLayout->addWidget(straightLineToggleButton);
+    controlLayout->addWidget(ropeToolButton);
+    controlLayout->addWidget(insertPictureButton);
     controlLayout->addWidget(fullscreenButton);
-    // controlLayout->addWidget(zoomButton);
-    controlLayout->addWidget(zoom50Button);
-    controlLayout->addWidget(dezoomButton);
-    controlLayout->addWidget(zoom200Button);
+    
+    // Right stretch to center the main buttons
     controlLayout->addStretch();
     
-    
-    controlLayout->addWidget(prevPageButton);
+    // Page controls and overflow menu on the right (fixed position)
+    controlLayout->addWidget(toggleBookmarkButton);
     controlLayout->addWidget(pageInput);
-    controlLayout->addWidget(nextPageButton);
+    controlLayout->addWidget(overflowMenuButton);
+    controlLayout->addWidget(deletePageButton);
+    
+    // Benchmark controls (hidden by default, can be enabled in settings)
     controlLayout->addWidget(benchmarkButton);
     controlLayout->addWidget(benchmarkLabel);
-    controlLayout->addWidget(deletePageButton);
+    
+    // Hide buttons that are now in overflow menu or obsolete (keep for functionality)
+    thicknessButton->setVisible(false);
+    loadPdfButton->setVisible(false);
+    clearPdfButton->setVisible(false);
+    exportPdfButton->setVisible(false);
+    openControlPanelButton->setVisible(false);
+    selectFolderButton->setVisible(false);
+    jumpToPageButton->setVisible(false);
+    zoom50Button->setVisible(false);
+    dezoomButton->setVisible(false);
+    zoom200Button->setVisible(false);
+    openRecentNotebooksButton->setVisible(false);
+    benchmarkButton->setVisible(false);  // Hidden by default, toggle via Settings > Features
+    benchmarkLabel->setVisible(false);
+    prevPageButton->setVisible(false);
+    nextPageButton->setVisible(false);
     
     
     
@@ -1183,6 +1292,115 @@ void MainWindow::setupUi() {
         updateScrollbarPositions();
     });
 
+    // ========================================
+    // Dial Mode Toolbar (retractable, vertical, right side)
+    // ========================================
+    // The toolbar panel - this is what takes up layout space
+    dialToolbar = new QWidget(this);
+    dialToolbar->setObjectName("dialToolbar");
+    dialToolbar->setFixedWidth(50);
+    
+    QVBoxLayout *dialToolbarLayout = new QVBoxLayout(dialToolbar);
+    dialToolbarLayout->setContentsMargins(4, 8, 4, 8);
+    dialToolbarLayout->setSpacing(6);
+    dialToolbarLayout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    
+    // Add dial mode buttons to vertical toolbar with larger sizes for touch
+    QSize dialBtnSize(42, 38);
+    
+    dialToggleButton->setFixedSize(dialBtnSize);
+    fastForwardButton->setFixedSize(dialBtnSize);
+    btnPannScroll->setFixedSize(dialBtnSize);
+    btnPageSwitch->setFixedSize(dialBtnSize);
+    btnZoom->setFixedSize(dialBtnSize);
+    btnThickness->setFixedSize(dialBtnSize);
+    btnTool->setFixedSize(dialBtnSize);
+    btnPresets->setFixedSize(dialBtnSize);
+    addPresetButton->setFixedSize(dialBtnSize);
+    
+    dialToolbarLayout->addWidget(dialToggleButton);
+    dialToolbarLayout->addWidget(fastForwardButton);
+    dialToolbarLayout->addWidget(btnPannScroll);
+    dialToolbarLayout->addWidget(btnPageSwitch);
+    dialToolbarLayout->addWidget(btnZoom);
+    dialToolbarLayout->addWidget(btnThickness);
+    dialToolbarLayout->addWidget(btnTool);
+    dialToolbarLayout->addWidget(btnPresets);
+    dialToolbarLayout->addWidget(addPresetButton);
+    
+    dialToolbarLayout->addStretch(); // Push buttons to top
+    
+    // Apply theme-aware styling to toolbar panel (solid background)
+    {
+        bool isDark = isDarkMode();
+        QString panelBg = isDark ? "#2D2D2D" : "#F5F5F5";
+        QString panelBorder = isDark ? "#555555" : "#CCCCCC";
+        QString panelStyle = QString(
+            "QWidget#dialToolbar {"
+            "  background-color: %1;"
+            "  border-left: 1px solid %2;"
+            "}"
+        ).arg(panelBg, panelBorder);
+        dialToolbar->setStyleSheet(panelStyle);
+    }
+    
+    // Dial toolbar floating tab - floats on top of the canvas, positioned absolutely
+    // This is a child of MainWindow so it can overlay the canvas area
+    dialToolbarToggle = new QPushButton(this);
+    dialToolbarToggle->setObjectName("dialToolbarTab");
+    dialToolbarToggle->setFixedSize(28, 80);
+    dialToolbarToggle->setToolTip(tr("Toggle Dial Mode Toolbar"));
+    dialToolbarToggle->setCursor(Qt::PointingHandCursor);
+    dialToolbarToggle->setIcon(loadThemedIcon("dial"));
+    dialToolbarToggle->setIconSize(QSize(18, 18));
+    dialToolbarToggle->raise(); // Ensure it's on top
+    
+    // Apply floating tab styling (solid background, right side tabs have left-rounded corners)
+    {
+        bool isDark = isDarkMode();
+        QString tabBg = isDark ? "#3A3A3A" : "#EAEAEA";
+        QString tabHover = isDark ? "#4A4A4A" : "#DADADA";
+        QString tabBorder = isDark ? "#555555" : "#CCCCCC";
+        
+        QString dialTabStyle = QString(
+            "QPushButton#dialToolbarTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-right: none;"
+            "  border-top-left-radius: 8px;"
+            "  border-bottom-left-radius: 8px;"
+            "}"
+            "QPushButton#dialToolbarTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#dialToolbarTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBg, tabBorder, tabHover);
+        dialToolbarToggle->setStyleSheet(dialTabStyle);
+    }
+    
+    // Connect toggle tab to show/hide toolbar panel
+    connect(dialToolbarToggle, &QPushButton::clicked, this, [this]() {
+        dialToolbarExpanded = !dialToolbarExpanded;
+        
+        // Show/hide the toolbar panel
+        dialToolbar->setVisible(dialToolbarExpanded);
+        
+        // Icon already indicates state, no need for arrow text
+        
+        // Update toggle button state for styling
+        dialToolbarToggle->setProperty("selected", dialToolbarExpanded);
+        dialToolbarToggle->style()->unpolish(dialToolbarToggle);
+        dialToolbarToggle->style()->polish(dialToolbarToggle);
+        
+        // Reposition the tab and dial container
+        positionDialToolbarTab();
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
+
     // Main layout: tab bar -> toolbar -> canvas (vertical stack)
     QWidget *container = new QWidget;
     container->setObjectName("container");
@@ -1201,6 +1419,7 @@ void MainWindow::setupUi() {
     contentLayout->addWidget(outlineSidebar, 0); // Fixed width outline sidebar
     contentLayout->addWidget(bookmarksSidebar, 0); // Fixed width bookmarks sidebar
     contentLayout->addWidget(canvasContainer, 1); // Canvas takes remaining space
+    contentLayout->addWidget(dialToolbar, 0); // Dial mode toolbar (before markdown sidebar)
     contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
     
     QWidget *contentWidget = new QWidget;
@@ -1233,9 +1452,11 @@ void MainWindow::setupUi() {
     // Now that all UI components are created, update the color palette
     updateColorPalette();
     
-    // Position add tab button initially
+    // Position add tab button and floating sidebar tabs initially
     QTimer::singleShot(100, this, [this]() {
         updateTabSizes();
+        positionLeftSidebarTabs();
+        positionDialToolbarTab();
     });
 
 }
@@ -1272,6 +1493,14 @@ MainWindow::~MainWindow() {
         localServer->close();
         localServer = nullptr;
     }
+    
+#ifdef Q_OS_LINUX
+    // Stop palm rejection timer to prevent callback during destruction
+    if (palmRejectionTimer) {
+        palmRejectionTimer->stop();
+        palmRejectionTimer->disconnect();
+    }
+#endif
     
     // Use static cleanup method for consistent cleanup
     cleanupSharedResources();
@@ -3089,8 +3318,7 @@ void MainWindow::updatePanRange() {
     if (scaledCanvasHeight <= effectiveViewportSize.height()) {
         panYSlider->setRange(0, 0);
         panYSlider->setValue(0);
-        // No need for vertical scrollbar
-        panYSlider->setVisible(false);
+        // panYSlider stays hidden permanently
     } else {
         // Check if this is a combined canvas to extend pan Y range to negative values
         InkCanvas *canvas = currentCanvas();
@@ -3143,12 +3371,9 @@ void MainWindow::updatePanY(int value) {
         canvas->setPanY(value);
         canvas->setLastPanY(value);  // ✅ Store panY per tab
         
-        // Show vertical scrollbar temporarily
+        // panYSlider stays hidden - update value internally only
         if (panYSlider->maximum() > 0) {
-            panYSlider->setVisible(true);
-            scrollbarsVisible = true;
-            
-            // Make sure scrollbar position matches the canvas position
+            // Make sure scrollbar value matches the canvas position (for internal use)
             if (panYSlider->value() != value) {
                 panYSlider->blockSignals(true);
                 panYSlider->setValue(value);
@@ -3296,6 +3521,52 @@ void MainWindow::switchTab(int index) {
         InkCanvas *prevCanvas = currentCanvas();
         if (prevCanvas) {
             prevCanvas->flushPendingMetadataSave();
+            
+            // ✅ SAFETY: Clean up any active stylus button modes on the previous canvas
+            // This prevents state inconsistency when switching tabs while holding a stylus button
+            if (stylusButtonAActive) {
+                // Restore previous state on old canvas before switching
+                switch (stylusButtonAAction) {
+                    case StylusButtonAction::HoldStraightLine:
+                        prevCanvas->setStraightLineMode(previousStraightLineModeA);
+                        break;
+                    case StylusButtonAction::HoldLasso:
+                        prevCanvas->clearInProgressLasso();
+                        prevCanvas->setRopeToolMode(previousRopeToolModeA);
+                        break;
+                    case StylusButtonAction::HoldEraser:
+                        prevCanvas->setTool(previousToolBeforeStylusA);
+                        break;
+                    case StylusButtonAction::HoldTextSelection:
+                        prevCanvas->setPdfTextSelectionEnabled(previousTextSelectionModeA);
+                        break;
+                    default:
+                        break;
+                }
+                stylusButtonAActive = false;
+            }
+            if (stylusButtonBActive) {
+                switch (stylusButtonBAction) {
+                    case StylusButtonAction::HoldStraightLine:
+                        prevCanvas->setStraightLineMode(previousStraightLineModeB);
+                        break;
+                    case StylusButtonAction::HoldLasso:
+                        prevCanvas->clearInProgressLasso();
+                        prevCanvas->setRopeToolMode(previousRopeToolModeB);
+                        break;
+                    case StylusButtonAction::HoldEraser:
+                        prevCanvas->setTool(previousToolBeforeStylusB);
+                        break;
+                    case StylusButtonAction::HoldTextSelection:
+                        prevCanvas->setPdfTextSelectionEnabled(previousTextSelectionModeB);
+                        break;
+                    default:
+                        break;
+                }
+                stylusButtonBActive = false;
+            }
+            // Clear any pending text selection disable
+            textSelectionPendingDisable = false;
         }
         
         canvasStack->setCurrentIndex(index);
@@ -3615,6 +3886,7 @@ void MainWindow::addNewTab() {
     connect(newCanvas, &InkCanvas::earlySaveRequested, this, &MainWindow::onEarlySaveRequested);
     connect(newCanvas, &InkCanvas::markdownNotesUpdated, this, &MainWindow::onMarkdownNotesUpdated);
     connect(newCanvas, &InkCanvas::highlightDoubleClicked, this, &MainWindow::onHighlightDoubleClicked);
+    connect(newCanvas, &InkCanvas::pdfTextSelectionCleared, this, &MainWindow::onPdfTextSelectionCleared);
     
     // Install event filter to detect mouse movement for scrollbar visibility
     newCanvas->setMouseTracking(true);
@@ -4094,6 +4366,10 @@ void MainWindow::positionDialContainer() {
     
     // Calculate total width of visible right-side sidebars
     int rightSidebarWidth = 0;
+    // Tab overlays canvas, so only count the panel width when expanded
+    if (dialToolbarExpanded && dialToolbar && dialToolbar->isVisible()) {
+        rightSidebarWidth += dialToolbar->width(); // 50px panel
+    }
     if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
         rightSidebarWidth += markdownNotesSidebar->width();
     }
@@ -4122,6 +4398,68 @@ void MainWindow::positionDialContainer() {
     
     // Move the dial to the calculated position
     dialContainer->move(finalX, finalY);
+}
+
+void MainWindow::positionDialToolbarTab() {
+    if (!dialToolbarToggle) return;
+    
+    // Calculate position: tab should be at the left edge of dialToolbar (or right edge of canvas if collapsed)
+    int windowWidth = width();
+    int tabWidth = dialToolbarToggle->width();  // 20px
+    
+    // Calculate heights for vertical positioning
+    int tabBarHeight = (tabBarContainer && tabBarContainer->isVisible()) ? 38 : 0;
+    int toolbarHeight = isToolbarTwoRows ? 80 : 50;
+    int topOffset = tabBarHeight + toolbarHeight + 60; // 60px margin from top of content area
+    
+    // Calculate x position based on visible right sidebars
+    int rightOffset = 0;
+    if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
+        rightOffset += markdownNotesSidebar->width();
+    }
+    if (dialToolbarExpanded && dialToolbar && dialToolbar->isVisible()) {
+        rightOffset += dialToolbar->width(); // 50px
+    }
+    
+    // Position the tab: right edge minus sidebars minus tab width
+    int tabX = windowWidth - rightOffset - tabWidth;
+    int tabY = topOffset;
+    
+    dialToolbarToggle->move(tabX, tabY);
+    dialToolbarToggle->raise(); // Ensure it stays on top
+}
+
+void MainWindow::positionLeftSidebarTabs() {
+    // Calculate heights for vertical positioning
+    int tabBarHeight = (tabBarContainer && tabBarContainer->isVisible()) ? 38 : 0;
+    int toolbarHeight = isToolbarTwoRows ? 80 : 50;
+    int topOffset = tabBarHeight + toolbarHeight + 60; // 60px margin from top of content area
+    int tabSpacing = 10; // Space between tabs
+    
+    // Calculate x position based on visible left sidebars
+    int leftOffset = 0;
+    if (outlineSidebarVisible && outlineSidebar && outlineSidebar->isVisible()) {
+        leftOffset += outlineSidebar->width();
+    }
+    if (bookmarksSidebarVisible && bookmarksSidebar && bookmarksSidebar->isVisible()) {
+        leftOffset += bookmarksSidebar->width();
+    }
+    
+    // Position outline tab
+    if (toggleOutlineButton) {
+        int tabX = leftOffset; // At the right edge of visible sidebars
+        int tabY = topOffset;
+        toggleOutlineButton->move(tabX, tabY);
+        toggleOutlineButton->raise();
+    }
+    
+    // Position bookmarks tab below outline tab
+    if (toggleBookmarksButton) {
+        int tabX = leftOffset;
+        int tabY = topOffset + 80 + tabSpacing; // Below outline tab
+        toggleBookmarksButton->move(tabX, tabY);
+        toggleBookmarksButton->raise();
+    }
 }
 
 void MainWindow::updateDialDisplay() {
@@ -4431,6 +4769,31 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 // Ignore tablet event errors to prevent crashes
             }
         }
+        // Handle tablet press/release for stylus button mapping
+        else if (event->type() == QEvent::TabletPress) {
+            QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
+#ifdef Q_OS_LINUX
+            onStylusProximityEnter(); // Treat press as "stylus is active" for palm rejection
+#endif
+            // Handle stylus side button press (not just tip)
+            Qt::MouseButtons buttons = tabletEvent->buttons();
+            if ((buttons & Qt::MiddleButton) || (buttons & Qt::RightButton)) {
+                handleStylusButtonPress(buttons);
+            }
+        }
+        else if (event->type() == QEvent::TabletRelease) {
+            QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
+#ifdef Q_OS_LINUX
+            onStylusProximityLeave(); // Treat release as "stylus may be leaving" for palm rejection
+#endif
+            // Handle stylus side button release
+            Qt::MouseButton releasedButton = tabletEvent->button();
+            Qt::MouseButtons remainingButtons = tabletEvent->buttons();
+            if (releasedButton == Qt::MiddleButton || releasedButton == Qt::RightButton ||
+                stylusButtonAActive || stylusButtonBActive) {
+                handleStylusButtonRelease(remainingButtons, releasedButton);
+            }
+        }
         // Handle mouse button press events for forward/backward navigation
         else if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
@@ -4494,13 +4857,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 int newPan = qBound(panYSlider->minimum(), currentPan + scrollDelta, panYSlider->maximum());
                 panYSlider->setValue(newPan); // This triggers autoscroll via valueChanged signal
                 
-                // Show scrollbar temporarily
-                panYSlider->setVisible(true);
-                scrollbarsVisible = true;
-                if (scrollbarHideTimer->isActive()) {
-                    scrollbarHideTimer->stop();
-                }
-                scrollbarHideTimer->start();
+                // panYSlider stays hidden - scrolling handled internally
                 
                 // Consume the event
                 return true;
@@ -5104,6 +5461,84 @@ void MainWindow::updateTheme() {
         )").arg(toolbarBgColor));
     }
     
+    // Common floating tab styling colors (solid, not transparent)
+    QString tabBgColor = darkMode ? "#3A3A3A" : "#EAEAEA";
+    QString tabHoverColor = darkMode ? "#4A4A4A" : "#DADADA";
+    QString tabBorderColor = darkMode ? "#555555" : "#CCCCCC";
+    
+    // Update dial toolbar tab styling (right side, rounded left)
+    if (dialToolbarToggle) {
+        QString dialTabStyle = QString(
+            "QPushButton#dialToolbarTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-right: none;"
+            "  border-top-left-radius: 8px;"
+            "  border-bottom-left-radius: 8px;"
+            "}"
+            "QPushButton#dialToolbarTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#dialToolbarTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
+        dialToolbarToggle->setStyleSheet(dialTabStyle);
+        dialToolbarToggle->setIcon(loadThemedIcon("dial"));
+    }
+    
+    if (dialToolbar) {
+        QString panelBg = darkMode ? "#2D2D2D" : "#F5F5F5";
+        QString panelStyle = QString(
+            "QWidget#dialToolbar {"
+            "  background-color: %1;"
+            "  border-left: 1px solid %2;"
+            "}"
+        ).arg(panelBg, tabBorderColor);
+        dialToolbar->setStyleSheet(panelStyle);
+    }
+    
+    // Update left sidebar tabs styling (left side, rounded right)
+    if (toggleOutlineButton) {
+        QString outlineStyle = QString(
+            "QPushButton#outlineSidebarTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-left: none;"
+            "  border-top-right-radius: 8px;"
+            "  border-bottom-right-radius: 8px;"
+            "}"
+            "QPushButton#outlineSidebarTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#outlineSidebarTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
+        toggleOutlineButton->setStyleSheet(outlineStyle);
+        toggleOutlineButton->setIcon(loadThemedIcon("outline"));
+    }
+    
+    if (toggleBookmarksButton) {
+        QString bookmarksStyle = QString(
+            "QPushButton#bookmarksSidebarTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-left: none;"
+            "  border-top-right-radius: 8px;"
+            "  border-bottom-right-radius: 8px;"
+            "}"
+            "QPushButton#bookmarksSidebarTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#bookmarksSidebarTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
+        toggleBookmarksButton->setStyleSheet(bookmarksStyle);
+        toggleBookmarksButton->setIcon(loadThemedIcon("bookmark"));
+    }
+    
     // Update dial background color
     if (pageDial) {
         pageDial->setStyleSheet(QString(R"(
@@ -5400,8 +5835,7 @@ void MainWindow::updateTheme() {
 
     if (benchmarkButton) benchmarkButton->setStyleSheet(newButtonStyle);
     if (toggleTabBarButton) toggleTabBarButton->setStyleSheet(newButtonStyle);
-    if (toggleOutlineButton) toggleOutlineButton->setStyleSheet(newButtonStyle);
-    if (toggleBookmarksButton) toggleBookmarksButton->setStyleSheet(newButtonStyle);
+    // toggleOutlineButton and toggleBookmarksButton use custom floating tab styles, not buttonStyle
     if (toggleBookmarkButton) toggleBookmarkButton->setStyleSheet(newButtonStyle);
     if (selectFolderButton) selectFolderButton->setStyleSheet(newButtonStyle);
     if (saveButton) saveButton->setStyleSheet(newButtonStyle);
@@ -5421,6 +5855,7 @@ void MainWindow::updateTheme() {
     if (ropeToolButton) ropeToolButton->setStyleSheet(newButtonStyle);
     if (insertPictureButton) insertPictureButton->setStyleSheet(newButtonStyle);
     if (deletePageButton) deletePageButton->setStyleSheet(newButtonStyle);
+    if (overflowMenuButton) overflowMenuButton->setStyleSheet(newButtonStyle);
     if (zoomButton) zoomButton->setStyleSheet(newButtonStyle);
     if (dialToggleButton) dialToggleButton->setStyleSheet(newButtonStyle);
     if (fastForwardButton) fastForwardButton->setStyleSheet(newButtonStyle);
@@ -5691,6 +6126,357 @@ void MainWindow::cycleTouchGestureMode() {
         case TouchGestureMode::Full:
             setTouchGestureMode(TouchGestureMode::Disabled);
             break;
+    }
+}
+
+#ifdef Q_OS_LINUX
+void MainWindow::setPalmRejectionEnabled(bool enabled) {
+    palmRejectionEnabled = enabled;
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("palmRejectionEnabled", enabled);
+    
+    // If disabling while active, restore the original mode immediately
+    if (!enabled && palmRejectionActive) {
+        if (palmRejectionTimer && palmRejectionTimer->isActive()) {
+            palmRejectionTimer->stop();
+        }
+        restoreTouchGestureMode();
+    }
+}
+
+void MainWindow::setPalmRejectionDelay(int delayMs) {
+    palmRejectionDelayMs = qBound(0, delayMs, 5000); // Clamp to 0-5000ms
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("palmRejectionDelayMs", palmRejectionDelayMs);
+}
+
+void MainWindow::onStylusProximityEnter() {
+    if (!palmRejectionEnabled || !canvasStack) {
+        return;
+    }
+    
+    // Stop any pending restore timer
+    if (palmRejectionTimer && palmRejectionTimer->isActive()) {
+        palmRejectionTimer->stop();
+    }
+    
+    // If not already suppressing, save current mode and disable touch gestures
+    if (!palmRejectionActive) {
+        // Don't interfere if touch gestures are already disabled
+        if (touchGestureMode == TouchGestureMode::Disabled) {
+            return;
+        }
+        
+        palmRejectionOriginalMode = touchGestureMode;
+        palmRejectionActive = true;
+        
+        // Temporarily disable touch gestures on all canvases
+        for (int i = 0; i < canvasStack->count(); ++i) {
+            InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
+            if (canvas) {
+                canvas->setTouchGestureMode(TouchGestureMode::Disabled);
+            }
+        }
+    }
+}
+
+void MainWindow::onStylusProximityLeave() {
+    if (!palmRejectionEnabled || !palmRejectionActive) {
+        return;
+    }
+    
+    // Start timer to restore touch gestures after delay
+    if (palmRejectionTimer) {
+        palmRejectionTimer->setInterval(palmRejectionDelayMs);
+        palmRejectionTimer->start();
+    }
+}
+
+void MainWindow::restoreTouchGestureMode() {
+    if (!palmRejectionActive || !canvasStack) {
+        return;
+    }
+    
+    palmRejectionActive = false;
+    
+    // Restore original touch gesture mode to all canvases
+    for (int i = 0; i < canvasStack->count(); ++i) {
+        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
+        if (canvas) {
+            canvas->setTouchGestureMode(palmRejectionOriginalMode);
+        }
+    }
+}
+
+bool MainWindow::event(QEvent *event) {
+    // Handle tablet proximity events for palm rejection
+    if (event->type() == QEvent::TabletEnterProximity) {
+        onStylusProximityEnter();
+    } else if (event->type() == QEvent::TabletLeaveProximity) {
+        onStylusProximityLeave();
+    }
+    
+    return QMainWindow::event(event);
+}
+#endif
+
+// ==================== Stylus Button Mapping ====================
+
+void MainWindow::setStylusButtonAAction(StylusButtonAction action) {
+    stylusButtonAAction = action;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonBAction(StylusButtonAction action) {
+    stylusButtonBAction = action;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonAQt(Qt::MouseButton button) {
+    stylusButtonAQt = button;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::setStylusButtonBQt(Qt::MouseButton button) {
+    stylusButtonBQt = button;
+    saveStylusButtonSettings();
+}
+
+void MainWindow::saveStylusButtonSettings() {
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("stylusButtonAAction", static_cast<int>(stylusButtonAAction));
+    settings.setValue("stylusButtonBAction", static_cast<int>(stylusButtonBAction));
+    settings.setValue("stylusButtonAQt", static_cast<int>(stylusButtonAQt));
+    settings.setValue("stylusButtonBQt", static_cast<int>(stylusButtonBQt));
+}
+
+void MainWindow::loadStylusButtonSettings() {
+    QSettings settings("SpeedyNote", "App");
+    stylusButtonAAction = static_cast<StylusButtonAction>(
+        settings.value("stylusButtonAAction", static_cast<int>(StylusButtonAction::None)).toInt());
+    stylusButtonBAction = static_cast<StylusButtonAction>(
+        settings.value("stylusButtonBAction", static_cast<int>(StylusButtonAction::None)).toInt());
+    stylusButtonAQt = static_cast<Qt::MouseButton>(
+        settings.value("stylusButtonAQt", static_cast<int>(Qt::MiddleButton)).toInt());
+    stylusButtonBQt = static_cast<Qt::MouseButton>(
+        settings.value("stylusButtonBQt", static_cast<int>(Qt::RightButton)).toInt());
+}
+
+void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    StylusButtonAction action = StylusButtonAction::None;
+    bool *activeFlag = nullptr;
+    ToolType *previousTool = nullptr;
+    bool *previousStraightLine = nullptr;
+    bool *previousRopeTool = nullptr;
+    bool *previousTextSelection = nullptr;
+    
+    // Determine which button and its settings
+    if (button == stylusButtonAQt) {
+        action = stylusButtonAAction;
+        activeFlag = &stylusButtonAActive;
+        previousTool = &previousToolBeforeStylusA;
+        previousStraightLine = &previousStraightLineModeA;
+        previousRopeTool = &previousRopeToolModeA;
+        previousTextSelection = &previousTextSelectionModeA;
+    } else if (button == stylusButtonBQt) {
+        action = stylusButtonBAction;
+        activeFlag = &stylusButtonBActive;
+        previousTool = &previousToolBeforeStylusB;
+        previousStraightLine = &previousStraightLineModeB;
+        previousRopeTool = &previousRopeToolModeB;
+        previousTextSelection = &previousTextSelectionModeB;
+    } else {
+        return; // Unknown button
+    }
+    
+    if (action == StylusButtonAction::None || *activeFlag) {
+        return; // No action configured or already active
+    }
+    
+    // Save current state before enabling
+    *previousTool = canvas->getCurrentTool();
+    *previousStraightLine = canvas->isStraightLineMode();
+    *previousRopeTool = canvas->isRopeToolMode();
+    *previousTextSelection = canvas->isPdfTextSelectionEnabled();
+    
+    *activeFlag = true;
+    
+    // Enable the requested mode
+    switch (action) {
+        case StylusButtonAction::HoldStraightLine:
+            // Disable rope tool if active (they're mutually exclusive)
+            if (canvas->isRopeToolMode()) {
+                canvas->setRopeToolMode(false);
+                updateRopeToolButtonState();
+            }
+            canvas->setStraightLineMode(true);
+            // Reset start point to current position if pen is already on surface
+            // This fixes race condition when stylus button and pen tip touch happen simultaneously
+            canvas->resetStraightLineStartPoint();
+            updateStraightLineButtonState();
+            break;
+            
+        case StylusButtonAction::HoldLasso:
+            // Disable straight line if active (they're mutually exclusive)
+            if (canvas->isStraightLineMode()) {
+                canvas->setStraightLineMode(false);
+                updateStraightLineButtonState();
+            }
+            canvas->setRopeToolMode(true);
+            updateRopeToolButtonState();
+            break;
+            
+        case StylusButtonAction::HoldEraser:
+            canvas->setTool(ToolType::Eraser);
+            updateToolButtonStates();
+            break;
+            
+        case StylusButtonAction::HoldTextSelection:
+            // Clear any pending disable from previous interaction
+            textSelectionPendingDisable = false;
+            canvas->setPdfTextSelectionEnabled(true);
+            updatePdfTextSelectButtonState();
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    StylusButtonAction action = StylusButtonAction::None;
+    bool *activeFlag = nullptr;
+    ToolType *previousTool = nullptr;
+    bool *previousStraightLine = nullptr;
+    bool *previousRopeTool = nullptr;
+    bool *previousTextSelection = nullptr;
+    
+    // Determine which button and its settings
+    if (button == stylusButtonAQt) {
+        action = stylusButtonAAction;
+        activeFlag = &stylusButtonAActive;
+        previousTool = &previousToolBeforeStylusA;
+        previousStraightLine = &previousStraightLineModeA;
+        previousRopeTool = &previousRopeToolModeA;
+        previousTextSelection = &previousTextSelectionModeA;
+    } else if (button == stylusButtonBQt) {
+        action = stylusButtonBAction;
+        activeFlag = &stylusButtonBActive;
+        previousTool = &previousToolBeforeStylusB;
+        previousStraightLine = &previousStraightLineModeB;
+        previousRopeTool = &previousRopeToolModeB;
+        previousTextSelection = &previousTextSelectionModeB;
+    } else {
+        return; // Unknown button
+    }
+    
+    if (!*activeFlag) {
+        return; // Was not active
+    }
+    
+    *activeFlag = false;
+    
+    // Restore previous state
+    switch (action) {
+        case StylusButtonAction::HoldStraightLine:
+            canvas->setStraightLineMode(*previousStraightLine);
+            updateStraightLineButtonState();
+            // Restore rope tool if it was active before
+            if (*previousRopeTool) {
+                canvas->setRopeToolMode(true);
+                updateRopeToolButtonState();
+            }
+            break;
+            
+        case StylusButtonAction::HoldLasso:
+#ifndef Q_OS_WIN
+            // Clear any in-progress lasso selection before disabling (non-Windows only)
+            // On Windows, InkCanvas handles lasso finalization in hover mode
+            canvas->clearInProgressLasso();
+#endif
+            canvas->setRopeToolMode(*previousRopeTool);
+            updateRopeToolButtonState();
+            // Restore straight line if it was active before
+            if (*previousStraightLine) {
+                canvas->setStraightLineMode(true);
+                updateStraightLineButtonState();
+            }
+            break;
+            
+        case StylusButtonAction::HoldEraser:
+            canvas->setTool(*previousTool);
+            updateToolButtonStates();
+            break;
+            
+        case StylusButtonAction::HoldTextSelection:
+            // Check if there's an active text selection that needs interaction
+            if (canvas->hasSelectedPdfText()) {
+                // Delay the disable - keep text selection mode on until user completes interaction
+                textSelectionPendingDisable = true;
+                textSelectionWasButtonA = (button == stylusButtonAQt);
+                // Don't disable yet, don't clear activeFlag - wait for onPdfTextSelectionCleared
+                return; // Exit without disabling
+            }
+            canvas->setPdfTextSelectionEnabled(*previousTextSelection);
+            updatePdfTextSelectButtonState();
+            break;
+            
+        default:
+            break;
+    }
+}
+
+void MainWindow::onPdfTextSelectionCleared() {
+    // Called when text selection is cleared (after menu action or tap outside)
+    // If we were waiting to disable text selection mode, do it now
+    if (!textSelectionPendingDisable) {
+        return; // Not waiting for disable
+    }
+    
+    textSelectionPendingDisable = false;
+    
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    // Determine which button's settings to use
+    bool *previousTextSelection = textSelectionWasButtonA ? 
+        &previousTextSelectionModeA : &previousTextSelectionModeB;
+    bool *activeFlag = textSelectionWasButtonA ?
+        &stylusButtonAActive : &stylusButtonBActive;
+    
+    // Now complete the disable
+    *activeFlag = false;
+    canvas->setPdfTextSelectionEnabled(*previousTextSelection);
+    updatePdfTextSelectButtonState();
+}
+
+void MainWindow::handleStylusButtonPress(Qt::MouseButtons buttons) {
+    // Check if any configured stylus button is now pressed
+    if ((buttons & stylusButtonAQt) && stylusButtonAAction != StylusButtonAction::None) {
+        enableStylusButtonMode(stylusButtonAQt);
+    }
+    if ((buttons & stylusButtonBQt) && stylusButtonBAction != StylusButtonAction::None) {
+        enableStylusButtonMode(stylusButtonBQt);
+    }
+}
+
+void MainWindow::handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton) {
+    // Check if a configured stylus button was released
+    if (releasedButton == stylusButtonAQt || !(buttons & stylusButtonAQt)) {
+        if (stylusButtonAActive) {
+            disableStylusButtonMode(stylusButtonAQt);
+        }
+    }
+    if (releasedButton == stylusButtonBQt || !(buttons & stylusButtonBQt)) {
+        if (stylusButtonBActive) {
+            disableStylusButtonMode(stylusButtonBQt);
+        }
     }
 }
 
@@ -6307,6 +7093,15 @@ void MainWindow::loadUserSettings() {
     touchGesturesButton->style()->unpolish(touchGesturesButton);
     touchGesturesButton->style()->polish(touchGesturesButton);
     
+#ifdef Q_OS_LINUX
+    // Load palm rejection settings (Linux only)
+    palmRejectionEnabled = settings.value("palmRejectionEnabled", false).toBool();
+    palmRejectionDelayMs = settings.value("palmRejectionDelayMs", 500).toInt();
+#endif
+    
+    // Load stylus button settings
+    loadStylusButtonSettings();
+    
     // Initialize default background settings if they don't exist
     if (!settings.contains("defaultBackgroundStyle")) {
         saveDefaultBackgroundSettings(BackgroundStyle::Grid, Qt::white, 30);
@@ -6416,14 +7211,11 @@ void MainWindow::handleTouchZoomChange(int newZoom) {
     zoomSlider->setValue(newZoom);
     zoomSlider->blockSignals(false);
     
-    // Show both scrollbars during gesture
+    // Show horizontal scrollbar during gesture (panYSlider stays hidden)
     if (panXSlider->maximum() > 0) {
         panXSlider->setVisible(true);
+        scrollbarsVisible = true;
     }
-    if (panYSlider->maximum() > 0) {
-        panYSlider->setVisible(true);
-    }
-    scrollbarsVisible = true;
     
     // Update canvas zoom directly
     InkCanvas *canvas = currentCanvas();
@@ -6445,14 +7237,11 @@ void MainWindow::handleTouchPanChange(int panX, int panY) {
     panX = qBound(panXSlider->minimum(), panX, panXSlider->maximum());
     panY = qBound(panYSlider->minimum(), panY, panYSlider->maximum());
     
-    // Show both scrollbars during gesture
+    // Show horizontal scrollbar during gesture (panYSlider stays hidden)
     if (panXSlider->maximum() > 0) {
         panXSlider->setVisible(true);
+        scrollbarsVisible = true;
     }
-    if (panYSlider->maximum() > 0) {
-        panYSlider->setVisible(true);
-    }
-    scrollbarsVisible = true;
     
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
@@ -6730,28 +7519,17 @@ void MainWindow::updateScrollbarPositions() {
 void MainWindow::handleEdgeProximity(InkCanvas* canvas, const QPoint& pos) {
     if (!canvas) return;
     
-    // Get canvas dimensions
-    int canvasWidth = canvas->width();
-    int canvasHeight = canvas->height();
+    // Get canvas dimensions (unused now but kept for potential future use)
+    Q_UNUSED(canvas);
     
-    // Edge detection zones - show scrollbars when pointer is within 50px of edges
-    bool nearLeftEdge = pos.x() < 25;  // For vertical scrollbar
+    // Edge detection zones - show scrollbars when pointer is within 25px of edges
     bool nearTopEdge = pos.y() < 25;   // For horizontal scrollbar - entire top edge
     
     // Only show scrollbars if canvas is larger than viewport
     bool needHorizontalScroll = panXSlider->maximum() > 0;
-    bool needVerticalScroll = panYSlider->maximum() > 0;
+    // panYSlider is permanently hidden, vertical scrolling handled by other mechanisms
     
-    // Show/hide scrollbars based on pointer position
-    if (nearLeftEdge && needVerticalScroll) {
-        panYSlider->setVisible(true);
-        scrollbarsVisible = true;
-        if (scrollbarHideTimer->isActive()) {
-            scrollbarHideTimer->stop();
-        }
-        scrollbarHideTimer->start();
-    }
-    
+    // Show/hide horizontal scrollbar based on pointer position
     if (nearTopEdge && needHorizontalScroll) {
         panXSlider->setVisible(true);
         scrollbarsVisible = true;
@@ -6806,6 +7584,9 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
         connect(layoutUpdateTimer, &QTimer::timeout, this, [this]() {
             updateToolbarLayout();
             updateTabSizes(); // Update tab widths when window resizes
+            // Reposition floating sidebar tabs
+            positionLeftSidebarTabs();
+            positionDialToolbarTab();
             // Also reposition dial after resize finishes
             if (dialContainer && dialContainer->isVisible()) {
                 positionDialContainer();
@@ -6818,61 +7599,68 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::updateToolbarLayout() {
-    // Calculate scaled width using device pixel ratio
-    QScreen *screen = QGuiApplication::primaryScreen();
-    // qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
-    int scaledWidth = width();
+    int windowWidth = width();
     
-    // Dynamic threshold based on zoom button visibility
-    int threshold = areZoomButtonsVisible() ? 1340 : 1230;
+    // Thresholds:
+    // >= 1090: Single row with centered buttons (left spacer compensates for right buttons)
+    // < 1090 and >= 1020: Single row without centering (left spacer removed, buttons can use full width)
+    // < 1020: Two-row layout
+    const int centeringThreshold = 1090;
+    const int twoRowThreshold = 1020;
     
-    // Debug output to understand what's happening
-    // qDebug() << "Window width:" << scaledWidth << "Threshold:" << threshold << "Zoom buttons visible:" << areZoomButtonsVisible();
+    bool shouldBeTwoRows = windowWidth < twoRowThreshold;
+    bool shouldBeCentered = windowWidth >= centeringThreshold;
     
-    bool shouldBeTwoRows = scaledWidth <= threshold;
-    
-    // qDebug() << "Should be two rows:" << shouldBeTwoRows << "Currently is two rows:" << isToolbarTwoRows;
+    // Track if we need to recreate the layout
+    static bool wasCentered = true;  // Start with centered assumption
     
     if (shouldBeTwoRows != isToolbarTwoRows) {
         isToolbarTwoRows = shouldBeTwoRows;
         
-        // qDebug() << "Switching to" << (isToolbarTwoRows ? "two rows" : "single row");
-        
         if (isToolbarTwoRows) {
             createTwoRowLayout();
         } else {
-            createSingleRowLayout();
+            createSingleRowLayout(shouldBeCentered);
         }
+        wasCentered = shouldBeCentered;
+    } else if (!isToolbarTwoRows && shouldBeCentered != wasCentered) {
+        // Still single row, but centering mode changed
+        createSingleRowLayout(shouldBeCentered);
+        wasCentered = shouldBeCentered;
     }
 }
 
-void MainWindow::createSingleRowLayout() {
+void MainWindow::createSingleRowLayout(bool centered) {
     // Delete separator line if it exists (from previous 2-row layout)
     if (separatorLine) {
         delete separatorLine;
         separatorLine = nullptr;
     }
     
-    // Create new single row layout first
+    // Create new single row layout
     QHBoxLayout *newLayout = new QHBoxLayout;
     
-    // Add all widgets to single row (same order as before)
-    newLayout->addWidget(toggleTabBarButton);
-            newLayout->addWidget(toggleOutlineButton);
-        newLayout->addWidget(toggleBookmarksButton);
-        newLayout->addWidget(toggleBookmarkButton);
-        newLayout->addWidget(toggleMarkdownNotesButton);
-        newLayout->addWidget(touchGesturesButton);
-        newLayout->addWidget(selectFolderButton);
+    // When centered mode is enabled (wide window), add a left spacer to compensate
+    // for the right-aligned buttons, making the center buttons truly centered.
+    // When not centered (narrower window), skip the spacer so buttons can use full width.
+    if (centered) {
+        // Right buttons: toggleBookmarkButton(36) + pageInput(36) + overflowMenuButton(30) + deletePageButton(22) + spacing
+        const int rightButtonsWidth = 130;
+        QSpacerItem *leftSpacer = new QSpacerItem(rightButtonsWidth, 0, QSizePolicy::Preferred, QSizePolicy::Minimum);
+        newLayout->addSpacerItem(leftSpacer);
+    }
     
-    newLayout->addWidget(loadPdfButton);
-    newLayout->addWidget(clearPdfButton);
+    // Left stretch to center the main buttons
+    newLayout->addStretch();
+    
+    // Centered buttons - toggle and utility
+    newLayout->addWidget(toggleTabBarButton);
+    newLayout->addWidget(toggleMarkdownNotesButton);
+    newLayout->addWidget(touchGesturesButton);
     newLayout->addWidget(pdfTextSelectButton);
-    // newLayout->addWidget(backgroundButton);
     newLayout->addWidget(saveButton);
-    newLayout->addWidget(exportPdfButton);
-    newLayout->addWidget(openControlPanelButton);
-    // openRecentNotebooksButton is now in tab bar layout, not toolbar
+    
+    // Color buttons
     newLayout->addWidget(redButton);
     newLayout->addWidget(blueButton);
     newLayout->addWidget(yellowButton);
@@ -6880,38 +7668,28 @@ void MainWindow::createSingleRowLayout() {
     newLayout->addWidget(blackButton);
     newLayout->addWidget(whiteButton);
     newLayout->addWidget(customColorButton);
+    
+    // Tool buttons
     newLayout->addWidget(penToolButton);
     newLayout->addWidget(markerToolButton);
     newLayout->addWidget(eraserToolButton);
     newLayout->addWidget(straightLineToggleButton);
     newLayout->addWidget(ropeToolButton);
     newLayout->addWidget(insertPictureButton);
-    newLayout->addWidget(dialToggleButton);
-    newLayout->addWidget(fastForwardButton);
-    newLayout->addWidget(btnPageSwitch);
-    newLayout->addWidget(btnPannScroll);
-    newLayout->addWidget(btnZoom);
-    newLayout->addWidget(btnThickness);
-
-    newLayout->addWidget(btnTool);
-    newLayout->addWidget(btnPresets);
-    newLayout->addWidget(addPresetButton);
     newLayout->addWidget(fullscreenButton);
     
-    // Only add zoom buttons if they're visible
-    if (areZoomButtonsVisible()) {
-        newLayout->addWidget(zoom50Button);
-        newLayout->addWidget(dezoomButton);
-        newLayout->addWidget(zoom200Button);
-    }
-    
+    // Right stretch to center the main buttons
     newLayout->addStretch();
-    newLayout->addWidget(prevPageButton);
+    
+    // Page controls and overflow menu on the right (fixed position)
+    newLayout->addWidget(toggleBookmarkButton);
     newLayout->addWidget(pageInput);
-    newLayout->addWidget(nextPageButton);
+    newLayout->addWidget(overflowMenuButton);
+    newLayout->addWidget(deletePageButton);
+    
+    // Benchmark controls (visibility controlled by settings)
     newLayout->addWidget(benchmarkButton);
     newLayout->addWidget(benchmarkLabel);
-    newLayout->addWidget(deletePageButton);
     
     // Safely replace the layout
     QLayout* oldLayout = controlBar->layout();
@@ -6938,34 +7716,26 @@ void MainWindow::createSingleRowLayout() {
 }
 
 void MainWindow::createTwoRowLayout() {
-    // Create new layouts first
+    // Two-row layout for narrow windows
+    
+    // Create new layouts
     QVBoxLayout *newVerticalLayout = new QVBoxLayout;
     QHBoxLayout *newFirstRowLayout = new QHBoxLayout;
     QHBoxLayout *newSecondRowLayout = new QHBoxLayout;
     
-    // Add comfortable spacing and margins for 2-row layout
-    newFirstRowLayout->setContentsMargins(8, 8, 8, 6);  // More generous margins
-    newFirstRowLayout->setSpacing(3);  // Add spacing between buttons for less cramped feel
-    newSecondRowLayout->setContentsMargins(8, 6, 8, 8);  // More generous margins
-    newSecondRowLayout->setSpacing(3);  // Add spacing between buttons for less cramped feel
+    // Add comfortable spacing and margins
+    newFirstRowLayout->setContentsMargins(8, 8, 8, 6);
+    newFirstRowLayout->setSpacing(3);
+    newSecondRowLayout->setContentsMargins(8, 6, 8, 8);
+    newSecondRowLayout->setSpacing(3);
     
-    // First row: up to customColorButton
+    // First row: toggle buttons and colors (centered - no right buttons, so no compensation needed)
+    newFirstRowLayout->addStretch();
     newFirstRowLayout->addWidget(toggleTabBarButton);
-            newFirstRowLayout->addWidget(toggleOutlineButton);
-        newFirstRowLayout->addWidget(toggleBookmarksButton);
-        newFirstRowLayout->addWidget(toggleBookmarkButton);
-        newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
-        newFirstRowLayout->addWidget(touchGesturesButton);
-        newFirstRowLayout->addWidget(selectFolderButton);
-    
-    newFirstRowLayout->addWidget(loadPdfButton);
-    newFirstRowLayout->addWidget(clearPdfButton);
+    newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
+    newFirstRowLayout->addWidget(touchGesturesButton);
     newFirstRowLayout->addWidget(pdfTextSelectButton);
-    // newFirstRowLayout->addWidget(backgroundButton);
     newFirstRowLayout->addWidget(saveButton);
-    newFirstRowLayout->addWidget(exportPdfButton);
-    newFirstRowLayout->addWidget(openControlPanelButton);
-    // openRecentNotebooksButton is now in tab bar layout, not toolbar
     newFirstRowLayout->addWidget(redButton);
     newFirstRowLayout->addWidget(blueButton);
     newFirstRowLayout->addWidget(yellowButton);
@@ -6973,9 +7743,6 @@ void MainWindow::createTwoRowLayout() {
     newFirstRowLayout->addWidget(blackButton);
     newFirstRowLayout->addWidget(whiteButton);
     newFirstRowLayout->addWidget(customColorButton);
-    newFirstRowLayout->addWidget(penToolButton);
-    newFirstRowLayout->addWidget(markerToolButton);
-    newFirstRowLayout->addWidget(eraserToolButton);
     newFirstRowLayout->addStretch();
     
     // Create a separator line
@@ -6987,43 +7754,41 @@ void MainWindow::createTwoRowLayout() {
         separatorLine->setStyleSheet("QFrame { color: rgba(255, 255, 255, 255); }");
     }
     
-    // Second row: everything after customColorButton
+    // Calculate the width of right-aligned buttons to create a compensating left spacer
+    // Right buttons: toggleBookmarkButton(36) + pageInput(36) + overflowMenuButton(30) + deletePageButton(22) + spacing
+    const int rightButtonsWidth = 130;
+    
+    // Second row: tool buttons (centered) and page controls (right)
+    // Left spacer to compensate for right-aligned buttons (can shrink when window is narrow)
+    QSpacerItem *leftSpacer = new QSpacerItem(rightButtonsWidth, 0, QSizePolicy::Preferred, QSizePolicy::Minimum);
+    newSecondRowLayout->addSpacerItem(leftSpacer);
+    
+    newSecondRowLayout->addStretch();
+    newSecondRowLayout->addWidget(penToolButton);
+    newSecondRowLayout->addWidget(markerToolButton);
+    newSecondRowLayout->addWidget(eraserToolButton);
     newSecondRowLayout->addWidget(straightLineToggleButton);
     newSecondRowLayout->addWidget(ropeToolButton);
     newSecondRowLayout->addWidget(insertPictureButton);
-    newSecondRowLayout->addWidget(dialToggleButton);
-    newSecondRowLayout->addWidget(fastForwardButton);
-    newSecondRowLayout->addWidget(btnPageSwitch);
-    newSecondRowLayout->addWidget(btnPannScroll);
-    newSecondRowLayout->addWidget(btnZoom);
-    newSecondRowLayout->addWidget(btnThickness);
-
-    newSecondRowLayout->addWidget(btnTool);
-    newSecondRowLayout->addWidget(btnPresets);
-    newSecondRowLayout->addWidget(addPresetButton);
     newSecondRowLayout->addWidget(fullscreenButton);
     
-    // Only add zoom buttons if they're visible
-    if (areZoomButtonsVisible()) {
-        newSecondRowLayout->addWidget(zoom50Button);
-        newSecondRowLayout->addWidget(dezoomButton);
-        newSecondRowLayout->addWidget(zoom200Button);
-    }
-    
     newSecondRowLayout->addStretch();
-    newSecondRowLayout->addWidget(prevPageButton);
+    
+    newSecondRowLayout->addWidget(toggleBookmarkButton);
     newSecondRowLayout->addWidget(pageInput);
-    newSecondRowLayout->addWidget(nextPageButton);
+    newSecondRowLayout->addWidget(overflowMenuButton);
+    newSecondRowLayout->addWidget(deletePageButton);
+    
+    // Benchmark controls (visibility controlled by settings)
     newSecondRowLayout->addWidget(benchmarkButton);
     newSecondRowLayout->addWidget(benchmarkLabel);
-    newSecondRowLayout->addWidget(deletePageButton);
     
     // Add layouts to vertical layout with separator
     newVerticalLayout->addLayout(newFirstRowLayout);
     newVerticalLayout->addWidget(separatorLine);
     newVerticalLayout->addLayout(newSecondRowLayout);
     newVerticalLayout->setContentsMargins(0, 0, 0, 0);
-    newVerticalLayout->setSpacing(0); // No spacing since we have our own separator
+    newVerticalLayout->setSpacing(0);
     
     // Safely replace the layout
     QLayout* oldLayout = controlBar->layout();
@@ -7363,6 +8128,19 @@ void MainWindow::toggleOutlineSidebar() {
             updateOutlineSelection(currentPage);
         }
     }
+    
+    // Force layout update and reposition floating tabs after sidebar visibility change
+    if (centralWidget() && centralWidget()->layout()) {
+        centralWidget()->layout()->invalidate();
+        centralWidget()->layout()->activate();
+    }
+    QTimer::singleShot(0, this, [this]() {
+        positionLeftSidebarTabs();
+        positionDialToolbarTab();
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
 }
 
 void MainWindow::onOutlineItemClicked(QTreeWidgetItem *item, int column) {
@@ -7635,6 +8413,19 @@ void MainWindow::toggleBookmarksSidebar() {
     if (bookmarksSidebarVisible) {
         loadBookmarks(); // Refresh bookmarks when opening
     }
+    
+    // Force layout update and reposition floating tabs after sidebar visibility change
+    if (centralWidget() && centralWidget()->layout()) {
+        centralWidget()->layout()->invalidate();
+        centralWidget()->layout()->activate();
+    }
+    QTimer::singleShot(0, this, [this]() {
+        positionLeftSidebarTabs();
+        positionDialToolbarTab();
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
 }
 
 void MainWindow::onBookmarkItemClicked(QTreeWidgetItem *item, int column) {
@@ -7736,29 +8527,9 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     bool isVisible = markdownNotesSidebar->isVisible();
     
-    // Hide other sidebars if showing markdown notes
-    if (!isVisible) {
-        if (outlineSidebar && outlineSidebar->isVisible()) {
-            outlineSidebar->setVisible(false);
-            outlineSidebarVisible = false;
-            if (toggleOutlineButton) {
-                toggleOutlineButton->setProperty("selected", false);
-                updateButtonIcon(toggleOutlineButton, "outline");
-                toggleOutlineButton->style()->unpolish(toggleOutlineButton);
-                toggleOutlineButton->style()->polish(toggleOutlineButton);
-            }
-        }
-        if (bookmarksSidebar && bookmarksSidebar->isVisible()) {
-            bookmarksSidebar->setVisible(false);
-            bookmarksSidebarVisible = false;
-            if (toggleBookmarksButton) {
-                toggleBookmarksButton->setProperty("selected", false);
-                updateButtonIcon(toggleBookmarksButton, "bookmark");
-                toggleBookmarksButton->style()->unpolish(toggleBookmarksButton);
-                toggleBookmarksButton->style()->polish(toggleBookmarksButton);
-            }
-        }
-    }
+    // Note: Markdown notes sidebar (right side) is independent of 
+    // outline/bookmarks sidebars (left side), so we don't hide them here.
+    // The left sidebars are mutually exclusive with each other, but not with markdown notes.
     
     markdownNotesSidebar->setVisible(!isVisible);
     markdownNotesSidebarVisible = !isVisible;
@@ -7788,10 +8559,15 @@ void MainWindow::toggleMarkdownNotesSidebar() {
         currentCanvas()->update();
     }
     
-    // Reposition dial container if it's visible (so it doesn't get covered by sidebar)
-    if (dialContainer && dialContainer->isVisible()) {
-        positionDialContainer();
-    }
+    // Reposition dial toolbar tab and dial container after layout settles
+    // Use a short delay to ensure the layout has fully completed
+    QTimer::singleShot(0, this, [this]() {
+        positionDialToolbarTab();
+        positionLeftSidebarTabs();  // Also reposition left tabs for consistency
+        if (dialContainer && dialContainer->isVisible()) {
+            positionDialContainer();
+        }
+    });
 }
 
 void MainWindow::onMarkdownNotesUpdated() {
