@@ -764,7 +764,7 @@ private:
     QHBoxLayout *controlLayoutFirstRow = nullptr;
     QHBoxLayout *controlLayoutSecondRow = nullptr;
     void updateToolbarLayout();
-    void createSingleRowLayout();
+    void createSingleRowLayout(bool centered = true);
     void createTwoRowLayout();
     
     // Helper function for tab text eliding

@@ -7596,35 +7596,38 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::updateToolbarLayout() {
-    // Calculate scaled width using device pixel ratio
-    QScreen *screen = QGuiApplication::primaryScreen();
-    // qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
-    int scaledWidth = width();
+    int windowWidth = width();
     
-    // Dynamic threshold based on zoom button visibility
-    int threshold = areZoomButtonsVisible() ? 1340 : 1230;
+    // Thresholds:
+    // >= 1090: Single row with centered buttons (left spacer compensates for right buttons)
+    // < 1090 and >= 930: Single row without centering (left spacer removed, buttons can use full width)
+    // < 930: Two-row layout
+    const int centeringThreshold = 1090;
+    const int twoRowThreshold = 930;
     
-    // Debug output to understand what's happening
-    // qDebug() << "Window width:" << scaledWidth << "Threshold:" << threshold << "Zoom buttons visible:" << areZoomButtonsVisible();
+    bool shouldBeTwoRows = windowWidth < twoRowThreshold;
+    bool shouldBeCentered = windowWidth >= centeringThreshold;
     
-    bool shouldBeTwoRows = scaledWidth <= threshold;
-    
-    // qDebug() << "Should be two rows:" << shouldBeTwoRows << "Currently is two rows:" << isToolbarTwoRows;
+    // Track if we need to recreate the layout
+    static bool wasCentered = true;  // Start with centered assumption
     
     if (shouldBeTwoRows != isToolbarTwoRows) {
         isToolbarTwoRows = shouldBeTwoRows;
         
-        // qDebug() << "Switching to" << (isToolbarTwoRows ? "two rows" : "single row");
-        
         if (isToolbarTwoRows) {
             createTwoRowLayout();
         } else {
-            createSingleRowLayout();
+            createSingleRowLayout(shouldBeCentered);
         }
+        wasCentered = shouldBeCentered;
+    } else if (!isToolbarTwoRows && shouldBeCentered != wasCentered) {
+        // Still single row, but centering mode changed
+        createSingleRowLayout(shouldBeCentered);
+        wasCentered = shouldBeCentered;
     }
 }
 
-void MainWindow::createSingleRowLayout() {
+void MainWindow::createSingleRowLayout(bool centered) {
     // Delete separator line if it exists (from previous 2-row layout)
     if (separatorLine) {
         delete separatorLine;
@@ -7633,6 +7636,16 @@ void MainWindow::createSingleRowLayout() {
     
     // Create new single row layout
     QHBoxLayout *newLayout = new QHBoxLayout;
+    
+    // When centered mode is enabled (wide window), add a left spacer to compensate
+    // for the right-aligned buttons, making the center buttons truly centered.
+    // When not centered (narrower window), skip the spacer so buttons can use full width.
+    if (centered) {
+        // Right buttons: toggleBookmarkButton(36) + pageInput(36) + overflowMenuButton(30) + deletePageButton(22) + spacing
+        const int rightButtonsWidth = 130;
+        QSpacerItem *leftSpacer = new QSpacerItem(rightButtonsWidth, 0, QSizePolicy::Preferred, QSizePolicy::Minimum);
+        newLayout->addSpacerItem(leftSpacer);
+    }
     
     // Left stretch to center the main buttons
     newLayout->addStretch();
@@ -7713,7 +7726,7 @@ void MainWindow::createTwoRowLayout() {
     newSecondRowLayout->setContentsMargins(8, 6, 8, 8);
     newSecondRowLayout->setSpacing(3);
     
-    // First row: toggle buttons and colors (centered)
+    // First row: toggle buttons and colors (centered - no right buttons, so no compensation needed)
     newFirstRowLayout->addStretch();
     newFirstRowLayout->addWidget(toggleTabBarButton);
     newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
@@ -7738,7 +7751,15 @@ void MainWindow::createTwoRowLayout() {
         separatorLine->setStyleSheet("QFrame { color: rgba(255, 255, 255, 255); }");
     }
     
+    // Calculate the width of right-aligned buttons to create a compensating left spacer
+    // Right buttons: toggleBookmarkButton(36) + pageInput(36) + overflowMenuButton(30) + deletePageButton(22) + spacing
+    const int rightButtonsWidth = 130;
+    
     // Second row: tool buttons (centered) and page controls (right)
+    // Left spacer to compensate for right-aligned buttons (can shrink when window is narrow)
+    QSpacerItem *leftSpacer = new QSpacerItem(rightButtonsWidth, 0, QSizePolicy::Preferred, QSizePolicy::Minimum);
+    newSecondRowLayout->addSpacerItem(leftSpacer);
+    
     newSecondRowLayout->addStretch();
     newSecondRowLayout->addWidget(penToolButton);
     newSecondRowLayout->addWidget(markerToolButton);
