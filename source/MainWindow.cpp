@@ -6395,8 +6395,11 @@ void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
             break;
             
         case StylusButtonAction::HoldLasso:
-            // Clear any in-progress lasso selection before disabling
+#ifndef Q_OS_WIN
+            // Clear any in-progress lasso selection before disabling (non-Windows only)
+            // On Windows, InkCanvas handles lasso finalization in hover mode
             canvas->clearInProgressLasso();
+#endif
             canvas->setRopeToolMode(*previousRopeTool);
             updateRopeToolButtonState();
             // Restore straight line if it was active before

@@ -203,7 +203,16 @@ public:
     void resetStraightLineStartPoint();
 
     // Rope tool mode toggle
-    void setRopeToolMode(bool enabled) { ropeToolMode = enabled; }
+    void setRopeToolMode(bool enabled) { 
+        ropeToolMode = enabled;
+#ifdef Q_OS_WIN
+        // Clear auto-disable flag when mode is manually set to avoid incorrect auto-disable
+        // from a previous Windows stylus hover lasso operation
+        if (enabled) {
+            windowsLassoNeedsAutoDisable = false;
+        }
+#endif
+    }
     bool isRopeToolMode() const { return ropeToolMode; }
 
     void loadPdfPreviewAsync(int pageNumber);  // ✅ Load a quick preview of the PDF page
@@ -407,6 +416,15 @@ private:
     QPolygonF lassoPathPoints; // Points of the lasso selection in LOGICAL WIDGET coordinates
     bool selectingWithRope = false; // True if currently drawing the lasso
     bool movingSelection = false; // True if currently moving the selection
+    
+#ifdef Q_OS_WIN
+    // Windows-specific: Track if we're in stylus hover mode (side button pressed while hovering)
+    // On Windows, stylus side buttons only work while hovering, not when pen tip touches screen
+    bool windowsStylusHoverDrawing = false;
+    bool windowsHoverWasStraightLine = false;  // True if hover mode was for straight line
+    bool windowsHoverWasLasso = false;         // True if hover mode was for lasso
+    bool windowsLassoNeedsAutoDisable = false; // True if lasso mode should auto-disable after interaction
+#endif
     bool selectionJustCopied = false; // True if selection was just copied and hasn't been moved yet
     bool selectionAreaCleared = false; // True if the selection area has been cleared from the buffer
     QPainterPath selectionMaskPath; // Path used to clear the selection area from buffer

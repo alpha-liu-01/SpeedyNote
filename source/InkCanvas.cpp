@@ -1259,6 +1259,50 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
                                        !(allButtons & Qt::LeftButton));
         
         if (isSideButtonOnly || isHoverWithSideButton) {
+#ifdef Q_OS_WIN
+            // Windows-specific: On Windows, stylus side buttons only work while hovering
+            // We need to allow drawing/tracking in hover mode for straight line and lasso
+            if (straightLineMode || ropeToolMode) {
+                windowsStylusHoverDrawing = true;
+                windowsHoverWasStraightLine = straightLineMode;
+                windowsHoverWasLasso = ropeToolMode;
+                drawing = true;
+                lastPoint = event->position();
+                
+                if (straightLineMode) {
+                    straightLineStartPoint = lastPoint;
+                }
+                if (ropeToolMode) {
+                    // Start new selection in hover mode
+                    if (!selectionBuffer.isNull()) {
+                        // Cancel existing selection
+                        selectionBuffer = QPixmap();
+                        selectionRect = QRect();
+                        lassoPathPoints.clear();
+                        movingSelection = false;
+                        selectingWithRope = false;
+                        selectionJustCopied = false;
+                        selectionAreaCleared = false;
+                        selectionMaskPath = QPainterPath();
+                        selectionBufferRect = QRectF();
+                        update();
+                    }
+                    selectingWithRope = true;
+                    movingSelection = false;
+                    selectionJustCopied = false;
+                    selectionAreaCleared = false;
+                    selectionMaskPath = QPainterPath();
+                    selectionBufferRect = QRectF();
+                    lassoPathPoints.clear();
+                    lassoPathPoints << lastPoint;
+                    selectionRect = QRect();
+                    selectionBuffer = QPixmap();
+                }
+                
+                event->accept();
+                return;
+            }
+#endif
             // This is a side button press while hovering - don't start drawing
             event->accept();
             return;
@@ -1308,6 +1352,13 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
                     selectionAreaCleared = false;
                     selectionMaskPath = QPainterPath();
                     selectionBufferRect = QRectF();
+#ifdef Q_OS_WIN
+                    // Auto-disable lasso mode if this was a Windows stylus hover lasso
+                    if (windowsLassoNeedsAutoDisable) {
+                        ropeToolMode = false;
+                        windowsLassoNeedsAutoDisable = false;
+                    }
+#endif
                     update(); // Full update to remove old selection visuals
                     drawing = false; // Consumed this press for cancel
                     return;
@@ -1430,6 +1481,114 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
         // Side button releases should not trigger drawing completion
         Qt::MouseButton releasedButton = event->button();
         bool isTipRelease = (releasedButton == Qt::LeftButton || releasedButton == Qt::NoButton);
+        
+#ifdef Q_OS_WIN
+        // Windows-specific: Handle side button release during hover drawing mode
+        // On Windows, we need to finalize straight line and lasso when side button is released
+        // Note: We use stored flags (windowsHoverWasStraightLine, windowsHoverWasLasso) because
+        // MainWindow's eventFilter may have already disabled the modes before we get here
+        bool isSideButtonRelease = (releasedButton == Qt::MiddleButton || releasedButton == Qt::RightButton);
+        
+        if (windowsStylusHoverDrawing && isSideButtonRelease) {
+            if (windowsHoverWasStraightLine && !isErasing) {
+                // Finalize straight line in hover mode
+                qreal pressure = event->pressure();
+                pressure = qMax(pressure, 0.5);
+                
+                // Only draw if there's meaningful distance
+                QPointF delta = event->position() - straightLineStartPoint;
+                if (delta.manhattanLength() > 5) {
+                    drawStroke(straightLineStartPoint, event->position(), pressure);
+                    if (!edited) {
+                        edited = true;
+                    }
+                }
+                
+                update();
+            } else if (windowsHoverWasStraightLine && isErasing) {
+                // Finalize erasing line in hover mode
+                qreal pressure = qMax(event->pressure(), 0.5);
+                eraseStroke(straightLineStartPoint, event->position(), pressure);
+                update();
+                if (!edited) {
+                    edited = true;
+                }
+            } else if (windowsHoverWasLasso && selectingWithRope) {
+                // Finalize lasso selection in hover mode
+                if (lassoPathPoints.size() > 2) {
+                    lassoPathPoints << lassoPathPoints.first(); // Close the polygon
+                    
+                    if (!lassoPathPoints.boundingRect().isEmpty()) {
+                        // Create a QPolygonF in buffer coordinates
+                        QPolygonF bufferLassoPath;
+                        for (const QPointF& p_widget_logical : std::as_const(lassoPathPoints)) {
+                            bufferLassoPath << mapLogicalWidgetToPhysicalBuffer(p_widget_logical);
+                        }
+
+                        // Get the bounding box of this path on the buffer
+                        QRectF bufferPathBoundingRect = bufferLassoPath.boundingRect();
+
+                        // Copy that part of the main buffer
+                        QPixmap originalPiece = buffer.copy(bufferPathBoundingRect.toRect());
+
+                        // Create the selectionBuffer and fill transparent
+                        selectionBuffer = QPixmap(originalPiece.size());
+                        selectionBuffer.fill(Qt::transparent);
+                        
+                        // Create a mask from the lasso path
+                        QPainterPath maskPath;
+                        maskPath.addPolygon(bufferLassoPath.translated(-bufferPathBoundingRect.topLeft()));
+                        
+                        // Paint the originalPiece onto selectionBuffer using the mask
+                        QPainter selectionPainter(&selectionBuffer);
+                        selectionPainter.setClipPath(maskPath);
+                        selectionPainter.drawPixmap(0, 0, originalPiece);
+                        selectionPainter.end();
+
+                        selectionAreaCleared = false;
+                        selectionMaskPath = maskPath.translated(bufferPathBoundingRect.topLeft());
+                        selectionBufferRect = bufferPathBoundingRect;
+                        
+                        // Calculate the correct selectionRect in logical widget coordinates
+                        QRectF logicalSelectionRect = mapRectBufferToWidgetLogical(bufferPathBoundingRect);
+                        selectionRect = logicalSelectionRect.toRect();
+                        exactSelectionRectF = logicalSelectionRect;
+                        
+                        update(logicalSelectionRect.adjusted(-2, -2, 2, 2).toRect());
+                        
+                        // Re-enable ropeToolMode so user can move the selection
+                        // MainWindow has already disabled it, but we need it enabled for interaction
+                        ropeToolMode = true;
+                        windowsLassoNeedsAutoDisable = true; // Mark for auto-disable after interaction
+                        
+                        // Emit signal for context menu
+                        QPoint menuPosition = selectionRect.center();
+                        QTimer::singleShot(500, this, [this, menuPosition]() {
+                            if (!selectionBuffer.isNull() && !selectionRect.isEmpty() && !movingSelection) {
+                                emit ropeSelectionCompleted(menuPosition);
+                            }
+                        });
+                    }
+                }
+                lassoPathPoints.clear();
+                selectingWithRope = false;
+            }
+            
+            // Reset Windows hover mode flags
+            windowsStylusHoverDrawing = false;
+            windowsHoverWasStraightLine = false;
+            windowsHoverWasLasso = false;
+            drawing = false;
+            
+            // Start auto-save if edited
+            if (edited && autoSaveTimer && !autoSaveTimer->isActive()) {
+                autoSaveTimer->start();
+            }
+            
+            event->accept();
+            return; // Don't continue to regular release handling
+        }
+#endif
         
         if (isTipRelease && drawing && straightLineMode && !isErasing) {
             // Draw the final line on release with the current pressure
@@ -1584,6 +1743,13 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
                     selectionAreaCleared = false;
                     selectionMaskPath = QPainterPath();
                     selectionBufferRect = QRectF();
+#ifdef Q_OS_WIN
+                    // Auto-disable lasso mode if this was a Windows stylus hover lasso
+                    if (windowsLassoNeedsAutoDisable) {
+                        ropeToolMode = false;
+                        windowsLassoNeedsAutoDisable = false;
+                    }
+#endif
                 }
             }
         }
@@ -3422,6 +3588,14 @@ void InkCanvas::deleteRopeSelection() {
         selectionMaskPath = QPainterPath();
         selectionBufferRect = QRectF();
         
+#ifdef Q_OS_WIN
+        // Auto-disable lasso mode if this was a Windows stylus hover lasso
+        if (windowsLassoNeedsAutoDisable) {
+            ropeToolMode = false;
+            windowsLassoNeedsAutoDisable = false;
+        }
+#endif
+        
         // Mark as edited since we deleted content
         if (!edited) {
             edited = true;
@@ -3463,6 +3637,14 @@ void InkCanvas::cancelRopeSelection() {
         selectionAreaCleared = false;
         selectionMaskPath = QPainterPath();
         selectionBufferRect = QRectF();
+        
+#ifdef Q_OS_WIN
+        // Auto-disable lasso mode if this was a Windows stylus hover lasso
+        if (windowsLassoNeedsAutoDisable) {
+            ropeToolMode = false;
+            windowsLassoNeedsAutoDisable = false;
+        }
+#endif
         
         // Update the restored area
         update(updateRect.adjusted(-5, -5, 5, 5));
