@@ -11,6 +11,8 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QColor>
+#include <QFont>
+#include <QFontDatabase>
 #include "MainWindow.h"
 #include "LauncherWindow.h"
 #include "SpnPackageManager.h"
@@ -41,6 +43,27 @@ static bool isWindows11() {
     return QSysInfo::kernelVersion().split('.')[2].toInt() >= 22000;
 #else
     return false;
+#endif
+}
+
+// Helper function to set nice Windows fonts (Segoe UI + Dengxian for Chinese)
+static void applyWindowsFonts(QApplication &app) {
+#ifdef Q_OS_WIN
+    // Use Segoe UI as the primary font (Windows Metro/Fluent UI font)
+    // with Dengxian (等线) as fallback for Chinese characters
+    QFont font("Segoe UI", 9);
+    font.setStyleHint(QFont::SansSerif);
+    font.setHintingPreference(QFont::PreferFullHinting);
+    
+    // Set font families with fallbacks for Chinese text
+    // Priority: Segoe UI -> Dengxian (等线) -> Microsoft YaHei (微软雅黑) -> system default
+    QStringList fontFamilies;
+    fontFamilies << "Segoe UI" << "Dengxian" << "Microsoft YaHei" << "SimHei";
+    font.setFamilies(fontFamilies);
+    
+    app.setFont(font);
+#else
+    Q_UNUSED(app);
 #endif
 }
 
@@ -167,6 +190,9 @@ int main(int argc, char *argv[]) {
 
     // Apply system-appropriate palette (dark/light) on Windows
     applySystemPalette(app);
+    
+    // Apply nice Windows fonts (Segoe UI + Dengxian for Chinese)
+    applyWindowsFonts(app);
 
     // ✅ DISK CLEANUP: Clean up orphaned temp directories from previous sessions on startup
     // Since .spn files are extracted to temp folders with hash-based names, orphaned folders

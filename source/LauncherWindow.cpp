@@ -40,7 +40,7 @@
 #include <QHash>
 
 LauncherWindow::LauncherWindow(QWidget *parent)
-    : QMainWindow(parent), notebookManager(nullptr), lastCalculatedWidth(0)
+    : QMainWindow(parent), notebookManager(nullptr), lastCalculatedWidth(0), lastColumnCount(0)
 {
     setupUi();
     applyModernStyling();
@@ -361,11 +361,12 @@ void LauncherWindow::setupStarredTab()
 
 void LauncherWindow::populateRecentGrid()
 {
-    // Clear existing widgets more thoroughly
+    if (!recentGridLayout || !recentScrollArea || !recentScrollArea->viewport() || !notebookManager) return;
+    
+    // Clear existing widgets
     QLayoutItem *child;
     while ((child = recentGridLayout->takeAt(0)) != nullptr) {
         if (child->widget()) {
-            // ✅ No need to disconnect - deleteLater() handles signal cleanup automatically
             child->widget()->deleteLater();
         }
         delete child;
@@ -374,17 +375,22 @@ void LauncherWindow::populateRecentGrid()
     QStringList recentPaths = notebookManager->getRecentNotebooks();
     
     // Calculate adaptive columns based on available width
-    int availableWidth = recentScrollArea->viewport()->width();
+    int availableWidth = recentScrollArea->viewport()->width() - 40;
+    int spacing = recentGridLayout->spacing();
+    int minButtonWithSpacing = MIN_BUTTON_WIDTH + spacing;
     
-    // Only recalculate if width changed significantly or first time
-    if (abs(availableWidth - lastCalculatedWidth) > 50 || lastCalculatedWidth == 0) {
-        lastCalculatedWidth = availableWidth;
-    } else {
-        availableWidth = lastCalculatedWidth; // Use cached width
-    }
+    // Calculate column count
+    int adaptiveColumns = qMax(2, qMin(4, availableWidth / minButtonWithSpacing));
+    lastColumnCount = adaptiveColumns;
+    lastCalculatedWidth = availableWidth;
     
-    int buttonWidth = BUTTON_SIZE + 20; // Button size plus some spacing
-    int adaptiveColumns = qMax(2, qMin(6, availableWidth / buttonWidth)); // Between 2-6 columns
+    // Calculate flexible button width to fill available space evenly
+    int totalSpacing = (adaptiveColumns - 1) * spacing;
+    int flexibleWidth = (availableWidth - totalSpacing) / adaptiveColumns;
+    flexibleWidth = qMax(MIN_BUTTON_WIDTH, flexibleWidth);
+    
+    // Scale height proportionally to width
+    int flexibleHeight = BUTTON_HEIGHT + (flexibleWidth - MIN_BUTTON_WIDTH) / 3;
     
     int row = 0, col = 0;
     
@@ -392,6 +398,7 @@ void LauncherWindow::populateRecentGrid()
         if (path.isEmpty()) continue;
         
         QPushButton *button = createNotebookButton(path, false);
+        button->setFixedSize(flexibleWidth, flexibleHeight);
         recentGridLayout->addWidget(button, row, col);
         
         col++;
@@ -404,11 +411,12 @@ void LauncherWindow::populateRecentGrid()
 
 void LauncherWindow::populateStarredGrid()
 {
-    // Clear existing widgets more thoroughly
+    if (!starredGridLayout || !starredScrollArea || !starredScrollArea->viewport() || !notebookManager) return;
+    
+    // Clear existing widgets
     QLayoutItem *child;
     while ((child = starredGridLayout->takeAt(0)) != nullptr) {
         if (child->widget()) {
-            // ✅ No need to disconnect - deleteLater() handles signal cleanup automatically
             child->widget()->deleteLater();
         }
         delete child;
@@ -416,16 +424,18 @@ void LauncherWindow::populateStarredGrid()
     
     QStringList starredPaths = notebookManager->getStarredNotebooks();
     
-    // Calculate adaptive columns based on available width
-    int availableWidth = starredScrollArea->viewport()->width();
+    // Use the same calculated values as recent grid for consistency
+    int availableWidth = lastCalculatedWidth > 0 ? lastCalculatedWidth : (starredScrollArea->viewport()->width() - 40);
+    int spacing = starredGridLayout->spacing();
+    int adaptiveColumns = lastColumnCount > 0 ? lastColumnCount : 3;
     
-    // Use the same cached width as recent grid for consistency
-    if (lastCalculatedWidth > 0) {
-        availableWidth = lastCalculatedWidth;
-    }
+    // Calculate flexible button width
+    int totalSpacing = (adaptiveColumns - 1) * spacing;
+    int flexibleWidth = (availableWidth - totalSpacing) / adaptiveColumns;
+    flexibleWidth = qMax(MIN_BUTTON_WIDTH, flexibleWidth);
     
-    int buttonWidth = BUTTON_SIZE + 20; // Button size plus some spacing
-    int adaptiveColumns = qMax(2, qMin(6, availableWidth / buttonWidth)); // Between 2-6 columns
+    // Scale height proportionally
+    int flexibleHeight = BUTTON_HEIGHT + (flexibleWidth - MIN_BUTTON_WIDTH) / 3;
     
     int row = 0, col = 0;
     
@@ -433,6 +443,7 @@ void LauncherWindow::populateStarredGrid()
         if (path.isEmpty()) continue;
         
         QPushButton *button = createNotebookButton(path, true);
+        button->setFixedSize(flexibleWidth, flexibleHeight);
         starredGridLayout->addWidget(button, row, col);
         
         col++;
@@ -446,7 +457,7 @@ void LauncherWindow::populateStarredGrid()
 QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isStarred)
 {
     QPushButton *button = new QPushButton();
-    button->setFixedSize(BUTTON_SIZE, BUTTON_SIZE);
+    // Size will be set by populateRecentGrid/populateStarredGrid for flexibility
     button->setObjectName("notebookButton");
     button->setProperty("notebookPath", path);
     button->setProperty("isStarred", isStarred);
@@ -467,16 +478,17 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     buttonLayout->setContentsMargins(10, 10, 10, 10);
     buttonLayout->setSpacing(8);
     
-    // Cover image
+    // Cover image - use stretch factor for flexible sizing
     QLabel *coverLabel = new QLabel();
-    coverLabel->setFixedSize(BUTTON_SIZE - 20, COVER_HEIGHT);
+    coverLabel->setMinimumHeight(COVER_HEIGHT);
     coverLabel->setAlignment(Qt::AlignCenter);
+    coverLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
     // Apply theme-appropriate styling for cover
     bool isDarkModeActive = isDarkMode();
     QString coverBg = isDarkModeActive ? "#2b2b2b" : "white";
     QString coverBorder = isDarkModeActive ? "#555555" : "#ddd";
-    coverLabel->setStyleSheet(QString("border: 1px solid %1; border-radius: 0px; background: %2;").arg(coverBorder).arg(coverBg));
+    coverLabel->setStyleSheet(QString("border: 1px solid %1; border-radius: 4px; background: %2;").arg(coverBorder).arg(coverBg));
     
     // Set scaling mode to fill the entire area
     coverLabel->setScaledContents(true);
@@ -484,7 +496,7 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     QString coverPath = notebookManager->getCoverImagePathForNotebook(path);
     if (!coverPath.isEmpty()) {
         // Use cached pixmap if available to prevent memory leaks
-        QString cacheKey = QString("%1_%2x%3").arg(coverPath).arg(coverLabel->width()).arg(coverLabel->height());
+        QString cacheKey = QString("%1_cropped").arg(coverPath);
         
         QPixmap finalPixmap;
         if (pixmapCache.contains(cacheKey)) {
@@ -494,20 +506,15 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
             // Load and process new pixmap
             QPixmap coverPixmap(coverPath);
             if (!coverPixmap.isNull()) {
-                // Scale to fill the entire label area, cropping if necessary
-                QPixmap scaledPixmap = coverPixmap.scaled(coverLabel->size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+                // Crop blank margins from the thumbnail first
+                QPixmap croppedPixmap = cropBlankMargins(coverPixmap);
                 
-                // If the scaled pixmap is larger than the label, crop it to center
-                if (scaledPixmap.size() != coverLabel->size()) {
-                    int x = (scaledPixmap.width() - coverLabel->width()) / 2;
-                    int y = (scaledPixmap.height() - coverLabel->height()) / 2;
-                    scaledPixmap = scaledPixmap.copy(x, y, coverLabel->width(), coverLabel->height());
-                }
+                // Scale to a reasonable size for caching
+                finalPixmap = croppedPixmap.scaled(MAX_BUTTON_WIDTH, COVER_HEIGHT, 
+                    Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
                 
-                finalPixmap = scaledPixmap;
-                
-                // Cache the processed pixmap (but limit cache size to prevent unbounded growth)
-                if (pixmapCache.size() < 20) { // Limit cache to 20 items to reduce memory usage
+                // Cache the processed pixmap (limit cache size)
+                if (pixmapCache.size() < 30) {
                     pixmapCache.insert(cacheKey, finalPixmap);
                 }
             }
@@ -526,23 +533,96 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
         coverLabel->setStyleSheet(coverLabel->styleSheet() + QString(" color: %1;").arg(textColor));
     }
     
-    buttonLayout->addWidget(coverLabel);
+    buttonLayout->addWidget(coverLabel, 1); // Stretch factor 1
     
     // Title
-    QLabel *titleLabel = new QLabel(notebookManager->getNotebookDisplayName(path));
+    QString displayName = notebookManager->getNotebookDisplayName(path);
+    QLabel *titleLabel = new QLabel(displayName);
     titleLabel->setAlignment(Qt::AlignCenter);
-    titleLabel->setWordWrap(false); // Disable word wrap to keep single line
-    titleLabel->setMaximumHeight(20); // Reduce height to enforce single line
-    titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed); // Allow text to be clipped
+    titleLabel->setWordWrap(false);
+    titleLabel->setMaximumHeight(24);
+    titleLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    titleLabel->setStyleSheet("font-weight: bold; font-size: 12px;");
     
-    // Set elide mode to show ellipsis when text is too long
-    QFontMetrics fontMetrics(titleLabel->font());
-    QString elidedText = fontMetrics.elidedText(titleLabel->text(), Qt::ElideRight, BUTTON_SIZE - 20);
-    titleLabel->setText(elidedText);
-    titleLabel->setStyleSheet("font-weight: bold;"); // Let system handle color
+    // Store full name for later eliding when button size is known
+    titleLabel->setProperty("fullName", displayName);
     buttonLayout->addWidget(titleLabel);
     
     return button;
+}
+
+QPixmap LauncherWindow::cropBlankMargins(const QPixmap &pixmap) const
+{
+    if (pixmap.isNull()) return pixmap;
+    
+    QImage image = pixmap.toImage();
+    int width = image.width();
+    int height = image.height();
+    
+    if (width == 0 || height == 0) return pixmap;
+    
+    // Get the background color from corners (assuming blank areas are uniform)
+    QColor bgColor = image.pixelColor(0, 0);
+    
+    // Define tolerance for "blank" detection (colors close to background)
+    auto isBlankColor = [&bgColor](const QColor &c) {
+        int tolerance = 30;
+        return qAbs(c.red() - bgColor.red()) < tolerance &&
+               qAbs(c.green() - bgColor.green()) < tolerance &&
+               qAbs(c.blue() - bgColor.blue()) < tolerance;
+    };
+    
+    // Find left boundary (first non-blank column)
+    int left = 0;
+    for (int x = 0; x < width; ++x) {
+        bool columnIsBlank = true;
+        for (int y = 0; y < height; y += 5) { // Sample every 5 pixels for speed
+            if (!isBlankColor(image.pixelColor(x, y))) {
+                columnIsBlank = false;
+                break;
+            }
+        }
+        if (!columnIsBlank) {
+            left = x;
+            break;
+        }
+    }
+    
+    // Find right boundary (last non-blank column)
+    int right = width - 1;
+    for (int x = width - 1; x >= 0; --x) {
+        bool columnIsBlank = true;
+        for (int y = 0; y < height; y += 5) {
+            if (!isBlankColor(image.pixelColor(x, y))) {
+                columnIsBlank = false;
+                break;
+            }
+        }
+        if (!columnIsBlank) {
+            right = x;
+            break;
+        }
+    }
+    
+    // Add small padding
+    int padding = 5;
+    left = qMax(0, left - padding);
+    right = qMin(width - 1, right + padding);
+    
+    // Only crop if we found significant blank margins (at least 10% on each side)
+    int cropWidth = right - left + 1;
+    if (cropWidth < width * 0.5) {
+        // Too much cropping, might remove important content - return original
+        return pixmap;
+    }
+    
+    if (left > width * 0.1 || (width - right) > width * 0.1) {
+        // Significant margins found, crop them
+        QImage croppedImage = image.copy(left, 0, cropWidth, height);
+        return QPixmap::fromImage(croppedImage);
+    }
+    
+    return pixmap;
 }
 
 void LauncherWindow::onNewNotebookClicked()
@@ -565,11 +645,14 @@ void LauncherWindow::onNewNotebookClicked()
         targetMainWindow = new MainWindow();
         
         // Connect to handle when MainWindow closes
-        connect(targetMainWindow, &MainWindow::destroyed, this, [this]() {
+        // Use QPointer to safely check if launcher still exists
+        QPointer<LauncherWindow> launcherPtr = this;
+        connect(targetMainWindow, &MainWindow::destroyed, this, [launcherPtr]() {
+            if (!launcherPtr) return; // Launcher was destroyed
             // Only show launcher if no other MainWindows exist
-            if (!findExistingMainWindow()) {
-                show();
-                refreshRecentNotebooks();
+            if (!launcherPtr->findExistingMainWindow()) {
+                launcherPtr->show();
+                launcherPtr->refreshRecentNotebooks();
             }
         });
     }
@@ -607,10 +690,13 @@ void LauncherWindow::onOpenPdfClicked()
             targetMainWindow = new MainWindow();
             
             // Connect to handle when MainWindow closes
-            connect(targetMainWindow, &MainWindow::destroyed, this, [this]() {
-                if (!findExistingMainWindow()) {
-                    show();
-                    refreshRecentNotebooks();
+            // Use QPointer to safely check if launcher still exists
+            QPointer<LauncherWindow> launcherPtr = this;
+            connect(targetMainWindow, &MainWindow::destroyed, this, [launcherPtr]() {
+                if (!launcherPtr) return; // Launcher was destroyed
+                if (!launcherPtr->findExistingMainWindow()) {
+                    launcherPtr->show();
+                    launcherPtr->refreshRecentNotebooks();
                 }
             });
         }
@@ -623,8 +709,12 @@ void LauncherWindow::onOpenPdfClicked()
         
         // Use the same approach as file explorer integration - call openPdfFile directly
         // This will show the proper dialog and handle PDF linking correctly
-        QTimer::singleShot(100, [targetMainWindow, pdfPath]() {
-            targetMainWindow->openPdfFile(pdfPath);
+        // Use QPointer to safely check if MainWindow still exists when timer fires
+        QPointer<MainWindow> mainWindowPtr = targetMainWindow;
+        QTimer::singleShot(100, [mainWindowPtr, pdfPath]() {
+            if (mainWindowPtr) {
+                mainWindowPtr->openPdfFile(pdfPath);
+            }
         });
     }
 }
@@ -720,12 +810,15 @@ void LauncherWindow::openNotebook(const QString &path)
         targetMainWindow = new MainWindow();
         
         // Connect to handle when MainWindow closes
-        connect(targetMainWindow, &MainWindow::destroyed, this, [this]() {
+        // Use QPointer to safely check if launcher still exists
+        QPointer<LauncherWindow> launcherPtr = this;
+        connect(targetMainWindow, &MainWindow::destroyed, this, [launcherPtr]() {
+            if (!launcherPtr) return; // Launcher was destroyed
             // Only show launcher if no other MainWindows exist
-            if (!findExistingMainWindow()) {
-                show();
-                refreshRecentNotebooks();
-                refreshStarredNotebooks();
+            if (!launcherPtr->findExistingMainWindow()) {
+                launcherPtr->show();
+                launcherPtr->refreshRecentNotebooks();
+                launcherPtr->refreshStarredNotebooks();
             }
         });
     }
@@ -995,13 +1088,27 @@ void LauncherWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
     
-    // Only recalculate grids if the size actually changed significantly
-    if (event->oldSize().isValid() && 
-        abs(event->size().width() - event->oldSize().width()) > 50) {
-        // Recalculate grids when window is resized significantly
-        // Use direct calls instead of timer to avoid timer accumulation
+    if (!event->oldSize().isValid()) return;
+    if (!recentScrollArea || !recentScrollArea->viewport() || !recentGridLayout) return;
+    
+    int widthDiff = abs(event->size().width() - event->oldSize().width());
+    if (widthDiff < 5) return; // Ignore tiny changes
+    
+    // Calculate what column count we would need
+    int availableWidth = recentScrollArea->viewport()->width() - 40;
+    int spacing = recentGridLayout->spacing();
+    int minButtonWithSpacing = MIN_BUTTON_WIDTH + spacing;
+    int newColumnCount = qMax(2, qMin(4, availableWidth / minButtonWithSpacing));
+    
+    if (lastColumnCount > 0 && newColumnCount != lastColumnCount) {
+        // Column count changed - need to repopulate
+        lastColumnCount = newColumnCount;
+        lastCalculatedWidth = availableWidth;
         populateRecentGrid();
         populateStarredGrid();
+    } else {
+        // Same column count - just resize existing buttons
+        resizeGridButtons();
     }
 }
 
@@ -1030,8 +1137,9 @@ void LauncherWindow::hideEvent(QHideEvent *event)
     // Don't clear pixmap cache - keep thumbnails cached to avoid reload/memory churn
     // The cache is size-limited (50 items) so it won't grow unbounded
     
-    // Reset width cache to force recalculation next time
+    // Reset layout cache to force recalculation next time
     lastCalculatedWidth = 0;
+    lastColumnCount = 0;
 }
 
 #ifdef Q_OS_WIN
@@ -1048,9 +1156,13 @@ bool LauncherWindow::nativeEvent(const QByteArray &eventType, void *message, qin
                 if (lparam && wcscmp(lparam, L"ImmersiveColorSet") == 0) {
                     // Windows theme changed - update Qt palette and our UI
                     // Use a small delay to ensure registry has been updated
-                    QTimer::singleShot(100, this, [this]() {
+                    // Use QPointer to safely check if launcher still exists
+                    QPointer<LauncherWindow> launcherPtr = this;
+                    QTimer::singleShot(100, this, [launcherPtr]() {
                         MainWindow::updateApplicationPalette(); // Update Qt's global palette
-                        applyModernStyling(); // Update our custom styling
+                        if (launcherPtr) {
+                            launcherPtr->applyModernStyling(); // Update our custom styling
+                        }
                     });
                 }
             }
@@ -1097,6 +1209,9 @@ QIcon LauncherWindow::loadThemedIcon(const QString& baseName)
 
 void LauncherWindow::onTabChanged(int index)
 {
+    // Use QPointer to safely check if launcher still exists when timer fires
+    QPointer<LauncherWindow> launcherPtr = this;
+    
     // Handle direct actions for certain tabs
     switch (index) {
         case 0: // Return tab
@@ -1112,8 +1227,10 @@ void LauncherWindow::onTabChanged(int index)
                         tr("There is no previous document to return to."));
                 }
                 // Reset to Recent tab to allow clicking Return again
-                QTimer::singleShot(50, this, [this]() {
-                    tabList->setCurrentRow(4);
+                QTimer::singleShot(50, this, [launcherPtr]() {
+                    if (launcherPtr && launcherPtr->tabList) {
+                        launcherPtr->tabList->setCurrentRow(4);
+                    }
                 });
             }
             break;
@@ -1121,24 +1238,30 @@ void LauncherWindow::onTabChanged(int index)
         case 1: // New tab - direct action
             onNewNotebookClicked();
             // Reset to Recent tab to allow clicking New again
-            QTimer::singleShot(50, this, [this]() {
-                tabList->setCurrentRow(4);
+            QTimer::singleShot(50, this, [launcherPtr]() {
+                if (launcherPtr && launcherPtr->tabList) {
+                    launcherPtr->tabList->setCurrentRow(4);
+                }
             });
             break;
             
         case 2: // Open PDF tab - direct action
             onOpenPdfClicked();
             // Reset to Recent tab to allow clicking Open PDF again
-            QTimer::singleShot(50, this, [this]() {
-                tabList->setCurrentRow(4);
+            QTimer::singleShot(50, this, [launcherPtr]() {
+                if (launcherPtr && launcherPtr->tabList) {
+                    launcherPtr->tabList->setCurrentRow(4);
+                }
             });
             break;
             
         case 3: // Open Notebook tab - direct action
             onOpenNotebookClicked();
             // Reset to Recent tab to allow clicking Open Notebook again
-            QTimer::singleShot(50, this, [this]() {
-                tabList->setCurrentRow(4);
+            QTimer::singleShot(50, this, [launcherPtr]() {
+                if (launcherPtr && launcherPtr->tabList) {
+                    launcherPtr->tabList->setCurrentRow(4);
+                }
             });
             break;
             
@@ -1149,6 +1272,42 @@ void LauncherWindow::onTabChanged(int index)
             contentStack->setCurrentIndex(index);
             break;
     }
+}
+
+void LauncherWindow::resizeGridButtons()
+{
+    if (!recentScrollArea || !recentScrollArea->viewport() || !recentGridLayout || !starredGridLayout) return;
+    
+    // Resize existing buttons without repopulating (prevents flickering)
+    int availableWidth = recentScrollArea->viewport()->width() - 40;
+    int spacing = recentGridLayout->spacing();
+    int adaptiveColumns = lastColumnCount > 0 ? lastColumnCount : 3;
+    
+    // Calculate flexible button width
+    int totalSpacing = (adaptiveColumns - 1) * spacing;
+    int flexibleWidth = (availableWidth - totalSpacing) / adaptiveColumns;
+    flexibleWidth = qMax(MIN_BUTTON_WIDTH, flexibleWidth);
+    
+    // Scale height proportionally
+    int flexibleHeight = BUTTON_HEIGHT + (flexibleWidth - MIN_BUTTON_WIDTH) / 3;
+    
+    // Resize all buttons in recent grid
+    for (int i = 0; i < recentGridLayout->count(); ++i) {
+        QLayoutItem *item = recentGridLayout->itemAt(i);
+        if (item && item->widget()) {
+            item->widget()->setFixedSize(flexibleWidth, flexibleHeight);
+        }
+    }
+    
+    // Resize all buttons in starred grid
+    for (int i = 0; i < starredGridLayout->count(); ++i) {
+        QLayoutItem *item = starredGridLayout->itemAt(i);
+        if (item && item->widget()) {
+            item->widget()->setFixedSize(flexibleWidth, flexibleHeight);
+        }
+    }
+    
+    lastCalculatedWidth = availableWidth;
 }
 
 void LauncherWindow::clearRecentGrid()

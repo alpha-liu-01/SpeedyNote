@@ -529,6 +529,10 @@ private:
     QPushButton *exportPdfButton; // Button to export annotated PDF
     QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
     QPushButton *toggleTabBarButton;
+    
+    // Overflow menu for infrequently used actions
+    QPushButton *overflowMenuButton;
+    QMenu *overflowMenu;
 
     QMap<InkCanvas*, int> pageMap;
     
@@ -558,16 +562,18 @@ private:
     // PDF Outline Sidebar
     QWidget *outlineSidebar;       // Container for PDF outline
     QTreeWidget *outlineTree;      // Tree widget for PDF bookmarks/outline
-    QPushButton *toggleOutlineButton; // Button to toggle outline sidebar
+    QPushButton *toggleOutlineButton; // Floating tab button to toggle outline sidebar
     bool outlineSidebarVisible = false;
     
     // Bookmarks Sidebar
     QWidget *bookmarksSidebar;     // Container for bookmarks
     QTreeWidget *bookmarksTree;    // Tree widget for bookmarks
-    QPushButton *toggleBookmarksButton; // Button to toggle bookmarks sidebar
+    QPushButton *toggleBookmarksButton; // Floating tab button to toggle bookmarks sidebar
     QPushButton *toggleBookmarkButton; // Button to add/remove current page bookmark
     QPushButton *touchGesturesButton; // Touch gestures toggle button
     bool bookmarksSidebarVisible = false;
+    
+    void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
     QMap<int, QString> bookmarks;  // Map of page number to bookmark title
     QPushButton *jumpToPageButton; // Button to jump to a specific page
     
@@ -575,6 +581,12 @@ private:
     MarkdownNotesSidebar *markdownNotesSidebar;  // Sidebar for markdown notes
     QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
     bool markdownNotesSidebarVisible = false;
+
+    // Dial Mode Toolbar (vertical, right side)
+    QWidget *dialToolbar = nullptr;           // Foldable vertical toolbar for dial mode buttons
+    QPushButton *dialToolbarToggle = nullptr; // Floating tab button to fold/unfold the dial toolbar
+    bool dialToolbarExpanded = true;          // Track expanded/collapsed state
+    void positionDialToolbarTab();            // Position the floating tab at the edge of the toolbar
 
     QWidget *dialContainer = nullptr;  // ✅ Floating dial container
     QDial *pageDial = nullptr;  // ✅ The dial itself

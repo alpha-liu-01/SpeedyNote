@@ -301,15 +301,6 @@ void ControlPanelDialog::createToolbarTab(){
     benchmarkNote->setStyleSheet("color: gray; font-size: 10px;");
     toolbarLayout->addWidget(benchmarkNote);
 
-    // ✅ Checkbox to show/hide zoom buttons
-    QCheckBox *zoomButtonsVisibilityCheckbox = new QCheckBox(tr("Show Zoom Buttons"), toolbarTab);
-    zoomButtonsVisibilityCheckbox->setChecked(mainWindowRef->areZoomButtonsVisible());
-    toolbarLayout->addWidget(zoomButtonsVisibilityCheckbox);
-    QLabel *zoomButtonsNote = new QLabel(tr("This will show/hide the 0.5x, 1x, and 2x zoom buttons on the toolbar"));
-    zoomButtonsNote->setWordWrap(true);
-    zoomButtonsNote->setStyleSheet("color: gray; font-size: 10px;");
-    toolbarLayout->addWidget(zoomButtonsNote);
-
 #ifdef Q_OS_LINUX
     // Palm rejection settings (Linux only - Windows has built-in palm rejection)
     toolbarLayout->addSpacing(15);
@@ -439,7 +430,6 @@ void ControlPanelDialog::createToolbarTab(){
 
     // Connect the checkbox
     connect(benchmarkVisibilityCheckbox, &QCheckBox::toggled, mainWindowRef, &MainWindow::setBenchmarkControlsVisible);
-    connect(zoomButtonsVisibilityCheckbox, &QCheckBox::toggled, mainWindowRef, &MainWindow::setZoomButtonsVisible);
 }
 
 
@@ -890,7 +880,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(5);
     
     // Version
-    QLabel *versionLabel = new QLabel(tr("Version 0.11.3"), aboutTab);
+    QLabel *versionLabel = new QLabel(tr("Version 0.12.0"), aboutTab);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 14px; color: #7f8c8d;");
     layout->addWidget(versionLabel);
