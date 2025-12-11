@@ -8491,29 +8491,9 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     bool isVisible = markdownNotesSidebar->isVisible();
     
-    // Hide other sidebars if showing markdown notes
-    if (!isVisible) {
-        if (outlineSidebar && outlineSidebar->isVisible()) {
-            outlineSidebar->setVisible(false);
-            outlineSidebarVisible = false;
-            if (toggleOutlineButton) {
-                toggleOutlineButton->setProperty("selected", false);
-                updateButtonIcon(toggleOutlineButton, "outline");
-                toggleOutlineButton->style()->unpolish(toggleOutlineButton);
-                toggleOutlineButton->style()->polish(toggleOutlineButton);
-            }
-        }
-        if (bookmarksSidebar && bookmarksSidebar->isVisible()) {
-            bookmarksSidebar->setVisible(false);
-            bookmarksSidebarVisible = false;
-            if (toggleBookmarksButton) {
-                toggleBookmarksButton->setProperty("selected", false);
-                updateButtonIcon(toggleBookmarksButton, "bookmark");
-                toggleBookmarksButton->style()->unpolish(toggleBookmarksButton);
-                toggleBookmarksButton->style()->polish(toggleBookmarksButton);
-            }
-        }
-    }
+    // Note: Markdown notes sidebar (right side) is independent of 
+    // outline/bookmarks sidebars (left side), so we don't hide them here.
+    // The left sidebars are mutually exclusive with each other, but not with markdown notes.
     
     markdownNotesSidebar->setVisible(!isVisible);
     markdownNotesSidebarVisible = !isVisible;
