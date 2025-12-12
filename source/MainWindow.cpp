@@ -9032,6 +9032,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         concurrentSaveFuture.waitForFinished();
     }
     
+    // Temp folder path for comparison
+    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
+    
     // Auto-save all tabs before closing the program
     if (canvasStack) {
         for (int i = 0; i < canvasStack->count(); ++i) {
@@ -9063,6 +9066,22 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 // ✅ OPTIMIZATION: Flush any pending deferred .spn package sync
                 // This ensures the .spn package is updated before closing
                 canvas->flushPendingSpnSync();
+                
+                // ✅ FIX: Update thumbnail for each tab before closing
+                // This was previously only done in closeTab, but that code path
+                // is never reached for the last remaining tab (or when quitting directly)
+                QString folderPath = canvas->getSaveFolder();
+                if (!folderPath.isEmpty() && folderPath != tempDir && recentNotebooksManager) {
+                    // Force canvas to update before thumbnail generation
+                    canvas->update();
+                    canvas->repaint();
+                    QApplication::processEvents();
+                    
+                    // Generate and save thumbnail
+                    recentNotebooksManager->generateAndSaveCoverPreview(folderPath, canvas);
+                    // Update recent list (moves to top)
+                    recentNotebooksManager->addRecentNotebook(folderPath, canvas);
+                }
             }
         }
         
