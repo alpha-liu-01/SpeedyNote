@@ -320,6 +320,8 @@ add_executable(${PROJECT_NAME}
 	  source/PdfRelinkDialog.cpp
     	  source/SpnPackageManager.cpp
     	  source/LauncherWindow.cpp
+        source/PictureSourceDialog.cpp
+        source/ExistingPictureDialog.cpp
         ${QRCC_FILES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
         ${QMARKDOWNTEXTEDIT_UI_HEADERS}

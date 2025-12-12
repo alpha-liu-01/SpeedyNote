@@ -4,6 +4,8 @@
 #include "MarkdownWindow.h" // Include the full definition
 #include "PictureWindowManager.h"
 #include "PictureWindow.h" // Include the full definition
+#include "PictureSourceDialog.h"
+#include "ExistingPictureDialog.h"
 #include <QMouseEvent>
 #include <QScreen>
 #include <QGuiApplication>
@@ -1899,82 +1901,72 @@ void InkCanvas::mousePressEvent(QMouseEvent *event) {
     
     // Handle picture selection when enabled
     if (pictureSelectionMode && event->button() == Qt::LeftButton) {
-        // qDebug() << "InkCanvas::mousePressEvent() - Picture selection mode active!";
-        //qDebug() << "  Click position:" << event->pos();
-        
         pictureSelecting = true;
         pictureSelectionStart = event->pos();
         
-        // Show file dialog to select image
-        //qDebug() << "  Opening file dialog...";
-        QString imagePath = QFileDialog::getOpenFileName(this, tr("Select Image"), "", 
-            tr("Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp)"));
-        
-        //qDebug() << "  Selected image path:" << imagePath;
-        
-        if (!imagePath.isEmpty()) {
-            // Copy image to notebook and create picture window
-            MainWindow *mainWindow = qobject_cast<MainWindow*>(parent());
-            if (!mainWindow) {
-                // Try to find MainWindow through the widget hierarchy
-                QWidget *current = this;
-                while (current && !mainWindow) {
-                    current = current->parentWidget();
-                    mainWindow = qobject_cast<MainWindow*>(current);
-                }
+        // ✅ NEW: Show choice dialog instead of directly opening file dialog
+        PictureSourceDialog sourceDialog(this);
+        if (sourceDialog.exec() != QDialog::Accepted) {
+            // User cancelled
+            setPictureSelectionMode(false);
+            MainWindow *mainWindow = findMainWindow();
+            if (mainWindow) {
+                mainWindow->updatePictureButtonState();
             }
-            //qDebug() << "  MainWindow found:" << (mainWindow != nullptr);
-            //qDebug() << "  PictureManager found:" << (pictureManager != nullptr);
+            event->accept();
+            return;
+        }
+        
+        QString imagePath;
+        int currentPage = getLastActivePage();
+        
+        if (sourceDialog.getResult() == PictureSourceDialog::LoadFromDisk) {
+            // Traditional file dialog
+            imagePath = QFileDialog::getOpenFileName(this, tr("Select Image"), "", 
+                tr("Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.tiff *.webp)"));
             
-            if (pictureManager) {
-                // Use InkCanvas's own method to get current page
-                int currentPage = getLastActivePage();
-                //qDebug() << "  Current page:" << currentPage;
-                
-                QString copiedImagePath = pictureManager->copyImageToNotebook(imagePath, currentPage);
-                //qDebug() << "  Copied image path:" << copiedImagePath;
-                
-                if (!copiedImagePath.isEmpty()) {
-                    // Create picture window at clicked position
-                    QRect initialRect(pictureSelectionStart, QSize(200, 150));
-                    //qDebug() << "  Creating picture window with rect:" << initialRect;
-                    
-                    PictureWindow* window = pictureManager->createPictureWindow(initialRect, copiedImagePath);
-                    //qDebug() << "  Picture window created:" << (window != nullptr);
-                    
-                    
-                    // ✅ COMBINED MODE FIX: Use combined-aware save to handle Y-coordinate adjustment
-                    saveCombinedWindowsForPage(currentPage);
-                    //qDebug() << "  Pictures saved for page";
-                    
-                    // Mark canvas as edited
-                    setEdited(true);
-                    
-                    //qDebug() << "  Canvas marked as edited";
-                } else {
-                    //qDebug() << "  ERROR: Failed to copy image to notebook!";
-                }
-            } else {
-                //qDebug() << "  ERROR: PictureManager is null!";
+            if (!imagePath.isEmpty() && pictureManager) {
+                // Copy image to notebook (this increments reference count)
+                imagePath = pictureManager->copyImageToNotebook(imagePath, currentPage);
             }
-        } else {
-            //qDebug() << "  User cancelled file dialog or no image selected";
+        } else if (sourceDialog.getResult() == PictureSourceDialog::UseExisting) {
+            // Show existing picture picker
+            ExistingPictureDialog existingDialog(this, currentPage, this);
+            if (existingDialog.exec() == QDialog::Accepted) {
+                QString selectedPath = existingDialog.getSelectedImagePath();
+                
+                if (!selectedPath.isEmpty()) {
+                    // ✅ For existing pictures, just increment reference count and reuse the path
+                    // DON'T call copyImageToNotebook - it would create a duplicate file!
+                    QString imageHash = extractImageHashFromPath(selectedPath);
+                    if (!imageHash.isEmpty()) {
+                        incrementImageReference(imageHash);
+                        imagePath = selectedPath; // Reuse the existing image file
+                    }
+                }
+            }
+        }
+        
+        // Create picture window if we have an image
+        if (!imagePath.isEmpty() && pictureManager) {
+            // Use widget position - PictureWindowManager::createPictureWindow converts to canvas coords
+            QRect initialRect(pictureSelectionStart, QSize(200, 150));
+            
+            PictureWindow* window = pictureManager->createPictureWindow(initialRect, imagePath);
+            Q_UNUSED(window);
+            
+            // Save with combined-aware handling
+            saveCombinedWindowsForPage(currentPage);
+            
+            // Mark canvas as edited
+            setEdited(true);
         }
         
         // Exit picture selection mode after placing a picture
         setPictureSelectionMode(false);
-        // qDebug() << "  Picture selection mode disabled";
         
         // Update the main window button state
-        MainWindow *mainWindow = qobject_cast<MainWindow*>(parent());
-        if (!mainWindow) {
-            // Try to find MainWindow through the widget hierarchy
-            QWidget *current = this;
-            while (current && !mainWindow) {
-                current = current->parentWidget();
-                mainWindow = qobject_cast<MainWindow*>(current);
-            }
-        }
+        MainWindow *mainWindow = findMainWindow();
         if (mainWindow) {
             mainWindow->updatePictureButtonState();
         }
@@ -6229,6 +6221,18 @@ void InkCanvas::loadNotebookMetadata() {
         }
     }
     
+    // Load image references (for picture window file management)
+    imageReferences.clear();
+    if (obj.contains("image_references")) {
+        QJsonObject imgRefObj = obj["image_references"].toObject();
+        for (auto it = imgRefObj.begin(); it != imgRefObj.end(); ++it) {
+            imageReferences[it.key()] = it.value().toInt();
+        }
+    } else {
+        // No image_references field - this is an old notebook, rebuild from scratch
+        rebuildImageReferences();
+    }
+    
     // If we have a PDF path, try to load it (missing PDF will be handled later)
     if (!pdfPath.isEmpty()) {
         if (QFile::exists(pdfPath)) {
@@ -6282,6 +6286,15 @@ void InkCanvas::saveNotebookMetadata() {
         notesArray.append(note.toJson());
     }
     obj["markdown_notes"] = notesArray;
+    
+    // Save image references (for picture window file management)
+    QJsonObject imgRefObj;
+    for (auto it = imageReferences.begin(); it != imageReferences.end(); ++it) {
+        if (it.value() > 0) { // Only save non-zero references
+            imgRefObj[it.key()] = it.value();
+        }
+    }
+    obj["image_references"] = imgRefObj;
     
     QJsonDocument doc(obj);
     
@@ -6342,6 +6355,124 @@ QString InkCanvas::getPdfPath() const {
 
 QString InkCanvas::getNotebookId() const {
     return notebookId;
+}
+
+// ✅ Image reference counting for picture windows
+void InkCanvas::incrementImageReference(const QString &imageHash) {
+    if (imageHash.isEmpty()) return;
+    imageReferences[imageHash] = imageReferences.value(imageHash, 0) + 1;
+    saveNotebookMetadataDeferred();
+}
+
+bool InkCanvas::decrementImageReference(const QString &imageHash) {
+    if (imageHash.isEmpty()) return false;
+    
+    int currentCount = imageReferences.value(imageHash, 0);
+    if (currentCount <= 0) {
+        // No references to decrement - file should be deleted (orphaned)
+        imageReferences.remove(imageHash);
+        saveNotebookMetadataDeferred();
+        return true;
+    }
+    
+    currentCount--;
+    if (currentCount <= 0) {
+        // Last reference removed - file should be deleted
+        imageReferences.remove(imageHash);
+        saveNotebookMetadataDeferred();
+        return true;
+    } else {
+        // Still has references - file should NOT be deleted
+        imageReferences[imageHash] = currentCount;
+        saveNotebookMetadataDeferred();
+        return false;
+    }
+}
+
+int InkCanvas::getImageReferenceCount(const QString &imageHash) const {
+    return imageReferences.value(imageHash, 0);
+}
+
+void InkCanvas::rebuildImageReferences() {
+    // Rebuild reference counts by scanning all picture metadata files
+    // This is called when a notebook is opened that doesn't have image_references field
+    if (saveFolder.isEmpty() || notebookId.isEmpty()) return;
+    
+    imageReferences.clear();
+    
+    // Scan all picture metadata files
+    QDir dir(saveFolder);
+    QString pattern = QString(".%1_pictures_*.json").arg(notebookId);
+    QStringList filters;
+    filters << pattern;
+    
+    // Get all matching files (need to list hidden files)
+    QStringList metadataFiles;
+    QFileInfoList allFiles = dir.entryInfoList(QDir::Files | QDir::Hidden);
+    for (const QFileInfo &fileInfo : allFiles) {
+        QString fileName = fileInfo.fileName();
+        if (fileName.startsWith(QString(".%1_pictures_").arg(notebookId)) && fileName.endsWith(".json")) {
+            metadataFiles.append(fileInfo.absoluteFilePath());
+        }
+    }
+    
+    // Parse each file and count image references
+    for (const QString &filePath : metadataFiles) {
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        
+        QByteArray data = file.readAll();
+        file.close();
+        
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (!doc.isArray()) continue;
+        
+        QJsonArray windowsArray = doc.array();
+        for (const QJsonValue &value : windowsArray) {
+            if (!value.isObject()) continue;
+            
+            QJsonObject windowObj = value.toObject();
+            QString imagePath = windowObj["image_path"].toString();
+            
+            // Extract hash from filename (format: {notebookId}_img_p{page}_{hash}.{ext})
+            QString fileName = QFileInfo(imagePath).fileName();
+            // Extract the hash portion (8 characters before the extension)
+            int lastDot = fileName.lastIndexOf('.');
+            int lastUnderscore = fileName.lastIndexOf('_');
+            if (lastDot > 0 && lastUnderscore > 0 && lastUnderscore < lastDot) {
+                QString hash = fileName.mid(lastUnderscore + 1, lastDot - lastUnderscore - 1);
+                if (!hash.isEmpty()) {
+                    imageReferences[hash] = imageReferences.value(hash, 0) + 1;
+                }
+            }
+        }
+    }
+    
+    // qDebug() << "Rebuilt image references:" << imageReferences;
+}
+
+MainWindow* InkCanvas::findMainWindow() {
+    // Try to find MainWindow through the widget hierarchy
+    MainWindow *mainWindow = qobject_cast<MainWindow*>(parent());
+    if (!mainWindow) {
+        QWidget *current = this;
+        while (current && !mainWindow) {
+            current = current->parentWidget();
+            mainWindow = qobject_cast<MainWindow*>(current);
+        }
+    }
+    return mainWindow;
+}
+
+QString InkCanvas::extractImageHashFromPath(const QString &imagePath) const {
+    // Extract hash from filename (format: {notebookId}_img_p{page}_{hash}.{ext})
+    QString fileName = QFileInfo(imagePath).fileName();
+    int lastDot = fileName.lastIndexOf('.');
+    int lastUnderscore = fileName.lastIndexOf('_');
+    if (lastDot > 0 && lastUnderscore > 0 && lastUnderscore < lastDot) {
+        return fileName.mid(lastUnderscore + 1, lastDot - lastUnderscore - 1);
+    }
+    return QString();
 }
 
 bool InkCanvas::handleMissingPdf(QWidget *parent) {

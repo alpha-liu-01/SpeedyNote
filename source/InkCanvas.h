@@ -28,6 +28,8 @@
 #include "SpnPackageManager.h"
 #include "PdfRelinkDialog.h"
 
+class MainWindow; // Forward declaration
+
 class PictureWindowManager;
 class PictureWindow;
 
@@ -518,7 +520,16 @@ public:
     QStringList getBookmarks() const;
     void setBookmarks(const QStringList &bookmarkList);
     
+    // ✅ Image reference counting for picture windows
+    void incrementImageReference(const QString &imageHash);
+    bool decrementImageReference(const QString &imageHash); // Returns true if file should be deleted (count reached 0)
+    int getImageReferenceCount(const QString &imageHash) const;
+    
 private:
+    void rebuildImageReferences(); // Rebuild reference counts by scanning all picture metadata files
+    MainWindow* findMainWindow(); // Helper to find parent MainWindow
+    QString extractImageHashFromPath(const QString &imagePath) const; // Extract hash portion from image filename
+    
     // Combined canvas window management
     QList<PictureWindow*> loadPictureWindowsForPage(int pageNumber); // Load picture windows without affecting current
     
@@ -603,6 +614,9 @@ private:
     
     // Markdown notes storage
     QList<MarkdownNoteData> markdownNotes; // All saved markdown notes for this notebook
+    
+    // ✅ Image reference counting for picture windows (key = hash portion of filename, value = count)
+    QHash<QString, int> imageReferences;
     
     // ✅ MEMORY LEAK FIX: Cache only page sizes instead of full Page objects
     QMap<int, QSizeF> pdfPageSizeCache; // Maps page number -> page size
