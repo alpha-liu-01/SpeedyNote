@@ -493,7 +493,19 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     // Set scaling mode to fill the entire area
     coverLabel->setScaledContents(true);
     
-    QString coverPath = notebookManager->getCoverImagePathForNotebook(path);
+    QString coverPath;
+    
+    // ✅ Safety check for notebookManager
+    if (notebookManager) {
+        coverPath = notebookManager->getCoverImagePathForNotebook(path);
+        
+        // ✅ If cover doesn't exist, try to regenerate it (without canvas - uses saved files)
+        if (coverPath.isEmpty() && QFile::exists(path)) {
+            notebookManager->generateAndSaveCoverPreview(path, nullptr);
+            coverPath = notebookManager->getCoverImagePathForNotebook(path);
+        }
+    }
+    
     if (!coverPath.isEmpty()) {
         // Use cached pixmap if available to prevent memory leaks
         QString cacheKey = QString("%1_cropped").arg(coverPath);
@@ -535,8 +547,9 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     
     buttonLayout->addWidget(coverLabel, 1); // Stretch factor 1
     
-    // Title
-    QString displayName = notebookManager->getNotebookDisplayName(path);
+    // Title - use notebook manager if available, otherwise fall back to file name
+    QString displayName = notebookManager ? notebookManager->getNotebookDisplayName(path) 
+                                          : QFileInfo(path).fileName();
     QLabel *titleLabel = new QLabel(displayName);
     titleLabel->setAlignment(Qt::AlignCenter);
     titleLabel->setWordWrap(false);
@@ -796,6 +809,19 @@ void LauncherWindow::openNotebook(const QString &path)
     MainWindow *existingMainWindow = findExistingMainWindow();
     MainWindow *targetMainWindow = nullptr;
     
+    // Check if this .spn notebook is already open in an existing MainWindow
+    if (existingMainWindow && path.endsWith(".spn", Qt::CaseInsensitive)) {
+        // Check for duplicate before creating new tab
+        if (existingMainWindow->switchToExistingNotebook(path)) {
+            // Notebook is already open - just show the window
+            existingMainWindow->show();
+            existingMainWindow->raise();
+            existingMainWindow->activateWindow();
+            hide();
+            return;
+        }
+    }
+    
     if (existingMainWindow) {
         // Use existing MainWindow and add new tab
         targetMainWindow = existingMainWindow;
@@ -803,7 +829,7 @@ void LauncherWindow::openNotebook(const QString &path)
         targetMainWindow->raise();
         targetMainWindow->activateWindow();
         
-        // Always create a new tab for the new document
+        // Create a new tab for the new document
         targetMainWindow->addNewTab();
     } else {
         // Create new MainWindow
@@ -901,6 +927,8 @@ void LauncherWindow::onNotebookRightClicked(const QPoint &pos)
 
 void LauncherWindow::toggleStarredStatus(const QString &path)
 {
+    if (!notebookManager) return;
+    
     if (notebookManager->isStarred(path)) {
         notebookManager->removeStarred(path);
     } else {
@@ -914,6 +942,8 @@ void LauncherWindow::toggleStarredStatus(const QString &path)
 
 void LauncherWindow::removeFromRecent(const QString &path)
 {
+    if (!notebookManager) return;
+    
     // Remove from recent notebooks
     notebookManager->removeRecentNotebook(path);
     

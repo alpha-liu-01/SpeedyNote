@@ -1,5 +1,6 @@
 #include "RecentNotebooksManager.h"
 #include "InkCanvas.h"
+#include "SpnPackageManager.h"
 #include <QDir>
 #include <QStandardPaths>
 #include <QFileInfo>
@@ -170,6 +171,25 @@ QString RecentNotebooksManager::getCoverImageDir() const {
 }
 
 void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPath, InkCanvas* optionalCanvas) {
+    // ✅ Early validation - don't proceed with invalid paths
+    if (folderPath.isEmpty()) {
+        return;
+    }
+    
+    // For .spn files, verify the file exists and is readable
+    if (folderPath.endsWith(".spn", Qt::CaseInsensitive)) {
+        QFileInfo fileInfo(folderPath);
+        if (!fileInfo.exists() || !fileInfo.isReadable()) {
+            return;
+        }
+    } else {
+        // For folders, verify the folder exists
+        QFileInfo fileInfo(folderPath);
+        if (!fileInfo.exists() || !fileInfo.isDir()) {
+            return;
+        }
+    }
+    
     QString coverDir = getCoverImageDir();
     QString coverFileName = sanitizeFolderName(folderPath) + "_cover.png";
     QString coverFilePath = coverDir + coverFileName;
@@ -207,18 +227,23 @@ void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPa
             QRect grabRect(xOffset, yOffset, grabWidth, grabHeight);
             QPixmap capturedView = optionalCanvas->grab(grabRect);
             
-            // ✅ Check if the captured view is not just blank/white
+            // ✅ Check if the captured view is not just blank/white (improved sampling)
             QImage testImage = capturedView.toImage();
             bool isBlank = true;
             if (!testImage.isNull() && testImage.width() > 0 && testImage.height() > 0) {
-                // Sample a few pixels to see if it's not just white
-                for (int i = 0; i < qMin(100, testImage.width() * testImage.height()); i += 10) {
-                    int x = (i % testImage.width());
-                    int y = (i / testImage.width()) % testImage.height();
-                    QRgb pixel = testImage.pixel(x, y);
-                    if (pixel != qRgb(255, 255, 255)) { // Not white
-                        isBlank = false;
-                        break;
+                // Sample more pixels spread across the image
+                int sampleCount = 0;
+                int stepX = qMax(1, testImage.width() / 20);
+                int stepY = qMax(1, testImage.height() / 20);
+                for (int y = 0; y < testImage.height() && isBlank; y += stepY) {
+                    for (int x = 0; x < testImage.width() && isBlank; x += stepX) {
+                        QRgb pixel = testImage.pixel(x, y);
+                        // Check for non-white and non-transparent pixels
+                        if (qAlpha(pixel) > 0 && pixel != qRgb(255, 255, 255)) {
+                            isBlank = false;
+                        }
+                        sampleCount++;
+                        if (sampleCount > 400) break; // Limit samples for performance
                     }
                 }
             }
@@ -230,91 +255,91 @@ void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPa
         }
     }
     
-         // ✅ If canvas grab failed or was blank, try saved files
-     if (!canvasGrabSuccessful) {
-         // ✅ Fallback: check for saved pages using new JSON metadata system
+    // ✅ If canvas grab failed or was blank, try saved files
+    if (!canvasGrabSuccessful) {
         QString notebookIdStr;
         QString actualFolderPath = folderPath;
+        bool needsCleanup = false;
         
-        // ✅ Handle .spn packages - extract to get notebook ID
+        // ✅ Handle .spn packages using SpnPackageManager (correct format!)
         if (folderPath.endsWith(".spn", Qt::CaseInsensitive)) {
-            // For .spn files, we need to extract temporarily to read metadata
-            // This is a bit expensive but necessary for thumbnails
-            QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + 
-                             "/speedynote_thumb_" + QString::number(QDateTime::currentMSecsSinceEpoch());
-            QDir().mkpath(tempDir);
+            // Read notebook ID directly from .spn without full extraction
+            SpnPackageManager::SpnMetadata metadata = SpnPackageManager::readMetadataFromSpn(folderPath);
+            if (metadata.isValid) {
+                notebookIdStr = metadata.notebookId;
+            }
             
-            // Simple extraction for thumbnail purposes (we'll clean up after)
-            QFile spnFile(folderPath);
-            if (spnFile.open(QIODevice::ReadOnly)) {
-                QDataStream in(&spnFile);
+            // For thumbnail image, we need to extract the first page image
+            // Try to extract page 1 image directly from .spn
+            if (!notebookIdStr.isEmpty()) {
+                // Try page 1 (pages start at 1, not 0!)
+                QString page1FileName = QString("%1_00001.png").arg(notebookIdStr);
+                QByteArray page1Data = SpnPackageManager::extractFileFromSpn(folderPath, page1FileName);
                 
-                // Skip header
-                QString header;
-                in >> header;
-                if (header == "Contents") {
-                    int fileCount;
-                    in >> fileCount;
-                    
-                    for (int i = 0; i < fileCount; ++i) {
-                        QString fileName;
-                        QByteArray fileData;
-                        in >> fileName >> fileData;
-                        
-                        QString filePath = tempDir + "/" + fileName;
-                        QDir().mkpath(QFileInfo(filePath).absolutePath());
-                        
-                        QFile outFile(filePath);
-                        if (outFile.open(QIODevice::WriteOnly)) {
-                            outFile.write(fileData);
-                            outFile.close();
-                        }
+                if (!page1Data.isEmpty()) {
+                    QImage pageImage;
+                    if (pageImage.loadFromData(page1Data)) {
+                        painter.drawImage(coverImage.rect(), pageImage, pageImage.rect());
+                        painter.end();
+                        coverImage.save(coverFilePath, "PNG");
+                        emit thumbnailUpdated(folderPath, coverFilePath);
+                        return;
                     }
                 }
-                spnFile.close();
-                actualFolderPath = tempDir;
+            }
+            
+            // If direct extraction failed, fall back to full extraction
+            actualFolderPath = SpnPackageManager::extractSpnToTemp(folderPath);
+            if (!actualFolderPath.isEmpty()) {
+                needsCleanup = true;
             }
         }
         
-        // ✅ Try new JSON metadata system first
-        QString jsonFile = actualFolderPath + "/.speedynote_metadata.json";
-        if (QFile::exists(jsonFile)) {
-            QFile file(jsonFile);
-            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                QByteArray data = file.readAll();
-                file.close();
-                
-                QJsonParseError error;
-                QJsonDocument doc = QJsonDocument::fromJson(data, &error);
-                
-                if (error.error == QJsonParseError::NoError) {
-                    QJsonObject obj = doc.object();
-                    notebookIdStr = obj["notebook_id"].toString();
+        // ✅ Try to get notebook ID from folder if not already obtained
+        if (notebookIdStr.isEmpty()) {
+            // Try JSON metadata first
+            QString jsonFile = actualFolderPath + "/.speedynote_metadata.json";
+            if (QFile::exists(jsonFile)) {
+                QFile file(jsonFile);
+                if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    QByteArray data = file.readAll();
+                    file.close();
+                    
+                    QJsonParseError error;
+                    QJsonDocument doc = QJsonDocument::fromJson(data, &error);
+                    
+                    if (error.error == QJsonParseError::NoError) {
+                        QJsonObject obj = doc.object();
+                        notebookIdStr = obj["notebook_id"].toString();
+                    }
                 }
             }
-        }
-        
-        // ✅ Fallback to old system for backwards compatibility
-        if (notebookIdStr.isEmpty()) {
-            QFile idFile(actualFolderPath + "/.notebook_id.txt");
-            if (idFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                QTextStream in(&idFile);
-                notebookIdStr = in.readLine().trimmed();
-                idFile.close();
+            
+            // Fallback to old system for backwards compatibility
+            if (notebookIdStr.isEmpty()) {
+                QFile idFile(actualFolderPath + "/.notebook_id.txt");
+                if (idFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    QTextStream in(&idFile);
+                    notebookIdStr = in.readLine().trimmed();
+                    idFile.close();
+                }
             }
         }
 
-        QString firstPagePath, firstAnnotatedPagePath;
+        // ✅ Try to load page image - pages start at 1, not 0!
+        QString firstPagePath, secondPagePath;
         if (!notebookIdStr.isEmpty()) {
-            firstPagePath = actualFolderPath + QString("/%1_00000.png").arg(notebookIdStr);
-            firstAnnotatedPagePath = actualFolderPath + QString("/annotated_%1_00000.png").arg(notebookIdStr);
+            // Try page 1 first (correct numbering)
+            firstPagePath = actualFolderPath + QString("/%1_00001.png").arg(notebookIdStr);
+            // Also try page 0 for backwards compatibility with any old notebooks
+            secondPagePath = actualFolderPath + QString("/%1_00000.png").arg(notebookIdStr);
         }
 
         QImage pageImage;
-        if (!firstAnnotatedPagePath.isEmpty() && QFile::exists(firstAnnotatedPagePath)) {
-            pageImage.load(firstAnnotatedPagePath);
-        } else if (!firstPagePath.isEmpty() && QFile::exists(firstPagePath)) {
+        if (!firstPagePath.isEmpty() && QFile::exists(firstPagePath)) {
             pageImage.load(firstPagePath);
+        } else if (!secondPagePath.isEmpty() && QFile::exists(secondPagePath)) {
+            pageImage.load(secondPagePath);
         }
 
         if (!pageImage.isNull()) {
@@ -323,19 +348,19 @@ void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPa
             // If no image found, draw a placeholder
             painter.fillRect(coverImage.rect(), Qt::darkGray);
             painter.setPen(Qt::white);
-            painter.drawText(coverImage.rect(), Qt::AlignCenter, tr("No Page 0 Preview"));
+            painter.drawText(coverImage.rect(), Qt::AlignCenter, tr("No Preview Available"));
         }
         
         // ✅ Clean up temporary directory if we extracted an .spn file
-        if (actualFolderPath != folderPath && actualFolderPath.contains("/speedynote_thumb_")) {
-            QDir tempDir(actualFolderPath);
-            tempDir.removeRecursively();
+        if (needsCleanup && !actualFolderPath.isEmpty()) {
+            SpnPackageManager::cleanupTempDir(actualFolderPath);
         }
     }
+    
+    painter.end();
     coverImage.save(coverFilePath, "PNG");
     
     // ✅ Emit signal to notify that thumbnail was updated
-    // This allows the launcher to invalidate its pixmap cache
     emit thumbnailUpdated(folderPath, coverFilePath);
 }
 
@@ -355,138 +380,66 @@ QString RecentNotebooksManager::getPdfPathFromNotebook(const QString& folderPath
         return pdfPathCache.value(folderPath);
     }
     
-    QString actualFolderPath = folderPath;
-    bool needsCleanup = false;
-    
-    // ✅ Handle .spn packages - extract temporarily to read PDF path
-    if (folderPath.endsWith(".spn", Qt::CaseInsensitive)) {
-        QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + 
-                         "/speedynote_pdf_check_" + QString::number(QDateTime::currentMSecsSinceEpoch());
-        QDir().mkpath(tempDir);
-        
-        QFile spnFile(folderPath);
-        if (spnFile.open(QIODevice::ReadOnly)) {
-            QDataStream in(&spnFile);
-            QString header;
-            in >> header;
-            if (header == "Contents") {
-                int fileCount;
-                in >> fileCount;
-                
-                for (int i = 0; i < fileCount; ++i) {
-                    QString fileName;
-                    QByteArray fileData;
-                    in >> fileName >> fileData;
-                    
-                    if (fileName == ".speedynote_metadata.json") {
-                        QString filePath = tempDir + "/" + fileName;
-                        QDir().mkpath(QFileInfo(filePath).absolutePath()); // Ensure directory exists
-                        QFile outFile(filePath);
-                        if (outFile.open(QIODevice::WriteOnly)) {
-                            outFile.write(fileData);
-                            outFile.close();
-                        }
-                        break;
-                    }
-                }
-            }
-            spnFile.close();
-            actualFolderPath = tempDir;
-            needsCleanup = true;
-        }
-    }
-    
     QString pdfPath;
     
-    // ✅ Check for PDF metadata in JSON first
-    QString jsonFile = actualFolderPath + "/.speedynote_metadata.json";
-    if (QFile::exists(jsonFile)) {
-        QFile file(jsonFile);
-        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QByteArray data = file.readAll();
-            file.close();
-            
-            QJsonParseError error;
-            QJsonDocument doc = QJsonDocument::fromJson(data, &error);
-            
-            if (error.error == QJsonParseError::NoError) {
-                QJsonObject obj = doc.object();
-                pdfPath = obj["pdf_path"].toString();
-            }
+    // ✅ Handle .spn packages using SpnPackageManager (efficient, no temp extraction)
+    if (folderPath.endsWith(".spn", Qt::CaseInsensitive)) {
+        SpnPackageManager::SpnMetadata metadata = SpnPackageManager::readMetadataFromSpn(folderPath);
+        if (metadata.isValid) {
+            pdfPath = metadata.pdfPath;
         }
-    }
-    
-    // ✅ Fallback to old system
-    if (pdfPath.isEmpty()) {
-        QString metadataFile = actualFolderPath + "/.pdf_path.txt";
-        if (QFile::exists(metadataFile)) {
-            QFile file(metadataFile);
+    } else {
+        // Regular folder - read metadata directly
+        QString jsonFile = folderPath + "/.speedynote_metadata.json";
+        if (QFile::exists(jsonFile)) {
+            QFile file(jsonFile);
             if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                QTextStream in(&file);
-                pdfPath = in.readLine().trimmed();
+                QByteArray data = file.readAll();
                 file.close();
+                
+                QJsonParseError error;
+                QJsonDocument doc = QJsonDocument::fromJson(data, &error);
+                
+                if (error.error == QJsonParseError::NoError) {
+                    QJsonObject obj = doc.object();
+                    pdfPath = obj["pdf_path"].toString();
+                }
+            }
+        }
+        
+        // Fallback to old system
+        if (pdfPath.isEmpty()) {
+            QString metadataFile = folderPath + "/.pdf_path.txt";
+            if (QFile::exists(metadataFile)) {
+                QFile file(metadataFile);
+                if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    QTextStream in(&file);
+                    pdfPath = in.readLine().trimmed();
+                    file.close();
+                }
             }
         }
     }
     
-    // ✅ Clean up temp directory if we extracted an .spn file
-    if (needsCleanup && actualFolderPath.contains("/speedynote_pdf_check_")) {
-        QDir tempDir(actualFolderPath);
-        tempDir.removeRecursively();
-    }
-    
-    // Cache the result to avoid repeated expensive extraction
+    // Cache the result to avoid repeated expensive operations
     pdfPathCache[folderPath] = pdfPath;
     
     return pdfPath;
 }
 
 QString RecentNotebooksManager::getNotebookIdFromPath(const QString& folderPath) const {
-    QString actualFolderPath = folderPath;
-    bool needsCleanup = false;
+    QString notebookId;
     
-    // ✅ Handle .spn packages - extract temporarily to read notebook ID
+    // ✅ Handle .spn packages using SpnPackageManager (efficient, no temp extraction)
     if (folderPath.endsWith(".spn", Qt::CaseInsensitive)) {
-        QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + 
-                         "/speedynote_id_check_" + QString::number(QDateTime::currentMSecsSinceEpoch());
-        QDir().mkpath(tempDir);
-        
-        QFile spnFile(folderPath);
-        if (spnFile.open(QIODevice::ReadOnly)) {
-            QDataStream in(&spnFile);
-            QString header;
-            in >> header;
-            if (header == "Contents") {
-                int fileCount;
-                in >> fileCount;
-                
-                for (int i = 0; i < fileCount; ++i) {
-                    QString fileName;
-                    QByteArray fileData;
-                    in >> fileName >> fileData;
-                    
-                    if (fileName == ".speedynote_metadata.json") {
-                        QString filePath = tempDir + "/" + fileName;
-                        QDir().mkpath(QFileInfo(filePath).absolutePath()); // Ensure directory exists
-                        QFile outFile(filePath);
-                        if (outFile.open(QIODevice::WriteOnly)) {
-                            outFile.write(fileData);
-                            outFile.close();
-                        }
-                        break;
-                    }
-                }
-            }
-            spnFile.close();
-            actualFolderPath = tempDir;
-            needsCleanup = true;
+        SpnPackageManager::SpnMetadata metadata = SpnPackageManager::readMetadataFromSpn(folderPath);
+        if (metadata.isValid) {
+            return metadata.notebookId;
         }
     }
     
-    QString notebookId;
-    
-    // ✅ Try new JSON metadata system first
-    QString jsonFile = actualFolderPath + "/.speedynote_metadata.json";
+    // Regular folder - read metadata directly
+    QString jsonFile = folderPath + "/.speedynote_metadata.json";
     if (QFile::exists(jsonFile)) {
         QFile file(jsonFile);
         if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -503,26 +456,13 @@ QString RecentNotebooksManager::getNotebookIdFromPath(const QString& folderPath)
         }
     }
     
-    // ✅ Fallback to old system
+    // Fallback to old system
     if (notebookId.isEmpty()) {
-        QFile idFile(actualFolderPath + "/.notebook_id.txt");
+        QFile idFile(folderPath + "/.notebook_id.txt");
         if (idFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QTextStream in(&idFile);
             notebookId = in.readLine().trimmed();
             idFile.close();
-        }
-    }
-    
-
-    
-    // ✅ Clean up temp directory if we extracted an .spn file
-    if (needsCleanup && actualFolderPath.contains("/speedynote_id_check_")) {
-        QDir tempDir(actualFolderPath);
-        if (tempDir.exists()) {
-            bool removed = tempDir.removeRecursively();
-            if (!removed) {
-                qWarning() << "Failed to clean up temporary directory:" << actualFolderPath;
-            }
         }
     }
     

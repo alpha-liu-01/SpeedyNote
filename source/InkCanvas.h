@@ -344,6 +344,8 @@ public:
     void addMarkdownNote(const MarkdownNoteData &note); // Add a markdown note directly
     void updateMarkdownNote(const MarkdownNoteData &note); // Update an existing markdown note
     void removeMarkdownNote(const QString &noteId); // Remove a markdown note
+    void clearHighlightsForPage(int pageNumber); // Clear all highlights for a specific page
+    void clearMarkdownNotesForPage(int pageNumber); // Clear all markdown notes for a specific page
     MarkdownNoteData* findMarkdownNote(const QString &noteId); // Find a note by ID
     QList<MarkdownNoteData> getMarkdownNotesForPages(int page1, int page2 = -1) const; // Get notes for page(s) in combined canvas
     QList<MarkdownNoteData> getAllMarkdownNotes() const; // Get all notes in the notebook

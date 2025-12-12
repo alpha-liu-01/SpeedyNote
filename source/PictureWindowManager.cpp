@@ -811,9 +811,32 @@ void PictureWindowManager::clearCurrentPageWindows() {
     }
     
     int currentPage = canvas->getLastActivePage();
+    bool isCombinedMode = canvas->isCombinedCanvasMode();
     
-    // Delete all current picture windows immediately
-    for (PictureWindow *window : currentWindows) {
+    // Get list of windows that belong to current page only
+    QList<PictureWindow*> windowsToDelete;
+    
+    if (isCombinedMode) {
+        // In combined mode: identify windows by canvas Y position
+        // Windows on upper half (canvas_y < singlePageHeight) belong to current page
+        int singlePageHeight = canvas->getSinglePageHeight();
+        
+        for (PictureWindow *window : currentWindows) {
+            if (window) {
+                QRect canvasRect = window->getCanvasRect();
+                // Window belongs to upper half (current page) if its top edge is in upper half
+                if (canvasRect.y() < singlePageHeight) {
+                    windowsToDelete.append(window);
+                }
+            }
+        }
+    } else {
+        // Single page mode: all currentWindows belong to the current page
+        windowsToDelete = currentWindows;
+    }
+    
+    // Delete the identified windows
+    for (PictureWindow *window : windowsToDelete) {
         if (window) {
             // ✅ Delete the associated image file before removing the window
             QString imagePath = window->getImagePath();
@@ -826,10 +849,8 @@ void PictureWindowManager::clearCurrentPageWindows() {
                 }
             }
             
-            // Remove from all page windows maps first
-            for (auto it = pageWindows.begin(); it != pageWindows.end(); ++it) {
-                it.value().removeAll(window);
-            }
+            // Remove from currentWindows list
+            currentWindows.removeAll(window);
 
             // ✅ CRASH FIX: Also remove from combined temp windows to prevent dangling pointers
             combinedTempWindows.removeAll(window);
@@ -839,10 +860,6 @@ void PictureWindowManager::clearCurrentPageWindows() {
             window->deleteLater();
         }
     }
-    currentWindows.clear();
-
-    // ✅ CRASH FIX: Clear combinedTempWindows to prevent dangling pointers
-    combinedTempWindows.clear();
     
     // Update the pageWindows map to reflect the cleared state
     pageWindows[currentPage] = QList<PictureWindow*>(); // Explicitly empty list
@@ -851,10 +868,12 @@ void PictureWindowManager::clearCurrentPageWindows() {
     canvas->setEdited(true);
     cacheUpdatedPages.remove(currentPage); // Clear cache flag to force re-clone
     
-    canvas->update(); // Trigger repaint to remove all pictures
+    // ✅ FIX: Write empty list to disk IMMEDIATELY (not just cache update)
+    // This ensures the JSON metadata file is cleared
+    savePictureData(currentPage, QList<PictureWindow*>());
     
-    // Save the cleared state to disk
-    saveWindowsForPage(currentPage);
+    // Force immediate repaint to visually remove picture windows
+    canvas->repaint();
 }
 
 void PictureWindowManager::onWindowDeleteRequested(PictureWindow *window) {

@@ -55,6 +55,25 @@ public:
 
     // Get total size of all temp directories in bytes
     static qint64 getTempDirsTotalSize();
+    
+    // Read notebook ID from .spn package without full extraction
+    // Returns empty string if not found or invalid
+    static QString readNotebookIdFromSpn(const QString &spnPath);
+    
+    // Struct to hold metadata read from .spn package
+    struct SpnMetadata {
+        QString notebookId;
+        QString pdfPath;
+        bool isValid = false;
+    };
+    
+    // Read metadata from .spn package without full extraction
+    // More efficient than multiple calls to readNotebookIdFromSpn
+    static SpnMetadata readMetadataFromSpn(const QString &spnPath);
+    
+    // Extract a single file from .spn package to a buffer
+    // Returns empty QByteArray if file not found
+    static QByteArray extractFileFromSpn(const QString &spnPath, const QString &fileName);
 
 private:
     static const QString SPN_EXTENSION;

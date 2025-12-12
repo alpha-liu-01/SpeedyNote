@@ -1907,8 +1907,31 @@ void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
 }
 
 void MainWindow::deleteCurrentPage() {
-    // Clear all content from current page (drawing + pictures + markdown) instead of deleting the page file
-    currentCanvas()->clearCurrentPage();
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    // Get the current page number to show in confirmation (display as 1-indexed for users)
+    int currentPage = getCurrentPageForCanvas(canvas);
+    int displayPageNumber = currentPage + 1; // Convert from 0-indexed to 1-indexed for display
+    
+    // Show confirmation dialog
+    QMessageBox confirmBox(this);
+    confirmBox.setWindowTitle(tr("Clear Page"));
+    confirmBox.setIcon(QMessageBox::Warning);
+    confirmBox.setText(tr("Are you sure you want to clear page %1?").arg(displayPageNumber));
+    confirmBox.setInformativeText(tr("This will permanently delete all drawings, pictures, highlights, and notes on this page. This action cannot be undone."));
+    confirmBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    confirmBox.setDefaultButton(QMessageBox::No);
+    
+    if (confirmBox.exec() == QMessageBox::Yes) {
+        // Clear all content from current page (drawing + pictures + highlights + markdown notes)
+        canvas->clearCurrentPage();
+        
+        // Reload markdown notes sidebar if visible
+        if (markdownNotesSidebarVisible) {
+            loadMarkdownNotesForCurrentPage();
+        }
+    }
 }
 
 void MainWindow::saveCurrentPage() {
@@ -3667,6 +3690,46 @@ void MainWindow::switchTab(int index) {
     }
 }
 
+int MainWindow::findTabWithNotebookId(const QString &notebookId) {
+    if (!canvasStack || notebookId.isEmpty()) return -1;
+    
+    for (int i = 0; i < canvasStack->count(); ++i) {
+        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
+        if (canvas && canvas->getNotebookId() == notebookId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
+    // Safety check for required UI components
+    if (!tabList || !canvasStack) {
+        return false;
+    }
+    
+    // Read notebook ID from the .spn file without full extraction
+    QString notebookId = SpnPackageManager::readNotebookIdFromSpn(spnPath);
+    if (notebookId.isEmpty()) {
+        return false; // Can't determine ID, allow opening
+    }
+    
+    // Check if any tab already has this notebook open
+    int existingTabIndex = findTabWithNotebookId(notebookId);
+    if (existingTabIndex >= 0 && existingTabIndex < tabList->count() && existingTabIndex < canvasStack->count()) {
+        // Notebook is already open - switch to that tab
+        tabList->setCurrentRow(existingTabIndex);
+        canvasStack->setCurrentIndex(existingTabIndex);
+        
+        // Show informational message
+        QMessageBox::information(this, tr("Notebook Already Open"),
+            tr("This notebook is already open in another tab. Switching to the existing tab."));
+        
+        return true;
+    }
+    
+    return false; // Not already open
+}
 
 void MainWindow::addNewTab() {
     if (!tabList || !canvasStack) return;  // Ensure tabList and canvasStack exist
@@ -5959,9 +6022,9 @@ void MainWindow::loadThemeSettings() {
 void MainWindow::updateTabSizes() {
     if (!tabList) return;
     
-    // Calculate max width: half of tabList width (so 2 tabs can fit side by side)
+    // Calculate max width with absolute cap of 300px
     int tabListWidth = tabList->width();
-    int maxTabWidth = tabListWidth / 2;
+    int maxTabWidth = qMin(tabListWidth / 2, 300); // Cap at 300px regardless of window size
     int minTabWidth = 80; // Keep minimum at 80px
     
     // Ensure max is at least as big as min
@@ -7214,7 +7277,7 @@ void MainWindow::handleTouchZoomChange(int newZoom) {
     // Show horizontal scrollbar during gesture (panYSlider stays hidden)
     if (panXSlider->maximum() > 0) {
         panXSlider->setVisible(true);
-        scrollbarsVisible = true;
+    scrollbarsVisible = true;
     }
     
     // Update canvas zoom directly
@@ -7240,7 +7303,7 @@ void MainWindow::handleTouchPanChange(int panX, int panY) {
     // Show horizontal scrollbar during gesture (panYSlider stays hidden)
     if (panXSlider->maximum() > 0) {
         panXSlider->setVisible(true);
-        scrollbarsVisible = true;
+    scrollbarsVisible = true;
     }
     
     InkCanvas *canvas = currentCanvas();
@@ -7655,8 +7718,8 @@ void MainWindow::createSingleRowLayout(bool centered) {
     
     // Centered buttons - toggle and utility
     newLayout->addWidget(toggleTabBarButton);
-    newLayout->addWidget(toggleMarkdownNotesButton);
-    newLayout->addWidget(touchGesturesButton);
+        newLayout->addWidget(toggleMarkdownNotesButton);
+        newLayout->addWidget(touchGesturesButton);
     newLayout->addWidget(pdfTextSelectButton);
     newLayout->addWidget(saveButton);
     
@@ -7732,8 +7795,8 @@ void MainWindow::createTwoRowLayout() {
     // First row: toggle buttons and colors (centered - no right buttons, so no compensation needed)
     newFirstRowLayout->addStretch();
     newFirstRowLayout->addWidget(toggleTabBarButton);
-    newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
-    newFirstRowLayout->addWidget(touchGesturesButton);
+        newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
+        newFirstRowLayout->addWidget(touchGesturesButton);
     newFirstRowLayout->addWidget(pdfTextSelectButton);
     newFirstRowLayout->addWidget(saveButton);
     newFirstRowLayout->addWidget(redButton);
@@ -8564,9 +8627,9 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     QTimer::singleShot(0, this, [this]() {
         positionDialToolbarTab();
         positionLeftSidebarTabs();  // Also reposition left tabs for consistency
-        if (dialContainer && dialContainer->isVisible()) {
-            positionDialContainer();
-        }
+    if (dialContainer && dialContainer->isVisible()) {
+        positionDialContainer();
+    }
     });
 }
 
@@ -9050,6 +9113,11 @@ void MainWindow::openSpnPackage(const QString &spnPath)
         return;
     }
     
+    // Check if this notebook is already open in another tab
+    if (switchToExistingNotebook(spnPath)) {
+        return; // Switched to existing tab, don't open again
+    }
+    
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
     
@@ -9391,6 +9459,13 @@ void MainWindow::cleanupSharedResources()
 
 void MainWindow::openFileInNewTab(const QString &filePath)
 {
+    // Check for duplicate .spn notebooks before creating a new tab
+    if (filePath.toLower().endsWith(".spn")) {
+        if (switchToExistingNotebook(filePath)) {
+            return; // Notebook already open, switched to existing tab
+        }
+    }
+    
     // Create a new tab first
     addNewTab();
     

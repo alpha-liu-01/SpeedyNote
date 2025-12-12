@@ -2778,17 +2778,35 @@ void InkCanvas::deletePage(int pageNumber) {
 }
 
 void InkCanvas::clearCurrentPage() {
-    // Clear the drawing buffer
+    int pageNumber = lastActivePage;
+    
+    // Clear the drawing buffer - only the current page (upper half in combined mode)
     if (buffer.isNull()) {
         initializeBuffer();
     } else {
-        buffer.fill(Qt::transparent);
+        if (isCombinedCanvasMode()) {
+            // Combined canvas mode: only clear the upper half (current page)
+            int singlePageHeight = getSinglePageHeight();
+            QPainter painter(&buffer);
+            painter.setCompositionMode(QPainter::CompositionMode_Source);
+            painter.fillRect(0, 0, buffer.width(), singlePageHeight, Qt::transparent);
+            painter.end();
+        } else {
+            // Single page mode: clear entire buffer
+            buffer.fill(Qt::transparent);
+        }
     }
     
     // Clear all picture windows from current page (already deletes files permanently)
     if (pictureManager) {
         pictureManager->clearCurrentPageWindows();
     }
+    
+    // Clear highlights for current page
+    clearHighlightsForPage(pageNumber);
+    
+    // Clear markdown notes for current page
+    clearMarkdownNotesForPage(pageNumber);
     
     // Mark as edited and update display
     edited = true;
@@ -2801,8 +2819,11 @@ void InkCanvas::clearCurrentPage() {
     
     // Auto-save the cleared page
     if (!saveFolder.isEmpty()) {
-        saveToFile(lastActivePage);
+        saveToFile(pageNumber);
     }
+    
+    // NOTE: Do NOT emit markdownNotesUpdated() here - that signal auto-opens the sidebar
+    // (intended for note creation). MainWindow::deleteCurrentPage() handles sidebar refresh.
 }
 
 void InkCanvas::setBackground(const QString &filePath, int pageNumber) {
@@ -5026,6 +5047,86 @@ void InkCanvas::removeMarkdownNote(const QString &noteId) {
             emit markdownNotesUpdated();
             return;
         }
+    }
+}
+
+// Clear all highlights for a specific page
+void InkCanvas::clearHighlightsForPage(int pageNumber) {
+    // Collect IDs of highlights to remove (for cascade deletion of linked notes)
+    QStringList removedHighlightIds;
+    
+    // Remove all highlights for this page
+    for (int i = persistentHighlights.size() - 1; i >= 0; --i) {
+        if (persistentHighlights[i].pageNumber == pageNumber) {
+            removedHighlightIds.append(persistentHighlights[i].id);
+            persistentHighlights.removeAt(i);
+        }
+    }
+    
+    // Cascade delete any markdown notes linked to removed highlights
+    for (const QString &highlightId : removedHighlightIds) {
+        for (int i = markdownNotes.size() - 1; i >= 0; --i) {
+            if (markdownNotes[i].highlightId == highlightId) {
+                markdownNotes.removeAt(i);
+            }
+        }
+    }
+    
+    // Save changes and invalidate cache
+    if (!removedHighlightIds.isEmpty()) {
+        saveNotebookMetadataDeferred();
+        setEdited(true);
+        
+        // ✅ CRITICAL: Invalidate PDF cache for this page so highlights re-render without the deleted ones
+        // Highlights are baked into cached PDF images, so we must clear the cache
+        invalidatePdfPageCache(pageNumber);
+        
+        // ✅ INSTANT UPDATE: If this page is currently displayed, force immediate re-render
+        // Note: We do NOT call loadPdfPage() here because that calls loadPage() which would
+        // reload the ink buffer from cache, potentially undoing a clearCurrentPage() operation.
+        // Instead, we just re-render the PDF background directly.
+        if (pdfDocument && (pageNumber == lastActivePage || pageNumber == currentCachedPage)) {
+            // Re-render PDF page to cache (without highlights since they're now deleted)
+            renderPdfPageToCache(pageNumber);
+            
+            // Update backgroundImage directly from the newly cached image
+            {
+                QMutexLocker locker(&pdfCacheMutex);
+                if (pdfCache.contains(pageNumber)) {
+                    backgroundImage = *pdfCache.object(pageNumber);
+                }
+            }
+            
+            // Trigger repaint to show updated background
+            update();
+        }
+    }
+}
+
+// Clear all markdown notes for a specific page (including orphaned ones not linked to highlights)
+void InkCanvas::clearMarkdownNotesForPage(int pageNumber) {
+    bool anyRemoved = false;
+    
+    // Remove all markdown notes for this page
+    for (int i = markdownNotes.size() - 1; i >= 0; --i) {
+        if (markdownNotes[i].pageNumber == pageNumber) {
+            // Unlink from highlight if linked
+            QString highlightId = markdownNotes[i].highlightId;
+            if (!highlightId.isEmpty()) {
+                TextHighlight *highlight = findHighlightById(highlightId);
+                if (highlight) {
+                    highlight->markdownWindowId.clear();
+                }
+            }
+            markdownNotes.removeAt(i);
+            anyRemoved = true;
+        }
+    }
+    
+    // Save changes
+    if (anyRemoved) {
+        saveNotebookMetadataDeferred();
+        setEdited(true);
     }
 }
 
