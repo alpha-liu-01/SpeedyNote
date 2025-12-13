@@ -328,8 +328,8 @@ void MainWindow::setupUi() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#outlineSidebarTab:hover {"
             "  background-color: %3;"
@@ -345,8 +345,8 @@ void MainWindow::setupUi() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#bookmarksSidebarTab:hover {"
             "  background-color: %3;"
@@ -1367,8 +1367,8 @@ void MainWindow::setupUi() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-right: none;"
-            "  border-top-left-radius: 8px;"
-            "  border-bottom-left-radius: 8px;"
+            "  border-top-left-radius: 0px;"
+            "  border-bottom-left-radius: 0px;"
             "}"
             "QPushButton#dialToolbarTab:hover {"
             "  background-color: %3;"
@@ -5536,8 +5536,8 @@ void MainWindow::updateTheme() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-right: none;"
-            "  border-top-left-radius: 8px;"
-            "  border-bottom-left-radius: 8px;"
+            "  border-top-left-radius: 0px;"
+            "  border-bottom-left-radius: 0px;"
             "}"
             "QPushButton#dialToolbarTab:hover {"
             "  background-color: %3;"
@@ -5568,8 +5568,8 @@ void MainWindow::updateTheme() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#outlineSidebarTab:hover {"
             "  background-color: %3;"
@@ -5588,8 +5588,8 @@ void MainWindow::updateTheme() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#bookmarksSidebarTab:hover {"
             "  background-color: %3;"
@@ -7458,7 +7458,7 @@ QColor MainWindow::getContrastingTextColor(const QColor &backgroundColor) {
 
 void MainWindow::updateCustomColorButtonStyle(const QColor &color) {
     QColor textColor = getContrastingTextColor(color);
-    customColorButton->setStyleSheet(QString("background-color: %1; color: %2")
+    customColorButton->setStyleSheet(QString("background-color: %1; color: %2; border-radius: 0px;")
         .arg(color.name())
         .arg(textColor.name()));
     customColorButton->setText(QString("%1").arg(color.name()).toUpper());

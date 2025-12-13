@@ -488,7 +488,7 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     bool isDarkModeActive = isDarkMode();
     QString coverBg = isDarkModeActive ? "#2b2b2b" : "white";
     QString coverBorder = isDarkModeActive ? "#555555" : "#ddd";
-    coverLabel->setStyleSheet(QString("border: 1px solid %1; border-radius: 4px; background: %2;").arg(coverBorder).arg(coverBg));
+    coverLabel->setStyleSheet(QString("border: 1px solid %1; border-radius: 0px; background: %2;").arg(coverBorder).arg(coverBg));
     
     // Set scaling mode to fill the entire area
     coverLabel->setScaledContents(true);
@@ -1019,7 +1019,7 @@ void LauncherWindow::applyModernStyling()
         QListWidget#sidebarTabList::item {
             margin: 4px 8px;
             padding-left: 20px;
-            border-radius: 8px;
+            border-radius: 0px;
         }
         
         QListWidget#sidebarTabList::item:selected {
@@ -1045,7 +1045,7 @@ void LauncherWindow::applyModernStyling()
         QPushButton#primaryButton {
             background-color: %4;
             border: none;
-            border-radius: 8px;
+            border-radius: 0px;
             color: white;
             font-size: 16px;
             font-weight: bold;
@@ -1063,7 +1063,7 @@ void LauncherWindow::applyModernStyling()
         QPushButton#notebookButton {
             background-color: %2;
             border: 1px solid %3;
-            border-radius: 12px;
+            border-radius: 0px;
             padding: 0px;
         }
         
@@ -1083,12 +1083,12 @@ void LauncherWindow::applyModernStyling()
         QScrollBar:vertical {
             background-color: %9;
             width: 12px;
-            border-radius: 6px;
+            border-radius: 0px;
         }
         
         QScrollBar::handle:vertical {
             background-color: %10;
-            border-radius: 6px;
+            border-radius: 0px;
             min-height: 30px;
         }
         

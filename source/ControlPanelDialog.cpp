@@ -1125,14 +1125,14 @@ void ControlPanelDialog::createCompatibilityTab() {
     
     // Title and description
     QLabel *titleLabel = new QLabel(tr("Compatibility Features"), compatibilityTab);
-    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;");
+    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
     layout->addWidget(titleLabel);
     
     layout->addSpacing(10);
     
     // Folder selection section
     QLabel *folderSectionLabel = new QLabel(tr("Manual Folder Selection"), compatibilityTab);
-    folderSectionLabel->setStyleSheet("font-size: 14px; font-weight: bold; color: #34495e;");
+    folderSectionLabel->setStyleSheet("font-size: 14px; font-weight: bold;");
     layout->addWidget(folderSectionLabel);
     
     QLabel *folderDescriptionLabel = new QLabel(tr("This feature allows you to manually select a save folder for your notes. "

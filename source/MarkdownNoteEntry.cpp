@@ -30,7 +30,7 @@ void MarkdownNoteEntry::setupUI() {
     colorIndicator = new QFrame(this);
     colorIndicator->setFixedWidth(4);
     colorIndicator->setMinimumHeight(20);
-    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
+    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 0px;")
                                   .arg(noteData.color.name()));
     
     // Title edit
@@ -121,7 +121,7 @@ void MarkdownNoteEntry::applyStyle() {
         MarkdownNoteEntry {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 4px;
+            border-radius: 0px;
         }
     )").arg(bgColor, borderColor));
     
@@ -169,7 +169,7 @@ void MarkdownNoteEntry::setNoteData(const MarkdownNoteData &data) {
     }
     
     if (colorChanged) {
-        colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
+        colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 0px;")
                                       .arg(data.color.name()));
     }
     
@@ -199,7 +199,7 @@ void MarkdownNoteEntry::setContent(const QString &content) {
 
 void MarkdownNoteEntry::setColor(const QColor &color) {
     noteData.color = color;
-    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
+    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 0px;")
                                   .arg(color.name()));
 }
 

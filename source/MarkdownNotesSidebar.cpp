@@ -148,7 +148,7 @@ void MarkdownNotesSidebar::applyStyle() {
         QLineEdit {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 6px;
+            border-radius: 0px;
             padding: 8px 12px;
             font-size: 14px;
         }
@@ -162,7 +162,7 @@ void MarkdownNotesSidebar::applyStyle() {
         QPushButton {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 6px;
+            border-radius: 0px;
             font-size: 16px;
             font-weight: bold;
         }
@@ -181,7 +181,7 @@ void MarkdownNotesSidebar::applyStyle() {
         QPushButton {
             background-color: %1;
             border: 1px solid #ff4444;
-            border-radius: 6px;
+            border-radius: 0px;
             font-size: 18px;
             font-weight: bold;
             color: #ff4444;
