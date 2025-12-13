@@ -46,7 +46,10 @@ SpeedyNote now supports opening PowerPoint presentations (`.ppt`, `.pptx`, `.odp
    - Check if LibreOffice is installed
    - Show progress dialog
    - Convert file to PDF in temporary directory
-   - Use converted PDF path for loading
+   - **Copy converted PDF to permanent location**:
+     - **Launcher**: Copy to same directory as original file (e.g., `presentation_converted.pdf`)
+     - **MainWindow**: Copy to notebook's save folder
+   - Use permanent PDF path for loading
 3. Continue with normal PDF loading routine
 
 ## LibreOffice Detection
@@ -146,11 +149,14 @@ To test the implementation:
 libreoffice --headless --convert-to pdf --outdir <output_dir> <input_file>
 ```
 
-### Temporary Files
+### Converted PDF Storage
 
-- Converted PDFs are stored in Qt's temporary directory (`QTemporaryDir`)
-- Cleaned up automatically when `DocumentConverter` is destroyed
-- Temporary files persist during the application session
+- **Initial conversion**: PDF created in Qt's temporary directory (`QTemporaryDir`)
+- **Permanent storage**:
+  - From **Launcher**: Saved next to original PowerPoint file as `[filename]_converted.pdf`
+  - From **MainWindow**: Saved in notebook's save folder as `[filename]_converted.pdf`
+- **Name conflicts**: Automatically appends counter (`_converted_1.pdf`, `_converted_2.pdf`, etc.)
+- **Temporary cleanup**: Original temp file cleaned up when converter is destroyed
 
 ### Performance
 
@@ -180,8 +186,9 @@ Possible improvements for future versions:
 
 1. **LibreOffice required** - External dependency needed for conversion
 2. **Conversion time** - Can take 5-120 seconds depending on file size
-3. **Temporary files** - Converted PDFs remain in temp directory during session
+3. **Converted PDF files** - Creates a permanent `_converted.pdf` file next to original or in notebook folder
 4. **No progress percentage** - Shows indefinite progress (LibreOffice doesn't provide progress)
+5. **Storage space** - Converted PDFs occupy additional disk space (same size as rendering the PowerPoint)
 
 ## Credits
 
