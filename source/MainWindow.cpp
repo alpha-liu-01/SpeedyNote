@@ -3472,10 +3472,17 @@ void MainWindow::loadPdf() {
             
             // Check if file already exists and create unique name if needed
             int counter = 1;
-            while (QFile::exists(outputPdfPath)) {
+            while (QFile::exists(outputPdfPath) && counter < 9999) {
                 pdfFileName = originalFileInfo.completeBaseName() + QString("_converted_%1.pdf").arg(counter);
                 outputPdfPath = saveFolder + "/" + pdfFileName;
                 counter++;
+            }
+            
+            // Safety check: if we hit the limit, warn user
+            if (counter >= 9999 && QFile::exists(outputPdfPath)) {
+                QMessageBox::critical(this, tr("Too Many Files"), 
+                    tr("Too many converted PDF files exist in the notebook folder. Please clean up old converted PDFs."));
+                return;
             }
             
             // Perform conversion with user's DPI settings

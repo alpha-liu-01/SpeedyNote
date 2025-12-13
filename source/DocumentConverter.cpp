@@ -39,16 +39,25 @@ QString DocumentConverter::getLibreOfficePath()
                   << "C:/Program Files (x86)/LibreOffice/program/soffice.com";
     
     // Check if soffice is in PATH
-    QProcess testProcess;
-    testProcess.start("soffice", QStringList() << "--version");
-    if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
-        return "soffice";
+    {
+        QProcess testProcess;
+        testProcess.start("soffice", QStringList() << "--version");
+        if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
+            testProcess.close();
+            return "soffice";
+        }
+        testProcess.close();
     }
     
     // Check if soffice.exe is in PATH
-    testProcess.start("soffice.exe", QStringList() << "--version");
-    if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
-        return "soffice.exe";
+    {
+        QProcess testProcess;
+        testProcess.start("soffice.exe", QStringList() << "--version");
+        if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
+            testProcess.close();
+            return "soffice.exe";
+        }
+        testProcess.close();
     }
 #elif defined(Q_OS_LINUX)
     // Linux paths
@@ -59,16 +68,25 @@ QString DocumentConverter::getLibreOfficePath()
                   << "/snap/bin/libreoffice";
     
     // Check if libreoffice is in PATH
-    QProcess testProcess;
-    testProcess.start("libreoffice", QStringList() << "--version");
-    if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
-        return "libreoffice";
+    {
+        QProcess testProcess;
+        testProcess.start("libreoffice", QStringList() << "--version");
+        if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
+            testProcess.close();
+            return "libreoffice";
+        }
+        testProcess.close();
     }
     
     // Check if soffice is in PATH
-    testProcess.start("soffice", QStringList() << "--version");
-    if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
-        return "soffice";
+    {
+        QProcess testProcess;
+        testProcess.start("soffice", QStringList() << "--version");
+        if (testProcess.waitForFinished(2000) && testProcess.exitCode() == 0) {
+            testProcess.close();
+            return "soffice";
+        }
+        testProcess.close();
     }
 #elif defined(Q_OS_MACOS)
     // macOS paths
@@ -166,9 +184,16 @@ QString DocumentConverter::convertToPdf(const QString &inputPath, ConversionStat
         
         // Check if file already exists and create unique name if needed
         int counter = 1;
-        while (QFile::exists(finalOutputPath)) {
+        while (QFile::exists(finalOutputPath) && counter < 9999) {
             finalOutputPath = outputDir + "/" + baseName + QString("_converted_%1.pdf").arg(counter);
             counter++;
+        }
+        
+        // Safety check: if we hit the limit, fail gracefully
+        if (counter >= 9999 && QFile::exists(finalOutputPath)) {
+            lastError = tr("Too many converted files exist. Please clean up old converted PDFs.");
+            status = ConversionFailed;
+            return QString();
         }
     } else {
         // Use specified output path
@@ -194,6 +219,17 @@ QString DocumentConverter::convertToPdf(const QString &inputPath, ConversionStat
     QString convertedPdfPath = convertToPdfInternal(inputPath, outputDir, dpi);
     
     if (convertedPdfPath.isEmpty()) {
+        // Clean up any partial files that might have been created
+        QFileInfo inputFileInfo(inputPath);
+        QString potentialPartialFile = outputDir + "/" + inputFileInfo.completeBaseName() + ".pdf";
+        if (QFile::exists(potentialPartialFile)) {
+            QFileInfo partialInfo(potentialPartialFile);
+            // Only delete if it's empty or very small (likely incomplete)
+            if (partialInfo.size() < 1024) {
+                QFile::remove(potentialPartialFile);
+            }
+        }
+        
         status = ConversionFailed;
         emit conversionFinished(false);
         return QString();
@@ -283,6 +319,15 @@ QString DocumentConverter::convertToPdfInternal(const QString &inputPath, const 
         lastError = tr("Conversion timed out after 120 seconds");
         qWarning() << "LibreOffice conversion timeout";
         conversionProcess->kill();
+        conversionProcess->waitForFinished(3000); // Wait up to 3s for process to die
+        
+        // Clean up any partial output files
+        QFileInfo inputFileInfo(inputPath);
+        QString potentialPartialFile = outputDir + "/" + inputFileInfo.completeBaseName() + ".pdf";
+        if (QFile::exists(potentialPartialFile)) {
+            QFile::remove(potentialPartialFile);
+        }
+        
         return QString();
     }
     

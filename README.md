@@ -90,16 +90,6 @@ this command to install SpeedyNote to your computer, and update with `sudo apt u
 
 ---
 
-## 📊 PowerPoint Support
-
-SpeedyNote now supports opening PowerPoint presentations (`.ppt`, `.pptx`) directly!
-
-- 💡 **Automatic conversion**: PowerPoint files are automatically converted to PDF when opened
-- 🔄 **Seamless experience**: Just select a `.ppt`/`.pptx` file from the file dialog
-- 📦 **LibreOffice required**: Install LibreOffice for this feature to work
-
-### Installing LibreOffice
-
 **Windows:**
 ```
 Download from: https://www.libreoffice.org/download/download/
