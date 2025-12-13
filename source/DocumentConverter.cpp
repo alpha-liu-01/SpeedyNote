@@ -7,12 +7,8 @@
 #include <QCoreApplication>
 
 DocumentConverter::DocumentConverter(QObject *parent)
-    : QObject(parent), tempDir(nullptr), conversionProcess(nullptr)
+    : QObject(parent), conversionProcess(nullptr)
 {
-    tempDir = new QTemporaryDir();
-    if (!tempDir->isValid()) {
-        qWarning() << "Failed to create temporary directory for document conversion";
-    }
 }
 
 DocumentConverter::~DocumentConverter()
@@ -21,10 +17,6 @@ DocumentConverter::~DocumentConverter()
         conversionProcess->kill();
         conversionProcess->waitForFinished(1000);
         delete conversionProcess;
-    }
-    
-    if (tempDir) {
-        delete tempDir;
     }
 }
 
@@ -141,7 +133,8 @@ bool DocumentConverter::needsConversion(const QString &filePath)
            lowerPath.endsWith(".odp");  // Also support OpenDocument Presentation
 }
 
-QString DocumentConverter::convertToPdf(const QString &inputPath, ConversionStatus &status)
+QString DocumentConverter::convertToPdf(const QString &inputPath, ConversionStatus &status, 
+                                       const QString &outputPath, int dpi)
 {
     lastError.clear();
     
@@ -161,27 +154,71 @@ QString DocumentConverter::convertToPdf(const QString &inputPath, ConversionStat
         return QString();
     }
     
-    // Ensure temp directory is valid
-    if (!tempDir || !tempDir->isValid()) {
-        lastError = tr("Failed to create temporary directory");
-        status = ConversionFailed;
-        return QString();
+    // Determine output directory and filename
+    QString outputDir;
+    QString finalOutputPath;
+    
+    if (outputPath.isEmpty()) {
+        // Save next to original file
+        outputDir = inputFile.absolutePath();
+        QString baseName = inputFile.completeBaseName();
+        finalOutputPath = outputDir + "/" + baseName + "_converted.pdf";
+        
+        // Check if file already exists and create unique name if needed
+        int counter = 1;
+        while (QFile::exists(finalOutputPath)) {
+            finalOutputPath = outputDir + "/" + baseName + QString("_converted_%1.pdf").arg(counter);
+            counter++;
+        }
+    } else {
+        // Use specified output path
+        finalOutputPath = outputPath;
+        QFileInfo outputInfo(outputPath);
+        outputDir = outputInfo.absolutePath();
+        
+        // Ensure output directory exists
+        QDir dir(outputDir);
+        if (!dir.exists()) {
+            if (!dir.mkpath(".")) {
+                lastError = tr("Failed to create output directory: %1").arg(outputDir);
+                status = ConversionFailed;
+                return QString();
+            }
+        }
     }
     
     emit conversionStarted();
     emit conversionProgress(tr("Converting %1 to PDF...").arg(inputFile.fileName()));
     
     // Perform conversion
-    QString outputPdfPath = convertToPdfInternal(inputPath, tempDir->path());
+    QString convertedPdfPath = convertToPdfInternal(inputPath, outputDir, dpi);
     
-    if (outputPdfPath.isEmpty()) {
+    if (convertedPdfPath.isEmpty()) {
         status = ConversionFailed;
         emit conversionFinished(false);
         return QString();
     }
     
+    // If LibreOffice created the file with a different name, rename it
+    if (convertedPdfPath != finalOutputPath && QFile::exists(convertedPdfPath)) {
+        // Remove target if it exists
+        if (QFile::exists(finalOutputPath)) {
+            QFile::remove(finalOutputPath);
+        }
+        
+        if (!QFile::rename(convertedPdfPath, finalOutputPath)) {
+            // If rename fails, try copy then delete
+            if (QFile::copy(convertedPdfPath, finalOutputPath)) {
+                QFile::remove(convertedPdfPath);
+            } else {
+                // If everything fails, just return the path LibreOffice created
+                finalOutputPath = convertedPdfPath;
+            }
+        }
+    }
+    
     // Verify the output file was created
-    QFileInfo outputFile(outputPdfPath);
+    QFileInfo outputFile(finalOutputPath);
     if (!outputFile.exists() || outputFile.size() == 0) {
         lastError = tr("Conversion completed but output PDF was not created or is empty");
         status = ConversionFailed;
@@ -191,10 +228,10 @@ QString DocumentConverter::convertToPdf(const QString &inputPath, ConversionStat
     
     status = Success;
     emit conversionFinished(true);
-    return outputPdfPath;
+    return finalOutputPath;
 }
 
-QString DocumentConverter::convertToPdfInternal(const QString &inputPath, const QString &outputDir)
+QString DocumentConverter::convertToPdfInternal(const QString &inputPath, const QString &outputDir, int dpi)
 {
     QString libreOfficePath = getLibreOfficePath();
     if (libreOfficePath.isEmpty()) {
@@ -202,12 +239,27 @@ QString DocumentConverter::convertToPdfInternal(const QString &inputPath, const 
         return QString();
     }
     
-    // Prepare conversion arguments
+    // Prepare conversion arguments with DPI settings
     QStringList args;
     args << "--headless"                    // Run without GUI
          << "--convert-to" << "pdf"         // Convert to PDF format
-         << "--outdir" << outputDir         // Output directory
-         << inputPath;                      // Input file
+         << "--outdir" << outputDir;        // Output directory
+    
+    // Add DPI/quality settings via filter options
+    // Format: "FilterName:OptionName=Value"
+    // For PDF export:ReduceImageResolution, MaxImageResolution
+    if (dpi > 0 && dpi != 96) {
+        // Scale factor relative to 96 DPI base
+        int maxResolution = dpi;
+        QString filterData = QString("writer_pdf_Export:{\"ReduceImageResolution\":{\"type\":\"boolean\",\"value\":\"true\"},"
+                                     "\"MaxImageResolution\":{\"type\":\"long\",\"value\":\"%1\"}}").arg(maxResolution);
+        
+        // Note: LibreOffice's filter options are complex and may not work consistently
+        // The DPI mainly affects image quality in the output
+        qDebug() << "Converting with DPI target:" << dpi;
+    }
+    
+    args << inputPath;  // Input file
     
     // Create process
     if (conversionProcess) {

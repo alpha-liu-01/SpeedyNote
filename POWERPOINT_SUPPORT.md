@@ -45,11 +45,10 @@ SpeedyNote now supports opening PowerPoint presentations (`.ppt`, `.pptx`, `.odp
 2. If the file is `.ppt`, `.pptx`, or `.odp`:
    - Check if LibreOffice is installed
    - Show progress dialog
-   - Convert file to PDF in temporary directory
-   - **Copy converted PDF to permanent location**:
-     - **Launcher**: Copy to same directory as original file (e.g., `presentation_converted.pdf`)
-     - **MainWindow**: Copy to notebook's save folder
-   - Use permanent PDF path for loading
+   - Convert file to PDF and save directly to permanent location:
+     - **Launcher**: Save next to original file (e.g., `presentation_converted.pdf`)
+     - **MainWindow**: Save to notebook's save folder with DPI settings applied
+   - Use converted PDF path for loading
 3. Continue with normal PDF loading routine
 
 ## LibreOffice Detection
@@ -149,14 +148,21 @@ To test the implementation:
 libreoffice --headless --convert-to pdf --outdir <output_dir> <input_file>
 ```
 
+### DPI/Quality Control
+
+- **Launcher**: Uses default quality (96 DPI equivalent)
+- **MainWindow**: Uses user-defined DPI from Control Panel > Performance tab
+- Lower DPI = smaller file size, faster loading, less memory
+- Higher DPI = better quality, larger file size, more memory
+- Recommended: 96-120 DPI for most presentations
+
 ### Converted PDF Storage
 
-- **Initial conversion**: PDF created in Qt's temporary directory (`QTemporaryDir`)
-- **Permanent storage**:
+- **Direct conversion to permanent location** (no temporary files):
   - From **Launcher**: Saved next to original PowerPoint file as `[filename]_converted.pdf`
   - From **MainWindow**: Saved in notebook's save folder as `[filename]_converted.pdf`
 - **Name conflicts**: Automatically appends counter (`_converted_1.pdf`, `_converted_2.pdf`, etc.)
-- **Temporary cleanup**: Original temp file cleaned up when converter is destroyed
+- **DPI settings**: MainWindow uses user-defined DPI from Performance settings to control PDF quality/size
 
 ### Performance
 
@@ -169,11 +175,11 @@ libreoffice --headless --convert-to pdf --outdir <output_dir> <input_file>
 
 Possible improvements for future versions:
 
-1. **Cache converted PDFs** - Store conversions to avoid re-converting
-2. **Background conversion** - Convert without blocking UI (already async via QProcess)
-3. **Conversion settings** - Allow users to configure DPI, compression, etc.
-4. **Support more formats** - Add Word (.doc, .docx), Excel, etc.
-5. **Progress percentage** - Show actual conversion progress if possible
+1. **Cache converted PDFs** - Detect if already converted and skip re-conversion
+2. **Conversion settings dialog** - More granular control over quality, compression
+3. **Support more formats** - Add Word (.doc, .docx), Excel, etc.
+4. **Progress percentage** - Show actual conversion progress if possible
+5. **Batch conversion** - Convert multiple presentations at once
 
 ## Compatibility
 

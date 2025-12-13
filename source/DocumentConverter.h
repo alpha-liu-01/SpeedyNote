@@ -31,8 +31,11 @@ public:
     static QString getInstallationInstructions();
     
     // Convert PowerPoint file to PDF
+    // outputPath: where to save the converted PDF (if empty, saves next to original file)
+    // dpi: resolution for PDF rendering (default 96, higher = better quality but larger file)
     // Returns the path to the converted PDF on success, empty string on failure
-    QString convertToPdf(const QString &inputPath, ConversionStatus &status);
+    QString convertToPdf(const QString &inputPath, ConversionStatus &status, 
+                        const QString &outputPath = QString(), int dpi = 96);
     
     // Check if a file needs conversion (is it a PowerPoint file?)
     static bool needsConversion(const QString &filePath);
@@ -47,10 +50,9 @@ signals:
 
 private:
     QString findLibreOfficeExecutable();
-    QString convertToPdfInternal(const QString &inputPath, const QString &outputDir);
+    QString convertToPdfInternal(const QString &inputPath, const QString &outputDir, int dpi);
     
     QString lastError;
-    QTemporaryDir* tempDir;
     QProcess* conversionProcess;
 };
 

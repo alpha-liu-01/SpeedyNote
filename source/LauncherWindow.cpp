@@ -710,7 +710,7 @@ void LauncherWindow::onOpenPdfClicked()
             progressDialog.show();
             QCoreApplication::processEvents();
             
-            // Perform conversion
+            // Perform conversion (will save next to original file by default)
             DocumentConverter converter(this);
             DocumentConverter::ConversionStatus status;
             pdfPath = converter.convertToPdf(filePath, status);
@@ -729,30 +729,6 @@ void LauncherWindow::onOpenPdfClicked()
                 QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
                 return;
             }
-            
-            // Copy the converted PDF to a permanent location (next to the original file)
-            QFileInfo originalFileInfo(filePath);
-            QString permanentPdfDir = originalFileInfo.absolutePath();
-            QString permanentPdfName = originalFileInfo.completeBaseName() + "_converted.pdf";
-            QString permanentPdfPath = permanentPdfDir + "/" + permanentPdfName;
-            
-            // Check if file already exists and create unique name if needed
-            int counter = 1;
-            while (QFile::exists(permanentPdfPath)) {
-                permanentPdfName = originalFileInfo.completeBaseName() + QString("_converted_%1.pdf").arg(counter);
-                permanentPdfPath = permanentPdfDir + "/" + permanentPdfName;
-                counter++;
-            }
-            
-            // Copy the temporary PDF to permanent location
-            if (!QFile::copy(pdfPath, permanentPdfPath)) {
-                QMessageBox::critical(this, tr("Conversion Failed"), 
-                    tr("Failed to save converted PDF to:\n%1").arg(permanentPdfPath));
-                return;
-            }
-            
-            // Update pdfPath to point to permanent location
-            pdfPath = permanentPdfPath;
         }
         
         // Continue with normal PDF loading

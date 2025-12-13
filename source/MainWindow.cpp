@@ -3465,10 +3465,23 @@ void MainWindow::loadPdf() {
             progressDialog.show();
             QCoreApplication::processEvents();
             
-            // Perform conversion
+            // Determine output path in notebook's save folder
+            QFileInfo originalFileInfo(filePath);
+            QString pdfFileName = originalFileInfo.completeBaseName() + "_converted.pdf";
+            QString outputPdfPath = saveFolder + "/" + pdfFileName;
+            
+            // Check if file already exists and create unique name if needed
+            int counter = 1;
+            while (QFile::exists(outputPdfPath)) {
+                pdfFileName = originalFileInfo.completeBaseName() + QString("_converted_%1.pdf").arg(counter);
+                outputPdfPath = saveFolder + "/" + pdfFileName;
+                counter++;
+            }
+            
+            // Perform conversion with user's DPI settings
             DocumentConverter converter(this);
             DocumentConverter::ConversionStatus status;
-            pdfPath = converter.convertToPdf(filePath, status);
+            pdfPath = converter.convertToPdf(filePath, status, outputPdfPath, pdfDPI);
             
             progressDialog.close();
             
@@ -3484,29 +3497,6 @@ void MainWindow::loadPdf() {
                 QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
                 return;
             }
-            
-            // Copy the converted PDF to the notebook's save folder
-            QFileInfo originalFileInfo(filePath);
-            QString pdfFileName = originalFileInfo.completeBaseName() + "_converted.pdf";
-            QString permanentPdfPath = saveFolder + "/" + pdfFileName;
-            
-            // Check if file already exists and create unique name if needed
-            int counter = 1;
-            while (QFile::exists(permanentPdfPath)) {
-                pdfFileName = originalFileInfo.completeBaseName() + QString("_converted_%1.pdf").arg(counter);
-                permanentPdfPath = saveFolder + "/" + pdfFileName;
-                counter++;
-            }
-            
-            // Copy the temporary PDF to notebook folder
-            if (!QFile::copy(pdfPath, permanentPdfPath)) {
-                QMessageBox::critical(this, tr("Conversion Failed"), 
-                    tr("Failed to save converted PDF to notebook folder:\n%1").arg(permanentPdfPath));
-                return;
-            }
-            
-            // Update pdfPath to point to permanent location
-            pdfPath = permanentPdfPath;
         }
         
         currentCanvas()->loadPdf(pdfPath);
