@@ -88,29 +88,6 @@ this command to install SpeedyNote to your computer, and update with `sudo apt u
 4. Next time when you double click the `spn` notebook, all the notes with the PDF background will be loaded.
 5. Start writing/drawing using your stylus
 
----
-
-**Windows:**
-```
-Download from: https://www.libreoffice.org/download/download/
-```
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt install libreoffice
-```
-
-**Linux (Fedora):**
-```bash
-sudo dnf install libreoffice
-```
-
-**macOS:**
-```bash
-brew install --cask libreoffice
-```
-
-Once LibreOffice is installed, SpeedyNote will automatically detect it and enable PowerPoint conversion.
 
 ---
 
