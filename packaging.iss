@@ -1,5 +1,5 @@
 ; SpeedyNote Inno Setup Script
-#define MyAppVersion "0.12.0"
+#define MyAppVersion "0.12.1"
 
 [Setup]
 AppName=SpeedyNote

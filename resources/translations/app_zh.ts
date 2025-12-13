@@ -793,8 +793,8 @@
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="883"/>
-        <source>Version 0.12.0</source>
-        <translation type="unfinished">0.12.0 公测版</translation>
+        <source>Version 0.12.1</source>
+        <translation type="unfinished">0.12.1 公测版</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="935"/>
@@ -2303,8 +2303,8 @@ Would you like to save it as a SpeedyNote Package (.spn) file before closing?</s
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="97"/>
-        <source>SpeedyNote Beta 0.12.0</source>
-        <translation type="unfinished">极疾记 Beta 0.12.0</translation>
+        <source>SpeedyNote Beta 0.12.1</source>
+        <translation type="unfinished">极疾记 Beta 0.12.1</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="228"/>
@@ -2950,7 +2950,7 @@ Location: %2</source>
         <translation type="unfinished">添加到书签</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9083"/>
+        <location filename="../../source/MainWindow.cpp" line="9102"/>
         <source>This notebook was last accessed on page %1.
 
 Would you like to go directly to page %1, or start from page 1?</source>
@@ -2959,62 +2959,62 @@ Would you like to go directly to page %1, or start from page 1?</source>
 你是否要直接跳转到第%1页，还是说从头开始？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9086"/>
+        <location filename="../../source/MainWindow.cpp" line="9105"/>
         <source>Last Accessed Page</source>
         <translation type="unfinished">上次访问的页面</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9090"/>
+        <location filename="../../source/MainWindow.cpp" line="9109"/>
         <source>Go to Page %1</source>
         <translation type="unfinished">翻到第%1页</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9091"/>
+        <location filename="../../source/MainWindow.cpp" line="9110"/>
         <source>Start from Page 1</source>
         <translation type="unfinished">从头开始</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9111"/>
+        <location filename="../../source/MainWindow.cpp" line="9130"/>
         <source>Invalid Package</source>
         <translation type="unfinished">笔记本封装错误</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9112"/>
+        <location filename="../../source/MainWindow.cpp" line="9131"/>
         <source>The selected file is not a valid SpeedyNote package.</source>
         <translation type="unfinished">您选中的文件不是一个有效的SpeedyNote笔记本。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9170"/>
+        <location filename="../../source/MainWindow.cpp" line="9189"/>
         <source>File Exists</source>
         <translation type="unfinished">文件已存在</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9171"/>
+        <location filename="../../source/MainWindow.cpp" line="9190"/>
         <source>A file with this name already exists. Please choose a different name.</source>
         <translation type="unfinished">具有相同命名的文件已经存在。请换一个文件名。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9181"/>
+        <location filename="../../source/MainWindow.cpp" line="9200"/>
         <source>Creation Failed</source>
         <translation type="unfinished">创建失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9182"/>
+        <location filename="../../source/MainWindow.cpp" line="9201"/>
         <source>Failed to create the SpeedyNote package. Please check file permissions.</source>
         <translation type="unfinished">无法创建SpeedyNote笔记本封装。请检查文件权限。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9220"/>
+        <location filename="../../source/MainWindow.cpp" line="9239"/>
         <source>Package Created</source>
         <translation type="unfinished">笔记本创建成功</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9221"/>
+        <location filename="../../source/MainWindow.cpp" line="9240"/>
         <source>New SpeedyNote package &apos;%1&apos; has been created successfully!</source>
         <translation type="unfinished">新SpeedyNote笔记本“%1”已经成功创建！</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9566"/>
+        <location filename="../../source/MainWindow.cpp" line="9585"/>
         <source>Mouse Dial: %1</source>
         <translation type="unfinished">鼠标控制旋钮： %1</translation>
     </message>

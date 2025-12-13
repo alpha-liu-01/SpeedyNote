@@ -97,7 +97,7 @@ void MarkdownNotesSidebar::setupSearchUI() {
     fromPageSpinBox->setMinimum(1);
     fromPageSpinBox->setMaximum(9999);
     fromPageSpinBox->setValue(1);
-    fromPageSpinBox->setMinimumSize(70, 36);
+    fromPageSpinBox->setMinimumSize(36, 30);
     
     toLabel = new QLabel(tr("to"), searchContainer);
     
@@ -105,7 +105,7 @@ void MarkdownNotesSidebar::setupSearchUI() {
     toPageSpinBox->setMinimum(1);
     toPageSpinBox->setMaximum(9999);
     toPageSpinBox->setValue(10);
-    toPageSpinBox->setMinimumSize(70, 36);
+    toPageSpinBox->setMinimumSize(36, 30);
     
     searchAllPagesCheckBox = new QCheckBox(tr("All"), searchContainer);
     searchAllPagesCheckBox->setToolTip(tr("Search all pages in the notebook"));

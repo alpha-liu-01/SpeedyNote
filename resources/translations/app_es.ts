@@ -743,7 +743,7 @@
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="883"/>
-        <source>Version 0.12.0</source>
+        <source>Version 0.12.1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2085,7 +2085,7 @@ Would you like to save it as a SpeedyNote Package (.spn) file before closing?</s
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="97"/>
-        <source>SpeedyNote Beta 0.12.0</source>
+        <source>SpeedyNote Beta 0.12.1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2643,69 +2643,69 @@ Do you want to replace the link with the new PDF?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9083"/>
+        <location filename="../../source/MainWindow.cpp" line="9102"/>
         <source>This notebook was last accessed on page %1.
 
 Would you like to go directly to page %1, or start from page 1?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9086"/>
+        <location filename="../../source/MainWindow.cpp" line="9105"/>
         <source>Last Accessed Page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9090"/>
+        <location filename="../../source/MainWindow.cpp" line="9109"/>
         <source>Go to Page %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9091"/>
+        <location filename="../../source/MainWindow.cpp" line="9110"/>
         <source>Start from Page 1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9111"/>
+        <location filename="../../source/MainWindow.cpp" line="9130"/>
         <source>Invalid Package</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9112"/>
+        <location filename="../../source/MainWindow.cpp" line="9131"/>
         <source>The selected file is not a valid SpeedyNote package.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9170"/>
+        <location filename="../../source/MainWindow.cpp" line="9189"/>
         <source>File Exists</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9171"/>
+        <location filename="../../source/MainWindow.cpp" line="9190"/>
         <source>A file with this name already exists. Please choose a different name.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9181"/>
+        <location filename="../../source/MainWindow.cpp" line="9200"/>
         <source>Creation Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9182"/>
+        <location filename="../../source/MainWindow.cpp" line="9201"/>
         <source>Failed to create the SpeedyNote package. Please check file permissions.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9220"/>
+        <location filename="../../source/MainWindow.cpp" line="9239"/>
         <source>Package Created</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9221"/>
+        <location filename="../../source/MainWindow.cpp" line="9240"/>
         <source>New SpeedyNote package &apos;%1&apos; has been created successfully!</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="9566"/>
+        <location filename="../../source/MainWindow.cpp" line="9585"/>
         <source>Mouse Dial: %1</source>
         <translation type="unfinished"></translation>
     </message>
