@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "RecentNotebooksManager.h"
 #include "SpnPackageManager.h"
+#include "DocumentConverter.h"
 #include <QApplication>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
@@ -21,6 +22,8 @@
 #include <QPixmap>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QProgressDialog>
+#include <QCoreApplication>
 #include <QMenu>
 #include <QAction>
 #include <QContextMenuEvent>
@@ -249,14 +252,14 @@ void LauncherWindow::setupOpenPdfTab()
     layout->addWidget(titleLabel);
     
     // Description
-    QLabel *descLabel = new QLabel(tr("Select a PDF file to create a notebook for annotation"));
+    QLabel *descLabel = new QLabel(tr("Select a PDF or PowerPoint file to create a notebook for annotation"));
     descLabel->setObjectName("descLabel");
     descLabel->setAlignment(Qt::AlignCenter);
     descLabel->setWordWrap(true);
     layout->addWidget(descLabel);
     
     // Open button
-    QPushButton *openBtn = new QPushButton(tr("Browse for PDF"));
+    QPushButton *openBtn = new QPushButton(tr("Browse for PDF/PPT"));
     openBtn->setObjectName("primaryButton");
     openBtn->setFixedSize(190, 50);
     connect(openBtn, &QPushButton::clicked, this, &LauncherWindow::onOpenPdfClicked);
@@ -679,12 +682,62 @@ void LauncherWindow::onNewNotebookClicked()
 
 void LauncherWindow::onOpenPdfClicked()
 {
-    QString pdfPath = QFileDialog::getOpenFileName(this, 
-        tr("Open PDF File"), 
+    QString filePath = QFileDialog::getOpenFileName(this, 
+        tr("Open PDF or PowerPoint File"), 
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
-        tr("PDF Files (*.pdf)"));
+        tr("Documents (*.pdf *.ppt *.pptx *.odp);;PDF Files (*.pdf);;PowerPoint Files (*.ppt *.pptx);;OpenDocument Presentation (*.odp)"));
     
-    if (!pdfPath.isEmpty()) {
+    if (!filePath.isEmpty()) {
+        // Check if the file needs conversion (PPT/PPTX/ODP)
+        QString pdfPath = filePath;
+        
+        if (DocumentConverter::needsConversion(filePath)) {
+            // Check if LibreOffice is available
+            if (!DocumentConverter::isLibreOfficeAvailable()) {
+                QMessageBox::warning(this, 
+                    tr("LibreOffice Required"), 
+                    DocumentConverter::getInstallationInstructions());
+                return;
+            }
+            
+            // Show progress dialog
+            QProgressDialog progressDialog(
+                tr("Converting %1 to PDF...").arg(QFileInfo(filePath).fileName()),
+                QString(), 0, 0, this);
+            progressDialog.setWindowModality(Qt::WindowModal);
+            progressDialog.setCancelButton(nullptr);
+            progressDialog.setMinimumDuration(0);
+            progressDialog.show();
+            QCoreApplication::processEvents();
+            
+            // Perform conversion
+            DocumentConverter converter(this);
+            DocumentConverter::ConversionStatus status;
+            pdfPath = converter.convertToPdf(filePath, status);
+            
+            progressDialog.close();
+            
+            if (status != DocumentConverter::Success || pdfPath.isEmpty()) {
+                QString errorMsg = tr("Failed to convert PowerPoint to PDF.\n\n");
+                
+                if (status == DocumentConverter::LibreOfficeNotFound) {
+                    errorMsg += DocumentConverter::getInstallationInstructions();
+                } else {
+                    errorMsg += tr("Error: %1").arg(converter.getLastError());
+                }
+                
+                QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
+                return;
+            }
+            
+            // Show success message
+            QMessageBox::information(this, 
+                tr("Conversion Successful"), 
+                tr("PowerPoint file has been converted to PDF successfully.\n\n"
+                   "The converted PDF will be used for your notebook."));
+        }
+        
+        // Continue with normal PDF loading
         // Try to find existing MainWindow first
         MainWindow *existingMainWindow = findExistingMainWindow();
         MainWindow *targetMainWindow = nullptr;

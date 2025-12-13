@@ -49,6 +49,7 @@
 #include "SDLControllerManager.h"
 #include "LauncherWindow.h" // Added for launcher access
 #include "PdfOpenDialog.h" // Added for PDF file association
+#include "DocumentConverter.h" // Added for PowerPoint conversion
 #include <poppler-qt6.h> // For PDF outline parsing
 #include <memory> // For std::shared_ptr
 
@@ -3438,9 +3439,60 @@ void MainWindow::loadPdf() {
         return;
     }
 
-    QString filePath = QFileDialog::getOpenFileName(this, tr("Select PDF"), "", "PDF Files (*.pdf)");
+    QString filePath = QFileDialog::getOpenFileName(this, tr("Select PDF or PowerPoint"), "", 
+        tr("Documents (*.pdf *.ppt *.pptx *.odp);;PDF Files (*.pdf);;PowerPoint Files (*.ppt *.pptx);;OpenDocument Presentation (*.odp)"));
+    
     if (!filePath.isEmpty()) {
-        currentCanvas()->loadPdf(filePath);
+        // Check if the file needs conversion (PPT/PPTX/ODP)
+        QString pdfPath = filePath;
+        
+        if (DocumentConverter::needsConversion(filePath)) {
+            // Check if LibreOffice is available
+            if (!DocumentConverter::isLibreOfficeAvailable()) {
+                QMessageBox::warning(this, 
+                    tr("LibreOffice Required"), 
+                    DocumentConverter::getInstallationInstructions());
+                return;
+            }
+            
+            // Show progress dialog
+            QProgressDialog progressDialog(
+                tr("Converting %1 to PDF...").arg(QFileInfo(filePath).fileName()),
+                QString(), 0, 0, this);
+            progressDialog.setWindowModality(Qt::WindowModal);
+            progressDialog.setCancelButton(nullptr);
+            progressDialog.setMinimumDuration(0);
+            progressDialog.show();
+            QCoreApplication::processEvents();
+            
+            // Perform conversion
+            DocumentConverter converter(this);
+            DocumentConverter::ConversionStatus status;
+            pdfPath = converter.convertToPdf(filePath, status);
+            
+            progressDialog.close();
+            
+            if (status != DocumentConverter::Success || pdfPath.isEmpty()) {
+                QString errorMsg = tr("Failed to convert PowerPoint to PDF.\n\n");
+                
+                if (status == DocumentConverter::LibreOfficeNotFound) {
+                    errorMsg += DocumentConverter::getInstallationInstructions();
+                } else {
+                    errorMsg += tr("Error: %1").arg(converter.getLastError());
+                }
+                
+                QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
+                return;
+            }
+            
+            // Show success message
+            QMessageBox::information(this, 
+                tr("Conversion Successful"), 
+                tr("PowerPoint file has been converted to PDF successfully.\n\n"
+                   "The converted PDF will be used for your notebook."));
+        }
+        
+        currentCanvas()->loadPdf(pdfPath);
         
         // ✅ Load the current page to display the PDF immediately
         int currentPage = getCurrentPageForCanvas(currentCanvas());
