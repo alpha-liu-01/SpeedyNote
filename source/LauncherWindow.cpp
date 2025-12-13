@@ -110,7 +110,7 @@ void LauncherWindow::setupUi()
     // Add tab items with explicit sizing
     QListWidgetItem *returnItem = new QListWidgetItem(loadThemedIcon("recent"), tr("Return"));
     QListWidgetItem *newItem = new QListWidgetItem(loadThemedIcon("addtab"), tr("New"));
-    QListWidgetItem *openPdfItem = new QListWidgetItem(loadThemedIcon("pdf"), tr("Open PDF"));
+    QListWidgetItem *openPdfItem = new QListWidgetItem(loadThemedIcon("pdf"), tr("Open File"));
     QListWidgetItem *openNotebookItem = new QListWidgetItem(loadThemedIcon("folder"), tr("Open Notes"));
     QListWidgetItem *recentItem = new QListWidgetItem(loadThemedIcon("benchmark"), tr("Recent"));
     QListWidgetItem *starredItem = new QListWidgetItem(loadThemedIcon("star"), tr("Starred"));

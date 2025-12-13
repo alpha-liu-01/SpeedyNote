@@ -226,7 +226,7 @@ void MainWindow::setupUi() {
     clearPdfButton->setIcon(pdfDeleteIcon);
     loadPdfButton->setStyleSheet(buttonStyle);
     clearPdfButton->setStyleSheet(buttonStyle);
-    loadPdfButton->setToolTip(tr("Manage PDF"));
+    loadPdfButton->setToolTip(tr("Import/Clear Document"));
     clearPdfButton->setToolTip(tr("Clear PDF"));
     clearPdfButton->setVisible(false); // ✅ Hide clearPdfButton to save space
     connect(loadPdfButton, &QPushButton::clicked, this, &MainWindow::handleSmartPdfButton);
@@ -1152,7 +1152,7 @@ void MainWindow::setupUi() {
     overflowMenu->setObjectName("overflowMenu");
     
     // Add actions to the overflow menu
-    QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Manage PDF"));
+    QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Import/Clear Document"));
     connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
     
     QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
@@ -3560,8 +3560,8 @@ void MainWindow::handleSmartPdfButton() {
     
     // ✅ 1. Check if tab is not saved to .spn file - warn user
     if (currentFolder.isEmpty() || currentFolder == tempFolder) {
-        QMessageBox::warning(this, tr("Cannot Manage PDF"), 
-            tr("Please save this notebook as a SpeedyNote Package (.spn) file before managing PDF.\n\n"
+        QMessageBox::warning(this, tr("Cannot Import/Clear Document"), 
+            tr("Please save this notebook as a SpeedyNote Package (.spn) file before importing a document.\n\n"
                "Click the Save button to save your notebook first."));
         return;
     }

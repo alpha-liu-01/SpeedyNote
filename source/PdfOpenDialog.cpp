@@ -13,7 +13,7 @@
 PdfOpenDialog::PdfOpenDialog(const QString &pdfPath, QWidget *parent)
     : QDialog(parent), result(Cancel), pdfPath(pdfPath)
 {
-    setWindowTitle(tr("Open PDF with SpeedyNote"));
+    setWindowTitle(tr("Open File with SpeedyNote"));
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
     setModal(true);
     
