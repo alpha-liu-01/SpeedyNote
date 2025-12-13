@@ -3481,7 +3481,7 @@ void MainWindow::loadPdf() {
             // Perform conversion with user's DPI settings
             DocumentConverter converter(this);
             DocumentConverter::ConversionStatus status;
-            pdfPath = converter.convertToPdf(filePath, status, outputPdfPath, pdfDPI);
+            pdfPath = converter.convertToPdf(filePath, status, outputPdfPath, getPdfDPI());
             
             progressDialog.close();
             
