@@ -29,6 +29,8 @@
 #include <QTabletEvent>
 #include <QTouchEvent>
 #include <QWheelEvent>
+#include <QGestureEvent>
+#include <QPinchGesture>
 #include <QApplication>
 #include <QtMath>
 #include <QPainterPath>
@@ -74,6 +76,9 @@ InkCanvas::InkCanvas(QWidget *parent)
     setAttribute(Qt::WA_StaticContents);
     setTabletTracking(true);
     setAttribute(Qt::WA_AcceptTouchEvents);  // Enable touch events
+    
+    // Enable pinch gesture recognition (for Linux/KDE trackpad pinch-to-zoom)
+    grabGesture(Qt::PinchGesture);
 
     // Enable immediate updates for smoother animation
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -3072,6 +3077,58 @@ void InkCanvas::saveNotebookId() {
 
 
 bool InkCanvas::event(QEvent *event) {
+    // Handle native pinch gestures (Linux/KDE trackpad pinch-to-zoom)
+    // On Linux, pinch-to-zoom comes as QPinchGesture, not Ctrl+Wheel like Windows
+    if (event->type() == QEvent::Gesture) {
+        QGestureEvent *gestureEvent = static_cast<QGestureEvent*>(event);
+        if (QPinchGesture *pinch = static_cast<QPinchGesture*>(gestureEvent->gesture(Qt::PinchGesture))) {
+            // DISABLED MODE: Block all gestures
+            if (touchGestureMode == TouchGestureMode::Disabled) {
+                event->accept();
+                return true;
+            }
+            
+            // Y-AXIS ONLY MODE: Disable pinch-zoom
+            if (touchGestureMode == TouchGestureMode::YAxisOnly) {
+                event->accept();
+                return true;
+            }
+            
+            if (pinch->state() == Qt::GestureStarted) {
+                // Initialize zoom at gesture start
+                internalZoomFactor = zoomFactor;
+                targetZoomFactor = zoomFactor;
+                isTrackpadPinchZooming = true;
+            }
+            
+            if (pinch->state() == Qt::GestureUpdated || pinch->state() == Qt::GestureStarted) {
+                // Get scale factor from gesture
+                qreal scaleFactor = pinch->scaleFactor();
+                QPointF centerPoint = pinch->centerPoint();
+                
+                // Update target zoom (accumulative)
+                targetZoomFactor *= scaleFactor;
+                targetZoomFactor = qBound(10.0, targetZoomFactor, 400.0);
+                
+                // Store zoom center point
+                trackpadZoomCenterPoint = mapFromGlobal(centerPoint.toPoint());
+                
+                // Start/continue smooth zoom animation
+                if (!trackpadZoomAnimationTimer->isActive()) {
+                    trackpadZoomAnimationTimer->start();
+                }
+            }
+            
+            if (pinch->state() == Qt::GestureFinished || pinch->state() == Qt::GestureCanceled) {
+                isTrackpadPinchZooming = false;
+                // Let animation finish naturally
+            }
+            
+            event->accept();
+            return true;
+        }
+    }
+    
     // Handle wheel events for trackpad gesture bridging
     if (event->type() == QEvent::Wheel) {
         // ✅ When touch gestures are DISABLED, block ALL wheel events immediately
