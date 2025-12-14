@@ -784,7 +784,7 @@ void MainWindow::setupUi() {
     // for a while to catch subsequent events that might fail detection (e.g., large angleDelta momentum)
     trackpadModeTimer = new QTimer(this);
     trackpadModeTimer->setSingleShot(true);
-    trackpadModeTimer->setInterval(200); // Stay in trackpad mode for 200ms after last detected event
+    trackpadModeTimer->setInterval(350); // Stay in trackpad mode for 350ms - covers Windows trackpad momentum
     connect(trackpadModeTimer, &QTimer::timeout, this, [this]() {
         trackpadModeActive = false;
     });

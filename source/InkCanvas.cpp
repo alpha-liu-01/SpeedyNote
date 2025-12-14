@@ -137,7 +137,7 @@ InkCanvas::InkCanvas(QWidget *parent)
     // Windows doesn't provide scroll phases, so we detect gesture end via timeout
     trackpadScrollTimeoutTimer = new QTimer(this);
     trackpadScrollTimeoutTimer->setSingleShot(true);
-    trackpadScrollTimeoutTimer->setInterval(120); // 120ms timeout (slightly longer than typical wheel event interval)
+    trackpadScrollTimeoutTimer->setInterval(300); // 300ms timeout - long enough to capture Windows trackpad momentum
     connect(trackpadScrollTimeoutTimer, &QTimer::timeout, this, &InkCanvas::resetTrackpadScrollingState);
 
     // Initialize trackpad pinch-zoom timeout timer (detects end of pinch-zoom gesture)
@@ -3078,16 +3078,9 @@ void InkCanvas::saveNotebookId() {
 
 
 bool InkCanvas::event(QEvent *event) {
-    // Debug: Log gesture and wheel events
-    if (event->type() == QEvent::Gesture || event->type() == QEvent::Wheel || 
-        event->type() == QEvent::NativeGesture) {
-        qDebug() << "EVENT TYPE:" << event->type();
-    }
-    
     // Handle native gestures (macOS/Linux trackpad)
     if (event->type() == QEvent::NativeGesture) {
         QNativeGestureEvent *nge = static_cast<QNativeGestureEvent*>(event);
-        qDebug() << "NativeGesture:" << nge->gestureType() << "value=" << nge->value() << "pos=" << nge->position();
         
         // Handle zoom gesture
         if (nge->gestureType() == Qt::ZoomNativeGesture) {
@@ -3128,9 +3121,7 @@ bool InkCanvas::event(QEvent *event) {
     // On Linux, pinch-to-zoom comes as QPinchGesture, not Ctrl+Wheel like Windows
     if (event->type() == QEvent::Gesture) {
         QGestureEvent *gestureEvent = static_cast<QGestureEvent*>(event);
-        qDebug() << "Gesture event received! Gestures:" << gestureEvent->gestures();
         if (QPinchGesture *pinch = static_cast<QPinchGesture*>(gestureEvent->gesture(Qt::PinchGesture))) {
-            qDebug() << "PinchGesture: state=" << pinch->state() << "scale=" << pinch->scaleFactor() << "center=" << pinch->centerPoint();
             // DISABLED MODE: Block all gestures
             if (touchGestureMode == TouchGestureMode::Disabled) {
                 event->accept();
@@ -3180,17 +3171,6 @@ bool InkCanvas::event(QEvent *event) {
     
     // Handle wheel events for trackpad gesture bridging
     if (event->type() == QEvent::Wheel) {
-        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
-        
-        // Debug ALL wheel events to diagnose Linux trackpad behavior
-        const QInputDevice *dbgDevice = wheelEvent->device();
-        qDebug() << "WHEEL:" 
-                 << "delta=" << wheelEvent->angleDelta()
-                 << "pixel=" << wheelEvent->pixelDelta()
-                 << "phase=" << wheelEvent->phase()
-                 << "Ctrl=" << (wheelEvent->modifiers() & Qt::ControlModifier ? "yes" : "no")
-                 << "device=" << (dbgDevice ? dbgDevice->type() : QInputDevice::DeviceType::Unknown);
-        
         // ✅ When touch gestures are DISABLED, block ALL wheel events immediately
         // This ensures trackpad does NOTHING when disabled - no scrolling, no zooming, no fallback
         if (touchGestureMode == TouchGestureMode::Disabled) {
@@ -3198,6 +3178,7 @@ bool InkCanvas::event(QEvent *event) {
             return true; // Block everything
         }
         
+        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
         
         // Check if this event comes from a touchpad device
         // Qt 6 provides device type information which is more reliable than heuristics
@@ -3244,11 +3225,6 @@ bool InkCanvas::event(QEvent *event) {
             trackpadPinchZoomTimeoutTimer->start();
         }
         
-        // Debug output for trackpad investigation
-        if (hasCtrlModifier) {
-            qDebug() << "Wheel+Ctrl: isFromTouchpad=" << isFromTouchpad << "isPinchZoom=" << isPinchZoom 
-                     << "ctrlAge=" << getCtrlKeyPressAge() << "delta=" << wheelEvent->angleDelta();
-        }
         
         if (isPinchZoom) {
             // Trackpad pinch-to-zoom gesture - ALWAYS handle regardless of touchGestureMode
@@ -3285,8 +3261,10 @@ bool InkCanvas::event(QEvent *event) {
         int angleX = qAbs(wheelEvent->angleDelta().x());
         bool hasSmallAngle = (angleY > 0 && angleY < 120) || (angleX > 0 && angleX < 120);
         
-        // Consider it trackpad if: device is touchpad, has pixel delta, has scroll phase, or small angles
-        bool isTrackpad = isFromTouchpad || hasPixelDelta || hasScrollPhase || (hasSmallAngle && !hasCtrlModifier);
+        // ✅ CRITICAL FIX: If we're already in a trackpad scrolling gesture, treat ALL subsequent
+        // wheel events as trackpad, even if they fail detection (e.g., momentum events with large angles).
+        // This prevents Windows trackpad momentum events from being handled as mouse wheel.
+        bool isTrackpad = isTrackpadScrolling || isFromTouchpad || hasPixelDelta || hasScrollPhase || (hasSmallAngle && !hasCtrlModifier);
         
         if (isTrackpad) {
             // Trackpad detected - handle trackpad scroll
