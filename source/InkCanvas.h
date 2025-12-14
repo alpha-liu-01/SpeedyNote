@@ -285,14 +285,12 @@ public:
         activeNoteWatchers.clear();
     }
 
-    // Touch gesture support
+    // Touch and trackpad gesture support
     void setTouchGestureMode(TouchGestureMode mode) { touchGestureMode = mode; }
     TouchGestureMode getTouchGestureMode() const { return touchGestureMode; }
-    bool isTouchPanningActive() const { return isTouchPanning; } // Check if actively touch panning
-    bool isTrackpadScrollingActive() const { return isTrackpadScrolling; } // Check if actively trackpad scrolling
-    bool isTrackpadPinchZoomingActive() const { return isTrackpadPinchZooming; } // Check if actively trackpad pinch-zooming
-
-    // Trackpad gesture support (bridges trackpad wheel events to touch gesture system)
+    bool isTouchPanningActive() const { return isTouchPanning; }
+    bool isTrackpadScrollingActive() const { return isTrackpadScrolling; }
+    bool isTrackpadPinchZoomingActive() const { return isTrackpadPinchZooming; }
     void handleTrackpadScroll(qreal pixelDeltaX, qreal pixelDeltaY, bool gestureStart, bool gestureEnd);
     void handleTrackpadPinchZoom(qreal scaleFactor, QPointF centerPoint);
     void setCtrlKeyPhysicallyPressed(bool pressed) { 
@@ -613,21 +611,21 @@ private:
     QPointF pendingContinuationTouchPos; // Touch position at the moment of page switch
     QElapsedTimer pageSwitchRecoveryTimer; // Timer to ignore spurious multi-touch events after page switch
 
-    // Trackpad gesture support (bridges trackpad wheel events to touch gesture system)
-    QTimer* trackpadScrollTimeoutTimer = nullptr; // Detects trackpad scroll gesture end (Windows doesn't have phases)
-    QTimer* trackpadPinchZoomTimeoutTimer = nullptr; // Detects trackpad pinch-zoom gesture end
-    QTimer* trackpadZoomAnimationTimer = nullptr; // Timer for smooth zoom animation (60fps interpolation)
-    bool isTrackpadScrolling = false; // True when actively scrolling with trackpad
-    bool isTrackpadPinchZooming = false; // True when actively pinch-zooming with trackpad
-    qreal targetZoomFactor = 100.0; // Target zoom level for smooth interpolation
-    QPointF trackpadZoomCenterPoint; // Center point for trackpad pinch-zoom
-    QElapsedTimer trackpadVelocityTimer; // Timer for velocity calculation during trackpad scroll
-    QList<QPair<QPointF, qint64>> trackpadRecentVelocities; // Recent velocities for trackpad inertia
-    bool ctrlKeyPhysicallyPressed = false; // Track if Ctrl key is physically pressed (to distinguish from pinch-zoom)
-    QElapsedTimer ctrlKeyPressTimer; // Track WHEN Ctrl was pressed (for synthetic Ctrl detection)
-    void resetTrackpadScrollingState(); // Called by timeout timer to end trackpad scroll gesture
-    void resetTrackpadPinchZoomState(); // Called by timeout timer to end trackpad pinch-zoom gesture
-    void updateTrackpadZoomAnimation(); // Smoothly interpolate zoom toward target (60fps)
+    // Trackpad gesture support (scrolling and pinch-to-zoom)
+    QTimer* trackpadScrollTimeoutTimer = nullptr;
+    QTimer* trackpadPinchZoomTimeoutTimer = nullptr;
+    QTimer* trackpadZoomAnimationTimer = nullptr;
+    bool isTrackpadScrolling = false;
+    bool isTrackpadPinchZooming = false;
+    qreal targetZoomFactor = 100.0;
+    QPointF trackpadZoomCenterPoint;
+    QElapsedTimer trackpadVelocityTimer;
+    QList<QPair<QPointF, qint64>> trackpadRecentVelocities;
+    bool ctrlKeyPhysicallyPressed = false;
+    QElapsedTimer ctrlKeyPressTimer;
+    void resetTrackpadScrollingState();
+    void resetTrackpadPinchZoomState();
+    void updateTrackpadZoomAnimation();
 
     // Background style members (moved to unified JSON metadata section above)
 

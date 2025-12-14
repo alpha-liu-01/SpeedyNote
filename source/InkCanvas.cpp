@@ -3169,92 +3169,70 @@ bool InkCanvas::event(QEvent *event) {
         }
     }
     
-    // Handle wheel events for trackpad gesture bridging
+    // ========================================================================
+    // WHEEL EVENT HANDLING: Trackpad Gestures
+    // ========================================================================
+    // MainWindow routes trackpad events here; mouse wheel is handled there.
+    // This handles: trackpad scrolling and trackpad pinch-to-zoom (Ctrl+Wheel)
+    // ========================================================================
     if (event->type() == QEvent::Wheel) {
         QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
         
-        // ✅ When touch gestures are DISABLED, block trackpad events but allow mouse wheel
-        // Mouse wheel events are handled by MainWindow, so anything reaching here is trackpad
+        // --- Extract event properties ---
+        const QInputDevice *device = wheelEvent->device();
+        const bool isFromTouchpad = device && (device->type() == QInputDevice::DeviceType::TouchPad);
+        const bool hasCtrlModifier = wheelEvent->modifiers() & Qt::ControlModifier;
+        const bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
+        const bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
+        const int angleX = qAbs(wheelEvent->angleDelta().x());
+        const int angleY = qAbs(wheelEvent->angleDelta().y());
+        const bool hasSmallAngle = (angleY > 0 && angleY < 120) || (angleX > 0 && angleX < 120);
+        
+        // --- Disabled mode: block trackpad, allow mouse wheel to propagate ---
         if (touchGestureMode == TouchGestureMode::Disabled) {
-            // Check if this looks like a mouse wheel event (exactly 120 units, no trackpad signals)
-            bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
-            bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
-            int angleY = qAbs(wheelEvent->angleDelta().y());
-            int angleX = qAbs(wheelEvent->angleDelta().x());
-            bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
-            
+            const bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
             if (hasExactWheelStep && !hasPixelDelta && !hasScrollPhase) {
-                // Looks like mouse wheel - let it propagate to MainWindow for handling
-                return QWidget::event(event);
+                return QWidget::event(event); // Let mouse wheel propagate to MainWindow
             }
-            
-            // Trackpad event - block it
             event->accept();
-            return true;
+            return true; // Block trackpad
         }
         
-        
-        // Check if this event comes from a touchpad device
-        // Qt 6 provides device type information which is more reliable than heuristics
-        const QInputDevice *device = wheelEvent->device();
-        bool isFromTouchpad = device && (device->type() == QInputDevice::DeviceType::TouchPad);
-        
-        // Check for Ctrl modifier (used by Windows for touchpad pinch-zoom)
-        bool hasCtrlModifier = wheelEvent->modifiers() & Qt::ControlModifier;
-        
-        // Trackpad pinch-zoom state machine:
-        // 1. If already in pinch-zoom mode, continue handling Ctrl+wheel as pinch-zoom
-        // 2. If not in pinch-zoom mode, use synthetic Ctrl detection to START pinch-zoom
-        // 3. Reset timeout timer on every event to keep gesture alive
-        
+        // ====================================================================
+        // PINCH-TO-ZOOM (Ctrl+Wheel from trackpad)
+        // ====================================================================
+        // Windows: Trackpad pinch generates synthetic Ctrl + wheel events
+        // Linux: Trackpad may be reported as TouchPad device, or Ctrl never pressed
+        // ====================================================================
         bool isPinchZoom = false;
         
-        if (isTrackpadPinchZooming && hasCtrlModifier) {
-            // Already in pinch-zoom mode - continue
-            isPinchZoom = true;
-        } else if (hasCtrlModifier) {
-            // Not in pinch-zoom mode - check if this is the START of a pinch-zoom gesture
-            // Use timing-based detection: if Ctrl was pressed very recently, it's synthetic
-            qint64 ctrlAge = getCtrlKeyPressAge();
-            bool ctrlPressedRecently = ctrlAge >= 0 && ctrlAge < 100; // Ctrl pressed within last 100ms
-            bool isSyntheticCtrl = ctrlPressedRecently;
-            
-            // Start pinch-zoom if:
-            // - touchpad device (Linux reports this correctly)
-            // - synthetic Ctrl (Windows timing detection)
-            // - Ctrl not physically pressed (fallback - assume trackpad if Ctrl wasn't pressed by user)
-            // - Linux: also check if Ctrl key timer is invalid (never pressed physically)
-            bool ctrlNeverPressed = getCtrlKeyPressAge() < 0; // Timer not started = Ctrl never pressed
-            
-            if (isFromTouchpad || isSyntheticCtrl || ctrlNeverPressed) {
+        if (hasCtrlModifier) {
+            if (isTrackpadPinchZooming) {
+                // Continue existing pinch-zoom gesture
                 isPinchZoom = true;
-                isTrackpadPinchZooming = true;
-                // Initialize target zoom to current zoom at gesture start
-                targetZoomFactor = internalZoomFactor;
+            } else {
+                // Detect start of pinch-zoom gesture
+                const qint64 ctrlAge = getCtrlKeyPressAge();
+                const bool isSyntheticCtrl = (ctrlAge >= 0 && ctrlAge < 100); // Ctrl pressed within 100ms
+                const bool ctrlNeverPressed = (ctrlAge < 0); // Ctrl was never physically pressed
+                
+                if (isFromTouchpad || isSyntheticCtrl || ctrlNeverPressed) {
+                    isPinchZoom = true;
+                    isTrackpadPinchZooming = true;
+                    targetZoomFactor = internalZoomFactor;
+                }
             }
         }
         
-        // Reset pinch-zoom timeout timer on every Ctrl+wheel event
-        if (isPinchZoom && trackpadPinchZoomTimeoutTimer) {
-            trackpadPinchZoomTimeoutTimer->start();
-        }
-        
-        
         if (isPinchZoom) {
-            // Trackpad pinch-to-zoom gesture - ALWAYS handle regardless of touchGestureMode
-            // Use smooth animation like touchscreen: accumulate target zoom, interpolate smoothly
-            qreal delta = wheelEvent->angleDelta().y();
+            trackpadPinchZoomTimeoutTimer->start();
             
-            // Update target zoom (accumulative - each wheel event adds to target)
-            // Scale factor: 120 units = ~8% zoom change to target
-            qreal scaleFactor = 1.0 + (delta / 1500.0);
-            targetZoomFactor *= scaleFactor;
-            targetZoomFactor = qBound(10.0, targetZoomFactor, 400.0);
-            
-            // Store zoom center point
+            // Smooth zoom animation: accumulate target, interpolate at 60fps
+            const qreal delta = wheelEvent->angleDelta().y();
+            const qreal scaleFactor = 1.0 + (delta / 1500.0); // ~8% zoom per 120 units
+            targetZoomFactor = qBound(10.0, targetZoomFactor * scaleFactor, 400.0);
             trackpadZoomCenterPoint = wheelEvent->position();
             
-            // Start/continue smooth zoom animation (60fps interpolation)
             if (!trackpadZoomAnimationTimer->isActive()) {
                 trackpadZoomAnimationTimer->start();
             }
@@ -3263,72 +3241,51 @@ bool InkCanvas::event(QEvent *event) {
             return true;
         }
         
-        // Check if this is a trackpad scroll (not a regular mouse wheel)
-        // Trackpad scroll detection: use pixelDelta if available, or check for scroll phases
-        QPoint pixelDelta = wheelEvent->pixelDelta();
-        bool hasPixelDelta = !pixelDelta.isNull();
-        bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
-        
-        // Also detect trackpad by checking for small angleDelta values (< 120 is typical for trackpad)
-        // But this is less reliable, so we combine with other signals
-        int angleY = qAbs(wheelEvent->angleDelta().y());
-        int angleX = qAbs(wheelEvent->angleDelta().x());
-        bool hasSmallAngle = (angleY > 0 && angleY < 120) || (angleX > 0 && angleX < 120);
-        
-        // ✅ CRITICAL FIX: If we're already in a trackpad scrolling gesture, treat ALL subsequent
-        // wheel events as trackpad, even if they fail detection (e.g., momentum events with large angles).
-        // This prevents Windows trackpad momentum events from being handled as mouse wheel.
-        bool isTrackpad = isTrackpadScrolling || isFromTouchpad || hasPixelDelta || hasScrollPhase || (hasSmallAngle && !hasCtrlModifier);
+        // ====================================================================
+        // TRACKPAD SCROLLING
+        // ====================================================================
+        // Detection: pixelDelta, scrollPhase, small angleDelta, or active gesture
+        // ====================================================================
+        const bool isTrackpad = isTrackpadScrolling || isFromTouchpad || hasPixelDelta || 
+                                hasScrollPhase || (hasSmallAngle && !hasCtrlModifier);
         
         if (isTrackpad) {
-            // Trackpad detected - handle trackpad scroll
+            // Calculate scroll delta
             qreal deltaX, deltaY;
-            
             if (hasPixelDelta) {
-                // Use pixel delta for precise trackpad scrolling
-                deltaX = pixelDelta.x();
-                deltaY = pixelDelta.y();
+                deltaX = wheelEvent->pixelDelta().x();
+                deltaY = wheelEvent->pixelDelta().y();
             } else {
-                // Fall back to angle delta, convert to approximate pixels
-                // angleDelta is in 1/8 degree units, typical mouse wheel step is 15 degrees (120 units)
-                // For trackpad, we use a smaller conversion factor for smoother scrolling
-                deltaX = wheelEvent->angleDelta().x() / 4.0; // Approximate pixel conversion
+                deltaX = wheelEvent->angleDelta().x() / 4.0;
                 deltaY = wheelEvent->angleDelta().y() / 4.0;
             }
             
-            // Determine gesture phase
+            // Determine gesture phase (Windows lacks scroll phases)
             bool gestureStart = false;
             bool gestureEnd = false;
             
-            Qt::ScrollPhase phase = wheelEvent->phase();
-            if (phase == Qt::ScrollBegin) {
-                gestureStart = true;
-            } else if (phase == Qt::ScrollEnd) {
-                gestureEnd = true;
-            } else if (phase == Qt::NoScrollPhase) {
-                // Windows doesn't provide phases - use timeout-based detection
-                // First event after timeout = gesture start
-                if (!isTrackpadScrolling) {
+            switch (wheelEvent->phase()) {
+                case Qt::ScrollBegin:
                     gestureStart = true;
-                }
-                // Reset timeout timer on each event
-                if (trackpadScrollTimeoutTimer) {
+                    break;
+                case Qt::ScrollEnd:
+                    gestureEnd = true;
+                    break;
+                case Qt::NoScrollPhase:
+                    gestureStart = !isTrackpadScrolling;
                     trackpadScrollTimeoutTimer->start();
-                }
-            } else {
-                // ScrollUpdate or ScrollMomentum - reset timeout
-                if (trackpadScrollTimeoutTimer) {
+                    break;
+                default:
                     trackpadScrollTimeoutTimer->start();
-                }
+                    break;
             }
             
             handleTrackpadScroll(deltaX, deltaY, gestureStart, gestureEnd);
-            
             event->accept();
             return true;
         }
         
-        // Not a trackpad event - let it propagate to MainWindow for mouse wheel handling
+        // Not a trackpad event - let MainWindow handle as mouse wheel
         return QWidget::event(event);
     }
     
