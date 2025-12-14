@@ -150,14 +150,14 @@ static void applySystemPalette(QApplication &app) {
 
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
-    FreeConsole();  // Hide console safely on Windows
+    // FreeConsole();  // Hide console safely on Windows
 
-    /*
+    
     // DEBUG: Show console for trackpad gesture debugging
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
-    */
+    
     
 #endif
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");

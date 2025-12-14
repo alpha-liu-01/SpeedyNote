@@ -3081,7 +3081,9 @@ bool InkCanvas::event(QEvent *event) {
     // On Linux, pinch-to-zoom comes as QPinchGesture, not Ctrl+Wheel like Windows
     if (event->type() == QEvent::Gesture) {
         QGestureEvent *gestureEvent = static_cast<QGestureEvent*>(event);
+        qDebug() << "Gesture event received! Gestures:" << gestureEvent->gestures();
         if (QPinchGesture *pinch = static_cast<QPinchGesture*>(gestureEvent->gesture(Qt::PinchGesture))) {
+            qDebug() << "PinchGesture: state=" << pinch->state() << "scale=" << pinch->scaleFactor() << "center=" << pinch->centerPoint();
             // DISABLED MODE: Block all gestures
             if (touchGestureMode == TouchGestureMode::Disabled) {
                 event->accept();
@@ -3165,8 +3167,14 @@ bool InkCanvas::event(QEvent *event) {
             bool ctrlPressedRecently = ctrlAge >= 0 && ctrlAge < 100; // Ctrl pressed within last 100ms
             bool isSyntheticCtrl = ctrlPressedRecently;
             
-            // Start pinch-zoom if: touchpad device, synthetic Ctrl, or Ctrl not physically pressed
-            if (isFromTouchpad || isSyntheticCtrl) {
+            // Start pinch-zoom if:
+            // - touchpad device (Linux reports this correctly)
+            // - synthetic Ctrl (Windows timing detection)
+            // - Ctrl not physically pressed (fallback - assume trackpad if Ctrl wasn't pressed by user)
+            // - Linux: also check if Ctrl key timer is invalid (never pressed physically)
+            bool ctrlNeverPressed = getCtrlKeyPressAge() < 0; // Timer not started = Ctrl never pressed
+            
+            if (isFromTouchpad || isSyntheticCtrl || ctrlNeverPressed) {
                 isPinchZoom = true;
                 isTrackpadPinchZooming = true;
                 // Initialize target zoom to current zoom at gesture start
@@ -3179,8 +3187,11 @@ bool InkCanvas::event(QEvent *event) {
             trackpadPinchZoomTimeoutTimer->start();
         }
         
-        // Debug output (reduced verbosity)
-        // qDebug() << "Wheel: Ctrl=" << hasCtrlModifier << "isPinchZoom=" << isPinchZoom << "zooming=" << isTrackpadPinchZooming;
+        // Debug output for trackpad investigation
+        if (hasCtrlModifier) {
+            qDebug() << "Wheel+Ctrl: isFromTouchpad=" << isFromTouchpad << "isPinchZoom=" << isPinchZoom 
+                     << "ctrlAge=" << getCtrlKeyPressAge() << "delta=" << wheelEvent->angleDelta();
+        }
         
         if (isPinchZoom) {
             // Trackpad pinch-to-zoom gesture - ALWAYS handle regardless of touchGestureMode
