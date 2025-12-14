@@ -77,6 +77,7 @@ private:
     QList<PictureWindow*> loadPictureData(int pageNumber);
     void updatePermanentCacheForWindow(PictureWindow *modifiedWindow, int pageNumber);
     void evictOldCachedPages(int currentPage); // ✅ LRU cache eviction
+    QString extractImageHash(const QString &imagePath) const; // Extract hash portion from image filename
     
     
     QString generateImageFileName(const QString &originalPath, int pageNumber);

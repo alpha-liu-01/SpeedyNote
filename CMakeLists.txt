@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.10)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 0.12.0)
+project(SpeedyNote VERSION 0.12.1)
 project(NoteApp)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -320,6 +320,9 @@ add_executable(${PROJECT_NAME}
 	  source/PdfRelinkDialog.cpp
     	  source/SpnPackageManager.cpp
     	  source/LauncherWindow.cpp
+        source/PictureSourceDialog.cpp
+        source/ExistingPictureDialog.cpp
+        source/DocumentConverter.cpp
         ${QRCC_FILES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
         ${QMARKDOWNTEXTEDIT_UI_HEADERS}

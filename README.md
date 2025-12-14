@@ -25,7 +25,7 @@ vintage hardware._
 
 - 🖊️ **Pressure-sensitive inking** with stylus support
 - 📄 **Multi-page notebooks** with tabbed or scrollable page view
-- 📌 **PDF background integration** with annotation overlay
+- 📌 **PDF & PowerPoint background integration** with annotation overlay
 - 🌀 **Dial UI + Joy-Con support** for intuitive one-handed control
 - 🎨 **Per-page background styles**: grid, lined, or blank (customizable)
 - 💾 **Portable `.spn` notebooks** for note storage
@@ -51,6 +51,7 @@ vintage hardware._
 - Windows 7/8/10/11/macOS 12+/Ubuntu/Debian/Fedora/RedHat/ArchLinux/AlpineLinux
 - Qt 5 or Qt 6 runtime (bundled in Windows releases)
 - Stylus input (Wacom recommended)
+- **LibreOffice** (optional, required for PowerPoint file support)
 
 ### 💾 Installation
 
@@ -86,6 +87,7 @@ this command to install SpeedyNote to your computer, and update with `sudo apt u
 3. Create an `spn` notebook package in the directory of the PDF file
 4. Next time when you double click the `spn` notebook, all the notes with the PDF background will be loaded.
 5. Start writing/drawing using your stylus
+
 
 ---
 

@@ -880,7 +880,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(5);
     
     // Version
-    QLabel *versionLabel = new QLabel(tr("Version 0.12.0"), aboutTab);
+    QLabel *versionLabel = new QLabel(tr("Version 0.12.1"), aboutTab);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 14px; color: #7f8c8d;");
     layout->addWidget(versionLabel);
@@ -1125,14 +1125,14 @@ void ControlPanelDialog::createCompatibilityTab() {
     
     // Title and description
     QLabel *titleLabel = new QLabel(tr("Compatibility Features"), compatibilityTab);
-    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;");
+    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
     layout->addWidget(titleLabel);
     
     layout->addSpacing(10);
     
     // Folder selection section
     QLabel *folderSectionLabel = new QLabel(tr("Manual Folder Selection"), compatibilityTab);
-    folderSectionLabel->setStyleSheet("font-size: 14px; font-weight: bold; color: #34495e;");
+    folderSectionLabel->setStyleSheet("font-size: 14px; font-weight: bold;");
     layout->addWidget(folderSectionLabel);
     
     QLabel *folderDescriptionLabel = new QLabel(tr("This feature allows you to manually select a save folder for your notes. "

@@ -505,3 +505,206 @@ qint64 SpnPackageManager::getTempDirsTotalSize()
 
     return totalSize;
 }
+
+QString SpnPackageManager::readNotebookIdFromSpn(const QString &spnPath)
+{
+    if (!isSpnPackage(spnPath)) {
+        return QString();
+    }
+    
+    QFile spnFile(spnPath);
+    if (!spnFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open .spn file for reading notebook ID:" << spnPath;
+        return QString();
+    }
+    
+    QDataStream stream(&spnFile);
+    stream.setVersion(QDataStream::Qt_6_0);
+    
+    // Read and verify header
+    QString header;
+    quint32 version;
+    stream >> header >> version;
+    
+    // Check stream status after reads
+    if (stream.status() != QDataStream::Ok) {
+        spnFile.close();
+        return QString();
+    }
+    
+    if (header != "SPEEDYNOTE_PACKAGE" || version != 1) {
+        spnFile.close();
+        return QString();
+    }
+    
+    // Read file count
+    quint32 fileCount;
+    stream >> fileCount;
+    
+    if (stream.status() != QDataStream::Ok) {
+        spnFile.close();
+        return QString();
+    }
+    
+    // Sanity check: file count should be reasonable
+    if (fileCount > 100000) {
+        qWarning() << "Suspicious file count in .spn package:" << fileCount;
+        spnFile.close();
+        return QString();
+    }
+    
+    // Search for .speedynote_metadata.json file
+    for (quint32 i = 0; i < fileCount; ++i) {
+        QString relativePath;
+        quint64 fileSize;
+        stream >> relativePath >> fileSize;
+        
+        // Check stream status after each read
+        if (stream.status() != QDataStream::Ok) {
+            spnFile.close();
+            return QString();
+        }
+        
+        // Sanity check: metadata file should be small (< 1MB)
+        const quint64 MAX_METADATA_SIZE = 1024 * 1024; // 1MB
+        
+        // Check if this is the metadata file
+        if (relativePath == ".speedynote_metadata.json") {
+            if (fileSize > MAX_METADATA_SIZE) {
+                qWarning() << "Metadata file too large:" << fileSize;
+                spnFile.close();
+                return QString();
+            }
+            
+            // Read the metadata content
+            QByteArray fileData(static_cast<qsizetype>(fileSize), 0);
+            if (stream.readRawData(fileData.data(), fileSize) != static_cast<int>(fileSize)) {
+                spnFile.close();
+                return QString();
+            }
+            spnFile.close();
+            
+            // Parse JSON to extract notebook_id
+            QJsonDocument doc = QJsonDocument::fromJson(fileData);
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                return obj["notebook_id"].toString();
+            }
+            return QString();
+        } else {
+            // Skip this file's data - check for potential overflow
+            qint64 currentPos = spnFile.pos();
+            qint64 newPos = currentPos + static_cast<qint64>(fileSize);
+            
+            // Sanity check: new position shouldn't exceed file size
+            if (newPos < currentPos || newPos > spnFile.size()) {
+                qWarning() << "Invalid file size in .spn package, potential corruption";
+                spnFile.close();
+                return QString();
+            }
+            
+            if (!spnFile.seek(newPos)) {
+                spnFile.close();
+                return QString();
+            }
+        }
+    }
+    
+    spnFile.close();
+    return QString();
+}
+
+SpnPackageManager::SpnMetadata SpnPackageManager::readMetadataFromSpn(const QString &spnPath)
+{
+    SpnMetadata metadata;
+    
+    QByteArray metadataContent = extractFileFromSpn(spnPath, ".speedynote_metadata.json");
+    if (metadataContent.isEmpty()) {
+        return metadata;
+    }
+    
+    QJsonDocument doc = QJsonDocument::fromJson(metadataContent);
+    if (doc.isObject()) {
+        QJsonObject obj = doc.object();
+        metadata.notebookId = obj["notebook_id"].toString();
+        metadata.pdfPath = obj["pdf_path"].toString();
+        metadata.isValid = !metadata.notebookId.isEmpty();
+    }
+    
+    return metadata;
+}
+
+QByteArray SpnPackageManager::extractFileFromSpn(const QString &spnPath, const QString &fileName)
+{
+    if (!isSpnPackage(spnPath)) {
+        return QByteArray();
+    }
+    
+    QFile spnFile(spnPath);
+    if (!spnFile.open(QIODevice::ReadOnly)) {
+        return QByteArray();
+    }
+    
+    QDataStream stream(&spnFile);
+    stream.setVersion(QDataStream::Qt_6_0);
+    
+    // Read and verify header
+    QString header;
+    quint32 version;
+    stream >> header >> version;
+    
+    if (stream.status() != QDataStream::Ok || header != "SPEEDYNOTE_PACKAGE" || version != 1) {
+        spnFile.close();
+        return QByteArray();
+    }
+    
+    // Read file count
+    quint32 fileCount;
+    stream >> fileCount;
+    
+    if (stream.status() != QDataStream::Ok || fileCount > 100000) {
+        spnFile.close();
+        return QByteArray();
+    }
+    
+    // Search for the requested file
+    const quint64 MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB limit for extracted files
+    
+    for (quint32 i = 0; i < fileCount; ++i) {
+        QString relativePath;
+        quint64 fileSize;
+        stream >> relativePath >> fileSize;
+        
+        if (stream.status() != QDataStream::Ok) {
+            spnFile.close();
+            return QByteArray();
+        }
+        
+        if (relativePath == fileName) {
+            if (fileSize > MAX_FILE_SIZE) {
+                spnFile.close();
+                return QByteArray();
+            }
+            
+            QByteArray fileData(static_cast<qsizetype>(fileSize), 0);
+            if (stream.readRawData(fileData.data(), fileSize) != static_cast<int>(fileSize)) {
+                spnFile.close();
+                return QByteArray();
+            }
+            spnFile.close();
+            return fileData;
+        } else {
+            // Skip this file's data
+            qint64 currentPos = spnFile.pos();
+            qint64 newPos = currentPos + static_cast<qint64>(fileSize);
+            
+            if (newPos < currentPos || newPos > spnFile.size() || !spnFile.seek(newPos)) {
+                spnFile.close();
+                return QByteArray();
+            }
+        }
+    }
+    
+    spnFile.close();
+    return QByteArray();
+}

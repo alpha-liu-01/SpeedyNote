@@ -341,6 +341,13 @@ public:
 
     void addNewTab();
 
+    // Find tab with given notebook ID, returns tab index or -1 if not found
+    int findTabWithNotebookId(const QString &notebookId);
+    
+    // Check if notebook is already open, switch to it if so
+    // Returns true if notebook was already open (and switched to), false otherwise
+    bool switchToExistingNotebook(const QString &spnPath);
+
     // Shared launcher instance to prevent memory leaks (moved from private)
     static LauncherWindow *sharedLauncher;
 

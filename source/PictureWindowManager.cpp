@@ -134,14 +134,21 @@ PictureWindow* PictureWindowManager::createPictureWindow(const QRect &rect, cons
 void PictureWindowManager::removePictureWindow(PictureWindow *window) {
     if (!window) return;
     
-    // ✅ Delete the associated image file before removing the window
+    // ✅ Reference counting: Only delete file if this is the last reference
     QString imagePath = window->getImagePath();
-    if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
-        // Only delete if the image is inside the notebook folder (don't delete user's original files)
-        QString saveFolder = getSaveFolder();
-        if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
-            QFile::remove(imagePath);
-            // qDebug() << "Deleted image file:" << imagePath;
+    if (!imagePath.isEmpty() && canvas) {
+        QString imageHash = extractImageHash(imagePath);
+        if (!imageHash.isEmpty()) {
+            // Decrement reference count - returns true if file should be deleted
+            bool shouldDelete = canvas->decrementImageReference(imageHash);
+            if (shouldDelete && QFile::exists(imagePath)) {
+                // Only delete if the image is inside the notebook folder
+                QString saveFolder = getSaveFolder();
+                if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
+                    QFile::remove(imagePath);
+                    // qDebug() << "Deleted image file (last reference):" << imagePath;
+                }
+            }
         }
     }
     
@@ -181,40 +188,57 @@ void PictureWindowManager::removePictureWindow(PictureWindow *window) {
 }
 
 void PictureWindowManager::clearAllWindows() {
+    // ✅ Track processed WINDOWS (not hashes) to avoid double-processing the same window object
+    // This handles the case where a window might be in both currentWindows and pageWindows
+    QSet<PictureWindow*> processedWindows;
+    QString saveFolder = getSaveFolder();
+    
     // Clear current windows
     for (PictureWindow *window : currentWindows) {
-        if (window) {
-            // ✅ Delete the associated image file before removing the window
+        if (window && !processedWindows.contains(window)) {
+            processedWindows.insert(window);
+            
+            // Decrement reference count for this window's image
             QString imagePath = window->getImagePath();
-            if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
-                // Only delete if the image is inside the notebook folder (don't delete user's original files)
-                QString saveFolder = getSaveFolder();
-                if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
-                    QFile::remove(imagePath);
-                    // qDebug() << "Cleared all image file:" << imagePath;
+            if (!imagePath.isEmpty() && canvas) {
+                QString imageHash = extractImageHash(imagePath);
+                if (!imageHash.isEmpty()) {
+                    bool shouldDelete = canvas->decrementImageReference(imageHash);
+                    if (shouldDelete && QFile::exists(imagePath)) {
+                        if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
+                            QFile::remove(imagePath);
+                        }
+                    }
                 }
             }
+            
+            window->deleteLater();
         }
-        window->deleteLater();
     }
     currentWindows.clear();
     
     // Clear page windows
     for (auto it = pageWindows.begin(); it != pageWindows.end(); ++it) {
         for (PictureWindow *window : it.value()) {
-            if (window) {
-                // ✅ Delete the associated image file before removing the window
+            if (window && !processedWindows.contains(window)) {
+                processedWindows.insert(window);
+                
+                // Decrement reference count for this window's image
                 QString imagePath = window->getImagePath();
-                if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
-                    // Only delete if the image is inside the notebook folder (don't delete user's original files)
-                    QString saveFolder = getSaveFolder();
-                    if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
-                        QFile::remove(imagePath);
-                        // qDebug() << "Cleared all page image file:" << imagePath;
+                if (!imagePath.isEmpty() && canvas) {
+                    QString imageHash = extractImageHash(imagePath);
+                    if (!imageHash.isEmpty()) {
+                        bool shouldDelete = canvas->decrementImageReference(imageHash);
+                        if (shouldDelete && QFile::exists(imagePath)) {
+                            if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
+                                QFile::remove(imagePath);
+                            }
+                        }
                     }
                 }
+                
+                window->deleteLater();
             }
-            window->deleteLater();
         }
     }
     pageWindows.clear();
@@ -223,11 +247,15 @@ void PictureWindowManager::clearAllWindows() {
 void PictureWindowManager::clearAllCachedWindows() {
     // ✅ MEMORY LEAK FIX: Clean up all cached windows WITHOUT deleting image files
     // This is used during canvas destruction to prevent memory leaks
+    
+    // ✅ Track processed windows to avoid double-deletion
+    // A window might appear in multiple lists (combinedTempWindows, pageWindows, currentWindows)
+    QSet<PictureWindow*> processedWindows;
 
     // Clear combined temp windows (temporary clones used for pseudo-smooth scrolling)
     for (PictureWindow *window : combinedTempWindows) {
-        if (window) {
-            // Clear render cache to release large pixmap memory
+        if (window && !processedWindows.contains(window)) {
+            processedWindows.insert(window);
             window->clearRenderCache();
             window->deleteLater();
         }
@@ -237,8 +265,8 @@ void PictureWindowManager::clearAllCachedWindows() {
     // Clear permanent page cache (windows loaded from disk and cached for reuse)
     for (auto it = pageWindows.begin(); it != pageWindows.end(); ++it) {
         for (PictureWindow *window : it.value()) {
-            if (window) {
-                // Clear render cache to release large pixmap memory
+            if (window && !processedWindows.contains(window)) {
+                processedWindows.insert(window);
                 window->clearRenderCache();
                 window->deleteLater();
             }
@@ -249,8 +277,8 @@ void PictureWindowManager::clearAllCachedWindows() {
 
     // Clear current windows (the visible windows on screen)
     for (PictureWindow *window : currentWindows) {
-        if (window) {
-            // Clear render cache to release large pixmap memory
+        if (window && !processedWindows.contains(window)) {
+            processedWindows.insert(window);
             window->clearRenderCache();
             window->deleteLater();
         }
@@ -348,6 +376,8 @@ void PictureWindowManager::loadWindowsForPage(int pageNumber) {
     // Update the current window list and show the windows
     currentWindows = newPageWindows;
     for (PictureWindow *window : currentWindows) {
+        if (!window) continue; // ✅ SAFETY: Skip null entries
+        
         // Validate that the window is within canvas bounds
         if (!window->isValidForCanvas()) {
             QRect canvasBounds = canvas->getCanvasRect();
@@ -377,23 +407,34 @@ void PictureWindowManager::loadWindowsForPage(int pageNumber) {
 }
 
 void PictureWindowManager::deleteWindowsForPage(int pageNumber) {
+    QString saveFolder = getSaveFolder();
+    
     // Remove windows from memory
     if (pageWindows.contains(pageNumber)) {
         QList<PictureWindow*> windows = pageWindows[pageNumber];
         for (PictureWindow *window : windows) {
             if (window) {
-                // ✅ Delete the associated image file before removing the window
+                // ✅ Reference counting: Only delete file if this is the last reference
                 QString imagePath = window->getImagePath();
-                if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
-                    // Only delete if the image is inside the notebook folder (don't delete user's original files)
-                    QString saveFolder = getSaveFolder();
-                    if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
-                        QFile::remove(imagePath);
-                        // qDebug() << "Deleted page image file:" << imagePath;
+                if (!imagePath.isEmpty() && canvas) {
+                    QString imageHash = extractImageHash(imagePath);
+                    if (!imageHash.isEmpty()) {
+                        bool shouldDelete = canvas->decrementImageReference(imageHash);
+                        if (shouldDelete && QFile::exists(imagePath)) {
+                            if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
+                                QFile::remove(imagePath);
+                                // qDebug() << "Deleted page image file (last reference):" << imagePath;
+                            }
+                        }
                     }
                 }
+                
+                // ✅ Also remove from currentWindows if present (avoid dangling pointers)
+                currentWindows.removeAll(window);
+                combinedTempWindows.removeAll(window);
+                
+                window->deleteLater();
             }
-            window->deleteLater();
         }
         pageWindows.remove(pageNumber);
     }
@@ -403,17 +444,14 @@ void PictureWindowManager::deleteWindowsForPage(int pageNumber) {
     if (QFile::exists(filePath)) {
         QFile::remove(filePath);
     }
-    
-    // Clear current windows if they belong to this page
-    if (pageWindows.value(pageNumber) == currentWindows) {
-        currentWindows.clear();
-    }
 }
 
 void PictureWindowManager::hideAllWindows() {
     // Hide all current windows
     for (PictureWindow *window : currentWindows) {
-        window->hide();
+        if (window) {
+            window->hide();
+        }
     }
 }
 
@@ -449,35 +487,43 @@ QList<PictureWindow*> PictureWindowManager::loadWindowsForPageSeparately(int pag
 
     QList<PictureWindow*> windows;
 
-    // Check if we have cached windows for this page that we can clone from
-    if (pageWindows.contains(pageNumber) && !pageWindows[pageNumber].isEmpty()) {
-        // Clone the cached windows to create new instances with same data
-        // ✅ LRU: Mark this page as recently accessed
-        pageAccessOrder.removeAll(pageNumber);
-        pageAccessOrder.append(pageNumber);
-
+    // Check if we have this page in cache (even if empty - empty means we know there are no windows)
+    if (pageWindows.contains(pageNumber)) {
+        // ✅ CROSS-PAGE MOVE FIX: Respect empty cache - it means we explicitly cleared windows
+        // Don't fall back to loading from disk (which has stale data before the move)
         const QList<PictureWindow*> &cachedWindows = pageWindows[pageNumber];
-        for (PictureWindow *cachedWindow : cachedWindows) {
-            // Serialize the cached window and create a new instance from it
-            QVariantMap data = cachedWindow->serialize();
-            QString imagePath = data.value("image_path", "").toString();
+        
+        if (!cachedWindows.isEmpty()) {
+            // Clone the cached windows to create new instances with same data
+            // ✅ LRU: Mark this page as recently accessed
+            pageAccessOrder.removeAll(pageNumber);
+            pageAccessOrder.append(pageNumber);
 
-            // ✅ CRITICAL FIX: Resolve relative paths to absolute paths
-            QFileInfo fileInfo(imagePath);
-            if (fileInfo.isRelative()) {
-                imagePath = getSaveFolder() + "/" + imagePath;
-                data["image_path"] = imagePath; // Update data with absolute path
-            }
+            for (PictureWindow *cachedWindow : cachedWindows) {
+                if (!cachedWindow) continue; // ✅ SAFETY: Skip null entries
+                
+                // Serialize the cached window and create a new instance from it
+                QVariantMap data = cachedWindow->serialize();
+                QString imagePath = data.value("image_path", "").toString();
 
-            if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
-                // Create new window instance with same data
-                PictureWindow *window = new PictureWindow(QRect(0, 0, 200, 150), imagePath, canvas);
-                window->deserialize(data);
-                windows.append(window);
+                // ✅ CRITICAL FIX: Resolve relative paths to absolute paths
+                QFileInfo fileInfo(imagePath);
+                if (fileInfo.isRelative()) {
+                    imagePath = getSaveFolder() + "/" + imagePath;
+                    data["image_path"] = imagePath; // Update data with absolute path
+                }
+
+                if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
+                    // Create new window instance with same data
+                    PictureWindow *window = new PictureWindow(QRect(0, 0, 200, 150), imagePath, canvas);
+                    window->deserialize(data);
+                    windows.append(window);
+                }
             }
         }
+        // else: cachedWindows is empty - return empty list (no windows on this page)
     } else {
-        // Load windows from file for the first time
+        // Page not in cache - load windows from file for the first time
         QList<PictureWindow*> loadedWindows = loadPictureData(pageNumber);
 
         // ✅ CRITICAL FIX: Store CLONES in permanent cache, not the loaded instances
@@ -485,6 +531,8 @@ QList<PictureWindow*> PictureWindowManager::loadWindowsForPageSeparately(int pag
         // We need the cache to always have the original unadjusted coordinates
         QList<PictureWindow*> permanentCache;
         for (PictureWindow *loadedWindow : loadedWindows) {
+            if (!loadedWindow) continue; // ✅ SAFETY: Skip null entries
+            
             // Clone for permanent cache
             QVariantMap data = loadedWindow->serialize();
             QString imagePath = data.value("image_path", "").toString();
@@ -523,6 +571,8 @@ QList<PictureWindow*> PictureWindowManager::loadWindowsForPageSeparately(int pag
     
     // Apply bounds checking and setup connections for all windows
     for (PictureWindow *window : windows) {
+        if (!window) continue; // ✅ SAFETY: Skip null entries
+        
         // Validate that the window is within canvas bounds
         if (!window->isValidForCanvas()) {
             QRect canvasBounds = canvas->getCanvasRect();
@@ -555,7 +605,7 @@ void PictureWindowManager::setCombinedWindows(const QList<PictureWindow*> &windo
     // ✅ CRASH FIX: Hide current windows BEFORE deleting any windows
     // Otherwise we might try to hide already-deleted windows
     for (PictureWindow *window : currentWindows) {
-        window->hide();
+        if (window) window->hide();
     }
 
     // ✅ MEMORY LEAK FIX: Clean up old temporary combined windows
@@ -597,7 +647,7 @@ void PictureWindowManager::setCombinedWindows(const QList<PictureWindow*> &windo
     
     // Update screen positions for all combined windows
     for (PictureWindow *window : currentWindows) {
-        window->updateScreenPositionImmediate();
+        if (window) window->updateScreenPositionImmediate();
     }
     
     // Trigger canvas repaint to show combined pictures
@@ -621,6 +671,8 @@ void PictureWindowManager::saveWindowsForPageSeparately(int pageNumber, const QL
     // Delete old clones from cache (but not if they're in currentWindows)
     if (pageWindows.contains(pageNumber)) {
         for (PictureWindow *oldWindow : pageWindows[pageNumber]) {
+            if (!oldWindow) continue; // ✅ SAFETY: Skip null entries
+            
             // Only delete if it's not in currentWindows (to avoid deleting active windows)
             if (!currentWindows.contains(oldWindow)) {
                 oldWindow->clearRenderCache(); // Free cached pixmaps
@@ -633,6 +685,8 @@ void PictureWindowManager::saveWindowsForPageSeparately(int pageNumber, const QL
     // (InkCanvas passes us temporary adjusted windows that will be deleted)
     QList<PictureWindow*> cacheWindows;
     for (PictureWindow *window : windows) {
+        if (!window) continue; // ✅ SAFETY: Skip null entries
+        
         QVariantMap data = window->serialize();
         PictureWindow *cloneWindow = new PictureWindow(QRect(0, 0, 400, 300), window->getImagePath(), canvas);
         cloneWindow->deserialize(data);
@@ -645,7 +699,10 @@ void PictureWindowManager::saveWindowsForPageSeparately(int pageNumber, const QL
     // Mark cache as updated (so we don't clone again until picture is modified)
     cacheUpdatedPages.insert(pageNumber);
     
-    // flushDirtyPagesToDisk() will write all cached pages to disk later
+    // ✅ CROSS-PAGE MOVE FIX: Write to disk immediately
+    // This ensures cross-page moves are persisted right away, not just cached
+    // Without this, the disk would have stale data if the app crashes before autosave
+    savePictureData(pageNumber, cacheWindows);
 }
 
 void PictureWindowManager::exitAllEditModes() {
@@ -708,8 +765,8 @@ QString PictureWindowManager::copyImageToNotebook(const QString &sourcePath, int
     QString saveFolder = getSaveFolder();
     // qDebug() << "  Save folder:" << saveFolder;
     
-    if (saveFolder.isEmpty()) {
-        // qDebug() << "  ERROR: Save folder is empty!";
+    if (saveFolder.isEmpty() || !canvas) {
+        // qDebug() << "  ERROR: Save folder is empty or canvas is null!";
         return QString();
     }
     
@@ -718,16 +775,20 @@ QString PictureWindowManager::copyImageToNotebook(const QString &sourcePath, int
         return QString();
     }
     
-    // Generate unique filename
+    // Generate unique filename based on content hash
     QString targetFileName = generateImageFileName(sourcePath, pageNumber);
     QString targetPath = saveFolder + "/" + targetFileName;
+    QString imageHash = extractImageHash(targetPath);
     // qDebug() << "  Target filename:" << targetFileName;
     // qDebug() << "  Target path:" << targetPath;
+    // qDebug() << "  Image hash:" << imageHash;
     
-    // Copy the file
+    // Check if file with this hash already exists
     if (QFile::exists(targetPath)) {
-        // qDebug() << "  Target file already exists, removing it first";
-        QFile::remove(targetPath); // Remove existing file if it exists
+        // File already exists - just increment reference count
+        // qDebug() << "  File already exists, incrementing reference count";
+        canvas->incrementImageReference(imageHash);
+        return targetPath;
     }
     
     QFileInfo sourceInfo(sourcePath);
@@ -737,6 +798,9 @@ QString PictureWindowManager::copyImageToNotebook(const QString &sourcePath, int
         QFileInfo targetInfo(targetPath);
         // qDebug() << "  SUCCESS: File copied successfully!";
         // qDebug() << "  Target file size:" << targetInfo.size() << "bytes";
+        
+        // ✅ Increment reference count for the new image
+        canvas->incrementImageReference(imageHash);
         
         #ifdef Q_OS_WIN
         // Set hidden attribute on Windows (optional, for consistency with other metadata files)
@@ -811,25 +875,51 @@ void PictureWindowManager::clearCurrentPageWindows() {
     }
     
     int currentPage = canvas->getLastActivePage();
+    bool isCombinedMode = canvas->isCombinedCanvasMode();
     
-    // Delete all current picture windows immediately
+    // Get list of windows that belong to current page only
+    QList<PictureWindow*> windowsToDelete;
+    
+    if (isCombinedMode) {
+        // In combined mode: identify windows by canvas Y position
+        // Windows on upper half (canvas_y < singlePageHeight) belong to current page
+        int singlePageHeight = canvas->getSinglePageHeight();
+        
     for (PictureWindow *window : currentWindows) {
+            if (window) {
+                QRect canvasRect = window->getCanvasRect();
+                // Window belongs to upper half (current page) if its top edge is in upper half
+                if (canvasRect.y() < singlePageHeight) {
+                    windowsToDelete.append(window);
+                }
+            }
+        }
+    } else {
+        // Single page mode: all currentWindows belong to the current page
+        windowsToDelete = currentWindows;
+    }
+    
+    // Delete the identified windows
+    QString saveFolder = getSaveFolder();
+    for (PictureWindow *window : windowsToDelete) {
         if (window) {
-            // ✅ Delete the associated image file before removing the window
+            // ✅ Reference counting: Only delete file if this is the last reference
             QString imagePath = window->getImagePath();
-            if (!imagePath.isEmpty() && QFile::exists(imagePath)) {
-                // Only delete if the image is inside the notebook folder (don't delete user's original files)
-                QString saveFolder = getSaveFolder();
-                if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
-                    QFile::remove(imagePath);
-                    // qDebug() << "Cleared image file:" << imagePath;
+            if (!imagePath.isEmpty()) {
+                QString imageHash = extractImageHash(imagePath);
+                if (!imageHash.isEmpty()) {
+                    bool shouldDelete = canvas->decrementImageReference(imageHash);
+                    if (shouldDelete && QFile::exists(imagePath)) {
+                        if (!saveFolder.isEmpty() && imagePath.startsWith(saveFolder)) {
+                            QFile::remove(imagePath);
+                            // qDebug() << "Cleared image file (last reference):" << imagePath;
+                        }
+                    }
                 }
             }
             
-            // Remove from all page windows maps first
-            for (auto it = pageWindows.begin(); it != pageWindows.end(); ++it) {
-                it.value().removeAll(window);
-            }
+            // Remove from currentWindows list
+            currentWindows.removeAll(window);
 
             // ✅ CRASH FIX: Also remove from combined temp windows to prevent dangling pointers
             combinedTempWindows.removeAll(window);
@@ -839,10 +929,6 @@ void PictureWindowManager::clearCurrentPageWindows() {
             window->deleteLater();
         }
     }
-    currentWindows.clear();
-
-    // ✅ CRASH FIX: Clear combinedTempWindows to prevent dangling pointers
-    combinedTempWindows.clear();
     
     // Update the pageWindows map to reflect the cleared state
     pageWindows[currentPage] = QList<PictureWindow*>(); // Explicitly empty list
@@ -851,10 +937,12 @@ void PictureWindowManager::clearCurrentPageWindows() {
     canvas->setEdited(true);
     cacheUpdatedPages.remove(currentPage); // Clear cache flag to force re-clone
     
-    canvas->update(); // Trigger repaint to remove all pictures
+    // ✅ FIX: Write empty list to disk IMMEDIATELY (not just cache update)
+    // This ensures the JSON metadata file is cleared
+    savePictureData(currentPage, QList<PictureWindow*>());
     
-    // Save the cleared state to disk
-    saveWindowsForPage(currentPage);
+    // Force immediate repaint to visually remove picture windows
+    canvas->repaint();
 }
 
 void PictureWindowManager::onWindowDeleteRequested(PictureWindow *window) {
@@ -891,6 +979,8 @@ void PictureWindowManager::savePictureData(int pageNumber, const QList<PictureWi
     
     QJsonArray windowsArray;
     for (PictureWindow *window : windows) {
+        if (!window) continue; // ✅ SAFETY: Skip null entries
+        
         QVariantMap windowData = window->serialize();
         windowsArray.append(QJsonObject::fromVariantMap(windowData));
     }
@@ -1031,6 +1121,22 @@ QString PictureWindowManager::generateImageFileName(const QString &originalPath,
            .arg(pageNumber, 5, 10, QChar('0'))
            .arg(hashString)
            .arg(extension);
+}
+
+QString PictureWindowManager::extractImageHash(const QString &imagePath) const {
+    // Extract the hash portion from image filename
+    // Format: {notebookId}_img_p{pageNumber}_{hash}.{extension}
+    QString fileName = QFileInfo(imagePath).fileName();
+    
+    // Find the hash between last underscore and extension
+    int lastDot = fileName.lastIndexOf('.');
+    int lastUnderscore = fileName.lastIndexOf('_');
+    
+    if (lastDot > 0 && lastUnderscore > 0 && lastUnderscore < lastDot) {
+        return fileName.mid(lastUnderscore + 1, lastDot - lastUnderscore - 1);
+    }
+    
+    return QString(); // Invalid format
 }
 
 

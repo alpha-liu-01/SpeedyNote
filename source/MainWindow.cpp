@@ -49,6 +49,7 @@
 #include "SDLControllerManager.h"
 #include "LauncherWindow.h" // Added for launcher access
 #include "PdfOpenDialog.h" // Added for PDF file association
+#include "DocumentConverter.h" // Added for PowerPoint conversion
 #include <poppler-qt6.h> // For PDF outline parsing
 #include <memory> // For std::shared_ptr
 
@@ -94,7 +95,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote Beta 0.12.0"));
+    setWindowTitle(tr("SpeedyNote Beta 0.12.1"));
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux
@@ -225,7 +226,7 @@ void MainWindow::setupUi() {
     clearPdfButton->setIcon(pdfDeleteIcon);
     loadPdfButton->setStyleSheet(buttonStyle);
     clearPdfButton->setStyleSheet(buttonStyle);
-    loadPdfButton->setToolTip(tr("Manage PDF"));
+    loadPdfButton->setToolTip(tr("Import/Clear Document"));
     clearPdfButton->setToolTip(tr("Clear PDF"));
     clearPdfButton->setVisible(false); // ✅ Hide clearPdfButton to save space
     connect(loadPdfButton, &QPushButton::clicked, this, &MainWindow::handleSmartPdfButton);
@@ -328,8 +329,8 @@ void MainWindow::setupUi() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#outlineSidebarTab:hover {"
             "  background-color: %3;"
@@ -345,8 +346,8 @@ void MainWindow::setupUi() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#bookmarksSidebarTab:hover {"
             "  background-color: %3;"
@@ -1151,7 +1152,7 @@ void MainWindow::setupUi() {
     overflowMenu->setObjectName("overflowMenu");
     
     // Add actions to the overflow menu
-    QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Manage PDF"));
+    QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Import/Clear Document"));
     connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
     
     QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
@@ -1367,8 +1368,8 @@ void MainWindow::setupUi() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-right: none;"
-            "  border-top-left-radius: 8px;"
-            "  border-bottom-left-radius: 8px;"
+            "  border-top-left-radius: 0px;"
+            "  border-bottom-left-radius: 0px;"
             "}"
             "QPushButton#dialToolbarTab:hover {"
             "  background-color: %3;"
@@ -1907,8 +1908,31 @@ void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
 }
 
 void MainWindow::deleteCurrentPage() {
-    // Clear all content from current page (drawing + pictures + markdown) instead of deleting the page file
-    currentCanvas()->clearCurrentPage();
+    InkCanvas *canvas = currentCanvas();
+    if (!canvas) return;
+    
+    // Get the current page number to show in confirmation (display as 1-indexed for users)
+    int currentPage = getCurrentPageForCanvas(canvas);
+    int displayPageNumber = currentPage + 1; // Convert from 0-indexed to 1-indexed for display
+    
+    // Show confirmation dialog
+    QMessageBox confirmBox(this);
+    confirmBox.setWindowTitle(tr("Clear Page"));
+    confirmBox.setIcon(QMessageBox::Warning);
+    confirmBox.setText(tr("Are you sure you want to clear page %1?").arg(displayPageNumber));
+    confirmBox.setInformativeText(tr("This will permanently delete all drawings, pictures, highlights, and notes on this page. This action cannot be undone."));
+    confirmBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    confirmBox.setDefaultButton(QMessageBox::No);
+    
+    if (confirmBox.exec() == QMessageBox::Yes) {
+        // Clear all content from current page (drawing + pictures + highlights + markdown notes)
+        canvas->clearCurrentPage();
+        
+        // Reload markdown notes sidebar if visible
+        if (markdownNotesSidebarVisible) {
+            loadMarkdownNotesForCurrentPage();
+        }
+    }
 }
 
 void MainWindow::saveCurrentPage() {
@@ -3415,9 +3439,74 @@ void MainWindow::loadPdf() {
         return;
     }
 
-    QString filePath = QFileDialog::getOpenFileName(this, tr("Select PDF"), "", "PDF Files (*.pdf)");
+    QString filePath = QFileDialog::getOpenFileName(this, tr("Select PDF or PowerPoint"), "", 
+        tr("Documents (*.pdf *.ppt *.pptx *.odp);;PDF Files (*.pdf);;PowerPoint Files (*.ppt *.pptx);;OpenDocument Presentation (*.odp)"));
+    
     if (!filePath.isEmpty()) {
-        currentCanvas()->loadPdf(filePath);
+        // Check if the file needs conversion (PPT/PPTX/ODP)
+        QString pdfPath = filePath;
+        
+        if (DocumentConverter::needsConversion(filePath)) {
+            // Check if LibreOffice is available
+            if (!DocumentConverter::isLibreOfficeAvailable()) {
+                QMessageBox::warning(this, 
+                    tr("LibreOffice Required"), 
+                    DocumentConverter::getInstallationInstructions());
+                return;
+            }
+            
+            // Show progress dialog
+            QProgressDialog progressDialog(
+                tr("Converting %1 to PDF...").arg(QFileInfo(filePath).fileName()),
+                QString(), 0, 0, this);
+            progressDialog.setWindowModality(Qt::WindowModal);
+            progressDialog.setCancelButton(nullptr);
+            progressDialog.setMinimumDuration(0);
+            progressDialog.show();
+            QCoreApplication::processEvents();
+            
+            // Determine output path in notebook's save folder
+            QFileInfo originalFileInfo(filePath);
+            QString pdfFileName = originalFileInfo.completeBaseName() + "_converted.pdf";
+            QString outputPdfPath = saveFolder + "/" + pdfFileName;
+            
+            // Check if file already exists and create unique name if needed
+            int counter = 1;
+            while (QFile::exists(outputPdfPath) && counter < 9999) {
+                pdfFileName = originalFileInfo.completeBaseName() + QString("_converted_%1.pdf").arg(counter);
+                outputPdfPath = saveFolder + "/" + pdfFileName;
+                counter++;
+            }
+            
+            // Safety check: if we hit the limit, warn user
+            if (counter >= 9999 && QFile::exists(outputPdfPath)) {
+                QMessageBox::critical(this, tr("Too Many Files"), 
+                    tr("Too many converted PDF files exist in the notebook folder. Please clean up old converted PDFs."));
+                return;
+            }
+            
+            // Perform conversion with user's DPI settings
+            DocumentConverter converter(this);
+            DocumentConverter::ConversionStatus status;
+            pdfPath = converter.convertToPdf(filePath, status, outputPdfPath, getPdfDPI());
+            
+            progressDialog.close();
+            
+            if (status != DocumentConverter::Success || pdfPath.isEmpty()) {
+                QString errorMsg = tr("Failed to convert PowerPoint to PDF.\n\n");
+                
+                if (status == DocumentConverter::LibreOfficeNotFound) {
+                    errorMsg += DocumentConverter::getInstallationInstructions();
+                } else {
+                    errorMsg += tr("Error: %1").arg(converter.getLastError());
+                }
+                
+                QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
+                return;
+            }
+        }
+        
+        currentCanvas()->loadPdf(pdfPath);
         
         // ✅ Load the current page to display the PDF immediately
         int currentPage = getCurrentPageForCanvas(currentCanvas());
@@ -3471,8 +3560,8 @@ void MainWindow::handleSmartPdfButton() {
     
     // ✅ 1. Check if tab is not saved to .spn file - warn user
     if (currentFolder.isEmpty() || currentFolder == tempFolder) {
-        QMessageBox::warning(this, tr("Cannot Manage PDF"), 
-            tr("Please save this notebook as a SpeedyNote Package (.spn) file before managing PDF.\n\n"
+        QMessageBox::warning(this, tr("Cannot Import/Clear Document"), 
+            tr("Please save this notebook as a SpeedyNote Package (.spn) file before importing a document.\n\n"
                "Click the Save button to save your notebook first."));
         return;
     }
@@ -3667,6 +3756,46 @@ void MainWindow::switchTab(int index) {
     }
 }
 
+int MainWindow::findTabWithNotebookId(const QString &notebookId) {
+    if (!canvasStack || notebookId.isEmpty()) return -1;
+    
+    for (int i = 0; i < canvasStack->count(); ++i) {
+        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
+        if (canvas && canvas->getNotebookId() == notebookId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
+    // Safety check for required UI components
+    if (!tabList || !canvasStack) {
+        return false;
+    }
+    
+    // Read notebook ID from the .spn file without full extraction
+    QString notebookId = SpnPackageManager::readNotebookIdFromSpn(spnPath);
+    if (notebookId.isEmpty()) {
+        return false; // Can't determine ID, allow opening
+    }
+    
+    // Check if any tab already has this notebook open
+    int existingTabIndex = findTabWithNotebookId(notebookId);
+    if (existingTabIndex >= 0 && existingTabIndex < tabList->count() && existingTabIndex < canvasStack->count()) {
+        // Notebook is already open - switch to that tab
+        tabList->setCurrentRow(existingTabIndex);
+        canvasStack->setCurrentIndex(existingTabIndex);
+        
+        // Show informational message
+        QMessageBox::information(this, tr("Notebook Already Open"),
+            tr("This notebook is already open in another tab. Switching to the existing tab."));
+        
+        return true;
+    }
+    
+    return false; // Not already open
+}
 
 void MainWindow::addNewTab() {
     if (!tabList || !canvasStack) return;  // Ensure tabList and canvasStack exist
@@ -5473,8 +5602,8 @@ void MainWindow::updateTheme() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-right: none;"
-            "  border-top-left-radius: 8px;"
-            "  border-bottom-left-radius: 8px;"
+            "  border-top-left-radius: 0px;"
+            "  border-bottom-left-radius: 0px;"
             "}"
             "QPushButton#dialToolbarTab:hover {"
             "  background-color: %3;"
@@ -5505,8 +5634,8 @@ void MainWindow::updateTheme() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#outlineSidebarTab:hover {"
             "  background-color: %3;"
@@ -5525,8 +5654,8 @@ void MainWindow::updateTheme() {
             "  background-color: %1;"
             "  border: 1px solid %2;"
             "  border-left: none;"
-            "  border-top-right-radius: 8px;"
-            "  border-bottom-right-radius: 8px;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
             "}"
             "QPushButton#bookmarksSidebarTab:hover {"
             "  background-color: %3;"
@@ -5959,9 +6088,9 @@ void MainWindow::loadThemeSettings() {
 void MainWindow::updateTabSizes() {
     if (!tabList) return;
     
-    // Calculate max width: half of tabList width (so 2 tabs can fit side by side)
+    // Calculate max width with absolute cap of 300px
     int tabListWidth = tabList->width();
-    int maxTabWidth = tabListWidth / 2;
+    int maxTabWidth = qMin(tabListWidth / 2, 300); // Cap at 300px regardless of window size
     int minTabWidth = 80; // Keep minimum at 80px
     
     // Ensure max is at least as big as min
@@ -7214,7 +7343,7 @@ void MainWindow::handleTouchZoomChange(int newZoom) {
     // Show horizontal scrollbar during gesture (panYSlider stays hidden)
     if (panXSlider->maximum() > 0) {
         panXSlider->setVisible(true);
-        scrollbarsVisible = true;
+    scrollbarsVisible = true;
     }
     
     // Update canvas zoom directly
@@ -7240,7 +7369,7 @@ void MainWindow::handleTouchPanChange(int panX, int panY) {
     // Show horizontal scrollbar during gesture (panYSlider stays hidden)
     if (panXSlider->maximum() > 0) {
         panXSlider->setVisible(true);
-        scrollbarsVisible = true;
+    scrollbarsVisible = true;
     }
     
     InkCanvas *canvas = currentCanvas();
@@ -7395,7 +7524,7 @@ QColor MainWindow::getContrastingTextColor(const QColor &backgroundColor) {
 
 void MainWindow::updateCustomColorButtonStyle(const QColor &color) {
     QColor textColor = getContrastingTextColor(color);
-    customColorButton->setStyleSheet(QString("background-color: %1; color: %2")
+    customColorButton->setStyleSheet(QString("background-color: %1; color: %2; border-radius: 0px;")
         .arg(color.name())
         .arg(textColor.name()));
     customColorButton->setText(QString("%1").arg(color.name()).toUpper());
@@ -7655,8 +7784,8 @@ void MainWindow::createSingleRowLayout(bool centered) {
     
     // Centered buttons - toggle and utility
     newLayout->addWidget(toggleTabBarButton);
-    newLayout->addWidget(toggleMarkdownNotesButton);
-    newLayout->addWidget(touchGesturesButton);
+        newLayout->addWidget(toggleMarkdownNotesButton);
+        newLayout->addWidget(touchGesturesButton);
     newLayout->addWidget(pdfTextSelectButton);
     newLayout->addWidget(saveButton);
     
@@ -7732,8 +7861,8 @@ void MainWindow::createTwoRowLayout() {
     // First row: toggle buttons and colors (centered - no right buttons, so no compensation needed)
     newFirstRowLayout->addStretch();
     newFirstRowLayout->addWidget(toggleTabBarButton);
-    newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
-    newFirstRowLayout->addWidget(touchGesturesButton);
+        newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
+        newFirstRowLayout->addWidget(touchGesturesButton);
     newFirstRowLayout->addWidget(pdfTextSelectButton);
     newFirstRowLayout->addWidget(saveButton);
     newFirstRowLayout->addWidget(redButton);
@@ -8564,9 +8693,9 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     QTimer::singleShot(0, this, [this]() {
         positionDialToolbarTab();
         positionLeftSidebarTabs();  // Also reposition left tabs for consistency
-        if (dialContainer && dialContainer->isVisible()) {
-            positionDialContainer();
-        }
+    if (dialContainer && dialContainer->isVisible()) {
+        positionDialContainer();
+    }
     });
 }
 
@@ -8969,6 +9098,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         concurrentSaveFuture.waitForFinished();
     }
     
+    // Temp folder path for comparison
+    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
+    
     // Auto-save all tabs before closing the program
     if (canvasStack) {
         for (int i = 0; i < canvasStack->count(); ++i) {
@@ -9000,6 +9132,22 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 // ✅ OPTIMIZATION: Flush any pending deferred .spn package sync
                 // This ensures the .spn package is updated before closing
                 canvas->flushPendingSpnSync();
+                
+                // ✅ FIX: Update thumbnail for each tab before closing
+                // This was previously only done in closeTab, but that code path
+                // is never reached for the last remaining tab (or when quitting directly)
+                QString folderPath = canvas->getSaveFolder();
+                if (!folderPath.isEmpty() && folderPath != tempDir && recentNotebooksManager) {
+                    // Force canvas to update before thumbnail generation
+                    canvas->update();
+                    canvas->repaint();
+                    QApplication::processEvents();
+                    
+                    // Generate and save thumbnail
+                    recentNotebooksManager->generateAndSaveCoverPreview(folderPath, canvas);
+                    // Update recent list (moves to top)
+                    recentNotebooksManager->addRecentNotebook(folderPath, canvas);
+                }
             }
         }
         
@@ -9048,6 +9196,11 @@ void MainWindow::openSpnPackage(const QString &spnPath)
         QMessageBox::warning(this, tr("Invalid Package"), 
             tr("The selected file is not a valid SpeedyNote package."));
         return;
+    }
+    
+    // Check if this notebook is already open in another tab
+    if (switchToExistingNotebook(spnPath)) {
+        return; // Switched to existing tab, don't open again
     }
     
     InkCanvas *canvas = currentCanvas();
@@ -9391,6 +9544,13 @@ void MainWindow::cleanupSharedResources()
 
 void MainWindow::openFileInNewTab(const QString &filePath)
 {
+    // Check for duplicate .spn notebooks before creating a new tab
+    if (filePath.toLower().endsWith(".spn")) {
+        if (switchToExistingNotebook(filePath)) {
+            return; // Notebook already open, switched to existing tab
+        }
+    }
+    
     // Create a new tab first
     addNewTab();
     

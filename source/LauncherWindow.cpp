@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "RecentNotebooksManager.h"
 #include "SpnPackageManager.h"
+#include "DocumentConverter.h"
 #include <QApplication>
 #include <QVBoxLayout>
 #ifdef Q_OS_WIN
@@ -21,6 +22,8 @@
 #include <QPixmap>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QProgressDialog>
+#include <QCoreApplication>
 #include <QMenu>
 #include <QAction>
 #include <QContextMenuEvent>
@@ -107,7 +110,7 @@ void LauncherWindow::setupUi()
     // Add tab items with explicit sizing
     QListWidgetItem *returnItem = new QListWidgetItem(loadThemedIcon("recent"), tr("Return"));
     QListWidgetItem *newItem = new QListWidgetItem(loadThemedIcon("addtab"), tr("New"));
-    QListWidgetItem *openPdfItem = new QListWidgetItem(loadThemedIcon("pdf"), tr("Open PDF"));
+    QListWidgetItem *openPdfItem = new QListWidgetItem(loadThemedIcon("pdf"), tr("Open File"));
     QListWidgetItem *openNotebookItem = new QListWidgetItem(loadThemedIcon("folder"), tr("Open Notes"));
     QListWidgetItem *recentItem = new QListWidgetItem(loadThemedIcon("benchmark"), tr("Recent"));
     QListWidgetItem *starredItem = new QListWidgetItem(loadThemedIcon("star"), tr("Starred"));
@@ -249,14 +252,14 @@ void LauncherWindow::setupOpenPdfTab()
     layout->addWidget(titleLabel);
     
     // Description
-    QLabel *descLabel = new QLabel(tr("Select a PDF file to create a notebook for annotation"));
+    QLabel *descLabel = new QLabel(tr("Select a PDF or PowerPoint file to create a notebook for annotation"));
     descLabel->setObjectName("descLabel");
     descLabel->setAlignment(Qt::AlignCenter);
     descLabel->setWordWrap(true);
     layout->addWidget(descLabel);
     
     // Open button
-    QPushButton *openBtn = new QPushButton(tr("Browse for PDF"));
+    QPushButton *openBtn = new QPushButton(tr("Browse for PDF/PPT"));
     openBtn->setObjectName("primaryButton");
     openBtn->setFixedSize(190, 50);
     connect(openBtn, &QPushButton::clicked, this, &LauncherWindow::onOpenPdfClicked);
@@ -488,12 +491,24 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     bool isDarkModeActive = isDarkMode();
     QString coverBg = isDarkModeActive ? "#2b2b2b" : "white";
     QString coverBorder = isDarkModeActive ? "#555555" : "#ddd";
-    coverLabel->setStyleSheet(QString("border: 1px solid %1; border-radius: 4px; background: %2;").arg(coverBorder).arg(coverBg));
+    coverLabel->setStyleSheet(QString("border: 1px solid %1; border-radius: 0px; background: %2;").arg(coverBorder).arg(coverBg));
     
     // Set scaling mode to fill the entire area
     coverLabel->setScaledContents(true);
     
-    QString coverPath = notebookManager->getCoverImagePathForNotebook(path);
+    QString coverPath;
+    
+    // ✅ Safety check for notebookManager
+    if (notebookManager) {
+        coverPath = notebookManager->getCoverImagePathForNotebook(path);
+        
+        // ✅ If cover doesn't exist, try to regenerate it (without canvas - uses saved files)
+        if (coverPath.isEmpty() && QFile::exists(path)) {
+            notebookManager->generateAndSaveCoverPreview(path, nullptr);
+            coverPath = notebookManager->getCoverImagePathForNotebook(path);
+        }
+    }
+    
     if (!coverPath.isEmpty()) {
         // Use cached pixmap if available to prevent memory leaks
         QString cacheKey = QString("%1_cropped").arg(coverPath);
@@ -535,8 +550,9 @@ QPushButton* LauncherWindow::createNotebookButton(const QString &path, bool isSt
     
     buttonLayout->addWidget(coverLabel, 1); // Stretch factor 1
     
-    // Title
-    QString displayName = notebookManager->getNotebookDisplayName(path);
+    // Title - use notebook manager if available, otherwise fall back to file name
+    QString displayName = notebookManager ? notebookManager->getNotebookDisplayName(path) 
+                                          : QFileInfo(path).fileName();
     QLabel *titleLabel = new QLabel(displayName);
     titleLabel->setAlignment(Qt::AlignCenter);
     titleLabel->setWordWrap(false);
@@ -666,12 +682,56 @@ void LauncherWindow::onNewNotebookClicked()
 
 void LauncherWindow::onOpenPdfClicked()
 {
-    QString pdfPath = QFileDialog::getOpenFileName(this, 
-        tr("Open PDF File"), 
+    QString filePath = QFileDialog::getOpenFileName(this, 
+        tr("Open PDF or PowerPoint File"), 
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
-        tr("PDF Files (*.pdf)"));
+        tr("Documents (*.pdf *.ppt *.pptx *.odp);;PDF Files (*.pdf);;PowerPoint Files (*.ppt *.pptx);;OpenDocument Presentation (*.odp)"));
     
-    if (!pdfPath.isEmpty()) {
+    if (!filePath.isEmpty()) {
+        // Check if the file needs conversion (PPT/PPTX/ODP)
+        QString pdfPath = filePath;
+        
+        if (DocumentConverter::needsConversion(filePath)) {
+            // Check if LibreOffice is available
+            if (!DocumentConverter::isLibreOfficeAvailable()) {
+                QMessageBox::warning(this, 
+                    tr("LibreOffice Required"), 
+                    DocumentConverter::getInstallationInstructions());
+                return;
+            }
+            
+            // Show progress dialog
+            QProgressDialog progressDialog(
+                tr("Converting %1 to PDF...").arg(QFileInfo(filePath).fileName()),
+                QString(), 0, 0, this);
+            progressDialog.setWindowModality(Qt::WindowModal);
+            progressDialog.setCancelButton(nullptr);
+            progressDialog.setMinimumDuration(0);
+            progressDialog.show();
+            QCoreApplication::processEvents();
+            
+            // Perform conversion (will save next to original file by default)
+            DocumentConverter converter(this);
+            DocumentConverter::ConversionStatus status;
+            pdfPath = converter.convertToPdf(filePath, status);
+            
+            progressDialog.close();
+            
+            if (status != DocumentConverter::Success || pdfPath.isEmpty()) {
+                QString errorMsg = tr("Failed to convert PowerPoint to PDF.\n\n");
+                
+                if (status == DocumentConverter::LibreOfficeNotFound) {
+                    errorMsg += DocumentConverter::getInstallationInstructions();
+                } else {
+                    errorMsg += tr("Error: %1").arg(converter.getLastError());
+                }
+                
+                QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
+                return;
+            }
+        }
+        
+        // Continue with normal PDF loading
         // Try to find existing MainWindow first
         MainWindow *existingMainWindow = findExistingMainWindow();
         MainWindow *targetMainWindow = nullptr;
@@ -796,6 +856,19 @@ void LauncherWindow::openNotebook(const QString &path)
     MainWindow *existingMainWindow = findExistingMainWindow();
     MainWindow *targetMainWindow = nullptr;
     
+    // Check if this .spn notebook is already open in an existing MainWindow
+    if (existingMainWindow && path.endsWith(".spn", Qt::CaseInsensitive)) {
+        // Check for duplicate before creating new tab
+        if (existingMainWindow->switchToExistingNotebook(path)) {
+            // Notebook is already open - just show the window
+            existingMainWindow->show();
+            existingMainWindow->raise();
+            existingMainWindow->activateWindow();
+            hide();
+            return;
+        }
+    }
+    
     if (existingMainWindow) {
         // Use existing MainWindow and add new tab
         targetMainWindow = existingMainWindow;
@@ -803,7 +876,7 @@ void LauncherWindow::openNotebook(const QString &path)
         targetMainWindow->raise();
         targetMainWindow->activateWindow();
         
-        // Always create a new tab for the new document
+        // Create a new tab for the new document
         targetMainWindow->addNewTab();
     } else {
         // Create new MainWindow
@@ -901,6 +974,8 @@ void LauncherWindow::onNotebookRightClicked(const QPoint &pos)
 
 void LauncherWindow::toggleStarredStatus(const QString &path)
 {
+    if (!notebookManager) return;
+    
     if (notebookManager->isStarred(path)) {
         notebookManager->removeStarred(path);
     } else {
@@ -914,6 +989,8 @@ void LauncherWindow::toggleStarredStatus(const QString &path)
 
 void LauncherWindow::removeFromRecent(const QString &path)
 {
+    if (!notebookManager) return;
+    
     // Remove from recent notebooks
     notebookManager->removeRecentNotebook(path);
     
@@ -989,7 +1066,7 @@ void LauncherWindow::applyModernStyling()
         QListWidget#sidebarTabList::item {
             margin: 4px 8px;
             padding-left: 20px;
-            border-radius: 8px;
+            border-radius: 0px;
         }
         
         QListWidget#sidebarTabList::item:selected {
@@ -1015,7 +1092,7 @@ void LauncherWindow::applyModernStyling()
         QPushButton#primaryButton {
             background-color: %4;
             border: none;
-            border-radius: 8px;
+            border-radius: 0px;
             color: white;
             font-size: 16px;
             font-weight: bold;
@@ -1033,7 +1110,7 @@ void LauncherWindow::applyModernStyling()
         QPushButton#notebookButton {
             background-color: %2;
             border: 1px solid %3;
-            border-radius: 12px;
+            border-radius: 0px;
             padding: 0px;
         }
         
@@ -1053,12 +1130,12 @@ void LauncherWindow::applyModernStyling()
         QScrollBar:vertical {
             background-color: %9;
             width: 12px;
-            border-radius: 6px;
+            border-radius: 0px;
         }
         
         QScrollBar::handle:vertical {
             background-color: %10;
-            border-radius: 6px;
+            border-radius: 0px;
             min-height: 30px;
         }
         

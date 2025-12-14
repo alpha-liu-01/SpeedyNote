@@ -31,8 +31,8 @@ void MarkdownNotesSidebar::setupUI() {
     
     scrollContent = new QWidget();
     scrollLayout = new QVBoxLayout(scrollContent);
-    scrollLayout->setContentsMargins(8, 8, 8, 8);
-    scrollLayout->setSpacing(8);
+    scrollLayout->setContentsMargins(12, 12, 12, 12);
+    scrollLayout->setSpacing(10);
     scrollLayout->addStretch(); // Push notes to top
     
     scrollArea->setWidget(scrollContent);
@@ -40,7 +40,7 @@ void MarkdownNotesSidebar::setupUI() {
     // Empty state label
     emptyLabel = new QLabel(tr("No notes on this page"), this);
     emptyLabel->setAlignment(Qt::AlignCenter);
-    emptyLabel->setStyleSheet("color: gray; font-style: italic; padding: 20px;");
+    emptyLabel->setStyleSheet("color: gray; font-style: italic; padding: 30px; font-size: 14px;");
     emptyLabel->setWordWrap(true);
     
     mainLayout->addWidget(searchContainer);
@@ -55,29 +55,30 @@ void MarkdownNotesSidebar::setupUI() {
 void MarkdownNotesSidebar::setupSearchUI() {
     searchContainer = new QWidget(this);
     searchLayout = new QVBoxLayout(searchContainer);
-    searchLayout->setContentsMargins(8, 8, 8, 8);
-    searchLayout->setSpacing(6);
+    searchLayout->setContentsMargins(12, 12, 12, 12);
+    searchLayout->setSpacing(10);
     
-    // Search bar row
+    // ✅ TOUCH-FRIENDLY: Search bar row with larger elements
     searchBarLayout = new QHBoxLayout();
-    searchBarLayout->setSpacing(4);
+    searchBarLayout->setSpacing(8);
     
     searchInput = new QLineEdit(searchContainer);
     searchInput->setPlaceholderText(tr("Search notes..."));
     searchInput->setClearButtonEnabled(true);
+    searchInput->setMinimumHeight(36);
     connect(searchInput, &QLineEdit::returnPressed, this, &MarkdownNotesSidebar::onSearchButtonClicked);
     
     searchButton = new QPushButton(searchContainer);
-    searchButton->setFixedSize(28, 28);
+    searchButton->setFixedSize(36, 36);
     searchButton->setToolTip(tr("Search"));
     // Use zoom icon with dark/light mode support
     QString zoomIconPath = isDarkMode ? ":/resources/icons/zoom_reversed.png" : ":/resources/icons/zoom.png";
     searchButton->setIcon(QIcon(zoomIconPath));
-    searchButton->setIconSize(QSize(20, 20));
+    searchButton->setIconSize(QSize(24, 24));
     connect(searchButton, &QPushButton::clicked, this, &MarkdownNotesSidebar::onSearchButtonClicked);
     
     exitSearchButton = new QPushButton("×", searchContainer);
-    exitSearchButton->setFixedSize(28, 28);
+    exitSearchButton->setFixedSize(36, 36);
     exitSearchButton->setToolTip(tr("Exit search mode"));
     exitSearchButton->setVisible(false);
     connect(exitSearchButton, &QPushButton::clicked, this, &MarkdownNotesSidebar::onExitSearchClicked);
@@ -86,9 +87,9 @@ void MarkdownNotesSidebar::setupSearchUI() {
     searchBarLayout->addWidget(searchButton);
     searchBarLayout->addWidget(exitSearchButton);
     
-    // Page range row
+    // ✅ TOUCH-FRIENDLY: Page range row with larger touch targets
     pageRangeLayout = new QHBoxLayout();
-    pageRangeLayout->setSpacing(4);
+    pageRangeLayout->setSpacing(8);
     
     pageRangeLabel = new QLabel(tr("Pages:"), searchContainer);
     
@@ -96,7 +97,7 @@ void MarkdownNotesSidebar::setupSearchUI() {
     fromPageSpinBox->setMinimum(1);
     fromPageSpinBox->setMaximum(9999);
     fromPageSpinBox->setValue(1);
-    fromPageSpinBox->setFixedWidth(60);
+    fromPageSpinBox->setMinimumSize(36, 30);
     
     toLabel = new QLabel(tr("to"), searchContainer);
     
@@ -104,10 +105,11 @@ void MarkdownNotesSidebar::setupSearchUI() {
     toPageSpinBox->setMinimum(1);
     toPageSpinBox->setMaximum(9999);
     toPageSpinBox->setValue(10);
-    toPageSpinBox->setFixedWidth(60);
+    toPageSpinBox->setMinimumSize(36, 30);
     
     searchAllPagesCheckBox = new QCheckBox(tr("All"), searchContainer);
     searchAllPagesCheckBox->setToolTip(tr("Search all pages in the notebook"));
+    searchAllPagesCheckBox->setMinimumHeight(36);
     connect(searchAllPagesCheckBox, &QCheckBox::toggled, this, &MarkdownNotesSidebar::onSearchAllPagesToggled);
     
     pageRangeLayout->addWidget(pageRangeLabel);
@@ -131,6 +133,9 @@ void MarkdownNotesSidebar::applyStyle() {
     QString bgColor = isDarkMode ? "#1e1e1e" : "#fafafa";
     QString inputBgColor = isDarkMode ? "#2d2d2d" : "#ffffff";
     QString borderColor = isDarkMode ? "#555555" : "#cccccc";
+    QString hoverColor = isDarkMode ? "#3d3d3d" : "#e5e5e5";
+    QString pressedColor = isDarkMode ? "#4d4d4d" : "#d5d5d5";
+    QString textColor = isDarkMode ? "#ffffff" : "#000000";
     
     setStyleSheet(QString(R"(
         MarkdownNotesSidebar {
@@ -138,26 +143,28 @@ void MarkdownNotesSidebar::applyStyle() {
         }
     )").arg(bgColor));
     
-    // Style search input
+    // ✅ TOUCH-FRIENDLY: Larger padding and font for search input
     searchInput->setStyleSheet(QString(R"(
         QLineEdit {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 4px;
-            padding: 4px 8px;
+            border-radius: 0px;
+            padding: 8px 12px;
+            font-size: 14px;
         }
         QLineEdit:focus {
-            border: 1px solid #0078d4;
+            border: 2px solid #0078d4;
         }
     )").arg(inputBgColor, borderColor));
     
-    // Style buttons
+    // ✅ TOUCH-FRIENDLY: Larger buttons with clear visual feedback
     QString buttonStyle = QString(R"(
         QPushButton {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 4px;
-            font-size: 14px;
+            border-radius: 0px;
+            font-size: 16px;
+            font-weight: bold;
         }
         QPushButton:hover {
             background-color: %3;
@@ -165,25 +172,47 @@ void MarkdownNotesSidebar::applyStyle() {
         QPushButton:pressed {
             background-color: %4;
         }
-    )").arg(inputBgColor, borderColor,
-            isDarkMode ? "#3d3d3d" : "#e5e5e5",
-            isDarkMode ? "#4d4d4d" : "#d5d5d5");
+    )").arg(inputBgColor, borderColor, hoverColor, pressedColor);
     
     searchButton->setStyleSheet(buttonStyle);
-    exitSearchButton->setStyleSheet(buttonStyle.replace(borderColor, "#ff4444"));
     
-    // Style spin boxes
-    QString spinBoxStyle = QString(R"(
-        QSpinBox {
+    // Exit button with red accent
+    exitSearchButton->setStyleSheet(QString(R"(
+        QPushButton {
             background-color: %1;
-            border: 1px solid %2;
-            border-radius: 4px;
-            padding: 2px;
+            border: 1px solid #ff4444;
+            border-radius: 0px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #ff4444;
         }
-    )").arg(inputBgColor, borderColor);
+        QPushButton:hover {
+            background-color: #ffeeee;
+            border: 2px solid #ff4444;
+        }
+        QPushButton:pressed {
+            background-color: #ff4444;
+            color: white;
+        }
+    )").arg(inputBgColor));
     
-    fromPageSpinBox->setStyleSheet(spinBoxStyle);
-    toPageSpinBox->setStyleSheet(spinBoxStyle);
+    // ✅ NO CUSTOM SPINBOX STYLING - Let them inherit global/system styles
+    // This ensures consistency with the main toolbar spinbox
+    // Just clear any previous custom styles
+    fromPageSpinBox->setStyleSheet("");
+    toPageSpinBox->setStyleSheet("");
+    
+    // ✅ Style the checkbox for better touch visibility
+    searchAllPagesCheckBox->setStyleSheet(QString(R"(
+        QCheckBox {
+            spacing: 8px;
+            font-size: 13px;
+        }
+        QCheckBox::indicator {
+            width: 20px;
+            height: 20px;
+        }
+    )"));
 }
 
 void MarkdownNotesSidebar::addNote(const MarkdownNoteData &data) {
