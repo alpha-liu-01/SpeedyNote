@@ -722,6 +722,10 @@ private:
     bool scrollbarsVisible = false;
     QTimer *scrollbarHideTimer = nullptr;
     
+    // Trackpad gesture mode - when active, ALL wheel events go to InkCanvas (no mouse wheel fallback)
+    bool trackpadModeActive = false;
+    QTimer *trackpadModeTimer = nullptr;
+    
 #ifdef Q_OS_LINUX
     // Palm rejection internal state
     bool palmRejectionActive = false; // Whether we're currently suppressing touch gestures
@@ -786,6 +790,7 @@ private:
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;  // New: Handle keyboard shortcuts
+    void keyReleaseEvent(QKeyEvent *event) override; // Track Ctrl key release for trackpad pinch-zoom detection
     void tabletEvent(QTabletEvent *event) override; // Handle pen hover for tooltips
 #ifdef Q_OS_LINUX
     bool event(QEvent *event) override; // Handle tablet proximity events for palm rejection

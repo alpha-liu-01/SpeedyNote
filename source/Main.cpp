@@ -153,14 +153,11 @@ int main(int argc, char *argv[]) {
     FreeConsole();  // Hide console safely on Windows
 
     /*
+    // DEBUG: Show console for trackpad gesture debugging
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
     */
-    
-    
-     // to show console for debugging
-    
     
 #endif
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
