@@ -725,6 +725,7 @@ private:
     // Trackpad gesture mode - when active, ALL wheel events go to InkCanvas (no mouse wheel fallback)
     bool trackpadModeActive = false;
     QTimer *trackpadModeTimer = nullptr;
+    QElapsedTimer lastWheelEventTimer; // Track time between wheel events for trackpad detection
     
 #ifdef Q_OS_LINUX
     // Palm rejection internal state

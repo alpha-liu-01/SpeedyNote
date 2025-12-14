@@ -4974,38 +4974,46 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             
             QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
             
-            // ✅ TRACKPAD MODE: Once we detect a trackpad event, ALL subsequent wheel events
-            // go to InkCanvas for a short period. This catches momentum events that have
-            // large angleDelta and would otherwise fail trackpad detection.
-            if (trackpadModeActive) {
-                // Already in trackpad mode - keep timer running and let InkCanvas handle
-                trackpadModeTimer->start(); // Reset the timeout
-                return false; // Let InkCanvas handle ALL wheel events while in trackpad mode
+            // Track time between events
+            qint64 timeSinceLastEvent = -1;
+            if (lastWheelEventTimer.isValid()) {
+                timeSinceLastEvent = lastWheelEventTimer.elapsed();
             }
+            lastWheelEventTimer.restart();
             
-            // Detect if this is a trackpad event
-            // Trackpad detection: has pixelDelta, has scroll phase, or has Ctrl modifier (pinch-zoom)
+            // Detect trackpad signals
             bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
             bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
             bool hasCtrlModifier = wheelEvent->modifiers() & Qt::ControlModifier;
-
-            // Also check for small angle delta (typical of trackpad smooth scrolling)
             int angleY = qAbs(wheelEvent->angleDelta().y());
             int angleX = qAbs(wheelEvent->angleDelta().x());
             bool hasSmallAngle = (angleY > 0 && angleY < 120) || (angleX > 0 && angleX < 120);
             
-            // ✅ CRITICAL: Check if InkCanvas is actively handling trackpad gestures
-            bool isTrackpadActive = canvas && (canvas->isTrackpadScrollingActive() || 
-                                                canvas->isTrackpadPinchZoomingActive());
+            // ✅ MOUSE WHEEL DETECTION: Exactly 120 units and no trackpad signals
+            bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
+            bool looksLikeMouseWheel = hasExactWheelStep && 
+                                       !hasPixelDelta && !hasScrollPhase && !hasCtrlModifier;
             
-            // Determine if this looks like a trackpad event
-            bool isLikelyTrackpad = hasPixelDelta || hasScrollPhase || hasCtrlModifier || hasSmallAngle || isTrackpadActive;
+            // ✅ CERTAINLY MOUSE WHEEL: Must have > 5ms gap to confirm it's not trackpad
+            // First event (timeSinceLastEvent < 0) is NEVER certainly mouse wheel - could be trackpad start
+            bool isCertainlyMouseWheel = looksLikeMouseWheel && timeSinceLastEvent > 5;
             
-            // ✅ If trackpad detected, enter trackpad mode and let InkCanvas handle it
-            if (isLikelyTrackpad) {
+            // ✅ If certainly mouse wheel, exit trackpad mode and handle as mouse wheel
+            if (isCertainlyMouseWheel) {
+                if (trackpadModeActive) {
+                    trackpadModeActive = false;
+                    if (trackpadModeTimer->isActive()) {
+                        trackpadModeTimer->stop();
+                    }
+                }
+                // Fall through to mouse wheel handling below
+            } else {
+                // Not certainly mouse wheel - treat as trackpad (safer default)
+                // This catches trackpad events that look like mouse wheel (exactly 120 units)
+                
                 trackpadModeActive = true;
                 trackpadModeTimer->start(); // Start/reset the timeout
-                return false; // Let InkCanvas::event() handle trackpad gestures
+                return false; // Let InkCanvas handle it
             }
             
             // This is a mouse wheel event (NOT trackpad) - handle with stepped scrolling
