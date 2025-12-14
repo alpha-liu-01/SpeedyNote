@@ -4972,6 +4972,10 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             }
 
             InkCanvas* canvas = currentCanvas();
+            if (!canvas) {
+                return false; // No canvas to handle events
+            }
+            
             QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
             
             // --- Timing-based detection ---
@@ -4992,7 +4996,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             const bool isMouseWheel = looksLikeMouseWheel && timeSinceLastEvent > 5;
             
             // --- Route event ---
-            if (canvas && canvas->getTouchGestureMode() == TouchGestureMode::Disabled) {
+            if (canvas->getTouchGestureMode() == TouchGestureMode::Disabled) {
                 // Disabled mode: mouse wheel works, trackpad blocked
                 if (!isMouseWheel) {
                     return true; // Block trackpad

@@ -3108,9 +3108,7 @@ bool InkCanvas::event(QEvent *event) {
             }
             
             // Reset timeout
-            if (trackpadPinchZoomTimeoutTimer) {
-                trackpadPinchZoomTimeoutTimer->start();
-            }
+            trackpadPinchZoomTimeoutTimer->start();
             
             event->accept();
             return true;
@@ -3326,6 +3324,12 @@ bool InkCanvas::event(QEvent *event) {
                 if (inertiaTimer->isActive()) {
                     inertiaTimer->stop();
                     cachedFrame = QPixmap(); // Clear old cache
+                }
+                
+                // Stop any ongoing trackpad scrolling (touch takes priority)
+                if (isTrackpadScrolling) {
+                    isTrackpadScrolling = false;
+                    trackpadScrollTimeoutTimer->stop();
                 }
                 
                 // Reset page switch cooldown
@@ -3893,6 +3897,11 @@ void InkCanvas::handleTrackpadScroll(qreal pixelDeltaX, qreal pixelDeltaY, bool 
     }
     
     if (gestureStart && !isTrackpadScrolling) {
+        // Don't start trackpad scrolling if touch panning is already active
+        if (isTouchPanning && activeTouchPoints > 0) {
+            return; // Touch gesture has priority
+        }
+        
         // Start of trackpad scroll gesture - same as TouchBegin for single finger pan
         
         // Stop any ongoing inertia
@@ -4013,7 +4022,7 @@ void InkCanvas::handleTrackpadPinchZoom(qreal scaleFactor, QPointF centerPoint) 
     if (isPanning || isTrackpadScrolling) {
         isPanning = false;
         isTrackpadScrolling = false;
-        if (trackpadScrollTimeoutTimer && trackpadScrollTimeoutTimer->isActive()) {
+        if (trackpadScrollTimeoutTimer->isActive()) {
             trackpadScrollTimeoutTimer->stop();
         }
     }
