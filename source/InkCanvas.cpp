@@ -31,6 +31,7 @@
 #include <QWheelEvent>
 #include <QGestureEvent>
 #include <QPinchGesture>
+#include <QNativeGestureEvent>
 #include <QApplication>
 #include <QtMath>
 #include <QPainterPath>
@@ -3077,6 +3078,52 @@ void InkCanvas::saveNotebookId() {
 
 
 bool InkCanvas::event(QEvent *event) {
+    // Debug: Log gesture and wheel events
+    if (event->type() == QEvent::Gesture || event->type() == QEvent::Wheel || 
+        event->type() == QEvent::NativeGesture) {
+        qDebug() << "EVENT TYPE:" << event->type();
+    }
+    
+    // Handle native gestures (macOS/Linux trackpad)
+    if (event->type() == QEvent::NativeGesture) {
+        QNativeGestureEvent *nge = static_cast<QNativeGestureEvent*>(event);
+        qDebug() << "NativeGesture:" << nge->gestureType() << "value=" << nge->value() << "pos=" << nge->position();
+        
+        // Handle zoom gesture
+        if (nge->gestureType() == Qt::ZoomNativeGesture) {
+            if (touchGestureMode == TouchGestureMode::Disabled || 
+                touchGestureMode == TouchGestureMode::YAxisOnly) {
+                event->accept();
+                return true;
+            }
+            
+            // Initialize on first zoom event
+            if (!isTrackpadPinchZooming) {
+                isTrackpadPinchZooming = true;
+                targetZoomFactor = internalZoomFactor;
+            }
+            
+            // Apply zoom - value is the scale delta (e.g., 0.1 for 10% zoom)
+            qreal scaleFactor = 1.0 + nge->value();
+            targetZoomFactor *= scaleFactor;
+            targetZoomFactor = qBound(10.0, targetZoomFactor, 400.0);
+            
+            trackpadZoomCenterPoint = nge->position();
+            
+            if (!trackpadZoomAnimationTimer->isActive()) {
+                trackpadZoomAnimationTimer->start();
+            }
+            
+            // Reset timeout
+            if (trackpadPinchZoomTimeoutTimer) {
+                trackpadPinchZoomTimeoutTimer->start();
+            }
+            
+            event->accept();
+            return true;
+        }
+    }
+    
     // Handle native pinch gestures (Linux/KDE trackpad pinch-to-zoom)
     // On Linux, pinch-to-zoom comes as QPinchGesture, not Ctrl+Wheel like Windows
     if (event->type() == QEvent::Gesture) {
@@ -3133,6 +3180,17 @@ bool InkCanvas::event(QEvent *event) {
     
     // Handle wheel events for trackpad gesture bridging
     if (event->type() == QEvent::Wheel) {
+        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+        
+        // Debug ALL wheel events to diagnose Linux trackpad behavior
+        const QInputDevice *dbgDevice = wheelEvent->device();
+        qDebug() << "WHEEL:" 
+                 << "delta=" << wheelEvent->angleDelta()
+                 << "pixel=" << wheelEvent->pixelDelta()
+                 << "phase=" << wheelEvent->phase()
+                 << "Ctrl=" << (wheelEvent->modifiers() & Qt::ControlModifier ? "yes" : "no")
+                 << "device=" << (dbgDevice ? dbgDevice->type() : QInputDevice::DeviceType::Unknown);
+        
         // ✅ When touch gestures are DISABLED, block ALL wheel events immediately
         // This ensures trackpad does NOTHING when disabled - no scrolling, no zooming, no fallback
         if (touchGestureMode == TouchGestureMode::Disabled) {
@@ -3140,7 +3198,6 @@ bool InkCanvas::event(QEvent *event) {
             return true; // Block everything
         }
         
-        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
         
         // Check if this event comes from a touchpad device
         // Qt 6 provides device type information which is more reliable than heuristics
