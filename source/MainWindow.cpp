@@ -4965,13 +4965,6 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             }
 
             InkCanvas* canvas = currentCanvas();
-            
-            // ✅ CRITICAL: When touch gestures are DISABLED, block ALL wheel events!
-            // This guarantees trackpad does NOTHING - no scrolling, no zooming, no fallback.
-            if (canvas && canvas->getTouchGestureMode() == TouchGestureMode::Disabled) {
-                return true; // Block ALL wheel events when touch gestures are off
-            }
-            
             QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
             
             // Track time between events
@@ -4997,6 +4990,18 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             // ✅ CERTAINLY MOUSE WHEEL: Must have > 5ms gap to confirm it's not trackpad
             // First event (timeSinceLastEvent < 0) is NEVER certainly mouse wheel - could be trackpad start
             bool isCertainlyMouseWheel = looksLikeMouseWheel && timeSinceLastEvent > 5;
+            
+            // ✅ When touch gestures are DISABLED:
+            // - Block trackpad events (they should do nothing)
+            // - Allow mouse wheel events (user can still use mouse wheel)
+            if (canvas && canvas->getTouchGestureMode() == TouchGestureMode::Disabled) {
+                if (isCertainlyMouseWheel) {
+                    // Mouse wheel is allowed - fall through to mouse wheel handling
+                } else {
+                    // Trackpad event - block it
+                    return true;
+                }
+            }
             
             // ✅ If certainly mouse wheel, exit trackpad mode and handle as mouse wheel
             if (isCertainlyMouseWheel) {

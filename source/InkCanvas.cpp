@@ -3171,14 +3171,28 @@ bool InkCanvas::event(QEvent *event) {
     
     // Handle wheel events for trackpad gesture bridging
     if (event->type() == QEvent::Wheel) {
-        // ✅ When touch gestures are DISABLED, block ALL wheel events immediately
-        // This ensures trackpad does NOTHING when disabled - no scrolling, no zooming, no fallback
+        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+        
+        // ✅ When touch gestures are DISABLED, block trackpad events but allow mouse wheel
+        // Mouse wheel events are handled by MainWindow, so anything reaching here is trackpad
         if (touchGestureMode == TouchGestureMode::Disabled) {
+            // Check if this looks like a mouse wheel event (exactly 120 units, no trackpad signals)
+            bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
+            bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
+            int angleY = qAbs(wheelEvent->angleDelta().y());
+            int angleX = qAbs(wheelEvent->angleDelta().x());
+            bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
+            
+            if (hasExactWheelStep && !hasPixelDelta && !hasScrollPhase) {
+                // Looks like mouse wheel - let it propagate to MainWindow for handling
+                return QWidget::event(event);
+            }
+            
+            // Trackpad event - block it
             event->accept();
-            return true; // Block everything
+            return true;
         }
         
-        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
         
         // Check if this event comes from a touchpad device
         // Qt 6 provides device type information which is more reliable than heuristics
