@@ -5356,17 +5356,18 @@ void InkCanvas::renderPdfPageToCacheThreadSafe(int pageNumber, Poppler::Document
         }
         
         // Ensure the cache holds only 6 pages max
+        // ✅ BUG FIX: Only evict ONE page, not two!
         if (pdfCache.count() >= 6) {
-            auto oldestKey = pdfCache.keys().first();
-            pdfCache.remove(oldestKey);
             // ✅ LRU: Evict the LEAST recently used page (front of the list)
             if (!pdfCacheAccessOrder.isEmpty()) {
                 int pageToEvict = pdfCacheAccessOrder.takeFirst();
                 pdfCache.remove(pageToEvict);
             } else {
                 // Fallback if access order is somehow empty
-            auto oldestKey = pdfCache.keys().first();
-            pdfCache.remove(oldestKey);
+                auto keys = pdfCache.keys();
+                if (!keys.isEmpty()) {
+                    pdfCache.remove(keys.first());
+                }
             }
         }
     }

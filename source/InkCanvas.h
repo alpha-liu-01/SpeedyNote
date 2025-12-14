@@ -275,10 +275,12 @@ public:
         
         // Cancel and clean up any active note watchers
         for (QFutureWatcher<void>* watcher : activeNoteWatchers) {
-            if (watcher && !watcher->isFinished()) {
-                watcher->cancel();
+            if (watcher) {
+                if (!watcher->isFinished()) {
+                    watcher->cancel();
+                }
+                watcher->deleteLater();
             }
-            watcher->deleteLater();
         }
         activeNoteWatchers.clear();
     }
