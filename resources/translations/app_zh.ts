@@ -1651,7 +1651,7 @@ Error output:
     </message>
     <message>
         <location filename="../../source/InkCanvas.cpp" line="3766"/>
-        <location filename="../../source/InkCanvas.cpp" line="6855"/>
+        <location filename="../../source/InkCanvas.cpp" line="6856"/>
         <source>Clipboard Error</source>
         <translation type="unfinished">剪贴板错误</translation>
     </message>
@@ -1700,27 +1700,27 @@ You can now paste it on other pages or tabs using the picture paste feature.</so
         <translation type="unfinished">笔注: </translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6856"/>
+        <location filename="../../source/InkCanvas.cpp" line="6857"/>
         <source>Failed to access system clipboard.</source>
         <translation type="unfinished">无法访问剪贴板。</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6863"/>
+        <location filename="../../source/InkCanvas.cpp" line="6864"/>
         <source>No Clipboard Data</source>
         <translation type="unfinished">剪贴板没有数据</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6864"/>
+        <location filename="../../source/InkCanvas.cpp" line="6865"/>
         <source>No data found in clipboard.</source>
         <translation type="unfinished">无法从剪贴板找到数据。</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6900"/>
+        <location filename="../../source/InkCanvas.cpp" line="6901"/>
         <source>No Image in Clipboard</source>
         <translation type="unfinished">剪贴板上没有图片</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6901"/>
+        <location filename="../../source/InkCanvas.cpp" line="6902"/>
         <source>No image data found in clipboard.
 
 Please copy an image to the clipboard first.</source>
@@ -1729,12 +1729,12 @@ Please copy an image to the clipboard first.</source>
 请先复制图片到剪贴板上。</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6907"/>
+        <location filename="../../source/InkCanvas.cpp" line="6908"/>
         <source>Image Too Large</source>
         <translation type="unfinished">图片太大</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6908"/>
+        <location filename="../../source/InkCanvas.cpp" line="6909"/>
         <source>The clipboard image is too large (max 8192x8192 pixels).
 
 Please use a smaller image.</source>
@@ -1743,22 +1743,22 @@ Please use a smaller image.</source>
 请换一张小点儿的图片。</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6920"/>
+        <location filename="../../source/InkCanvas.cpp" line="6921"/>
         <source>No Notebook Open</source>
         <translation type="unfinished">未打开笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6921"/>
+        <location filename="../../source/InkCanvas.cpp" line="6922"/>
         <source>Please save your notebook as a SpeedyNote Package (.spn) file before pasting images.</source>
         <translation type="unfinished">请把你的笔记本保存成spn格式之后再去粘贴图片上去。</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6954"/>
+        <location filename="../../source/InkCanvas.cpp" line="6955"/>
         <source>Save Error</source>
         <translation type="unfinished">保存失败</translation>
     </message>
     <message>
-        <location filename="../../source/InkCanvas.cpp" line="6955"/>
+        <location filename="../../source/InkCanvas.cpp" line="6956"/>
         <source>Failed to save clipboard image to notebook.
 
 Path: %1</source>
