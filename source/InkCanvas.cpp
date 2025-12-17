@@ -28,6 +28,10 @@
 #include <QInputDevice>
 #include <QTabletEvent>
 #include <QTouchEvent>
+#include <QWheelEvent>
+#include <QGestureEvent>
+#include <QPinchGesture>
+#include <QNativeGestureEvent>
 #include <QApplication>
 #include <QtMath>
 #include <QPainterPath>
@@ -73,6 +77,9 @@ InkCanvas::InkCanvas(QWidget *parent)
     setAttribute(Qt::WA_StaticContents);
     setTabletTracking(true);
     setAttribute(Qt::WA_AcceptTouchEvents);  // Enable touch events
+    
+    // Enable pinch gesture recognition (for Linux/KDE trackpad pinch-to-zoom)
+    grabGesture(Qt::PinchGesture);
 
     // Enable immediate updates for smoother animation
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -125,7 +132,25 @@ InkCanvas::InkCanvas(QWidget *parent)
     touchPanningTimeoutTimer->setSingleShot(true);
     touchPanningTimeoutTimer->setInterval(200); // 200ms timeout
     connect(touchPanningTimeoutTimer, &QTimer::timeout, this, &InkCanvas::resetTouchPanningState);
-    
+
+    // Initialize trackpad scroll timeout timer (detects end of trackpad scroll gesture)
+    // Windows doesn't provide scroll phases, so we detect gesture end via timeout
+    trackpadScrollTimeoutTimer = new QTimer(this);
+    trackpadScrollTimeoutTimer->setSingleShot(true);
+    trackpadScrollTimeoutTimer->setInterval(300); // 300ms timeout - long enough to capture Windows trackpad momentum
+    connect(trackpadScrollTimeoutTimer, &QTimer::timeout, this, &InkCanvas::resetTrackpadScrollingState);
+
+    // Initialize trackpad pinch-zoom timeout timer (detects end of pinch-zoom gesture)
+    trackpadPinchZoomTimeoutTimer = new QTimer(this);
+    trackpadPinchZoomTimeoutTimer->setSingleShot(true);
+    trackpadPinchZoomTimeoutTimer->setInterval(150); // 150ms timeout
+    connect(trackpadPinchZoomTimeoutTimer, &QTimer::timeout, this, &InkCanvas::resetTrackpadPinchZoomState);
+
+    // Initialize trackpad zoom animation timer (smooth 60fps interpolation like touchscreen)
+    trackpadZoomAnimationTimer = new QTimer(this);
+    trackpadZoomAnimationTimer->setInterval(16); // ~60 FPS
+    connect(trackpadZoomAnimationTimer, &QTimer::timeout, this, &InkCanvas::updateTrackpadZoomAnimation);
+
     // Initialize auto-save timer (single-shot, triggered after first edit)
     autoSaveTimer = new QTimer(this);
     autoSaveTimer->setSingleShot(true);
@@ -3053,6 +3078,216 @@ void InkCanvas::saveNotebookId() {
 
 
 bool InkCanvas::event(QEvent *event) {
+    // Handle native gestures (macOS/Linux trackpad)
+    if (event->type() == QEvent::NativeGesture) {
+        QNativeGestureEvent *nge = static_cast<QNativeGestureEvent*>(event);
+        
+        // Handle zoom gesture
+        if (nge->gestureType() == Qt::ZoomNativeGesture) {
+            if (touchGestureMode == TouchGestureMode::Disabled || 
+                touchGestureMode == TouchGestureMode::YAxisOnly) {
+                event->accept();
+                return true;
+            }
+            
+            // Initialize on first zoom event
+            if (!isTrackpadPinchZooming) {
+                isTrackpadPinchZooming = true;
+                targetZoomFactor = internalZoomFactor;
+            }
+            
+            // Apply zoom - value is the scale delta (e.g., 0.1 for 10% zoom)
+            qreal scaleFactor = 1.0 + nge->value();
+            targetZoomFactor *= scaleFactor;
+            targetZoomFactor = qBound(10.0, targetZoomFactor, 400.0);
+            
+            trackpadZoomCenterPoint = nge->position();
+            
+            if (!trackpadZoomAnimationTimer->isActive()) {
+                trackpadZoomAnimationTimer->start();
+            }
+            
+            // Reset timeout
+            trackpadPinchZoomTimeoutTimer->start();
+            
+            event->accept();
+            return true;
+        }
+    }
+    
+    // Handle native pinch gestures (Linux/KDE trackpad pinch-to-zoom)
+    // On Linux, pinch-to-zoom comes as QPinchGesture, not Ctrl+Wheel like Windows
+    if (event->type() == QEvent::Gesture) {
+        QGestureEvent *gestureEvent = static_cast<QGestureEvent*>(event);
+        if (QPinchGesture *pinch = static_cast<QPinchGesture*>(gestureEvent->gesture(Qt::PinchGesture))) {
+            // DISABLED MODE: Block all gestures
+            if (touchGestureMode == TouchGestureMode::Disabled) {
+                event->accept();
+                return true;
+            }
+            
+            // Y-AXIS ONLY MODE: Disable pinch-zoom
+            if (touchGestureMode == TouchGestureMode::YAxisOnly) {
+                event->accept();
+                return true;
+            }
+            
+            if (pinch->state() == Qt::GestureStarted) {
+                // Initialize zoom at gesture start
+                internalZoomFactor = zoomFactor;
+                targetZoomFactor = zoomFactor;
+                isTrackpadPinchZooming = true;
+            }
+            
+            if (pinch->state() == Qt::GestureUpdated || pinch->state() == Qt::GestureStarted) {
+                // Get scale factor from gesture
+                qreal scaleFactor = pinch->scaleFactor();
+                QPointF centerPoint = pinch->centerPoint();
+                
+                // Update target zoom (accumulative)
+                targetZoomFactor *= scaleFactor;
+                targetZoomFactor = qBound(10.0, targetZoomFactor, 400.0);
+                
+                // Store zoom center point
+                trackpadZoomCenterPoint = mapFromGlobal(centerPoint.toPoint());
+                
+                // Start/continue smooth zoom animation
+                if (!trackpadZoomAnimationTimer->isActive()) {
+                    trackpadZoomAnimationTimer->start();
+                }
+            }
+            
+            if (pinch->state() == Qt::GestureFinished || pinch->state() == Qt::GestureCanceled) {
+                isTrackpadPinchZooming = false;
+                // Let animation finish naturally
+            }
+            
+            event->accept();
+            return true;
+        }
+    }
+    
+    // ========================================================================
+    // WHEEL EVENT HANDLING: Trackpad Gestures
+    // ========================================================================
+    // MainWindow routes trackpad events here; mouse wheel is handled there.
+    // This handles: trackpad scrolling and trackpad pinch-to-zoom (Ctrl+Wheel)
+    // ========================================================================
+    if (event->type() == QEvent::Wheel) {
+        QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+        
+        // --- Extract event properties ---
+        const QInputDevice *device = wheelEvent->device();
+        const bool isFromTouchpad = device && (device->type() == QInputDevice::DeviceType::TouchPad);
+        const bool hasCtrlModifier = wheelEvent->modifiers() & Qt::ControlModifier;
+        const bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
+        const bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
+        const int angleX = qAbs(wheelEvent->angleDelta().x());
+        const int angleY = qAbs(wheelEvent->angleDelta().y());
+        const bool hasSmallAngle = (angleY > 0 && angleY < 120) || (angleX > 0 && angleX < 120);
+        
+        // --- Disabled mode: block trackpad, allow mouse wheel to propagate ---
+        if (touchGestureMode == TouchGestureMode::Disabled) {
+            const bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
+            if (hasExactWheelStep && !hasPixelDelta && !hasScrollPhase) {
+                return QWidget::event(event); // Let mouse wheel propagate to MainWindow
+            }
+            event->accept();
+            return true; // Block trackpad
+        }
+        
+        // ====================================================================
+        // PINCH-TO-ZOOM (Ctrl+Wheel from trackpad)
+        // ====================================================================
+        // Windows: Trackpad pinch generates synthetic Ctrl + wheel events
+        // Linux: Trackpad may be reported as TouchPad device, or Ctrl never pressed
+        // ====================================================================
+        bool isPinchZoom = false;
+        
+        if (hasCtrlModifier) {
+            if (isTrackpadPinchZooming) {
+                // Continue existing pinch-zoom gesture
+                isPinchZoom = true;
+            } else {
+                // Detect start of pinch-zoom gesture
+                const qint64 ctrlAge = getCtrlKeyPressAge();
+                const bool isSyntheticCtrl = (ctrlAge >= 0 && ctrlAge < 100); // Ctrl pressed within 100ms
+                const bool ctrlNeverPressed = (ctrlAge < 0); // Ctrl was never physically pressed
+                
+                if (isFromTouchpad || isSyntheticCtrl || ctrlNeverPressed) {
+                    isPinchZoom = true;
+                    isTrackpadPinchZooming = true;
+                    targetZoomFactor = internalZoomFactor;
+                }
+            }
+        }
+        
+        if (isPinchZoom) {
+            trackpadPinchZoomTimeoutTimer->start();
+            
+            // Smooth zoom animation: accumulate target, interpolate at 60fps
+            const qreal delta = wheelEvent->angleDelta().y();
+            const qreal scaleFactor = 1.0 + (delta / 1500.0); // ~8% zoom per 120 units
+            targetZoomFactor = qBound(10.0, targetZoomFactor * scaleFactor, 400.0);
+            trackpadZoomCenterPoint = wheelEvent->position();
+            
+            if (!trackpadZoomAnimationTimer->isActive()) {
+                trackpadZoomAnimationTimer->start();
+            }
+            
+            event->accept();
+            return true;
+        }
+        
+        // ====================================================================
+        // TRACKPAD SCROLLING
+        // ====================================================================
+        // Detection: pixelDelta, scrollPhase, small angleDelta, or active gesture
+        // ====================================================================
+        const bool isTrackpad = isTrackpadScrolling || isFromTouchpad || hasPixelDelta || 
+                                hasScrollPhase || (hasSmallAngle && !hasCtrlModifier);
+        
+        if (isTrackpad) {
+            // Calculate scroll delta
+            qreal deltaX, deltaY;
+            if (hasPixelDelta) {
+                deltaX = wheelEvent->pixelDelta().x();
+                deltaY = wheelEvent->pixelDelta().y();
+            } else {
+                deltaX = wheelEvent->angleDelta().x() / 4.0;
+                deltaY = wheelEvent->angleDelta().y() / 4.0;
+            }
+            
+            // Determine gesture phase (Windows lacks scroll phases)
+            bool gestureStart = false;
+            bool gestureEnd = false;
+            
+            switch (wheelEvent->phase()) {
+                case Qt::ScrollBegin:
+                    gestureStart = true;
+                    break;
+                case Qt::ScrollEnd:
+                    gestureEnd = true;
+                    break;
+                case Qt::NoScrollPhase:
+                    gestureStart = !isTrackpadScrolling;
+                    trackpadScrollTimeoutTimer->start();
+                    break;
+                default:
+                    trackpadScrollTimeoutTimer->start();
+                    break;
+            }
+            
+            handleTrackpadScroll(deltaX, deltaY, gestureStart, gestureEnd);
+            event->accept();
+            return true;
+        }
+        
+        // Not a trackpad event - let MainWindow handle as mouse wheel
+        return QWidget::event(event);
+    }
+    
+    // Touch gesture handling - only when not disabled
     if (touchGestureMode == TouchGestureMode::Disabled) {
         return QWidget::event(event);
     }
@@ -3089,6 +3324,12 @@ bool InkCanvas::event(QEvent *event) {
                 if (inertiaTimer->isActive()) {
                     inertiaTimer->stop();
                     cachedFrame = QPixmap(); // Clear old cache
+                }
+                
+                // Stop any ongoing trackpad scrolling (touch takes priority)
+                if (isTrackpadScrolling) {
+                    isTrackpadScrolling = false;
+                    trackpadScrollTimeoutTimer->stop();
                 }
                 
                 // Reset page switch cooldown
@@ -3521,6 +3762,326 @@ void InkCanvas::resetTouchPanningState() {
         // Force a full repaint to show any pending changes
         update();
     }
+}
+
+void InkCanvas::resetTrackpadScrollingState() {
+    // Called when trackpad scroll timeout fires (no wheel events for ~120ms)
+    // This signals the end of a trackpad scroll gesture
+    if (isTrackpadScrolling) {
+        isTrackpadScrolling = false;
+        isPanning = false;
+        
+        // DO NOT apply our own inertia for trackpad scrolling!
+        // Windows Precision Touchpad drivers handle momentum by continuing to send
+        // wheel events after the finger lifts. If we start our own inertia, it
+        // conflicts with the driver's momentum events, causing back-and-forth skipping.
+        // (This is different from touchscreen, which stops sending events when finger lifts)
+        
+        // End touch panning state
+        isTouchPanning = false;
+        emit touchPanningChanged(false);
+        
+        // Clear cached frame to force full redraw
+        cachedFrame = QPixmap();
+        cachedFrameOffset = QPoint(0, 0);
+        
+        // Clear velocity tracking
+        trackpadRecentVelocities.clear();
+        
+        // Emit signal that gesture has ended
+        emit touchGestureEnded();
+        
+        update();
+    }
+}
+
+void InkCanvas::resetTrackpadPinchZoomState() {
+    // Called when trackpad pinch-zoom timeout fires (no wheel events for ~150ms)
+    // This signals the end of a trackpad pinch-zoom gesture
+    if (isTrackpadPinchZooming) {
+        isTrackpadPinchZooming = false;
+        
+        // Stop zoom animation (let it finish naturally to target)
+        // Animation will stop itself when it reaches target
+        
+        // Sync target with current for next gesture
+        targetZoomFactor = internalZoomFactor;
+        
+        // Emit signal that gesture has ended
+        emit touchGestureEnded();
+    }
+}
+
+void InkCanvas::updateTrackpadZoomAnimation() {
+    // Smoothly interpolate internalZoomFactor toward targetZoomFactor
+    // This creates touchscreen-like smooth zooming from discrete wheel events
+    
+    const qreal interpolationSpeed = 0.25; // 25% of the way each frame (smooth but responsive)
+    const qreal epsilon = 0.5; // Stop when within 0.5% of target
+    
+    qreal diff = targetZoomFactor - internalZoomFactor;
+    
+    if (qAbs(diff) < epsilon) {
+        // Close enough to target - snap to it and stop
+        internalZoomFactor = targetZoomFactor;
+        trackpadZoomAnimationTimer->stop();
+        
+        // Final update
+        zoomFactor = qRound(internalZoomFactor);
+        emit zoomChanged(zoomFactor);
+        update();
+        return;
+    }
+    
+    // Interpolate toward target
+    internalZoomFactor += diff * interpolationSpeed;
+    internalZoomFactor = qBound(10.0, internalZoomFactor, 400.0);
+    
+    // Apply zoom with center point adjustment (same math as touchscreen pinch)
+    qreal scaledCanvasWidth = buffer.width() * (zoomFactor / 100.0);
+    qreal scaledCanvasHeight = buffer.height() * (zoomFactor / 100.0);
+    qreal centerOffsetX = (scaledCanvasWidth < width()) ? (width() - scaledCanvasWidth) / 2.0 : 0;
+    qreal centerOffsetY = (scaledCanvasHeight < height()) ? (height() - scaledCanvasHeight) / 2.0 : 0;
+    
+    // Adjust center point for centering offset
+    QPointF adjustedCenter = trackpadZoomCenterPoint - QPointF(centerOffsetX, centerOffsetY);
+    
+    // Calculate pan adjustment to keep the zoom centered at the gesture center
+    QPointF bufferCenter = adjustedCenter / (zoomFactor / 100.0) + QPointF(panOffsetX, panOffsetY);
+    
+    // Update zoom factor
+    int newZoom = qRound(internalZoomFactor);
+    if (newZoom != zoomFactor) {
+        zoomFactor = newZoom;
+        emit zoomChanged(newZoom);
+    }
+    
+    // Clear cached frame when zoom changes
+    cachedFrame = QPixmap();
+    cachedFrameOffset = QPoint(0, 0);
+    
+    // Adjust pan to keep center point fixed
+    qreal newPanX = bufferCenter.x() - adjustedCenter.x() / (internalZoomFactor / 100.0);
+    qreal newPanY = bufferCenter.y() - adjustedCenter.y() / (internalZoomFactor / 100.0);
+    
+    // Clamp pan X to valid range
+    qreal newScaledCanvasWidth = buffer.width() * (internalZoomFactor / 100.0);
+    qreal newScaledCanvasHeight = buffer.height() * (internalZoomFactor / 100.0);
+    
+    if (newScaledCanvasWidth <= width()) {
+        newPanX = 0;
+    } else {
+        qreal maxPanX = newScaledCanvasWidth - width();
+        newPanX = qBound(0.0, newPanX, maxPanX);
+    }
+    
+    if (newScaledCanvasHeight < height()) {
+        newPanY = 0;
+    }
+    
+    // Update pan
+    panOffsetX = qRound(newPanX);
+    panOffsetY = qRound(newPanY);
+    emit panChanged(panOffsetX, panOffsetY);
+    
+    // Request repaint
+    update();
+}
+
+void InkCanvas::handleTrackpadScroll(qreal pixelDeltaX, qreal pixelDeltaY, bool gestureStart, bool gestureEnd) {
+    // Bridge trackpad two-finger scroll to touch gesture pan system
+    // This reuses all the touch gesture infrastructure (cached frame, inertia, autoscroll, etc.)
+    
+    if (touchGestureMode == TouchGestureMode::Disabled) {
+        return;
+    }
+    
+    if (gestureStart && !isTrackpadScrolling) {
+        // Don't start trackpad scrolling if touch panning is already active
+        if (isTouchPanning && activeTouchPoints > 0) {
+            return; // Touch gesture has priority
+        }
+        
+        // Start of trackpad scroll gesture - same as TouchBegin for single finger pan
+        
+        // Stop any ongoing inertia
+        if (inertiaTimer->isActive()) {
+            inertiaTimer->stop();
+            cachedFrame = QPixmap();
+        }
+        
+        // Reset page switch cooldown
+        pageSwitchInProgress = false;
+        
+        isPanning = true;
+        isTouchPanning = true;
+        isTrackpadScrolling = true;
+        emit touchPanningChanged(true);
+        
+        // Store starting pan position
+        touchPanStartX = panOffsetX;
+        touchPanStartY = panOffsetY;
+        
+        // Initialize velocity tracking
+        trackpadVelocityTimer.start();
+        trackpadRecentVelocities.clear();
+        
+        // Capture current frame for efficient panning (same as touch gesture)
+        qreal scaledCanvasWidth = buffer.width() * (internalZoomFactor / 100.0);
+        qreal scaledCanvasHeight = buffer.height() * (internalZoomFactor / 100.0);
+        
+        qreal centerOffsetX = (scaledCanvasWidth < width()) ? (width() - scaledCanvasWidth) / 2.0 : 0;
+        qreal centerOffsetY = (scaledCanvasHeight < height()) ? (height() - scaledCanvasHeight) / 2.0 : 0;
+        
+        cachedCanvasRegion = QRect(
+            qRound(centerOffsetX - panOffsetX * (internalZoomFactor / 100.0)),
+            qRound(centerOffsetY - panOffsetY * (internalZoomFactor / 100.0)),
+            qRound(scaledCanvasWidth),
+            qRound(scaledCanvasHeight)
+        );
+        
+        // Clip to widget bounds
+        cachedCanvasRegion = cachedCanvasRegion.intersected(rect());
+        
+        // Grab the canvas region for efficient panning
+        cachedFrame = grab(cachedCanvasRegion);
+        cachedFrameOffset = QPoint(0, 0);
+    }
+    
+    if (isTrackpadScrolling && !gestureEnd) {
+        // Update phase - apply delta to pan (same as TouchUpdate)
+        qint64 elapsed = trackpadVelocityTimer.elapsed();
+        
+        // Track velocity for inertia
+        if (elapsed > 0) {
+            // Y-AXIS ONLY MODE: Only track Y-axis velocity
+            qreal velocityX = (touchGestureMode == TouchGestureMode::YAxisOnly) ? 0 : pixelDeltaX / elapsed;
+            qreal velocityY = pixelDeltaY / elapsed;
+            QPointF velocity(velocityX, velocityY);
+            trackpadRecentVelocities.append(qMakePair(velocity, elapsed));
+            
+            // Keep only last 5 velocity samples
+            if (trackpadRecentVelocities.size() > 5) {
+                trackpadRecentVelocities.removeFirst();
+            }
+        }
+        trackpadVelocityTimer.restart();
+        
+        // Convert pixel delta to pan delta (accounting for zoom)
+        // Note: pixelDelta is in screen pixels, need to convert to canvas units
+        qreal scaledDeltaX = pixelDeltaX / (internalZoomFactor / 100.0);
+        qreal scaledDeltaY = pixelDeltaY / (internalZoomFactor / 100.0);
+        
+        // Calculate new pan positions
+        qreal newPanX = panOffsetX - scaledDeltaX;
+        qreal newPanY = panOffsetY - scaledDeltaY;
+        
+        // Y-AXIS ONLY MODE: Lock X-axis panning
+        if (touchGestureMode == TouchGestureMode::YAxisOnly) {
+            newPanX = panOffsetX;
+        }
+        
+        // Clamp pan X to valid range (pan Y is not clamped for pseudo smooth scrolling)
+        qreal scaledCanvasWidth = buffer.width() * (internalZoomFactor / 100.0);
+        qreal scaledCanvasHeight = buffer.height() * (internalZoomFactor / 100.0);
+        
+        if (scaledCanvasWidth <= width()) {
+            newPanX = 0;
+        } else {
+            qreal maxPanX = scaledCanvasWidth - width();
+            newPanX = qBound(0.0, newPanX, maxPanX);
+        }
+        
+        if (scaledCanvasHeight < height()) {
+            newPanY = 0;
+        }
+        
+        // Use efficient scrolling during trackpad gesture
+        int roundedPanX = qRound(newPanX);
+        int roundedPanY = qRound(newPanY);
+        setPanWithTouchScroll(roundedPanX, roundedPanY);
+    }
+    
+    if (gestureEnd && isTrackpadScrolling) {
+        // End of gesture - trigger inertia calculation via timeout handler
+        resetTrackpadScrollingState();
+    }
+}
+
+void InkCanvas::handleTrackpadPinchZoom(qreal scaleFactor, QPointF centerPoint) {
+    // Bridge trackpad pinch-to-zoom to touch gesture zoom system
+    // Trackpad pinch-zoom ALWAYS works regardless of touchGestureMode
+    // (touchGestureMode controls touch screen gestures, not trackpad)
+
+    // Y-AXIS ONLY MODE: Disable pinch-zoom (user explicitly chose to disable zoom)
+    if (touchGestureMode == TouchGestureMode::YAxisOnly) {
+        return;
+    }
+    
+    // Stop any panning during zoom
+    if (isPanning || isTrackpadScrolling) {
+        isPanning = false;
+        isTrackpadScrolling = false;
+        if (trackpadScrollTimeoutTimer->isActive()) {
+            trackpadScrollTimeoutTimer->stop();
+        }
+    }
+    
+    if (isTouchPanning) {
+        isTouchPanning = false;
+        emit touchPanningChanged(false);
+    }
+    
+    // Apply scale factor to internal zoom
+    internalZoomFactor *= scaleFactor;
+    internalZoomFactor = qBound(10.0, internalZoomFactor, 400.0);
+    
+    // Calculate zoom center adjustment (same math as touch pinch zoom)
+    qreal scaledCanvasWidth = buffer.width() * (zoomFactor / 100.0);
+    qreal scaledCanvasHeight = buffer.height() * (zoomFactor / 100.0);
+    qreal centerOffsetX = (scaledCanvasWidth < width()) ? (width() - scaledCanvasWidth) / 2.0 : 0;
+    qreal centerOffsetY = (scaledCanvasHeight < height()) ? (height() - scaledCanvasHeight) / 2.0 : 0;
+    
+    // Adjust center point for centering offset
+    QPointF adjustedCenter = centerPoint - QPointF(centerOffsetX, centerOffsetY);
+    
+    // Calculate pan adjustment to keep the zoom centered at the gesture center
+    QPointF bufferCenter = adjustedCenter / (zoomFactor / 100.0) + QPointF(panOffsetX, panOffsetY);
+    
+    // Update zoom factor
+    int newZoom = qRound(internalZoomFactor);
+    zoomFactor = newZoom;
+    
+    // Emit zoom change
+    emit zoomChanged(newZoom);
+    
+    // Clear cached frame when zoom changes
+    cachedFrame = QPixmap();
+    cachedFrameOffset = QPoint(0, 0);
+    
+    // Adjust pan to keep center point fixed
+    qreal newPanX = bufferCenter.x() - adjustedCenter.x() / (internalZoomFactor / 100.0);
+    qreal newPanY = bufferCenter.y() - adjustedCenter.y() / (internalZoomFactor / 100.0);
+    
+    // Clamp pan X to valid range
+    qreal newScaledCanvasWidth = buffer.width() * (internalZoomFactor / 100.0);
+    qreal newScaledCanvasHeight = buffer.height() * (internalZoomFactor / 100.0);
+    
+    if (newScaledCanvasWidth <= width()) {
+        newPanX = 0;
+    } else {
+        qreal maxPanX = newScaledCanvasWidth - width();
+        newPanX = qBound(0.0, newPanX, maxPanX);
+    }
+    
+    if (newScaledCanvasHeight < height()) {
+        newPanY = 0;
+    }
+    
+    emit panChanged(qRound(newPanX), qRound(newPanY));
+    
+    // Request update
+    update();
 }
 
 void InkCanvas::onAutoSaveTimeout() {

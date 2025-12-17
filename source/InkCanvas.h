@@ -285,10 +285,22 @@ public:
         activeNoteWatchers.clear();
     }
 
-    // Touch gesture support
+    // Touch and trackpad gesture support
     void setTouchGestureMode(TouchGestureMode mode) { touchGestureMode = mode; }
     TouchGestureMode getTouchGestureMode() const { return touchGestureMode; }
-    bool isTouchPanningActive() const { return isTouchPanning; } // Check if actively touch panning
+    bool isTouchPanningActive() const { return isTouchPanning; }
+    bool isTrackpadScrollingActive() const { return isTrackpadScrolling; }
+    bool isTrackpadPinchZoomingActive() const { return isTrackpadPinchZooming; }
+    void handleTrackpadScroll(qreal pixelDeltaX, qreal pixelDeltaY, bool gestureStart, bool gestureEnd);
+    void handleTrackpadPinchZoom(qreal scaleFactor, QPointF centerPoint);
+    void setCtrlKeyPhysicallyPressed(bool pressed) { 
+        ctrlKeyPhysicallyPressed = pressed;
+        if (pressed) {
+            ctrlKeyPressTimer.start(); // Record when Ctrl was pressed
+        }
+    }
+    bool isCtrlKeyPhysicallyPressed() const { return ctrlKeyPhysicallyPressed; }
+    qint64 getCtrlKeyPressAge() const { return ctrlKeyPressTimer.isValid() ? ctrlKeyPressTimer.elapsed() : -1; }
 
     // Rope tool selection actions
     void deleteRopeSelection(); // Delete the current rope tool selection
@@ -598,6 +610,22 @@ private:
     int pendingContinuationPanY = 0; // Stored pan Y to restore after page load
     QPointF pendingContinuationTouchPos; // Touch position at the moment of page switch
     QElapsedTimer pageSwitchRecoveryTimer; // Timer to ignore spurious multi-touch events after page switch
+
+    // Trackpad gesture support (scrolling and pinch-to-zoom)
+    QTimer* trackpadScrollTimeoutTimer = nullptr;
+    QTimer* trackpadPinchZoomTimeoutTimer = nullptr;
+    QTimer* trackpadZoomAnimationTimer = nullptr;
+    bool isTrackpadScrolling = false;
+    bool isTrackpadPinchZooming = false;
+    qreal targetZoomFactor = 100.0;
+    QPointF trackpadZoomCenterPoint;
+    QElapsedTimer trackpadVelocityTimer;
+    QList<QPair<QPointF, qint64>> trackpadRecentVelocities;
+    bool ctrlKeyPhysicallyPressed = false;
+    QElapsedTimer ctrlKeyPressTimer;
+    void resetTrackpadScrollingState();
+    void resetTrackpadPinchZoomState();
+    void updateTrackpadZoomAnimation();
 
     // Background style members (moved to unified JSON metadata section above)
 

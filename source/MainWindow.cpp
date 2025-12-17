@@ -95,7 +95,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote Beta 0.12.1"));
+    setWindowTitle(tr("SpeedyNote Beta 0.12.2"));
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux
@@ -780,6 +780,14 @@ void MainWindow::setupUi() {
         scrollbarsVisible = false;
     });
     
+    // Trackpad mode timer: maintains trackpad state across rapid events
+    trackpadModeTimer = new QTimer(this);
+    trackpadModeTimer->setSingleShot(true);
+    trackpadModeTimer->setInterval(350);
+    connect(trackpadModeTimer, &QTimer::timeout, this, [this]() {
+        trackpadModeActive = false;
+    });
+
 #ifdef Q_OS_LINUX
     // Create timer for palm rejection restore delay
     palmRejectionTimer = new QTimer(this);
@@ -4948,78 +4956,88 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             // ✅ Don't handle ExtraButton1/ExtraButton2 here anymore - handled by mouse dial system
         }
         // Handle wheel events for scrolling
+        // ========================================================================
+        // WHEEL EVENT ROUTING: Mouse Wheel vs Trackpad
+        // ========================================================================
+        // Mouse wheel events are handled here with stepped scrolling.
+        // Trackpad events are forwarded to InkCanvas for smooth gesture handling.
+        //
+        // Detection strategy:
+        // - Mouse wheel: exactly 120 units, no pixelDelta, no scrollPhase, > 5ms gap
+        // - Everything else: treated as trackpad (safer default)
+        // ========================================================================
         else if (event->type() == QEvent::Wheel) {
-            // ✅ Don't handle wheel events if mouse dial mode is active
             if (mouseDialModeActive) {
-                return false; // Let the main window wheelEvent handle it
+                return false;
+            }
+
+            InkCanvas* canvas = currentCanvas();
+            if (!canvas) {
+                return false; // No canvas to handle events
             }
             
             QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
             
-            // Check if we need scrolling
-            bool needHorizontalScroll = panXSlider->maximum() > 0;
-            bool needVerticalScroll = panYSlider->maximum() > 0;
+            // --- Timing-based detection ---
+            qint64 timeSinceLastEvent = lastWheelEventTimer.isValid() ? lastWheelEventTimer.elapsed() : -1;
+            lastWheelEventTimer.restart();
             
-            // Handle vertical scrolling (Y axis)
-            if (wheelEvent->angleDelta().y() != 0 && needVerticalScroll) {
-                // Calculate scroll amount (negative because wheel up should scroll up)
-                int scrollDelta = -wheelEvent->angleDelta().y() / 8; // Convert from 1/8 degree units
-                
-                // Detect if this is a trackpad (smooth scrolling) vs mouse wheel (stepped)
-                // Trackpad typically sends smaller, more frequent events
-                bool isTrackpad = qAbs(wheelEvent->angleDelta().y()) < 120; // Less than typical mouse wheel step
-                
-                if (isTrackpad) {
-                    // Trackpad: Use direct, smooth scrolling for better responsiveness
-                    scrollDelta = scrollDelta / 2; // Reduce sensitivity for smooth trackpad scrolling
-                } else {
-                    // Mouse wheel: Use stepped scrolling as before
-                    scrollDelta = scrollDelta / 15; // Convert to steps (typical wheel step is 15 degrees)
-                    
-                    // Much faster base scroll speed - aim for ~3-5 scrolls to reach bottom
-                    int baseScrollAmount = panYSlider->maximum() / 8; // 1/8 of total range per scroll
-                    scrollDelta = scrollDelta * qMax(baseScrollAmount, 50); // Minimum 50 units per scroll
+            // --- Extract wheel event properties ---
+            const int angleX = qAbs(wheelEvent->angleDelta().x());
+            const int angleY = qAbs(wheelEvent->angleDelta().y());
+            const bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
+            const bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
+            const bool hasCtrlModifier = wheelEvent->modifiers() & Qt::ControlModifier;
+            
+            // --- Mouse wheel detection ---
+            // A real mouse wheel produces exactly 120 units per step with no trackpad signals
+            const bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
+            const bool looksLikeMouseWheel = hasExactWheelStep && !hasPixelDelta && !hasScrollPhase && !hasCtrlModifier;
+            const bool isMouseWheel = looksLikeMouseWheel && timeSinceLastEvent > 5;
+            
+            // --- Route event ---
+            if (canvas->getTouchGestureMode() == TouchGestureMode::Disabled) {
+                // Disabled mode: mouse wheel works, trackpad blocked
+                if (!isMouseWheel) {
+                    return true; // Block trackpad
                 }
-                
-                // Apply the scroll
-                int currentPan = panYSlider->value();
-                int newPan = qBound(panYSlider->minimum(), currentPan + scrollDelta, panYSlider->maximum());
-                panYSlider->setValue(newPan); // This triggers autoscroll via valueChanged signal
-                
-                // panYSlider stays hidden - scrolling handled internally
-                
-                // Consume the event
+            } else if (!isMouseWheel) {
+                // Normal mode: send trackpad events to InkCanvas
+                trackpadModeActive = true;
+                trackpadModeTimer->start();
+                return false; // Let InkCanvas handle
+            }
+            
+            // --- Exit trackpad mode if this is definitely a mouse wheel event ---
+            if (trackpadModeActive) {
+                trackpadModeActive = false;
+                trackpadModeTimer->stop();
+            }
+            
+            // --- Handle mouse wheel scrolling ---
+            const bool needVerticalScroll = panYSlider->maximum() > 0;
+            const bool needHorizontalScroll = panXSlider->maximum() > 0;
+            
+            if (wheelEvent->angleDelta().y() != 0 && needVerticalScroll) {
+                int scrollSteps = -wheelEvent->angleDelta().y() / 120;
+                int scrollAmount = scrollSteps * qMax(panYSlider->maximum() / 8, 50);
+                int newPan = qBound(panYSlider->minimum(), panYSlider->value() + scrollAmount, panYSlider->maximum());
+                panYSlider->setValue(newPan);
                 return true;
             }
             
-            // Handle horizontal scrolling (X axis) - for completeness
             if (wheelEvent->angleDelta().x() != 0 && needHorizontalScroll) {
-                // Calculate scroll amount
-                int scrollDelta = wheelEvent->angleDelta().x() / 8; // Convert from 1/8 degree units
-                scrollDelta = scrollDelta / 15; // Convert to steps
-                
-                // Much faster base scroll speed - same logic as vertical
-                int baseScrollAmount = panXSlider->maximum() / 8; // 1/8 of total range per scroll
-                scrollDelta = scrollDelta * qMax(baseScrollAmount, 50); // Minimum 50 units per scroll
-                
-                // Apply the scroll
-                int currentPan = panXSlider->value();
-                int newPan = qBound(panXSlider->minimum(), currentPan + scrollDelta, panXSlider->maximum());
+                int scrollSteps = wheelEvent->angleDelta().x() / 120;
+                int scrollAmount = scrollSteps * qMax(panXSlider->maximum() / 8, 50);
+                int newPan = qBound(panXSlider->minimum(), panXSlider->value() + scrollAmount, panXSlider->maximum());
                 panXSlider->setValue(newPan);
                 
-                // Show scrollbar temporarily
                 panXSlider->setVisible(true);
                 scrollbarsVisible = true;
-                if (scrollbarHideTimer->isActive()) {
-                    scrollbarHideTimer->stop();
-                }
                 scrollbarHideTimer->start();
-                
-                // Consume the event
                 return true;
             }
             
-            // If no scrolling was needed, let the event propagate
             return false;
         }
     }
@@ -8117,6 +8135,15 @@ QMap<QString, QString> MainWindow::getKeyboardMappings() const {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event) {
+    // Track Ctrl key state for trackpad pinch-zoom detection
+    // Windows sends pinch-zoom as Ctrl+Wheel, so we need to distinguish from real Ctrl+Wheel
+    if (event->key() == Qt::Key_Control) {
+        InkCanvas *canvas = currentCanvas();
+        if (canvas) {
+            canvas->setCtrlKeyPhysicallyPressed(true);
+        }
+    }
+    
     // Don't intercept keyboard events when text input widgets have focus
     // This prevents conflicts with Windows TextInputFramework
     QWidget *focusWidget = QApplication::focusWidget();
@@ -8178,6 +8205,18 @@ void MainWindow::keyPressEvent(QKeyEvent *event) {
     
     // If not handled, pass to parent
     QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::keyReleaseEvent(QKeyEvent *event) {
+    // Track Ctrl key release for trackpad pinch-zoom detection
+    if (event->key() == Qt::Key_Control) {
+        InkCanvas *canvas = currentCanvas();
+        if (canvas) {
+            canvas->setCtrlKeyPhysicallyPressed(false);
+        }
+    }
+    
+    QMainWindow::keyReleaseEvent(event);
 }
 
 void MainWindow::tabletEvent(QTabletEvent *event) {

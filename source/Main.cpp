@@ -150,16 +150,13 @@ static void applySystemPalette(QApplication &app) {
 
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
-    FreeConsole();  // Hide console safely on Windows
+    // FreeConsole();  // Hide console safely on Windows
 
-    /*
+    
+    // DEBUG: Show console for trackpad gesture debugging
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
-    */
-    
-    
-     // to show console for debugging
     
     
 #endif
