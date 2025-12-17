@@ -110,7 +110,7 @@ if ($arm64) {
 Write-Host "Copying required DLLs from $toolchainPath\bin..." -ForegroundColor Cyan
 
 $requiredDlls = @(
-    "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll", "libreadline8.dll", "Qt6Core.dll", "libdouble-conversion.dll", "libicudt77.dll", "libnghttp2-14.dll", "librhash.dll", "Qt6Gui.dll", "libexpat-1.dll", "libicuin77.dll", "libnghttp3-9.dll", "libsharpyuv-0.dll", "Qt6Network.dll", "libffi-8.dll", "libicuio77.dll", "libngtcp2-16.dll", "libssh2-1.dll", "Qt6Widgets.dll", "libfontconfig-1.dll", "libicutest77.dll", "libngtcp2_crypto_gnutls-8.dll", "libssl-3.dll", "libssl-3-x64.dll", "SDL2.dll", "libformw6.dll", "libicutu77.dll", "libngtcp2_crypto_ossl-0.dll", "libsystre-0.dll", "libLTO.dll", "libfreetype-6.dll", "libicuuc77.dll", "libngtcp2_crypto_ossl.dll", "libtasn1-6.dll", "libLerc.dll", "libgif-7.dll", "libidn2-0.dll", "libnspr4.dll", "libtermcap-0.dll", "libRemarks.dll", "libgio-2.0-0.dll", "libintl-8.dll", "libomp.dll", "libtiff-6.dll", "libarchive-13.dll", "libgirepository-2.0-0.dll", "libjbig-0.dll", "libopenjp2-7.dll", "libtiffxx-6.dll", "libasprintf-0.dll", "libglib-2.0-0.dll", "libjpeg-8.dll", "libopenjpip-7.dll", "libtre-5.dll", "libb2-1.dll", "libgmodule-2.0-0.dll", "libjsoncpp-26.dll", "libp11-kit-0.dll", "libturbojpeg.dll", "libbrotlicommon.dll", "libgmp-10.dll", "liblcms2-2.dll", "libpanelw6.dll", "libunistring-5.dll", "libbrotlidec.dll", "libgmpxx-4.dll", "liblcms2_fast_float-2.dll", "libpcre2-16-0.dll", "libunwind.dll", "libbrotlienc.dll", "libgnutls-30.dll", "liblldb.dll", "libpcre2-32-0.dll", "libuv-1.dll", "libbz2-1.dll", "libgnutls-openssl-27.dll", "liblz4.dll", "libpcre2-8-0.dll", "libwebp-7.dll", "libc++.dll", "libgnutlsxx-30.dll", "liblzma-5.dll", "libpcre2-posix-3.dll", "libwebpdecoder-3.dll", "libcairo-2.dll", "libgobject-2.0-0.dll", "liblzo2-2.dll", "libpixman-1-0.dll", "libwebpdemux-2.dll", "libcairo-gobject-2.dll", "libgraphite2.dll", "libmd4c-html.dll", "libpkgconf-7.dll", "libwebpmux-3.dll", "libcairo-script-interpreter-2.dll", "libgthread-2.0-0.dll", "libmd4c.dll", "libplc4.dll", "libwinpthread-1.dll", "libcares-2.dll", "libharfbuzz-0.dll", "libmenuw6.dll", "libplds4.dll", "libzstd.dll", "libcharset-1.dll", "libharfbuzz-gobject-0.dll", "libmpdec++-4.dll", "libpng16-16.dll", "nss3.dll", "libcrypto-3.dll", "libcrypto-3-x64.dll", "libharfbuzz-subset-0.dll", "libmpdec-4.dll", "nssutil3.dll", "libcurl-4.dll", "libhistory8.dll", "libncurses++w6.dll", "libpoppler-qt6-3.dll", "smime3.dll", "libdbus-1-3.dll", "libhogweed-6.dll", "libncursesw6.dll", "libpsl-5.dll", "zlib1.dll"
+    "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll", "libreadline8.dll", "Qt6Core.dll", "libdouble-conversion.dll", "libicudt78.dll", "libnghttp2-14.dll", "librhash.dll", "Qt6Gui.dll", "libexpat-1.dll", "libicuin78.dll", "libnghttp3-9.dll", "libsharpyuv-0.dll", "Qt6Network.dll", "libffi-8.dll", "libicuio78.dll", "libngtcp2-16.dll", "libssh2-1.dll", "Qt6Widgets.dll", "libfontconfig-1.dll", "libicutest78.dll", "libngtcp2_crypto_gnutls-8.dll", "libssl-3.dll", "libssl-3-x64.dll", "SDL2.dll", "libformw6.dll", "libicutu78.dll", "libngtcp2_crypto_ossl-0.dll", "libsystre-0.dll", "libLTO.dll", "libfreetype-6.dll", "libicuuc78.dll", "libngtcp2_crypto_ossl.dll", "libtasn1-6.dll", "libLerc.dll", "libgif-7.dll", "libidn2-0.dll", "libnspr4.dll", "libtermcap-0.dll", "libRemarks.dll", "libgio-2.0-0.dll", "libintl-8.dll", "libomp.dll", "libtiff-6.dll", "libarchive-13.dll", "libgirepository-2.0-0.dll", "libjbig-0.dll", "libopenjp2-7.dll", "libtiffxx-6.dll", "libasprintf-0.dll", "libglib-2.0-0.dll", "libjpeg-8.dll", "libopenjpip-7.dll", "libtre-5.dll", "libb2-1.dll", "libgmodule-2.0-0.dll", "libjsoncpp-26.dll", "libp11-kit-0.dll", "libturbojpeg.dll", "libbrotlicommon.dll", "libgmp-10.dll", "liblcms2-2.dll", "libpanelw6.dll", "libunistring-5.dll", "libbrotlidec.dll", "libgmpxx-4.dll", "liblcms2_fast_float-2.dll", "libpcre2-16-0.dll", "libunwind.dll", "libbrotlienc.dll", "libgnutls-30.dll", "liblldb.dll", "libpcre2-32-0.dll", "libuv-1.dll", "libbz2-1.dll", "libgnutls-openssl-27.dll", "liblz4.dll", "libpcre2-8-0.dll", "libwebp-7.dll", "libc++.dll", "libgnutlsxx-30.dll", "liblzma-5.dll", "libpcre2-posix-3.dll", "libwebpdecoder-3.dll", "libcairo-2.dll", "libgobject-2.0-0.dll", "liblzo2-2.dll", "libpixman-1-0.dll", "libwebpdemux-2.dll", "libcairo-gobject-2.dll", "libgraphite2.dll", "libmd4c-html.dll", "libpkgconf-7.dll", "libwebpmux-3.dll", "libcairo-script-interpreter-2.dll", "libgthread-2.0-0.dll", "libmd4c.dll", "libplc4.dll", "libwinpthread-1.dll", "libcares-2.dll", "libharfbuzz-0.dll", "libmenuw6.dll", "libplds4.dll", "libzstd.dll", "libcharset-1.dll", "libharfbuzz-gobject-0.dll", "libmpdec++-4.dll", "libpng16-16.dll", "nss3.dll", "libcrypto-3.dll", "libcrypto-3-x64.dll", "libharfbuzz-subset-0.dll", "libmpdec-4.dll", "nssutil3.dll", "libcurl-4.dll", "libhistory8.dll", "libncurses++w6.dll", "libpoppler-qt6-3.dll", "smime3.dll", "libdbus-1-3.dll", "libhogweed-6.dll", "libncursesw6.dll", "libpsl-5.dll", "zlib1.dll"
 )
 
 $sourceDir = "$toolchainPath\bin"
@@ -128,19 +128,31 @@ foreach ($popplerDll in $popplerDlls) {
 }
 
 # ✅ Copy other required DLLs
+$missingDlls = @()
 foreach ($dll in $requiredDlls) {
     $sourcePath = Join-Path $sourceDir $dll
     $destPath = $dll  # We're already in the build directory
-    
+
     if (Test-Path $sourcePath) {
         if (-not (Test-Path $destPath)) {
             Copy-Item -Path $sourcePath -Destination $destPath -Force
             $copiedCount++
         }
+    } else {
+        $missingDlls += $dll
     }
 }
 
 Write-Host "Copied $copiedCount DLL(s) from $toolchain\bin" -ForegroundColor Green
+
+# ✅ Warn about missing DLLs
+if ($missingDlls.Count -gt 0) {
+    Write-Host "⚠️  Warning: The following DLLs from the required list were not found and could not be copied:" -ForegroundColor Yellow
+    foreach ($missingDll in $missingDlls) {
+        Write-Host "  - $missingDll" -ForegroundColor Red
+    }
+    Write-Host "   This may indicate version changes or missing dependencies. Please verify the DLL names." -ForegroundColor Yellow
+}
 
 # Copy share folder
 Copy-Item -Path "$toolchainPath\share\poppler" -Destination "..\build\share\poppler" -Recurse -Force
