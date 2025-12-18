@@ -1,6 +1,5 @@
 #include "MainWindow.h"
 #include "InkCanvas.h"
-#include "MarkdownWindowManager.h"
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>

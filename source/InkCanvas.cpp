@@ -1,7 +1,5 @@
 #include "InkCanvas.h"
 #include "ToolType.h"
-#include "MarkdownWindowManager.h"
-#include "MarkdownWindow.h" // Include the full definition
 #include "PictureWindowManager.h"
 #include "PictureWindow.h" // Include the full definition
 #include "PictureSourceDialog.h"
@@ -3746,7 +3744,7 @@ void InkCanvas::resetTouchPanningState() {
     // This handles cases where TouchEnd event is lost or delayed on Linux
     if (isTouchPanning && !inertiaTimer->isActive()) {
         // Only reset if not in inertia scroll (inertia should complete naturally)
-        qDebug() << "Touch panning timeout - resetting stuck isTouchPanning state";
+        // qDebug() << "Touch panning timeout - resetting stuck isTouchPanning state";
         
         isTouchPanning = false;
         isPanning = false;
@@ -5136,9 +5134,9 @@ void InkCanvas::showPdfTextSelectionMenu(const QPoint &position) {
             if (!noteId.isEmpty()) {
                 // Note was created - emit signal to update UI and auto-open sidebar
                 emit markdownNotesUpdated();
-                qDebug() << "Markdown note linked to existing highlight:" << noteId;
+                // qDebug() << "Markdown note linked to existing highlight:" << noteId;
             } else {
-                qDebug() << "Failed to create markdown note - no highlight found?";
+                // qDebug() << "Failed to create markdown note - no highlight found?";
             }
         });
     } else {
@@ -5151,9 +5149,9 @@ void InkCanvas::showPdfTextSelectionMenu(const QPoint &position) {
             if (!noteId.isEmpty()) {
                 // Note was created - emit signal to update UI and auto-open sidebar
                 emit markdownNotesUpdated();
-                qDebug() << "Highlight and note created:" << noteId;
+                // qDebug() << "Highlight and note created:" << noteId;
             } else {
-                qDebug() << "Failed to create highlight and note - no selection?";
+                // qDebug() << "Failed to create highlight and note - no selection?";
             }
         });
         
