@@ -23,28 +23,22 @@
 #include <shlobj.h>
 #endif
 
+#ifdef Q_OS_WIN
 // Helper function to detect Windows dark mode
 static bool isWindowsDarkMode() {
-#ifdef Q_OS_WIN
     QSettings settings("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 
                        QSettings::NativeFormat);
     int appsUseLightTheme = settings.value("AppsUseLightTheme", 1).toInt();
     return (appsUseLightTheme == 0);
-#else
-    return false;
-#endif
 }
 
 // Helper function to detect Windows 11
 static bool isWindows11() {
-#ifdef Q_OS_WIN
     // Windows 11 is build 22000 or higher
     // Use QSysInfo to check Windows version
     return QSysInfo::kernelVersion().split('.')[2].toInt() >= 22000;
-#else
-    return false;
-#endif
 }
+#endif
 
 // Helper function to set nice Windows fonts (Segoe UI + Dengxian for Chinese)
 static void applyWindowsFonts(QApplication &app) {

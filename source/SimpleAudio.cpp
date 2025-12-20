@@ -388,7 +388,7 @@ bool SimpleAudio::loadWavFile(const QString& filePath)
     
     // Find the "fmt " chunk
     size_t pos = 12;
-    while (pos < fileData.size() - 8) {
+    while (pos < static_cast<size_t>(fileData.size()) - 8) {
         if (memcmp(data + pos, "fmt ", 4) == 0) {
             uint32_t chunkSize = *reinterpret_cast<const uint32_t*>(data + pos + 4);
             if (chunkSize >= 16) {
@@ -414,7 +414,7 @@ bool SimpleAudio::loadWavFile(const QString& filePath)
     
     // Find the "data" chunk
     pos = 12;
-    while (pos < fileData.size() - 8) {
+    while (pos < static_cast<size_t>(fileData.size()) - 8) {
         if (memcmp(data + pos, "data", 4) == 0) {
             uint32_t dataSize = *reinterpret_cast<const uint32_t*>(data + pos + 4);
             d->dataOffset = pos + 8;

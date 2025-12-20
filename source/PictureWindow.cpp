@@ -661,7 +661,6 @@ bool PictureWindow::isClickOnDeleteButton(const QPoint &canvasPos) const {
     if (!editMode) return false;
     
     // Calculate delete button rect in canvas coordinates
-    int headerHeight = 32; // Match the new header height
     QRect deleteRect(canvasRect.right() - 24, canvasRect.y() + 8, 20, 20); // Larger button for better touch interaction
     
     return deleteRect.contains(canvasPos);
@@ -1333,7 +1332,6 @@ void PictureWindow::convertScreenToCanvasRect(const QRect &screenRect) {
     if (QWidget *canvas = parentWidget()) {
         // Try to cast to InkCanvas to use the coordinate conversion methods
         if (InkCanvas *inkCanvas = qobject_cast<InkCanvas*>(canvas)) {
-            QRect oldCanvasRect = canvasRect;
             QRect newCanvasRect = inkCanvas->mapWidgetToCanvas(screenRect);
             
             // Store the converted canvas coordinates

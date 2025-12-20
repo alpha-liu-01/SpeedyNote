@@ -237,7 +237,7 @@ void SDLControllerManager::start() {
     // qDebug() << "Found" << numJoysticks << "joystick(s)";
     
     for (int i = 0; i < numJoysticks; ++i) {
-        const char* joystickName = SDL_JoystickNameForIndex(i);
+        // const char* joystickName = SDL_JoystickNameForIndex(i);
         // qDebug() << "Joystick" << i << ":" << (joystickName ? joystickName : "Unknown");
         
         joystick = SDL_JoystickOpen(i);

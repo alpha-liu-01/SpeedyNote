@@ -103,7 +103,7 @@ enum class StylusButtonAction {
     HoldTextSelection    // Enable PDF text selection while held
 };
 
-static QString actionToString(ControllerAction action) {
+[[maybe_unused]] static QString actionToString(ControllerAction action) {
     switch (action) {
         case ControllerAction::ToggleFullscreen: return "Toggle Fullscreen";
         case ControllerAction::ToggleDial: return "Toggle Dial";
@@ -139,7 +139,7 @@ static QString actionToString(ControllerAction action) {
     }
 }
 
-static ControllerAction stringToAction(const QString &str) {
+[[maybe_unused]] static ControllerAction stringToAction(const QString &str) {
     // Convert internal key to ControllerAction enum
     InternalControllerAction internalAction = ButtonMappingHelper::internalKeyToAction(str);
     

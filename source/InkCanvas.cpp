@@ -65,7 +65,7 @@
 
 
 InkCanvas::InkCanvas(QWidget *parent) 
-    : QWidget(parent), drawing(false), penColor(Qt::black), penThickness(5.0), zoomFactor(100), panOffsetX(0), panOffsetY(0), currentTool(ToolType::Pen) {    
+    : QWidget(parent), drawing(false), penColor(Qt::black), penThickness(5.0), currentTool(ToolType::Pen), zoomFactor(100), panOffsetX(0), panOffsetY(0) {    
     
     // Set theme-aware default pen color
     MainWindow *mainWindow = qobject_cast<MainWindow*>(parent);
@@ -372,7 +372,6 @@ qreal InkCanvas::getEffectiveDpiScale(QScreen *screen) const {
 
 void InkCanvas::initializeBuffer() {
     QScreen *screen = QGuiApplication::primaryScreen();
-    qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
 
     // Get logical screen size
     QSize logicalSize = screen ? screen->size() : QSize(1440, 900);
@@ -407,7 +406,7 @@ static QImage invertPdfImage(const QImage &original) {
 // Helper function to calculate contrasting text color for highlights
 // For normal mode: returns white or black based on highlight luminance
 // For inverted PDF mode: returns the inverted highlight color (original color)
-static QColor getContrastingTextColor(const QColor &highlightColor, bool isPdfInverted) {
+[[maybe_unused]] static QColor getContrastingTextColor(const QColor &highlightColor, bool isPdfInverted) {
     if (isPdfInverted) {
         // For inverted PDFs, use the original (non-inverted) color
         // This means inverting the highlight color back
@@ -2201,7 +2200,6 @@ void InkCanvas::drawStroke(const QPointF &start, const QPointF &end, qreal press
     }
 
     // Track if this is the first edit
-    bool wasEdited = edited;
     if (!edited){
         edited = true;
     }
@@ -2270,7 +2268,6 @@ void InkCanvas::eraseStroke(const QPointF &start, const QPointF &end, qreal pres
     }
 
     // Track if this is the first edit
-    bool wasEdited = edited;
     if (!edited){
         edited = true;
     }
@@ -3365,11 +3362,10 @@ bool InkCanvas::event(QEvent *event) {
                 // Clip to widget bounds to avoid grabbing outside
                 cachedCanvasRegion = cachedCanvasRegion.intersected(rect());
                 
-                // Get effective DPI scale (Wayland-aware, respects manual override)
-                qreal dpr = getEffectiveDpiScale();
-                
                 // DEBUG: Print cached region information
                 /*
+                // Get effective DPI scale (Wayland-aware, respects manual override)
+                qreal dpr = getEffectiveDpiScale();
                 qDebug() << "=== TOUCH GESTURE START - CACHE INFO ===";
                 qDebug() << "Effective DPI Scale (Wayland-aware):" << dpr;
                 qDebug() << "Widget size (logical):" << width() << "x" << height() << "=" << (width() * height()) << "pixels";
@@ -3536,7 +3532,6 @@ bool InkCanvas::event(QEvent *event) {
                 QPointF bufferCenter = adjustedCenter / (zoomFactor / 100.0) + QPointF(panOffsetX, panOffsetY);
                 
                 // Update zoom factor before emitting
-                qreal oldZoomFactor = zoomFactor;
                 zoomFactor = newZoom;
                 
                 // Emit zoom change even for small changes
