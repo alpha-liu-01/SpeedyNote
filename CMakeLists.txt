@@ -315,8 +315,8 @@ set(LAYER_SOURCES
 
 # ✅ NEW ARCHITECTURE: Inserted objects (images, text, shapes)
 set(OBJECT_SOURCES
-        # source/objects/InsertedObject.cpp  # Task 1.1.4
-        # source/objects/ImageObject.cpp     # Task 1.1.5
+        source/objects/InsertedObject.cpp  # Task 1.1.4
+        source/objects/ImageObject.cpp     # Task 1.1.5
 )
 
 # ✅ NEW ARCHITECTURE: Stroke data types (extracted from VectorCanvas)

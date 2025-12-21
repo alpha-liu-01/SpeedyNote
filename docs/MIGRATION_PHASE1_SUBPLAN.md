@@ -87,68 +87,47 @@ A single layer containing strokes. Based on VectorCanvas but:
 
 ---
 
-### Task 1.1.4: Create InsertedObject Base Class
+### Task 1.1.4: Create InsertedObject Base Class ✅ COMPLETE
 Abstract base for all insertable objects.
 
-**File:** `source/objects/InsertedObject.h` and `.cpp`
+**Files created:**
+- `source/objects/InsertedObject.h` ✅
+- `source/objects/InsertedObject.cpp` ✅
 
-```cpp
-class InsertedObject {
-public:
-    QString id;           // UUID
-    QPointF position;     // Top-left position on page
-    QSizeF size;          // Bounding size
-    int zOrder = 0;       // Stacking order (higher = on top)
-    bool locked = false;
-    bool visible = true;
-    
-    virtual ~InsertedObject() = default;
-    
-    // Pure virtual - subclasses implement
-    virtual void render(QPainter& painter, qreal zoom) const = 0;
-    virtual QString type() const = 0;  // "image", "text", etc.
-    virtual QJsonObject toJson() const;
-    virtual bool containsPoint(QPointF pt) const;
-    
-    // Factory method for deserialization
-    static std::unique_ptr<InsertedObject> fromJson(const QJsonObject& obj);
-    
-    // Common helpers
-    QRectF boundingRect() const { return QRectF(position, size); }
-};
-```
+**Features implemented:**
+- Common properties: id, position, size, zOrder, locked, visible, rotation
+- Pure virtual: render(), type()
+- Virtual with base impl: toJson(), loadFromJson(), containsPoint()
+- Helpers: boundingRect(), setBoundingRect(), center(), moveBy()
+- Factory method: fromJson() (creates subclasses by type)
+- Full Doxygen documentation
 
 **Dependencies:** None
-**Estimated size:** ~80 lines
+**Actual size:** ~150 lines header + ~80 lines cpp
+**Note:** InsertedObject.cpp includes ImageObject.h - won't compile until 1.1.5 done
 
 ---
 
-### Task 1.1.5: Create ImageObject Class
+### Task 1.1.5: Create ImageObject Class ✅ COMPLETE
 First concrete InsertedObject type.
 
-**File:** `source/objects/ImageObject.h` and `.cpp`
+**Files created:**
+- `source/objects/ImageObject.h` ✅
+- `source/objects/ImageObject.cpp` ✅
 
-```cpp
-class ImageObject : public InsertedObject {
-public:
-    QString imagePath;     // Path to image file (relative to notebook)
-    QString imageHash;     // For deduplication
-    QPixmap cachedPixmap;  // Cached for rendering
-    
-    void render(QPainter& painter, qreal zoom) const override;
-    QString type() const override { return "image"; }
-    QJsonObject toJson() const override;
-    
-    // Load image from path
-    bool loadImage(const QString& basePath);
-    
-    static std::unique_ptr<ImageObject> fromJson(const QJsonObject& obj);
-};
-```
+**Features implemented:**
+- Image properties: imagePath, imageHash, maintainAspectRatio, originalAspectRatio
+- Rendering: render() with zoom and rotation support
+- Loading: loadImage(), setPixmap(), unloadImage()
+- Aspect ratio: resizeToWidth(), resizeToHeight()
+- Deduplication: calculateHash() (SHA-256)
+- Path handling: fullPath() (resolves relative paths)
+- Serialization: toJson(), loadFromJson()
+- Full Doxygen documentation
 
 **Dependencies:** Task 1.1.4 (InsertedObject)
-**Estimated size:** ~100 lines
-**Reuses:** Logic from PictureWindow (simplified)
+**Actual size:** ~130 lines header + ~160 lines cpp
+**Reuses:** Concepts from PictureWindow (simplified)
 
 ---
 
@@ -249,8 +228,8 @@ void testPageSerialization() {
 | 1.1.1 | Directory structure | None | 10 | [✅] |
 | 1.1.2 | Extract StrokePoint/VectorStroke | None | 120 | [✅] |
 | 1.1.3 | Create VectorLayer | 1.1.2 | 200 | [✅] |
-| 1.1.4 | Create InsertedObject base | None | 80 | [ ] |
-| 1.1.5 | Create ImageObject | 1.1.4 | 100 | [ ] |
+| 1.1.4 | Create InsertedObject base | None | 80 | [✅] |
+| 1.1.5 | Create ImageObject | 1.1.4 | 100 | [✅] |
 | 1.1.6 | Create Page class | 1.1.3, 1.1.4, 1.1.5 | 250 | [ ] |
 | 1.1.7 | Unit tests | All above | 50 | [ ] |
 | **TOTAL** | | | **~810** | |
