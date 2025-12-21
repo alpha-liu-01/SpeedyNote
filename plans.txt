@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 0.2 COMPLETE ✅
-NEXT:   Phase 0.3 - Document page-related widgets in MainWindow
+STATUS: Phase 0 COMPLETE ✅ ✅ ✅
+NEXT:   Phase 1.1 - Create Page class
 
 =============================================================================
                          CURRENT ARCHITECTURE
@@ -76,7 +76,11 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      → 6 helper methods exist ONLY for combined canvas (will be deleted)
      → ~500-700 lines of code to eliminate
 
-[  ] 0.3 Document page-related widgets in MainWindow
+[✅] 0.3 Document page-related widgets in MainWindow
+     → See: docs/MIGRATION_PHASE0_WIDGETS.md
+     → Found: 22+ widgets across 6 categories
+     → Found: 20 signal connections, 32 handler methods
+     → Categories: Page Navigation, Pan/Zoom, Outline, Bookmarks, Markdown, Tabs
      → pageInput, panXSlider, panYSlider, zoomSlider
      → outline tree, bookmarks panel, markdown sidebar
      → All widgets that need reconnection in Phase 4
@@ -187,5 +191,25 @@ From Phase 0.2 - COMBINED CANVAS CODE SMELL:
    loadCombinedWindowsForPage(), saveCombinedWindowsForPage()
    loadPdfTextBoxesForCombinedCanvas()
    → All become unnecessary with per-page architecture
+
+-----------------------------------------------------------------------------
+
+From Phase 0.3 - WIDGET RECONNECTION SCOPE:
+
+1. PAGE NAVIGATION (5 widgets, 5 handlers)
+   pageInput, prevPageButton, nextPageButton, jumpToPageButton, deletePageButton
+   → All must connect to DocumentViewport instead of InkCanvas
+
+2. PAN/ZOOM (8 widgets, 8 handlers)  
+   zoomSlider, panXSlider, panYSlider, zoom buttons
+   → Viewport owns view state, widgets sync via signals
+
+3. SIDEBARS (9 widgets, 14 handlers)
+   outlineTree, bookmarkList, markdownNotesSidebar
+   → Data from Document, navigation via Viewport
+
+4. AUTOSCROLL SYSTEM
+   autoScrollRequested, earlySaveRequested signals
+   → May become unnecessary with continuous scrolling
 
 =============================================================================
