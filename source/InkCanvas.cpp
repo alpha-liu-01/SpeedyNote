@@ -1705,6 +1705,10 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
                 case ToolType::Eraser:
                     penThickness = eraserToolThickness;
                     break;
+                case ToolType::VectorPen:
+                case ToolType::VectorEraser:
+                    // Vector tools handle their own thickness
+                    break;
             }
         }
 
@@ -2398,6 +2402,10 @@ void InkCanvas::adjustAllToolThicknesses(qreal zoomRatio) {
         case ToolType::Eraser:
             penThickness = eraserToolThickness;
             break;
+        case ToolType::VectorPen:
+        case ToolType::VectorEraser:
+            // Vector tools handle their own thickness
+            break;
     }
 }
 
@@ -2424,6 +2432,7 @@ void InkCanvas::setTool(ToolType tool) {
                 vectorCanvas->setTool(VectorCanvas::Tool::Pen);
                 vectorCanvas->setPenColor(penColor);
                 vectorCanvas->setPenThickness(penToolThickness);
+                vectorCanvas->setInputActive(true);  // Enable input on vector canvas
                 vectorCanvas->show();
                 vectorCanvas->raise();
             }
@@ -2436,17 +2445,18 @@ void InkCanvas::setTool(ToolType tool) {
             if (vectorCanvas) {
                 vectorCanvas->setTool(VectorCanvas::Tool::Eraser);
                 vectorCanvas->setEraserSize(eraserToolThickness * 3);
+                vectorCanvas->setInputActive(true);  // Enable input on vector canvas
                 vectorCanvas->show();
                 vectorCanvas->raise();
             }
             break;
     }
     
-    // Hide vector canvas when using non-vector tools (but keep data)
+    // Disable vector canvas input when using non-vector tools (but keep strokes visible)
     if (currentTool != ToolType::VectorPen && currentTool != ToolType::VectorEraser) {
         if (vectorCanvas) {
+            vectorCanvas->setInputActive(false);  // Disable input - events pass through to InkCanvas
             // Don't hide - keep it visible so strokes are shown
-            // vectorCanvas->hide();
         }
     }
 }

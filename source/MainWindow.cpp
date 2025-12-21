@@ -4706,16 +4706,22 @@ void MainWindow::updateDialDisplay() {
                 switch (currentCanvas()->getCurrentTool()) {
                     case ToolType::Pen:
                         toolName = tr("Pen");
-            break;
+                        break;
                     case ToolType::Marker:
                         toolName = tr("Marker");
-            break;
+                        break;
                     case ToolType::Eraser:
                         toolName = tr("Eraser");
-                    break;
-            }
+                        break;
+                    case ToolType::VectorPen:
+                        toolName = tr("Vector Pen");
+                        break;
+                    case ToolType::VectorEraser:
+                        toolName = tr("Vector Eraser");
+                        break;
+                }
                 dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(currentCanvas()->getPenThickness(), 'f', 1))));
-            dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             }
             break;  
         case DialMode::ZoomControl:
@@ -4736,6 +4742,14 @@ void MainWindow::updateDialDisplay() {
                     break;
                 case ToolType::Eraser:
                     dialDisplay->setText(tr("\n\n\nEraser"));
+                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/eraser_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    break;
+                case ToolType::VectorPen:
+                    dialDisplay->setText(tr("\n\n\nVector Pen"));
+                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    break;
+                case ToolType::VectorEraser:
+                    dialDisplay->setText(tr("\n\n\nVector Eraser"));
                     dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/eraser_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                     break;
             }

@@ -11,6 +11,7 @@
 #include <QStack>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QPixmap>
 #include <deque>
 
 // A single point in a stroke with pressure
@@ -132,6 +133,10 @@ public:
     explicit VectorCanvas(QWidget *parent = nullptr);
     ~VectorCanvas() override;
     
+    // Input control - when false, events pass through to underlying widget
+    void setInputActive(bool active) { inputActive = active; }
+    bool isInputActive() const { return inputActive; }
+    
     // Tool settings
     void setTool(Tool tool) { currentTool = tool; }
     Tool getTool() const { return currentTool; }
@@ -188,6 +193,9 @@ private:
     qreal penThickness = 5.0;
     qreal eraserSize = 20.0;
     
+    // Input control - when false, events pass through to parent
+    bool inputActive = false;
+    
     // Undo/Redo
     QStack<UndoAction> undoStack;
     QStack<UndoAction> redoStack;
@@ -197,8 +205,11 @@ private:
     bool modified = false;
     QPointF lastPoint;
     
-    // Performance
+    // Performance - stroke cache
     QRectF dirtyRegion;
+    QPixmap strokeCache;        // Cached rendering of all completed strokes
+    bool strokeCacheDirty = true;  // True when cache needs rebuilding
+    void rebuildStrokeCache();  // Rebuild the cache from all strokes
     
     // Benchmark (measures paint refresh rate)
     bool benchmarking = false;

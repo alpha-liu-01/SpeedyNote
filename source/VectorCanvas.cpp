@@ -34,29 +34,65 @@ void VectorCanvas::paintEvent(QPaintEvent *event)
     }
     
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing, true);
     
-    // Get visible rect for culling
-    QRectF visibleRect = rect();
+    // ========== PERFORMANCE OPTIMIZATION: Stroke Caching ==========
+    // Completed strokes are cached in a QPixmap and only rebuilt when changed.
+    // This makes paint performance O(1) instead of O(n*points) during drawing.
     
-    // Render all strokes (with bounding box culling for performance)
-    for (const auto& stroke : strokes) {
-        if (stroke.boundingBox.intersects(visibleRect)) {
-            renderStroke(painter, stroke);
-        }
+    // Rebuild cache if needed (strokes added, removed, or canvas resized)
+    // Compare physical sizes to detect resize (cache stores physical pixels)
+    QSize expectedPhysicalSize = size() * devicePixelRatioF();
+    if (strokeCacheDirty || strokeCache.size() != expectedPhysicalSize) {
+        rebuildStrokeCache();
     }
     
-    // Render current stroke being drawn
+    // Draw the cached completed strokes (single blit operation)
+    if (!strokeCache.isNull()) {
+        painter.drawPixmap(0, 0, strokeCache);
+    }
+    
+    // Draw current stroke being drawn (only this needs per-frame rendering)
     if (drawing && !currentStroke.points.isEmpty()) {
+        painter.setRenderHint(QPainter::Antialiasing, true);
         renderStroke(painter, currentStroke);
     }
     
-    // Draw eraser cursor when in eraser mode
-    if (currentTool == Tool::Eraser && underMouse()) {
+    // Draw eraser cursor when in eraser mode and input is active
+    if (inputActive && currentTool == Tool::Eraser && underMouse()) {
+        painter.setRenderHint(QPainter::Antialiasing, false);
         painter.setPen(QPen(Qt::gray, 1, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
         painter.drawEllipse(lastPoint, eraserSize, eraserSize);
     }
+}
+
+void VectorCanvas::rebuildStrokeCache()
+{
+    // ========== HIGH-DPI FIX ==========
+    // Create pixmap at physical pixel size, not logical size.
+    // On 125% scaling, a 100x100 widget needs 125x125 pixels in the cache.
+    qreal dpr = devicePixelRatioF();
+    QSize physicalSize = size() * dpr;
+    
+    strokeCache = QPixmap(physicalSize);
+    strokeCache.setDevicePixelRatio(dpr);  // Tell Qt this is a high-DPI pixmap
+    strokeCache.fill(Qt::transparent);
+    
+    if (strokes.isEmpty()) {
+        strokeCacheDirty = false;
+        return;
+    }
+    
+    QPainter cachePainter(&strokeCache);
+    cachePainter.setRenderHint(QPainter::Antialiasing, true);
+    
+    // Render all completed strokes to cache
+    // QPainter automatically scales because we set devicePixelRatio on the pixmap
+    for (const auto& stroke : strokes) {
+        renderStroke(cachePainter, stroke);
+    }
+    
+    strokeCacheDirty = false;
 }
 
 void VectorCanvas::renderStroke(QPainter& painter, const VectorStroke& stroke) const
@@ -93,6 +129,12 @@ void VectorCanvas::renderStroke(QPainter& painter, const VectorStroke& stroke) c
 
 void VectorCanvas::tabletEvent(QTabletEvent *event)
 {
+    // CRITICAL: If input is not active, let events pass through to parent (InkCanvas)
+    if (!inputActive) {
+        event->ignore();
+        return;
+    }
+    
     QPointF pos = event->position();
     qreal pressure = event->pressure();
     
@@ -145,8 +187,13 @@ void VectorCanvas::tabletEvent(QTabletEvent *event)
 
 void VectorCanvas::mousePressEvent(QMouseEvent *event)
 {
-    // IMPORTANT: Reject touch-synthesized mouse events
-    // Touch events come through as mouse events with TouchScreen source
+    // CRITICAL: If input is not active, let events pass through to parent (InkCanvas)
+    if (!inputActive) {
+        event->ignore();
+        return;
+    }
+    
+    // Reject touch-synthesized mouse events
     if (event->source() == Qt::MouseEventSynthesizedBySystem ||
         event->source() == Qt::MouseEventSynthesizedByQt) {
         event->ignore();
@@ -178,7 +225,13 @@ void VectorCanvas::mousePressEvent(QMouseEvent *event)
 
 void VectorCanvas::mouseMoveEvent(QMouseEvent *event)
 {
-    // IMPORTANT: Reject touch-synthesized mouse events
+    // CRITICAL: If input is not active, let events pass through to parent (InkCanvas)
+    if (!inputActive) {
+        event->ignore();
+        return;
+    }
+    
+    // Reject touch-synthesized mouse events
     if (event->source() == Qt::MouseEventSynthesizedBySystem ||
         event->source() == Qt::MouseEventSynthesizedByQt) {
         event->ignore();
@@ -202,7 +255,13 @@ void VectorCanvas::mouseMoveEvent(QMouseEvent *event)
 
 void VectorCanvas::mouseReleaseEvent(QMouseEvent *event)
 {
-    // IMPORTANT: Reject touch-synthesized mouse events
+    // CRITICAL: If input is not active, let events pass through to parent (InkCanvas)
+    if (!inputActive) {
+        event->ignore();
+        return;
+    }
+    
+    // Reject touch-synthesized mouse events
     if (event->source() == Qt::MouseEventSynthesizedBySystem ||
         event->source() == Qt::MouseEventSynthesizedByQt) {
         event->ignore();
@@ -262,6 +321,9 @@ void VectorCanvas::finishStroke()
     // Clear redo stack on new action
     redoStack.clear();
     
+    // Mark cache dirty - new stroke added
+    strokeCacheDirty = true;
+    
     modified = true;
     emit strokeAdded();
     emit canvasModified();
@@ -315,6 +377,9 @@ void VectorCanvas::eraseAt(const QPointF& pos)
         strokes.removeAt(idx);
     }
     
+    // Mark cache dirty - strokes removed
+    strokeCacheDirty = true;
+    
     modified = true;
     emit strokeRemoved();
     emit canvasModified();
@@ -354,6 +419,9 @@ void VectorCanvas::undo()
     
     // Push to redo stack
     redoStack.push(action);
+    
+    // Mark cache dirty - strokes changed
+    strokeCacheDirty = true;
     
     modified = true;
     emit canvasModified();
@@ -400,6 +468,9 @@ void VectorCanvas::redo()
     // Push back to undo stack
     undoStack.push(action);
     
+    // Mark cache dirty - strokes changed
+    strokeCacheDirty = true;
+    
     modified = true;
     emit canvasModified();
     update();
@@ -419,6 +490,9 @@ void VectorCanvas::clear()
     
     redoStack.clear();
     strokes.clear();
+    
+    // Mark cache dirty - all strokes cleared
+    strokeCacheDirty = true;
     
     modified = true;
     emit canvasModified();
@@ -459,6 +533,9 @@ void VectorCanvas::fromJson(const QJsonObject& obj)
     for (const auto& val : strokesArray) {
         strokes.append(VectorStroke::fromJson(val.toObject()));
     }
+    
+    // Mark cache dirty - new strokes loaded
+    strokeCacheDirty = true;
     
     modified = false;
     update();
