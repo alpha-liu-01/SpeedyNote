@@ -205,11 +205,17 @@ private:
     bool modified = false;
     QPointF lastPoint;
     
-    // Performance - stroke cache
+    // Performance - stroke cache for completed strokes
     QRectF dirtyRegion;
     QPixmap strokeCache;        // Cached rendering of all completed strokes
     bool strokeCacheDirty = true;  // True when cache needs rebuilding
     void rebuildStrokeCache();  // Rebuild the cache from all strokes
+    
+    // Performance - incremental rendering for current stroke
+    QPixmap currentStrokeCache;     // Accumulates current stroke as it's drawn
+    int lastRenderedPointIndex = 0; // Index of last point rendered to currentStrokeCache
+    void renderCurrentStrokeIncremental(QPainter& painter); // Incremental render
+    void resetCurrentStrokeCache(); // Reset when starting new stroke
     
     // Benchmark (measures paint refresh rate)
     bool benchmarking = false;

@@ -51,10 +51,12 @@ void VectorCanvas::paintEvent(QPaintEvent *event)
         painter.drawPixmap(0, 0, strokeCache);
     }
     
-    // Draw current stroke being drawn (only this needs per-frame rendering)
+    // Draw current stroke being drawn
+    // Use INCREMENTAL rendering - only draw the last few segments, not the entire stroke
+    // This is much faster than re-rendering the full polygon every frame
     if (drawing && !currentStroke.points.isEmpty()) {
         painter.setRenderHint(QPainter::Antialiasing, true);
-        renderStroke(painter, currentStroke);
+        renderCurrentStrokeIncremental(painter);
     }
     
     // Draw eraser cursor when in eraser mode and input is active
@@ -186,6 +188,81 @@ void VectorCanvas::renderStroke(QPainter& painter, const VectorStroke& stroke) c
     painter.drawEllipse(stroke.points[n - 1].pos, endRadius, endRadius);
 }
 
+void VectorCanvas::resetCurrentStrokeCache()
+{
+    // Reset incremental rendering state for new stroke
+    qreal dpr = devicePixelRatioF();
+    QSize physicalSize = size() * dpr;
+    
+    currentStrokeCache = QPixmap(physicalSize);
+    currentStrokeCache.setDevicePixelRatio(dpr);
+    currentStrokeCache.fill(Qt::transparent);
+    lastRenderedPointIndex = 0;
+}
+
+void VectorCanvas::renderCurrentStrokeIncremental(QPainter& painter)
+{
+    // ========== OPTIMIZATION: Incremental Stroke Rendering ==========
+    // Instead of re-rendering the entire current stroke every frame,
+    // we accumulate rendered segments in currentStrokeCache and only
+    // render NEW segments to the cache.
+    
+    const int n = currentStroke.points.size();
+    if (n < 1) return;
+    
+    // Ensure cache is valid
+    QSize expectedSize = size() * devicePixelRatioF();
+    if (currentStrokeCache.isNull() || currentStrokeCache.size() != expectedSize) {
+        resetCurrentStrokeCache();
+    }
+    
+    // Render new segments to the cache (if any)
+    if (n > lastRenderedPointIndex && n >= 2) {
+        QPainter cachePainter(&currentStrokeCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Use line-based rendering for incremental updates (fast)
+        QPen pen(currentStroke.color, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        
+        // Start from the last rendered point (or 1 if starting fresh)
+        int startIdx = qMax(1, lastRenderedPointIndex);
+        
+        // Render each new segment
+        for (int i = startIdx; i < n; ++i) {
+            const auto& p0 = currentStroke.points[i - 1];
+            const auto& p1 = currentStroke.points[i];
+            
+            qreal avgPressure = (p0.pressure + p1.pressure) / 2.0;
+            qreal width = qMax(currentStroke.baseThickness * avgPressure, 1.0);
+            
+            pen.setWidthF(width);
+            cachePainter.setPen(pen);
+            cachePainter.drawLine(p0.pos, p1.pos);
+        }
+        
+        // Draw start cap if this is the first render
+        if (lastRenderedPointIndex == 0 && n >= 1) {
+            qreal startRadius = qMax(currentStroke.baseThickness * currentStroke.points[0].pressure, 1.0) / 2.0;
+            cachePainter.setPen(Qt::NoPen);
+            cachePainter.setBrush(currentStroke.color);
+            cachePainter.drawEllipse(currentStroke.points[0].pos, startRadius, startRadius);
+        }
+        
+        lastRenderedPointIndex = n;
+    }
+    
+    // Blit the cached current stroke
+    painter.drawPixmap(0, 0, currentStrokeCache);
+    
+    // Draw end cap at current position (always needs updating)
+    if (n >= 1) {
+        qreal endRadius = qMax(currentStroke.baseThickness * currentStroke.points[n - 1].pressure, 1.0) / 2.0;
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(currentStroke.color);
+        painter.drawEllipse(currentStroke.points[n - 1].pos, endRadius, endRadius);
+    }
+}
+
 void VectorCanvas::tabletEvent(QTabletEvent *event)
 {
     // CRITICAL: If input is not active, let events pass through to parent (InkCanvas)
@@ -208,6 +285,7 @@ void VectorCanvas::tabletEvent(QTabletEvent *event)
                 currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 currentStroke.color = penColor;
                 currentStroke.baseThickness = penThickness;
+                resetCurrentStrokeCache();  // Reset incremental rendering cache
                 addPoint(pos, pressure);
             } else if (currentTool == Tool::Eraser) {
                 drawing = true;
@@ -273,6 +351,7 @@ void VectorCanvas::mousePressEvent(QMouseEvent *event)
         currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         currentStroke.color = penColor;
         currentStroke.baseThickness = penThickness;
+        resetCurrentStrokeCache();  // Reset incremental rendering cache
         addPoint(pos, pressure);
     } else if (currentTool == Tool::Eraser) {
         drawing = true;
