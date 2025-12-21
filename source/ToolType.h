@@ -5,7 +5,9 @@
 enum class ToolType {
     Pen,
     Marker,
-    Eraser
+    Eraser,
+    VectorPen,      // Vector-based pen with undo support
+    VectorEraser    // Stroke-based eraser for vector canvas
 };
 
 #endif // TOOLTYPE_H

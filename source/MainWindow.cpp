@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "InkCanvas.h"
+#include "VectorCanvas.h"
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -572,6 +573,28 @@ void MainWindow::setupUi() {
     eraserToolButton->setStyleSheet(buttonStyle);
     eraserToolButton->setToolTip(tr("Eraser Tool"));
     connect(eraserToolButton, &QPushButton::clicked, this, &MainWindow::setEraserTool);
+
+    // ✅ Vector tool buttons (experimental vector canvas with undo support)
+    vectorPenButton = new QPushButton(this);
+    vectorPenButton->setFixedSize(36, 36);
+    vectorPenButton->setStyleSheet(buttonStyle);
+    vectorPenButton->setToolTip(tr("Vector Pen (with Undo)"));
+    vectorPenButton->setText("VP"); // Temporary text until we have an icon
+    connect(vectorPenButton, &QPushButton::clicked, this, &MainWindow::setVectorPenTool);
+
+    vectorEraserButton = new QPushButton(this);
+    vectorEraserButton->setFixedSize(36, 36);
+    vectorEraserButton->setStyleSheet(buttonStyle);
+    vectorEraserButton->setToolTip(tr("Vector Eraser (Stroke-based)"));
+    vectorEraserButton->setText("VE"); // Temporary text until we have an icon
+    connect(vectorEraserButton, &QPushButton::clicked, this, &MainWindow::setVectorEraserTool);
+
+    vectorUndoButton = new QPushButton(this);
+    vectorUndoButton->setFixedSize(36, 36);
+    vectorUndoButton->setStyleSheet(buttonStyle);
+    vectorUndoButton->setToolTip(tr("Undo Vector Stroke (Ctrl+Z)"));
+    vectorUndoButton->setText("↩"); // Undo arrow symbol
+    connect(vectorUndoButton, &QPushButton::clicked, this, &MainWindow::vectorUndo);
 
     backgroundButton = new QPushButton(this);
     backgroundButton->setFixedSize(26, 30);
@@ -1218,6 +1241,9 @@ void MainWindow::setupUi() {
     controlLayout->addWidget(penToolButton);
     controlLayout->addWidget(markerToolButton);
     controlLayout->addWidget(eraserToolButton);
+    controlLayout->addWidget(vectorPenButton);
+    controlLayout->addWidget(vectorEraserButton);
+    controlLayout->addWidget(vectorUndoButton);
     controlLayout->addWidget(straightLineToggleButton);
     controlLayout->addWidget(ropeToolButton);
     controlLayout->addWidget(insertPictureButton);
@@ -1608,6 +1634,28 @@ void MainWindow::setEraserTool() {
     updateDialDisplay();
 }
 
+void MainWindow::setVectorPenTool() {
+    if (!currentCanvas()) return;
+    currentCanvas()->setTool(ToolType::VectorPen);
+    updateToolButtonStates();
+    updateDialDisplay();
+}
+
+void MainWindow::setVectorEraserTool() {
+    if (!currentCanvas()) return;
+    currentCanvas()->setTool(ToolType::VectorEraser);
+    updateToolButtonStates();
+    updateDialDisplay();
+}
+
+void MainWindow::vectorUndo() {
+    if (!currentCanvas()) return;
+    VectorCanvas* vc = currentCanvas()->getVectorCanvas();
+    if (vc && vc->canUndo()) {
+        vc->undo();
+    }
+}
+
 void MainWindow::updateToolButtonStates() {
     if (!currentCanvas()) return;
     
@@ -1615,6 +1663,8 @@ void MainWindow::updateToolButtonStates() {
     penToolButton->setProperty("selected", false);
     markerToolButton->setProperty("selected", false);
     eraserToolButton->setProperty("selected", false);
+    vectorPenButton->setProperty("selected", false);
+    vectorEraserButton->setProperty("selected", false);
     
     // Update icons for unselected state
     updateButtonIcon(penToolButton, "pen");
@@ -1636,6 +1686,12 @@ void MainWindow::updateToolButtonStates() {
             eraserToolButton->setProperty("selected", true);
             updateButtonIcon(eraserToolButton, "eraser");
             break;
+        case ToolType::VectorPen:
+            vectorPenButton->setProperty("selected", true);
+            break;
+        case ToolType::VectorEraser:
+            vectorEraserButton->setProperty("selected", true);
+            break;
     }
     
     // Force style update
@@ -1645,6 +1701,10 @@ void MainWindow::updateToolButtonStates() {
     markerToolButton->style()->polish(markerToolButton);
     eraserToolButton->style()->unpolish(eraserToolButton);
     eraserToolButton->style()->polish(eraserToolButton);
+    vectorPenButton->style()->unpolish(vectorPenButton);
+    vectorPenButton->style()->polish(vectorPenButton);
+    vectorEraserButton->style()->unpolish(vectorEraserButton);
+    vectorEraserButton->style()->polish(vectorEraserButton);
 }
 
 void MainWindow::handleColorButtonClick() {
@@ -1657,6 +1717,12 @@ void MainWindow::handleColorButtonClick() {
         currentCanvas()->setTool(ToolType::Pen);
         updateToolButtonStates();
         updateThicknessSliderForCurrentTool();
+    }
+    
+    // If in vector eraser mode, switch back to vector pen mode
+    if (currentTool == ToolType::VectorEraser) {
+        currentCanvas()->setTool(ToolType::VectorPen);
+        updateToolButtonStates();
     }
     
     // If rope tool is enabled, turn it off
@@ -7814,6 +7880,9 @@ void MainWindow::createSingleRowLayout(bool centered) {
     newLayout->addWidget(penToolButton);
     newLayout->addWidget(markerToolButton);
     newLayout->addWidget(eraserToolButton);
+    newLayout->addWidget(vectorPenButton);
+    newLayout->addWidget(vectorEraserButton);
+    newLayout->addWidget(vectorUndoButton);
     newLayout->addWidget(straightLineToggleButton);
     newLayout->addWidget(ropeToolButton);
     newLayout->addWidget(insertPictureButton);
@@ -7908,6 +7977,9 @@ void MainWindow::createTwoRowLayout() {
     newSecondRowLayout->addWidget(penToolButton);
     newSecondRowLayout->addWidget(markerToolButton);
     newSecondRowLayout->addWidget(eraserToolButton);
+    newSecondRowLayout->addWidget(vectorPenButton);
+    newSecondRowLayout->addWidget(vectorEraserButton);
+    newSecondRowLayout->addWidget(vectorUndoButton);
     newSecondRowLayout->addWidget(straightLineToggleButton);
     newSecondRowLayout->addWidget(ropeToolButton);
     newSecondRowLayout->addWidget(insertPictureButton);

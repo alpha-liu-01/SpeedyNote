@@ -32,6 +32,7 @@ class MainWindow; // Forward declaration
 
 class PictureWindowManager;
 class PictureWindow;
+class VectorCanvas; // Forward declaration for vector overlay
 
 enum class TouchGestureMode {
     Disabled,     // Touch gestures completely off
@@ -196,6 +197,10 @@ public:
     QColor getPenColor(); // Added getter for pen color
     qreal getPenThickness(); // Added getter for pen thickness
     ToolType getCurrentTool(); // Added getter for tool type
+    
+    // Vector canvas overlay
+    VectorCanvas* getVectorCanvas() const { return vectorCanvas; }
+    void initializeVectorCanvas(); // Initialize the vector overlay on first page
 
     // Straight line mode toggle
     void setStraightLineMode(bool enabled) { straightLineMode = enabled; }
@@ -420,6 +425,10 @@ private:
     qreal penToolThickness = 5.0;    // Default pen thickness
     qreal markerToolThickness = 5.0; // Default marker thickness (will be scaled by 8x in drawing)
     qreal eraserToolThickness = 5.0; // Default eraser thickness (will be scaled by 6x in drawing)
+    
+    // Vector canvas overlay (for vector-based drawing with undo support)
+    VectorCanvas* vectorCanvas = nullptr;
+    
     QString saveFolder;
     QString actualPackagePath; // ✅ Store .spn package path for display purposes
     QString tempWorkingDir; // ✅ Temporary directory for .spn packages

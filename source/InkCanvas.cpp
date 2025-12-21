@@ -1,5 +1,6 @@
 #include "InkCanvas.h"
 #include "ToolType.h"
+#include "VectorCanvas.h" // Vector overlay for vector-based drawing
 #include "PictureWindowManager.h"
 #include "PictureWindow.h" // Include the full definition
 #include "PictureSourceDialog.h"
@@ -390,6 +391,35 @@ void InkCanvas::initializeBuffer() {
     buffer.fill(Qt::transparent);
 
     setMaximumSize(pixelSize); // 🔥 KEY LINE to make full canvas drawable
+}
+
+void InkCanvas::initializeVectorCanvas() {
+    if (vectorCanvas) {
+        return; // Already initialized
+    }
+    
+    // Create vector canvas as child of this widget (overlay)
+    vectorCanvas = new VectorCanvas(this);
+    
+    // Size it to match the first page (half of combined canvas height)
+    QSize canvasSize = buffer.size();
+    int singlePageHeight = canvasSize.height() / 2; // First page only
+    vectorCanvas->setGeometry(0, 0, canvasSize.width(), singlePageHeight);
+    
+    // Set initial pen settings to match current InkCanvas settings
+    vectorCanvas->setPenColor(penColor);
+    vectorCanvas->setPenThickness(penToolThickness);
+    vectorCanvas->setEraserSize(eraserToolThickness * 3);
+    
+    // Make it visible and on top
+    vectorCanvas->show();
+    vectorCanvas->raise();
+    
+    // Connect signals for state tracking
+    connect(vectorCanvas, &VectorCanvas::canvasModified, this, [this]() {
+        // Mark InkCanvas as edited when vector canvas changes
+        edited = true;
+    });
 }
 
 // Helper function to invert PDF colors for dark mode
@@ -2314,6 +2344,11 @@ void InkCanvas::eraseStroke(const QPointF &start, const QPointF &end, qreal pres
 
 void InkCanvas::setPenColor(const QColor &color) {
     penColor = color;
+    
+    // Sync to vector canvas if it exists
+    if (vectorCanvas) {
+        vectorCanvas->setPenColor(color);
+    }
 }
 
 void InkCanvas::setPenThickness(qreal thickness) {
@@ -2328,10 +2363,22 @@ void InkCanvas::setPenThickness(qreal thickness) {
         case ToolType::Eraser:
             eraserToolThickness = thickness;
             break;
+        case ToolType::VectorPen:
+            penToolThickness = thickness;
+            break;
+        case ToolType::VectorEraser:
+            eraserToolThickness = thickness;
+            break;
     }
     
     // Update the current thickness for efficient drawing
     penThickness = thickness;
+    
+    // Sync to vector canvas if it exists
+    if (vectorCanvas) {
+        vectorCanvas->setPenThickness(penToolThickness);
+        vectorCanvas->setEraserSize(eraserToolThickness * 3);
+    }
 }
 
 void InkCanvas::adjustAllToolThicknesses(qreal zoomRatio) {
@@ -2368,6 +2415,39 @@ void InkCanvas::setTool(ToolType tool) {
         case ToolType::Eraser:
             penThickness = eraserToolThickness;
             break;
+        case ToolType::VectorPen:
+            // Initialize vector canvas if not already done
+            if (!vectorCanvas) {
+                initializeVectorCanvas();
+            }
+            if (vectorCanvas) {
+                vectorCanvas->setTool(VectorCanvas::Tool::Pen);
+                vectorCanvas->setPenColor(penColor);
+                vectorCanvas->setPenThickness(penToolThickness);
+                vectorCanvas->show();
+                vectorCanvas->raise();
+            }
+            break;
+        case ToolType::VectorEraser:
+            // Initialize vector canvas if not already done
+            if (!vectorCanvas) {
+                initializeVectorCanvas();
+            }
+            if (vectorCanvas) {
+                vectorCanvas->setTool(VectorCanvas::Tool::Eraser);
+                vectorCanvas->setEraserSize(eraserToolThickness * 3);
+                vectorCanvas->show();
+                vectorCanvas->raise();
+            }
+            break;
+    }
+    
+    // Hide vector canvas when using non-vector tools (but keep data)
+    if (currentTool != ToolType::VectorPen && currentTool != ToolType::VectorEraser) {
+        if (vectorCanvas) {
+            // Don't hide - keep it visible so strokes are shown
+            // vectorCanvas->hide();
+        }
     }
 }
 
