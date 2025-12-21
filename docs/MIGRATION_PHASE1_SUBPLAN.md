@@ -131,60 +131,27 @@ First concrete InsertedObject type.
 
 ---
 
-### Task 1.1.6: Create Page Class (Finally!)
+### Task 1.1.6: Create Page Class (Finally!) ✅ COMPLETE
 Now Page is just a coordinator, not a monster.
 
-**File:** `source/core/Page.h` and `.cpp`
+**Files created:**
+- `source/core/Page.h` ✅
+- `source/core/Page.cpp` ✅
 
-```cpp
-class Page {
-public:
-    // Identity
-    int pageIndex = 0;
-    QSizeF size;          // Page dimensions
-    bool modified = false;
-    
-    // Background
-    enum class BackgroundType { None, PDF, Custom, Grid, Lines };
-    BackgroundType backgroundType = BackgroundType::None;
-    int pdfPageNumber = -1;           // If BackgroundType::PDF
-    QPixmap customBackground;          // If BackgroundType::Custom
-    QColor backgroundColor = Qt::white;
-    int gridDensity = 20;
-    
-    // Layers (ordered, index 0 = bottom)
-    QVector<std::unique_ptr<VectorLayer>> vectorLayers;
-    int activeLayerIndex = 0;
-    
-    // Inserted objects
-    QVector<std::unique_ptr<InsertedObject>> objects;
-    
-    // Layer management
-    VectorLayer* activeLayer();
-    void addLayer(const QString& name = "New Layer");
-    void removeLayer(int index);
-    void moveLayer(int from, int to);
-    
-    // Object management
-    void addObject(std::unique_ptr<InsertedObject> obj);
-    void removeObject(const QString& id);
-    InsertedObject* objectAtPoint(QPointF pt);
-    
-    // Rendering (for export/preview - Viewport handles live rendering)
-    void render(QPainter& painter, const QPixmap* pdfBackground = nullptr) const;
-    
-    // Serialization
-    QJsonObject toJson() const;
-    static std::unique_ptr<Page> fromJson(const QJsonObject& obj);
-    
-    // Factory
-    static std::unique_ptr<Page> createDefault(QSizeF size);
-};
-```
+**Features implemented:**
+- Identity: pageIndex, size, modified
+- Background: 5 types (None, PDF, Custom, Grid, Lines) with colors/spacing
+- Layer management: activeLayer(), addLayer(), removeLayer(), moveLayer()
+- Object management: addObject(), removeObject(), objectAtPoint(), objectById()
+- Rendering: render(), renderBackground() with zoom support
+- Serialization: toJson(), fromJson(), loadImages()
+- Factory: createDefault(), createForPdf()
+- Utility: hasContent(), clearContent(), contentBoundingRect()
+- Full Doxygen documentation
 
 **Dependencies:** Tasks 1.1.3, 1.1.4, 1.1.5
-**Estimated size:** ~250 lines
-**Note:** Page is a data container + coordinator. No rendering cache (Viewport does that).
+**Actual size:** ~260 lines header + ~380 lines cpp
+**Note:** Page is a pure data coordinator - Viewport handles caching.
 
 ---
 
@@ -230,7 +197,7 @@ void testPageSerialization() {
 | 1.1.3 | Create VectorLayer | 1.1.2 | 200 | [✅] |
 | 1.1.4 | Create InsertedObject base | None | 80 | [✅] |
 | 1.1.5 | Create ImageObject | 1.1.4 | 100 | [✅] |
-| 1.1.6 | Create Page class | 1.1.3, 1.1.4, 1.1.5 | 250 | [ ] |
+| 1.1.6 | Create Page class | 1.1.3, 1.1.4, 1.1.5 | 250 | [✅] |
 | 1.1.7 | Unit tests | All above | 50 | [ ] |
 | **TOTAL** | | | **~810** | |
 

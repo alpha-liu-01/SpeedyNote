@@ -303,7 +303,7 @@ QT6_ADD_RESOURCES(QRCC_FILES ${RESOURCES})
 # ✅ NEW ARCHITECTURE: Core document classes (Phase 1 migration)
 # These files implement the new Page/Document/Viewport architecture
 set(CORE_SOURCES
-        # source/core/Page.cpp           # Task 1.1.6
+        source/core/Page.cpp           # Task 1.1.6
         # source/core/Document.cpp       # Task 1.2
         # source/core/DocumentViewport.cpp # Task 1.3
 )
