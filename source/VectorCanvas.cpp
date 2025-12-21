@@ -108,23 +108,80 @@ void VectorCanvas::renderStroke(QPainter& painter, const VectorStroke& stroke) c
         return;
     }
     
-    // Performance optimization: For many points, batch into segments
-    // Draw variable-width stroke by drawing each segment with interpolated width
-    for (int i = 1; i < stroke.points.size(); ++i) {
-        const auto& p0 = stroke.points[i-1];
-        const auto& p1 = stroke.points[i];
-        
-        // Interpolate pressure for smooth width transition
-        qreal avgPressure = (p0.pressure + p1.pressure) / 2.0;
-        qreal width = stroke.baseThickness * avgPressure;
-        
-        // Minimum width to ensure visibility
-        width = qMax(width, 1.0);
-        
-        QPen pen(stroke.color, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-        painter.setPen(pen);
-        painter.drawLine(p0.pos, p1.pos);
+    // ========== OPTIMIZATION: Render as filled polygon ==========
+    // Instead of N drawLine() calls with varying widths, render the stroke
+    // as a single filled polygon representing the variable-width outline.
+    // This is much faster: 1 draw call instead of N, and GPU-friendly.
+    
+    const int n = stroke.points.size();
+    
+    // Pre-calculate half-widths for each point
+    QVector<qreal> halfWidths(n);
+    for (int i = 0; i < n; ++i) {
+        qreal width = stroke.baseThickness * stroke.points[i].pressure;
+        halfWidths[i] = qMax(width, 1.0) / 2.0;
     }
+    
+    // Build the stroke outline polygon
+    // Left edge goes forward, right edge goes backward
+    QVector<QPointF> leftEdge(n);
+    QVector<QPointF> rightEdge(n);
+    
+    for (int i = 0; i < n; ++i) {
+        const QPointF& pos = stroke.points[i].pos;
+        qreal hw = halfWidths[i];
+        
+        // Calculate perpendicular direction
+        QPointF tangent;
+        if (i == 0) {
+            // First point: use direction to next point
+            tangent = stroke.points[1].pos - pos;
+        } else if (i == n - 1) {
+            // Last point: use direction from previous point
+            tangent = pos - stroke.points[n - 2].pos;
+        } else {
+            // Middle points: average of incoming and outgoing directions
+            tangent = stroke.points[i + 1].pos - stroke.points[i - 1].pos;
+        }
+        
+        // Normalize tangent
+        qreal len = qSqrt(tangent.x() * tangent.x() + tangent.y() * tangent.y());
+        if (len < 0.0001) {
+            // Degenerate case: use arbitrary perpendicular
+            tangent = QPointF(1.0, 0.0);
+            len = 1.0;
+        }
+        tangent /= len;
+        
+        // Perpendicular vector (rotate 90 degrees)
+        QPointF perp(-tangent.y(), tangent.x());
+        
+        // Calculate left and right edge points
+        leftEdge[i] = pos + perp * hw;
+        rightEdge[i] = pos - perp * hw;
+    }
+    
+    // Build polygon: left edge forward, then right edge backward
+    QPolygonF polygon;
+    polygon.reserve(n * 2 + 2);
+    
+    for (int i = 0; i < n; ++i) {
+        polygon << leftEdge[i];
+    }
+    for (int i = n - 1; i >= 0; --i) {
+        polygon << rightEdge[i];
+    }
+    
+    // Draw filled polygon
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(stroke.color);
+    painter.drawPolygon(polygon);
+    
+    // Draw round end caps for a smooth look
+    qreal startRadius = halfWidths[0];
+    qreal endRadius = halfWidths[n - 1];
+    painter.drawEllipse(stroke.points[0].pos, startRadius, startRadius);
+    painter.drawEllipse(stroke.points[n - 1].pos, endRadius, endRadius);
 }
 
 void VectorCanvas::tabletEvent(QTabletEvent *event)
