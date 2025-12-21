@@ -14,109 +14,11 @@
 #include <QPixmap>
 #include <deque>
 
-// A single point in a stroke with pressure
-struct StrokePoint {
-    QPointF pos;      // Position in canvas coordinates
-    qreal pressure;   // 0.0 to 1.0
-    
-    QJsonObject toJson() const {
-        QJsonObject obj;
-        obj["x"] = pos.x();
-        obj["y"] = pos.y();
-        obj["p"] = pressure;
-        return obj;
-    }
-    
-    static StrokePoint fromJson(const QJsonObject& obj) {
-        StrokePoint pt;
-        pt.pos = QPointF(obj["x"].toDouble(), obj["y"].toDouble());
-        pt.pressure = obj["p"].toDouble(1.0);
-        return pt;
-    }
-};
+// Stroke data types (extracted to separate files for modularity - Phase 1.1.2)
+#include "strokes/StrokePoint.h"
+#include "strokes/VectorStroke.h"
 
-// A complete stroke (pen down → pen up)
-struct VectorStroke {
-    QString id;                     // UUID for tracking
-    QVector<StrokePoint> points;    // All points in the stroke
-    QColor color;
-    qreal baseThickness;            // Before pressure scaling
-    QRectF boundingBox;             // Cached for fast culling/hit testing
-    
-    VectorStroke() : baseThickness(5.0) {}
-    
-    void updateBoundingBox() {
-        if (points.isEmpty()) {
-            boundingBox = QRectF();
-            return;
-        }
-        qreal maxWidth = baseThickness * 2;
-        qreal minX = points[0].pos.x(), maxX = minX;
-        qreal minY = points[0].pos.y(), maxY = minY;
-        for (const auto& pt : points) {
-            minX = qMin(minX, pt.pos.x());
-            maxX = qMax(maxX, pt.pos.x());
-            minY = qMin(minY, pt.pos.y());
-            maxY = qMax(maxY, pt.pos.y());
-        }
-        boundingBox = QRectF(minX - maxWidth, minY - maxWidth,
-                             maxX - minX + maxWidth * 2,
-                             maxY - minY + maxWidth * 2);
-    }
-    
-    // Check if a point is near this stroke (for eraser)
-    bool containsPoint(const QPointF& point, qreal tolerance) const {
-        if (!boundingBox.adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(point)) {
-            return false;
-        }
-        // Check each segment
-        for (int i = 1; i < points.size(); ++i) {
-            if (distanceToSegment(point, points[i-1].pos, points[i].pos) < tolerance + baseThickness) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    QJsonObject toJson() const {
-        QJsonObject obj;
-        obj["id"] = id;
-        obj["color"] = color.name(QColor::HexArgb);
-        obj["thickness"] = baseThickness;
-        QJsonArray pointsArray;
-        for (const auto& pt : points) {
-            pointsArray.append(pt.toJson());
-        }
-        obj["points"] = pointsArray;
-        return obj;
-    }
-    
-    static VectorStroke fromJson(const QJsonObject& obj) {
-        VectorStroke stroke;
-        stroke.id = obj["id"].toString();
-        stroke.color = QColor(obj["color"].toString());
-        stroke.baseThickness = obj["thickness"].toDouble(5.0);
-        QJsonArray pointsArray = obj["points"].toArray();
-        for (const auto& val : pointsArray) {
-            stroke.points.append(StrokePoint::fromJson(val.toObject()));
-        }
-        stroke.updateBoundingBox();
-        return stroke;
-    }
-    
-private:
-    static qreal distanceToSegment(const QPointF& p, const QPointF& a, const QPointF& b) {
-        QPointF ab = b - a;
-        QPointF ap = p - a;
-        qreal lenSq = ab.x() * ab.x() + ab.y() * ab.y();
-        if (lenSq < 0.0001) return QLineF(p, a).length();
-        qreal t = qBound(0.0, (ap.x() * ab.x() + ap.y() * ab.y()) / lenSq, 1.0);
-        QPointF closest = a + t * ab;
-        return QLineF(p, closest).length();
-    }
-};
-
-// Undo action types
+// Undo action types (specific to VectorCanvas's undo system)
 struct UndoAction {
     enum Type { AddStroke, RemoveStroke, RemoveMultiple };
     Type type;

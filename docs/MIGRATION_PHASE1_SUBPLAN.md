@@ -45,83 +45,45 @@ source/
 
 ---
 
-### Task 1.1.2: Extract Stroke Types to Separate Files
+### Task 1.1.2: Extract Stroke Types to Separate Files ✅ COMPLETE
 Move `StrokePoint` and `VectorStroke` from `VectorCanvas.h` to their own files.
 
-**Files to create:**
-- `source/strokes/StrokePoint.h`
-- `source/strokes/VectorStroke.h`
+**Files created:**
+- `source/strokes/StrokePoint.h` ✅
+- `source/strokes/VectorStroke.h` ✅
 
-**Content (from VectorCanvas.h lines 17-117):**
-```cpp
-// StrokePoint.h
-struct StrokePoint {
-    QPointF pos;
-    qreal pressure;
-    QJsonObject toJson() const;
-    static StrokePoint fromJson(const QJsonObject& obj);
-};
-
-// VectorStroke.h  
-struct VectorStroke {
-    QString id;
-    QVector<StrokePoint> points;
-    QColor color;
-    qreal baseThickness;
-    QRectF boundingBox;
-    
-    void updateBoundingBox();
-    bool containsPoint(const QPointF& point, qreal tolerance) const;
-    QJsonObject toJson() const;
-    static VectorStroke fromJson(const QJsonObject& obj);
-};
-```
+**Changes made:**
+- Extracted `StrokePoint` struct with full documentation
+- Extracted `VectorStroke` struct with full documentation  
+- Updated `VectorCanvas.h` to `#include` the new files
+- All functionality preserved (toJson, fromJson, containsPoint, updateBoundingBox, distanceToSegment)
+- Added Doxygen-style documentation comments
 
 **Dependencies:** None
-**Estimated size:** ~120 lines total (extraction, no new logic)
-**Note:** VectorCanvas.h will #include these instead of defining them inline
+**Actual size:** ~160 lines total (with added documentation)
+**Note:** Header-only implementation (no .cpp files needed)
 
 ---
 
-### Task 1.1.3: Create VectorLayer Class
+### Task 1.1.3: Create VectorLayer Class ✅ COMPLETE
 A single layer containing strokes. Based on VectorCanvas but:
 - No widget (just data + rendering helper)
 - No input handling (that's Viewport's job)
 - Has: name, visibility, opacity, locked state
 
-**File:** `source/layers/VectorLayer.h` and `.cpp`
+**File created:** `source/layers/VectorLayer.h` ✅ (header-only)
 
-```cpp
-class VectorLayer {
-public:
-    QString name = "Layer 1";
-    bool visible = true;
-    qreal opacity = 1.0;
-    bool locked = false;
-    
-    // Stroke management
-    void addStroke(const VectorStroke& stroke);
-    void removeStroke(const QString& id);
-    const QVector<VectorStroke>& strokes() const;
-    
-    // Rendering (no caching - Page handles that)
-    void render(QPainter& painter) const;
-    
-    // Hit testing (for eraser)
-    QVector<QString> strokesAtPoint(QPointF pt, qreal tolerance) const;
-    
-    // Serialization
-    QJsonObject toJson() const;
-    static VectorLayer fromJson(const QJsonObject& obj);
-    
-private:
-    QVector<VectorStroke> m_strokes;
-};
-```
+**Features implemented:**
+- Layer properties: id, name, visible, opacity, locked
+- Stroke management: addStroke (copy & move), removeStroke, strokes(), clear()
+- Hit testing: strokesAtPoint(), boundingBox()
+- Rendering: render(), static renderStroke() helper
+- Serialization: toJson(), fromJson()
+- Full Doxygen documentation
 
 **Dependencies:** Task 1.1.2 (StrokePoint, VectorStroke)
-**Estimated size:** ~200 lines
-**Reuses:** Rendering logic from VectorCanvas::renderStroke()
+**Actual size:** ~280 lines (with documentation)
+**Reuses:** Rendering logic from VectorCanvas::renderStroke() as static helper
 
 ---
 
@@ -285,8 +247,8 @@ void testPageSerialization() {
 | Task | Description | Dependencies | Est. Lines | Status |
 |------|-------------|--------------|------------|--------|
 | 1.1.1 | Directory structure | None | 10 | [✅] |
-| 1.1.2 | Extract StrokePoint/VectorStroke | None | 120 | [ ] |
-| 1.1.3 | Create VectorLayer | 1.1.2 | 200 | [ ] |
+| 1.1.2 | Extract StrokePoint/VectorStroke | None | 120 | [✅] |
+| 1.1.3 | Create VectorLayer | 1.1.2 | 200 | [✅] |
 | 1.1.4 | Create InsertedObject base | None | 80 | [ ] |
 | 1.1.5 | Create ImageObject | 1.1.4 | 100 | [ ] |
 | 1.1.6 | Create Page class | 1.1.3, 1.1.4, 1.1.5 | 250 | [ ] |
