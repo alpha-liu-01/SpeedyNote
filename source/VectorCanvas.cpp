@@ -28,6 +28,11 @@ void VectorCanvas::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
     
+    // Benchmark: track paint timestamps
+    if (benchmarking) {
+        paintTimestamps.push_back(benchmarkTimer.elapsed());
+    }
+    
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     
@@ -140,6 +145,14 @@ void VectorCanvas::tabletEvent(QTabletEvent *event)
 
 void VectorCanvas::mousePressEvent(QMouseEvent *event)
 {
+    // IMPORTANT: Reject touch-synthesized mouse events
+    // Touch events come through as mouse events with TouchScreen source
+    if (event->source() == Qt::MouseEventSynthesizedBySystem ||
+        event->source() == Qt::MouseEventSynthesizedByQt) {
+        event->ignore();
+        return;
+    }
+    
     if (event->button() != Qt::LeftButton) {
         event->ignore();
         return;
@@ -165,6 +178,13 @@ void VectorCanvas::mousePressEvent(QMouseEvent *event)
 
 void VectorCanvas::mouseMoveEvent(QMouseEvent *event)
 {
+    // IMPORTANT: Reject touch-synthesized mouse events
+    if (event->source() == Qt::MouseEventSynthesizedBySystem ||
+        event->source() == Qt::MouseEventSynthesizedByQt) {
+        event->ignore();
+        return;
+    }
+    
     QPointF pos = event->position();
     lastPoint = pos;
     
@@ -182,6 +202,13 @@ void VectorCanvas::mouseMoveEvent(QMouseEvent *event)
 
 void VectorCanvas::mouseReleaseEvent(QMouseEvent *event)
 {
+    // IMPORTANT: Reject touch-synthesized mouse events
+    if (event->source() == Qt::MouseEventSynthesizedBySystem ||
+        event->source() == Qt::MouseEventSynthesizedByQt) {
+        event->ignore();
+        return;
+    }
+    
     if (event->button() != Qt::LeftButton) {
         event->ignore();
         return;
@@ -440,4 +467,30 @@ void VectorCanvas::fromJson(const QJsonObject& obj)
 QRect VectorCanvas::strokeToWidgetRect(const QRectF& strokeRect) const
 {
     return strokeRect.toRect().adjusted(-2, -2, 2, 2);
+}
+
+void VectorCanvas::startBenchmark()
+{
+    benchmarking = true;
+    paintTimestamps.clear();
+    benchmarkTimer.start();
+}
+
+void VectorCanvas::stopBenchmark()
+{
+    benchmarking = false;
+}
+
+int VectorCanvas::getPaintRate() const
+{
+    if (!benchmarking) return 0;
+    
+    qint64 now = benchmarkTimer.elapsed();
+    
+    // Remove timestamps older than 1 second
+    while (!paintTimestamps.empty() && now - paintTimestamps.front() > 1000) {
+        paintTimestamps.pop_front();
+    }
+    
+    return static_cast<int>(paintTimestamps.size());
 }

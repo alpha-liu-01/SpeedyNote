@@ -1544,15 +1544,39 @@ void MainWindow::toggleBenchmark() {
     benchmarking = !benchmarking;
     if (benchmarking) {
         currentCanvas()->startBenchmark();
-        benchmarkTimer->start(1000); // Update every second
+        // Also start VectorCanvas benchmark if it exists
+        VectorCanvas* vc = currentCanvas()->getVectorCanvas();
+        if (vc) {
+            vc->startBenchmark();
+        }
+        benchmarkTimer->start(1000); // Update 10 times per second for smoother display
     } else {
         currentCanvas()->stopBenchmark();
+        VectorCanvas* vc = currentCanvas()->getVectorCanvas();
+        if (vc) {
+            vc->stopBenchmark();
+        }
         benchmarkTimer->stop();
         benchmarkLabel->setText(tr("PR:N/A"));
     }
 }
 
 void MainWindow::updateBenchmarkDisplay() {
+    if (!currentCanvas()) return;
+    
+    ToolType tool = currentCanvas()->getCurrentTool();
+    
+    // For vector tools, show paint rate from VectorCanvas
+    if (tool == ToolType::VectorPen || tool == ToolType::VectorEraser) {
+        VectorCanvas* vc = currentCanvas()->getVectorCanvas();
+        if (vc) {
+            int paintRate = vc->getPaintRate();
+            benchmarkLabel->setText(QString(tr("Paint:%1 Hz")).arg(paintRate));
+            return;
+        }
+    }
+    
+    // For regular tools, show input sample rate from InkCanvas
     int sampleRate = currentCanvas()->getProcessedRate();
     benchmarkLabel->setText(QString(tr("PR:%1 Hz")).arg(sampleRate));
 }

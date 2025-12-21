@@ -11,6 +11,7 @@
 #include <QStack>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <deque>
 
 // A single point in a stroke with pressure
 struct StrokePoint {
@@ -157,6 +158,11 @@ public:
     bool isModified() const { return modified; }
     void setModified(bool mod) { modified = mod; }
     int strokeCount() const { return strokes.size(); }
+    
+    // Benchmark (measures canvas refresh rate, not input rate)
+    void startBenchmark();
+    void stopBenchmark();
+    int getPaintRate() const; // Returns paints per second
 
 signals:
     void strokeAdded();
@@ -193,6 +199,11 @@ private:
     
     // Performance
     QRectF dirtyRegion;
+    
+    // Benchmark (measures paint refresh rate)
+    bool benchmarking = false;
+    QElapsedTimer benchmarkTimer;
+    mutable std::deque<qint64> paintTimestamps;
     
     // Internal methods
     void addPoint(const QPointF& pos, qreal pressure);

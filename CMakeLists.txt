@@ -323,6 +323,10 @@ add_executable(${PROJECT_NAME}
         source/PictureSourceDialog.cpp
         source/ExistingPictureDialog.cpp
         source/DocumentConverter.cpp
+
+        source/VectorCanvas.cpp
+
+        source/VectorCanvas.h
         ${QRCC_FILES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
         ${QMARKDOWNTEXTEDIT_UI_HEADERS}
