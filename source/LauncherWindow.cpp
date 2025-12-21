@@ -43,7 +43,7 @@
 #include <QHash>
 
 LauncherWindow::LauncherWindow(QWidget *parent)
-    : QMainWindow(parent), notebookManager(nullptr), lastCalculatedWidth(0), lastColumnCount(0)
+    : QMainWindow(parent), lastCalculatedWidth(0), lastColumnCount(0), notebookManager(nullptr)
 {
     setupUi();
     applyModernStyling();

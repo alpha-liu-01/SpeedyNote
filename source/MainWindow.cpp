@@ -1559,7 +1559,6 @@ void MainWindow::adjustThicknessForZoom(int oldZoom, int newZoom) {
     if (!canvas) return;
     
     qreal zoomRatio = qreal(oldZoom) / qreal(newZoom);
-    ToolType currentTool = canvas->getCurrentTool();
     
     // Adjust thickness for all tools, not just the current one
     canvas->adjustAllToolThicknesses(zoomRatio);
@@ -3308,8 +3307,6 @@ void MainWindow::updatePanRange() {
     int zoom = currentCanvas()->getZoom();
 
     QSize canvasSize = currentCanvas()->getCanvasSize();
-    QSize viewportSize = QGuiApplication::primaryScreen()->size() * QGuiApplication::primaryScreen()->devicePixelRatio();
-    qreal dpr = initialDpr;
     
     // Get the actual widget size instead of screen size for more accurate calculation
     QSize actualViewportSize = size();
@@ -3588,7 +3585,7 @@ void MainWindow::handleSmartPdfButton() {
         
         QPushButton *replaceButton = msgBox.addButton(tr("Replace PDF"), QMessageBox::ActionRole);
         QPushButton *deleteButton = msgBox.addButton(tr("Remove PDF"), QMessageBox::DestructiveRole);
-        QPushButton *cancelButton = msgBox.addButton(QMessageBox::Cancel);
+        msgBox.addButton(QMessageBox::Cancel);
         
         msgBox.setDefaultButton(replaceButton);
         msgBox.exec();
@@ -4603,8 +4600,6 @@ void MainWindow::updateDialDisplay() {
     if (!dialColorPreview) return;
     if (!dialIconView) return;
     dialIconView->show();
-    qreal dpr = initialDpr;
-    QColor currentColor = currentCanvas()->getPenColor();
     switch (currentDialMode) {
         case DialMode::PageSwitching:
             if (fastForwardMode){
@@ -4931,12 +4926,12 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             }
         }
         // Handle mouse button press events for forward/backward navigation
+        // ✅ Don't handle BackButton/ForwardButton here anymore - handled by mouse dial system
+        // They will handle short press page navigation and long press dial mode
+        /*
         else if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
             
-            // ✅ Don't handle BackButton/ForwardButton here anymore - handled by mouse dial system
-            // They will handle short press page navigation and long press dial mode
-            /*
             // Mouse button 4 (Back button) - Previous page
             if (mouseEvent->button() == Qt::BackButton) {
                 if (prevPageButton) {
@@ -4951,9 +4946,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 }
                 return true; // Consume the event
             }
-            */
             // ✅ Don't handle ExtraButton1/ExtraButton2 here anymore - handled by mouse dial system
         }
+        */
         // Handle wheel events for scrolling
         // ========================================================================
         // WHEEL EVENT ROUTING: Mouse Wheel vs Trackpad
@@ -9026,8 +9021,6 @@ void MainWindow::updateColorPalette() {
     
     // Only update UI elements if they exist
     if (redButton && blueButton && yellowButton && greenButton) {
-        bool darkMode = isDarkMode();
-        
         // Update color button icons based on current palette (not theme)
         QString redIconPath = useBrighterPalette ? ":/resources/icons/pen_light_red.png" : ":/resources/icons/pen_dark_red.png";
         QString blueIconPath = useBrighterPalette ? ":/resources/icons/pen_light_blue.png" : ":/resources/icons/pen_dark_blue.png";
@@ -9211,11 +9204,11 @@ bool MainWindow::showLastAccessedPageDialog(InkCanvas *canvas) {
     msgBox.setIcon(QMessageBox::Question);
     
     QPushButton *gotoLastPageBtn = msgBox.addButton(tr("Go to Page %1").arg(lastPage + 1), QMessageBox::AcceptRole);
-    QPushButton *startFromFirstBtn = msgBox.addButton(tr("Start from Page 1"), QMessageBox::RejectRole);
+    msgBox.addButton(tr("Start from Page 1"), QMessageBox::RejectRole);
     
     msgBox.setDefaultButton(gotoLastPageBtn);
     
-    int result = msgBox.exec();
+    msgBox.exec();
     
     if (msgBox.clickedButton() == gotoLastPageBtn) {
         // User wants to go to last accessed page (convert 0-based to 1-based)
