@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.10)
 cmake_policy(SET CMP0074 NEW)
 
 project(SpeedyNote VERSION 0.12.2)
@@ -300,6 +300,31 @@ qt6_wrap_ui(QMARKDOWNTEXTEDIT_UI_HEADERS ${QMARKDOWNTEXTEDIT_UI})
 set(RESOURCES resources.qrc ${QMARKDOWNTEXTEDIT_RESOURCES})
 QT6_ADD_RESOURCES(QRCC_FILES ${RESOURCES})
 
+# ✅ NEW ARCHITECTURE: Core document classes (Phase 1 migration)
+# These files implement the new Page/Document/Viewport architecture
+set(CORE_SOURCES
+        # source/core/Page.cpp           # Task 1.1.6
+        # source/core/Document.cpp       # Task 1.2
+        # source/core/DocumentViewport.cpp # Task 1.3
+)
+
+# ✅ NEW ARCHITECTURE: Vector layer system
+set(LAYER_SOURCES
+        # source/layers/VectorLayer.cpp  # Task 1.1.3
+)
+
+# ✅ NEW ARCHITECTURE: Inserted objects (images, text, shapes)
+set(OBJECT_SOURCES
+        # source/objects/InsertedObject.cpp  # Task 1.1.4
+        # source/objects/ImageObject.cpp     # Task 1.1.5
+)
+
+# ✅ NEW ARCHITECTURE: Stroke data types (extracted from VectorCanvas)
+set(STROKE_SOURCES
+        # source/strokes/StrokePoint.cpp     # Task 1.1.2 (header-only, no cpp needed)
+        # source/strokes/VectorStroke.cpp    # Task 1.1.2
+)
+
 # ✅ Build target
 add_executable(${PROJECT_NAME}
         source/Main.cpp
@@ -314,12 +339,12 @@ add_executable(${PROJECT_NAME}
         source/ControllerMappingDialog.cpp
         source/MarkdownNoteEntry.cpp
         source/MarkdownNotesSidebar.cpp
-	  source/PictureWindow.cpp
-    	  source/PictureWindowManager.cpp
+        source/PictureWindow.cpp
+        source/PictureWindowManager.cpp
         source/PdfOpenDialog.cpp
-	  source/PdfRelinkDialog.cpp
-    	  source/SpnPackageManager.cpp
-    	  source/LauncherWindow.cpp
+        source/PdfRelinkDialog.cpp
+        source/SpnPackageManager.cpp
+        source/LauncherWindow.cpp
         source/PictureSourceDialog.cpp
         source/ExistingPictureDialog.cpp
         source/DocumentConverter.cpp
@@ -327,6 +352,13 @@ add_executable(${PROJECT_NAME}
         source/VectorCanvas.cpp
 
         source/VectorCanvas.h
+        
+        # New architecture sources (uncomment as implemented)
+        ${CORE_SOURCES}
+        ${LAYER_SOURCES}
+        ${OBJECT_SOURCES}
+        ${STROKE_SOURCES}
+        
         ${QRCC_FILES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
         ${QMARKDOWNTEXTEDIT_UI_HEADERS}
