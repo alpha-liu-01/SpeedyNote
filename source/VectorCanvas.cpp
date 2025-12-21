@@ -484,6 +484,9 @@ void VectorCanvas::finishStroke()
     // Mark cache dirty - new stroke added
     strokeCacheDirty = true;
     
+    // Reset incremental rendering state
+    lastRenderedPointIndex = 0;
+    
     modified = true;
     emit strokeAdded();
     emit canvasModified();
@@ -699,11 +702,6 @@ void VectorCanvas::fromJson(const QJsonObject& obj)
     
     modified = false;
     update();
-}
-
-QRect VectorCanvas::strokeToWidgetRect(const QRectF& strokeRect) const
-{
-    return strokeRect.toRect().adjusted(-2, -2, 2, 2);
 }
 
 void VectorCanvas::startBenchmark()

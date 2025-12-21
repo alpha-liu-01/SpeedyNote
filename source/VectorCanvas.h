@@ -206,7 +206,6 @@ private:
     QPointF lastPoint;
     
     // Performance - stroke cache for completed strokes
-    QRectF dirtyRegion;
     QPixmap strokeCache;        // Cached rendering of all completed strokes
     bool strokeCacheDirty = true;  // True when cache needs rebuilding
     void rebuildStrokeCache();  // Rebuild the cache from all strokes
@@ -227,7 +226,6 @@ private:
     void finishStroke();
     void eraseAt(const QPointF& pos);
     void renderStroke(QPainter& painter, const VectorStroke& stroke) const;
-    QRect strokeToWidgetRect(const QRectF& strokeRect) const;
     void pushUndo(const UndoAction& action);
 };
 
