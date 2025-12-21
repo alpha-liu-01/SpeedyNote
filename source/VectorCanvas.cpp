@@ -172,10 +172,12 @@ void VectorCanvas::renderStroke(QPainter& painter, const VectorStroke& stroke) c
         polygon << rightEdge[i];
     }
     
-    // Draw filled polygon
+    // Draw filled polygon with WindingFill to handle self-intersections
+    // OddEvenFill (default) leaves holes where stroke crosses itself
+    // WindingFill fills all enclosed areas regardless of winding count
     painter.setPen(Qt::NoPen);
     painter.setBrush(stroke.color);
-    painter.drawPolygon(polygon);
+    painter.drawPolygon(polygon, Qt::WindingFill);
     
     // Draw round end caps for a smooth look
     qreal startRadius = halfWidths[0];
