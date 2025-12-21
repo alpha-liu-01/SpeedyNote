@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 0.1 COMPLETE ✅
-NEXT:   Phase 0.2 - Map isCombinedCanvas locations
+STATUS: Phase 0.2 COMPLETE ✅
+NEXT:   Phase 0.3 - Document page-related widgets in MainWindow
 
 =============================================================================
                          CURRENT ARCHITECTURE
@@ -69,9 +69,12 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      → Found: 318 method calls, 18 signal/slot connections
      → Categorized by: Setters (87), Getters (100), Actions (26), Signals (18)
 
-[  ] 0.2 Map all isCombinedCanvas locations in InkCanvas.cpp
-     → Goal: Identify all combined canvas special-case code to eliminate
-     → These are the pain points that the new architecture removes
+[✅] 0.2 Map all isCombinedCanvas locations in InkCanvas.cpp
+     → See: docs/MIGRATION_PHASE0_COMBINED_CANVAS.md
+     → Found: 11 detection blocks, ~150 references in InkCanvas.cpp
+     → Found: 2 detection blocks, ~20 references in MainWindow.cpp
+     → 6 helper methods exist ONLY for combined canvas (will be deleted)
+     → ~500-700 lines of code to eliminate
 
 [  ] 0.3 Document page-related widgets in MainWindow
      → pageInput, panXSlider, panYSlider, zoomSlider
@@ -162,5 +165,27 @@ From Phase 0.1 - DANGEROUS PATTERNS identified:
 3. COMBINED CANVAS LOGIC IN MAINWINDOW
    MainWindow knows about buffer.height() / 2 splitting!
    → MainWindow should NOT know about internal canvas layout
+
+-----------------------------------------------------------------------------
+
+From Phase 0.2 - COMBINED CANVAS CODE SMELL:
+
+1. DUPLICATED DETECTION PATTERN (11+ times!)
+   Same 8-line detection block copy-pasted everywhere
+   → Should be ONE method: isCombinedCanvas()
+
+2. MAGIC NUMBERS EVERYWHERE
+   1.8, 1400, 2000 used inconsistently for detection
+   → Fragile heuristics that break on different displays
+
+3. COORDINATE OFFSET HELL
+   Every coordinate operation must add/subtract singlePageHeight
+   → New architecture: Viewport handles transforms automatically
+
+4. HELPER METHODS TO DELETE (6 total)
+   isCombinedCanvasMode(), getSinglePageHeight(), getPageNumberForCanvasY()
+   loadCombinedWindowsForPage(), saveCombinedWindowsForPage()
+   loadPdfTextBoxesForCombinedCanvas()
+   → All become unnecessary with per-page architecture
 
 =============================================================================
