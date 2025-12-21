@@ -1,0 +1,166 @@
+=============================================================================
+                    SPEEDYNOTE VIEWPORT MIGRATION PLAN
+=============================================================================
+
+STATUS: Phase 0.1 COMPLETE ✅
+NEXT:   Phase 0.2 - Map isCombinedCanvas locations
+
+=============================================================================
+                         CURRENT ARCHITECTURE
+=============================================================================
+
+┌─────────────────────────────────────────────────────────────┐
+│                        MainWindow                            │
+│  - Tab management (multiple notebooks)                       │
+│  - Page switching logic (switchPage, goToNextPage, etc.)     │
+│  - ALL UI widgets (10,000 lines!)                            │
+└────────────────────────┬────────────────────────────────────┘
+                         │ owns
+┌────────────────────────▼────────────────────────────────────┐
+│                        InkCanvas                             │
+│  - Document model (PDF, strokes, metadata) ← MIXED          │
+│  - View (rendering, pan/zoom)              ← TOGETHER       │
+│  - Input handling (tablet, mouse, touch)                     │
+│  - Combined canvas hack (2 pages stacked vertically)         │
+│  - 744 lines of header, ~6000+ lines of implementation       │
+└─────────────────────────────────────────────────────────────┘
+
+The "combined canvas" hack: Loads page N and N+1 into a double-height 
+buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
+
+=============================================================================
+                          TARGET ARCHITECTURE
+=============================================================================
+
+┌─────────────────────────────────────────────────────────────┐
+│                        MainWindow                            │
+│  - Tab management                                            │
+│  - Toolbar/UI coordination                                   │
+└────────────────────────┬────────────────────────────────────┘
+                         │ owns
+┌────────────────────────▼────────────────────────────────────┐
+│                    DocumentViewport                          │
+│  - Pan/zoom state                                            │
+│  - Renders visible pages from Document                       │
+│  - Routes input to correct page                              │
+└────────────────────────┬────────────────────────────────────┘
+                         │ references
+┌────────────────────────▼────────────────────────────────────┐
+│                        Document                              │
+│  - List of Pages (or infinite canvas regions)               │
+│  - PDF reference (if any)                                    │
+│  - Notebook metadata                                         │
+└────────────────────────┬────────────────────────────────────┘
+                         │ contains
+┌────────────────────────▼────────────────────────────────────┐
+│                         Page                                 │
+│  - Pixmap layer (raster strokes)                            │
+│  - Vector layer (VectorCanvas strokes)                       │
+│  - Background (PDF page / grid / custom image)              │
+│  - Picture windows for this page                            │
+└─────────────────────────────────────────────────────────────┘
+
+=============================================================================
+                        PHASE 0: PREPARATION
+=============================================================================
+
+[✅] 0.1 Map all MainWindow ↔ InkCanvas interactions
+     → See: docs/MIGRATION_PHASE0_INTERACTIONS.md
+     → Found: 318 method calls, 18 signal/slot connections
+     → Categorized by: Setters (87), Getters (100), Actions (26), Signals (18)
+
+[  ] 0.2 Map all isCombinedCanvas locations in InkCanvas.cpp
+     → Goal: Identify all combined canvas special-case code to eliminate
+     → These are the pain points that the new architecture removes
+
+[  ] 0.3 Document page-related widgets in MainWindow
+     → pageInput, panXSlider, panYSlider, zoomSlider
+     → outline tree, bookmarks panel, markdown sidebar
+     → All widgets that need reconnection in Phase 4
+
+=============================================================================
+                   PHASE 1: CREATE NEW DATA STRUCTURES
+=============================================================================
+
+[  ] 1.1 Create Page class
+     → File: source/Page.h, source/Page.cpp
+     → Holds: pixmap, vector strokes, background, metadata for ONE page
+
+[  ] 1.2 Create Document class  
+     → File: source/Document.h, source/Document.cpp
+     → Owns: list of Pages, PDF reference, notebook metadata
+
+[  ] 1.3 Create DocumentViewport class
+     → File: source/DocumentViewport.h, source/DocumentViewport.cpp
+     → QWidget that renders from Document, handles pan/zoom
+
+[  ] 1.4 Unit tests
+     → Test Document/Page serialization
+     → Test Page creation
+     → Test basic viewport rendering
+
+=============================================================================
+                    PHASE 2: BUILD DOCUMENTVIEWPORT
+=============================================================================
+
+[  ] 2.1 Basic rendering - Render pages in vertical layout
+[  ] 2.2 Pan/zoom - Viewport transform, smooth scrolling  
+[  ] 2.3 Page visibility culling - Only render visible pages
+[  ] 2.4 Input routing - Map click → correct Page → correct layer
+[  ] 2.5 Test harness - Standalone test window
+
+=============================================================================
+                     PHASE 3: INTEGRATION BRIDGE
+=============================================================================
+
+[  ] 3.1 Add DocumentViewport to MainWindow (hidden, feature flag)
+[  ] 3.2 Create adapter signals (same as InkCanvas)
+[  ] 3.3 Toggle mechanism (debug shortcut to switch)
+[  ] 3.4 Verify parity (same notebook looks identical in both)
+
+=============================================================================
+                      PHASE 4: WIDGET MIGRATION
+=============================================================================
+
+Priority: HIGH
+[  ] Page navigation (pageInput, prev/next buttons)
+[  ] Pan sliders (panXSlider, panYSlider)
+[  ] Zoom controls
+
+Priority: MEDIUM  
+[  ] Tool buttons (pen, eraser, marker)
+[  ] Outline tree, bookmarks
+[  ] Touch gestures
+
+Priority: LOW
+[  ] Picture windows
+[  ] Markdown notes sidebar
+
+=============================================================================
+                         PHASE 5: CLEANUP
+=============================================================================
+
+[  ] 5.1 Remove feature flag - New viewport becomes default
+[  ] 5.2 Delete combined canvas code
+[  ] 5.3 Deprecate InkCanvas
+[  ] 5.4 Final testing
+
+=============================================================================
+                           KEY FINDINGS
+=============================================================================
+
+From Phase 0.1 - DANGEROUS PATTERNS identified:
+
+1. DIRECT BUFFER ACCESS
+   canvas->getBuffer()  // Returns raw QPixmap - tight coupling!
+   → New architecture should NOT expose raw buffers
+
+2. DIRECT POPPLER ACCESS  
+   canvas->getPdfDocument()  // Returns Poppler::Document*
+   → PDF document should be owned by Document class
+
+3. COMBINED CANVAS LOGIC IN MAINWINDOW
+   MainWindow knows about buffer.height() / 2 splitting!
+   → MainWindow should NOT know about internal canvas layout
+
+=============================================================================
