@@ -17,6 +17,7 @@
 #include "LauncherWindow.h"
 #include "SpnPackageManager.h"
 #include "InkCanvas.h" // For BackgroundStyle enum
+#include "core/PageTests.h" // Phase 1.1.7: Page unit tests
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -144,15 +145,15 @@ static void applySystemPalette(QApplication &app) {
 
 int main(int argc, char *argv[]) {
 #ifdef _WIN32
-    FreeConsole();  // Hide console safely on Windows
+    // FreeConsole();  // Hide console safely on Windows
 
     
     // DEBUG: Show console for trackpad gesture debugging
-    /*
+    
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
-    */
+    
     
 #endif
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
@@ -241,6 +242,7 @@ int main(int argc, char *argv[]) {
     QString inputFile;
     bool createNewPackage = false;
     bool createSilent = false;
+    bool runPageTests = false;
     
     if (argc >= 2) {
         QString firstArg = QString::fromLocal8Bit(argv[1]);
@@ -252,11 +254,27 @@ int main(int argc, char *argv[]) {
             // Handle --create-silent command (creates file and exits)
             createSilent = true;
             inputFile = QString::fromLocal8Bit(argv[2]);
+        } else if (firstArg == "--test-page") {
+            // Phase 1.1.7: Run Page unit tests
+            runPageTests = true;
         } else {
             // Regular file argument
             inputFile = firstArg;
         }
         // qDebug() << "Input file received:" << inputFile << "Create new:" << createNewPackage << "Create silent:" << createSilent;
+    }
+    
+    // Phase 1.1.7: Handle --test-page command
+    if (runPageTests) {
+#ifdef _WIN32
+        // Re-enable console for test output on Windows
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+#endif
+        bool success = PageTests::runAllTests();
+        SDL_Quit();
+        return success ? 0 : 1;
     }
 
     // Handle silent creation (context menu) - create file and exit immediately

@@ -98,7 +98,7 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.1.4 Create InsertedObject base class
      [✅] 1.1.5 Create ImageObject class
      [✅] 1.1.6 Create Page class (coordinator)
-     [  ] 1.1.7 Unit tests for serialization
+     [✅] 1.1.7 Unit tests for serialization
 
 [  ] 1.2 Create Document class  
      → File: source/core/Document.h, source/core/Document.cpp

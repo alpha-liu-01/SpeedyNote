@@ -155,36 +155,27 @@ Now Page is just a coordinator, not a monster.
 
 ---
 
-### Task 1.1.7: Unit Tests
+### Task 1.1.7: Unit Tests ✅ COMPLETE
 Simple tests to verify serialization round-trip.
 
-**File:** `tests/test_page.cpp` (or inline test function)
+**File created:** `source/core/PageTests.h` ✅ (header-only test suite)
 
-```cpp
-void testPageSerialization() {
-    // Create page with layers and objects
-    auto page = Page::createDefault(QSizeF(800, 600));
-    page->addLayer("Layer 2");
-    page->activeLayer()->addStroke(testStroke);
-    
-    auto img = std::make_unique<ImageObject>();
-    img->position = QPointF(100, 100);
-    page->addObject(std::move(img));
-    
-    // Serialize
-    QJsonObject json = page->toJson();
-    
-    // Deserialize
-    auto restored = Page::fromJson(json);
-    
-    // Verify
-    assert(restored->vectorLayers.size() == 2);
-    assert(restored->objects.size() == 1);
-}
-```
+**Tests implemented:**
+- `testSerializationRoundTrip()` - Create page with content → JSON → restore → verify
+- `testLayerManagement()` - add/remove/move layers, active layer tracking
+- `testObjectManagement()` - add/remove objects, hit testing with z-order
+- `renderTestPageToPng()` - Optional visual verification export
+- `runAllTests()` - Run all tests with pass/fail summary
+
+**Usage:** Run `NoteApp.exe --test-page` from command line
+
+**Changes to Main.cpp:**
+- Added `--test-page` command-line flag
+- Enables console output on Windows for test results
+- Returns exit code 0 (success) or 1 (failure)
 
 **Dependencies:** All above tasks
-**Estimated size:** ~50 lines
+**Actual size:** ~350 lines
 
 ---
 
@@ -198,7 +189,7 @@ void testPageSerialization() {
 | 1.1.4 | Create InsertedObject base | None | 80 | [✅] |
 | 1.1.5 | Create ImageObject | 1.1.4 | 100 | [✅] |
 | 1.1.6 | Create Page class | 1.1.3, 1.1.4, 1.1.5 | 250 | [✅] |
-| 1.1.7 | Unit tests | All above | 50 | [ ] |
+| 1.1.7 | Unit tests | All above | 50 | [✅] |
 | **TOTAL** | | | **~810** | |
 
 ---
