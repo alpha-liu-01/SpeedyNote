@@ -105,9 +105,9 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.2.1 Create PdfProvider interface (source/pdf/)
      [✅] 1.2.2 Create PopplerPdfProvider implementation
      [✅] 1.2.3 Create Document class skeleton (identity, mode)
-     [  ] 1.2.4 Add PDF reference management to Document
-     [  ] 1.2.5 Add page management methods
-     [  ] 1.2.6 Add bookmarks support
+     [✅] 1.2.4 Add PDF reference management to Document
+     [✅] 1.2.5 Add page management methods
+     [✅] 1.2.6 Add bookmarks support
      [  ] 1.2.7 Add serialization (toJson/fromJson/saveToSpn/loadFromSpn)
      [  ] 1.2.8 Unit tests for Document
 

@@ -116,70 +116,65 @@ Basic Document structure with identity, mode, and page storage.
 
 ---
 
-### Task 1.2.4: Add PDF Reference Management
+### Task 1.2.4: Add PDF Reference Management ✅ COMPLETE
 
 Add PDF path, provider, and relink functionality to Document.
 
-**Additions to Document class:**
+**Files modified:**
+- `source/core/Document.h` ✅ (added ~100 lines)
+- `source/core/Document.cpp` ✅ (added ~120 lines)
 
-```cpp
-// ===== PDF Reference =====
-QString pdfPath;                                    // Path to external PDF
-std::unique_ptr<PdfProvider> pdfProvider;           // Loaded PDF (may be null)
+**Features implemented:**
+- **State queries:** `hasPdfReference()`, `isPdfLoaded()`, `pdfFileExists()`, `pdfPath()`
+- **PDF loading:** `loadPdf()`, `relinkPdf()`, `unloadPdf()`, `clearPdfReference()`
+- **Rendering:** `renderPdfPageToImage()`, `renderPdfPageToPixmap()`
+- **PDF info:** `pdfPageCount()`, `pdfPageSize()`, `pdfTitle()`, `pdfAuthor()`
+- **Outline:** `pdfHasOutline()`, `pdfOutline()`
+- **Advanced access:** `pdfProvider()` returns const pointer for text boxes, links, etc.
 
-// Methods
-bool hasPdf() const;
-bool loadPdf(const QString& path);
-bool relinkPdf(const QString& newPath);
-void unloadPdf();
-QPixmap renderPdfPage(int pageIndex, qreal dpi) const;
-int pdfPageCount() const;
-QSizeF pdfPageSize(int pageIndex) const;
-```
+**Design decisions:**
+- `m_pdfPath` is stored even if loading fails (enables relink workflow)
+- `loadPdf()` stores path first, then attempts load
+- `relinkPdf()` calls `loadPdf()` and marks document modified on success
+- `unloadPdf()` releases resources but preserves path for relink
+- `clearPdfReference()` removes both provider and path
+- `createForPdf()` now actually loads the PDF
 
 **Dependencies:** Tasks 1.2.1, 1.2.2, 1.2.3
-**Estimated size:** ~80 lines
+**Actual size:** ~220 lines added (header + implementation)
 
 ---
 
-### Task 1.2.5: Add Page Management Methods
+### Task 1.2.5: Add Page Management Methods ✅ COMPLETE
 
 Methods to add, remove, insert, reorder pages.
 
-**Additions to Document class:**
+**Files modified:**
+- `source/core/Document.h` ✅ (added ~90 lines)
+- `source/core/Document.cpp` ✅ (added ~170 lines)
 
-```cpp
-// ===== Pages =====
-private:
-    std::vector<std::unique_ptr<Page>> m_pages;
+**Features implemented:**
+- **Storage:** `std::vector<std::unique_ptr<Page>> m_pages`
+- **Access:** `pageCount()`, `page(int index)` (const and non-const)
+- **Modification:** `addPage()`, `insertPage()`, `addPageForPdf()`, `removePage()`, `movePage()`
+- **Edgeless mode:** `edgelessPage()` (const and non-const)
+- **Utility:** `ensureMinimumPages()`, `findPageByPdfPage()`, `createPagesForPdf()`
+- **Helper:** `createDefaultPage()` (private)
 
-public:
-    // Access
-    int pageCount() const;
-    Page* page(int index);
-    const Page* page(int index) const;
-    
-    // Modification
-    Page* addPage();                                    // Add at end
-    Page* insertPage(int index);                        // Insert at position
-    Page* addPageForPdf(int pdfPageIndex);              // Add with PDF background
-    bool removePage(int index);
-    bool movePage(int from, int to);
-    
-    // Edgeless mode
-    Page* edgelessPage();                               // Returns the single page (mode must be Edgeless)
-    
-    // Utility
-    void ensureMinimumPages();                          // Ensure at least 1 page exists
-    int findPageByPdfPage(int pdfPageIndex) const;      // Find doc page for PDF page (-1 if not found)
-```
+**Design decisions:**
+- `removePage()` prevents removing the last page (enforces minimum of 1)
+- `addPageForPdf()` converts PDF page size from 72 dpi to 96 dpi
+- `createPagesForPdf()` clears existing pages and creates fresh ones
+- `ensureMinimumPages()` creates a 4096x4096 page for edgeless mode
+- Factory methods now create initial pages automatically
+- `createForPdf()` creates one page per PDF page with BackgroundType::PDF
 
-**Dependencies:** Task 1.2.3
-**Estimated size:** ~150 lines
+**Dependencies:** Task 1.2.3, Page class (1.1)
+**Actual size:** ~260 lines added (header + implementation)
 
 ---
 
-### Task 1.2.6: Add Bookmarks Support
+### Task 1.2.6: Add Bookmarks Support ✅ COMPLETE
 
 Bookmark storage and management.
 
@@ -187,33 +182,33 @@ Bookmark storage and management.
 - Each Page has `isBookmarked` flag and `bookmarkLabel`
 - Document provides quick access methods
 
-**Additions to Page class:**
+**Files modified:**
+- `source/core/Page.h` ✅ (added 2 fields)
+- `source/core/Page.cpp` ✅ (added serialization ~6 lines)
+- `source/core/Document.h` ✅ (added ~75 lines)
+- `source/core/Document.cpp` ✅ (added ~100 lines)
 
-```cpp
-// ===== Bookmarks (add to Page) =====
-bool isBookmarked = false;
-QString bookmarkLabel;
-```
+**Features implemented:**
+- **Page fields:** `isBookmarked`, `bookmarkLabel`
+- **Page serialization:** Bookmark fields included in toJson/fromJson
+- **Document struct:** `Bookmark { pageIndex, label }`
+- **Document methods:**
+  - `getBookmarks()` - returns all bookmarks sorted by page
+  - `setBookmark()` - add/update bookmark with optional label
+  - `removeBookmark()` - remove bookmark from page
+  - `hasBookmark()` - check if page is bookmarked
+  - `bookmarkLabel()` - get label for bookmarked page
+  - `nextBookmark()` / `prevBookmark()` - navigate with wrap-around
+  - `toggleBookmark()` - convenience method for toggle
+  - `bookmarkCount()` - total number of bookmarks
 
-**Additions to Document class:**
-
-```cpp
-// ===== Bookmarks =====
-struct Bookmark {
-    int pageIndex;
-    QString label;
-};
-
-QVector<Bookmark> getBookmarks() const;                 // Get all bookmarked pages
-void setBookmark(int pageIndex, const QString& label);
-void removeBookmark(int pageIndex);
-bool hasBookmark(int pageIndex) const;
-int nextBookmark(int fromPage) const;                   // Navigate to next bookmark
-int prevBookmark(int fromPage) const;                   // Navigate to previous bookmark
-```
+**Design notes:**
+- Default bookmark label is "Bookmark N" (1-based page number)
+- Navigation methods wrap around (next from last goes to first)
+- Compatible with existing MainWindow bookmark UI patterns
 
 **Dependencies:** Task 1.2.5
-**Estimated size:** ~80 lines
+**Actual size:** ~180 lines added
 
 ---
 
@@ -296,9 +291,9 @@ namespace DocumentTests {
 | 1.2.1 | PdfProvider interface | None | 60 | [✅] |
 | 1.2.2 | PopplerPdfProvider | 1.2.1 | 150 | [✅] |
 | 1.2.3 | Document skeleton | Page (1.1) | 150 | [✅] |
-| 1.2.4 | PDF reference management | 1.2.1-1.2.3 | 80 | [ ] |
-| 1.2.5 | Page management | 1.2.3 | 150 | [ ] |
-| 1.2.6 | Bookmarks | 1.2.5 | 80 | [ ] |
+| 1.2.4 | PDF reference management | 1.2.1-1.2.3 | 80 | [✅] |
+| 1.2.5 | Page management | 1.2.3 | 150 | [✅] |
+| 1.2.6 | Bookmarks | 1.2.5 | 80 | [✅] |
 | 1.2.7 | Serialization | 1.2.3-1.2.6 | 200 | [ ] |
 | 1.2.8 | Unit tests | All above | 300 | [ ] |
 | **TOTAL** | | | **~1170** | |

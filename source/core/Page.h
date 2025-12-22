@@ -63,6 +63,10 @@ public:
     int gridSpacing = 20;               ///< Grid spacing in pixels
     int lineSpacing = 24;               ///< Line spacing for ruled paper
     
+    // ===== Bookmarks (Task 1.2.6) =====
+    bool isBookmarked = false;          ///< True if this page has a bookmark
+    QString bookmarkLabel;              ///< User-visible bookmark label/title
+    
     // ===== Layers =====
     // Note: Using std::vector because QVector requires copyable types,
     // but std::unique_ptr is move-only

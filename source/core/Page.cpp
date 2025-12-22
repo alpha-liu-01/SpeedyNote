@@ -287,6 +287,12 @@ QJsonObject Page::toJson() const
     obj["lineSpacing"] = lineSpacing;
     // Note: customBackground pixmap is not serialized - path should be stored separately
     
+    // Bookmarks (Task 1.2.6)
+    obj["isBookmarked"] = isBookmarked;
+    if (!bookmarkLabel.isEmpty()) {
+        obj["bookmarkLabel"] = bookmarkLabel;
+    }
+    
     // Active layer
     obj["activeLayerIndex"] = activeLayerIndex;
     
@@ -325,6 +331,10 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
     page->gridColor = QColor(obj["gridColor"].toString("#ffc8c8c8"));
     page->gridSpacing = obj["gridSpacing"].toInt(20);
     page->lineSpacing = obj["lineSpacing"].toInt(24);
+    
+    // Bookmarks (Task 1.2.6)
+    page->isBookmarked = obj["isBookmarked"].toBool(false);
+    page->bookmarkLabel = obj["bookmarkLabel"].toString();
     
     // Active layer
     page->activeLayerIndex = obj["activeLayerIndex"].toInt(0);
