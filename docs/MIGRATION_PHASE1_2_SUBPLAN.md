@@ -212,27 +212,22 @@ Bookmark storage and management.
 
 ---
 
-### Task 1.2.7: Add Serialization
+### Task 1.2.7: Add Serialization ✅ COMPLETE
 
 JSON serialization matching extended `.speedynote_metadata.json` format.
 
-**Additions to Document class:**
+**Files modified:**
+- `source/core/Document.h` ✅ (added ~80 lines)
+- `source/core/Document.cpp` ✅ (added ~200 lines)
 
-```cpp
-// ===== Serialization =====
-QJsonObject toJson() const;                             // Metadata only (not page content)
-static std::unique_ptr<Document> fromJson(const QJsonObject& obj);
+**Features implemented:**
+- **Metadata serialization:** `toJson()` / `fromJson()` - document metadata only
+- **Full serialization:** `toFullJson()` / `fromFullJson()` - includes all page content
+- **Page serialization:** `pagesToJson()` / `loadPagesFromJson()`
+- **Background settings:** `defaultBackgroundToJson()` / `loadDefaultBackgroundFromJson()`
+- **Enum converters:** `backgroundTypeToString()`, `stringToBackgroundType()`, `modeToString()`, `stringToMode()`
 
-QJsonObject toFullJson() const;                         // Include all pages
-static std::unique_ptr<Document> fromFullJson(const QJsonObject& obj);
-
-// Save/Load helpers (uses SpnPackageManager internally)
-bool saveToSpn(const QString& spnPath);
-static std::unique_ptr<Document> loadFromSpn(const QString& spnPath);
-```
-
-**Metadata JSON structure:**
-
+**JSON structure (metadata):**
 ```json
 {
     "format_version": "2.0",
@@ -246,17 +241,25 @@ static std::unique_ptr<Document> loadFromSpn(const QString& spnPath);
     "last_accessed_page": 5,
     "default_background": {
         "type": "grid",
-        "color": "#ffffff",
+        "color": "#ffffffff",
+        "grid_color": "#ffc8c8c8",
         "grid_spacing": 20,
-        "line_spacing": 24
+        "line_spacing": 24,
+        "page_width": 816,
+        "page_height": 1056
     },
-    "page_count": 10,
-    "pages": [ ... ]
+    "page_count": 10
 }
 ```
 
-**Dependencies:** Tasks 1.2.3-1.2.6
-**Estimated size:** ~200 lines
+**Design notes:**
+- `fromJson()` does NOT auto-load PDF - call `loadPdf()` separately if needed
+- Legacy format support: reads flat `background_style`, `background_color`, `background_density`
+- Page content kept separate from metadata for efficiency (can read metadata without loading strokes)
+- No `saveToSpn()`/`loadFromSpn()` yet - those will integrate with SpnPackageManager later
+
+**Dependencies:** Tasks 1.2.3-1.2.6, Page serialization (1.1)
+**Actual size:** ~280 lines added
 
 ---
 
@@ -294,7 +297,7 @@ namespace DocumentTests {
 | 1.2.4 | PDF reference management | 1.2.1-1.2.3 | 80 | [✅] |
 | 1.2.5 | Page management | 1.2.3 | 150 | [✅] |
 | 1.2.6 | Bookmarks | 1.2.5 | 80 | [✅] |
-| 1.2.7 | Serialization | 1.2.3-1.2.6 | 200 | [ ] |
+| 1.2.7 | Serialization | 1.2.3-1.2.6 | 200 | [✅] |
 | 1.2.8 | Unit tests | All above | 300 | [ ] |
 | **TOTAL** | | | **~1170** | |
 

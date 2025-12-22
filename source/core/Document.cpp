@@ -503,3 +503,229 @@ int Document::bookmarkCount() const
     }
     return count;
 }
+
+// =========================================================================
+// Serialization (Task 1.2.7)
+// =========================================================================
+
+QJsonObject Document::toJson() const
+{
+    QJsonObject obj;
+    
+    // Format version (for compatibility checks)
+    obj["format_version"] = formatVersion;
+    
+    // Identity
+    obj["notebook_id"] = id;
+    obj["name"] = name;
+    obj["author"] = author;
+    obj["created"] = created.toString(Qt::ISODate);
+    obj["last_modified"] = lastModified.toString(Qt::ISODate);
+    
+    // Mode
+    obj["mode"] = modeToString(mode);
+    
+    // PDF reference (path only, provider is runtime)
+    obj["pdf_path"] = m_pdfPath;
+    
+    // State
+    obj["last_accessed_page"] = lastAccessedPage;
+    
+    // Default background settings
+    obj["default_background"] = defaultBackgroundToJson();
+    
+    // Page count (for quick info without loading pages)
+    obj["page_count"] = pageCount();
+    
+    return obj;
+}
+
+std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
+{
+    auto doc = std::make_unique<Document>();
+    
+    // Clear the auto-generated ID, we'll load it from JSON
+    doc->id = obj["notebook_id"].toString();
+    if (doc->id.isEmpty()) {
+        // Generate new ID if not present (legacy format)
+        doc->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
+    
+    // Format version
+    doc->formatVersion = obj["format_version"].toString("1.0");
+    
+    // Identity
+    doc->name = obj["name"].toString();
+    doc->author = obj["author"].toString();
+    
+    // Timestamps
+    QString createdStr = obj["created"].toString();
+    if (!createdStr.isEmpty()) {
+        doc->created = QDateTime::fromString(createdStr, Qt::ISODate);
+    }
+    QString modifiedStr = obj["last_modified"].toString();
+    if (!modifiedStr.isEmpty()) {
+        doc->lastModified = QDateTime::fromString(modifiedStr, Qt::ISODate);
+    }
+    
+    // Mode
+    doc->mode = stringToMode(obj["mode"].toString("paged"));
+    
+    // PDF reference (don't load yet, just store path)
+    doc->m_pdfPath = obj["pdf_path"].toString();
+    
+    // State
+    doc->lastAccessedPage = obj["last_accessed_page"].toInt(0);
+    
+    // Default background settings
+    if (obj.contains("default_background")) {
+        doc->loadDefaultBackgroundFromJson(obj["default_background"].toObject());
+    } else {
+        // Legacy format: read flat fields
+        QString bgStyle = obj["background_style"].toString("None");
+        doc->defaultBackgroundType = stringToBackgroundType(bgStyle);
+        QString bgColor = obj["background_color"].toString("#ffffff");
+        doc->defaultBackgroundColor = QColor(bgColor);
+        doc->defaultGridSpacing = obj["background_density"].toInt(20);
+        doc->defaultLineSpacing = obj["background_density"].toInt(24);
+    }
+    
+    // Note: Pages are NOT loaded here - call loadPagesFromJson() separately
+    // or use fromFullJson() to load everything
+    
+    doc->modified = false;
+    return doc;
+}
+
+QJsonObject Document::toFullJson() const
+{
+    QJsonObject obj = toJson();
+    
+    // Add full page content
+    obj["pages"] = pagesToJson();
+    
+    return obj;
+}
+
+std::unique_ptr<Document> Document::fromFullJson(const QJsonObject& obj)
+{
+    // First, load metadata
+    auto doc = fromJson(obj);
+    if (!doc) {
+        return nullptr;
+    }
+    
+    // Load page content
+    if (obj.contains("pages")) {
+        doc->loadPagesFromJson(obj["pages"].toArray());
+    } else {
+        // No pages in JSON, ensure minimum
+        doc->ensureMinimumPages();
+    }
+    
+    return doc;
+}
+
+int Document::loadPagesFromJson(const QJsonArray& pagesArray)
+{
+    // Clear existing pages
+    m_pages.clear();
+    
+    int loadedCount = 0;
+    
+    for (const auto& val : pagesArray) {
+        auto page = Page::fromJson(val.toObject());
+        if (page) {
+            m_pages.push_back(std::move(page));
+            ++loadedCount;
+        }
+    }
+    
+    // Ensure at least one page exists
+    ensureMinimumPages();
+    
+    return loadedCount;
+}
+
+QJsonArray Document::pagesToJson() const
+{
+    QJsonArray pagesArray;
+    
+    for (const auto& page : m_pages) {
+        pagesArray.append(page->toJson());
+    }
+    
+    return pagesArray;
+}
+
+QJsonObject Document::defaultBackgroundToJson() const
+{
+    QJsonObject bg;
+    bg["type"] = backgroundTypeToString(defaultBackgroundType);
+    bg["color"] = defaultBackgroundColor.name(QColor::HexArgb);
+    bg["grid_color"] = defaultGridColor.name(QColor::HexArgb);
+    bg["grid_spacing"] = defaultGridSpacing;
+    bg["line_spacing"] = defaultLineSpacing;
+    bg["page_width"] = defaultPageSize.width();
+    bg["page_height"] = defaultPageSize.height();
+    return bg;
+}
+
+void Document::loadDefaultBackgroundFromJson(const QJsonObject& obj)
+{
+    defaultBackgroundType = stringToBackgroundType(obj["type"].toString("None"));
+    
+    QString bgColor = obj["color"].toString("#ffffffff");
+    defaultBackgroundColor = QColor(bgColor);
+    
+    QString gridColor = obj["grid_color"].toString("#ffc8c8c8");
+    defaultGridColor = QColor(gridColor);
+    
+    defaultGridSpacing = obj["grid_spacing"].toInt(20);
+    defaultLineSpacing = obj["line_spacing"].toInt(24);
+    
+    if (obj.contains("page_width") && obj.contains("page_height")) {
+        defaultPageSize = QSizeF(
+            obj["page_width"].toDouble(816),
+            obj["page_height"].toDouble(1056)
+        );
+    }
+}
+
+QString Document::backgroundTypeToString(Page::BackgroundType type)
+{
+    switch (type) {
+        case Page::BackgroundType::None:   return "none";
+        case Page::BackgroundType::PDF:    return "pdf";
+        case Page::BackgroundType::Custom: return "custom";
+        case Page::BackgroundType::Grid:   return "grid";
+        case Page::BackgroundType::Lines:  return "lines";
+        default: return "none";
+    }
+}
+
+Page::BackgroundType Document::stringToBackgroundType(const QString& str)
+{
+    QString lower = str.toLower();
+    if (lower == "pdf")    return Page::BackgroundType::PDF;
+    if (lower == "custom") return Page::BackgroundType::Custom;
+    if (lower == "grid")   return Page::BackgroundType::Grid;
+    if (lower == "lines")  return Page::BackgroundType::Lines;
+    return Page::BackgroundType::None;
+}
+
+QString Document::modeToString(Mode m)
+{
+    switch (m) {
+        case Mode::Paged:    return "paged";
+        case Mode::Edgeless: return "edgeless";
+        default: return "paged";
+    }
+}
+
+Document::Mode Document::stringToMode(const QString& str)
+{
+    QString lower = str.toLower();
+    if (lower == "edgeless") return Mode::Edgeless;
+    return Mode::Paged;
+}

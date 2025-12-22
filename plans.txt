@@ -108,7 +108,7 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.2.4 Add PDF reference management to Document
      [✅] 1.2.5 Add page management methods
      [✅] 1.2.6 Add bookmarks support
-     [  ] 1.2.7 Add serialization (toJson/fromJson/saveToSpn/loadFromSpn)
+     [✅] 1.2.7 Add serialization (toJson/fromJson)
      [  ] 1.2.8 Unit tests for Document
 
 [  ] 1.3 Create DocumentViewport class

@@ -466,9 +466,90 @@ public:
     int bookmarkCount() const;
     
     // =========================================================================
-    // The following sections will be added in subsequent tasks:
-    // - Serialization (Task 1.2.7)
+    // Serialization (Task 1.2.7)
     // =========================================================================
+    
+    /**
+     * @brief Serialize document metadata to JSON.
+     * @return JSON object containing document metadata.
+     * 
+     * Does NOT include page content (strokes, objects).
+     * Use toFullJson() for complete serialization.
+     */
+    QJsonObject toJson() const;
+    
+    /**
+     * @brief Create a document from metadata JSON.
+     * @param obj JSON object containing document metadata.
+     * @return New document with metadata loaded, or nullptr on error.
+     * 
+     * Pages are created but content is NOT loaded - call loadPagesFromJson() 
+     * or read page data separately.
+     */
+    static std::unique_ptr<Document> fromJson(const QJsonObject& obj);
+    
+    /**
+     * @brief Serialize complete document to JSON.
+     * @return JSON object containing document metadata AND all page content.
+     * 
+     * Warning: Can be very large for documents with many strokes.
+     */
+    QJsonObject toFullJson() const;
+    
+    /**
+     * @brief Create a complete document from full JSON.
+     * @param obj JSON object containing document metadata and pages.
+     * @return New document with all data loaded, or nullptr on error.
+     */
+    static std::unique_ptr<Document> fromFullJson(const QJsonObject& obj);
+    
+    /**
+     * @brief Load page content from a pages JSON array.
+     * @param pagesArray JSON array of page objects.
+     * @return Number of pages successfully loaded.
+     * 
+     * Clears existing pages and creates new ones from JSON.
+     * Use after fromJson() to load page content.
+     */
+    int loadPagesFromJson(const QJsonArray& pagesArray);
+    
+    /**
+     * @brief Get pages as JSON array.
+     * @return JSON array of page objects.
+     */
+    QJsonArray pagesToJson() const;
+    
+    /**
+     * @brief Get default background settings as JSON.
+     * @return JSON object with background settings.
+     */
+    QJsonObject defaultBackgroundToJson() const;
+    
+    /**
+     * @brief Load default background settings from JSON.
+     * @param obj JSON object with background settings.
+     */
+    void loadDefaultBackgroundFromJson(const QJsonObject& obj);
+    
+    /**
+     * @brief Convert BackgroundType enum to string.
+     */
+    static QString backgroundTypeToString(Page::BackgroundType type);
+    
+    /**
+     * @brief Convert string to BackgroundType enum.
+     */
+    static Page::BackgroundType stringToBackgroundType(const QString& str);
+    
+    /**
+     * @brief Convert Mode enum to string.
+     */
+    static QString modeToString(Mode m);
+    
+    /**
+     * @brief Convert string to Mode enum.
+     */
+    static Mode stringToMode(const QString& str);
     
 private:
     // ===== PDF Reference (Task 1.2.4) =====
