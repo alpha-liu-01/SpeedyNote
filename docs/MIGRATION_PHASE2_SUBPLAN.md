@@ -54,11 +54,20 @@ DocumentViewport
 
 ## Task Breakdown
 
-### Task 2.1: Tool State Management (~100 lines)
+### Task 2.1: Tool State Management (~100 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
 **Goal:** Add tool state to DocumentViewport so MainWindow can set pen/eraser mode.
+
+**Implemented:**
+- Added `#include "ToolType.h"` for tool enum
+- Added `setCurrentTool()`, `currentTool()` for tool selection
+- Added `setPenColor()`, `penColor()` for pen color
+- Added `setPenThickness()`, `penThickness()` for pen size
+- Added `setEraserSize()`, `eraserSize()` for eraser radius
+- Added `toolChanged(ToolType)` signal
+- All setters have bounds checking and change detection
 
 **Add to DocumentViewport.h:**
 ```cpp
@@ -735,24 +744,46 @@ static bool testPerPageUndo() {
 
 ## Task Summary
 
-| Task | Description | Est. Lines | Dependencies |
-|------|-------------|------------|--------------|
-| 2.1 | Tool State Management | 100 | 1.3 |
-| 2.2 | Stroke Creation | 250 | 2.1 |
-| 2.3 | Incremental Stroke Rendering | 150 | 2.2 |
-| 2.4 | Eraser Tool | 150 | 2.1 |
-| 2.5 | Per-Page Undo/Redo | 200 | 2.2, 2.4 |
-| 2.6 | Benchmark Integration | 50 | 2.3 |
-| 2.7 | Drawing Tests | 100 | All above |
+### Phase 2A: Core Drawing (Migration from VectorCanvas)
 
-**Total estimated:** ~1000 lines (much less than original estimate since we're migrating, not rewriting)
+| Task | Description | Est. Lines | Dependencies | Status |
+|------|-------------|------------|--------------|--------|
+| 2.1 | Tool State Management | 100 | 1.3 | ✅ |
+| 2.2 | Stroke Creation | 250 | 2.1 | [ ] |
+| 2.3 | Incremental Stroke Rendering | 150 | 2.2 | [ ] |
+| 2.4 | Eraser Tool | 150 | 2.1 | [ ] |
+| 2.5 | Per-Page Undo/Redo | 200 | 2.2, 2.4 | [ ] |
+| 2.6 | Benchmark Integration | 50 | 2.3 | [ ] |
+| 2.7 | Drawing Tests | 100 | All above | [ ] |
+
+**Phase 2A Total:** ~1000 lines
+
+### Phase 2B: Additional Tools (New Implementation)
+
+| Task | Description | Est. Lines | Dependencies | Status |
+|------|-------------|------------|--------------|--------|
+| 2.8 | Marker Tool | ~150 | 2.7 | [ ] |
+| 2.9 | Straight Line Mode | ~200 | 2.7 | [ ] |
+| 2.10 | Lasso Selection Tool | ~400 | 2.7 | [ ] |
+| 2.11 | Highlighter Tool | ~100 | 2.8 | [ ] |
+
+**Phase 2B Total:** ~850 lines (can be deferred)
+
+**Notes on Phase 2B:**
+- **Marker (2.8):** Semi-transparent strokes, blending mode
+- **Straight Line (2.9):** Draw mode modifier, snap to line from press to release
+- **Lasso (2.10):** Selection tool, needs selection state management, copy/paste/delete
+- **Highlighter (2.11):** Like marker but with specific highlighting blend mode
+
+Phase 2B tasks are **optional for initial release** - core pen/eraser is sufficient for MVP.
 
 ---
 
 ## Execution Order
 
+### Phase 2A (Core - Required)
 ```
-2.1 (Tool State)
+2.1 (Tool State) ✅
     ↓
 ┌───┴───┐
 2.2     2.4
@@ -775,6 +806,20 @@ static bool testPerPageUndo() {
 
 Tasks 2.2 and 2.4 can be done in parallel after 2.1.
 
+### Phase 2B (Additional Tools - Can be deferred)
+```
+      2.7 (Tests Complete)
+          ↓
+    ┌─────┼─────┐
+   2.8   2.9   2.10
+(Marker)(Line)(Lasso)
+    ↓
+   2.11
+(Highlighter)
+```
+
+Phase 2B tasks are independent and can be done in any order after 2.7.
+
 ---
 
 ## Code Migration Checklist
@@ -789,14 +834,14 @@ Tasks 2.2 and 2.4 can be done in parallel after 2.1.
 | `UndoAction` struct | Same struct | [ ] |
 | `undo()` / `redo()` | Per-page versions | [ ] |
 | `startBenchmark()` / `getPaintRate()` | Same | [ ] |
-| Tool enum | Use `ToolType.h` | [ ] |
-| Pen color/thickness | Same properties | [ ] |
+| Tool enum | Use `ToolType.h` | [x] |
+| Pen color/thickness | Same properties | [x] |
 
 ---
 
 ## Success Criteria
 
-Phase 2 is complete when:
+### Phase 2A Complete When:
 
 1. [ ] Can draw strokes with pressure on any page
 2. [ ] Point decimation reduces points by 50%+ with no visible quality loss
@@ -806,19 +851,43 @@ Phase 2 is complete when:
 6. [ ] Strokes persist in Page→VectorLayer→strokes
 7. [ ] All tests pass
 
+### Phase 2B Complete When (Optional):
+
+8. [ ] Marker tool draws semi-transparent strokes
+9. [ ] Straight line mode snaps pen strokes to lines
+10. [ ] Lasso tool can select, move, and delete strokes
+11. [ ] Highlighter tool works with proper blend mode
+
 ---
 
 ## Notes
+
+### VectorCanvas Status
+**DO NOT UPDATE VectorCanvas** - It's a test implementation being deleted in Phase 5.
+- Keep it working as-is for the transition period
+- Keep `VectorPen`/`VectorEraser` enum names for backward compatibility
+- DocumentViewport is the replacement - all new code goes there
+- Phase 5 will remove VectorCanvas and rename enum values
+
+### ToolType.h Location
+Currently at `source/ToolType.h` - will move to `source/core/ToolType.h` in Phase 5 cleanup.
+For now, keep it where it is to avoid breaking InkCanvas/MainWindow.
 
 ### Performance Targets (Same as VectorCanvas)
 - Paint at 60+ FPS when idle
 - Handle 360Hz input without lag
 - CPU usage < 50% on Celeron N4000 during drawing
 
-### What's NOT in Phase 2
+### What's NOT in Phase 2A
 - Touch gesture drawing (Phase 4)
-- Marker/highlighter tools (future)
-- Partial stroke eraser (future)
+- Partial stroke eraser (future consideration)
 - Multi-layer editing UI (future)
 
-Phase 2 creates **basic but complete drawing capability** using the new architecture.
+### What's in Phase 2B (Optional)
+- Marker tool (semi-transparent strokes)
+- Highlighter tool
+- Straight line mode
+- Lasso selection tool
+
+Phase 2A creates **basic but complete drawing capability** using the new architecture.
+Phase 2B adds **enhanced tools** that can be deferred to post-MVP.

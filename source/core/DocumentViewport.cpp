@@ -111,6 +111,60 @@ void DocumentViewport::setPageGap(int gap)
     emitScrollFractions();
 }
 
+// ===== Tool State Management (Task 2.1) =====
+
+void DocumentViewport::setCurrentTool(ToolType tool)
+{
+    if (m_currentTool == tool) {
+        return;
+    }
+    
+    m_currentTool = tool;
+    
+    // Update cursor and repaint for eraser cursor visibility
+    update();
+    
+    emit toolChanged(tool);
+}
+
+void DocumentViewport::setPenColor(const QColor& color)
+{
+    if (m_penColor == color) {
+        return;
+    }
+    
+    m_penColor = color;
+}
+
+void DocumentViewport::setPenThickness(qreal thickness)
+{
+    // Clamp to reasonable range
+    thickness = qBound(0.5, thickness, 100.0);
+    
+    if (qFuzzyCompare(m_penThickness, thickness)) {
+        return;
+    }
+    
+    m_penThickness = thickness;
+}
+
+void DocumentViewport::setEraserSize(qreal size)
+{
+    // Clamp to reasonable range
+    size = qBound(5.0, size, 200.0);
+    
+    if (qFuzzyCompare(m_eraserSize, size)) {
+        return;
+    }
+    
+    m_eraserSize = size;
+    
+    // Repaint to update eraser cursor size
+    if (m_currentTool == ToolType::Eraser || m_currentTool == ToolType::VectorEraser) {
+        update();
+    }
+}
+
 // ===== View State Setters =====
 
 void DocumentViewport::setZoomLevel(qreal zoom)

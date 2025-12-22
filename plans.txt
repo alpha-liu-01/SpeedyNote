@@ -98,7 +98,7 @@ AFTER (Target):
      └── Signal system for MainWindow sync
 
 =============================================================================
-            PHASE 2: DRAWING IMPLEMENTATION (NEXT) - MIGRATION
+            PHASE 2: DRAWING IMPLEMENTATION - MIGRATION
 =============================================================================
 
 → See: docs/MIGRATION_PHASE2_SUBPLAN.md for detailed breakdown
@@ -107,7 +107,12 @@ NOTE: This is a MIGRATION from VectorCanvas, not a rewrite!
 VectorCanvas already has working: pen, eraser, undo, point decimation,
 incremental rendering, benchmarking. We're moving this to the new architecture.
 
-[  ] 2.1 Tool State Management (~100 lines)
+NOTE: DO NOT update VectorCanvas - it will be deleted in Phase 5.
+Keep VectorPen/VectorEraser enum names for backward compatibility.
+
+----- Phase 2A: Core Drawing (Required for MVP) -----
+
+[✅] 2.1 Tool State Management (~100 lines)
      - Add tool state to DocumentViewport (ToolType, color, thickness)
      - setCurrentTool(), setPenColor(), setPenThickness(), setEraserSize()
      - Signal: toolChanged()
@@ -141,6 +146,22 @@ incremental rendering, benchmarking. We're moving this to the new architecture.
      - Test stroke creation and point decimation
      - Test eraser
      - Test per-page undo/redo
+
+----- Phase 2B: Additional Tools (Can be deferred) -----
+
+[  ] 2.8 Marker Tool (~150 lines)
+     - Semi-transparent strokes with blending
+
+[  ] 2.9 Straight Line Mode (~200 lines)
+     - Draw mode modifier for pen tool
+     - Snap stroke to line from press to release
+
+[  ] 2.10 Lasso Selection Tool (~400 lines)
+     - Select strokes by drawing region
+     - Move, copy, delete selected strokes
+
+[  ] 2.11 Highlighter Tool (~100 lines)
+     - Like marker with highlight blend mode
 
 =============================================================================
               PHASE 3: MAINWINDOW INTEGRATION BRIDGE
@@ -268,12 +289,14 @@ source/
 
 Phase 0: COMPLETE ✅
 Phase 1: COMPLETE ✅
-Phase 2: ~2 days (migration, not rewrite - ~1000 lines)
+Phase 2A: ~2 days (core drawing - ~1000 lines)
+Phase 2B: ~2 days (additional tools - ~850 lines, OPTIONAL)
 Phase 3: ~2-3 days
 Phase 4: ~3-4 days
 Phase 5: ~1-2 days
 
-Total remaining: ~8-11 days of focused work
+Total for MVP (without 2B): ~8-11 days
+Total with all features: ~10-13 days
 
 =============================================================================
                           KEY DECISIONS
@@ -300,7 +323,15 @@ VectorCanvas (source/VectorCanvas.h/.cpp) - Test overlay with working:
 - High-DPI support
 - Benchmark (paint rate measurement)
 
+⚠️  VectorCanvas is FROZEN - DO NOT UPDATE
+    It will be deleted in Phase 5 after DocumentViewport is complete.
+    Use it only as reference for migrating code to DocumentViewport.
+
 MainWindow already has temporary buttons: VP (Vector Pen), VE (Vector Eraser)
 These connect to VectorCanvas which overlays on InkCanvas page 1.
+
+ToolType.h: Keep at source/ToolType.h for now (move to core/ in Phase 5)
+- Keep VectorPen/VectorEraser names for backward compatibility
+- Old Pen/Marker/Eraser are OBSOLETE (pixmap tools)
 
 =============================================================================

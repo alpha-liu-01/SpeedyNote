@@ -16,12 +16,14 @@
 
 #include "Document.h"
 #include "Page.h"
+#include "../ToolType.h"
 
 #include <QWidget>
 #include <QPointF>
 #include <QSizeF>
 #include <QRectF>
 #include <QVector>
+#include <QColor>
 
 // Forward declarations
 class QPaintEvent;
@@ -217,6 +219,52 @@ public:
      */
     void setPageGap(int gap);
     
+    // ===== Tool Management (Task 2.1) =====
+    
+    /**
+     * @brief Set the current drawing tool.
+     * @param tool The tool to use (Pen, Eraser, VectorPen, VectorEraser, etc.)
+     */
+    void setCurrentTool(ToolType tool);
+    
+    /**
+     * @brief Get the current drawing tool.
+     */
+    ToolType currentTool() const { return m_currentTool; }
+    
+    /**
+     * @brief Set the pen color for drawing.
+     * @param color The color to use.
+     */
+    void setPenColor(const QColor& color);
+    
+    /**
+     * @brief Get the current pen color.
+     */
+    QColor penColor() const { return m_penColor; }
+    
+    /**
+     * @brief Set the pen thickness for drawing.
+     * @param thickness Thickness in document units.
+     */
+    void setPenThickness(qreal thickness);
+    
+    /**
+     * @brief Get the current pen thickness.
+     */
+    qreal penThickness() const { return m_penThickness; }
+    
+    /**
+     * @brief Set the eraser size.
+     * @param size Eraser radius in document units.
+     */
+    void setEraserSize(qreal size);
+    
+    /**
+     * @brief Get the current eraser size.
+     */
+    qreal eraserSize() const { return m_eraserSize; }
+    
     // ===== Layout Engine (Task 1.3.2) =====
     
     /**
@@ -393,6 +441,12 @@ signals:
     void documentModified();
     
     /**
+     * @brief Emitted when the current tool changes.
+     * @param tool New tool type.
+     */
+    void toolChanged(ToolType tool);
+    
+    /**
      * @brief Emitted when horizontal scroll position changes.
      * @param fraction Scroll position as fraction (0.0 to 1.0).
      */
@@ -443,6 +497,12 @@ private:
     PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
+    
+    // ===== Tool State (Task 2.1) =====
+    ToolType m_currentTool = ToolType::Pen;   ///< Current drawing tool
+    QColor m_penColor = Qt::black;            ///< Pen color for drawing
+    qreal m_penThickness = 5.0;               ///< Pen thickness in document units
+    qreal m_eraserSize = 20.0;                ///< Eraser radius in document units
     
     // ===== Private Methods =====
     
