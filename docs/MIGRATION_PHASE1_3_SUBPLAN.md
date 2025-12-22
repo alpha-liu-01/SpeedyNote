@@ -523,9 +523,17 @@ void DocumentViewport::resizeEvent(QResizeEvent* event) {
 
 ---
 
-### Task 1.3.10: Signals & Scroll Sync (~100 lines)
+### Task 1.3.10: Signals & Scroll Sync (~100 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.h, DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `emitScrollFractions()` - calculates and emits scroll fractions (0.0 to 1.0)
+- `setHorizontalScrollFraction()` - sets pan X from external scrollbar
+- `setVerticalScrollFraction()` - sets pan Y from external scrollbar
+- Handles edge cases (content smaller than viewport, empty document)
+- Updates current page index on vertical scroll
+- Emits panChanged signal when scroll position changes
 
 Signals for MainWindow integration:
 

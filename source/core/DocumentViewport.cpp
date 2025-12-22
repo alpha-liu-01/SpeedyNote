@@ -265,14 +265,61 @@ void DocumentViewport::scrollToHome()
 
 void DocumentViewport::setHorizontalScrollFraction(qreal fraction)
 {
-    // TODO (Task 1.3.10): Implement based on total content size
-    Q_UNUSED(fraction);
+    if (!m_document || m_document->pageCount() == 0) {
+        return;
+    }
+    
+    // Clamp fraction to valid range
+    fraction = qBound(0.0, fraction, 1.0);
+    
+    // Calculate scrollable width
+    QSizeF contentSize = totalContentSize();
+    qreal viewportWidth = width() / m_zoomLevel;
+    qreal scrollableWidth = contentSize.width() - viewportWidth;
+    
+    if (scrollableWidth <= 0) {
+        // Content fits in viewport - no horizontal scroll needed
+        return;
+    }
+    
+    // Set pan offset based on fraction
+    qreal newX = fraction * scrollableWidth;
+    if (!qFuzzyCompare(m_panOffset.x(), newX)) {
+        m_panOffset.setX(newX);
+        clampPanOffset();
+        emit panChanged(m_panOffset);
+        update();
+    }
 }
 
 void DocumentViewport::setVerticalScrollFraction(qreal fraction)
 {
-    // TODO (Task 1.3.10): Implement based on total content size
-    Q_UNUSED(fraction);
+    if (!m_document || m_document->pageCount() == 0) {
+        return;
+    }
+    
+    // Clamp fraction to valid range
+    fraction = qBound(0.0, fraction, 1.0);
+    
+    // Calculate scrollable height
+    QSizeF contentSize = totalContentSize();
+    qreal viewportHeight = height() / m_zoomLevel;
+    qreal scrollableHeight = contentSize.height() - viewportHeight;
+    
+    if (scrollableHeight <= 0) {
+        // Content fits in viewport - no vertical scroll needed
+        return;
+    }
+    
+    // Set pan offset based on fraction
+    qreal newY = fraction * scrollableHeight;
+    if (!qFuzzyCompare(m_panOffset.y(), newY)) {
+        m_panOffset.setY(newY);
+        clampPanOffset();
+        updateCurrentPageIndex();
+        emit panChanged(m_panOffset);
+        update();
+    }
 }
 
 // ===== Layout Engine (Task 1.3.2) =====
@@ -1378,8 +1425,30 @@ void DocumentViewport::updateCurrentPageIndex()
 
 void DocumentViewport::emitScrollFractions()
 {
-    // TODO (Task 1.3.10): Calculate based on content size
-    // For now, emit 0
-    emit horizontalScrollChanged(0.0);
-    emit verticalScrollChanged(0.0);
+    if (!m_document || m_document->pageCount() == 0) {
+        emit horizontalScrollChanged(0.0);
+        emit verticalScrollChanged(0.0);
+        return;
+    }
+    
+    QSizeF contentSize = totalContentSize();
+    qreal viewportWidth = width() / m_zoomLevel;
+    qreal viewportHeight = height() / m_zoomLevel;
+    
+    // Calculate horizontal scroll fraction
+    qreal scrollableWidth = contentSize.width() - viewportWidth;
+    qreal hFraction = 0.0;
+    if (scrollableWidth > 0) {
+        hFraction = qBound(0.0, m_panOffset.x() / scrollableWidth, 1.0);
+    }
+    
+    // Calculate vertical scroll fraction
+    qreal scrollableHeight = contentSize.height() - viewportHeight;
+    qreal vFraction = 0.0;
+    if (scrollableHeight > 0) {
+        vFraction = qBound(0.0, m_panOffset.y() / scrollableHeight, 1.0);
+    }
+    
+    emit horizontalScrollChanged(hFraction);
+    emit verticalScrollChanged(vFraction);
 }
