@@ -19,6 +19,7 @@
 #include "InkCanvas.h" // For BackgroundStyle enum
 #include "core/PageTests.h" // Phase 1.1.7: Page unit tests
 #include "core/DocumentTests.h" // Phase 1.2.8: Document unit tests
+#include "core/DocumentViewportTests.h" // Phase 1.3.11: Viewport tests
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -245,6 +246,7 @@ int main(int argc, char *argv[]) {
     bool createSilent = false;
     bool runPageTests = false;
     bool runDocumentTests = false;
+    bool runViewportTests = false;
     
     if (argc >= 2) {
         QString firstArg = QString::fromLocal8Bit(argv[1]);
@@ -262,6 +264,9 @@ int main(int argc, char *argv[]) {
         } else if (firstArg == "--test-document") {
             // Phase 1.2.8: Run Document unit tests
             runDocumentTests = true;
+        } else if (firstArg == "--test-viewport") {
+            // Phase 1.3.11: Run DocumentViewport visual test
+            runViewportTests = true;
         } else {
             // Regular file argument
             inputFile = firstArg;
@@ -293,6 +298,19 @@ int main(int argc, char *argv[]) {
         bool success = DocumentTests::runAllTests();
         SDL_Quit();
         return success ? 0 : 1;
+    }
+    
+    // Phase 1.3.11: Handle --test-viewport command
+    if (runViewportTests) {
+#ifdef _WIN32
+        // Re-enable console for test output on Windows
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+#endif
+        int result = DocumentViewportTests::runVisualTest();
+        SDL_Quit();
+        return result;
     }
 
     // Handle silent creation (context menu) - create file and exit immediately

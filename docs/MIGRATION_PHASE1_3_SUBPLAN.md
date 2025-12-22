@@ -572,9 +572,28 @@ qreal verticalFraction() const {
 
 ---
 
-### Task 1.3.11: Test Harness (~100 lines)
+### Task 1.3.11: Test Harness (~100 lines) ✅ COMPLETE
 
-**Files:** `source/Main.cpp` (add `--test-viewport` flag)
+**Files:** `source/core/DocumentViewportTests.h`, `source/Main.cpp`
+
+**Implemented:**
+- `--test-viewport` command line flag
+- Separate test file (`DocumentViewportTests.h`) following existing pattern
+- **9 Unit Tests:**
+  - `testViewportCreation` - basic creation and document assignment
+  - `testZoomBounds` - zoom min/max clamping
+  - `testLayoutEngine` - SingleColumn and TwoColumn positioning
+  - `testCoordinateTransforms` - viewport ↔ document transforms
+  - `testPageHitDetection` - page hit detection and gaps
+  - `testVisiblePages` - visible page calculation
+  - `testScrollFractions` - scroll fraction setters/getters
+  - `testPdfCache` - cache management (no crash)
+  - `testPointerEvents` - PointerEvent and GestureState structs
+- **Visual Test:**
+  - 5-page document with colored strokes
+  - Variable backgrounds (plain/grid/lines)
+  - Wavy, diagonal, and spiral strokes
+  - Interactive pan/zoom/click testing
 
 Create standalone test:
 
