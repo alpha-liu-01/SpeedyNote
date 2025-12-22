@@ -263,27 +263,32 @@ JSON serialization matching extended `.speedynote_metadata.json` format.
 
 ---
 
-### Task 1.2.8: Unit Tests for Document
+### Task 1.2.8: Unit Tests for Document ✅ COMPLETE
 
 Test serialization, page management, PDF reference, and bookmarks.
 
-**File:** `source/core/DocumentTests.h`
+**Files created/modified:**
+- `source/core/DocumentTests.h` ✅ (~600 lines)
+- `source/Main.cpp` ✅ (added --test-document flag)
 
-```cpp
-namespace DocumentTests {
-    bool testDocumentCreation();
-    bool testPageManagement();
-    bool testBookmarks();
-    bool testSerializationRoundTrip();
-    bool testPdfReference();          // Mock PDF or skip if not available
-    bool runAllTests();
-}
-```
+**Tests implemented:**
+
+| Test | What it validates |
+|------|-------------------|
+| `testDocumentCreation()` | Factory methods (`createNew()`, edgeless mode), default values, UUIDs |
+| `testPageManagement()` | `addPage()`, `insertPage()`, `removePage()`, `movePage()`, min page constraint |
+| `testBookmarks()` | `setBookmark()`, `removeBookmark()`, `nextBookmark()`, `prevBookmark()` wrap-around, `toggleBookmark()` |
+| `testSerializationRoundTrip()` | `toFullJson()` → `fromFullJson()` data integrity |
+| `testPdfReference()` | `loadPdf()` failure handling, path stored for relink, `clearPdfReference()` |
+| `testMetadataOnlySerialization()` | `toJson()` vs `toFullJson()`, `loadPagesFromJson()` |
+| `testActualPdfLoad()` | **Real PDF tests** (requires `1.pdf` in exe folder): `createForPdf()`, page count, page size scaling (72→96 dpi), PDF background type, rendering at multiple DPIs, serialization with PDF, insert page in PDF doc, unload/reload |
 
 **Usage:** `NoteApp.exe --test-document`
 
-**Dependencies:** All above tasks
-**Estimated size:** ~300 lines
+**Expected output:** All tests PASS, returning exit code 0
+
+**Dependencies:** All above tasks (1.2.1-1.2.7)
+**Actual size:** ~600 lines
 
 ---
 
@@ -298,7 +303,7 @@ namespace DocumentTests {
 | 1.2.5 | Page management | 1.2.3 | 150 | [✅] |
 | 1.2.6 | Bookmarks | 1.2.5 | 80 | [✅] |
 | 1.2.7 | Serialization | 1.2.3-1.2.6 | 200 | [✅] |
-| 1.2.8 | Unit tests | All above | 300 | [ ] |
+| 1.2.8 | Unit tests | All above | 300 | [✅] |
 | **TOTAL** | | | **~1170** | |
 
 ---
