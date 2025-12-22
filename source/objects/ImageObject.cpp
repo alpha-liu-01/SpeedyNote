@@ -86,7 +86,7 @@ bool ImageObject::loadImage(const QString& basePath)
     cachedPixmap = QPixmap::fromImage(image);
     
     // Update aspect ratio if this is the first load
-    if (originalAspectRatio <= 0.0 && !cachedPixmap.isNull()) {
+    if (originalAspectRatio <= 0.0 && !cachedPixmap.isNull() && cachedPixmap.height() > 0) {
         originalAspectRatio = static_cast<qreal>(cachedPixmap.width()) / 
                               static_cast<qreal>(cachedPixmap.height());
     }
@@ -104,9 +104,11 @@ void ImageObject::setPixmap(const QPixmap& pixmap)
     cachedPixmap = pixmap;
     
     if (!cachedPixmap.isNull()) {
-        // Update aspect ratio
-        originalAspectRatio = static_cast<qreal>(cachedPixmap.width()) / 
-                              static_cast<qreal>(cachedPixmap.height());
+        // Update aspect ratio (guard against height=0)
+        if (cachedPixmap.height() > 0) {
+            originalAspectRatio = static_cast<qreal>(cachedPixmap.width()) / 
+                                  static_cast<qreal>(cachedPixmap.height());
+        }
         
         // Update size if not set
         if (size.isEmpty()) {

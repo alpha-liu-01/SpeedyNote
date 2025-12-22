@@ -300,6 +300,11 @@ public:
         layer.opacity = obj["opacity"].toDouble(1.0);
         layer.locked = obj["locked"].toBool(false);
         
+        // Generate UUID if missing (for backwards compatibility)
+        if (layer.id.isEmpty()) {
+            layer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
+        
         QJsonArray strokesArray = obj["strokes"].toArray();
         for (const auto& val : strokesArray) {
             layer.m_strokes.append(VectorStroke::fromJson(val.toObject()));

@@ -16,6 +16,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QLineF>
+#include <QUuid>
 
 /**
  * @brief A complete vector stroke consisting of multiple points.
@@ -109,6 +110,12 @@ struct VectorStroke {
         stroke.id = obj["id"].toString();
         stroke.color = QColor(obj["color"].toString());
         stroke.baseThickness = obj["thickness"].toDouble(5.0);
+        
+        // Generate UUID if missing (for backwards compatibility)
+        if (stroke.id.isEmpty()) {
+            stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
+        
         QJsonArray pointsArray = obj["points"].toArray();
         for (const auto& val : pointsArray) {
             stroke.points.append(StrokePoint::fromJson(val.toObject()));

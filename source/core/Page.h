@@ -72,7 +72,7 @@ public:
     // ===== Inserted Objects =====
     std::vector<std::unique_ptr<InsertedObject>> objects;    ///< All inserted objects
     
-    // ===== Constructors =====
+    // ===== Constructors & Rule of Five =====
     
     /**
      * @brief Default constructor.
@@ -85,6 +85,19 @@ public:
      * @param pageSize The page dimensions.
      */
     explicit Page(const QSizeF& pageSize);
+    
+    /**
+     * @brief Destructor.
+     */
+    ~Page() = default;
+    
+    // Page is non-copyable due to unique_ptr members
+    Page(const Page&) = delete;
+    Page& operator=(const Page&) = delete;
+    
+    // Page is movable
+    Page(Page&&) = default;
+    Page& operator=(Page&&) = default;
     
     // ===== Layer Management =====
     
