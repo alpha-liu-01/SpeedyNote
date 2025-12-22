@@ -439,9 +439,22 @@ void DocumentViewport::preloadStrokeCaches() {
 
 ---
 
-### Task 1.3.8: Input Routing Basics (~150 lines)
+### Task 1.3.8: Input Routing Basics (~150 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `PointerEvent` struct - unified input abstraction for mouse/tablet/touch
+- `GestureState` struct - stub for multi-touch gestures (Phase 2+)
+- `mouseToPointerEvent()` / `tabletToPointerEvent()` - event converters
+- `handlePointerEvent()` - main routing dispatcher
+- `handlePointerPress()` / `handlePointerMove()` / `handlePointerRelease()` - handlers
+- Eraser button detection via `QPointingDevice::PointerType::Eraser`
+- Barrel button support via `event->buttons()`
+- Active drawing page tracking (m_activeDrawingPage)
+- Pointer source tracking (avoids tablet/mouse duplicate events)
+- Debug output for testing (qDebug)
+- Cache pre-loading on pointer release
 
 Handle mouse/tablet events and route to pages:
 
@@ -473,9 +486,17 @@ private:
 
 ---
 
-### Task 1.3.9: Resize Handling (~50 lines)
+### Task 1.3.9: Resize Handling (~50 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- Keeps same document point centered after resize
+- Handles first resize (no old size) gracefully
+- Clamps pan offset to new bounds
+- Updates current page index
+- Emits panChanged and scroll fraction signals
+- Works correctly for window resize and screen rotation
 
 Handle viewport resize:
 

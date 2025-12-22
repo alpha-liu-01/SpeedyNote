@@ -15,6 +15,8 @@
 #include <QtMath>     // For qPow
 #include <algorithm>  // For std::remove_if
 #include <limits>
+#include <QDateTime>  // For timestamp
+#include <QDebug>     // For debug output
 
 // ===== Constructor & Destructor =====
 
@@ -574,29 +576,92 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
     
-    // TODO (Task 1.3.9): Maintain view position on resize
-    // For now, just clamp and update
+    // Keep the same document point at viewport center after resize
+    // This ensures content doesn't jump around during window resize or rotation
+    
+    if (!m_document || event->oldSize().isEmpty()) {
+        // No document or first resize - just clamp and update
+        clampPanOffset();
+        update();
+        emitScrollFractions();
+        return;
+    }
+    
+    // Calculate the document point that was at the center of the OLD viewport
+    QPointF oldCenter(event->oldSize().width() / 2.0, event->oldSize().height() / 2.0);
+    QPointF docPointAtOldCenter = oldCenter / m_zoomLevel + m_panOffset;
+    
+    // Calculate where the NEW center is in viewport coordinates
+    QPointF newCenter(width() / 2.0, height() / 2.0);
+    
+    // Adjust pan offset so the same document point is at the NEW center
+    // docPointAtOldCenter = newCenter / m_zoomLevel + m_panOffset
+    // m_panOffset = docPointAtOldCenter - newCenter / m_zoomLevel
+    m_panOffset = docPointAtOldCenter - newCenter / m_zoomLevel;
+    
+    // Clamp to valid bounds (content may now be smaller/larger relative to viewport)
     clampPanOffset();
-    update();
+    
+    // Update current page index (visible area changed)
+    updateCurrentPageIndex();
+    
+    // Emit signals and repaint
+    emit panChanged(m_panOffset);
     emitScrollFractions();
+    update();
 }
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
 {
-    // TODO (Task 1.3.8): Route to correct page
-    Q_UNUSED(event);
+    // Only handle left button for drawing
+    if (event->button() != Qt::LeftButton) {
+        event->ignore();
+        return;
+    }
+    
+    // Ignore if tablet is active (avoid duplicate events)
+    if (m_pointerActive && m_activeSource == PointerEvent::Stylus) {
+        event->accept();
+        return;
+    }
+    
+    PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Press);
+    handlePointerEvent(pe);
+    event->accept();
 }
 
 void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
 {
-    // TODO (Task 1.3.8): Route to correct page
-    Q_UNUSED(event);
+    // Ignore if tablet is active
+    if (m_pointerActive && m_activeSource == PointerEvent::Stylus) {
+        event->accept();
+        return;
+    }
+    
+    // Only process move if we have an active pointer or for hover
+    if (m_pointerActive || (event->buttons() & Qt::LeftButton)) {
+        PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Move);
+        handlePointerEvent(pe);
+    }
+    event->accept();
 }
 
 void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
 {
-    // TODO (Task 1.3.8): Route to correct page
-    Q_UNUSED(event);
+    if (event->button() != Qt::LeftButton) {
+        event->ignore();
+        return;
+    }
+    
+    // Ignore if tablet is active
+    if (m_activeSource == PointerEvent::Stylus) {
+        event->accept();
+        return;
+    }
+    
+    PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Release);
+    handlePointerEvent(pe);
+    event->accept();
 }
 
 void DocumentViewport::wheelEvent(QWheelEvent* event)
@@ -671,8 +736,26 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
-    // TODO (Task 1.3.8): Route to correct page
-    Q_UNUSED(event);
+    // Determine event type
+    PointerEvent::Type peType;
+    switch (event->type()) {
+        case QEvent::TabletPress:
+            peType = PointerEvent::Press;
+            break;
+        case QEvent::TabletMove:
+            peType = PointerEvent::Move;
+            break;
+        case QEvent::TabletRelease:
+            peType = PointerEvent::Release;
+            break;
+        default:
+            event->ignore();
+            return;
+    }
+    
+    PointerEvent pe = tabletToPointerEvent(event, peType);
+    handlePointerEvent(pe);
+    event->accept();
 }
 
 // ===== Coordinate Transforms (Task 1.3.5) =====
@@ -929,6 +1012,166 @@ void DocumentViewport::preloadStrokeCaches()
             }
         }
     }
+}
+
+// ===== Input Routing (Task 1.3.8) =====
+
+PointerEvent DocumentViewport::mouseToPointerEvent(QMouseEvent* event, PointerEvent::Type type)
+{
+    PointerEvent pe;
+    pe.type = type;
+    pe.source = PointerEvent::Mouse;
+    pe.viewportPos = event->position();
+    pe.pageHit = viewportToPage(pe.viewportPos);
+    
+    // Mouse has no pressure sensitivity
+    pe.pressure = 1.0;
+    pe.tiltX = 0;
+    pe.tiltY = 0;
+    pe.rotation = 0;
+    
+    // Hardware state
+    pe.isEraser = false;
+    pe.stylusButtons = 0;
+    pe.buttons = event->buttons();
+    pe.modifiers = event->modifiers();
+    pe.timestamp = QDateTime::currentMSecsSinceEpoch();
+    
+    return pe;
+}
+
+PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, PointerEvent::Type type)
+{
+    PointerEvent pe;
+    pe.type = type;
+    pe.source = PointerEvent::Stylus;
+    pe.viewportPos = event->position();
+    pe.pageHit = viewportToPage(pe.viewportPos);
+    
+    // Tablet pressure and tilt
+    pe.pressure = event->pressure();
+    pe.tiltX = event->xTilt();
+    pe.tiltY = event->yTilt();
+    pe.rotation = event->rotation();
+    
+    // Check for eraser - either eraser end of stylus or eraser button
+    // Qt6: pointerType() returns the type of pointing device
+    pe.isEraser = (event->pointerType() == QPointingDevice::PointerType::Eraser);
+    
+    // Barrel buttons - Qt provides via buttons()
+    // Common mappings: barrel button 1 = Qt::MiddleButton, barrel button 2 = Qt::RightButton
+    pe.stylusButtons = static_cast<int>(event->buttons());
+    pe.buttons = event->buttons();
+    pe.modifiers = event->modifiers();
+    pe.timestamp = QDateTime::currentMSecsSinceEpoch();
+    
+    return pe;
+}
+
+void DocumentViewport::handlePointerEvent(const PointerEvent& pe)
+{
+    switch (pe.type) {
+        case PointerEvent::Press:
+            handlePointerPress(pe);
+            break;
+        case PointerEvent::Move:
+            handlePointerMove(pe);
+            break;
+        case PointerEvent::Release:
+            handlePointerRelease(pe);
+            break;
+    }
+}
+
+void DocumentViewport::handlePointerPress(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Set active state
+    m_pointerActive = true;
+    m_activeSource = pe.source;
+    m_lastPointerPos = pe.viewportPos;
+    
+    // Determine which page to draw on
+    if (pe.pageHit.valid()) {
+        m_activeDrawingPage = pe.pageHit.pageIndex;
+    } else {
+        // Pointer is not on any page (in gap or outside content)
+        m_activeDrawingPage = -1;
+    }
+    
+    // Debug output (can be removed later)
+    qDebug() << "PointerPress:"
+             << "source=" << (pe.source == PointerEvent::Stylus ? "Stylus" : "Mouse")
+             << "page=" << m_activeDrawingPage
+             << "pagePos=" << (pe.pageHit.valid() ? pe.pageHit.pagePoint : QPointF())
+             << "pressure=" << pe.pressure
+             << "isEraser=" << pe.isEraser;
+    
+    // TODO (Phase 2): Forward to tool handler for actual drawing
+    // For now, we just track state - actual stroke creation comes in Phase 2
+    
+    update();  // Trigger repaint for visual feedback
+}
+
+void DocumentViewport::handlePointerMove(const PointerEvent& pe)
+{
+    if (!m_document || !m_pointerActive) return;
+    
+    // Only process if we have an active drawing page
+    if (m_activeDrawingPage < 0) {
+        m_lastPointerPos = pe.viewportPos;
+        return;
+    }
+    
+    // Calculate delta for potential use
+    QPointF delta = pe.viewportPos - m_lastPointerPos;
+    m_lastPointerPos = pe.viewportPos;
+    
+    // Get page-local coordinates
+    // Note: Even if pointer moves off the active page, we continue drawing
+    // to that page (don't switch pages mid-stroke)
+    QPointF pagePos;
+    if (pe.pageHit.valid() && pe.pageHit.pageIndex == m_activeDrawingPage) {
+        pagePos = pe.pageHit.pagePoint;
+    } else {
+        // Pointer moved off active page - extrapolate position
+        QPointF docPos = viewportToDocument(pe.viewportPos);
+        QPointF pageOrigin = pagePosition(m_activeDrawingPage);
+        pagePos = docPos - pageOrigin;
+    }
+    
+    // TODO (Phase 2): Forward to tool handler for stroke continuation
+    // Tool handler will add point to current stroke
+    
+    Q_UNUSED(delta);
+    Q_UNUSED(pagePos);
+    
+    update();  // Trigger repaint
+}
+
+void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Debug output
+    qDebug() << "PointerRelease:"
+             << "source=" << (pe.source == PointerEvent::Stylus ? "Stylus" : "Mouse")
+             << "page=" << m_activeDrawingPage;
+    
+    // TODO (Phase 2): Forward to tool handler to finish stroke
+    // Tool handler will complete the stroke and add it to the layer
+    
+    // Clear active state
+    m_pointerActive = false;
+    m_activeDrawingPage = -1;
+    m_lastPointerPos = QPointF();
+    
+    // Pre-load caches after interaction
+    preloadPdfCache();
+    preloadStrokeCaches();
+    
+    update();
 }
 
 // ===== Rendering Helpers (Task 1.3.3) =====

@@ -120,8 +120,8 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.3.5 Coordinate transforms (viewport ↔ document ↔ page)
      [✅] 1.3.6 PDF cache (2-4 pages, single DPI)
      [✅] 1.3.7 Stroke cache preloading (nearby pages)
-     [  ] 1.3.8 Input routing basics (mouse/tablet → page)
-     [  ] 1.3.9 Resize handling (maintain view position)
+     [✅] 1.3.8 Input routing basics (mouse/tablet → page)
+     [✅] 1.3.9 Resize handling (maintain view position)
      [  ] 1.3.10 Signals & scroll sync (for MainWindow sliders)
      [  ] 1.3.11 Test harness (--test-viewport)
 

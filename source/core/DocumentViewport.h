@@ -64,6 +64,65 @@ struct PdfCacheEntry {
 };
 
 /**
+ * @brief Unified pointer event for all input types (Task 1.3.8).
+ * 
+ * This abstracts mouse, tablet, and single-touch input into a common format.
+ * Multi-touch gestures are handled separately by GestureState.
+ */
+struct PointerEvent {
+    enum Type { Press, Move, Release };
+    enum Source { Mouse, Stylus, Touch, Unknown };
+    
+    Type type = Move;
+    Source source = Unknown;
+    
+    QPointF viewportPos;      ///< Position in widget/viewport coordinates
+    PageHit pageHit;          ///< Resolved page index + page-local coords
+    
+    // Pressure-sensitive input (mouse defaults to 1.0)
+    qreal pressure = 1.0;     ///< 0.0 to 1.0
+    qreal tiltX = 0;          ///< Stylus tilt X (-90 to 90 degrees)
+    qreal tiltY = 0;          ///< Stylus tilt Y (-90 to 90 degrees)
+    qreal rotation = 0;       ///< Stylus rotation (0 to 360 degrees)
+    
+    // Hardware state
+    bool isEraser = false;    ///< True if using eraser end OR eraser button
+    int stylusButtons = 0;    ///< Barrel button bitmask
+    Qt::MouseButtons buttons; ///< Mouse/stylus buttons
+    Qt::KeyboardModifiers modifiers;  ///< Keyboard modifiers (Ctrl, Shift, etc.)
+    
+    // Timestamp for velocity calculations
+    qint64 timestamp = 0;
+};
+
+/**
+ * @brief State for multi-touch gesture recognition (Task 1.3.8 stub).
+ * 
+ * Full implementation comes in Phase 2/4.
+ */
+struct GestureState {
+    enum Type { None, Pan, PinchZoom, TwoFingerTap };
+    Type activeGesture = None;
+    
+    QPointF panDelta;         ///< Accumulated pan delta
+    qreal zoomFactor = 1.0;   ///< Pinch zoom factor
+    QPointF zoomCenter;       ///< Center point of pinch
+    
+    // Inertia scrolling (future)
+    QPointF velocity;
+    bool inertiaActive = false;
+    
+    void reset() {
+        activeGesture = None;
+        panDelta = QPointF();
+        zoomFactor = 1.0;
+        zoomCenter = QPointF();
+        velocity = QPointF();
+        inertiaActive = false;
+    }
+};
+
+/**
  * @brief The main canvas widget for displaying and interacting with documents.
  * 
  * DocumentViewport handles:
@@ -372,6 +431,13 @@ private:
     static constexpr qreal MIN_ZOOM = 0.1;   // 10%
     static constexpr qreal MAX_ZOOM = 10.0;  // 1000%
     
+    // ===== Input State (Task 1.3.8) =====
+    int m_activeDrawingPage = -1;       ///< Page currently receiving strokes (-1 = none)
+    bool m_pointerActive = false;       ///< True if pointer is pressed
+    PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
+    GestureState m_gestureState;        ///< Multi-touch gesture state
+    QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
+    
     // ===== Private Methods =====
     
     /**
@@ -446,6 +512,39 @@ private:
      * Call after scroll settles for smooth scrolling.
      */
     void preloadStrokeCaches();
+    
+    // ===== Input Routing (Task 1.3.8) =====
+    
+    /**
+     * @brief Convert QMouseEvent to PointerEvent.
+     */
+    PointerEvent mouseToPointerEvent(QMouseEvent* event, PointerEvent::Type type);
+    
+    /**
+     * @brief Convert QTabletEvent to PointerEvent.
+     */
+    PointerEvent tabletToPointerEvent(QTabletEvent* event, PointerEvent::Type type);
+    
+    /**
+     * @brief Main pointer event handler.
+     * Routes to the correct page and handles the input.
+     */
+    void handlePointerEvent(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer press (start of stroke or action).
+     */
+    void handlePointerPress(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer move (continuing stroke).
+     */
+    void handlePointerMove(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer release (end of stroke).
+     */
+    void handlePointerRelease(const PointerEvent& pe);
     
     // ===== Rendering Helpers (Task 1.3.3) =====
     
