@@ -325,6 +325,11 @@ set(STROKE_SOURCES
         # source/strokes/VectorStroke.cpp    # Task 1.1.2
 )
 
+# ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
+set(PDF_SOURCES
+        # source/pdf/PopplerPdfProvider.cpp  # Task 1.2.2
+)
+
 # ✅ Build target
 add_executable(${PROJECT_NAME}
         source/Main.cpp
@@ -358,6 +363,7 @@ add_executable(${PROJECT_NAME}
         ${LAYER_SOURCES}
         ${OBJECT_SOURCES}
         ${STROKE_SOURCES}
+        ${PDF_SOURCES}
         
         ${QRCC_FILES}
         ${QMARKDOWNTEXTEDIT_SOURCES}

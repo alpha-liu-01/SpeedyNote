@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 0 COMPLETE ✅ ✅ ✅
-NEXT:   Phase 1.1 - Create Page class
+STATUS: Phase 1.1 COMPLETE ✅ | Phase 1.2 IN PROGRESS
+NEXT:   Phase 1.2 - Create Document class
 
 =============================================================================
                          CURRENT ARCHITECTURE
@@ -100,9 +100,16 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.1.6 Create Page class (coordinator)
      [✅] 1.1.7 Unit tests for serialization
 
-[  ] 1.2 Create Document class  
-     → File: source/core/Document.h, source/core/Document.cpp
-     → Owns: list of Pages, PDF reference, notebook metadata
+[  ] 1.2 Create Document class (8 sub-tasks, ~1170 lines total)
+     → See: docs/MIGRATION_PHASE1_2_SUBPLAN.md for detailed breakdown
+     [  ] 1.2.1 Create PdfProvider interface (source/pdf/)
+     [  ] 1.2.2 Create PopplerPdfProvider implementation
+     [  ] 1.2.3 Create Document class skeleton (identity, mode)
+     [  ] 1.2.4 Add PDF reference management to Document
+     [  ] 1.2.5 Add page management methods
+     [  ] 1.2.6 Add bookmarks support
+     [  ] 1.2.7 Add serialization (toJson/fromJson/saveToSpn/loadFromSpn)
+     [  ] 1.2.8 Unit tests for Document
 
 [  ] 1.3 Create DocumentViewport class
      → File: source/core/DocumentViewport.h, source/core/DocumentViewport.cpp
