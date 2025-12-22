@@ -17,6 +17,7 @@
 #include <QUuid>
 #include <QPainter>
 #include <QPolygonF>
+#include <QPixmap>
 #include <QtMath>
 
 /**
@@ -62,6 +63,7 @@ public:
      */
     void addStroke(const VectorStroke& stroke) {
         m_strokes.append(stroke);
+        invalidateStrokeCache();  // Cache needs rebuild
     }
     
     /**
@@ -70,6 +72,7 @@ public:
      */
     void addStroke(VectorStroke&& stroke) {
         m_strokes.append(std::move(stroke));
+        invalidateStrokeCache();  // Cache needs rebuild
     }
     
     /**
@@ -81,6 +84,7 @@ public:
         for (int i = m_strokes.size() - 1; i >= 0; --i) {
             if (m_strokes[i].id == strokeId) {
                 m_strokes.removeAt(i);
+                invalidateStrokeCache();  // Cache needs rebuild
                 return true;
             }
         }
@@ -112,7 +116,10 @@ public:
     /**
      * @brief Clear all strokes from this layer.
      */
-    void clear() { m_strokes.clear(); }
+    void clear() { 
+        m_strokes.clear(); 
+        invalidateStrokeCache();  // Cache needs rebuild
+    }
     
     // ===== Hit Testing =====
     
@@ -313,6 +320,99 @@ public:
         return layer;
     }
     
+    // ===== Stroke Cache (Task 1.3.7) =====
+    
+    /**
+     * @brief Ensure stroke cache is valid for the given size and DPI.
+     * @param size The target size in logical pixels.
+     * @param dpr Device pixel ratio for high DPI support.
+     * 
+     * If cache is invalid or wrong size, rebuilds it.
+     * Call this before rendering for pre-loading nearby pages.
+     */
+    void ensureStrokeCacheValid(const QSizeF& size, qreal dpr) {
+        QSize physicalSize(static_cast<int>(size.width() * dpr), 
+                           static_cast<int>(size.height() * dpr));
+        
+        if (!m_strokeCacheDirty && 
+            m_strokeCache.size() == physicalSize &&
+            qFuzzyCompare(m_cacheDpr, dpr)) {
+            return;  // Cache is valid
+        }
+        
+        rebuildStrokeCache(size, dpr);
+    }
+    
+    /**
+     * @brief Check if stroke cache is valid.
+     */
+    bool isStrokeCacheValid() const { return !m_strokeCacheDirty && !m_strokeCache.isNull(); }
+    
+    /**
+     * @brief Invalidate stroke cache (call when strokes change).
+     */
+    void invalidateStrokeCache() { m_strokeCacheDirty = true; }
+    
+    /**
+     * @brief Render using stroke cache if available.
+     * @param painter The QPainter to render to.
+     * @param size The target size in logical pixels.
+     * @param dpr Device pixel ratio.
+     * 
+     * If cache is valid, renders from cache (fast).
+     * Otherwise falls back to direct rendering.
+     */
+    void renderWithCache(QPainter& painter, const QSizeF& size, qreal dpr) {
+        if (!visible || m_strokes.isEmpty()) {
+            return;
+        }
+        
+        ensureStrokeCacheValid(size, dpr);
+        
+        if (!m_strokeCache.isNull()) {
+            painter.drawPixmap(0, 0, m_strokeCache);
+        } else {
+            // Fallback to direct rendering
+            render(painter);
+        }
+    }
+    
 private:
     QVector<VectorStroke> m_strokes;  ///< All strokes in this layer
+    
+    // Stroke cache for performance (Task 1.3.7)
+    mutable QPixmap m_strokeCache;        ///< Cached rendered strokes
+    mutable bool m_strokeCacheDirty = true;  ///< Whether cache needs rebuild
+    mutable qreal m_cacheDpr = 1.0;       ///< DPI ratio cache was built at
+    
+    /**
+     * @brief Rebuild stroke cache at given size.
+     * @param size Target size in logical pixels.
+     * @param dpr Device pixel ratio.
+     */
+    void rebuildStrokeCache(const QSizeF& size, qreal dpr) const {
+        QSize physicalSize(static_cast<int>(size.width() * dpr), 
+                           static_cast<int>(size.height() * dpr));
+        
+        m_strokeCache = QPixmap(physicalSize);
+        m_strokeCache.setDevicePixelRatio(dpr);
+        m_strokeCache.fill(Qt::transparent);
+        
+        if (m_strokes.isEmpty()) {
+            m_strokeCacheDirty = false;
+            m_cacheDpr = dpr;
+            return;
+        }
+        
+        QPainter cachePainter(&m_strokeCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Render all strokes to cache
+        for (const auto& stroke : m_strokes) {
+            renderStroke(cachePainter, stroke);
+        }
+        
+        m_strokeCacheDirty = false;
+        m_cacheDpr = dpr;
+    }
 };

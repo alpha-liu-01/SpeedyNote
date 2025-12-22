@@ -12,7 +12,8 @@
 #include <QMouseEvent>
 #include <QTabletEvent>
 #include <QWheelEvent>
-#include <QtMath>  // For qPow
+#include <QtMath>     // For qPow
+#include <algorithm>  // For std::remove_if
 #include <limits>
 
 // ===== Constructor & Destructor =====
@@ -51,6 +52,9 @@ void DocumentViewport::setDocument(Document* doc)
     
     m_document = doc;
     
+    // Invalidate PDF cache for new document (Task 1.3.6)
+    invalidatePdfCache();
+    
     // Reset view state
     m_zoomLevel = 1.0;
     m_panOffset = QPointF(0, 0);
@@ -83,6 +87,9 @@ void DocumentViewport::setLayoutMode(LayoutMode mode)
     
     m_layoutMode = mode;
     
+    // Update PDF cache capacity for new layout (Task 1.3.6)
+    updatePdfCacheCapacity();
+    
     // Recalculate layout and repaint
     clampPanOffset();
     update();
@@ -114,7 +121,14 @@ void DocumentViewport::setZoomLevel(qreal zoom)
         return;
     }
     
+    qreal oldDpi = effectivePdfDpi();
     m_zoomLevel = zoom;
+    qreal newDpi = effectivePdfDpi();
+    
+    // Invalidate PDF cache if DPI changed significantly (Task 1.3.6)
+    if (!qFuzzyCompare(oldDpi, newDpi)) {
+        invalidatePdfCache();
+    }
     
     // Clamp pan offset (bounds change with zoom)
     clampPanOffset();
@@ -661,6 +675,76 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
     Q_UNUSED(event);
 }
 
+// ===== Coordinate Transforms (Task 1.3.5) =====
+
+QPointF DocumentViewport::viewportToDocument(QPointF viewportPt) const
+{
+    // Viewport coordinates are in logical (widget) pixels
+    // Document coordinates are in our custom unit system
+    // 
+    // The viewport shows a portion of the document:
+    // - panOffset is the top-left corner of the viewport in document coords
+    // - zoomLevel scales the document (zoom 2.0 = document appears twice as large)
+    //
+    // viewportPt = (docPt - panOffset) * zoomLevel
+    // So: docPt = viewportPt / zoomLevel + panOffset
+    
+    return viewportPt / m_zoomLevel + m_panOffset;
+}
+
+QPointF DocumentViewport::documentToViewport(QPointF docPt) const
+{
+    // Inverse of viewportToDocument
+    // viewportPt = (docPt - panOffset) * zoomLevel
+    
+    return (docPt - m_panOffset) * m_zoomLevel;
+}
+
+PageHit DocumentViewport::viewportToPage(QPointF viewportPt) const
+{
+    // Convert viewport → document → page
+    QPointF docPt = viewportToDocument(viewportPt);
+    return documentToPage(docPt);
+}
+
+QPointF DocumentViewport::pageToViewport(int pageIndex, QPointF pagePt) const
+{
+    // Convert page → document → viewport
+    QPointF docPt = pageToDocument(pageIndex, pagePt);
+    return documentToViewport(docPt);
+}
+
+QPointF DocumentViewport::pageToDocument(int pageIndex, QPointF pagePt) const
+{
+    // Page-local coordinates are relative to the page's top-left corner
+    // Document coordinates are absolute within the document
+    //
+    // docPt = pagePosition + pagePt
+    
+    QPointF pagePos = pagePosition(pageIndex);
+    return pagePos + pagePt;
+}
+
+PageHit DocumentViewport::documentToPage(QPointF docPt) const
+{
+    PageHit hit;
+    
+    // Find which page contains this document point
+    int pageIdx = pageAtPoint(docPt);
+    if (pageIdx < 0) {
+        // Point is not on any page (in the gaps or outside content)
+        return hit;  // Invalid hit
+    }
+    
+    // Convert document point to page-local coordinates
+    QPointF pagePos = pagePosition(pageIdx);
+    
+    hit.pageIndex = pageIdx;
+    hit.pagePoint = docPt - pagePos;
+    
+    return hit;
+}
+
 // ===== Pan & Zoom Helpers (Task 1.3.4) =====
 
 QPointF DocumentViewport::viewportCenter() const
@@ -702,6 +786,151 @@ void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
     update();
 }
 
+// ===== PDF Cache Helpers (Task 1.3.6) =====
+
+QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
+{
+    if (!m_document || !m_document->isPdfLoaded()) {
+        return QPixmap();
+    }
+    
+    // Check if we have this page cached at the right DPI
+    for (const PdfCacheEntry& entry : m_pdfCache) {
+        if (entry.matches(pageIndex, dpi)) {
+            return entry.pixmap;
+        }
+    }
+    
+    // Not cached - render it now
+    QImage pdfImage = m_document->renderPdfPageToImage(pageIndex, dpi);
+    if (pdfImage.isNull()) {
+        return QPixmap();
+    }
+    
+    QPixmap pixmap = QPixmap::fromImage(pdfImage);
+    
+    // Add to cache
+    PdfCacheEntry entry;
+    entry.pageIndex = pageIndex;
+    entry.dpi = dpi;
+    entry.pixmap = pixmap;
+    
+    // If cache is full, remove the oldest entry
+    if (m_pdfCache.size() >= m_pdfCacheCapacity) {
+        m_pdfCache.removeFirst();
+    }
+    
+    m_pdfCache.append(entry);
+    m_cachedDpi = dpi;
+    
+    return pixmap;
+}
+
+void DocumentViewport::preloadPdfCache()
+{
+    if (!m_document || !m_document->isPdfLoaded()) {
+        return;
+    }
+    
+    QVector<int> visible = visiblePages();
+    if (visible.isEmpty()) {
+        return;
+    }
+    
+    int first = visible.first();
+    int last = visible.last();
+    
+    // Pre-load ±1 pages beyond visible
+    int preloadStart = qMax(0, first - 1);
+    int preloadEnd = qMin(m_document->pageCount() - 1, last + 1);
+    
+    qreal dpi = effectivePdfDpi();
+    
+    // Pre-load pages (this also adds them to cache)
+    for (int i = preloadStart; i <= preloadEnd; ++i) {
+        Page* page = m_document->page(i);
+        if (page && page->backgroundType == Page::BackgroundType::PDF) {
+            getCachedPdfPage(page->pdfPageNumber, dpi);
+        }
+    }
+}
+
+void DocumentViewport::invalidatePdfCache()
+{
+    m_pdfCache.clear();
+    m_cachedDpi = 0;
+}
+
+void DocumentViewport::invalidatePdfCachePage(int pageIndex)
+{
+    // Remove all entries for this page
+    m_pdfCache.erase(
+        std::remove_if(m_pdfCache.begin(), m_pdfCache.end(),
+                       [pageIndex](const PdfCacheEntry& entry) {
+                           return entry.pageIndex == pageIndex;
+                       }),
+        m_pdfCache.end()
+    );
+}
+
+void DocumentViewport::updatePdfCacheCapacity()
+{
+    // Set capacity based on layout mode:
+    // - Single column: cache 2 extra pages (1 above, 1 below visible)
+    // - Two column: cache 4 extra pages (1 row above, 1 row below)
+    switch (m_layoutMode) {
+        case LayoutMode::SingleColumn:
+            m_pdfCacheCapacity = 4;  // Visible + 2 buffer
+            break;
+        case LayoutMode::TwoColumn:
+            m_pdfCacheCapacity = 8;  // Visible + 4 buffer
+            break;
+    }
+    
+    // Trim cache if over capacity
+    while (m_pdfCache.size() > m_pdfCacheCapacity) {
+        m_pdfCache.removeFirst();
+    }
+}
+
+// ===== Stroke Cache Helpers (Task 1.3.7) =====
+
+void DocumentViewport::preloadStrokeCaches()
+{
+    if (!m_document) {
+        return;
+    }
+    
+    QVector<int> visible = visiblePages();
+    if (visible.isEmpty()) {
+        return;
+    }
+    
+    int first = visible.first();
+    int last = visible.last();
+    
+    // Pre-load ±1 pages beyond visible
+    int preloadStart = qMax(0, first - 1);
+    int preloadEnd = qMin(m_document->pageCount() - 1, last + 1);
+    
+    // Get device pixel ratio for cache
+    qreal dpr = devicePixelRatioF();
+    
+    for (int i = preloadStart; i <= preloadEnd; ++i) {
+        Page* page = m_document->page(i);
+        if (!page) continue;
+        
+        // Pre-generate stroke cache for all layers on this page
+        for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
+            VectorLayer* layer = page->layer(layerIdx);
+            if (layer && layer->visible && !layer->isEmpty()) {
+                // Ensure cache is valid at page size
+                layer->ensureStrokeCacheValid(page->size, dpr);
+            }
+        }
+    }
+}
+
 // ===== Rendering Helpers (Task 1.3.3) =====
 
 void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
@@ -721,17 +950,14 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             break;
             
         case Page::BackgroundType::PDF:
-            // Render PDF page
+            // Render PDF page from cache (Task 1.3.6)
             if (m_document->isPdfLoaded() && page->pdfPageNumber >= 0) {
-                // TODO (Task 1.3.6): Use PDF cache instead of live rendering
-                // For now, render live at effective DPI
                 qreal dpi = effectivePdfDpi();
-                QImage pdfImage = m_document->renderPdfPageToImage(page->pdfPageNumber, dpi);
+                QPixmap pdfPixmap = getCachedPdfPage(page->pdfPageNumber, dpi);
                 
-                if (!pdfImage.isNull()) {
-                    // Scale image to fit page rect
-                    // The PDF was rendered at effective DPI, we need to scale to page size
-                    painter.drawImage(pageRect, pdfImage);
+                if (!pdfPixmap.isNull()) {
+                    // Scale pixmap to fit page rect
+                    painter.drawPixmap(pageRect.toRect(), pdfPixmap);
                 }
             }
             break;
@@ -774,29 +1000,48 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             break;
     }
     
-    // 3. Render vector layers and objects via Page::render()
-    // Note: Pass zoom=1.0 since we're already applying zoom via painter transform
-    // Pass nullptr for PDF background since we've already rendered it
-    page->render(painter, nullptr, 1.0);
+    // 3. Render vector layers with stroke cache (Task 1.3.7)
+    // We render layers directly instead of via Page::render() to use caching
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    qreal dpr = devicePixelRatioF();
     
-    // 4. Draw page border (optional, for visual separation)
+    for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
+        VectorLayer* layer = page->layer(layerIdx);
+        if (layer && layer->visible) {
+            // Use cached rendering for performance
+            layer->renderWithCache(painter, pageSize, dpr);
+        }
+    }
+    
+    // 4. Render inserted objects (sorted by z-order)
+    page->renderObjects(painter, 1.0);
+    
+    // 5. Draw page border (optional, for visual separation)
     painter.setPen(QPen(QColor(180, 180, 180), 1.0 / m_zoomLevel));
     painter.drawRect(pageRect);
 }
 
 qreal DocumentViewport::effectivePdfDpi() const
 {
-    // Base DPI for 100% zoom
+    // Base DPI for 100% zoom on a 1x DPR screen
     constexpr qreal baseDpi = 96.0;
     
-    // Scale DPI with zoom level for crisp rendering
+    // Get device pixel ratio for high DPI support
+    // This handles Retina displays, Windows scaling (125%, 150%, 200%), etc.
+    // Qt caches this value internally, so calling it is very fast
+    qreal dpr = devicePixelRatioF();
+    
+    // Scale DPI with zoom level AND device pixel ratio for crisp rendering
     // At zoom > 1.0, we want higher DPI to avoid pixelation
     // At zoom < 1.0, we can use lower DPI to save memory/time
+    // On high DPI screens, we need extra resolution to match physical pixels
     // 
-    // However, for very high zoom, cap the DPI to avoid excessive memory usage
-    qreal scaledDpi = baseDpi * m_zoomLevel;
+    // Example: 200% Windows scaling (dpr=2.0) at zoom 1.0 → 192 DPI
+    // Example: 100% scaling (dpr=1.0) at zoom 2.0 → 192 DPI
+    qreal scaledDpi = baseDpi * m_zoomLevel * dpr;
     
     // Cap at reasonable maximum (300 DPI is print quality)
+    // This prevents excessive memory usage at very high zoom on high DPI screens
     return qMin(scaledDpi, 300.0);
 }
 

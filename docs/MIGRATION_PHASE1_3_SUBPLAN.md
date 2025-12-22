@@ -291,9 +291,21 @@ private:
 
 ---
 
-### Task 1.3.5: Coordinate Transform (~100 lines)
+### Task 1.3.5: Coordinate Transform (~100 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `viewportToDocument()` - viewport pixel → document coordinate
+- `documentToViewport()` - document coordinate → viewport pixel
+- `viewportToPage()` - viewport pixel → page-local (via PageHit)
+- `pageToViewport()` - page-local → viewport pixel
+- `pageToDocument()` - page-local → document coordinate
+- `documentToPage()` - document coordinate → page-local (via PageHit)
+- Uses existing `pageAtPoint()` and `pagePosition()` from layout engine
+- No DPR code needed (Qt handles logical coordinates automatically)
+
+**Also fixed:** `effectivePdfDpi()` now includes device pixel ratio for high DPI screens.
 
 Implement coordinate conversion:
 
@@ -324,9 +336,21 @@ QPointF pageToViewport(int pageIndex, QPointF pagePt) const;
 
 ---
 
-### Task 1.3.6: PDF Cache (~200 lines)
+### Task 1.3.6: PDF Cache (~200 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp (or separate `source/core/PdfCache.h`)
+**Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `PdfCacheEntry` struct for cached PDF page data
+- `getCachedPdfPage()` - returns cached pixmap or renders and caches
+- `preloadPdfCache()` - pre-loads ±1 pages around visible area
+- `invalidatePdfCache()` - clears all cached pages (on zoom/document change)
+- `invalidatePdfCachePage()` - invalidates single page
+- `updatePdfCacheCapacity()` - adjusts capacity based on layout mode
+- Cache capacity: 4 for single column, 8 for two column
+- Auto-invalidation on zoom change (DPI changed)
+- Auto-invalidation on document change
+- Updated `renderPage()` to use cache instead of live rendering
 
 Implement PDF page caching:
 
@@ -364,9 +388,21 @@ private:
 
 ---
 
-### Task 1.3.7: Stroke Cache Pre-loading (~100 lines)
+### Task 1.3.7: Stroke Cache Pre-loading (~100 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.cpp`, `source/layers/VectorLayer.h`, `source/core/Page.h`, `source/core/Page.cpp`
+
+**Implemented:**
+- Added stroke cache to `VectorLayer`:
+  - `ensureStrokeCacheValid(size, dpr)` - builds/validates cache
+  - `invalidateStrokeCache()` - marks cache dirty
+  - `renderWithCache(painter, size, dpr)` - renders using cache
+  - Auto-invalidation on addStroke/removeStroke/clear
+  - High DPI support via device pixel ratio
+- Added `preloadStrokeCaches()` to DocumentViewport
+- Added `renderObjects()` to Page (for separate object rendering)
+- Updated `renderPage()` to use cached layer rendering
+- Cache pre-loads ±1 pages around visible area
 
 Pre-generate stroke caches for nearby pages:
 

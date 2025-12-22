@@ -50,6 +50,20 @@ struct PageHit {
 };
 
 /**
+ * @brief Cache entry for a rendered PDF page (Task 1.3.6).
+ */
+struct PdfCacheEntry {
+    int pageIndex = -1;     ///< Which page this is (-1 = invalid)
+    qreal dpi = 0;          ///< DPI at which it was rendered
+    QPixmap pixmap;         ///< The rendered PDF image
+    
+    bool isValid() const { return pageIndex >= 0 && !pixmap.isNull(); }
+    bool matches(int page, qreal targetDpi) const {
+        return pageIndex == page && qFuzzyCompare(dpi, targetDpi);
+    }
+};
+
+/**
  * @brief The main canvas widget for displaying and interacting with documents.
  * 
  * DocumentViewport handles:
@@ -179,6 +193,60 @@ public:
      */
     QRectF visibleRect() const;
     
+    // ===== Coordinate Transforms (Task 1.3.5) =====
+    
+    /**
+     * @brief Convert viewport pixel coordinates to document coordinates.
+     * @param viewportPt Point in viewport/widget coordinates (logical pixels).
+     * @return Point in document coordinates.
+     * 
+     * This is the inverse of documentToViewport().
+     */
+    QPointF viewportToDocument(QPointF viewportPt) const;
+    
+    /**
+     * @brief Convert document coordinates to viewport pixel coordinates.
+     * @param docPt Point in document coordinates.
+     * @return Point in viewport/widget coordinates (logical pixels).
+     * 
+     * This is the inverse of viewportToDocument().
+     */
+    QPointF documentToViewport(QPointF docPt) const;
+    
+    /**
+     * @brief Convert viewport pixel coordinates to page-local coordinates.
+     * @param viewportPt Point in viewport/widget coordinates.
+     * @return PageHit containing page index and page-local coordinates.
+     * 
+     * Returns invalid PageHit (pageIndex=-1) if point is not on any page.
+     */
+    PageHit viewportToPage(QPointF viewportPt) const;
+    
+    /**
+     * @brief Convert page-local coordinates to viewport pixel coordinates.
+     * @param pageIndex The page index.
+     * @param pagePt Point in page-local coordinates.
+     * @return Point in viewport/widget coordinates.
+     */
+    QPointF pageToViewport(int pageIndex, QPointF pagePt) const;
+    
+    /**
+     * @brief Convert page-local coordinates to document coordinates.
+     * @param pageIndex The page index.
+     * @param pagePt Point in page-local coordinates.
+     * @return Point in document coordinates.
+     */
+    QPointF pageToDocument(int pageIndex, QPointF pagePt) const;
+    
+    /**
+     * @brief Convert document coordinates to page-local coordinates.
+     * @param docPt Point in document coordinates.
+     * @return PageHit containing page index and page-local coordinates.
+     * 
+     * Returns invalid PageHit (pageIndex=-1) if point is not on any page.
+     */
+    PageHit documentToPage(QPointF docPt) const;
+    
     // ===== View State Setters (Slots) =====
     
 public slots:
@@ -295,6 +363,11 @@ private:
     LayoutMode m_layoutMode = LayoutMode::SingleColumn;
     int m_pageGap = 20;  // Pixels between pages
     
+    // ===== PDF Cache (Task 1.3.6) =====
+    QVector<PdfCacheEntry> m_pdfCache;
+    int m_pdfCacheCapacity = 2;  // Default for single column
+    qreal m_cachedDpi = 0;       // DPI at which cache was rendered
+    
     // ===== Zoom Limits =====
     static constexpr qreal MIN_ZOOM = 0.1;   // 10%
     static constexpr qreal MAX_ZOOM = 10.0;  // 1000%
@@ -332,6 +405,47 @@ private:
      * Used for zoom-towards-cursor behavior with mouse wheel.
      */
     void zoomAtPoint(qreal newZoom, QPointF viewportPt);
+    
+    // ===== PDF Cache Helpers (Task 1.3.6) =====
+    
+    /**
+     * @brief Get a cached PDF page pixmap, rendering if necessary.
+     * @param pageIndex The page index.
+     * @param dpi The target DPI.
+     * @return Cached or freshly rendered pixmap (may be null if not a PDF page).
+     */
+    QPixmap getCachedPdfPage(int pageIndex, qreal dpi);
+    
+    /**
+     * @brief Pre-load PDF pages around the visible area.
+     * Called after scroll settles to ensure smooth scrolling.
+     */
+    void preloadPdfCache();
+    
+    /**
+     * @brief Invalidate the entire PDF cache.
+     * Called when zoom changes (DPI changed) or document changes.
+     */
+    void invalidatePdfCache();
+    
+    /**
+     * @brief Invalidate a single page in the PDF cache.
+     * @param pageIndex The page to invalidate.
+     */
+    void invalidatePdfCachePage(int pageIndex);
+    
+    /**
+     * @brief Update cache capacity based on layout mode.
+     */
+    void updatePdfCacheCapacity();
+    
+    // ===== Stroke Cache Helpers (Task 1.3.7) =====
+    
+    /**
+     * @brief Pre-load stroke caches for nearby pages.
+     * Call after scroll settles for smooth scrolling.
+     */
+    void preloadStrokeCaches();
     
     // ===== Rendering Helpers (Task 1.3.3) =====
     

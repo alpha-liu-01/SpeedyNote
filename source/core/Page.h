@@ -217,6 +217,16 @@ public:
      */
     void renderBackground(QPainter& painter, const QPixmap* pdfBackground = nullptr, qreal zoom = 1.0) const;
     
+    /**
+     * @brief Render just the inserted objects (Task 1.3.7).
+     * @param painter The QPainter to render to.
+     * @param zoom Zoom level.
+     * 
+     * This is separated from render() to allow DocumentViewport to use
+     * cached layer rendering while still rendering objects.
+     */
+    void renderObjects(QPainter& painter, qreal zoom = 1.0) const;
+    
     // ===== Serialization =====
     
     /**

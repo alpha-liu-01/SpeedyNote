@@ -267,6 +267,31 @@ void Page::renderBackground(QPainter& painter, const QPixmap* pdfBackground, qre
     }
 }
 
+void Page::renderObjects(QPainter& painter, qreal zoom) const
+{
+    if (objects.empty()) {
+        return;
+    }
+    
+    // Sort objects by z-order
+    std::vector<InsertedObject*> sortedObjects;
+    sortedObjects.reserve(objects.size());
+    for (const auto& obj : objects) {
+        sortedObjects.push_back(obj.get());
+    }
+    std::sort(sortedObjects.begin(), sortedObjects.end(),
+              [](InsertedObject* a, InsertedObject* b) {
+                  return a->zOrder < b->zOrder;
+              });
+    
+    // Render each visible object
+    for (InsertedObject* obj : sortedObjects) {
+        if (obj->visible) {
+            obj->render(painter, zoom);
+        }
+    }
+}
+
 // ===== Serialization =====
 
 QJsonObject Page::toJson() const
