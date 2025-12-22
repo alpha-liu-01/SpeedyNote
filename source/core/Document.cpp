@@ -39,13 +39,12 @@ std::unique_ptr<Document> Document::createForPdf(const QString& docName, const Q
     doc->mode = Mode::Paged;
     
     // Try to load the PDF
+    // Note: loadPdf() stores the path regardless of success (for relink)
     if (doc->loadPdf(pdfPath)) {
         // Create pages for all PDF pages
         doc->createPagesForPdf();
     } else {
-        // PDF failed to load, but we still create the document
-        // The path is stored for potential relink later
-        doc->m_pdfPath = pdfPath;
+        // PDF failed to load, path is already stored by loadPdf()
         // Create a single default page
         doc->ensureMinimumPages();
     }
@@ -352,6 +351,10 @@ void Document::createPagesForPdf()
     
     // Create one page per PDF page
     int count = pdfPageCount();
+    
+    // Pre-allocate to avoid repeated vector reallocations
+    m_pages.reserve(static_cast<size_t>(count));
+    
     for (int i = 0; i < count; ++i) {
         addPageForPdf(i);
     }
@@ -611,6 +614,8 @@ std::unique_ptr<Document> Document::fromFullJson(const QJsonObject& obj)
 {
     // First, load metadata
     auto doc = fromJson(obj);
+    // Note: fromJson() always returns a valid document (uses make_unique),
+    // but we keep this check for defensive programming / future changes
     if (!doc) {
         return nullptr;
     }
@@ -630,6 +635,9 @@ int Document::loadPagesFromJson(const QJsonArray& pagesArray)
 {
     // Clear existing pages
     m_pages.clear();
+    
+    // Pre-allocate to avoid repeated vector reallocations
+    m_pages.reserve(static_cast<size_t>(pagesArray.size()));
     
     int loadedCount = 0;
     
