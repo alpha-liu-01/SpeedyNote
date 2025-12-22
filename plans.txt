@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 1.1 COMPLETE ✅ | Phase 1.2 IN PROGRESS
-NEXT:   Phase 1.2 - Create Document class
+STATUS: Phase 1.1 COMPLETE ✅ | Phase 1.2 COMPLETE ✅ | Phase 1.3 READY
+NEXT:   Phase 1.3 - Create DocumentViewport class
 
 =============================================================================
                          CURRENT ARCHITECTURE
@@ -91,7 +91,7 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
 
 → See: docs/MIGRATION_PHASE1_SUBPLAN.md for detailed breakdown
 
-[  ] 1.1 Create Page class (7 sub-tasks, ~810 lines total)
+[✅] 1.1 Create Page class (7 sub-tasks, ~810 lines total) COMPLETE
      [✅] 1.1.1 Create directory structure (core/, layers/, objects/, strokes/)
      [✅] 1.1.2 Extract StrokePoint/VectorStroke to source/strokes/
      [✅] 1.1.3 Create VectorLayer class (single layer, no widget)
@@ -100,7 +100,7 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.1.6 Create Page class (coordinator)
      [✅] 1.1.7 Unit tests for serialization
 
-[  ] 1.2 Create Document class (8 sub-tasks, ~1170 lines total)
+[✅] 1.2 Create Document class (8 sub-tasks, ~1170 lines total) COMPLETE
      → See: docs/MIGRATION_PHASE1_2_SUBPLAN.md for detailed breakdown
      [✅] 1.2.1 Create PdfProvider interface (source/pdf/)
      [✅] 1.2.2 Create PopplerPdfProvider implementation
@@ -111,9 +111,19 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
      [✅] 1.2.7 Add serialization (toJson/fromJson)
      [✅] 1.2.8 Unit tests for Document
 
-[  ] 1.3 Create DocumentViewport class
-     → File: source/core/DocumentViewport.h, source/core/DocumentViewport.cpp
-     → QWidget that renders from Document, handles pan/zoom
+[  ] 1.3 Create DocumentViewport class (11 sub-tasks, ~1600 lines total)
+     → See: docs/MIGRATION_PHASE1_3_SUBPLAN.md for detailed breakdown
+     [  ] 1.3.1 Core skeleton (signals, document reference)
+     [  ] 1.3.2 Layout engine (SingleColumn, TwoColumn, page gaps)
+     [  ] 1.3.3 Basic rendering (paintEvent, page backgrounds)
+     [  ] 1.3.4 Pan & zoom (setZoomLevel, setPanOffset, scrollToPage)
+     [  ] 1.3.5 Coordinate transforms (viewport ↔ document ↔ page)
+     [  ] 1.3.6 PDF cache (2-4 pages, single DPI)
+     [  ] 1.3.7 Stroke cache preloading (nearby pages)
+     [  ] 1.3.8 Input routing basics (mouse/tablet → page)
+     [  ] 1.3.9 Resize handling (maintain view position)
+     [  ] 1.3.10 Signals & scroll sync (for MainWindow sliders)
+     [  ] 1.3.11 Test harness (--test-viewport)
 
 [  ] 1.4 Integration tests
      → Test Document/Page serialization round-trip
