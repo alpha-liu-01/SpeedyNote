@@ -2,18 +2,17 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 1.1 COMPLETE ✅ | Phase 1.2 COMPLETE ✅ | Phase 1.3 READY
-NEXT:   Phase 1.3 - Create DocumentViewport class
+STATUS: Phase 1 COMPLETE ✅ | Phase 2 READY
+LAST UPDATED: Dec 2024
 
 =============================================================================
-                         CURRENT ARCHITECTURE
+                         ARCHITECTURE OVERVIEW
 =============================================================================
 
+BEFORE (Current):
 ┌─────────────────────────────────────────────────────────────┐
 │                        MainWindow                            │
-│  - Tab management (multiple notebooks)                       │
-│  - Page switching logic (switchPage, goToNextPage, etc.)     │
-│  - ALL UI widgets (10,000 lines!)                            │
+│  - Tab management, page switching, ALL UI widgets           │
 └────────────────────────┬────────────────────────────────────┘
                          │ owns
 ┌────────────────────────▼────────────────────────────────────┐
@@ -21,219 +20,287 @@ NEXT:   Phase 1.3 - Create DocumentViewport class
 │  - Document model (PDF, strokes, metadata) ← MIXED          │
 │  - View (rendering, pan/zoom)              ← TOGETHER       │
 │  - Input handling (tablet, mouse, touch)                     │
-│  - Combined canvas hack (2 pages stacked vertically)         │
-│  - 744 lines of header, ~6000+ lines of implementation       │
+│  - Combined canvas hack (2 pages stacked)                    │
+│  - ~7000 lines of code                                       │
 └─────────────────────────────────────────────────────────────┘
 
-The "combined canvas" hack: Loads page N and N+1 into a double-height 
-buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
-
-=============================================================================
-                          TARGET ARCHITECTURE
-=============================================================================
-
+AFTER (Target):
 ┌─────────────────────────────────────────────────────────────┐
 │                        MainWindow                            │
-│  - Tab management                                            │
-│  - Toolbar/UI coordination                                   │
+│  - Tab management, toolbar coordination                      │
 └────────────────────────┬────────────────────────────────────┘
                          │ owns
 ┌────────────────────────▼────────────────────────────────────┐
-│                    DocumentViewport                          │
+│                    DocumentViewport (✅ BUILT)               │
 │  - Pan/zoom state                                            │
 │  - Renders visible pages from Document                       │
 │  - Routes input to correct page                              │
 └────────────────────────┬────────────────────────────────────┘
                          │ references
 ┌────────────────────────▼────────────────────────────────────┐
-│                        Document                              │
-│  - List of Pages (or infinite canvas regions)               │
-│  - PDF reference (if any)                                    │
-│  - Notebook metadata                                         │
+│                    Document (✅ BUILT)                       │
+│  - List of Pages (or infinite canvas for edgeless)          │
+│  - PDF reference (PdfProvider abstraction)                   │
+│  - Notebook metadata & bookmarks                             │
 └────────────────────────┬────────────────────────────────────┘
                          │ contains
 ┌────────────────────────▼────────────────────────────────────┐
-│                         Page                                 │
-│  - Pixmap layer (raster strokes)                            │
-│  - Vector layer (VectorCanvas strokes)                       │
-│  - Background (PDF page / grid / custom image)              │
-│  - Picture windows for this page                            │
+│                     Page (✅ BUILT)                          │
+│  - Vector layers (VectorLayer with stroke cache)            │
+│  - Background (PDF / grid / lines / custom)                  │
+│  - Inserted objects (images, etc.)                           │
 └─────────────────────────────────────────────────────────────┘
 
 =============================================================================
-                        PHASE 0: PREPARATION
+                    PHASE 0: PREPARATION (✅ COMPLETE)
 =============================================================================
 
 [✅] 0.1 Map all MainWindow ↔ InkCanvas interactions
-     → See: docs/MIGRATION_PHASE0_INTERACTIONS.md
-     → Found: 318 method calls, 18 signal/slot connections
-     → Categorized by: Setters (87), Getters (100), Actions (26), Signals (18)
+     → docs/MIGRATION_PHASE0_INTERACTIONS.md
+     → 318 method calls, 18 signal/slot connections
 
-[✅] 0.2 Map all isCombinedCanvas locations in InkCanvas.cpp
-     → See: docs/MIGRATION_PHASE0_COMBINED_CANVAS.md
-     → Found: 11 detection blocks, ~150 references in InkCanvas.cpp
-     → Found: 2 detection blocks, ~20 references in MainWindow.cpp
-     → 6 helper methods exist ONLY for combined canvas (will be deleted)
-     → ~500-700 lines of code to eliminate
+[✅] 0.2 Map all isCombinedCanvas locations  
+     → docs/MIGRATION_PHASE0_COMBINED_CANVAS.md
+     → ~500-700 lines to eliminate
 
-[✅] 0.3 Document page-related widgets in MainWindow
-     → See: docs/MIGRATION_PHASE0_WIDGETS.md
-     → Found: 22+ widgets across 6 categories
-     → Found: 20 signal connections, 32 handler methods
-     → Categories: Page Navigation, Pan/Zoom, Outline, Bookmarks, Markdown, Tabs
-     → pageInput, panXSlider, panYSlider, zoomSlider
-     → outline tree, bookmarks panel, markdown sidebar
-     → All widgets that need reconnection in Phase 4
+[✅] 0.3 Document page-related widgets
+     → docs/MIGRATION_PHASE0_WIDGETS.md
+     → 22+ widgets, 20 signals, 32 handlers to reconnect
 
 =============================================================================
-                   PHASE 1: CREATE NEW DATA STRUCTURES
+                PHASE 1: NEW DATA STRUCTURES (✅ COMPLETE)
 =============================================================================
 
-→ See: docs/MIGRATION_PHASE1_SUBPLAN.md for detailed breakdown
+[✅] 1.1 Page class (~810 lines) - docs/MIGRATION_PHASE1_SUBPLAN.md
+     ├── source/strokes/StrokePoint.h
+     ├── source/strokes/VectorStroke.h
+     ├── source/layers/VectorLayer.h (with stroke cache)
+     ├── source/objects/InsertedObject.h/.cpp
+     ├── source/objects/ImageObject.h/.cpp
+     ├── source/core/Page.h/.cpp
+     └── source/core/PageTests.h (--test-page)
 
-[✅] 1.1 Create Page class (7 sub-tasks, ~810 lines total) COMPLETE
-     [✅] 1.1.1 Create directory structure (core/, layers/, objects/, strokes/)
-     [✅] 1.1.2 Extract StrokePoint/VectorStroke to source/strokes/
-     [✅] 1.1.3 Create VectorLayer class (single layer, no widget)
-     [✅] 1.1.4 Create InsertedObject base class
-     [✅] 1.1.5 Create ImageObject class
-     [✅] 1.1.6 Create Page class (coordinator)
-     [✅] 1.1.7 Unit tests for serialization
+[✅] 1.2 Document class (~1170 lines) - docs/MIGRATION_PHASE1_2_SUBPLAN.md
+     ├── source/pdf/PdfProvider.h (interface)
+     ├── source/pdf/PopplerPdfProvider.h/.cpp
+     ├── source/core/Document.h/.cpp
+     └── source/core/DocumentTests.h (--test-document)
 
-[✅] 1.2 Create Document class (8 sub-tasks, ~1170 lines total) COMPLETE
-     → See: docs/MIGRATION_PHASE1_2_SUBPLAN.md for detailed breakdown
-     [✅] 1.2.1 Create PdfProvider interface (source/pdf/)
-     [✅] 1.2.2 Create PopplerPdfProvider implementation
-     [✅] 1.2.3 Create Document class skeleton (identity, mode)
-     [✅] 1.2.4 Add PDF reference management to Document
-     [✅] 1.2.5 Add page management methods
-     [✅] 1.2.6 Add bookmarks support
-     [✅] 1.2.7 Add serialization (toJson/fromJson)
-     [✅] 1.2.8 Unit tests for Document
-
-[  ] 1.3 Create DocumentViewport class (11 sub-tasks, ~1600 lines total)
-     → See: docs/MIGRATION_PHASE1_3_SUBPLAN.md for detailed breakdown
-     [✅] 1.3.1 Core skeleton (signals, document reference)
-     [✅] 1.3.2 Layout engine (SingleColumn, TwoColumn, page gaps)
-     [✅] 1.3.3 Basic rendering (paintEvent, page backgrounds)
-     [✅] 1.3.4 Pan & zoom (setZoomLevel, setPanOffset, scrollToPage)
-     [✅] 1.3.5 Coordinate transforms (viewport ↔ document ↔ page)
-     [✅] 1.3.6 PDF cache (2-4 pages, single DPI)
-     [✅] 1.3.7 Stroke cache preloading (nearby pages)
-     [✅] 1.3.8 Input routing basics (mouse/tablet → page)
-     [✅] 1.3.9 Resize handling (maintain view position)
-     [✅] 1.3.10 Signals & scroll sync (for MainWindow sliders)
-     [✅] 1.3.11 Test harness (--test-viewport)
-
-[  ] 1.4 Integration tests
-     → Test Document/Page serialization round-trip
-     → Test multi-layer rendering
-     → Test object insertion/removal
+[✅] 1.3 DocumentViewport class (~1600 lines) - docs/MIGRATION_PHASE1_3_SUBPLAN.md
+     ├── source/core/DocumentViewport.h/.cpp
+     ├── source/core/DocumentViewportTests.h (--test-viewport)
+     ├── Layout engine (SingleColumn, TwoColumn)
+     ├── Pan/zoom with coordinate transforms
+     ├── PDF cache (2-4 pages, DPI-aware)
+     ├── Stroke cache pre-loading
+     ├── Input routing (mouse/tablet → page)
+     ├── Resize handling
+     └── Signal system for MainWindow sync
 
 =============================================================================
-                    PHASE 2: BUILD DOCUMENTVIEWPORT
+            PHASE 2: DRAWING IMPLEMENTATION (NEXT) - MIGRATION
 =============================================================================
 
-[  ] 2.1 Basic rendering - Render pages in vertical layout
-[  ] 2.2 Pan/zoom - Viewport transform, smooth scrolling  
-[  ] 2.3 Page visibility culling - Only render visible pages
-[  ] 2.4 Input routing - Map click → correct Page → correct layer
-[  ] 2.5 Test harness - Standalone test window
+→ See: docs/MIGRATION_PHASE2_SUBPLAN.md for detailed breakdown
+
+NOTE: This is a MIGRATION from VectorCanvas, not a rewrite!
+VectorCanvas already has working: pen, eraser, undo, point decimation,
+incremental rendering, benchmarking. We're moving this to the new architecture.
+
+[  ] 2.1 Tool State Management (~100 lines)
+     - Add tool state to DocumentViewport (ToolType, color, thickness)
+     - setCurrentTool(), setPenColor(), setPenThickness(), setEraserSize()
+     - Signal: toolChanged()
+
+[  ] 2.2 Stroke Creation (~250 lines)
+     - MIGRATE addPoint() with point decimation from VectorCanvas
+     - startStroke(), continueStroke(), finishStroke()
+     - Store strokes in Page→VectorLayer (not internal list)
+     - Invalidate stroke cache after stroke completes
+
+[  ] 2.3 Incremental Stroke Rendering (~150 lines)
+     - MIGRATE currentStrokeCache pattern from VectorCanvas
+     - renderCurrentStrokeIncremental() for smooth drawing
+     - Reset cache on new stroke
+
+[  ] 2.4 Eraser Tool (~150 lines)
+     - MIGRATE eraseAt() to use VectorLayer::strokesAtPoint()
+     - Visual eraser cursor
+     - Remove strokes from layer
+
+[  ] 2.5 Per-Page Undo/Redo (~200 lines)
+     - MIGRATE UndoAction struct from VectorCanvas
+     - Per-page undo/redo stacks (not global)
+     - Ctrl+Z / Ctrl+Y keyboard handling
+
+[  ] 2.6 Benchmark Integration (~50 lines)
+     - COPY startBenchmark(), getPaintRate() from VectorCanvas
+     - Paint timestamp tracking
+
+[  ] 2.7 Drawing Tests (~100 lines)
+     - Test stroke creation and point decimation
+     - Test eraser
+     - Test per-page undo/redo
 
 =============================================================================
-                     PHASE 3: INTEGRATION BRIDGE
+              PHASE 3: MAINWINDOW INTEGRATION BRIDGE
 =============================================================================
 
-[  ] 3.1 Add DocumentViewport to MainWindow (hidden, feature flag)
-[  ] 3.2 Create adapter signals (same as InkCanvas)
-[  ] 3.3 Toggle mechanism (debug shortcut to switch)
-[  ] 3.4 Verify parity (same notebook looks identical in both)
+Add DocumentViewport to MainWindow with feature flag for A/B testing.
+
+[  ] 3.1 Feature Flag System (~50 lines)
+     - Add --use-new-viewport command line flag
+     - Add settings toggle (hidden in debug menu)
+     - Store preference
+
+[  ] 3.2 Add DocumentViewport to MainWindow (~200 lines)
+     - Create alongside InkCanvas (not replacing yet)
+     - Share same tab container
+     - Only one visible at a time based on flag
+
+[  ] 3.3 Adapter Signals (~150 lines)
+     - Map DocumentViewport signals to existing slot names
+     - Ensure MainWindow doesn't need changes (yet)
+     - zoomChanged, panChanged, currentPageChanged, documentModified
+
+[  ] 3.4 Document Loading Bridge (~200 lines)
+     - Convert existing .spn files to new Document format
+     - Load PDF via new PdfProvider
+     - Populate Pages from existing InkCanvas data
+
+[  ] 3.5 Verification
+     - Same notebook looks identical in both viewports
+     - Pan/zoom behavior matches
+     - Page navigation works
 
 =============================================================================
-                      PHASE 4: WIDGET MIGRATION
+                    PHASE 4: WIDGET MIGRATION
 =============================================================================
 
-Priority: HIGH
-[  ] Page navigation (pageInput, prev/next buttons)
-[  ] Pan sliders (panXSlider, panYSlider)
-[  ] Zoom controls
+Reconnect all MainWindow widgets to DocumentViewport.
 
-Priority: MEDIUM  
-[  ] Tool buttons (pen, eraser, marker)
-[  ] Outline tree, bookmarks
-[  ] Touch gestures
+Priority: HIGH (Core functionality)
+[  ] 4.1 Page Navigation
+     - pageInput, prevPageButton, nextPageButton
+     - jumpToPageButton, deletePageButton
+     - Connect to scrollToPage(), currentPageChanged()
 
-Priority: LOW
-[  ] Picture windows
-[  ] Markdown notes sidebar
+[  ] 4.2 Pan/Zoom Controls  
+     - panXSlider, panYSlider → setHorizontalScrollFraction/Vertical
+     - zoomSlider, zoom buttons → setZoomLevel()
+     - Connect to horizontalScrollChanged(), verticalScrollChanged()
+
+[  ] 4.3 Tool Switching
+     - Pen, eraser, marker, highlighter buttons
+     - Connect to setCurrentTool()
+
+Priority: MEDIUM (Enhanced features)
+[  ] 4.4 Outline & Bookmarks
+     - outlineTree → scrollToPage()
+     - bookmarkList → scrollToPage()
+     - Data from Document::bookmarks()
+
+[  ] 4.5 Touch Gestures
+     - Migrate gesture handling from InkCanvas
+     - Two-finger pan, pinch zoom
+     - Palm rejection
+
+Priority: LOW (Can be deferred)
+[  ] 4.6 Picture Windows
+     - PictureWindow integration with Page objects
+     - Insert/resize/delete operations
+
+[  ] 4.7 Markdown Notes Sidebar
+     - markdownNotesSidebar integration
+     - Per-page markdown notes
 
 =============================================================================
                          PHASE 5: CLEANUP
 =============================================================================
 
-[  ] 5.1 Remove feature flag - New viewport becomes default
-[  ] 5.2 Delete combined canvas code
-[  ] 5.3 Deprecate InkCanvas
-[  ] 5.4 Final testing
+Remove old code once new viewport is proven stable.
+
+[  ] 5.1 Remove Feature Flag - New viewport becomes default
+[  ] 5.2 Delete Combined Canvas Code (~500-700 lines)
+[  ] 5.3 Deprecate InkCanvas (keep for reference initially)
+[  ] 5.4 Remove VectorCanvas overlay (test implementation)
+[  ] 5.5 Final Testing & Performance Validation
+[  ] 5.6 Update documentation
 
 =============================================================================
-                           KEY FINDINGS
+                          FILE STRUCTURE
 =============================================================================
 
-From Phase 0.1 - DANGEROUS PATTERNS identified:
+source/
+├── core/                         ✅ COMPLETE
+│   ├── Document.h / Document.cpp
+│   ├── DocumentTests.h
+│   ├── Page.h / Page.cpp
+│   ├── PageTests.h
+│   ├── DocumentViewport.h / DocumentViewport.cpp
+│   └── DocumentViewportTests.h
+├── layers/                       ✅ COMPLETE
+│   └── VectorLayer.h
+├── strokes/                      ✅ COMPLETE
+│   ├── StrokePoint.h
+│   └── VectorStroke.h
+├── objects/                      ✅ COMPLETE
+│   ├── InsertedObject.h / InsertedObject.cpp
+│   └── ImageObject.h / ImageObject.cpp
+├── pdf/                          ✅ COMPLETE
+│   ├── PdfProvider.h
+│   └── PopplerPdfProvider.h / PopplerPdfProvider.cpp
+├── InkCanvas.h / InkCanvas.cpp   (legacy, to be deprecated)
+├── VectorCanvas.h / VectorCanvas.cpp (test overlay, to be removed)
+└── MainWindow.h / MainWindow.cpp (to be updated in Phase 3-4)
 
-1. DIRECT BUFFER ACCESS
-   canvas->getBuffer()  // Returns raw QPixmap - tight coupling!
-   → New architecture should NOT expose raw buffers
+=============================================================================
+                         TEST COMMANDS
+=============================================================================
 
-2. DIRECT POPPLER ACCESS  
-   canvas->getPdfDocument()  // Returns Poppler::Document*
-   → PDF document should be owned by Document class
+./NoteApp.exe --test-page        # Phase 1.1 tests (Page, Layer, Object)
+./NoteApp.exe --test-document    # Phase 1.2 tests (Document, PDF)
+./NoteApp.exe --test-viewport    # Phase 1.3 tests (DocumentViewport visual)
 
-3. COMBINED CANVAS LOGIC IN MAINWINDOW
-   MainWindow knows about buffer.height() / 2 splitting!
-   → MainWindow should NOT know about internal canvas layout
+=============================================================================
+                       ESTIMATED EFFORT
+=============================================================================
 
------------------------------------------------------------------------------
+Phase 0: COMPLETE ✅
+Phase 1: COMPLETE ✅
+Phase 2: ~2 days (migration, not rewrite - ~1000 lines)
+Phase 3: ~2-3 days
+Phase 4: ~3-4 days
+Phase 5: ~1-2 days
 
-From Phase 0.2 - COMBINED CANVAS CODE SMELL:
+Total remaining: ~8-11 days of focused work
 
-1. DUPLICATED DETECTION PATTERN (11+ times!)
-   Same 8-line detection block copy-pasted everywhere
-   → Should be ONE method: isCombinedCanvas()
+=============================================================================
+                          KEY DECISIONS
+=============================================================================
 
-2. MAGIC NUMBERS EVERYWHERE
-   1.8, 1400, 2000 used inconsistently for detection
-   → Fragile heuristics that break on different displays
+1. ONE DocumentViewport per tab (like InkCanvas today)
+2. Per-page undo/redo (not global)
+3. PDF cache: 2 pages (single col) / 4 pages (two col), single DPI
+4. Continuous scrolling (not snap-to-page)
+5. Keep QDataStream format for .spn files (no ZIP compression)
+6. Edgeless canvas = single unbounded Page
+7. Future: new file extension .snx when format stabilizes
 
-3. COORDINATE OFFSET HELL
-   Every coordinate operation must add/subtract singlePageHeight
-   → New architecture: Viewport handles transforms automatically
+=============================================================================
+                       REFERENCE IMPLEMENTATIONS
+=============================================================================
 
-4. HELPER METHODS TO DELETE (6 total)
-   isCombinedCanvasMode(), getSinglePageHeight(), getPageNumberForCanvasY()
-   loadCombinedWindowsForPage(), saveCombinedWindowsForPage()
-   loadPdfTextBoxesForCombinedCanvas()
-   → All become unnecessary with per-page architecture
+VectorCanvas (source/VectorCanvas.h/.cpp) - Test overlay with working:
+- Pressure-sensitive pen with point decimation (1.5px threshold)
+- Stroke-based eraser with visual cursor
+- Undo/redo (50-action stack, Add/Remove/RemoveMultiple)
+- Incremental rendering (currentStrokeCache pattern)
+- Stroke caching for completed strokes
+- High-DPI support
+- Benchmark (paint rate measurement)
 
------------------------------------------------------------------------------
-
-From Phase 0.3 - WIDGET RECONNECTION SCOPE:
-
-1. PAGE NAVIGATION (5 widgets, 5 handlers)
-   pageInput, prevPageButton, nextPageButton, jumpToPageButton, deletePageButton
-   → All must connect to DocumentViewport instead of InkCanvas
-
-2. PAN/ZOOM (8 widgets, 8 handlers)  
-   zoomSlider, panXSlider, panYSlider, zoom buttons
-   → Viewport owns view state, widgets sync via signals
-
-3. SIDEBARS (9 widgets, 14 handlers)
-   outlineTree, bookmarkList, markdownNotesSidebar
-   → Data from Document, navigation via Viewport
-
-4. AUTOSCROLL SYSTEM
-   autoScrollRequested, earlySaveRequested signals
-   → May become unnecessary with continuous scrolling
+MainWindow already has temporary buttons: VP (Vector Pen), VE (Vector Eraser)
+These connect to VectorCanvas which overlays on InkCanvas page 1.
 
 =============================================================================
