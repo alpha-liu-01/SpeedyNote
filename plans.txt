@@ -102,7 +102,7 @@ buffer to fake smooth scrolling. Results in ~50+ isCombinedCanvas checks.
 
 [  ] 1.2 Create Document class (8 sub-tasks, ~1170 lines total)
      → See: docs/MIGRATION_PHASE1_2_SUBPLAN.md for detailed breakdown
-     [  ] 1.2.1 Create PdfProvider interface (source/pdf/)
+     [✅] 1.2.1 Create PdfProvider interface (source/pdf/)
      [  ] 1.2.2 Create PopplerPdfProvider implementation
      [  ] 1.2.3 Create Document class skeleton (identity, mode)
      [  ] 1.2.4 Add PDF reference management to Document

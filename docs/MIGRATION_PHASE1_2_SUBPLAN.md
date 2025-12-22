@@ -34,37 +34,30 @@ source/
 
 ## Task Breakdown
 
-### Task 1.2.1: Create `pdf/` Directory and PdfProvider Interface
+### Task 1.2.1: Create `pdf/` Directory and PdfProvider Interface ✅ COMPLETE
 
 Abstract interface for PDF operations, enabling future backend swaps (Android, MuPDF, etc.).
 
-**File:** `source/pdf/PdfProvider.h`
+**File created:** `source/pdf/PdfProvider.h` ✅
 
-```cpp
-class PdfProvider {
-public:
-    virtual ~PdfProvider() = default;
-    
-    // Document info
-    virtual bool isValid() const = 0;
-    virtual int pageCount() const = 0;
-    virtual QString title() const = 0;
-    virtual QString author() const = 0;
-    
-    // Page info
-    virtual QSizeF pageSize(int pageIndex) const = 0;
-    
-    // Rendering
-    virtual QPixmap renderPage(int pageIndex, qreal dpi) const = 0;
-    virtual QImage renderPageToImage(int pageIndex, qreal dpi) const = 0;
-    
-    // Factory
-    static std::unique_ptr<PdfProvider> create(const QString& pdfPath);
-};
-```
+**Features implemented:**
+- **Data structs:** `PdfTextBox`, `PdfLink`, `PdfOutlineItem` (platform-independent)
+- **Document info:** `isValid()`, `isLocked()`, `pageCount()`, `title()`, `author()`, `subject()`, `filePath()`
+- **Outline (TOC):** `outline()`, `hasOutline()`
+- **Page info:** `pageSize()`
+- **Rendering:** `renderPageToImage()`, `renderPageToPixmap()` (with default impl)
+- **Text selection:** `textBoxes()`, `supportsTextExtraction()`
+- **Links:** `links()`, `supportsLinks()`
+- **Factory:** `create()`, `isAvailable()`
+
+**Design decisions:**
+- Uses simple data structs (not Poppler types) for portability
+- Link areas use normalized coordinates (0-1) for consistency
+- Text boxes use PDF points (72 dpi) coordinates
+- `renderPageToPixmap()` has default implementation using `renderPageToImage()`
 
 **Dependencies:** None
-**Estimated size:** ~60 lines
+**Actual size:** ~220 lines (with documentation)
 
 ---
 
@@ -327,7 +320,7 @@ namespace DocumentTests {
 
 | Task | Description | Dependencies | Est. Lines | Status |
 |------|-------------|--------------|------------|--------|
-| 1.2.1 | PdfProvider interface | None | 60 | [ ] |
+| 1.2.1 | PdfProvider interface | None | 60 | [✅] |
 | 1.2.2 | PopplerPdfProvider | 1.2.1 | 150 | [ ] |
 | 1.2.3 | Document skeleton | Page (1.1) | 150 | [ ] |
 | 1.2.4 | PDF reference management | 1.2.1-1.2.3 | 80 | [ ] |
