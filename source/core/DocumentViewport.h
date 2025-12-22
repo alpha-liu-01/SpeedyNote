@@ -59,7 +59,10 @@ struct PdfCacheEntry {
     
     bool isValid() const { return pageIndex >= 0 && !pixmap.isNull(); }
     bool matches(int page, qreal targetDpi) const {
-        return pageIndex == page && qFuzzyCompare(dpi, targetDpi);
+        // Note: qFuzzyCompare doesn't work well near 0, so use relative comparison
+        if (pageIndex != page) return false;
+        if (dpi == 0 || targetDpi == 0) return dpi == targetDpi;
+        return qFuzzyCompare(dpi, targetDpi);
     }
 };
 
@@ -88,8 +91,8 @@ struct PointerEvent {
     // Hardware state
     bool isEraser = false;    ///< True if using eraser end OR eraser button
     int stylusButtons = 0;    ///< Barrel button bitmask
-    Qt::MouseButtons buttons; ///< Mouse/stylus buttons
-    Qt::KeyboardModifiers modifiers;  ///< Keyboard modifiers (Ctrl, Shift, etc.)
+    Qt::MouseButtons buttons = Qt::NoButton;  ///< Mouse/stylus buttons
+    Qt::KeyboardModifiers modifiers = Qt::NoModifier;  ///< Keyboard modifiers (Ctrl, Shift, etc.)
     
     // Timestamp for velocity calculations
     qint64 timestamp = 0;
@@ -135,6 +138,9 @@ struct GestureState {
  */
 class DocumentViewport : public QWidget {
     Q_OBJECT
+    
+    // Allow test class to access private members
+    friend class DocumentViewportTests;
     
 public:
     // ===== Constructor & Destructor =====

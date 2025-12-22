@@ -16,7 +16,6 @@
 #include <algorithm>  // For std::remove_if
 #include <limits>
 #include <QDateTime>  // For timestamp
-#include <QDebug>     // For debug output
 
 // ===== Constructor & Destructor =====
 
@@ -154,7 +153,7 @@ void DocumentViewport::setPanOffset(QPointF offset)
 
 void DocumentViewport::scrollToPage(int pageIndex)
 {
-    if (!m_document) return;
+    if (!m_document || m_document->pageCount() == 0) return;
     
     pageIndex = qBound(0, pageIndex, m_document->pageCount() - 1);
     
@@ -190,6 +189,12 @@ void DocumentViewport::zoomToFit()
     }
     
     QSizeF pageSize = page->size;
+    
+    // Guard against zero-size pages
+    if (pageSize.width() <= 0 || pageSize.height() <= 0) {
+        setZoomLevel(1.0);
+        return;
+    }
     
     // Calculate zoom to fit page in viewport with some margin
     qreal marginFraction = 0.05;  // 5% margin on each side
@@ -235,6 +240,12 @@ void DocumentViewport::zoomToWidth()
     }
     
     QSizeF pageSize = page->size;
+    
+    // Guard against zero-width pages
+    if (pageSize.width() <= 0) {
+        setZoomLevel(1.0);
+        return;
+    }
     
     // Calculate zoom to fit page width with some margin
     qreal marginFraction = 0.05;  // 5% margin on each side
@@ -1147,16 +1158,11 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
         m_activeDrawingPage = -1;
     }
     
-    // Debug output (can be removed later)
-    qDebug() << "PointerPress:"
-             << "source=" << (pe.source == PointerEvent::Stylus ? "Stylus" : "Mouse")
-             << "page=" << m_activeDrawingPage
-             << "pagePos=" << (pe.pageHit.valid() ? pe.pageHit.pagePoint : QPointF())
-             << "pressure=" << pe.pressure
-             << "isEraser=" << pe.isEraser;
-    
     // TODO (Phase 2): Forward to tool handler for actual drawing
     // For now, we just track state - actual stroke creation comes in Phase 2
+    // 
+    // Debug info available: pe.source, pe.pageHit, pe.pressure, pe.isEraser,
+    //                       pe.tiltX, pe.tiltY, pe.rotation, pe.stylusButtons
     
     update();  // Trigger repaint for visual feedback
 }
@@ -1201,16 +1207,14 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 {
     if (!m_document) return;
     
-    // Debug output
-    qDebug() << "PointerRelease:"
-             << "source=" << (pe.source == PointerEvent::Stylus ? "Stylus" : "Mouse")
-             << "page=" << m_activeDrawingPage;
+    Q_UNUSED(pe);  // Will be used in Phase 2 for tool handling
     
     // TODO (Phase 2): Forward to tool handler to finish stroke
     // Tool handler will complete the stroke and add it to the layer
     
     // Clear active state
     m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;  // Reset source
     m_activeDrawingPage = -1;
     m_lastPointerPos = QPointF();
     
@@ -1225,7 +1229,9 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 
 void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
 {
-    if (!page) return;
+    if (!page || !m_document) return;
+    
+    Q_UNUSED(pageIndex);  // Used for PDF page lookup via page->pdfPageNumber
     
     QSizeF pageSize = page->size;
     QRectF pageRect(0, 0, pageSize.width(), pageSize.height());
