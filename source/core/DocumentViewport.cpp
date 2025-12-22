@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QTabletEvent>
 #include <QWheelEvent>
+#include <QtMath>  // For qPow
 #include <limits>
 
 // ===== Constructor & Destructor =====
@@ -160,16 +161,83 @@ void DocumentViewport::scrollBy(QPointF delta)
 
 void DocumentViewport::zoomToFit()
 {
-    // TODO (Task 1.3.4): Calculate zoom to fit entire document
-    // For now, just reset to 1.0
-    setZoomLevel(1.0);
+    if (!m_document || m_document->pageCount() == 0) {
+        setZoomLevel(1.0);
+        return;
+    }
+    
+    // Get current page size
+    const Page* page = m_document->page(m_currentPageIndex);
+    if (!page) {
+        setZoomLevel(1.0);
+        return;
+    }
+    
+    QSizeF pageSize = page->size;
+    
+    // Calculate zoom to fit page in viewport with some margin
+    qreal marginFraction = 0.05;  // 5% margin on each side
+    qreal availWidth = width() * (1.0 - 2 * marginFraction);
+    qreal availHeight = height() * (1.0 - 2 * marginFraction);
+    
+    qreal zoomX = availWidth / pageSize.width();
+    qreal zoomY = availHeight / pageSize.height();
+    
+    // Use the smaller zoom to fit both dimensions
+    qreal newZoom = qMin(zoomX, zoomY);
+    newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    
+    // Set zoom and center on current page
+    setZoomLevel(newZoom);
+    
+    // Center the page in viewport
+    QPointF pagePos = pagePosition(m_currentPageIndex);
+    QPointF pageCenter = pagePos + QPointF(pageSize.width() / 2, pageSize.height() / 2);
+    
+    // Calculate pan offset to center the page
+    qreal viewWidth = width() / m_zoomLevel;
+    qreal viewHeight = height() / m_zoomLevel;
+    m_panOffset = pageCenter - QPointF(viewWidth / 2, viewHeight / 2);
+    
+    clampPanOffset();
+    update();
+    emit panChanged(m_panOffset);
 }
 
 void DocumentViewport::zoomToWidth()
 {
-    // TODO (Task 1.3.4): Calculate zoom to fit page width
-    // For now, just reset to 1.0
-    setZoomLevel(1.0);
+    if (!m_document || m_document->pageCount() == 0) {
+        setZoomLevel(1.0);
+        return;
+    }
+    
+    // Get current page size
+    const Page* page = m_document->page(m_currentPageIndex);
+    if (!page) {
+        setZoomLevel(1.0);
+        return;
+    }
+    
+    QSizeF pageSize = page->size;
+    
+    // Calculate zoom to fit page width with some margin
+    qreal marginFraction = 0.05;  // 5% margin on each side
+    qreal availWidth = width() * (1.0 - 2 * marginFraction);
+    
+    qreal newZoom = availWidth / pageSize.width();
+    newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    
+    // Set zoom and adjust pan to keep current page visible
+    setZoomLevel(newZoom);
+    
+    // Center horizontally on current page
+    QPointF pagePos = pagePosition(m_currentPageIndex);
+    qreal viewWidth = width() / m_zoomLevel;
+    m_panOffset.setX(pagePos.x() + pageSize.width() / 2 - viewWidth / 2);
+    
+    clampPanOffset();
+    update();
+    emit panChanged(m_panOffset);
 }
 
 void DocumentViewport::scrollToHome()
@@ -417,79 +485,75 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     
+    // Fill background (visible in gaps between pages)
+    painter.fillRect(rect(), QColor(64, 64, 64));
+    
     if (!m_document) {
         // No document - draw placeholder
-        painter.fillRect(rect(), QColor(64, 64, 64));
         painter.setPen(Qt::white);
         painter.drawText(rect(), Qt::AlignCenter, 
                          tr("No document loaded"));
         return;
     }
     
-    // TODO (Task 1.3.3): Implement full rendering
-    // For now, draw a simple placeholder showing document info and page outlines
-    
-    painter.fillRect(rect(), QColor(64, 64, 64));
+    // Get visible pages to render
+    QVector<int> visible = visiblePages();
     
     // Apply view transform
     painter.save();
     painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
     painter.scale(m_zoomLevel, m_zoomLevel);
     
-    // Draw page outlines for all pages
-    QVector<int> visible = visiblePages();
-    for (int i = 0; i < m_document->pageCount(); ++i) {
-        QRectF rect = pageRect(i);
+    // Render each visible page
+    for (int pageIdx : visible) {
+        Page* page = m_document->page(pageIdx);
+        if (!page) continue;
         
-        // Fill page with white
-        painter.fillRect(rect, Qt::white);
+        QPointF pos = pagePosition(pageIdx);
         
-        // Draw page border
-        bool isVisible = visible.contains(i);
-        painter.setPen(QPen(isVisible ? QColor(100, 150, 255) : QColor(150, 150, 150), 
-                            isVisible ? 3 : 1));
-        painter.drawRect(rect);
+        painter.save();
+        painter.translate(pos);
         
-        // Draw page number
-        painter.setPen(Qt::black);
-        QFont font = painter.font();
-        font.setPointSize(24);
-        painter.setFont(font);
-        painter.drawText(rect, Qt::AlignCenter, QString::number(i + 1));
+        // Render the page (background + content)
+        renderPage(painter, page, pageIdx);
+        
+        painter.restore();
     }
     
     painter.restore();
     
-    // Draw debug info overlay
-    painter.setPen(Qt::white);
-    QFont smallFont = painter.font();
-    smallFont.setPointSize(10);
-    painter.setFont(smallFont);
-    
-    QSizeF contentSize = totalContentSize();
-    QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
-                           "Zoom: %4% | Pan: (%5, %6)\n"
-                           "Layout: %7 | Content: %8x%9\n"
-                           "Visible pages: %10")
-        .arg(m_document->displayName())
-        .arg(m_document->pageCount())
-        .arg(m_currentPageIndex + 1)
-        .arg(m_zoomLevel * 100, 0, 'f', 0)
-        .arg(m_panOffset.x(), 0, 'f', 1)
-        .arg(m_panOffset.y(), 0, 'f', 1)
-        .arg(m_layoutMode == LayoutMode::SingleColumn ? "Single Column" : "Two Column")
-        .arg(contentSize.width(), 0, 'f', 0)
-        .arg(contentSize.height(), 0, 'f', 0)
-        .arg(visible.size());
-    
-    // Draw with background for readability
-    QRect textRect = painter.fontMetrics().boundingRect(
-        rect().adjusted(10, 10, -10, -10), 
-        Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, info);
-    textRect.adjust(-5, -5, 5, 5);
-    painter.fillRect(textRect, QColor(0, 0, 0, 180));
-    painter.drawText(rect().adjusted(10, 10, -10, -10), 
-                     Qt::AlignTop | Qt::AlignLeft, info);
+    // Draw debug info overlay if enabled
+    if (m_showDebugOverlay) {
+        painter.setPen(Qt::white);
+        QFont smallFont = painter.font();
+        smallFont.setPointSize(10);
+        painter.setFont(smallFont);
+        
+        QSizeF contentSize = totalContentSize();
+        QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
+                               "Zoom: %4% | Pan: (%5, %6)\n"
+                               "Layout: %7 | Content: %8x%9\n"
+                               "Visible pages: %10")
+            .arg(m_document->displayName())
+            .arg(m_document->pageCount())
+            .arg(m_currentPageIndex + 1)
+            .arg(m_zoomLevel * 100, 0, 'f', 0)
+            .arg(m_panOffset.x(), 0, 'f', 1)
+            .arg(m_panOffset.y(), 0, 'f', 1)
+            .arg(m_layoutMode == LayoutMode::SingleColumn ? "Single Column" : "Two Column")
+            .arg(contentSize.width(), 0, 'f', 0)
+            .arg(contentSize.height(), 0, 'f', 0)
+            .arg(visible.size());
+        
+        // Draw with background for readability
+        QRect textRect = painter.fontMetrics().boundingRect(
+            rect().adjusted(10, 10, -10, -10), 
+            Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, info);
+        textRect.adjust(-5, -5, 5, 5);
+        painter.fillRect(textRect, QColor(0, 0, 0, 180));
+        painter.drawText(rect().adjusted(10, 10, -10, -10), 
+                         Qt::AlignTop | Qt::AlignLeft, info);
+    }
 }
 
 void DocumentViewport::resizeEvent(QResizeEvent* event)
@@ -523,14 +587,217 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
 
 void DocumentViewport::wheelEvent(QWheelEvent* event)
 {
-    // TODO (Task 1.3.4): Implement scroll/zoom with wheel
-    Q_UNUSED(event);
+    if (!m_document) {
+        event->ignore();
+        return;
+    }
+    
+    // Get scroll delta (in degrees * 8, or pixels for high-res touchpads)
+    QPoint pixelDelta = event->pixelDelta();
+    QPoint angleDelta = event->angleDelta();
+    
+    // Check for Ctrl modifier → Zoom
+    if (event->modifiers() & Qt::ControlModifier) {
+        // Zoom at cursor position
+        qreal zoomDelta = 0;
+        
+        if (!angleDelta.isNull()) {
+            // Mouse wheel: 120 units = 15 degrees = one "step"
+            zoomDelta = angleDelta.y() / 120.0;
+        } else if (!pixelDelta.isNull()) {
+            // Touchpad: use pixel delta scaled down
+            zoomDelta = pixelDelta.y() / 50.0;
+        }
+        
+        if (qFuzzyIsNull(zoomDelta)) {
+            event->accept();
+            return;
+        }
+        
+        // Calculate new zoom level
+        // Use multiplicative zoom for consistent feel
+        qreal zoomFactor = qPow(1.1, zoomDelta);  // 10% per step
+        qreal newZoom = m_zoomLevel * zoomFactor;
+        newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+        
+        // Zoom towards cursor position
+        zoomAtPoint(newZoom, event->position());
+        
+        event->accept();
+        return;
+    }
+    
+    // Scroll
+    QPointF scrollDelta;
+    
+    if (!pixelDelta.isNull()) {
+        // Touchpad: use pixel delta directly (in viewport pixels)
+        // Convert to document units
+        scrollDelta = QPointF(-pixelDelta.x(), -pixelDelta.y()) / m_zoomLevel;
+    } else if (!angleDelta.isNull()) {
+        // Mouse wheel: convert degrees to scroll distance
+        // 120 units = one step, scroll by ~40 document units per step
+        qreal scrollSpeed = 40.0;
+        scrollDelta.setX(-angleDelta.x() / 120.0 * scrollSpeed);
+        scrollDelta.setY(-angleDelta.y() / 120.0 * scrollSpeed);
+    }
+    
+    if (!scrollDelta.isNull()) {
+        // Check for Shift modifier → Horizontal scroll
+        if (event->modifiers() & Qt::ShiftModifier) {
+            // Swap X and Y for horizontal scroll
+            scrollDelta = QPointF(scrollDelta.y(), scrollDelta.x());
+        }
+        
+        scrollBy(scrollDelta);
+    }
+    
+    event->accept();
 }
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
     // TODO (Task 1.3.8): Route to correct page
     Q_UNUSED(event);
+}
+
+// ===== Pan & Zoom Helpers (Task 1.3.4) =====
+
+QPointF DocumentViewport::viewportCenter() const
+{
+    // Get center of viewport in document coordinates
+    qreal viewWidth = width() / m_zoomLevel;
+    qreal viewHeight = height() / m_zoomLevel;
+    
+    return m_panOffset + QPointF(viewWidth / 2, viewHeight / 2);
+}
+
+void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
+{
+    if (qFuzzyCompare(newZoom, m_zoomLevel)) {
+        return;
+    }
+    
+    // Convert viewport point to document coordinates at current zoom
+    QPointF docPt = viewportPt / m_zoomLevel + m_panOffset;
+    
+    // Set new zoom
+    qreal oldZoom = m_zoomLevel;
+    m_zoomLevel = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    
+    // Calculate new pan offset to keep docPt at the same viewport position
+    // viewportPt = (docPt - m_panOffset) * m_zoomLevel
+    // m_panOffset = docPt - viewportPt / m_zoomLevel
+    m_panOffset = docPt - viewportPt / m_zoomLevel;
+    
+    clampPanOffset();
+    updateCurrentPageIndex();
+    
+    if (!qFuzzyCompare(oldZoom, m_zoomLevel)) {
+        emit zoomChanged(m_zoomLevel);
+    }
+    emit panChanged(m_panOffset);
+    emitScrollFractions();
+    
+    update();
+}
+
+// ===== Rendering Helpers (Task 1.3.3) =====
+
+void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
+{
+    if (!page) return;
+    
+    QSizeF pageSize = page->size;
+    QRectF pageRect(0, 0, pageSize.width(), pageSize.height());
+    
+    // 1. Fill with page background color
+    painter.fillRect(pageRect, page->backgroundColor);
+    
+    // 2. Render background based on type
+    switch (page->backgroundType) {
+        case Page::BackgroundType::None:
+            // Just the background color (already filled)
+            break;
+            
+        case Page::BackgroundType::PDF:
+            // Render PDF page
+            if (m_document->isPdfLoaded() && page->pdfPageNumber >= 0) {
+                // TODO (Task 1.3.6): Use PDF cache instead of live rendering
+                // For now, render live at effective DPI
+                qreal dpi = effectivePdfDpi();
+                QImage pdfImage = m_document->renderPdfPageToImage(page->pdfPageNumber, dpi);
+                
+                if (!pdfImage.isNull()) {
+                    // Scale image to fit page rect
+                    // The PDF was rendered at effective DPI, we need to scale to page size
+                    painter.drawImage(pageRect, pdfImage);
+                }
+            }
+            break;
+            
+        case Page::BackgroundType::Custom:
+            // Draw custom background image
+            if (!page->customBackground.isNull()) {
+                painter.drawPixmap(pageRect.toRect(), page->customBackground);
+            }
+            break;
+            
+        case Page::BackgroundType::Grid:
+            {
+                // Draw grid lines
+                painter.setPen(QPen(page->gridColor, 1.0 / m_zoomLevel));  // Constant line width
+                qreal spacing = page->gridSpacing;
+                
+                // Vertical lines
+                for (qreal x = spacing; x < pageSize.width(); x += spacing) {
+                    painter.drawLine(QPointF(x, 0), QPointF(x, pageSize.height()));
+                }
+                
+                // Horizontal lines
+                for (qreal y = spacing; y < pageSize.height(); y += spacing) {
+                    painter.drawLine(QPointF(0, y), QPointF(pageSize.width(), y));
+                }
+            }
+            break;
+            
+        case Page::BackgroundType::Lines:
+            {
+                // Draw horizontal ruled lines
+                painter.setPen(QPen(page->gridColor, 1.0 / m_zoomLevel));  // Constant line width
+                qreal spacing = page->lineSpacing;
+                
+                for (qreal y = spacing; y < pageSize.height(); y += spacing) {
+                    painter.drawLine(QPointF(0, y), QPointF(pageSize.width(), y));
+                }
+            }
+            break;
+    }
+    
+    // 3. Render vector layers and objects via Page::render()
+    // Note: Pass zoom=1.0 since we're already applying zoom via painter transform
+    // Pass nullptr for PDF background since we've already rendered it
+    page->render(painter, nullptr, 1.0);
+    
+    // 4. Draw page border (optional, for visual separation)
+    painter.setPen(QPen(QColor(180, 180, 180), 1.0 / m_zoomLevel));
+    painter.drawRect(pageRect);
+}
+
+qreal DocumentViewport::effectivePdfDpi() const
+{
+    // Base DPI for 100% zoom
+    constexpr qreal baseDpi = 96.0;
+    
+    // Scale DPI with zoom level for crisp rendering
+    // At zoom > 1.0, we want higher DPI to avoid pixelation
+    // At zoom < 1.0, we can use lower DPI to save memory/time
+    // 
+    // However, for very high zoom, cap the DPI to avoid excessive memory usage
+    qreal scaledDpi = baseDpi * m_zoomLevel;
+    
+    // Cap at reasonable maximum (300 DPI is print quality)
+    return qMin(scaledDpi, 300.0);
 }
 
 // ===== Private Methods =====

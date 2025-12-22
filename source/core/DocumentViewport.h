@@ -315,4 +315,45 @@ private:
      * @brief Emit scroll fraction signals.
      */
     void emitScrollFractions();
+    
+    // ===== Pan & Zoom Helpers (Task 1.3.4) =====
+    
+    /**
+     * @brief Get the viewport center point in document coordinates.
+     * @return Center of viewport in document space.
+     */
+    QPointF viewportCenter() const;
+    
+    /**
+     * @brief Zoom at a specific point, keeping that point stationary.
+     * @param newZoom The new zoom level.
+     * @param viewportPt The point in viewport coordinates to keep fixed.
+     * 
+     * Used for zoom-towards-cursor behavior with mouse wheel.
+     */
+    void zoomAtPoint(qreal newZoom, QPointF viewportPt);
+    
+    // ===== Rendering Helpers (Task 1.3.3) =====
+    
+    /**
+     * @brief Render a single page (background + content).
+     * @param painter The QPainter to render to.
+     * @param page The page to render.
+     * @param pageIndex The page index (for PDF pages).
+     * 
+     * Assumes painter is already translated to page position.
+     * Handles solid color, grid, lines, and PDF backgrounds.
+     */
+    void renderPage(QPainter& painter, Page* page, int pageIndex);
+    
+    /**
+     * @brief Get the effective DPI for rendering PDF at current zoom.
+     * @return DPI value scaled by zoom level.
+     */
+    qreal effectivePdfDpi() const;
+    
+    /**
+     * @brief Whether to show debug overlay.
+     */
+    bool m_showDebugOverlay = true;
 };

@@ -190,9 +190,19 @@ TwoColumn:
 
 ---
 
-### Task 1.3.3: Basic Rendering (~250 lines)
+### Task 1.3.3: Basic Rendering (~250 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `renderPage()` helper method for rendering a single page
+- Page background rendering (solid color, grid, lines, custom image)
+- PDF page rendering (live render, cache comes in Task 1.3.6)
+- `effectivePdfDpi()` to calculate zoom-scaled DPI for PDF rendering
+- Calls `Page::render()` with zoom=1.0 (painter handles zoom)
+- Page border rendering for visual separation
+- Debug overlay toggle (`m_showDebugOverlay`)
+- Only renders visible pages for performance
 
 Implement `paintEvent()`:
 
@@ -237,9 +247,19 @@ void DocumentViewport::paintEvent(QPaintEvent* event) {
 
 ---
 
-### Task 1.3.4: Pan & Zoom (~200 lines)
+### Task 1.3.4: Pan & Zoom (~200 lines) ✅ COMPLETE
 
-**Files:** DocumentViewport.cpp
+**Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `zoomToFit()` - fits current page in viewport with 5% margin
+- `zoomToWidth()` - fits page width to viewport with 5% margin
+- `wheelEvent()` - scroll with wheel, zoom with Ctrl+wheel
+- `viewportCenter()` - returns viewport center in document coords
+- `zoomAtPoint()` - zoom towards cursor (keeps point stationary)
+- Scroll with Shift+wheel for horizontal scrolling
+- Supports both mouse wheel and touchpad pixel deltas
+- Multiplicative zoom (10% per wheel step) for consistent feel
 
 Implement view manipulation:
 
