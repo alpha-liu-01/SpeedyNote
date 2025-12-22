@@ -61,85 +61,58 @@ Abstract interface for PDF operations, enabling future backend swaps (Android, M
 
 ---
 
-### Task 1.2.2: Create PopplerPdfProvider Implementation
+### Task 1.2.2: Create PopplerPdfProvider Implementation ✅ COMPLETE
 
 Wraps Poppler-Qt6 calls behind the abstract interface.
 
-**File:** `source/pdf/PopplerPdfProvider.h` and `source/pdf/PopplerPdfProvider.cpp`
+**Files created:**
+- `source/pdf/PopplerPdfProvider.h` ✅
+- `source/pdf/PopplerPdfProvider.cpp` ✅
 
-```cpp
-class PopplerPdfProvider : public PdfProvider {
-public:
-    explicit PopplerPdfProvider(const QString& pdfPath);
-    
-    bool isValid() const override;
-    int pageCount() const override;
-    QString title() const override;
-    QString author() const override;
-    QSizeF pageSize(int pageIndex) const override;
-    QPixmap renderPage(int pageIndex, qreal dpi) const override;
-    QImage renderPageToImage(int pageIndex, qreal dpi) const override;
-    
-private:
-    std::unique_ptr<Poppler::Document> m_document;
-    QString m_path;
-};
-```
+**Features implemented:**
+- **Constructor:** Loads PDF and applies render hints (Antialiasing, TextAntialiasing, TextHinting, TextSlightHinting)
+- **Document info:** All metadata methods (title, author, subject, etc.)
+- **Outline:** Recursive conversion of Poppler::OutlineItem to PdfOutlineItem
+- **Page rendering:** `renderPageToImage()` at specified DPI
+- **Text extraction:** Converts Poppler::TextBox to PdfTextBox with character-level bounding boxes
+- **Links:** Converts Poppler::Link types (Goto, Browse) to PdfLink with proper page number conversion
+- **Factory methods:** `PdfProvider::create()` and `PdfProvider::isAvailable()` implemented
+
+**Key implementation details:**
+- Poppler uses 1-based page numbers → converted to 0-based
+- Link areas already normalized (0-1) from Poppler
+- Character bounding boxes extracted for precise text selection
+- Render hints match existing InkCanvas implementation for consistency
 
 **Dependencies:** Task 1.2.1, Poppler-Qt6
-**Estimated size:** ~150 lines
+**Actual size:** ~80 lines header + ~220 lines cpp = ~300 lines total
 
 ---
 
-### Task 1.2.3: Create Document Class Skeleton
+### Task 1.2.3: Create Document Class Skeleton ✅ COMPLETE
 
 Basic Document structure with identity, mode, and page storage.
 
-**File:** `source/core/Document.h` and `source/core/Document.cpp`
+**Files created:**
+- `source/core/Document.h` ✅
+- `source/core/Document.cpp` ✅
 
-```cpp
-class Document {
-public:
-    // ===== Identity & Metadata =====
-    QString id;                     // UUID
-    QString name;                   // Display name
-    QString author;                 // Optional
-    QDateTime created;
-    QDateTime lastModified;
-    QString version = "2.0";        // Format version
-    
-    // ===== Document Mode =====
-    enum class Mode {
-        Paged,      // Traditional page-based document
-        Edgeless    // Single infinite canvas
-    };
-    Mode mode = Mode::Paged;
-    
-    // ===== Default Settings =====
-    Page::BackgroundType defaultBackgroundType = Page::BackgroundType::None;
-    QColor defaultBackgroundColor = Qt::white;
-    int defaultGridSpacing = 20;
-    int defaultLineSpacing = 24;
-    
-    // ===== State =====
-    bool modified = false;
-    int lastAccessedPage = 0;
-    
-    // ===== Constructors =====
-    Document();
-    static std::unique_ptr<Document> createNew(const QString& name, Mode mode = Mode::Paged);
-    
-    // Rule of Five
-    ~Document() = default;
-    Document(const Document&) = delete;
-    Document& operator=(const Document&) = delete;
-    Document(Document&&) = default;
-    Document& operator=(Document&&) = default;
-};
-```
+**Features implemented:**
+- **Identity:** id (UUID), name, author, created, lastModified, formatVersion
+- **Mode:** enum class Mode { Paged, Edgeless }
+- **Default settings:** defaultBackgroundType, defaultBackgroundColor, defaultGridColor, defaultGridSpacing, defaultLineSpacing, defaultPageSize
+- **State:** modified, lastAccessedPage
+- **Rule of Five:** Non-copyable, movable
+- **Factory methods:** `createNew()`, `createForPdf()` (stub for 1.2.4)
+- **Utility:** `markModified()`, `clearModified()`, `displayName()`, `isEdgeless()`, `isPaged()`
+
+**Design notes:**
+- Document is a skeleton; page management (1.2.5), PDF (1.2.4), bookmarks (1.2.6), and serialization (1.2.7) will be added incrementally
+- `createForPdf()` is a stub - full implementation in Task 1.2.4
+- Default page size is US Letter at 96 DPI (816x1056 pixels)
 
 **Dependencies:** Page class (1.1)
-**Estimated size:** ~100 lines header + ~50 lines cpp
+**Actual size:** ~140 lines header + ~50 lines cpp
 
 ---
 
@@ -321,8 +294,8 @@ namespace DocumentTests {
 | Task | Description | Dependencies | Est. Lines | Status |
 |------|-------------|--------------|------------|--------|
 | 1.2.1 | PdfProvider interface | None | 60 | [✅] |
-| 1.2.2 | PopplerPdfProvider | 1.2.1 | 150 | [ ] |
-| 1.2.3 | Document skeleton | Page (1.1) | 150 | [ ] |
+| 1.2.2 | PopplerPdfProvider | 1.2.1 | 150 | [✅] |
+| 1.2.3 | Document skeleton | Page (1.1) | 150 | [✅] |
 | 1.2.4 | PDF reference management | 1.2.1-1.2.3 | 80 | [ ] |
 | 1.2.5 | Page management | 1.2.3 | 150 | [ ] |
 | 1.2.6 | Bookmarks | 1.2.5 | 80 | [ ] |
