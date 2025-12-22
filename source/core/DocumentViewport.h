@@ -138,6 +138,47 @@ public:
      */
     void setPageGap(int gap);
     
+    // ===== Layout Engine (Task 1.3.2) =====
+    
+    /**
+     * @brief Get the position of a page in document coordinates.
+     * @param pageIndex 0-based page index.
+     * @return Top-left corner of the page in document coordinates.
+     */
+    QPointF pagePosition(int pageIndex) const;
+    
+    /**
+     * @brief Get the full rectangle of a page in document coordinates.
+     * @param pageIndex 0-based page index.
+     * @return Rectangle including position and size.
+     */
+    QRectF pageRect(int pageIndex) const;
+    
+    /**
+     * @brief Get the total size of all pages (bounding box).
+     * @return Size of the content area containing all pages.
+     */
+    QSizeF totalContentSize() const;
+    
+    /**
+     * @brief Find which page contains a point in document coordinates.
+     * @param documentPt Point in document coordinates.
+     * @return Page index, or -1 if point is not on any page.
+     */
+    int pageAtPoint(QPointF documentPt) const;
+    
+    /**
+     * @brief Get the list of pages currently visible in the viewport.
+     * @return Vector of page indices that intersect the viewport.
+     */
+    QVector<int> visiblePages() const;
+    
+    /**
+     * @brief Get the visible rectangle in document coordinates.
+     * @return The area of the document currently visible in the viewport.
+     */
+    QRectF visibleRect() const;
+    
     // ===== View State Setters (Slots) =====
     
 public slots:

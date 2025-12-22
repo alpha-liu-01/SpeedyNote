@@ -132,9 +132,23 @@ private:
 
 ---
 
-### Task 1.3.2: Layout Engine (~200 lines)
+### Task 1.3.2: Layout Engine (~200 lines) ✅ COMPLETE
 
-**Files:** Same as above + potentially `source/core/PageLayout.h`
+**Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- `pagePosition(int pageIndex)` - calculates top-left of page in document coords
+- `pageRect(int pageIndex)` - returns full rect including position and size
+- `totalContentSize()` - bounding box of all pages
+- `pageAtPoint(QPointF documentPt)` - finds which page contains a point
+- `visiblePages()` - returns list of pages intersecting viewport
+- `visibleRect()` - returns visible area in document coordinates
+- Layout support for SingleColumn and TwoColumn modes
+- Edgeless document support (single page, no clamping)
+- Updated `clampPanOffset()` to use `totalContentSize()`
+- Updated `updateCurrentPageIndex()` to use layout engine
+- Updated `scrollToPage()` to use `pagePosition()`
+- Debug rendering showing page outlines with numbers
 
 Implement page positioning:
 
