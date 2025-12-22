@@ -77,9 +77,19 @@ DocumentViewport is a QWidget that:
 
 ## Task Breakdown
 
-### Task 1.3.1: Core Skeleton (~150 lines)
+### Task 1.3.1: Core Skeleton (~150 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+- Constructor with mouse/tablet tracking enabled
+- `setDocument()` / `document()` - sets document reference, resets view state
+- View state: `zoomLevel`, `panOffset`, `currentPageIndex` with getters/setters
+- Layout: `layoutMode`, `pageGap` with getters/setters
+- Signals: `zoomChanged`, `panChanged`, `currentPageChanged`, `documentModified`, scroll fractions
+- Slots: `setZoomLevel`, `setPanOffset`, `scrollToPage`, `scrollBy`, `zoomToFit`, `zoomToWidth`, `scrollToHome`
+- Placeholder `paintEvent()` showing document info
+- Stub implementations for input events and coordinate transforms (marked with TODO)
 
 Create the basic class structure:
 

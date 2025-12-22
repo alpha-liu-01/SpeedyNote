@@ -305,7 +305,7 @@ QT6_ADD_RESOURCES(QRCC_FILES ${RESOURCES})
 set(CORE_SOURCES
         source/core/Page.cpp           # Task 1.1.6
         source/core/Document.cpp       # Task 1.2.3
-        # source/core/DocumentViewport.cpp # Task 1.3
+        source/core/DocumentViewport.cpp # Task 1.3.1
 )
 
 # ✅ NEW ARCHITECTURE: Vector layer system
