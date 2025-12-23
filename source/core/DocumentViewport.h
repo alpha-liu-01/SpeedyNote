@@ -468,6 +468,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void tabletEvent(QTabletEvent* event) override;
     
 private:
@@ -498,6 +499,7 @@ private:
     PointerEvent::Source m_activeSource = PointerEvent::Unknown;  ///< Active input source
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
+    bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
     
     // ===== Tool State (Task 2.1) =====
     ToolType m_currentTool = ToolType::Pen;   ///< Current drawing tool

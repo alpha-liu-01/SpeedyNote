@@ -13,6 +13,7 @@
 #include <QMouseEvent>
 #include <QTabletEvent>
 #include <QWheelEvent>
+#include <QKeyEvent>
 #include <QtMath>     // For qPow
 #include <algorithm>  // For std::remove_if
 #include <limits>
@@ -674,10 +675,21 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.setFont(smallFont);
         
         QSizeF contentSize = totalContentSize();
+        
+        // Tool name for debug display
+        QString toolName;
+        switch (m_currentTool) {
+            case ToolType::Pen: toolName = "Pen"; break;
+            case ToolType::Marker: toolName = "Marker"; break;
+            case ToolType::Eraser: toolName = "Eraser"; break;
+            case ToolType::VectorPen: toolName = "VectorPen"; break;
+            case ToolType::VectorEraser: toolName = "VectorEraser"; break;
+        }
+        
         QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
                                "Zoom: %4% | Pan: (%5, %6)\n"
                                "Layout: %7 | Content: %8x%9\n"
-                               "Visible pages: %10")
+                               "Visible: %10 | Tool: %11 [P=Pen, E=Eraser]")
             .arg(m_document->displayName())
             .arg(m_document->pageCount())
             .arg(m_currentPageIndex + 1)
@@ -687,7 +699,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             .arg(m_layoutMode == LayoutMode::SingleColumn ? "Single Column" : "Two Column")
             .arg(contentSize.width(), 0, 'f', 0)
             .arg(contentSize.height(), 0, 'f', 0)
-            .arg(visible.size());
+            .arg(visible.size())
+            .arg(toolName);
         
         // Draw with background for readability
         QRect textRect = painter.fontMetrics().boundingRect(
@@ -868,6 +881,45 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
     }
     
     event->accept();
+}
+
+void DocumentViewport::keyPressEvent(QKeyEvent* event)
+{
+    // Tool switching shortcuts (for testing and quick access)
+    switch (event->key()) {
+        case Qt::Key_P:
+            // P = Pen tool (VectorPen for new viewport)
+            setCurrentTool(ToolType::VectorPen);
+            event->accept();
+            return;
+            
+        case Qt::Key_E:
+            // E = Eraser tool (VectorEraser for new viewport)
+            setCurrentTool(ToolType::VectorEraser);
+            event->accept();
+            return;
+            
+        case Qt::Key_Z:
+            // Ctrl+Z = Undo (Task 2.5)
+            if (event->modifiers() & Qt::ControlModifier) {
+                // TODO (Task 2.5): undo();
+                event->accept();
+                return;
+            }
+            break;
+            
+        case Qt::Key_Y:
+            // Ctrl+Y = Redo (Task 2.5)
+            if (event->modifiers() & Qt::ControlModifier) {
+                // TODO (Task 2.5): redo();
+                event->accept();
+                return;
+            }
+            break;
+    }
+    
+    // Pass unhandled keys to parent
+    QWidget::keyPressEvent(event);
 }
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
@@ -1227,6 +1279,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     m_pointerActive = true;
     m_activeSource = pe.source;
     m_lastPointerPos = pe.viewportPos;
+    m_hardwareEraserActive = pe.isEraser;  // Track hardware eraser state
     
     // Determine which page to draw on
     if (pe.pageHit.valid()) {
@@ -1237,7 +1290,10 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     }
     
     // Handle tool-specific actions
-    if (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen) {
+    // Hardware eraser (stylus eraser end) always erases, regardless of selected tool
+    if (pe.isEraser) {
+        eraseAt(pe);
+    } else if (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen) {
         startStroke(pe);
     } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
@@ -1259,7 +1315,11 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
     }
     
     // Handle tool-specific actions
-    if (m_isDrawing && (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen)) {
+    // Hardware eraser (stylus eraser end) always erases, regardless of selected tool
+    if (pe.isEraser) {
+        eraseAt(pe);
+        update();  // Update eraser cursor
+    } else if (m_isDrawing && (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen)) {
         continueStroke(pe);
     } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
@@ -1282,7 +1342,8 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     m_pointerActive = false;
     m_activeSource = PointerEvent::Unknown;  // Reset source
     m_activeDrawingPage = -1;
-    m_lastPointerPos = QPointF();
+    m_hardwareEraserActive = false;  // Clear hardware eraser state
+    // Note: Don't clear m_lastPointerPos - keep it for eraser cursor during hover
     
     // Pre-load caches after interaction
     preloadPdfCache();
@@ -1556,7 +1617,12 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
 
 void DocumentViewport::drawEraserCursor(QPainter& painter)
 {
-    if (m_currentTool != ToolType::Eraser && m_currentTool != ToolType::VectorEraser) {
+    // Show eraser cursor for: selected eraser tool OR active hardware eraser
+    bool showCursor = (m_currentTool == ToolType::Eraser || 
+                       m_currentTool == ToolType::VectorEraser ||
+                       m_hardwareEraserActive);
+    
+    if (!showCursor) {
         return;
     }
     
