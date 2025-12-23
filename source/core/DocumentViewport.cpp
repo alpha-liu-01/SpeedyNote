@@ -40,9 +40,10 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
     
     // Set background color (will be painted over by pages)
+    // CUSTOMIZABLE: Viewport background color (theme setting, visible in gaps between pages)
     setAutoFillBackground(true);
     QPalette pal = palette();
-    pal.setColor(QPalette::Window, QColor(64, 64, 64));  // Dark gray background
+    pal.setColor(QPalette::Window, QColor(64, 64, 64));  // Dark gray - TODO: Load from theme settings
     setPalette(pal);
     
     // Benchmark display timer - updates debug overlay periodically when benchmarking
@@ -944,7 +945,8 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
     } else if (!angleDelta.isNull()) {
         // Mouse wheel: convert degrees to scroll distance
         // 120 units = one step, scroll by ~40 document units per step
-        qreal scrollSpeed = 40.0;
+        // CUSTOMIZABLE: Scroll speed (user preference, range: 10-100)
+        qreal scrollSpeed = 40.0;  // TODO: Load from user settings
         scrollDelta.setX(-angleDelta.x() / 120.0 * scrollSpeed);
         scrollDelta.setY(-angleDelta.y() / 120.0 * scrollSpeed);
     }
@@ -2087,7 +2089,8 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     page->renderObjects(painter, 1.0);
     
     // 5. Draw page border (optional, for visual separation)
-    painter.setPen(QPen(QColor(180, 180, 180), 1.0 / m_zoomLevel));
+    // CUSTOMIZABLE: Page border color (theme setting)
+    painter.setPen(QPen(QColor(180, 180, 180), 1.0 / m_zoomLevel));  // Light gray border
     painter.drawRect(pageRect);
 }
 

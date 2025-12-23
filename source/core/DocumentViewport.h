@@ -568,18 +568,43 @@ private:
     QPointF m_panOffset;
     int m_currentPageIndex = 0;
     
-    // ===== Layout =====
+    // =========================================================================
+    // CUSTOMIZABLE VALUES
+    // =========================================================================
+    // These values should eventually come from user settings (ControlPanelDialog).
+    // TODO: Load from QSettings or a Settings class in Phase 4.
+    // =========================================================================
+    
+    // ----- Layout Settings -----
     LayoutMode m_layoutMode = LayoutMode::SingleColumn;
-    int m_pageGap = 20;  // Pixels between pages
+    int m_pageGap = 20;  ///< CUSTOMIZABLE: Pixels between pages (range: 0-100)
     
-    // ===== PDF Cache (Task 1.3.6) =====
-    QVector<PdfCacheEntry> m_pdfCache;
-    int m_pdfCacheCapacity = 2;  // Default for single column
-    qreal m_cachedDpi = 0;       // DPI at which cache was rendered
-    
-    // ===== Zoom Limits =====
+    // ----- Zoom Limits -----
+    /// CUSTOMIZABLE: Minimum zoom level (power user setting, range: 0.05-0.5)
     static constexpr qreal MIN_ZOOM = 0.1;   // 10%
+    /// CUSTOMIZABLE: Maximum zoom level (power user setting, range: 5.0-20.0)
     static constexpr qreal MAX_ZOOM = 10.0;  // 1000%
+    
+    // ----- Tool Defaults -----
+    // These are initial values; MainWindow will set them from user preferences.
+    ToolType m_currentTool = ToolType::Pen;
+    QColor m_penColor = Qt::black;    ///< CUSTOMIZABLE: Default pen color (user preference)
+    qreal m_penThickness = 5.0;       ///< CUSTOMIZABLE: Default pen thickness (range: 1-50 document units)
+    qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
+    
+    // ----- Performance/Memory Settings -----
+    /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 1-10)
+    int m_pdfCacheCapacity = 2;  // Default for single column, 4 for two column
+    /// CUSTOMIZABLE: Max undo actions per page - higher = more RAM (range: 10-200)
+    static const int MAX_UNDO_PER_PAGE = 50;
+    
+    // =========================================================================
+    // END CUSTOMIZABLE VALUES
+    // =========================================================================
+    
+    // ===== PDF Cache State (Task 1.3.6) =====
+    QVector<PdfCacheEntry> m_pdfCache;
+    qreal m_cachedDpi = 0;       ///< DPI at which cache was rendered
     
     // ===== Input State (Task 1.3.8) =====
     int m_activeDrawingPage = -1;       ///< Page currently receiving strokes (-1 = none)
@@ -589,17 +614,11 @@ private:
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
     bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
     
-    // ===== Tool State (Task 2.1) =====
-    ToolType m_currentTool = ToolType::Pen;   ///< Current drawing tool
-    QColor m_penColor = Qt::black;            ///< Pen color for drawing
-    qreal m_penThickness = 5.0;               ///< Pen thickness in document units
-    qreal m_eraserSize = 20.0;                ///< Eraser radius in document units
-    
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
     bool m_isDrawing = false;                 ///< True while actively drawing a stroke
     
-    /// Point decimation threshold - skip points closer than 1.5 pixels
+    /// Point decimation threshold - skip points closer than 1.5 pixels (performance tuning, not user-facing)
     static constexpr qreal MIN_DISTANCE_SQ = 1.5 * 1.5;
     
     // ===== Incremental Stroke Rendering (Task 2.3) =====
@@ -611,7 +630,6 @@ private:
     // ===== Undo/Redo State (Task 2.5) =====
     QMap<int, QStack<PageUndoAction>> m_undoStacks;  ///< Per-page undo stacks
     QMap<int, QStack<PageUndoAction>> m_redoStacks;  ///< Per-page redo stacks
-    static const int MAX_UNDO_PER_PAGE = 50;     ///< Max undo actions per page
     
     // ===== Benchmark State (Task 2.6) =====
     bool m_benchmarking = false;                      ///< Whether benchmarking is active
