@@ -300,12 +300,13 @@ qt6_wrap_ui(QMARKDOWNTEXTEDIT_UI_HEADERS ${QMARKDOWNTEXTEDIT_UI})
 set(RESOURCES resources.qrc ${QMARKDOWNTEXTEDIT_RESOURCES})
 QT6_ADD_RESOURCES(QRCC_FILES ${RESOURCES})
 
-# ✅ NEW ARCHITECTURE: Core document classes (Phase 1 migration)
+# ✅ NEW ARCHITECTURE: Core document classes (Phase 1-3 migration)
 # These files implement the new Page/Document/Viewport architecture
 set(CORE_SOURCES
         source/core/Page.cpp           # Task 1.1.6
         source/core/Document.cpp       # Task 1.2.3
         source/core/DocumentViewport.cpp # Task 1.3.1
+        source/core/DocumentManager.cpp  # Task 3.0.1
 )
 
 # ✅ NEW ARCHITECTURE: Vector layer system
