@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 1 COMPLETE ✅ | Phase 2 READY
-LAST UPDATED: Dec 2024
+STATUS: Phase 1 COMPLETE ✅ | Phase 2A COMPLETE ✅ | Phase 3 READY
+LAST UPDATED: Dec 13, 2024
 
 =============================================================================
                          ARCHITECTURE OVERVIEW
@@ -27,28 +27,45 @@ BEFORE (Current):
 AFTER (Target):
 ┌─────────────────────────────────────────────────────────────┐
 │                        MainWindow                            │
-│  - Tab management, toolbar coordination                      │
-└────────────────────────┬────────────────────────────────────┘
-                         │ owns
-┌────────────────────────▼────────────────────────────────────┐
-│                    DocumentViewport (✅ BUILT)               │
-│  - Pan/zoom state                                            │
-│  - Renders visible pages from Document                       │
-│  - Routes input to correct page                              │
-└────────────────────────┬────────────────────────────────────┘
-                         │ references
-┌────────────────────────▼────────────────────────────────────┐
-│                    Document (✅ BUILT)                       │
-│  - List of Pages (or infinite canvas for edgeless)          │
-│  - PDF reference (PdfProvider abstraction)                   │
-│  - Notebook metadata & bookmarks                             │
-└────────────────────────┬────────────────────────────────────┘
-                         │ contains
-┌────────────────────────▼────────────────────────────────────┐
-│                     Page (✅ BUILT)                          │
-│  - Vector layers (VectorLayer with stroke cache)            │
-│  - Background (PDF / grid / lines / custom)                  │
-│  - Inserted objects (images, etc.)                           │
+│  - Global tool state (ToolType, color, thickness)           │
+│  - Menus, toolbars, status bar                              │
+│  - Coordinates: TabManager, DocumentManager, LayerPanel      │
+└───────┬──────────────────────┬──────────────────────┬───────┘
+        │                      │                      │
+        ▼                      ▼                      ▼
+┌───────────────┐    ┌─────────────────┐    ┌───────────────┐
+│ DocumentMgr   │    │   TabManager    │    │  LayerPanel   │
+│ (✓ Phase 3)   │    │  (✓ Phase 3)    │    │ (✓ Phase 3)   │
+│               │    │                 │    │               │
+│ OWNS:         │    │ WRAPS:          │    │ TALKS TO:     │
+│ - Documents   │    │ - QTabWidget    │    │ - Page        │
+│               │    │ - Viewports     │    │ (directly!)   │
+└───────┬───────┘    └────────┬────────┘    └───────────────┘
+        │                     │
+        │ OWNS                │ CREATES
+        ▼                     ▼
+┌────────────────────────────────────────────────────────────┐
+│                    Document (✅ BUILT)                      │
+│  - List of Pages                                            │
+│  - PDF reference (PdfProvider)                              │
+│  - Notebook metadata & bookmarks                            │
+└───────────────────────┬────────────────────────────────────┘
+                        │ contains
+┌───────────────────────▼────────────────────────────────────┐
+│                    DocumentViewport (✅ BUILT)              │
+│  - REFERENCES Document (doesn't own)                        │
+│  - Pan/zoom/view state (per-document)                       │
+│  - Renders visible pages                                    │
+│  - Routes input to correct page                             │
+│  - currentPage() → for LayerPanel                           │
+└───────────────────────┬────────────────────────────────────┘
+                        │ renders
+┌───────────────────────▼────────────────────────────────────┐
+│                     Page (✅ BUILT)                         │
+│  - Vector layers (multi-layer support!)                     │
+│  - activeLayerIndex (for drawing)                           │
+│  - addLayer(), removeLayer(), moveLayer()                   │
+│  - Background (PDF / grid / lines / custom)                 │
 └─────────────────────────────────────────────────────────────┘
 
 =============================================================================
@@ -98,144 +115,194 @@ AFTER (Target):
      └── Signal system for MainWindow sync
 
 =============================================================================
-            PHASE 2: DRAWING IMPLEMENTATION - MIGRATION
+            PHASE 2: DRAWING IMPLEMENTATION - MIGRATION (✅ COMPLETE)
 =============================================================================
 
 → See: docs/MIGRATION_PHASE2_SUBPLAN.md for detailed breakdown
 
-NOTE: This is a MIGRATION from VectorCanvas, not a rewrite!
-VectorCanvas already has working: pen, eraser, undo, point decimation,
-incremental rendering, benchmarking. We're moving this to the new architecture.
+NOTE: This was a MIGRATION from VectorCanvas, not a rewrite!
+All drawing logic from VectorCanvas now works in DocumentViewport.
+VectorCanvas is FROZEN and will be deleted in Phase 5.
 
-NOTE: DO NOT update VectorCanvas - it will be deleted in Phase 5.
-ToolType simplified: Pen, Marker, Eraser (no more VectorPen/VectorEraser).
-
------ Phase 2A: Core Drawing (Required for MVP) -----
+----- Phase 2A: Core Drawing ✅ COMPLETE -----
 
 [✅] 2.1 Tool State Management (~100 lines)
-     - Add tool state to DocumentViewport (ToolType, color, thickness)
+     - Tool state in DocumentViewport (ToolType, color, thickness)
      - setCurrentTool(), setPenColor(), setPenThickness(), setEraserSize()
-     - Signal: toolChanged()
 
 [✅] 2.2 Stroke Creation (~250 lines)
-     - MIGRATE addPoint() with point decimation from VectorCanvas
-     - startStroke(), continueStroke(), finishStroke()
-     - Store strokes in Page→VectorLayer (not internal list)
-     - In-progress stroke rendering in paintEvent()
+     - Point decimation (1.5px threshold)
+     - Strokes stored in Page→VectorLayer
+     - Zoom-aware caching eliminates aliasing
 
 [✅] 2.3 Incremental Stroke Rendering (~150 lines)
-     - MIGRATE currentStrokeCache pattern from VectorCanvas
-     - renderCurrentStrokeIncremental() for smooth drawing
-     - Reset cache on new stroke, pan/zoom change, or resize
+     - currentStrokeCache pattern for smooth 360Hz drawing
+     - CPU usage ~18% on Celeron N4000
 
 [✅] 2.4 Eraser Tool (~150 lines)
-     - MIGRATE eraseAt() to use VectorLayer::strokesAtPoint()
+     - Hardware eraser detection (stylus flip)
      - Visual eraser cursor (dashed circle)
-     - Remove strokes from layer
 
 [✅] 2.5 Per-Page Undo/Redo (~200 lines)
-     - MIGRATE UndoAction struct from VectorCanvas
-     - Per-page undo/redo stacks (QMap<int, QStack<UndoAction>>)
+     - Per-page stacks (50 actions max)
      - Ctrl+Z / Ctrl+Y keyboard handling
-     - Max 50 undo actions per page
 
 [✅] 2.6 Benchmark Integration (~50 lines)
-     - COPY startBenchmark(), getPaintRate() from VectorCanvas
-     - Paint timestamp tracking (std::deque<qint64>)
-     - Toggle with B key in test viewport
+     - Paint rate measurement (toggle with B key)
 
-[  ] 2.7 Drawing Tests (~100 lines)
-     - Test stroke creation and point decimation
-     - Test eraser
-     - Test per-page undo/redo
+[✅] 2.7 Manual Testing Complete
+     - All core drawing features verified in --test-viewport
 
------ Phase 2B: Additional Tools (Can be deferred) -----
+----- Phase 2B: Additional Tools (DEFERRED to after Phase 3) -----
 
 [  ] 2.8 Marker Tool (~150 lines)
-     - Semi-transparent strokes with blending
-
 [  ] 2.9 Straight Line Mode (~200 lines)
-     - Draw mode modifier for pen tool
-     - Snap stroke to line from press to release
-
 [  ] 2.10 Lasso Selection Tool (~400 lines)
-     - Select strokes by drawing region
-     - Move, copy, delete selected strokes
-
 [  ] 2.11 Highlighter Tool (~100 lines)
-     - Like marker with highlight blend mode
+
+NOTE: Phase 2B deferred - MainWindow UI makes testing these tools easier.
 
 =============================================================================
               PHASE 3: MAINWINDOW INTEGRATION BRIDGE
 =============================================================================
 
-Add DocumentViewport to MainWindow with feature flag for A/B testing.
+→ See: docs/MIGRATION_PHASE3_SUBPLAN.md for detailed breakdown
 
-[  ] 3.1 Feature Flag System (~50 lines)
-     - Add --use-new-viewport command line flag
-     - Add settings toggle (hidden in debug menu)
-     - Store preference
+Integrate DocumentViewport into MainWindow, replacing InkCanvas.
+BREAKING CHANGE: Old .spn files NOT supported (version 1.0.0-rc1).
 
-[  ] 3.2 Add DocumentViewport to MainWindow (~200 lines)
-     - Create alongside InkCanvas (not replacing yet)
-     - Share same tab container
-     - Only one visible at a time based on flag
+NEW ARCHITECTURE COMPONENTS:
+- DocumentManager: Owns Documents, handles file I/O
+- TabManager: Thin wrapper for QTabWidget operations
+- LayerPanel: Multi-layer editing UI (bottom-left sidebar, SAI2-style)
+- Global tool state + per-document view state
 
-[  ] 3.3 Adapter Signals (~150 lines)
-     - Map DocumentViewport signals to existing slot names
-     - Ensure MainWindow doesn't need changes (yet)
-     - zoomChanged, panChanged, currentPageChanged, documentModified
+----- Phase 3.0: Pre-Integration Setup -----
 
-[  ] 3.4 Document Loading Bridge (~200 lines)
-     - Convert existing .spn files to new Document format
-     - Load PDF via new PdfProvider
-     - Populate Pages from existing InkCanvas data
+[  ] 3.0.1 DocumentManager Class (~150 lines)
+     - source/core/DocumentManager.h/.cpp
+     - createDocument(), loadDocument(), saveDocument(), closeDocument()
+     - Owns all Document instances
 
-[  ] 3.5 Verification
-     - Same notebook looks identical in both viewports
-     - Pan/zoom behavior matches
-     - Page navigation works
+[  ] 3.0.2 TabManager Class (~100 lines)
+     - source/ui/TabManager.h/.cpp
+     - createTab(), closeTab(), currentViewport()
+     - Thin wrapper for code organization
+
+[  ] 3.0.3 LayerPanel Class (~250 lines)
+     - source/ui/LayerPanel.h/.cpp
+     - Add/delete/reorder layers, select active layer
+     - Talks directly to Page (not through DocumentViewport)
+
+[  ] 3.0.4 Command Line Flag (~20 lines)
+     - --use-new-viewport flag for controlled rollout
+
+----- Phase 3.1: Disconnect InkCanvas -----
+
+[  ] 3.1.1 Conditional InkCanvas Creation (~50 lines)
+     - Only create InkCanvas when NOT using new viewport
+
+[  ] 3.1.2 Stub Signal/Slot Connections (~100 lines)
+     - Prevent crashes when InkCanvas doesn't exist
+
+----- Phase 3.2: Add DocumentViewport -----
+
+[  ] 3.2.1 Initialize Managers (~50 lines)
+     - Create DocumentManager, TabManager in MainWindow
+
+[  ] 3.2.2 Create Tab with DocumentViewport (~100 lines)
+     - New tabs use DocumentViewport + Document
+
+[  ] 3.2.3 Basic Rendering Verification
+     - Multi-tab rendering works
+
+----- Phase 3.3: Core Features Reconnection -----
+
+[  ] 3.3.1 Tool Selection (~80 lines)
+     - Toolbar buttons → viewport.setCurrentTool()
+     - Global tool state pattern
+
+[  ] 3.3.2 Pen Color & Thickness (~60 lines)
+     - Color picker, thickness slider
+
+[  ] 3.3.3 Pan/Zoom Controls (~100 lines)
+     - Zoom slider, buttons, scroll bars
+
+[  ] 3.3.4 Page Navigation (~80 lines)
+     - Page spinbox, prev/next buttons
+
+[  ] 3.3.5 Undo/Redo (~40 lines)
+     - Edit menu Ctrl+Z/Y
+
+----- Phase 3.4: Layer Management UI (NEW) -----
+
+[  ] 3.4.1 Add LayerPanel to Sidebar (~60 lines)
+     - Below PDF outline/bookmarks
+
+[  ] 3.4.2 Connect LayerPanel to Current Page (~50 lines)
+     - Update when tab/page changes
+
+[  ] 3.4.3 Connect LayerPanel Signals (~40 lines)
+     - Layer changes → document modified
+
+[  ] 3.4.4 Test Multi-Layer Editing
+     - Add/delete/reorder/select layers
+     - Drawing goes to active layer only
+
+----- Phase 3.5: File Operations -----
+
+[  ] 3.5.1 New Document (~30 lines)
+[  ] 3.5.2 Save Document (~80 lines) - New .snx format
+[  ] 3.5.3 Load Document (~80 lines) - New format only
+[  ] 3.5.4 PDF Loading (~60 lines)
+
+----- Phase 3.6: Verification -----
+
+[  ] 3.6.1 Feature Verification Checklist
+[  ] 3.6.2 Move Debug Overlay to Status Bar (~30 lines)
+
+TOTAL ESTIMATED: ~1630 lines new code
 
 =============================================================================
                     PHASE 4: WIDGET MIGRATION
 =============================================================================
 
-Reconnect all MainWindow widgets to DocumentViewport.
+Reconnect remaining MainWindow widgets to DocumentViewport.
+(Many widgets already connected in Phase 3.3)
 
 Priority: HIGH (Core functionality)
-[  ] 4.1 Page Navigation
-     - pageInput, prevPageButton, nextPageButton
-     - jumpToPageButton, deletePageButton
-     - Connect to scrollToPage(), currentPageChanged()
-
-[  ] 4.2 Pan/Zoom Controls  
-     - panXSlider, panYSlider → setHorizontalScrollFraction/Vertical
-     - zoomSlider, zoom buttons → setZoomLevel()
-     - Connect to horizontalScrollChanged(), verticalScrollChanged()
-
-[  ] 4.3 Tool Switching
-     - Pen, eraser, marker, highlighter buttons
-     - Connect to setCurrentTool()
-
-Priority: MEDIUM (Enhanced features)
-[  ] 4.4 Outline & Bookmarks
+[  ] 4.1 Outline & Bookmarks
      - outlineTree → scrollToPage()
      - bookmarkList → scrollToPage()
      - Data from Document::bookmarks()
 
-[  ] 4.5 Touch Gestures
+[  ] 4.2 Touch Gestures
      - Migrate gesture handling from InkCanvas
      - Two-finger pan, pinch zoom
+     - Trackpad gestures (already working in InkCanvas)
      - Palm rejection
 
-Priority: LOW (Can be deferred)
-[  ] 4.6 Picture Windows
+[  ] 4.3 Controller Support
+     - MagicDial / Joy-Con integration
+     - SDLControllerManager connection
+
+Priority: MEDIUM (Enhanced features)
+[  ] 4.4 Picture Windows
      - PictureWindow integration with Page objects
      - Insert/resize/delete operations
 
-[  ] 4.7 Markdown Notes Sidebar
+[  ] 4.5 Markdown Notes Sidebar
      - markdownNotesSidebar integration
      - Per-page markdown notes
+
+[  ] 4.6 ControlPanelDialog Migration
+     - Connect settings to DocumentViewport customizable values
+     - Load/save settings to QSettings
+
+Priority: LOW (Can be deferred further)
+[  ] 4.7 Phase 2B Tools
+     - Marker, Straight Line, Lasso, Highlighter
+     - Now easier with MainWindow UI
 
 =============================================================================
                          PHASE 5: CLEANUP
@@ -243,26 +310,48 @@ Priority: LOW (Can be deferred)
 
 Remove old code once new viewport is proven stable.
 
-[  ] 5.1 Remove Feature Flag - New viewport becomes default
-[  ] 5.2 Delete Combined Canvas Code (~500-700 lines)
-[  ] 5.3 Deprecate InkCanvas (keep for reference initially)
-[  ] 5.4 Remove VectorCanvas overlay (test implementation)
+[  ] 5.1 Remove Feature Flag
+     - New viewport becomes default
+     - Remove --use-new-viewport flag
+
+[  ] 5.2 Delete InkCanvas (~7000 lines)
+     - All pixmap-based canvas code
+     - Combined canvas hack
+
+[  ] 5.3 Delete VectorCanvas (~800 lines)
+     - Test overlay implementation
+     - All temporary toolbar buttons (VP, VE)
+
+[  ] 5.4 MainWindow Cleanup
+     - Remove conditional code paths (if !m_useNewViewport)
+     - Consider extracting TabManager if not done
+     - General code organization
+
 [  ] 5.5 Final Testing & Performance Validation
-[  ] 5.6 Update documentation
+     - Full feature regression test
+     - Performance on Clovertrail Atom target
+
+[  ] 5.6 Update Documentation
+     - README updates
+     - User migration guide (if any existing users)
 
 =============================================================================
                           FILE STRUCTURE
 =============================================================================
 
 source/
-├── core/                         ✅ COMPLETE
+├── core/                         ✅ COMPLETE (Phase 1-2)
 │   ├── Document.h / Document.cpp
+│   ├── DocumentManager.h / DocumentManager.cpp   ← NEW (Phase 3)
 │   ├── DocumentTests.h
 │   ├── Page.h / Page.cpp
 │   ├── PageTests.h
 │   ├── DocumentViewport.h / DocumentViewport.cpp
 │   ├── DocumentViewportTests.h
 │   └── ToolType.h                ← SIMPLIFIED (Pen, Marker, Eraser, etc.)
+├── ui/                           ← NEW FOLDER (Phase 3)
+│   ├── TabManager.h / TabManager.cpp             ← NEW (Phase 3)
+│   └── LayerPanel.h / LayerPanel.cpp             ← NEW (Phase 3)
 ├── layers/                       ✅ COMPLETE
 │   └── VectorLayer.h
 ├── strokes/                      ✅ COMPLETE
@@ -274,9 +363,9 @@ source/
 ├── pdf/                          ✅ COMPLETE
 │   ├── PdfProvider.h
 │   └── PopplerPdfProvider.h / PopplerPdfProvider.cpp
-├── InkCanvas.h / InkCanvas.cpp   (legacy, reference only)
-├── VectorCanvas.h / VectorCanvas.cpp (test overlay, to be removed)
-└── MainWindow.h / MainWindow.cpp (to be updated in Phase 3-4)
+├── InkCanvas.h / InkCanvas.cpp   (legacy, conditional in Phase 3)
+├── VectorCanvas.h / VectorCanvas.cpp (frozen, removed in Phase 5)
+└── MainWindow.h / MainWindow.cpp (heavily modified in Phase 3-4)
 
 =============================================================================
                          TEST COMMANDS
@@ -284,7 +373,8 @@ source/
 
 ./NoteApp.exe --test-page        # Phase 1.1 tests (Page, Layer, Object)
 ./NoteApp.exe --test-document    # Phase 1.2 tests (Document, PDF)
-./NoteApp.exe --test-viewport    # Phase 1.3 tests (DocumentViewport visual)
+./NoteApp.exe --test-viewport    # Phase 1.3/2 tests (DocumentViewport visual)
+./NoteApp.exe --use-new-viewport # Phase 3: Run app with new DocumentViewport
 
 =============================================================================
                        ESTIMATED EFFORT
@@ -292,53 +382,65 @@ source/
 
 Phase 0: COMPLETE ✅
 Phase 1: COMPLETE ✅
-Phase 2A: ~2 days (core drawing - ~1000 lines)
-Phase 2B: ~2 days (additional tools - ~850 lines, OPTIONAL)
-Phase 3: ~2-3 days
-Phase 4: ~3-4 days
-Phase 5: ~1-2 days
+Phase 2A: COMPLETE ✅ (~1000 lines - core drawing)
+Phase 2B: DEFERRED (additional tools - ~850 lines, after Phase 3)
+Phase 3: ~4-5 days (~1630 lines - MainWindow integration + LayerPanel)
+Phase 4: ~3-4 days (widget migration - touch gestures, etc.)
+Phase 5: ~1-2 days (cleanup - remove InkCanvas, VectorCanvas)
 
-Total for MVP (without 2B): ~8-11 days
-Total with all features: ~10-13 days
+Total for MVP: ~8-11 days remaining
+Total with Phase 2B tools: ~10-13 days remaining
 
 =============================================================================
                           KEY DECISIONS
 =============================================================================
 
+PHASE 1-2 DECISIONS:
 1. ONE DocumentViewport per tab (like InkCanvas today)
 2. Per-page undo/redo (not global)
 3. PDF cache: 2 pages (single col) / 4 pages (two col), single DPI
 4. Continuous scrolling (not snap-to-page)
-5. Keep QDataStream format for .spn files (no ZIP compression)
-6. Edgeless canvas = single unbounded Page
-7. Future: new file extension .snx when format stabilizes
+5. Edgeless canvas = single unbounded Page
+
+PHASE 3 DECISIONS:
+6. DocumentManager: YES - owns all Documents, handles file I/O
+7. TabManager: YES - thin wrapper for code organization (~100 lines)
+8. LayerPanel: Talks directly to Page, NOT through DocumentViewport
+9. Tool state: GLOBAL (industry standard - Photoshop, SAI2, etc.)
+10. View state: PER-DOCUMENT (zoom, pan, current page)
+11. Old .spn files: NOT SUPPORTED (breaking change for v1.0.0-rc1)
+12. New file format: .snx (SpeedyNote eXtended)
+13. Layer Panel location: Bottom-left sidebar, below PDF outline/bookmarks
 
 =============================================================================
                        REFERENCE IMPLEMENTATIONS
 =============================================================================
 
-VectorCanvas (source/VectorCanvas.h/.cpp) - Test overlay with working:
-- Pressure-sensitive pen with point decimation (1.5px threshold)
-- Stroke-based eraser with visual cursor
-- Undo/redo (50-action stack, Add/Remove/RemoveMultiple)
-- Incremental rendering (currentStrokeCache pattern)
-- Stroke caching for completed strokes
-- High-DPI support
-- Benchmark (paint rate measurement)
+VectorCanvas (source/VectorCanvas.h/.cpp):
+⚠️  FROZEN - DO NOT UPDATE - Will be deleted in Phase 5
+    Was used as prototype for DocumentViewport.
+    All its features are now migrated to DocumentViewport.
 
-⚠️  VectorCanvas is FROZEN - DO NOT UPDATE
-    It will be deleted in Phase 5 after DocumentViewport is complete.
-    Use it only as reference for migrating code to DocumentViewport.
+InkCanvas (source/InkCanvas.h/.cpp):
+⚠️  LEGACY - Will be deleted in Phase 5
+    Only created when NOT using --use-new-viewport flag.
+    Used as reference for MainWindow widget connections.
 
-MainWindow has temporary buttons: VP (Vector Pen), VE (Vector Eraser)
-These will be updated in Phase 3-4 to use the simplified ToolType enum.
+DocumentViewport (source/core/DocumentViewport.h/.cpp):
+✅  PRODUCTION IMPLEMENTATION
+    - All drawing features from VectorCanvas
+    - Multi-page, multi-layer architecture
+    - 360Hz input, ~18% CPU on N4000
+    - Zoom-aware caching (no aliasing)
 
-ToolType.h: ✅ SIMPLIFIED AND MOVED TO source/core/ToolType.h
-- Pen     = Vector pen (pressure-sensitive, undo support)
-- Marker  = Vector marker (semi-transparent)
-- Eraser  = Vector eraser (stroke-based)
-- Highlighter, Lasso = Future tools (Phase 2B)
-- VectorPen/VectorEraser REMOVED - all tools are vector now
-- Old pixmap-based tools from InkCanvas are OBSOLETE
+ToolType.h (source/core/ToolType.h):
+✅  SIMPLIFIED
+    - Pen, Marker, Eraser, Highlighter, Lasso
+    - All tools are vector-based
+    - VectorPen/VectorEraser REMOVED
+
+MainWindow temporary buttons (VP, VE):
+    - Will be removed in Phase 3-4
+    - Replaced by unified toolbar with global tool state
 
 =============================================================================
