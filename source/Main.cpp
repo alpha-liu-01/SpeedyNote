@@ -151,7 +151,7 @@ int main(int argc, char *argv[]) {
 
     
     // DEBUG: Show console for trackpad gesture debugging
-    
+
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);

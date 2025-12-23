@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "DocumentViewport.h"
+#include "../layers/VectorLayer.h"
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -16,6 +17,7 @@
 #include <algorithm>  // For std::remove_if
 #include <limits>
 #include <QDateTime>  // For timestamp
+#include <QUuid>      // For stroke IDs
 
 // ===== Constructor & Destructor =====
 
@@ -184,6 +186,10 @@ void DocumentViewport::setZoomLevel(qreal zoom)
     if (!qFuzzyCompare(oldDpi, newDpi)) {
         invalidatePdfCache();
     }
+    
+    // Note: Stroke caches are zoom-aware and will rebuild automatically
+    // when ensureStrokeCacheValid() is called with the new zoom level.
+    // No explicit invalidation needed - just lazy rebuild on next paint.
     
     // Clamp pan offset (bounds change with zoom)
     clampPanOffset();
@@ -644,6 +650,21 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         
         // Render the page (background + content)
         renderPage(painter, page, pageIdx);
+        
+        painter.restore();
+    }
+    
+    // Render current stroke being drawn (Task 2.2)
+    // This is rendered on top of the page content but still in document space
+    if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
+        QPointF pagePos = pagePosition(m_activeDrawingPage);
+        
+        painter.save();
+        painter.translate(pagePos);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Render the in-progress stroke using VectorLayer's static helper
+        VectorLayer::renderStroke(painter, m_currentStroke);
         
         painter.restore();
     }
@@ -1115,12 +1136,12 @@ void DocumentViewport::preloadStrokeCaches()
         Page* page = m_document->page(i);
         if (!page) continue;
         
-        // Pre-generate stroke cache for all layers on this page
+        // Pre-generate zoom-aware stroke cache for all layers on this page
         for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
             VectorLayer* layer = page->layer(layerIdx);
             if (layer && layer->visible && !layer->isEmpty()) {
-                // Ensure cache is valid at page size
-                layer->ensureStrokeCacheValid(page->size, dpr);
+                // Build cache at current zoom level for sharp rendering
+                layer->ensureStrokeCacheValid(page->size, m_zoomLevel, dpr);
             }
         }
     }
@@ -1212,11 +1233,12 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
         m_activeDrawingPage = -1;
     }
     
-    // TODO (Phase 2): Forward to tool handler for actual drawing
-    // For now, we just track state - actual stroke creation comes in Phase 2
-    // 
-    // Debug info available: pe.source, pe.pageHit, pe.pressure, pe.isEraser,
-    //                       pe.tiltX, pe.tiltY, pe.rotation, pe.stylusButtons
+    // Handle tool-specific actions
+    if (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen) {
+        startStroke(pe);
+    } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
+        // TODO (Task 2.4): eraseAt(pe);
+    }
     
     update();  // Trigger repaint for visual feedback
 }
@@ -1225,15 +1247,74 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 {
     if (!m_document || !m_pointerActive) return;
     
+    // Update last pointer position for cursor tracking
+    m_lastPointerPos = pe.viewportPos;
+    
     // Only process if we have an active drawing page
     if (m_activeDrawingPage < 0) {
-        m_lastPointerPos = pe.viewportPos;
         return;
     }
     
-    // Calculate delta for potential use
-    QPointF delta = pe.viewportPos - m_lastPointerPos;
-    m_lastPointerPos = pe.viewportPos;
+    // Handle tool-specific actions
+    if (m_isDrawing && (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen)) {
+        continueStroke(pe);
+    } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
+        // TODO (Task 2.4): eraseAt(pe);
+        update();  // Update eraser cursor
+    }
+}
+
+void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    Q_UNUSED(pe);
+    
+    // Finish stroke if we were drawing
+    if (m_isDrawing) {
+        finishStroke();
+    }
+    
+    // Clear active state
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;  // Reset source
+    m_activeDrawingPage = -1;
+    m_lastPointerPos = QPointF();
+    
+    // Pre-load caches after interaction
+    preloadPdfCache();
+    preloadStrokeCaches();
+    
+    update();
+}
+
+// ===== Stroke Drawing (Task 2.2) =====
+
+void DocumentViewport::startStroke(const PointerEvent& pe)
+{
+    if (!m_document || !pe.pageHit.valid()) return;
+    
+    // Only pen tools start strokes
+    if (m_currentTool != ToolType::VectorPen && m_currentTool != ToolType::Pen) {
+        return;
+    }
+    
+    m_isDrawing = true;
+    m_activeDrawingPage = pe.pageHit.pageIndex;
+    
+    // Initialize new stroke
+    m_currentStroke = VectorStroke();
+    m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_currentStroke.color = m_penColor;
+    m_currentStroke.baseThickness = m_penThickness;
+    
+    // Add first point
+    addPointToStroke(pe.pageHit.pagePoint, pe.pressure);
+}
+
+void DocumentViewport::continueStroke(const PointerEvent& pe)
+{
+    if (!m_isDrawing || m_activeDrawingPage < 0) return;
     
     // Get page-local coordinates
     // Note: Even if pointer moves off the active page, we continue drawing
@@ -1248,34 +1329,70 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         pagePos = docPos - pageOrigin;
     }
     
-    // TODO (Phase 2): Forward to tool handler for stroke continuation
-    // Tool handler will add point to current stroke
-    
-    Q_UNUSED(delta);
-    Q_UNUSED(pagePos);
-    
-    update();  // Trigger repaint
+    addPointToStroke(pagePos, pe.pressure);
 }
 
-void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
+void DocumentViewport::finishStroke()
 {
-    if (!m_document) return;
+    if (!m_isDrawing) return;
     
-    Q_UNUSED(pe);  // Will be used in Phase 2 for tool handling
+    // Don't save empty strokes
+    if (m_currentStroke.points.isEmpty()) {
+        m_isDrawing = false;
+        m_currentStroke = VectorStroke();
+        return;
+    }
     
-    // TODO (Phase 2): Forward to tool handler to finish stroke
-    // Tool handler will complete the stroke and add it to the layer
+    // Finalize stroke
+    m_currentStroke.updateBoundingBox();
     
-    // Clear active state
-    m_pointerActive = false;
-    m_activeSource = PointerEvent::Unknown;  // Reset source
-    m_activeDrawingPage = -1;
-    m_lastPointerPos = QPointF();
+    // Add to page's active layer
+    Page* page = m_document ? m_document->page(m_activeDrawingPage) : nullptr;
+    if (page) {
+        VectorLayer* layer = page->activeLayer();
+        if (layer) {
+            layer->addStroke(m_currentStroke);
+            
+            // TODO (Task 2.5): Push to undo stack
+            // pushUndoAction(m_activeDrawingPage, UndoAction::AddStroke, m_currentStroke);
+        }
+    }
     
-    // Pre-load caches after interaction
-    preloadPdfCache();
-    preloadStrokeCaches();
+    // Clear stroke state
+    m_currentStroke = VectorStroke();
+    m_isDrawing = false;
     
+    emit documentModified();
+}
+
+void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
+{
+    // ========== OPTIMIZATION: Point Decimation ==========
+    // At 360Hz, consecutive points are often <1 pixel apart.
+    // Skip points that are too close to reduce memory and rendering work.
+    // This typically reduces point count by 50-70% with no visible quality loss.
+    
+    if (!m_currentStroke.points.isEmpty()) {
+        const QPointF& lastPos = m_currentStroke.points.last().pos;
+        qreal dx = pagePos.x() - lastPos.x();
+        qreal dy = pagePos.y() - lastPos.y();
+        qreal distSq = dx * dx + dy * dy;
+        
+        if (distSq < MIN_DISTANCE_SQ) {
+            // Point too close - but update pressure if higher (preserve pressure peaks)
+            if (pressure > m_currentStroke.points.last().pressure) {
+                m_currentStroke.points.last().pressure = pressure;
+            }
+            return;  // Skip this point
+        }
+    }
+    
+    StrokePoint pt;
+    pt.pos = pagePos;
+    pt.pressure = qBound(0.1, pressure, 1.0);
+    m_currentStroke.points.append(pt);
+    
+    // Request repaint - use full update for now, will optimize in Task 2.3
     update();
 }
 
@@ -1350,16 +1467,19 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             break;
     }
     
-    // 3. Render vector layers with stroke cache (Task 1.3.7)
-    // We render layers directly instead of via Page::render() to use caching
+    // 3. Render vector layers with ZOOM-AWARE stroke cache
+    // The cache is built at pageSize * zoom * dpr physical pixels, ensuring
+    // sharp rendering at any zoom level. The cache's devicePixelRatio is set
+    // to zoom * dpr, so Qt handles coordinate mapping correctly.
     painter.setRenderHint(QPainter::Antialiasing, true);
     qreal dpr = devicePixelRatioF();
     
     for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
         VectorLayer* layer = page->layer(layerIdx);
         if (layer && layer->visible) {
-            // Use cached rendering for performance
-            layer->renderWithCache(painter, pageSize, dpr);
+            // Use zoom-aware cache for maximum performance
+            // The painter is scaled by zoom, cache is at zoom * dpr resolution
+            layer->renderWithZoomCache(painter, pageSize, m_zoomLevel, dpr);
         }
     }
     

@@ -117,11 +117,11 @@ Keep VectorPen/VectorEraser enum names for backward compatibility.
      - setCurrentTool(), setPenColor(), setPenThickness(), setEraserSize()
      - Signal: toolChanged()
 
-[  ] 2.2 Stroke Creation (~250 lines)
+[✅] 2.2 Stroke Creation (~250 lines)
      - MIGRATE addPoint() with point decimation from VectorCanvas
      - startStroke(), continueStroke(), finishStroke()
      - Store strokes in Page→VectorLayer (not internal list)
-     - Invalidate stroke cache after stroke completes
+     - In-progress stroke rendering in paintEvent()
 
 [  ] 2.3 Incremental Stroke Rendering (~150 lines)
      - MIGRATE currentStrokeCache pattern from VectorCanvas

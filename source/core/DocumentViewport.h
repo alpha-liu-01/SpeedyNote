@@ -17,6 +17,7 @@
 #include "Document.h"
 #include "Page.h"
 #include "../ToolType.h"
+#include "../strokes/VectorStroke.h"
 
 #include <QWidget>
 #include <QPointF>
@@ -504,6 +505,13 @@ private:
     qreal m_penThickness = 5.0;               ///< Pen thickness in document units
     qreal m_eraserSize = 20.0;                ///< Eraser radius in document units
     
+    // ===== Stroke Drawing State (Task 2.2) =====
+    VectorStroke m_currentStroke;             ///< Stroke currently being drawn
+    bool m_isDrawing = false;                 ///< True while actively drawing a stroke
+    
+    /// Point decimation threshold - skip points closer than 1.5 pixels
+    static constexpr qreal MIN_DISTANCE_SQ = 1.5 * 1.5;
+    
     // ===== Private Methods =====
     
     /**
@@ -611,6 +619,32 @@ private:
      * @brief Handle pointer release (end of stroke).
      */
     void handlePointerRelease(const PointerEvent& pe);
+    
+    // ===== Stroke Drawing (Task 2.2) =====
+    
+    /**
+     * @brief Start a new stroke at the given pointer position.
+     * @param pe The pointer event that initiated the stroke.
+     */
+    void startStroke(const PointerEvent& pe);
+    
+    /**
+     * @brief Continue the current stroke with a new point.
+     * @param pe The pointer event with the new position.
+     */
+    void continueStroke(const PointerEvent& pe);
+    
+    /**
+     * @brief Finish the current stroke and add it to the page's layer.
+     */
+    void finishStroke();
+    
+    /**
+     * @brief Add a point to the current stroke with point decimation.
+     * @param pagePos Point position in page-local coordinates.
+     * @param pressure Pressure value (0.0 to 1.0).
+     */
+    void addPointToStroke(const QPointF& pagePos, qreal pressure);
     
     // ===== Rendering Helpers (Task 1.3.3) =====
     

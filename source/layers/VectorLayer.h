@@ -320,27 +320,36 @@ public:
         return layer;
     }
     
-    // ===== Stroke Cache (Task 1.3.7) =====
+    // ===== Stroke Cache (Task 1.3.7 + Zoom-Aware Update) =====
     
     /**
-     * @brief Ensure stroke cache is valid for the given size and DPI.
-     * @param size The target size in logical pixels.
+     * @brief Ensure stroke cache is valid for the given size, zoom, and DPI.
+     * @param size The target size in logical pixels (page size).
+     * @param zoom Current zoom level (1.0 = 100%).
      * @param dpr Device pixel ratio for high DPI support.
      * 
-     * If cache is invalid or wrong size, rebuilds it.
-     * Call this before rendering for pre-loading nearby pages.
+     * Cache is built at size * zoom * dpr for sharp rendering at current zoom.
+     * If cache is invalid, wrong size, or wrong zoom, rebuilds it.
      */
-    void ensureStrokeCacheValid(const QSizeF& size, qreal dpr) {
-        QSize physicalSize(static_cast<int>(size.width() * dpr), 
-                           static_cast<int>(size.height() * dpr));
+    void ensureStrokeCacheValid(const QSizeF& size, qreal zoom, qreal dpr) {
+        // Calculate physical size at this zoom level
+        QSize physicalSize(static_cast<int>(size.width() * zoom * dpr), 
+                           static_cast<int>(size.height() * zoom * dpr));
         
+        // Check if cache is valid for current parameters
         if (!m_strokeCacheDirty && 
             m_strokeCache.size() == physicalSize &&
+            qFuzzyCompare(m_cacheZoom, zoom) &&
             qFuzzyCompare(m_cacheDpr, dpr)) {
             return;  // Cache is valid
         }
         
-        rebuildStrokeCache(size, dpr);
+        rebuildStrokeCache(size, zoom, dpr);
+    }
+    
+    // Backward-compatible overload (assumes zoom = 1.0)
+    void ensureStrokeCacheValid(const QSizeF& size, qreal dpr) {
+        ensureStrokeCacheValid(size, 1.0, dpr);
     }
     
     /**
@@ -349,57 +358,87 @@ public:
     bool isStrokeCacheValid() const { return !m_strokeCacheDirty && !m_strokeCache.isNull(); }
     
     /**
+     * @brief Check if stroke cache matches the given zoom level.
+     * @param zoom The zoom level to check against.
+     * @return True if cache was built at this zoom level.
+     */
+    bool isCacheValidForZoom(qreal zoom) const { 
+        return !m_strokeCacheDirty && !m_strokeCache.isNull() && qFuzzyCompare(m_cacheZoom, zoom);
+    }
+    
+    /**
      * @brief Invalidate stroke cache (call when strokes change).
      */
     void invalidateStrokeCache() { m_strokeCacheDirty = true; }
     
     /**
-     * @brief Render using stroke cache if available.
+     * @brief Render using zoom-aware stroke cache.
      * @param painter The QPainter to render to.
-     * @param size The target size in logical pixels.
+     * @param size The page size in logical pixels.
+     * @param zoom Current zoom level.
      * @param dpr Device pixel ratio.
      * 
-     * If cache is valid, renders from cache (fast).
-     * Otherwise falls back to direct rendering.
+     * The cache is built at size * zoom * dpr physical pixels with devicePixelRatio
+     * set to zoom * dpr. This means Qt sees the cache as having logical size = size.
+     * If the painter is pre-scaled by zoom, the result is that each cache pixel maps
+     * to exactly one physical screen pixel, giving sharp rendering at any zoom level.
      */
-    void renderWithCache(QPainter& painter, const QSizeF& size, qreal dpr) {
+    void renderWithZoomCache(QPainter& painter, const QSizeF& size, qreal zoom, qreal dpr) {
         if (!visible || m_strokes.isEmpty()) {
             return;
         }
         
-        ensureStrokeCacheValid(size, dpr);
+        ensureStrokeCacheValid(size, zoom, dpr);
         
         if (!m_strokeCache.isNull()) {
+            // Draw the pre-zoomed cache at (0,0) - it's already at the right size
+            // The cache was built at size * zoom * dpr, with devicePixelRatio = zoom * dpr
             painter.drawPixmap(0, 0, m_strokeCache);
         } else {
-            // Fallback to direct rendering
+            // Fallback to direct rendering (shouldn't happen)
+            painter.save();
+            painter.scale(zoom, zoom);
             render(painter);
+            painter.restore();
         }
+    }
+    
+    // Legacy method for backward compatibility (1:1 cache, no zoom)
+    void renderWithCache(QPainter& painter, const QSizeF& size, qreal dpr) {
+        renderWithZoomCache(painter, size, 1.0, dpr);
     }
     
 private:
     QVector<VectorStroke> m_strokes;  ///< All strokes in this layer
     
-    // Stroke cache for performance (Task 1.3.7)
-    mutable QPixmap m_strokeCache;        ///< Cached rendered strokes
-    mutable bool m_strokeCacheDirty = true;  ///< Whether cache needs rebuild
-    mutable qreal m_cacheDpr = 1.0;       ///< DPI ratio cache was built at
+    // Stroke cache for performance (Task 1.3.7 + Zoom-Aware)
+    mutable QPixmap m_strokeCache;          ///< Cached rendered strokes at current zoom
+    mutable bool m_strokeCacheDirty = true; ///< Whether cache needs rebuild
+    mutable qreal m_cacheZoom = 1.0;        ///< Zoom level cache was built at
+    mutable qreal m_cacheDpr = 1.0;         ///< DPI ratio cache was built at
     
     /**
-     * @brief Rebuild stroke cache at given size.
-     * @param size Target size in logical pixels.
+     * @brief Rebuild stroke cache at given size and zoom.
+     * @param size Target size in logical pixels (page size).
+     * @param zoom Zoom level to render at.
      * @param dpr Device pixel ratio.
+     * 
+     * Creates a cache pixmap at size * zoom * dpr physical pixels.
+     * Strokes are rendered pre-scaled by zoom for sharp display.
      */
-    void rebuildStrokeCache(const QSizeF& size, qreal dpr) const {
-        QSize physicalSize(static_cast<int>(size.width() * dpr), 
-                           static_cast<int>(size.height() * dpr));
+    void rebuildStrokeCache(const QSizeF& size, qreal zoom, qreal dpr) const {
+        // Physical size includes both zoom and DPI scaling
+        QSize physicalSize(static_cast<int>(size.width() * zoom * dpr), 
+                           static_cast<int>(size.height() * zoom * dpr));
         
         m_strokeCache = QPixmap(physicalSize);
-        m_strokeCache.setDevicePixelRatio(dpr);
+        // Set device pixel ratio to zoom * dpr so Qt draws at logical page size
+        m_strokeCache.setDevicePixelRatio(zoom * dpr);
         m_strokeCache.fill(Qt::transparent);
         
         if (m_strokes.isEmpty()) {
             m_strokeCacheDirty = false;
+            m_cacheZoom = zoom;
             m_cacheDpr = dpr;
             return;
         }
@@ -407,12 +446,15 @@ private:
         QPainter cachePainter(&m_strokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
         
-        // Render all strokes to cache
+        // Strokes are in page coordinates - with devicePixelRatio set to zoom * dpr,
+        // Qt automatically scales the drawing to fill the physical pixmap.
+        // This gives us zoom-level resolution without manual coordinate scaling.
         for (const auto& stroke : m_strokes) {
             renderStroke(cachePainter, stroke);
         }
         
         m_strokeCacheDirty = false;
+        m_cacheZoom = zoom;
         m_cacheDpr = dpr;
     }
 };

@@ -344,12 +344,12 @@ add_executable(${PROJECT_NAME}
         source/ControllerMappingDialog.cpp
         source/MarkdownNoteEntry.cpp
         source/MarkdownNotesSidebar.cpp
-        source/PictureWindow.cpp
-        source/PictureWindowManager.cpp
+	  source/PictureWindow.cpp
+    	  source/PictureWindowManager.cpp
         source/PdfOpenDialog.cpp
-        source/PdfRelinkDialog.cpp
-        source/SpnPackageManager.cpp
-        source/LauncherWindow.cpp
+	  source/PdfRelinkDialog.cpp
+    	  source/SpnPackageManager.cpp
+    	  source/LauncherWindow.cpp
         source/PictureSourceDialog.cpp
         source/ExistingPictureDialog.cpp
         source/DocumentConverter.cpp

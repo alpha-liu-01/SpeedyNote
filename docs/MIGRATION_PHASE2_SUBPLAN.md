@@ -107,11 +107,24 @@ private:
 
 ---
 
-### Task 2.2: Stroke Creation (~250 lines)
+### Task 2.2: Stroke Creation (~250 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
 **Goal:** Implement actual stroke drawing in DocumentViewport.
+
+**Implemented:**
+- Added `m_currentStroke`, `m_isDrawing`, `MIN_DISTANCE_SQ` members
+- Added `startStroke()`, `continueStroke()`, `finishStroke()`, `addPointToStroke()` methods
+- Point decimation (1.5px threshold) to reduce points by 50-70%
+- Pressure peak preservation when skipping points
+- Updated `handlePointerPress/Move/Release` to call stroke methods
+- Added in-progress stroke rendering in `paintEvent()` using `VectorLayer::renderStroke()`
+- Strokes are stored in `Page->activeLayer()` on completion
+- **ZOOM-AWARE CACHING**: VectorLayer stroke cache now includes zoom level
+  - Cache built at `pageSize * zoom * dpr` physical pixels
+  - Sharp rendering at any zoom level without aliasing
+  - Auto-rebuilds when zoom changes (lazy invalidation)
 
 **Key code to migrate from VectorCanvas:**
 1. `addPoint()` with point decimation
@@ -749,7 +762,7 @@ static bool testPerPageUndo() {
 | Task | Description | Est. Lines | Dependencies | Status |
 |------|-------------|------------|--------------|--------|
 | 2.1 | Tool State Management | 100 | 1.3 | ✅ |
-| 2.2 | Stroke Creation | 250 | 2.1 | [ ] |
+| 2.2 | Stroke Creation | 250 | 2.1 | ✅ |
 | 2.3 | Incremental Stroke Rendering | 150 | 2.2 | [ ] |
 | 2.4 | Eraser Tool | 150 | 2.1 | [ ] |
 | 2.5 | Per-Page Undo/Redo | 200 | 2.2, 2.4 | [ ] |
@@ -826,8 +839,8 @@ Phase 2B tasks are independent and can be done in any order after 2.7.
 
 | VectorCanvas Code | Migrate To | Status |
 |-------------------|------------|--------|
-| `addPoint()` with decimation | `addPointToStroke()` | [ ] |
-| `finishStroke()` | `finishStroke()` | [ ] |
+| `addPoint()` with decimation | `addPointToStroke()` | [x] |
+| `finishStroke()` | `finishStroke()` | [x] |
 | `eraseAt()` | `eraseAt()` | [ ] |
 | `renderCurrentStrokeIncremental()` | Same name | [ ] |
 | `resetCurrentStrokeCache()` | Same name | [ ] |

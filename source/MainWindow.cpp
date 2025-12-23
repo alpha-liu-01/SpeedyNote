@@ -809,7 +809,7 @@ void MainWindow::setupUi() {
     connect(trackpadModeTimer, &QTimer::timeout, this, [this]() {
         trackpadModeActive = false;
     });
-
+    
 #ifdef Q_OS_LINUX
     // Create timer for palm rejection restore delay
     palmRejectionTimer = new QTimer(this);
@@ -4706,22 +4706,22 @@ void MainWindow::updateDialDisplay() {
                 switch (currentCanvas()->getCurrentTool()) {
                     case ToolType::Pen:
                         toolName = tr("Pen");
-                        break;
+            break;
                     case ToolType::Marker:
                         toolName = tr("Marker");
-                        break;
+            break;
                     case ToolType::Eraser:
                         toolName = tr("Eraser");
-                        break;
+                    break;
                     case ToolType::VectorPen:
                         toolName = tr("Vector Pen");
                         break;
                     case ToolType::VectorEraser:
                         toolName = tr("Vector Eraser");
                         break;
-                }
+            }
                 dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(currentCanvas()->getPenThickness(), 'f', 1))));
-                dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             }
             break;  
         case DialMode::ZoomControl:
@@ -5030,9 +5030,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             }
         }
         // Handle mouse button press events for forward/backward navigation
-        // ✅ Don't handle BackButton/ForwardButton here anymore - handled by mouse dial system
-        // They will handle short press page navigation and long press dial mode
-        /*
+            // ✅ Don't handle BackButton/ForwardButton here anymore - handled by mouse dial system
+            // They will handle short press page navigation and long press dial mode
+            /*
         else if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
             

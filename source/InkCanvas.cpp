@@ -149,7 +149,7 @@ InkCanvas::InkCanvas(QWidget *parent)
     trackpadZoomAnimationTimer = new QTimer(this);
     trackpadZoomAnimationTimer->setInterval(16); // ~60 FPS
     connect(trackpadZoomAnimationTimer, &QTimer::timeout, this, &InkCanvas::updateTrackpadZoomAnimation);
-
+    
     // Initialize auto-save timer (single-shot, triggered after first edit)
     autoSaveTimer = new QTimer(this);
     autoSaveTimer->setSingleShot(true);
