@@ -181,7 +181,7 @@ private:
 
 ---
 
-#### Task 3.0.2: Create TabManager Class (~100 lines)
+#### Task 3.0.2: Create TabManager Class (~100 lines) ✅ COMPLETE
 
 **Files:** `source/ui/TabManager.h`, `source/ui/TabManager.cpp`
 
@@ -242,7 +242,7 @@ private:
 
 ---
 
-#### Task 3.0.3: Create LayerPanel Class (~250 lines)
+#### Task 3.0.3: Create LayerPanel Class (~250 lines) ✅ COMPLETE
 
 **Files:** `source/ui/LayerPanel.h`, `source/ui/LayerPanel.cpp`
 
@@ -1059,8 +1059,8 @@ void MainWindow::updateDebugStatus() {
 |------|-------------|------------|--------|
 | **3.0 Pre-Integration** | | | |
 | 3.0.1 | DocumentManager class | ~150 | ✅ |
-| 3.0.2 | TabManager class | ~100 | [ ] |
-| 3.0.3 | LayerPanel class | ~250 | [ ] |
+| 3.0.2 | TabManager class | ~100 | ✅ |
+| 3.0.3 | LayerPanel class | ~250 | ✅ |
 | 3.0.4 | Command line flag | ~20 | [ ] |
 | **3.1 Disconnect InkCanvas** | | | |
 | 3.1.1 | Conditional creation | ~50 | [ ] |

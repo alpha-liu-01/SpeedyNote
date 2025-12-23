@@ -326,6 +326,12 @@ set(STROKE_SOURCES
         # source/strokes/VectorStroke.cpp    # Task 1.1.2
 )
 
+# ✅ NEW ARCHITECTURE: UI components (Phase 3)
+set(UI_SOURCES
+        source/ui/TabManager.cpp             # Task 3.0.2
+        source/ui/LayerPanel.cpp             # Task 3.0.3
+)
+
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
 set(PDF_SOURCES
         source/pdf/PopplerPdfProvider.cpp  # Task 1.2.2
@@ -362,6 +368,7 @@ add_executable(${PROJECT_NAME}
         # New architecture sources (uncomment as implemented)
         ${CORE_SOURCES}
         ${LAYER_SOURCES}
+        ${UI_SOURCES}
         ${OBJECT_SOURCES}
         ${STROKE_SOURCES}
         ${PDF_SOURCES}
