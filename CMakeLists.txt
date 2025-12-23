@@ -361,8 +361,8 @@ add_executable(${PROJECT_NAME}
         source/ExistingPictureDialog.cpp
         source/DocumentConverter.cpp
 
-        # source/VectorCanvas.cpp  # REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
-        # source/VectorCanvas.h    # REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
+        source/VectorCanvas.cpp    # Keep until InkCanvas is removed (dependency)
+        source/VectorCanvas.h      # Keep until InkCanvas is removed (dependency)
         
         # New architecture sources (uncomment as implemented)
         ${CORE_SOURCES}

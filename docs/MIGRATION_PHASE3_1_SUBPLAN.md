@@ -84,32 +84,43 @@ void MainWindow::addNewTab() {
 
 ---
 
-### Task 3.1.3: Remove VectorCanvas and Buttons (~100 lines) ✅ COMPLETE
+### Task 3.1.3: Remove VectorCanvas Buttons from MainWindow (~100 lines) ✅ COMPLETE
 
-**Goal:** Remove VectorCanvas overlay and its toolbar buttons.
+**Goal:** Remove VectorCanvas toolbar buttons (VP, VE, VUndo) from MainWindow.
 
-**Files:** `MainWindow.h`, `MainWindow.cpp`, `CMakeLists.txt`
+> **IMPORTANT DEPENDENCY:** VectorCanvas.cpp/h must stay in CMakeLists.txt until InkCanvas is removed!
+> InkCanvas internally creates VectorCanvas (`initializeVectorCanvas()`), so removing VectorCanvas 
+> from the build causes linker errors. VectorCanvas files will be removed in Phase 5 cleanup.
 
-**Remove from MainWindow.h:**
+**Files:** `MainWindow.h`, `MainWindow.cpp` (NOT CMakeLists.txt!)
+
+**Removed from MainWindow.h:** ✅
 ```cpp
-// Remove these members:
+// Removed:
 QPushButton *vectorPenButton;
 QPushButton *vectorEraserButton;
 QPushButton *vectorUndoButton;
+void setVectorPenTool();
+void setVectorEraserTool();
+void vectorUndo();
 ```
 
-**Remove from MainWindow.cpp:**
-- VectorCanvas #include
+**Removed from MainWindow.cpp:** ✅
+- `#include "VectorCanvas.h"` (commented out)
 - Button creation and connections
 - `setVectorPenTool()`, `setVectorEraserTool()`, `vectorUndo()` methods
+- Layout additions for vector buttons
+- References in `updateToolButtonStates()`
+- References in `toggleBenchmark()`
 
-**Remove from CMakeLists.txt:**
+**NOT removed from CMakeLists.txt:** (deferred to Phase 5)
 ```cmake
-# Remove from SOURCES:
+# KEEP these until InkCanvas is removed:
 source/VectorCanvas.cpp
+source/VectorCanvas.h
 ```
 
-**Verification:** App compiles without VectorCanvas
+**Verification:** App compiles (VectorCanvas still in build, buttons removed from UI)
 
 ---
 
