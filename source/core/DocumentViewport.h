@@ -512,6 +512,12 @@ private:
     /// Point decimation threshold - skip points closer than 1.5 pixels
     static constexpr qreal MIN_DISTANCE_SQ = 1.5 * 1.5;
     
+    // ===== Incremental Stroke Rendering (Task 2.3) =====
+    QPixmap m_currentStrokeCache;             ///< Cache for in-progress stroke segments
+    int m_lastRenderedPointIndex = 0;         ///< Index of last point rendered to cache
+    qreal m_cacheZoom = 1.0;                  ///< Zoom level when cache was built
+    QPointF m_cachePan;                       ///< Pan offset when cache was built
+    
     // ===== Private Methods =====
     
     /**
@@ -645,6 +651,40 @@ private:
      * @param pressure Pressure value (0.0 to 1.0).
      */
     void addPointToStroke(const QPointF& pagePos, qreal pressure);
+    
+    // ===== Incremental Stroke Rendering (Task 2.3) =====
+    
+    /**
+     * @brief Reset the current stroke cache for a new stroke.
+     * Creates a transparent pixmap at viewport size for accumulating stroke segments.
+     */
+    void resetCurrentStrokeCache();
+    
+    /**
+     * @brief Render the in-progress stroke incrementally.
+     * @param painter The QPainter to render to (viewport painter, unmodified transform).
+     * 
+     * Only renders NEW segments since last call, accumulating in m_currentStrokeCache.
+     * This is much faster than re-rendering the entire stroke each frame.
+     */
+    void renderCurrentStrokeIncremental(QPainter& painter);
+    
+    // ===== Eraser Tool (Task 2.4) =====
+    
+    /**
+     * @brief Erase strokes at the given pointer position.
+     * @param pe The pointer event containing hit information.
+     * 
+     * Finds all strokes within eraser radius and removes them from the layer.
+     * Invalidates stroke cache after removal.
+     */
+    void eraseAt(const PointerEvent& pe);
+    
+    /**
+     * @brief Draw the eraser cursor circle at the current pointer position.
+     * @param painter The QPainter to render to (viewport coordinates).
+     */
+    void drawEraserCursor(QPainter& painter);
     
     // ===== Rendering Helpers (Task 1.3.3) =====
     

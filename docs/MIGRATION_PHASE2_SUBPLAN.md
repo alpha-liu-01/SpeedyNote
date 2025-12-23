@@ -263,11 +263,21 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe) {
 
 ---
 
-### Task 2.3: Incremental Stroke Rendering (~150 lines)
+### Task 2.3: Incremental Stroke Rendering (~150 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
 **Goal:** Render in-progress stroke efficiently (not redrawing entire stroke each frame).
+
+**Implemented:**
+- Added `m_currentStrokeCache` QPixmap for caching rendered segments
+- Added `m_lastRenderedPointIndex` to track progress
+- Added `m_cacheZoom`, `m_cachePan` to detect transform changes
+- `resetCurrentStrokeCache()` - creates viewport-sized transparent cache
+- `renderCurrentStrokeIncremental()` - renders only NEW segments to cache
+- Cache auto-invalidates on resize, pan, or zoom changes during drawing
+- End cap always rendered fresh (follows current position)
+- Integrated into `paintEvent()` and `startStroke()`/`finishStroke()`
 
 **Add to DocumentViewport.h:**
 ```cpp
@@ -379,11 +389,19 @@ void DocumentViewport::paintEvent(QPaintEvent* event) {
 
 ---
 
-### Task 2.4: Eraser Tool (~150 lines)
+### Task 2.4: Eraser Tool (~150 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
 **Goal:** Implement stroke-based eraser using VectorLayer's existing hit detection.
+
+**Implemented:**
+- Added `eraseAt(const PointerEvent& pe)` - finds and removes strokes at pointer position
+- Added `drawEraserCursor(QPainter& painter)` - draws dashed circle at cursor position
+- Uses `VectorLayer::strokesAtPoint()` for hit detection with `m_eraserSize` tolerance
+- Eraser cursor visible during hover (mouse tracking enabled)
+- Stroke cache auto-invalidated on removal
+- Undo integration prepared (commented out, Task 2.5)
 
 **Add to DocumentViewport.h:**
 ```cpp
@@ -763,8 +781,8 @@ static bool testPerPageUndo() {
 |------|-------------|------------|--------------|--------|
 | 2.1 | Tool State Management | 100 | 1.3 | ✅ |
 | 2.2 | Stroke Creation | 250 | 2.1 | ✅ |
-| 2.3 | Incremental Stroke Rendering | 150 | 2.2 | [ ] |
-| 2.4 | Eraser Tool | 150 | 2.1 | [ ] |
+| 2.3 | Incremental Stroke Rendering | 150 | 2.2 | ✅ |
+| 2.4 | Eraser Tool | 150 | 2.1 | ✅ |
 | 2.5 | Per-Page Undo/Redo | 200 | 2.2, 2.4 | [ ] |
 | 2.6 | Benchmark Integration | 50 | 2.3 | [ ] |
 | 2.7 | Drawing Tests | 100 | All above | [ ] |
@@ -841,9 +859,9 @@ Phase 2B tasks are independent and can be done in any order after 2.7.
 |-------------------|------------|--------|
 | `addPoint()` with decimation | `addPointToStroke()` | [x] |
 | `finishStroke()` | `finishStroke()` | [x] |
-| `eraseAt()` | `eraseAt()` | [ ] |
-| `renderCurrentStrokeIncremental()` | Same name | [ ] |
-| `resetCurrentStrokeCache()` | Same name | [ ] |
+| `eraseAt()` | `eraseAt()` | [x] |
+| `renderCurrentStrokeIncremental()` | Same name | [x] |
+| `resetCurrentStrokeCache()` | Same name | [x] |
 | `UndoAction` struct | Same struct | [ ] |
 | `undo()` / `redo()` | Per-page versions | [ ] |
 | `startBenchmark()` / `getPaintRate()` | Same | [ ] |

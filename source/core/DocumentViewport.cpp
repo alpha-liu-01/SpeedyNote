@@ -654,22 +654,17 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.restore();
     }
     
-    // Render current stroke being drawn (Task 2.2)
-    // This is rendered on top of the page content but still in document space
+    painter.restore();
+    
+    // Render current stroke with incremental caching (Task 2.3)
+    // This is done AFTER restoring the painter transform because the cache
+    // is in viewport coordinates (not document coordinates)
     if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
-        QPointF pagePos = pagePosition(m_activeDrawingPage);
-        
-        painter.save();
-        painter.translate(pagePos);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        
-        // Render the in-progress stroke using VectorLayer's static helper
-        VectorLayer::renderStroke(painter, m_currentStroke);
-        
-        painter.restore();
+        renderCurrentStrokeIncremental(painter);
     }
     
-    painter.restore();
+    // Draw eraser cursor (Task 2.4)
+    drawEraserCursor(painter);
     
     // Draw debug info overlay if enabled
     if (m_showDebugOverlay) {
@@ -771,10 +766,18 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         return;
     }
     
-    // Only process move if we have an active pointer or for hover
+    // Process move if we have an active pointer or for hover
     if (m_pointerActive || (event->buttons() & Qt::LeftButton)) {
         PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Move);
         handlePointerEvent(pe);
+    } else {
+        // Track position for eraser cursor even when not pressing (hover)
+        m_lastPointerPos = event->position();
+        
+        // Request repaint if eraser tool is active (to update cursor)
+        if (m_currentTool == ToolType::Eraser || m_currentTool == ToolType::VectorEraser) {
+            update();
+        }
     }
     event->accept();
 }
@@ -1237,7 +1240,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     if (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen) {
         startStroke(pe);
     } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
-        // TODO (Task 2.4): eraseAt(pe);
+        eraseAt(pe);
     }
     
     update();  // Trigger repaint for visual feedback
@@ -1259,7 +1262,7 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
     if (m_isDrawing && (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen)) {
         continueStroke(pe);
     } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
-        // TODO (Task 2.4): eraseAt(pe);
+        eraseAt(pe);
         update();  // Update eraser cursor
     }
 }
@@ -1307,6 +1310,9 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_currentStroke.color = m_penColor;
     m_currentStroke.baseThickness = m_penThickness;
+    
+    // Reset incremental rendering cache (Task 2.3)
+    resetCurrentStrokeCache();
     
     // Add first point
     addPointToStroke(pe.pageHit.pagePoint, pe.pressure);
@@ -1361,6 +1367,7 @@ void DocumentViewport::finishStroke()
     // Clear stroke state
     m_currentStroke = VectorStroke();
     m_isDrawing = false;
+    m_lastRenderedPointIndex = 0;  // Reset incremental rendering state
     
     emit documentModified();
 }
@@ -1392,8 +1399,180 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
     pt.pressure = qBound(0.1, pressure, 1.0);
     m_currentStroke.points.append(pt);
     
-    // Request repaint - use full update for now, will optimize in Task 2.3
+    // Request repaint - incremental rendering (Task 2.3) makes this efficient
     update();
+}
+
+// ===== Incremental Stroke Rendering (Task 2.3) =====
+
+void DocumentViewport::resetCurrentStrokeCache()
+{
+    // Create cache at viewport size with high DPI support
+    qreal dpr = devicePixelRatioF();
+    QSize physicalSize(static_cast<int>(width() * dpr), 
+                       static_cast<int>(height() * dpr));
+    
+    m_currentStrokeCache = QPixmap(physicalSize);
+    m_currentStrokeCache.setDevicePixelRatio(dpr);
+    m_currentStrokeCache.fill(Qt::transparent);
+    m_lastRenderedPointIndex = 0;
+    
+    // Track the transform state when cache was created
+    m_cacheZoom = m_zoomLevel;
+    m_cachePan = m_panOffset;
+}
+
+void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
+{
+    // ========== OPTIMIZATION: Incremental Stroke Rendering ==========
+    // Instead of re-rendering the entire current stroke every frame,
+    // we accumulate rendered segments in m_currentStrokeCache and only
+    // render NEW segments to the cache. This reduces CPU load significantly
+    // when drawing long strokes at high poll rates (360Hz).
+    
+    const int n = m_currentStroke.points.size();
+    if (n < 1 || m_activeDrawingPage < 0) return;
+    
+    // Ensure cache is valid (may need recreation after resize or transform change)
+    qreal dpr = devicePixelRatioF();
+    QSize expectedSize(static_cast<int>(width() * dpr), 
+                       static_cast<int>(height() * dpr));
+    
+    // Check if cache needs full rebuild (size changed, or transform changed during drawing)
+    bool needsRebuild = m_currentStrokeCache.isNull() || 
+                        m_currentStrokeCache.size() != expectedSize ||
+                        !qFuzzyCompare(m_cacheZoom, m_zoomLevel) ||
+                        m_cachePan != m_panOffset;
+    
+    if (needsRebuild) {
+        resetCurrentStrokeCache();
+        // Must re-render all points since transform changed
+    }
+    
+    // Render new segments to the cache (if any)
+    if (n > m_lastRenderedPointIndex && n >= 2) {
+        QPainter cachePainter(&m_currentStrokeCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Apply the same transform as paintEvent to convert page coords to viewport coords
+        // The cache is in viewport coordinates (widget pixels)
+        QPointF pagePos = pagePosition(m_activeDrawingPage);
+        cachePainter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+        cachePainter.scale(m_zoomLevel, m_zoomLevel);
+        cachePainter.translate(pagePos);
+        
+        // Use line-based rendering for incremental updates (fast)
+        QPen pen(m_currentStroke.color, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        
+        // Start from the last rendered point (or 1 if starting fresh)
+        int startIdx = qMax(1, m_lastRenderedPointIndex);
+        
+        // Render each new segment
+        for (int i = startIdx; i < n; ++i) {
+            const auto& p0 = m_currentStroke.points[i - 1];
+            const auto& p1 = m_currentStroke.points[i];
+            
+            qreal avgPressure = (p0.pressure + p1.pressure) / 2.0;
+            qreal width = qMax(m_currentStroke.baseThickness * avgPressure, 1.0);
+            
+            pen.setWidthF(width);
+            cachePainter.setPen(pen);
+            cachePainter.drawLine(p0.pos, p1.pos);
+        }
+        
+        // Draw start cap if this is the first render
+        if (m_lastRenderedPointIndex == 0 && n >= 1) {
+            qreal startRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[0].pressure, 1.0) / 2.0;
+            cachePainter.setPen(Qt::NoPen);
+            cachePainter.setBrush(m_currentStroke.color);
+            cachePainter.drawEllipse(m_currentStroke.points[0].pos, startRadius, startRadius);
+        }
+        
+        m_lastRenderedPointIndex = n;
+    }
+    
+    // Blit the cached current stroke to the viewport
+    // The painter here should be in raw viewport coordinates (no transform)
+    painter.drawPixmap(0, 0, m_currentStrokeCache);
+    
+    // Draw end cap at current position (always needs updating as it moves)
+    if (n >= 1) {
+        // Apply transform to draw end cap at correct position
+        painter.save();
+        painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+        painter.scale(m_zoomLevel, m_zoomLevel);
+        painter.translate(pagePosition(m_activeDrawingPage));
+        
+        qreal endRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[n - 1].pressure, 1.0) / 2.0;
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(m_currentStroke.color);
+        painter.drawEllipse(m_currentStroke.points[n - 1].pos, endRadius, endRadius);
+        
+        painter.restore();
+    }
+}
+
+// ===== Eraser Tool (Task 2.4) =====
+
+void DocumentViewport::eraseAt(const PointerEvent& pe)
+{
+    if (!m_document || !pe.pageHit.valid()) return;
+    
+    Page* page = m_document->page(pe.pageHit.pageIndex);
+    if (!page) return;
+    
+    VectorLayer* layer = page->activeLayer();
+    if (!layer || layer->locked) return;
+    
+    // Find strokes at eraser position
+    QVector<QString> hitIds = layer->strokesAtPoint(pe.pageHit.pagePoint, m_eraserSize);
+    
+    if (hitIds.isEmpty()) return;
+    
+    // Collect strokes for undo before removing (Task 2.5 will use this)
+    // QVector<VectorStroke> removedStrokes;
+    // for (const QString& id : hitIds) {
+    //     const VectorStroke* stroke = layer->strokeById(id);
+    //     if (stroke) removedStrokes.append(*stroke);
+    // }
+    
+    // Remove strokes
+    for (const QString& id : hitIds) {
+        layer->removeStroke(id);
+    }
+    
+    // Stroke cache is automatically invalidated by removeStroke()
+    
+    // TODO (Task 2.5): Push undo action
+    // if (removedStrokes.size() == 1) {
+    //     pushUndoAction(pe.pageHit.pageIndex, UndoAction::RemoveStroke, removedStrokes[0]);
+    // } else if (removedStrokes.size() > 1) {
+    //     pushUndoAction(pe.pageHit.pageIndex, UndoAction::RemoveMultiple, removedStrokes);
+    // }
+    
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::drawEraserCursor(QPainter& painter)
+{
+    if (m_currentTool != ToolType::Eraser && m_currentTool != ToolType::VectorEraser) {
+        return;
+    }
+    
+    // Only draw if we have a valid pointer position
+    if (m_lastPointerPos.isNull()) {
+        return;
+    }
+    
+    // Draw eraser circle at last pointer position (in viewport coordinates)
+    // The eraser size is in document units, so scale by zoom for screen display
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    painter.setPen(QPen(Qt::gray, 1, Qt::DashLine));
+    painter.setBrush(Qt::NoBrush);
+    
+    qreal screenRadius = m_eraserSize * m_zoomLevel;
+    painter.drawEllipse(m_lastPointerPos, screenRadius, screenRadius);
 }
 
 // ===== Rendering Helpers (Task 1.3.3) =====
