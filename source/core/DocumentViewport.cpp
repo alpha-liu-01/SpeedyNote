@@ -19,6 +19,7 @@
 #include <limits>
 #include <QDateTime>  // For timestamp
 #include <QUuid>      // For stroke IDs
+#include <QSet>       // For efficient ID lookup in eraseAt
 
 // ===== Constructor & Destructor =====
 
@@ -1699,12 +1700,16 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     if (hitIds.isEmpty()) return;
     
     // Collect strokes for undo before removing
+    // Use a set for O(1) lookup instead of O(n) per ID
+    QSet<QString> hitIdSet(hitIds.begin(), hitIds.end());
     QVector<VectorStroke> removedStrokes;
-    for (const QString& id : hitIds) {
-        for (const VectorStroke& s : layer->strokes()) {
-            if (s.id == id) {
-                removedStrokes.append(s);
-                break;
+    removedStrokes.reserve(hitIds.size());
+    
+    for (const VectorStroke& s : layer->strokes()) {
+        if (hitIdSet.contains(s.id)) {
+            removedStrokes.append(s);
+            if (removedStrokes.size() == hitIds.size()) {
+                break;  // Found all strokes, no need to continue
             }
         }
     }
@@ -1743,8 +1748,9 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
         return;
     }
     
-    // Only draw if we have a valid pointer position
-    if (m_lastPointerPos.isNull()) {
+    // Only draw if pointer is within the viewport
+    // Note: Don't use isNull() - QPointF(0,0) is a valid position!
+    if (!rect().contains(m_lastPointerPos.toPoint())) {
         return;
     }
     
@@ -1768,24 +1774,8 @@ void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, 
     action.stroke = stroke;
     
     m_undoStacks[pageIndex].push(action);
-    
-    // Limit stack size to prevent unbounded memory growth
-    while (m_undoStacks[pageIndex].size() > MAX_UNDO_PER_PAGE) {
-        // Remove oldest action (bottom of stack)
-        QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
-        QStack<PageUndoAction> temp;
-        while (!stack.isEmpty()) {
-            temp.push(stack.pop());
-        }
-        temp.pop();  // Remove the oldest
-        while (!temp.isEmpty()) {
-            stack.push(temp.pop());
-        }
-    }
-    
-    // Clear redo stack - new action invalidates redo history
+    trimUndoStack(pageIndex);
     clearRedoStack(pageIndex);
-    
     emit undoAvailableChanged(canUndo());
 }
 
@@ -1797,20 +1787,7 @@ void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, 
     action.strokes = strokes;
     
     m_undoStacks[pageIndex].push(action);
-    
-    // Limit stack size
-    while (m_undoStacks[pageIndex].size() > MAX_UNDO_PER_PAGE) {
-        QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
-        QStack<PageUndoAction> temp;
-        while (!stack.isEmpty()) {
-            temp.push(stack.pop());
-        }
-        temp.pop();
-        while (!temp.isEmpty()) {
-            stack.push(temp.pop());
-        }
-    }
-    
+    trimUndoStack(pageIndex);
     clearRedoStack(pageIndex);
     emit undoAvailableChanged(canUndo());
 }
@@ -1822,6 +1799,33 @@ void DocumentViewport::clearRedoStack(int pageIndex)
         m_redoStacks[pageIndex].clear();
         if (hadRedo) {
             emit redoAvailableChanged(false);
+        }
+    }
+}
+
+void DocumentViewport::trimUndoStack(int pageIndex)
+{
+    // Limit stack size to prevent unbounded memory growth
+    // Using a simple approach: if over limit, convert to list, remove front, convert back
+    // This is O(n) but only runs when stack exceeds limit (rare)
+    if (m_undoStacks[pageIndex].size() > MAX_UNDO_PER_PAGE) {
+        QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
+        
+        // Convert to list for efficient front removal
+        QList<PageUndoAction> list;
+        list.reserve(stack.size());
+        while (!stack.isEmpty()) {
+            list.prepend(stack.pop());
+        }
+        
+        // Remove oldest entries until within limit
+        while (list.size() > MAX_UNDO_PER_PAGE) {
+            list.removeFirst();
+        }
+        
+        // Convert back to stack
+        for (const auto& action : list) {
+            stack.push(action);
         }
     }
 }

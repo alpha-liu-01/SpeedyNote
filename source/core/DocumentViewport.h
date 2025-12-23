@@ -811,6 +811,12 @@ private:
      */
     void clearRedoStack(int pageIndex);
     
+    /**
+     * @brief Trim undo stack to MAX_UNDO_PER_PAGE if exceeded.
+     * @param pageIndex The page whose undo stack to trim.
+     */
+    void trimUndoStack(int pageIndex);
+    
     // ===== Rendering Helpers (Task 1.3.3) =====
     
     /**
