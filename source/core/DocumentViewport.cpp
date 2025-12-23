@@ -1396,25 +1396,34 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 {
     if (!m_document || !m_pointerActive) return;
     
-    // Update last pointer position for cursor tracking
-    m_lastPointerPos = pe.viewportPos;
-    
     // Only process if we have an active drawing page
     if (m_activeDrawingPage < 0) {
+        // Still update eraser cursor position when not on a valid page
+        if (m_hardwareEraserActive || m_currentTool == ToolType::Eraser) {
+            updateEraserCursor(pe.viewportPos);
+        } else {
+            m_lastPointerPos = pe.viewportPos;
+        }
         return;
     }
     
     // Handle tool-specific actions
     // Hardware eraser: use m_hardwareEraserActive (set on Press) because some tablets
     // don't consistently report pointerType() == Eraser in every move event
+    // NOTE: For eraser, updateEraserCursor() handles m_lastPointerPos update and dirty region
+    // For pen/marker, we update m_lastPointerPos directly (no cursor to track)
     if (m_hardwareEraserActive || pe.isEraser) {
         eraseAt(pe);
-        // eraseAt() already does targeted update, no need for full update here
-    } else if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
-        continueStroke(pe);
+        // eraseAt() calls updateEraserCursor() which handles position and targeted update
     } else if (m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
-        // eraseAt() already does targeted update
+        // eraseAt() calls updateEraserCursor() which handles position and targeted update
+    } else if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
+        m_lastPointerPos = pe.viewportPos;
+        continueStroke(pe);
+    } else {
+        // Non-drawing move event - update position for any cursor tracking
+        m_lastPointerPos = pe.viewportPos;
     }
 }
 
@@ -1686,18 +1695,32 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 
 void DocumentViewport::eraseAt(const PointerEvent& pe)
 {
-    if (!m_document || !pe.pageHit.valid()) return;
+    if (!m_document || !pe.pageHit.valid()) {
+        // Still update eraser cursor even if not on valid page
+        updateEraserCursor(pe.viewportPos);
+        return;
+    }
     
     Page* page = m_document->page(pe.pageHit.pageIndex);
-    if (!page) return;
+    if (!page) {
+        updateEraserCursor(pe.viewportPos);
+        return;
+    }
     
     VectorLayer* layer = page->activeLayer();
-    if (!layer || layer->locked) return;
+    if (!layer || layer->locked) {
+        updateEraserCursor(pe.viewportPos);
+        return;
+    }
     
     // Find strokes at eraser position
     QVector<QString> hitIds = layer->strokesAtPoint(pe.pageHit.pagePoint, m_eraserSize);
     
-    if (hitIds.isEmpty()) return;
+    if (hitIds.isEmpty()) {
+        // No strokes to erase, but still update eraser cursor position
+        updateEraserCursor(pe.viewportPos);
+        return;
+    }
     
     // Collect strokes for undo before removing
     // Use a set for O(1) lookup instead of O(n) per ID
@@ -1732,11 +1755,39 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     
     // ========== OPTIMIZATION: Dirty Region Update for Eraser ==========
     // Calculate region around eraser position for targeted repaint
-    qreal eraserRadius = m_eraserSize * m_zoomLevel;
-    QPointF vpPos = pe.viewportPos;
-    QRectF dirtyRect(vpPos.x() - eraserRadius - 10, vpPos.y() - eraserRadius - 10,
-                     (eraserRadius + 10) * 2, (eraserRadius + 10) * 2);
-    update(dirtyRect.toRect());
+    // Include both old cursor position (to erase it) and new position (for stroke removal area)
+    QPointF oldPos = m_lastPointerPos;
+    m_lastPointerPos = pe.viewportPos;
+    
+    qreal eraserRadius = m_eraserSize * m_zoomLevel + 10;  // +10 for stroke visibility margin
+    QPointF newPos = pe.viewportPos;
+    
+    // Union of old cursor position and new eraser area
+    QRectF newRect(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
+                   eraserRadius * 2, eraserRadius * 2);
+    QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                   eraserRadius * 2, eraserRadius * 2);
+    
+    update(newRect.united(oldRect).toRect());
+}
+
+void DocumentViewport::updateEraserCursor(const QPointF& newPos)
+{
+    // ========== Targeted update for eraser cursor movement ==========
+    // This ensures smooth cursor movement even when not erasing strokes
+    
+    QPointF oldPos = m_lastPointerPos;
+    m_lastPointerPos = newPos;
+    
+    qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;  // +5 for stroke width margin
+    
+    // Union of old and new cursor positions for efficient repaint
+    QRectF newRect(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
+                   eraserRadius * 2, eraserRadius * 2);
+    QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                   eraserRadius * 2, eraserRadius * 2);
+    
+    update(newRect.united(oldRect).toRect());
 }
 
 void DocumentViewport::drawEraserCursor(QPainter& painter)

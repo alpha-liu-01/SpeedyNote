@@ -782,6 +782,15 @@ private:
     void eraseAt(const PointerEvent& pe);
     
     /**
+     * @brief Update the eraser cursor position and trigger targeted repaint.
+     * @param newPos The new cursor position in viewport coordinates.
+     *
+     * This ensures smooth cursor movement even when not actively erasing strokes.
+     * Uses a dirty region update for efficiency.
+     */
+    void updateEraserCursor(const QPointF& newPos);
+    
+    /**
      * @brief Draw the eraser cursor circle at the current pointer position.
      * @param painter The QPainter to render to (viewport coordinates).
      */
