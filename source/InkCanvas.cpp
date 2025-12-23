@@ -1,5 +1,5 @@
 #include "InkCanvas.h"
-#include "ToolType.h"
+#include "core/ToolType.h"
 #include "VectorCanvas.h" // Vector overlay for vector-based drawing
 #include "PictureWindowManager.h"
 #include "PictureWindow.h" // Include the full definition
@@ -1705,9 +1705,9 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
                 case ToolType::Eraser:
                     penThickness = eraserToolThickness;
                     break;
-                case ToolType::VectorPen:
-                case ToolType::VectorEraser:
-                    // Vector tools handle their own thickness
+                case ToolType::Highlighter:
+                case ToolType::Lasso:
+                    // Future tools - not implemented yet in InkCanvas
                     break;
             }
         }
@@ -2367,11 +2367,9 @@ void InkCanvas::setPenThickness(qreal thickness) {
         case ToolType::Eraser:
             eraserToolThickness = thickness;
             break;
-        case ToolType::VectorPen:
-            penToolThickness = thickness;
-            break;
-        case ToolType::VectorEraser:
-            eraserToolThickness = thickness;
+        case ToolType::Highlighter:
+        case ToolType::Lasso:
+            // Future tools - not implemented yet in InkCanvas
             break;
     }
     
@@ -2402,9 +2400,9 @@ void InkCanvas::adjustAllToolThicknesses(qreal zoomRatio) {
         case ToolType::Eraser:
             penThickness = eraserToolThickness;
             break;
-        case ToolType::VectorPen:
-        case ToolType::VectorEraser:
-            // Vector tools handle their own thickness
+        case ToolType::Highlighter:
+        case ToolType::Lasso:
+            // Future tools - not implemented yet in InkCanvas
             break;
     }
 }
@@ -2423,41 +2421,18 @@ void InkCanvas::setTool(ToolType tool) {
         case ToolType::Eraser:
             penThickness = eraserToolThickness;
             break;
-        case ToolType::VectorPen:
-            // Initialize vector canvas if not already done
-            if (!vectorCanvas) {
-                initializeVectorCanvas();
-            }
-            if (vectorCanvas) {
-                vectorCanvas->setTool(VectorCanvas::Tool::Pen);
-                vectorCanvas->setPenColor(penColor);
-                vectorCanvas->setPenThickness(penToolThickness);
-                vectorCanvas->setInputActive(true);  // Enable input on vector canvas
-                vectorCanvas->show();
-                vectorCanvas->raise();
-            }
-            break;
-        case ToolType::VectorEraser:
-            // Initialize vector canvas if not already done
-            if (!vectorCanvas) {
-                initializeVectorCanvas();
-            }
-            if (vectorCanvas) {
-                vectorCanvas->setTool(VectorCanvas::Tool::Eraser);
-                vectorCanvas->setEraserSize(eraserToolThickness * 3);
-                vectorCanvas->setInputActive(true);  // Enable input on vector canvas
-                vectorCanvas->show();
-                vectorCanvas->raise();
-            }
+        case ToolType::Highlighter:
+        case ToolType::Lasso:
+            // Future tools - will be implemented in DocumentViewport (Phase 2B)
+            // For now, fall back to pen behavior
+            penThickness = penToolThickness;
             break;
     }
     
     // Disable vector canvas input when using non-vector tools (but keep strokes visible)
-    if (currentTool != ToolType::VectorPen && currentTool != ToolType::VectorEraser) {
-        if (vectorCanvas) {
-            vectorCanvas->setInputActive(false);  // Disable input - events pass through to InkCanvas
-            // Don't hide - keep it visible so strokes are shown
-        }
+    if (vectorCanvas) {
+        vectorCanvas->setInputActive(false);  // Disable input - events pass through to InkCanvas
+        // Don't hide - keep it visible so strokes are shown
     }
 }
 

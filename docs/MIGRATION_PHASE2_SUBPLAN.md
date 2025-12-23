@@ -862,8 +862,8 @@ Phase 2B tasks are independent and can be done in any order after 2.7.
 | `eraseAt()` | `eraseAt()` | [x] |
 | `renderCurrentStrokeIncremental()` | Same name | [x] |
 | `resetCurrentStrokeCache()` | Same name | [x] |
-| `UndoAction` struct | Same struct | [ ] |
-| `undo()` / `redo()` | Per-page versions | [ ] |
+| `UndoAction` struct | Same struct | [x] |
+| `undo()` / `redo()` | Per-page versions | [x] |
 | `startBenchmark()` / `getPaintRate()` | Same | [ ] |
 | Tool enum | Use `ToolType.h` | [x] |
 | Pen color/thickness | Same properties | [x] |

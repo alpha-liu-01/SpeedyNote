@@ -108,7 +108,7 @@ VectorCanvas already has working: pen, eraser, undo, point decimation,
 incremental rendering, benchmarking. We're moving this to the new architecture.
 
 NOTE: DO NOT update VectorCanvas - it will be deleted in Phase 5.
-Keep VectorPen/VectorEraser enum names for backward compatibility.
+ToolType simplified: Pen, Marker, Eraser (no more VectorPen/VectorEraser).
 
 ----- Phase 2A: Core Drawing (Required for MVP) -----
 
@@ -133,10 +133,11 @@ Keep VectorPen/VectorEraser enum names for backward compatibility.
      - Visual eraser cursor (dashed circle)
      - Remove strokes from layer
 
-[  ] 2.5 Per-Page Undo/Redo (~200 lines)
+[✅] 2.5 Per-Page Undo/Redo (~200 lines)
      - MIGRATE UndoAction struct from VectorCanvas
-     - Per-page undo/redo stacks (not global)
+     - Per-page undo/redo stacks (QMap<int, QStack<UndoAction>>)
      - Ctrl+Z / Ctrl+Y keyboard handling
+     - Max 50 undo actions per page
 
 [  ] 2.6 Benchmark Integration (~50 lines)
      - COPY startBenchmark(), getPaintRate() from VectorCanvas
@@ -259,7 +260,8 @@ source/
 │   ├── Page.h / Page.cpp
 │   ├── PageTests.h
 │   ├── DocumentViewport.h / DocumentViewport.cpp
-│   └── DocumentViewportTests.h
+│   ├── DocumentViewportTests.h
+│   └── ToolType.h                ← SIMPLIFIED (Pen, Marker, Eraser, etc.)
 ├── layers/                       ✅ COMPLETE
 │   └── VectorLayer.h
 ├── strokes/                      ✅ COMPLETE
@@ -271,7 +273,7 @@ source/
 ├── pdf/                          ✅ COMPLETE
 │   ├── PdfProvider.h
 │   └── PopplerPdfProvider.h / PopplerPdfProvider.cpp
-├── InkCanvas.h / InkCanvas.cpp   (legacy, to be deprecated)
+├── InkCanvas.h / InkCanvas.cpp   (legacy, reference only)
 ├── VectorCanvas.h / VectorCanvas.cpp (test overlay, to be removed)
 └── MainWindow.h / MainWindow.cpp (to be updated in Phase 3-4)
 
@@ -327,11 +329,15 @@ VectorCanvas (source/VectorCanvas.h/.cpp) - Test overlay with working:
     It will be deleted in Phase 5 after DocumentViewport is complete.
     Use it only as reference for migrating code to DocumentViewport.
 
-MainWindow already has temporary buttons: VP (Vector Pen), VE (Vector Eraser)
-These connect to VectorCanvas which overlays on InkCanvas page 1.
+MainWindow has temporary buttons: VP (Vector Pen), VE (Vector Eraser)
+These will be updated in Phase 3-4 to use the simplified ToolType enum.
 
-ToolType.h: Keep at source/ToolType.h for now (move to core/ in Phase 5)
-- Keep VectorPen/VectorEraser names for backward compatibility
-- Old Pen/Marker/Eraser are OBSOLETE (pixmap tools)
+ToolType.h: ✅ SIMPLIFIED AND MOVED TO source/core/ToolType.h
+- Pen     = Vector pen (pressure-sensitive, undo support)
+- Marker  = Vector marker (semi-transparent)
+- Eraser  = Vector eraser (stroke-based)
+- Highlighter, Lasso = Future tools (Phase 2B)
+- VectorPen/VectorEraser REMOVED - all tools are vector now
+- Old pixmap-based tools from InkCanvas are OBSOLETE
 
 =============================================================================

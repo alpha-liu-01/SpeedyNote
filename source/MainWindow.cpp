@@ -14,7 +14,7 @@
 #include <QTextEdit>
 #include <QPlainTextEdit>
 #include <QPointer>
-#include "ToolType.h" // Include the header file where ToolType is defined
+#include "core/ToolType.h" // Include the header file where ToolType is defined
 #include <QFileDialog>
 #include <QDateTime>
 #include <QDir>
@@ -1566,15 +1566,8 @@ void MainWindow::updateBenchmarkDisplay() {
     
     ToolType tool = currentCanvas()->getCurrentTool();
     
-    // For vector tools, show paint rate from VectorCanvas
-    if (tool == ToolType::VectorPen || tool == ToolType::VectorEraser) {
-        VectorCanvas* vc = currentCanvas()->getVectorCanvas();
-        if (vc) {
-            int paintRate = vc->getPaintRate();
-            benchmarkLabel->setText(QString(tr("Paint:%1 Hz")).arg(paintRate));
-            return;
-        }
-    }
+    // VectorCanvas benchmark removed - will be replaced by DocumentViewport in Phase 3
+    Q_UNUSED(tool);
     
     // For regular tools, show input sample rate from InkCanvas
     int sampleRate = currentCanvas()->getProcessedRate();
@@ -1659,15 +1652,19 @@ void MainWindow::setEraserTool() {
 }
 
 void MainWindow::setVectorPenTool() {
+    // NOTE: VectorPen removed from ToolType - now maps to regular Pen
+    // Will be replaced by DocumentViewport integration in Phase 3
     if (!currentCanvas()) return;
-    currentCanvas()->setTool(ToolType::VectorPen);
+    currentCanvas()->setTool(ToolType::Pen);
     updateToolButtonStates();
     updateDialDisplay();
 }
 
 void MainWindow::setVectorEraserTool() {
+    // NOTE: VectorEraser removed from ToolType - now maps to regular Eraser
+    // Will be replaced by DocumentViewport integration in Phase 3
     if (!currentCanvas()) return;
-    currentCanvas()->setTool(ToolType::VectorEraser);
+    currentCanvas()->setTool(ToolType::Eraser);
     updateToolButtonStates();
     updateDialDisplay();
 }
@@ -1710,11 +1707,9 @@ void MainWindow::updateToolButtonStates() {
             eraserToolButton->setProperty("selected", true);
             updateButtonIcon(eraserToolButton, "eraser");
             break;
-        case ToolType::VectorPen:
-            vectorPenButton->setProperty("selected", true);
-            break;
-        case ToolType::VectorEraser:
-            vectorEraserButton->setProperty("selected", true);
+        case ToolType::Highlighter:
+        case ToolType::Lasso:
+            // Future tools - will be implemented in DocumentViewport (Phase 2B)
             break;
     }
     
@@ -1743,11 +1738,7 @@ void MainWindow::handleColorButtonClick() {
         updateThicknessSliderForCurrentTool();
     }
     
-    // If in vector eraser mode, switch back to vector pen mode
-    if (currentTool == ToolType::VectorEraser) {
-        currentCanvas()->setTool(ToolType::VectorPen);
-        updateToolButtonStates();
-    }
+    // VectorEraser handling removed - simplified ToolType enum
     
     // If rope tool is enabled, turn it off
     if (currentCanvas()->isRopeToolMode()) {
@@ -4713,11 +4704,11 @@ void MainWindow::updateDialDisplay() {
                     case ToolType::Eraser:
                         toolName = tr("Eraser");
                     break;
-                    case ToolType::VectorPen:
-                        toolName = tr("Vector Pen");
+                    case ToolType::Highlighter:
+                        toolName = tr("Highlighter");
                         break;
-                    case ToolType::VectorEraser:
-                        toolName = tr("Vector Eraser");
+                    case ToolType::Lasso:
+                        toolName = tr("Lasso");
                         break;
             }
                 dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(currentCanvas()->getPenThickness(), 'f', 1))));
@@ -4744,13 +4735,13 @@ void MainWindow::updateDialDisplay() {
                     dialDisplay->setText(tr("\n\n\nEraser"));
                     dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/eraser_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                     break;
-                case ToolType::VectorPen:
-                    dialDisplay->setText(tr("\n\n\nVector Pen"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                case ToolType::Highlighter:
+                    dialDisplay->setText(tr("\n\n\nHighlighter"));
+                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/marker_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                     break;
-                case ToolType::VectorEraser:
-                    dialDisplay->setText(tr("\n\n\nVector Eraser"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/eraser_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                case ToolType::Lasso:
+                    dialDisplay->setText(tr("\n\n\nLasso"));
+                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                     break;
             }
             break;

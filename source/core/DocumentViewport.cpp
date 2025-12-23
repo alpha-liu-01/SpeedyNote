@@ -163,7 +163,7 @@ void DocumentViewport::setEraserSize(qreal size)
     m_eraserSize = size;
     
     // Repaint to update eraser cursor size
-    if (m_currentTool == ToolType::Eraser || m_currentTool == ToolType::VectorEraser) {
+    if (m_currentTool == ToolType::Eraser) {
         update();
     }
 }
@@ -682,14 +682,14 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             case ToolType::Pen: toolName = "Pen"; break;
             case ToolType::Marker: toolName = "Marker"; break;
             case ToolType::Eraser: toolName = "Eraser"; break;
-            case ToolType::VectorPen: toolName = "VectorPen"; break;
-            case ToolType::VectorEraser: toolName = "VectorEraser"; break;
+            case ToolType::Highlighter: toolName = "Highlighter"; break;
+            case ToolType::Lasso: toolName = "Lasso"; break;
         }
         
         QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
                                "Zoom: %4% | Pan: (%5, %6)\n"
                                "Layout: %7 | Content: %8x%9\n"
-                               "Visible: %10 | Tool: %11 [P=Pen, E=Eraser]")
+                               "Visible: %10 | Tool: %11%12 | Undo:%13 Redo:%14")
             .arg(m_document->displayName())
             .arg(m_document->pageCount())
             .arg(m_currentPageIndex + 1)
@@ -700,7 +700,10 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             .arg(contentSize.width(), 0, 'f', 0)
             .arg(contentSize.height(), 0, 'f', 0)
             .arg(visible.size())
-            .arg(toolName);
+            .arg(toolName)
+            .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
+            .arg(canUndo() ? "Y" : "N")
+            .arg(canRedo() ? "Y" : "N");
         
         // Draw with background for readability
         QRect textRect = painter.fontMetrics().boundingRect(
@@ -788,7 +791,7 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         m_lastPointerPos = event->position();
         
         // Request repaint if eraser tool is active (to update cursor)
-        if (m_currentTool == ToolType::Eraser || m_currentTool == ToolType::VectorEraser) {
+        if (m_currentTool == ToolType::Eraser) {
             update();
         }
     }
@@ -888,30 +891,30 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     // Tool switching shortcuts (for testing and quick access)
     switch (event->key()) {
         case Qt::Key_P:
-            // P = Pen tool (VectorPen for new viewport)
-            setCurrentTool(ToolType::VectorPen);
+            // P = Pen tool
+            setCurrentTool(ToolType::Pen);
             event->accept();
             return;
             
         case Qt::Key_E:
-            // E = Eraser tool (VectorEraser for new viewport)
-            setCurrentTool(ToolType::VectorEraser);
+            // E = Eraser tool
+            setCurrentTool(ToolType::Eraser);
             event->accept();
             return;
             
         case Qt::Key_Z:
-            // Ctrl+Z = Undo (Task 2.5)
+            // Ctrl+Z = Undo
             if (event->modifiers() & Qt::ControlModifier) {
-                // TODO (Task 2.5): undo();
+                undo();
                 event->accept();
                 return;
             }
             break;
             
         case Qt::Key_Y:
-            // Ctrl+Y = Redo (Task 2.5)
+            // Ctrl+Y = Redo
             if (event->modifiers() & Qt::ControlModifier) {
-                // TODO (Task 2.5): redo();
+                redo();
                 event->accept();
                 return;
             }
@@ -1279,7 +1282,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     m_pointerActive = true;
     m_activeSource = pe.source;
     m_lastPointerPos = pe.viewportPos;
-    m_hardwareEraserActive = pe.isEraser;  // Track hardware eraser state
+    m_hardwareEraserActive = pe.isEraser;  // Track hardware eraser state for entire stroke
     
     // Determine which page to draw on
     if (pe.pageHit.valid()) {
@@ -1291,11 +1294,11 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     
     // Handle tool-specific actions
     // Hardware eraser (stylus eraser end) always erases, regardless of selected tool
-    if (pe.isEraser) {
+    if (m_hardwareEraserActive) {
         eraseAt(pe);
-    } else if (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen) {
+    } else if (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker) {
         startStroke(pe);
-    } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
+    } else if (m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
     }
     
@@ -1315,13 +1318,14 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
     }
     
     // Handle tool-specific actions
-    // Hardware eraser (stylus eraser end) always erases, regardless of selected tool
-    if (pe.isEraser) {
+    // Hardware eraser: use m_hardwareEraserActive (set on Press) because some tablets
+    // don't consistently report pointerType() == Eraser in every move event
+    if (m_hardwareEraserActive || pe.isEraser) {
         eraseAt(pe);
         update();  // Update eraser cursor
-    } else if (m_isDrawing && (m_currentTool == ToolType::VectorPen || m_currentTool == ToolType::Pen)) {
+    } else if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
         continueStroke(pe);
-    } else if (m_currentTool == ToolType::VectorEraser || m_currentTool == ToolType::Eraser) {
+    } else if (m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
         update();  // Update eraser cursor
     }
@@ -1358,8 +1362,8 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
 {
     if (!m_document || !pe.pageHit.valid()) return;
     
-    // Only pen tools start strokes
-    if (m_currentTool != ToolType::VectorPen && m_currentTool != ToolType::Pen) {
+    // Only drawing tools start strokes (Pen, Marker)
+    if (m_currentTool != ToolType::Pen && m_currentTool != ToolType::Marker) {
         return;
     }
     
@@ -1420,8 +1424,8 @@ void DocumentViewport::finishStroke()
         if (layer) {
             layer->addStroke(m_currentStroke);
             
-            // TODO (Task 2.5): Push to undo stack
-            // pushUndoAction(m_activeDrawingPage, UndoAction::AddStroke, m_currentStroke);
+            // Push to undo stack
+            pushUndoAction(m_activeDrawingPage, PageUndoAction::AddStroke, m_currentStroke);
         }
     }
     
@@ -1590,12 +1594,16 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     
     if (hitIds.isEmpty()) return;
     
-    // Collect strokes for undo before removing (Task 2.5 will use this)
-    // QVector<VectorStroke> removedStrokes;
-    // for (const QString& id : hitIds) {
-    //     const VectorStroke* stroke = layer->strokeById(id);
-    //     if (stroke) removedStrokes.append(*stroke);
-    // }
+    // Collect strokes for undo before removing
+    QVector<VectorStroke> removedStrokes;
+    for (const QString& id : hitIds) {
+        for (const VectorStroke& s : layer->strokes()) {
+            if (s.id == id) {
+                removedStrokes.append(s);
+                break;
+            }
+        }
+    }
     
     // Remove strokes
     for (const QString& id : hitIds) {
@@ -1604,12 +1612,12 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     
     // Stroke cache is automatically invalidated by removeStroke()
     
-    // TODO (Task 2.5): Push undo action
-    // if (removedStrokes.size() == 1) {
-    //     pushUndoAction(pe.pageHit.pageIndex, UndoAction::RemoveStroke, removedStrokes[0]);
-    // } else if (removedStrokes.size() > 1) {
-    //     pushUndoAction(pe.pageHit.pageIndex, UndoAction::RemoveMultiple, removedStrokes);
-    // }
+    // Push undo action
+    if (removedStrokes.size() == 1) {
+        pushUndoAction(pe.pageHit.pageIndex, PageUndoAction::RemoveStroke, removedStrokes[0]);
+    } else if (removedStrokes.size() > 1) {
+        pushUndoAction(pe.pageHit.pageIndex, PageUndoAction::RemoveMultiple, removedStrokes);
+    }
     
     emit documentModified();
     update();
@@ -1618,9 +1626,7 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
 void DocumentViewport::drawEraserCursor(QPainter& painter)
 {
     // Show eraser cursor for: selected eraser tool OR active hardware eraser
-    bool showCursor = (m_currentTool == ToolType::Eraser || 
-                       m_currentTool == ToolType::VectorEraser ||
-                       m_hardwareEraserActive);
+    bool showCursor = (m_currentTool == ToolType::Eraser || m_hardwareEraserActive);
     
     if (!showCursor) {
         return;
@@ -1639,6 +1645,174 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
     
     qreal screenRadius = m_eraserSize * m_zoomLevel;
     painter.drawEllipse(m_lastPointerPos, screenRadius, screenRadius);
+}
+
+// ===== Undo/Redo System (Task 2.5) =====
+
+void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, const VectorStroke& stroke)
+{
+    PageUndoAction action;
+    action.type = type;
+    action.pageIndex = pageIndex;
+    action.stroke = stroke;
+    
+    m_undoStacks[pageIndex].push(action);
+    
+    // Limit stack size to prevent unbounded memory growth
+    while (m_undoStacks[pageIndex].size() > MAX_UNDO_PER_PAGE) {
+        // Remove oldest action (bottom of stack)
+        QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
+        QStack<PageUndoAction> temp;
+        while (!stack.isEmpty()) {
+            temp.push(stack.pop());
+        }
+        temp.pop();  // Remove the oldest
+        while (!temp.isEmpty()) {
+            stack.push(temp.pop());
+        }
+    }
+    
+    // Clear redo stack - new action invalidates redo history
+    clearRedoStack(pageIndex);
+    
+    emit undoAvailableChanged(canUndo());
+}
+
+void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, const QVector<VectorStroke>& strokes)
+{
+    PageUndoAction action;
+    action.type = type;
+    action.pageIndex = pageIndex;
+    action.strokes = strokes;
+    
+    m_undoStacks[pageIndex].push(action);
+    
+    // Limit stack size
+    while (m_undoStacks[pageIndex].size() > MAX_UNDO_PER_PAGE) {
+        QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
+        QStack<PageUndoAction> temp;
+        while (!stack.isEmpty()) {
+            temp.push(stack.pop());
+        }
+        temp.pop();
+        while (!temp.isEmpty()) {
+            stack.push(temp.pop());
+        }
+    }
+    
+    clearRedoStack(pageIndex);
+    emit undoAvailableChanged(canUndo());
+}
+
+void DocumentViewport::clearRedoStack(int pageIndex)
+{
+    if (m_redoStacks.contains(pageIndex)) {
+        bool hadRedo = !m_redoStacks[pageIndex].isEmpty();
+        m_redoStacks[pageIndex].clear();
+        if (hadRedo) {
+            emit redoAvailableChanged(false);
+        }
+    }
+}
+
+void DocumentViewport::undo()
+{
+    int pageIdx = m_currentPageIndex;
+    
+    if (!m_undoStacks.contains(pageIdx) || m_undoStacks[pageIdx].isEmpty()) {
+        return;
+    }
+    
+    Page* page = m_document ? m_document->page(pageIdx) : nullptr;
+    if (!page) return;
+    
+    VectorLayer* layer = page->activeLayer();
+    if (!layer) return;
+    
+    PageUndoAction action = m_undoStacks[pageIdx].pop();
+    
+    switch (action.type) {
+        case PageUndoAction::AddStroke:
+            // Undo adding = remove the stroke
+            layer->removeStroke(action.stroke.id);
+            break;
+            
+        case PageUndoAction::RemoveStroke:
+            // Undo removing = add the stroke back
+            layer->addStroke(action.stroke);
+            break;
+            
+        case PageUndoAction::RemoveMultiple:
+            // Undo removing multiple = add all strokes back
+            for (const auto& s : action.strokes) {
+                layer->addStroke(s);
+            }
+            break;
+    }
+    
+    // Push to redo stack
+    m_redoStacks[pageIdx].push(action);
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::redo()
+{
+    int pageIdx = m_currentPageIndex;
+    
+    if (!m_redoStacks.contains(pageIdx) || m_redoStacks[pageIdx].isEmpty()) {
+        return;
+    }
+    
+    Page* page = m_document ? m_document->page(pageIdx) : nullptr;
+    if (!page) return;
+    
+    VectorLayer* layer = page->activeLayer();
+    if (!layer) return;
+    
+    PageUndoAction action = m_redoStacks[pageIdx].pop();
+    
+    switch (action.type) {
+        case PageUndoAction::AddStroke:
+            // Redo adding = add the stroke again
+            layer->addStroke(action.stroke);
+            break;
+            
+        case PageUndoAction::RemoveStroke:
+            // Redo removing = remove the stroke again
+            layer->removeStroke(action.stroke.id);
+            break;
+            
+        case PageUndoAction::RemoveMultiple:
+            // Redo removing multiple = remove all strokes again
+            for (const auto& s : action.strokes) {
+                layer->removeStroke(s.id);
+            }
+            break;
+    }
+    
+    // Push back to undo stack
+    m_undoStacks[pageIdx].push(action);
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+    emit documentModified();
+    update();
+}
+
+bool DocumentViewport::canUndo() const
+{
+    return m_undoStacks.contains(m_currentPageIndex) && 
+           !m_undoStacks[m_currentPageIndex].isEmpty();
+}
+
+bool DocumentViewport::canRedo() const
+{
+    return m_redoStacks.contains(m_currentPageIndex) && 
+           !m_redoStacks[m_currentPageIndex].isEmpty();
 }
 
 // ===== Rendering Helpers (Task 1.3.3) =====
@@ -1845,6 +2019,9 @@ void DocumentViewport::updateCurrentPageIndex()
     
     if (m_currentPageIndex != oldIndex) {
         emit currentPageChanged(m_currentPageIndex);
+        // Undo/redo availability may change when page changes
+        emit undoAvailableChanged(canUndo());
+        emit redoAvailableChanged(canRedo());
     }
 }
 

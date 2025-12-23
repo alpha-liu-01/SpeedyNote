@@ -16,8 +16,33 @@
 
 #include "Document.h"
 #include "Page.h"
-#include "../ToolType.h"
+#include "ToolType.h"
 #include "../strokes/VectorStroke.h"
+#include <QStack>
+#include <QMap>
+
+// ============================================================================
+// PageUndoAction - Represents a single undoable action (Task 2.5)
+// ============================================================================
+
+/**
+ * @brief Represents a single undoable action for per-page undo/redo.
+ * 
+ * Named PageUndoAction to avoid conflict with VectorCanvas::UndoAction
+ * (which will be removed in Phase 5).
+ */
+struct PageUndoAction {
+    enum Type { 
+        AddStroke,       ///< A stroke was added (undo = remove it)
+        RemoveStroke,    ///< A single stroke was removed (undo = add it back)
+        RemoveMultiple   ///< Multiple strokes removed at once (undo = add all back)
+    };
+    
+    Type type;
+    int pageIndex;                      ///< The page this action occurred on
+    VectorStroke stroke;                ///< For AddStroke and RemoveStroke
+    QVector<VectorStroke> strokes;      ///< For RemoveMultiple
+};
 
 #include <QWidget>
 #include <QPointF>
@@ -224,7 +249,7 @@ public:
     
     /**
      * @brief Set the current drawing tool.
-     * @param tool The tool to use (Pen, Eraser, VectorPen, VectorEraser, etc.)
+     * @param tool The tool to use (Pen, Marker, Eraser, Highlighter, Lasso)
      */
     void setCurrentTool(ToolType tool);
     
@@ -265,6 +290,28 @@ public:
      * @brief Get the current eraser size.
      */
     qreal eraserSize() const { return m_eraserSize; }
+    
+    // ===== Undo/Redo (Task 2.5) =====
+    
+    /**
+     * @brief Undo the last action on the current page.
+     */
+    void undo();
+    
+    /**
+     * @brief Redo the last undone action on the current page.
+     */
+    void redo();
+    
+    /**
+     * @brief Check if undo is available for the current page.
+     */
+    bool canUndo() const;
+    
+    /**
+     * @brief Check if redo is available for the current page.
+     */
+    bool canRedo() const;
     
     // ===== Layout Engine (Task 1.3.2) =====
     
@@ -448,6 +495,18 @@ signals:
     void toolChanged(ToolType tool);
     
     /**
+     * @brief Emitted when undo availability changes for current page.
+     * @param available True if undo is now available.
+     */
+    void undoAvailableChanged(bool available);
+    
+    /**
+     * @brief Emitted when redo availability changes for current page.
+     * @param available True if redo is now available.
+     */
+    void redoAvailableChanged(bool available);
+    
+    /**
      * @brief Emitted when horizontal scroll position changes.
      * @param fraction Scroll position as fraction (0.0 to 1.0).
      */
@@ -519,6 +578,11 @@ private:
     int m_lastRenderedPointIndex = 0;         ///< Index of last point rendered to cache
     qreal m_cacheZoom = 1.0;                  ///< Zoom level when cache was built
     QPointF m_cachePan;                       ///< Pan offset when cache was built
+    
+    // ===== Undo/Redo State (Task 2.5) =====
+    QMap<int, QStack<PageUndoAction>> m_undoStacks;  ///< Per-page undo stacks
+    QMap<int, QStack<PageUndoAction>> m_redoStacks;  ///< Per-page redo stacks
+    static const int MAX_UNDO_PER_PAGE = 50;     ///< Max undo actions per page
     
     // ===== Private Methods =====
     
@@ -687,6 +751,30 @@ private:
      * @param painter The QPainter to render to (viewport coordinates).
      */
     void drawEraserCursor(QPainter& painter);
+    
+    // ===== Undo/Redo Helpers (Task 2.5) =====
+    
+    /**
+     * @brief Push an undo action for a single stroke.
+     * @param pageIndex The page where the action occurred.
+     * @param type The action type.
+     * @param stroke The affected stroke.
+     */
+    void pushUndoAction(int pageIndex, PageUndoAction::Type type, const VectorStroke& stroke);
+    
+    /**
+     * @brief Push an undo action for multiple strokes.
+     * @param pageIndex The page where the action occurred.
+     * @param type The action type (should be RemoveMultiple).
+     * @param strokes The affected strokes.
+     */
+    void pushUndoAction(int pageIndex, PageUndoAction::Type type, const QVector<VectorStroke>& strokes);
+    
+    /**
+     * @brief Clear the redo stack for a page (called when new actions occur).
+     * @param pageIndex The page whose redo stack to clear.
+     */
+    void clearRedoStack(int pageIndex);
     
     // ===== Rendering Helpers (Task 1.3.3) =====
     

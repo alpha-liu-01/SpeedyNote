@@ -9,7 +9,7 @@
 #include <QElapsedTimer>
 #include <deque>
 #include <QColor>
-#include "ToolType.h"
+#include "core/ToolType.h"
 #include <QImage>
 #include <poppler-qt6.h>
 #include <QCache>
@@ -23,7 +23,7 @@
 #include <QUuid>
 #include "PictureWindowManager.h"
 #include "MarkdownNoteEntry.h"
-#include "ToolType.h"
+// ToolType.h already included above
 #include "ButtonMappingTypes.h"
 #include "SpnPackageManager.h"
 #include "PdfRelinkDialog.h"
