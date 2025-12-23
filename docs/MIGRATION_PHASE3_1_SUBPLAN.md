@@ -84,7 +84,7 @@ void MainWindow::addNewTab() {
 
 ---
 
-### Task 3.1.3: Remove VectorCanvas and Buttons (~100 lines)
+### Task 3.1.3: Remove VectorCanvas and Buttons (~100 lines) ✅ COMPLETE
 
 **Goal:** Remove VectorCanvas overlay and its toolbar buttons.
 

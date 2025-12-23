@@ -486,9 +486,8 @@ private:
     void setPenTool();               // Set pen tool
     void setMarkerTool();            // Set marker tool
     void setEraserTool();            // Set eraser tool
-    void setVectorPenTool();         // Set vector pen tool
-    void setVectorEraserTool();      // Set vector eraser tool
-    void vectorUndo();               // Undo last vector stroke
+    // REMOVED Phase 3.1.3: setVectorPenTool(), setVectorEraserTool(), vectorUndo()
+    // Features migrated to DocumentViewport
 
     QColor getContrastingTextColor(const QColor &backgroundColor);
     void updateCustomColorButtonStyle(const QColor &color);
@@ -552,9 +551,8 @@ private:
     QPushButton *penToolButton;    // Individual pen tool button
     QPushButton *markerToolButton; // Individual marker tool button
     QPushButton *eraserToolButton; // Individual eraser tool button
-    QPushButton *vectorPenButton;    // Vector pen tool button (with undo support)
-    QPushButton *vectorEraserButton; // Vector eraser tool button (stroke-based)
-    QPushButton *vectorUndoButton;   // Undo button for vector canvas
+    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
+    // Features migrated to DocumentViewport - pen/eraser now use vector layers directly
     QPushButton *deletePageButton;
     QPushButton *selectFolderButton; // Button to select folder
     QPushButton *saveButton; // Button to save file

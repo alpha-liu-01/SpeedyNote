@@ -1052,7 +1052,7 @@ void MainWindow::updateDebugStatus() {
 | **3.1 Disconnect InkCanvas** | | | |
 | 3.1.1 | Replace tab system (QTabWidget) | ~200 | [ ] |
 | 3.1.2 | Remove addNewTab InkCanvas | ~150 | [ ] |
-| 3.1.3 | Remove VectorCanvas + buttons | ~100 | [ ] |
+| 3.1.3 | Remove VectorCanvas + buttons | ~100 | ✅ |
 | 3.1.4 | Create currentViewport() | ~300 | [ ] |
 | 3.1.5 | Stub signal handlers | ~150 | [ ] |
 | 3.1.6 | Remove page navigation | ~200 | [ ] |
