@@ -51,6 +51,7 @@ struct PageUndoAction {
 #include <QVector>
 #include <QColor>
 #include <QElapsedTimer>
+#include <QTimer>
 #include <deque>
 
 // Forward declarations
@@ -616,6 +617,7 @@ private:
     bool m_benchmarking = false;                      ///< Whether benchmarking is active
     QElapsedTimer m_benchmarkTimer;                   ///< Timer for measuring intervals
     mutable std::deque<qint64> m_paintTimestamps;     ///< Timestamps of recent paints (mutable for const getPaintRate)
+    QTimer m_benchmarkDisplayTimer;                   ///< Timer for periodic display updates
     
     // ===== Private Methods =====
     

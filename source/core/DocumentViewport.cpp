@@ -31,6 +31,10 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Accept tablet events
     setAttribute(Qt::WA_TabletTracking, true);
     
+    // CRITICAL: Reject touch events - we only want stylus/mouse input for drawing
+    // Touch gestures are handled separately (will be added in Phase 4)
+    setAttribute(Qt::WA_AcceptTouchEvents, false);
+    
     // Set focus policy for keyboard shortcuts
     setFocusPolicy(Qt::StrongFocus);
     
@@ -39,6 +43,14 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     QPalette pal = palette();
     pal.setColor(QPalette::Window, QColor(64, 64, 64));  // Dark gray background
     setPalette(pal);
+    
+    // Benchmark display timer - updates debug overlay periodically when benchmarking
+    connect(&m_benchmarkDisplayTimer, &QTimer::timeout, this, [this]() {
+        if (m_benchmarking && m_showDebugOverlay) {
+            // Only update the debug overlay region (top-left corner)
+            update(QRect(0, 0, 500, 100));
+        }
+    });
 }
 
 DocumentViewport::~DocumentViewport()
@@ -615,8 +627,6 @@ QVector<int> DocumentViewport::visiblePages() const
 
 void DocumentViewport::paintEvent(QPaintEvent* event)
 {
-    Q_UNUSED(event);
-    
     // Benchmark: track paint timestamps (Task 2.6)
     if (m_benchmarking) {
         m_paintTimestamps.push_back(m_benchmarkTimer.elapsed());
@@ -625,8 +635,17 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     
-    // Fill background (visible in gaps between pages)
-    painter.fillRect(rect(), QColor(64, 64, 64));
+    // ========== OPTIMIZATION: Dirty Region Rendering ==========
+    // Only repaint what's needed. During stroke drawing, the dirty region is small.
+    QRect dirtyRect = event->rect();
+    bool isPartialUpdate = (dirtyRect.width() < width() / 2 || dirtyRect.height() < height() / 2);
+    
+    // Fill background - only the dirty region for partial updates
+    if (isPartialUpdate) {
+        painter.fillRect(dirtyRect, QColor(64, 64, 64));
+    } else {
+        painter.fillRect(rect(), QColor(64, 64, 64));
+    }
     
     if (!m_document) {
         // No document - draw placeholder
@@ -645,9 +664,24 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     painter.scale(m_zoomLevel, m_zoomLevel);
     
     // Render each visible page
+    // For partial updates, only render pages that intersect the dirty region
     for (int pageIdx : visible) {
         Page* page = m_document->page(pageIdx);
         if (!page) continue;
+        
+        // Check if this page intersects the dirty region (optimization for partial updates)
+        if (isPartialUpdate) {
+            QPointF pos = pagePosition(pageIdx);
+            QRectF pageRectInViewport = QRectF(
+                (pos.x() - m_panOffset.x()) * m_zoomLevel,
+                (pos.y() - m_panOffset.y()) * m_zoomLevel,
+                page->size.width() * m_zoomLevel,
+                page->size.height() * m_zoomLevel
+            );
+            if (!pageRectInViewport.intersects(dirtyRect)) {
+                continue;  // Skip this page - it doesn't intersect dirty region
+            }
+        }
         
         QPointF pos = pagePosition(pageIdx);
         
@@ -670,10 +704,15 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     }
     
     // Draw eraser cursor (Task 2.4)
-    drawEraserCursor(painter);
+    // Skip during stroke drawing (partial updates for pen don't need eraser cursor)
+    if (!m_isDrawing || !isPartialUpdate) {
+        drawEraserCursor(painter);
+    }
     
     // Draw debug info overlay if enabled
-    if (m_showDebugOverlay) {
+    // Skip during partial updates unless the dirty region includes the overlay area
+    QRect debugOverlayArea(0, 0, 500, 120);
+    if (m_showDebugOverlay && (!isPartialUpdate || dirtyRect.intersects(debugOverlayArea))) {
         painter.setPen(Qt::white);
         QFont smallFont = painter.font();
         smallFont.setPointSize(10);
@@ -694,7 +733,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
                                "Zoom: %4% | Pan: (%5, %6)\n"
                                "Layout: %7 | Content: %8x%9\n"
-                               "Visible: %10 | Tool: %11%12 | Undo:%13 Redo:%14%15")
+                               "Tool: %10%11 | Undo:%12 Redo:%13\n"
+                               "Paint Rate: %14 [P=Pen, E=Eraser, B=Benchmark]")
             .arg(m_document->displayName())
             .arg(m_document->pageCount())
             .arg(m_currentPageIndex + 1)
@@ -704,12 +744,11 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             .arg(m_layoutMode == LayoutMode::SingleColumn ? "Single Column" : "Two Column")
             .arg(contentSize.width(), 0, 'f', 0)
             .arg(contentSize.height(), 0, 'f', 0)
-            .arg(visible.size())
             .arg(toolName)
             .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
             .arg(canUndo() ? "Y" : "N")
             .arg(canRedo() ? "Y" : "N")
-            .arg(m_benchmarking ? QString(" | Paint:%1Hz").arg(getPaintRate()) : "");
+            .arg(m_benchmarking ? QString("%1 Hz").arg(getPaintRate()) : "OFF (press B)");
         
         // Draw with background for readability
         QRect textRect = painter.fontMetrics().boundingRect(
@@ -769,6 +808,14 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         return;
     }
     
+    // CRITICAL: Reject touch-synthesized mouse events
+    // Touch input should not draw - only stylus and real mouse
+    if (event->source() == Qt::MouseEventSynthesizedBySystem ||
+        event->source() == Qt::MouseEventSynthesizedByQt) {
+        event->ignore();
+        return;
+    }
+    
     // Ignore if tablet is active (avoid duplicate events)
     if (m_pointerActive && m_activeSource == PointerEvent::Stylus) {
         event->accept();
@@ -782,6 +829,13 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
 
 void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
 {
+    // CRITICAL: Reject touch-synthesized mouse events
+    if (event->source() == Qt::MouseEventSynthesizedBySystem ||
+        event->source() == Qt::MouseEventSynthesizedByQt) {
+        event->ignore();
+        return;
+    }
+    
     // Ignore if tablet is active
     if (m_pointerActive && m_activeSource == PointerEvent::Stylus) {
         event->accept();
@@ -794,11 +848,19 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         handlePointerEvent(pe);
     } else {
         // Track position for eraser cursor even when not pressing (hover)
+        QPointF oldPos = m_lastPointerPos;
         m_lastPointerPos = event->position();
         
         // Request repaint if eraser tool is active (to update cursor)
+        // Use targeted update for efficiency
         if (m_currentTool == ToolType::Eraser) {
-            update();
+            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            // Union of old and new cursor positions
+            QRectF dirtyRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                             eraserRadius * 2, eraserRadius * 2);
+            QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+            update(dirtyRect.united(oldRect).toRect());
         }
     }
     event->accept();
@@ -807,6 +869,13 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
 void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() != Qt::LeftButton) {
+        event->ignore();
+        return;
+    }
+    
+    // CRITICAL: Reject touch-synthesized mouse events
+    if (event->source() == Qt::MouseEventSynthesizedBySystem ||
+        event->source() == Qt::MouseEventSynthesizedByQt) {
         event->ignore();
         return;
     }
@@ -1311,6 +1380,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     
     // Handle tool-specific actions
     // Hardware eraser (stylus eraser end) always erases, regardless of selected tool
+    // Each action (eraseAt, startStroke) does its own targeted update for efficiency
     if (m_hardwareEraserActive) {
         eraseAt(pe);
     } else if (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker) {
@@ -1318,8 +1388,7 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     } else if (m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
     }
-    
-    update();  // Trigger repaint for visual feedback
+    // No full update() needed - tool actions do targeted updates
 }
 
 void DocumentViewport::handlePointerMove(const PointerEvent& pe)
@@ -1339,12 +1408,12 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
     // don't consistently report pointerType() == Eraser in every move event
     if (m_hardwareEraserActive || pe.isEraser) {
         eraseAt(pe);
-        update();  // Update eraser cursor
+        // eraseAt() already does targeted update, no need for full update here
     } else if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
         continueStroke(pe);
     } else if (m_currentTool == ToolType::Eraser) {
         eraseAt(pe);
-        update();  // Update eraser cursor
+        // eraseAt() already does targeted update
     }
 }
 
@@ -1481,8 +1550,26 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
     pt.pressure = qBound(0.1, pressure, 1.0);
     m_currentStroke.points.append(pt);
     
-    // Request repaint - incremental rendering (Task 2.3) makes this efficient
-    update();
+    // ========== OPTIMIZATION: Dirty Region Update ==========
+    // Only repaint the small region around the new point instead of the entire widget.
+    // This significantly improves performance, especially on lower-end hardware.
+    
+    qreal padding = m_penThickness * 2 * m_zoomLevel;  // Extra padding for stroke width
+    
+    // Convert page position to viewport coordinates
+    QPointF vpPos = pageToViewport(m_activeDrawingPage, pagePos);
+    QRectF dirtyRect(vpPos.x() - padding, vpPos.y() - padding, padding * 2, padding * 2);
+    
+    // Include line from previous point if exists
+    if (m_currentStroke.points.size() > 1) {
+        const auto& prevPt = m_currentStroke.points[m_currentStroke.points.size() - 2];
+        QPointF prevVpPos = pageToViewport(m_activeDrawingPage, prevPt.pos);
+        QRectF prevRect(prevVpPos.x() - padding, prevVpPos.y() - padding, padding * 2, padding * 2);
+        dirtyRect = dirtyRect.united(prevRect);
+    }
+    
+    // Update only the dirty region (much faster than full widget repaint)
+    update(dirtyRect.toRect().adjusted(-2, -2, 2, 2));
 }
 
 // ===== Incremental Stroke Rendering (Task 2.3) =====
@@ -1637,7 +1724,14 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     }
     
     emit documentModified();
-    update();
+    
+    // ========== OPTIMIZATION: Dirty Region Update for Eraser ==========
+    // Calculate region around eraser position for targeted repaint
+    qreal eraserRadius = m_eraserSize * m_zoomLevel;
+    QPointF vpPos = pe.viewportPos;
+    QRectF dirtyRect(vpPos.x() - eraserRadius - 10, vpPos.y() - eraserRadius - 10,
+                     (eraserRadius + 10) * 2, (eraserRadius + 10) * 2);
+    update(dirtyRect.toRect());
 }
 
 void DocumentViewport::drawEraserCursor(QPainter& painter)
@@ -1839,11 +1933,15 @@ void DocumentViewport::startBenchmark()
     m_benchmarking = true;
     m_paintTimestamps.clear();
     m_benchmarkTimer.start();
+    
+    // Start periodic display updates (1000ms = 1 update/sec)
+    m_benchmarkDisplayTimer.start(1000);
 }
 
 void DocumentViewport::stopBenchmark()
 {
     m_benchmarking = false;
+    m_benchmarkDisplayTimer.stop();
 }
 
 int DocumentViewport::getPaintRate() const
