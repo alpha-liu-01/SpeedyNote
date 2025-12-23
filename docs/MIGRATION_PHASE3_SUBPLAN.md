@@ -336,9 +336,9 @@ private:
 
 ---
 
-#### Task 3.0.4: Add Command Line Flag (~20 lines)
+#### Task 3.0.4: Add Command Line Flag (~20 lines) ✅ COMPLETE
 
-**Files:** `source/Main.cpp`, `source/MainWindow.h`
+**Files:** `source/Main.cpp`, `source/MainWindow.h`, `source/MainWindow.cpp`
 
 **Goal:** Add `--use-new-viewport` flag for controlled rollout.
 
@@ -1061,7 +1061,7 @@ void MainWindow::updateDebugStatus() {
 | 3.0.1 | DocumentManager class | ~150 | ✅ |
 | 3.0.2 | TabManager class | ~100 | ✅ |
 | 3.0.3 | LayerPanel class | ~250 | ✅ |
-| 3.0.4 | Command line flag | ~20 | [ ] |
+| 3.0.4 | Command line flag | ~20 | ✅ |
 | **3.1 Disconnect InkCanvas** | | | |
 | 3.1.1 | Conditional creation | ~50 | [ ] |
 | 3.1.2 | Stub connections | ~100 | [ ] |

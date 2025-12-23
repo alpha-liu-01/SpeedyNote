@@ -186,8 +186,28 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    /**
+     * @brief Construct MainWindow.
+     * @param useNewViewport If true, use new DocumentViewport architecture (Phase 3+).
+     *                       If false, use legacy InkCanvas.
+     * @param parent Parent widget.
+     */
+    explicit MainWindow(bool useNewViewport = false, QWidget *parent = nullptr);
     virtual ~MainWindow();
+    
+    /**
+     * @brief Check if using new viewport architecture.
+     * @return True if using DocumentViewport, false if using InkCanvas.
+     */
+    bool isUsingNewViewport() const { return m_useNewViewport; }
+    
+    /**
+     * @brief Static flag for viewport architecture mode.
+     * 
+     * Set once at startup from command line (--use-new-viewport).
+     * Used by LauncherWindow when creating new MainWindow instances.
+     */
+    static bool s_useNewViewport;
     int getCurrentPageForCanvas(InkCanvas *canvas); 
 
     bool lowResPreviewEnabled = true;
@@ -504,6 +524,11 @@ private:
     void loadMarkdownNotesForCurrentPage(); // Load notes for currently visible page(s)
 
 private:
+    // =========================================================================
+    // Architecture Mode (Phase 3)
+    // =========================================================================
+    bool m_useNewViewport = false;  ///< True = DocumentViewport, False = InkCanvas
+    
     InkCanvas *canvas;
     QPushButton *benchmarkButton;
     QLabel *benchmarkLabel;

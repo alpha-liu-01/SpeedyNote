@@ -658,7 +658,8 @@ void LauncherWindow::onNewNotebookClicked()
         targetMainWindow->addNewTab();
     } else {
         // Create a new MainWindow with a blank notebook
-        targetMainWindow = new MainWindow();
+        // Phase 3.0.4: Use static flag for viewport architecture
+        targetMainWindow = new MainWindow(MainWindow::s_useNewViewport);
         
         // Connect to handle when MainWindow closes
         // Use QPointer to safely check if launcher still exists
@@ -747,7 +748,8 @@ void LauncherWindow::onOpenPdfClicked()
             targetMainWindow->addNewTab();
         } else {
             // Create new MainWindow
-            targetMainWindow = new MainWindow();
+            // Phase 3.0.4: Use static flag for viewport architecture
+            targetMainWindow = new MainWindow(MainWindow::s_useNewViewport);
             
             // Connect to handle when MainWindow closes
             // Use QPointer to safely check if launcher still exists
@@ -880,7 +882,8 @@ void LauncherWindow::openNotebook(const QString &path)
         targetMainWindow->addNewTab();
     } else {
         // Create new MainWindow
-        targetMainWindow = new MainWindow();
+        // Phase 3.0.4: Use static flag for viewport architecture
+        targetMainWindow = new MainWindow(MainWindow::s_useNewViewport);
         
         // Connect to handle when MainWindow closes
         // Use QPointer to safely check if launcher still exists

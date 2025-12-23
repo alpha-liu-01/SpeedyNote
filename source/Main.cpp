@@ -247,32 +247,38 @@ int main(int argc, char *argv[]) {
     bool runPageTests = false;
     bool runDocumentTests = false;
     bool runViewportTests = false;
+    bool useNewViewport = false;  // Phase 3: New DocumentViewport architecture
     
-    if (argc >= 2) {
-        QString firstArg = QString::fromLocal8Bit(argv[1]);
-        if (firstArg == "--create-new" && argc >= 3) {
+    // Parse command line arguments
+    for (int i = 1; i < argc; ++i) {
+        QString arg = QString::fromLocal8Bit(argv[i]);
+        
+        if (arg == "--use-new-viewport") {
+            // Phase 3: Enable new DocumentViewport architecture
+            useNewViewport = true;
+        } else if (arg == "--create-new" && i + 1 < argc) {
             // Handle --create-new command (opens SpeedyNote)
             createNewPackage = true;
-            inputFile = QString::fromLocal8Bit(argv[2]);
-        } else if (firstArg == "--create-silent" && argc >= 3) {
+            inputFile = QString::fromLocal8Bit(argv[++i]);
+        } else if (arg == "--create-silent" && i + 1 < argc) {
             // Handle --create-silent command (creates file and exits)
             createSilent = true;
-            inputFile = QString::fromLocal8Bit(argv[2]);
-        } else if (firstArg == "--test-page") {
+            inputFile = QString::fromLocal8Bit(argv[++i]);
+        } else if (arg == "--test-page") {
             // Phase 1.1.7: Run Page unit tests
             runPageTests = true;
-        } else if (firstArg == "--test-document") {
+        } else if (arg == "--test-document") {
             // Phase 1.2.8: Run Document unit tests
             runDocumentTests = true;
-        } else if (firstArg == "--test-viewport") {
+        } else if (arg == "--test-viewport") {
             // Phase 1.3.11: Run DocumentViewport visual test
             runViewportTests = true;
-        } else {
-            // Regular file argument
-            inputFile = firstArg;
+        } else if (!arg.startsWith("--") && inputFile.isEmpty()) {
+            // Regular file argument (first non-flag argument)
+            inputFile = arg;
         }
-        // qDebug() << "Input file received:" << inputFile << "Create new:" << createNewPackage << "Create silent:" << createSilent;
     }
+    // qDebug() << "Input file received:" << inputFile << "Create new:" << createNewPackage << "Create silent:" << createSilent;
     
     // Phase 1.1.7: Handle --test-page command
     if (runPageTests) {
@@ -377,13 +383,17 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    // Phase 3.0.4: Set static flag for viewport architecture mode
+    // This flag is used by LauncherWindow when creating new MainWindow instances
+    MainWindow::s_useNewViewport = useNewViewport;
+    
     // Determine which window to show based on command line arguments
     int exitCode = 0;
     
     if (!inputFile.isEmpty()) {
         // If a file is specified, go directly to MainWindow
         // Allocate on heap to avoid destructor issues on exit
-        MainWindow *w = new MainWindow();
+        MainWindow *w = new MainWindow(useNewViewport);
         w->setAttribute(Qt::WA_DeleteOnClose); // Qt will delete when closed
         
         if (createNewPackage) {

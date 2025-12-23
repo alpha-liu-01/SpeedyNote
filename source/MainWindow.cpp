@@ -65,6 +65,10 @@
 QSharedMemory *MainWindow::sharedMemory = nullptr;
 LauncherWindow *MainWindow::sharedLauncher = nullptr;
 
+// Phase 3.0.4: Static flag for viewport architecture mode
+// Set from command line (--use-new-viewport) and used by LauncherWindow
+bool MainWindow::s_useNewViewport = false;
+
 #ifdef Q_OS_LINUX
 // Linux-specific signal handler for cleanup
 void linuxSignalHandler(int signal) {
@@ -92,10 +96,17 @@ void setupLinuxSignalHandlers() {
 }
 #endif
 
-MainWindow::MainWindow(QWidget *parent) 
-    : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
+MainWindow::MainWindow(bool useNewViewport, QWidget *parent) 
+    : QMainWindow(parent), m_useNewViewport(useNewViewport), benchmarking(false), localServer(nullptr) {
 
     setWindowTitle(tr("SpeedyNote Beta 0.12.2"));
+    
+    // Log architecture mode for debugging
+    if (m_useNewViewport) {
+        qDebug() << "MainWindow: Using NEW DocumentViewport architecture (Phase 3+)";
+    } else {
+        qDebug() << "MainWindow: Using LEGACY InkCanvas architecture";
+    }
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux
