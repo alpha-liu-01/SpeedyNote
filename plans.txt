@@ -139,9 +139,10 @@ ToolType simplified: Pen, Marker, Eraser (no more VectorPen/VectorEraser).
      - Ctrl+Z / Ctrl+Y keyboard handling
      - Max 50 undo actions per page
 
-[  ] 2.6 Benchmark Integration (~50 lines)
+[✅] 2.6 Benchmark Integration (~50 lines)
      - COPY startBenchmark(), getPaintRate() from VectorCanvas
-     - Paint timestamp tracking
+     - Paint timestamp tracking (std::deque<qint64>)
+     - Toggle with B key in test viewport
 
 [  ] 2.7 Drawing Tests (~100 lines)
      - Test stroke creation and point decimation

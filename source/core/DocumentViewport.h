@@ -50,6 +50,8 @@ struct PageUndoAction {
 #include <QRectF>
 #include <QVector>
 #include <QColor>
+#include <QElapsedTimer>
+#include <deque>
 
 // Forward declarations
 class QPaintEvent;
@@ -312,6 +314,32 @@ public:
      * @brief Check if redo is available for the current page.
      */
     bool canRedo() const;
+    
+    // ===== Benchmark (Task 2.6) =====
+    
+    /**
+     * @brief Start measuring paint refresh rate.
+     * 
+     * Call this to begin tracking how often paintEvent is called.
+     * Use getPaintRate() to retrieve the current rate.
+     */
+    void startBenchmark();
+    
+    /**
+     * @brief Stop measuring paint refresh rate.
+     */
+    void stopBenchmark();
+    
+    /**
+     * @brief Get the current paint refresh rate.
+     * @return Paints per second (based on last 1 second of data).
+     */
+    int getPaintRate() const;
+    
+    /**
+     * @brief Check if benchmarking is currently active.
+     */
+    bool isBenchmarking() const { return m_benchmarking; }
     
     // ===== Layout Engine (Task 1.3.2) =====
     
@@ -583,6 +611,11 @@ private:
     QMap<int, QStack<PageUndoAction>> m_undoStacks;  ///< Per-page undo stacks
     QMap<int, QStack<PageUndoAction>> m_redoStacks;  ///< Per-page redo stacks
     static const int MAX_UNDO_PER_PAGE = 50;     ///< Max undo actions per page
+    
+    // ===== Benchmark State (Task 2.6) =====
+    bool m_benchmarking = false;                      ///< Whether benchmarking is active
+    QElapsedTimer m_benchmarkTimer;                   ///< Timer for measuring intervals
+    mutable std::deque<qint64> m_paintTimestamps;     ///< Timestamps of recent paints (mutable for const getPaintRate)
     
     // ===== Private Methods =====
     

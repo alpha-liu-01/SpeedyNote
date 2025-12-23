@@ -617,6 +617,11 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event);
     
+    // Benchmark: track paint timestamps (Task 2.6)
+    if (m_benchmarking) {
+        m_paintTimestamps.push_back(m_benchmarkTimer.elapsed());
+    }
+    
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     
@@ -689,7 +694,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
                                "Zoom: %4% | Pan: (%5, %6)\n"
                                "Layout: %7 | Content: %8x%9\n"
-                               "Visible: %10 | Tool: %11%12 | Undo:%13 Redo:%14")
+                               "Visible: %10 | Tool: %11%12 | Undo:%13 Redo:%14%15")
             .arg(m_document->displayName())
             .arg(m_document->pageCount())
             .arg(m_currentPageIndex + 1)
@@ -703,7 +708,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             .arg(toolName)
             .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
             .arg(canUndo() ? "Y" : "N")
-            .arg(canRedo() ? "Y" : "N");
+            .arg(canRedo() ? "Y" : "N")
+            .arg(m_benchmarking ? QString(" | Paint:%1Hz").arg(getPaintRate()) : "");
         
         // Draw with background for readability
         QRect textRect = painter.fontMetrics().boundingRect(
@@ -899,6 +905,17 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         case Qt::Key_E:
             // E = Eraser tool
             setCurrentTool(ToolType::Eraser);
+            event->accept();
+            return;
+            
+        case Qt::Key_B:
+            // B = Toggle benchmark
+            if (m_benchmarking) {
+                stopBenchmark();
+            } else {
+                startBenchmark();
+            }
+            update();
             event->accept();
             return;
             
@@ -1813,6 +1830,34 @@ bool DocumentViewport::canRedo() const
 {
     return m_redoStacks.contains(m_currentPageIndex) && 
            !m_redoStacks[m_currentPageIndex].isEmpty();
+}
+
+// ===== Benchmark (Task 2.6) =====
+
+void DocumentViewport::startBenchmark()
+{
+    m_benchmarking = true;
+    m_paintTimestamps.clear();
+    m_benchmarkTimer.start();
+}
+
+void DocumentViewport::stopBenchmark()
+{
+    m_benchmarking = false;
+}
+
+int DocumentViewport::getPaintRate() const
+{
+    if (!m_benchmarking) return 0;
+    
+    qint64 now = m_benchmarkTimer.elapsed();
+    
+    // Remove timestamps older than 1 second
+    while (!m_paintTimestamps.empty() && now - m_paintTimestamps.front() > 1000) {
+        m_paintTimestamps.pop_front();
+    }
+    
+    return static_cast<int>(m_paintTimestamps.size());
 }
 
 // ===== Rendering Helpers (Task 1.3.3) =====
