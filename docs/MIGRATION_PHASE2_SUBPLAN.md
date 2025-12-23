@@ -483,6 +483,32 @@ void DocumentViewport::paintEvent(QPaintEvent* event) {
 
 **Deliverable:** Can erase strokes by touching them with eraser
 
+**Hardware Eraser Fix (Critical):**
+
+Hardware eraser (flipping stylus to eraser end) had multiple issues:
+
+1. **Eraser cursor didn't move when pressed**: `eraseAt()` only called `update()` when strokes were actually removed. When moving over empty space, no repaint happened.
+   - **Fix:** Added explicit cursor area updates in both `handlePointerPress` and `handlePointerMove`, regardless of whether strokes were removed.
+
+2. **Hardware eraser detection inconsistent**: Some tablet drivers don't report `pointerType() == Eraser` on every event - only some events have it.
+   - **Fix:** If ANY event in a stroke sequence has `pe.isEraser`, set `m_hardwareEraserActive = true`. Only reset on Release. This mirrors the `InkCanvas` pattern.
+
+3. **Alternative eraser detection**: Added fallback detection using device name (some tablets have "eraser" in device name).
+
+**Key code pattern (from InkCanvas):**
+```cpp
+// In handlePointerMove:
+if (pe.isEraser && !m_hardwareEraserActive) {
+    m_hardwareEraserActive = true;  // Upgrade to eraser mid-stroke
+}
+
+// Always update cursor area when erasing:
+qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+QRectF oldRect(oldPos.x() - eraserRadius, ...);
+QRectF newRect(pe.viewportPos.x() - eraserRadius, ...);
+update(oldRect.united(newRect).toRect());
+```
+
 ---
 
 ### Task 2.5: Per-Page Undo/Redo System (~200 lines)
