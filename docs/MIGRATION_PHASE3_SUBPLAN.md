@@ -359,62 +359,49 @@ MainWindow mainWindow(useNewViewport);
 
 ---
 
-### Task 3.1: Disconnect InkCanvas
+### Task 3.1: Disconnect InkCanvas and Replace Tab System
 
-#### Task 3.1.1: Conditional InkCanvas Creation (~50 lines)
+> **REVISED:** InkCanvas is COMPLETELY REMOVED, not toggled.
+> See detailed breakdown: `docs/MIGRATION_PHASE3_1_SUBPLAN.md`
 
-**Files:** `source/MainWindow.cpp`
+**Goal:** Remove all InkCanvas dependencies. Replace custom tab system with QTabWidget.
 
-**Goal:** Only create InkCanvas when NOT using new viewport.
+**Reference files created:**
+- `source/MainWindow_OLD.cpp` - Original before changes
+- `source/MainWindow_OLD.h` - Original header before changes
 
-**Implementation:**
-```cpp
-// In MainWindow constructor or tab creation:
-if (m_useNewViewport) {
-    // Create DocumentViewport instead (Task 3.2)
-} else {
-    // Existing InkCanvas creation code
-    auto* canvas = new InkCanvas(this);
-    // ... existing setup
-}
-```
+#### Sub-tasks:
 
-**Key Points:**
-1. Wrap InkCanvas creation in `if (!m_useNewViewport)`
-2. Keep all existing InkCanvas code intact (not deleted yet)
-3. This is a TOGGLE, not removal
+| Task | Description | Est. Lines |
+|------|-------------|------------|
+| 3.1.1 | Replace `tabList` + `canvasStack` with QTabWidget + TabManager | ~200 |
+| 3.1.2 | Remove `addNewTab()` InkCanvas code | ~150 |
+| 3.1.3 | Remove VectorCanvas and its buttons (VP, VE, VUndo) | ~100 |
+| 3.1.4 | Create `currentViewport()`, replace `currentCanvas()` calls | ~300 |
+| 3.1.5 | Stub InkCanvas signal handlers | ~150 |
+| 3.1.6 | Remove page navigation methods (`switchPage`, etc.) | ~200 |
+| 3.1.7 | Remove InkCanvas includes and members | ~50 |
+| 3.1.8 | Disable ControlPanelDialog (depends on InkCanvas) | ~30 |
+| 3.1.9 | Stub markdown/highlight handlers | ~50 |
 
-**Deliverable:** InkCanvas only created when flag is OFF ✓
+**Order of implementation:**
+1. 3.1.3 - Remove VectorCanvas (isolated)
+2. 3.1.1 - Replace tab system
+3. 3.1.2 - Remove addNewTab InkCanvas
+4. 3.1.7 - Remove InkCanvas includes
+5. 3.1.4 - Create currentViewport()
+6. 3.1.6 - Remove page navigation
+7. 3.1.5 - Stub signal handlers
+8. 3.1.8 - Disable ControlPanelDialog
+9. 3.1.9 - Stub markdown handlers
 
----
+**Success criteria:**
+- [ ] MainWindow compiles without InkCanvas
+- [ ] VectorCanvas removed from build
+- [ ] App launches without crashes
+- [ ] TabManager integrated with QTabWidget
 
-#### Task 3.1.2: Stub Signal/Slot Connections (~100 lines)
-
-**Files:** `source/MainWindow.cpp`
-
-**Goal:** Prevent crashes when InkCanvas doesn't exist.
-
-**Implementation Pattern:**
-```cpp
-// Before (crashes if canvas is null):
-connect(canvas, &InkCanvas::pageChanged, this, &MainWindow::onPageChanged);
-
-// After (conditional connection):
-if (m_useNewViewport) {
-    // DocumentViewport connections (Task 3.3)
-} else {
-    connect(canvas, &InkCanvas::pageChanged, this, &MainWindow::onPageChanged);
-}
-```
-
-**Affected Connections (from Phase 0 mapping):**
-- pageChanged
-- zoomChanged
-- scrollChanged
-- documentModified
-- Tool state changes
-
-**Deliverable:** App runs with `--use-new-viewport` without crashes ✓
+**Deliverable:** MainWindow compiles, ready for DocumentViewport integration ✓
 
 ---
 
@@ -1063,8 +1050,15 @@ void MainWindow::updateDebugStatus() {
 | 3.0.3 | LayerPanel class | ~250 | ✅ |
 | 3.0.4 | Command line flag | ~20 | ✅ |
 | **3.1 Disconnect InkCanvas** | | | |
-| 3.1.1 | Conditional creation | ~50 | [ ] |
-| 3.1.2 | Stub connections | ~100 | [ ] |
+| 3.1.1 | Replace tab system (QTabWidget) | ~200 | [ ] |
+| 3.1.2 | Remove addNewTab InkCanvas | ~150 | [ ] |
+| 3.1.3 | Remove VectorCanvas + buttons | ~100 | [ ] |
+| 3.1.4 | Create currentViewport() | ~300 | [ ] |
+| 3.1.5 | Stub signal handlers | ~150 | [ ] |
+| 3.1.6 | Remove page navigation | ~200 | [ ] |
+| 3.1.7 | Remove InkCanvas includes | ~50 | [ ] |
+| 3.1.8 | Disable ControlPanelDialog | ~30 | [ ] |
+| 3.1.9 | Stub markdown handlers | ~50 | [ ] |
 | **3.2 Add DocumentViewport** | | | |
 | 3.2.1 | Initialize managers | ~50 | [ ] |
 | 3.2.2 | Create tab with viewport | ~100 | [ ] |
