@@ -144,6 +144,339 @@ The following markdown/highlight handlers are stubbed (will be reimplemented in 
 
 ---
 
+## Phase 3.3: Pan/Zoom/Scroll Control System
+
+### Key Principle: No Inter-Control Dependencies
+
+**CRITICAL:** All UI controls (sliders, buttons, dial, etc.) must call DocumentViewport methods directly. Controls must NEVER rely on each other.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CONTROL PATTERN                          │
+│                                                             │
+│  UI Widget ──────────► DocumentViewport.setXXX()            │
+│      ▲                                                      │
+│      │                                                      │
+│  DocumentViewport.xxxChanged() signal ──────────────────────┘
+│                                                             │
+│  NO control should call another control's method!           │
+│  All controls read/write to DocumentViewport directly.      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### DocumentViewport Pan/Scroll Interface
+
+| Method | Purpose | Units |
+|--------|---------|-------|
+| `setPanOffset(QPointF)` | Set pan position directly | Document pixels |
+| `scrollBy(QPointF delta)` | Scroll by delta amount | Document pixels |
+| `setHorizontalScrollFraction(qreal)` | Set horizontal scroll | 0.0-1.0 fraction |
+| `setVerticalScrollFraction(qreal)` | Set vertical scroll | 0.0-1.0 fraction |
+| `setZoomLevel(qreal)` | Set zoom level | 1.0 = 100% |
+| `scrollToPage(int)` | Jump to specific page | Page index |
+
+| Signal | Purpose | Value |
+|--------|---------|-------|
+| `panChanged(QPointF)` | Pan offset changed | Document pixels |
+| `horizontalScrollChanged(qreal)` | H-scroll fraction changed | 0.0-1.0 |
+| `verticalScrollChanged(qreal)` | V-scroll fraction changed | 0.0-1.0 |
+| `zoomChanged(qreal)` | Zoom level changed | 1.0 = 100% |
+| `currentPageChanged(int)` | Visible page changed | Page index |
+
+### Connection Flow (Mouse Wheel / Touch / Sliders)
+
+```
+Mouse Wheel                          Scroll Bar Slider
+     │                                      │
+     ▼                                      ▼
+scrollBy(delta)                 setVerticalScrollFraction(frac)
+     │                                      │
+     └──────────► m_panOffset ◄─────────────┘
+                       │
+                       ▼
+              clampPanOffset()
+                       │
+                       ▼
+            emitScrollFractions()
+                       │
+                       ▼
+            verticalScrollChanged(fraction)
+                       │
+                       ▼
+              (MainWindow updates slider position)
+```
+
+### Slider Precision
+
+For a 1000-page document (~1,000,000px content):
+- Slider range 0-100: each step = 10,000px = 10 pages ❌
+- Slider range 0-1000: each step = 1,000px = 1 page ❌
+- Slider range 0-10000+: each step = ~100px ✅
+
+**Decision:** Use high-resolution sliders (0-10000 or higher), convert to fraction:
+```cpp
+// Slider → DocumentViewport
+qreal fraction = slider->value() / 10000.0;
+viewport->setVerticalScrollFraction(fraction);
+
+// DocumentViewport → Slider (via signal)
+connect(viewport, &DocumentViewport::verticalScrollChanged, [slider](qreal fraction) {
+    slider->blockSignals(true);
+    slider->setValue(qRound(fraction * 10000));
+    slider->blockSignals(false);
+});
+```
+
+### Pan Overshoot (Intentional Feature)
+
+DocumentViewport allows 50% viewport overscroll at document edges:
+
+```cpp
+// In clampPanOffset():
+qreal overscrollY = viewHeight * 0.5;  // 50% of viewport
+qreal minY = -overscrollY;
+qreal maxY = contentHeight - viewHeight + overscrollY;
+```
+
+**Example (700px viewport, 5360px content):**
+- `minY = -350` (can scroll 350px before first page)
+- `maxY = 5010` (can scroll 350px past last page)
+- Total pan range: -350 to 5010 ✅
+
+### Scroll Input Types
+
+| Input | Method | Precision | Use Case |
+|-------|--------|-----------|----------|
+| Mouse wheel | `scrollBy()` | Document pixels | Fine scrolling |
+| Touch gesture | `scrollBy()` | Document pixels | Smooth scrolling (Phase 4) |
+| Scroll bar slider | `setVerticalScrollFraction()` | Fraction 0-1 | Rough navigation |
+| Page navigation | `scrollToPage()` | Page index | Jump to page |
+
+### Touch Gesture Scrolling (Phase 4)
+
+Touch gestures will use `scrollBy()` directly with touch deltas:
+- High frequency updates (60-120Hz)
+- Momentum/inertia after finger lift
+- Same `m_panOffset` state as other inputs
+
+### DocumentViewport Content Centering
+
+**IMPLEMENTED (Task 3.3.3):** Content is centered horizontally via initial negative pan X.
+
+**Problem:** When content (pages) is narrower than the viewport, it appears left-aligned because pan X = 0 means document x=0 is at viewport x=0 (left edge).
+
+**Solution:** MainWindow sets an initial negative pan X value when creating new tabs.
+
+```cpp
+// In MainWindow::centerViewportContent(int tabIndex):
+qreal centeringOffset = (viewportWidth - contentSize.width()) / 2.0;
+viewport->setPanOffset(QPointF(-centeringOffset, currentPan.y()));
+```
+
+**Key design decisions:**
+1. **One-time calculation** - Only done when tab is created, not on every resize/zoom
+2. **MainWindow's responsibility** - DocumentViewport is NOT modified
+3. **Negative pan X** - The debug overlay correctly shows negative pan X values
+4. **User can pan freely** - After initial centering, user scrolls as normal
+5. **Layout flexibility preserved** - Pan X = 0 still means "left edge of content"
+
+**Why NOT Option D (rendering offset in DocumentViewport):**
+- Breaks zoom behavior (offset must be recalculated at each zoom level)
+- Complicates coordinate transforms
+- Makes horizontal scrolling layouts impossible
+- Violates the "pan offset is the source of truth" principle
+
+### Old Pan Sliders - Detailed Analysis
+
+**Widget Type:** `QScrollBar` (not QSlider)
+
+**Declarations:**
+```cpp
+// MainWindow.h:606-607
+QScrollBar *panXSlider;
+QScrollBar *panYSlider;
+```
+
+**Positioning:**
+- Both are children of `canvasContainer` (overlay on top of content)
+- `panXSlider`: Positioned at **TOP** of container (horizontal scrollbar)
+- `panYSlider`: Positioned at **LEFT** of container (vertical scrollbar)
+- Both have 3px margin and 15px corner offset to avoid overlap
+
+```cpp
+// updateScrollbarPositions():
+panXSlider->setGeometry(
+    cornerOffset + margin,  // Leave space at left corner
+    margin,                 // At top
+    containerWidth - cornerOffset - margin*2,
+    scrollbarHeight
+);
+
+panYSlider->setGeometry(
+    margin,                 // At left
+    cornerOffset + margin,  // Leave space at top corner  
+    scrollbarWidth,
+    containerHeight - cornerOffset - margin*2
+);
+```
+
+**Styling (shared):**
+```css
+QScrollBar {
+    background: rgba(200, 200, 200, 80);
+    border: none;
+}
+QScrollBar::handle {
+    background: rgba(100, 100, 100, 150);
+    border-radius: 2px;
+    min-height: 120px;
+    min-width: 120px;
+}
+/* Scroll buttons hidden, page areas transparent */
+```
+
+**Dimensions:**
+- `panXSlider`: Fixed height 16px
+- `panYSlider`: Fixed width 16px
+
+**Current State (Phase 3.1):**
+```cpp
+// panYSlider PERMANENTLY HIDDEN (hack):
+panYSlider->setVisible(false);
+panYSlider->setEnabled(false);
+
+// Auto-hide timer only shows panXSlider:
+scrollbarHideTimer->connect([this]() {
+    panXSlider->setVisible(false);
+    // panYSlider stays hidden permanently
+});
+```
+
+**Auto-Hide Behavior:**
+- 200ms timer after mouse leaves scrollbar
+- Enter event stops timer (keeps visible)
+- Leave event starts timer
+
+**Current Stubbed Handlers:**
+```cpp
+void MainWindow::updatePanX(int value) {
+    Q_UNUSED(value);  // Stubbed
+}
+void MainWindow::updatePanY(int value) {
+    Q_UNUSED(value);  // Stubbed
+}
+void MainWindow::updatePanRange() {
+    // Sets both to range(0,0) and hides them
+}
+```
+
+**Phase 3.3 Changes Required:**
+
+1. **Unhide panYSlider:**
+   - Remove `panYSlider->setVisible(false)` and `setEnabled(false)` from setup
+   - Add panYSlider to auto-hide timer alongside panXSlider
+
+2. **Connect to DocumentViewport:**
+   ```cpp
+   // Slider → Viewport
+   connect(panXSlider, &QScrollBar::valueChanged, [this](int value) {
+       if (auto* vp = currentViewport()) {
+           vp->setHorizontalScrollFraction(value / 10000.0);
+       }
+   });
+   connect(panYSlider, &QScrollBar::valueChanged, [this](int value) {
+       if (auto* vp = currentViewport()) {
+           vp->setVerticalScrollFraction(value / 10000.0);
+       }
+   });
+   
+   // Viewport → Slider (in connectViewportSignals)
+   connect(viewport, &DocumentViewport::horizontalScrollChanged, [this](qreal frac) {
+       panXSlider->blockSignals(true);
+       panXSlider->setValue(qRound(frac * 10000));
+       panXSlider->blockSignals(false);
+   });
+   connect(viewport, &DocumentViewport::verticalScrollChanged, [this](qreal frac) {
+       panYSlider->blockSignals(true);
+       panYSlider->setValue(qRound(frac * 10000));
+       panYSlider->blockSignals(false);
+   });
+   ```
+
+3. **`updatePanRange()` is OBSOLETE:**
+
+   The old InkCanvas required recalculating pan range on every zoom change:
+   - At 100% zoom, if page fit viewport: pan range = 0
+   - At 200% zoom: pan range = 50% of page size
+   
+   DocumentViewport eliminates this entirely:
+   ```cpp
+   // In emitScrollFractions():
+   qreal viewportHeight = height() / m_zoomLevel;  // Zoom-aware!
+   qreal scrollableHeight = contentSize.height() - viewportHeight;
+   vFraction = m_panOffset.y() / scrollableHeight;  // Always 0.0-1.0
+   ```
+   
+   **The fraction 0.0-1.0 is zoom-independent.** DocumentViewport handles zoom internally.
+   
+   ```cpp
+   void MainWindow::updatePanRange() {
+       // OBSOLETE - can be removed or kept as no-op
+       // Sliders use fixed range 0-10000, connected to scroll fractions
+       // DocumentViewport handles all zoom-aware calculations internally
+   }
+   ```
+   
+   **Slider setup (done ONCE at init, never updated):**
+   ```cpp
+   panXSlider->setRange(0, 10000);
+   panYSlider->setRange(0, 10000);
+   ```
+
+4. **Event Filter on DocumentViewport:**
+   - DocumentViewport must have MainWindow's eventFilter installed for wheel events
+   - Done in `connectViewportScrollSignals()` when viewport changes
+
+5. **Slider Visibility (Phase 3.3 Status):**
+   - **Currently:** Sliders are ALWAYS VISIBLE (simplified for now)
+   - **Deferred to Phase 3.4:** Auto-hide behavior with timer
+   - The auto-hide logic exists but is disabled - signals/timer not connected
+   - Position: panXSlider at top (below tab bar), panYSlider at left
+
+6. **Memory Safety (Phase 3.3 Cleanup):**
+   - Viewport scroll connections stored as member variables (`m_hScrollConn`, `m_vScrollConn`)
+   - `QPointer<DocumentViewport> m_connectedViewport` - auto-nulls if viewport deleted
+   - Connections properly disconnected in destructor
+   - Division-by-zero guard for zoomLevel
+   - No static local variables (proper object lifetime management)
+
+7. **Mouse Wheel Event Routing (Phase 3.3 Fix):**
+   - **Previous (broken):** MainWindow's eventFilter intercepted wheel events on DocumentViewport
+     and routed them through sliders, which clamped to 0-10000 (no overshoot support)
+   - **Fixed:** eventFilter now returns `false` for wheel events on DocumentViewport,
+     allowing DocumentViewport::wheelEvent() to handle scrolling natively
+   - DocumentViewport's wheelEvent uses scrollBy() → setPanOffset() → clampPanOffset()
+     which properly supports 50% viewport overshoot at document edges
+   - Sliders are updated via scroll fraction signals (horizontalScrollChanged/verticalScrollChanged)
+   - This ensures consistent pan overshoot behavior for wheel, trackpad, AND touch (future)
+
+### Why This Architecture is Better
+
+| Aspect | Old InkCanvas | New DocumentViewport |
+|--------|---------------|----------------------|
+| Pan range calculation | MainWindow's job | DocumentViewport's job |
+| Zoom affects pan range? | Yes, must recalculate | No, fraction is zoom-independent |
+| `updatePanRange()` calls | On every zoom change | Never (obsolete) |
+| Slider range | Dynamic (changes with zoom) | Fixed (0-10000) |
+| Pan overshoot | Unknown/inconsistent | 50% of viewport (consistent) |
+
+**Key insight:** The scroll fraction (0.0-1.0) is an **abstraction layer** that hides zoom complexity from MainWindow. At any zoom level:
+- Fraction 0.0 = top of document
+- Fraction 1.0 = bottom of document
+- DocumentViewport converts fraction ↔ pan offset internally
+
+---
+
 ## Phase 3.1 Task Order
 
 Per `MIGRATION_PHASE3_1_SUBPLAN.md`:

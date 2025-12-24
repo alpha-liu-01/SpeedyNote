@@ -710,3 +710,29 @@ Phase 1.3 is complete when:
 - Undo/redo (Phase 2)
 
 Phase 1.3 creates the **rendering and view infrastructure**. Drawing comes in Phase 2.
+
+---
+
+## Important Notes for MainWindow Integration (Phase 3)
+
+### Content Centering (Pan X = 0 Semantics)
+
+**Pan X = 0 means document x=0 is at viewport x=0 (left edge).**
+
+When content is narrower than the viewport, it appears left-aligned by default. To center content:
+
+**Solution (implemented in Phase 3.3):** MainWindow sets an initial negative pan X when creating new tabs.
+
+```cpp
+// In MainWindow::centerViewportContent():
+qreal centeringOffset = (viewportWidth - contentSize.width()) / 2.0;
+viewport->setPanOffset(QPointF(-centeringOffset, currentPan.y()));
+```
+
+**Why this approach:**
+1. **Preserves layout flexibility** - Pan semantics unchanged, horizontal scrolling still works
+2. **One-time calculation** - Not recalculated on every zoom/resize (avoids complexity)
+3. **DocumentViewport unchanged** - All centering logic is in MainWindow
+4. **Debug overlay shows truth** - Negative pan X values are correct and expected
+
+**DO NOT** add a separate rendering offset in DocumentViewport - this breaks zoom behavior and complicates coordinate transforms.

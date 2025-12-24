@@ -151,8 +151,8 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Connect TabManager signals
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
-        Q_UNUSED(vp);
-        // TODO: Phase 3.3 - Update UI when viewport changes
+        // Phase 3.3: Connect scroll signals from current viewport
+        connectViewportScrollSignals(vp);
         updateDialDisplay();
     });
     QSettings settings("SpeedyNote", "App");
@@ -693,36 +693,39 @@ void MainWindow::setupUi() {
     panYSlider = new QScrollBar(Qt::Vertical, this);
     panYSlider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     
-    // Hide panYSlider permanently (keep for internal use but not user interaction)
-    panYSlider->setVisible(false);
-    panYSlider->setEnabled(false);
+    // Phase 3.3: Set fixed high-resolution range for scroll fraction (0.0-1.0 mapped to 0-10000)
+    panXSlider->setRange(0, 10000);
+    panYSlider->setRange(0, 10000);
+    // Set page step to control handle size (10% of range = reasonable handle size)
+    panXSlider->setPageStep(1000);
+    panYSlider->setPageStep(1000);
     
-    // Set scrollbar styling
+    // Set scrollbar styling - semi-transparent overlay style
     QString scrollBarStyle = R"(
         QScrollBar {
-            background: rgba(200, 200, 200, 80);
+            background: rgba(180, 180, 180, 120);
             border: none;
             margin: 0px;
         }
         QScrollBar:hover {
-            background: rgba(200, 200, 200, 120);
+            background: rgba(180, 180, 180, 180);
         }
         QScrollBar:horizontal {
-            height: 16px !important;  /* Force narrow height */
+            height: 16px !important;
             max-height: 16px !important;
         }
         QScrollBar:vertical {
-            width: 16px !important;   /* Force narrow width */
+            width: 16px !important;
             max-width: 16px !important;
         }
         QScrollBar::handle {
-            background: rgba(100, 100, 100, 150);
-            border-radius: 2px;
-            min-height: 120px;  /* Longer handle for vertical scrollbar */
-            min-width: 120px;   /* Longer handle for horizontal scrollbar */
+            background: rgba(100, 100, 100, 180);
+            border-radius: 3px;
+            min-height: 40px;
+            min-width: 40px;
         }
         QScrollBar::handle:hover {
-            background: rgba(80, 80, 80, 210);
+            background: rgba(80, 80, 80, 220);
         }
         /* Hide scroll buttons */
         QScrollBar::add-line, 
@@ -746,23 +749,17 @@ void MainWindow::setupUi() {
     panXSlider->setFixedHeight(16);
     panYSlider->setFixedWidth(16);
     
-    // Set up auto-hiding
+    // Phase 3.3: Sliders always visible (auto-hide deferred to Phase 3.4)
     panXSlider->setMouseTracking(true);
     panYSlider->setMouseTracking(true);
-    panXSlider->installEventFilter(this);
-    panYSlider->installEventFilter(this);
-    panXSlider->setVisible(false);
-    panYSlider->setVisible(false);
+    panXSlider->setVisible(true);
+    panYSlider->setVisible(true);
     
-    // Create timer for auto-hiding
+    // Create timer for auto-hiding (disabled for now - Phase 3.4)
     scrollbarHideTimer = new QTimer(this);
     scrollbarHideTimer->setSingleShot(true);
-    scrollbarHideTimer->setInterval(200); // Hide after 0.2 seconds
-    connect(scrollbarHideTimer, &QTimer::timeout, this, [this]() {
-        panXSlider->setVisible(false);
-        // panYSlider stays hidden permanently
-        scrollbarsVisible = false;
-    });
+    scrollbarHideTimer->setInterval(200);
+    // Timer not connected - sliders stay visible
     
     // Trackpad mode timer: maintains trackpad state across rapid events
     trackpadModeTimer = new QTimer(this);
@@ -1453,6 +1450,13 @@ MainWindow::~MainWindow() {
     }
 
     saveButtonMappings();  // ✅ Save on exit, as backup
+    
+    // Phase 3.3: Clean up viewport scroll connections
+    if (m_hScrollConn) disconnect(m_hScrollConn);
+    if (m_vScrollConn) disconnect(m_vScrollConn);
+    if (m_connectedViewport) {
+        m_connectedViewport->removeEventFilter(this);
+    }
     
     // Note: Do NOT manually delete canvas - it's a child of canvasStack
     // Qt will automatically delete all canvases when canvasStack is destroyed
@@ -2975,30 +2979,142 @@ qreal MainWindow::getDevicePixelRatio(){
 }
 
 void MainWindow::updatePanRange() {
-    // Phase 3.1: Stubbed - DocumentViewport handles its own pan/zoom
-    // TODO Phase 3.3: Remove pan sliders or connect to DocumentViewport
-    // For now, just hide the sliders since there's no InkCanvas
-    if (panXSlider) {
-        panXSlider->setRange(0, 0);
-        panXSlider->setVisible(false);
-    }
-    if (panYSlider) {
-        panYSlider->setRange(0, 0);
-        panYSlider->setVisible(false);
-    }
+    // Phase 3.3: OBSOLETE - DocumentViewport handles pan range internally
+    // Sliders use fixed range 0-10000 and connect via scroll fractions
+    // This function is now a no-op (kept for compatibility with old call sites)
 }
 
 void MainWindow::updatePanX(int value) {
-    // Phase 3.1.8: Stubbed - DocumentViewport handles its own panning
-    Q_UNUSED(value);
-    // TODO Phase 3.3: Connect to currentViewport() pan if needed
+    // Phase 3.3: Convert slider value to fraction and apply to viewport
+    if (DocumentViewport* vp = currentViewport()) {
+        qreal fraction = value / 10000.0;
+        vp->setHorizontalScrollFraction(fraction);
+    }
 }
 
 void MainWindow::updatePanY(int value) {
-    // Phase 3.1.8: Stubbed - DocumentViewport handles its own panning
-    Q_UNUSED(value);
-    // TODO Phase 3.3: Connect to currentViewport() pan if needed
+    // Phase 3.3: Convert slider value to fraction and apply to viewport
+    if (DocumentViewport* vp = currentViewport()) {
+        qreal fraction = value / 10000.0;
+        vp->setVerticalScrollFraction(fraction);
+    }
 }
+
+void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
+    // Phase 3.3: Connect viewport scroll signals to update pan sliders
+    // This is called when the current viewport changes (tab switch)
+    
+    // Disconnect any previous viewport connections
+    if (m_hScrollConn) {
+        disconnect(m_hScrollConn);
+        m_hScrollConn = {};
+    }
+    if (m_vScrollConn) {
+        disconnect(m_vScrollConn);
+        m_vScrollConn = {};
+    }
+    
+    // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
+    if (m_connectedViewport) {
+        m_connectedViewport->removeEventFilter(this);
+    }
+    m_connectedViewport = nullptr;
+    
+    if (!viewport) {
+        return;
+    }
+    
+    // Install event filter on the new viewport for wheel/tablet event handling
+    viewport->installEventFilter(this);
+    m_connectedViewport = viewport;  // QPointer tracks lifetime
+    
+    // Initialize slider values from current viewport state
+    // Guard against division by zero (zoomLevel should never be 0, but be safe)
+    qreal zoomLevel = viewport->zoomLevel();
+    if (zoomLevel <= 0) {
+        zoomLevel = 1.0;
+    }
+    
+    QPointF panOffset = viewport->panOffset();
+    QSizeF contentSize = viewport->totalContentSize();
+    
+    qreal viewWidth = viewport->width() / zoomLevel;
+    qreal viewHeight = viewport->height() / zoomLevel;
+    qreal scrollableWidth = contentSize.width() - viewWidth;
+    qreal scrollableHeight = contentSize.height() - viewHeight;
+    
+    qreal hFraction = (scrollableWidth > 0) ? qBound(0.0, panOffset.x() / scrollableWidth, 1.0) : 0.0;
+    qreal vFraction = (scrollableHeight > 0) ? qBound(0.0, panOffset.y() / scrollableHeight, 1.0) : 0.0;
+    
+    if (panXSlider) {
+        panXSlider->blockSignals(true);
+        panXSlider->setValue(qRound(hFraction * 10000));
+        panXSlider->blockSignals(false);
+    }
+    if (panYSlider) {
+        panYSlider->blockSignals(true);
+        panYSlider->setValue(qRound(vFraction * 10000));
+        panYSlider->blockSignals(false);
+    }
+    
+    // Connect signals - sliders stay visible (auto-hide deferred to Phase 3.4)
+    m_hScrollConn = connect(viewport, &DocumentViewport::horizontalScrollChanged, this, [this](qreal fraction) {
+        if (panXSlider) {
+            panXSlider->blockSignals(true);
+            panXSlider->setValue(qRound(fraction * 10000));
+            panXSlider->blockSignals(false);
+        }
+    });
+    
+    m_vScrollConn = connect(viewport, &DocumentViewport::verticalScrollChanged, this, [this](qreal fraction) {
+        if (panYSlider) {
+            panYSlider->blockSignals(true);
+            panYSlider->setValue(qRound(fraction * 10000));
+            panYSlider->blockSignals(false);
+        }
+    });
+}
+
+void MainWindow::centerViewportContent(int tabIndex) {
+    // Phase 3.3: One-time horizontal centering for new tabs
+    // Sets initial pan X to a negative value so content appears centered
+    // when it's narrower than the viewport.
+    //
+    // This is called ONCE when a tab is created. User can then pan freely.
+    // The DocumentViewport debug overlay will show negative pan X values.
+    
+    if (!m_tabManager) return;
+    
+    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+    if (!viewport) return;
+    
+    // Get content and viewport dimensions in document units
+    QSizeF contentSize = viewport->totalContentSize();
+    qreal zoomLevel = viewport->zoomLevel();
+    
+    // Guard against zero zoom
+    if (zoomLevel <= 0) zoomLevel = 1.0;
+    
+    qreal viewportWidth = viewport->width() / zoomLevel;
+    
+    // Only center if content is narrower than viewport
+    if (contentSize.width() < viewportWidth) {
+        // Calculate the offset needed to center content
+        // Negative pan X shifts content to the right (toward center)
+        qreal centeringOffset = (viewportWidth - contentSize.width()) / 2.0;
+        
+        // Set initial pan with negative X to center horizontally
+        QPointF currentPan = viewport->panOffset();
+        viewport->setPanOffset(QPointF(-centeringOffset, currentPan.y()));
+        
+        qDebug() << "centerViewportContent: tabIndex=" << tabIndex
+                 << "contentWidth=" << contentSize.width()
+                 << "viewportWidth=" << viewportWidth
+                 << "centeringOffset=" << centeringOffset
+                 << "newPanX=" << -centeringOffset;
+    }
+}
+
 void MainWindow::applyZoom() {
     // Phase 3.1.8: Stubbed - DocumentViewport handles zoom via zoomSlider
     // TODO Phase 3.3: Connect to currentViewport()->setZoom() if needed
@@ -3113,6 +3229,12 @@ void MainWindow::addNewTab() {
     if (m_tabWidget) {
         m_tabWidget->setCurrentIndex(tabIndex);
     }
+    
+    // Phase 3.3: Center content horizontally (one-time initial offset)
+    // Defer to next event loop iteration so viewport has its final size
+    QTimer::singleShot(0, this, [this, tabIndex]() {
+        centerViewportContent(tabIndex);
+    });
     
     updateDialDisplay();
     
@@ -4205,30 +4327,13 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 trackpadModeTimer->stop();
             }
             
-            // --- Handle mouse wheel scrolling ---
-            const bool needVerticalScroll = panYSlider->maximum() > 0;
-            const bool needHorizontalScroll = panXSlider->maximum() > 0;
-            
-            if (wheelEvent->angleDelta().y() != 0 && needVerticalScroll) {
-                int scrollSteps = -wheelEvent->angleDelta().y() / 120;
-                int scrollAmount = scrollSteps * qMax(panYSlider->maximum() / 8, 50);
-                int newPan = qBound(panYSlider->minimum(), panYSlider->value() + scrollAmount, panYSlider->maximum());
-                panYSlider->setValue(newPan);
-                return true;
-            }
-            
-            if (wheelEvent->angleDelta().x() != 0 && needHorizontalScroll) {
-                int scrollSteps = wheelEvent->angleDelta().x() / 120;
-                int scrollAmount = scrollSteps * qMax(panXSlider->maximum() / 8, 50);
-                int newPan = qBound(panXSlider->minimum(), panXSlider->value() + scrollAmount, panXSlider->maximum());
-                panXSlider->setValue(newPan);
-                
-                panXSlider->setVisible(true);
-                scrollbarsVisible = true;
-                scrollbarHideTimer->start();
-                return true;
-            }
-            
+            // --- Let DocumentViewport handle mouse wheel scrolling natively ---
+            // Phase 3.3: DocumentViewport's wheelEvent() handles all scroll/zoom
+            // with proper pan overshoot support. The sliders are updated via
+            // the scroll fraction signals (horizontalScrollChanged/verticalScrollChanged).
+            // 
+            // Previously this code handled mouse wheel via sliders which clamped
+            // to 0-10000 (no overshoot). Now we let DocumentViewport handle it.
             return false;
         }
     }
@@ -6534,14 +6639,17 @@ void MainWindow::updateFastForwardButtonState() {
 void MainWindow::updateScrollbarPositions() {
     // Phase 3.1: Use m_tabWidget instead of canvasStack
     QWidget *container = m_tabWidget ? m_tabWidget->parentWidget() : nullptr;
-    if (!container || !panXSlider || !panYSlider) return;
+    if (!container || !panXSlider || !panYSlider || !m_tabWidget) return;
+    
+    // Get tab bar height to offset positions (sliders should be below tab bar)
+    int tabBarHeight = m_tabWidget->tabBar()->isVisible() ? m_tabWidget->tabBar()->height() : 0;
     
     // Add small margins for better visibility
     const int margin = 3;
     
-    // Get scrollbar dimensions
-    const int scrollbarWidth = panYSlider->width();
-    const int scrollbarHeight = panXSlider->height();
+    // Get scrollbar dimensions - use fixed values since setFixedHeight/Width was called
+    const int scrollbarWidth = 16;  // panYSlider fixed width
+    const int scrollbarHeight = 16; // panXSlider fixed height
     
     // Calculate sizes based on container
     int containerWidth = container->width();
@@ -6550,21 +6658,25 @@ void MainWindow::updateScrollbarPositions() {
     // Leave a bit of space for the corner
     int cornerOffset = 15;
     
-    // Position horizontal scrollbar at top
+    // Position horizontal scrollbar at top (BELOW tab bar)
     panXSlider->setGeometry(
         cornerOffset + margin,  // Leave space at left corner
-        margin,
+        tabBarHeight + margin,  // Below tab bar
         containerWidth - cornerOffset - margin*2,  // Full width minus corner and right margin
         scrollbarHeight
     );
     
-    // Position vertical scrollbar at left
+    // Position vertical scrollbar at left (starting below tab bar)
     panYSlider->setGeometry(
         margin,
-        cornerOffset + margin,  // Leave space at top corner
+        tabBarHeight + cornerOffset + margin,  // Below tab bar + corner offset
         scrollbarWidth,
-        containerHeight - cornerOffset - margin*2  // Full height minus corner and bottom margin
+        containerHeight - tabBarHeight - cornerOffset - margin*2  // Height minus tab bar
     );
+    
+    // Ensure sliders are raised above content
+    panXSlider->raise();
+    panYSlider->raise();
 }
 void MainWindow::handleEdgeProximity(InkCanvas* canvas, const QPoint& pos) {
     // Phase 3.1.7: Stubbed - InkCanvas-specific edge detection

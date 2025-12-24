@@ -174,7 +174,7 @@ BREAKING CHANGE: Old .spn files NOT supported (version 1.0.0-rc1).
 
 NEW ARCHITECTURE COMPONENTS:
 - DocumentManager: Owns Documents, handles file I/O
-- TabManager: Thin wrapper for QTabWidget operations  
+- TabManager: Thin wrapper for QTabWidget operations
 - LayerPanel: Multi-layer editing UI (bottom-left sidebar, SAI2-style)
 - Global tool state + per-document view state
 

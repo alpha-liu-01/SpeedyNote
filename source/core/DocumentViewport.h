@@ -491,6 +491,14 @@ public slots:
      */
     void setVerticalScrollFraction(qreal fraction);
     
+    /**
+     * @brief Emit scroll fraction signals for current state.
+     * 
+     * Call this to sync external UI (e.g., scrollbars) with current viewport state.
+     * Emits horizontalScrollChanged() and verticalScrollChanged() signals.
+     */
+    void syncScrollState() { emitScrollFractions(); }
+    
 signals:
     // ===== View State Signals =====
     

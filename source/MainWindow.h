@@ -11,6 +11,7 @@ class InkCanvas;
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
+#include <QPointer>
 #include <QFuture>
 #include <QLineEdit>
 #include <QSlider>
@@ -456,6 +457,8 @@ private slots:
     void onThicknessReleased(); // Added function to handle thickness control
     // void updateCustomColor();
     void updateDialDisplay();
+    void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
+    void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     // void handleModeSelection(int angle);
 
     void handleToolSelection(int angle);
@@ -774,6 +777,11 @@ private:
 
     bool scrollbarsVisible = false;
     QTimer *scrollbarHideTimer = nullptr;
+    
+    // Phase 3.3: Viewport scroll signal connections (for proper cleanup)
+    QMetaObject::Connection m_hScrollConn;
+    QMetaObject::Connection m_vScrollConn;
+    QPointer<DocumentViewport> m_connectedViewport;  // QPointer for safe dangling check
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;
