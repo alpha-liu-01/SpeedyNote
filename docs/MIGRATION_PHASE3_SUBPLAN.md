@@ -10,7 +10,9 @@ Phase 3 integrates `DocumentViewport` into `MainWindow`, replacing the obsolete 
 - `LayerPanel` - New UI for multi-layer editing
 - Global tool state with per-document view state
 
-**Status: IN PROGRESS**
+**Status:** Phase 3.0-3.2 ✅ COMPLETE | Phase 3.3 IN PROGRESS (~60%)
+
+**Last Updated:** Dec 24, 2024
 
 ---
 
@@ -1044,30 +1046,30 @@ void MainWindow::updateDebugStatus() {
 
 | Task | Description | Est. Lines | Status |
 |------|-------------|------------|--------|
-| **3.0 Pre-Integration** | | | |
+| **3.0 Pre-Integration** | | | ✅ COMPLETE |
 | 3.0.1 | DocumentManager class | ~150 | ✅ |
 | 3.0.2 | TabManager class | ~100 | ✅ |
 | 3.0.3 | LayerPanel class | ~250 | ✅ |
-| 3.0.4 | Command line flag | ~20 | ✅ |
-| **3.1 Disconnect InkCanvas** | | | |
-| 3.1.1 | Replace tab system (QTabWidget) | ~200 | [ ] |
-| 3.1.2 | Remove addNewTab InkCanvas | ~150 | [ ] |
+| 3.0.4 | Command line flag | ~20 | ✅ REMOVED |
+| **3.1 Disconnect InkCanvas** | | | ✅ COMPLETE |
+| 3.1.1 | Replace tab system (QTabWidget) | ~200 | ✅ |
+| 3.1.2 | Remove addNewTab InkCanvas | ~150 | ✅ |
 | 3.1.3 | Remove VectorCanvas + buttons | ~100 | ✅ |
-| 3.1.4 | Create currentViewport() | ~300 | [ ] |
-| 3.1.5 | Stub signal handlers | ~150 | [ ] |
-| 3.1.6 | Remove page navigation | ~200 | [ ] |
-| 3.1.7 | Remove InkCanvas includes | ~50 | [ ] |
-| 3.1.8 | Disable ControlPanelDialog | ~30 | [ ] |
-| 3.1.9 | Stub markdown handlers | ~50 | [ ] |
-| **3.2 Add DocumentViewport** | | | |
-| 3.2.1 | Initialize managers | ~50 | [ ] |
-| 3.2.2 | Create tab with viewport | ~100 | [ ] |
-| 3.2.3 | Basic rendering verification | ~20 | [ ] |
-| **3.3 Core Features** | | | |
-| 3.3.1 | Tool selection | ~80 | [ ] |
-| 3.3.2 | Pen color & thickness | ~60 | [ ] |
-| 3.3.3 | Pan/zoom controls | ~100 | [ ] |
-| 3.3.4 | Page navigation | ~80 | [ ] |
+| 3.1.4 | Create currentViewport() | ~300 | ✅ |
+| 3.1.5 | Stub signal handlers | ~150 | ✅ |
+| 3.1.6 | Remove page navigation | ~200 | ✅ |
+| 3.1.7 | Remove InkCanvas includes | ~50 | ✅ |
+| 3.1.8 | Disable ControlPanelDialog | ~30 | ✅ |
+| 3.1.9 | Stub markdown handlers | ~50 | ✅ |
+| **3.2 Add DocumentViewport** | | | ✅ COMPLETE |
+| 3.2.1 | Initialize managers | ~50 | ✅ |
+| 3.2.2 | Create tab with viewport | ~100 | ✅ |
+| 3.2.3 | Basic rendering verification | ~20 | ✅ |
+| **3.3 Core Features** | | | 🔄 IN PROGRESS |
+| 3.3.1 | Tool selection | ~80 | ✅ |
+| 3.3.2 | Pen color & thickness | ~60 | ✅ |
+| 3.3.3 | Pan/zoom controls | ~100 | ✅ (partial) |
+| 3.3.4 | Page navigation | ~80 | [ ] stubbed |
 | 3.3.5 | Undo/redo | ~40 | [ ] |
 | **3.4 Layer Management UI** | | | |
 | 3.4.1 | Add LayerPanel to sidebar | ~60 | [ ] |
@@ -1083,7 +1085,7 @@ void MainWindow::updateDebugStatus() {
 | 3.6.1 | Feature checklist | Manual | [ ] |
 | 3.6.2 | Move debug overlay | ~30 | [ ] |
 
-**Total Estimated:** ~1630 lines of new code
+**Progress:** Phase 3.0-3.2 complete, Phase 3.3 ~60% complete
 
 ---
 
@@ -1134,20 +1136,23 @@ source/
 
 ## Success Criteria
 
-### Phase 3 Complete When:
+### Current Status (Dec 24, 2024):
 
-1. [ ] Can launch with `--use-new-viewport` flag
-2. [ ] New tabs use DocumentViewport (not InkCanvas)
-3. [ ] Can draw/erase on any page
-4. [ ] Multi-layer editing works (add/delete/reorder/select)
-5. [ ] Drawing goes to active layer only
-6. [ ] Can save to `.snx` format
-7. [ ] Can load `.snx` files with all layers preserved
-8. [ ] Can open PDF files
-9. [ ] Tool state is global (switches affect all tabs)
-10. [ ] View state is per-document (zoom, pan, current page)
-11. [ ] No crashes when switching tabs rapidly
-12. [ ] Memory doesn't leak when closing tabs
+1. [x] ~~Can launch with `--use-new-viewport` flag~~ → Flag removed, new viewport is DEFAULT
+2. [x] New tabs use DocumentViewport (not InkCanvas)
+3. [x] Can draw/erase on any page
+4. [ ] Multi-layer editing works (add/delete/reorder/select) → Phase 3.4
+5. [ ] Drawing goes to active layer only → Phase 3.4
+6. [ ] Can save to `.snx` format → Phase 3.5
+7. [ ] Can load `.snx` files with all layers preserved → Phase 3.5
+8. [ ] Can open PDF files → Phase 3.5
+9. [x] Tool state is global (switches affect all tabs)
+10. [x] View state is per-document (zoom, pan, current page)
+11. [x] No crashes when switching tabs rapidly
+12. [ ] Memory doesn't leak when closing tabs → Needs testing
+
+### Phase 3 Complete When:
+All items above are checked ✅
 
 ---
 

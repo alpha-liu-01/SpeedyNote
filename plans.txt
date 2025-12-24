@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 1 COMPLETE ✅ | Phase 2A COMPLETE ✅ | Phase 3 READY
-LAST UPDATED: Dec 13, 2024
+STATUS: Phase 1 ✅ | Phase 2A ✅ | Phase 3.0-3.2 ✅ | Phase 3.3 IN PROGRESS
+LAST UPDATED: Dec 24, 2024
 
 =============================================================================
                          ARCHITECTURE OVERVIEW
@@ -167,74 +167,78 @@ NOTE: Phase 2B deferred - MainWindow UI makes testing these tools easier.
 =============================================================================
 
 → See: docs/MIGRATION_PHASE3_SUBPLAN.md for detailed breakdown
+→ See: docs/MIGRATION_PHASE3_NOTES.md for implementation notes
 
 Integrate DocumentViewport into MainWindow, replacing InkCanvas.
 BREAKING CHANGE: Old .spn files NOT supported (version 1.0.0-rc1).
 
 NEW ARCHITECTURE COMPONENTS:
 - DocumentManager: Owns Documents, handles file I/O
-- TabManager: Thin wrapper for QTabWidget operations
+- TabManager: Thin wrapper for QTabWidget operations  
 - LayerPanel: Multi-layer editing UI (bottom-left sidebar, SAI2-style)
 - Global tool state + per-document view state
 
------ Phase 3.0: Pre-Integration Setup -----
+----- Phase 3.0: Pre-Integration Setup ✅ COMPLETE -----
 
-[  ] 3.0.1 DocumentManager Class (~150 lines)
+[✅] 3.0.1 DocumentManager Class (~150 lines)
      - source/core/DocumentManager.h/.cpp
-     - createDocument(), loadDocument(), saveDocument(), closeDocument()
-     - Owns all Document instances
 
-[  ] 3.0.2 TabManager Class (~100 lines)
+[✅] 3.0.2 TabManager Class (~100 lines)
      - source/ui/TabManager.h/.cpp
-     - createTab(), closeTab(), currentViewport()
-     - Thin wrapper for code organization
 
-[  ] 3.0.3 LayerPanel Class (~250 lines)
+[✅] 3.0.3 LayerPanel Class (~250 lines)
      - source/ui/LayerPanel.h/.cpp
-     - Add/delete/reorder layers, select active layer
-     - Talks directly to Page (not through DocumentViewport)
 
-[  ] 3.0.4 Command Line Flag (~20 lines)
-     - --use-new-viewport flag for controlled rollout
+[✅] 3.0.4 Command Line Flag - REMOVED
+     - --use-new-viewport removed, new viewport is now default
 
------ Phase 3.1: Disconnect InkCanvas -----
+----- Phase 3.1: Disconnect InkCanvas ✅ COMPLETE -----
 
-[  ] 3.1.1 Conditional InkCanvas Creation (~50 lines)
-     - Only create InkCanvas when NOT using new viewport
+[✅] 3.1.1 Replace Tab System with QTabWidget
+[✅] 3.1.2 Remove addNewTab() InkCanvas code
+[✅] 3.1.3 Remove VectorCanvas buttons
+[✅] 3.1.4 Create currentViewport() helper
+[✅] 3.1.5 Stub InkCanvas signal handlers
+[✅] 3.1.6 Remove page navigation methods
+[✅] 3.1.7 Remove InkCanvas includes/members
+[✅] 3.1.8 Disable ControlPanelDialog
+[✅] 3.1.9 Stub markdown handlers
 
-[  ] 3.1.2 Stub Signal/Slot Connections (~100 lines)
-     - Prevent crashes when InkCanvas doesn't exist
+Note: InkCanvas.cpp still compiles but is not used. Full removal in Phase 5.
+Disconnected files: LauncherWindow.cpp, ControlPanelDialog.cpp
 
------ Phase 3.2: Add DocumentViewport -----
+----- Phase 3.2: Add DocumentViewport ✅ COMPLETE -----
 
-[  ] 3.2.1 Initialize Managers (~50 lines)
-     - Create DocumentManager, TabManager in MainWindow
+[✅] 3.2.1 Initialize Managers
+     - DocumentManager, TabManager created in MainWindow constructor
 
-[  ] 3.2.2 Create Tab with DocumentViewport (~100 lines)
-     - New tabs use DocumentViewport + Document
+[✅] 3.2.2 Create Tab with DocumentViewport
+     - addNewTab() creates Document + DocumentViewport via managers
 
-[  ] 3.2.3 Basic Rendering Verification
-     - Multi-tab rendering works
+[✅] 3.2.3 Basic Rendering Verification
+     - App launches, tabs work, drawing works
 
------ Phase 3.3: Core Features Reconnection -----
+----- Phase 3.3: Core Features Reconnection (IN PROGRESS) -----
 
-[  ] 3.3.1 Tool Selection (~80 lines)
-     - Toolbar buttons → viewport.setCurrentTool()
-     - Global tool state pattern
+[✅] 3.3.1 Tool Selection
+     - Pen/Eraser buttons → currentViewport()->setCurrentTool()
 
-[  ] 3.3.2 Pen Color & Thickness (~60 lines)
-     - Color picker, thickness slider
+[✅] 3.3.2 Pen Color & Thickness
+     - Color buttons → currentViewport()->setPenColor()
+     - Thickness slider → currentViewport()->setPenThickness()
 
-[  ] 3.3.3 Pan/Zoom Controls (~100 lines)
-     - Zoom slider, buttons, scroll bars
+[✅] 3.3.3 Pan/Zoom Controls (PARTIAL)
+     - Zoom 50%/100%/200% buttons work
+     - Zoom slider → currentViewport()->setZoomLevel()
+     [  ] Scroll bars need reconnection (stubbed)
 
-[  ] 3.3.4 Page Navigation (~80 lines)
-     - Page spinbox, prev/next buttons
+[  ] 3.3.4 Page Navigation
+     - Page spinbox, prev/next buttons (stubbed, needs DocumentViewport)
 
-[  ] 3.3.5 Undo/Redo (~40 lines)
-     - Edit menu Ctrl+Z/Y
+[  ] 3.3.5 Undo/Redo
+     - Edit menu Ctrl+Z/Y → currentViewport()->undo()/redo()
 
------ Phase 3.4: Layer Management UI (NEW) -----
+----- Phase 3.4: Layer Management UI -----
 
 [  ] 3.4.1 Add LayerPanel to Sidebar (~60 lines)
      - Below PDF outline/bookmarks
@@ -261,7 +265,7 @@ NEW ARCHITECTURE COMPONENTS:
 [  ] 3.6.1 Feature Verification Checklist
 [  ] 3.6.2 Move Debug Overlay to Status Bar (~30 lines)
 
-TOTAL ESTIMATED: ~1630 lines new code
+PROGRESS: Phase 3.0-3.2 complete, 3.3 ~60% complete
 
 =============================================================================
                     PHASE 4: WIDGET MIGRATION
