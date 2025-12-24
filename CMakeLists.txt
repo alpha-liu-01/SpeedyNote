@@ -356,7 +356,7 @@ add_executable(${PROJECT_NAME}
         source/PdfOpenDialog.cpp
 	  source/PdfRelinkDialog.cpp
     	  source/SpnPackageManager.cpp
-    	  source/LauncherWindow.cpp
+    	  # source/LauncherWindow.cpp  # Phase 3.1: Disconnected - uses MainWindow::s_useNewViewport
         source/PictureSourceDialog.cpp
         source/ExistingPictureDialog.cpp
         source/DocumentConverter.cpp

@@ -49,7 +49,7 @@
 // #include "HandwritingLineEdit.h"
 #include "ControlPanelDialog.h"
 #include "SDLControllerManager.h"
-#include "LauncherWindow.h" // Added for launcher access
+// #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 #include "PdfOpenDialog.h" // Added for PDF file association
 #include "DocumentConverter.h" // Added for PowerPoint conversion
 #include <poppler-qt6.h> // For PDF outline parsing
@@ -65,7 +65,8 @@
 
 // Static member definition for single instance
 QSharedMemory *MainWindow::sharedMemory = nullptr;
-LauncherWindow *MainWindow::sharedLauncher = nullptr;
+// Phase 3.1: LauncherWindow disconnected - will be re-linked later
+// LauncherWindow *MainWindow::sharedLauncher = nullptr;
 
 // REMOVED Phase 3.1: Static flag for viewport architecture mode
 // Always using new architecture now
@@ -1509,11 +1510,11 @@ MainWindow::~MainWindow() {
         controllerThread->wait();  // Wait for thread to finish
     }
     
-    // Cleanup shared launcher instance
-    if (sharedLauncher) {
-        sharedLauncher->deleteLater();
-        sharedLauncher = nullptr;
-    }
+    // Phase 3.1: LauncherWindow disconnected
+    // if (sharedLauncher) {
+    //     sharedLauncher->deleteLater();
+    //     sharedLauncher = nullptr;
+    // }
     
     // Cleanup single instance resources
     if (localServer) {
@@ -1794,163 +1795,24 @@ bool MainWindow::selectFolder() {
 }
 
 void MainWindow::saveCanvas() {
+    // Phase 3.1: Add null check - will crash if called without canvas
+    if (!currentCanvas()) return;
     currentCanvas()->saveToFile(getCurrentPageForCanvas(currentCanvas()));
 }
 
 
 void MainWindow::switchPage(int pageNumber) {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-
-    // ✅ NOTE: Don't flush pending metadata save here!
-    // Markdown notes are stored in memory (markdownNotes list) and sidebar reads from memory.
-    // Flushing causes a blocking disk write that freezes the UI.
-    // The deferred save will happen automatically after 1 second of inactivity, or on app close.
-
-    if (currentCanvas()->isEdited()){
-        saveCurrentPageConcurrent(); // Use concurrent saving for smoother page flipping
-    }
-
-    int oldPage = getCurrentPageForCanvas(currentCanvas()) + 1; // Convert to 1-based for comparison
-    int newPage = pageNumber - 1;
-    pageMap[canvas] = newPage;  // ✅ Save the page for this tab
-
-    if (canvas->isPdfLoadedFunc() && pageNumber - 1 < canvas->getTotalPdfPages()) {
-        canvas->loadPdfPage(newPage);
-    } else {
-        canvas->loadPage(newPage);
-    }
-
-    canvas->setLastActivePage(newPage);
-    
-    // ✅ Track last accessed page in JSON metadata
-    canvas->setLastAccessedPage(newPage);
-    
-    updateZoom();
-    // It seems panXSlider and panYSlider can be null here during startup.
-    if(panXSlider && panYSlider){
-    canvas->setLastPanX(panXSlider->maximum());
-    canvas->setLastPanY(panYSlider->maximum());
-        
-        // ✅ Enhanced scroll-on-top functionality with explicit direction
-        // Now enabled for all notebooks, not just PDFs
-        if (panYSlider->maximum() > 0) {
-            if (pageNumber > oldPage) {
-                // Forward page switching → scroll to top
-                QTimer::singleShot(0, this, [this]() {
-                    if (panYSlider) panYSlider->setValue(0);
-                });
-            } else if (pageNumber < oldPage) {
-                // Backward page switching → scroll to threshold - offset to match the new switch point
-                QTimer::singleShot(0, this, [this, canvas]() {
-                    if (panYSlider && canvas) {
-                        int threshold = canvas->getAutoscrollThreshold();
-                        if (threshold > 0) {
-                            // Calculate the backward switch offset (matching InkCanvas logic)
-                            int backwardOffset = 300;
-                            if (threshold < 600) {
-                                // For small thresholds, use proportional offset
-                                backwardOffset = threshold / 4;
-                            }
-                            // Position at threshold - offset to match the new backward switch threshold
-                            int targetPan = threshold - backwardOffset;
-                            // Ensure we don't go negative if threshold is too small
-                            targetPan = qMax(0, targetPan);
-                            panYSlider->setValue(targetPan);
-                        } else {
-                            // Fallback for non-combined canvases or error cases
-                            panYSlider->setValue(panYSlider->maximum());
-                        }
-                    }
-                });
-            }
-        }
-    }
-    updateDialDisplay();
-    updateBookmarkButtonState(); // Update bookmark button state when switching pages
-    
-    // ✅ Update outline selection to match the new page
-    updateOutlineSelection(pageNumber);
-    
-    // Load markdown notes for the new page
-    if (markdownNotesSidebarVisible) {
-        loadMarkdownNotesForCurrentPage();
-    }
+    // Phase 3.1.6: Stubbed - will use DocumentViewport::scrollToPage() in Phase 3.3
+    Q_UNUSED(pageNumber);
+    // TODO Phase 3.3.4: Use currentViewport()->scrollToPage()
+    qDebug() << "switchPage(): Not implemented yet (Phase 3.3.4)";
 }
 void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-
-    // ✅ NOTE: Don't flush pending metadata save here - see comment in switchPage()
-
-    if (currentCanvas()->isEdited()){
-        saveCurrentPageConcurrent(); // Use concurrent saving for smoother page flipping
-    }
-
-    int newPage = pageNumber - 1;
-    pageMap[canvas] = newPage;  // ✅ Save the page for this tab
-
-    if (canvas->isPdfLoadedFunc() && pageNumber - 1 < canvas->getTotalPdfPages()) {
-        canvas->loadPdfPage(newPage);
-    } else {
-        canvas->loadPage(newPage);
-    }
-
-    canvas->setLastActivePage(newPage);
-    
-    // ✅ Track last accessed page in JSON metadata
-    canvas->setLastAccessedPage(newPage);
-    
-    updateZoom();
-    // It seems panXSlider and panYSlider can be null here during startup.
-    if(panXSlider && panYSlider){
-        canvas->setLastPanX(panXSlider->maximum());
-        canvas->setLastPanY(panYSlider->maximum());
-        
-        // ✅ Enhanced scroll-on-top functionality with explicit direction
-        // Now enabled for all notebooks, not just PDFs
-        if (panYSlider->maximum() > 0) {
-            if (direction > 0) {
-                // Forward page switching → scroll to top
-                QTimer::singleShot(0, this, [this]() {
-                    if (panYSlider) panYSlider->setValue(0);
-                });
-            } else if (direction < 0) {
-                // Backward page switching → scroll to threshold - offset to match the new switch point
-                QTimer::singleShot(0, this, [this, canvas]() {
-                    if (panYSlider && canvas) {
-                        int threshold = canvas->getAutoscrollThreshold();
-                        if (threshold > 0) {
-                            // Calculate the backward switch offset (matching InkCanvas logic)
-                            int backwardOffset = 300;
-                            if (threshold < 600) {
-                                // For small thresholds, use proportional offset
-                                backwardOffset = threshold / 4;
-                            }
-                            // Position at threshold - offset to match the new backward switch threshold
-                            int targetPan = threshold - backwardOffset;
-                            // Ensure we don't go negative if threshold is too small
-                            targetPan = qMax(0, targetPan);
-                            panYSlider->setValue(targetPan);
-                        } else {
-                            // Fallback for non-combined canvases or error cases
-                            panYSlider->setValue(panYSlider->maximum());
-                        }
-                    }
-                });
-            }
-        }
-    }
-    updateDialDisplay();
-    updateBookmarkButtonState(); // Update bookmark button state when switching pages
-    
-    // ✅ Update outline selection to match the new page
-    updateOutlineSelection(pageNumber);
-    
-    // Load markdown notes for the new page
-    if (markdownNotesSidebarVisible) {
-        loadMarkdownNotesForCurrentPage();
-    }
+    // Phase 3.1.6: Stubbed - will use DocumentViewport::scrollToPage() in Phase 3.3
+    Q_UNUSED(pageNumber);
+    Q_UNUSED(direction);
+    // TODO Phase 3.3.4: Use currentViewport()->scrollToPage() with scroll direction
+    qDebug() << "switchPageWithDirection(): Not implemented yet (Phase 3.3.4)";
 }
 
 void MainWindow::deleteCurrentPage() {
@@ -2039,13 +1901,13 @@ void MainWindow::saveCurrentPage() {
         updateTabLabel();
 
         // ✅ Add to recent notebooks after successful save
-        if (recentNotebooksManager) {
-            recentNotebooksManager->addRecentNotebook(selectedSpnPath, canvas);
-            // Refresh shared launcher if it exists and is visible
-            if (sharedLauncher && sharedLauncher->isVisible()) {
-                sharedLauncher->refreshRecentNotebooks();
-            }
-        }
+        // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
+        // if (recentNotebooksManager) {
+        //     recentNotebooksManager->addRecentNotebook(selectedSpnPath, canvas);
+        //     if (sharedLauncher && sharedLauncher->isVisible()) {
+        //         sharedLauncher->refreshRecentNotebooks();
+        //     }
+        // }
         
         // Show success message
         QMessageBox::information(this, tr("Saved"), 
@@ -3344,66 +3206,16 @@ qreal MainWindow::getDevicePixelRatio(){
 }
 
 void MainWindow::updatePanRange() {
-    int zoom = currentCanvas()->getZoom();
-
-    QSize canvasSize = currentCanvas()->getCanvasSize();
-    
-    // Get the actual widget size instead of screen size for more accurate calculation
-    QSize actualViewportSize = size();
-    
-    // Adjust viewport size for tab bar and toolbar layout (tab bar is now above toolbar)
-    QSize effectiveViewportSize = actualViewportSize;
-    int tabBarHeight = (tabBarContainer && tabBarContainer->isVisible()) ? 38 : 0; // Tab bar height
-    int toolbarHeight = isToolbarTwoRows ? 80 : 50; // Toolbar height
-    effectiveViewportSize.setHeight(actualViewportSize.height() - tabBarHeight - toolbarHeight);
-    
-    // Calculate scaled canvas size using proper DPR scaling
-    int scaledCanvasWidth = canvasSize.width() * zoom / 100;
-    int scaledCanvasHeight = canvasSize.height() * zoom / 100;
-    
-    // Calculate max pan values - if canvas is smaller than viewport, pan should be 0
-    int maxPanX = qMax(0, scaledCanvasWidth - effectiveViewportSize.width());
-    int maxPanY = qMax(0, scaledCanvasHeight - effectiveViewportSize.height());
-
-    // Scale the pan range properly
-    int maxPanX_scaled = maxPanX * 100 / zoom;
-    int maxPanY_scaled = maxPanY * 100 / zoom;
-
-    // Set range to 0 when canvas is smaller than viewport (centered)
-    if (scaledCanvasWidth <= effectiveViewportSize.width()) {
+    // Phase 3.1: Stubbed - DocumentViewport handles its own pan/zoom
+    // TODO Phase 3.3: Remove pan sliders or connect to DocumentViewport
+    // For now, just hide the sliders since there's no InkCanvas
+    if (panXSlider) {
         panXSlider->setRange(0, 0);
-        panXSlider->setValue(0);
-        // No need for horizontal scrollbar
         panXSlider->setVisible(false);
-    } else {
-    panXSlider->setRange(0, maxPanX_scaled);
-        // Show scrollbar only if mouse is near and timeout hasn't occurred
-        if (scrollbarsVisible && !scrollbarHideTimer->isActive()) {
-            scrollbarHideTimer->start();
-        }
     }
-    
-    if (scaledCanvasHeight <= effectiveViewportSize.height()) {
+    if (panYSlider) {
         panYSlider->setRange(0, 0);
-        panYSlider->setValue(0);
-        // panYSlider stays hidden permanently
-    } else {
-        // Check if this is a combined canvas to extend pan Y range to negative values
-        InkCanvas *canvas = currentCanvas();
-        int minPanY = 0;
-        if (canvas && canvas->getAutoscrollThreshold() > 0) {
-            // For combined canvases, allow negative pan Y for backward scrolling
-            int threshold = canvas->getAutoscrollThreshold();
-            // Calculate the required negative range based on the dynamic backward switch threshold
-            int backwardOffset = (threshold < 600) ? (threshold / 4) : 300;
-            minPanY = qMin(-backwardOffset, -(threshold / 10)); // Ensure we can reach the switch threshold
-        }
-        
-        panYSlider->setRange(minPanY, maxPanY_scaled);
-        // Show scrollbar only if mouse is near and timeout hasn't occurred
-        if (scrollbarsVisible && !scrollbarHideTimer->isActive()) {
-            scrollbarHideTimer->start();
-        }
+        panYSlider->setVisible(false);
     }
 }
 
@@ -3693,33 +3505,11 @@ int MainWindow::findTabWithNotebookId(const QString &notebookId) {
 }
 
 bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
-    // Phase 3.1.1: Stubbed - will be implemented with DocumentManager
+    // Phase 3.1.1: Stubbed - will be implemented with DocumentManager in Phase 3.5
+    Q_UNUSED(spnPath);
     // TODO Phase 3.5: Use DocumentManager to check if document is already open
-    if (!m_tabWidget) {
-        return false;
-    }
-    
-    // Read notebook ID from the .spn file without full extraction
-    QString notebookId = SpnPackageManager::readNotebookIdFromSpn(spnPath);
-    if (notebookId.isEmpty()) {
-        return false; // Can't determine ID, allow opening
-    }
-    
-    // Check if any tab already has this notebook open
-    int existingTabIndex = findTabWithNotebookId(notebookId);
-    if (existingTabIndex >= 0 && existingTabIndex < tabList->count() && existingTabIndex < canvasStack->count()) {
-        // Notebook is already open - switch to that tab
-        tabList->setCurrentRow(existingTabIndex);
-        canvasStack->setCurrentIndex(existingTabIndex);
-        
-        // Show informational message
-        QMessageBox::information(this, tr("Notebook Already Open"),
-            tr("This notebook is already open in another tab. Switching to the existing tab."));
-        
-        return true;
-    }
-    
-    return false; // Not already open
+    // For now, always return false (allow opening)
+    return false;
 }
 
 void MainWindow::addNewTab() {
@@ -3795,7 +3585,6 @@ void MainWindow::addNewTab() {
     
     // ✅ Create new InkCanvas instance EARLIER so it can be captured by the lambda
     InkCanvas *newCanvas = new InkCanvas(this);
-    ========== END OLD INKCANVAS CODE ==========*/
     
     // ✅ Handle tab closing when the button is clicked
     connect(closeButton, &QPushButton::clicked, this, [=]() { // newCanvas is now captured
@@ -4030,129 +3819,20 @@ void MainWindow::addNewTab() {
     
     // Update color button states for the new tab
     updateColorButtonStates();
+    ========== END OLD INKCANVAS CODE ==========*/
 }
 void MainWindow::removeTabAt(int index) {
-    if (!tabList || !canvasStack) return; // Ensure UI elements exist
-    if (index < 0 || index >= canvasStack->count()) return;
-
-    // ✅ Remove tab entry
-    QListWidgetItem *item = tabList->takeItem(index);
-    delete item;
-    
-    // Update tab sizes and button position after removing tab
-    QTimer::singleShot(0, this, [this]() {
-        updateTabSizes();
-    });
-
-    // ✅ Remove and delete the canvas safely
-        QWidget *canvasWidget = canvasStack->widget(index); // Get widget before removal
-        // ensureTabHasUniqueSaveFolder(currentCanvas()); // Moved to the close button lambda
-
-        if (canvasWidget) {
-            // ✅ Disconnect all signals from this canvas to prevent memory leaks
-            InkCanvas *canvasInstance = qobject_cast<InkCanvas*>(canvasWidget);
-            if (canvasInstance) {
-                // Disconnect all signals between this canvas and MainWindow
-                disconnect(canvasInstance, nullptr, this, nullptr);
-                // Remove event filter
-                canvasInstance->removeEventFilter(this);
-            }
-            
-            canvasStack->removeWidget(canvasWidget); // Remove from stack
-            canvasWidget->deleteLater(); // ✅ Use deleteLater() for safer deletion
+    // Phase 3.1.2: Use TabManager to remove tabs
+    if (m_tabManager) {
+        m_tabManager->closeTab(index);
     }
-
-    // ✅ Select the previous tab (or first tab if none left)
-    if (tabList->count() > 0) {
-        int newIndex = qMax(0, index - 1);
-        tabList->setCurrentRow(newIndex);
-        canvasStack->setCurrentWidget(canvasStack->widget(newIndex));
-    }
-
-    // QWidget *canvasWidget = canvasStack->widget(index); // Redeclaration - remove this block
-    // InkCanvas *canvasInstance = qobject_cast<InkCanvas*>(canvasWidget);
-    //
-    // if (canvasInstance) {
-    //     QString folderPath = canvasInstance->getSaveFolder();
-    //     if (!folderPath.isEmpty() && folderPath != QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session") {
-    //         // recentNotebooksManager->addRecentNotebook(folderPath, canvasInstance); // Moved to close button lambda
-    //     }
-    // }
 }
 
 bool MainWindow::ensureTabHasUniqueSaveFolder(InkCanvas* canvas) {
-    if (!canvas) return true; // No canvas to save, allow closure
-
-    if (canvasStack->count() == 0) return true; // No tabs, allow closure
-
-    QString currentFolder = canvas->getSaveFolder();
-    QString tempFolder = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
-
-    if (currentFolder.isEmpty() || currentFolder == tempFolder) {
-
-        QDir sourceDir(tempFolder);
-        QStringList pageFiles = sourceDir.entryList(QStringList() << "*.png", QDir::Files);
-
-        // No pages to save → allow closure without prompting
-        if (pageFiles.isEmpty()) {
-            return true;
-        }
-
-        QMessageBox::StandardButton reply = QMessageBox::question(this, 
-            tr("Save Notebook"), 
-            tr("This notebook contains unsaved work.\n\n"
-               "Would you like to save it as a SpeedyNote Package (.spn) file before closing?"),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-            QMessageBox::Save);
-
-        if (reply == QMessageBox::Cancel) {
-            return false; // User cancelled, don't close tab
-        }
-        
-        if (reply == QMessageBox::Discard) {
-            return true; // User chose to discard, allow closure
-        }
-
-        // User chose Save - prompt for .spn file location
-        QString suggestedName = "MyNotebook.spn";
-        QString selectedSpnPath = QFileDialog::getSaveFileName(this, 
-            tr("Save SpeedyNote Package"), 
-            suggestedName, 
-            "SpeedyNote Package (*.spn)");
-            
-        if (selectedSpnPath.isEmpty()) {
-            return false; // User cancelled save dialog, don't close tab
-        }
-
-        // Ensure .spn extension
-        if (!selectedSpnPath.toLower().endsWith(".spn")) {
-            selectedSpnPath += ".spn";
-        }
-
-        // Create .spn package from temp folder contents
-        if (!SpnPackageManager::convertFolderToSpnPath(tempFolder, selectedSpnPath)) {
-            QMessageBox::critical(this, tr("Save Failed"), 
-                tr("Failed to save the notebook as a SpeedyNote Package.\nPlease try again or choose a different location."));
-            return false; // Save failed, don't close tab
-        }
-
-        // Update canvas to use the new .spn package
-        canvas->setSaveFolder(selectedSpnPath);
-
-        // ✅ Add to recent notebooks after successful save
-        if (recentNotebooksManager) {
-            recentNotebooksManager->addRecentNotebook(selectedSpnPath, canvas);
-            // Refresh shared launcher if it exists and is visible
-            if (sharedLauncher && sharedLauncher->isVisible()) {
-                sharedLauncher->refreshRecentNotebooks();
-            }
-        }
-        
-        QMessageBox::information(this, tr("Saved Successfully"), 
-            tr("Notebook saved as: %1").arg(QFileInfo(selectedSpnPath).fileName()));
-    }
-
-    return true; // Success, allow tab closure
+    // Phase 3.1.2: Stubbed - will use new save logic in Phase 3.5
+    Q_UNUSED(canvas);
+    // TODO Phase 3.5: Implement save-before-close logic with DocumentManager
+    return true; // Allow closure for now
 }
 
 
@@ -4174,60 +3854,16 @@ DocumentViewport* MainWindow::currentViewport() const {
 
 
 void MainWindow::updateTabLabel() {
-    int index = tabList->currentRow();
-    if (index < 0) return;
-
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-
-    QString folderPath = canvas->getDisplayPath(); // ✅ Get display path (shows .spn filename instead of temp dir)
-    if (folderPath.isEmpty()) return;
-
-    QString tabName;
-
-    // ✅ Get PDF path from JSON metadata
-    canvas->loadNotebookMetadata(); // Ensure metadata is loaded
-    QString pdfPath = canvas->getPdfPath();
-    if (!pdfPath.isEmpty()) {
-            QFileInfo pdfInfo(pdfPath);
-            if (pdfInfo.exists()) {
-            tabName = pdfInfo.fileName(); // Use full filename, adaptive width handles display
-        }
-    }
-
-    // ✅ If no PDF, use appropriate fallback
-    if (tabName.isEmpty()) {
-        if (folderPath.toLower().endsWith(".spn")) {
-            // For .spn packages, use the .spn filename
-            QFileInfo spnInfo(folderPath);
-            tabName = spnInfo.fileName(); // Use full filename, adaptive width handles display
-        } else {
-            // For regular folders, use the folder name
-        QFileInfo folderInfo(folderPath);
-            tabName = folderInfo.fileName(); // Use full filename, adaptive width handles display
-        }
-    }
-
-    QListWidgetItem *tabItem = tabList->item(index);
-    if (tabItem) {
-        QWidget *tabWidget = tabList->itemWidget(tabItem); // Get the tab's custom widget
-        if (tabWidget) {
-            QLabel *tabLabel = tabWidget->findChild<QLabel *>(); // Get the QLabel inside
-            if (tabLabel) {
-                tabLabel->setText(tabName); // ✅ Update tab label
-                tabLabel->setWordWrap(false); // No wrapping for horizontal tabs
-                
-                // Update tab sizes since text changed
-                QTimer::singleShot(0, this, [this]() {
-                    updateTabSizes();
-                });
-            }
-        }
-    }
+    // Phase 3.1.2: TabManager handles tab labels via QTabWidget
+    // TODO Phase 3.3: Connect to Document displayName changes
+    qDebug() << "updateTabLabel(): Using TabManager (Phase 3.3)";
 }
 
 int MainWindow::getCurrentPageForCanvas(InkCanvas *canvas) {
-    return pageMap.contains(canvas) ? pageMap[canvas] : 0;
+    // Phase 3.1.6: Stubbed - use DocumentViewport::currentPageIndex() instead
+    Q_UNUSED(canvas);
+    // TODO Phase 3.3: Remove this method entirely
+    return 0;
 }
 
 void MainWindow::toggleZoomSlider() {
@@ -4562,6 +4198,14 @@ void MainWindow::updateDialDisplay() {
     if (!dialDisplay) return;
     if (!dialColorPreview) return;
     if (!dialIconView) return;
+    
+    // Phase 3.1: Early return if no canvas available
+    // TODO Phase 3.3: Use DocumentViewport for tool/page info
+    if (!currentCanvas()) {
+        dialDisplay->setText(tr("\n\nNo Canvas"));
+        return;
+    }
+    
     dialIconView->show();
     switch (currentDialMode) {
         case DialMode::PageSwitching:
@@ -4836,7 +4480,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     }
 
     // Handle resize events for canvas container
-    QWidget *container = canvasStack ? canvasStack->parentWidget() : nullptr;
+    // Phase 3.1: Use m_tabWidget instead of canvasStack
+    QWidget *container = m_tabWidget ? m_tabWidget->parentWidget() : nullptr;
     if (obj == container && event->type() == QEvent::Resize) {
         updateScrollbarPositions();
         return false; // Let the event propagate
@@ -5824,77 +5469,15 @@ void MainWindow::updateTheme() {
         )").arg(bgColor).arg(textColor).arg(hoverColor).arg(selectedColor));
     }
     
-    // Update horizontal tab bar container and tab list styling - entire container uses accent color
-    if (tabBarContainer && tabList) {
+    // Phase 3.1: Tab bar styling now uses QTabWidget
+    // TODO Phase 3.3: Apply styling to m_tabWidget via QTabBar::setStyleSheet
+    if (tabBarContainer) {
         // Set the entire tab bar container to use accent color
         tabBarContainer->setStyleSheet(QString(R"(
         QWidget#tabBarContainer {
             background-color: %1;
         }
         )").arg(accentColor.name()));
-        
-        // Tab list styling (transparent background to show container color)
-        // Swapped: selected tab now matches toolbar, unselected tabs stand out
-        QString itemBgColor = darkMode ? "rgba(45, 45, 45, 255)" : "white";
-        QString selectedBgColor = darkMode ? "rgba(80, 80, 80, 255)" : "rgba(220, 220, 220, 255)";
-        QString borderColor = darkMode ? "rgba(100, 100, 100, 255)" : "rgba(180, 180, 180, 255)";
-        QString hoverBgColor = darkMode ? "rgba(70, 70, 70, 255)" : "rgba(240, 240, 240, 255)";
-        
-        tabList->setStyleSheet(QString(R"(
-        QListWidget {
-            background-color: transparent;
-            border: none;
-            border-bottom: 2px solid %1;
-            outline: none;
-            padding-left: 45px;
-        }
-        QListWidget::item {
-            background-color: %2;
-            border: 1px solid %3;
-            border-bottom: 1px solid %1;
-            margin-right: 1px;
-            margin-top: 2px;
-            padding: 0px;
-        }
-        QListWidget::item:selected {
-            background-color: %4;
-            border: 1px solid %3;
-            border-bottom: 3px solid %4;
-            margin-top: 1px;
-        }
-        QListWidget::item:hover:!selected {
-            background-color: %5;
-        }
-        QScrollBar:horizontal {
-            background: transparent;
-            height: 8px;
-            border: none;
-            margin: 0px;
-            border-top: 1px solid %3;
-        }
-        QScrollBar::handle:horizontal {
-            background: rgba(150, 150, 150, 120);
-            border-radius: 4px;
-            min-width: 20px;
-            margin: 1px;
-        }
-        QScrollBar::handle:horizontal:hover {
-            background: rgba(120, 120, 120, 200);
-        }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-            width: 0px;
-            height: 0px;
-            background: none;
-            border: none;
-        }
-        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-            background: transparent;
-        }
-        )").arg(accentColor.name())
-           .arg(itemBgColor)
-           .arg(borderColor)
-           .arg(selectedBgColor)
-           .arg(hoverBgColor));
     }
     
 
@@ -6021,29 +5604,9 @@ void MainWindow::updateTheme() {
         whiteButton->setIcon(QIcon(whiteIconPath));
     }
     
-    // Update tab close button icons and label styling
-    if (tabList) {
-        bool darkMode = isDarkMode();
-        QString labelColor = darkMode ? "#E0E0E0" : "#333";
-        
-        for (int i = 0; i < tabList->count(); ++i) {
-            QListWidgetItem *item = tabList->item(i);
-            if (item) {
-                QWidget *tabWidget = tabList->itemWidget(item);
-                if (tabWidget) {
-                    QPushButton *closeButton = tabWidget->findChild<QPushButton*>();
-                    if (closeButton) {
-                        closeButton->setIcon(loadThemedIcon("cross"));
-                    }
-                    
-                    QLabel *tabLabel = tabWidget->findChild<QLabel*>("tabLabel");
-                    if (tabLabel) {
-                        tabLabel->setStyleSheet(QString("color: %1; font-weight: 500; padding: 2px; text-align: left;").arg(labelColor));
-                    }
-                }
-            }
-        }
-    }
+    // Phase 3.1: Tab styling now uses QTabWidget
+    // QTabWidget provides built-in close buttons via setTabsClosable(true)
+    // TODO Phase 3.3: Apply custom styling to m_tabWidget tabs if needed
     
     // Update dial display
     updateDialDisplay();
@@ -6075,82 +5638,9 @@ void MainWindow::loadThemeSettings() {
 }
 
 void MainWindow::updateTabSizes() {
-    if (!tabList) return;
-    
-    // Calculate max width with absolute cap of 300px
-    int tabListWidth = tabList->width();
-    int maxTabWidth = qMin(tabListWidth / 2, 300); // Cap at 300px regardless of window size
-    int minTabWidth = 80; // Keep minimum at 80px
-    
-    // Ensure max is at least as big as min
-    if (maxTabWidth < minTabWidth) {
-        maxTabWidth = minTabWidth;
-    }
-    
-    int lastTabRight = 0; // Track where the last tab ends
-    
-    // Update each tab item's size
-    for (int i = 0; i < tabList->count(); ++i) {
-        QListWidgetItem *item = tabList->item(i);
-        if (!item) continue;
-        
-        QWidget *tabWidget = tabList->itemWidget(item);
-        if (!tabWidget) continue;
-        
-        // Get the label to measure text width
-        QLabel *label = tabWidget->findChild<QLabel*>("tabLabel");
-        if (!label) continue;
-        
-        // Calculate desired width based on text content
-        QFontMetrics fm(label->font());
-        int textWidth = fm.horizontalAdvance(label->text());
-        int desiredWidth = textWidth + 42; // Add padding for close button and margins (increased to fit one more character)
-        
-        // Clamp between min and max
-        int finalWidth = qBound(minTabWidth, desiredWidth, maxTabWidth);
-        
-        // Set the item size hint
-        item->setSizeHint(QSize(finalWidth, 32));
-        
-        // Calculate position of this tab to find the rightmost edge
-        QRect visualRect = tabList->visualItemRect(item);
-        lastTabRight = qMax(lastTabRight, visualRect.right());
-    }
-    
-    // Position the recent button to the left of all tabs
-    if (openRecentNotebooksButton && tabBarContainer && tabList) {
-        int buttonX = 10; // Fixed position at left margin
-        int buttonY = 9; // Align with tabs (tabs have margin-top: 2px)
-        openRecentNotebooksButton->move(buttonX, buttonY);
-        openRecentNotebooksButton->setVisible(true);
-    }
-    
-    // Position the add tab button next to the last tab
-    if (addTabButton && tabBarContainer && tabList) {
-        // Account for the left padding added to tab list (45px for recent button space)
-        int tabListLeftPadding = 45;
-        
-        // Get the scroll offset
-        int scrollOffset = tabList->horizontalScrollBar()->value();
-        
-        // Calculate the rightmost position for the button (stays at far right initially)
-        int maxButtonX = tabList->width() - addTabButton->width() - 10;
-        
-        // Calculate where the button would be if next to last tab
-        // Add the padding offset to account for tab list's left padding
-        int buttonXNextToTab = lastTabRight - scrollOffset + tabListLeftPadding + 10; // 10px spacing from last tab
-        
-        // Button position: next to last tab, but don't go beyond the max position
-        int buttonX = qMin(buttonXNextToTab, maxButtonX);
-        
-        // Ensure button stays visible (at least past the recent button)
-        buttonX = qMax(buttonX, tabListLeftPadding + 10);
-        
-        int buttonY = 9; // Slightly lower to align with tabs (tabs have margin-top: 2px)
-        
-        addTabButton->move(buttonX, buttonY);
-        addTabButton->setVisible(true);
-    }
+    // Phase 3.1: QTabWidget handles its own tab sizing
+    // This function is now a stub - QTabWidget with setElideMode() handles overflow
+    // TODO Phase 3.3: Consider custom tab styling via QTabBar::setTabButton if needed
 }
 
 // performance optimizations
@@ -6220,13 +5710,13 @@ TouchGestureMode MainWindow::getTouchGestureMode() const {
 void MainWindow::setTouchGestureMode(TouchGestureMode mode) {
     touchGestureMode = mode;
     
-    // Apply to all canvases
-    for (int i = 0; i < canvasStack->count(); ++i) {
-        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
-        if (canvas) {
-            canvas->setTouchGestureMode(mode);
-        }
-    }
+    // Phase 3.1: DocumentViewport handles touch gestures differently
+    // TODO Phase 3.3: Apply touch gesture mode to all DocumentViewports via TabManager
+    // if (m_tabManager) {
+    //     m_tabManager->applyToAllViewports([mode](DocumentViewport* vp) {
+    //         vp->setTouchGestureMode(mode);
+    //     });
+    // }
     
     QSettings settings("SpeedyNote", "App");
     settings.setValue("touchGestureMode", static_cast<int>(mode));
@@ -6269,7 +5759,8 @@ void MainWindow::setPalmRejectionDelay(int delayMs) {
 }
 
 void MainWindow::onStylusProximityEnter() {
-    if (!palmRejectionEnabled || !canvasStack) {
+    // Phase 3.1: Palm rejection stubbed - will use DocumentViewport
+    if (!palmRejectionEnabled) {
         return;
     }
     
@@ -6280,7 +5771,6 @@ void MainWindow::onStylusProximityEnter() {
     
     // If not already suppressing, save current mode and disable touch gestures
     if (!palmRejectionActive) {
-        // Don't interfere if touch gestures are already disabled
         if (touchGestureMode == TouchGestureMode::Disabled) {
             return;
         }
@@ -6288,13 +5778,7 @@ void MainWindow::onStylusProximityEnter() {
         palmRejectionOriginalMode = touchGestureMode;
         palmRejectionActive = true;
         
-        // Temporarily disable touch gestures on all canvases
-        for (int i = 0; i < canvasStack->count(); ++i) {
-            InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
-            if (canvas) {
-                canvas->setTouchGestureMode(TouchGestureMode::Disabled);
-            }
-        }
+        // TODO Phase 3.3: Apply to DocumentViewports via TabManager
     }
 }
 
@@ -6311,19 +5795,14 @@ void MainWindow::onStylusProximityLeave() {
 }
 
 void MainWindow::restoreTouchGestureMode() {
-    if (!palmRejectionActive || !canvasStack) {
+    // Phase 3.1: Palm rejection stubbed - will use DocumentViewport
+    if (!palmRejectionActive) {
         return;
     }
     
     palmRejectionActive = false;
     
-    // Restore original touch gesture mode to all canvases
-    for (int i = 0; i < canvasStack->count(); ++i) {
-        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
-        if (canvas) {
-            canvas->setTouchGestureMode(palmRejectionOriginalMode);
-        }
-    }
+    // TODO Phase 3.3: Apply to DocumentViewports via TabManager
 }
 
 bool MainWindow::event(QEvent *event) {
@@ -6968,33 +6447,13 @@ void MainWindow::openPdfFile(const QString &pdfPath) {
             // Use QPointer to safely handle canvas deletion
             QPointer<InkCanvas> canvasPtr(canvas);
             
-            // Check if PDF is already loaded
-            if (canvasPtr && canvasPtr->isPdfLoadedFunc()) {
-                // PDF is already loaded, add to recent notebooks immediately
-                recentNotebooksManager->addRecentNotebook(existingFolderPath, canvasPtr.data());
-                // Refresh shared launcher if it exists and is visible
-                if (sharedLauncher && sharedLauncher->isVisible()) {
-                    sharedLauncher->refreshRecentNotebooks();
-                }
-            } else {
-                // PDF is still loading, wait for pdfLoaded signal
-                // Use a shared_ptr to safely manage the connection lifetime
-                auto connection = std::make_shared<QMetaObject::Connection>();
-                *connection = connect(canvasPtr.data(), &InkCanvas::pdfLoaded, this, [this, existingFolderPath, canvasPtr, connection]() {
-                    if (recentNotebooksManager && canvasPtr && !canvasPtr.isNull()) {
-                        // Add to recent notebooks immediately - RecentNotebooksManager handles delayed thumbnail generation
-                        recentNotebooksManager->addRecentNotebook(existingFolderPath, canvasPtr.data());
-                        // Refresh shared launcher if it exists and is visible
-                        if (sharedLauncher && sharedLauncher->isVisible()) {
-                            sharedLauncher->refreshRecentNotebooks();
-                        }
-                    }
-                    // Disconnect the signal to avoid multiple calls
-                    if (connection && *connection) {
-                        disconnect(*connection);
-                    }
-                });
-            }
+            // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
+            // if (canvasPtr && canvasPtr->isPdfLoadedFunc()) {
+            //     recentNotebooksManager->addRecentNotebook(existingFolderPath, canvasPtr.data());
+            //     if (sharedLauncher && sharedLauncher->isVisible()) {
+            //         sharedLauncher->refreshRecentNotebooks();
+            //     }
+            // }
         }
         
         return; // Exit early, no need to show dialog
@@ -7041,35 +6500,10 @@ void MainWindow::openPdfFile(const QString &pdfPath) {
         updateZoom();
         updatePanRange();
         
-        // ✅ Add to recent notebooks AFTER PDF is loaded to ensure proper thumbnail generation
-        if (recentNotebooksManager) {
-            // Use QPointer to safely handle canvas deletion
-            QPointer<InkCanvas> canvasPtr(canvas);
-            
-            // Check if PDF is already loaded
-            if (canvasPtr && canvasPtr->isPdfLoadedFunc()) {
-                // PDF is already loaded, add to recent notebooks immediately
-                recentNotebooksManager->addRecentNotebook(selectedFolder, canvasPtr.data());
-                // Refresh shared launcher if it exists and is visible
-                if (sharedLauncher && sharedLauncher->isVisible()) {
-                    sharedLauncher->refreshRecentNotebooks();
-                }
-            } else {
-                // PDF is still loading, wait for pdfLoaded signal
-                // Use a shared_ptr to safely manage the connection lifetime
-                auto connection = std::make_shared<QMetaObject::Connection>();
-                *connection = connect(canvasPtr.data(), &InkCanvas::pdfLoaded, this, [this, selectedFolder, canvasPtr, connection]() {
-                    if (recentNotebooksManager && canvasPtr && !canvasPtr.isNull()) {
-                        // Add to recent notebooks immediately - RecentNotebooksManager handles delayed thumbnail generation
-                        recentNotebooksManager->addRecentNotebook(selectedFolder, canvasPtr.data());
-                    }
-                    // Disconnect the signal to avoid multiple calls
-                    if (connection && *connection) {
-                        disconnect(*connection);
-                    }
-                });
-            }
-        }
+        // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
+        // if (recentNotebooksManager) {
+        //     // Add to recent notebooks after PDF load
+        // }
         
     } else if (result == PdfOpenDialog::UseExistingFolder) {
         // ✅ Check if the existing folder is linked to the same PDF using JSON metadata
@@ -7132,35 +6566,10 @@ void MainWindow::openPdfFile(const QString &pdfPath) {
         updateZoom();
         updatePanRange();
         
-        // ✅ Add to recent notebooks AFTER PDF is loaded to ensure proper thumbnail generation
-        if (recentNotebooksManager) {
-            // Use QPointer to safely handle canvas deletion
-            QPointer<InkCanvas> canvasPtr(canvas);
-            
-            // Check if PDF is already loaded
-            if (canvasPtr && canvasPtr->isPdfLoadedFunc()) {
-                // PDF is already loaded, add to recent notebooks immediately
-                recentNotebooksManager->addRecentNotebook(selectedFolder, canvasPtr.data());
-                // Refresh shared launcher if it exists and is visible
-                if (sharedLauncher && sharedLauncher->isVisible()) {
-                    sharedLauncher->refreshRecentNotebooks();
-                }
-            } else {
-                // PDF is still loading, wait for pdfLoaded signal
-                // Use a shared_ptr to safely manage the connection lifetime
-                auto connection = std::make_shared<QMetaObject::Connection>();
-                *connection = connect(canvasPtr.data(), &InkCanvas::pdfLoaded, this, [this, selectedFolder, canvasPtr, connection]() {
-                    if (recentNotebooksManager && canvasPtr && !canvasPtr.isNull()) {
-                        // Add to recent notebooks immediately - RecentNotebooksManager handles delayed thumbnail generation
-                        recentNotebooksManager->addRecentNotebook(selectedFolder, canvasPtr.data());
-                    }
-                    // Disconnect the signal to avoid multiple calls
-                    if (connection && *connection) {
-                        disconnect(*connection);
-                    }
-                });
-            }
-        }
+        // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
+        // if (recentNotebooksManager) {
+        //     // Add to recent notebooks after PDF load
+        // }
     }
 }
 
@@ -7600,7 +7009,8 @@ void MainWindow::updateFastForwardButtonState() {
 
 // Add this new method
 void MainWindow::updateScrollbarPositions() {
-    QWidget *container = canvasStack->parentWidget();
+    // Phase 3.1: Use m_tabWidget instead of canvasStack
+    QWidget *container = m_tabWidget ? m_tabWidget->parentWidget() : nullptr;
     if (!container || !panXSlider || !panYSlider) return;
     
     // Add small margins for better visibility
@@ -7659,37 +7069,10 @@ void MainWindow::handleEdgeProximity(InkCanvas* canvas, const QPoint& pos) {
 }
 
 void MainWindow::returnToLauncher() {
-    // Save current work before returning to launcher
-    if (currentCanvas() && currentCanvas()->isEdited()) {
-        saveCurrentPage();
-    }
-    
-    // Use shared launcher instance to prevent memory leaks
-    if (!sharedLauncher) {
-        sharedLauncher = new LauncherWindow();
-        
-        // Connect to handle when launcher is destroyed - clean up static reference
-        connect(sharedLauncher, &LauncherWindow::destroyed, []() {
-            MainWindow::sharedLauncher = nullptr;
-        });
-    }
-    
-    // Preserve window state
-    if (isMaximized()) {
-        sharedLauncher->showMaximized();
-    } else if (isFullScreen()) {
-        sharedLauncher->showFullScreen();
-    } else {
-        sharedLauncher->resize(size());
-        sharedLauncher->move(pos());
-        sharedLauncher->show();
-    }
-    
-    // Don't refresh here - showEvent will handle it automatically
-    // This prevents double population (returnToLauncher + showEvent)
-    
-    // Hide this main window
-    hide();
+    // Phase 3.1: LauncherWindow disconnected - will be re-linked later
+    // TODO Phase 3.5: Re-implement launcher return functionality
+    QMessageBox::information(this, tr("Return to Launcher"), 
+        tr("Launcher is being redesigned. This feature will return soon!"));
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
@@ -9111,59 +8494,14 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     // Temp folder path for comparison
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
     
-    // Auto-save all tabs before closing the program
-    if (canvasStack) {
-        for (int i = 0; i < canvasStack->count(); ++i) {
-            InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
-            if (canvas) {
-                // Save current page if edited
-                if (canvas->isEdited()) {
-                    int pageNumber = getCurrentPageForCanvas(canvas);
-                    canvas->saveToFile(pageNumber);
-                    
-                    // ✅ COMBINED MODE FIX: Use combined-aware save for markdown/picture windows
-                    canvas->saveCombinedWindowsForPage(pageNumber);
-                }
-                
-                // ✅ PERFORMANCE FIX: Flush all dirty picture pages to disk
-                // This ensures any pages modified during page switches are saved
-                if (canvas->getPictureManager()) {
-                    canvas->getPictureManager()->flushDirtyPagesToDisk();
-                }
-                
-                // ✅ Save last accessed page for each canvas
-                int currentPage = getCurrentPageForCanvas(canvas);
-                canvas->setLastAccessedPage(currentPage);
-                
-                // ✅ OPTIMIZATION: Flush any pending deferred metadata save immediately
-                // (setLastAccessedPage triggers a deferred save, but app is closing)
-                canvas->flushPendingMetadataSave();
-                
-                // ✅ OPTIMIZATION: Flush any pending deferred .spn package sync
-                // This ensures the .spn package is updated before closing
-                canvas->flushPendingSpnSync();
-                
-                // ✅ FIX: Update thumbnail for each tab before closing
-                // This was previously only done in closeTab, but that code path
-                // is never reached for the last remaining tab (or when quitting directly)
-                QString folderPath = canvas->getSaveFolder();
-                if (!folderPath.isEmpty() && folderPath != tempDir && recentNotebooksManager) {
-                    // Force canvas to update before thumbnail generation
-                    canvas->update();
-                    canvas->repaint();
-                    QApplication::processEvents();
-                    
-                    // Generate and save thumbnail
-                    recentNotebooksManager->generateAndSaveCoverPreview(folderPath, canvas);
-                    // Update recent list (moves to top)
-                    recentNotebooksManager->addRecentNotebook(folderPath, canvas);
-                }
-            }
-        }
-        
-        // ✅ Save current bookmarks before closing
-        saveBookmarks();
-    }
+    // Phase 3.1: Auto-save via DocumentManager and TabManager
+    // TODO Phase 3.5: Implement auto-save for DocumentViewports
+    // if (m_tabManager && m_documentManager) {
+    //     m_tabManager->saveAllTabs();
+    // }
+    
+    // ✅ Save current bookmarks before closing
+    saveBookmarks();
     
     // Accept the close event to allow the program to close
     event->accept();
@@ -9249,13 +8587,13 @@ void MainWindow::openSpnPackage(const QString &spnPath)
     updateZoom();
     updatePanRange();
     
-    if (recentNotebooksManager) {
-        recentNotebooksManager->addRecentNotebook(spnPath, canvas);
-        // Refresh shared launcher if it exists and is visible
-        if (sharedLauncher && sharedLauncher->isVisible()) {
-            sharedLauncher->refreshRecentNotebooks();
-        }
-    }
+    // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
+    // if (recentNotebooksManager) {
+    //     recentNotebooksManager->addRecentNotebook(spnPath, canvas);
+    //     if (sharedLauncher && sharedLauncher->isVisible()) {
+    //         sharedLauncher->refreshRecentNotebooks();
+    //     }
+    // }
 }
 
 void MainWindow::createNewSpnPackage(const QString &spnPath)
@@ -9302,14 +8640,13 @@ void MainWindow::createNewSpnPackage(const QString &spnPath)
     updateZoom();
     updatePanRange();
     
-    // Add to recent notebooks
-    if (recentNotebooksManager) {
-        recentNotebooksManager->addRecentNotebook(spnPath, canvas);
-        // Refresh shared launcher if it exists and is visible
-        if (sharedLauncher && sharedLauncher->isVisible()) {
-            sharedLauncher->refreshRecentNotebooks();
-        }
-    }
+    // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
+    // if (recentNotebooksManager) {
+    //     recentNotebooksManager->addRecentNotebook(spnPath, canvas);
+    //     if (sharedLauncher && sharedLauncher->isVisible()) {
+    //         sharedLauncher->refreshRecentNotebooks();
+    //     }
+    // }
     
     // Show success message
     QMessageBox::information(this, tr("Package Created"), 

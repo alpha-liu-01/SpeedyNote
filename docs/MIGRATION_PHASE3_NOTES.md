@@ -7,6 +7,24 @@
 
 ## Current State Summary
 
+### Runtime State (Dec 23, 2024)
+
+**App launches successfully!** Current behavior:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| App Launch | ✅ Works | No crash on startup (after fixing `updatePanRange`, `updateDialDisplay`) |
+| Toolbar | ✅ Visible | Old toolbar displays correctly |
+| Old Tab Bar | ⚠️ Visible but empty | `tabBarContainer` shows only add tab button (tabList removed) |
+| New Tab Bar (QTabWidget) | ✅ Works | Below toolbar, creates DocumentViewport tabs correctly |
+| Add Tab Button | ✅ Works | Creates new tabs with DocumentViewport |
+| DocumentViewport | ✅ Works | Same behavior as `--test-viewport` window |
+| Color Buttons | ❌ Crash | Calls `currentCanvas()->setPenColor()` on null |
+| PDF/Bookmark Sidebars | ✅ Toggle works | Empty content (expected) |
+| MagicDial Display | ✅ Correct | Shows "No Canvas" text |
+
+**UI Layout Issue:** Two tab bars visible - old `tabBarContainer` (top) and new `m_tabWidget` (below toolbar). Should consolidate to single tab bar.
+
 ### Completed Tasks
 
 | Task | Status | Notes |
@@ -16,7 +34,15 @@
 | 3.0.3 LayerPanel | ✅ Complete | `source/ui/LayerPanel.h/.cpp` |
 | 3.0.4 Command line flag | ✅ REMOVED | `--use-new-viewport` removed in 3.1.1 |
 | 3.1.3 Remove VectorCanvas | ✅ Complete | Removed from MainWindow, NOT from CMakeLists yet |
-| 3.1.1 Replace Tab System | 🔄 In Progress | QTabWidget + TabManager replaces tabList + canvasStack |
+| 3.1.1 Replace Tab System | ✅ Complete | tabList, canvasStack, pageMap removed; m_tabWidget + TabManager in place |
+| 3.1.2 addNewTab stubbed | ✅ Complete | Old InkCanvas code wrapped in comment block |
+| 3.1.6 Page Nav stubbed | ✅ Complete | switchPage, switchPageWithDirection stubbed |
+| LauncherWindow | ⏸️ Disconnected | Commented out from CMakeLists.txt, sharedLauncher refs commented |
+| Touch/Palm Rejection | ⏸️ Stubbed | onStylusProximityEnter, restoreTouchGestureMode stubbed |
+| updateTabSizes | ⏸️ Stubbed | QTabWidget handles its own sizing |
+| updateTheme tabList | ⏸️ Stubbed | Will use m_tabWidget styling in Phase 3.3 |
+| updatePanRange | ⏸️ Stubbed | DocumentViewport handles own pan/zoom |
+| updateDialDisplay | ⏸️ Protected | Returns early if no currentCanvas() |
 
 ### Reference Files
 
@@ -86,6 +112,29 @@ Per `MIGRATION_PHASE3_1_SUBPLAN.md`:
 9. 3.1.9 - Stub markdown handlers
 
 **Goal:** MainWindow compiles without InkCanvas. Many features will be broken/stubbed.
+
+---
+
+## Known Issues (Phase 3.1)
+
+### 1. Dual Tab Bars
+- **Issue:** Two tab bars visible - old `tabBarContainer` at top, new `m_tabWidget` below toolbar
+- **Solution:** Move `m_tabWidget` into `tabBarContainer`, or replace tabBarContainer entirely
+- **Priority:** Medium - cosmetic but confusing
+
+### 2. Color Button Crash
+- **Issue:** Clicking color buttons (red, blue, etc.) crashes - calls `currentCanvas()->setPenColor()` on null
+- **Location:** `setupUi()` lambda at ~line 456+ (connect statements)
+- **Solution:** Add null checks to all button lambdas, or stub them
+- **Priority:** High - prevents testing
+
+### 3. Tool Button Crash (likely)
+- **Issue:** Pen/Marker/Eraser buttons likely crash similarly
+- **Solution:** Same as color buttons
+
+### 4. 176 `currentCanvas()` Calls
+- **Issue:** Many functions still call `currentCanvas()` without null checks
+- **Solution:** Phase 3.1.4 - Replace with `currentViewport()` or add null guards
 
 ---
 

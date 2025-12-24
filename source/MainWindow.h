@@ -365,8 +365,8 @@ public:
     // Returns true if notebook was already open (and switched to), false otherwise
     bool switchToExistingNotebook(const QString &spnPath);
 
-    // Shared launcher instance to prevent memory leaks (moved from private)
-    static LauncherWindow *sharedLauncher;
+    // Phase 3.1: sharedLauncher disconnected - will be re-linked later
+    // static LauncherWindow *sharedLauncher;
 
     static QSharedMemory *sharedMemory;
     
