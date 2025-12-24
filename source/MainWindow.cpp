@@ -1,5 +1,5 @@
 #include "MainWindow.h"
-#include "InkCanvas.h"
+// #include "InkCanvas.h"  // Phase 3.1.7: Disconnected - using DocumentViewport
 // #include "VectorCanvas.h"  // REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
@@ -40,6 +40,7 @@
 #include <QSet>
 #include <QWheelEvent>
 #include <QTimer>
+#include <QColorDialog>  // Phase 3.1.8: For custom color picker
 #include <QPdfWriter>
 #include <QProgressDialog>
 #include <QProcess>
@@ -47,7 +48,7 @@
 #include <QThread>
 #include <QPointer>
 // #include "HandwritingLineEdit.h"
-#include "ControlPanelDialog.h"
+// #include "ControlPanelDialog.h"  // Phase 3.1.8: Disabled - depends on InkCanvas
 #include "SDLControllerManager.h"
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 #include "PdfOpenDialog.h" // Added for PDF file association
@@ -261,41 +262,9 @@ void MainWindow::setupUi() {
     pdfTextSelectButton->setProperty("selected", false); // Initially disabled
     updateButtonIcon(pdfTextSelectButton, "ibeam");
     connect(pdfTextSelectButton, &QPushButton::clicked, this, [this]() {
-        if (!currentCanvas()) return;
-        
-        bool newMode = !currentCanvas()->isPdfTextSelectionEnabled();
-        currentCanvas()->setPdfTextSelectionEnabled(newMode);
-        updatePdfTextSelectButtonState();
-        updateBookmarkButtonState();
-        
-        // Temporarily disable touch gestures when text selection is enabled
-        if (newMode) {
-            // Save current touch gesture mode and disable it
-            previousTouchGestureMode = touchGestureMode;
-            if (touchGestureMode != TouchGestureMode::Disabled) {
-                setTouchGestureMode(TouchGestureMode::Disabled);
-                touchGesturesButton->setProperty("selected", false);
-                touchGesturesButton->setProperty("yAxisOnly", false);
-                updateButtonIcon(touchGesturesButton, "hand");
-                touchGesturesButton->style()->unpolish(touchGesturesButton);
-                touchGesturesButton->style()->polish(touchGesturesButton);
-            }
-        } else {
-            // Restore previous touch gesture mode
-            if (previousTouchGestureMode != touchGestureMode) {
-                setTouchGestureMode(previousTouchGestureMode);
-                touchGesturesButton->setProperty("selected", previousTouchGestureMode != TouchGestureMode::Disabled);
-                touchGesturesButton->setProperty("yAxisOnly", previousTouchGestureMode == TouchGestureMode::YAxisOnly);
-                updateButtonIcon(touchGesturesButton, "hand");
-                touchGesturesButton->style()->unpolish(touchGesturesButton);
-                touchGesturesButton->style()->polish(touchGesturesButton);
-            }
-        }
-        
-        // Clear any existing selection when toggling
-        if (!newMode) {
-            currentCanvas()->clearPdfTextSelection();
-        }
+        // Phase 3.1.4: PDF text selection stubbed - will be reimplemented for DocumentViewport
+        // TODO Phase 3.4: Implement PDF text selection in DocumentViewport
+        qDebug() << "PDF text select: Not implemented yet (Phase 3.4)";
     });
 
 
@@ -452,10 +421,13 @@ void MainWindow::setupUi() {
     redButton->setIcon(redIcon);
     redButton->setStyleSheet(buttonStyle);
     connect(redButton, &QPushButton::clicked, [this]() { 
-        handleColorButtonClick();
-        currentCanvas()->setPenColor(getPaletteColor("red")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
+        // Phase 3.1.4: Use currentViewport()
+        if (DocumentViewport* vp = currentViewport()) {
+            handleColorButtonClick();
+            vp->setPenColor(getPaletteColor("red")); 
+            updateDialDisplay(); 
+            updateColorButtonStates();
+        }
     });
     
     blueButton = new QPushButton(this);
@@ -465,10 +437,13 @@ void MainWindow::setupUi() {
     blueButton->setIcon(blueIcon);
     blueButton->setStyleSheet(buttonStyle);
     connect(blueButton, &QPushButton::clicked, [this]() { 
-        handleColorButtonClick();
-        currentCanvas()->setPenColor(getPaletteColor("blue")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
+        // Phase 3.1.4: Use currentViewport()
+        if (DocumentViewport* vp = currentViewport()) {
+            handleColorButtonClick();
+            vp->setPenColor(getPaletteColor("blue")); 
+            updateDialDisplay(); 
+            updateColorButtonStates();
+        }
     });
 
     yellowButton = new QPushButton(this);
@@ -478,10 +453,13 @@ void MainWindow::setupUi() {
     yellowButton->setIcon(yellowIcon);
     yellowButton->setStyleSheet(buttonStyle);
     connect(yellowButton, &QPushButton::clicked, [this]() { 
-        handleColorButtonClick();
-        currentCanvas()->setPenColor(getPaletteColor("yellow")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
+        // Phase 3.1.4: Use currentViewport()
+        if (DocumentViewport* vp = currentViewport()) {
+            handleColorButtonClick();
+            vp->setPenColor(getPaletteColor("yellow")); 
+            updateDialDisplay(); 
+            updateColorButtonStates();
+        }
     });
 
     greenButton = new QPushButton(this);
@@ -491,10 +469,13 @@ void MainWindow::setupUi() {
     greenButton->setIcon(greenIcon);
     greenButton->setStyleSheet(buttonStyle);
     connect(greenButton, &QPushButton::clicked, [this]() { 
-        handleColorButtonClick();
-        currentCanvas()->setPenColor(getPaletteColor("green")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
+        // Phase 3.1.4: Use currentViewport()
+        if (DocumentViewport* vp = currentViewport()) {
+            handleColorButtonClick();
+            vp->setPenColor(getPaletteColor("green")); 
+            updateDialDisplay(); 
+            updateColorButtonStates();
+        }
     });
 
     blackButton = new QPushButton(this);
@@ -504,10 +485,13 @@ void MainWindow::setupUi() {
     blackButton->setIcon(blackIcon);
     blackButton->setStyleSheet(buttonStyle);
     connect(blackButton, &QPushButton::clicked, [this]() { 
-        handleColorButtonClick();
-        currentCanvas()->setPenColor(QColor("#000000")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
+        // Phase 3.1.4: Use currentViewport()
+        if (DocumentViewport* vp = currentViewport()) {
+            handleColorButtonClick();
+            vp->setPenColor(QColor("#000000")); 
+            updateDialDisplay(); 
+            updateColorButtonStates();
+        }
     });
 
     whiteButton = new QPushButton(this);
@@ -517,10 +501,13 @@ void MainWindow::setupUi() {
     whiteButton->setIcon(whiteIcon);
     whiteButton->setStyleSheet(buttonStyle);
     connect(whiteButton, &QPushButton::clicked, [this]() { 
-        handleColorButtonClick();
-        currentCanvas()->setPenColor(QColor("#FFFFFF")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
+        // Phase 3.1.4: Use currentViewport()
+        if (DocumentViewport* vp = currentViewport()) {
+            handleColorButtonClick();
+            vp->setPenColor(QColor("#FFFFFF")); 
+            updateDialDisplay(); 
+            updateColorButtonStates();
+        }
     });
     
     customColorInput = new QLineEdit(this);
@@ -615,17 +602,9 @@ void MainWindow::setupUi() {
     straightLineToggleButton->setProperty("selected", false); // Initially disabled
     updateButtonIcon(straightLineToggleButton, "straightLine");
     connect(straightLineToggleButton, &QPushButton::clicked, this, [this]() {
-        if (!currentCanvas()) return;
-        
-        // If we're turning on straight line mode, first disable rope tool
-        if (!currentCanvas()->isStraightLineMode()) {
-            currentCanvas()->setRopeToolMode(false);
-            updateRopeToolButtonState();
-        }
-        
-        bool newMode = !currentCanvas()->isStraightLineMode();
-        currentCanvas()->setStraightLineMode(newMode);
-        updateStraightLineButtonState();
+        // Phase 3.1.4: Straight line mode stubbed - will be reimplemented for DocumentViewport
+        // TODO Phase 3.3: Implement straight line mode in DocumentViewport
+        qDebug() << "Straight line toggle: Not implemented yet (Phase 3.3)";
     });
     
     ropeToolButton = new QPushButton(this);
@@ -635,16 +614,9 @@ void MainWindow::setupUi() {
     ropeToolButton->setProperty("selected", false); // Initially disabled
     updateButtonIcon(ropeToolButton, "rope");
     connect(ropeToolButton, &QPushButton::clicked, this, [this]() {
-        if (!currentCanvas()) return;
-        
-        // If we're turning on rope tool mode, first disable straight line
-        if (!currentCanvas()->isRopeToolMode()) {
-            currentCanvas()->setStraightLineMode(false);
-            updateStraightLineButtonState();
-        }
-        
-        bool newMode = !currentCanvas()->isRopeToolMode();
-        currentCanvas()->setRopeToolMode(newMode);
+        // Phase 3.1.4: Rope tool mode stubbed - will be reimplemented for DocumentViewport
+        // TODO Phase 3.3: Implement rope/lasso tool in DocumentViewport
+        qDebug() << "Rope tool toggle: Not implemented yet (Phase 3.3)";
         updateRopeToolButtonState();
     });
     
@@ -656,22 +628,9 @@ void MainWindow::setupUi() {
     insertPictureButton->setProperty("selected", false); // Initially disabled
     updateButtonIcon(insertPictureButton, "background");
     connect(insertPictureButton, &QPushButton::clicked, this, [this]() {
-        // qDebug() << "MainWindow: Insert Picture button clicked!";
-        
-        if (!currentCanvas()) {
-            // qDebug() << "  ERROR: No current canvas!";
-            return;
-        }
-        
-        // Toggle picture selection mode
-        bool currentMode = currentCanvas()->isPictureSelectionMode();
-        bool newMode = !currentMode;
-        // qDebug() << "  Current picture selection mode:" << currentMode;
-        // qDebug() << "  New picture selection mode:" << newMode;
-        
-        currentCanvas()->setPictureSelectionMode(newMode);
-        updatePictureButtonState();
-        // qDebug() << "  Picture button state updated";
+        // Phase 3.1.4: Picture insertion stubbed - will be reimplemented for DocumentViewport
+        // TODO Phase 4: Implement picture insertion in DocumentViewport via InsertedObject
+        qDebug() << "Insert picture: Not implemented yet (Phase 4)";
     });
     
     deletePageButton = new QPushButton(this);
@@ -879,10 +838,9 @@ void MainWindow::setupUi() {
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::highlightLinkClicked, this, &MainWindow::onHighlightLinkClicked);
     
     // Set up note provider for search functionality
+    // Phase 3.1.8: Stubbed - markdown notes will use DocumentViewport in Phase 3.3
     markdownNotesSidebar->setNoteProvider([this]() -> QList<MarkdownNoteData> {
-        if (currentCanvas()) {
-            return currentCanvas()->getAllMarkdownNotes();
-        }
+        // TODO Phase 3.3: Get notes from currentViewport()->document()
         return QList<MarkdownNoteData>();
     });
     
@@ -895,36 +853,24 @@ void MainWindow::setupUi() {
     // Connect tab changes to switchTab
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::switchTab);
 
-    // Create horizontal tab container (still needed for positioning buttons)
-    tabBarContainer = new QWidget(this);
-    tabBarContainer->setObjectName("tabBarContainer");
-    tabBarContainer->setFixedHeight(40);  // Match old height
-    
-    QHBoxLayout *tabBarLayout = new QHBoxLayout(tabBarContainer);
-    tabBarLayout->setContentsMargins(5, 5, 5, 5);
-    tabBarLayout->setSpacing(5);
-    // Note: m_tabWidget is NOT added to tabBarLayout - it will be the central widget
-    // The tabBarContainer is now just for the buttons
-    
-    // Create "Return to Launcher" button (positioned manually like add tab button)
-    openRecentNotebooksButton = new QPushButton(tabBarContainer); // Parent to tab bar container
+    // Phase 3.1: Consolidate tab bars - use m_tabWidget's corner widgets instead of separate container
+    // Create "Return to Launcher" button as left corner widget
+    openRecentNotebooksButton = new QPushButton(this);
     openRecentNotebooksButton->setIcon(loadThemedIcon("recent"));
     openRecentNotebooksButton->setStyleSheet(buttonStyle);
     openRecentNotebooksButton->setToolTip(tr("Return to Launcher"));
     openRecentNotebooksButton->setFixedSize(30, 30);
-    openRecentNotebooksButton->raise(); // Keep it above other widgets
     connect(openRecentNotebooksButton, &QPushButton::clicked, this, &MainWindow::returnToLauncher);
+    m_tabWidget->setCornerWidget(openRecentNotebooksButton, Qt::TopLeftCorner);
     
-    // 🌟 Add Button for New Tab (styled like browser + button) - created AFTER tabBarContainer
-    addTabButton = new QPushButton(tabBarContainer);  // Parent to tab bar container
-    QIcon addTab(loadThemedIcon("addtab"));  // Path to your icon in resources
+    // Add Button for New Tab as right corner widget
+    addTabButton = new QPushButton(this);
+    QIcon addTab(loadThemedIcon("addtab"));
     addTabButton->setIcon(addTab);
-    addTabButton->setFixedSize(30, 30);  // Even smaller to match thinner layout
-    addTabButton->raise();  // Keep it above other widgets
+    addTabButton->setFixedSize(30, 30);
     addTabButton->setStyleSheet(R"(
         QPushButton {
             background-color: rgba(220, 220, 220, 0);
-            /*border: 1px solid rgba(180, 180, 180, 255);*/
             border-radius: 0px;
             margin: 2px;
         }
@@ -937,14 +883,21 @@ void MainWindow::setupUi() {
     )");
     addTabButton->setToolTip(tr("Add New Tab"));
     connect(addTabButton, &QPushButton::clicked, this, &MainWindow::addNewTab);
+    m_tabWidget->setCornerWidget(addTabButton, Qt::TopRightCorner);
     
-    // Phase 3.1.1: Tab scroll handled by QTabWidget internally
-    // Old: connect(tabList->horizontalScrollBar(), &QScrollBar::valueChanged, ...)
+    // Phase 3.1: Old tabBarContainer kept but hidden (for reference, will be removed later)
+    tabBarContainer = new QWidget(this);
+    tabBarContainer->setObjectName("tabBarContainer");
+    tabBarContainer->setVisible(false);  // Hidden - using m_tabWidget's tab bar instead
+    
+    // Phase 3.1: Tab scroll handled by QTabWidget internally
     // QTabWidget handles tab scrolling automatically
 
     connect(toggleTabBarButton, &QPushButton::clicked, this, [=]() {
-        bool isVisible = tabBarContainer->isVisible();
-        tabBarContainer->setVisible(!isVisible);
+        // Phase 3.1: Toggle the tab bar visibility via m_tabWidget
+        QTabBar* tabBar = m_tabWidget->tabBar();
+        bool isVisible = tabBar->isVisible();
+        tabBar->setVisible(!isVisible);
         
         // Update button toggle state
         toggleTabBarButton->setProperty("selected", !isVisible);
@@ -952,10 +905,9 @@ void MainWindow::setupUi() {
         toggleTabBarButton->style()->unpolish(toggleTabBarButton);
         toggleTabBarButton->style()->polish(toggleTabBarButton);
 
+        // Phase 3.1.8: Stubbed - DocumentViewport handles its own sizing
         QTimer::singleShot(0, this, [this]() {
-            if (auto *canvas = currentCanvas()) {
-                canvas->setMaximumSize(canvas->getCanvasSize());
-            }
+            // TODO Phase 3.3: Handle viewport sizing if needed
         });
     });
     
@@ -1114,11 +1066,10 @@ void MainWindow::setupUi() {
     openControlPanelButton->setFixedSize(26, 30);  // Adjust to match your other buttons
 
     connect(openControlPanelButton, &QPushButton::clicked, this, [=]() {
-        InkCanvas *canvas = currentCanvas();
-        if (canvas) {
-            ControlPanelDialog dialog(this, canvas, this);
-            dialog.exec();  // Modal
-        }
+        // Phase 3.1.8: ControlPanelDialog disabled - depends on InkCanvas
+        QMessageBox::information(const_cast<MainWindow*>(this), tr("Control Panel"), 
+            tr("Control Panel is being redesigned. Coming soon!"));
+        // TODO Phase 4.6: Reconnect ControlPanelDialog with DocumentViewport
     });
 
     // openRecentNotebooksButton created earlier and added to tab bar layout
@@ -1128,15 +1079,18 @@ void MainWindow::setupUi() {
     QColor initialColor = getDefaultPenColor();  // Theme-aware default color
     customColorButton->setText(initialColor.name().toUpper());
 
-    if (currentCanvas()) {
-        initialColor = currentCanvas()->getPenColor();
+    // Phase 3.1.4: Use currentViewport() for initial color
+    if (DocumentViewport* vp = currentViewport()) {
+        initialColor = vp->penColor();
     }
 
     updateCustomColorButtonStyle(initialColor);
 
     QTimer::singleShot(0, this, [=]() {
         connect(customColorButton, &QPushButton::clicked, this, [=]() {
-            if (!currentCanvas()) return;
+            // Phase 3.1.4: Use currentViewport()
+            DocumentViewport* vp = currentViewport();
+            if (!vp) return;
             
             handleColorButtonClick();
             
@@ -1145,18 +1099,18 @@ void MainWindow::setupUi() {
             QColor customColor(buttonText);
             
             // Check if the custom color is already the current pen color
-            if (currentCanvas()->getPenColor() == customColor) {
+            if (vp->penColor() == customColor) {
                 // Second click - show color picker dialog
-            QColor chosen = QColorDialog::getColor(currentCanvas()->getPenColor(), this, "Select Pen Color");
-            if (chosen.isValid()) {
-                currentCanvas()->setPenColor(chosen);
+                QColor chosen = QColorDialog::getColor(vp->penColor(), this, "Select Pen Color");
+                if (chosen.isValid()) {
+                    vp->setPenColor(chosen);
                     updateCustomColorButtonStyle(chosen);
-                updateDialDisplay();
+                    updateDialDisplay();
                     updateColorButtonStates();
                 }
             } else {
                 // First click - apply the custom color
-                currentCanvas()->setPenColor(customColor);
+                vp->setPenColor(customColor);
                 updateDialDisplay();
                 updateColorButtonStates();
             }
@@ -1437,8 +1391,9 @@ void MainWindow::setupUi() {
     mainLayout->setSpacing(0); // ✅ Remove spacing between components
 
     // Add components in vertical order
-    mainLayout->addWidget(tabBarContainer);   // Tab bar at top
-    mainLayout->addWidget(controlBar);        // Toolbar below tab bar
+    // Phase 3.1: tabBarContainer hidden - buttons moved to m_tabWidget corner widgets
+    // mainLayout->addWidget(tabBarContainer);   // Old tab bar - now hidden
+    mainLayout->addWidget(controlBar);        // Toolbar at top
     
     // Content area with sidebars and canvas
     QHBoxLayout *contentLayout = new QHBoxLayout;
@@ -1535,79 +1490,81 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::toggleBenchmark() {
+    // Phase 3.1.4: Use currentViewport() for benchmark
     benchmarking = !benchmarking;
-    if (benchmarking) {
-        currentCanvas()->startBenchmark();
-        // REMOVED Phase 3.1.3: VectorCanvas benchmark (migrated to DocumentViewport)
-        benchmarkTimer->start(1000); // Update 10 times per second for smoother display
+    if (DocumentViewport* vp = currentViewport()) {
+        if (benchmarking) {
+            vp->startBenchmark();
+            benchmarkTimer->start(1000);
+        } else {
+            vp->stopBenchmark();
+            benchmarkTimer->stop();
+            benchmarkLabel->setText(tr("PR:N/A"));
+        }
     } else {
-        currentCanvas()->stopBenchmark();
-        // REMOVED Phase 3.1.3: VectorCanvas benchmark
         benchmarkTimer->stop();
         benchmarkLabel->setText(tr("PR:N/A"));
     }
 }
 
 void MainWindow::updateBenchmarkDisplay() {
-    if (!currentCanvas()) return;
-    
-    ToolType tool = currentCanvas()->getCurrentTool();
-    
-    // VectorCanvas benchmark removed - will be replaced by DocumentViewport in Phase 3
-    Q_UNUSED(tool);
-    
-    // For regular tools, show input sample rate from InkCanvas
-    int sampleRate = currentCanvas()->getProcessedRate();
-    benchmarkLabel->setText(QString(tr("PR:%1 Hz")).arg(sampleRate));
+    // Phase 3.1.4: Use currentViewport() for benchmark display
+    if (DocumentViewport* vp = currentViewport()) {
+        int paintRate = vp->getPaintRate();
+        benchmarkLabel->setText(QString(tr("PR:%1 Hz")).arg(paintRate));
+    } else {
+        benchmarkLabel->setText(tr("PR:N/A"));
+    }
 }
 
 void MainWindow::applyCustomColor() {
-    QString colorCode = customColorInput->text();
-    if (!colorCode.startsWith("#")) {
-        colorCode.prepend("#");
+    // Phase 3.1.4: Use currentViewport()
+    if (DocumentViewport* vp = currentViewport()) {
+        QString colorCode = customColorInput->text();
+        if (!colorCode.startsWith("#")) {
+            colorCode.prepend("#");
+        }
+        vp->setPenColor(QColor(colorCode));
+        updateDialDisplay(); 
     }
-    currentCanvas()->setPenColor(QColor(colorCode));
-    updateDialDisplay(); 
 }
 
 void MainWindow::updateThickness(int value) {
-    // Calculate thickness based on the slider value at 100% zoom
-    // The slider value represents the desired visual thickness
-    qreal visualThickness = value; // Scale slider value to reasonable thickness
-    
-    // Apply zoom scaling to maintain visual consistency
-    qreal actualThickness = visualThickness * (100.0 / currentCanvas()->getZoom()); 
-    
-    currentCanvas()->setPenThickness(actualThickness);
+    // Phase 3.1.4: Use currentViewport()
+    if (DocumentViewport* vp = currentViewport()) {
+        // Calculate thickness based on the slider value at 100% zoom
+        qreal visualThickness = value;
+        
+        // Apply zoom scaling to maintain visual consistency
+        qreal zoomPercent = vp->zoomLevel() * 100.0;  // zoomLevel() returns 1.0 for 100%
+        qreal actualThickness = visualThickness * (100.0 / zoomPercent); 
+        
+        vp->setPenThickness(actualThickness);
+    }
 }
 
 void MainWindow::adjustThicknessForZoom(int oldZoom, int newZoom) {
     // Adjust all tool thicknesses to maintain visual consistency when zoom changes
+    // Phase 3.1.8: Stubbed - DocumentViewport handles zoom-adjusted thickness internally
     if (oldZoom == newZoom || oldZoom <= 0 || newZoom <= 0) return;
     
-    InkCanvas* canvas = currentCanvas();
-    if (!canvas) return;
-    
-    qreal zoomRatio = qreal(oldZoom) / qreal(newZoom);
-    
-    // Adjust thickness for all tools, not just the current one
-    canvas->adjustAllToolThicknesses(zoomRatio);
-    
-    // Update the thickness slider to reflect the current tool's new thickness
+    // TODO Phase 3.3: If needed, adjust thickness on DocumentViewport
+    // DocumentViewport already handles zoom-aware pen thickness
     updateThicknessSliderForCurrentTool();
-    
-    // ✅ FIXED: Update dial display to show new thickness immediately during zoom changes
     updateDialDisplay();
 }
 
 
 void MainWindow::changeTool(int index) {
-    if (index == 0) {
-        currentCanvas()->setTool(ToolType::Pen);
-    } else if (index == 1) {
-        currentCanvas()->setTool(ToolType::Marker);
-    } else if (index == 2) {
-        currentCanvas()->setTool(ToolType::Eraser);
+    // Phase 3.1.4: Use currentViewport() instead of currentCanvas()
+    if (DocumentViewport* vp = currentViewport()) {
+        if (index == 0) {
+            vp->setCurrentTool(ToolType::Pen);
+        } else if (index == 1) {
+            vp->setCurrentTool(ToolType::Marker);
+        } else if (index == 2) {
+            vp->setCurrentTool(ToolType::Eraser);
+        }
     }
     updateToolButtonStates();
     updateThicknessSliderForCurrentTool();
@@ -1615,24 +1572,30 @@ void MainWindow::changeTool(int index) {
 }
 
 void MainWindow::setPenTool() {
-    if (!currentCanvas()) return;
-    currentCanvas()->setTool(ToolType::Pen);
+    // Phase 3.1.4: Use currentViewport() instead of currentCanvas()
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->setCurrentTool(ToolType::Pen);
+    }
     updateToolButtonStates();
     updateThicknessSliderForCurrentTool();
     updateDialDisplay();
 }
 
 void MainWindow::setMarkerTool() {
-    if (!currentCanvas()) return;
-    currentCanvas()->setTool(ToolType::Marker);
+    // Phase 3.1.4: Use currentViewport() instead of currentCanvas()
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->setCurrentTool(ToolType::Marker);
+    }
     updateToolButtonStates();
     updateThicknessSliderForCurrentTool();
     updateDialDisplay();
 }
 
 void MainWindow::setEraserTool() {
-    if (!currentCanvas()) return;
-    currentCanvas()->setTool(ToolType::Eraser);
+    // Phase 3.1.4: Use currentViewport() instead of currentCanvas()
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->setCurrentTool(ToolType::Eraser);
+    }
     updateToolButtonStates();
     updateThicknessSliderForCurrentTool();
     updateDialDisplay();
@@ -1642,13 +1605,14 @@ void MainWindow::setEraserTool() {
 // Features migrated to DocumentViewport
 
 void MainWindow::updateToolButtonStates() {
-    if (!currentCanvas()) return;
+    // Phase 3.1.4: Use currentViewport()
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
     
     // Reset all tool buttons
     penToolButton->setProperty("selected", false);
     markerToolButton->setProperty("selected", false);
     eraserToolButton->setProperty("selected", false);
-    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton
     
     // Update icons for unselected state
     updateButtonIcon(penToolButton, "pen");
@@ -1656,8 +1620,8 @@ void MainWindow::updateToolButtonStates() {
     updateButtonIcon(eraserToolButton, "eraser");
     
     // Set the selected property for the current tool
-    ToolType currentTool = currentCanvas()->getCurrentTool();
-    switch (currentTool) {
+    ToolType tool = vp->currentTool();
+    switch (tool) {
         case ToolType::Pen:
             penToolButton->setProperty("selected", true);
             updateButtonIcon(penToolButton, "pen");
@@ -1687,40 +1651,37 @@ void MainWindow::updateToolButtonStates() {
 }
 
 void MainWindow::handleColorButtonClick() {
-    if (!currentCanvas()) return;
+    // Phase 3.1.4: Use currentViewport()
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
     
-    ToolType currentTool = currentCanvas()->getCurrentTool();
+    ToolType tool = vp->currentTool();
     
     // If in eraser mode, switch back to pen mode
-    if (currentTool == ToolType::Eraser) {
-        currentCanvas()->setTool(ToolType::Pen);
+    if (tool == ToolType::Eraser) {
+        vp->setCurrentTool(ToolType::Pen);
         updateToolButtonStates();
         updateThicknessSliderForCurrentTool();
     }
     
-    // VectorEraser handling removed - simplified ToolType enum
-    
-    // If rope tool is enabled, turn it off
-    if (currentCanvas()->isRopeToolMode()) {
-        currentCanvas()->setRopeToolMode(false);
-        updateRopeToolButtonState();
-    }
-    
-    // For marker and straight line mode, leave them as they are
-    // No special handling needed - they can work with color changes
+    // TODO Phase 3.3: Rope tool mode handling (if implemented)
+    // For now, rope tool is InkCanvas-only and will be reimplemented later
 }
 
 void MainWindow::updateThicknessSliderForCurrentTool() {
-    if (!currentCanvas() || !thicknessSlider) return;
+    // Phase 3.1.4: Use currentViewport()
+    DocumentViewport* vp = currentViewport();
+    if (!vp || !thicknessSlider) return;
     
     // Block signals to prevent recursive calls
     thicknessSlider->blockSignals(true);
     
     // Update slider to reflect current tool's thickness
-    qreal currentThickness = currentCanvas()->getPenThickness();
+    qreal currentThickness = vp->penThickness();
     
     // Convert thickness back to slider value (reverse of updateThickness calculation)
-    qreal visualThickness = currentThickness * (currentCanvas()->getZoom() / 100.0);
+    qreal zoomPercent = vp->zoomLevel() * 100.0;
+    qreal visualThickness = currentThickness * (zoomPercent / 100.0);
     int sliderValue = qBound(1, static_cast<int>(qRound(visualThickness)), 50);
     
     thicknessSlider->setValue(sliderValue);
@@ -1728,76 +1689,17 @@ void MainWindow::updateThicknessSliderForCurrentTool() {
 }
 
 bool MainWindow::selectFolder() {
-    QString folder = QFileDialog::getExistingDirectory(this, tr("Select Save Folder"));
-    if (!folder.isEmpty()) {
-        InkCanvas *canvas = currentCanvas();
-        if (canvas) {
-            if (canvas->isEdited()){
-                saveCurrentPage();
-            }
-            
-            // ✅ Check if user wants to convert to .spn package
-            QMessageBox::StandardButton reply = QMessageBox::question(
-                this,
-                tr("Notebook Format"),
-                tr("Would you like to convert this notebook to a SpeedyNote Package (.spn) file?\n\n"
-                   ".spn files appear as single files in your file manager but maintain the same performance.\n\n"
-                   "Choose 'Yes' to create a .spn package, or 'No' to keep it as a regular folder."),
-                QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel
-            );
-            
-            if (reply == QMessageBox::Cancel) {
-                return false; // User cancelled
-            }
-            
-            QString finalPath = folder;
-            if (reply == QMessageBox::Yes) {
-                // Convert to .spn package
-                QString spnPath;
-                if (SpnPackageManager::convertFolderToSpn(folder, spnPath)) {
-                    finalPath = spnPath;
-                    QMessageBox::information(this, tr("Success"), 
-                        tr("Notebook converted to SpeedyNote Package:\n%1").arg(QFileInfo(spnPath).fileName()));
-                } else {
-                    QMessageBox::warning(this, tr("Conversion Failed"), 
-                        tr("Failed to convert folder to .spn package. Using original folder."));
-                }
-            }
-            
-            canvas->setSaveFolder(finalPath);
-            
-            // ✅ Handle missing PDF file if it's a .spn package
-            if (SpnPackageManager::isSpnPackage(finalPath)) {
-                if (!canvas->handleMissingPdf(this)) {
-                    // User cancelled PDF relinking, don't continue
-                    return false;
-                }
-                // ✅ Update scroll behavior based on PDF loading state after relinking
-                setScrollOnTopEnabled(canvas->isPdfLoadedFunc());
-            }
-            
-            // ✅ Show last accessed page dialog if available
-            if (!showLastAccessedPageDialog(canvas)) {
-                // No last accessed page or user chose page 1
-                switchPageWithDirection(1, 1); // Going to page 1 is forward direction
-                pageInput->setValue(1);
-            } else {
-                // Dialog handled page switching, update page input
-                pageInput->setValue(getCurrentPageForCanvas(canvas) + 1);
-            }
-        updateTabLabel();
-            updateBookmarkButtonState(); // ✅ Update bookmark button state after loading notebook
-            recentNotebooksManager->addRecentNotebook(canvas->getDisplayPath(), canvas); // Track the display path
-    }
-        return true; // Success
-    }
-    return false; // User cancelled folder selection or no canvas available
+    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
+    // TODO Phase 3.4: Implement save folder selection for new .snx format
+    QMessageBox::information(this, tr("Save Location"), 
+        tr("Saving to folder is being redesigned. Coming soon with .snx format!"));
+    return false;
 }
 
 void MainWindow::saveCanvas() {
-    // Phase 3.1: Add null check - will crash if called without canvas
-    if (!currentCanvas()) return;
-    currentCanvas()->saveToFile(getCurrentPageForCanvas(currentCanvas()));
+    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
+    // TODO Phase 3.4: Implement document saving to new .snx format
+    qDebug() << "saveCanvas(): Not implemented yet (Phase 3.4)";
 }
 
 
@@ -1816,239 +1718,44 @@ void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
 }
 
 void MainWindow::deleteCurrentPage() {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
+    // Phase 3.1.8: Stubbed - page deletion will use DocumentViewport
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
     
-    // Get the current page number to show in confirmation (display as 1-indexed for users)
-    int currentPage = getCurrentPageForCanvas(canvas);
-    int displayPageNumber = currentPage + 1; // Convert from 0-indexed to 1-indexed for display
+    int displayPageNumber = vp->currentPageIndex() + 1;
     
     // Show confirmation dialog
     QMessageBox confirmBox(this);
     confirmBox.setWindowTitle(tr("Clear Page"));
     confirmBox.setIcon(QMessageBox::Warning);
     confirmBox.setText(tr("Are you sure you want to clear page %1?").arg(displayPageNumber));
-    confirmBox.setInformativeText(tr("This will permanently delete all drawings, pictures, highlights, and notes on this page. This action cannot be undone."));
+    confirmBox.setInformativeText(tr("This will permanently delete all drawings on this page. This action cannot be undone."));
     confirmBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
     confirmBox.setDefaultButton(QMessageBox::No);
     
     if (confirmBox.exec() == QMessageBox::Yes) {
-        // Clear all content from current page (drawing + pictures + highlights + markdown notes)
-        canvas->clearCurrentPage();
-        
-        // Reload markdown notes sidebar if visible
-        if (markdownNotesSidebarVisible) {
-            loadMarkdownNotesForCurrentPage();
-        }
+        // TODO Phase 3.3: Clear page via vp->document()->currentPage()->clearAll()
+        qDebug() << "deleteCurrentPage(): Clear page not implemented yet";
     }
 }
 
 void MainWindow::saveCurrentPage() {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-    
-    QString currentFolder = canvas->getSaveFolder();
-    QString tempFolder = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
-    
-    // ✅ Check if canvas is in temporary directory (not yet saved to .spn)
-    if (currentFolder.isEmpty() || currentFolder == tempFolder) {
-        // ✅ FIRST: Save the current page to temp folder (like pressing old save button)
-        // This ensures the current page is included in the .spn conversion
-        int currentPageNumber = getCurrentPageForCanvas(canvas);
-        canvas->saveToFile(currentPageNumber);
-        
-        // ✅ COMBINED MODE FIX: Use combined-aware save for markdown/picture windows
-        canvas->saveCombinedWindowsForPage(currentPageNumber);
-        
-        // ✅ THEN: Check if there are any pages to save
-        QDir sourceDir(tempFolder);
-        QStringList pageFiles = sourceDir.entryList(QStringList() << "*.png", QDir::Files);
-
-        if (pageFiles.isEmpty()) {
-            QMessageBox::information(this, tr("Nothing to Save"), 
-                tr("There are no pages to save in this notebook."));
-            return;
-        }
-        
-        // Canvas is in temp directory - show Save As dialog directly
-        QString suggestedName = "MyNotebook.spn";
-        QString selectedSpnPath = QFileDialog::getSaveFileName(this, 
-            tr("Save SpeedyNote Package"), 
-            suggestedName, 
-            "SpeedyNote Package (*.spn)");
-            
-        if (selectedSpnPath.isEmpty()) {
-            // User cancelled save dialog
-            return;
-        }
-
-        // Ensure .spn extension
-        if (!selectedSpnPath.toLower().endsWith(".spn")) {
-            selectedSpnPath += ".spn";
-        }
-
-        // Create .spn package from temp folder contents
-        if (!SpnPackageManager::convertFolderToSpnPath(tempFolder, selectedSpnPath)) {
-            QMessageBox::critical(this, tr("Save Failed"), 
-                tr("Failed to save the notebook as a SpeedyNote Package.\nPlease try again or choose a different location."));
-            return;
-        }
-
-        // Update canvas to use the new .spn package
-        canvas->setSaveFolder(selectedSpnPath);
-        
-        // Update tab label to reflect the new save location
-        updateTabLabel();
-
-        // ✅ Add to recent notebooks after successful save
-        // Phase 3.1: recentNotebooksManager and sharedLauncher disconnected
-        // if (recentNotebooksManager) {
-        //     recentNotebooksManager->addRecentNotebook(selectedSpnPath, canvas);
-        //     if (sharedLauncher && sharedLauncher->isVisible()) {
-        //         sharedLauncher->refreshRecentNotebooks();
-        //     }
-        // }
-        
-        // Show success message
-        QMessageBox::information(this, tr("Saved"), 
-            tr("Notebook saved successfully as: %1").arg(QFileInfo(selectedSpnPath).fileName()));
-            
-    } else {
-        // Canvas is already tied to an .spn file - normal save behavior
-        canvas->saveToFile(getCurrentPageForCanvas(canvas));
-        
-        // Show brief confirmation for normal saves
-        QMessageBox::information(this, tr("Saved"), 
-            tr("Current page saved successfully."));
-    }
+    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
+    // TODO Phase 3.4: Implement page saving to new .snx format
+    qDebug() << "saveCurrentPage(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::saveCurrentPageConcurrent() {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas || !canvas->isEdited()) return;
-    
-    int pageNumber = getCurrentPageForCanvas(canvas);
-    QString saveFolder = canvas->getSaveFolder();
-    
-    if (saveFolder.isEmpty()) return;
-    
-    // ✅ OPTIMIZATION: Wait for any previous save to complete first
-    // This prevents too many concurrent saves from piling up
-    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
-        concurrentSaveFuture.waitForFinished();
-    }
-    
-    // Create a copy of the buffer for concurrent saving
-    QPixmap bufferCopy = canvas->getBuffer();
-    
-    // Check if this is a combined canvas first to determine window saving strategy
-    QPixmap backgroundImage = canvas->getBackgroundImage();
-    bool isCombinedCanvas = false;
-    
-    // If we have a background image (PDF) and buffer is roughly double its height, it's combined
-    if (!backgroundImage.isNull() && bufferCopy.height() >= backgroundImage.height() * 1.8) {
-        isCombinedCanvas = true;
-    } else if (bufferCopy.height() > 2000) { // Fallback heuristic for very tall buffers
-        isCombinedCanvas = true;
-    }
-    
-    // ✅ Get notebook ID from JSON metadata before concurrent operation
-    QString notebookId = canvas->getNotebookId();
-    if (notebookId.isEmpty()) {
-        canvas->loadNotebookMetadata(); // Ensure metadata is loaded
-        notebookId = canvas->getNotebookId();
-    }
-    
-    // Calculate single page height for canvas splitting
-    int singlePageHeight = bufferCopy.height();
-    if (isCombinedCanvas) {
-        if (!backgroundImage.isNull()) {
-            singlePageHeight = backgroundImage.height() / 2; // Each PDF page in the combined image
-        } else {
-            singlePageHeight = bufferCopy.height() / 2; // Fallback for combined canvas
-        }
-    }
-    
-    // ✅ OPTIMIZATION: Split buffer and populate cache IMMEDIATELY (main thread, fast memory ops)
-    // This eliminates the save-invalidate-reload cycle - new page can use cached data instantly
-    int bufferWidth = bufferCopy.width();
-    QPixmap topPagePixmap, bottomPagePixmap;
-    
-    if (isCombinedCanvas) {
-        // Split into top and bottom halves
-        topPagePixmap = bufferCopy.copy(0, 0, bufferWidth, singlePageHeight);
-        bottomPagePixmap = bufferCopy.copy(0, singlePageHeight, bufferWidth, singlePageHeight);
-        
-        // Populate cache immediately - this makes data available for the next combined canvas
-        canvas->insertPageIntoCache(pageNumber, topPagePixmap);
-        canvas->insertPageIntoCache(pageNumber + 1, bottomPagePixmap);
-    } else {
-        // Single page - cache the whole buffer
-        canvas->insertPageIntoCache(pageNumber, bufferCopy);
-    }
-    
-    // Mark as not edited BEFORE async save starts (data is safe in cache now)
-    canvas->setEdited(false);
-    
-    // ✅ BUG FIX: Save window data IMMEDIATELY, not deferred
-    // The previous deferred save (QTimer::singleShot) caused a race condition:
-    // By the time the deferred save ran, currentWindows had been replaced with
-    // the NEW page's windows, but the save was called for the OLD page number.
-    // This caused windows from the new page to be incorrectly saved to the old page's cache.
-    if (isCombinedCanvas) {
-        canvas->saveCombinedWindowsForPage(pageNumber);
-    } else {
-        if (canvas->getPictureManager()) {
-            canvas->getPictureManager()->saveWindowsForPage(pageNumber);
-        }
-    }
-    
-    // ✅ OPTIMIZATION: Run disk I/O asynchronously - page switch proceeds immediately
-    // The cache already has fresh data, so loadPage() won't need to wait for disk
-    if (isCombinedCanvas) {
-        concurrentSaveFuture = QtConcurrent::run([saveFolder, pageNumber, topPagePixmap, bottomPagePixmap, notebookId]() {
-            // Save top page (current page)
-            QString currentFilePath = saveFolder + QString("/%1_%2.png").arg(notebookId).arg(pageNumber, 5, 10, QChar('0'));
-            QImage currentImage(topPagePixmap.size(), QImage::Format_ARGB32);
-            currentImage.fill(Qt::transparent);
-            {
-                QPainter painter(&currentImage);
-                painter.drawPixmap(0, 0, topPagePixmap);
-            }
-            currentImage.save(currentFilePath, "PNG");
-            
-            // Save bottom page (next page)
-            int nextPageNumber = pageNumber + 1;
-            QString nextFilePath = saveFolder + QString("/%1_%2.png").arg(notebookId).arg(nextPageNumber, 5, 10, QChar('0'));
-            QImage nextImage(bottomPagePixmap.size(), QImage::Format_ARGB32);
-            nextImage.fill(Qt::transparent);
-            {
-                QPainter painter(&nextImage);
-                painter.drawPixmap(0, 0, bottomPagePixmap);
-            }
-            nextImage.save(nextFilePath, "PNG");
-        });
-    } else {
-        concurrentSaveFuture = QtConcurrent::run([saveFolder, pageNumber, bufferCopy, notebookId]() {
-            QString filePath = saveFolder + QString("/%1_%2.png").arg(notebookId).arg(pageNumber, 5, 10, QChar('0'));
-            QImage image(bufferCopy.size(), QImage::Format_ARGB32);
-            image.fill(Qt::transparent);
-            QPainter painter(&image);
-            painter.drawPixmap(0, 0, bufferCopy);
-            image.save(filePath, "PNG");
-        });
-    }
-    
-    // ✅ NO waitForFinished() - page switch proceeds immediately!
-    // ✅ NO invalidateBothPagesCache() - cache already has fresh data!
+    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
+    // TODO Phase 3.4: Implement concurrent page saving to new .snx format
+    qDebug() << "saveCurrentPageConcurrent(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::selectBackground() {
-    QString filePath = QFileDialog::getOpenFileName(this, tr("Select Background Image"), "", "Images (*.png *.jpg *.jpeg)");
-    if (!filePath.isEmpty()) {
-        currentCanvas()->setBackground(filePath, getCurrentPageForCanvas(currentCanvas()));
-        updateZoom(); // ✅ Update zoom and pan range after background is set
-    }
+    // Phase 3.1.8: Stubbed - background selection will use DocumentViewport
+    // TODO Phase 3.3: Implement background selection for DocumentViewport
+    QMessageBox::information(this, tr("Background"), 
+        tr("Background selection is being redesigned. Coming soon!"));
 }
 
 // Helper function to show page range selection dialog
@@ -2148,6 +1855,13 @@ bool MainWindow::showPageRangeDialog(int totalPages, bool &exportWholeDocument, 
 }
 
 void MainWindow::exportAnnotatedPdf() {
+    // Phase 3.1.8: Stubbed - PDF export will be reimplemented for DocumentViewport
+    QMessageBox::information(this, tr("Export PDF"), 
+        tr("PDF export is being redesigned. Coming soon!"));
+    return;
+
+#if 0 // Phase 3.1.8: Old export code disabled - uses InkCanvas
+    // Original code below - will be removed after Phase 3.4
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
 
@@ -2540,8 +2254,11 @@ void MainWindow::exportAnnotatedPdf() {
     });
     
     mergeWatcher->setFuture(mergeFuture);
+#endif // Phase 3.1.8: Old export code disabled
 }
 
+// Phase 3.1.8: Entire function disabled - uses InkCanvas
+#if 0
 // Export canvas-only notebook (no underlying PDF) to PDF
 void MainWindow::exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId) {
     // Scan for canvas PNG files
@@ -2722,7 +2439,17 @@ void MainWindow::exportCanvasOnlyNotebook(const QString &saveFolder, const QStri
         .arg(outputInfo.size() / 1024.0 / 1024.0, 0, 'f', 2)
         .arg(exportPath));
 }
+#endif // Phase 3.1.8: exportCanvasOnlyNotebook disabled
 
+// Phase 3.1.8: Stub implementation - function disabled
+void MainWindow::exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId) {
+    Q_UNUSED(saveFolder);
+    Q_UNUSED(notebookId);
+    qDebug() << "exportCanvasOnlyNotebook(): Disabled in Phase 3.1.8";
+}
+
+// Phase 3.1.8: Entire function disabled - uses InkCanvas
+#if 0
 // Helper function for full render fallback
 void MainWindow::exportAnnotatedPdfFullRender(const QString &exportPath, const QSet<int> &annotatedPages, 
                                                bool exportWholeDocument, int exportStartPage, int exportEndPage) {
@@ -2823,7 +2550,21 @@ void MainWindow::exportAnnotatedPdfFullRender(const QString &exportPath, const Q
     QMessageBox::information(this, tr("Export Complete"), 
         tr("Annotated PDF exported to:\n%1").arg(exportPath));
 }
+#endif // Phase 3.1.8: exportAnnotatedPdfFullRender disabled
 
+// Phase 3.1.8: Stub implementation - function disabled
+void MainWindow::exportAnnotatedPdfFullRender(const QString &exportPath, const QSet<int> &annotatedPages, 
+                                               bool exportWholeDocument, int exportStartPage, int exportEndPage) {
+    Q_UNUSED(exportPath);
+    Q_UNUSED(annotatedPages);
+    Q_UNUSED(exportWholeDocument);
+    Q_UNUSED(exportStartPage);
+    Q_UNUSED(exportEndPage);
+    qDebug() << "exportAnnotatedPdfFullRender(): Disabled in Phase 3.1.8";
+}
+
+// Phase 3.1.8: Entire function disabled - uses InkCanvas
+#if 0
 // Helper function to create PDF with only annotated pages
 bool MainWindow::createAnnotatedPagesPdf(const QString &outputPath, const QList<int> &pages, QProgressDialog &progress) {
     InkCanvas *canvas = currentCanvas();
@@ -2887,7 +2628,19 @@ bool MainWindow::createAnnotatedPagesPdf(const QString &outputPath, const QList<
     painter.end();
     return true;
 }
+#endif // Phase 3.1.8: createAnnotatedPagesPdf disabled
 
+// Phase 3.1.8: Stub implementation - function disabled
+bool MainWindow::createAnnotatedPagesPdf(const QString &outputPath, const QList<int> &pages, QProgressDialog &progress) {
+    Q_UNUSED(outputPath);
+    Q_UNUSED(pages);
+    Q_UNUSED(progress);
+    qDebug() << "createAnnotatedPagesPdf(): Disabled in Phase 3.1.8";
+    return false;
+}
+
+// Phase 3.1.8: Entire function disabled - uses InkCanvas
+#if 0
 // Helper function to merge using pdftk
 bool MainWindow::mergePdfWithPdftk(const QString &originalPdf, const QString &annotatedPagesPdf, 
                                     const QString &outputPdf, const QList<int> &annotatedPageNumbers,
@@ -2982,8 +2735,26 @@ bool MainWindow::mergePdfWithPdftk(const QString &originalPdf, const QString &an
     
     return true;
 }
+#endif // Phase 3.1.8: mergePdfWithPdftk disabled
+
+// Phase 3.1.8: Stub implementation - function disabled
+bool MainWindow::mergePdfWithPdftk(const QString &originalPdf, const QString &annotatedPagesPdf, 
+                                    const QString &outputPdf, const QList<int> &annotatedPageNumbers,
+                                    QString *errorMsg, bool exportWholeDocument, int exportStartPage, int exportEndPage) {
+    Q_UNUSED(originalPdf);
+    Q_UNUSED(annotatedPagesPdf);
+    Q_UNUSED(outputPdf);
+    Q_UNUSED(annotatedPageNumbers);
+    Q_UNUSED(exportWholeDocument);
+    Q_UNUSED(exportStartPage);
+    Q_UNUSED(exportEndPage);
+    if (errorMsg) *errorMsg = "Disabled in Phase 3.1.8";
+    qDebug() << "mergePdfWithPdftk(): Disabled in Phase 3.1.8";
+    return false;
+}
 
 // Extract PDF metadata including outline/bookmarks using pdftk
+// Note: This function doesn't use InkCanvas, so it's not disabled
 bool MainWindow::extractPdfOutlineData(const QString &pdfPath, QString &outlineData) {
     QProcess process;
     process.start("pdftk", QStringList() << pdfPath << "dump_data");
@@ -3150,13 +2921,11 @@ bool MainWindow::applyOutlineToPdf(const QString &pdfPath, const QString &outlin
 
 
 void MainWindow::updateZoom() {
-    InkCanvas *canvas = currentCanvas();
-    if (canvas) {
-        canvas->setZoom(zoomSlider->value());
-        canvas->setLastZoomLevel(zoomSlider->value());  // ✅ Store zoom level per tab
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    if (vp && zoomSlider) {
+        vp->setZoomLevel(zoomSlider->value() / 100.0); // Convert slider value to zoom factor
         updatePanRange();
-        // updateThickness(thicknessSlider->value()); // ✅ REMOVED: This was resetting thickness on page switch
-        // updateDialDisplay();
     }
 }
 
@@ -3220,60 +2989,20 @@ void MainWindow::updatePanRange() {
 }
 
 void MainWindow::updatePanX(int value) {
-    InkCanvas *canvas = currentCanvas();
-    if (canvas) {
-        canvas->setPanX(value);
-        canvas->setLastPanX(value);  // ✅ Store panX per tab
-        
-        // Show horizontal scrollbar temporarily
-        if (panXSlider->maximum() > 0) {
-            panXSlider->setVisible(true);
-            scrollbarsVisible = true;
-            
-            // Make sure scrollbar position matches the canvas position
-            if (panXSlider->value() != value) {
-                panXSlider->blockSignals(true);
-                panXSlider->setValue(value);
-                panXSlider->blockSignals(false);
-            }
-            
-            if (scrollbarHideTimer->isActive()) {
-                scrollbarHideTimer->stop();
-            }
-            scrollbarHideTimer->start();
-        }
-    }
+    // Phase 3.1.8: Stubbed - DocumentViewport handles its own panning
+    Q_UNUSED(value);
+    // TODO Phase 3.3: Connect to currentViewport() pan if needed
 }
 
 void MainWindow::updatePanY(int value) {
-    InkCanvas *canvas = currentCanvas();
-    if (canvas) {
-        canvas->setPanY(value);
-        canvas->setLastPanY(value);  // ✅ Store panY per tab
-        
-        // panYSlider stays hidden - update value internally only
-        if (panYSlider->maximum() > 0) {
-            // Make sure scrollbar value matches the canvas position (for internal use)
-            if (panYSlider->value() != value) {
-                panYSlider->blockSignals(true);
-                panYSlider->setValue(value);
-                panYSlider->blockSignals(false);
-            }
-            
-            if (scrollbarHideTimer->isActive()) {
-                scrollbarHideTimer->stop();
-            }
-            scrollbarHideTimer->start();
-        }
-    }
+    // Phase 3.1.8: Stubbed - DocumentViewport handles its own panning
+    Q_UNUSED(value);
+    // TODO Phase 3.3: Connect to currentViewport() pan if needed
 }
 void MainWindow::applyZoom() {
-    bool ok;
-    int zoomValue = zoomInput->text().toInt(&ok);
-    if (ok && zoomValue > 0) {
-        currentCanvas()->setZoom(zoomValue);
-        updatePanRange(); // Update slider range after zoom change
-    }
+    // Phase 3.1.8: Stubbed - DocumentViewport handles zoom via zoomSlider
+    // TODO Phase 3.3: Connect to currentViewport()->setZoom() if needed
+    qDebug() << "applyZoom(): Not implemented yet (Phase 3.3)";
 }
 
 void MainWindow::forceUIRefresh() {
@@ -3282,175 +3011,23 @@ void MainWindow::forceUIRefresh() {
 }
 
 void MainWindow::loadPdf() {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-
-    QString saveFolder = canvas->getSaveFolder();
-    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
-    
-    // Check if no save folder is set or if it's the temporary directory
-    if (saveFolder.isEmpty() || saveFolder == tempDir) {
-        QMessageBox::warning(this, tr("Cannot Load PDF"), 
-            tr("Please select a permanent save folder before loading a PDF.\n\nClick the folder icon to choose a location for your notebook."));
-        return;
-    }
-
-    QString filePath = QFileDialog::getOpenFileName(this, tr("Select PDF or PowerPoint"), "", 
-        tr("Documents (*.pdf *.ppt *.pptx *.odp);;PDF Files (*.pdf);;PowerPoint Files (*.ppt *.pptx);;OpenDocument Presentation (*.odp)"));
-    
-    if (!filePath.isEmpty()) {
-        // Check if the file needs conversion (PPT/PPTX/ODP)
-        QString pdfPath = filePath;
-        
-        if (DocumentConverter::needsConversion(filePath)) {
-            // Check if LibreOffice is available
-            if (!DocumentConverter::isLibreOfficeAvailable()) {
-                QMessageBox::warning(this, 
-                    tr("LibreOffice Required"), 
-                    DocumentConverter::getInstallationInstructions());
-                return;
-            }
-            
-            // Show progress dialog
-            QProgressDialog progressDialog(
-                tr("Converting %1 to PDF...").arg(QFileInfo(filePath).fileName()),
-                QString(), 0, 0, this);
-            progressDialog.setWindowModality(Qt::WindowModal);
-            progressDialog.setCancelButton(nullptr);
-            progressDialog.setMinimumDuration(0);
-            progressDialog.show();
-            QCoreApplication::processEvents();
-            
-            // Determine output path in notebook's save folder
-            QFileInfo originalFileInfo(filePath);
-            QString pdfFileName = originalFileInfo.completeBaseName() + "_converted.pdf";
-            QString outputPdfPath = saveFolder + "/" + pdfFileName;
-            
-            // Check if file already exists and create unique name if needed
-            int counter = 1;
-            while (QFile::exists(outputPdfPath) && counter < 9999) {
-                pdfFileName = originalFileInfo.completeBaseName() + QString("_converted_%1.pdf").arg(counter);
-                outputPdfPath = saveFolder + "/" + pdfFileName;
-                counter++;
-            }
-            
-            // Safety check: if we hit the limit, warn user
-            if (counter >= 9999 && QFile::exists(outputPdfPath)) {
-                QMessageBox::critical(this, tr("Too Many Files"), 
-                    tr("Too many converted PDF files exist in the notebook folder. Please clean up old converted PDFs."));
-                return;
-            }
-            
-            // Perform conversion with user's DPI settings
-            DocumentConverter converter(this);
-            DocumentConverter::ConversionStatus status;
-            pdfPath = converter.convertToPdf(filePath, status, outputPdfPath, getPdfDPI());
-            
-            progressDialog.close();
-            
-            if (status != DocumentConverter::Success || pdfPath.isEmpty()) {
-                QString errorMsg = tr("Failed to convert PowerPoint to PDF.\n\n");
-                
-                if (status == DocumentConverter::LibreOfficeNotFound) {
-                    errorMsg += DocumentConverter::getInstallationInstructions();
-                } else {
-                    errorMsg += tr("Error: %1").arg(converter.getLastError());
-                }
-                
-                QMessageBox::critical(this, tr("Conversion Failed"), errorMsg);
-                return;
-            }
-        }
-        
-        currentCanvas()->loadPdf(pdfPath);
-        
-        // ✅ Load the current page to display the PDF immediately
-        int currentPage = getCurrentPageForCanvas(currentCanvas());
-        currentCanvas()->loadPdfPage(currentPage);
-
-        updateTabLabel(); // ✅ Update the tab name after assigning a PDF
-        updateZoom(); // ✅ Update zoom and pan range after PDF is loaded
-        
-        // Refresh PDF outline if sidebar is visible
-        if (outlineSidebarVisible) {
-            loadPdfOutline();
-        }
-        
-        // ✅ Automatically enable scroll on top when PDF is loaded (required for pseudo smooth scrolling)
-        setScrollOnTopEnabled(true);
-        
-        // ✅ Refresh the canvas to show the PDF immediately
-        currentCanvas()->update();
-    }
+    // Phase 3.1.8: Stubbed - PDF loading will use DocumentViewport
+    // TODO Phase 3.4: Implement PDF loading for DocumentViewport
+    QMessageBox::information(this, tr("PDF Loading"), 
+        tr("PDF loading is being redesigned. Coming soon!"));
 }
 
 void MainWindow::clearPdf() {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-    
-    canvas->clearPdf();
-    
-    // ✅ Update the tab label to reflect PDF removal
-    updateTabLabel();
-    
-    // ✅ Automatically disable scroll on top when PDF is cleared (not needed for independent canvases)
-    setScrollOnTopEnabled(false);
-    
-    // ✅ Refresh the canvas to show the cleared state immediately
-    canvas->update();
-    
-    updateZoom(); // ✅ Update zoom and pan range after PDF is cleared
-    
-    // ✅ Clear PDF outline if sidebar is visible
-    if (outlineSidebarVisible) {
-        loadPdfOutline(); // This will clear the outline since no PDF is loaded
-    }
+    // Phase 3.1.8: Stubbed - PDF clearing will use DocumentViewport
+    // TODO Phase 3.4: Implement PDF clearing for DocumentViewport
+    qDebug() << "clearPdf(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::handleSmartPdfButton() {
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-    
-    QString currentFolder = canvas->getSaveFolder();
-    QString tempFolder = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
-    
-    // ✅ 1. Check if tab is not saved to .spn file - warn user
-    if (currentFolder.isEmpty() || currentFolder == tempFolder) {
-        QMessageBox::warning(this, tr("Cannot Import/Clear Document"), 
-            tr("Please save this notebook as a SpeedyNote Package (.spn) file before importing a document.\n\n"
-               "Click the Save button to save your notebook first."));
-        return;
-    }
-    
-    // ✅ 2. Check if PDF is already loaded
-    bool hasPdf = canvas->isPdfLoadedFunc();
-    
-    if (!hasPdf) {
-        // ✅ 3. No PDF loaded - act like old loadPdfButton
-        loadPdf();
-    } else {
-        // ✅ 4. PDF already loaded - show Replace/Delete dialog
-        QMessageBox msgBox(this);
-        msgBox.setWindowTitle(tr("PDF Management"));
-        msgBox.setText(tr("A PDF is already loaded in this notebook."));
-        msgBox.setInformativeText(tr("What would you like to do?"));
-        
-        QPushButton *replaceButton = msgBox.addButton(tr("Replace PDF"), QMessageBox::ActionRole);
-        QPushButton *deleteButton = msgBox.addButton(tr("Remove PDF"), QMessageBox::DestructiveRole);
-        msgBox.addButton(QMessageBox::Cancel);
-        
-        msgBox.setDefaultButton(replaceButton);
-        msgBox.exec();
-        
-        if (msgBox.clickedButton() == replaceButton) {
-            // Replace PDF - call loadPdf which will replace the existing one
-            loadPdf();
-        } else if (msgBox.clickedButton() == deleteButton) {
-            // Delete PDF - call clearPdf
-            clearPdf();
-        }
-        // If Cancel, do nothing
-    }
+    // Phase 3.1.8: Stubbed - PDF management will use DocumentViewport
+    // For now, show a message since loadPdf() is also stubbed
+    QMessageBox::information(this, tr("PDF Management"), 
+        tr("PDF import/management is being redesigned. Coming soon!"));
 }
 
 
@@ -3907,8 +3484,11 @@ void MainWindow::toggleFullscreen() {
 }
 
 void MainWindow::showJumpToPageDialog() {
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
+    
     bool ok;
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1;  // ✅ Convert zero-based to one-based
     int newPage = QInputDialog::getInt(this, "Jump to Page", "Enter Page Number:", 
                                        currentPage, 1, 9999, 1, &ok);
     if (ok) {
@@ -3924,7 +3504,9 @@ void MainWindow::showJumpToPageDialog() {
 }
 
 void MainWindow::goToPreviousPage() {
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1;  // Convert to 1-based
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     if (currentPage > 1) {
         int newPage = currentPage - 1;
         switchPageWithDirection(newPage, -1); // -1 indicates backward
@@ -3935,7 +3517,9 @@ void MainWindow::goToPreviousPage() {
 }
 
 void MainWindow::goToNextPage() {
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1;  // Convert to 1-based
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     int newPage = currentPage + 1;
     switchPageWithDirection(newPage, 1); // 1 indicates forward
     pageInput->blockSignals(true);
@@ -3944,7 +3528,9 @@ void MainWindow::goToNextPage() {
 }
 
 void MainWindow::onPageInputChanged(int newPage) {
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1;  // Convert to 1-based
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     
     // ✅ Use direction-aware page switching for spinbox
     int direction = (newPage > currentPage) ? 1 : (newPage < currentPage) ? -1 : 0;
@@ -4199,9 +3785,9 @@ void MainWindow::updateDialDisplay() {
     if (!dialColorPreview) return;
     if (!dialIconView) return;
     
-    // Phase 3.1: Early return if no canvas available
-    // TODO Phase 3.3: Use DocumentViewport for tool/page info
-    if (!currentCanvas()) {
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    if (!vp) {
         dialDisplay->setText(tr("\n\nNo Canvas"));
         return;
     }
@@ -4210,17 +3796,17 @@ void MainWindow::updateDialDisplay() {
     switch (currentDialMode) {
         case DialMode::PageSwitching:
             if (fastForwardMode){
-                dialDisplay->setText(QString(tr("\n\nPage\n%1").arg(getCurrentPageForCanvas(currentCanvas()) + 1 + tempClicks * 8)));
+                dialDisplay->setText(QString(tr("\n\nPage\n%1").arg(vp->currentPageIndex() + 1 + tempClicks * 8)));
             }
             else {
-                dialDisplay->setText(QString(tr("\n\nPage\n%1").arg(getCurrentPageForCanvas(currentCanvas()) + 1 + tempClicks)));
+                dialDisplay->setText(QString(tr("\n\nPage\n%1").arg(vp->currentPageIndex() + 1 + tempClicks)));
             }
             dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/bookpage_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             break;
         case DialMode::ThicknessControl:
             {
                 QString toolName;
-                switch (currentCanvas()->getCurrentTool()) {
+                switch (vp->currentTool()) {
                     case ToolType::Pen:
                         toolName = tr("Pen");
             break;
@@ -4237,18 +3823,18 @@ void MainWindow::updateDialDisplay() {
                         toolName = tr("Lasso");
                         break;
             }
-                dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(currentCanvas()->getPenThickness(), 'f', 1))));
+                dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(vp->penThickness(), 'f', 1))));
             dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             }
             break;  
         case DialMode::ZoomControl:
-            dialDisplay->setText(QString(tr("\n\nZoom\n%1%").arg(currentCanvas() ? qRound(currentCanvas()->getZoom() * initialDpr) : qRound(zoomSlider->value() * initialDpr))));
+            dialDisplay->setText(QString(tr("\n\nZoom\n%1%").arg(vp ? qRound(vp->zoomLevel() * 100.0 * initialDpr) : qRound(zoomSlider->value() * initialDpr))));
             dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/zoom_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
             break;
   
         case DialMode::ToolSwitching:
             // ✅ Convert ToolType to QString for display
-            switch (currentCanvas()->getCurrentTool()) {
+            switch (vp->currentTool()) {
                 case ToolType::Pen:
                     dialDisplay->setText(tr("\n\n\nPen"));
                     dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -4285,7 +3871,8 @@ void MainWindow::updateDialDisplay() {
             {
                 dialIconView->setPixmap(QPixmap(":/resources/icons/scroll_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 QString fullscreenStatus = controlBarVisible ? tr("Etr") : tr("Exit");
-                dialDisplay->setText(QString(tr("\n\nPage %1\n%2 FulScr")).arg(getCurrentPageForCanvas(currentCanvas()) + 1).arg(fullscreenStatus));
+                int pageNum = vp ? vp->currentPageIndex() + 1 : 1;
+                dialDisplay->setText(QString(tr("\n\nPage %1\n%2 FulScr")).arg(pageNum).arg(fullscreenStatus));
             }
             break;
         case None:
@@ -4361,12 +3948,8 @@ void MainWindow::handleDialInput(int angle) {
             tempClicks = currentClicks;
             updateDialDisplay();
     
-            // Only load PDF previews for page-switching dial modes
-            if (isLowResPreviewEnabled() && 
-                (currentDialMode == PageSwitching || currentDialMode == PanAndPageScroll)) {
-                int previewPage = qBound(1, getCurrentPageForCanvas(currentCanvas()) + currentClicks, 99999);
-                currentCanvas()->loadPdfPreviewAsync(previewPage);
-            }
+            // Phase 3.1.8: PDF preview stubbed - DocumentViewport handles its own rendering
+            // TODO Phase 3.4: Implement low-res preview for DocumentViewport if needed
         }
     }
 
@@ -4393,12 +3976,10 @@ void MainWindow::onDialReleased() {
     
 
     if (totalClicks != 0 || grossTotalClicks != 0) {  // ✅ Only switch pages if movement happened
-        // Use concurrent autosave for smoother dial operation
-        if (currentCanvas()->isEdited()) {
-            saveCurrentPageConcurrent();
-        }
-
-        int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1;
+        // Phase 3.1.8: Autosave stubbed - DocumentViewport handles undo/redo, not file saving
+        
+        DocumentViewport* vp = currentViewport();
+        int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
         int newPage = qBound(1, currentPage + totalClicks * pagesToAdvance, 99999);
         
         // ✅ Use direction-aware page switching for dial
@@ -4505,22 +4086,18 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         }
     }
 
-    // Check if this is a canvas event for scrollbar handling
-    InkCanvas* canvas = qobject_cast<InkCanvas*>(obj);
-    if (canvas) {
+    // Phase 3.1.8: InkCanvas event filtering disabled - DocumentViewport handles its own events
+    // Check if this is a viewport event for scrollbar handling
+    DocumentViewport* viewport = qobject_cast<DocumentViewport*>(obj);
+    if (viewport) {
         // Handle mouse movement for scrollbar visibility
         if (event->type() == QEvent::MouseMove) {
-            QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
-            handleEdgeProximity(canvas, mouseEvent->pos());
+            // QMouseEvent* mouseEvent = static_cast<QMouseEvent*>(event);
+            // TODO Phase 3.3: Implement edge proximity for scrollbar visibility
         }
         // Handle tablet events for stylus hover (safely)
         else if (event->type() == QEvent::TabletMove) {
-            try {
-                QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
-                handleEdgeProximity(canvas, tabletEvent->position().toPoint());
-            } catch (...) {
-                // Ignore tablet event errors to prevent crashes
-            }
+            // TODO Phase 3.3: Implement tablet hover handling
         }
         // Handle tablet press/release for stylus button mapping
         else if (event->type() == QEvent::TabletPress) {
@@ -4587,10 +4164,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
                 return false;
             }
 
-            InkCanvas* canvas = currentCanvas();
-            if (!canvas) {
-                return false; // No canvas to handle events
-            }
+            // Phase 3.1.8: Use touchGestureMode member directly instead of InkCanvas
             
             QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
             
@@ -4612,16 +4186,17 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
             const bool isMouseWheel = looksLikeMouseWheel && timeSinceLastEvent > 5;
             
             // --- Route event ---
-            if (canvas->getTouchGestureMode() == TouchGestureMode::Disabled) {
+            // Phase 3.1.8: Use member variable touchGestureMode directly
+            if (touchGestureMode == TouchGestureMode::Disabled) {
                 // Disabled mode: mouse wheel works, trackpad blocked
                 if (!isMouseWheel) {
                     return true; // Block trackpad
                 }
             } else if (!isMouseWheel) {
-                // Normal mode: send trackpad events to InkCanvas
+                // Normal mode: send trackpad events to DocumentViewport
                 trackpadModeActive = true;
                 trackpadModeTimer->start();
-                return false; // Let InkCanvas handle
+                return false; // Let DocumentViewport handle
             }
             
             // --- Exit trackpad mode if this is definitely a mouse wheel event ---
@@ -4859,12 +4434,10 @@ void MainWindow::handleDialPanScroll(int angle) {
 void MainWindow::onPanScrollReleased() {
     // ✅ Perform page flip only when dial released and flip is pending
     if (pendingPageFlip != 0) {
-        // Use concurrent saving for smooth dial operation
-        if (currentCanvas()->isEdited()) {
-            saveCurrentPageConcurrent();
-        }
+        // Phase 3.1.8: Autosave stubbed - DocumentViewport handles undo/redo
 
-        int currentPage = getCurrentPageForCanvas(currentCanvas());
+        DocumentViewport* vp = currentViewport();
+        int currentPage = vp ? vp->currentPageIndex() : 0;
         int newPage = qBound(1, currentPage + pendingPageFlip + 1, 99999);
         
         // ✅ Use direction-aware page switching for pan-and-scroll dial
@@ -4901,8 +4474,12 @@ void MainWindow::handleDialThickness(int angle) {
     if (delta > 180) delta -= 360;
     if (delta < -180) delta += 360;
 
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    
     int thicknessStep = fastForwardMode ? 5 : 1;
-    currentCanvas()->setPenThickness(qBound<qreal>(1.0, currentCanvas()->getPenThickness() + (delta / 10.0) * thicknessStep, 50.0));
+    vp->setPenThickness(qBound<qreal>(1.0, vp->penThickness() + (delta / 10.0) * thicknessStep, 50.0));
 
     updateDialDisplay();
     lastAngle = angle;
@@ -4926,7 +4503,10 @@ void MainWindow::handlePresetSelection(int angle) {
         currentPresetIndex = (currentPresetIndex + (delta > 0 ? 1 : -1) + colorPresets.size()) % colorPresets.size();
         
         QColor selectedColor = colorPresets[currentPresetIndex];
-        currentCanvas()->setPenColor(selectedColor);
+        // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setPenColor(selectedColor);
+        }
         updateCustomColorButtonStyle(selectedColor);
         updateDialDisplay();
         updateColorButtonStates();  // Update button states when preset is selected
@@ -4952,7 +4532,11 @@ void MainWindow::onPresetReleased() {
 
 
 void MainWindow::addColorPreset() {
-    QColor currentColor = currentCanvas()->getPenColor();
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    
+    QColor currentColor = vp->penColor();
 
     // ✅ Prevent duplicates
     if (!colorPresets.contains(currentColor)) {
@@ -5470,14 +5054,28 @@ void MainWindow::updateTheme() {
     }
     
     // Phase 3.1: Tab bar styling now uses QTabWidget
-    // TODO Phase 3.3: Apply styling to m_tabWidget via QTabBar::setStyleSheet
-    if (tabBarContainer) {
-        // Set the entire tab bar container to use accent color
-        tabBarContainer->setStyleSheet(QString(R"(
-        QWidget#tabBarContainer {
+    if (m_tabWidget) {
+        // Style the tab bar with accent color
+        m_tabWidget->setStyleSheet(QString(R"(
+        QTabBar {
             background-color: %1;
         }
-        )").arg(accentColor.name()));
+        QTabBar::tab {
+            background-color: %1;
+            color: %2;
+            padding: 8px 16px;
+            border: none;
+        }
+        QTabBar::tab:selected {
+            background-color: %3;
+        }
+        QTabBar::tab:hover:!selected {
+            background-color: %4;
+        }
+        )").arg(accentColor.name())
+           .arg(darkMode ? "#ffffff" : "#000000")
+           .arg(accentColor.darker(110).name())
+           .arg(accentColor.lighter(110).name()));
     }
     
 
@@ -5860,6 +5458,13 @@ void MainWindow::loadStylusButtonSettings() {
 }
 
 void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
+    // Phase 3.1.8: Stubbed - stylus button modes will use DocumentViewport
+    Q_UNUSED(button);
+    // TODO Phase 3.3: Implement stylus button modes with DocumentViewport
+    qDebug() << "enableStylusButtonMode(): Not implemented yet (Phase 3.3)";
+    return;
+
+#if 0 // Phase 3.1.8: Old stylus button code disabled
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
     
@@ -5941,9 +5546,17 @@ void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
         default:
             break;
     }
+#endif // Phase 3.1.8: enableStylusButtonMode disabled
 }
 
 void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
+    // Phase 3.1.8: Stubbed - stylus button modes will use DocumentViewport
+    Q_UNUSED(button);
+    // TODO Phase 3.3: Implement stylus button modes with DocumentViewport
+    qDebug() << "disableStylusButtonMode(): Not implemented yet (Phase 3.3)";
+    return;
+
+#if 0 // Phase 3.1.8: Old stylus button code disabled
     InkCanvas *canvas = currentCanvas();
     if (!canvas) return;
     
@@ -6027,9 +5640,16 @@ void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
         default:
             break;
     }
+#endif // Phase 3.1.8: disableStylusButtonMode disabled
 }
 
 void MainWindow::onPdfTextSelectionCleared() {
+    // Phase 3.1.8: Stubbed - text selection will use DocumentViewport
+    // TODO Phase 3.4: Implement text selection with DocumentViewport
+    textSelectionPendingDisable = false;
+    return;
+
+#if 0 // Phase 3.1.8: Old text selection code disabled
     // Called when text selection is cleared (after menu action or tap outside)
     // If we were waiting to disable text selection mode, do it now
     if (!textSelectionPendingDisable) {
@@ -6051,6 +5671,7 @@ void MainWindow::onPdfTextSelectionCleared() {
     *activeFlag = false;
     canvas->setPdfTextSelectionEnabled(*previousTextSelection);
     updatePdfTextSelectButtonState();
+#endif // Phase 3.1.8: onPdfTextSelectionCleared disabled
 }
 
 void MainWindow::handleStylusButtonPress(Qt::MouseButtons buttons) {
@@ -6399,6 +6020,13 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
 
 
 void MainWindow::openPdfFile(const QString &pdfPath) {
+    // Phase 3.1.8: Stubbed - PDF opening will use DocumentViewport
+    Q_UNUSED(pdfPath);
+    QMessageBox::information(this, tr("Open PDF"), 
+        tr("PDF opening from file association is being redesigned. Coming soon!"));
+    return;
+
+#if 0 // Phase 3.1.8: Old PDF opening code disabled
     // Check if the PDF file exists
     if (!QFile::exists(pdfPath)) {
         QMessageBox::warning(this, tr("File Not Found"), tr("The PDF file could not be found:\n%1").arg(pdfPath));
@@ -6571,6 +6199,7 @@ void MainWindow::openPdfFile(const QString &pdfPath) {
         //     // Add to recent notebooks after PDF load
         // }
     }
+#endif // Phase 3.1.8: openPdfFile disabled
 }
 
 void MainWindow::setPdfDPI(int dpi) {
@@ -6578,14 +6207,8 @@ void MainWindow::setPdfDPI(int dpi) {
         pdfRenderDPI = dpi;
         savePdfDPI(dpi);
 
-        // Apply immediately to current canvas if needed
-        if (currentCanvas()) {
-            currentCanvas()->setPDFRenderDPI(dpi);
-            currentCanvas()->clearPdfCache();
-            currentCanvas()->loadPdfPage(getCurrentPageForCanvas(currentCanvas()));  // Optional: add this if needed
-            updateZoom();
-            updatePanRange();
-        }
+        // Phase 3.1.8: Stubbed - PDF DPI will apply to DocumentViewport when PDF support is added
+        // TODO Phase 3.4: Apply DPI setting to currentViewport() when PDF rendering is implemented
     }
 }
 
@@ -6630,8 +6253,9 @@ void MainWindow::loadUserSettings() {
     loadStylusButtonSettings();
     
     // Initialize default background settings if they don't exist
+    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
     if (!settings.contains("defaultBackgroundStyle")) {
-        saveDefaultBackgroundSettings(BackgroundStyle::Grid, Qt::white, 30);
+        saveDefaultBackgroundSettings(Page::BackgroundType::Grid, Qt::white, 30);
     }
     
     // Load keyboard mappings
@@ -6648,11 +6272,12 @@ void MainWindow::toggleControlBar() {
         // Going into fullscreen mode
         
         // First, remember current tab bar state
-        sidebarWasVisibleBeforeFullscreen = tabBarContainer->isVisible();
+        QTabBar* tabBar = m_tabWidget->tabBar();
+        sidebarWasVisibleBeforeFullscreen = tabBar->isVisible();
         
         // Hide tab bar if it's visible
-        if (tabBarContainer->isVisible()) {
-            tabBarContainer->setVisible(false);
+        if (tabBar->isVisible()) {
+            tabBar->setVisible(false);
         }
         
         // Hide control bar
@@ -6689,7 +6314,7 @@ void MainWindow::toggleControlBar() {
         controlBar->setVisible(true);
         
         // Restore tab bar to its previous state
-        tabBarContainer->setVisible(sidebarWasVisibleBeforeFullscreen);
+        m_tabWidget->tabBar()->setVisible(sidebarWasVisibleBeforeFullscreen);
         
         // Show widgets that are now properly in the layout
         // thicknessButton and jumpToPageButton are now in the layout so they'll be visible automatically
@@ -6698,12 +6323,9 @@ void MainWindow::toggleControlBar() {
     // Update dial display to reflect new status
     updateDialDisplay();
     
+    // Phase 3.1.8: Canvas size management stubbed - DocumentViewport handles its own size
     // Force layout update to recalculate space
-    if (auto *canvas = currentCanvas()) {
-        QTimer::singleShot(0, this, [this, canvas]() {
-            canvas->setMaximumSize(canvas->getCanvasSize());
-        });
-    }
+    // TODO Phase 3.3: Implement viewport size management if needed
 }
 
 void MainWindow::cycleZoomLevels() {
@@ -6732,116 +6354,36 @@ void MainWindow::cycleZoomLevels() {
 }
 
 void MainWindow::handleTouchZoomChange(int newZoom) {
-    // Update zoom slider without triggering updateZoom again
-    zoomSlider->blockSignals(true);
-    int oldZoom = zoomSlider->value();  // Get the old zoom value before updating the slider
-    zoomSlider->setValue(newZoom);
-    zoomSlider->blockSignals(false);
-    
-    // Show horizontal scrollbar during gesture (panYSlider stays hidden)
-    if (panXSlider->maximum() > 0) {
-        panXSlider->setVisible(true);
-    scrollbarsVisible = true;
-    }
-    
-    // Update canvas zoom directly
-    InkCanvas *canvas = currentCanvas();
-    if (canvas) {
-        // The canvas zoom has already been set by the gesture processing in InkCanvas::event()
-        // So we don't need to set it again, just update the last zoom level
-        canvas->setLastZoomLevel(newZoom);
-        updatePanRange();
-        
-        // ✅ FIXED: Add thickness adjustment for pinch-to-zoom gestures to maintain visual consistency
-        adjustThicknessForZoom(oldZoom, newZoom);
-        
-        updateDialDisplay();
-    }
+    // Phase 3.1.5: Stubbed - will connect to DocumentViewport in Phase 3.3
+    Q_UNUSED(newZoom);
+    // TODO Phase 3.3: Connect to DocumentViewport zoom handling
 }
 
 void MainWindow::handleTouchPanChange(int panX, int panY) {
-    // Clamp values to valid ranges
-    panX = qBound(panXSlider->minimum(), panX, panXSlider->maximum());
-    panY = qBound(panYSlider->minimum(), panY, panYSlider->maximum());
-    
-    // Show horizontal scrollbar during gesture (panYSlider stays hidden)
-    if (panXSlider->maximum() > 0) {
-        panXSlider->setVisible(true);
-    scrollbarsVisible = true;
-    }
-    
-    InkCanvas *canvas = currentCanvas();
-    if (!canvas) return;
-    
-    // ⚡ OPTIMIZATION: During touch panning, only update sliders (don't call setPanX/setPanY)
-    // The pan offsets are already set by setPanWithTouchScroll() in InkCanvas
-    // Calling setPanX/setPanY would trigger update() and defeat the optimization
-    if (canvas->isTouchPanningActive()) {
-        // Just update the slider positions without triggering canvas updates
-        panXSlider->blockSignals(true);
-        panXSlider->setValue(panX);
-        panXSlider->blockSignals(false);
-        
-        panYSlider->blockSignals(true);
-        panYSlider->setValue(panY);
-        panYSlider->blockSignals(false);
-        
-        // Store the pan values for later use
-        canvas->setLastPanX(panX);
-        canvas->setLastPanY(panY);
-    } else {
-        // Normal flow for non-touch panning (mouse wheel, etc.)
-        // Update sliders - allow panY signals for autoscroll, block panX to avoid redundancy
-        panXSlider->blockSignals(true);
-        panXSlider->setValue(panX);
-        panXSlider->blockSignals(false);
-        
-        // For panY: DON'T block signals so it triggers the same autoscroll flow as mouse wheel
-        panYSlider->setValue(panY); // This will trigger updatePanY() -> setPanY() -> autoscroll logic
-        
-        // Update canvas X pan directly (Y pan is handled by the setValue signal above)
-        canvas->setPanX(panX);
-        canvas->setLastPanX(panX);
-        // Note: panY is handled by panYSlider->setValue() signal flow above
-    }
+    // Phase 3.1.5: Stubbed - will connect to DocumentViewport in Phase 3.3
+    Q_UNUSED(panX);
+    Q_UNUSED(panY);
+    // TODO Phase 3.3: Connect to DocumentViewport pan handling
 }
 
-// Now add two new slots to handle gesture end events
 void MainWindow::handleTouchGestureEnd() {
-    // Hide scrollbars immediately when touch gesture ends
-    panXSlider->setVisible(false);
-    panYSlider->setVisible(false);
-    scrollbarsVisible = false;
+    // Phase 3.1.5: Stubbed - will connect to DocumentViewport in Phase 3.3
+    // TODO Phase 3.3: Hide scrollbars after gesture ends
 }
 
 void MainWindow::handleTouchPanningChanged(bool active) {
-    // ✅ PERFORMANCE: Control window frame-only mode for touch panning AND inertia scrolling
-    // Frame-only mode shows only the 4 corner vertices, dramatically improving scroll performance
-    InkCanvas* canvas = currentCanvas();
-    if (!canvas) return;
-    
-    PictureWindowManager* pictureMgr = canvas->getPictureManager();
-    
-    if (active) {
-        // Touch panning started - enable frame-only mode for performance
-        // This stays enabled during inertia scrolling (until velocity drops to zero)
-        if (pictureMgr) {
-            pictureMgr->setWindowsFrameOnlyMode(true);
-        }
-    } else {
-        // Touch panning AND inertia scrolling ended - restore full window display
-        if (pictureMgr) {
-            pictureMgr->setWindowsFrameOnlyMode(false);
-        }
-    }
+    // Phase 3.1.5: Stubbed - InkCanvas-specific PictureWindowManager optimization
+    Q_UNUSED(active);
+    // TODO Phase 4: Reimplement for DocumentViewport if picture windows are added
 }
 
 void MainWindow::updateColorButtonStates() {
-    // Check if there's a current canvas
-    if (!currentCanvas()) return;
+    // Phase 3.1.4: Use currentViewport()
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
     
     // Get current pen color
-    QColor currentColor = currentCanvas()->getPenColor();
+    QColor currentColor = vp->penColor();
     
     // Determine if we're in dark mode to match the correct colors
     bool darkMode = isDarkMode();
@@ -6929,47 +6471,28 @@ void MainWindow::updateCustomColorButtonStyle(const QColor &color) {
 }
 
 void MainWindow::updateStraightLineButtonState() {
-    // Check if there's a current canvas
-    if (!currentCanvas()) return;
-    
-    // Update the button state to match the canvas straight line mode
-    bool isEnabled = currentCanvas()->isStraightLineMode();
-    
-    // Set visual indicator that the button is active/inactive
+    // Phase 3.1.4: Stubbed - straight line mode not implemented yet
     if (straightLineToggleButton) {
-        straightLineToggleButton->setProperty("selected", isEnabled);
+        straightLineToggleButton->setProperty("selected", false);
         updateButtonIcon(straightLineToggleButton, "straightLine");
-        
-        // Force style update
         straightLineToggleButton->style()->unpolish(straightLineToggleButton);
         straightLineToggleButton->style()->polish(straightLineToggleButton);
     }
 }
 
 void MainWindow::updateRopeToolButtonState() {
-    // Check if there's a current canvas
-    if (!currentCanvas()) return;
-
-    // Update the button state to match the canvas rope tool mode
-    bool isEnabled = currentCanvas()->isRopeToolMode();
-
-    // Set visual indicator that the button is active/inactive
+    // Phase 3.1.4: Stubbed - rope tool mode not implemented yet
     if (ropeToolButton) {
-        ropeToolButton->setProperty("selected", isEnabled);
+        ropeToolButton->setProperty("selected", false);
         updateButtonIcon(ropeToolButton, "rope");
-
-        // Force style update
         ropeToolButton->style()->unpolish(ropeToolButton);
         ropeToolButton->style()->polish(ropeToolButton);
     }
 }
 
 void MainWindow::updatePictureButtonState() {
-    // Check if there's a current canvas
-    if (!currentCanvas()) return;
-
-    // Update the button state to match the canvas picture selection mode
-    bool isEnabled = currentCanvas()->isPictureSelectionMode();
+    // Phase 3.1.4: Stubbed - picture insertion not implemented yet
+    bool isEnabled = false;
 
     // Set visual indicator that the button is active/inactive
     if (insertPictureButton) {
@@ -7043,29 +6566,11 @@ void MainWindow::updateScrollbarPositions() {
         containerHeight - cornerOffset - margin*2  // Full height minus corner and bottom margin
     );
 }
-// Add the new helper method for edge detection
 void MainWindow::handleEdgeProximity(InkCanvas* canvas, const QPoint& pos) {
-    if (!canvas) return;
-    
-    // Get canvas dimensions (unused now but kept for potential future use)
+    // Phase 3.1.7: Stubbed - InkCanvas-specific edge detection
     Q_UNUSED(canvas);
-    
-    // Edge detection zones - show scrollbars when pointer is within 25px of edges
-    bool nearTopEdge = pos.y() < 25;   // For horizontal scrollbar - entire top edge
-    
-    // Only show scrollbars if canvas is larger than viewport
-    bool needHorizontalScroll = panXSlider->maximum() > 0;
-    // panYSlider is permanently hidden, vertical scrolling handled by other mechanisms
-    
-    // Show/hide horizontal scrollbar based on pointer position
-    if (nearTopEdge && needHorizontalScroll) {
-        panXSlider->setVisible(true);
-        scrollbarsVisible = true;
-        if (scrollbarHideTimer->isActive()) {
-            scrollbarHideTimer->stop();
-        }
-        scrollbarHideTimer->start();
-    }
+    Q_UNUSED(pos);
+    // TODO Phase 3.3: Implement for DocumentViewport if needed
 }
 
 void MainWindow::returnToLauncher() {
@@ -7491,14 +6996,10 @@ QMap<QString, QString> MainWindow::getKeyboardMappings() const {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event) {
+    // Phase 3.1.8: Ctrl tracking for trackpad zoom stubbed
     // Track Ctrl key state for trackpad pinch-zoom detection
     // Windows sends pinch-zoom as Ctrl+Wheel, so we need to distinguish from real Ctrl+Wheel
-    if (event->key() == Qt::Key_Control) {
-        InkCanvas *canvas = currentCanvas();
-        if (canvas) {
-            canvas->setCtrlKeyPhysicallyPressed(true);
-        }
-    }
+    // TODO Phase 3.3: Track Ctrl state in DocumentViewport if needed
     
     // Don't intercept keyboard events when text input widgets have focus
     // This prevents conflicts with Windows TextInputFramework
@@ -7564,13 +7065,8 @@ void MainWindow::keyPressEvent(QKeyEvent *event) {
 }
 
 void MainWindow::keyReleaseEvent(QKeyEvent *event) {
-    // Track Ctrl key release for trackpad pinch-zoom detection
-    if (event->key() == Qt::Key_Control) {
-        InkCanvas *canvas = currentCanvas();
-        if (canvas) {
-            canvas->setCtrlKeyPhysicallyPressed(false);
-        }
-    }
+    // Phase 3.1.8: Ctrl tracking for trackpad zoom stubbed
+    // TODO Phase 3.3: Track Ctrl state in DocumentViewport if needed
     
     QMainWindow::keyReleaseEvent(event);
 }
@@ -7599,15 +7095,17 @@ void MainWindow::showPendingTooltip() {
 }
 
 void MainWindow::onZoomSliderChanged(int value) {
-    // This handles manual zoom slider changes and preserves thickness
-    int oldZoom = currentCanvas() ? currentCanvas()->getZoom() : 100;
+    // Phase 3.1.4: Use currentViewport() for zoom
+    DocumentViewport* vp = currentViewport();
+    int oldZoom = vp ? qRound(vp->zoomLevel() * 100.0) : 100;
     int newZoom = value;
     
     updateZoom();
     adjustThicknessForZoom(oldZoom, newZoom); // Maintain visual thickness consistency
 }
 
-void MainWindow::saveDefaultBackgroundSettings(BackgroundStyle style, QColor color, int density) {
+void MainWindow::saveDefaultBackgroundSettings(Page::BackgroundType style, QColor color, int density) {
+    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
     QSettings settings("SpeedyNote", "App");
     settings.setValue("defaultBackgroundStyle", static_cast<int>(style));
     settings.setValue("defaultBackgroundColor", color.name());
@@ -7645,10 +7143,10 @@ void MainWindow::toggleOutlineSidebar() {
     if (outlineSidebarVisible) {
         loadPdfOutline();
         
-        // ✅ Update outline selection to match the current page
-        InkCanvas* canvas = currentCanvas();
-        if (canvas) {
-            int currentPage = getCurrentPageForCanvas(canvas) + 1; // Convert to 1-based
+        // Phase 3.1.8: Use currentViewport() for page tracking
+        DocumentViewport* viewport = currentViewport();
+        if (viewport) {
+            int currentPage = viewport->currentPageIndex() + 1; // Convert to 1-based
             updateOutlineSelection(currentPage);
         }
     }
@@ -7801,16 +7299,15 @@ void MainWindow::updateOutlineSelection(int pageNumber) {
 }
 
 Poppler::Document* MainWindow::getPdfDocument() {
-    InkCanvas* canvas = currentCanvas();
-    if (!canvas || !canvas->isPdfLoadedFunc()) {
-        return nullptr;
-    }
-    return canvas->getPdfDocument();
+    // Phase 3.1.8: Stubbed - PDF document access will use DocumentViewport
+    // TODO Phase 3.4: Implement PDF access through DocumentViewport
+    return nullptr;
 }
 
-void MainWindow::loadDefaultBackgroundSettings(BackgroundStyle &style, QColor &color, int &density) {
+void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &color, int &density) {
+    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
     QSettings settings("SpeedyNote", "App");
-    style = static_cast<BackgroundStyle>(settings.value("defaultBackgroundStyle", static_cast<int>(BackgroundStyle::Grid)).toInt());
+    style = static_cast<Page::BackgroundType>(settings.value("defaultBackgroundStyle", static_cast<int>(Page::BackgroundType::Grid)).toInt());
     color = QColor(settings.value("defaultBackgroundColor", "#FFFFFF").toString());
     density = settings.value("defaultBackgroundDensity", 30).toInt();
     
@@ -7821,76 +7318,21 @@ void MainWindow::loadDefaultBackgroundSettings(BackgroundStyle &style, QColor &c
 }
 
 void MainWindow::applyDefaultBackgroundToCanvas(InkCanvas *canvas) {
-    if (!canvas) return;
-    
-    BackgroundStyle defaultStyle;
-    QColor defaultColor;
-    int defaultDensity;
-    loadDefaultBackgroundSettings(defaultStyle, defaultColor, defaultDensity);
-    
-    canvas->setBackgroundStyle(defaultStyle);
-    canvas->setBackgroundColor(defaultColor);
-    canvas->setBackgroundDensity(defaultDensity);
-    canvas->saveBackgroundMetadata(); // Save the settings
-    canvas->update(); // Refresh the display
+    // Phase 3.1.7: Stubbed - InkCanvas-specific background handling
+    Q_UNUSED(canvas);
+    // TODO Phase 3.3: Implement for DocumentViewport via Page background settings
 }
 
 void MainWindow::showRopeSelectionMenu(const QPoint &position) {
-    // Create context menu for rope tool selection
-    QMenu *contextMenu = new QMenu(this);
-    contextMenu->setAttribute(Qt::WA_DeleteOnClose);
-    
-    // Add Copy action
-    QAction *copyAction = contextMenu->addAction(tr("Copy"));
-    copyAction->setIcon(loadThemedIcon("copy"));
-    connect(copyAction, &QAction::triggered, this, [this]() {
-        if (currentCanvas()) {
-            currentCanvas()->copyRopeSelection();
-        }
-    });
-    
-    // Add Copy to Clipboard action
-    QAction *copyToClipboardAction = contextMenu->addAction(tr("Copy to Clipboard"));
-    copyToClipboardAction->setIcon(loadThemedIcon("clipboard"));
-    connect(copyToClipboardAction, &QAction::triggered, this, [this]() {
-        if (currentCanvas()) {
-            currentCanvas()->copyRopeSelectionToClipboard();
-        }
-    });
-    
-    // Add Delete action
-    QAction *deleteAction = contextMenu->addAction(tr("Delete"));
-    deleteAction->setIcon(loadThemedIcon("trash"));
-    connect(deleteAction, &QAction::triggered, this, [this]() {
-        if (currentCanvas()) {
-            currentCanvas()->deleteRopeSelection();
-        }
-    });
-    
-    // Add Cancel action
-    QAction *cancelAction = contextMenu->addAction(tr("Cancel"));
-    cancelAction->setIcon(loadThemedIcon("cross"));
-    connect(cancelAction, &QAction::triggered, this, [this]() {
-        if (currentCanvas()) {
-            currentCanvas()->cancelRopeSelection();
-        }
-    });
-    
-    // Convert position from canvas coordinates to global coordinates
-    QPoint globalPos = currentCanvas()->mapToGlobal(position);
-    
-    // Show the menu at the specified position
-    contextMenu->popup(globalPos);
+    // Phase 3.1.5: Stubbed - Lasso/rope tool will be reimplemented in Phase 2B
+    Q_UNUSED(position);
+    // TODO Phase 2B: Reimplement rope selection menu for DocumentViewport
 }
 void MainWindow::updatePdfTextSelectButtonState() {
-    // Check if PDF text selection is enabled
-    bool isEnabled = currentCanvas() && currentCanvas()->isPdfTextSelectionEnabled();
-    
+    // Phase 3.1.5: Stubbed - PDF text selection not yet implemented in DocumentViewport
     if (pdfTextSelectButton) {
-        pdfTextSelectButton->setProperty("selected", isEnabled);
+        pdfTextSelectButton->setProperty("selected", false);
         updateButtonIcon(pdfTextSelectButton, "ibeam");
-        
-        // Force style update (uses the same buttonStyle as other toggle buttons)
         pdfTextSelectButton->style()->unpolish(pdfTextSelectButton);
         pdfTextSelectButton->style()->polish(pdfTextSelectButton);
     }
@@ -7960,89 +7402,24 @@ void MainWindow::onBookmarkItemClicked(QTreeWidgetItem *item, int column) {
     bool ok;
     int pageNumber = item->data(0, Qt::UserRole).toInt(&ok);
     if (ok && pageNumber > 0) {
-        // Navigate to the bookmarked page
-        switchPageWithDirection(pageNumber, (pageNumber > getCurrentPageForCanvas(currentCanvas()) + 1) ? 1 : -1);
+        // Phase 3.1.9: Use currentViewport() for page navigation
+        DocumentViewport* vp = currentViewport();
+        int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
+        switchPageWithDirection(pageNumber, (pageNumber > currentPage) ? 1 : -1);
         pageInput->setValue(pageNumber);
     }
 }
 
 void MainWindow::loadBookmarks() {
-    if (!bookmarksTree || !currentCanvas()) return;
+    // Phase 3.1.9: Stubbed - bookmarks will use Document in Phase 3.4
+    if (!bookmarksTree) return;
     
     bookmarksTree->clear();
     bookmarks.clear();
     
-    // ✅ Get bookmarks from InkCanvas JSON metadata
-    QStringList bookmarkList = currentCanvas()->getBookmarks();
-    for (const QString &line : bookmarkList) {
-        if (line.isEmpty()) continue;
-        
-        QStringList parts = line.split('\t', Qt::KeepEmptyParts);
-        if (parts.size() >= 2) {
-            bool ok;
-            int pageNum = parts[0].toInt(&ok);
-            if (ok) {
-                QString title = parts[1];
-                bookmarks[pageNum] = title;
-            }
-        }
-    }
+    // TODO Phase 3.4: Load bookmarks from currentViewport()->document()
     
-    // Populate the tree widget
-    for (auto it = bookmarks.begin(); it != bookmarks.end(); ++it) {
-        QTreeWidgetItem *item = new QTreeWidgetItem(bookmarksTree);
-        
-        // Create a custom widget for each bookmark item
-        QWidget *itemWidget = new QWidget();
-        QHBoxLayout *itemLayout = new QHBoxLayout(itemWidget);
-        itemLayout->setContentsMargins(5, 2, 5, 2);
-        itemLayout->setSpacing(5);
-        
-        // Page number label (fixed width)
-        QLabel *pageLabel = new QLabel(QString(tr("Page %1")).arg(it.key()));
-        pageLabel->setFixedWidth(60);
-        pageLabel->setStyleSheet("font-weight: bold; color: #666;");
-        itemLayout->addWidget(pageLabel);
-        
-        // Editable title (supports Windows handwriting if available)
-        QLineEdit *titleEdit = new QLineEdit(it.value());
-        titleEdit->setPlaceholderText("Enter bookmark title...");
-        titleEdit->setProperty("pageNumber", it.key()); // Store page number for saving
-        
-        // Enable IME support for multi-language input
-        titleEdit->setAttribute(Qt::WA_InputMethodEnabled, true);
-        titleEdit->setInputMethodHints(Qt::ImhNone); // Allow all input methods
-        titleEdit->installEventFilter(this); // Install event filter for IME handling
-        
-        // Connect to save when editing is finished
-        connect(titleEdit, &QLineEdit::editingFinished, this, [this, titleEdit]() {
-            int pageNum = titleEdit->property("pageNumber").toInt();
-            QString newTitle = titleEdit->text().trimmed();
-            
-            if (newTitle.isEmpty()) {
-                // Remove bookmark if title is empty
-                bookmarks.remove(pageNum);
-            } else {
-                // Update bookmark title
-                bookmarks[pageNum] = newTitle;
-            }
-            saveBookmarks();
-            updateBookmarkButtonState(); // Update button state
-        });
-        
-        itemLayout->addWidget(titleEdit, 1);
-        
-        // Store page number in item data for navigation
-        item->setData(0, Qt::UserRole, it.key());
-        
-        // Set the custom widget
-        bookmarksTree->setItemWidget(item, 0, itemWidget);
-        
-        // Set item height
-        item->setSizeHint(0, QSize(0, 30));
-    }
-    
-    updateBookmarkButtonState(); // Update button state after loading
+    updateBookmarkButtonState();
 }
 
 // Markdown Notes Sidebar functionality
@@ -8079,8 +7456,9 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     // Update canvas position and scrollbars
     updatePanRange();
-    if (currentCanvas()) {
-        currentCanvas()->update();
+    // Phase 3.1.9: Stubbed - DocumentViewport auto-updates
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->update();
     }
     
     // Reposition dial toolbar tab and dial container after layout settles
@@ -8111,181 +7489,58 @@ void MainWindow::onMarkdownNotesUpdated() {
 }
 
 void MainWindow::onMarkdownNoteContentChanged(const QString &noteId, const MarkdownNoteData &data) {
+    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
     Q_UNUSED(noteId);
-    if (!currentCanvas()) return;
-    
-    // Update the note in the canvas WITHOUT triggering a reload
-    // (avoids feedback loop that resets the editor on every keystroke)
-    currentCanvas()->updateMarkdownNote(data);
-    
-    // Don't reload notes here - that would reset the editor!
-    // The sidebar already has the updated content.
+    Q_UNUSED(data);
+    qDebug() << "onMarkdownNoteContentChanged(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::onMarkdownNoteDeleted(const QString &noteId) {
-    if (!currentCanvas()) return;
-    
-    // Remove the note from the canvas
-    currentCanvas()->removeMarkdownNote(noteId);
+    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
+    Q_UNUSED(noteId);
+    qDebug() << "onMarkdownNoteDeleted(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::onHighlightLinkClicked(const QString &highlightId) {
-    if (!currentCanvas()) return;
-    
-    // Find the highlight and navigate to its page
-    TextHighlight *highlight = currentCanvas()->findHighlightById(highlightId);
-    if (!highlight) return;
-    
-    int targetPage = highlight->pageNumber + 1; // Convert to 1-based
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1;
-    
-    // Navigate to the page first
-    switchPageWithDirection(targetPage, (targetPage > currentPage) ? 1 : -1);
-    pageInput->setValue(targetPage);
-    
-    // After navigation, pan to the highlight position
-    // Need to wait for page to load before panning
-    QPointer<MainWindow> mainWindowPtr(this); // Safe pointer for lambda
-    QTimer::singleShot(100, this, [mainWindowPtr, highlightId]() {
-        if (!mainWindowPtr || !mainWindowPtr->currentCanvas() || !mainWindowPtr->panYSlider) return;
-        
-        InkCanvas *canvas = mainWindowPtr->currentCanvas();
-        
-        // Find highlight again after page switch
-        TextHighlight *highlight = canvas->findHighlightById(highlightId);
-        if (!highlight) return;
-        
-        // Get the Y position of the highlight in PDF coordinates
-        qreal highlightY = highlight->boundingBox.center().y();
-        
-        // Check if we're in combined canvas mode
-        QPixmap backgroundImage = canvas->getBackgroundImage();
-        QPixmap buffer = canvas->getBuffer();
-        bool isCombinedCanvas = false;
-        int singlePageHeight = buffer.height();
-        
-        if (!backgroundImage.isNull() && buffer.height() >= backgroundImage.height() * 1.8) {
-            isCombinedCanvas = true;
-            singlePageHeight = backgroundImage.height() / 2;
-        } else if (buffer.height() > 1400) {
-            isCombinedCanvas = true;
-            singlePageHeight = buffer.height() / 2;
-        }
-        
-        // Get current page from canvas
-        int canvasFirstPage = canvas->getLastActivePage();
-        int highlightPage = highlight->pageNumber;
-        
-        // Calculate Y offset for combined canvas
-        qreal yOffset = 0;
-        if (isCombinedCanvas && highlightPage > canvasFirstPage) {
-            // Highlight is on the second page of combined canvas
-            yOffset = singlePageHeight;
-        }
-        
-        // Convert PDF Y coordinate to image/widget coordinate
-        // Get PDF page size (assuming standard letter size if not cached)
-        qreal pdfPageHeight = 792.0; // Standard letter height in points
-        qreal imageHeight = isCombinedCanvas ? singlePageHeight : backgroundImage.height();
-        
-        // Scale from PDF to image coordinates
-        qreal scaleY = imageHeight / pdfPageHeight;
-        qreal imageY = highlightY * scaleY;
-        
-        // Add offset for second page in combined canvas
-        imageY += yOffset;
-        
-        // Center the highlight vertically in the viewport
-        qreal viewportHeight = canvas->height();
-        qreal targetPanY = imageY - (viewportHeight / 2.0);
-        
-        // Clamp to valid range
-        targetPanY = qMax(0.0, qMin(targetPanY, (qreal)mainWindowPtr->panYSlider->maximum()));
-        
-        // Set pan position
-        mainWindowPtr->panYSlider->setValue((int)targetPanY);
-    });
+    // Phase 3.1.9: Stubbed - text highlights will use Document in Phase 3.4
+    Q_UNUSED(highlightId);
+    qDebug() << "onHighlightLinkClicked(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::onHighlightDoubleClicked(const QString &highlightId) {
-    if (!currentCanvas()) return;
-    
-    // Find the highlight
-    TextHighlight *highlight = currentCanvas()->findHighlightById(highlightId);
-    if (!highlight) return;
-    
-    // Check if it has a linked note
-    if (!highlight->markdownWindowId.isEmpty()) {
-        // Open the markdown notes sidebar if not already open
-        if (!markdownNotesSidebarVisible) {
-            toggleMarkdownNotesSidebar();
-        }
-        
-        // Find and expand the note entry
-        MarkdownNoteEntry *noteEntry = markdownNotesSidebar->findNoteEntry(highlight->markdownWindowId);
-        if (noteEntry) {
-            noteEntry->setPreviewMode(false); // Switch to edit mode
-        }
-    }
+    // Phase 3.1.9: Stubbed - text highlights will use Document in Phase 3.4
+    Q_UNUSED(highlightId);
+    qDebug() << "onHighlightDoubleClicked(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::loadMarkdownNotesForCurrentPage() {
+    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
     if (!markdownNotesSidebar) return;
     
-    // Handle case when no canvas is available (all tabs closed)
-    if (!currentCanvas()) {
-        if (markdownNotesSidebar->isInSearchMode()) {
-            markdownNotesSidebar->exitSearchMode();
-        }
-        markdownNotesSidebar->clearNotes();
-        return;
+    // Clear sidebar since we don't have InkCanvas notes anymore
+    if (markdownNotesSidebar->isInSearchMode()) {
+        markdownNotesSidebar->exitSearchMode();
     }
+    markdownNotesSidebar->clearNotes();
     
-    int currentPage = getCurrentPageForCanvas(currentCanvas());
-    int secondPage = -1;
-    int totalPages = 1;
-    
-    // Check if combined canvas is active (second page visible)
-    if (currentCanvas()->isPdfLoadedFunc()) {
-        totalPages = currentCanvas()->getTotalPdfPages();
-        // Get the second page if in combined mode
-        // For now, we'll just check currentPage + 1
-        if (currentPage + 1 < totalPages) {
-            secondPage = currentPage + 1;
-        }
+    DocumentViewport* vp = currentViewport();
+    if (vp) {
+        // TODO Phase 3.4: Get notes from vp->document()->currentPage()
+        markdownNotesSidebar->setCurrentPageInfo(vp->currentPageIndex(), 1);
     }
-    
-    // ✅ Update sidebar with current page info for search functionality
-    markdownNotesSidebar->setCurrentPageInfo(currentPage, totalPages);
-    
-    // Get notes for the current page(s)
-    QList<MarkdownNoteData> notes = currentCanvas()->getMarkdownNotesForPages(currentPage, secondPage);
-    
-    // Load notes into sidebar
-    markdownNotesSidebar->loadNotesForPages(notes);
 }
 
 void MainWindow::saveBookmarks() {
-    if (!currentCanvas()) return;
-    
-    // ✅ Save bookmarks to InkCanvas JSON metadata
-    QStringList bookmarkList;
-    
-    // Sort bookmarks by page number
-    QList<int> sortedPages = bookmarks.keys();
-    std::sort(sortedPages.begin(), sortedPages.end());
-    
-    for (int pageNum : sortedPages) {
-        bookmarkList.append(QString("%1\t%2").arg(pageNum).arg(bookmarks[pageNum]));
-    }
-    
-    currentCanvas()->setBookmarks(bookmarkList);
+    // Phase 3.1.9: Stubbed - bookmarks will use Document in Phase 3.4
+    qDebug() << "saveBookmarks(): Not implemented yet (Phase 3.4)";
 }
 
 void MainWindow::toggleCurrentPageBookmark() {
-    if (!currentCanvas()) return;
+    // Phase 3.1.9: Stubbed - bookmarks will use Document in Phase 3.4
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
     
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1; // Convert to 1-based
+    int currentPage = vp->currentPageIndex() + 1; // Convert to 1-based
     
     if (bookmarks.contains(currentPage)) {
         // Remove bookmark
@@ -8296,7 +7551,7 @@ void MainWindow::toggleCurrentPageBookmark() {
         bookmarks[currentPage] = defaultTitle;
     }
     
-    saveBookmarks();
+    // TODO Phase 3.4: Save bookmarks to Document
     updateBookmarkButtonState();
     
     // Refresh bookmarks view if visible
@@ -8306,9 +7561,11 @@ void MainWindow::toggleCurrentPageBookmark() {
 }
 
 void MainWindow::updateBookmarkButtonState() {
-    if (!toggleBookmarkButton || !currentCanvas()) return;
+    // Phase 3.1.9: Use currentViewport() instead of currentCanvas()
+    if (!toggleBookmarkButton) return;
     
-    int currentPage = getCurrentPageForCanvas(currentCanvas()) + 1; // Convert to 1-based
+    DocumentViewport* vp = currentViewport();
+    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     bool isBookmarked = bookmarks.contains(currentPage);
     
     toggleBookmarkButton->setProperty("selected", isBookmarked);
@@ -8508,38 +7765,20 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 }
 
 bool MainWindow::showLastAccessedPageDialog(InkCanvas *canvas) {
-    if (!canvas) return false;
-    
-    int lastPage = canvas->getLastAccessedPage();
-    if (lastPage <= 0) return false; // No last accessed page or page 0 (first page)
-    
-    QString message = tr("This notebook was last accessed on page %1.\n\nWould you like to go directly to page %1, or start from page 1?").arg(lastPage + 1);
-    
-    QMessageBox msgBox(this);
-    msgBox.setWindowTitle(tr("Last Accessed Page"));
-    msgBox.setText(message);
-    msgBox.setIcon(QMessageBox::Question);
-    
-    QPushButton *gotoLastPageBtn = msgBox.addButton(tr("Go to Page %1").arg(lastPage + 1), QMessageBox::AcceptRole);
-    msgBox.addButton(tr("Start from Page 1"), QMessageBox::RejectRole);
-    
-    msgBox.setDefaultButton(gotoLastPageBtn);
-    
-    msgBox.exec();
-    
-    if (msgBox.clickedButton() == gotoLastPageBtn) {
-        // User wants to go to last accessed page (convert 0-based to 1-based)
-        switchPageWithDirection(lastPage + 1, 1);
-        return true;
-    } else {
-        // User wants to start from page 1
-        switchPageWithDirection(1, 1);
-        return true;
-    }
+    // Phase 3.1.7: Stubbed - InkCanvas-specific
+    Q_UNUSED(canvas);
+    return false;
 }
 
 void MainWindow::openSpnPackage(const QString &spnPath)
 {
+    // Phase 3.1.8: Stubbed - .spn format is being replaced with .snx
+    Q_UNUSED(spnPath);
+    QMessageBox::information(this, tr("Open Notebook"), 
+        tr("Opening .spn packages is being redesigned. Coming soon with .snx format!"));
+    return;
+
+#if 0 // Phase 3.1.8: Old .spn opening code disabled
     if (!SpnPackageManager::isValidSpnPackage(spnPath)) {
         QMessageBox::warning(this, tr("Invalid Package"), 
             tr("The selected file is not a valid SpeedyNote package."));
@@ -8594,10 +7833,18 @@ void MainWindow::openSpnPackage(const QString &spnPath)
     //         sharedLauncher->refreshRecentNotebooks();
     //     }
     // }
+#endif // Phase 3.1.8: openSpnPackage disabled
 }
 
 void MainWindow::createNewSpnPackage(const QString &spnPath)
 {
+    // Phase 3.1.8: Stubbed - .spn format is being replaced with .snx
+    Q_UNUSED(spnPath);
+    QMessageBox::information(this, tr("Create Notebook"), 
+        tr("Creating .spn packages is being redesigned. Coming soon with .snx format!"));
+    return;
+
+#if 0 // Phase 3.1.8: Old .spn creation code disabled
     // Check if file already exists
     if (QFile::exists(spnPath)) {
         QMessageBox::warning(this, tr("File Exists"), 
@@ -8651,6 +7898,7 @@ void MainWindow::createNewSpnPackage(const QString &spnPath)
     // Show success message
     QMessageBox::information(this, tr("Package Created"), 
         tr("New SpeedyNote package '%1' has been created successfully!").arg(notebookName));
+#endif // Phase 3.1.8: createNewSpnPackage disabled
 }
 
 // ========================================
@@ -9109,23 +8357,13 @@ void MainWindow::loadMouseDialMappings() {
 
 void MainWindow::onAutoScrollRequested(int direction)
 {
-    // ✅ OPTIMIZATION: No need to wait for concurrent save anymore!
-    // saveCurrentPageConcurrent() now populates cache immediately before async disk I/O,
-    // so loadPage() will find fresh data in cache without waiting for disk writes
-    
-    if (direction > 0) {
-        goToNextPage();
-    } else if (direction < 0) {
-        goToPreviousPage();
-    }
+    // Phase 3.1.5: Stubbed - not needed with DocumentViewport's continuous scrolling
+    Q_UNUSED(direction);
+    // DocumentViewport handles infinite scrolling internally
 }
 
 void MainWindow::onEarlySaveRequested()
 {
-    // Proactive save triggered when approaching autoscroll threshold
-    // This ensures content is saved before the actual page switch happens
-    InkCanvas *canvas = currentCanvas();
-    if (canvas && canvas->isEdited()) {
-        saveCurrentPageConcurrent();
-    }
+    // Phase 3.1.5: Stubbed - will be reimplemented in Phase 3.5 (file operations)
+    // TODO Phase 3.5: Connect to DocumentManager save operations
 }

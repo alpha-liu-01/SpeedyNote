@@ -343,7 +343,7 @@ add_executable(${PROJECT_NAME}
         source/MainWindow.cpp
         source/InkCanvas.cpp
         source/SimpleAudio.cpp
-        source/ControlPanelDialog.cpp
+        # source/ControlPanelDialog.cpp  # Phase 3.1.8: Disabled - depends on InkCanvas
         source/SDLControllerManager.cpp
         source/ButtonMappingTypes.cpp
         source/RecentNotebooksManager.cpp

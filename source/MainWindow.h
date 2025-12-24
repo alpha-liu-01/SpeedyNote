@@ -2,8 +2,12 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include "InkCanvas.h"
+// #include "InkCanvas.h"  // Phase 3.1.7: Disconnected - using DocumentViewport
 #include "MarkdownNotesSidebar.h"
+#include "core/Page.h"  // Phase 3.1.8: For Page::BackgroundType
+
+// Phase 3.1.7: Forward declaration for legacy method signatures (will be removed)
+class InkCanvas;
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
@@ -33,7 +37,7 @@
 #include <QTabletEvent>
 #include <QMenu>
 #include <QCloseEvent>
-#include "ControlPanelDialog.h"
+// #include "ControlPanelDialog.h"  // Phase 3.1.8: Disabled - depends on InkCanvas
 #include "PictureWindowManager.h"
 #include "SpnPackageManager.h"
 #include <QLocalServer>
@@ -44,6 +48,20 @@
 // Phase 3.1: New architecture includes
 #include "ui/TabManager.h"
 #include "core/DocumentManager.h"
+#include "core/ToolType.h"
+#include <QElapsedTimer>
+
+// Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
+// Will be reimplemented in Phase 3.3 if needed
+// Guard to prevent redefinition if InkCanvas.h is also included
+#ifndef TOUCHGESTUREMODE_DEFINED
+#define TOUCHGESTUREMODE_DEFINED
+enum class TouchGestureMode {
+    Disabled,     // Touch gestures completely off
+    YAxisOnly,    // Only Y-axis panning allowed (X-axis and zoom locked)
+    Full          // Full touch gestures (panning and zoom)
+};
+#endif
 
 // Forward declarations
 class QTreeWidgetItem;
@@ -204,7 +222,7 @@ public:
     
     // REMOVED Phase 3.1: isUsingNewViewport() - always using new architecture
     // REMOVED Phase 3.1: s_useNewViewport - no longer needed
-    int getCurrentPageForCanvas(InkCanvas *canvas); 
+    int getCurrentPageForCanvas(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - returns 0 
 
     bool lowResPreviewEnabled = true;
 
@@ -305,7 +323,7 @@ public:
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
     void openFileInNewTab(const QString &filePath); // ✅ Open .spn package directly
-    bool showLastAccessedPageDialog(InkCanvas *canvas); // ✅ Show dialog for last accessed page
+    bool showLastAccessedPageDialog(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - returns false
 
     int getPdfDPI() const { return pdfRenderDPI; }
     void setPdfDPI(int dpi);
@@ -314,9 +332,10 @@ public:
     void savePdfDPI(int dpi); // New
 
     // Background settings persistence
-    void saveDefaultBackgroundSettings(BackgroundStyle style, QColor color, int density);
-    void loadDefaultBackgroundSettings(BackgroundStyle &style, QColor &color, int &density);
-    void applyDefaultBackgroundToCanvas(InkCanvas *canvas); // ✅ Helper to apply default background settings
+    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
+    void saveDefaultBackgroundSettings(Page::BackgroundType style, QColor color, int density);
+    void loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &color, int &density);
+    void applyDefaultBackgroundToCanvas(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - no-op
     
     void saveThemeSettings();
     void loadThemeSettings();
@@ -327,7 +346,7 @@ public:
     QString migrateOldDialModeString(const QString &oldString);
     QString migrateOldActionString(const QString &oldString);
 
-    InkCanvas* currentCanvas(); // Made public for RecentNotebooksDialog - WILL BE REMOVED Phase 3.1.7
+    InkCanvas* currentCanvas();  // Phase 3.1.7: Returns nullptr - kept for legacy code paths, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     void saveCurrentPage(); // Made public for RecentNotebooksDialog
     void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
@@ -525,7 +544,7 @@ private:
     // bool m_useNewViewport = false;
     // =========================================================================
     
-    InkCanvas *canvas;
+    // InkCanvas *canvas;  // Phase 3.1.7: Removed - using DocumentViewport via TabManager
     QPushButton *benchmarkButton;
     QLabel *benchmarkLabel;
     QTimer *benchmarkTimer;
@@ -739,7 +758,7 @@ private:
     void saveKeyboardMappings();
     void loadKeyboardMappings();
 
-    bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas); // Returns true if tab can be closed
+    bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas);  // Phase 3.1.7: Stubbed - returns true
 
     RecentNotebooksManager *recentNotebooksManager; // Added manager instance
 
@@ -801,7 +820,7 @@ private:
     void updateScrollbarPositions();
     
     // Handle edge proximity detection for scrollbar visibility
-    void handleEdgeProximity(InkCanvas* canvas, const QPoint& pos);
+    void handleEdgeProximity(InkCanvas* canvas, const QPoint& pos);  // Phase 3.1.7: Stubbed - no-op
     
     // Responsive toolbar management
     bool isToolbarTwoRows = false;

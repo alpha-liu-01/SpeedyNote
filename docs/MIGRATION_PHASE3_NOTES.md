@@ -15,15 +15,15 @@
 |---------|--------|-------|
 | App Launch | ✅ Works | No crash on startup (after fixing `updatePanRange`, `updateDialDisplay`) |
 | Toolbar | ✅ Visible | Old toolbar displays correctly |
-| Old Tab Bar | ⚠️ Visible but empty | `tabBarContainer` shows only add tab button (tabList removed) |
-| New Tab Bar (QTabWidget) | ✅ Works | Below toolbar, creates DocumentViewport tabs correctly |
+| Tab Bar | ✅ Works | Single `m_tabWidget` tab bar with corner buttons (back + add tab) |
 | Add Tab Button | ✅ Works | Creates new tabs with DocumentViewport |
 | DocumentViewport | ✅ Works | Same behavior as `--test-viewport` window |
-| Color Buttons | ❌ Crash | Calls `currentCanvas()->setPenColor()` on null |
+| Color Buttons | ✅ Fixed | Null checks added to prevent crashes |
+| Tool Buttons | ✅ Fixed | Null checks added to prevent crashes |
 | PDF/Bookmark Sidebars | ✅ Toggle works | Empty content (expected) |
 | MagicDial Display | ✅ Correct | Shows "No Canvas" text |
 
-**UI Layout Issue:** Two tab bars visible - old `tabBarContainer` (top) and new `m_tabWidget` (below toolbar). Should consolidate to single tab bar.
+**Tab Bar Consolidation:** Old `tabBarContainer` hidden, buttons moved to `m_tabWidget` corner widgets.
 
 ### Completed Tasks
 
@@ -38,11 +38,45 @@
 | 3.1.2 addNewTab stubbed | ✅ Complete | Old InkCanvas code wrapped in comment block |
 | 3.1.6 Page Nav stubbed | ✅ Complete | switchPage, switchPageWithDirection stubbed |
 | LauncherWindow | ⏸️ Disconnected | Commented out from CMakeLists.txt, sharedLauncher refs commented |
+| ControlPanelDialog | ⏸️ Disconnected | Commented out from CMakeLists.txt (source/ControlPanelDialog.cpp) |
 | Touch/Palm Rejection | ⏸️ Stubbed | onStylusProximityEnter, restoreTouchGestureMode stubbed |
 | updateTabSizes | ⏸️ Stubbed | QTabWidget handles its own sizing |
 | updateTheme tabList | ⏸️ Stubbed | Will use m_tabWidget styling in Phase 3.3 |
 | updatePanRange | ⏸️ Stubbed | DocumentViewport handles own pan/zoom |
 | updateDialDisplay | ⏸️ Protected | Returns early if no currentCanvas() |
+| Button Handlers | ✅ Fixed | Null checks added to color/tool/thickness buttons |
+| Tab Bar Consolidation | ✅ Complete | tabBarContainer hidden, buttons as m_tabWidget corner widgets |
+| 3.1.8 ControlPanelDialog | ✅ Disabled | Replaced with QMessageBox, include commented out |
+| 3.1.8b InkCanvas Cleanup | ✅ Complete | All InkCanvas calls wrapped in #if 0 blocks or stubbed |
+
+### Type Migrations (Phase 3.1.8)
+
+| Old Type | New Type | Location |
+|----------|----------|----------|
+| `BackgroundStyle` (from InkCanvas.h) | `Page::BackgroundType` (from Page.h) | `saveDefaultBackgroundSettings()`, `loadDefaultBackgroundSettings()` |
+| `vp->setZoom()` | `vp->setZoomLevel()` | `updateZoom()` |
+| `viewport->currentPage()` | `viewport->currentPageIndex()` | `toggleOutlineSidebar()` |
+
+**Note:** `Page::BackgroundType` has additional values (`PDF`, `Custom`) not in the old `BackgroundStyle`. The QSettings key remains `defaultBackgroundStyle` but now stores `Page::BackgroundType` integer values.
+
+### Disabled Functions (Phase 3.1.8)
+
+The following functions have been stubbed/disabled using `#if 0` blocks:
+- `exportAnnotatedPdf()` - PDF export will be reimplemented for DocumentViewport
+- `exportCanvasOnlyNotebook()` - Canvas export disabled
+- `exportAnnotatedPdfFullRender()` - Full render export disabled  
+- `createAnnotatedPagesPdf()` - PDF creation disabled
+- `mergePdfWithPdftk()` - PDF merge disabled
+- `enableStylusButtonMode()` - Stylus modes will use DocumentViewport
+- `disableStylusButtonMode()` - Stylus modes disabled
+- `onPdfTextSelectionCleared()` - Text selection disabled
+- `openPdfFile()` - PDF file association disabled
+- `openSpnPackage()` - .spn format being replaced with .snx
+- `createNewSpnPackage()` - .spn creation disabled
+- `keyPressEvent/keyReleaseEvent` - Ctrl tracking stubbed
+- `toggleControlBar` - Canvas size management stubbed
+- `getPdfDocument()` - Returns nullptr (will use DocumentViewport)
+- `eventFilter()` - InkCanvas event handling replaced with DocumentViewport
 
 ### Reference Files
 
@@ -102,39 +136,162 @@
 Per `MIGRATION_PHASE3_1_SUBPLAN.md`:
 
 1. ~~3.1.3 - Remove VectorCanvas~~ ✅ COMPLETE
-2. **3.1.1 - Replace tab system** ← NEXT
-3. 3.1.2 - Remove addNewTab InkCanvas code
-4. 3.1.7 - Remove InkCanvas includes/members
-5. 3.1.4 - Create currentViewport(), replace currentCanvas()
-6. 3.1.6 - Remove page navigation methods
-7. 3.1.5 - Stub signal handlers
-8. 3.1.8 - Disable ControlPanelDialog
-9. 3.1.9 - Stub markdown handlers
+2. ~~3.1.1 - Replace tab system~~ ✅ COMPLETE (QTabWidget + TabManager)
+3. ~~3.1.2 - Remove addNewTab InkCanvas code~~ ✅ COMPLETE (wrapped in comment block)
+4. ~~3.1.6 - Remove page navigation methods~~ ✅ COMPLETE (stubbed)
+5. ~~3.1.4 - Create currentViewport(), replace currentCanvas()~~ ✅ COMPLETE (186→115 calls)
+6. ~~3.1.5 - Stub signal handlers~~ ✅ COMPLETE (115→101 calls)
+7. ~~3.1.7 - Remove InkCanvas includes/members~~ ✅ COMPLETE (include commented, forward decl added)
+8. ~~3.1.8 - Disable ControlPanelDialog~~ ✅ COMPLETE
+   - Shows "Coming soon" message for ControlPanelDialog
+   - Fixed missing type definitions: `TouchGestureMode`, `ToolType`, `QElapsedTimer`
+   - Added local `TouchGestureMode` enum (extracted from InkCanvas.h) with guards
+   - Added `#include "core/ToolType.h"` and `#include <QElapsedTimer>` and `#include <QColorDialog>`
+   - Stubbed all InkCanvas-dependent functions: save, export, PDF, pan, zoom
+   - Replaced ~30 `currentCanvas()` calls with `currentViewport()` where needed
+9. ~~3.1.9 - Stub markdown handlers~~ ✅ COMPLETE
+   - Stubbed: loadBookmarks, saveBookmarks, toggleCurrentPageBookmark
+   - Stubbed: onMarkdownNoteContentChanged, onMarkdownNoteDeleted
+   - Stubbed: onHighlightLinkClicked, onHighlightDoubleClicked
+   - Stubbed: loadMarkdownNotesForCurrentPage
+   - Updated page navigation functions to use currentViewport()
+
+**Phase 3.1 COMPLETE** - App should compile without InkCanvas method calls causing errors.
 
 **Goal:** MainWindow compiles without InkCanvas. Many features will be broken/stubbed.
+
+**Current Status:** App launches and runs without crashes. Basic tab/viewport functionality works.
 
 ---
 
 ## Known Issues (Phase 3.1)
 
-### 1. Dual Tab Bars
-- **Issue:** Two tab bars visible - old `tabBarContainer` at top, new `m_tabWidget` below toolbar
-- **Solution:** Move `m_tabWidget` into `tabBarContainer`, or replace tabBarContainer entirely
-- **Priority:** Medium - cosmetic but confusing
+### ~~1. Dual Tab Bars~~ ✅ FIXED
+- **Solution:** Buttons moved to `m_tabWidget` corner widgets, `tabBarContainer` hidden
 
-### 2. Color Button Crash
-- **Issue:** Clicking color buttons (red, blue, etc.) crashes - calls `currentCanvas()->setPenColor()` on null
-- **Location:** `setupUi()` lambda at ~line 456+ (connect statements)
-- **Solution:** Add null checks to all button lambdas, or stub them
-- **Priority:** High - prevents testing
+### ~~2. Color Button Crash~~ ✅ FIXED
+- **Solution:** Null checks added to all color button lambdas
 
-### 3. Tool Button Crash (likely)
-- **Issue:** Pen/Marker/Eraser buttons likely crash similarly
-- **Solution:** Same as color buttons
+### ~~3. Tool Button Crash~~ ✅ FIXED
+- **Solution:** Null checks already present or added
 
-### 4. 176 `currentCanvas()` Calls
-- **Issue:** Many functions still call `currentCanvas()` without null checks
-- **Solution:** Phase 3.1.4 - Replace with `currentViewport()` or add null guards
+### ~~4. `currentCanvas()` Calls~~ ✅ MOSTLY FIXED
+- **Status:** Reduced from 186 to 115 calls (38% reduction)
+- **Updated:** Tool setters, color buttons, benchmark, thickness slider now use `currentViewport()`
+- **Stubbed:** Straight line, rope tool, picture insertion, PDF text selection
+- **Remaining:** 115 calls in dormant code paths (PDF, save/export, dial, markdown)
+
+---
+
+## Partial Implementations (Phase 3.1.4)
+
+### Tool/Color Connection - Current vs Target
+
+The tool and color button handlers now use `currentViewport()` but with a **simplified pattern** that defers the full "global state" architecture to Phase 3.3.
+
+#### Current Implementation (Phase 3.1)
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌───────────────────┐
+│  Color Button   │───▶│  MainWindow      │───▶│  DocumentViewport │
+│  (clicked)      │    │  currentViewport()│    │  setPenColor()    │
+└─────────────────┘    └──────────────────┘    └───────────────────┘
+                              │
+                              ▼
+                       TabManager::currentViewport()
+```
+
+**Code path:**
+```cpp
+// Button lambda in setupUi()
+connect(redButton, &QPushButton::clicked, [this]() { 
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->setPenColor(getPaletteColor("red")); 
+    }
+});
+
+// currentViewport() in MainWindow
+DocumentViewport* MainWindow::currentViewport() const {
+    return m_tabManager ? m_tabManager->currentViewport() : nullptr;
+}
+```
+
+**Characteristics:**
+- ✅ Uses correct component chain (MainWindow → TabManager → DocumentViewport)
+- ✅ Works without crashes
+- ❌ No global state stored in MainWindow
+- ❌ No tab-switch handler to reapply state
+
+#### Target Architecture (Phase 3.3)
+
+```
+┌─────────────────┐    ┌──────────────────────────────┐    ┌───────────────────┐
+│  Color Button   │───▶│  MainWindow                  │───▶│  DocumentViewport │
+│  (clicked)      │    │  1. Store in m_penColor      │    │  setPenColor()    │
+└─────────────────┘    │  2. Apply to currentViewport │    └───────────────────┘
+                       └──────────────────────────────┘
+                                      │
+                       ┌──────────────▼──────────────┐
+                       │  onViewportChanged()        │
+                       │  - Apply m_penColor         │
+                       │  - Apply m_penThickness     │
+                       │  - Apply m_currentTool      │
+                       │  - Apply m_eraserSize       │
+                       └─────────────────────────────┘
+```
+
+**Target code (from MIGRATION_PHASE3_SUBPLAN.md):**
+```cpp
+// MainWindow members for global state
+ToolType m_currentTool = ToolType::Pen;
+QColor m_penColor = Qt::black;
+qreal m_penThickness = 5.0;
+qreal m_eraserSize = 20.0;
+
+// Color change handler
+void MainWindow::onPenColorChanged(const QColor& color) {
+    m_penColor = color;  // Store globally
+    if (auto* vp = m_tabManager->currentViewport()) {
+        vp->setPenColor(color);  // Apply to current
+    }
+}
+
+// Tab switch handler
+void MainWindow::onViewportChanged(DocumentViewport* viewport) {
+    if (viewport) {
+        viewport->setCurrentTool(m_currentTool);
+        viewport->setPenColor(m_penColor);
+        viewport->setPenThickness(m_penThickness);
+        viewport->setEraserSize(m_eraserSize);
+    }
+}
+```
+
+### Comparison Table
+
+| Aspect | Current (3.1) | Target (3.3) |
+|--------|---------------|--------------|
+| Color stored in | DocumentViewport only | MainWindow + DocumentViewport |
+| Tool stored in | DocumentViewport only | MainWindow + DocumentViewport |
+| Tab switch handling | No state sync | Reapply global state |
+| Multi-tab consistency | Each tab independent | All tabs share tool state |
+
+### What Works Now
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Color buttons (6) | ✅ Working | Red, blue, yellow, green, black, white |
+| Custom color button | ✅ Working | Color picker + apply |
+| Tool buttons | ✅ Working | Pen, marker (→pen), eraser |
+| Thickness slider | ✅ Working | Updates viewport thickness |
+| Benchmark | ✅ Working | Uses viewport's getPaintRate() |
+
+### What's Deferred to Phase 3.3
+
+- [ ] Global tool state members (`m_currentTool`, `m_penColor`, etc.)
+- [ ] `onViewportChanged()` tab switch handler
+- [ ] Unified tool/color change methods
+- [ ] Tab-consistent tool state (switching tabs maintains tool)
 
 ---
 

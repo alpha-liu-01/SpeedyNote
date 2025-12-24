@@ -34,11 +34,15 @@ class PictureWindowManager;
 class PictureWindow;
 class VectorCanvas; // Forward declaration for vector overlay
 
+// Guard to prevent redefinition if MainWindow.h is also included
+#ifndef TOUCHGESTUREMODE_DEFINED
+#define TOUCHGESTUREMODE_DEFINED
 enum class TouchGestureMode {
     Disabled,     // Touch gestures completely off
     YAxisOnly,    // Only Y-axis panning allowed (X-axis and zoom locked)
     Full          // Full touch gestures (panning and zoom)
 };
+#endif
 
 enum class BackgroundStyle {
     None,
