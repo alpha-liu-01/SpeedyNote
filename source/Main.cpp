@@ -247,16 +247,14 @@ int main(int argc, char *argv[]) {
     bool runPageTests = false;
     bool runDocumentTests = false;
     bool runViewportTests = false;
-    bool useNewViewport = false;  // Phase 3: New DocumentViewport architecture
+    // REMOVED Phase 3.1: useNewViewport - always using new architecture
     
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
         QString arg = QString::fromLocal8Bit(argv[i]);
         
-        if (arg == "--use-new-viewport") {
-            // Phase 3: Enable new DocumentViewport architecture
-            useNewViewport = true;
-        } else if (arg == "--create-new" && i + 1 < argc) {
+        // REMOVED Phase 3.1: --use-new-viewport flag - always using new architecture
+        if (arg == "--create-new" && i + 1 < argc) {
             // Handle --create-new command (opens SpeedyNote)
             createNewPackage = true;
             inputFile = QString::fromLocal8Bit(argv[++i]);
@@ -383,52 +381,59 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // Phase 3.0.4: Set static flag for viewport architecture mode
-    // This flag is used by LauncherWindow when creating new MainWindow instances
-    MainWindow::s_useNewViewport = useNewViewport;
+    // Phase 3.1: Skip LauncherWindow, go directly to MainWindow
+    // REMOVED: MainWindow::s_useNewViewport - always using new architecture
     
     // Determine which window to show based on command line arguments
     int exitCode = 0;
     
+    // Phase 3.1: Always go to MainWindow (LauncherWindow will be reconnected later)
+    MainWindow *w = new MainWindow();
+    w->setAttribute(Qt::WA_DeleteOnClose); // Qt will delete when closed
+    w->show();
+    
+    // Phase 3.1: File handling is stubbed for now
+    // TODO Phase 3.5: Reconnect file operations
+    if (!inputFile.isEmpty()) {
+        qDebug() << "File argument received but file operations are stubbed:" << inputFile;
+        // OLD: w->openSpnPackage(inputFile) or w->openPdfFile(inputFile)
+    }
+    
+    exitCode = app.exec();
+    
+    /* Phase 3.1: LauncherWindow code commented out - will be reconnected later
     if (!inputFile.isEmpty()) {
         // If a file is specified, go directly to MainWindow
-        // Allocate on heap to avoid destructor issues on exit
-        MainWindow *w = new MainWindow(useNewViewport);
-        w->setAttribute(Qt::WA_DeleteOnClose); // Qt will delete when closed
+        MainWindow *w = new MainWindow();
+        w->setAttribute(Qt::WA_DeleteOnClose);
         
         if (createNewPackage) {
-            // Handle --create-new command
             if (inputFile.toLower().endsWith(".spn")) {
-                w->show(); // Show window first
+                w->show();
                 w->createNewSpnPackage(inputFile);
             } else {
-                // Invalid file extension for new package
                 w->show();
             }
         } else {
-            // Check file extension to determine how to handle it
             if (inputFile.toLower().endsWith(".pdf")) {
-                // Handle PDF file association
-                w->show(); // Show window first for dialog parent
+                w->show();
                 w->openPdfFile(inputFile);
             } else if (inputFile.toLower().endsWith(".spn")) {
-                // Handle SpeedyNote package
-                w->show(); // Show window first
+                w->show();
                 w->openSpnPackage(inputFile);
             } else {
-                // Unknown file type, just show the application
                 w->show();
             }
         }
         exitCode = app.exec();
     } else {
         // No file specified - show the launcher window
-        // Create the launcher and set it as the shared instance
         LauncherWindow *launcher = new LauncherWindow();
-        MainWindow::sharedLauncher = launcher; // Set as shared instance
+        MainWindow::sharedLauncher = launcher;
         launcher->show();
         exitCode = app.exec();
     }
+    */
     
     // Clean up SDL before exiting to properly release HID device handles
     // This is especially important on macOS where HID handles can remain locked

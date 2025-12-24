@@ -1,6 +1,8 @@
 #include "MainWindow.h"
 #include "InkCanvas.h"
 // #include "VectorCanvas.h"  // REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
+#include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
+#include "core/Document.h"          // Phase 3.1: Document class
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -65,9 +67,9 @@
 QSharedMemory *MainWindow::sharedMemory = nullptr;
 LauncherWindow *MainWindow::sharedLauncher = nullptr;
 
-// Phase 3.0.4: Static flag for viewport architecture mode
-// Set from command line (--use-new-viewport) and used by LauncherWindow
-bool MainWindow::s_useNewViewport = false;
+// REMOVED Phase 3.1: Static flag for viewport architecture mode
+// Always using new architecture now
+// bool MainWindow::s_useNewViewport = false;
 
 #ifdef Q_OS_LINUX
 // Linux-specific signal handler for cleanup
@@ -96,17 +98,13 @@ void setupLinuxSignalHandlers() {
 }
 #endif
 
-MainWindow::MainWindow(bool useNewViewport, QWidget *parent) 
-    : QMainWindow(parent), m_useNewViewport(useNewViewport), benchmarking(false), localServer(nullptr) {
+MainWindow::MainWindow(QWidget *parent) 
+    : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
 
     setWindowTitle(tr("SpeedyNote Beta 0.12.2"));
     
-    // Log architecture mode for debugging
-    if (m_useNewViewport) {
-        qDebug() << "MainWindow: Using NEW DocumentViewport architecture (Phase 3+)";
-    } else {
-        qDebug() << "MainWindow: Using LEGACY InkCanvas architecture";
-    }
+    // Phase 3.1: Always using new DocumentViewport architecture
+    qDebug() << "MainWindow: Using DocumentViewport architecture (Phase 3.1+)";
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux
@@ -137,12 +135,24 @@ MainWindow::MainWindow(bool useNewViewport, QWidget *parent)
         QSize logicalSize = screen->availableGeometry().size() * 0.89;
         resize(logicalSize);
     }
-    // ✅ Create a stacked widget to hold multiple canvases
-    canvasStack = new QStackedWidget(this);
-    setCentralWidget(canvasStack);
-
-    // ✅ Create the first tab (default canvas)
-    // addNewTab();
+    // Phase 3.1.1: Create QTabWidget to hold DocumentViewports
+    // Replaces old canvasStack (QStackedWidget)
+    m_tabWidget = new QTabWidget(this);
+    m_tabWidget->setTabsClosable(true);
+    m_tabWidget->setMovable(true);
+    m_tabWidget->setDocumentMode(true);
+    // Note: m_tabWidget will be positioned in setupUi(), not set as central widget directly
+    
+    // Phase 3.1.1: Initialize DocumentManager and TabManager
+    m_documentManager = new DocumentManager(this);
+    m_tabManager = new TabManager(m_tabWidget, this);
+    
+    // Connect TabManager signals
+    connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
+        Q_UNUSED(vp);
+        // TODO: Phase 3.3 - Update UI when viewport changes
+        updateDialDisplay();
+    });
     QSettings settings("SpeedyNote", "App");
     pdfRenderDPI = settings.value("pdfRenderDPI", 192).toInt();
     setPdfDPI(pdfRenderDPI);
@@ -875,31 +885,25 @@ void MainWindow::setupUi() {
         return QList<MarkdownNoteData>();
     });
     
-    // 🌟 Horizontal Tab Bar (like modern web browsers)
-    tabList = new QListWidget(this);
-    tabList->setFlow(QListView::LeftToRight);  // Make it horizontal
-    tabList->setFixedHeight(38);  // Increased to accommodate scrollbar below tabs
-    tabList->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    tabList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    tabList->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Phase 3.1.1: QTabWidget replaces old QListWidget tabList
+    // m_tabWidget was created in constructor, configure it here
+    m_tabWidget->setTabPosition(QTabWidget::North);
+    m_tabWidget->setElideMode(Qt::ElideRight);
     // Stylesheet will be applied in updateTheme() to match dark/light mode
 
-    if (!canvasStack) {
-        canvasStack = new QStackedWidget(this);
-    }
+    // Connect tab changes to switchTab
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::switchTab);
 
-    connect(tabList, &QListWidget::currentRowChanged, this, &MainWindow::switchTab);
-
-    // Create horizontal tab container
+    // Create horizontal tab container (still needed for positioning buttons)
     tabBarContainer = new QWidget(this);
     tabBarContainer->setObjectName("tabBarContainer");
-    tabBarContainer->setFixedHeight(40);  // Increased to accommodate scrollbar below tabs
+    tabBarContainer->setFixedHeight(40);  // Match old height
     
     QHBoxLayout *tabBarLayout = new QHBoxLayout(tabBarContainer);
     tabBarLayout->setContentsMargins(5, 5, 5, 5);
     tabBarLayout->setSpacing(5);
-    tabBarLayout->addWidget(tabList, 1);  // Tab list takes most space
-    // Add button and recent button are now positioned manually (not in layout)
+    // Note: m_tabWidget is NOT added to tabBarLayout - it will be the central widget
+    // The tabBarContainer is now just for the buttons
     
     // Create "Return to Launcher" button (positioned manually like add tab button)
     openRecentNotebooksButton = new QPushButton(tabBarContainer); // Parent to tab bar container
@@ -933,10 +937,9 @@ void MainWindow::setupUi() {
     addTabButton->setToolTip(tr("Add New Tab"));
     connect(addTabButton, &QPushButton::clicked, this, &MainWindow::addNewTab);
     
-    // Connect scroll bar to update button position
-    connect(tabList->horizontalScrollBar(), &QScrollBar::valueChanged, this, [this]() {
-        updateTabSizes(); // Reposition add button when scrolling
-    });
+    // Phase 3.1.1: Tab scroll handled by QTabWidget internally
+    // Old: connect(tabList->horizontalScrollBar(), &QScrollBar::valueChanged, ...)
+    // QTabWidget handles tab scrolling automatically
 
     connect(toggleTabBarButton, &QPushButton::clicked, this, [=]() {
         bool isVisible = tabBarContainer->isVisible();
@@ -1282,14 +1285,14 @@ void MainWindow::setupUi() {
     
         
 
-    canvasStack = new QStackedWidget();
-    canvasStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // Phase 3.1.1: m_tabWidget was created in constructor, just configure size policy
+    m_tabWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    // Create a container for the canvas and scrollbars with relative positioning
+    // Create a container for the tab widget and scrollbars with relative positioning
     QWidget *canvasContainer = new QWidget;
     QVBoxLayout *canvasLayout = new QVBoxLayout(canvasContainer);
     canvasLayout->setContentsMargins(0, 0, 0, 0);
-    canvasLayout->addWidget(canvasStack);
+    canvasLayout->addWidget(m_tabWidget);  // Phase 3.1.1: Use m_tabWidget instead of canvasStack
 
     // Enable context menu for the workaround
     canvasContainer->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -3640,178 +3643,59 @@ void MainWindow::handleSmartPdfButton() {
 
 
 void MainWindow::switchTab(int index) {
-    if (!canvasStack || !tabList || !pageInput || !zoomSlider || !panXSlider || !panYSlider) {
-        // qDebug() << "Error: switchTab() called before UI was fully initialized!";
+    // Phase 3.1.1: Simplified switchTab using TabManager
+    // Many InkCanvas-specific features are stubbed for now
+    
+    if (!m_tabWidget || !pageInput || !zoomSlider) {
         return;
     }
 
-    if (index >= 0 && index < canvasStack->count()) {
-        // ✅ OPTIMIZATION: Flush any pending metadata save from the previous tab
-        // before switching to ensure data is persisted
-        InkCanvas *prevCanvas = currentCanvas();
-        if (prevCanvas) {
-            prevCanvas->flushPendingMetadataSave();
+    if (index >= 0 && index < m_tabWidget->count()) {
+        // QTabWidget handles the tab switch internally
+        // m_tabWidget->setCurrentIndex(index) is called by QTabWidget's signal
+        
+        DocumentViewport *viewport = currentViewport();
+        if (viewport) {
+            // TODO Phase 3.3: Update page spinbox from viewport
+            // int currentPage = viewport->currentPageIndex();
+            // pageInput->blockSignals(true);
+            // pageInput->setValue(currentPage + 1);
+            // pageInput->blockSignals(false);
             
-            // ✅ SAFETY: Clean up any active stylus button modes on the previous canvas
-            // This prevents state inconsistency when switching tabs while holding a stylus button
-            if (stylusButtonAActive) {
-                // Restore previous state on old canvas before switching
-                switch (stylusButtonAAction) {
-                    case StylusButtonAction::HoldStraightLine:
-                        prevCanvas->setStraightLineMode(previousStraightLineModeA);
-                        break;
-                    case StylusButtonAction::HoldLasso:
-                        prevCanvas->clearInProgressLasso();
-                        prevCanvas->setRopeToolMode(previousRopeToolModeA);
-                        break;
-                    case StylusButtonAction::HoldEraser:
-                        prevCanvas->setTool(previousToolBeforeStylusA);
-                        break;
-                    case StylusButtonAction::HoldTextSelection:
-                        prevCanvas->setPdfTextSelectionEnabled(previousTextSelectionModeA);
-                        break;
-                    default:
-                        break;
-                }
-                stylusButtonAActive = false;
-            }
-            if (stylusButtonBActive) {
-                switch (stylusButtonBAction) {
-                    case StylusButtonAction::HoldStraightLine:
-                        prevCanvas->setStraightLineMode(previousStraightLineModeB);
-                        break;
-                    case StylusButtonAction::HoldLasso:
-                        prevCanvas->clearInProgressLasso();
-                        prevCanvas->setRopeToolMode(previousRopeToolModeB);
-                        break;
-                    case StylusButtonAction::HoldEraser:
-                        prevCanvas->setTool(previousToolBeforeStylusB);
-                        break;
-                    case StylusButtonAction::HoldTextSelection:
-                        prevCanvas->setPdfTextSelectionEnabled(previousTextSelectionModeB);
-                        break;
-                    default:
-                        break;
-                }
-                stylusButtonBActive = false;
-            }
-            // Clear any pending text selection disable
-            textSelectionPendingDisable = false;
+            // TODO Phase 3.3: Update zoom from viewport
+            // zoomSlider->blockSignals(true);
+            // zoomSlider->setValue(viewport->zoomLevel() * 100);
+            // zoomSlider->blockSignals(false);
         }
         
-        canvasStack->setCurrentIndex(index);
-        
-        // Ensure the tab list selection is properly set and styled
-        if (tabList->currentRow() != index) {
-            tabList->setCurrentRow(index);
-        }
-        
-        InkCanvas *canvas = currentCanvas();
-        if (canvas) {
-            int savedPage = canvas->getLastActivePage();
-            
-            // ✅ Only call blockSignals if pageInput is valid
-            if (pageInput) {  
-                pageInput->blockSignals(true);
-                pageInput->setValue(savedPage + 1);
-                pageInput->blockSignals(false);
-            }
-
-            // ✅ Ensure zoomSlider exists before calling methods
-            if (zoomSlider) {
-                zoomSlider->blockSignals(true);
-                zoomSlider->setValue(canvas->getLastZoomLevel());
-                zoomSlider->blockSignals(false);
-                canvas->setZoom(canvas->getLastZoomLevel());
-            }
-
-            // ✅ Ensure pan sliders exist before modifying values
-            if (panXSlider && panYSlider) {
-                panXSlider->blockSignals(true);
-                panYSlider->blockSignals(true);
-                panXSlider->setValue(canvas->getLastPanX());
-                panYSlider->setValue(canvas->getLastPanY());
-                panXSlider->blockSignals(false);
-                panYSlider->blockSignals(false);
-                updatePanRange();
-            }
-            updateDialDisplay();
-            updateColorButtonStates();  // Update button states when switching tabs
-            updateStraightLineButtonState();  // Update straight line button state when switching tabs
-            updateRopeToolButtonState(); // Update rope tool button state when switching tabs
-            updatePictureButtonState(); // Update picture button state when switching tabs
-            updatePdfTextSelectButtonState(); // Update PDF text selection button state when switching tabs
-            updateBookmarkButtonState(); // Update bookmark button state when switching tabs
-            updateDialButtonState();     // Update dial button state when switching tabs
-            updateFastForwardButtonState(); // Update fast forward button state when switching tabs
-            updateToolButtonStates();   // Update tool button states when switching tabs
-            updateThicknessSliderForCurrentTool(); // Update thickness slider for current tool when switching tabs
-            
-            // ✅ Update scroll on top behavior based on PDF loading state
-            setScrollOnTopEnabled(canvas->isPdfLoadedFunc());
-            
-            // Refresh PDF outline if sidebar is visible
-            if (outlineSidebarVisible) {
-                loadPdfOutline();
-                // ✅ Update outline selection for the current page after loading
-                updateOutlineSelection(savedPage + 1); // Convert to 1-based page number
-            }
-            
-            // ✅ Refresh bookmarks if sidebar is visible
-            if (bookmarksSidebarVisible) {
-                loadBookmarks();
-            }
-            
-            // ✅ Exit search mode when switching tabs (search results are document-specific)
-            if (markdownNotesSidebar && markdownNotesSidebar->isInSearchMode()) {
-                markdownNotesSidebar->exitSearchMode();
-            }
-            
-            // ✅ Refresh markdown notes if sidebar is visible
-            if (markdownNotesSidebarVisible) {
-                loadMarkdownNotesForCurrentPage();
-            }
-            
-            // Force layout refresh when switching tabs with sidebar visible
-            if (markdownNotesSidebarVisible || outlineSidebarVisible || bookmarksSidebarVisible) {
-                if (centralWidget() && centralWidget()->layout()) {
-                    centralWidget()->layout()->invalidate();
-                    centralWidget()->layout()->activate();
-                }
-                QApplication::processEvents();
-                updatePanRange();
-            }
-            
-            // ✅ Update recent notebooks when switching to a tab to bump it to the top
-            QString folderPath = canvas->getSaveFolder();
-            QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
-            if (!folderPath.isEmpty() && folderPath != tempDir && recentNotebooksManager) {
-                    // Add to recent notebooks to bump it to the top
-                    recentNotebooksManager->addRecentNotebook(folderPath, canvas);
-                    // Refresh shared launcher if it exists and is visible
-                    if (sharedLauncher && sharedLauncher->isVisible()) {
-                        sharedLauncher->refreshRecentNotebooks();
-                    }
-            }
-        }
+        updateDialDisplay();
+        // TODO Phase 3.3: Reconnect these update functions to work with DocumentViewport
+        // updateColorButtonStates();
+        // updateStraightLineButtonState();
+        // updateRopeToolButtonState();
+        // updatePictureButtonState();
+        // updatePdfTextSelectButtonState();
+        // updateBookmarkButtonState();
+        updateDialButtonState();
+        updateFastForwardButtonState();
+        // updateToolButtonStates();
+        // updateThicknessSliderForCurrentTool();
     }
 }
 
 int MainWindow::findTabWithNotebookId(const QString &notebookId) {
-    if (!canvasStack || notebookId.isEmpty()) return -1;
+    // Phase 3.1.1: Stubbed - will be implemented with DocumentManager
+    // TODO Phase 3.5: Use DocumentManager to find document by notebook ID
+    if (!m_tabWidget || notebookId.isEmpty()) return -1;
     
-    for (int i = 0; i < canvasStack->count(); ++i) {
-        InkCanvas *canvas = qobject_cast<InkCanvas*>(canvasStack->widget(i));
-        if (canvas && canvas->getNotebookId() == notebookId) {
-            return i;
-        }
-    }
+    // For now, return -1 (not found) - will be implemented with new save/load system
     return -1;
 }
 
 bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
-    // Safety check for required UI components
-    if (!tabList || !canvasStack) {
+    // Phase 3.1.1: Stubbed - will be implemented with DocumentManager
+    // TODO Phase 3.5: Use DocumentManager to check if document is already open
+    if (!m_tabWidget) {
         return false;
     }
     
@@ -3839,6 +3723,37 @@ bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
 }
 
 void MainWindow::addNewTab() {
+    // Phase 3.1.1: Simplified addNewTab using DocumentManager and TabManager
+    if (!m_tabManager || !m_documentManager) {
+        qWarning() << "addNewTab: TabManager or DocumentManager not initialized";
+        return;
+    }
+    
+    // Create a new blank document
+    Document* doc = m_documentManager->createDocument();
+    if (!doc) {
+        qWarning() << "addNewTab: Failed to create document";
+        return;
+    }
+    
+    // Create a new tab with DocumentViewport
+    QString tabTitle = doc->displayName();
+    int tabIndex = m_tabManager->createTab(doc, tabTitle);
+    
+    qDebug() << "Created new tab at index" << tabIndex << "with document:" << tabTitle;
+    
+    // Switch to the new tab
+    if (m_tabWidget) {
+        m_tabWidget->setCurrentIndex(tabIndex);
+    }
+    
+    updateDialDisplay();
+    
+    return;
+    
+    /* ========== OLD INKCANVAS CODE - KEPT FOR REFERENCE ==========
+    // This code will be removed in Phase 3.1.7 when InkCanvas is fully disconnected
+    
     if (!tabList || !canvasStack) return;  // Ensure tabList and canvasStack exist
 
     int newTabIndex = tabList->count();  // New tab index
@@ -3880,6 +3795,7 @@ void MainWindow::addNewTab() {
     
     // ✅ Create new InkCanvas instance EARLIER so it can be captured by the lambda
     InkCanvas *newCanvas = new InkCanvas(this);
+    ========== END OLD INKCANVAS CODE ==========*/
     
     // ✅ Handle tab closing when the button is clicked
     connect(closeButton, &QPushButton::clicked, this, [=]() { // newCanvas is now captured
@@ -4242,8 +4158,18 @@ bool MainWindow::ensureTabHasUniqueSaveFolder(InkCanvas* canvas) {
 
 
 InkCanvas* MainWindow::currentCanvas() {
-    if (!canvasStack || canvasStack->currentWidget() == nullptr) return nullptr;
-    return static_cast<InkCanvas*>(canvasStack->currentWidget());
+    // WILL BE REMOVED Phase 3.1.7 - Use currentViewport() instead
+    // For now, this returns nullptr since canvasStack is replaced with m_tabWidget
+    // which contains DocumentViewports, not InkCanvases
+    return nullptr;
+}
+
+// Phase 3.1.4: New accessor for DocumentViewport
+DocumentViewport* MainWindow::currentViewport() const {
+    if (m_tabManager) {
+        return m_tabManager->currentViewport();
+    }
+    return nullptr;
 }
 
 

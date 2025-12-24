@@ -39,10 +39,16 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSharedMemory>
+#include <QTabWidget>
+
+// Phase 3.1: New architecture includes
+#include "ui/TabManager.h"
+#include "core/DocumentManager.h"
 
 // Forward declarations
 class QTreeWidgetItem;
 class QProgressDialog;
+class DocumentViewport;
 namespace Poppler { 
     class Document; 
     class OutlineItem;
@@ -188,26 +194,16 @@ class MainWindow : public QMainWindow {
 public:
     /**
      * @brief Construct MainWindow.
-     * @param useNewViewport If true, use new DocumentViewport architecture (Phase 3+).
-     *                       If false, use legacy InkCanvas.
      * @param parent Parent widget.
+     * 
+     * Phase 3.1: Always uses new DocumentViewport architecture.
+     * Legacy InkCanvas support has been removed.
      */
-    explicit MainWindow(bool useNewViewport = false, QWidget *parent = nullptr);
+    explicit MainWindow(QWidget *parent = nullptr);
     virtual ~MainWindow();
     
-    /**
-     * @brief Check if using new viewport architecture.
-     * @return True if using DocumentViewport, false if using InkCanvas.
-     */
-    bool isUsingNewViewport() const { return m_useNewViewport; }
-    
-    /**
-     * @brief Static flag for viewport architecture mode.
-     * 
-     * Set once at startup from command line (--use-new-viewport).
-     * Used by LauncherWindow when creating new MainWindow instances.
-     */
-    static bool s_useNewViewport;
+    // REMOVED Phase 3.1: isUsingNewViewport() - always using new architecture
+    // REMOVED Phase 3.1: s_useNewViewport - no longer needed
     int getCurrentPageForCanvas(InkCanvas *canvas); 
 
     bool lowResPreviewEnabled = true;
@@ -331,7 +327,8 @@ public:
     QString migrateOldDialModeString(const QString &oldString);
     QString migrateOldActionString(const QString &oldString);
 
-    InkCanvas* currentCanvas(); // Made public for RecentNotebooksDialog
+    InkCanvas* currentCanvas(); // Made public for RecentNotebooksDialog - WILL BE REMOVED Phase 3.1.7
+    DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     void saveCurrentPage(); // Made public for RecentNotebooksDialog
     void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
@@ -524,9 +521,9 @@ private:
 
 private:
     // =========================================================================
-    // Architecture Mode (Phase 3)
+    // REMOVED Phase 3.1: Architecture Mode flag - always using new architecture
+    // bool m_useNewViewport = false;
     // =========================================================================
-    bool m_useNewViewport = false;  ///< True = DocumentViewport, False = InkCanvas
     
     InkCanvas *canvas;
     QPushButton *benchmarkButton;
@@ -570,7 +567,8 @@ private:
     QPushButton *overflowMenuButton;
     QMenu *overflowMenu;
 
-    QMap<InkCanvas*, int> pageMap;
+    // REMOVED Phase 3.1.1: QMap<InkCanvas*, int> pageMap;
+    // Page tracking now done by DocumentViewport internally
     
 
     QPushButton *backgroundButton; // New button to set background
@@ -590,8 +588,15 @@ private:
     QScrollBar *panYSlider;
 
 
-    QListWidget *tabList;          // Horizontal tab bar
-    QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
+    // REMOVED Phase 3.1.1: Old tab system replaced with QTabWidget + TabManager
+    // QListWidget *tabList;          // Horizontal tab bar
+    // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
+    
+    // Phase 3.1.1: New tab system
+    QTabWidget *m_tabWidget = nullptr;      // Replaces tabList + canvasStack
+    TabManager *m_tabManager = nullptr;     // Manages tabs and DocumentViewports
+    DocumentManager *m_documentManager = nullptr;  // Manages Document lifecycle
+    
     QPushButton *addTabButton;     // Button to add tabs
     QWidget *tabBarContainer;      // Container for horizontal tab bar
     

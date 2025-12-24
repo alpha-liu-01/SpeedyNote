@@ -14,8 +14,9 @@
 | 3.0.1 DocumentManager | ✅ Complete | `source/core/DocumentManager.h/.cpp` |
 | 3.0.2 TabManager | ✅ Complete | `source/ui/TabManager.h/.cpp` |
 | 3.0.3 LayerPanel | ✅ Complete | `source/ui/LayerPanel.h/.cpp` |
-| 3.0.4 Command line flag | ✅ Complete | `--use-new-viewport` (currently unused) |
+| 3.0.4 Command line flag | ✅ REMOVED | `--use-new-viewport` removed in 3.1.1 |
 | 3.1.3 Remove VectorCanvas | ✅ Complete | Removed from MainWindow, NOT from CMakeLists yet |
+| 3.1.1 Replace Tab System | 🔄 In Progress | QTabWidget + TabManager replaces tabList + canvasStack |
 
 ### Reference Files
 
