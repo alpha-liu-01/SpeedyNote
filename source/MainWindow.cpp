@@ -7473,18 +7473,13 @@ void MainWindow::toggleMarkdownNotesSidebar() {
 }
 
 void MainWindow::onMarkdownNotesUpdated() {
-    // Auto-exit search mode when a new note is created
-    // so the user can see and edit the new note
-    if (markdownNotesSidebar) {
-        markdownNotesSidebar->onNewNoteCreated();
-    }
+    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
+    // This was triggered by InkCanvas::markdownNotesUpdated signal (now disconnected)
+    qDebug() << "onMarkdownNotesUpdated(): Not implemented yet (Phase 3.4)";
     
-    // Auto-open the sidebar if it's not visible (so user sees the note they just created)
-    if (!markdownNotesSidebarVisible) {
-        toggleMarkdownNotesSidebar();
-    } else {
-        // Just reload if already open
-        loadMarkdownNotesForCurrentPage();
+    // Still handle sidebar visibility for future use
+    if (markdownNotesSidebar && !markdownNotesSidebarVisible) {
+        // Don't auto-open sidebar when note is created (will be re-enabled in Phase 3.4)
     }
 }
 

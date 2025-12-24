@@ -48,6 +48,7 @@
 | Tab Bar Consolidation | ✅ Complete | tabBarContainer hidden, buttons as m_tabWidget corner widgets |
 | 3.1.8 ControlPanelDialog | ✅ Disabled | Replaced with QMessageBox, include commented out |
 | 3.1.8b InkCanvas Cleanup | ✅ Complete | All InkCanvas calls wrapped in #if 0 blocks or stubbed |
+| 3.1.9 Markdown Handlers | ✅ Complete | All markdown/highlight handlers stubbed |
 
 ### Type Migrations (Phase 3.1.8)
 
@@ -77,6 +78,16 @@ The following functions have been stubbed/disabled using `#if 0` blocks:
 - `toggleControlBar` - Canvas size management stubbed
 - `getPdfDocument()` - Returns nullptr (will use DocumentViewport)
 - `eventFilter()` - InkCanvas event handling replaced with DocumentViewport
+
+### Stubbed Markdown Handlers (Phase 3.1.9)
+
+The following markdown/highlight handlers are stubbed (will be reimplemented in Phase 3.4):
+- `onMarkdownNotesUpdated()` - Was triggered by InkCanvas signal
+- `onMarkdownNoteContentChanged()` - Note content sync
+- `onMarkdownNoteDeleted()` - Note deletion
+- `onHighlightLinkClicked()` - Navigate to highlight
+- `onHighlightDoubleClicked()` - Edit highlight note
+- `loadMarkdownNotesForCurrentPage()` - Loads notes for current page
 
 ### Reference Files
 
