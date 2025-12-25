@@ -833,6 +833,23 @@ This violates single responsibility. Each widget should handle its own events.
      - Other binary insertions
    - Focus on JSON first, .snx is days/weeks away
 
+   **doc-1 Subplan:** See `docs/MIGRATION_DOC1_SUBPLAN.md`
+   
+   Temporary keyboard shortcuts (will be removed/customized later):
+   - `Ctrl+S` → Save JSON (file dialog)
+   - `Ctrl+O` → Load JSON (file dialog)
+   - `Ctrl+Shift+O` → Open PDF
+   - `Ctrl+Shift+N` → New Edgeless document
+   - `Ctrl+Shift+A` → Add Page (append at end)
+   - `Ctrl+Shift+I` → Insert Page (after current)
+   
+   Testing sequence:
+   1. Save/Load infrastructure (modular, future features depend on it)
+   2. PDF loading integration
+   3. Page management (add/insert)
+   4. Edgeless mode
+   5. LayerPanel GUI integration
+
 2. **SECOND: MainWindow Modularization**
    - Full refactor, not incremental cleanup
    - Extract components to source/ui/ (with subfolders for complex widgets)
