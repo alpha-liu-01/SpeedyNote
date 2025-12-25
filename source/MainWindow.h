@@ -459,6 +459,10 @@ private slots:
     void updateDialDisplay();
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
+    
+    // Phase doc-1: Document operations
+    void addPageToDocument();  // doc-1.0: Add page at end of document (Ctrl+Shift+A)
+    
     // void handleModeSelection(int angle);
 
     void handleToolSelection(int angle);

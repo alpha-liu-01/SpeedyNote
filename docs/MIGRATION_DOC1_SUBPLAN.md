@@ -292,7 +292,7 @@ LayerPanel::activeLayerChanged
 ## Success Criteria
 
 ### Phase 1: Core Save/Load
-- [ ] Can add page to document (Ctrl+Shift+A) - prerequisite
+- [x] Can add page to document (Ctrl+Shift+A) - prerequisite ✅
 - [ ] Can save multi-page document to JSON file (Ctrl+S)
 - [ ] Can load document from JSON file (Ctrl+O)
 - [ ] Strokes and layers preserved on save/load

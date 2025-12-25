@@ -40,6 +40,7 @@
 #include <QSet>
 #include <QWheelEvent>
 #include <QTimer>
+#include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
 #include <QColorDialog>  // Phase 3.1.8: For custom color picker
 #include <QPdfWriter>
 #include <QProgressDialog>
@@ -1438,6 +1439,17 @@ void MainWindow::setupUi() {
         positionLeftSidebarTabs();
         positionDialToolbarTab();
     });
+    
+    // =========================================================================
+    // Phase doc-1: Application-wide keyboard shortcuts
+    // Using QShortcut with ApplicationShortcut context for guaranteed behavior
+    // regardless of which widget has focus.
+    // =========================================================================
+    
+    // Add Page: Ctrl+Shift+A - appends new page at end of document
+    QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
+    addPageShortcut->setContext(Qt::ApplicationShortcut);
+    connect(addPageShortcut, &QShortcut::activated, this, &MainWindow::addPageToDocument);
 
 }
 
@@ -3113,6 +3125,52 @@ void MainWindow::centerViewportContent(int tabIndex) {
                  << "centeringOffset=" << centeringOffset
                  << "newPanX=" << -centeringOffset;
         */
+    }
+}
+
+// ============================================================================
+// Phase doc-1: Document Operations
+// ============================================================================
+
+void MainWindow::addPageToDocument()
+{
+    // Phase doc-1.0: Add new page at end of document
+    // Required for multi-page save/load testing
+    
+    if (!m_tabManager) {
+        qDebug() << "addPageToDocument: No tab manager";
+        return;
+    }
+    
+    DocumentViewport* viewport = m_tabManager->currentViewport();
+    if (!viewport) {
+        qDebug() << "addPageToDocument: No current viewport";
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        qDebug() << "addPageToDocument: No document in viewport";
+        return;
+    }
+    
+    // Add page at end
+    Page* newPage = doc->addPage();
+    if (newPage) {
+        qDebug() << "addPageToDocument: Added page" << doc->pageCount() 
+                 << "to document" << doc->name;
+        
+        // Trigger viewport repaint to show new page in layout
+        viewport->update();
+        
+        // Mark tab as modified
+        int currentIndex = m_tabManager->currentIndex();
+        if (currentIndex >= 0) {
+            m_tabManager->markTabModified(currentIndex, true);
+        }
+        
+        // Optionally scroll to the new page (user can do this manually for now)
+        // viewport->scrollToPage(doc->pageCount() - 1);
     }
 }
 
