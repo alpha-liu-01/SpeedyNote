@@ -3147,15 +3147,15 @@ void MainWindow::centerViewportContent(int tabIndex) {
 void MainWindow::saveDocument()
 {
     // Phase doc-1.1: Save current document to JSON file via file dialog
+    // Uses DocumentManager for proper document handling
     
-    if (!m_tabManager) {
-        qDebug() << "saveDocument: No tab manager";
+    if (!m_documentManager || !m_tabManager) {
+        qWarning() << "saveDocument: DocumentManager or TabManager not initialized";
         return;
     }
     
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
-        qDebug() << "saveDocument: No current viewport";
         QMessageBox::warning(this, tr("Save Document"), 
             tr("No document is open."));
         return;
@@ -3163,19 +3163,25 @@ void MainWindow::saveDocument()
     
     Document* doc = viewport->document();
     if (!doc) {
-        qDebug() << "saveDocument: No document in viewport";
         QMessageBox::warning(this, tr("Save Document"), 
             tr("No document is open."));
         return;
     }
     
+    // Check if document already has a path (previously saved)
+    QString existingPath = m_documentManager->documentPath(doc);
+    
     // Open file dialog for save location
     QString defaultName = doc->name.isEmpty() ? "Untitled" : doc->name;
+    QString defaultPath = existingPath.isEmpty() 
+        ? QDir::homePath() + "/" + defaultName + ".json"
+        : existingPath;
+    
     QString filter = tr("SpeedyNote JSON (*.json);;All Files (*)");
     QString filePath = QFileDialog::getSaveFileName(
         this,
         tr("Save Document"),
-        QDir::homePath() + "/" + defaultName + ".json",
+        defaultPath,
         filter
     );
     
@@ -3193,30 +3199,12 @@ void MainWindow::saveDocument()
     QFileInfo fileInfo(filePath);
     doc->name = fileInfo.baseName();
     
-    // Serialize document to JSON
-    QJsonObject docJson = doc->toFullJson();
-    QJsonDocument jsonDoc(docJson);
-    
-    // Write to file
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    // Use DocumentManager to save (handles all the file I/O and state updates)
+    if (!m_documentManager->saveDocumentAs(doc, filePath)) {
         QMessageBox::critical(this, tr("Save Error"),
-            tr("Could not open file for writing:\n%1").arg(file.errorString()));
+            tr("Failed to save document to:\n%1").arg(filePath));
         return;
     }
-    
-    // Write with indentation for readability
-    qint64 bytesWritten = file.write(jsonDoc.toJson(QJsonDocument::Indented));
-    file.close();
-    
-    if (bytesWritten < 0) {
-        QMessageBox::critical(this, tr("Save Error"),
-            tr("Failed to write document:\n%1").arg(file.errorString()));
-        return;
-    }
-    
-    // Update document state
-    doc->clearModified();
     
     // Update tab title (remove * prefix)
     int currentIndex = m_tabManager->currentIndex();
@@ -3225,16 +3213,21 @@ void MainWindow::saveDocument()
         m_tabManager->markTabModified(currentIndex, false);
     }
     
-    qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath
-             << "(" << bytesWritten << "bytes)";
+    qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath;
 }
 
 void MainWindow::loadDocument()
 {
     // Phase doc-1.2: Load document from JSON file via file dialog
+    // Uses DocumentManager for proper document ownership
+    
+    if (!m_documentManager || !m_tabManager) {
+        qWarning() << "loadDocument: DocumentManager or TabManager not initialized";
+        return;
+    }
     
     // Open file dialog for file selection
-    QString filter = tr("SpeedyNote JSON (*.json);;All Files (*)");
+    QString filter = tr("SpeedyNote Files (*.json *.snx);;All Files (*)");
     QString filePath = QFileDialog::getOpenFileName(
         this,
         tr("Open Document"),
@@ -3247,40 +3240,11 @@ void MainWindow::loadDocument()
         return;
     }
     
-    // Read file contents
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::critical(this, tr("Load Error"),
-            tr("Could not open file for reading:\n%1").arg(file.errorString()));
-        return;
-    }
-    
-    QByteArray jsonData = file.readAll();
-    file.close();
-    
-    // Parse JSON
-    QJsonParseError parseError;
-    QJsonDocument jsonDoc = QJsonDocument::fromJson(jsonData, &parseError);
-    
-    if (parseError.error != QJsonParseError::NoError) {
-        QMessageBox::critical(this, tr("Load Error"),
-            tr("Invalid JSON file:\n%1\nAt offset: %2")
-                .arg(parseError.errorString())
-                .arg(parseError.offset));
-        return;
-    }
-    
-    if (!jsonDoc.isObject()) {
-        QMessageBox::critical(this, tr("Load Error"),
-            tr("Invalid document format: expected JSON object."));
-        return;
-    }
-    
-    // Deserialize document
-    std::unique_ptr<Document> doc = Document::fromFullJson(jsonDoc.object());
+    // Use DocumentManager to load the document (handles ownership, PDF reloading, etc.)
+    Document* doc = m_documentManager->loadDocument(filePath);
     if (!doc) {
         QMessageBox::critical(this, tr("Load Error"),
-            tr("Failed to parse document data."));
+            tr("Failed to load document from:\n%1").arg(filePath));
         return;
     }
     
@@ -3290,41 +3254,14 @@ void MainWindow::loadDocument()
         doc->name = fileInfo.baseName();
     }
     
-    // Transfer ownership to DocumentManager (if using one) or keep locally
-    // For now, we create the tab and let TabManager handle the viewport
-    Document* docPtr = doc.get();
-    
     // Create new tab with the loaded document
-    if (!m_tabManager) {
-        qDebug() << "loadDocument: No tab manager";
-        return;
-    }
-    
-    int tabIndex = m_tabManager->createTab(docPtr, doc->displayName());
+    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
     
     if (tabIndex >= 0) {
-        // Transfer document ownership - store in a document container
-        // Note: For now, we'll use a simple approach where the document
-        // lives as long as the viewport. In a full implementation,
-        // DocumentManager would own documents.
-        
-        // Store the document pointer in the viewport's user data or similar
-        // For now, we'll use a static vector as a simple ownership mechanism
-        static std::vector<std::unique_ptr<Document>> s_loadedDocuments;
-        s_loadedDocuments.push_back(std::move(doc));
-        
-        // Try to reload PDF if the document has a PDF reference
-        if (!docPtr->pdfPath().isEmpty()) {
-            if (!docPtr->loadPdf(docPtr->pdfPath())) {
-                qDebug() << "loadDocument: Could not reload PDF from" << docPtr->pdfPath();
-                // Continue anyway - annotations are still usable without PDF
-            }
-        }
-        
         // Center the viewport content
         centerViewportContent(tabIndex);
         
-        qDebug() << "loadDocument: Loaded" << docPtr->pageCount() << "pages from" << filePath;
+        qDebug() << "loadDocument: Loaded" << doc->pageCount() << "pages from" << filePath;
     }
 }
 

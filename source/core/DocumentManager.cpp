@@ -92,8 +92,8 @@ Document* DocumentManager::loadDocument(const QString& path)
         return doc;
     }
     
-    // Handle .snx files - load from JSON
-    if (suffix == "snx") {
+    // Handle .snx and .json files - load from JSON
+    if (suffix == "snx" || suffix == "json") {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) {
             qWarning() << "DocumentManager::loadDocument: Cannot open file:" << path;

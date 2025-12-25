@@ -98,7 +98,7 @@ User presses Ctrl+O
     → centerViewportContent()
 ```
 
-**Note:** Document ownership uses static vector for now. Will integrate with DocumentManager later.
+**Note:** Document ownership properly handled by `DocumentManager`.
 
 #### 1.3 Connect Keyboard Shortcuts ✅ COMPLETE
 **Goal:** Wire up Ctrl+S, Ctrl+O, and Ctrl+Shift+A to handlers
@@ -499,6 +499,59 @@ This caused QSettings to load stale values incorrectly (e.g., old Grid=1 → new
 | `defaultBackgroundColor` | QString | "#FFFFFF" | Background color (HexRgb) |
 | `defaultGridColor` | QString | "#C8C8C8" | Grid/line color (HexRgb) |
 | `defaultBackgroundDensity` | int | 30 | Grid/line spacing in pixels |
+
+---
+
+## DocumentManager Integration (doc-1 fix)
+
+### Problem
+Save/Load in MainWindow used a hacky `static std::vector<std::unique_ptr<Document>>` for document ownership. This led to:
+1. Memory management confusion (documents lived forever until app close)
+2. No proper tracking of document state (modified, path)
+3. Duplicated code (DocumentManager already had proper save/load)
+
+### Fix
+Refactored `MainWindow::saveDocument()` and `MainWindow::loadDocument()` to use `DocumentManager`:
+
+**Save flow:**
+```
+MainWindow::saveDocument()
+  → Check for existing path via m_documentManager->documentPath(doc)
+  → Show QFileDialog for save location
+  → m_documentManager->saveDocumentAs(doc, path)
+    → Serializes JSON
+    → Writes to file with proper error handling
+    → Updates document state (clearModified)
+    → Adds to recent documents
+  → Update tab title
+```
+
+**Load flow:**
+```
+MainWindow::loadDocument()
+  → Show QFileDialog for file selection
+  → m_documentManager->loadDocument(filePath)
+    → Reads and parses JSON
+    → Deserializes Document
+    → Takes ownership
+    → Attempts PDF reload if referenced
+    → Adds to recent documents
+  → m_tabManager->createTab(doc, title)
+  → centerViewportContent()
+```
+
+### DocumentManager File Format Support
+Added `.json` support to `DocumentManager::loadDocument()`:
+- Previously only supported `.snx` and `.pdf`
+- Now supports `.json` (same internal format as `.snx`)
+- Future: `.snx` will be QDataStream package with embedded binaries
+
+### Benefits
+1. **Single source of truth** for document ownership
+2. **Proper lifecycle management** - documents cleaned up in destructor
+3. **State tracking** - modified flags, file paths, recent documents
+4. **Signal emission** - `documentSaved`, `documentLoaded` for UI updates
+5. **No memory leaks** - unique_ptr ownership transferred to DocumentManager
 
 ---
 
