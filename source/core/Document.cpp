@@ -671,7 +671,7 @@ QJsonObject Document::defaultBackgroundToJson() const
     QJsonObject bg;
     bg["type"] = backgroundTypeToString(defaultBackgroundType);
     bg["color"] = defaultBackgroundColor.name(QColor::HexArgb);
-    bg["grid_color"] = defaultGridColor.name(QColor::HexArgb);
+    bg["grid_color"] = defaultGridColor.name(QColor::HexRgb);  // Use 6-char hex (#RRGGBB) for clarity
     bg["grid_spacing"] = defaultGridSpacing;
     bg["line_spacing"] = defaultLineSpacing;
     bg["page_width"] = defaultPageSize.width();
@@ -686,7 +686,7 @@ void Document::loadDefaultBackgroundFromJson(const QJsonObject& obj)
     QString bgColor = obj["color"].toString("#ffffffff");
     defaultBackgroundColor = QColor(bgColor);
     
-    QString gridColor = obj["grid_color"].toString("#ffc8c8c8");
+    QString gridColor = obj["grid_color"].toString("#c8c8c8");  // Gray (200,200,200) in 6-char hex
     defaultGridColor = QColor(gridColor);
     
     defaultGridSpacing = obj["grid_spacing"].toInt(20);

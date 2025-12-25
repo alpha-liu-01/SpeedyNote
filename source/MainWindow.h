@@ -334,8 +334,8 @@ public:
 
     // Background settings persistence
     // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
-    void saveDefaultBackgroundSettings(Page::BackgroundType style, QColor color, int density);
-    void loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &color, int &density);
+    void saveDefaultBackgroundSettings(Page::BackgroundType style, QColor bgColor, QColor gridColor, int density);
+    void loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density);
     void applyDefaultBackgroundToCanvas(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - no-op
     
     void saveThemeSettings();
@@ -461,6 +461,8 @@ private slots:
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     
     // Phase doc-1: Document operations
+    void saveDocument();       // doc-1.1: Save document to JSON file (Ctrl+S)
+    void loadDocument();       // doc-1.2: Load document from JSON file (Ctrl+O)
     void addPageToDocument();  // doc-1.0: Add page at end of document (Ctrl+Shift+A)
     
     // void handleModeSelection(int angle);

@@ -307,7 +307,7 @@ QJsonObject Page::toJson() const
     obj["backgroundType"] = static_cast<int>(backgroundType);
     obj["pdfPageNumber"] = pdfPageNumber;
     obj["backgroundColor"] = backgroundColor.name(QColor::HexArgb);
-    obj["gridColor"] = gridColor.name(QColor::HexArgb);
+    obj["gridColor"] = gridColor.name(QColor::HexRgb);  // Use 6-char hex (#RRGGBB) for clarity
     obj["gridSpacing"] = gridSpacing;
     obj["lineSpacing"] = lineSpacing;
     // Note: customBackground pixmap is not serialized - path should be stored separately
@@ -353,7 +353,7 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
     page->backgroundType = static_cast<BackgroundType>(obj["backgroundType"].toInt(0));
     page->pdfPageNumber = obj["pdfPageNumber"].toInt(-1);
     page->backgroundColor = QColor(obj["backgroundColor"].toString("#ffffffff"));
-    page->gridColor = QColor(obj["gridColor"].toString("#ffc8c8c8"));
+    page->gridColor = QColor(obj["gridColor"].toString("#c8c8c8"));  // Gray (200,200,200) in 6-char hex
     page->gridSpacing = obj["gridSpacing"].toInt(20);
     page->lineSpacing = obj["lineSpacing"].toInt(24);
     

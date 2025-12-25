@@ -46,6 +46,8 @@
 #include <QProgressDialog>
 #include <QProcess>
 #include <QFileInfo>
+#include <QFile>
+#include <QJsonDocument>  // Phase doc-1: JSON serialization
 #include <QThread>
 #include <QPointer>
 // #include "HandwritingLineEdit.h"
@@ -1445,6 +1447,16 @@ void MainWindow::setupUi() {
     // Using QShortcut with ApplicationShortcut context for guaranteed behavior
     // regardless of which widget has focus.
     // =========================================================================
+    
+    // Save Document: Ctrl+S - save document to JSON file
+    QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
+    saveShortcut->setContext(Qt::ApplicationShortcut);
+    connect(saveShortcut, &QShortcut::activated, this, &MainWindow::saveDocument);
+    
+    // Load Document: Ctrl+O - load document from JSON file
+    QShortcut* loadShortcut = new QShortcut(QKeySequence::Open, this);
+    loadShortcut->setContext(Qt::ApplicationShortcut);
+    connect(loadShortcut, &QShortcut::activated, this, &MainWindow::loadDocument);
     
     // Add Page: Ctrl+Shift+A - appends new page at end of document
     QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
@@ -3132,6 +3144,190 @@ void MainWindow::centerViewportContent(int tabIndex) {
 // Phase doc-1: Document Operations
 // ============================================================================
 
+void MainWindow::saveDocument()
+{
+    // Phase doc-1.1: Save current document to JSON file via file dialog
+    
+    if (!m_tabManager) {
+        qDebug() << "saveDocument: No tab manager";
+        return;
+    }
+    
+    DocumentViewport* viewport = m_tabManager->currentViewport();
+    if (!viewport) {
+        qDebug() << "saveDocument: No current viewport";
+        QMessageBox::warning(this, tr("Save Document"), 
+            tr("No document is open."));
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        qDebug() << "saveDocument: No document in viewport";
+        QMessageBox::warning(this, tr("Save Document"), 
+            tr("No document is open."));
+        return;
+    }
+    
+    // Open file dialog for save location
+    QString defaultName = doc->name.isEmpty() ? "Untitled" : doc->name;
+    QString filter = tr("SpeedyNote JSON (*.json);;All Files (*)");
+    QString filePath = QFileDialog::getSaveFileName(
+        this,
+        tr("Save Document"),
+        QDir::homePath() + "/" + defaultName + ".json",
+        filter
+    );
+    
+    if (filePath.isEmpty()) {
+        // User cancelled
+        return;
+    }
+    
+    // Ensure .json extension
+    if (!filePath.endsWith(".json", Qt::CaseInsensitive)) {
+        filePath += ".json";
+    }
+    
+    // Update document name from file name (without extension)
+    QFileInfo fileInfo(filePath);
+    doc->name = fileInfo.baseName();
+    
+    // Serialize document to JSON
+    QJsonObject docJson = doc->toFullJson();
+    QJsonDocument jsonDoc(docJson);
+    
+    // Write to file
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, tr("Save Error"),
+            tr("Could not open file for writing:\n%1").arg(file.errorString()));
+        return;
+    }
+    
+    // Write with indentation for readability
+    qint64 bytesWritten = file.write(jsonDoc.toJson(QJsonDocument::Indented));
+    file.close();
+    
+    if (bytesWritten < 0) {
+        QMessageBox::critical(this, tr("Save Error"),
+            tr("Failed to write document:\n%1").arg(file.errorString()));
+        return;
+    }
+    
+    // Update document state
+    doc->clearModified();
+    
+    // Update tab title (remove * prefix)
+    int currentIndex = m_tabManager->currentIndex();
+    if (currentIndex >= 0) {
+        m_tabManager->setTabTitle(currentIndex, doc->name);
+        m_tabManager->markTabModified(currentIndex, false);
+    }
+    
+    qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath
+             << "(" << bytesWritten << "bytes)";
+}
+
+void MainWindow::loadDocument()
+{
+    // Phase doc-1.2: Load document from JSON file via file dialog
+    
+    // Open file dialog for file selection
+    QString filter = tr("SpeedyNote JSON (*.json);;All Files (*)");
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        tr("Open Document"),
+        QDir::homePath(),
+        filter
+    );
+    
+    if (filePath.isEmpty()) {
+        // User cancelled
+        return;
+    }
+    
+    // Read file contents
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, tr("Load Error"),
+            tr("Could not open file for reading:\n%1").arg(file.errorString()));
+        return;
+    }
+    
+    QByteArray jsonData = file.readAll();
+    file.close();
+    
+    // Parse JSON
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(jsonData, &parseError);
+    
+    if (parseError.error != QJsonParseError::NoError) {
+        QMessageBox::critical(this, tr("Load Error"),
+            tr("Invalid JSON file:\n%1\nAt offset: %2")
+                .arg(parseError.errorString())
+                .arg(parseError.offset));
+        return;
+    }
+    
+    if (!jsonDoc.isObject()) {
+        QMessageBox::critical(this, tr("Load Error"),
+            tr("Invalid document format: expected JSON object."));
+        return;
+    }
+    
+    // Deserialize document
+    std::unique_ptr<Document> doc = Document::fromFullJson(jsonDoc.object());
+    if (!doc) {
+        QMessageBox::critical(this, tr("Load Error"),
+            tr("Failed to parse document data."));
+        return;
+    }
+    
+    // Get document name from file if not set
+    if (doc->name.isEmpty()) {
+        QFileInfo fileInfo(filePath);
+        doc->name = fileInfo.baseName();
+    }
+    
+    // Transfer ownership to DocumentManager (if using one) or keep locally
+    // For now, we create the tab and let TabManager handle the viewport
+    Document* docPtr = doc.get();
+    
+    // Create new tab with the loaded document
+    if (!m_tabManager) {
+        qDebug() << "loadDocument: No tab manager";
+        return;
+    }
+    
+    int tabIndex = m_tabManager->createTab(docPtr, doc->displayName());
+    
+    if (tabIndex >= 0) {
+        // Transfer document ownership - store in a document container
+        // Note: For now, we'll use a simple approach where the document
+        // lives as long as the viewport. In a full implementation,
+        // DocumentManager would own documents.
+        
+        // Store the document pointer in the viewport's user data or similar
+        // For now, we'll use a static vector as a simple ownership mechanism
+        static std::vector<std::unique_ptr<Document>> s_loadedDocuments;
+        s_loadedDocuments.push_back(std::move(doc));
+        
+        // Try to reload PDF if the document has a PDF reference
+        if (!docPtr->pdfPath().isEmpty()) {
+            if (!docPtr->loadPdf(docPtr->pdfPath())) {
+                qDebug() << "loadDocument: Could not reload PDF from" << docPtr->pdfPath();
+                // Continue anyway - annotations are still usable without PDF
+            }
+        }
+        
+        // Center the viewport content
+        centerViewportContent(tabIndex);
+        
+        qDebug() << "loadDocument: Loaded" << docPtr->pageCount() << "pages from" << filePath;
+    }
+}
+
 void MainWindow::addPageToDocument()
 {
     // Phase doc-1.0: Add new page at end of document
@@ -3276,6 +3472,35 @@ void MainWindow::addNewTab() {
     if (!doc) {
         qWarning() << "addNewTab: Failed to create document";
         return;
+    }
+    
+    // Phase doc-1: Apply user's default background settings from QSettings
+    // This ensures new pages use the user's preferred background style
+    {
+        Page::BackgroundType defaultStyle;
+        QColor defaultBgColor;
+        QColor defaultGridColor;
+        int defaultDensity;
+        loadDefaultBackgroundSettings(defaultStyle, defaultBgColor, defaultGridColor, defaultDensity);
+        
+        // Update document defaults for future pages
+        doc->defaultBackgroundType = defaultStyle;
+        doc->defaultBackgroundColor = defaultBgColor;
+        doc->defaultGridColor = defaultGridColor;
+        doc->defaultGridSpacing = defaultDensity;
+        doc->defaultLineSpacing = defaultDensity;
+        
+        // Also apply to the first page (already created by Document::createNew)
+        if (doc->pageCount() > 0) {
+            Page* firstPage = doc->page(0);
+            if (firstPage) {
+                firstPage->backgroundType = defaultStyle;
+                firstPage->backgroundColor = defaultBgColor;
+                firstPage->gridColor = defaultGridColor;
+                firstPage->gridSpacing = defaultDensity;
+                firstPage->lineSpacing = defaultDensity;
+            }
+        }
     }
     
     // Create a new tab with DocumentViewport
@@ -6416,10 +6641,16 @@ void MainWindow::loadUserSettings() {
     // Load stylus button settings
     loadStylusButtonSettings();
     
-    // Initialize default background settings if they don't exist
-    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
-    if (!settings.contains("defaultBackgroundStyle")) {
-        saveDefaultBackgroundSettings(Page::BackgroundType::Grid, Qt::white, 30);
+    // Phase doc-1: Migrate from old BackgroundStyle enum to Page::BackgroundType
+    // Old enum: None=0, Grid=1, Lines=2
+    // New enum: None=0, PDF=1, Custom=2, Grid=3, Lines=4
+    // Using new key "defaultBgType" to avoid loading stale values from old enum
+    if (!settings.contains("defaultBgType")) {
+        // Clear old key if it exists (from pre-migration)
+        if (settings.contains("defaultBackgroundStyle")) {
+            settings.remove("defaultBackgroundStyle");
+        }
+        saveDefaultBackgroundSettings(Page::BackgroundType::Grid, Qt::white, QColor(200, 200, 200), 30);
     }
     
     // Load keyboard mappings
@@ -7275,11 +7506,12 @@ void MainWindow::onZoomSliderChanged(int value) {
     adjustThicknessForZoom(oldZoom, newZoom); // Maintain visual thickness consistency
 }
 
-void MainWindow::saveDefaultBackgroundSettings(Page::BackgroundType style, QColor color, int density) {
-    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
+void MainWindow::saveDefaultBackgroundSettings(Page::BackgroundType style, QColor bgColor, QColor gridColor, int density) {
+    // Phase doc-1: Using new key "defaultBgType" to avoid stale values from old BackgroundStyle enum
     QSettings settings("SpeedyNote", "App");
-    settings.setValue("defaultBackgroundStyle", static_cast<int>(style));
-    settings.setValue("defaultBackgroundColor", color.name());
+    settings.setValue("defaultBgType", static_cast<int>(style));
+    settings.setValue("defaultBackgroundColor", bgColor.name());
+    settings.setValue("defaultGridColor", gridColor.name());  // Phase doc-1: Added grid color
     settings.setValue("defaultBackgroundDensity", density);
 }
 
@@ -7475,17 +7707,25 @@ Poppler::Document* MainWindow::getPdfDocument() {
     return nullptr;
 }
 
-void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &color, int &density) {
-    // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
+void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density) {
+    // Phase doc-1: Using new key "defaultBgType" to avoid stale values from old BackgroundStyle enum
     QSettings settings("SpeedyNote", "App");
-    style = static_cast<Page::BackgroundType>(settings.value("defaultBackgroundStyle", static_cast<int>(Page::BackgroundType::Grid)).toInt());
-    color = QColor(settings.value("defaultBackgroundColor", "#FFFFFF").toString());
+    style = static_cast<Page::BackgroundType>(settings.value("defaultBgType", static_cast<int>(Page::BackgroundType::Grid)).toInt());
+    bgColor = QColor(settings.value("defaultBackgroundColor", "#FFFFFF").toString());
+    gridColor = QColor(settings.value("defaultGridColor", "#C8C8C8").toString());  // Phase doc-1: Added grid color (gray 200,200,200)
     density = settings.value("defaultBackgroundDensity", 30).toInt();
     
     // Ensure valid values
-    if (!color.isValid()) color = Qt::white;
+    if (!bgColor.isValid()) bgColor = Qt::white;
+    if (!gridColor.isValid()) gridColor = QColor(200, 200, 200);
     if (density < 10) density = 10;
     if (density > 200) density = 200;
+    
+    // Validate enum range (0-4 for Page::BackgroundType)
+    int styleInt = static_cast<int>(style);
+    if (styleInt < 0 || styleInt > 4) {
+        style = Page::BackgroundType::Grid;  // Default to Grid if invalid
+    }
 }
 
 void MainWindow::applyDefaultBackgroundToCanvas(InkCanvas *canvas) {
