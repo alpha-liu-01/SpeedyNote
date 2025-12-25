@@ -3106,12 +3106,13 @@ void MainWindow::centerViewportContent(int tabIndex) {
         // Set initial pan with negative X to center horizontally
         QPointF currentPan = viewport->panOffset();
         viewport->setPanOffset(QPointF(-centeringOffset, currentPan.y()));
-        
+        /*
         qDebug() << "centerViewportContent: tabIndex=" << tabIndex
                  << "contentWidth=" << contentSize.width()
                  << "viewportWidth=" << viewportWidth
                  << "centeringOffset=" << centeringOffset
                  << "newPanX=" << -centeringOffset;
+        */
     }
 }
 

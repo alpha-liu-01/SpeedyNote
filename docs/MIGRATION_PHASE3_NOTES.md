@@ -780,5 +780,152 @@ Don't copy test code from DocumentViewportTests - keep architecture clean.
 
 ---
 
+## Architectural Considerations (Dec 24, 2024)
+
+### MainWindow Size Problem
+
+The current MainWindow.cpp is ~8500 lines - a "god class" handling too many responsibilities:
+- Window frame, layout, menus
+- Tab/document management (partially extracted)
+- All toolbar buttons + handlers
+- MagicDial (6+ modes: tool, page, zoom, pan, thickness, preset)
+- Centralized eventFilter for multiple widgets
+- Settings persistence
+- PDF/export functionality
+- Stylus button mapping
+- Touch gesture configuration
+
+### eventFilter Bloat
+
+The eventFilter handles events for:
+- QLineEdit (IME focus)
+- canvasContainer (resize)
+- panXSlider/panYSlider (enter/leave)
+- DocumentViewport (tablet, wheel)
+- dialContainer (long press + drag)
+
+This violates single responsibility. Each widget should handle its own events.
+
+### Proposed Future Extraction (Phase 4+)
+
+| New Component | Extracted From |
+|---------------|----------------|
+| `ToolbarWidget` | Toolbar buttons, color buttons, tool handlers |
+| `MagicDialWidget` | Dial UI, mode switching, dial event handling |
+| `ScrollbarController` | Pan sliders, visibility, auto-hide |
+| `SettingsManager` | QSettings load/save, defaults |
+| `ExportManager` | PDF export, canvas export, merge operations |
+
+### Decisions Made (Dec 24, 2024)
+
+#### Overall Priority Order
+
+1. **FIRST: Document System Completion**
+   - Document loading integration (Document.cpp, PopplerPdfProvider.cpp)
+   - **JSON save/load** (metadata + pages with vector layers/strokes)
+   - This is prerequisite for testing modularization
+
+   **Note on file formats:**
+   - **JSON format (first):** Pure JSON containing document metadata + all pages with vector layers and strokes. No inserted objects (images, etc.) - those come later.
+   - **.snx package (later):** QDataStream-based package that bundles:
+     - The JSON document data
+     - Inserted pictures (ImageObject binary data)
+     - Other binary insertions
+   - Focus on JSON first, .snx is days/weeks away
+
+2. **SECOND: MainWindow Modularization**
+   - Full refactor, not incremental cleanup
+   - Extract components to source/ui/ (with subfolders for complex widgets)
+   - Each widget handles its own events (no centralized eventFilter)
+
+3. **THIRD: Feature Integration**
+   - Page navigation (after we can create multiple pages)
+   - LayerPanel integration
+   - Add/insert pages UI
+
+4. **FOURTH: Export System** (much later)
+   - ExportManager - low priority, app runs fine without it
+   - Just calls pdftk, not architecturally important
+
+#### What Stays in MainWindow
+
+- Window frame (resize, close, minimize, fullscreen)
+- Menu bar and menu actions
+- Overall layout orchestration (which widgets go where)
+- Central widget setup (the tab widget container)
+- Application-level state coordination
+- Global keyboard shortcuts (that don't belong to specific widgets)
+
+#### What Gets Extracted
+
+| Component | Location | Notes |
+|-----------|----------|-------|
+| `MagicDialWidget` | `source/ui/dial/` | Self-contained, SDL Controller integration |
+| `ToolbarWidget` | `source/ui/toolbar/` | Tool buttons, color buttons, thickness |
+| `ScrollbarController` | `source/ui/` | Pan sliders, visibility, DocumentViewport sync |
+| `SidebarManager` | `source/ui/sidebar/` | Abstract base for PDF outline, bookmarks, future |
+| `ExportManager` | `source/export/` | PDF export, canvas export (DELAYED) |
+
+#### Sidebar Abstraction
+
+SidebarManager should provide abstraction layer for:
+- PDF outline sidebar
+- Bookmarks sidebar
+- Future extensions (markdown notes, highlights, etc.)
+
+Common interface for all sidebars makes adding new sidebar types consistent.
+
+#### Component Pattern (from LayerPanel)
+
+All extracted components should follow LayerPanel's pattern:
+```cpp
+// Self-contained QWidget in source/ui/
+class ExampleWidget : public QWidget {
+    Q_OBJECT
+public:
+    explicit ExampleWidget(QWidget* parent = nullptr);
+    
+    // Connection methods
+    void setCurrentXXX(XXX* ptr);
+    
+signals:
+    // State change signals
+    void somethingChanged(...);
+    
+private:
+    void setupUI();
+    // Widget handles its own events - no external eventFilter needed
+};
+```
+
+MainWindow responsibilities:
+1. Create widget instances
+2. Place them in layout
+3. Connect signals to other components
+4. That's it - no event filtering, no internal logic
+
+#### eventFilter Strategy
+
+- **Current state**: Bloated, handles events for many widgets
+- **Target state**: No centralized eventFilter needed
+- **Transition**: As each widget is extracted, its event handling moves with it
+- **The program can run with no eventFilter** - add handlers back to individual widgets as needed
+
+#### Delayed Features
+
+| Feature | Reason | When |
+|---------|--------|------|
+| Page navigation (3.3.4) | Need multiple pages to test | After add/insert pages UI |
+| Undo/redo menu (3.3.5) | Keyboard shortcuts already work | Low priority |
+| ExportManager | App runs fine without it | Much later |
+
+### Modularization Rationale
+
+New features like LayerPanel and page management UI are already designed to be modular. 
+If we integrate them into the current "god class" MainWindow, we'll just add more spaghetti.
+Better to clean up MainWindow first, THEN integrate modular components cleanly.
+
+---
+
 *Notes file for SpeedyNote Phase 3 migration*
 
