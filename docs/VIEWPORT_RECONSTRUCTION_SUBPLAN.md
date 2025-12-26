@@ -2,7 +2,7 @@
 
 > **Purpose:** Fix the fundamental rendering architecture flaw in DocumentViewport
 > **Created:** Dec 26, 2024
-> **Status:** 🔄 IN PROGRESS (Phase 0 complete, Phase 1-3 complete)
+> **Status:** 📋 PLANNING
 
 ---
 
@@ -162,60 +162,12 @@ source/ui/LayerPanel.cpp         - No changes (only signal handlers change)
 
 ## Phase Breakdown
 
-### Phase 0: Preparation ✅ COMPLETE
-- [x] Create `source/viewport/` directory
-- [x] Add new files to CMakeLists.txt
-- [x] Document current DocumentViewport interface for reference
+### Phase 0: Preparation
+- [ ] Create `source/viewport/` directory
+- [ ] Add new files to CMakeLists.txt
+- [ ] Document current DocumentViewport interface for reference
 
-**Created files:**
-```
-source/viewport/
-├── BackgroundWidget.h    (98 lines)
-├── BackgroundWidget.cpp  (154 lines)
-├── LayerWidget.h         (107 lines)
-├── LayerWidget.cpp       (99 lines)
-├── PageWidget.h          (164 lines)
-└── PageWidget.cpp        (221 lines)
-```
-
-**CMakeLists.txt update:**
-```cmake
-set(VIEWPORT_SOURCES
-    source/viewport/BackgroundWidget.cpp
-    source/viewport/LayerWidget.cpp
-    source/viewport/PageWidget.cpp
-)
-```
-
-**Current DocumentViewport Interface (for reference):**
-```cpp
-// Key methods to KEEP (will be modified to use PageWidgets):
-void setDocument(Document* doc);
-void setZoomLevel(qreal zoom);
-void setPanOffset(QPointF offset);
-void scrollToPage(int pageIndex);
-QPointF viewportToDocument(QPointF viewportPt) const;
-PageHit viewportToPage(QPointF viewportPt) const;
-int pageAtPoint(QPointF documentPt) const;
-QVector<int> visiblePages() const;
-
-// Key methods to REMOVE (replaced by PageWidget):
-void renderPage(QPainter& painter, Page* page, int pageIndex);
-void renderCurrentStrokeIncremental(QPainter& painter);
-
-// Key methods to MODIFY (route to PageWidget):
-void handlePointerPress(const PointerEvent& pe);
-void handlePointerMove(const PointerEvent& pe);
-void handlePointerRelease(const PointerEvent& pe);
-
-// Signals to KEEP:
-void zoomChanged(qreal zoom);
-void panChanged(QPointF offset);
-void currentPageChanged(int pageIndex);
-void documentModified();
-```
-
-### Phase 1: BackgroundWidget ✅ COMPLETE
+### Phase 1: BackgroundWidget
 **Goal:** Widget that renders page background (color + PDF + grid/lines)
 
 **Files:** `BackgroundWidget.h`, `BackgroundWidget.cpp`
@@ -256,7 +208,7 @@ private:
 - Cache rebuilt only when zoom/dpr/settings change
 - Receives PDF pixmap from parent (PageWidget gets it from DocumentViewport)
 
-### Phase 2: LayerWidget ✅ COMPLETE
+### Phase 2: LayerWidget
 **Goal:** Widget that renders one VectorLayer's strokes
 
 **Files:** `LayerWidget.h`, `LayerWidget.cpp`
@@ -297,7 +249,7 @@ private:
 - If active, also renders `m_currentStroke`
 - Only this widget updates during stroke drawing
 
-### Phase 3: PageWidget ✅ COMPLETE
+### Phase 3: PageWidget
 **Goal:** Container that manages BackgroundWidget + LayerWidgets for one page
 
 **Files:** `PageWidget.h`, `PageWidget.cpp`
@@ -350,76 +302,8 @@ private:
 - Routes current stroke to active LayerWidget
 - Positions all child widgets to fill the page area
 
-### Phase 4: DocumentViewport Modification ✅ COMPLETE
+### Phase 4: DocumentViewport Modification
 **Goal:** Replace single-widget rendering with PageWidget management
-
-**Testing Shortcut Added:**
-- Press `T` to toggle between OLD (direct render) and NEW (PageWidgets) architecture
-- Debug overlay shows current architecture: `Arch: OLD` or `Arch: NEW`
-- Console outputs toggle status via qDebug
-
----
-
-## CRITICAL FIX: Qt Transparency Compositing Issue
-
-### The Problem Discovered
-
-Initial testing showed BackgroundWidget and LayerWidget paint counts were **IDENTICAL**:
-```
-BackgroundWidget::paintEvent # 101
-LayerWidget::paintEvent # 101
-```
-
-**Root Cause:** Qt's transparency compositing model.
-
-When LayerWidget had `WA_TranslucentBackground`:
-1. `activeLW->update()` is called
-2. Qt sees LayerWidget is transparent
-3. Qt needs what's "behind" for compositing
-4. Qt marks BackgroundWidget as needing repaint
-5. BackgroundWidget repaints (**including PDF blit!**)
-6. LayerWidget repaints
-7. Qt composites them
-
-**This is fundamental to Qt's widget model - cannot be bypassed with stacked transparent widgets.**
-
-### The Solution: Bake + Blit Architecture
-
-**NEW Architecture:**
-```
-PageWidget
-├── BackgroundWidget (OPAQUE)
-│   └── Caches: Background + PDF + Grid + ALL INACTIVE layer strokes
-│
-└── LayerWidget (OPAQUE - only ONE for active layer)
-    └── paintEvent:
-        1. Blit BackgroundWidget's cache (single drawPixmap)
-        2. Render active layer strokes
-        3. Render current stroke
-```
-
-**Key Changes:**
-1. **BackgroundWidget** now renders INACTIVE layer strokes into its cache
-2. **LayerWidget** is now **OPAQUE** (not transparent)
-3. **LayerWidget** blits the background cache before rendering strokes
-4. **Only ONE LayerWidget exists** (for the active layer)
-5. When active layer changes, BackgroundWidget rebuilds cache
-
-**Performance:**
-- During strokes: Only LayerWidget updates
-- BackgroundWidget does NOT repaint
-- PDF is NEVER re-blitted during strokes
-- Stroke performance is completely decoupled from PDF!
-
----
-
-**How to Test:**
-1. Launch application
-2. Load JSON with PDF
-3. Press `T` to switch to NEW architecture
-4. Rapid-fire draw strokes
-5. Check console: BackgroundWidget should NOT repaint during strokes
-6. Press `B` to benchmark, compare paint rates between OLD and NEW
 
 **Changes to DocumentViewport:**
 
