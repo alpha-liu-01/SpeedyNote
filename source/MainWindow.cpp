@@ -1462,6 +1462,11 @@ void MainWindow::setupUi() {
     QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
     addPageShortcut->setContext(Qt::ApplicationShortcut);
     connect(addPageShortcut, &QShortcut::activated, this, &MainWindow::addPageToDocument);
+    
+    // Open PDF: Ctrl+Shift+O - open PDF file in new tab
+    QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
+    openPdfShortcut->setContext(Qt::ApplicationShortcut);
+    connect(openPdfShortcut, &QShortcut::activated, this, &MainWindow::openPdfDocument);
 
 }
 
@@ -3307,6 +3312,56 @@ void MainWindow::addPageToDocument()
     }
 }
 
+void MainWindow::openPdfDocument()
+{
+    // Phase doc-1.4: Open PDF file and create PDF-backed document
+    // Uses DocumentManager for proper document ownership
+    
+    if (!m_documentManager || !m_tabManager) {
+        qWarning() << "openPdfDocument: DocumentManager or TabManager not initialized";
+        return;
+    }
+    
+    // Open file dialog for PDF selection
+    QString filter = tr("PDF Files (*.pdf);;All Files (*)");
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        tr("Open PDF"),
+        QDir::homePath(),
+        filter
+    );
+    
+    if (filePath.isEmpty()) {
+        // User cancelled
+        return;
+    }
+    
+    // Use DocumentManager to load the PDF
+    // DocumentManager::loadDocument() handles .pdf extension:
+    // - Calls Document::createForPdf(baseName, path)
+    // - Takes ownership of the document
+    // - Adds to recent documents
+    Document* doc = m_documentManager->loadDocument(filePath);
+    if (!doc) {
+        QMessageBox::critical(this, tr("PDF Error"),
+            tr("Failed to open PDF file:\n%1").arg(filePath));
+        return;
+    }
+    
+    // Create new tab with the PDF document
+    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
+    
+    if (tabIndex >= 0) {
+        // Center the viewport content
+        centerViewportContent(tabIndex);
+        
+        qDebug() << "openPdfDocument: Loaded PDF with" << doc->pageCount() 
+                 << "pages from" << filePath;
+    } else {
+        qWarning() << "openPdfDocument: Failed to create tab for document";
+    }
+}
+
 void MainWindow::applyZoom() {
     // Phase 3.1.8: Stubbed - DocumentViewport handles zoom via zoomSlider
     // TODO Phase 3.3: Connect to currentViewport()->setZoom() if needed
@@ -3319,10 +3374,9 @@ void MainWindow::forceUIRefresh() {
 }
 
 void MainWindow::loadPdf() {
-    // Phase 3.1.8: Stubbed - PDF loading will use DocumentViewport
-    // TODO Phase 3.4: Implement PDF loading for DocumentViewport
-    QMessageBox::information(this, tr("PDF Loading"), 
-        tr("PDF loading is being redesigned. Coming soon!"));
+    // Phase doc-1.4: Redirect to openPdfDocument() for PDF loading
+    // This stub exists for backward compatibility with menu items
+    openPdfDocument();
 }
 
 void MainWindow::clearPdf() {

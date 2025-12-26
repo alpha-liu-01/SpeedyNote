@@ -112,8 +112,92 @@ User presses Ctrl+O
 
 ### Phase 2: PDF Loading Integration
 
-#### 2.1 Implement Open PDF Flow
+#### 2.1 Implement Open PDF Flow ✅ COMPLETE
 **Goal:** Load PDF file and create PDF-backed document
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     PDF LOADING ARCHITECTURE                     │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   MainWindow    │────▶│ DocumentManager  │────▶│    Document     │
+│                 │     │                  │     │                 │
+│ openPdfDocument │     │ loadDocument()   │     │ loadPdf()       │
+│ (Ctrl+Shift+O)  │     │ - owns Document  │     │ createForPdf()  │
+└─────────────────┘     │ - tracks path    │     │                 │
+                        │ - recent docs    │     │ m_pdfProvider   │
+                        └──────────────────┘     └────────┬────────┘
+                                                          │
+                                                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     PDF PROVIDER LAYER                           │
+├─────────────────────────────────────────────────────────────────┤
+│  PdfProvider (interface)     PopplerPdfProvider (implementation) │
+│  ├─ pageCount()             ├─ Poppler::Document::load()         │
+│  ├─ pageSize(i)             │   [FAST: only parses metadata]     │
+│  ├─ renderPageToImage()     ├─ renderToImage(dpi)                │
+│  ├─ outline()               │   [EXPENSIVE: renders on demand]   │
+│  └─ textBoxes(i)            └─ getPage(i)->renderToImage()       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                   PDF RENDERING (Lazy, On-Demand)                │
+├─────────────────────────────────────────────────────────────────┤
+│  DocumentViewport                                                │
+│  ├─ paintEvent()                                                 │
+│  │   └─ renderPage() → getCachedPdfPage(pageIndex, dpi)         │
+│  │                                                               │
+│  ├─ m_pdfCache: QVector<PdfCacheEntry>  (capacity: 4-8)         │
+│  │   ├─ getCachedPdfPage() - returns cached or renders new      │
+│  │   ├─ preloadPdfCache()  - pre-renders ±1 adjacent pages      │
+│  │   └─ invalidatePdfCache() - clears on zoom/doc change        │
+│  │                                                               │
+│  └─ Cache Strategy:                                              │
+│      ┌──────────────────────────────────────────────────┐       │
+│      │ Page 3 │ Page 4 │ Page 5 │ Page 6 │ (empty)      │       │
+│      │(preload)│(visible)│(visible)│(preload)│           │       │
+│      └──────────────────────────────────────────────────┘       │
+│               ▲                              ▲                   │
+│          evicted first                 added last (FIFO)         │
+└─────────────────────────────────────────────────────────────────┘
+
+PERFORMANCE CHARACTERISTICS:
+─────────────────────────────
+• PDF Load:     O(1) - metadata parsing only
+• First Paint:  O(visible pages) - typically 1-2 pages
+• Scroll:       O(1) if cache hit, O(1 page) if cache miss
+• Zoom:         O(visible pages) - cache invalidated, re-render
+• Memory:       Bounded by cache capacity (4-8 pages)
+
+OPTIMIZATION DECISIONS:
+───────────────────────
+1. **Async Preloading (TODO)**
+   - Use `QtConcurrent` for background PDF page rendering
+   - Prevents scrolling jank on low-power devices
+   - Current: synchronous (blocks main thread)
+   - Future: async with progress signals
+
+2. **Zoom Debounce Timer**
+   - Problem: Ctrl+wheel zoom fires many rapid events
+   - Solution: Delay cache invalidation until zoom "settles"
+   - Implementation:
+     ```
+     onZoomChanged():
+       → Cancel existing debounce timer
+       → Start new timer (e.g., 200-300ms)
+       → On timeout: invalidatePdfCache() + re-render visible pages
+     ```
+   - Benefit: Avoids rendering intermediate zoom levels
+
+3. **Cache Size**
+   - Current: 4 pages (single column), 8 pages (two column)
+   - Future: Configurable via Control Panel (after reconnection)
+
+4. **Never Block UI**
+   - PDF opens immediately (metadata only)
+   - First visible page renders synchronously (unavoidable)
+   - Adjacent pages preload in background (after async is implemented)
+   - If page not ready, show placeholder or partial render
 
 **Requirements:**
 - Open OS file dialog for PDF selection
@@ -132,11 +216,23 @@ User presses Ctrl+O
 User presses Ctrl+Shift+O
   → MainWindow::openPdfDocument()
     → Show QFileDialog::getOpenFileName() with PDF filter
-    → Document::createForPdf(name, path)
-    → Create new tab (via TabManager)
-    → Set document on viewport
-    → Viewport renders PDF pages
+    → m_documentManager->loadDocument(path)  [handles .pdf extension]
+      → Document::createForPdf(baseName, path)
+        → Document::loadPdf(path)
+          → PdfProvider::create(path)
+            → PopplerPdfProvider (parses metadata only - FAST)
+        → Document::createPagesForPdf() (creates Page objects, no rendering)
+      → Takes ownership, adds to recent
+    → m_tabManager->createTab(doc, title)
+    → centerViewportContent()
+    → [First paintEvent triggers getCachedPdfPage() for visible pages]
 ```
+
+**Implementation Notes:**
+- `openPdfDocument()` added to MainWindow (Ctrl+Shift+O)
+- Legacy `loadPdf()` stub now redirects to `openPdfDocument()`
+- Uses `DocumentManager::loadDocument()` for proper ownership
+- Error dialog shown if PDF fails to load
 
 #### 2.2 Verify PDF Rendering
 **Goal:** Confirm PDF pages render correctly in DocumentViewport
@@ -146,6 +242,37 @@ User presses Ctrl+Shift+O
 - Multi-page PDF
 - PDF with different page sizes
 - Zooming and scrolling work correctly
+
+#### 2.3 Implement Zoom Debounce (Optimization)
+**Goal:** Prevent unnecessary re-renders during rapid zoom operations
+
+**Problem:** Ctrl+wheel zoom fires many events in quick succession. Current behavior:
+- Each zoom level change invalidates PDF cache
+- Re-renders all visible pages at new DPI
+- Wastes CPU on intermediate zoom levels user doesn't care about
+
+**Solution:** Add debounce timer to `DocumentViewport`:
+```cpp
+// In DocumentViewport.h:
+QTimer m_zoomDebounceTimer;
+
+// In constructor:
+m_zoomDebounceTimer.setSingleShot(true);
+m_zoomDebounceTimer.setInterval(250);  // 250ms settle time
+connect(&m_zoomDebounceTimer, &QTimer::timeout, this, [this]() {
+    invalidatePdfCache();
+    preloadPdfCache();
+    update();
+});
+
+// In setZoomLevel():
+// Don't invalidate immediately - just mark that zoom changed
+m_zoomDebounceTimer.start();  // Restarts timer on each zoom event
+```
+
+**Files to modify:**
+- `source/core/DocumentViewport.h` - Add timer member
+- `source/core/DocumentViewport.cpp` - Implement debounce logic
 
 ---
 
