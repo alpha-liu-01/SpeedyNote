@@ -682,5 +682,187 @@ Added `.json` support to `DocumentManager::loadDocument()`:
 
 ---
 
+## Bug Fixes (Phase 2 Testing)
+
+### Fix 1: Crash on Application Close (Signal-During-Destruction)
+
+**Problem:** Application crashes when closing with a document loaded.
+
+**Root Cause (from stack trace):**
+```
+MainWindow::~MainWindow()
+  → TabManager::~TabManager()
+    → DocumentViewport destroyed
+      → Signal: currentViewportChanged() emitted
+        → Slot: MainWindow::updateDialDisplay() called
+          → QPixmap::load() CRASH (MainWindow already partially destroyed)
+```
+
+When Qt deletes TabManager's children (DocumentViewport), signals are emitted to 
+slots in MainWindow which is already being destroyed.
+
+**Fix:** Disconnect TabManager signals in MainWindow destructor BEFORE Qt deletes children.
+
+```cpp
+MainWindow::~MainWindow() {
+    // Disconnect TabManager signals before children are deleted
+    if (m_tabManager) {
+        disconnect(m_tabManager, nullptr, this, nullptr);
+    }
+    
+    // ... rest of cleanup
+}
+```
+
+Also add defensive null check in `updateDialDisplay()` for robustness.
+
+---
+
+### Fix 2: Ctrl+S Always Shows File Dialog
+
+**Problem:** Pressing Ctrl+S on an already-saved document still shows the file dialog.
+
+**Expected behavior:**
+- **New document (no path):** Show "Save As" dialog
+- **Existing document (has path):** Save directly, no dialog
+
+**Fix:** Check if document has existing path before showing dialog.
+
+```cpp
+void MainWindow::saveDocument() {
+    // ...
+    QString existingPath = m_documentManager->documentPath(doc);
+    
+    if (!existingPath.isEmpty()) {
+        // Already saved - save in-place
+        if (!m_documentManager->saveDocument(doc)) {
+            QMessageBox::critical(...);
+        }
+        // Update UI (clear modified flag)
+        return;
+    }
+    
+    // New document - show Save As dialog
+    // ... existing dialog code
+}
+```
+
+---
+
+### Fix 3: PDF Performance Degradation (Page Background Caching)
+
+**Problem:** Rapid strokes are delayed when a PDF is loaded, but not on Grid/Lines pages.
+
+**Root Cause Analysis:**
+
+The old architecture had TWO separate widgets:
+- `InkCanvas`: Rendered background (PDF/grid/lines) - only repainted when background changed
+- `VectorCanvas`: Transparent overlay for strokes - repainted during drawing
+
+The new `DocumentViewport` merged everything into ONE widget. During each `paintEvent()`:
+```
+Current (slow for PDF):
+  paintEvent() → renderPage()
+    → fillRect(backgroundColor)     ← Re-done every paint
+    → drawPixmap(pdfFromCache)      ← Re-blitted every paint (overhead!)
+    → drawLines(grid)               ← Re-drawn every paint
+    → layer->renderWithZoomCache()  ← Stroke cache (fast)
+```
+
+Even though the PDF is cached, calling `drawPixmap()` for the full page 360 times/second has overhead.
+Grid/Lines are lightweight vector ops, so they don't show the same slowdown.
+
+**Solution: Add Page Background Composite Cache**
+
+Pre-render the entire page background (color + PDF + grid/lines) to a single pixmap:
+
+```
+Desired (fast for all background types):
+  paintEvent() → renderPage()
+    → drawPixmap(cachedPageBackground)  ← Single blit (fast!)
+    → layer->renderWithZoomCache()      ← Stroke cache (fast)
+```
+
+**Implementation Plan:**
+
+1. **Add to DocumentViewport.h:**
+   ```cpp
+   // Page background composite cache
+   struct PageBackgroundCache {
+       int pageIndex = -1;
+       qreal zoom = 0;
+       qreal dpr = 0;
+       QPixmap pixmap;
+       bool isValid(int idx, qreal z, qreal d) const {
+           return pageIndex == idx && qFuzzyCompare(zoom, z) && qFuzzyCompare(dpr, d);
+       }
+   };
+   QVector<PageBackgroundCache> m_pageBackgroundCaches;  // Per visible page
+   int m_backgroundCacheCapacity = 4;  // Same as PDF cache
+   ```
+
+2. **Add helper methods:**
+   ```cpp
+   QPixmap getCachedPageBackground(int pageIndex);
+   void invalidateBackgroundCaches();
+   void invalidateBackgroundCache(int pageIndex);
+   ```
+
+3. **Modify renderPage():**
+   ```cpp
+   void renderPage(QPainter& painter, Page* page, int pageIndex) {
+       // 1. Get or build background cache
+       QPixmap bgCache = getCachedPageBackground(pageIndex);
+       if (!bgCache.isNull()) {
+           painter.drawPixmap(0, 0, bgCache);
+       }
+       
+       // 2. Render strokes on top (already cached)
+       for (VectorLayer* layer : page->layers()) {
+           layer->renderWithZoomCache(painter, ...);
+       }
+       
+       // 3. Render objects, border, etc.
+   }
+   ```
+
+4. **getCachedPageBackground() builds cache if needed:**
+   ```cpp
+   QPixmap getCachedPageBackground(int pageIndex) {
+       // Check existing cache
+       for (auto& cache : m_pageBackgroundCaches) {
+           if (cache.isValid(pageIndex, m_zoomLevel, devicePixelRatioF())) {
+               return cache.pixmap;
+           }
+       }
+       
+       // Build new cache: render background + PDF + grid to pixmap
+       QPixmap bg = renderPageBackgroundToPixmap(pageIndex);
+       
+       // Store in cache (FIFO eviction if full)
+       // ...
+       
+       return bg;
+   }
+   ```
+
+5. **Invalidate cache when:**
+   - `setZoomLevel()` changes zoom
+   - `setDocument()` changes document
+   - Page background settings change
+
+**Expected Result:**
+- PDF pages: Same performance as Grid/Lines pages
+- During rapid strokes: Only 2 blits per page (background + strokes)
+- Background only re-rendered when zoom/settings change
+
+**Files to modify:**
+- `source/core/DocumentViewport.h` - Add cache structures
+- `source/core/DocumentViewport.cpp` - Implement caching logic
+
+---
+
+---
+
 *Subplan for doc-1 task in SpeedyNote Phase 3 migration*
 

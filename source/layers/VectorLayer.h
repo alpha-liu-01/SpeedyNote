@@ -19,6 +19,7 @@
 #include <QPolygonF>
 #include <QPixmap>
 #include <QtMath>
+#include <QDebug>
 
 /**
  * @brief A single vector layer containing strokes.
@@ -60,19 +61,25 @@ public:
     /**
      * @brief Add a stroke to this layer.
      * @param stroke The stroke to add.
+     * @param incrementalCacheUpdate DEPRECATED - no longer used. Cache is managed by BackgroundWidget.
      */
-    void addStroke(const VectorStroke& stroke) {
+    void addStroke(const VectorStroke& stroke, bool incrementalCacheUpdate = true) {
+        Q_UNUSED(incrementalCacheUpdate);
         m_strokes.append(stroke);
-        invalidateStrokeCache();  // Cache needs rebuild
+        // NOTE: VectorLayer's stroke cache is no longer used in the new architecture.
+        // BackgroundWidget manages the cache with all committed strokes.
+        // We just store the stroke data here.
     }
     
     /**
      * @brief Add a stroke by moving it (more efficient for large strokes).
      * @param stroke The stroke to move into this layer.
+     * @param incrementalCacheUpdate DEPRECATED - no longer used.
      */
-    void addStroke(VectorStroke&& stroke) {
+    void addStroke(VectorStroke&& stroke, bool incrementalCacheUpdate = true) {
+        Q_UNUSED(incrementalCacheUpdate);
         m_strokes.append(std::move(stroke));
-        invalidateStrokeCache();  // Cache needs rebuild
+        // NOTE: VectorLayer's stroke cache is no longer used in the new architecture.
     }
     
     /**
@@ -427,6 +434,8 @@ private:
      * Strokes are rendered pre-scaled by zoom for sharp display.
      */
     void rebuildStrokeCache(const QSizeF& size, qreal zoom, qreal dpr) const {
+        qDebug() << "VectorLayer: FULL cache rebuild, rendering" << m_strokes.size() << "strokes";
+        
         // Physical size includes both zoom and DPI scaling
         QSize physicalSize(static_cast<int>(size.width() * zoom * dpr), 
                            static_cast<int>(size.height() * zoom * dpr));
@@ -456,5 +465,25 @@ private:
         m_strokeCacheDirty = false;
         m_cacheZoom = zoom;
         m_cacheDpr = dpr;
+    }
+    
+    /**
+     * @brief Append a single stroke to the existing cache (O(1) operation).
+     * @param stroke The stroke to render onto the cache.
+     * 
+     * This is called when a stroke is committed, avoiding a full cache rebuild.
+     * The cache must already exist and be valid (not dirty).
+     */
+    void appendStrokeToCache(const VectorStroke& stroke) const {
+        if (m_strokeCache.isNull() || m_strokeCacheDirty) {
+            return;  // Cache not valid, can't append
+        }
+        
+        QPainter cachePainter(&m_strokeCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Render just this stroke onto the existing cache
+        // The cache already has devicePixelRatio set correctly
+        renderStroke(cachePainter, stroke);
     }
 };

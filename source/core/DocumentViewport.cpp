@@ -6,6 +6,7 @@
 
 #include "DocumentViewport.h"
 #include "../layers/VectorLayer.h"
+#include "../viewport/PageWidget.h"
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -20,6 +21,7 @@
 #include <QDateTime>  // For timestamp
 #include <QUuid>      // For stroke IDs
 #include <QSet>       // For efficient ID lookup in eraseAt
+#include <QDebug>     // For architecture toggle debug output
 
 // ===== Constructor & Destructor =====
 
@@ -58,6 +60,9 @@ DocumentViewport::DocumentViewport(QWidget* parent)
 DocumentViewport::~DocumentViewport()
 {
     // Document is not owned, so nothing to delete
+    
+    // Clean up PageWidgets (new architecture)
+    destroyAllPageWidgets();
 }
 
 // ===== Document Management =====
@@ -73,6 +78,9 @@ void DocumentViewport::setDocument(Document* doc)
     // Invalidate PDF cache for new document (Task 1.3.6)
     invalidatePdfCache();
     
+    // Destroy existing PageWidgets (new architecture)
+    destroyAllPageWidgets();
+    
     // Reset view state
     m_zoomLevel = 1.0;
     m_panOffset = QPointF(0, 0);
@@ -83,6 +91,11 @@ void DocumentViewport::setDocument(Document* doc)
         m_currentPageIndex = qMin(m_document->lastAccessedPage, 
                                    m_document->pageCount() - 1);
         // Will scroll to this page in a later task
+    }
+    
+    // Rebuild PageWidgets if new architecture is enabled
+    if (m_useNewArchitecture && m_document) {
+        syncPageWidgets();
     }
     
     // Trigger repaint
@@ -206,6 +219,19 @@ void DocumentViewport::setZoomLevel(qreal zoom)
     // when ensureStrokeCacheValid() is called with the new zoom level.
     // No explicit invalidation needed - just lazy rebuild on next paint.
     
+    // NEW ARCHITECTURE: Update PageWidgets with new zoom
+    if (m_useNewArchitecture) {
+        for (PageWidget* pw : m_pageWidgets) {
+            pw->setZoom(m_zoomLevel);
+            pw->invalidateBackgroundCache();
+        }
+        // Re-provide PDF pixmaps at new DPI
+        for (auto it = m_pageIndexToWidget.begin(); it != m_pageIndexToWidget.end(); ++it) {
+            providePdfToPageWidget(it.key(), it.value());
+        }
+        updatePageWidgetPositions();
+    }
+    
     // Clamp pan offset (bounds change with zoom)
     clampPanOffset();
     
@@ -220,6 +246,11 @@ void DocumentViewport::setPanOffset(QPointF offset)
     clampPanOffset();
     
     updateCurrentPageIndex();
+    
+    // NEW ARCHITECTURE: Update PageWidget positions and sync visible pages
+    if (m_useNewArchitecture) {
+        syncPageWidgets();  // Creates/destroys PageWidgets as pages scroll in/out
+    }
     
     update();
     emit panChanged(m_panOffset);
@@ -657,59 +688,81 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         return;
     }
     
-    // Get visible pages to render
-    QVector<int> visible = visiblePages();
-    
-    // Apply view transform
-    painter.save();
-    painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-    painter.scale(m_zoomLevel, m_zoomLevel);
-    
-    // Render each visible page
-    // For partial updates, only render pages that intersect the dirty region
-    for (int pageIdx : visible) {
-        Page* page = m_document->page(pageIdx);
-        if (!page) continue;
+    // ========== NEW ARCHITECTURE: PageWidgets handle their own rendering ==========
+    // When using new architecture, DocumentViewport only paints:
+    // - The gray background (already done above)
+    // - The eraser cursor
+    // - The debug overlay
+    // PageWidgets paint themselves (background + layers)
+    if (m_useNewArchitecture) {
+        // NOTE: Do NOT call syncPageWidgets() here - it's called from setPanOffset/resize
+        // Calling it here causes hundreds of redundant calls per second
         
-        // Check if this page intersects the dirty region (optimization for partial updates)
-        if (isPartialUpdate) {
-            QPointF pos = pagePosition(pageIdx);
-            QRectF pageRectInViewport = QRectF(
-                (pos.x() - m_panOffset.x()) * m_zoomLevel,
-                (pos.y() - m_panOffset.y()) * m_zoomLevel,
-                page->size.width() * m_zoomLevel,
-                page->size.height() * m_zoomLevel
-            );
-            if (!pageRectInViewport.intersects(dirtyRect)) {
-                continue;  // Skip this page - it doesn't intersect dirty region
+        // Draw eraser cursor
+        drawEraserCursor(painter);
+        
+        // Skip to debug overlay (drawn below)
+        goto draw_debug_overlay;
+    }
+    
+    // ========== OLD ARCHITECTURE: Direct rendering ==========
+    {
+        // Get visible pages to render
+        QVector<int> visible = visiblePages();
+        
+        // Apply view transform
+        painter.save();
+        painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+        painter.scale(m_zoomLevel, m_zoomLevel);
+        
+        // Render each visible page
+        // For partial updates, only render pages that intersect the dirty region
+        for (int pageIdx : visible) {
+            Page* page = m_document->page(pageIdx);
+            if (!page) continue;
+            
+            // Check if this page intersects the dirty region (optimization for partial updates)
+            if (isPartialUpdate) {
+                QPointF pos = pagePosition(pageIdx);
+                QRectF pageRectInViewport = QRectF(
+                    (pos.x() - m_panOffset.x()) * m_zoomLevel,
+                    (pos.y() - m_panOffset.y()) * m_zoomLevel,
+                    page->size.width() * m_zoomLevel,
+                    page->size.height() * m_zoomLevel
+                );
+                if (!pageRectInViewport.intersects(dirtyRect)) {
+                    continue;  // Skip this page - it doesn't intersect dirty region
+                }
             }
+            
+            QPointF pos = pagePosition(pageIdx);
+            
+            painter.save();
+            painter.translate(pos);
+            
+            // Render the page (background + content)
+            renderPage(painter, page, pageIdx);
+            
+            painter.restore();
         }
         
-        QPointF pos = pagePosition(pageIdx);
-        
-        painter.save();
-        painter.translate(pos);
-        
-        // Render the page (background + content)
-        renderPage(painter, page, pageIdx);
-        
         painter.restore();
+        
+        // Render current stroke with incremental caching (Task 2.3)
+        // This is done AFTER restoring the painter transform because the cache
+        // is in viewport coordinates (not document coordinates)
+        if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
+            renderCurrentStrokeIncremental(painter);
+        }
+        
+        // Draw eraser cursor (Task 2.4)
+        // Skip during stroke drawing (partial updates for pen don't need eraser cursor)
+        if (!m_isDrawing || !isPartialUpdate) {
+            drawEraserCursor(painter);
+        }
     }
     
-    painter.restore();
-    
-    // Render current stroke with incremental caching (Task 2.3)
-    // This is done AFTER restoring the painter transform because the cache
-    // is in viewport coordinates (not document coordinates)
-    if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
-        renderCurrentStrokeIncremental(painter);
-    }
-    
-    // Draw eraser cursor (Task 2.4)
-    // Skip during stroke drawing (partial updates for pen don't need eraser cursor)
-    if (!m_isDrawing || !isPartialUpdate) {
-        drawEraserCursor(painter);
-    }
+draw_debug_overlay:
     
     // Draw debug info overlay if enabled
     // Skip during partial updates unless the dirty region includes the overlay area
@@ -736,7 +789,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
                                "Zoom: %4% | Pan: (%5, %6)\n"
                                "Layout: %7 | Content: %8x%9\n"
                                "Tool: %10%11 | Undo:%12 Redo:%13\n"
-                               "Paint Rate: %14 [P=Pen, E=Eraser, B=Benchmark]")
+                               "Arch: %14 | Paint Rate: %15 [P/E/B/T]")
             .arg(m_document->displayName())
             .arg(m_document->pageCount())
             .arg(m_currentPageIndex + 1)
@@ -750,7 +803,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
             .arg(canUndo() ? "Y" : "N")
             .arg(canRedo() ? "Y" : "N")
-            .arg(m_benchmarking ? QString("%1 Hz").arg(getPaintRate()) : "OFF (press B)");
+            .arg(m_useNewArchitecture ? "NEW" : "OLD")
+            .arg(m_benchmarking ? QString("%1 Hz").arg(getPaintRate()) : "OFF");
         
         // Draw with background for readability
         QRect textRect = painter.fontMetrics().boundingRect(
@@ -795,6 +849,11 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     
     // Update current page index (visible area changed)
     updateCurrentPageIndex();
+    
+    // NEW ARCHITECTURE: Sync PageWidgets (visible pages may have changed)
+    if (m_useNewArchitecture) {
+        syncPageWidgets();
+    }
     
     // Emit signals and repaint
     emit panChanged(m_panOffset);
@@ -988,6 +1047,13 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
                 startBenchmark();
             }
             update();
+            event->accept();
+            return;
+            
+        case Qt::Key_T:
+            // T = Toggle new architecture (for testing)
+            setUseNewArchitecture(!m_useNewArchitecture);
+            qDebug() << "Architecture toggled:" << (m_useNewArchitecture ? "NEW (PageWidgets)" : "OLD (direct render)");
             event->accept();
             return;
             
@@ -1407,7 +1473,37 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
                           eraserRadius * 2, eraserRadius * 2);
         update(cursorRect.toRect());
     } else if (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker) {
-        startStroke(pe);
+        // NEW ARCHITECTURE: Route stroke to PageWidget
+        if (m_useNewArchitecture && m_activeDrawingPage >= 0) {
+            PageWidget* pw = pageWidgetForPage(m_activeDrawingPage);
+            if (pw) {
+                qDebug() << "NEW ARCH: beginStroke on page" << m_activeDrawingPage;
+                
+                // Create initial stroke
+                VectorStroke stroke;
+                stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                stroke.color = m_penColor;
+                stroke.baseThickness = m_penThickness;
+                
+                // Add first point
+                StrokePoint sp;
+                sp.pos = pe.pageHit.pagePoint;
+                sp.pressure = pe.pressure;
+                stroke.points.append(sp);
+                stroke.updateBoundingBox();
+                
+                pw->beginStroke(stroke);
+                m_isDrawing = true;
+            } else {
+                qDebug() << "NEW ARCH: No PageWidget for page" << m_activeDrawingPage;
+            }
+        } else {
+            // OLD ARCHITECTURE: Handle stroke directly
+            if (m_useNewArchitecture) {
+                qDebug() << "NEW ARCH: Stroke NOT routed (activeDrawingPage=" << m_activeDrawingPage << ")";
+            }
+            startStroke(pe);
+        }
     }
 }
 
@@ -1450,7 +1546,36 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
                        eraserRadius * 2, eraserRadius * 2);
         update(oldRect.united(newRect).toRect());
     } else if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
-        continueStroke(pe);
+        // NEW ARCHITECTURE: Route stroke update to PageWidget
+        if (m_useNewArchitecture) {
+            PageWidget* pw = pageWidgetForPage(m_activeDrawingPage);
+            if (pw && pw->isDrawing()) {
+                // Get the current stroke and add a point
+                VectorStroke stroke = pw->currentStroke();
+                
+                // Add point with decimation
+                QPointF pagePos = pe.pageHit.pagePoint;
+                if (!stroke.points.isEmpty()) {
+                    QPointF lastPos = stroke.points.last().pos;
+                    qreal dx = pagePos.x() - lastPos.x();
+                    qreal dy = pagePos.y() - lastPos.y();
+                    if (dx * dx + dy * dy < MIN_DISTANCE_SQ) {
+                        return;  // Skip - too close to last point
+                    }
+                }
+                
+                StrokePoint sp;
+                sp.pos = pagePos;
+                sp.pressure = pe.pressure;
+                stroke.points.append(sp);
+                stroke.updateBoundingBox();
+                
+                pw->updateStroke(stroke);
+            }
+        } else {
+            // OLD ARCHITECTURE: Handle stroke directly
+            continueStroke(pe);
+        }
     }
 }
 
@@ -1462,7 +1587,20 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     
     // Finish stroke if we were drawing
     if (m_isDrawing) {
-        finishStroke();
+        // NEW ARCHITECTURE: Route stroke finish to PageWidget
+        if (m_useNewArchitecture && m_activeDrawingPage >= 0) {
+            PageWidget* pw = pageWidgetForPage(m_activeDrawingPage);
+            if (pw && pw->isDrawing()) {
+                pw->endStroke();
+                
+                // Push undo action (stroke was added to the layer by PageWidget)
+                // Note: PageWidget emits strokeCompleted signal for this
+            }
+            m_isDrawing = false;
+        } else {
+            // OLD ARCHITECTURE: Handle stroke directly
+            finishStroke();
+        }
     }
     
     // Clear active state
@@ -2237,4 +2375,167 @@ void DocumentViewport::emitScrollFractions()
     
     emit horizontalScrollChanged(hFraction);
     emit verticalScrollChanged(vFraction);
+}
+
+// ============================================================================
+// NEW ARCHITECTURE: PageWidget Management (Viewport Reconstruction)
+// ============================================================================
+
+void DocumentViewport::setUseNewArchitecture(bool enable)
+{
+    if (m_useNewArchitecture == enable) {
+        return;
+    }
+    
+    m_useNewArchitecture = enable;
+    
+    if (enable && m_document) {
+        // Switch to new architecture: create PageWidgets
+        qDebug() << "NEW ARCHITECTURE: Creating PageWidgets for document with" 
+                 << m_document->pageCount() << "pages";
+        syncPageWidgets();
+        qDebug() << "NEW ARCHITECTURE: Created" << m_pageWidgets.count() << "PageWidgets";
+    } else {
+        // Switch to old architecture: destroy PageWidgets
+        qDebug() << "OLD ARCHITECTURE: Destroying" << m_pageWidgets.count() << "PageWidgets";
+        destroyAllPageWidgets();
+    }
+    
+    update();
+}
+
+void DocumentViewport::syncPageWidgets()
+{
+    if (!m_useNewArchitecture || !m_document) {
+        return;
+    }
+    
+    // Get currently visible pages
+    QVector<int> visible = visiblePages();
+    QSet<int> visibleSet(visible.begin(), visible.end());
+    
+    // Quick check: if visible pages haven't changed, just update positions
+    QSet<int> currentSet;
+    for (auto it = m_pageIndexToWidget.begin(); it != m_pageIndexToWidget.end(); ++it) {
+        currentSet.insert(it.key());
+    }
+    
+    if (visibleSet == currentSet) {
+        // Same pages visible - just update positions (no widget create/destroy)
+        updatePageWidgetPositions();
+        return;
+    }
+    
+    qDebug() << "syncPageWidgets: Visible pages changed:" << visible;
+    
+    // Find which PageWidgets to destroy (no longer visible)
+    QVector<int> toDestroy;
+    for (auto it = m_pageIndexToWidget.begin(); it != m_pageIndexToWidget.end(); ++it) {
+        if (!visibleSet.contains(it.key())) {
+            toDestroy.append(it.key());
+        }
+    }
+    
+    // Destroy PageWidgets for pages that scrolled out
+    for (int pageIndex : toDestroy) {
+        PageWidget* pw = m_pageIndexToWidget.take(pageIndex);
+        m_pageWidgets.removeOne(pw);
+        delete pw;
+        qDebug() << "syncPageWidgets: Destroyed PageWidget for page" << pageIndex;
+    }
+    
+    // Create PageWidgets for newly visible pages
+    for (int pageIndex : visible) {
+        if (!m_pageIndexToWidget.contains(pageIndex)) {
+            Page* page = m_document->page(pageIndex);
+            if (page) {
+                PageWidget* pw = new PageWidget(this);
+                pw->setPage(page);
+                pw->setZoom(m_zoomLevel);
+                
+                // Set active layer from page
+                pw->setActiveLayerIndex(page->activeLayerIndex);
+                
+                // Provide PDF pixmap if this is a PDF page
+                providePdfToPageWidget(pageIndex, pw);
+                
+                pw->show();
+                
+                m_pageWidgets.append(pw);
+                m_pageIndexToWidget.insert(pageIndex, pw);
+                
+                qDebug() << "syncPageWidgets: Created PageWidget for page" << pageIndex
+                         << "at zoom" << m_zoomLevel;
+            }
+        }
+    }
+    
+    // Update positions for all PageWidgets
+    updatePageWidgetPositions();
+    qDebug() << "syncPageWidgets: PageWidgets updated, count:" << m_pageWidgets.count();
+}
+
+PageWidget* DocumentViewport::pageWidgetForPage(int pageIndex) const
+{
+    return m_pageIndexToWidget.value(pageIndex, nullptr);
+}
+
+void DocumentViewport::updatePageWidgetPositions()
+{
+    if (!m_useNewArchitecture || !m_document) {
+        return;
+    }
+    
+    for (auto it = m_pageIndexToWidget.begin(); it != m_pageIndexToWidget.end(); ++it) {
+        int pageIndex = it.key();
+        PageWidget* pw = it.value();
+        
+        Page* page = m_document->page(pageIndex);
+        if (!page) continue;
+        
+        // Calculate page position in viewport coordinates
+        QPointF docPos = pagePosition(pageIndex);
+        QPointF viewportPos = documentToViewport(docPos);
+        
+        // Calculate page size at current zoom
+        QSizeF scaledSize(page->size.width() * m_zoomLevel,
+                          page->size.height() * m_zoomLevel);
+        
+        // Set geometry
+        pw->setGeometry(static_cast<int>(viewportPos.x()),
+                        static_cast<int>(viewportPos.y()),
+                        static_cast<int>(scaledSize.width()),
+                        static_cast<int>(scaledSize.height()));
+        
+        // Update zoom (triggers cache rebuilds if needed)
+        pw->setZoom(m_zoomLevel);
+    }
+}
+
+void DocumentViewport::destroyAllPageWidgets()
+{
+    for (PageWidget* pw : m_pageWidgets) {
+        delete pw;
+    }
+    m_pageWidgets.clear();
+    m_pageIndexToWidget.clear();
+}
+
+void DocumentViewport::providePdfToPageWidget(int pageIndex, PageWidget* pageWidget)
+{
+    if (!m_document || !pageWidget) {
+        return;
+    }
+    
+    Page* page = m_document->page(pageIndex);
+    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
+        return;
+    }
+    
+    // Use existing PDF cache to get the pixmap
+    if (page->pdfPageNumber >= 0 && m_document->isPdfLoaded()) {
+        qreal dpi = effectivePdfDpi();
+        QPixmap pdfPixmap = getCachedPdfPage(page->pdfPageNumber, dpi);
+        pageWidget->setPdfPixmap(pdfPixmap);
+    }
 }

@@ -332,6 +332,13 @@ set(UI_SOURCES
         source/ui/LayerPanel.cpp             # Task 3.0.3
 )
 
+# ✅ NEW ARCHITECTURE: Viewport reconstruction (Performance fix)
+set(VIEWPORT_SOURCES
+        source/viewport/BackgroundWidget.cpp  # Renders page background
+        source/viewport/LayerWidget.cpp       # Renders one VectorLayer
+        source/viewport/PageWidget.cpp        # Container for bg + layers
+)
+
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
 set(PDF_SOURCES
         source/pdf/PopplerPdfProvider.cpp  # Task 1.2.2
@@ -368,6 +375,7 @@ add_executable(${PROJECT_NAME}
         ${CORE_SOURCES}
         ${LAYER_SOURCES}
         ${UI_SOURCES}
+        ${VIEWPORT_SOURCES}
         ${OBJECT_SOURCES}
         ${STROKE_SOURCES}
         ${PDF_SOURCES}

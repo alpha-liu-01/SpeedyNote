@@ -1,0 +1,34 @@
+This was what you said last time you tried this... 
+
+BackgroundWidget and LayerWidget paint counts are IDENTICAL! They're both at 101, 201, 301, 401...
+This means every time LayerWidget updates, BackgroundWidget is ALSO repainting!
+The Root Cause
+The problem is WA_TranslucentBackground on LayerWidget:
+// LayerWidget.cppsetAttribute(Qt::WA_TranslucentBackground, true);setAttribute(Qt::WA_NoSystemBackground, true);
+When a child widget has WA_TranslucentBackground, Qt must repaint the parent first to composite correctly. This is fundamental to Qt's widget rendering model:
+activeLW->update() is called
+Qt sees LayerWidget is transparent
+Qt knows it needs what's "behind" LayerWidget for compositing
+Qt marks BackgroundWidget as needing repaint
+BackgroundWidget repaints (including the PDF!)
+LayerWidget repaints
+Qt composites them
+The widget-per-layer architecture fundamentally cannot work with Qt's transparency model without this overhead.
+The Real Solution
+The correct approach is dirty rect compositing in a single widget:
+During stroke drawing:1. Calculate dirty rect (just the new stroke segment, ~100x100 pixels)2. In paintEvent, ONLY that rect is processed:   - Blit that small portion of pre-cached background (instant)   - Render only strokes intersecting that rect (few or none)   - Render current stroke segment
+This is what we should have done from the start. The multi-widget approach was a red herring.
+Let me update DocumentViewport to implement proper dirty rect updates in the OLD architecture, which will actually fix the performance issue:
+Now I understand the real issue! Let me trace the actual problem:
+addPointToStroke() calls update(dirtyRect) - a small 100x100 pixel area
+paintEvent() receives this dirty rect
+But renderPage() still calls painter.drawPixmap(pageRect.toRect(), pdfPixmap) - the FULL page
+Even though the painter is clipped to the dirty rect, Qt still has to:
+Read the full PDF pixmap from memory
+Scale/transform it
+Composite the visible portion
+The solution: Create a page-level background cache at current zoom in DocumentViewport itself (not in child widgets). During strokes, we blit only the dirty portion of this pre-scaled cache.
+
+
+
+This was what you said last time you tried this... 

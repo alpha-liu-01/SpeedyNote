@@ -1480,6 +1480,14 @@ MainWindow::~MainWindow() {
 
     saveButtonMappings();  // ✅ Save on exit, as backup
     
+    // ✅ FIX: Disconnect TabManager signals BEFORE Qt deletes children
+    // This prevents "signal during destruction" crash where TabManager emits
+    // currentViewportChanged during child deletion, triggering updateDialDisplay
+    // on a partially-destroyed MainWindow.
+    if (m_tabManager) {
+        disconnect(m_tabManager, nullptr, this, nullptr);
+    }
+    
     // Phase 3.3: Clean up viewport scroll connections
     if (m_hScrollConn) disconnect(m_hScrollConn);
     if (m_vScrollConn) disconnect(m_vScrollConn);
@@ -3151,8 +3159,10 @@ void MainWindow::centerViewportContent(int tabIndex) {
 
 void MainWindow::saveDocument()
 {
-    // Phase doc-1.1: Save current document to JSON file via file dialog
+    // Phase doc-1.1: Save current document to JSON file
     // Uses DocumentManager for proper document handling
+    // - If document has existing path: save in-place (no dialog)
+    // - If new document: show Save As dialog
     
     if (!m_documentManager || !m_tabManager) {
         qWarning() << "saveDocument: DocumentManager or TabManager not initialized";
@@ -3176,11 +3186,27 @@ void MainWindow::saveDocument()
     // Check if document already has a path (previously saved)
     QString existingPath = m_documentManager->documentPath(doc);
     
-    // Open file dialog for save location
+    if (!existingPath.isEmpty()) {
+        // ✅ Document was previously saved - save in-place, no dialog
+        if (!m_documentManager->saveDocument(doc)) {
+            QMessageBox::critical(this, tr("Save Error"),
+                tr("Failed to save document to:\n%1").arg(existingPath));
+            return;
+        }
+        
+        // Update tab title (clear modified flag)
+        int currentIndex = m_tabManager->currentIndex();
+        if (currentIndex >= 0) {
+            m_tabManager->markTabModified(currentIndex, false);
+        }
+        
+        qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << existingPath;
+        return;
+    }
+    
+    // ✅ New document - show Save As dialog
     QString defaultName = doc->name.isEmpty() ? "Untitled" : doc->name;
-    QString defaultPath = existingPath.isEmpty() 
-        ? QDir::homePath() + "/" + defaultName + ".json"
-        : existingPath;
+    QString defaultPath = QDir::homePath() + "/" + defaultName + ".json";
     
     QString filter = tr("SpeedyNote JSON (*.json);;All Files (*)");
     QString filePath = QFileDialog::getSaveFileName(

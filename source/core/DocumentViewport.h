@@ -20,6 +20,10 @@
 #include "../strokes/VectorStroke.h"
 #include <QStack>
 #include <QMap>
+#include <QHash>
+
+// Forward declarations for new viewport architecture
+class PageWidget;
 
 // ============================================================================
 // PageUndoAction - Represents a single undoable action (Task 2.5)
@@ -866,4 +870,74 @@ private:
      * @brief Whether to show debug overlay.
      */
     bool m_showDebugOverlay = true;
+    
+    // =========================================================================
+    // NEW ARCHITECTURE: Widget-per-layer rendering (Viewport Reconstruction)
+    // =========================================================================
+    // When m_useNewArchitecture is true, DocumentViewport uses PageWidgets
+    // instead of direct rendering. Each PageWidget contains a BackgroundWidget
+    // and LayerWidgets for proper layer separation.
+    // Toggle allows A/B testing during development.
+    // =========================================================================
+    
+    /// @brief Toggle between old (single widget) and new (widget-per-layer) architecture
+    bool m_useNewArchitecture = false;
+    
+    /// @brief PageWidgets for visible pages (new architecture)
+    QVector<PageWidget*> m_pageWidgets;
+    
+    /// @brief Map from page index to PageWidget for quick lookup
+    QHash<int, PageWidget*> m_pageIndexToWidget;
+    
+    /**
+     * @brief Synchronize PageWidgets with visible pages.
+     * 
+     * Creates PageWidgets for newly visible pages, destroys those that scrolled out.
+     * Only called when m_useNewArchitecture is true.
+     */
+    void syncPageWidgets();
+    
+    /**
+     * @brief Get the PageWidget for a specific page index.
+     * @param pageIndex The page index.
+     * @return PageWidget pointer, or nullptr if page not visible.
+     */
+    PageWidget* pageWidgetForPage(int pageIndex) const;
+    
+    /**
+     * @brief Update positions and sizes of all PageWidgets.
+     * 
+     * Called after pan/zoom changes to reposition PageWidgets.
+     */
+    void updatePageWidgetPositions();
+    
+    /**
+     * @brief Destroy all PageWidgets.
+     * 
+     * Called when document changes or viewport is destroyed.
+     */
+    void destroyAllPageWidgets();
+    
+    /**
+     * @brief Provide PDF pixmap to a PageWidget.
+     * @param pageIndex The page index.
+     * @param pageWidget The PageWidget to update.
+     * 
+     * Uses the existing PDF cache to get/render the PDF pixmap.
+     */
+    void providePdfToPageWidget(int pageIndex, PageWidget* pageWidget);
+    
+public:
+    /**
+     * @brief Enable or disable the new widget-per-layer architecture.
+     * @param enable True to use new architecture, false for old.
+     * 
+     * For development/testing. Triggers full rebuild of PageWidgets.
+     */
+    void setUseNewArchitecture(bool enable);
+    
+    /**
+     * @brief Check if new architecture is enabled.
+     */
+    bool useNewArchitecture() const { return m_useNewArchitecture; }
 };
