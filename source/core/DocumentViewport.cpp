@@ -73,8 +73,9 @@ void DocumentViewport::setDocument(Document* doc)
     
     m_document = doc;
     
-    // Invalidate PDF cache for new document (Task 1.3.6)
+    // Invalidate caches for new document
     invalidatePdfCache();
+    invalidatePageLayoutCache();
     
     // Reset view state
     m_zoomLevel = 1.0;
@@ -107,6 +108,9 @@ void DocumentViewport::setLayoutMode(LayoutMode mode)
     }
     
     m_layoutMode = mode;
+    
+    // Invalidate layout cache for new layout mode
+    invalidatePageLayoutCache();
     
     // Update PDF cache capacity for new layout (Task 1.3.6)
     updatePdfCacheCapacity();
@@ -202,7 +206,6 @@ void DocumentViewport::setZoomLevel(qreal zoom)
     
     // Invalidate PDF cache if DPI changed significantly (Task 1.3.6)
     if (!qFuzzyCompare(oldDpi, newDpi)) {
-        qDebug() << "setZoomLevel: DPI changed from" << oldDpi << "to" << newDpi << "- invalidating cache";
         invalidatePdfCache();
     }
     
@@ -228,6 +231,10 @@ void DocumentViewport::setPanOffset(QPointF offset)
     update();
     emit panChanged(m_panOffset);
     emitScrollFractions();
+    
+    // Preload PDF cache for adjacent pages after scroll (Task: PDF Performance Fix)
+    // Safe here because scroll is user-initiated, not during rapid stroke drawing
+    preloadPdfCache();
 }
 
 void DocumentViewport::scrollToPage(int pageIndex)
@@ -425,51 +432,25 @@ QPointF DocumentViewport::pagePosition(int pageIndex) const
         return QPointF(0, 0);
     }
     
+    // Ensure cache is valid - O(n) rebuild only when dirty
+    ensurePageLayoutCache();
+    
+    // O(1) lookup from cache
+    qreal y = (pageIndex < m_pageYCache.size()) ? m_pageYCache[pageIndex] : 0;
+    
     switch (m_layoutMode) {
-        case LayoutMode::SingleColumn: {
-            // Pages stacked vertically, centered horizontally
-            qreal y = 0;
-            for (int i = 0; i < pageIndex; ++i) {
-                const Page* page = m_document->page(i);
-                if (page) {
-                    y += page->size.height() + m_pageGap;
-                }
-            }
-            
-            // Center horizontally within the widest page
-            // For now, just use x = 0 (will center in rendering)
+        case LayoutMode::SingleColumn:
+            // X is always 0 for single column
             return QPointF(0, y);
-        }
         
         case LayoutMode::TwoColumn: {
-            // Pages arranged in pairs: (0,1), (2,3), (4,5), ...
-            int row = pageIndex / 2;
+            // Y comes from cache, just need to calculate X for right column
             int col = pageIndex % 2;
-            
-            qreal y = 0;
-            for (int r = 0; r < row; ++r) {
-                // Get the height of the row (max of two pages)
-                qreal rowHeight = 0;
-                int leftIdx = r * 2;
-                int rightIdx = r * 2 + 1;
-                
-                const Page* leftPage = m_document->page(leftIdx);
-                if (leftPage) {
-                    rowHeight = qMax(rowHeight, leftPage->size.height());
-                }
-                
-                const Page* rightPage = m_document->page(rightIdx);
-                if (rightPage) {
-                    rowHeight = qMax(rowHeight, rightPage->size.height());
-                }
-                
-                y += rowHeight + m_pageGap;
-            }
-            
             qreal x = 0;
+            
             if (col == 1) {
                 // Right column - offset by left page width + gap
-                int leftIdx = row * 2;
+                int leftIdx = (pageIndex / 2) * 2;
                 const Page* leftPage = m_document->page(leftIdx);
                 if (leftPage) {
                     x = leftPage->size.width() + m_pageGap;
@@ -572,18 +553,51 @@ int DocumentViewport::pageAtPoint(QPointF documentPt) const
     
     // For edgeless documents, the single page covers everything
     if (m_document->isEdgeless()) {
-        // Check if within page bounds (for edgeless, always return 0 if within bounds)
         const Page* page = m_document->edgelessPage();
         if (page) {
-            // Edgeless pages can extend beyond their nominal size
-            // For now, any point returns page 0
             return 0;
         }
         return -1;
     }
     
-    // Check each page's rect
-    for (int i = 0; i < m_document->pageCount(); ++i) {
+    // Ensure cache is valid for O(1) page position lookup
+    ensurePageLayoutCache();
+    
+    int pageCount = m_document->pageCount();
+    qreal y = documentPt.y();
+    
+    // For single column: use binary search on Y positions (O(log n))
+    if (m_layoutMode == LayoutMode::SingleColumn && !m_pageYCache.isEmpty()) {
+        // Binary search to find the page containing this Y coordinate
+        int low = 0;
+        int high = pageCount - 1;
+        int candidate = -1;
+        
+        while (low <= high) {
+            int mid = (low + high) / 2;
+            qreal pageY = m_pageYCache[mid];
+            
+            if (y < pageY) {
+                high = mid - 1;
+            } else {
+                candidate = mid;  // This page starts at or before our Y
+                low = mid + 1;
+            }
+        }
+        
+        // Check if the point is actually within the candidate page
+        if (candidate >= 0) {
+            QRectF rect = pageRect(candidate);  // Now O(1)
+            if (rect.contains(documentPt)) {
+                return candidate;
+            }
+        }
+        
+        return -1;
+    }
+    
+    // For two-column: linear search (still O(n) but pageRect is now O(1))
+    for (int i = 0; i < pageCount; ++i) {
         QRectF rect = pageRect(i);
         if (rect.contains(documentPt)) {
             return i;
@@ -616,10 +630,57 @@ QVector<int> DocumentViewport::visiblePages() const
         return result;
     }
     
-    QRectF viewRect = visibleRect();
+    // Ensure cache is valid for O(1) page position lookup
+    ensurePageLayoutCache();
     
-    // Check each page for intersection with visible rect
-    for (int i = 0; i < m_document->pageCount(); ++i) {
+    QRectF viewRect = visibleRect();
+    int pageCount = m_document->pageCount();
+    
+    // For single column: use binary search to find visible range (O(log n))
+    if (m_layoutMode == LayoutMode::SingleColumn && !m_pageYCache.isEmpty()) {
+        qreal viewTop = viewRect.top();
+        qreal viewBottom = viewRect.bottom();
+        
+        // Binary search for first page that might be visible
+        int low = 0;
+        int high = pageCount - 1;
+        int firstCandidate = pageCount;  // Beyond last page
+        
+        while (low <= high) {
+            int mid = (low + high) / 2;
+            qreal pageY = m_pageYCache[mid];
+            const Page* page = m_document->page(mid);
+            qreal pageBottom = page ? (pageY + page->size.height()) : pageY;
+            
+            if (pageBottom < viewTop) {
+                // Page is entirely above viewport
+                low = mid + 1;
+            } else {
+                // Page might be visible
+                firstCandidate = mid;
+                high = mid - 1;
+            }
+        }
+        
+        // Now iterate from first candidate until pages are below viewport
+        for (int i = firstCandidate; i < pageCount; ++i) {
+            qreal pageY = m_pageYCache[i];
+            if (pageY > viewBottom) {
+                // This and all subsequent pages are below viewport
+                break;
+            }
+            
+            QRectF rect = pageRect(i);  // O(1) now
+            if (rect.intersects(viewRect)) {
+                result.append(i);
+            }
+        }
+        
+        return result;
+    }
+    
+    // For two-column: linear search (pageRect is now O(1))
+    for (int i = 0; i < pageCount; ++i) {
         QRectF rect = pageRect(i);
         if (rect.intersects(viewRect)) {
             result.append(i);
@@ -1173,29 +1234,15 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
         return QPixmap();
     }
     
-    // DEBUG: Show what we're looking for
-    qDebug() << "getCachedPdfPage: LOOKING FOR pageIndex=" << pageIndex << " dpi=" << dpi 
-             << " cacheSize=" << m_pdfCache.size();
-    
     // Check if we have this page cached at the right DPI
-    for (int i = 0; i < m_pdfCache.size(); ++i) {
-        const PdfCacheEntry& entry = m_pdfCache[i];
-        bool pageMatch = (entry.pageIndex == pageIndex);
-        bool dpiMatch = qFuzzyCompare(entry.dpi, dpi);
-        
-        qDebug() << "  Cache[" << i << "]: pageIndex=" << entry.pageIndex 
-                 << " dpi=" << entry.dpi
-                 << " pageMatch=" << pageMatch 
-                 << " dpiMatch=" << dpiMatch
-                 << " pixmapNull=" << entry.pixmap.isNull();
-        
+    for (const PdfCacheEntry& entry : m_pdfCache) {
         if (entry.matches(pageIndex, dpi)) {
-            qDebug() << "  -> CACHE HIT!";
             return entry.pixmap;
         }
     }
-
-    qDebug() << "  -> CACHE MISS! Rendering page...";
+    
+    // Cache miss - render the page (this is the expensive operation)
+    // qDebug() << "PDF cache miss: rendering page" << pageIndex << "at" << dpi << "dpi";
     
     // Not cached - render it now
     QImage pdfImage = m_document->renderPdfPageToImage(pageIndex, dpi);
@@ -1242,13 +1289,10 @@ void DocumentViewport::preloadPdfCache()
     
     qreal dpi = effectivePdfDpi();
     
-    qDebug() << "preloadPdfCache: visible=" << visible << " preloadRange=" << preloadStart << "-" << preloadEnd << " dpi=" << dpi << " cacheCapacity=" << m_pdfCacheCapacity;
-    
     // Pre-load pages (this also adds them to cache)
     for (int i = preloadStart; i <= preloadEnd; ++i) {
         Page* page = m_document->page(i);
         if (page && page->backgroundType == Page::BackgroundType::PDF) {
-            qDebug() << "  preloading docPage=" << i << " pdfPageNum=" << page->pdfPageNumber;
             getCachedPdfPage(page->pdfPageNumber, dpi);
         }
     }
@@ -1256,7 +1300,6 @@ void DocumentViewport::preloadPdfCache()
 
 void DocumentViewport::invalidatePdfCache()
 {
-    qDebug() << "!!! invalidatePdfCache() called! Clearing" << m_pdfCache.size() << "entries";
     m_pdfCache.clear();
     m_cachedDpi = 0;
 }
@@ -1291,6 +1334,70 @@ void DocumentViewport::updatePdfCacheCapacity()
     while (m_pdfCache.size() > m_pdfCacheCapacity) {
         m_pdfCache.removeFirst();
     }
+}
+
+// ===== Page Layout Cache (Performance Optimization) =====
+
+void DocumentViewport::ensurePageLayoutCache() const
+{
+    if (!m_pageLayoutDirty || !m_document) {
+        return;
+    }
+    
+    int pageCount = m_document->pageCount();
+    m_pageYCache.resize(pageCount);
+    
+    if (m_document->isEdgeless() || pageCount == 0) {
+        m_pageLayoutDirty = false;
+        return;
+    }
+    
+    // Build cache based on layout mode
+    switch (m_layoutMode) {
+        case LayoutMode::SingleColumn: {
+            qreal y = 0;
+            for (int i = 0; i < pageCount; ++i) {
+                m_pageYCache[i] = y;
+                const Page* page = m_document->page(i);
+                if (page) {
+                    y += page->size.height() + m_pageGap;
+                }
+            }
+            break;
+        }
+        
+        case LayoutMode::TwoColumn: {
+            // For two-column, we store the Y of each row
+            // Y position is same for both pages in a row
+            qreal y = 0;
+            for (int i = 0; i < pageCount; ++i) {
+                int row = i / 2;
+                
+                if (i % 2 == 0) {
+                    // First page of row - calculate and store Y
+                    m_pageYCache[i] = y;
+                } else {
+                    // Second page of row - same Y as first
+                    m_pageYCache[i] = m_pageYCache[i - 1];
+                    
+                    // After second page, advance Y
+                    qreal rowHeight = 0;
+                    const Page* leftPage = m_document->page(i - 1);
+                    const Page* rightPage = m_document->page(i);
+                    if (leftPage) rowHeight = qMax(rowHeight, leftPage->size.height());
+                    if (rightPage) rowHeight = qMax(rowHeight, rightPage->size.height());
+                    y += rowHeight + m_pageGap;
+                }
+            }
+            // Handle odd page count (last page is alone)
+            if (pageCount % 2 == 1 && pageCount > 0) {
+                // Last row Y already set, just need to ensure it's correct
+            }
+            break;
+        }
+    }
+    
+    m_pageLayoutDirty = false;
 }
 
 // ===== Stroke Cache Helpers (Task 1.3.7) =====
@@ -2061,7 +2168,6 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             // Render PDF page from cache (Task 1.3.6)
             if (m_document->isPdfLoaded() && page->pdfPageNumber >= 0) {
                 qreal dpi = effectivePdfDpi();
-                qDebug() << "renderPage: docPageIdx=" << pageIndex << " pdfPageNum=" << page->pdfPageNumber << " dpi=" << dpi;
                 QPixmap pdfPixmap = getCachedPdfPage(page->pdfPageNumber, dpi);
                 
                 if (!pdfPixmap.isNull()) {

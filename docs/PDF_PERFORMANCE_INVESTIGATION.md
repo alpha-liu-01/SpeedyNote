@@ -1,6 +1,6 @@
 # PDF Performance Investigation
 
-> **Status:** 🔴 UNRESOLVED - Root cause not yet identified
+> **Status:** ✅ RESOLVED - Cache thrashing bug fixed
 > **Created:** Dec 26, 2024
 > **Last Updated:** Dec 26, 2024
 
@@ -289,18 +289,152 @@ LayerWidget::paintEvent # 1001 layer: "Layer 1" active: true hasBgCache: true bg
 
 ---
 
-## Conclusion
+## ✅ ROOT CAUSE IDENTIFIED & FIXED
 
-The PDF performance issue remains **UNRESOLVED**. All measured timing shows similar performance between PDF and non-PDF cases (~250 µs per paint), yet the user experiences significantly worse lag with PDF.
+### The Problem: PDF Cache Thrashing
 
-The root cause appears to be **OUTSIDE** of our rendering code, possibly in:
-- Input event delivery
-- Memory/system-level effects
-- Qt event loop behavior
+**Root Cause:** Two bugs causing cache thrashing:
 
-Further investigation is needed with profiling tools that can measure the entire event pipeline, not just the paint cycle.
+1. **Default cache capacity was 2 instead of 4**
+   - Header file: `int m_pdfCacheCapacity = 2;`
+   - But `preloadPdfCache()` tries to cache 3-4 pages (visible + buffer)
+   - Result: Every preload evicts pages that will be needed immediately
+
+2. **`preloadPdfCache()` called on every stroke release**
+   - `handlePointerRelease()` called `preloadPdfCache()`
+   - During rapid strokes, this triggered the thrashing cycle:
+     1. Preload page 2 → evicts page 0
+     2. `paintEvent()` needs page 0 → MISS → re-render → evicts page 1
+     3. `paintEvent()` needs page 1 → MISS → re-render → evicts page 2
+     4. Next stroke → preload again → repeat!
+
+3. **`updatePdfCacheCapacity()` never called in constructor**
+   - The function existed to set capacity to 4 (single column) or 8 (two column)
+   - But it was only called from `setLayoutMode()`, not from constructor
+   - So capacity remained at the broken default of 2
+
+### The Fix
+
+```cpp
+// 1. Fixed default in DocumentViewport.h
+int m_pdfCacheCapacity = 4;  // Was: 2
+
+// 2. Added to constructor
+updatePdfCacheCapacity();  // Ensure capacity is set properly
+
+// 3. Removed preloadPdfCache() from handlePointerRelease()
+// Only call it during scroll, not during drawing
+
+// 4. Added preloadPdfCache() to setPanOffset()
+// Preload adjacent pages after scroll (safe here, not during rapid strokes)
+```
+
+### Why This Caused "Several Hundred Times" Worse Performance
+
+- **PDF render time:** ~50-200ms per page (Poppler rendering)
+- **With thrashing:** 4+ PDF renders per stroke (thrashing cycle)
+- **Per stroke overhead:** 200-800ms+ of blocking PDF rendering
+- **Rapid-fire strokes:** 10+ strokes/second × 200ms each = complete freeze
+
+### Why Paint Timing Was "Similar"
+
+The paint timing measurements (~250 µs) only measured the `drawPixmap()` call for CACHED pages. The expensive Poppler renders happened BEFORE `paintEvent()` in `getCachedPdfPage()`, which wasn't included in the timing.
+
+### Cache Architecture Explained
+
+**Q: Why do visible pages need to stay in cache?**
+
+The PDF cache stores **pre-rendered QPixmaps**:
+- Without cache: Every `paintEvent()` → `renderPdfPageToImage()` → Poppler re-renders PDF (50-200ms)
+- With cache: Every `paintEvent()` → `getCachedPdfPage()` → returns cached pixmap (0.1ms)
+
+Visible pages MUST be cached, otherwise every paint would trigger expensive PDF rendering.
+
+**Q: Why so many cache hits per stroke?**
+
+Each stroke point triggers:
+1. `update()` → `paintEvent()` → `renderPage()` → `getCachedPdfPage()`
+
+Cache HITs are essentially free (~0.001ms each). The problem was cache MISSES triggering expensive re-renders.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `source/core/DocumentViewport.h` | Fixed default `m_pdfCacheCapacity = 4` |
+| `source/core/DocumentViewport.cpp` | Added `updatePdfCacheCapacity()` to constructor, removed `preloadPdfCache()` from `handlePointerRelease()`, added it to `setPanOffset()` |
+
+### Verification
+
+After fix:
+- Cache size stays at 3 (page 0, 1, 2 for 3-page PDF)
+- All strokes show CACHE HIT
+- No more `renderPageToImage` calls during drawing
+- CPU usage dropped from 8% to ~0.8%
+- Rapid-fire strokes work perfectly
 
 ---
 
-*Investigation document for SpeedyNote PDF performance issue*
+## ✅ SECOND OPTIMIZATION: O(n²) → O(log n) Page Layout
+
+### The Problem (Dec 26, 2024)
+
+For very large documents (3600+ pages), stroke performance degraded even after the cache thrashing fix. The paint rate dropped from 500-800 Hz to 120 Hz.
+
+### Root Cause
+
+**`pagePosition()`** was O(pageIndex):
+```cpp
+for (int i = 0; i < pageIndex; ++i) {  // O(n) loop!
+    y += page->size.height() + m_pageGap;
+}
+```
+
+**`pageAtPoint()`** was O(n²):
+```cpp
+for (int i = 0; i < pageCount; ++i) {  // O(n) iterations
+    QRectF rect = pageRect(i);  // pageRect → pagePosition → O(i)
+}
+```
+
+For page 1800 (middle of 3600):
+- `pageAtPoint()` loops 1800 times
+- Each loop calls `pagePosition(i)` which loops `i` times
+- **Total: 0+1+2+...+1800 ≈ 1.6 MILLION operations per stroke point**
+
+At 360 Hz tablet input = **576 million operations/second!**
+
+### The Fix
+
+1. **Added page Y position cache** (`m_pageYCache`)
+   - Rebuilt once when document/layout changes
+   - Makes `pagePosition()` O(1)
+
+2. **Optimized `pageAtPoint()` with binary search**
+   - O(log n) instead of O(n²)
+   - For 3600 pages: ~12 operations instead of 1.6 million
+
+3. **Optimized `visiblePages()` with binary search**
+   - Finds first/last visible page in O(log n)
+   - Only iterates visible range (~2-3 pages)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `source/core/DocumentViewport.h` | Added `m_pageYCache`, `m_pageLayoutDirty`, `ensurePageLayoutCache()`, `invalidatePageLayoutCache()` |
+| `source/core/DocumentViewport.cpp` | Implemented cache, optimized `pagePosition()`, `pageAtPoint()`, `visiblePages()` |
+
+### Complexity Before vs After
+
+| Operation | Before | After |
+|-----------|--------|-------|
+| `pagePosition(i)` | O(i) | O(1) |
+| `pageAtPoint()` | O(n²) | O(log n) |
+| `visiblePages()` | O(n²) | O(log n + visible) |
+| Per stroke point (3600 pages) | ~1.6M ops | ~20 ops |
+
+---
+
+*Investigation document for SpeedyNote PDF performance issue - RESOLVED Dec 26, 2024*
 

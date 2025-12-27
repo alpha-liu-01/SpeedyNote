@@ -614,6 +614,10 @@ private:
     QVector<PdfCacheEntry> m_pdfCache;
     qreal m_cachedDpi = 0;       ///< DPI at which cache was rendered
     
+    // ===== Page Layout Cache (Performance: O(1) page position lookup) =====
+    mutable QVector<qreal> m_pageYCache;  ///< Cached Y position for each page (single column)
+    mutable bool m_pageLayoutDirty = true; ///< True if cache needs rebuild
+    
     // ===== Input State (Task 1.3.8) =====
     int m_activeDrawingPage = -1;       ///< Page currently receiving strokes (-1 = none)
     bool m_pointerActive = false;       ///< True if pointer is pressed
@@ -711,6 +715,17 @@ private:
      * @brief Update cache capacity based on layout mode.
      */
     void updatePdfCacheCapacity();
+    
+    /**
+     * @brief Invalidate page layout cache - call when pages added/removed/resized.
+     */
+    void invalidatePageLayoutCache() { m_pageLayoutDirty = true; }
+    
+    /**
+     * @brief Rebuild page layout cache if dirty.
+     * Makes pagePosition() O(1) instead of O(n).
+     */
+    void ensurePageLayoutCache() const;
     
     // ===== Stroke Cache Helpers (Task 1.3.7) =====
     
