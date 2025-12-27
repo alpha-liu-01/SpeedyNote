@@ -436,5 +436,115 @@ At 360 Hz tablet input = **576 million operations/second!**
 
 ---
 
+## ✅ THIRD OPTIMIZATION: Async Preloading + Smart Eviction
+
+### The Problem (Dec 26, 2024)
+
+PDF preloading was:
+1. **Synchronous** - blocked main thread during scroll
+2. **Using FIFO eviction** - evicted pages we were about to need when scrolling back
+
+### The Fix
+
+**1. Async PDF Preloading (Non-Blocking)**
+
+PDF pages are now rendered in background threads using `QtConcurrent`:
+
+```cpp
+// Each background thread creates its own PdfProvider (thread-safe)
+QtConcurrent::run([pdfPath, pdfPageNum, dpi]() {
+    PopplerPdfProvider threadPdf(pdfPath);  // Thread-local PDF instance
+    QImage image = threadPdf.renderPageToImage(pdfPageNum, dpi);
+    // Add to cache with mutex lock
+});
+```
+
+**2. Debounced Preload Requests (150ms)**
+
+```cpp
+void preloadPdfCache() {
+    m_pdfPreloadTimer->start(PDF_PRELOAD_DELAY_MS);  // Restarts timer
+}
+
+// Timer fires only after 150ms of no scroll
+void doAsyncPdfPreload() {
+    // Launch background threads for missing pages
+}
+```
+
+**3. Smart Eviction (Distance-Based, Not FIFO)**
+
+```cpp
+// Evict page FURTHEST from current page
+int evictIndex = 0;
+int maxDistance = -1;
+for (int i = 0; i < m_pdfCache.size(); ++i) {
+    int distance = qAbs(m_pdfCache[i].pageIndex - pageIndex);
+    if (distance > maxDistance) {
+        maxDistance = distance;
+        evictIndex = i;
+    }
+}
+m_pdfCache.removeAt(evictIndex);
+```
+
+**4. Increased Cache Capacity**
+
+| Layout | Before | After |
+|--------|--------|-------|
+| Single Column | 4 pages | 6 pages |
+| Two Column | 8 pages | 12 pages |
+
+### Verified Behavior
+
+**Test:** Scroll from page 0 → page 11 → back to page 0
+
+```
+PDF CACHE MISS: rendering page 0 | cache has [ "" ] capacity= 6  ← Initial (expected)
+PDF async preload: started 1 background renders for pages QList(1)
+PDF async preload: started 1 background renders for pages QList(2)
+...
+PDF async preload: started 1 background renders for pages QList(12)  ← Forward scroll
+PDF async preload: started 1 background renders for pages QList(6)   ← Scroll back
+PDF async preload: started 1 background renders for pages QList(5)
+...
+PDF async preload: started 1 background renders for pages QList(0)
+```
+
+**Key observation: NO CACHE MISS during scroll back!**
+
+This means:
+- Async preloads completed while scrolling forward
+- Pages were already in cache when scrolling back
+- Smart eviction kept nearby pages (instead of evicting the ones we needed)
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `source/core/DocumentViewport.h` | Added `QMutex m_pdfCacheMutex`, `QTimer* m_pdfPreloadTimer`, `QList<QFutureWatcher<void>*> m_activePdfWatchers`, `doAsyncPdfPreload()` |
+| `source/core/DocumentViewport.cpp` | Async preloading with `QtConcurrent`, debounce timer, smart eviction, thread-safe cache access |
+
+### Architecture Summary
+
+```
+User scrolls
+    ↓
+preloadPdfCache() → Restarts 150ms debounce timer
+    ↓ (after 150ms of no scroll)
+doAsyncPdfPreload()
+    ↓
+For each missing page:
+    QtConcurrent::run() → Background thread
+        ↓
+        Creates thread-local PopplerPdfProvider
+        Renders page to QImage
+        Locks mutex, adds to cache (smart eviction if full)
+        ↓
+    QFutureWatcher::finished → update() (repaint)
+```
+
+---
+
 *Investigation document for SpeedyNote PDF performance issue - RESOLVED Dec 26, 2024*
 

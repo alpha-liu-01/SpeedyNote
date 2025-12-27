@@ -6,6 +6,7 @@
 
 #include "DocumentViewport.h"
 #include "../layers/VectorLayer.h"
+#include "../pdf/PopplerPdfProvider.h"
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -15,6 +16,7 @@
 #include <QWheelEvent>
 #include <QKeyEvent>
 #include <QtMath>     // For qPow
+#include <QtConcurrent>  // For async PDF rendering
 #include <algorithm>  // For std::remove_if
 #include <limits>
 #include <QDateTime>  // For timestamp
@@ -54,13 +56,29 @@ DocumentViewport::DocumentViewport(QWidget* parent)
         }
     });
     
+    // PDF preload timer - debounces preload requests during rapid scrolling
+    m_pdfPreloadTimer = new QTimer(this);
+    m_pdfPreloadTimer->setSingleShot(true);
+    connect(m_pdfPreloadTimer, &QTimer::timeout, this, &DocumentViewport::doAsyncPdfPreload);
+    
     // Initialize PDF cache capacity based on default layout mode
     updatePdfCacheCapacity();
 }
 
 DocumentViewport::~DocumentViewport()
 {
-    // Document is not owned, so nothing to delete
+    // Cancel any pending preload requests
+    if (m_pdfPreloadTimer) {
+        m_pdfPreloadTimer->stop();
+    }
+    
+    // Wait for and clean up any active async PDF watchers
+    for (QFutureWatcher<void>* watcher : m_activePdfWatchers) {
+        watcher->cancel();
+        watcher->waitForFinished();
+        delete watcher;
+    }
+    m_activePdfWatchers.clear();
 }
 
 // ===== Document Management =====
@@ -1234,17 +1252,33 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
         return QPixmap();
     }
     
+    // Thread-safe cache lookup
+    QMutexLocker locker(&m_pdfCacheMutex);
+    
     // Check if we have this page cached at the right DPI
     for (const PdfCacheEntry& entry : m_pdfCache) {
         if (entry.matches(pageIndex, dpi)) {
-            return entry.pixmap;
+            return entry.pixmap;  // Cache hit - fast path
         }
     }
     
-    // Cache miss - render the page (this is the expensive operation)
-    // qDebug() << "PDF cache miss: rendering page" << pageIndex << "at" << dpi << "dpi";
+    // Cache miss - render synchronously (for visible pages that MUST be shown)
+    // This should only happen on first paint of a new page
+    locker.unlock();  // Release mutex during expensive render
     
-    // Not cached - render it now
+    // Build cache contents string for debug
+    QString cacheContents;
+    {
+        QMutexLocker debugLocker(&m_pdfCacheMutex);
+        for (const PdfCacheEntry& e : m_pdfCache) {
+            if (!cacheContents.isEmpty()) cacheContents += ",";
+            cacheContents += QString::number(e.pageIndex);
+        }
+    }
+    qDebug() << "PDF CACHE MISS: rendering page" << pageIndex 
+             << "| cache has [" << cacheContents << "] capacity=" << m_pdfCacheCapacity;
+    
+    // Render the page (expensive operation - done outside mutex)
     QImage pdfImage = m_document->renderPdfPageToImage(pageIndex, dpi);
     if (pdfImage.isNull()) {
         return QPixmap();
@@ -1252,15 +1286,34 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
     
     QPixmap pixmap = QPixmap::fromImage(pdfImage);
     
-    // Add to cache
+    // Add to cache (thread-safe)
+    locker.relock();
+    
+    // Double-check it wasn't added by another thread while we were rendering
+    for (const PdfCacheEntry& entry : m_pdfCache) {
+        if (entry.matches(pageIndex, dpi)) {
+            return entry.pixmap;  // Another thread added it
+        }
+    }
+    
     PdfCacheEntry entry;
     entry.pageIndex = pageIndex;
     entry.dpi = dpi;
     entry.pixmap = pixmap;
     
-    // If cache is full, remove the oldest entry
+    // If cache is full, evict the page FURTHEST from current page (smart eviction)
+    // This prevents evicting pages we're about to need (like the next visible page)
     if (m_pdfCache.size() >= m_pdfCacheCapacity) {
-        m_pdfCache.removeFirst();
+        int evictIndex = 0;
+        int maxDistance = -1;
+        for (int i = 0; i < m_pdfCache.size(); ++i) {
+            int distance = qAbs(m_pdfCache[i].pageIndex - pageIndex);
+            if (distance > maxDistance) {
+                maxDistance = distance;
+                evictIndex = i;
+            }
+        }
+        m_pdfCache.removeAt(evictIndex);
     }
     
     m_pdfCache.append(entry);
@@ -1270,6 +1323,15 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
 }
 
 void DocumentViewport::preloadPdfCache()
+{
+    // Debounce: restart timer on each call
+    // Actual preloading happens after user stops scrolling
+    if (m_pdfPreloadTimer) {
+        m_pdfPreloadTimer->start(PDF_PRELOAD_DELAY_MS);
+    }
+}
+
+void DocumentViewport::doAsyncPdfPreload()
 {
     if (!m_document || !m_document->isPdfLoaded()) {
         return;
@@ -1288,25 +1350,135 @@ void DocumentViewport::preloadPdfCache()
     int preloadEnd = qMin(m_document->pageCount() - 1, last + 1);
     
     qreal dpi = effectivePdfDpi();
+    QString pdfPath = m_document->pdfPath();
     
-    // Pre-load pages (this also adds them to cache)
-    for (int i = preloadStart; i <= preloadEnd; ++i) {
-        Page* page = m_document->page(i);
-        if (page && page->backgroundType == Page::BackgroundType::PDF) {
-            getCachedPdfPage(page->pdfPageNumber, dpi);
+    if (pdfPath.isEmpty()) {
+        return;  // No PDF path available
+    }
+    
+    // Collect pages that need preloading
+    QList<int> pagesToPreload;
+    {
+        QMutexLocker locker(&m_pdfCacheMutex);
+        for (int i = preloadStart; i <= preloadEnd; ++i) {
+            Page* page = m_document->page(i);
+            if (page && page->backgroundType == Page::BackgroundType::PDF) {
+                int pdfPageNum = page->pdfPageNumber;
+                
+                // Check if already cached
+                bool alreadyCached = false;
+                for (const PdfCacheEntry& entry : m_pdfCache) {
+                    if (entry.matches(pdfPageNum, dpi)) {
+                        alreadyCached = true;
+                        break;
+                    }
+                }
+                
+                if (!alreadyCached) {
+                    pagesToPreload.append(pdfPageNum);
+                }
+            }
         }
+    }
+    
+    if (pagesToPreload.isEmpty()) {
+        return;  // All pages already cached
+    }
+    
+    // Launch async render for each page that needs caching
+    for (int pdfPageNum : pagesToPreload) {
+        QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+        
+        // Track watcher for cleanup
+        m_activePdfWatchers.append(watcher);
+        
+        // Clean up watcher when done and trigger repaint
+        connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher]() {
+            m_activePdfWatchers.removeOne(watcher);
+            watcher->deleteLater();
+            
+            // Trigger repaint to show newly cached page
+            update();
+        });
+        
+        // Capture needed values for lambda (by value for thread safety)
+        QFuture<void> future = QtConcurrent::run([this, pdfPageNum, dpi, pdfPath]() {
+            // Create thread-local PDF provider (each thread loads its own copy)
+            PopplerPdfProvider threadPdf(pdfPath);
+            if (!threadPdf.isValid()) {
+                return;
+            }
+            
+            // Render page using thread-local provider
+            QImage pdfImage = threadPdf.renderPageToImage(pdfPageNum, dpi);
+            if (pdfImage.isNull()) {
+                return;
+            }
+            
+            QPixmap pixmap = QPixmap::fromImage(pdfImage);
+            
+            // Add to cache (thread-safe)
+            QMutexLocker locker(&m_pdfCacheMutex);
+            
+            // Check if already added (race condition prevention)
+            for (const PdfCacheEntry& entry : m_pdfCache) {
+                if (entry.matches(pdfPageNum, dpi)) {
+                    return;  // Already cached
+                }
+            }
+            
+            PdfCacheEntry entry;
+            entry.pageIndex = pdfPageNum;
+            entry.dpi = dpi;
+            entry.pixmap = pixmap;
+            
+            // Evict page FURTHEST from this page (smart eviction)
+            if (m_pdfCache.size() >= m_pdfCacheCapacity) {
+                int evictIndex = 0;
+                int maxDistance = -1;
+                for (int i = 0; i < m_pdfCache.size(); ++i) {
+                    int distance = qAbs(m_pdfCache[i].pageIndex - pdfPageNum);
+                    if (distance > maxDistance) {
+                        maxDistance = distance;
+                        evictIndex = i;
+                    }
+                }
+                m_pdfCache.removeAt(evictIndex);
+            }
+            
+            m_pdfCache.append(entry);
+            m_cachedDpi = dpi;
+        });
+        
+        watcher->setFuture(future);
+    }
+    
+    if (!pagesToPreload.isEmpty()) {
+        qDebug() << "PDF async preload: started" << pagesToPreload.size() 
+                 << "background renders for pages" << pagesToPreload;
     }
 }
 
 void DocumentViewport::invalidatePdfCache()
 {
+    // Cancel pending async preloads
+    if (m_pdfPreloadTimer) {
+        m_pdfPreloadTimer->stop();
+    }
+    
+    // Thread-safe cache clear
+    QMutexLocker locker(&m_pdfCacheMutex);
+    if (!m_pdfCache.isEmpty()) {
+        qDebug() << "PDF CACHE INVALIDATED: cleared" << m_pdfCache.size() << "entries";
+    }
     m_pdfCache.clear();
     m_cachedDpi = 0;
 }
 
 void DocumentViewport::invalidatePdfCachePage(int pageIndex)
 {
-    // Remove all entries for this page
+    // Thread-safe page removal
+    QMutexLocker locker(&m_pdfCacheMutex);
     m_pdfCache.erase(
         std::remove_if(m_pdfCache.begin(), m_pdfCache.end(),
                        [pageIndex](const PdfCacheEntry& entry) {
@@ -1319,18 +1491,19 @@ void DocumentViewport::invalidatePdfCachePage(int pageIndex)
 void DocumentViewport::updatePdfCacheCapacity()
 {
     // Set capacity based on layout mode:
-    // - Single column: cache 2 extra pages (1 above, 1 below visible)
-    // - Two column: cache 4 extra pages (1 row above, 1 row below)
+    // - Single column: visible (2) + ±2 buffer = 6 pages
+    // - Two column: visible (4) + ±1 row buffer = 12 pages
     switch (m_layoutMode) {
         case LayoutMode::SingleColumn:
-            m_pdfCacheCapacity = 4;  // Visible + 2 buffer
+            m_pdfCacheCapacity = 6;  // Visible + generous buffer for scroll direction changes
             break;
         case LayoutMode::TwoColumn:
-            m_pdfCacheCapacity = 8;  // Visible + 4 buffer
+            m_pdfCacheCapacity = 12;  // Visible + row buffer
             break;
     }
     
-    // Trim cache if over capacity
+    // Thread-safe trim
+    QMutexLocker locker(&m_pdfCacheMutex);
     while (m_pdfCache.size() > m_pdfCacheCapacity) {
         m_pdfCache.removeFirst();
     }

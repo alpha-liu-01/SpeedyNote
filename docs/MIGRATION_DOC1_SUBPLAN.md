@@ -152,32 +152,39 @@ User presses Ctrl+O
 │  │   ├─ preloadPdfCache()  - pre-renders ±1 adjacent pages      │
 │  │   └─ invalidatePdfCache() - clears on zoom/doc change        │
 │  │                                                               │
-│  └─ Cache Strategy:                                              │
+│  └─ Cache Strategy (SMART EVICTION):                              │
 │      ┌──────────────────────────────────────────────────┐       │
-│      │ Page 3 │ Page 4 │ Page 5 │ Page 6 │ (empty)      │       │
-│      │(preload)│(visible)│(visible)│(preload)│           │       │
+│      │ Page 3 │ Page 4 │ Page 5 │ Page 6 │ Page 7 │ P8  │       │
+│      │(preload)│(visible)│(visible)│(preload)│ async │async│       │
 │      └──────────────────────────────────────────────────┘       │
-│               ▲                              ▲                   │
-│          evicted first                 added last (FIFO)         │
+│               ▲                                                  │
+│    evicted: page FURTHEST from current (not FIFO!)              │
 └─────────────────────────────────────────────────────────────────┘
 
 PERFORMANCE CHARACTERISTICS:
 ─────────────────────────────
 • PDF Load:     O(1) - metadata parsing only
 • First Paint:  O(visible pages) - typically 1-2 pages
-• Scroll:       O(1) if cache hit, O(1 page) if cache miss
+• Scroll:       O(1) if cache hit, async background render if miss
 • Zoom:         O(visible pages) - cache invalidated, re-render
-• Memory:       Bounded by cache capacity (4-8 pages)
+• Memory:       Bounded by cache capacity (6-12 pages)
+• Scroll Back:  O(1) - smart eviction keeps nearby pages cached
 
 OPTIMIZATION DECISIONS:
 ───────────────────────
-1. **Async Preloading (TODO)**
-   - Use `QtConcurrent` for background PDF page rendering
-   - Prevents scrolling jank on low-power devices
-   - Current: synchronous (blocks main thread)
-   - Future: async with progress signals
+1. **Async Preloading ✅ IMPLEMENTED**
+   - Uses `QtConcurrent::run()` with thread-local `PopplerPdfProvider`
+   - Debounced (150ms) - only fires after scroll stops
+   - Each thread creates own PDF instance for thread safety
+   - `QFutureWatcher` triggers `update()` when render completes
+   - Result: NO main thread blocking during scroll
 
-2. **Zoom Debounce Timer**
+2. **Smart Eviction ✅ IMPLEMENTED**
+   - Problem: FIFO eviction evicted pages we were about to need
+   - Solution: Evict page FURTHEST from current view (distance-based)
+   - Result: Scroll forward → back has NO cache misses
+
+3. **Zoom Debounce Timer (TODO)**
    - Problem: Ctrl+wheel zoom fires many rapid events
    - Solution: Delay cache invalidation until zoom "settles"
    - Implementation:
@@ -189,15 +196,16 @@ OPTIMIZATION DECISIONS:
      ```
    - Benefit: Avoids rendering intermediate zoom levels
 
-3. **Cache Size**
-   - Current: 4 pages (single column), 8 pages (two column)
+4. **Cache Size ✅ INCREASED**
+   - Before: 4 pages (single column), 8 pages (two column)
+   - After: 6 pages (single column), 12 pages (two column)
    - Future: Configurable via Control Panel (after reconnection)
 
-4. **Never Block UI**
+5. **Never Block UI ✅ ACHIEVED**
    - PDF opens immediately (metadata only)
    - First visible page renders synchronously (unavoidable)
-   - Adjacent pages preload in background (after async is implemented)
-   - If page not ready, show placeholder or partial render
+   - Adjacent pages preload in background via async
+   - Scroll back has cache hits (smart eviction keeps nearby pages)
 
 **Requirements:**
 - Open OS file dialog for PDF selection

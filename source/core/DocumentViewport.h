@@ -52,6 +52,8 @@ struct PageUndoAction {
 #include <QColor>
 #include <QElapsedTimer>
 #include <QTimer>
+#include <QMutex>
+#include <QFutureWatcher>
 #include <deque>
 
 // Forward declarations
@@ -601,8 +603,8 @@ private:
     qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
     
     // ----- Performance/Memory Settings -----
-    /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 1-10)
-    int m_pdfCacheCapacity = 4;  // Default for single column, 8 for two column
+    /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)
+    int m_pdfCacheCapacity = 6;  // Default for single column (visible + ±2 buffer)
     /// CUSTOMIZABLE: Max undo actions per page - higher = more RAM (range: 10-200)
     static const int MAX_UNDO_PER_PAGE = 50;
     
@@ -613,6 +615,12 @@ private:
     // ===== PDF Cache State (Task 1.3.6) =====
     QVector<PdfCacheEntry> m_pdfCache;
     qreal m_cachedDpi = 0;       ///< DPI at which cache was rendered
+    mutable QMutex m_pdfCacheMutex;  ///< Mutex for thread-safe cache access
+    
+    // ===== Async PDF Preloading =====
+    QTimer* m_pdfPreloadTimer = nullptr;  ///< Debounce timer for preload requests
+    QList<QFutureWatcher<void>*> m_activePdfWatchers;  ///< Active async render operations
+    static constexpr int PDF_PRELOAD_DELAY_MS = 150;   ///< Debounce delay (ms) before preloading
     
     // ===== Page Layout Cache (Performance: O(1) page position lookup) =====
     mutable QVector<qreal> m_pageYCache;  ///< Cached Y position for each page (single column)
@@ -694,10 +702,16 @@ private:
     QPixmap getCachedPdfPage(int pageIndex, qreal dpi);
     
     /**
-     * @brief Pre-load PDF pages around the visible area.
-     * Called after scroll settles to ensure smooth scrolling.
+     * @brief Request PDF preload (debounced).
+     * Called during scroll - actual preload happens after delay.
      */
     void preloadPdfCache();
+    
+    /**
+     * @brief Actually perform async PDF preload.
+     * Called by timer after debounce delay. Runs in background threads.
+     */
+    void doAsyncPdfPreload();
     
     /**
      * @brief Invalidate the entire PDF cache.
