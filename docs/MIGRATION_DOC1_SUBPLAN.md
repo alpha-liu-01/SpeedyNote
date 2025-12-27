@@ -872,5 +872,109 @@ Desired (fast for all background types):
 
 ---
 
+## Code Review: DocumentViewport Issues (Dec 27, 2024)
+
+After completing Phase 2, a comprehensive review of `DocumentViewport.cpp` identified the following issues.
+
+### ✅ ALL ISSUES FIXED (Dec 27, 2024)
+
+---
+
+### ✅ FIXED: Thread Safety Bug in Async PDF Preload
+
+**Problem:** `QPixmap::fromImage()` was called inside a background thread (`QtConcurrent::run`).
+Qt documentation states QPixmap must only be created on the main thread.
+
+**Fix Applied:**
+1. Changed `QFutureWatcher<void>` to `QFutureWatcher<QImage>`
+2. Background thread now returns `QImage` (thread-safe)
+3. `QPixmap::fromImage()` is called in the `finished` handler (main thread)
+4. Cache updates happen on main thread inside mutex
+
+```cpp
+// Background thread: returns QImage (safe)
+QFuture<QImage> future = QtConcurrent::run([pdfPageNum, dpi, pdfPath]() -> QImage {
+    PopplerPdfProvider threadPdf(pdfPath);
+    return threadPdf.renderPageToImage(pdfPageNum, dpi);
+});
+
+// Finished handler (main thread): converts to QPixmap (safe)
+connect(watcher, &QFutureWatcher<QImage>::finished, this, [...]() {
+    QPixmap pixmap = QPixmap::fromImage(watcher->result());
+    // ... add to cache under mutex ...
+});
+```
+
+---
+
+### ✅ FIXED: Inefficient Undo Stack Trimming
+
+**Problem:** Used O(n) stack→list→stack conversion with unnecessary allocations.
+
+**Fix Applied:** Simplified to use `QStack::remove(0)` directly (QStack inherits from QVector):
+
+```cpp
+while (stack.size() > MAX_UNDO_PER_PAGE) {
+    stack.remove(0);  // Remove oldest entry at bottom
+}
+```
+
+---
+
+### ✅ FIXED: m_cachedDpi Data Race
+
+**Problem:** `m_cachedDpi` was written in background thread under mutex but could be read unsafely.
+
+**Fix Applied:** As a side effect of the QPixmap fix, all cache mutations now happen on the 
+main thread (in the finished handler), eliminating the data race. All accesses are now either:
+- Single-threaded (main thread only), or
+- Protected by mutex
+
+---
+
+### ✅ FIXED: Debug Code and Style Issues
+
+**Cleaned up:**
+- Removed empty lines after opening braces
+- Removed commented-out debug code (`painter.fillRect`, `return; DO NOTHING ELSE`)
+- Removed stray `qDebug()` comments
+- Fixed double empty lines
+
+---
+
+### ✅ FIXED: Duplicate pagePosition() Call
+
+**Problem:** `pagePosition(pageIdx)` was called twice for partial updates.
+
+**Fix Applied:** Moved the call before the `isPartialUpdate` check so it's only called once:
+
+```cpp
+QPointF pos = pagePosition(pageIdx);  // Call once, reuse
+
+if (isPartialUpdate) {
+    QRectF pageRectInViewport = QRectF(
+        (pos.x() - m_panOffset.x()) * m_zoomLevel,
+        // ...
+    );
+    // ...
+}
+
+painter.translate(pos);  // Reuse
+```
+
+---
+
+### Summary Table
+
+| Priority | Issue | Status |
+|----------|-------|--------|
+| 🔴 CRITICAL | QPixmap in background thread | ✅ FIXED |
+| 🟡 MEDIUM | Inefficient trimUndoStack | ✅ FIXED |
+| 🟡 MEDIUM | m_cachedDpi data race | ✅ FIXED |
+| 🟢 MINOR | Debug code cleanup | ✅ FIXED |
+| 🟢 MINOR | Duplicate pagePosition call | ✅ FIXED |
+
+---
+
 *Subplan for doc-1 task in SpeedyNote Phase 3 migration*
 

@@ -629,7 +629,7 @@ private:
     
     // ===== Async PDF Preloading =====
     QTimer* m_pdfPreloadTimer = nullptr;  ///< Debounce timer for preload requests
-    QList<QFutureWatcher<void>*> m_activePdfWatchers;  ///< Active async render operations
+    QList<QFutureWatcher<QImage>*> m_activePdfWatchers;  ///< Active async render operations (returns QImage for thread safety)
     static constexpr int PDF_PRELOAD_DELAY_MS = 150;   ///< Debounce delay (ms) before preloading
     
     // ===== Page Layout Cache (Performance: O(1) page position lookup) =====

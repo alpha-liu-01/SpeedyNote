@@ -101,7 +101,7 @@ if ($arm64) {
 
 # ✅ Configure and build
 & "$toolchainPath\bin\cmake.exe" @cmakeArgs ..
-& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j16
+& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j32
 
 # ✅ Deploy Qt runtime
 & "$toolchainPath\bin\windeployqt6.exe" "NoteApp.exe"

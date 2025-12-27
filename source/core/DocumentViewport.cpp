@@ -73,7 +73,7 @@ DocumentViewport::~DocumentViewport()
     }
     
     // Wait for and clean up any active async PDF watchers
-    for (QFutureWatcher<void>* watcher : m_activePdfWatchers) {
+    for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
         watcher->cancel();
         watcher->waitForFinished();
         delete watcher;
@@ -730,19 +730,12 @@ QVector<int> DocumentViewport::visiblePages() const
 
 void DocumentViewport::paintEvent(QPaintEvent* event)
 {
-
-    
     // Benchmark: track paint timestamps (Task 2.6)
     if (m_benchmarking) {
         m_paintTimestamps.push_back(m_benchmarkTimer.elapsed());
     }
     
     QPainter painter(this);
-
-    // painter.fillRect(rect(), Qt::black);
-    // return;  // DO NOTHING ELSE
-
-
     painter.setRenderHint(QPainter::Antialiasing, true);
     
     // ========== OPTIMIZATION: Dirty Region Rendering ==========
@@ -773,36 +766,33 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
     painter.scale(m_zoomLevel, m_zoomLevel);
     
-    
     // Render each visible page
     // For partial updates, only render pages that intersect the dirty region
     for (int pageIdx : visible) {
         Page* page = m_document->page(pageIdx);
         if (!page) continue;
         
+        // Get page position once (O(1) with cache, but avoid redundant calls)
+        QPointF pos = pagePosition(pageIdx);
+        
         // Check if this page intersects the dirty region (optimization for partial updates)
         if (isPartialUpdate) {
-            QPointF pos = pagePosition(pageIdx);
             QRectF pageRectInViewport = QRectF(
                 (pos.x() - m_panOffset.x()) * m_zoomLevel,
                 (pos.y() - m_panOffset.y()) * m_zoomLevel,
                 page->size.width() * m_zoomLevel,
                 page->size.height() * m_zoomLevel
             );
-            // qDebug() << "dirtyRect=" << dirtyRect;
-            // qDebug() << "intersects=" << pageRectInViewport.intersects(dirtyRect);
             if (!pageRectInViewport.intersects(dirtyRect)) {
                 continue;  // Skip this page - it doesn't intersect dirty region
             }
         }
         
-        QPointF pos = pagePosition(pageIdx);
-        
         painter.save();
         painter.translate(pos);
         
         // Render the page (background + content)
-        renderPage(painter, page, pageIdx); // even if we comment out this line, the page doesn't render and it still lags on rapid fire. 
+        renderPage(painter, page, pageIdx);
         
         painter.restore();
     }
@@ -1405,43 +1395,36 @@ void DocumentViewport::doAsyncPdfPreload()
     
     // Launch async render for each page that needs caching
     for (int pdfPageNum : pagesToPreload) {
-        QFutureWatcher<void>* watcher = new QFutureWatcher<void>(this);
+        QFutureWatcher<QImage>* watcher = new QFutureWatcher<QImage>(this);
         
         // Track watcher for cleanup
         m_activePdfWatchers.append(watcher);
         
-        // Clean up watcher when done and trigger repaint
-        connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher]() {
+        // THREAD SAFETY FIX: QPixmap must only be created on the main thread.
+        // The background thread returns QImage, and we convert to QPixmap here
+        // in the finished handler which runs on the main thread.
+        connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, pdfPageNum, dpi]() {
             m_activePdfWatchers.removeOne(watcher);
+            
+            // Get the rendered image from the background task
+            QImage pdfImage = watcher->result();
             watcher->deleteLater();
             
-            // Trigger repaint to show newly cached page
-            update();
-        });
-        
-        // Capture needed values for lambda (by value for thread safety)
-        QFuture<void> future = QtConcurrent::run([this, pdfPageNum, dpi, pdfPath]() {
-            // Create thread-local PDF provider (each thread loads its own copy)
-            PopplerPdfProvider threadPdf(pdfPath);
-            if (!threadPdf.isValid()) {
-                return;
-            }
-            
-            // Render page using thread-local provider
-            QImage pdfImage = threadPdf.renderPageToImage(pdfPageNum, dpi);
+            // Check if rendering failed
             if (pdfImage.isNull()) {
                 return;
             }
             
+            // SAFE: QPixmap::fromImage on main thread
             QPixmap pixmap = QPixmap::fromImage(pdfImage);
             
-            // Add to cache (thread-safe)
+            // Add to cache (thread-safe access to shared cache)
             QMutexLocker locker(&m_pdfCacheMutex);
             
             // Check if already added (race condition prevention)
             for (const PdfCacheEntry& entry : m_pdfCache) {
                 if (entry.matches(pdfPageNum, dpi)) {
-                    return;  // Already cached
+                    return;  // Already cached by another path
                 }
             }
             
@@ -1466,6 +1449,24 @@ void DocumentViewport::doAsyncPdfPreload()
             
             m_pdfCache.append(entry);
             m_cachedDpi = dpi;
+            
+            // Trigger repaint to show newly cached page
+            update();
+        });
+        
+        // Background thread: render PDF to QImage (thread-safe)
+        // NOTE: QImage is explicitly documented as thread-safe for read operations
+        // and can be safely passed between threads.
+        QFuture<QImage> future = QtConcurrent::run([pdfPageNum, dpi, pdfPath]() -> QImage {
+            // Create thread-local PDF provider (each thread loads its own copy)
+            PopplerPdfProvider threadPdf(pdfPath);
+            if (!threadPdf.isValid()) {
+                return QImage();  // Return null image on failure
+            }
+            
+            // Render page using thread-local provider
+            // This is the expensive operation (50-200ms) that we're offloading
+            return threadPdf.renderPageToImage(pdfPageNum, dpi);
         });
         
         watcher->setFuture(future);
@@ -2196,27 +2197,14 @@ void DocumentViewport::clearRedoStack(int pageIndex)
 void DocumentViewport::trimUndoStack(int pageIndex)
 {
     // Limit stack size to prevent unbounded memory growth
-    // Using a simple approach: if over limit, convert to list, remove front, convert back
-    // This is O(n) but only runs when stack exceeds limit (rare)
-    if (m_undoStacks[pageIndex].size() > MAX_UNDO_PER_PAGE) {
-        QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
-        
-        // Convert to list for efficient front removal
-        QList<PageUndoAction> list;
-        list.reserve(stack.size());
-        while (!stack.isEmpty()) {
-            list.prepend(stack.pop());
-        }
-        
-        // Remove oldest entries until within limit
-        while (list.size() > MAX_UNDO_PER_PAGE) {
-            list.removeFirst();
-        }
-        
-        // Convert back to stack
-        for (const auto& action : list) {
-            stack.push(action);
-        }
+    // QStack inherits from QVector, so we can use remove() for O(n) trimming
+    // This only runs when stack exceeds limit (rare - once every MAX_UNDO_PER_PAGE actions)
+    QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
+    
+    while (stack.size() > MAX_UNDO_PER_PAGE) {
+        // Remove oldest entry (at the bottom of the stack = index 0)
+        // QStack inherits QVector's remove() method
+        stack.remove(0);
     }
 }
 
@@ -2365,8 +2353,6 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     
     // 1. Fill with page background color
     painter.fillRect(pageRect, page->backgroundColor);
-
-    // qDebug() << "renderPage: pageIndex=" << pageIndex << " pageSize=" << pageSize;  // many renderPage calls per stroke
     
     // 2. Render background based on type
     switch (page->backgroundType) {
@@ -2383,9 +2369,6 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
                 if (!pdfPixmap.isNull()) {
                     // Scale pixmap to fit page rect
                     painter.drawPixmap(pageRect.toRect(), pdfPixmap);
-
-                    // qDebug() << "renderPage: pageIndex=" << pageIndex << " pageSize=" << pageSize << " pdfPixmap.size=" << pdfPixmap.size();
-                    // We are supposed to make the pageSize the same as the pdfPixmap, instead of the other way around. 
                 }
             }
             break;
