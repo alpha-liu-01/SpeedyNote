@@ -2055,6 +2055,7 @@ void DocumentViewport::finishStroke()
     if (m_currentStroke.points.isEmpty()) {
         m_isDrawing = false;
         m_currentStroke = VectorStroke();
+        m_currentStrokeCache = QPixmap();  // Release cache memory
         return;
     }
     
@@ -2077,6 +2078,11 @@ void DocumentViewport::finishStroke()
     m_currentStroke = VectorStroke();
     m_isDrawing = false;
     m_lastRenderedPointIndex = 0;  // Reset incremental rendering state
+    
+    // MEMORY FIX: Release the incremental stroke cache
+    // This cache is viewport-sized (~33MB at 4K) and should be freed after stroke completes.
+    // It will be lazily reallocated on the next stroke start.
+    m_currentStrokeCache = QPixmap();
     
     emit documentModified();
 }
@@ -2357,6 +2363,42 @@ void DocumentViewport::clearRedoStack(int pageIndex)
         if (hadRedo) {
             emit redoAvailableChanged(false);
         }
+    }
+}
+
+void DocumentViewport::clearUndoStacksFrom(int pageIndex)
+{
+    // Clear undo/redo stacks for all pages >= pageIndex
+    // Used when inserting/deleting pages to prevent stale undo from applying to wrong pages
+    // Preserves undo for pages before the affected index (user's "done" work)
+    
+    bool hadUndo = canUndo();
+    bool hadRedo = canRedo();
+    
+    // Clear undo stacks for affected pages
+    for (auto it = m_undoStacks.begin(); it != m_undoStacks.end(); ) {
+        if (it.key() >= pageIndex) {
+            it = m_undoStacks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // Clear redo stacks for affected pages
+    for (auto it = m_redoStacks.begin(); it != m_redoStacks.end(); ) {
+        if (it.key() >= pageIndex) {
+            it = m_redoStacks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // Emit signals if availability changed
+    if (hadUndo && !canUndo()) {
+        emit undoAvailableChanged(false);
+    }
+    if (hadRedo && !canRedo()) {
+        emit redoAvailableChanged(false);
     }
 }
 

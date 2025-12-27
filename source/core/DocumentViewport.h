@@ -318,6 +318,17 @@ public:
      */
     bool canRedo() const;
     
+    /**
+     * @brief Clear undo/redo stacks for pages >= pageIndex.
+     * 
+     * Used when inserting/deleting pages to prevent stale undo history
+     * from being applied to wrong pages. Preserves undo for pages before
+     * the affected index.
+     * 
+     * @param pageIndex First page index to clear (inclusive)
+     */
+    void clearUndoStacksFrom(int pageIndex);
+    
     // ===== Benchmark (Task 2.6) =====
     
     /**

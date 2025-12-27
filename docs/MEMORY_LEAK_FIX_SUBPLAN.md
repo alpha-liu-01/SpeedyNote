@@ -1,6 +1,6 @@
 # Memory Leak Fix Subplan
 
-> **Status:** ✅ IMPLEMENTED - Awaiting testing
+> **Status:** ✅ ALL MAJOR LEAKS FIXED
 > **Created:** Dec 27, 2024
 > **Priority:** HIGH - Memory leaks prevent long sessions
 
@@ -321,16 +321,20 @@ Document::~Document() {
 | 4 | ML-4 | Verify PdfProvider cleanup | ✅ VERIFIED (unique_ptr) |
 | 5 | ML-5 | Investigate file dialog leak | ⏸️ SKIPPED (likely Qt/OS) |
 | 6 | ML-6 | Add memory debug tools | ✅ ADDED |
+| 7 | ML-7 | VectorLayer stroke cache eviction | ✅ FIXED |
+| 8 | ML-8 | Incremental stroke cache release | ✅ FIXED |
 
 ---
 
 ## Success Criteria
 
 After fixes:
-- [ ] Opening and closing 10 tabs returns to initial memory usage
-- [ ] Opening PDF, scrolling, closing returns to near-initial memory
-- [ ] No "Document CREATED" without matching "Document DESTROYED"
-- [ ] File dialog behavior documented (if Qt/OS issue)
+- [x] Opening and closing 10 tabs returns to initial memory usage ✅
+- [x] Opening PDF, scrolling, closing returns to near-initial memory ✅
+- [x] No "Document CREATED" without matching "Document DESTROYED" ✅
+- [x] VectorLayer stroke caches evicted when scrolling away ✅
+- [x] Incremental stroke cache freed after stroke completes ✅
+- [ ] File dialog behavior documented (if Qt/OS issue) - skipped, Qt/OS behavior
 
 ---
 
@@ -496,6 +500,62 @@ void DocumentViewport::setPanOffset(QPointF offset)
 **Result:** Memory now stays bounded. Only visible ±2 pages have stroke caches 
 allocated. Distant pages have their caches released, and they're rebuilt lazily 
 when the user scrolls back to them.
+
+---
+
+## Bug Fix: Incremental Stroke Cache Not Released (Dec 27, 2024)
+
+**Symptom:** When any page in a document was edited (strokes drawn), memory increased
+by approximately one viewport-sized pixmap (~33MB at 4K) and was never freed, even 
+when scrolling away or closing the document. This was independent of the VectorLayer
+stroke cache issue and affected the viewport itself.
+
+**Root Cause:** 
+`DocumentViewport::m_currentStrokeCache` is a `QPixmap` used for incremental stroke
+rendering during drawing. It's allocated in `resetCurrentStrokeCache()` at viewport
+resolution but was **never released** in `finishStroke()`.
+
+```cpp
+// Before fix - m_currentStrokeCache stayed allocated forever
+void DocumentViewport::finishStroke()
+{
+    // ... finalize stroke ...
+    m_currentStroke = VectorStroke();
+    m_isDrawing = false;
+    m_lastRenderedPointIndex = 0;
+    // BUG: m_currentStrokeCache not cleared!
+}
+```
+
+**Fix:** Release the cache at stroke completion:
+
+```cpp
+void DocumentViewport::finishStroke()
+{
+    // Don't save empty strokes
+    if (m_currentStroke.points.isEmpty()) {
+        m_isDrawing = false;
+        m_currentStroke = VectorStroke();
+        m_currentStrokeCache = QPixmap();  // Release cache memory
+        return;
+    }
+    
+    // ... finalize stroke ...
+    m_currentStroke = VectorStroke();
+    m_isDrawing = false;
+    m_lastRenderedPointIndex = 0;
+    
+    // MEMORY FIX: Release the incremental stroke cache
+    // This cache is viewport-sized (~33MB at 4K) and should be freed after stroke completes.
+    // It will be lazily reallocated on the next stroke start.
+    m_currentStrokeCache = QPixmap();
+    
+    emit documentModified();
+}
+```
+
+**Result:** Memory for the stroke rendering cache is now freed after each stroke
+completes. The cache is lazily reallocated when the user starts a new stroke.
 
 ---
 

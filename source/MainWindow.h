@@ -461,10 +461,11 @@ private slots:
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     
     // Phase doc-1: Document operations
-    void saveDocument();       // doc-1.1: Save document to JSON file (Ctrl+S)
-    void loadDocument();       // doc-1.2: Load document from JSON file (Ctrl+O)
-    void addPageToDocument();  // doc-1.0: Add page at end of document (Ctrl+Shift+A)
-    void openPdfDocument();    // doc-1.4: Open PDF file (Ctrl+Shift+O)
+    void saveDocument();          // doc-1.1: Save document to JSON file (Ctrl+S)
+    void loadDocument();          // doc-1.2: Load document from JSON file (Ctrl+O)
+    void addPageToDocument();     // doc-1.0: Add page at end of document (Ctrl+Shift+A)
+    void insertPageInDocument();  // Phase 3: Insert page after current (Ctrl+Shift+I)
+    void openPdfDocument();       // doc-1.4: Open PDF file (Ctrl+Shift+O)
     
     // void handleModeSelection(int angle);
 

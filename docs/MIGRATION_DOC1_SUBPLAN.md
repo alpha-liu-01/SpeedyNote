@@ -2,7 +2,7 @@
 
 > **Purpose:** Complete document loading/saving integration with DocumentViewport
 > **Created:** Dec 24, 2024
-> **Status:** 🔄 IN PROGRESS (Phase 1 & 2 complete, starting Phase 3)
+> **Status:** 🔄 IN PROGRESS (Phase 1, 2, 3 complete, ready for Phase 3B/4)
 
 ---
 
@@ -23,7 +23,7 @@ These shortcuts are temporary until the toolbar is migrated. They will be remove
 | `Ctrl+Shift+O` | Open PDF | Opens file dialog, creates PDF-backed document |
 | `Ctrl+Shift+N` | New Edgeless | Creates new edgeless document in new tab |
 | `Ctrl+Shift+A` | Add Page | Appends new page at end of document |
-| `Ctrl+Shift+I` | Insert Page | Inserts new page after current page |
+| `Ctrl+Shift+I` | Insert Page | ✅ Inserts new page after current page |
 
 ---
 
@@ -734,10 +734,139 @@ LayerPanel::activeLayerChanged
 - [x] PDF performance matches Grid/Lines pages ✅
 - [x] Memory bounded via cache eviction ✅
 
-### Phase 3: Insert Page
-- [ ] Can insert page after current (Ctrl+Shift+I)
-- [ ] Insert works correctly for non-PDF documents
-- [ ] Insert behavior defined for PDF documents
+### Phase 3: Insert Page ✅ COMPLETE
+- [x] Can insert page after current (Ctrl+Shift+I) ✅
+- [x] Insert works correctly for non-PDF documents ✅
+- [x] Insert behavior defined for PDF documents ✅ (blank page, no PDF background)
+- [x] Page centering preserved after insert ✅
+- [x] Undo stacks cleared for affected pages ✅
+
+---
+
+## Phase 3 Analysis: Insert Page Performance (Dec 27, 2024)
+
+### Key Architectural Insight: Two Separate Indexes
+
+| Field | Purpose | Affected by Insert? |
+|-------|---------|---------------------|
+| `Page::pageIndex` | Position in document (metadata) | Yes - but just an integer |
+| `Page::pdfPageNumber` | Which PDF page provides background | **NO!** |
+
+When inserting a blank page at position 5 in a 3600-page document:
+- Pages 5-3599 shift to positions 6-3600 in the `m_pages` vector
+- But their `pdfPageNumber` values **stay unchanged**!
+- Page that was at index 5 with `pdfPageNumber=5` is now at index 6, but still renders PDF page 5
+
+### Performance Analysis
+
+**O(n) Operations (all fast):**
+1. **Vector insertion**: ~3600 pointer moves (~28KB memory shift) - microseconds
+2. **Page::pageIndex updates**: Optional - this field is redundant with vector position
+3. **Page layout cache invalidation**: Must call `invalidatePageLayoutCache()` - O(n) rebuild on next paint
+
+**UNAFFECTED by insert:**
+- **PDF Cache**: Keyed by `pdfPageNumber`, not document position
+  ```cpp
+  QPixmap pdfPixmap = getCachedPdfPage(page->pdfPageNumber, dpi);
+  ```
+- **Stroke caches**: Per-layer, not dependent on page position
+
+### ⚠️ Problem: Undo Stacks Keyed by Page Index
+
+```cpp
+QMap<int, QStack<PageUndoAction>> m_undoStacks;  // Keyed by document page index!
+```
+
+If we insert at page 5, the undo history for pages 5+ is now at the **wrong key**!
+- Page that WAS at index 5 is now at index 6
+- But its undo history is still at key 5
+- If kept, undo on "page 5" would apply to the NEW blank page, not the original!
+
+**Solution: Clear undo/redo for pages >= insertIndex**
+
+```cpp
+// After inserting at insertIndex:
+for (auto it = m_undoStacks.begin(); it != m_undoStacks.end(); ) {
+    if (it.key() >= insertIndex) {
+        it = m_undoStacks.erase(it);
+    } else {
+        ++it;
+    }
+}
+// Same for m_redoStacks
+```
+
+**Rationale:**
+- Users typically work front-to-back; pages before insert are likely "done"
+- Preserves undo for pages 0 to insertIndex-1
+- Simple O(k) where k = pages after insert point
+- Correct behavior: no stale undo applied to wrong pages
+
+### Insert Page Behavior (Non-PDF vs PDF)
+
+| Document Type | Insert Behavior |
+|---------------|-----------------|
+| **Non-PDF** | Insert blank page with document defaults |
+| **PDF-backed** | Insert blank page (no PDF background) - useful for notes |
+
+For PDF documents, inserted pages have `backgroundType = None` (or Grid/Lines per defaults), not `backgroundType = PDF`. The PDF page numbering is fixed at document creation.
+
+### Implementation Plan
+
+1. **MainWindow::insertPageInDocument()** (Ctrl+Shift+I)
+   - Get current page index from viewport
+   - Call `Document::insertPage(currentIndex + 1)`
+   - Call `viewport->notifyDocumentStructureChanged()`
+
+2. **DocumentViewport::clearUndoStacksFrom(int pageIndex)**
+   - New method to clear undo/redo for pages >= pageIndex
+   - Called from MainWindow after insert
+
+3. **Document::insertPage()** - Already exists and works correctly
+
+4. **Viewport notification** - Already have `notifyDocumentStructureChanged()`
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `source/MainWindow.cpp` | Add `insertPageInDocument()` handler |
+| `source/MainWindow.h` | Declare method |
+| `source/core/DocumentViewport.cpp` | Add `clearUndoStacksFrom(int)` |
+| `source/core/DocumentViewport.h` | Declare method |
+
+### Delete Page (Phase 3B) - Same Pattern
+
+When deleting page at index `deleteIndex`:
+1. Clear undo for pages >= deleteIndex (same logic)
+2. Call `Document::removePage(deleteIndex)`
+3. Call `viewport->notifyDocumentStructureChanged()`
+
+The undo stack clearing is the same for both insert and delete - we just clear from the affected index onward.
+
+### Phase 3 Fixes During Testing (Dec 27, 2024)
+
+#### Fix 1: Page Centering Lost After Insert
+
+**Problem:** After `Ctrl+Shift+I`, pages stuck to the left edge instead of centering.
+
+**Root Cause:** `insertPageInDocument()` called `scrollToPage()` which set pan to 
+the page's left edge, not centered.
+
+**Fix:** Removed `scrollToPage()` call, matching `addPageToDocument()` behavior.
+The viewport now preserves the current pan position after insert.
+
+#### Fix 2: Incremental Stroke Cache Memory Leak
+
+**Problem:** Editing any page caused ~33MB (at 4K) memory increase that was never freed.
+
+**Root Cause:** `m_currentStrokeCache` (viewport-sized QPixmap for incremental stroke
+rendering) was allocated during drawing but never released in `finishStroke()`.
+
+**Fix:** Added `m_currentStrokeCache = QPixmap();` at the end of `finishStroke()` to
+release the cache. It's lazily reallocated on the next stroke start.
+
+See `docs/MEMORY_LEAK_FIX_SUBPLAN.md` for full details.
 
 ### Phase 3B: Delete Page
 - [ ] Delete page works for non-PDF documents

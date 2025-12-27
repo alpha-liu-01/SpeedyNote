@@ -1476,6 +1476,11 @@ void MainWindow::setupUi() {
     addPageShortcut->setContext(Qt::ApplicationShortcut);
     connect(addPageShortcut, &QShortcut::activated, this, &MainWindow::addPageToDocument);
     
+    // Insert Page: Ctrl+Shift+I - inserts new page after current page
+    QShortcut* insertPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this);
+    insertPageShortcut->setContext(Qt::ApplicationShortcut);
+    connect(insertPageShortcut, &QShortcut::activated, this, &MainWindow::insertPageInDocument);
+    
     // Open PDF: Ctrl+Shift+O - open PDF file in new tab
     QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
     openPdfShortcut->setContext(Qt::ApplicationShortcut);
@@ -3349,6 +3354,56 @@ void MainWindow::addPageToDocument()
         
         // Optionally scroll to the new page (user can do this manually for now)
         // viewport->scrollToPage(doc->pageCount() - 1);
+    }
+}
+
+void MainWindow::insertPageInDocument()
+{
+    // Phase 3: Insert new page after current page
+    // Works for both PDF and non-PDF documents (inserted page has no PDF background)
+    
+    if (!m_tabManager) {
+        qDebug() << "insertPageInDocument: No tab manager";
+        return;
+    }
+    
+    DocumentViewport* viewport = m_tabManager->currentViewport();
+    if (!viewport) {
+        qDebug() << "insertPageInDocument: No current viewport";
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        qDebug() << "insertPageInDocument: No document in viewport";
+        return;
+    }
+    
+    // Get current page index and insert after it
+    int currentPageIndex = viewport->currentPageIndex();
+    int insertIndex = currentPageIndex + 1;
+    
+    // Clear undo/redo for pages >= insertIndex (they're shifting)
+    // This must be done BEFORE the insert to avoid stale undo applying to wrong pages
+    viewport->clearUndoStacksFrom(insertIndex);
+    
+    // Insert page after current
+    Page* newPage = doc->insertPage(insertIndex);
+    if (newPage) {
+        qDebug() << "insertPageInDocument: Inserted page at" << insertIndex
+                 << "in document" << doc->name << "(now" << doc->pageCount() << "pages)";
+        
+        // Notify viewport that document structure changed
+        viewport->notifyDocumentStructureChanged();
+        
+        // Mark tab as modified
+        int tabIndex = m_tabManager->currentIndex();
+        if (tabIndex >= 0) {
+            m_tabManager->markTabModified(tabIndex, true);
+        }
+        
+        // Note: Don't auto-scroll - let user scroll manually if needed
+        // (matches addPageToDocument behavior)
     }
 }
 
