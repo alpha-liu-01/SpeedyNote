@@ -1481,6 +1481,11 @@ void MainWindow::setupUi() {
     insertPageShortcut->setContext(Qt::ApplicationShortcut);
     connect(insertPageShortcut, &QShortcut::activated, this, &MainWindow::insertPageInDocument);
     
+    // Delete Page: Ctrl+Shift+D - delete current page
+    QShortcut* deletePageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this);
+    deletePageShortcut->setContext(Qt::ApplicationShortcut);
+    connect(deletePageShortcut, &QShortcut::activated, this, &MainWindow::deletePageInDocument);
+    
     // Open PDF: Ctrl+Shift+O - open PDF file in new tab
     QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
     openPdfShortcut->setContext(Qt::ApplicationShortcut);
@@ -3404,6 +3409,69 @@ void MainWindow::insertPageInDocument()
         
         // Note: Don't auto-scroll - let user scroll manually if needed
         // (matches addPageToDocument behavior)
+    }
+}
+
+void MainWindow::deletePageInDocument()
+{
+    // Phase 3B: Delete current page
+    // - Non-PDF pages: delete entirely
+    // - PDF pages: blocked (use external tool to modify PDF)
+    
+    if (!m_tabManager) {
+        qDebug() << "deletePageInDocument: No tab manager";
+        return;
+    }
+    
+    DocumentViewport* viewport = m_tabManager->currentViewport();
+    if (!viewport) {
+        qDebug() << "deletePageInDocument: No current viewport";
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        qDebug() << "deletePageInDocument: No document in viewport";
+        return;
+    }
+    
+    // Guard 1: Cannot delete the last page
+    if (doc->pageCount() <= 1) {
+        QMessageBox::information(this, tr("Cannot Delete"),
+            tr("Cannot delete the last remaining page."));
+        return;
+    }
+    
+    int currentPageIndex = viewport->currentPageIndex();
+    Page* page = doc->page(currentPageIndex);
+    if (!page) {
+        qDebug() << "deletePageInDocument: Invalid page index" << currentPageIndex;
+        return;
+    }
+    
+    // Guard 2: Cannot delete PDF pages
+    if (page->backgroundType == Page::BackgroundType::PDF) {
+        QMessageBox::information(this, tr("Cannot Delete"),
+            tr("Cannot delete PDF pages. Use an external tool to modify the PDF."));
+        return;
+    }
+    
+    // Clear undo/redo for pages >= currentPageIndex (they're shifting or being deleted)
+    viewport->clearUndoStacksFrom(currentPageIndex);
+    
+    // Delete the page
+    doc->removePage(currentPageIndex);
+    
+    qDebug() << "deletePageInDocument: Deleted page at" << currentPageIndex
+             << "in document" << doc->name << "(now" << doc->pageCount() << "pages)";
+    
+    // Notify viewport that document structure changed
+    viewport->notifyDocumentStructureChanged();
+    
+    // Mark tab as modified
+    int tabIndex = m_tabManager->currentIndex();
+    if (tabIndex >= 0) {
+        m_tabManager->markTabModified(tabIndex, true);
     }
 }
 

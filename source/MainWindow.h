@@ -465,6 +465,7 @@ private slots:
     void loadDocument();          // doc-1.2: Load document from JSON file (Ctrl+O)
     void addPageToDocument();     // doc-1.0: Add page at end of document (Ctrl+Shift+A)
     void insertPageInDocument();  // Phase 3: Insert page after current (Ctrl+Shift+I)
+    void deletePageInDocument();  // Phase 3B: Delete current page (Ctrl+Shift+D)
     void openPdfDocument();       // doc-1.4: Open PDF file (Ctrl+Shift+O)
     
     // void handleModeSelection(int angle);

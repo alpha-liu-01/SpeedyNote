@@ -2,7 +2,7 @@
 
 > **Purpose:** Complete document loading/saving integration with DocumentViewport
 > **Created:** Dec 24, 2024
-> **Status:** 🔄 IN PROGRESS (Phase 1, 2, 3 complete, ready for Phase 3B/4)
+> **Status:** 🔄 IN PROGRESS (Phase 1, 2, 3, 3B complete, ready for Phase 4)
 
 ---
 
@@ -24,6 +24,7 @@ These shortcuts are temporary until the toolbar is migrated. They will be remove
 | `Ctrl+Shift+N` | New Edgeless | Creates new edgeless document in new tab |
 | `Ctrl+Shift+A` | Add Page | Appends new page at end of document |
 | `Ctrl+Shift+I` | Insert Page | ✅ Inserts new page after current page |
+| `Ctrl+Shift+D` | Delete Page | ✅ Deletes current page (non-PDF only) |
 
 ---
 
@@ -868,10 +869,107 @@ release the cache. It's lazily reallocated on the next stroke start.
 
 See `docs/MEMORY_LEAK_FIX_SUBPLAN.md` for full details.
 
-### Phase 3B: Delete Page
-- [ ] Delete page works for non-PDF documents
-- [ ] Delete behavior defined for PDF documents
-- [ ] Cannot delete last remaining page
+### Phase 3B: Delete Page ✅ COMPLETE
+- [x] Delete page works for non-PDF documents ✅
+- [x] PDF pages blocked with message ✅
+- [x] Cannot delete last remaining page ✅
+
+---
+
+## Phase 3B Analysis: Delete Page (Dec 27, 2024)
+
+### Design Decisions
+
+#### Non-PDF Pages: Delete Entirely, No Page-Level Undo
+
+**Rationale:** Users have two recovery paths that cover all use cases:
+
+| Recovery Need | Solution |
+|---------------|----------|
+| Remove specific strokes | Ctrl+Z (undo stack) |
+| Remove a layer's work | LayerPanel → Delete Layer |
+| Recover deleted page | Not needed - see below |
+
+**Why no page-level undo?**
+- If user wants fine-grained recovery → use LayerPanel to delete/restore layers
+- If user deletes entire page → intentional decision, no "oops" recovery needed
+- Adding page-level undo would complicate the architecture for a rare use case
+
+#### PDF Pages: Block Deletion
+
+**Behavior:** Show message "Cannot delete PDF pages"
+
+**Rationale:**
+- PDF page mapping (`pdfPageNumber`) is fixed at document creation
+- Deleting a PDF page would break the page-to-PDF correspondence
+- Future: pdftk integration will allow actual PDF page removal
+
+**Future Plan (not Phase 3B):**
+1. Use pdftk to remove pages from actual PDF file
+2. Save modified PDF to temp location
+3. Reload document with new PDF
+4. This modifies the source file - intentional and non-undoable
+
+### Implementation Plan
+
+```cpp
+void MainWindow::deletePageInDocument()
+{
+    // ... get viewport, document, currentPageIndex ...
+    
+    // Guard 1: Cannot delete PDF pages
+    Page* page = doc->page(currentPageIndex);
+    if (page && page->hasPdfBackground()) {
+        QMessageBox::information(this, tr("Cannot Delete"),
+            tr("Cannot delete PDF pages. Use an external tool to modify the PDF."));
+        return;
+    }
+    
+    // Guard 2: Cannot delete the last page
+    if (doc->pageCount() <= 1) {
+        QMessageBox::information(this, tr("Cannot Delete"),
+            tr("Cannot delete the last remaining page."));
+        return;
+    }
+    
+    // Clear undo stacks for pages >= deleteIndex (same as insert)
+    viewport->clearUndoStacksFrom(currentPageIndex);
+    
+    // Delete the page
+    doc->removePage(currentPageIndex);
+    
+    // Notify viewport
+    viewport->notifyDocumentStructureChanged();
+    
+    // Mark document as modified
+    markCurrentTabModified();
+}
+```
+
+### Keyboard Shortcut
+
+| Shortcut | Action |
+|----------|--------|
+| `Delete` or `Ctrl+Shift+D` | Delete current page |
+
+**Note:** Need to choose shortcut that doesn't conflict with existing bindings.
+
+### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `source/MainWindow.cpp` | Add `deletePageInDocument()` |
+| `source/MainWindow.h` | Declare method |
+| `source/core/Page.h` | May need `hasPdfBackground()` helper |
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Delete only page | Block with message |
+| Delete PDF page | Block with message |
+| Delete page while drawing | Finish stroke first, then delete |
+| Delete current page | Navigate to previous (or next if at page 0) |
 
 ### Phase 4: Edgeless Mode
 - [ ] Can create edgeless document (Ctrl+Shift+N)
