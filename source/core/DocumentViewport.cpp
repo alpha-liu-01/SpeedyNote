@@ -61,6 +61,11 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     m_pdfPreloadTimer->setSingleShot(true);
     connect(m_pdfPreloadTimer, &QTimer::timeout, this, &DocumentViewport::doAsyncPdfPreload);
     
+    // Zoom gesture timeout timer - fallback for detecting gesture end
+    m_zoomGestureTimeoutTimer = new QTimer(this);
+    m_zoomGestureTimeoutTimer->setSingleShot(true);
+    connect(m_zoomGestureTimeoutTimer, &QTimer::timeout, this, &DocumentViewport::endZoomGesture);
+    
     // Initialize PDF cache capacity based on default layout mode
     updatePdfCacheCapacity();
 }
@@ -71,6 +76,14 @@ DocumentViewport::~DocumentViewport()
     if (m_pdfPreloadTimer) {
         m_pdfPreloadTimer->stop();
     }
+    
+    // Stop zoom gesture timer
+    if (m_zoomGestureTimeoutTimer) {
+        m_zoomGestureTimeoutTimer->stop();
+    }
+    
+    // Clear zoom gesture cached frame (releases memory)
+    m_zoomGesture.reset();
     
     // Wait for and clean up any active async PDF watchers
     for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
@@ -87,6 +100,12 @@ void DocumentViewport::setDocument(Document* doc)
 {
     if (m_document == doc) {
         return;
+    }
+    
+    // End any active zoom gesture (cached frame is from old document)
+    if (m_zoomGesture.isActive) {
+        m_zoomGesture.reset();
+        m_zoomGestureTimeoutTimer->stop();
     }
     
     m_document = doc;
@@ -738,6 +757,40 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     
+    // ========== FAST PATH: Zoom Gesture ==========
+    // During zoom gestures, draw scaled cached frame instead of re-rendering.
+    // This provides 60+ FPS during rapid zoom operations.
+    if (m_zoomGesture.isActive && !m_zoomGesture.cachedFrame.isNull() 
+        && m_zoomGesture.startZoom > 0) {  // Guard against division by zero
+        // Calculate scale factor relative to when frame was captured
+        qreal relativeScale = m_zoomGesture.targetZoom / m_zoomGesture.startZoom;
+        
+        // Fill background (for areas outside scaled frame)
+        painter.fillRect(rect(), QColor(64, 64, 64));
+        
+        // Calculate scaled frame size in LOGICAL pixels (not physical)
+        // grab() returns a pixmap at device pixel ratio, so we must divide by DPR
+        // to get the logical size that matches the widget's coordinate system
+        qreal dpr = m_zoomGesture.frameDevicePixelRatio;
+        QSizeF logicalSize(m_zoomGesture.cachedFrame.width() / dpr,
+                           m_zoomGesture.cachedFrame.height() / dpr);
+        QSizeF scaledSize = logicalSize * relativeScale;
+        
+        // The zoom center should remain fixed in viewport coords
+        // cachedFrame was captured at startZoom with centerPoint at some position
+        // We want centerPoint to remain at the same position after scaling
+        QPointF center = m_zoomGesture.centerPoint;
+        QPointF scaledOrigin = center - (center * relativeScale);
+        
+        // Draw scaled cached frame (may be blurry, but fast!)
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed over quality
+        painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_zoomGesture.cachedFrame, 
+                          m_zoomGesture.cachedFrame.rect());
+        
+        // Skip normal rendering during gesture
+        return;
+    }
+    
     // ========== OPTIMIZATION: Dirty Region Rendering ==========
     // Only repaint what's needed. During stroke drawing, the dirty region is small.
     QRect dirtyRect = event->rect();
@@ -869,6 +922,11 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
 void DocumentViewport::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
+    
+    // End zoom gesture if active (cached frame size no longer matches)
+    if (m_zoomGesture.isActive) {
+        endZoomGesture();
+    }
     
     // Keep the same document point at viewport center after resize
     // This ensures content doesn't jump around during window resize or rotation
@@ -1007,9 +1065,9 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
     QPoint pixelDelta = event->pixelDelta();
     QPoint angleDelta = event->angleDelta();
     
-    // Check for Ctrl modifier → Zoom
+    // Check for Ctrl modifier → Zoom (deferred rendering)
     if (event->modifiers() & Qt::ControlModifier) {
-        // Zoom at cursor position
+        // Zoom at cursor position using deferred gesture API
         qreal zoomDelta = 0;
         
         if (!angleDelta.isNull()) {
@@ -1025,14 +1083,11 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
             return;
         }
         
-        // Calculate new zoom level
-        // Use multiplicative zoom for consistent feel
+        // Calculate zoom factor (multiplicative for consistent feel)
         qreal zoomFactor = qPow(1.1, zoomDelta);  // 10% per step
-        qreal newZoom = m_zoomLevel * zoomFactor;
-        newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
         
-        // Zoom towards cursor position
-        zoomAtPoint(newZoom, event->position());
+        // Use deferred zoom gesture API (will capture frame on first call)
+        updateZoomGesture(zoomFactor, event->position());
         
         event->accept();
         return;
@@ -1115,6 +1170,29 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     
     // Pass unhandled keys to parent
     QWidget::keyPressEvent(event);
+}
+
+void DocumentViewport::keyReleaseEvent(QKeyEvent* event)
+{
+    // Ctrl release ends zoom gesture (if active)
+    if (event->key() == Qt::Key_Control && m_zoomGesture.isActive) {
+        endZoomGesture();
+        event->accept();
+        return;
+    }
+    
+    // Pass unhandled keys to parent
+    QWidget::keyReleaseEvent(event);
+}
+
+void DocumentViewport::focusOutEvent(QFocusEvent* event)
+{
+    // End zoom gesture if window loses focus (user can't release Ctrl otherwise)
+    if (m_zoomGesture.isActive) {
+        endZoomGesture();
+    }
+    
+    QWidget::focusOutEvent(event);
 }
 
 void DocumentViewport::tabletEvent(QTabletEvent* event)
@@ -1250,6 +1328,94 @@ void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
     emitScrollFractions();
     
     update();
+}
+
+// ===== Deferred Zoom Gesture (Task 2.3 - Zoom Optimization) =====
+
+void DocumentViewport::beginZoomGesture(QPointF centerPoint)
+{
+    if (m_zoomGesture.isActive) {
+        return;  // Already in gesture
+    }
+    
+    m_zoomGesture.isActive = true;
+    m_zoomGesture.startZoom = m_zoomLevel;
+    m_zoomGesture.targetZoom = m_zoomLevel;
+    m_zoomGesture.centerPoint = centerPoint;
+    m_zoomGesture.startPan = m_panOffset;
+    
+    // Capture current viewport as cached frame for fast scaling
+    m_zoomGesture.cachedFrame = grab();
+    // Store device pixel ratio for correct scaling on high-DPI displays
+    m_zoomGesture.frameDevicePixelRatio = m_zoomGesture.cachedFrame.devicePixelRatio();
+    
+    // Grab keyboard focus to receive keyReleaseEvent when Ctrl is released
+    setFocus(Qt::OtherFocusReason);
+    
+    // Start timeout timer (fallback for gesture end detection)
+    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
+}
+
+void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
+{
+    // Auto-begin gesture if not already active
+    if (!m_zoomGesture.isActive) {
+        beginZoomGesture(centerPoint);
+    }
+    
+    // Accumulate zoom (multiplicative for smooth feel)
+    m_zoomGesture.targetZoom *= scaleFactor;
+    m_zoomGesture.targetZoom = qBound(MIN_ZOOM, m_zoomGesture.targetZoom, MAX_ZOOM);
+    m_zoomGesture.centerPoint = centerPoint;
+    
+    // Restart timeout timer (each event resets the timeout)
+    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
+    
+    // Trigger repaint (will use fast cached frame scaling)
+    update();
+}
+
+void DocumentViewport::endZoomGesture()
+{
+    if (!m_zoomGesture.isActive) {
+        return;  // Not in gesture
+    }
+    
+    // Stop timeout timer
+    m_zoomGestureTimeoutTimer->stop();
+    
+    // Get final zoom level
+    qreal finalZoom = m_zoomGesture.targetZoom;
+    
+    // Calculate new pan offset to keep center point fixed
+    // The center point should map to the same document point before and after zoom
+    QPointF center = m_zoomGesture.centerPoint;
+    QPointF docPtAtCenter = center / m_zoomGesture.startZoom + m_zoomGesture.startPan;
+    QPointF newPan = docPtAtCenter - center / finalZoom;
+    
+    // Clear gesture state BEFORE applying zoom (to avoid recursion in paintEvent)
+    m_zoomGesture.reset();
+    
+    // Apply final zoom and pan
+    m_zoomLevel = finalZoom;
+    m_panOffset = newPan;
+    
+    // Invalidate PDF cache (DPI changed)
+    invalidatePdfCache();
+    
+    // Clamp and emit signals
+    clampPanOffset();
+    updateCurrentPageIndex();
+    
+    emit zoomChanged(m_zoomLevel);
+    emit panChanged(m_panOffset);
+    emitScrollFractions();
+    
+    // Trigger full re-render at new DPI
+    update();
+    
+    // Preload PDF cache for new zoom level
+    preloadPdfCache();
 }
 
 // ===== PDF Cache Helpers (Task 1.3.6) =====

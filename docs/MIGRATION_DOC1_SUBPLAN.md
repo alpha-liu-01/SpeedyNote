@@ -2,7 +2,7 @@
 
 > **Purpose:** Complete document loading/saving integration with DocumentViewport
 > **Created:** Dec 24, 2024
-> **Status:** 🔄 IN PROGRESS (Phase 1.0 complete)
+> **Status:** 🔄 IN PROGRESS (Phase 1 & 2 complete, starting Phase 3)
 
 ---
 
@@ -29,7 +29,7 @@ These shortcuts are temporary until the toolbar is migrated. They will be remove
 
 ## Task Breakdown
 
-### Phase 1: Core Save/Load Infrastructure
+### Phase 1: Core Save/Load Infrastructure ✅ COMPLETE
 
 #### 1.0 Implement Add Page (Prerequisite) ✅ COMPLETE
 **Goal:** Add new page at end of document so we can test multi-page save/load
@@ -110,7 +110,7 @@ User presses Ctrl+O
 
 ---
 
-### Phase 2: PDF Loading Integration
+### Phase 2: PDF Loading Integration ✅ COMPLETE
 
 #### 2.1 Implement Open PDF Flow ✅ COMPLETE
 **Goal:** Load PDF file and create PDF-backed document
@@ -242,45 +242,303 @@ User presses Ctrl+Shift+O
 - Uses `DocumentManager::loadDocument()` for proper ownership
 - Error dialog shown if PDF fails to load
 
-#### 2.2 Verify PDF Rendering
+#### 2.2 Verify PDF Rendering ✅ COMPLETE
 **Goal:** Confirm PDF pages render correctly in DocumentViewport
 
-**Test cases:**
-- Single page PDF
-- Multi-page PDF
-- PDF with different page sizes
-- Zooming and scrolling work correctly
+**Test cases verified:**
+- ✅ Single page PDF
+- ✅ Multi-page PDF (tested with 3600+ pages)
+- ✅ PDF with different page sizes
+- ✅ Zooming and scrolling work correctly
+- ✅ Rapid stroke drawing on PDF pages (performance fixed)
 
-#### 2.3 Implement Zoom Debounce (Optimization)
-**Goal:** Prevent unnecessary re-renders during rapid zoom operations
+#### 2.3 Deferred Zoom Rendering 🔄 PLANNED
+**Status:** Design complete, ready for implementation.
 
-**Problem:** Ctrl+wheel zoom fires many events in quick succession. Current behavior:
-- Each zoom level change invalidates PDF cache
-- Re-renders all visible pages at new DPI
-- Wastes CPU on intermediate zoom levels user doesn't care about
+**Problem:** Current zoom implementation re-renders PDF at new DPI on every zoom event.
+- Ctrl+wheel: ~5 events/second → 5 expensive PDF re-renders
+- Pinch gesture: ~120 events/second → 120 expensive PDF re-renders
 
-**Solution:** Add debounce timer to `DocumentViewport`:
-```cpp
-// In DocumentViewport.h:
-QTimer m_zoomDebounceTimer;
+**Solution:** Defer rendering until gesture ends. Scale cached frame during gesture.
 
-// In constructor:
-m_zoomDebounceTimer.setSingleShot(true);
-m_zoomDebounceTimer.setInterval(250);  // 250ms settle time
-connect(&m_zoomDebounceTimer, &QTimer::timeout, this, [this]() {
-    invalidatePdfCache();
-    preloadPdfCache();
-    update();
-});
+---
 
-// In setZoomLevel():
-// Don't invalidate immediately - just mark that zoom changed
-m_zoomDebounceTimer.start();  // Restarts timer on each zoom event
+### Deferred Zoom Rendering - Detailed Design
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    UNIFIED ZOOM GESTURE SYSTEM                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Input Sources (all feed into same state machine):              │
+│  ├─ Ctrl+Wheel (discrete, ~5 Hz)                                │
+│  ├─ Touch Pinch (continuous, ~120 Hz)                           │
+│  └─ Trackpad Pinch (continuous, ~60 Hz)                         │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                    ZoomGestureState                         ││
+│  │  ├─ isActive: bool                                          ││
+│  │  ├─ startZoom: qreal          (zoom level when started)     ││
+│  │  ├─ targetZoom: qreal         (accumulates zoom changes)    ││
+│  │  ├─ centerPoint: QPointF      (zoom center in viewport)     ││
+│  │  └─ cachedFrame: QPixmap      (viewport snapshot)           ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Files to modify:**
-- `source/core/DocumentViewport.h` - Add timer member
-- `source/core/DocumentViewport.cpp` - Implement debounce logic
+#### State Machine
+
+```
+                    ┌──────────────────┐
+                    │      IDLE        │
+                    │  (normal render) │
+                    └────────┬─────────┘
+                             │
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+    Ctrl+Wheel         Pinch Start         Trackpad Pinch
+         │                   │                   │
+         ▼                   ▼                   ▼
+    ┌─────────────────────────────────────────────────┐
+    │                  ZOOM GESTURE                    │
+    │  • Capture cachedFrame on first event           │
+    │  • Update targetZoom on each event              │
+    │  • paintEvent: scale cachedFrame (fast!)        │
+    │  • NO PDF re-rendering during gesture           │
+    └─────────────────────────┬───────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+    Ctrl Release         Pinch End          Timeout (fallback)
+    (if in gesture)                         (300ms no events)
+         │                    │                    │
+         ▼                    ▼                    ▼
+    ┌─────────────────────────────────────────────────┐
+    │                  GESTURE END                     │
+    │  • m_zoomLevel = targetZoom                     │
+    │  • invalidatePdfCache()                         │
+    │  • Clear cachedFrame                            │
+    │  • Trigger full re-render at new DPI            │
+    │  • Return to IDLE                               │
+    └─────────────────────────────────────────────────┘
+```
+
+#### Implementation Details
+
+**1. New Members in DocumentViewport.h:**
+
+```cpp
+// ===== Deferred Zoom Gesture State =====
+struct ZoomGestureState {
+    bool isActive = false;           ///< True during zoom gesture
+    qreal startZoom = 1.0;           ///< Zoom level when gesture started
+    qreal targetZoom = 1.0;          ///< Target zoom (accumulates changes)
+    QPointF centerPoint;             ///< Zoom center in viewport coords
+    QPixmap cachedFrame;             ///< Viewport snapshot for fast scaling
+    QPointF startPan;                ///< Pan offset when gesture started
+    
+    void reset() {
+        isActive = false;
+        cachedFrame = QPixmap();
+    }
+};
+
+ZoomGestureState m_zoomGesture;
+QTimer* m_zoomGestureTimeoutTimer = nullptr;  ///< Fallback gesture end detection
+static constexpr int ZOOM_GESTURE_TIMEOUT_MS = 300;
+```
+
+**2. Gesture Start (any source):**
+
+```cpp
+void DocumentViewport::beginZoomGesture(QPointF centerPoint)
+{
+    if (m_zoomGesture.isActive) return;  // Already in gesture
+    
+    m_zoomGesture.isActive = true;
+    m_zoomGesture.startZoom = m_zoomLevel;
+    m_zoomGesture.targetZoom = m_zoomLevel;
+    m_zoomGesture.centerPoint = centerPoint;
+    m_zoomGesture.startPan = m_panOffset;
+    
+    // Capture current viewport as cached frame
+    m_zoomGesture.cachedFrame = grab();
+    
+    // Start timeout timer (fallback for gesture end detection)
+    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
+}
+```
+
+**3. During Gesture:**
+
+```cpp
+void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
+{
+    if (!m_zoomGesture.isActive) {
+        beginZoomGesture(centerPoint);
+    }
+    
+    // Accumulate zoom (multiplicative for smooth feel)
+    m_zoomGesture.targetZoom *= scaleFactor;
+    m_zoomGesture.targetZoom = qBound(MIN_ZOOM, m_zoomGesture.targetZoom, MAX_ZOOM);
+    m_zoomGesture.centerPoint = centerPoint;
+    
+    // Restart timeout timer
+    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
+    
+    // Trigger repaint (will use cached frame scaling)
+    update();
+}
+```
+
+**4. Modified paintEvent (fast path during gesture):**
+
+```cpp
+void DocumentViewport::paintEvent(QPaintEvent* event)
+{
+    // FAST PATH: During zoom gesture, just scale the cached frame
+    if (m_zoomGesture.isActive && !m_zoomGesture.cachedFrame.isNull()) {
+        QPainter painter(this);
+        
+        // Calculate scale factor
+        qreal scale = m_zoomGesture.targetZoom / m_zoomGesture.startZoom;
+        
+        // Calculate transform to zoom at center point
+        QPointF center = m_zoomGesture.centerPoint;
+        
+        painter.translate(center);
+        painter.scale(scale, scale);
+        painter.translate(-center);
+        
+        // Draw scaled cached frame (fast GPU operation, may be blurry)
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.drawPixmap(0, 0, m_zoomGesture.cachedFrame);
+        
+        return;  // Skip expensive page rendering
+    }
+    
+    // NORMAL PATH: Full rendering (existing code)
+    // ... existing paintEvent code ...
+}
+```
+
+**5. Gesture End:**
+
+```cpp
+void DocumentViewport::endZoomGesture()
+{
+    if (!m_zoomGesture.isActive) return;
+    
+    // Stop timeout timer
+    m_zoomGestureTimeoutTimer->stop();
+    
+    // Apply final zoom level
+    qreal finalZoom = m_zoomGesture.targetZoom;
+    
+    // Calculate new pan offset to keep center point fixed
+    qreal scale = finalZoom / m_zoomGesture.startZoom;
+    QPointF center = m_zoomGesture.centerPoint;
+    QPointF docPtAtCenter = center / m_zoomGesture.startZoom + m_zoomGesture.startPan;
+    m_panOffset = docPtAtCenter - center / finalZoom;
+    
+    // Clear gesture state BEFORE setting zoom (to avoid recursion)
+    m_zoomGesture.reset();
+    
+    // Now set the zoom level (will invalidate PDF cache and trigger re-render)
+    setZoomLevel(finalZoom);
+    
+    // Clamp pan and emit signals
+    clampPanOffset();
+    emit panChanged(m_panOffset);
+}
+```
+
+**6. Input Event Handlers:**
+
+```cpp
+// Ctrl+Wheel
+void DocumentViewport::wheelEvent(QWheelEvent* event)
+{
+    if (event->modifiers() & Qt::ControlModifier) {
+        qreal zoomDelta = event->angleDelta().y() / 120.0;
+        qreal scaleFactor = qPow(1.1, zoomDelta);
+        
+        updateZoomGesture(scaleFactor, event->position());
+        
+        event->accept();
+        return;
+    }
+    // ... existing scroll handling ...
+}
+
+// Ctrl key release
+void DocumentViewport::keyReleaseEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Control && m_zoomGesture.isActive) {
+        endZoomGesture();
+        event->accept();
+        return;
+    }
+    QWidget::keyReleaseEvent(event);
+}
+
+// Touch pinch (future)
+void DocumentViewport::handlePinchGesture(qreal scaleFactor, QPointF center)
+{
+    updateZoomGesture(scaleFactor, center);
+}
+
+void DocumentViewport::handlePinchEnd()
+{
+    endZoomGesture();
+}
+```
+
+**7. Timeout Fallback:**
+
+```cpp
+// Constructor:
+m_zoomGestureTimeoutTimer = new QTimer(this);
+m_zoomGestureTimeoutTimer->setSingleShot(true);
+connect(m_zoomGestureTimeoutTimer, &QTimer::timeout, 
+        this, &DocumentViewport::endZoomGesture);
+```
+
+#### Performance Characteristics
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Ctrl+wheel (5 clicks) | 5 PDF re-renders | 1 re-render at end |
+| Pinch gesture (2 sec @ 120Hz) | 240 PDF re-renders | 1 re-render at end |
+| Frame rate during gesture | Variable (depends on PDF) | Consistent 60+ FPS |
+| Visual quality during gesture | Sharp | May be blurry |
+| Visual quality after gesture | Sharp | Sharp |
+
+#### Edge Cases
+
+1. **Zoom gesture abandoned** (e.g., Ctrl pressed, but no wheel events):
+   - Timeout timer fires after 300ms, calls `endZoomGesture()`
+   - If `targetZoom == startZoom`, no actual change occurs
+
+2. **Window loses focus during gesture**:
+   - `focusOutEvent` should call `endZoomGesture()` as safety measure
+
+3. **Document changed during gesture**:
+   - `setDocument()` should call `endZoomGesture()` first
+
+4. **Very large zoom change** (e.g., 100% → 1000%):
+   - Cached frame will be very pixelated
+   - This is acceptable per design decision (prioritize frame rate)
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `source/core/DocumentViewport.h` | Add `ZoomGestureState`, timer member |
+| `source/core/DocumentViewport.cpp` | Implement gesture state machine, modify `paintEvent`, `wheelEvent`, add `keyReleaseEvent` |
 
 ---
 
@@ -461,16 +719,20 @@ LayerPanel::activeLayerChanged
 
 ## Success Criteria
 
-### Phase 1: Core Save/Load
-- [x] Can add page to document (Ctrl+Shift+A) - prerequisite ✅
+### Phase 1: Core Save/Load ✅ COMPLETE
+- [x] Can add page to document (Ctrl+Shift+A) ✅
 - [x] Can save multi-page document to JSON file (Ctrl+S) ✅
 - [x] Can load document from JSON file (Ctrl+O) ✅
-- [ ] Strokes and layers preserved on save/load (needs testing)
+- [x] Strokes and layers preserved on save/load ✅
 
-### Phase 2: PDF Loading
-- [ ] Can open PDF and view in DocumentViewport (Ctrl+Shift+O)
-- [ ] PDF pages render correctly
-- [ ] Multi-page PDF works
+### Phase 2: PDF Loading ✅ COMPLETE
+- [x] Can open PDF and view in DocumentViewport (Ctrl+Shift+O) ✅
+- [x] PDF pages render correctly ✅
+- [x] Multi-page PDF works (tested with 3600+ page document) ✅
+- [x] Async PDF preloading (non-blocking) ✅
+- [x] Smart cache eviction (distance-based) ✅
+- [x] PDF performance matches Grid/Lines pages ✅
+- [x] Memory bounded via cache eviction ✅
 
 ### Phase 3: Insert Page
 - [ ] Can insert page after current (Ctrl+Shift+I)
@@ -757,116 +1019,42 @@ void MainWindow::saveDocument() {
 
 ---
 
-### Fix 3: PDF Performance Degradation (Page Background Caching)
+### ~~Fix 3: PDF Performance Degradation (Page Background Caching)~~ ❌ OBSOLETE
 
-**Problem:** Rapid strokes are delayed when a PDF is loaded, but not on Grid/Lines pages.
+> **Status:** This section was an incorrect hypothesis. See below for actual root causes.
 
-**Root Cause Analysis:**
+**Original Hypothesis (WRONG):**
+Thought that `drawPixmap()` for PDF pages 360 times/second caused overhead.
 
-The old architecture had TWO separate widgets:
-- `InkCanvas`: Rendered background (PDF/grid/lines) - only repainted when background changed
-- `VectorCanvas`: Transparent overlay for strokes - repainted during drawing
+**Actual Root Causes (found via investigation):**
 
-The new `DocumentViewport` merged everything into ONE widget. During each `paintEvent()`:
-```
-Current (slow for PDF):
-  paintEvent() → renderPage()
-    → fillRect(backgroundColor)     ← Re-done every paint
-    → drawPixmap(pdfFromCache)      ← Re-blitted every paint (overhead!)
-    → drawLines(grid)               ← Re-drawn every paint
-    → layer->renderWithZoomCache()  ← Stroke cache (fast)
-```
+1. **O(n²) page layout calculations** 
+   - `pagePosition(i)` was O(i), called in loops
+   - For 3600-page document: 1.6 million operations per stroke point!
+   - **Fix:** Added `m_pageYCache` for O(1) lookup, binary search for `pageAtPoint()`
 
-Even though the PDF is cached, calling `drawPixmap()` for the full page 360 times/second has overhead.
-Grid/Lines are lightweight vector ops, so they don't show the same slowdown.
+2. **PDF cache thrashing on stroke release**
+   - `preloadPdfCache()` was called after every stroke finished
+   - This triggered cache rebuilds during rapid drawing
+   - **Fix:** Moved `preloadPdfCache()` to scroll events only, added 150ms debounce
 
-**Solution: Add Page Background Composite Cache**
+3. **FIFO cache eviction**
+   - When scrolling back, pages we just passed were evicted
+   - Caused cache misses for pages we were about to need
+   - **Fix:** Smart eviction - evict page FURTHEST from current view
 
-Pre-render the entire page background (color + PDF + grid/lines) to a single pixmap:
+4. **Synchronous PDF preloading**
+   - Blocking main thread during scroll
+   - **Fix:** Async preloading with `QtConcurrent` and thread-local PDF providers
 
-```
-Desired (fast for all background types):
-  paintEvent() → renderPage()
-    → drawPixmap(cachedPageBackground)  ← Single blit (fast!)
-    → layer->renderWithZoomCache()      ← Stroke cache (fast)
-```
+**Actual Fixes Applied:**
+- See `docs/PDF_PERFORMANCE_INVESTIGATION.md` for full details
+- O(1) page position cache + binary search
+- Async PDF preloading with debounce
+- Distance-based smart eviction
+- Cache capacity increased (6 single column, 12 two column)
 
-**Implementation Plan:**
-
-1. **Add to DocumentViewport.h:**
-   ```cpp
-   // Page background composite cache
-   struct PageBackgroundCache {
-       int pageIndex = -1;
-       qreal zoom = 0;
-       qreal dpr = 0;
-       QPixmap pixmap;
-       bool isValid(int idx, qreal z, qreal d) const {
-           return pageIndex == idx && qFuzzyCompare(zoom, z) && qFuzzyCompare(dpr, d);
-       }
-   };
-   QVector<PageBackgroundCache> m_pageBackgroundCaches;  // Per visible page
-   int m_backgroundCacheCapacity = 4;  // Same as PDF cache
-   ```
-
-2. **Add helper methods:**
-   ```cpp
-   QPixmap getCachedPageBackground(int pageIndex);
-   void invalidateBackgroundCaches();
-   void invalidateBackgroundCache(int pageIndex);
-   ```
-
-3. **Modify renderPage():**
-   ```cpp
-   void renderPage(QPainter& painter, Page* page, int pageIndex) {
-       // 1. Get or build background cache
-       QPixmap bgCache = getCachedPageBackground(pageIndex);
-       if (!bgCache.isNull()) {
-           painter.drawPixmap(0, 0, bgCache);
-       }
-       
-       // 2. Render strokes on top (already cached)
-       for (VectorLayer* layer : page->layers()) {
-           layer->renderWithZoomCache(painter, ...);
-       }
-       
-       // 3. Render objects, border, etc.
-   }
-   ```
-
-4. **getCachedPageBackground() builds cache if needed:**
-   ```cpp
-   QPixmap getCachedPageBackground(int pageIndex) {
-       // Check existing cache
-       for (auto& cache : m_pageBackgroundCaches) {
-           if (cache.isValid(pageIndex, m_zoomLevel, devicePixelRatioF())) {
-               return cache.pixmap;
-           }
-       }
-       
-       // Build new cache: render background + PDF + grid to pixmap
-       QPixmap bg = renderPageBackgroundToPixmap(pageIndex);
-       
-       // Store in cache (FIFO eviction if full)
-       // ...
-       
-       return bg;
-   }
-   ```
-
-5. **Invalidate cache when:**
-   - `setZoomLevel()` changes zoom
-   - `setDocument()` changes document
-   - Page background settings change
-
-**Expected Result:**
-- PDF pages: Same performance as Grid/Lines pages
-- During rapid strokes: Only 2 blits per page (background + strokes)
-- Background only re-rendered when zoom/settings change
-
-**Files to modify:**
-- `source/core/DocumentViewport.h` - Add cache structures
-- `source/core/DocumentViewport.cpp` - Implement caching logic
+**Result:** PDF performance is now equivalent to Grid/Lines pages.
 
 ---
 
@@ -973,6 +1161,102 @@ painter.translate(pos);  // Reuse
 | 🟡 MEDIUM | m_cachedDpi data race | ✅ FIXED |
 | 🟢 MINOR | Debug code cleanup | ✅ FIXED |
 | 🟢 MINOR | Duplicate pagePosition call | ✅ FIXED |
+
+---
+
+## Zoom Optimization: Deferred Rendering (Dec 27, 2024)
+
+### ✅ IMPLEMENTED: Deferred Zoom Rendering
+
+**Problem:** Rapid zoom operations (Ctrl+wheel, future touch pinch) triggered expensive 
+PDF re-renders on every event, causing lag and dropped frames.
+
+**Solution:** Deferred zoom rendering with cached viewport snapshot.
+
+### Design
+
+**During Gesture:**
+1. On first zoom event, capture viewport snapshot via `grab()`
+2. Scale the cached snapshot during gesture (may be blurry, but fast)
+3. No PDF/stroke rendering during gesture → guaranteed 60+ FPS
+
+**On Gesture End:**
+1. Detected via Ctrl key release OR timeout (300ms fallback)
+2. Apply final zoom/pan transformation
+3. Invalidate PDF cache (DPI changed)
+4. Trigger full re-render at correct DPI
+5. Preload PDF cache for new zoom level
+
+### Public API (for future gesture modules)
+
+```cpp
+// These can be called by any input source (Ctrl+wheel, touch, trackpad, SDL controller)
+void beginZoomGesture(QPointF centerPoint);     // Capture snapshot
+void updateZoomGesture(qreal scaleFactor, QPointF centerPoint);  // Scale display
+void endZoomGesture();                          // Apply final zoom
+bool isZoomGestureActive() const;               // Query state
+```
+
+### Implementation Details
+
+**New members in DocumentViewport:**
+```cpp
+struct ZoomGestureState {
+    bool isActive = false;           // True during gesture
+    qreal startZoom = 1.0;           // Zoom when gesture started
+    qreal targetZoom = 1.0;          // Accumulated target zoom
+    QPointF centerPoint;             // Zoom center (viewport coords)
+    QPixmap cachedFrame;             // Viewport snapshot
+    QPointF startPan;                // Pan offset when started
+};
+ZoomGestureState m_zoomGesture;
+QTimer* m_zoomGestureTimeoutTimer;   // Fallback for gesture end
+```
+
+**paintEvent fast path:**
+```cpp
+if (m_zoomGesture.isActive && !m_zoomGesture.cachedFrame.isNull()) {
+    qreal relativeScale = m_zoomGesture.targetZoom / m_zoomGesture.startZoom;
+    painter.fillRect(rect(), QColor(64, 64, 64));
+    // Scale cached frame around zoom center
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed > quality
+    painter.drawPixmap(...scaled...);
+    return;  // Skip expensive rendering
+}
+```
+
+**Gesture end triggers:**
+1. `keyReleaseEvent(Qt::Key_Control)` → `endZoomGesture()`
+2. Timeout timer (3s) → `endZoomGesture()` (fallback)
+3. `focusOutEvent()` → `endZoomGesture()` (window loses focus)
+4. `resizeEvent()` → `endZoomGesture()` (cached frame size invalid)
+5. `setDocument()` → reset gesture (cached frame from old document)
+
+### Edge Cases Handled
+
+| Scenario | Handling |
+|----------|----------|
+| Window loses focus during gesture | `focusOutEvent` ends gesture |
+| Window resized during gesture | `resizeEvent` ends gesture (frame size mismatch) |
+| Document changed during gesture | `setDocument` resets gesture state |
+| Division by zero (startZoom=0) | Guard in paintEvent skips fast path |
+| Destructor during gesture | Explicit timer stop and frame cleanup |
+
+### Integration with Future Gesture Module
+
+Touch/trackpad gestures will be implemented in a separate module that calls:
+```cpp
+// Touch gesture module (future)
+void onPinchUpdate(qreal scale, QPointF center) {
+    documentViewport->updateZoomGesture(scale / lastScale, center);
+}
+
+void onPinchEnd() {
+    documentViewport->endZoomGesture();
+}
+```
+
+No changes to DocumentViewport needed for touch support - just call the API.
 
 ---
 

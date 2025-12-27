@@ -511,6 +511,42 @@ public slots:
      */
     void syncScrollState() { emitScrollFractions(); }
     
+    // ===== Zoom Gesture API (for deferred zoom rendering) =====
+    // These methods can be called by any input source (Ctrl+wheel, touch pinch, etc.)
+    
+    /**
+     * @brief Begin a zoom gesture.
+     * @param centerPoint The zoom center point in viewport coordinates.
+     * 
+     * Captures a snapshot of the current viewport for fast scaling during the gesture.
+     * If already in a gesture, this call is ignored.
+     */
+    void beginZoomGesture(QPointF centerPoint);
+    
+    /**
+     * @brief Update the zoom gesture with a new scale factor.
+     * @param scaleFactor Multiplicative scale factor (1.0 = no change, 1.1 = 10% zoom in).
+     * @param centerPoint The zoom center point in viewport coordinates.
+     * 
+     * If not in a gesture, automatically calls beginZoomGesture first.
+     * The scaleFactor is accumulated multiplicatively for smooth zooming.
+     */
+    void updateZoomGesture(qreal scaleFactor, QPointF centerPoint);
+    
+    /**
+     * @brief End the zoom gesture and apply the final zoom level.
+     * 
+     * Re-renders the viewport at the correct DPI for the new zoom level.
+     * If not in a gesture, this call is ignored.
+     */
+    void endZoomGesture();
+    
+    /**
+     * @brief Check if a zoom gesture is currently active.
+     * @return True if in a zoom gesture.
+     */
+    bool isZoomGestureActive() const { return m_zoomGesture.isActive; }
+    
 signals:
     // ===== View State Signals =====
     
@@ -577,6 +613,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
     void tabletEvent(QTabletEvent* event) override;
     
 private:
@@ -666,6 +704,40 @@ private:
     QElapsedTimer m_benchmarkTimer;                   ///< Timer for measuring intervals
     mutable std::deque<qint64> m_paintTimestamps;     ///< Timestamps of recent paints (mutable for const getPaintRate)
     QTimer m_benchmarkDisplayTimer;                   ///< Timer for periodic display updates
+    
+    // ===== Deferred Zoom Gesture State (Task 2.3 - Zoom Optimization) =====
+    /**
+     * @brief State for deferred zoom rendering.
+     * 
+     * During zoom gestures (Ctrl+wheel, touch pinch), we defer expensive PDF
+     * re-rendering. Instead, we capture a snapshot of the viewport and scale
+     * it during the gesture. Only when the gesture ends do we re-render at
+     * the correct DPI.
+     * 
+     * This provides consistent 60+ FPS during zoom operations regardless of
+     * PDF complexity.
+     * 
+     * The API (beginZoomGesture, updateZoomGesture, endZoomGesture) is designed
+     * to be called by any input source - currently Ctrl+wheel, but future
+     * gesture modules can call these methods directly.
+     */
+    struct ZoomGestureState {
+        bool isActive = false;           ///< True during zoom gesture
+        qreal startZoom = 1.0;           ///< Zoom level when gesture started
+        qreal targetZoom = 1.0;          ///< Target zoom (accumulates changes)
+        QPointF centerPoint;             ///< Zoom center in viewport coords
+        QPixmap cachedFrame;             ///< Viewport snapshot for fast scaling
+        QPointF startPan;                ///< Pan offset when gesture started
+        qreal frameDevicePixelRatio = 1.0; ///< Device pixel ratio when frame was captured
+        
+        void reset() {
+            isActive = false;
+            cachedFrame = QPixmap();
+        }
+    };
+    ZoomGestureState m_zoomGesture;
+    QTimer* m_zoomGestureTimeoutTimer = nullptr;  ///< Fallback gesture end detection
+    static constexpr int ZOOM_GESTURE_TIMEOUT_MS = 3000;  ///< Timeout for gesture end fallback (3s)
     
     // ===== Private Methods =====
     

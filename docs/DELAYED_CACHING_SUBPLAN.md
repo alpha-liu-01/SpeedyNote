@@ -2,7 +2,7 @@
 
 > **Purpose:** Fix PDF performance degradation during rapid stroke drawing
 > **Created:** Dec 26, 2024
-> **Status:** 📋 PLANNING
+> **Status:** 📋 CANCELLED
 
 ---
 

@@ -344,7 +344,7 @@ public:
             return;  // Cache is valid
         }
         
-        rebuildStrokeCache(size, zoom, dpr);
+            rebuildStrokeCache(size, zoom, dpr);
     }
     
     // Backward-compatible overload (assumes zoom = 1.0)
@@ -408,11 +408,11 @@ public:
         }
         
         ensureStrokeCacheValid(size, zoom, dpr);
-        
-        if (!m_strokeCache.isNull()) {
+            
+            if (!m_strokeCache.isNull()) {
             // Draw the pre-zoomed cache at (0,0) - it's already at the right size
             // The cache was built at size * zoom * dpr, with devicePixelRatio = zoom * dpr
-            painter.drawPixmap(0, 0, m_strokeCache);
+                painter.drawPixmap(0, 0, m_strokeCache);
         } else {
             // Fallback to direct rendering (shouldn't happen)
             painter.save();

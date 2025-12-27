@@ -158,7 +158,7 @@ MainWindow::MainWindow(QWidget *parent)
         connectViewportScrollSignals(vp);
         updateDialDisplay();
     });
-    
+
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
     // TabManager::closeTab() emits this signal before deleting the viewport
     connect(m_tabManager, &TabManager::tabCloseRequested, this, [this](int index, DocumentViewport* vp) {
@@ -439,10 +439,10 @@ void MainWindow::setupUi() {
     connect(redButton, &QPushButton::clicked, [this]() { 
         // Phase 3.1.4: Use currentViewport()
         if (DocumentViewport* vp = currentViewport()) {
-            handleColorButtonClick();
+        handleColorButtonClick();
             vp->setPenColor(getPaletteColor("red")); 
-            updateDialDisplay(); 
-            updateColorButtonStates();
+        updateDialDisplay(); 
+        updateColorButtonStates();
         }
     });
     
@@ -455,10 +455,10 @@ void MainWindow::setupUi() {
     connect(blueButton, &QPushButton::clicked, [this]() { 
         // Phase 3.1.4: Use currentViewport()
         if (DocumentViewport* vp = currentViewport()) {
-            handleColorButtonClick();
+        handleColorButtonClick();
             vp->setPenColor(getPaletteColor("blue")); 
-            updateDialDisplay(); 
-            updateColorButtonStates();
+        updateDialDisplay(); 
+        updateColorButtonStates();
         }
     });
 
@@ -471,10 +471,10 @@ void MainWindow::setupUi() {
     connect(yellowButton, &QPushButton::clicked, [this]() { 
         // Phase 3.1.4: Use currentViewport()
         if (DocumentViewport* vp = currentViewport()) {
-            handleColorButtonClick();
+        handleColorButtonClick();
             vp->setPenColor(getPaletteColor("yellow")); 
-            updateDialDisplay(); 
-            updateColorButtonStates();
+        updateDialDisplay(); 
+        updateColorButtonStates();
         }
     });
 
@@ -487,10 +487,10 @@ void MainWindow::setupUi() {
     connect(greenButton, &QPushButton::clicked, [this]() { 
         // Phase 3.1.4: Use currentViewport()
         if (DocumentViewport* vp = currentViewport()) {
-            handleColorButtonClick();
+        handleColorButtonClick();
             vp->setPenColor(getPaletteColor("green")); 
-            updateDialDisplay(); 
-            updateColorButtonStates();
+        updateDialDisplay(); 
+        updateColorButtonStates();
         }
     });
 
@@ -503,10 +503,10 @@ void MainWindow::setupUi() {
     connect(blackButton, &QPushButton::clicked, [this]() { 
         // Phase 3.1.4: Use currentViewport()
         if (DocumentViewport* vp = currentViewport()) {
-            handleColorButtonClick();
+        handleColorButtonClick();
             vp->setPenColor(QColor("#000000")); 
-            updateDialDisplay(); 
-            updateColorButtonStates();
+        updateDialDisplay(); 
+        updateColorButtonStates();
         }
     });
 
@@ -519,10 +519,10 @@ void MainWindow::setupUi() {
     connect(whiteButton, &QPushButton::clicked, [this]() { 
         // Phase 3.1.4: Use currentViewport()
         if (DocumentViewport* vp = currentViewport()) {
-            handleColorButtonClick();
+        handleColorButtonClick();
             vp->setPenColor(QColor("#FFFFFF")); 
-            updateDialDisplay(); 
-            updateColorButtonStates();
+        updateDialDisplay(); 
+        updateColorButtonStates();
         }
     });
     
@@ -1115,10 +1115,10 @@ void MainWindow::setupUi() {
             if (vp->penColor() == customColor) {
                 // Second click - show color picker dialog
                 QColor chosen = QColorDialog::getColor(vp->penColor(), this, "Select Pen Color");
-                if (chosen.isValid()) {
+            if (chosen.isValid()) {
                     vp->setPenColor(chosen);
                     updateCustomColorButtonStyle(chosen);
-                    updateDialDisplay();
+                updateDialDisplay();
                     updateColorButtonStates();
                 }
             } else {
@@ -1547,10 +1547,10 @@ void MainWindow::toggleBenchmark() {
     // Phase 3.1.4: Use currentViewport() for benchmark
     benchmarking = !benchmarking;
     if (DocumentViewport* vp = currentViewport()) {
-        if (benchmarking) {
+    if (benchmarking) {
             vp->startBenchmark();
             benchmarkTimer->start(1000);
-        } else {
+    } else {
             vp->stopBenchmark();
             benchmarkTimer->stop();
             benchmarkLabel->setText(tr("PR:N/A"));
@@ -1574,25 +1574,25 @@ void MainWindow::updateBenchmarkDisplay() {
 void MainWindow::applyCustomColor() {
     // Phase 3.1.4: Use currentViewport()
     if (DocumentViewport* vp = currentViewport()) {
-        QString colorCode = customColorInput->text();
-        if (!colorCode.startsWith("#")) {
-            colorCode.prepend("#");
-        }
+    QString colorCode = customColorInput->text();
+    if (!colorCode.startsWith("#")) {
+        colorCode.prepend("#");
+    }
         vp->setPenColor(QColor(colorCode));
-        updateDialDisplay(); 
+    updateDialDisplay(); 
     }
 }
 
 void MainWindow::updateThickness(int value) {
     // Phase 3.1.4: Use currentViewport()
     if (DocumentViewport* vp = currentViewport()) {
-        // Calculate thickness based on the slider value at 100% zoom
+    // Calculate thickness based on the slider value at 100% zoom
         qreal visualThickness = value;
-        
-        // Apply zoom scaling to maintain visual consistency
+    
+    // Apply zoom scaling to maintain visual consistency
         qreal zoomPercent = vp->zoomLevel() * 100.0;  // zoomLevel() returns 1.0 for 100%
         qreal actualThickness = visualThickness * (100.0 / zoomPercent); 
-        
+    
         vp->setPenThickness(actualThickness);
     }
 }
@@ -1612,11 +1612,11 @@ void MainWindow::adjustThicknessForZoom(int oldZoom, int newZoom) {
 void MainWindow::changeTool(int index) {
     // Phase 3.1.4: Use currentViewport() instead of currentCanvas()
     if (DocumentViewport* vp = currentViewport()) {
-        if (index == 0) {
+    if (index == 0) {
             vp->setCurrentTool(ToolType::Pen);
-        } else if (index == 1) {
+    } else if (index == 1) {
             vp->setCurrentTool(ToolType::Marker);
-        } else if (index == 2) {
+    } else if (index == 2) {
             vp->setCurrentTool(ToolType::Eraser);
         }
     }
@@ -1747,7 +1747,7 @@ bool MainWindow::selectFolder() {
     // TODO Phase 3.4: Implement save folder selection for new .snx format
     QMessageBox::information(this, tr("Save Location"), 
         tr("Saving to folder is being redesigned. Coming soon with .snx format!"));
-    return false;
+                    return false;
 }
 
 void MainWindow::saveCanvas() {
@@ -3097,15 +3097,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     qreal vFraction = (scrollableHeight > 0) ? qBound(0.0, panOffset.y() / scrollableHeight, 1.0) : 0.0;
     
     if (panXSlider) {
-        panXSlider->blockSignals(true);
+                panXSlider->blockSignals(true);
         panXSlider->setValue(qRound(hFraction * 10000));
-        panXSlider->blockSignals(false);
-    }
+                panXSlider->blockSignals(false);
+            }
     if (panYSlider) {
         panYSlider->blockSignals(true);
         panYSlider->setValue(qRound(vFraction * 10000));
         panYSlider->blockSignals(false);
-    }
+        }
     
     // Connect signals - sliders stay visible (auto-hide deferred to Phase 3.4)
     m_hScrollConn = connect(viewport, &DocumentViewport::horizontalScrollChanged, this, [this](qreal fraction) {
@@ -3118,12 +3118,12 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     
     m_vScrollConn = connect(viewport, &DocumentViewport::verticalScrollChanged, this, [this](qreal fraction) {
         if (panYSlider) {
-            panYSlider->blockSignals(true);
+                panYSlider->blockSignals(true);
             panYSlider->setValue(qRound(fraction * 10000));
-            panYSlider->blockSignals(false);
-        }
+                panYSlider->blockSignals(false);
+            }
     });
-}
+        }
 
 void MainWindow::centerViewportContent(int tabIndex) {
     // Phase 3.3: One-time horizontal centering for new tabs
@@ -3180,15 +3180,15 @@ void MainWindow::saveDocument()
     if (!m_documentManager || !m_tabManager) {
         qWarning() << "saveDocument: DocumentManager or TabManager not initialized";
         return;
-    }
-    
+            }
+            
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
         QMessageBox::warning(this, tr("Save Document"), 
             tr("No document is open."));
-        return;
-    }
-    
+                return;
+            }
+            
     Document* doc = viewport->document();
     if (!doc) {
         QMessageBox::warning(this, tr("Save Document"), 
@@ -3198,7 +3198,7 @@ void MainWindow::saveDocument()
     
     // Check if document already has a path (previously saved)
     QString existingPath = m_documentManager->documentPath(doc);
-    
+            
     if (!existingPath.isEmpty()) {
         // ✅ Document was previously saved - save in-place, no dialog
         if (!m_documentManager->saveDocument(doc)) {
@@ -3211,11 +3211,11 @@ void MainWindow::saveDocument()
         int currentIndex = m_tabManager->currentIndex();
         if (currentIndex >= 0) {
             m_tabManager->markTabModified(currentIndex, false);
-        }
-        
+                }
+                
         qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << existingPath;
-        return;
-    }
+                return;
+            }
     
     // ✅ New document - show Save As dialog
     QString defaultName = doc->name.isEmpty() ? "Untitled" : doc->name;
@@ -3237,12 +3237,12 @@ void MainWindow::saveDocument()
     // Ensure .json extension
     if (!filePath.endsWith(".json", Qt::CaseInsensitive)) {
         filePath += ".json";
-    }
-    
+        }
+        
     // Update document name from file name (without extension)
     QFileInfo fileInfo(filePath);
     doc->name = fileInfo.baseName();
-    
+        
     // Use DocumentManager to save (handles all the file I/O and state updates)
     if (!m_documentManager->saveDocumentAs(doc, filePath)) {
         QMessageBox::critical(this, tr("Save Error"),
@@ -3361,7 +3361,7 @@ void MainWindow::openPdfDocument()
         qWarning() << "openPdfDocument: DocumentManager or TabManager not initialized";
         return;
     }
-    
+
     // Open file dialog for PDF selection
     QString filter = tr("PDF Files (*.pdf);;All Files (*)");
     QString filePath = QFileDialog::getOpenFileName(
@@ -3406,8 +3406,8 @@ void MainWindow::applyZoom() {
     // Phase 3.1.8: Stubbed - DocumentViewport handles zoom via zoomSlider
     // TODO Phase 3.3: Connect to currentViewport()->setZoom() if needed
     qDebug() << "applyZoom(): Not implemented yet (Phase 3.3)";
-}
-
+        }
+        
 void MainWindow::forceUIRefresh() {
     setWindowState(Qt::WindowNoState);  // Restore first
     setWindowState(Qt::WindowMaximized);  // Maximize again
@@ -3423,7 +3423,7 @@ void MainWindow::clearPdf() {
     // Phase 3.1.8: Stubbed - PDF clearing will use DocumentViewport
     // TODO Phase 3.4: Implement PDF clearing for DocumentViewport
     qDebug() << "clearPdf(): Not implemented yet (Phase 3.4)";
-}
+            }
 
 void MainWindow::handleSmartPdfButton() {
     // Phase 3.1.8: Stubbed - PDF management will use DocumentViewport
@@ -3488,9 +3488,9 @@ bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
     Q_UNUSED(spnPath);
     // TODO Phase 3.5: Use DocumentManager to check if document is already open
     // For now, always return false (allow opening)
-    return false;
-}
-
+        return false;
+    }
+    
 void MainWindow::addNewTab() {
     // Phase 3.1.1: Simplified addNewTab using DocumentManager and TabManager
     if (!m_tabManager || !m_documentManager) {
@@ -3857,7 +3857,7 @@ InkCanvas* MainWindow::currentCanvas() {
     // For now, this returns nullptr since canvasStack is replaced with m_tabWidget
     // which contains DocumentViewports, not InkCanvases
     return nullptr;
-}
+            }
 
 // Phase 3.1.4: New accessor for DocumentViewport
 DocumentViewport* MainWindow::currentViewport() const {
@@ -4415,7 +4415,7 @@ void MainWindow::onDialReleased() {
 
     if (totalClicks != 0 || grossTotalClicks != 0) {  // ✅ Only switch pages if movement happened
         // Phase 3.1.8: Autosave stubbed - DocumentViewport handles undo/redo, not file saving
-        
+
         DocumentViewport* vp = currentViewport();
         int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
         int newPage = qBound(1, currentPage + totalClicks * pagesToAdvance, 99999);
@@ -4898,7 +4898,7 @@ void MainWindow::handleDialThickness(int angle) {
     // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
     DocumentViewport* vp = currentViewport();
     if (!vp) return;
-    
+
     int thicknessStep = fastForwardMode ? 5 : 1;
     vp->setPenThickness(qBound<qreal>(1.0, vp->penThickness() + (delta / 10.0) * thicknessStep, 50.0));
 
@@ -7736,7 +7736,7 @@ void MainWindow::updateOutlineSelection(int pageNumber) {
 Poppler::Document* MainWindow::getPdfDocument() {
     // Phase 3.1.8: Stubbed - PDF document access will use DocumentViewport
     // TODO Phase 3.4: Implement PDF access through DocumentViewport
-    return nullptr;
+        return nullptr;
 }
 
 void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density) {
@@ -7956,10 +7956,10 @@ void MainWindow::loadMarkdownNotesForCurrentPage() {
     if (!markdownNotesSidebar) return;
     
     // Clear sidebar since we don't have InkCanvas notes anymore
-    if (markdownNotesSidebar->isInSearchMode()) {
-        markdownNotesSidebar->exitSearchMode();
-    }
-    markdownNotesSidebar->clearNotes();
+        if (markdownNotesSidebar->isInSearchMode()) {
+            markdownNotesSidebar->exitSearchMode();
+        }
+        markdownNotesSidebar->clearNotes();
     
     DocumentViewport* vp = currentViewport();
     if (vp) {
@@ -8194,9 +8194,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     // if (m_tabManager && m_documentManager) {
     //     m_tabManager->saveAllTabs();
     // }
-    
-    // ✅ Save current bookmarks before closing
-    saveBookmarks();
+        
+        // ✅ Save current bookmarks before closing
+        saveBookmarks();
     
     // Accept the close event to allow the program to close
     event->accept();
