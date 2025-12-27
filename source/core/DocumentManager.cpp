@@ -193,6 +193,11 @@ void DocumentManager::closeDocument(Document* doc)
         return;
     }
     
+#ifdef QT_DEBUG
+    qDebug() << "DocumentManager::closeDocument: Closing document" << doc 
+             << "remaining=" << (m_documents.size() - 1);
+#endif
+    
     // Emit signal before deletion so receivers can clean up
     emit documentClosed(doc);
     

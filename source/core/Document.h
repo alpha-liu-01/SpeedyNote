@@ -85,8 +85,10 @@ public:
     
     /**
      * @brief Destructor.
+     * Cleans up pages and PDF provider (via unique_ptr).
+     * In debug builds, logs destruction for memory leak detection.
      */
-    ~Document() = default;
+    ~Document();
     
     // Document is non-copyable due to unique_ptr members
     Document(const Document&) = delete;

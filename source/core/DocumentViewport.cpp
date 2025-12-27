@@ -153,6 +153,20 @@ void DocumentViewport::setPageGap(int gap)
     emitScrollFractions();
 }
 
+// ===== Document Change Notifications =====
+
+void DocumentViewport::notifyDocumentStructureChanged()
+{
+    // Invalidate layout cache - page count or sizes changed
+    invalidatePageLayoutCache();
+    
+    // Trigger repaint to show new/removed pages
+    update();
+    
+    // Emit scroll signals (scroll range may have changed)
+    emitScrollFractions();
+}
+
 // ===== Tool State Management (Task 2.1) =====
 
 void DocumentViewport::setCurrentTool(ToolType tool)
@@ -253,6 +267,10 @@ void DocumentViewport::setPanOffset(QPointF offset)
     // Preload PDF cache for adjacent pages after scroll (Task: PDF Performance Fix)
     // Safe here because scroll is user-initiated, not during rapid stroke drawing
     preloadPdfCache();
+    
+    // MEMORY FIX: Evict stroke caches for distant pages after scroll
+    // This prevents unbounded memory growth when scrolling through large documents
+    preloadStrokeCaches();
 }
 
 void DocumentViewport::scrollToPage(int pageIndex)
@@ -1588,14 +1606,33 @@ void DocumentViewport::preloadStrokeCaches()
     
     int first = visible.first();
     int last = visible.last();
+    int pageCount = m_document->pageCount();
     
     // Pre-load ±1 pages beyond visible
     int preloadStart = qMax(0, first - 1);
-    int preloadEnd = qMin(m_document->pageCount() - 1, last + 1);
+    int preloadEnd = qMin(pageCount - 1, last + 1);
+    
+    // MEMORY OPTIMIZATION: Evict stroke caches for pages far from visible area
+    // Keep caches for visible ±2 pages, release everything else
+    // This prevents unbounded memory growth when scrolling through large documents
+    static constexpr int STROKE_CACHE_BUFFER = 2;
+    int keepStart = qMax(0, first - STROKE_CACHE_BUFFER);
+    int keepEnd = qMin(pageCount - 1, last + STROKE_CACHE_BUFFER);
+    
+    // Evict caches for pages outside the keep range
+    for (int i = 0; i < pageCount; ++i) {
+        if (i < keepStart || i > keepEnd) {
+            Page* page = m_document->page(i);
+            if (page && page->hasLayerCachesAllocated()) {
+                page->releaseLayerCaches();
+            }
+        }
+    }
     
     // Get device pixel ratio for cache
     qreal dpr = devicePixelRatioF();
     
+    // Preload nearby pages
     for (int i = preloadStart; i <= preloadEnd; ++i) {
         Page* page = m_document->page(i);
         if (!page) continue;

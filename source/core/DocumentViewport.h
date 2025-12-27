@@ -439,6 +439,16 @@ public:
      */
     PageHit documentToPage(QPointF docPt) const;
     
+    // ===== Document Change Notifications =====
+    
+    /**
+     * @brief Notify viewport that document structure changed (pages added/removed/resized).
+     * 
+     * Call this after modifying Document's page list (addPage, removePage, etc.).
+     * Invalidates layout cache and triggers repaint.
+     */
+    void notifyDocumentStructureChanged();
+    
     // ===== View State Setters (Slots) =====
     
 public slots:

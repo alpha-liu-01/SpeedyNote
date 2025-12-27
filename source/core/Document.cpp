@@ -6,7 +6,7 @@
 
 #include "Document.h"
 
-// ===== Constructor =====
+// ===== Constructor & Destructor =====
 
 Document::Document()
 {
@@ -16,6 +16,19 @@ Document::Document()
     // Set timestamps
     created = QDateTime::currentDateTime();
     lastModified = created;
+    
+#ifdef QT_DEBUG
+    qDebug() << "Document CREATED:" << this << "id=" << id.left(8);
+#endif
+}
+
+Document::~Document()
+{
+#ifdef QT_DEBUG
+    qDebug() << "Document DESTROYED:" << this << "id=" << id.left(8) 
+             << "pages=" << m_pages.size();
+#endif
+    // Note: m_pages and m_pdfProvider are unique_ptr, auto-cleaned
 }
 
 // ===== Factory Methods =====

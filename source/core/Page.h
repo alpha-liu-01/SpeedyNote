@@ -153,6 +153,19 @@ public:
     VectorLayer* layer(int index);
     const VectorLayer* layer(int index) const;
     
+    /**
+     * @brief Release all layer stroke caches to free memory.
+     * Call this for pages that are far from the visible area.
+     * Caches will be rebuilt lazily when the page becomes visible again.
+     */
+    void releaseLayerCaches();
+    
+    /**
+     * @brief Check if any layer has a stroke cache allocated.
+     * @return True if at least one layer has a cache using memory.
+     */
+    bool hasLayerCachesAllocated() const;
+    
     // ===== Object Management =====
     
     /**

@@ -115,6 +115,25 @@ const VectorLayer* Page::layer(int index) const
     return nullptr;
 }
 
+void Page::releaseLayerCaches()
+{
+    for (auto& layer : vectorLayers) {
+        if (layer) {
+            layer->releaseStrokeCache();
+        }
+    }
+}
+
+bool Page::hasLayerCachesAllocated() const
+{
+    for (const auto& layer : vectorLayers) {
+        if (layer && layer->hasStrokeCacheAllocated()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ===== Object Management =====
 
 void Page::addObject(std::unique_ptr<InsertedObject> obj)

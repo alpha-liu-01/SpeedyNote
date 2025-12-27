@@ -158,6 +158,19 @@ MainWindow::MainWindow(QWidget *parent)
         connectViewportScrollSignals(vp);
         updateDialDisplay();
     });
+    
+    // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
+    // TabManager::closeTab() emits this signal before deleting the viewport
+    connect(m_tabManager, &TabManager::tabCloseRequested, this, [this](int index, DocumentViewport* vp) {
+        Q_UNUSED(index);
+        if (vp && m_documentManager) {
+            Document* doc = vp->document();
+            if (doc) {
+                m_documentManager->closeDocument(doc);
+            }
+        }
+    });
+    
     QSettings settings("SpeedyNote", "App");
     pdfRenderDPI = settings.value("pdfRenderDPI", 192).toInt();
     setPdfDPI(pdfRenderDPI);
@@ -3324,8 +3337,9 @@ void MainWindow::addPageToDocument()
         qDebug() << "addPageToDocument: Added page" << doc->pageCount() 
                  << "to document" << doc->name;
         
-        // Trigger viewport repaint to show new page in layout
-        viewport->update();
+        // CRITICAL: Notify viewport that document structure changed
+        // This invalidates layout cache and triggers repaint
+        viewport->notifyDocumentStructureChanged();
         
         // Mark tab as modified
         int currentIndex = m_tabManager->currentIndex();
@@ -3823,6 +3837,7 @@ void MainWindow::addNewTab() {
 }
 void MainWindow::removeTabAt(int index) {
     // Phase 3.1.2: Use TabManager to remove tabs
+    // Note: Document cleanup happens via tabCloseRequested signal handler (ML-1 fix)
     if (m_tabManager) {
         m_tabManager->closeTab(index);
     }

@@ -368,8 +368,27 @@ public:
     
     /**
      * @brief Invalidate stroke cache (call when strokes change).
+     * Note: This only marks the cache dirty, it does NOT free memory.
      */
     void invalidateStrokeCache() { m_strokeCacheDirty = true; }
+    
+    /**
+     * @brief Release stroke cache memory completely.
+     * Call this for pages that are far from the visible area to save memory.
+     * The cache will be rebuilt lazily when the page becomes visible again.
+     */
+    void releaseStrokeCache() {
+        m_strokeCache = QPixmap();  // Actually free the pixmap memory
+        m_strokeCacheDirty = true;
+        m_cacheZoom = 0;
+        m_cacheDpr = 0;
+    }
+    
+    /**
+     * @brief Check if stroke cache is currently allocated (using memory).
+     * @return True if cache pixmap is allocated.
+     */
+    bool hasStrokeCacheAllocated() const { return !m_strokeCache.isNull(); }
     
     /**
      * @brief Render using zoom-aware stroke cache.
