@@ -602,7 +602,7 @@ private:
     
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 1-10)
-    int m_pdfCacheCapacity = 2;  // Default for single column, 4 for two column
+    int m_pdfCacheCapacity = 4;  // Default for single column, 8 for two column
     /// CUSTOMIZABLE: Max undo actions per page - higher = more RAM (range: 10-200)
     static const int MAX_UNDO_PER_PAGE = 50;
     

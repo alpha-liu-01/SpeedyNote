@@ -137,6 +137,7 @@ QImage PopplerPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
     if (!page) {
         return QImage();
     }
+    qDebug() << "renderPageToImage: pageIndex=" << pageIndex << " dpi=" << dpi;
     return page->renderToImage(dpi, dpi);
 }
 

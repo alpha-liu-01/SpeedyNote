@@ -53,6 +53,9 @@ DocumentViewport::DocumentViewport(QWidget* parent)
             update(QRect(0, 0, 500, 100));
         }
     });
+    
+    // Initialize PDF cache capacity based on default layout mode
+    updatePdfCacheCapacity();
 }
 
 DocumentViewport::~DocumentViewport()
@@ -199,6 +202,7 @@ void DocumentViewport::setZoomLevel(qreal zoom)
     
     // Invalidate PDF cache if DPI changed significantly (Task 1.3.6)
     if (!qFuzzyCompare(oldDpi, newDpi)) {
+        qDebug() << "setZoomLevel: DPI changed from" << oldDpi << "to" << newDpi << "- invalidating cache";
         invalidatePdfCache();
     }
     
@@ -629,12 +633,19 @@ QVector<int> DocumentViewport::visiblePages() const
 
 void DocumentViewport::paintEvent(QPaintEvent* event)
 {
+
+    
     // Benchmark: track paint timestamps (Task 2.6)
     if (m_benchmarking) {
         m_paintTimestamps.push_back(m_benchmarkTimer.elapsed());
     }
     
     QPainter painter(this);
+
+    // painter.fillRect(rect(), Qt::black);
+    // return;  // DO NOTHING ELSE
+
+
     painter.setRenderHint(QPainter::Antialiasing, true);
     
     // ========== OPTIMIZATION: Dirty Region Rendering ==========
@@ -665,6 +676,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
     painter.scale(m_zoomLevel, m_zoomLevel);
     
+    
     // Render each visible page
     // For partial updates, only render pages that intersect the dirty region
     for (int pageIdx : visible) {
@@ -680,6 +692,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
                 page->size.width() * m_zoomLevel,
                 page->size.height() * m_zoomLevel
             );
+            // qDebug() << "dirtyRect=" << dirtyRect;
+            // qDebug() << "intersects=" << pageRectInViewport.intersects(dirtyRect);
             if (!pageRectInViewport.intersects(dirtyRect)) {
                 continue;  // Skip this page - it doesn't intersect dirty region
             }
@@ -691,7 +705,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.translate(pos);
         
         // Render the page (background + content)
-        renderPage(painter, page, pageIdx);
+        renderPage(painter, page, pageIdx); // even if we comment out this line, the page doesn't render and it still lags on rapid fire. 
         
         painter.restore();
     }
@@ -713,6 +727,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     
     // Draw debug info overlay if enabled
     // Skip during partial updates unless the dirty region includes the overlay area
+    
     QRect debugOverlayArea(0, 0, 500, 120);
     if (m_showDebugOverlay && (!isPartialUpdate || dirtyRect.intersects(debugOverlayArea))) {
         painter.setPen(Qt::white);
@@ -761,6 +776,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.drawText(rect().adjusted(10, 10, -10, -10), 
                          Qt::AlignTop | Qt::AlignLeft, info);
     }
+    
 }
 
 void DocumentViewport::resizeEvent(QResizeEvent* event)
@@ -1157,12 +1173,29 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
         return QPixmap();
     }
     
+    // DEBUG: Show what we're looking for
+    qDebug() << "getCachedPdfPage: LOOKING FOR pageIndex=" << pageIndex << " dpi=" << dpi 
+             << " cacheSize=" << m_pdfCache.size();
+    
     // Check if we have this page cached at the right DPI
-    for (const PdfCacheEntry& entry : m_pdfCache) {
+    for (int i = 0; i < m_pdfCache.size(); ++i) {
+        const PdfCacheEntry& entry = m_pdfCache[i];
+        bool pageMatch = (entry.pageIndex == pageIndex);
+        bool dpiMatch = qFuzzyCompare(entry.dpi, dpi);
+        
+        qDebug() << "  Cache[" << i << "]: pageIndex=" << entry.pageIndex 
+                 << " dpi=" << entry.dpi
+                 << " pageMatch=" << pageMatch 
+                 << " dpiMatch=" << dpiMatch
+                 << " pixmapNull=" << entry.pixmap.isNull();
+        
         if (entry.matches(pageIndex, dpi)) {
+            qDebug() << "  -> CACHE HIT!";
             return entry.pixmap;
         }
     }
+
+    qDebug() << "  -> CACHE MISS! Rendering page...";
     
     // Not cached - render it now
     QImage pdfImage = m_document->renderPdfPageToImage(pageIndex, dpi);
@@ -1209,10 +1242,13 @@ void DocumentViewport::preloadPdfCache()
     
     qreal dpi = effectivePdfDpi();
     
+    qDebug() << "preloadPdfCache: visible=" << visible << " preloadRange=" << preloadStart << "-" << preloadEnd << " dpi=" << dpi << " cacheCapacity=" << m_pdfCacheCapacity;
+    
     // Pre-load pages (this also adds them to cache)
     for (int i = preloadStart; i <= preloadEnd; ++i) {
         Page* page = m_document->page(i);
         if (page && page->backgroundType == Page::BackgroundType::PDF) {
+            qDebug() << "  preloading docPage=" << i << " pdfPageNum=" << page->pdfPageNumber;
             getCachedPdfPage(page->pdfPageNumber, dpi);
         }
     }
@@ -1220,6 +1256,7 @@ void DocumentViewport::preloadPdfCache()
 
 void DocumentViewport::invalidatePdfCache()
 {
+    qDebug() << "!!! invalidatePdfCache() called! Clearing" << m_pdfCache.size() << "entries";
     m_pdfCache.clear();
     m_cachedDpi = 0;
 }
@@ -1472,8 +1509,8 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     m_hardwareEraserActive = false;  // Clear hardware eraser state
     // Note: Don't clear m_lastPointerPos - keep it for eraser cursor during hover
     
-    // Pre-load caches after interaction
-    preloadPdfCache();
+    // Pre-load stroke caches after interaction (but NOT PDF cache - it causes thrashing during rapid strokes)
+    // PDF cache is preloaded during scroll/zoom, not during drawing
     preloadStrokeCaches();
     
     update();
@@ -2011,6 +2048,8 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     
     // 1. Fill with page background color
     painter.fillRect(pageRect, page->backgroundColor);
+
+    // qDebug() << "renderPage: pageIndex=" << pageIndex << " pageSize=" << pageSize;  // many renderPage calls per stroke
     
     // 2. Render background based on type
     switch (page->backgroundType) {
@@ -2022,11 +2061,15 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             // Render PDF page from cache (Task 1.3.6)
             if (m_document->isPdfLoaded() && page->pdfPageNumber >= 0) {
                 qreal dpi = effectivePdfDpi();
+                qDebug() << "renderPage: docPageIdx=" << pageIndex << " pdfPageNum=" << page->pdfPageNumber << " dpi=" << dpi;
                 QPixmap pdfPixmap = getCachedPdfPage(page->pdfPageNumber, dpi);
                 
                 if (!pdfPixmap.isNull()) {
                     // Scale pixmap to fit page rect
                     painter.drawPixmap(pageRect.toRect(), pdfPixmap);
+
+                    // qDebug() << "renderPage: pageIndex=" << pageIndex << " pageSize=" << pageSize << " pdfPixmap.size=" << pdfPixmap.size();
+                    // We are supposed to make the pageSize the same as the pdfPixmap, instead of the other way around. 
                 }
             }
             break;
@@ -2090,6 +2133,7 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     
     // 5. Draw page border (optional, for visual separation)
     // CUSTOMIZABLE: Page border color (theme setting)
+    // The border does not need to be redrawn every time the page is rendered. 
     painter.setPen(QPen(QColor(180, 180, 180), 1.0 / m_zoomLevel));  // Light gray border
     painter.drawRect(pageRect);
 }
