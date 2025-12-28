@@ -117,6 +117,34 @@ Document* DocumentManager::loadDocument(const QString& path)
         return doc;
     }
     
+    // Handle .snb bundle directories - edgeless documents with O(1) tile loading
+    if (suffix == "snb" || fileInfo.isDir()) {
+        // Check if it's a valid bundle (has document.json)
+        QString manifestPath = path + "/document.json";
+        if (!QFile::exists(manifestPath)) {
+            if (suffix == "snb") {
+                qWarning() << "DocumentManager::loadDocument: Invalid bundle (no manifest):" << path;
+                return nullptr;
+            }
+            // Not a bundle directory, fall through to other handlers
+        } else {
+            auto docPtr = Document::loadBundle(path);
+            if (!docPtr) {
+                qWarning() << "DocumentManager::loadDocument: Failed to load bundle:" << path;
+                return nullptr;
+            }
+            
+            Document* doc = docPtr.release();
+            m_documents.append(doc);
+            m_documentPaths[doc] = path;
+            m_modifiedFlags[doc] = false;
+            
+            addToRecent(path);
+            emit documentLoaded(doc);
+            return doc;
+        }
+    }
+    
     // Handle .snx and .json files - load from JSON
     if (suffix == "snx" || suffix == "json") {
         QFile file(path);
@@ -386,6 +414,31 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
         return false;
     }
     
+    QFileInfo fileInfo(path);
+    QString suffix = fileInfo.suffix().toLower();
+    
+    // ========== EDGELESS BUNDLE FORMAT (.snb) ==========
+    // Edgeless documents use bundle format for O(1) tile loading
+    if (doc->isEdgeless() || suffix == "snb") {
+        QString bundlePath = path;
+        // Ensure .snb extension
+        if (!bundlePath.endsWith(".snb", Qt::CaseInsensitive)) {
+            bundlePath += ".snb";
+        }
+        
+        if (!doc->saveBundle(bundlePath)) {
+            qWarning() << "DocumentManager::doSave: Failed to save bundle:" << bundlePath;
+            return false;
+        }
+        
+        // Update state
+        clearModified(doc);
+        addToRecent(bundlePath);
+        emit documentSaved(doc);
+        return true;
+    }
+    
+    // ========== PAGED DOCUMENT FORMAT (.json) ==========
     // Serialize document to JSON
     QJsonObject jsonObj = doc->toFullJson();
     QJsonDocument jsonDoc(jsonObj);

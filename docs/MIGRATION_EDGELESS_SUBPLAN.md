@@ -2,7 +2,7 @@
 
 > **Purpose:** Implement infinite canvas support with tiled architecture
 > **Created:** Dec 27, 2024
-> **Status:** ✅ DESIGN COMPLETE - Ready for implementation
+> **Status:** 🔄 IN PROGRESS - Core drawing works, persistence & undo pending
 > **Parent:** MIGRATION_DOC1_SUBPLAN.md (Phase 4)
 
 ---
@@ -13,30 +13,90 @@ Edgeless mode provides an infinite canvas for freeform note-taking. Unlike paged
 
 ---
 
-## Current State Analysis
+## Implementation Progress (Dec 27, 2024)
 
-### What Exists (Implemented Early, Never Tested)
+### ✅ What's Working Now
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Tile infrastructure** | ✅ Complete | Sparse `std::map<TileCoord, Page>` storage |
+| **Tile creation on-demand** | ✅ Complete | Tiles created when user draws |
+| **Stroke drawing** | ✅ Complete | Points in document coords, stored in tiles |
+| **Stroke splitting at boundaries** | ✅ Complete | Strokes split at tile edges, overlap point for continuity |
+| **Pan/scroll** | ✅ Complete | Mouse wheel vertical, Shift+wheel horizontal |
+| **Background rendering** | ✅ Complete | Default bg shown for all visible tiles (even empty) |
+| **Debug grid overlay** | ✅ Complete | Tile boundaries visible for testing |
+| **Min zoom limit** | ✅ Complete | Prevents zooming out too far (≤9 tiles visible) |
+| **Ctrl+Shift+N shortcut** | ✅ Complete | Creates new edgeless document |
+
+### ❌ Known Issues (Expected at This Stage)
+
+| Issue | Reason | Resolution |
+|-------|--------|------------|
+| **Undo doesn't work** | Phase E6 not implemented | Implement after persistence |
+| **Memory grows with tiles** | No tile cache eviction | Implement with persistence (E5) |
+| **Can't save/load** | Phase E5 not implemented | Next priority |
+
+### 🔧 Bugs Fixed During Testing
+
+| Bug | Root Cause | Fix |
+|-----|------------|-----|
+| **Pan not working** | `clampPanOffset()` reset pan when `pageCount()==0` | Check `isEdgeless()` before `pageCount()` |
+| **Initially blank canvas** | Only rendered existing tiles | Render background for ALL visible tile coords |
+| **Strokes clipped at tile boundary** | Stored in first tile only | Implemented stroke splitting |
+| **Rendering 16+ tiles** | 1-tile (1024px) margin for backgrounds | Reduced to 100px for strokes, 0 for backgrounds |
+
+---
+
+## Deferred Decisions
+
+### Tile Memory Management
+
+**Decision:** Delay stroke cache eviction until persistence (E5) is implemented.
+
+**Rationale:**
+- Stroke cache eviction makes sense paired with dynamic disk loading/unloading
+- Without persistence, evicted caches would just need to be regenerated
+- Option B chosen: Full tile unloading to disk (not just cache eviction)
+
+**Current behavior:**
+- Tiles stay in memory once created
+- Stroke caches (~4MB each) accumulate as user draws on more tiles
+- Acceptable for MVP testing; will be bounded after E5
+
+### Undo/Redo
+
+**Decision:** Implement undo (E6) after persistence (E5).
+
+**Rationale:**
+- Undo needs to store tile coordinates with each action
+- Makes more sense to complete the tile system first
+- Global undo stack confirmed (not per-tile)
+
+---
+
+## Original State Analysis (Historical)
+
+### What Existed Before Tiled Architecture
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `Document::Mode::Edgeless` | ✅ Enum exists | Used in Document creation |
-| `Document::createNew(..., Mode::Edgeless)` | ✅ Factory exists | Creates single 4096×4096 page |
-| `Document::isEdgeless()` | ✅ Helper exists | Returns `mode == Mode::Edgeless` |
-| `Document::edgelessPage()` | ✅ Accessor exists | Returns single page (index 0) |
+| `Document::Mode::Edgeless` | ✅ Enum existed | Used in Document creation |
+| `Document::createNew(..., Mode::Edgeless)` | ⚠️ Broken | Created single 4096×4096 page (doesn't scale) |
+| `Document::isEdgeless()` | ✅ Helper existed | Returns `mode == Mode::Edgeless` |
+| `Document::edgelessPage()` | ⚠️ Broken | Returned single giant page |
 | Pan offset clamping disabled | ✅ Working | Allows infinite pan in edgeless |
-| `Ctrl+Shift+N` shortcut | ❌ Not connected | Needs implementation |
 
-### What's Broken / Missing
+### Issues Fixed by Tiled Architecture
 
-| Issue | Severity | Description |
-|-------|----------|-------------|
-| **Single giant page** | 🔴 CRITICAL | 4096×4096 page doesn't scale |
-| **Stroke cache memory** | 🔴 CRITICAL | Cache at page size = 64MB+ at zoom |
-| **No tile system** | 🔴 CRITICAL | No sparse 2D storage |
-| **No on-demand loading** | 🟡 MEDIUM | All strokes loaded at once |
-| **No stroke culling** | 🟡 MEDIUM | Renders all strokes even if off-screen |
-| **Serialization** | 🟡 MEDIUM | Doesn't support tile format |
-| **Shortcut not connected** | 🟢 LOW | Easy fix |
+| Issue | Severity | Resolution |
+|-------|----------|------------|
+| **Single giant page** | 🔴 CRITICAL | ✅ Now uses sparse tile grid |
+| **Stroke cache memory** | 🔴 CRITICAL | ✅ Cache per tile (~4MB), not per canvas |
+| **No tile system** | 🔴 CRITICAL | ✅ `std::map<TileCoord, Page>` implemented |
+| **No stroke culling** | 🟡 MEDIUM | ✅ Only visible tiles rendered |
+| **Serialization** | 🟡 MEDIUM | 🔄 Phase E5 pending |
+| **Shortcut not connected** | 🟢 LOW | ✅ Connected |
 
 ---
 
@@ -78,30 +138,42 @@ Coordinates can be negative (infinite in all directions):
 | **Rendering** | Render visible tiles + 1-tile margin |
 | **No clipping** | Strokes render completely, painter clips to viewport |
 
-### 4. Viewport Zoom Limits
+### 4. Viewport Tile Coverage & Zoom Limits
 
-**Goal:** At most 4 tiles (2×2 = 2048×2048) visible at once.
+**Tile Coverage Analysis:**
 
-**Formula:**
+With 1024×1024 tiles on a viewport of size W×H:
+- Horizontally: `ceil(W/1024)` tiles, +1 if straddling boundary = up to 3 tiles
+- Vertically: `ceil(H/1024)` tiles, +1 if straddling boundary = up to 3 tiles
+
+| Viewport | Best Case (aligned) | Worst Case (straddling) |
+|----------|---------------------|-------------------------|
+| 1920×1080 | 2×2 = 4 tiles | 3×3 = **9 tiles** |
+| 1280×720 | 2×1 = 2 tiles | 3×2 = 6 tiles |
+| 2560×1440 | 3×2 = 6 tiles | 4×3 = 12 tiles |
+
+**Min Zoom Formula:**
 ```cpp
-qreal minZoom = qMax(
-    static_cast<qreal>(width()) / 2048.0,
-    static_cast<qreal>(height()) / 2048.0
-);
+// Allow ~2048 logical pixels of document per dimension
+// At worst case, this means up to 9 tiles visible
+qreal minZoom = qMax(width(), height()) / 2048.0;
 minZoom = qMax(minZoom, 0.1);  // Absolute floor at 10%
 ```
 
-**Key:** Use Qt's logical pixels (`width()`, `height()`), which are already DPI-adjusted.
+**Memory Impact:**
+- 9 tiles × ~4MB each = ~36MB stroke cache at zoom 1.0, DPR 1.0
+- At 2× zoom: ~16MB per tile → ~144MB (zoomed caches are larger)
+- Caches are invalidated on zoom change, so only one zoom level's worth is in memory
 
-| Display | Scaling | Logical Size | Min Zoom |
-|---------|---------|--------------|----------|
-| 1920×1080 | 100% | 1920×1080 | 94% |
-| 1920×1080 | 125% | 1536×864 | 75% |
-| 2560×1440 | 150% | 1707×960 | 83% |
-| 2048×1536 | 200% | 1024×768 | 50% |
-| 3840×2160 | 100% | 3840×2160 | 188% (can't zoom out) |
+| Display | Scaling | Logical Size | Min Zoom | Max Tiles |
+|---------|---------|--------------|----------|-----------|
+| 1920×1080 | 100% | 1920×1080 | 94% | 9 |
+| 1920×1080 | 125% | 1536×864 | 75% | 6 |
+| 2560×1440 | 150% | 1707×960 | 83% | 9 |
+| 2048×1536 | 200% | 1024×768 | 50% | 4 |
+| 3840×2160 | 100% | 3840×2160 | 188% | 12 (can't zoom out much) |
 
-**Edge case (4K@100%):** Accepted. Users with 4K at 100% scaling are rare, and they still get a usable canvas area. No special handling needed for MVP.
+**Edge case (4K@100%):** Accepted. Users with 4K at 100% scaling are rare. They get more tiles visible but less zoom-out range.
 
 ### 5. Serialization Format
 
@@ -230,60 +302,51 @@ Page* Document::edgelessPage() {
 
 **Goal:** Render tiles correctly with cross-tile stroke support.
 
-#### E2.1: Add Tile Rendering Path
+#### E2.1: Two-Pass Rendering Strategy
 
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::paintEvent(QPaintEvent* event) {
-    // ... existing code ...
-    
-    if (m_document->isEdgeless()) {
-        renderEdgelessMode(painter);
-    } else {
-        // ... existing paged rendering ...
-    }
-}
+With stroke splitting, we use optimized two-pass rendering:
 
+```cpp
 void DocumentViewport::renderEdgelessMode(QPainter& painter) {
-    // Get visible rect in document coordinates
     QRectF viewRect = visibleRect();
     
-    // Expand by 1 tile margin for cross-tile strokes
-    int margin = Document::EDGELESS_TILE_SIZE;
-    QRectF expandedRect = viewRect.adjusted(-margin, -margin, margin, margin);
+    // ========== OPTIMIZED TILE SELECTION ==========
+    // With stroke splitting, cross-tile strokes are stored as separate segments.
+    // Small margin (100px) handles thick strokes extending beyond tile boundary.
+    constexpr int STROKE_MARGIN = 100;
+    QRectF strokeRect = viewRect.adjusted(-STROKE_MARGIN, -STROKE_MARGIN, 
+                                          STROKE_MARGIN, STROKE_MARGIN);
     
-    // Get tiles to render
-    QVector<QPair<int,int>> tilesToRender = m_document->tilesInRect(expandedRect);
+    // Backgrounds: only visible tiles (4-9 for 1920x1080)
+    QVector<TileCoord> visibleTiles = m_document->tilesInRect(viewRect);
     
-    // Apply view transform
-    painter.save();
-    painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-    painter.scale(m_zoomLevel, m_zoomLevel);
+    // Strokes: visible + small margin (for thick stroke edges)
+    QVector<TileCoord> strokeTiles = m_document->tilesInRect(strokeRect);
     
-    // Render each tile
-    for (const auto& coord : tilesToRender) {
-        Page* tile = m_document->getTile(coord.first, coord.second);
-        if (!tile) continue;
-        
-        // Calculate tile origin in document coordinates
-        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                          coord.second * Document::EDGELESS_TILE_SIZE);
-        
-        painter.save();
-        painter.translate(tileOrigin);
-        renderTile(painter, tile, coord);
-        painter.restore();
+    // PASS 1: Backgrounds for visible tiles only (including empty tiles)
+    for (const auto& coord : visibleTiles) {
+        // Render background color + grid/lines
     }
     
-    // Draw tile boundary grid (debug)
+    // PASS 2: Strokes for visible tiles + margin (only existing tiles)
+    for (const auto& coord : strokeTiles) {
+        Page* tile = m_document->getTile(coord);
+        if (!tile) continue;  // Skip empty tiles
+        // Render vector layers
+    }
+    
+    // Debug overlay: tile boundaries
     if (m_showTileBoundaries) {
         drawTileBoundaries(painter, viewRect);
     }
-    
-    painter.restore();
 }
 ```
+
+**Performance:**
+- Before (1-tile margin): 16+ tiles rendered for backgrounds
+- After (optimized): Only 4-9 tiles for backgrounds, 4-9 for strokes
 
 #### E2.2: Implement renderTile()
 
@@ -494,63 +557,300 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos) {
 
 ---
 
-### Phase E5: Serialization
+### Phase E5: Serialization 🔄 IN PROGRESS
 
-**Goal:** Save/load tiled edgeless documents.
+**Goal:** Save/load tiled edgeless documents with O(1) tile access.
 
-#### E5.1: Update toFullJson() for Edgeless
+#### E5.0a: TEMPORARY - Directory-Based Loading
+
+**Current State (Dec 27, 2024):**
+
+The `.snb` format is currently a **directory** (folder), not a single file:
+```
+MyDocument.snb/
+├── document.json    # Manifest with metadata + tile index
+└── tiles/
+    ├── 0,0.json     # Individual tile files
+    ├── 1,0.json
+    └── ...
+```
+
+**Why a folder?**
+- Enables O(1) tile access (read/write single tile file)
+- Easier development/debugging (view tiles in text editor)
+- Defers compression/packaging decision
+
+**TEMPORARY Workaround:**
+- `Ctrl+Shift+L` opens a **folder picker** to select `.snb` directory
+- Regular `Ctrl+O` only works for `.json`/`.snx` (single files)
+- This is documented as temporary until unified packaging is implemented
+
+**Future Options:**
+1. **Zip package**: Package `.snb/` into `.snb.zip`, rename to `.snb`
+2. **SQLite**: Store tiles as blobs in SQLite database (single file)
+3. **QDataStream**: Custom binary format (like old `.spn`)
+4. **Keep folder**: Some apps (macOS .app, .pages) use folder bundles
+
+**Decision:** Defer packaging until core edgeless features are stable.
+
+#### E5.0: Design - Multi-File Document Bundle
+
+**Problem with single JSON file:**
+- All tiles in one file → O(n) parsing to open document
+- Loading 1000 tiles just to view 9 → wasteful
+- Modifying one tile requires rewriting entire file
+
+**Solution: Document Bundle Format**
+
+```
+MyDocument.snb/                    # Directory (SpeedyNote Bundle)
+├── document.json                  # Metadata ONLY (no tile content)
+│   {
+│     "id": "uuid",
+│     "name": "My Canvas",
+│     "mode": "edgeless",
+│     "tile_size": 1024,
+│     "default_background": {...},
+│     "tile_index": ["0,0", "1,0", "-1,2"]  # Existing tile coords
+│   }
+└── tiles/
+    ├── 0,0.json                   # Individual tile files
+    ├── 1,0.json                   # Each ~10-100KB typically
+    └── -1,2.json
+```
+
+**Complexity Analysis:**
+
+| Operation | Old (single file) | New (bundle) |
+|-----------|-------------------|--------------|
+| Open document | O(n) parse all tiles | O(1) parse manifest |
+| Load visible tiles | Already loaded | O(k) where k = visible tiles |
+| Save after edit | O(n) rewrite all | O(1) write dirty tile only |
+| Memory (1000 tiles) | All 1000 in RAM | Only visible ~9 in RAM |
+
+#### E5.1: Document Bundle Path Management
+
+**New members in Document.h:**
 
 ```cpp
-QJsonObject Document::toFullJson() const {
-    QJsonObject obj = toJson();
+class Document {
+    // ... existing ...
     
-    if (mode == Mode::Edgeless) {
-        obj["tile_size"] = EDGELESS_TILE_SIZE;
-        
-        QJsonObject tilesObj;
-        for (auto it = m_tiles.begin(); it != m_tiles.end(); ++it) {
-            QString key = QString("%1,%2").arg(it.key().first).arg(it.key().second);
-            tilesObj[key] = it.value()->toJson();
-        }
-        obj["tiles"] = tilesObj;
-    } else {
-        obj["pages"] = pagesToJson();
+    // Bundle path management
+    QString m_bundlePath;              // Path to .snb directory
+    QSet<TileCoord> m_tileIndex;       // All tile coords that exist on disk
+    QSet<TileCoord> m_dirtyTiles;      // Tiles modified since last save
+    
+    // Tile loading
+    bool m_lazyLoadEnabled = false;    // True after loading from disk
+    
+public:
+    // Bundle operations
+    void setBundlePath(const QString& path);
+    QString bundlePath() const;
+    
+    // Tile persistence
+    bool saveTile(TileCoord coord);
+    bool loadTileFromDisk(TileCoord coord);
+    void markTileDirty(TileCoord coord);
+    bool isTileDirty(TileCoord coord) const;
+    
+    // Tile eviction (for memory management)
+    void evictTile(TileCoord coord);        // Save if dirty, remove from memory
+    bool isTileLoaded(TileCoord coord) const;
+    bool tileExistsOnDisk(TileCoord coord) const;
+};
+```
+
+#### E5.2: Lazy Tile Loading
+
+**Modified getTile() - Load on demand:**
+
+```cpp
+Page* Document::getTile(int tx, int ty) const {
+    TileCoord coord(tx, ty);
+    
+    // 1. Check if already in memory
+    auto it = m_tiles.find(coord);
+    if (it != m_tiles.end()) {
+        return it->second.get();
     }
     
-    return obj;
+    // 2. If lazy loading enabled, try to load from disk
+    if (m_lazyLoadEnabled && m_tileIndex.contains(coord)) {
+        // const_cast needed because loading modifies m_tiles
+        Document* mutableThis = const_cast<Document*>(this);
+        if (mutableThis->loadTileFromDisk(coord)) {
+            return m_tiles.at(coord).get();
+        }
+    }
+    
+    // 3. Tile doesn't exist
+    return nullptr;
 }
 ```
 
-#### E5.2: Update fromFullJson() for Edgeless
+#### E5.3: Tile File Operations
 
 ```cpp
-std::unique_ptr<Document> Document::fromFullJson(const QJsonObject& obj) {
-    auto doc = fromJson(obj);
+bool Document::saveTile(TileCoord coord) {
+    auto it = m_tiles.find(coord);
+    if (it == m_tiles.end()) return false;
+    
+    QString tilePath = m_bundlePath + "/tiles/" + 
+                       QString("%1,%2.json").arg(coord.first).arg(coord.second);
+    
+    QFile file(tilePath);
+    if (!file.open(QIODevice::WriteOnly)) return false;
+    
+    QJsonDocument doc(it->second->toJson());
+    file.write(doc.toJson(QJsonDocument::Compact));
+    
+    m_dirtyTiles.remove(coord);
+    m_tileIndex.insert(coord);
+    return true;
+}
+
+bool Document::loadTileFromDisk(TileCoord coord) {
+    QString tilePath = m_bundlePath + "/tiles/" + 
+                       QString("%1,%2.json").arg(coord.first).arg(coord.second);
+    
+    QFile file(tilePath);
+    if (!file.open(QIODevice::ReadOnly)) return false;
+    
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    auto tile = Page::fromJson(doc.object());
+    if (!tile) return false;
+    
+    m_tiles[coord] = std::move(tile);
+    return true;
+}
+
+void Document::evictTile(TileCoord coord) {
+    // Save if dirty
+    if (m_dirtyTiles.contains(coord)) {
+        saveTile(coord);
+    }
+    
+    // Remove from memory (keeps coord in m_tileIndex)
+    m_tiles.erase(coord);
+}
+```
+
+#### E5.4: Bundle Save/Load
+
+```cpp
+// Save entire document bundle
+bool Document::saveBundle(const QString& path) {
+    m_bundlePath = path;
+    
+    // Create directory structure
+    QDir().mkpath(path + "/tiles");
+    
+    // Save manifest (document.json)
+    QJsonObject manifest = toJson();  // Metadata only
+    
+    // Build tile index from both memory and disk
+    QJsonArray tileIndexArray;
+    for (const auto& coord : m_tileIndex) {
+        tileIndexArray.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+    }
+    for (const auto& pair : m_tiles) {
+        QString key = QString("%1,%2").arg(pair.first.first).arg(pair.first.second);
+        if (!m_tileIndex.contains(pair.first)) {
+            tileIndexArray.append(key);
+        }
+    }
+    manifest["tile_index"] = tileIndexArray;
+    
+    // Write manifest
+    QFile manifestFile(path + "/document.json");
+    if (!manifestFile.open(QIODevice::WriteOnly)) return false;
+    manifestFile.write(QJsonDocument(manifest).toJson());
+    
+    // Save all dirty tiles
+    for (const auto& coord : m_dirtyTiles) {
+        saveTile(coord);
+    }
+    
+    // Save tiles that are in memory but not yet on disk
+    for (const auto& pair : m_tiles) {
+        if (!m_tileIndex.contains(pair.first)) {
+            saveTile(pair.first);
+        }
+    }
+    
+    m_dirtyTiles.clear();
+    return true;
+}
+
+// Load document bundle (manifest only, tiles lazy-loaded)
+static std::unique_ptr<Document> Document::loadBundle(const QString& path) {
+    QFile manifestFile(path + "/document.json");
+    if (!manifestFile.open(QIODevice::ReadOnly)) return nullptr;
+    
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(manifestFile.readAll());
+    auto doc = Document::fromJson(jsonDoc.object());
     if (!doc) return nullptr;
     
-    if (doc->mode == Mode::Edgeless) {
-        // Load tiles
-        QJsonObject tilesObj = obj["tiles"].toObject();
-        for (auto it = tilesObj.begin(); it != tilesObj.end(); ++it) {
-            // Parse "x,y" key
-            QStringList parts = it.key().split(',');
-            if (parts.size() != 2) continue;
-            
+    doc->m_bundlePath = path;
+    doc->m_lazyLoadEnabled = true;
+    
+    // Parse tile index (no actual tile loading!)
+    QJsonArray tileIndexArray = jsonDoc.object()["tile_index"].toArray();
+    for (const auto& val : tileIndexArray) {
+        QStringList parts = val.toString().split(',');
+        if (parts.size() == 2) {
             int tx = parts[0].toInt();
             int ty = parts[1].toInt();
-            
-            auto tile = Page::fromJson(it.value().toObject());
-            if (tile) {
-                doc->m_tiles[{tx, ty}] = std::move(tile);
-            }
+            doc->m_tileIndex.insert({tx, ty});
         }
-    } else {
-        // ... existing paged loading ...
     }
     
-    return doc;
+    return doc;  // Tiles loaded on-demand when getTile() is called
 }
 ```
+
+#### E5.5: Integration with DocumentViewport
+
+**Tile eviction during pan:**
+
+```cpp
+void DocumentViewport::evictDistantTiles() {
+    if (!m_document || !m_document->isEdgeless()) return;
+    
+    QRectF viewRect = visibleRect();
+    constexpr int KEEP_MARGIN = 2;  // Keep tiles within 2 tiles of viewport
+    
+    QVector<TileCoord> toEvict;
+    for (const auto& coord : m_document->allLoadedTileCoords()) {
+        QRectF tileRect(coord.first * TILE_SIZE, coord.second * TILE_SIZE,
+                        TILE_SIZE, TILE_SIZE);
+        
+        // Check if tile is far from viewport
+        QRectF keepRect = viewRect.adjusted(
+            -KEEP_MARGIN * TILE_SIZE, -KEEP_MARGIN * TILE_SIZE,
+            KEEP_MARGIN * TILE_SIZE, KEEP_MARGIN * TILE_SIZE);
+        
+        if (!keepRect.intersects(tileRect)) {
+            toEvict.append(coord);
+        }
+    }
+    
+    for (const auto& coord : toEvict) {
+        m_document->evictTile(coord);
+    }
+}
+```
+
+#### E5.6: File Extension Decision
+
+| Extension | Type | Use Case |
+|-----------|------|----------|
+| `.snb` | Directory | Edgeless documents (bundle) |
+| `.json` | Single file | Paged documents (current format) |
+
+**Future consideration:** Could use `.snb` for both, with paged docs having `pages/` instead of `tiles/`.
 
 ---
 
@@ -701,7 +1001,9 @@ void MainWindow::newEdgelessDocument() {
 | Eraser across tiles | Search home tile + 8 neighbors | Catches cross-tile strokes |
 | Undo scope | **Global stack** for edgeless | User mental model: "undo last action anywhere" |
 | Origin point | (0,0) = top-left of tile (0,0) | Simple, matches document coordinates |
-| Min zoom calculation | `qMax(width, height) / 2048` | Ensures ≤4 tiles visible, uses logical pixels |
+| Min zoom calculation | `qMax(width, height) / 2048` | Ensures ≤9 tiles visible (worst case), uses logical pixels |
+| Rendering margin | 100px for strokes, 0 for backgrounds | Stroke splitting eliminates need for large margin |
+| Tile count at 1920×1080 | 4-9 (depending on pan alignment) | Acceptable for memory (~36MB stroke cache) |
 
 ### Why Global Undo for Edgeless (Not Per-Tile)
 
@@ -729,20 +1031,35 @@ void DocumentViewport::undo() {
 
 ### MVP (Phase E1-E7)
 
-- [ ] Edgeless document creates successfully
-- [ ] Tiles created on-demand when drawing
-- [ ] No memory explosion (cache bounded per tile)
-- [ ] Cross-tile strokes render correctly
-- [ ] Save/load works with tile format
-- [ ] Basic undo/redo works
+- [x] Edgeless document creates successfully ✅
+- [x] Tiles created on-demand when drawing ✅
+- [x] Cross-tile strokes render correctly ✅ (stroke splitting)
+- [x] Pan/scroll works infinitely ✅
+- [x] Zoom limits enforced (≤9 tiles visible) ✅
+- [ ] Save/load works with tile format (E5 pending)
+- [ ] Basic undo/redo works (E6 pending)
+- [ ] Eraser works across tiles (E4 pending)
 
-### Future Enhancements (Not in MVP)
+### Memory Management (Deferred to E5)
 
+- [ ] Tile stroke cache eviction for distant tiles
+- [ ] Full tile unloading to disk (Option B chosen)
 - [ ] On-demand tile loading from disk
+
+### Future Enhancements (Post-MVP)
+
 - [ ] Spatial indexing for large stroke counts
 - [ ] Tile boundary grid customization
 - [ ] Minimap for navigation
 - [ ] Stroke culling within tiles
+
+---
+
+## Next Steps
+
+1. **Phase E5: Serialization** - Save/load tile-based documents
+2. **Phase E4: Eraser** - Erase strokes across tile boundaries
+3. **Phase E6: Undo/Redo** - Global undo stack for edgeless
 
 ---
 

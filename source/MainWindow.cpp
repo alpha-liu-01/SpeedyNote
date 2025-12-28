@@ -1491,6 +1491,12 @@ void MainWindow::setupUi() {
     newEdgelessShortcut->setContext(Qt::ApplicationShortcut);
     connect(newEdgelessShortcut, &QShortcut::activated, this, &MainWindow::addNewEdgelessTab);
     
+    // TEMPORARY: Load Edgeless Canvas: Ctrl+Shift+L - opens .snb bundle folder
+    // TODO: Replace with unified file picker when .snb becomes a single file
+    QShortcut* loadEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), this);
+    loadEdgelessShortcut->setContext(Qt::ApplicationShortcut);
+    connect(loadEdgelessShortcut, &QShortcut::activated, this, &MainWindow::loadEdgelessDocument);
+    
     // Open PDF: Ctrl+Shift+O - open PDF file in new tab
     QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
     openPdfShortcut->setContext(Qt::ApplicationShortcut);
@@ -3759,9 +3765,90 @@ void MainWindow::addNewEdgelessTab()
     });
     
     updateDialDisplay();
+}
+
+void MainWindow::loadEdgelessDocument()
+{
+    // TEMPORARY: Load edgeless document from .snb bundle directory
+    // Uses directory selection because .snb is a folder, not a single file.
+    // 
+    // TODO: Replace with unified file handling after implementing:
+    // 1. Single-file packaging (.snb as zip/tar), OR
+    // 2. Unified file picker that handles both files and folders
     
-    return;
+    if (!m_documentManager || !m_tabManager) {
+        qWarning() << "loadEdgelessDocument: DocumentManager or TabManager not initialized";
+        return;
+    }
     
+    // Use directory dialog to select .snb bundle folder
+    QString bundlePath = QFileDialog::getExistingDirectory(
+        this,
+        tr("Open Edgeless Canvas (.snb folder)"),
+        QDir::homePath(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+    );
+    
+    if (bundlePath.isEmpty()) {
+        // User cancelled
+        return;
+    }
+    
+    // Validate that it's a .snb bundle (has document.json)
+    QString manifestPath = bundlePath + "/document.json";
+    if (!QFile::exists(manifestPath)) {
+        QMessageBox::critical(this, tr("Load Error"),
+            tr("Selected folder is not a valid SpeedyNote bundle.\n"
+               "Missing document.json manifest.\n\n%1").arg(bundlePath));
+        return;
+    }
+    
+    // Load the bundle via DocumentManager
+    Document* doc = m_documentManager->loadDocument(bundlePath);
+    if (!doc) {
+        QMessageBox::critical(this, tr("Load Error"),
+            tr("Failed to load edgeless canvas from:\n%1").arg(bundlePath));
+        return;
+    }
+    
+    // Get document name from folder if not set
+    if (doc->name.isEmpty()) {
+        QFileInfo folderInfo(bundlePath);
+        doc->name = folderInfo.baseName();
+        // Remove .snb suffix if present
+        if (doc->name.endsWith(".snb", Qt::CaseInsensitive)) {
+            doc->name.chop(4);
+        }
+    }
+    
+    // Create new tab with the loaded document
+    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
+    
+    if (tabIndex >= 0) {
+        // Switch to the new tab
+        if (m_tabWidget) {
+            m_tabWidget->setCurrentIndex(tabIndex);
+        }
+        
+        // Center on origin for edgeless
+        QTimer::singleShot(0, this, [this, tabIndex]() {
+            if (m_tabManager) {
+                DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+                if (viewport) {
+                    viewport->setPanOffset(QPointF(-100, -100));
+                }
+            }
+        });
+        
+        qDebug() << "loadEdgelessDocument: Loaded edgeless canvas with" 
+                 << doc->tileIndexCount() << "tiles indexed (lazy load) from" << bundlePath;
+    }
+    
+    updateDialDisplay();
+}
+
+// ========== LEGACY CODE BELOW ==========
+
     /* ========== OLD INKCANVAS CODE - KEPT FOR REFERENCE ==========
     // Tab label styling will be updated by theme
 
@@ -4023,7 +4110,7 @@ void MainWindow::addNewEdgelessTab()
     // Update color button states for the new tab
     updateColorButtonStates();
     ========== END OLD INKCANVAS CODE ==========*/
-}
+
 void MainWindow::removeTabAt(int index) {
     // Phase 3.1.2: Use TabManager to remove tabs
     // Note: Document cleanup happens via tabCloseRequested signal handler (ML-1 fix)

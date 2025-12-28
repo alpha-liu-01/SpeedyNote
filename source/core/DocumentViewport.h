@@ -842,6 +842,14 @@ private:
      */
     void preloadStrokeCaches();
     
+    /**
+     * @brief Evict tiles that are far from the visible area.
+     * 
+     * For edgeless mode with lazy loading enabled, this saves dirty tiles
+     * and removes them from memory to bound memory usage.
+     */
+    void evictDistantTiles();
+    
     // ===== Input Routing (Task 1.3.8) =====
     
     /**
@@ -1048,7 +1056,7 @@ private:
     
     /**
      * @brief Calculate minimum zoom for edgeless mode.
-     * @return Min zoom to ensure at most 4 tiles (2x2) are visible.
+     * @return Min zoom to ensure at most ~9 tiles (3x3 worst case) are visible.
      */
     qreal minZoomForEdgeless() const;
 };

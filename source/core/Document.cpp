@@ -416,39 +416,68 @@ Document::TileCoord Document::tileCoordForPoint(QPointF docPt) const
 Page* Document::getTile(int tx, int ty) const
 {
     TileCoord coord(tx, ty);
+    
+    // 1. Check if already in memory
     auto it = m_tiles.find(coord);
-    return (it != m_tiles.end()) ? it->second.get() : nullptr;
+    if (it != m_tiles.end()) {
+        return it->second.get();
+    }
+    
+    // 2. If lazy loading enabled, try to load from disk
+    if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
+        // const_cast needed because lazy loading modifies m_tiles
+        // This is safe because the observable state (tile content) doesn't change
+        Document* mutableThis = const_cast<Document*>(this);
+        if (mutableThis->loadTileFromDisk(coord)) {
+            return m_tiles.at(coord).get();
+        }
+    }
+    
+    // 3. Tile doesn't exist
+    return nullptr;
 }
 
 Page* Document::getOrCreateTile(int tx, int ty)
 {
     TileCoord coord(tx, ty);
     
+    // 1. Check if already in memory
     auto it = m_tiles.find(coord);
-    if (it == m_tiles.end()) {
-        auto tile = std::make_unique<Page>();
-        tile->size = QSizeF(EDGELESS_TILE_SIZE, EDGELESS_TILE_SIZE);
-        tile->backgroundType = defaultBackgroundType;
-        tile->backgroundColor = defaultBackgroundColor;
-        tile->gridColor = defaultGridColor;
-        tile->gridSpacing = defaultGridSpacing;
-        tile->lineSpacing = defaultLineSpacing;
-        
-        // Store tile coordinate for reference (using pageIndex as a hack for now)
-        // In future, Page might have explicit tileX/tileY fields
-        tile->pageIndex = tx;  // Repurpose pageIndex temporarily
-        tile->pdfPageNumber = ty;  // Repurpose pdfPageNumber temporarily
-        
-        auto [insertIt, inserted] = m_tiles.emplace(coord, std::move(tile));
-        markModified();
-        
-#ifdef QT_DEBUG
-        qDebug() << "Document: Created tile at (" << tx << "," << ty << ") total tiles:" << m_tiles.size();
-#endif
-        return insertIt->second.get();
+    if (it != m_tiles.end()) {
+        return it->second.get();
     }
     
-    return it->second.get();
+    // 2. If lazy loading enabled, try to load from disk
+    if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
+        if (loadTileFromDisk(coord)) {
+            return m_tiles.at(coord).get();
+        }
+    }
+    
+    // 3. Create new tile
+    auto tile = std::make_unique<Page>();
+    tile->size = QSizeF(EDGELESS_TILE_SIZE, EDGELESS_TILE_SIZE);
+    tile->backgroundType = defaultBackgroundType;
+    tile->backgroundColor = defaultBackgroundColor;
+    tile->gridColor = defaultGridColor;
+    tile->gridSpacing = defaultGridSpacing;
+    tile->lineSpacing = defaultLineSpacing;
+    
+    // Store tile coordinate for reference (using pageIndex as a hack for now)
+    // In future, Page might have explicit tileX/tileY fields
+    tile->pageIndex = tx;  // Repurpose pageIndex temporarily
+    tile->pdfPageNumber = ty;  // Repurpose pdfPageNumber temporarily
+    
+    auto [insertIt, inserted] = m_tiles.emplace(coord, std::move(tile));
+    
+    // Mark new tile as dirty (needs saving)
+    m_dirtyTiles.insert(coord);
+    markModified();
+    
+#ifdef QT_DEBUG
+    qDebug() << "Document: Created tile at (" << tx << "," << ty << ") total tiles:" << m_tiles.size();
+#endif
+    return insertIt->second.get();
 }
 
 QVector<Document::TileCoord> Document::tilesInRect(QRectF docRect) const
@@ -867,4 +896,239 @@ Document::Mode Document::stringToMode(const QString& str)
     QString lower = str.toLower();
     if (lower == "edgeless") return Mode::Edgeless;
     return Mode::Paged;
+}
+
+// =============================================================================
+// Tile Persistence (Phase E5)
+// =============================================================================
+
+QVector<Document::TileCoord> Document::allLoadedTileCoords() const
+{
+    QVector<TileCoord> coords;
+    coords.reserve(static_cast<int>(m_tiles.size()));
+    for (const auto& pair : m_tiles) {
+        coords.append(pair.first);
+    }
+    return coords;
+}
+
+void Document::markTileDirty(TileCoord coord)
+{
+    m_dirtyTiles.insert(coord);
+    markModified();
+}
+
+bool Document::saveTile(TileCoord coord)
+{
+    if (m_bundlePath.isEmpty()) {
+        qWarning() << "Cannot save tile: bundle path not set";
+        return false;
+    }
+    
+    auto it = m_tiles.find(coord);
+    if (it == m_tiles.end()) {
+        qWarning() << "Cannot save tile: not loaded in memory" << coord.first << coord.second;
+        return false;
+    }
+    
+    // Ensure tiles directory exists
+    QString tilesDir = m_bundlePath + "/tiles";
+    QDir().mkpath(tilesDir);
+    
+    // Build tile file path
+    QString tilePath = tilesDir + "/" + 
+                       QString("%1,%2.json").arg(coord.first).arg(coord.second);
+    
+    QFile file(tilePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "Cannot save tile: failed to open file" << tilePath;
+        return false;
+    }
+    
+    QJsonDocument jsonDoc(it->second->toJson());
+    file.write(jsonDoc.toJson(QJsonDocument::Compact));
+    file.close();
+    
+    // Update state
+    m_dirtyTiles.erase(coord);
+    m_tileIndex.insert(coord);
+    
+#ifdef QT_DEBUG
+    qDebug() << "Saved tile" << coord.first << "," << coord.second << "to" << tilePath;
+#endif
+    
+    return true;
+}
+
+bool Document::loadTileFromDisk(TileCoord coord)
+{
+    if (m_bundlePath.isEmpty()) {
+        return false;
+    }
+    
+    QString tilePath = m_bundlePath + "/tiles/" + 
+                       QString("%1,%2.json").arg(coord.first).arg(coord.second);
+    
+    QFile file(tilePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Cannot load tile: file not found" << tilePath;
+        return false;
+    }
+    
+    QByteArray data = file.readAll();
+    file.close();
+    
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        qWarning() << "Cannot load tile: JSON parse error" << parseError.errorString();
+        return false;
+    }
+    
+    auto tile = Page::fromJson(jsonDoc.object());
+    if (!tile) {
+        qWarning() << "Cannot load tile: Page::fromJson failed";
+        return false;
+    }
+    
+    m_tiles[coord] = std::move(tile);
+    
+#ifdef QT_DEBUG
+    qDebug() << "Loaded tile" << coord.first << "," << coord.second << "from disk";
+#endif
+    
+    return true;
+}
+
+void Document::evictTile(TileCoord coord)
+{
+    auto it = m_tiles.find(coord);
+    if (it == m_tiles.end()) {
+        return;  // Not loaded, nothing to evict
+    }
+    
+    // Save if dirty
+    if (m_dirtyTiles.count(coord) > 0) {
+        if (!saveTile(coord)) {
+            qWarning() << "Failed to save tile before eviction" << coord.first << coord.second;
+            // Continue with eviction anyway to free memory
+        }
+    }
+    
+    // Remove from memory
+    m_tiles.erase(it);
+    
+#ifdef QT_DEBUG
+    qDebug() << "Evicted tile" << coord.first << "," << coord.second << "from memory";
+#endif
+}
+
+bool Document::saveBundle(const QString& path)
+{
+    m_bundlePath = path;
+    
+    // Create directory structure
+    if (!QDir().mkpath(path + "/tiles")) {
+        qWarning() << "Cannot create bundle directory" << path;
+        return false;
+    }
+    
+    // Build manifest
+    QJsonObject manifest = toJson();  // Metadata only
+    
+    // Build tile index (union of disk tiles and memory tiles)
+    std::set<TileCoord> allTileCoords = m_tileIndex;
+    for (const auto& pair : m_tiles) {
+        allTileCoords.insert(pair.first);
+    }
+    
+    QJsonArray tileIndexArray;
+    for (const auto& coord : allTileCoords) {
+        tileIndexArray.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+    }
+    manifest["tile_index"] = tileIndexArray;
+    manifest["tile_size"] = EDGELESS_TILE_SIZE;
+    
+    // Write manifest
+    QString manifestPath = path + "/document.json";
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::WriteOnly)) {
+        qWarning() << "Cannot write manifest" << manifestPath;
+        return false;
+    }
+    manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+    manifestFile.close();
+    
+    // Save all tiles in memory (dirty or not yet on disk)
+    for (const auto& pair : m_tiles) {
+        TileCoord coord = pair.first;
+        if (m_dirtyTiles.count(coord) > 0 || m_tileIndex.count(coord) == 0) {
+            saveTile(coord);
+        }
+    }
+    
+    m_dirtyTiles.clear();
+    m_tileIndex = allTileCoords;
+    m_lazyLoadEnabled = true;
+    
+    clearModified();
+    
+#ifdef QT_DEBUG
+    qDebug() << "Saved bundle to" << path << "with" << allTileCoords.size() << "tiles";
+#endif
+    
+    return true;
+}
+
+std::unique_ptr<Document> Document::loadBundle(const QString& path)
+{
+    QString manifestPath = path + "/document.json";
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "Cannot open bundle manifest" << manifestPath;
+        return nullptr;
+    }
+    
+    QByteArray data = manifestFile.readAll();
+    manifestFile.close();
+    
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        qWarning() << "Bundle manifest parse error:" << parseError.errorString();
+        return nullptr;
+    }
+    
+    QJsonObject obj = jsonDoc.object();
+    
+    // Load document metadata
+    auto doc = Document::fromJson(obj);
+    if (!doc) {
+        qWarning() << "Failed to parse document metadata";
+        return nullptr;
+    }
+    
+    // Set bundle path and enable lazy loading
+    doc->m_bundlePath = path;
+    doc->m_lazyLoadEnabled = true;
+    
+    // Parse tile index (just coordinates, no actual loading!)
+    QJsonArray tileIndexArray = obj["tile_index"].toArray();
+    for (const auto& val : tileIndexArray) {
+        QStringList parts = val.toString().split(',');
+        if (parts.size() == 2) {
+            bool okX, okY;
+            int tx = parts[0].toInt(&okX);
+            int ty = parts[1].toInt(&okY);
+            if (okX && okY) {
+                doc->m_tileIndex.insert({tx, ty});
+            }
+        }
+    }
+    
+#ifdef QT_DEBUG
+    qDebug() << "Loaded bundle from" << path << "with" << doc->m_tileIndex.size() << "tiles indexed";
+#endif
+    
+    return doc;
 }

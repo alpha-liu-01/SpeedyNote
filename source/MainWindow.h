@@ -386,6 +386,15 @@ public:
      */
     void addNewEdgelessTab();
 
+    /**
+     * TEMPORARY: Load edgeless document from .snb bundle directory.
+     * Uses QFileDialog::getExistingDirectory() to select the .snb folder.
+     * 
+     * TODO: Replace with unified file picker that handles both files and bundles,
+     * possibly by packaging .snb as a single file (zip/tar) in the future.
+     */
+    void loadEdgelessDocument();
+
     // Find tab with given notebook ID, returns tab index or -1 if not found
     int findTabWithNotebookId(const QString &notebookId);
     

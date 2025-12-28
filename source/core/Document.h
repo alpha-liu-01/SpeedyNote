@@ -24,10 +24,15 @@
 #include <QUuid>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QFileInfo>
+#include <QDir>
+#include <QFile>
 #include <QPixmap>
+#include <QSet>
 #include <vector>
 #include <map>
+#include <set>
 #include <memory>
 
 /**
@@ -204,10 +209,109 @@ public:
     int tileCount() const { return static_cast<int>(m_tiles.size()); }
     
     /**
+     * @brief Get count of tiles indexed on disk (for lazy loading).
+     * @return Number of tiles in the disk index.
+     */
+    int tileIndexCount() const { return static_cast<int>(m_tileIndex.size()); }
+    
+    /**
      * @brief Get all tile coordinates.
      * @return Vector of tile coordinates.
      */
     QVector<TileCoord> allTileCoords() const;
+    
+    /**
+     * @brief Get all tile coordinates currently loaded in memory.
+     * @return Vector of tile coordinates that are in m_tiles.
+     */
+    QVector<TileCoord> allLoadedTileCoords() const;
+    
+    // =========================================================================
+    // Tile Persistence (Phase E5)
+    // =========================================================================
+    
+    /**
+     * @brief Set the bundle path for saving/loading tiles.
+     * @param path Path to the .snb directory.
+     */
+    void setBundlePath(const QString& path) { m_bundlePath = path; }
+    
+    /**
+     * @brief Get the bundle path.
+     * @return Path to the .snb directory, or empty if not set.
+     */
+    QString bundlePath() const { return m_bundlePath; }
+    
+    /**
+     * @brief Check if lazy loading from disk is enabled.
+     */
+    bool isLazyLoadEnabled() const { return m_lazyLoadEnabled; }
+    
+    /**
+     * @brief Save a single tile to disk.
+     * @param coord Tile coordinate to save.
+     * @return True if saved successfully.
+     */
+    bool saveTile(TileCoord coord);
+    
+    /**
+     * @brief Load a single tile from disk into memory.
+     * @param coord Tile coordinate to load.
+     * @return True if loaded successfully.
+     */
+    bool loadTileFromDisk(TileCoord coord);
+    
+    /**
+     * @brief Mark a tile as dirty (modified since last save).
+     * @param coord Tile coordinate.
+     */
+    void markTileDirty(TileCoord coord);
+    
+    /**
+     * @brief Check if a tile is dirty.
+     * @param coord Tile coordinate.
+     * @return True if tile has unsaved changes.
+     */
+    bool isTileDirty(TileCoord coord) const { return m_dirtyTiles.count(coord) > 0; }
+    
+    /**
+     * @brief Evict a tile from memory (save if dirty first).
+     * @param coord Tile coordinate to evict.
+     * 
+     * The tile coord remains in m_tileIndex so it can be reloaded later.
+     */
+    void evictTile(TileCoord coord);
+    
+    /**
+     * @brief Check if a tile is currently loaded in memory.
+     * @param coord Tile coordinate.
+     */
+    bool isTileLoaded(TileCoord coord) const { return m_tiles.find(coord) != m_tiles.end(); }
+    
+    /**
+     * @brief Check if a tile exists on disk.
+     * @param coord Tile coordinate.
+     */
+    bool tileExistsOnDisk(TileCoord coord) const { return m_tileIndex.count(coord) > 0; }
+    
+    /**
+     * @brief Save the entire document as a bundle.
+     * @param path Path to the .snb directory.
+     * @return True if saved successfully.
+     */
+    bool saveBundle(const QString& path);
+    
+    /**
+     * @brief Load a document from a bundle (tiles lazy-loaded).
+     * @param path Path to the .snb directory.
+     * @return Loaded document, or nullptr on error.
+     */
+    static std::unique_ptr<Document> loadBundle(const QString& path);
+    
+    /**
+     * @brief Check if there are any unsaved tile changes.
+     */
+    bool hasUnsavedTileChanges() const { return !m_dirtyTiles.empty(); }
     
     // =========================================================================
     // PDF Reference Management (Task 1.2.4)
@@ -626,6 +730,12 @@ private:
     /// Uses std::map instead of QMap because QMap requires copyable values,
     /// but unique_ptr is move-only.
     mutable std::map<std::pair<int,int>, std::unique_ptr<Page>> m_tiles;
+    
+    // ===== Tile Persistence (Phase E5) =====
+    QString m_bundlePath;                           ///< Path to .snb bundle directory
+    std::set<TileCoord> m_tileIndex;                ///< All tile coords that exist on disk
+    mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
+    bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
     
     /**
      * @brief Create a new page with document defaults applied.

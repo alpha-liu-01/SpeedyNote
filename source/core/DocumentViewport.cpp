@@ -296,6 +296,10 @@ void DocumentViewport::setPanOffset(QPointF offset)
     // MEMORY FIX: Evict stroke caches for distant pages after scroll
     // This prevents unbounded memory growth when scrolling through large documents
     preloadStrokeCaches();
+    
+    // EDGELESS MEMORY FIX: Evict tiles that are far from visible area
+    // This saves dirty tiles to disk and removes them from memory (Phase E5)
+    evictDistantTiles();
 }
 
 void DocumentViewport::scrollToPage(int pageIndex)
@@ -1878,6 +1882,44 @@ void DocumentViewport::preloadStrokeCaches()
     }
 }
 
+void DocumentViewport::evictDistantTiles()
+{
+    // Only applies to edgeless mode with lazy loading
+    if (!m_document || !m_document->isEdgeless() || !m_document->isLazyLoadEnabled()) {
+        return;
+    }
+    
+    QRectF viewRect = visibleRect();
+    
+    // Keep tiles within 2 tiles of viewport, evict the rest
+    constexpr int KEEP_MARGIN = 2;
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+    
+    QRectF keepRect = viewRect.adjusted(
+        -KEEP_MARGIN * tileSize, -KEEP_MARGIN * tileSize,
+        KEEP_MARGIN * tileSize, KEEP_MARGIN * tileSize);
+    
+    // Get all loaded tiles and check which to evict
+    QVector<Document::TileCoord> loadedTiles = m_document->allLoadedTileCoords();
+    
+    int evictedCount = 0;
+    for (const auto& coord : loadedTiles) {
+        QRectF tileRect(coord.first * tileSize, coord.second * tileSize,
+                        tileSize, tileSize);
+        
+        if (!keepRect.intersects(tileRect)) {
+            m_document->evictTile(coord);
+            ++evictedCount;
+        }
+    }
+    
+// #ifdef QT_DEBUG
+    if (evictedCount > 0) {
+        qDebug() << "Evicted" << evictedCount << "tiles, remaining:" << m_document->tileCount();
+    }
+// #endif
+}
+
 // ===== Input Routing (Task 1.3.8) =====
 
 PointerEvent DocumentViewport::mouseToPointerEvent(QMouseEvent* event, PointerEvent::Type type)
@@ -2324,6 +2366,9 @@ void DocumentViewport::finishStrokeEdgeless()
         // Add to tile's layer
         layer->addStroke(localStroke);
         layer->invalidateStrokeCache();
+        
+        // Mark tile as dirty for persistence (Phase E5)
+        m_document->markTileDirty(seg.coord);
         
         addedStrokes.append({seg.coord, localStroke});
         
@@ -2930,21 +2975,28 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     // Get visible rect in document coordinates
     QRectF viewRect = visibleRect();
     
-    // Expand by 1 tile margin for cross-tile strokes
-    int margin = Document::EDGELESS_TILE_SIZE;
-    QRectF expandedRect = viewRect.adjusted(-margin, -margin, margin, margin);
+    // ========== TILE RENDERING STRATEGY ==========
+    // With stroke splitting, cross-tile strokes are stored as separate segments in each tile.
+    // Each segment is rendered when its tile is rendered - no margin needed for cross-tile!
+    // Small margin (100px) handles thick strokes extending slightly beyond tile boundary.
+    constexpr int STROKE_MARGIN = 100;  // Max stroke width / anti-aliasing buffer
+    QRectF strokeRect = viewRect.adjusted(-STROKE_MARGIN, -STROKE_MARGIN, STROKE_MARGIN, STROKE_MARGIN);
     
-    // Get all tile coordinates in the visible range (including empty ones for grid)
-    QVector<Document::TileCoord> tilesToRender = m_document->tilesInRect(expandedRect);
+    // For backgrounds, render only tiles that intersect the visible area
+    QVector<Document::TileCoord> visibleTiles = m_document->tilesInRect(viewRect);
+    
+    // For strokes, include small margin for thick strokes at tile edges
+    QVector<Document::TileCoord> strokeTiles = m_document->tilesInRect(strokeRect);
     
     // Apply view transform (same as paged mode)
     painter.save();
     painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
     painter.scale(m_zoomLevel, m_zoomLevel);
     
-    // ========== ISSUE 4 FIX: Render default background for ALL visible tiles ==========
-    // Even if tiles don't exist yet, show the background so canvas isn't blank
-    for (const auto& coord : tilesToRender) {
+    // ========== PASS 1: Render backgrounds for VISIBLE tiles only ==========
+    // This ensures non-blank canvas without wasting time on off-screen tiles.
+    // For 1920x1080 viewport with 1024x1024 tiles: up to 9 tiles (3x3 worst case)
+    for (const auto& coord : visibleTiles) {
         QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
                            coord.second * Document::EDGELESS_TILE_SIZE);
         QRectF tileRect(tileOrigin.x(), tileOrigin.y(), 
@@ -2977,8 +3029,10 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         }
     }
     
-    // ========== Render existing tiles (strokes) on top ==========
-    for (const auto& coord : tilesToRender) {
+    // ========== PASS 2: Render strokes with small margin for thick strokes ==========
+    // Strokes are split at tile boundaries, so each tile renders its own segments.
+    // Small margin ensures thick strokes at edges are fully rendered.
+    for (const auto& coord : strokeTiles) {
         Page* tile = m_document->getTile(coord.first, coord.second);
         if (!tile) continue;  // Skip empty tiles
         
@@ -3137,7 +3191,17 @@ void DocumentViewport::drawTileBoundaries(QPainter& painter, QRectF viewRect)
 
 qreal DocumentViewport::minZoomForEdgeless() const
 {
-    // Goal: at most 4 tiles (2x2 = 2048x2048) visible at once
+    // ========== EDGELESS MIN ZOOM CALCULATION ==========
+    // With 1024x1024 tiles, a 1920x1080 viewport can show up to:
+    //   - Best case (aligned): 2x2 = 4 tiles
+    //   - Worst case (straddling): 3x3 = 9 tiles
+    //
+    // This limit prevents zooming out so far that too many tiles are visible.
+    // We allow ~2 tiles worth of document space per viewport dimension.
+    // At worst case (pan straddling tile boundaries), this means up to 9 tiles.
+    //
+    // Memory: 9 tiles × ~4MB each = ~36MB stroke cache at zoom 1.0, DPR 1.0
+    
     constexpr qreal maxVisibleSize = 2.0 * Document::EDGELESS_TILE_SIZE;  // 2048
     
     // Use logical pixels (Qt handles DPI automatically)
