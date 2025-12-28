@@ -377,6 +377,14 @@ public:
     bool selectFolder(); // Select save folder - moved to public for ControlPanelDialog access, returns true on success
 
     void addNewTab();
+    
+    /**
+     * @brief Create a new tab with an edgeless (infinite canvas) document.
+     * 
+     * Edgeless mode provides an infinite canvas where tiles are created
+     * on-demand as the user draws.
+     */
+    void addNewEdgelessTab();
 
     // Find tab with given notebook ID, returns tab index or -1 if not found
     int findTabWithNotebookId(const QString &notebookId);

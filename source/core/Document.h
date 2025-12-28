@@ -27,6 +27,7 @@
 #include <QFileInfo>
 #include <QPixmap>
 #include <vector>
+#include <map>
 #include <memory>
 
 /**
@@ -148,6 +149,65 @@ public:
      * @brief Check if this is a paged document.
      */
     bool isPaged() const { return mode == Mode::Paged; }
+    
+    // =========================================================================
+    // Edgeless Tile Management (Phase E1)
+    // =========================================================================
+    
+    /// Fixed tile size for edgeless mode (1024x1024 pixels)
+    static constexpr int EDGELESS_TILE_SIZE = 1024;
+    
+    /// Type alias for tile coordinate
+    using TileCoord = std::pair<int,int>;
+    
+    /**
+     * @brief Get the tile coordinate for a document point.
+     * @param docPt Point in document coordinates.
+     * @return Tile coordinate (tx, ty).
+     */
+    TileCoord tileCoordForPoint(QPointF docPt) const;
+    
+    /**
+     * @brief Get a tile by coordinate (does not create if missing).
+     * @param tx Tile X coordinate.
+     * @param ty Tile Y coordinate.
+     * @return Pointer to tile, or nullptr if tile doesn't exist.
+     */
+    Page* getTile(int tx, int ty) const;
+    
+    /**
+     * @brief Get or create a tile at the given coordinate.
+     * @param tx Tile X coordinate.
+     * @param ty Tile Y coordinate.
+     * @return Pointer to the tile (never nullptr).
+     */
+    Page* getOrCreateTile(int tx, int ty);
+    
+    /**
+     * @brief Get all tiles that intersect a document rectangle.
+     * @param docRect Rectangle in document coordinates.
+     * @return Vector of tile coordinates.
+     */
+    QVector<TileCoord> tilesInRect(QRectF docRect) const;
+    
+    /**
+     * @brief Remove a tile if it has no content.
+     * @param tx Tile X coordinate.
+     * @param ty Tile Y coordinate.
+     */
+    void removeTileIfEmpty(int tx, int ty);
+    
+    /**
+     * @brief Get the number of tiles in the edgeless canvas.
+     * @return Tile count.
+     */
+    int tileCount() const { return static_cast<int>(m_tiles.size()); }
+    
+    /**
+     * @brief Get all tile coordinates.
+     * @return Vector of tile coordinates.
+     */
+    QVector<TileCoord> allTileCoords() const;
     
     // =========================================================================
     // PDF Reference Management (Task 1.2.4)
@@ -559,7 +619,13 @@ private:
     std::unique_ptr<PdfProvider> m_pdfProvider;    ///< Loaded PDF (may be null)
     
     // ===== Pages (Task 1.2.5) =====
-    std::vector<std::unique_ptr<Page>> m_pages;    ///< All pages in the document
+    std::vector<std::unique_ptr<Page>> m_pages;    ///< All pages in paged mode
+    
+    // ===== Tiles (Phase E1 - Edgeless Mode) =====
+    /// Sparse 2D map of tiles for edgeless mode. Key = (tx, ty) tile coordinate.
+    /// Uses std::map instead of QMap because QMap requires copyable values,
+    /// but unique_ptr is move-only.
+    mutable std::map<std::pair<int,int>, std::unique_ptr<Page>> m_tiles;
     
     /**
      * @brief Create a new page with document defaults applied.

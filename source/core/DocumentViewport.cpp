@@ -17,6 +17,7 @@
 #include <QKeyEvent>
 #include <QtMath>     // For qPow
 #include <QtConcurrent>  // For async PDF rendering
+#include <cmath>      // For std::floor, std::ceil
 #include <algorithm>  // For std::remove_if
 #include <limits>
 #include <QDateTime>  // For timestamp
@@ -244,8 +245,13 @@ void DocumentViewport::setEraserSize(qreal size)
 
 void DocumentViewport::setZoomLevel(qreal zoom)
 {
+    // Apply mode-specific minimum zoom
+    qreal minZ = (m_document && m_document->isEdgeless()) 
+                 ? minZoomForEdgeless() 
+                 : MIN_ZOOM;
+    
     // Clamp to valid range
-    zoom = qBound(MIN_ZOOM, zoom, MAX_ZOOM);
+    zoom = qBound(minZ, zoom, MAX_ZOOM);
     
     if (qFuzzyCompare(m_zoomLevel, zoom)) {
         return;
@@ -811,6 +817,60 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         return;
     }
     
+    // ========== EDGELESS MODE ==========
+    // Edgeless uses tiled rendering instead of page-based rendering
+    if (m_document->isEdgeless()) {
+        renderEdgelessMode(painter);
+        
+        // Draw eraser cursor
+        if (!m_isDrawing || !isPartialUpdate) {
+            drawEraserCursor(painter);
+        }
+        
+        // Draw debug overlay for edgeless
+        QRect debugOverlayArea(0, 0, 500, 120);
+        if (m_showDebugOverlay && (!isPartialUpdate || dirtyRect.intersects(debugOverlayArea))) {
+            painter.setPen(Qt::white);
+            QFont smallFont = painter.font();
+            smallFont.setPointSize(10);
+            painter.setFont(smallFont);
+            
+            QString toolName;
+            switch (m_currentTool) {
+                case ToolType::Pen: toolName = "Pen"; break;
+                case ToolType::Marker: toolName = "Marker"; break;
+                case ToolType::Eraser: toolName = "Eraser"; break;
+                case ToolType::Highlighter: toolName = "Highlighter"; break;
+                case ToolType::Lasso: toolName = "Lasso"; break;
+            }
+            
+            QString info = QString("Edgeless Canvas | Tiles: %1\n"
+                                   "Zoom: %2% | Pan: (%3, %4)\n"
+                                   "Tool: %5%6 | Undo:%7 Redo:%8\n"
+                                   "Min Zoom: %9% | Paint Rate: %10")
+                .arg(m_document->tileCount())
+                .arg(m_zoomLevel * 100, 0, 'f', 0)
+                .arg(m_panOffset.x(), 0, 'f', 1)
+                .arg(m_panOffset.y(), 0, 'f', 1)
+                .arg(toolName)
+                .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
+                .arg(canUndo() ? "Y" : "N")
+                .arg(canRedo() ? "Y" : "N")
+                .arg(minZoomForEdgeless() * 100, 0, 'f', 0)
+                .arg(m_benchmarking ? QString("%1 Hz").arg(getPaintRate()) : "OFF");
+            
+            QRect textRect = painter.fontMetrics().boundingRect(
+                rect().adjusted(10, 10, -10, -10), 
+                Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, info);
+            textRect.adjust(-5, -5, 5, 5);
+            painter.fillRect(textRect, QColor(0, 0, 0, 180));
+            painter.drawText(rect().adjusted(10, 10, -10, -10), 
+                             Qt::AlignTop | Qt::AlignLeft, info);
+        }
+        return;  // Done with edgeless rendering
+    }
+    
+    // ========== PAGED MODE ==========
     // Get visible pages to render
     QVector<int> visible = visiblePages();
     
@@ -1384,8 +1444,11 @@ void DocumentViewport::endZoomGesture()
     // Stop timeout timer
     m_zoomGestureTimeoutTimer->stop();
     
-    // Get final zoom level
-    qreal finalZoom = m_zoomGesture.targetZoom;
+    // Get final zoom level with mode-specific min zoom
+    qreal minZ = (m_document && m_document->isEdgeless()) 
+                 ? minZoomForEdgeless() 
+                 : MIN_ZOOM;
+    qreal finalZoom = qBound(minZ, m_zoomGesture.targetZoom, MAX_ZOOM);
     
     // Calculate new pan offset to keep center point fixed
     // The center point should map to the same document point before and after zoom
@@ -2004,12 +2067,43 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 
 void DocumentViewport::startStroke(const PointerEvent& pe)
 {
-    if (!m_document || !pe.pageHit.valid()) return;
+    if (!m_document) return;
     
     // Only drawing tools start strokes (Pen, Marker)
     if (m_currentTool != ToolType::Pen && m_currentTool != ToolType::Marker) {
         return;
     }
+    
+    // For edgeless mode, we don't require a page hit - we use document coordinates
+    if (m_document->isEdgeless()) {
+        m_isDrawing = true;
+        m_activeDrawingPage = 0;  // Edgeless is conceptually "page 0"
+        
+        // Initialize new stroke
+        m_currentStroke = VectorStroke();
+        m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_currentStroke.color = m_penColor;
+        m_currentStroke.baseThickness = m_penThickness;
+        
+        // Reset incremental rendering cache
+        resetCurrentStrokeCache();
+        
+        // Get document coordinates for the first point
+        QPointF docPt = viewportToDocument(pe.viewportPos);
+        
+        // Store the tile coordinate where stroke starts
+        m_edgelessDrawingTile = m_document->tileCoordForPoint(docPt);
+        
+        // Add first point (stored in DOCUMENT coordinates for edgeless)
+        StrokePoint pt;
+        pt.pos = docPt;
+        pt.pressure = qBound(0.1, pe.pressure, 1.0);
+        m_currentStroke.points.append(pt);
+        return;
+    }
+    
+    // Paged mode - require valid page hit
+    if (!pe.pageHit.valid()) return;
     
     m_isDrawing = true;
     m_activeDrawingPage = pe.pageHit.pageIndex;
@@ -2023,13 +2117,57 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     // Reset incremental rendering cache (Task 2.3)
     resetCurrentStrokeCache();
     
-    // Add first point
+    // Add first point (in page-local coordinates)
     addPointToStroke(pe.pageHit.pagePoint, pe.pressure);
 }
 
 void DocumentViewport::continueStroke(const PointerEvent& pe)
 {
-    if (!m_isDrawing || m_activeDrawingPage < 0) return;
+    if (!m_isDrawing || !m_document) return;
+    
+    // For edgeless mode, use document coordinates directly
+    if (m_document->isEdgeless()) {
+        QPointF docPt = viewportToDocument(pe.viewportPos);
+        
+        // Point decimation (same logic as addPointToStroke but for document coords)
+        if (!m_currentStroke.points.isEmpty()) {
+            const QPointF& lastPos = m_currentStroke.points.last().pos;
+            qreal dx = docPt.x() - lastPos.x();
+            qreal dy = docPt.y() - lastPos.y();
+            qreal distSq = dx * dx + dy * dy;
+            
+            if (distSq < MIN_DISTANCE_SQ) {
+                // Point too close - but update pressure if higher
+                if (pe.pressure > m_currentStroke.points.last().pressure) {
+                    m_currentStroke.points.last().pressure = pe.pressure;
+                }
+                return;
+            }
+        }
+        
+        StrokePoint pt;
+        pt.pos = docPt;
+        pt.pressure = qBound(0.1, pe.pressure, 1.0);
+        m_currentStroke.points.append(pt);
+        
+        // Dirty region update for edgeless (document coords → viewport coords)
+        qreal padding = m_penThickness * 2 * m_zoomLevel;
+        QPointF vpPos = documentToViewport(docPt);
+        QRectF dirtyRect(vpPos.x() - padding, vpPos.y() - padding, padding * 2, padding * 2);
+        
+        if (m_currentStroke.points.size() > 1) {
+            const auto& prevPt = m_currentStroke.points[m_currentStroke.points.size() - 2];
+            QPointF prevVpPos = documentToViewport(prevPt.pos);
+            dirtyRect = dirtyRect.united(QRectF(prevVpPos.x() - padding, prevVpPos.y() - padding, 
+                                                 padding * 2, padding * 2));
+        }
+        
+        update(dirtyRect.toAlignedRect());
+        return;
+    }
+    
+    // Paged mode
+    if (m_activeDrawingPage < 0) return;
     
     // Get page-local coordinates
     // Note: Even if pointer moves off the active page, we continue drawing
@@ -2062,7 +2200,13 @@ void DocumentViewport::finishStroke()
     // Finalize stroke
     m_currentStroke.updateBoundingBox();
     
-    // Add to page's active layer
+    // Branch for edgeless mode
+    if (m_document && m_document->isEdgeless()) {
+        finishStrokeEdgeless();
+        return;
+    }
+    
+    // Paged mode: add to page's active layer
     Page* page = m_document ? m_document->page(m_activeDrawingPage) : nullptr;
     if (page) {
         VectorLayer* layer = page->activeLayer();
@@ -2083,6 +2227,125 @@ void DocumentViewport::finishStroke()
     // This cache is viewport-sized (~33MB at 4K) and should be freed after stroke completes.
     // It will be lazily reallocated on the next stroke start.
     m_currentStrokeCache = QPixmap();
+    
+    emit documentModified();
+}
+
+void DocumentViewport::finishStrokeEdgeless()
+{
+    // In edgeless mode, stroke points are in DOCUMENT coordinates.
+    // We split the stroke at tile boundaries so each segment is stored in its home tile.
+    // This allows the stroke cache to work per-tile while strokes can span multiple tiles.
+    
+    if (m_currentStroke.points.isEmpty()) {
+        m_isDrawing = false;
+        m_currentStroke = VectorStroke();
+        m_currentStrokeCache = QPixmap();
+        return;
+    }
+    
+    // ========== STROKE SPLITTING AT TILE BOUNDARIES ==========
+    // Strategy: Walk through all points, group consecutive points by tile.
+    // When crossing a tile boundary, end current segment and start a new one.
+    // Overlapping point at boundary ensures visual continuity.
+    
+    struct TileSegment {
+        Document::TileCoord coord;
+        QVector<StrokePoint> points;
+    };
+    QVector<TileSegment> segments;
+    
+    // Start first segment
+    TileSegment currentSegment;
+    currentSegment.coord = m_document->tileCoordForPoint(m_currentStroke.points.first().pos);
+    currentSegment.points.append(m_currentStroke.points.first());
+    
+    // Walk through remaining points
+    for (int i = 1; i < m_currentStroke.points.size(); ++i) {
+        const StrokePoint& pt = m_currentStroke.points[i];
+        Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
+        
+        if (ptTile != currentSegment.coord) {
+            // Tile boundary crossed!
+            // End current segment (include this point for overlap at boundary)
+            currentSegment.points.append(pt);
+            segments.append(currentSegment);
+            
+            // Start new segment (also include this point for overlap)
+            currentSegment.coord = ptTile;
+            currentSegment.points.clear();
+            currentSegment.points.append(pt);  // Overlap point
+        } else {
+            // Same tile, just add point
+            currentSegment.points.append(pt);
+        }
+    }
+    
+    // Don't forget the last segment
+    if (!currentSegment.points.isEmpty()) {
+        segments.append(currentSegment);
+    }
+    
+#ifdef QT_DEBUG
+    qDebug() << "Edgeless: Stroke split into" << segments.size() << "segments";
+#endif
+    
+    // ========== ADD EACH SEGMENT TO ITS TILE ==========
+    QVector<QPair<Document::TileCoord, VectorStroke>> addedStrokes;  // For undo
+    
+    for (const TileSegment& seg : segments) {
+        // Get or create tile
+        Page* tile = m_document->getOrCreateTile(seg.coord.first, seg.coord.second);
+        if (!tile) continue;
+        
+        // Ensure tile has enough layers
+        while (tile->layerCount() <= m_edgelessActiveLayerIndex) {
+            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+        }
+        
+        VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
+        if (!layer) continue;
+        
+        // Create local stroke (convert from document coords to tile-local)
+        VectorStroke localStroke = m_currentStroke;  // Copy base properties (color, width, etc.)
+        localStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);  // New unique ID for each segment
+        localStroke.points.clear();
+        
+        QPointF tileOrigin(seg.coord.first * Document::EDGELESS_TILE_SIZE,
+                           seg.coord.second * Document::EDGELESS_TILE_SIZE);
+        
+        for (const StrokePoint& pt : seg.points) {
+            StrokePoint localPt = pt;
+            localPt.pos -= tileOrigin;
+            localStroke.points.append(localPt);
+        }
+        localStroke.updateBoundingBox();
+        
+        // Add to tile's layer
+        layer->addStroke(localStroke);
+        layer->invalidateStrokeCache();
+        
+        addedStrokes.append({seg.coord, localStroke});
+        
+#ifdef QT_DEBUG
+        qDebug() << "  -> Tile" << seg.coord.first << "," << seg.coord.second
+                 << "points:" << localStroke.points.size();
+#endif
+    }
+    
+    // TODO: Push to edgeless undo stack (Phase E6)
+    // For undo, we need to remove ALL segments as one action
+    // pushUndoActionEdgelessMulti(addedStrokes);
+    Q_UNUSED(addedStrokes);
+    
+    // Clear stroke state
+    m_currentStroke = VectorStroke();
+    m_isDrawing = false;
+    m_lastRenderedPointIndex = 0;
+    m_currentStrokeCache = QPixmap();
+    
+    // Trigger repaint
+    update();
     
     emit documentModified();
 }
@@ -2164,7 +2427,11 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     // when drawing long strokes at high poll rates (360Hz).
     
     const int n = m_currentStroke.points.size();
-    if (n < 1 || m_activeDrawingPage < 0) return;
+    if (n < 1) return;
+    
+    // For paged mode, require valid drawing page
+    bool isEdgeless = m_document && m_document->isEdgeless();
+    if (!isEdgeless && m_activeDrawingPage < 0) return;
     
     // Ensure cache is valid (may need recreation after resize or transform change)
     qreal dpr = devicePixelRatioF();
@@ -2187,12 +2454,16 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         QPainter cachePainter(&m_currentStrokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
         
-        // Apply the same transform as paintEvent to convert page coords to viewport coords
+        // Apply transform to convert coords to viewport coords
         // The cache is in viewport coordinates (widget pixels)
-        QPointF pagePos = pagePosition(m_activeDrawingPage);
         cachePainter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
         cachePainter.scale(m_zoomLevel, m_zoomLevel);
-        cachePainter.translate(pagePos);
+        
+        // For paged mode, translate to page position
+        // For edgeless, stroke points are already in document coords - no extra translate
+        if (!isEdgeless) {
+            cachePainter.translate(pagePosition(m_activeDrawingPage));
+        }
         
         // Use line-based rendering for incremental updates (fast)
         QPen pen(m_currentStroke.color, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
@@ -2234,7 +2505,12 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         painter.save();
         painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
         painter.scale(m_zoomLevel, m_zoomLevel);
-        painter.translate(pagePosition(m_activeDrawingPage));
+        
+        // For paged mode, translate to page position
+        // For edgeless, stroke points are already in document coords
+        if (!isEdgeless) {
+            painter.translate(pagePosition(m_activeDrawingPage));
+        }
         
         qreal endRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[n - 1].pressure, 1.0) / 2.0;
         painter.setPen(Qt::NoPen);
@@ -2645,6 +2921,233 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     painter.drawRect(pageRect);
 }
 
+// ===== Edgeless Mode Rendering (Phase E2) =====
+
+void DocumentViewport::renderEdgelessMode(QPainter& painter)
+{
+    if (!m_document || !m_document->isEdgeless()) return;
+    
+    // Get visible rect in document coordinates
+    QRectF viewRect = visibleRect();
+    
+    // Expand by 1 tile margin for cross-tile strokes
+    int margin = Document::EDGELESS_TILE_SIZE;
+    QRectF expandedRect = viewRect.adjusted(-margin, -margin, margin, margin);
+    
+    // Get all tile coordinates in the visible range (including empty ones for grid)
+    QVector<Document::TileCoord> tilesToRender = m_document->tilesInRect(expandedRect);
+    
+    // Apply view transform (same as paged mode)
+    painter.save();
+    painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+    painter.scale(m_zoomLevel, m_zoomLevel);
+    
+    // ========== ISSUE 4 FIX: Render default background for ALL visible tiles ==========
+    // Even if tiles don't exist yet, show the background so canvas isn't blank
+    for (const auto& coord : tilesToRender) {
+        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                           coord.second * Document::EDGELESS_TILE_SIZE);
+        QRectF tileRect(tileOrigin.x(), tileOrigin.y(), 
+                        Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE);
+        
+        // Fill with default background color
+        painter.fillRect(tileRect, m_document->defaultBackgroundColor);
+        
+        // Draw default background pattern if any
+        if (m_document->defaultBackgroundType == Page::BackgroundType::Grid) {
+            painter.setPen(QPen(m_document->defaultGridColor, 1.0 / m_zoomLevel));
+            qreal spacing = m_document->defaultGridSpacing;
+            
+            for (qreal x = tileOrigin.x() + spacing; x < tileOrigin.x() + Document::EDGELESS_TILE_SIZE; x += spacing) {
+                painter.drawLine(QPointF(x, tileOrigin.y()), 
+                                QPointF(x, tileOrigin.y() + Document::EDGELESS_TILE_SIZE));
+            }
+            for (qreal y = tileOrigin.y() + spacing; y < tileOrigin.y() + Document::EDGELESS_TILE_SIZE; y += spacing) {
+                painter.drawLine(QPointF(tileOrigin.x(), y), 
+                                QPointF(tileOrigin.x() + Document::EDGELESS_TILE_SIZE, y));
+            }
+        } else if (m_document->defaultBackgroundType == Page::BackgroundType::Lines) {
+            painter.setPen(QPen(m_document->defaultGridColor, 1.0 / m_zoomLevel));
+            qreal spacing = m_document->defaultLineSpacing;
+            
+            for (qreal y = tileOrigin.y() + spacing; y < tileOrigin.y() + Document::EDGELESS_TILE_SIZE; y += spacing) {
+                painter.drawLine(QPointF(tileOrigin.x(), y), 
+                                QPointF(tileOrigin.x() + Document::EDGELESS_TILE_SIZE, y));
+            }
+        }
+    }
+    
+    // ========== Render existing tiles (strokes) on top ==========
+    for (const auto& coord : tilesToRender) {
+        Page* tile = m_document->getTile(coord.first, coord.second);
+        if (!tile) continue;  // Skip empty tiles
+        
+        // Calculate tile origin in document coordinates
+        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                           coord.second * Document::EDGELESS_TILE_SIZE);
+        
+        painter.save();
+        painter.translate(tileOrigin);
+        renderTileStrokes(painter, tile, coord);  // Only render strokes, not background
+        painter.restore();
+    }
+    
+    // Draw tile boundary grid (debug)
+    if (m_showTileBoundaries) {
+        drawTileBoundaries(painter, viewRect);
+    }
+    
+    painter.restore();
+    
+    // Render current stroke with incremental caching
+    if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
+        renderCurrentStrokeIncremental(painter);
+    }
+}
+
+void DocumentViewport::renderTile(QPainter& painter, Page* tile, Document::TileCoord coord)
+{
+    Q_UNUSED(coord);  // Used for debugging
+    
+    if (!tile) return;
+    
+    QSizeF tileSize = tile->size;
+    QRectF tileRect(0, 0, tileSize.width(), tileSize.height());
+    
+    // 1. Fill background
+    painter.fillRect(tileRect, tile->backgroundColor);
+    
+    // 2. Draw background pattern (Grid/Lines)
+    switch (tile->backgroundType) {
+        case Page::BackgroundType::None:
+            // Just the background color (already filled)
+            break;
+            
+        case Page::BackgroundType::PDF:
+            // PDF backgrounds not supported in edgeless mode
+            break;
+            
+        case Page::BackgroundType::Custom:
+            if (!tile->customBackground.isNull()) {
+                painter.drawPixmap(tileRect.toRect(), tile->customBackground);
+            }
+            break;
+            
+        case Page::BackgroundType::Grid:
+            {
+                painter.setPen(QPen(tile->gridColor, 1.0 / m_zoomLevel));
+                qreal spacing = tile->gridSpacing;
+                
+                // Vertical lines
+                for (qreal x = spacing; x < tileSize.width(); x += spacing) {
+                    painter.drawLine(QPointF(x, 0), QPointF(x, tileSize.height()));
+                }
+                
+                // Horizontal lines
+                for (qreal y = spacing; y < tileSize.height(); y += spacing) {
+                    painter.drawLine(QPointF(0, y), QPointF(tileSize.width(), y));
+                }
+            }
+            break;
+            
+        case Page::BackgroundType::Lines:
+            {
+                painter.setPen(QPen(tile->gridColor, 1.0 / m_zoomLevel));
+                qreal spacing = tile->lineSpacing;
+                
+                for (qreal y = spacing; y < tileSize.height(); y += spacing) {
+                    painter.drawLine(QPointF(0, y), QPointF(tileSize.width(), y));
+                }
+            }
+            break;
+    }
+    
+    // 3. Render vector layers (strokes may extend beyond tile bounds - that's OK!)
+    // The painter clips to viewport, so cross-tile strokes render correctly.
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    qreal dpr = devicePixelRatioF();
+    
+    for (int layerIdx = 0; layerIdx < tile->layerCount(); ++layerIdx) {
+        VectorLayer* layer = tile->layer(layerIdx);
+        if (layer && layer->visible) {
+            layer->renderWithZoomCache(painter, tileSize, m_zoomLevel, dpr);
+        }
+    }
+    
+    // 4. Render inserted objects
+    tile->renderObjects(painter, 1.0);
+}
+
+void DocumentViewport::renderTileStrokes(QPainter& painter, Page* tile, Document::TileCoord coord)
+{
+    Q_UNUSED(coord);
+    
+    if (!tile) return;
+    
+    QSizeF tileSize = tile->size;
+    
+    // Render only vector layers (strokes may extend beyond tile bounds - OK!)
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    qreal dpr = devicePixelRatioF();
+    
+    for (int layerIdx = 0; layerIdx < tile->layerCount(); ++layerIdx) {
+        VectorLayer* layer = tile->layer(layerIdx);
+        if (layer && layer->visible) {
+            layer->renderWithZoomCache(painter, tileSize, m_zoomLevel, dpr);
+        }
+    }
+    
+    // Render inserted objects
+    tile->renderObjects(painter, 1.0);
+}
+
+void DocumentViewport::drawTileBoundaries(QPainter& painter, QRectF viewRect)
+{
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+    
+    // Calculate visible tile range
+    int minTx = static_cast<int>(std::floor(viewRect.left() / tileSize));
+    int maxTx = static_cast<int>(std::ceil(viewRect.right() / tileSize));
+    int minTy = static_cast<int>(std::floor(viewRect.top() / tileSize));
+    int maxTy = static_cast<int>(std::ceil(viewRect.bottom() / tileSize));
+    
+    // Semi-transparent dashed lines
+    painter.setPen(QPen(QColor(100, 100, 100, 100), 1.0 / m_zoomLevel, Qt::DashLine));
+    
+    // Vertical lines
+    for (int tx = minTx; tx <= maxTx; ++tx) {
+        qreal x = tx * tileSize;
+        painter.drawLine(QPointF(x, viewRect.top()), QPointF(x, viewRect.bottom()));
+    }
+    
+    // Horizontal lines
+    for (int ty = minTy; ty <= maxTy; ++ty) {
+        qreal y = ty * tileSize;
+        painter.drawLine(QPointF(viewRect.left(), y), QPointF(viewRect.right(), y));
+    }
+    
+    // Draw origin marker (tile 0,0 corner)
+    QPointF origin(0, 0);
+    if (viewRect.contains(origin)) {
+        painter.setPen(QPen(QColor(255, 100, 100), 2.0 / m_zoomLevel));
+        painter.drawLine(QPointF(-20 / m_zoomLevel, 0), QPointF(20 / m_zoomLevel, 0));
+        painter.drawLine(QPointF(0, -20 / m_zoomLevel), QPointF(0, 20 / m_zoomLevel));
+    }
+}
+
+qreal DocumentViewport::minZoomForEdgeless() const
+{
+    // Goal: at most 4 tiles (2x2 = 2048x2048) visible at once
+    constexpr qreal maxVisibleSize = 2.0 * Document::EDGELESS_TILE_SIZE;  // 2048
+    
+    // Use logical pixels (Qt handles DPI automatically)
+    qreal minZoomX = static_cast<qreal>(width()) / maxVisibleSize;
+    qreal minZoomY = static_cast<qreal>(height()) / maxVisibleSize;
+    
+    // Take the larger (more restrictive) value, with 10% floor
+    return qMax(qMax(minZoomX, minZoomY), 0.1);
+}
+
 qreal DocumentViewport::effectivePdfDpi() const
 {
     // Base DPI for 100% zoom on a 1x DPR screen
@@ -2673,7 +3176,7 @@ qreal DocumentViewport::effectivePdfDpi() const
 
 void DocumentViewport::clampPanOffset()
 {
-    if (!m_document || m_document->pageCount() == 0) {
+    if (!m_document) {
         m_panOffset = QPointF(0, 0);
         return;
     }
@@ -2681,6 +3184,12 @@ void DocumentViewport::clampPanOffset()
     // For edgeless documents, allow unlimited pan (infinite canvas)
     if (m_document->isEdgeless()) {
         // No clamping for edgeless - user can pan anywhere
+        return;
+    }
+    
+    // Paged mode: require at least one page
+    if (m_document->pageCount() == 0) {
+        m_panOffset = QPointF(0, 0);
         return;
     }
     

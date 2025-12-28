@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "Document.h"
+#include <cmath>
 
 // ===== Constructor & Destructor =====
 
@@ -26,9 +27,9 @@ Document::~Document()
 {
 #ifdef QT_DEBUG
     qDebug() << "Document DESTROYED:" << this << "id=" << id.left(8) 
-             << "pages=" << m_pages.size();
+             << "pages=" << m_pages.size() << "tiles=" << m_tiles.size();
 #endif
-    // Note: m_pages and m_pdfProvider are unique_ptr, auto-cleaned
+    // Note: m_pages, m_tiles, and m_pdfProvider are unique_ptr, auto-cleaned
 }
 
 // ===== Factory Methods =====
@@ -39,8 +40,13 @@ std::unique_ptr<Document> Document::createNew(const QString& docName, Mode docMo
     doc->name = docName;
     doc->mode = docMode;
     
-    // Ensure at least one page exists
-    doc->ensureMinimumPages();
+    if (docMode == Mode::Edgeless) {
+        // Don't create any tiles - they're created on-demand when user draws
+        // m_tiles starts empty (default state)
+    } else {
+        // Paged mode: ensure at least one page exists
+        doc->ensureMinimumPages();
+    }
     
     return doc;
 }
@@ -309,10 +315,9 @@ Page* Document::edgelessPage()
         return nullptr;
     }
     
-    // Ensure page exists
-    ensureMinimumPages();
-    
-    return m_pages.empty() ? nullptr : m_pages[0].get();
+    // For compatibility, return origin tile (0,0)
+    // Creates it if doesn't exist
+    return getOrCreateTile(0, 0);
 }
 
 const Page* Document::edgelessPage() const
@@ -320,7 +325,8 @@ const Page* Document::edgelessPage() const
     if (mode != Mode::Edgeless) {
         return nullptr;
     }
-    return m_pages.empty() ? nullptr : m_pages[0].get();
+    // Const version uses getTile (doesn't create)
+    return getTile(0, 0);
 }
 
 void Document::ensureMinimumPages()
@@ -394,6 +400,118 @@ std::unique_ptr<Page> Document::createDefaultPage()
     page->lineSpacing = defaultLineSpacing;
     
     return page;
+}
+
+// =========================================================================
+// Edgeless Tile Management (Phase E1)
+// =========================================================================
+
+Document::TileCoord Document::tileCoordForPoint(QPointF docPt) const
+{
+    int tx = static_cast<int>(std::floor(docPt.x() / EDGELESS_TILE_SIZE));
+    int ty = static_cast<int>(std::floor(docPt.y() / EDGELESS_TILE_SIZE));
+    return {tx, ty};
+}
+
+Page* Document::getTile(int tx, int ty) const
+{
+    TileCoord coord(tx, ty);
+    auto it = m_tiles.find(coord);
+    return (it != m_tiles.end()) ? it->second.get() : nullptr;
+}
+
+Page* Document::getOrCreateTile(int tx, int ty)
+{
+    TileCoord coord(tx, ty);
+    
+    auto it = m_tiles.find(coord);
+    if (it == m_tiles.end()) {
+        auto tile = std::make_unique<Page>();
+        tile->size = QSizeF(EDGELESS_TILE_SIZE, EDGELESS_TILE_SIZE);
+        tile->backgroundType = defaultBackgroundType;
+        tile->backgroundColor = defaultBackgroundColor;
+        tile->gridColor = defaultGridColor;
+        tile->gridSpacing = defaultGridSpacing;
+        tile->lineSpacing = defaultLineSpacing;
+        
+        // Store tile coordinate for reference (using pageIndex as a hack for now)
+        // In future, Page might have explicit tileX/tileY fields
+        tile->pageIndex = tx;  // Repurpose pageIndex temporarily
+        tile->pdfPageNumber = ty;  // Repurpose pdfPageNumber temporarily
+        
+        auto [insertIt, inserted] = m_tiles.emplace(coord, std::move(tile));
+        markModified();
+        
+#ifdef QT_DEBUG
+        qDebug() << "Document: Created tile at (" << tx << "," << ty << ") total tiles:" << m_tiles.size();
+#endif
+        return insertIt->second.get();
+    }
+    
+    return it->second.get();
+}
+
+QVector<Document::TileCoord> Document::tilesInRect(QRectF docRect) const
+{
+    QVector<TileCoord> result;
+    
+    // Calculate tile range
+    int minTx = static_cast<int>(std::floor(docRect.left() / EDGELESS_TILE_SIZE));
+    int maxTx = static_cast<int>(std::floor(docRect.right() / EDGELESS_TILE_SIZE));
+    int minTy = static_cast<int>(std::floor(docRect.top() / EDGELESS_TILE_SIZE));
+    int maxTy = static_cast<int>(std::floor(docRect.bottom() / EDGELESS_TILE_SIZE));
+    
+    // Return all coordinates in range (even if tiles don't exist yet)
+    for (int ty = minTy; ty <= maxTy; ++ty) {
+        for (int tx = minTx; tx <= maxTx; ++tx) {
+            result.append({tx, ty});
+        }
+    }
+    
+    return result;
+}
+
+QVector<Document::TileCoord> Document::allTileCoords() const
+{
+    QVector<TileCoord> result;
+    result.reserve(static_cast<int>(m_tiles.size()));
+    
+    for (const auto& pair : m_tiles) {
+        result.append(pair.first);
+    }
+    
+    return result;
+}
+
+void Document::removeTileIfEmpty(int tx, int ty)
+{
+    TileCoord coord(tx, ty);
+    auto it = m_tiles.find(coord);
+    
+    if (it == m_tiles.end()) {
+        return;  // Tile doesn't exist
+    }
+    
+    Page* tile = it->second.get();
+    
+    // Check if tile has any content
+    bool hasContent = false;
+    
+    for (const auto& layer : tile->vectorLayers) {
+        if (!layer->strokes().isEmpty()) {
+            hasContent = true;
+            break;
+        }
+    }
+    
+    if (!hasContent && tile->objects.empty()) {
+        m_tiles.erase(it);
+        markModified();
+        
+#ifdef QT_DEBUG
+        qDebug() << "Document: Removed empty tile at (" << tx << "," << ty << ") remaining tiles:" << m_tiles.size();
+#endif
+    }
 }
 
 // =========================================================================

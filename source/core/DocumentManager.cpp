@@ -59,6 +59,31 @@ Document* DocumentManager::createDocument(const QString& name)
     return doc;
 }
 
+Document* DocumentManager::createEdgelessDocument(const QString& name)
+{
+    // Create a new edgeless (infinite canvas) document
+    auto docPtr = Document::createNew(
+        name.isEmpty() ? QStringLiteral("Untitled Canvas") : name,
+        Document::Mode::Edgeless
+    );
+    
+    if (!docPtr) {
+        qWarning() << "DocumentManager::createEdgelessDocument: Failed to create document";
+        return nullptr;
+    }
+    
+    Document* doc = docPtr.release();  // Transfer ownership to DocumentManager
+    
+    m_documents.append(doc);
+    m_documentPaths[doc] = QString();  // New document has no path yet
+    m_modifiedFlags[doc] = false;      // New document is not modified
+    
+    qDebug() << "DocumentManager: Created edgeless document" << doc->name;
+    
+    emit documentCreated(doc);
+    return doc;
+}
+
 Document* DocumentManager::loadDocument(const QString& path)
 {
     if (path.isEmpty()) {

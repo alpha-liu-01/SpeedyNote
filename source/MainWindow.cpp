@@ -1486,6 +1486,11 @@ void MainWindow::setupUi() {
     deletePageShortcut->setContext(Qt::ApplicationShortcut);
     connect(deletePageShortcut, &QShortcut::activated, this, &MainWindow::deletePageInDocument);
     
+    // New Edgeless Canvas: Ctrl+Shift+N - creates infinite canvas document
+    QShortcut* newEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this);
+    newEdgelessShortcut->setContext(Qt::ApplicationShortcut);
+    connect(newEdgelessShortcut, &QShortcut::activated, this, &MainWindow::addNewEdgelessTab);
+    
     // Open PDF: Ctrl+Shift+O - open PDF file in new tab
     QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
     openPdfShortcut->setContext(Qt::ApplicationShortcut);
@@ -3697,6 +3702,67 @@ void MainWindow::addNewTab() {
     tabLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     tabLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); // Left-align to show filename start
     tabLabel->setTextFormat(Qt::PlainText); // Ensure plain text for proper eliding
+    ========== END OLD INKCANVAS CODE ========== */
+}
+
+void MainWindow::addNewEdgelessTab()
+{
+    // Phase E7: Create a new edgeless (infinite canvas) document
+    if (!m_tabManager || !m_documentManager) {
+        qWarning() << "addNewEdgelessTab: TabManager or DocumentManager not initialized";
+        return;
+    }
+    
+    // Create a new edgeless document
+    Document* doc = m_documentManager->createEdgelessDocument();
+    if (!doc) {
+        qWarning() << "addNewEdgelessTab: Failed to create edgeless document";
+        return;
+    }
+    
+    // Apply user's default background settings from QSettings
+    {
+        Page::BackgroundType defaultStyle;
+        QColor defaultBgColor;
+        QColor defaultGridColor;
+        int defaultDensity;
+        loadDefaultBackgroundSettings(defaultStyle, defaultBgColor, defaultGridColor, defaultDensity);
+        
+        // Update document defaults for tiles
+        doc->defaultBackgroundType = defaultStyle;
+        doc->defaultBackgroundColor = defaultBgColor;
+        doc->defaultGridColor = defaultGridColor;
+        doc->defaultGridSpacing = defaultDensity;
+        doc->defaultLineSpacing = defaultDensity;
+    }
+    
+    // Create a new tab with DocumentViewport
+    QString tabTitle = doc->displayName();
+    int tabIndex = m_tabManager->createTab(doc, tabTitle);
+    
+    qDebug() << "Created new edgeless tab at index" << tabIndex << "with document:" << tabTitle;
+    
+    // Switch to the new tab
+    if (m_tabWidget) {
+        m_tabWidget->setCurrentIndex(tabIndex);
+    }
+    
+    // For edgeless, center on origin (0,0)
+    QTimer::singleShot(0, this, [this, tabIndex]() {
+        if (m_tabManager) {
+            DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+            if (viewport) {
+                // Center on origin - start with a small negative pan so origin is visible
+                viewport->setPanOffset(QPointF(-100, -100));
+            }
+        }
+    });
+    
+    updateDialDisplay();
+    
+    return;
+    
+    /* ========== OLD INKCANVAS CODE - KEPT FOR REFERENCE ==========
     // Tab label styling will be updated by theme
 
     // ✅ Create the close button (❌) - styled for browser-like tabs

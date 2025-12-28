@@ -895,6 +895,14 @@ private:
     void finishStroke();
     
     /**
+     * @brief Finish the current stroke in edgeless mode.
+     * 
+     * Converts stroke from document coordinates to tile-local coordinates
+     * and adds it to the appropriate tile.
+     */
+    void finishStrokeEdgeless();
+    
+    /**
      * @brief Add a point to the current stroke with point decimation.
      * @param pagePos Point position in page-local coordinates.
      * @param pressure Pressure value (0.0 to 1.0).
@@ -988,4 +996,59 @@ private:
      * @brief Whether to show debug overlay.
      */
     bool m_showDebugOverlay = true;
+    
+    // ===== Edgeless Mode State (Phase E2/E3) =====
+    
+    /**
+     * @brief Whether to show tile boundary grid lines (debug).
+     */
+    bool m_showTileBoundaries = true;
+    
+    /**
+     * @brief Active layer index for edgeless mode.
+     * 
+     * In paged mode, each Page tracks its own activeLayerIndex.
+     * In edgeless mode, all tiles share this viewport-level active layer.
+     * When a new tile is created, strokes go to this layer.
+     */
+    int m_edgelessActiveLayerIndex = 0;
+    
+    /**
+     * @brief For edgeless drawing, stores the first point's tile coordinate.
+     * Used to determine which tile receives the finished stroke.
+     */
+    Document::TileCoord m_edgelessDrawingTile = {0, 0};
+    
+    /**
+     * @brief Render the edgeless canvas (tiled architecture).
+     * @param painter The QPainter to render to.
+     */
+    void renderEdgelessMode(QPainter& painter);
+    
+    /**
+     * @brief Render a single tile.
+     * @param painter The QPainter to render to (already translated to tile origin).
+     * @param tile The tile (Page) to render.
+     * @param coord The tile coordinate (for debugging).
+     */
+    void renderTile(QPainter& painter, Page* tile, Document::TileCoord coord);
+    
+    /**
+     * Renders only the strokes/objects of a tile (no background)
+     * Used when backgrounds are pre-rendered for the entire visible area
+     */
+    void renderTileStrokes(QPainter& painter, Page* tile, Document::TileCoord coord);
+    
+    /**
+     * @brief Draw tile boundary grid lines for debugging.
+     * @param painter The QPainter to render to.
+     * @param viewRect The visible rectangle in document coordinates.
+     */
+    void drawTileBoundaries(QPainter& painter, QRectF viewRect);
+    
+    /**
+     * @brief Calculate minimum zoom for edgeless mode.
+     * @return Min zoom to ensure at most 4 tiles (2x2) are visible.
+     */
+    qreal minZoomForEdgeless() const;
 };

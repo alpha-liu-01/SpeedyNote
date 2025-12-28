@@ -53,6 +53,17 @@ public:
      * Emits documentCreated() signal.
      */
     Document* createDocument(const QString& name = QString());
+    
+    /**
+     * @brief Create a new edgeless (infinite canvas) document.
+     * @param name Optional name for the document (default: "Untitled Canvas").
+     * @return Pointer to the newly created document.
+     * 
+     * The document is owned by DocumentManager.
+     * Creates an edgeless document with no tiles (tiles created on-demand).
+     * Emits documentCreated() signal.
+     */
+    Document* createEdgelessDocument(const QString& name = QString());
 
     /**
      * @brief Load a document from a file.

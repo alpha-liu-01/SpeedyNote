@@ -53,7 +53,7 @@ Each tile:
 - Created on-demand when user draws
 - Removed when empty (optional optimization)
 
-Storage: QMap<QPair<int,int>, std::unique_ptr<Page>>
+Storage: std::map<std::pair<int,int>, std::unique_ptr<Page>>
 
 Coordinates can be negative (infinite in all directions):
   (-1,-1)  (0,-1)  (1,-1)
@@ -131,7 +131,7 @@ minZoom = qMax(minZoom, 0.1);  // Absolute floor at 10%
 
 ## Implementation Phases
 
-### Phase E1: Core Tile Infrastructure
+### Phase E1: Core Tile Infrastructure ✅ COMPLETE
 
 **Goal:** Replace single giant page with sparse tile map.
 
@@ -141,16 +141,19 @@ minZoom = qMax(minZoom, 0.1);  // Absolute floor at 10%
 
 ```cpp
 // New members for edgeless mode
-QMap<QPair<int,int>, std::unique_ptr<Page>> m_tiles;
+// Uses std::map (not QMap) because unique_ptr is move-only
+using TileCoord = std::pair<int,int>;
+std::map<TileCoord, std::unique_ptr<Page>> m_tiles;
 static constexpr int EDGELESS_TILE_SIZE = 1024;
 
 // New methods
 Page* getTile(int tx, int ty) const;
 Page* getOrCreateTile(int tx, int ty);
-QPair<int,int> tileCoordForPoint(QPointF docPt) const;
-QVector<QPair<int,int>> tilesInRect(QRectF docRect) const;
+TileCoord tileCoordForPoint(QPointF docPt) const;
+QVector<TileCoord> tilesInRect(QRectF docRect) const;
 void removeTileIfEmpty(int tx, int ty);
 int tileCount() const;
+QVector<TileCoord> allTileCoords() const;
 ```
 
 #### E1.2: Implement Tile Methods
@@ -223,7 +226,7 @@ Page* Document::edgelessPage() {
 
 ---
 
-### Phase E2: Viewport Rendering for Edgeless
+### Phase E2: Viewport Rendering for Edgeless ✅ COMPLETE
 
 **Goal:** Render tiles correctly with cross-tile stroke support.
 
@@ -380,76 +383,63 @@ void DocumentViewport::endZoomGesture() {
 
 ---
 
-### Phase E3: Stroke Drawing in Edgeless
+### Phase E3: Stroke Drawing in Edgeless ✅ COMPLETE (with Stroke Splitting)
 
-**Goal:** Strokes are added to correct tile based on first point.
+**Goal:** Strokes are added to correct tile(s), split at tile boundaries for cache efficiency.
 
-#### E3.1: Update finishStroke() for Edgeless
+#### E3.1: Stroke Splitting Strategy
 
-```cpp
-void DocumentViewport::finishStroke() {
-    if (!m_isDrawing) return;
-    if (m_currentStroke.points.isEmpty()) {
-        // ... cleanup ...
-        return;
-    }
-    
-    m_currentStroke.updateBoundingBox();
-    
-    if (m_document->isEdgeless()) {
-        // Get tile for first point
-        QPointF firstPt = m_currentStroke.points.first().pos;
-        
-        // Convert from page-local to document coordinates
-        // (In edgeless, m_activeDrawingPage is tile index, but stroke points
-        //  are in tile-local coords - need to convert)
-        
-        // Actually, for edgeless we need a different approach...
-        // See E3.2 for edgeless-specific stroke handling
-        finishStrokeEdgeless();
-    } else {
-        // ... existing paged code ...
-    }
-}
-```
+When a stroke crosses tile boundaries:
+1. Split into separate segments (one per tile)
+2. Each segment stored in its home tile
+3. Segments share a point at boundaries for visual continuity
+4. Each segment gets a unique stroke ID (for undo to work correctly)
 
-#### E3.2: Edgeless Stroke Handling
+**Benefits:**
+- ✅ Stroke cache works per-tile (bounded memory)
+- ✅ Cross-tile strokes render correctly (each tile renders its part)
+- ✅ Undo removes all segments as one action
+
+**Trade-offs:**
+- Slight overdraw at boundaries (acceptable per user feedback)
+
+#### E3.2: finishStrokeEdgeless() Implementation
 
 ```cpp
 void DocumentViewport::finishStrokeEdgeless() {
-    // m_currentStroke points are in DOCUMENT coordinates for edgeless
-    QPointF firstPt = m_currentStroke.points.first().pos;
-    QPair<int,int> tileCoord = m_document->tileCoordForPoint(firstPt);
+    // Walk through all points, group by tile
+    struct TileSegment { TileCoord coord; QVector<StrokePoint> points; };
+    QVector<TileSegment> segments;
     
-    // Get or create the tile
-    Page* tile = m_document->getOrCreateTile(tileCoord.first, tileCoord.second);
-    if (!tile) return;
+    TileSegment current;
+    current.coord = tileCoordForPoint(m_currentStroke.points.first().pos);
+    current.points.append(m_currentStroke.points.first());
     
-    VectorLayer* layer = tile->activeLayer();
-    if (!layer) return;
-    
-    // Convert stroke points from document coords to tile-local coords
-    VectorStroke localStroke = m_currentStroke;
-    QPointF tileOrigin(tileCoord.first * Document::EDGELESS_TILE_SIZE,
-                       tileCoord.second * Document::EDGELESS_TILE_SIZE);
-    
-    for (StrokePoint& pt : localStroke.points) {
-        pt.pos -= tileOrigin;
+    for (int i = 1; i < m_currentStroke.points.size(); ++i) {
+        TileCoord ptTile = tileCoordForPoint(pt.pos);
+        
+        if (ptTile != current.coord) {
+            // Tile boundary crossed!
+            current.points.append(pt);  // Include for overlap
+            segments.append(current);
+            
+            // Start new segment (with overlap point)
+            current.coord = ptTile;
+            current.points.clear();
+            current.points.append(pt);
+        } else {
+            current.points.append(pt);
+        }
     }
-    localStroke.updateBoundingBox();
+    segments.append(current);  // Last segment
     
-    // Add to tile
-    layer->addStroke(localStroke);
-    
-    // Undo (store tile coord for later)
-    pushUndoActionEdgeless(tileCoord, PageUndoAction::AddStroke, localStroke);
-    
-    // Cleanup
-    m_currentStroke = VectorStroke();
-    m_isDrawing = false;
-    m_currentStrokeCache = QPixmap();
-    
-    emit documentModified();
+    // Add each segment to its tile with unique ID
+    for (const TileSegment& seg : segments) {
+        Page* tile = getOrCreateTile(seg.coord);
+        VectorStroke localStroke = m_currentStroke;  // Copy base properties
+        localStroke.id = QUuid::createUuid().toString();  // New ID per segment
+        // ... convert to tile-local coords and add ...
+    }
 }
 ```
 
@@ -647,9 +637,24 @@ bool DocumentViewport::canUndo() const {
 
 ---
 
-### Phase E7: Connect Shortcut & Test
+### Phase E7: Connect Shortcut & Test ✅ COMPLETE (with Fixes)
 
 **Goal:** Basic edgeless mode working end-to-end.
+
+#### E7.1: Bug Fixes During Testing
+
+| Issue | Problem | Fix |
+|-------|---------|-----|
+| **Pan not working** | `clampPanOffset()` reset pan to (0,0) when `pageCount()==0` (true for edgeless since it uses tiles) | Move edgeless check before `pageCount()` check |
+| **Initially blank** | Viewport only rendered existing tiles, so empty canvas was gray | `renderEdgelessMode` now draws default background for ALL visible tile coordinates first |
+| **Stroke clipping** | Strokes only appeared in starting tile | Implemented stroke splitting at tile boundaries (see E3.2) |
+
+#### E7.2: Scroll/Pan Controls
+
+For edgeless mode:
+- **Mouse wheel**: Vertical pan (same as paged mode)
+- **Shift + Mouse wheel**: Horizontal pan (same as paged mode)
+- **Future**: Smooth pan with viewport frame caching (like zoom)
 
 #### E7.1: Connect Ctrl+Shift+N
 
