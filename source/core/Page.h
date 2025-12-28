@@ -60,8 +60,8 @@ public:
     QPixmap customBackground;           ///< Custom background image if BackgroundType::Custom
     QColor backgroundColor = Qt::white; ///< Background color (used by all types)
     QColor gridColor = QColor(200, 200, 200); ///< Grid/line color
-    int gridSpacing = 20;               ///< Grid spacing in pixels
-    int lineSpacing = 24;               ///< Line spacing for ruled paper
+    int gridSpacing = 32;               ///< Grid spacing in pixels
+    int lineSpacing = 32;               ///< Line spacing for ruled paper
     
     // ===== Bookmarks (Task 1.2.6) =====
     bool isBookmarked = false;          ///< True if this page has a bookmark
@@ -229,6 +229,35 @@ public:
      * @param zoom Zoom level.
      */
     void renderBackground(QPainter& painter, const QPixmap* pdfBackground = nullptr, qreal zoom = 1.0) const;
+    
+    /**
+     * @brief Static helper to render a background pattern (Grid/Lines/None).
+     * 
+     * Used by both:
+     * - Page::renderBackground() for existing pages
+     * - DocumentViewport::renderEdgelessMode() for empty tile coordinates
+     * 
+     * This avoids duplicating grid/lines rendering logic.
+     * 
+     * @param painter The QPainter to render to (should be positioned at page/tile origin).
+     * @param rect The rectangle to fill (in painter's coordinate system).
+     * @param bgColor Background fill color.
+     * @param bgType Background type (None, Grid, or Lines - PDF/Custom handled separately).
+     * @param gridColor Color for grid/lines.
+     * @param gridSpacing Spacing between grid lines (ignored for Lines type).
+     * @param lineSpacing Spacing between horizontal lines (ignored for Grid type).
+     * @param penWidth Pen width for grid/lines (typically 1.0).
+     */
+    static void renderBackgroundPattern(
+        QPainter& painter,
+        const QRectF& rect,
+        const QColor& bgColor,
+        BackgroundType bgType,
+        const QColor& gridColor,
+        qreal gridSpacing,
+        qreal lineSpacing,
+        qreal penWidth = 1.0
+    );
     
     /**
      * @brief Render just the inserted objects (Task 1.3.7).

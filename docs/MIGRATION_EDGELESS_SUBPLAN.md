@@ -7,6 +7,119 @@
 
 ---
 
+## Code Review: Edgeless Implementation (Dec 28, 2024)
+
+### 🔴 Critical Issues
+
+| Issue | Location | Description | Fix |
+|-------|----------|-------------|-----|
+| **CR-1: const_cast in getTile()** | `Document.cpp:428-431` | `getTile()` is `const` but modifies `m_tiles` via `const_cast`. Violates const-correctness, thread-unsafe. | Make `getTile()` non-const, or make `m_tiles` mutable |
+| **CR-2: Dead code - renderTile()** | `DocumentViewport.cpp:3062-3133` | `renderTile()` is never called. Duplicates logic with `renderEdgelessMode()` and `renderTileStrokes()`. | Remove it |
+
+### 🟡 Medium Issues - ALL FIXED ✅
+
+| Issue | Location | Description | Status |
+|-------|----------|-------------|--------|
+| **CR-3: Debug output in release** | `DocumentViewport.cpp:1917-1919` | `qDebug()` for tile eviction is outside `#ifdef QT_DEBUG` | ✅ Wrapped in `#ifdef QT_DEBUG` |
+| **CR-4: Dummy page index** | `DocumentViewport.cpp:2121-2122` | Uses `m_activeDrawingPage = 0` as hack in edgeless mode | ✅ Added explanatory comment |
+| **CR-5: tilesInRect() called twice** | `DocumentViewport.cpp:2986-2989` | `tilesInRect(viewRect)` and `tilesInRect(strokeRect)` overlap significantly | ✅ Combined to single call, filter in loop |
+| **CR-6: Failed tile load not tracked** | `Document.cpp:988-991` | If `Page::fromJson()` fails, coord stays in `m_tileIndex`, causing repeated failed loads | ✅ Now removes from `m_tileIndex` on failure |
+
+### 🟢 Minor / Cleanup - ALL FIXED ✅
+
+| Issue | Location | Description | Status |
+|-------|----------|-------------|--------|
+| **CR-7: Duplicate background drawing** | `renderEdgelessMode()` vs `Page::renderBackground()` | Grid/Lines drawing duplicated | ✅ Extracted `Page::renderBackgroundPattern()` static helper |
+| **CR-8: Hardcoded tile coord storage** | `Document.cpp:467-469` | `tile->pageIndex = tx; tile->pdfPageNumber = ty;` | ✅ Removed - was dead code, coord already in map key |
+| **CR-9: Magic number STROKE_MARGIN** | `DocumentViewport.cpp:2982` | `constexpr int STROKE_MARGIN = 100;` | ✅ Added comment explaining purpose |
+
+### CR-7 Solution: Shared Background Pattern Helper
+
+**Problem:** Two separate implementations of grid/lines rendering:
+1. `Page::renderBackground()` - for paged mode
+2. `renderEdgelessMode()` - for empty tile coordinates
+
+**Why duplication was necessary:** Empty tile coordinates (where no `Page` exists) still need to show the background pattern based on document defaults. We can't call `Page::renderBackground()` without a `Page` instance.
+
+**Solution:** Added `Page::renderBackgroundPattern()` static helper:
+
+```cpp
+// Page.h - static helper that doesn't need a Page instance
+static void renderBackgroundPattern(
+    QPainter& painter,
+    const QRectF& rect,
+    const QColor& bgColor,
+    BackgroundType bgType,
+    const QColor& gridColor,
+    qreal gridSpacing,
+    qreal lineSpacing,
+    qreal penWidth = 1.0
+);
+```
+
+Now both paths use the same logic:
+- `Page::renderBackground()` calls helper for Grid/Lines
+- `renderEdgelessMode()` calls helper with document defaults (empty tiles) or tile settings (existing tiles)
+
+### 🔧 Proposed Fixes
+
+#### CR-1: Fix const_cast in getTile()
+
+**Option A (Recommended):** Make `m_tiles` mutable for lazy loading
+```cpp
+// Document.h
+mutable std::map<TileCoord, std::unique_ptr<Page>> m_tiles;
+
+// Document.cpp - remove const_cast
+Page* Document::getTile(int tx, int ty) const {
+    // ... check m_tiles ...
+    if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
+        if (loadTileFromDisk(coord)) {  // Now legal on const this
+            return m_tiles.at(coord).get();
+        }
+    }
+    return nullptr;
+}
+
+bool Document::loadTileFromDisk(TileCoord coord) const { /* ... */ }
+```
+
+**Option B:** Make `getTile()` non-const
+```cpp
+Page* Document::getTile(int tx, int ty);  // Remove const
+```
+
+#### CR-2: Remove Dead Code
+
+Delete `DocumentViewport::renderTile()` entirely (lines 3062-3133). It's:
+1. Never called
+2. Duplicates `renderEdgelessMode()` + `renderTileStrokes()`
+
+#### CR-4: Clean Up Edgeless Drawing State
+
+```cpp
+// DocumentViewport.h
+bool m_isEdgelessDrawing = false;  // Instead of m_activeDrawingPage == 0 hack
+
+// startStroke()
+if (m_document->isEdgeless()) {
+    m_isEdgelessDrawing = true;
+    m_activeDrawingPage = -1;  // Explicitly invalid for paged logic
+    // ...
+}
+
+// finishStroke()
+if (m_isEdgelessDrawing) {
+    finishStrokeEdgeless();
+    m_isEdgelessDrawing = false;
+    return;
+}
+```
+
+---
+
+---
+
 ## Overview
 
 Edgeless mode provides an infinite canvas for freeform note-taking. Unlike paged mode (vertical stack of fixed-size pages), edgeless mode allows drawing anywhere on a 2D plane that extends infinitely in all directions.

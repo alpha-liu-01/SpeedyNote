@@ -235,51 +235,81 @@ void Page::renderBackground(QPainter& painter, const QPixmap* pdfBackground, qre
 {
     QRectF pageRect(0, 0, size.width() * zoom, size.height() * zoom);
     
-    // Fill background color
-    painter.fillRect(pageRect, backgroundColor);
+    // Handle PDF and Custom backgrounds specially (they need pixmaps)
+    if (backgroundType == BackgroundType::PDF) {
+        painter.fillRect(pageRect, backgroundColor);
+        if (pdfBackground && !pdfBackground->isNull()) {
+            painter.drawPixmap(pageRect.toRect(), *pdfBackground);
+        }
+        return;
+    }
     
-    switch (backgroundType) {
+    if (backgroundType == BackgroundType::Custom) {
+        painter.fillRect(pageRect, backgroundColor);
+        if (!customBackground.isNull()) {
+            painter.drawPixmap(pageRect.toRect(), customBackground);
+        }
+        return;
+    }
+    
+    // For None/Grid/Lines, use the shared helper
+    // Note: spacing is scaled by zoom since we're drawing in zoomed coordinates
+    renderBackgroundPattern(
+        painter,
+        pageRect,
+        backgroundColor,
+        backgroundType,
+        gridColor,
+        gridSpacing * zoom,
+        lineSpacing * zoom,
+        1.0  // pen width
+    );
+}
+
+void Page::renderBackgroundPattern(
+    QPainter& painter,
+    const QRectF& rect,
+    const QColor& bgColor,
+    BackgroundType bgType,
+    const QColor& gridColor,
+    qreal gridSpacing,
+    qreal lineSpacing,
+    qreal penWidth)
+{
+    // Fill background color
+    painter.fillRect(rect, bgColor);
+    
+    // Draw pattern based on type
+    switch (bgType) {
         case BackgroundType::None:
-            // Just the background color (already filled)
-            break;
-            
         case BackgroundType::PDF:
-            if (pdfBackground && !pdfBackground->isNull()) {
-                painter.drawPixmap(pageRect.toRect(), *pdfBackground);
-            }
-            break;
-            
         case BackgroundType::Custom:
-            if (!customBackground.isNull()) {
-                painter.drawPixmap(pageRect.toRect(), customBackground);
-            }
+            // These are handled elsewhere (PDF/Custom need pixmaps)
             break;
             
         case BackgroundType::Grid:
             {
-                painter.setPen(QPen(gridColor, 1));
-                qreal spacing = gridSpacing * zoom;
+                painter.setPen(QPen(gridColor, penWidth));
                 
                 // Vertical lines
-                for (qreal x = spacing; x < pageRect.width(); x += spacing) {
-                    painter.drawLine(QPointF(x, 0), QPointF(x, pageRect.height()));
+                for (qreal x = rect.left() + gridSpacing; x < rect.right(); x += gridSpacing) {
+                    painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()));
                 }
                 
                 // Horizontal lines
-                for (qreal y = spacing; y < pageRect.height(); y += spacing) {
-                    painter.drawLine(QPointF(0, y), QPointF(pageRect.width(), y));
+                for (qreal y = rect.top() + gridSpacing; y < rect.bottom(); y += gridSpacing) {
+                    painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y));
                 }
             }
             break;
             
         case BackgroundType::Lines:
             {
-                painter.setPen(QPen(gridColor, 1));
-                qreal spacing = lineSpacing * zoom;
+                painter.setPen(QPen(gridColor, penWidth));
                 
                 // Horizontal lines only
-                for (qreal y = spacing; y < pageRect.height(); y += spacing) {
-                    painter.drawLine(QPointF(0, y), QPointF(pageRect.width(), y));
+                for (qreal y = rect.top() + lineSpacing; y < rect.bottom(); y += lineSpacing) {
+                    painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y));
                 }
             }
             break;
@@ -373,8 +403,8 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
     page->pdfPageNumber = obj["pdfPageNumber"].toInt(-1);
     page->backgroundColor = QColor(obj["backgroundColor"].toString("#ffffffff"));
     page->gridColor = QColor(obj["gridColor"].toString("#c8c8c8"));  // Gray (200,200,200) in 6-char hex
-    page->gridSpacing = obj["gridSpacing"].toInt(20);
-    page->lineSpacing = obj["lineSpacing"].toInt(24);
+    page->gridSpacing = obj["gridSpacing"].toInt(32);
+    page->lineSpacing = obj["lineSpacing"].toInt(32);
     
     // Bookmarks (Task 1.2.6)
     page->isBookmarked = obj["isBookmarked"].toBool(false);

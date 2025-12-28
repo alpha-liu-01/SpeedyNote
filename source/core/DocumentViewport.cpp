@@ -1913,11 +1913,11 @@ void DocumentViewport::evictDistantTiles()
         }
     }
     
-// #ifdef QT_DEBUG
+#ifdef QT_DEBUG
     if (evictedCount > 0) {
         qDebug() << "Evicted" << evictedCount << "tiles, remaining:" << m_document->tileCount();
     }
-// #endif
+#endif
 }
 
 // ===== Input Routing (Task 1.3.8) =====
@@ -2119,7 +2119,10 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     // For edgeless mode, we don't require a page hit - we use document coordinates
     if (m_document->isEdgeless()) {
         m_isDrawing = true;
-        m_activeDrawingPage = 0;  // Edgeless is conceptually "page 0"
+        // CR-4: m_activeDrawingPage = 0 is used for edgeless mode to satisfy
+        // the m_activeDrawingPage >= 0 checks in renderCurrentStrokeIncremental().
+        // The actual tile is tracked in m_edgelessDrawingTile.
+        m_activeDrawingPage = 0;
         
         // Initialize new stroke
         m_currentStroke = VectorStroke();
@@ -2978,15 +2981,21 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     // ========== TILE RENDERING STRATEGY ==========
     // With stroke splitting, cross-tile strokes are stored as separate segments in each tile.
     // Each segment is rendered when its tile is rendered - no margin needed for cross-tile!
-    // Small margin (100px) handles thick strokes extending slightly beyond tile boundary.
-    constexpr int STROKE_MARGIN = 100;  // Max stroke width / anti-aliasing buffer
+    // Small margin handles thick strokes extending slightly beyond tile boundary.
+    // CR-9: STROKE_MARGIN is max expected stroke width + anti-aliasing buffer
+    constexpr int STROKE_MARGIN = 100;
+    
+    // CR-5: Single tilesInRect() call - use stroke margin for all tiles
+    // Background pass will filter to viewRect bounds
     QRectF strokeRect = viewRect.adjusted(-STROKE_MARGIN, -STROKE_MARGIN, STROKE_MARGIN, STROKE_MARGIN);
+    QVector<Document::TileCoord> allTiles = m_document->tilesInRect(strokeRect);
     
-    // For backgrounds, render only tiles that intersect the visible area
-    QVector<Document::TileCoord> visibleTiles = m_document->tilesInRect(viewRect);
-    
-    // For strokes, include small margin for thick strokes at tile edges
-    QVector<Document::TileCoord> strokeTiles = m_document->tilesInRect(strokeRect);
+    // Pre-calculate visible tile range for background filtering
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+    int minVisibleTx = static_cast<int>(std::floor(viewRect.left() / tileSize));
+    int maxVisibleTx = static_cast<int>(std::floor(viewRect.right() / tileSize));
+    int minVisibleTy = static_cast<int>(std::floor(viewRect.top() / tileSize));
+    int maxVisibleTy = static_cast<int>(std::floor(viewRect.bottom() / tileSize));
     
     // Apply view transform (same as paged mode)
     painter.save();
@@ -2996,49 +3005,58 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     // ========== PASS 1: Render backgrounds for VISIBLE tiles only ==========
     // This ensures non-blank canvas without wasting time on off-screen tiles.
     // For 1920x1080 viewport with 1024x1024 tiles: up to 9 tiles (3x3 worst case)
-    for (const auto& coord : visibleTiles) {
-        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                           coord.second * Document::EDGELESS_TILE_SIZE);
-        QRectF tileRect(tileOrigin.x(), tileOrigin.y(), 
-                        Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE);
+    // 
+    // Uses Page::renderBackgroundPattern() to share grid/lines logic with Page::renderBackground().
+    // Empty tile coordinates use document defaults; existing tiles use their own settings.
+    for (const auto& coord : allTiles) {
+        // CR-5: Skip tiles outside visible rect (margin tiles are for strokes only)
+        if (coord.first < minVisibleTx || coord.first > maxVisibleTx ||
+            coord.second < minVisibleTy || coord.second > maxVisibleTy) {
+            continue;
+        }
         
-        // Fill with default background color
-        painter.fillRect(tileRect, m_document->defaultBackgroundColor);
+        QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+        QRectF tileRect(tileOrigin.x(), tileOrigin.y(), tileSize, tileSize);
         
-        // Draw default background pattern if any
-        if (m_document->defaultBackgroundType == Page::BackgroundType::Grid) {
-            painter.setPen(QPen(m_document->defaultGridColor, 1.0 / m_zoomLevel));
-            qreal spacing = m_document->defaultGridSpacing;
-            
-            for (qreal x = tileOrigin.x() + spacing; x < tileOrigin.x() + Document::EDGELESS_TILE_SIZE; x += spacing) {
-                painter.drawLine(QPointF(x, tileOrigin.y()), 
-                                QPointF(x, tileOrigin.y() + Document::EDGELESS_TILE_SIZE));
-            }
-            for (qreal y = tileOrigin.y() + spacing; y < tileOrigin.y() + Document::EDGELESS_TILE_SIZE; y += spacing) {
-                painter.drawLine(QPointF(tileOrigin.x(), y), 
-                                QPointF(tileOrigin.x() + Document::EDGELESS_TILE_SIZE, y));
-            }
-        } else if (m_document->defaultBackgroundType == Page::BackgroundType::Lines) {
-            painter.setPen(QPen(m_document->defaultGridColor, 1.0 / m_zoomLevel));
-            qreal spacing = m_document->defaultLineSpacing;
-            
-            for (qreal y = tileOrigin.y() + spacing; y < tileOrigin.y() + Document::EDGELESS_TILE_SIZE; y += spacing) {
-                painter.drawLine(QPointF(tileOrigin.x(), y), 
-                                QPointF(tileOrigin.x() + Document::EDGELESS_TILE_SIZE, y));
-            }
+        // Check if tile exists - use its settings, otherwise use document defaults
+        Page* tile = m_document->getTile(coord.first, coord.second);
+        
+        if (tile) {
+            // Existing tile: use its background settings
+            Page::renderBackgroundPattern(
+                painter,
+                tileRect,
+                tile->backgroundColor,
+                tile->backgroundType,
+                tile->gridColor,
+                tile->gridSpacing,
+                tile->lineSpacing,
+                1.0 / m_zoomLevel  // Constant pen width in screen pixels
+            );
+        } else {
+            // Empty tile coordinate: use document defaults
+            Page::renderBackgroundPattern(
+                painter,
+                tileRect,
+                m_document->defaultBackgroundColor,
+                m_document->defaultBackgroundType,
+                m_document->defaultGridColor,
+                m_document->defaultGridSpacing,
+                m_document->defaultLineSpacing,
+                1.0 / m_zoomLevel  // Constant pen width in screen pixels
+            );
         }
     }
     
-    // ========== PASS 2: Render strokes with small margin for thick strokes ==========
+    // ========== PASS 2: Render strokes (includes margin tiles for thick strokes) ==========
     // Strokes are split at tile boundaries, so each tile renders its own segments.
-    // Small margin ensures thick strokes at edges are fully rendered.
-    for (const auto& coord : strokeTiles) {
+    // Margin tiles ensure thick strokes at edges are fully rendered.
+    for (const auto& coord : allTiles) {
         Page* tile = m_document->getTile(coord.first, coord.second);
         if (!tile) continue;  // Skip empty tiles
         
         // Calculate tile origin in document coordinates
-        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                           coord.second * Document::EDGELESS_TILE_SIZE);
+        QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
         
         painter.save();
         painter.translate(tileOrigin);
@@ -3059,78 +3077,8 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     }
 }
 
-void DocumentViewport::renderTile(QPainter& painter, Page* tile, Document::TileCoord coord)
-{
-    Q_UNUSED(coord);  // Used for debugging
-    
-    if (!tile) return;
-    
-    QSizeF tileSize = tile->size;
-    QRectF tileRect(0, 0, tileSize.width(), tileSize.height());
-    
-    // 1. Fill background
-    painter.fillRect(tileRect, tile->backgroundColor);
-    
-    // 2. Draw background pattern (Grid/Lines)
-    switch (tile->backgroundType) {
-        case Page::BackgroundType::None:
-            // Just the background color (already filled)
-            break;
-            
-        case Page::BackgroundType::PDF:
-            // PDF backgrounds not supported in edgeless mode
-            break;
-            
-        case Page::BackgroundType::Custom:
-            if (!tile->customBackground.isNull()) {
-                painter.drawPixmap(tileRect.toRect(), tile->customBackground);
-            }
-            break;
-            
-        case Page::BackgroundType::Grid:
-            {
-                painter.setPen(QPen(tile->gridColor, 1.0 / m_zoomLevel));
-                qreal spacing = tile->gridSpacing;
-                
-                // Vertical lines
-                for (qreal x = spacing; x < tileSize.width(); x += spacing) {
-                    painter.drawLine(QPointF(x, 0), QPointF(x, tileSize.height()));
-                }
-                
-                // Horizontal lines
-                for (qreal y = spacing; y < tileSize.height(); y += spacing) {
-                    painter.drawLine(QPointF(0, y), QPointF(tileSize.width(), y));
-                }
-            }
-            break;
-            
-        case Page::BackgroundType::Lines:
-            {
-                painter.setPen(QPen(tile->gridColor, 1.0 / m_zoomLevel));
-                qreal spacing = tile->lineSpacing;
-                
-                for (qreal y = spacing; y < tileSize.height(); y += spacing) {
-                    painter.drawLine(QPointF(0, y), QPointF(tileSize.width(), y));
-                }
-            }
-            break;
-    }
-    
-    // 3. Render vector layers (strokes may extend beyond tile bounds - that's OK!)
-    // The painter clips to viewport, so cross-tile strokes render correctly.
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    qreal dpr = devicePixelRatioF();
-    
-    for (int layerIdx = 0; layerIdx < tile->layerCount(); ++layerIdx) {
-        VectorLayer* layer = tile->layer(layerIdx);
-        if (layer && layer->visible) {
-            layer->renderWithZoomCache(painter, tileSize, m_zoomLevel, dpr);
-        }
-    }
-    
-    // 4. Render inserted objects
-    tile->renderObjects(painter, 1.0);
-}
+// NOTE: renderTile() was removed (CR-2) - it was dead code duplicating 
+// renderEdgelessMode() + renderTileStrokes()
 
 void DocumentViewport::renderTileStrokes(QPainter& painter, Page* tile, Document::TileCoord coord)
 {

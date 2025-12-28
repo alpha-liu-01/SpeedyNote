@@ -73,8 +73,8 @@ public:
     Page::BackgroundType defaultBackgroundType = Page::BackgroundType::None;
     QColor defaultBackgroundColor = Qt::white;
     QColor defaultGridColor = QColor(200, 200, 200);
-    int defaultGridSpacing = 20;
-    int defaultLineSpacing = 24;
+    int defaultGridSpacing = 32;
+    int defaultLineSpacing = 32;
     QSizeF defaultPageSize = QSizeF(816, 1056);  ///< Default page size (US Letter at 96 DPI)
     
     // ===== State =====
@@ -259,7 +259,7 @@ public:
      * @param coord Tile coordinate to load.
      * @return True if loaded successfully.
      */
-    bool loadTileFromDisk(TileCoord coord);
+    bool loadTileFromDisk(TileCoord coord) const;
     
     /**
      * @brief Mark a tile as dirty (modified since last save).
@@ -733,7 +733,7 @@ private:
     
     // ===== Tile Persistence (Phase E5) =====
     QString m_bundlePath;                           ///< Path to .snb bundle directory
-    std::set<TileCoord> m_tileIndex;                ///< All tile coords that exist on disk
+    mutable std::set<TileCoord> m_tileIndex;        ///< All tile coords that exist on disk (mutable for lazy-load failure cleanup)
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
     

@@ -1035,15 +1035,11 @@ private:
     
     /**
      * @brief Render a single tile.
+     * Renders only the strokes/objects of a tile (no background).
+     * Used when backgrounds are pre-rendered for the entire visible area.
      * @param painter The QPainter to render to (already translated to tile origin).
      * @param tile The tile (Page) to render.
      * @param coord The tile coordinate (for debugging).
-     */
-    void renderTile(QPainter& painter, Page* tile, Document::TileCoord coord);
-    
-    /**
-     * Renders only the strokes/objects of a tile (no background)
-     * Used when backgrounds are pre-rendered for the entire visible area
      */
     void renderTileStrokes(QPainter& painter, Page* tile, Document::TileCoord coord);
     

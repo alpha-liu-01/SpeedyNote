@@ -424,11 +424,9 @@ Page* Document::getTile(int tx, int ty) const
     }
     
     // 2. If lazy loading enabled, try to load from disk
+    // m_tiles is mutable, so this works on const Document
     if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
-        // const_cast needed because lazy loading modifies m_tiles
-        // This is safe because the observable state (tile content) doesn't change
-        Document* mutableThis = const_cast<Document*>(this);
-        if (mutableThis->loadTileFromDisk(coord)) {
+        if (loadTileFromDisk(coord)) {
             return m_tiles.at(coord).get();
         }
     }
@@ -463,10 +461,8 @@ Page* Document::getOrCreateTile(int tx, int ty)
     tile->gridSpacing = defaultGridSpacing;
     tile->lineSpacing = defaultLineSpacing;
     
-    // Store tile coordinate for reference (using pageIndex as a hack for now)
-    // In future, Page might have explicit tileX/tileY fields
-    tile->pageIndex = tx;  // Repurpose pageIndex temporarily
-    tile->pdfPageNumber = ty;  // Repurpose pdfPageNumber temporarily
+    // CR-8: Removed tile coord storage in pageIndex/pdfPageNumber - it was never read.
+    // Tile coordinate is already the map key, no need to duplicate in Page.
     
     auto [insertIt, inserted] = m_tiles.emplace(coord, std::move(tile));
     
@@ -749,8 +745,8 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
         doc->defaultBackgroundType = stringToBackgroundType(bgStyle);
         QString bgColor = obj["background_color"].toString("#ffffff");
         doc->defaultBackgroundColor = QColor(bgColor);
-        doc->defaultGridSpacing = obj["background_density"].toInt(20);
-        doc->defaultLineSpacing = obj["background_density"].toInt(24);
+        doc->defaultGridSpacing = obj["background_density"].toInt(32);
+        doc->defaultLineSpacing = obj["background_density"].toInt(32);
     }
     
     // Note: Pages are NOT loaded here - call loadPagesFromJson() separately
@@ -849,8 +845,8 @@ void Document::loadDefaultBackgroundFromJson(const QJsonObject& obj)
     QString gridColor = obj["grid_color"].toString("#c8c8c8");  // Gray (200,200,200) in 6-char hex
     defaultGridColor = QColor(gridColor);
     
-    defaultGridSpacing = obj["grid_spacing"].toInt(20);
-    defaultLineSpacing = obj["line_spacing"].toInt(24);
+    defaultGridSpacing = obj["grid_spacing"].toInt(32);
+    defaultLineSpacing = obj["line_spacing"].toInt(32);
     
     if (obj.contains("page_width") && obj.contains("page_height")) {
         defaultPageSize = QSizeF(
@@ -960,7 +956,7 @@ bool Document::saveTile(TileCoord coord)
     return true;
 }
 
-bool Document::loadTileFromDisk(TileCoord coord)
+bool Document::loadTileFromDisk(TileCoord coord) const
 {
     if (m_bundlePath.isEmpty()) {
         return false;
@@ -972,6 +968,8 @@ bool Document::loadTileFromDisk(TileCoord coord)
     QFile file(tilePath);
     if (!file.open(QIODevice::ReadOnly)) {
         qWarning() << "Cannot load tile: file not found" << tilePath;
+        // CR-6: Remove from index to prevent repeated failed loads
+        m_tileIndex.erase(coord);
         return false;
     }
     
@@ -982,12 +980,14 @@ bool Document::loadTileFromDisk(TileCoord coord)
     QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
         qWarning() << "Cannot load tile: JSON parse error" << parseError.errorString();
+        m_tileIndex.erase(coord);  // CR-6: Remove from index
         return false;
     }
     
     auto tile = Page::fromJson(jsonDoc.object());
     if (!tile) {
         qWarning() << "Cannot load tile: Page::fromJson failed";
+        m_tileIndex.erase(coord);  // CR-6: Remove from index
         return false;
     }
     
