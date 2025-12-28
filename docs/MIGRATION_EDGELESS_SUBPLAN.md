@@ -2,7 +2,7 @@
 
 > **Purpose:** Implement infinite canvas support with tiled architecture
 > **Created:** Dec 27, 2024
-> **Status:** 📋 PLANNING
+> **Status:** ✅ DESIGN COMPLETE - Ready for implementation
 > **Parent:** MIGRATION_DOC1_SUBPLAN.md (Phase 4)
 
 ---
@@ -80,10 +80,28 @@ Coordinates can be negative (infinite in all directions):
 
 ### 4. Viewport Zoom Limits
 
-| Constraint | Value | Rationale |
-|------------|-------|-----------|
-| Min zoom | ~0.5 | Ensures ≤4 tiles visible at once |
-| Max zoom | 5.0 | Same as paged mode |
+**Goal:** At most 4 tiles (2×2 = 2048×2048) visible at once.
+
+**Formula:**
+```cpp
+qreal minZoom = qMax(
+    static_cast<qreal>(width()) / 2048.0,
+    static_cast<qreal>(height()) / 2048.0
+);
+minZoom = qMax(minZoom, 0.1);  // Absolute floor at 10%
+```
+
+**Key:** Use Qt's logical pixels (`width()`, `height()`), which are already DPI-adjusted.
+
+| Display | Scaling | Logical Size | Min Zoom |
+|---------|---------|--------------|----------|
+| 1920×1080 | 100% | 1920×1080 | 94% |
+| 1920×1080 | 125% | 1536×864 | 75% |
+| 2560×1440 | 150% | 1707×960 | 83% |
+| 2048×1536 | 200% | 1024×768 | 50% |
+| 3840×2160 | 100% | 3840×2160 | 188% (can't zoom out) |
+
+**Edge case (4K@100%):** Accepted. Users with 4K at 100% scaling are rare, and they still get a usable canvas area. No special handling needed for MVP.
 
 ### 5. Serialization Format
 
@@ -316,6 +334,50 @@ void DocumentViewport::drawTileBoundaries(QPainter& painter, QRectF viewRect) {
 }
 ```
 
+#### E2.4: Implement Dynamic Min Zoom
+
+```cpp
+// In DocumentViewport.h
+qreal minZoomForEdgeless() const;
+
+// In DocumentViewport.cpp
+qreal DocumentViewport::minZoomForEdgeless() const {
+    // Goal: at most 4 tiles (2x2 = 2048x2048) visible
+    constexpr qreal maxVisibleSize = 2.0 * Document::EDGELESS_TILE_SIZE;  // 2048
+    
+    // Use logical pixels (Qt handles DPI automatically)
+    qreal minZoomX = static_cast<qreal>(width()) / maxVisibleSize;
+    qreal minZoomY = static_cast<qreal>(height()) / maxVisibleSize;
+    
+    // Take the larger (more restrictive) value, with 10% floor
+    return qMax(qMax(minZoomX, minZoomY), 0.1);
+}
+
+// Update setZoomLevel() to use dynamic min zoom
+void DocumentViewport::setZoomLevel(qreal zoom) {
+    // Apply mode-specific minimum zoom
+    qreal minZ = (m_document && m_document->isEdgeless()) 
+                 ? minZoomForEdgeless() 
+                 : MIN_ZOOM;
+    
+    zoom = qBound(minZ, zoom, MAX_ZOOM);
+    
+    // ... rest of existing code ...
+}
+
+// Also update endZoomGesture() to respect dynamic min zoom
+void DocumentViewport::endZoomGesture() {
+    // ... existing code ...
+    
+    qreal minZ = (m_document && m_document->isEdgeless()) 
+                 ? minZoomForEdgeless() 
+                 : MIN_ZOOM;
+    qreal finalZoom = qBound(minZ, m_zoomGesture.targetZoom, MAX_ZOOM);
+    
+    // ... rest of existing code ...
+}
+```
+
 ---
 
 ### Phase E3: Stroke Drawing in Edgeless
@@ -504,24 +566,83 @@ std::unique_ptr<Document> Document::fromFullJson(const QJsonObject& obj) {
 
 ### Phase E6: Undo/Redo for Edgeless
 
-**Goal:** Undo works with tile-based storage.
+**Goal:** Global undo stack for seamless edgeless experience.
 
-#### E6.1: Tile-Aware Undo Actions
+#### E6.1: Global Undo Stack
+
+**File:** `source/core/DocumentViewport.h`
 
 ```cpp
-// Option A: Global undo stack (simpler for MVP)
-// - One undo stack for entire edgeless document
-// - Each action stores tile coordinate
-
+// Edgeless undo action (stores tile coordinate for applying undo)
 struct EdgelessUndoAction {
-    QPair<int,int> tileCoord;
-    PageUndoAction::Type type;
-    VectorStroke stroke;
-    QVector<VectorStroke> strokes;
+    QPair<int,int> tileCoord;      // Which tile this action affects
+    PageUndoAction::Type type;      // AddStroke, RemoveStroke, RemoveMultiple
+    VectorStroke stroke;            // For single stroke actions
+    QVector<VectorStroke> strokes;  // For multi-stroke actions
 };
 
+// Global stacks for edgeless mode
 QStack<EdgelessUndoAction> m_edgelessUndoStack;
 QStack<EdgelessUndoAction> m_edgelessRedoStack;
+static constexpr int MAX_UNDO_GLOBAL = 100;  // Memory bound
+```
+
+#### E6.2: Implement undoEdgeless() and redoEdgeless()
+
+```cpp
+void DocumentViewport::undoEdgeless() {
+    if (m_edgelessUndoStack.isEmpty()) return;
+    
+    EdgelessUndoAction action = m_edgelessUndoStack.pop();
+    
+    // Get the tile this action affects
+    Page* tile = m_document->getTile(action.tileCoord.first, action.tileCoord.second);
+    if (!tile) return;  // Tile was removed? Skip.
+    
+    VectorLayer* layer = tile->activeLayer();
+    if (!layer) return;
+    
+    switch (action.type) {
+        case PageUndoAction::AddStroke:
+            layer->removeStroke(action.stroke.id);
+            break;
+        case PageUndoAction::RemoveStroke:
+            layer->addStroke(action.stroke);
+            break;
+        case PageUndoAction::RemoveMultiple:
+            for (const auto& s : action.strokes) {
+                layer->addStroke(s);
+            }
+            break;
+    }
+    
+    m_edgelessRedoStack.push(action);
+    trimEdgelessUndoStack();
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::trimEdgelessUndoStack() {
+    while (m_edgelessUndoStack.size() > MAX_UNDO_GLOBAL) {
+        m_edgelessUndoStack.remove(0);  // Remove oldest
+    }
+}
+```
+
+#### E6.3: Update canUndo() and canRedo()
+
+```cpp
+bool DocumentViewport::canUndo() const {
+    if (m_document && m_document->isEdgeless()) {
+        return !m_edgelessUndoStack.isEmpty();
+    }
+    // Existing per-page logic for paged mode
+    return m_undoStacks.contains(m_currentPageIndex) && 
+           !m_undoStacks[m_currentPageIndex].isEmpty();
+}
 ```
 
 ---
@@ -568,14 +689,34 @@ void MainWindow::newEdgelessDocument() {
 
 ---
 
-## Open Questions
+## Decisions (All Resolved)
 
-| Question | Status | Decision |
-|----------|--------|----------|
-| Eraser across tiles | Answered | Search home tile + 8 neighbors |
-| Undo scope | TBD | Global stack (simpler) or per-tile? |
-| Origin point | TBD | (0,0) = top-left of tile (0,0) |
-| Min zoom calculation | TBD | Based on viewport size |
+| Question | Decision | Rationale |
+|----------|----------|-----------|
+| Eraser across tiles | Search home tile + 8 neighbors | Catches cross-tile strokes |
+| Undo scope | **Global stack** for edgeless | User mental model: "undo last action anywhere" |
+| Origin point | (0,0) = top-left of tile (0,0) | Simple, matches document coordinates |
+| Min zoom calculation | `qMax(width, height) / 2048` | Ensures ≤4 tiles visible, uses logical pixels |
+
+### Why Global Undo for Edgeless (Not Per-Tile)
+
+Paged mode uses per-page undo because each page is independent. In edgeless:
+
+1. **Canvas is seamless** - user doesn't think in terms of tiles
+2. **User expectation:** "Undo my last stroke" regardless of where they panned
+3. **Problem with per-tile:** Draw in (0,0), pan to (2,2), press undo → nothing happens (confusing!)
+4. **Memory:** Bounded with `MAX_UNDO_GLOBAL = 100`
+
+```cpp
+// Edgeless uses different undo path
+void DocumentViewport::undo() {
+    if (m_document->isEdgeless()) {
+        undoEdgeless();  // Global stack
+    } else {
+        undoPaged();     // Per-page stack (existing)
+    }
+}
+```
 
 ---
 
