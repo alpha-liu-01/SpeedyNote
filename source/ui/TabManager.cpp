@@ -198,7 +198,10 @@ void TabManager::onCurrentChanged(int index)
 void TabManager::onTabCloseRequested(int index)
 {
     // The user clicked the close button on a tab
-    // We emit our signal and then close the tab
-    // MainWindow can intercept tabCloseRequested to check for unsaved changes
-    closeTab(index);
+    // Emit signal so MainWindow can check for unsaved changes and prompt user.
+    // MainWindow is responsible for calling closeTab() if appropriate.
+    // The tab is NOT automatically closed here.
+    if (index >= 0 && index < m_viewports.size()) {
+        emit tabCloseAttempted(index, m_viewports.at(index));
+    }
 }

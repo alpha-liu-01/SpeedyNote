@@ -154,14 +154,25 @@ signals:
     void currentViewportChanged(DocumentViewport* viewport);
 
     /**
-     * @brief Emitted when a tab close is requested.
+     * @brief Emitted just before a tab is closed (notification only).
      * @param index The tab index being closed.
      * @param viewport The viewport being closed.
      * 
-     * MainWindow can connect to this to check for unsaved changes.
-     * The tab will be closed after this signal is emitted.
+     * This is emitted from closeTab() just before the actual close.
+     * MainWindow can use this to clean up Document via DocumentManager.
      */
     void tabCloseRequested(int index, DocumentViewport* viewport);
+    
+    /**
+     * @brief Emitted when user attempts to close a tab (via X button).
+     * @param index The tab index the user wants to close.
+     * @param viewport The viewport the user wants to close.
+     * 
+     * MainWindow should connect to this to check for unsaved changes
+     * and prompt the user before calling closeTab().
+     * The tab is NOT automatically closed - MainWindow must call closeTab().
+     */
+    void tabCloseAttempted(int index, DocumentViewport* viewport);
 
 private slots:
     /**

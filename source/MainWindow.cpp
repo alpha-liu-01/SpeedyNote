@@ -171,6 +171,89 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     
+    // ========== EDGELESS SAVE PROMPT (A2: Prompt save before closing) ==========
+    // Connect tabCloseAttempted to check for unsaved edgeless documents.
+    // The tab is NOT automatically closed - we must call closeTab() explicitly.
+    connect(m_tabManager, &TabManager::tabCloseAttempted, this, [this](int index, DocumentViewport* vp) {
+        if (!vp || !m_documentManager || !m_tabManager) {
+            return;
+        }
+        
+        // Prevent closing the last tab (same behavior as old InkCanvas)
+        if (m_tabManager->tabCount() <= 1) {
+            QMessageBox::information(this, tr("Notice"), 
+                tr("At least one tab must remain open."));
+            return;
+        }
+        
+        Document* doc = vp->document();
+        if (!doc) {
+            // No document, just close
+            m_tabManager->closeTab(index);
+            return;
+        }
+        
+        // Check if this is an unsaved edgeless document with content
+        bool isUnsavedEdgeless = doc->isEdgeless() && 
+                                  m_documentManager->isUsingTempBundle(doc) &&
+                                  (doc->tileCount() > 0 || doc->tileIndexCount() > 0);
+        
+        if (isUnsavedEdgeless) {
+            // Prompt user to save
+            QMessageBox::StandardButton reply = QMessageBox::question(
+                this,
+                tr("Save Canvas?"),
+                tr("This canvas has unsaved changes. Do you want to save before closing?"),
+                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+                QMessageBox::Save
+            );
+            
+            if (reply == QMessageBox::Cancel) {
+                // User cancelled - don't close
+                return;
+            }
+            
+            if (reply == QMessageBox::Save) {
+                // Show save dialog
+                QString defaultName = doc->name.isEmpty() ? "Untitled Canvas" : doc->name;
+                QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                
+                QString savePath = QFileDialog::getSaveFileName(
+                    this,
+                    tr("Save Edgeless Canvas"),
+                    defaultPath,
+                    tr("SpeedyNote Bundle (*.snb)")
+                );
+                
+                if (savePath.isEmpty()) {
+                    // User cancelled save dialog - don't close
+                    return;
+                }
+                
+                // Ensure .snb extension
+                if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
+                    savePath += ".snb";
+                }
+                
+                // Save to the chosen location
+                if (!m_documentManager->saveDocumentAs(doc, savePath)) {
+                    QMessageBox::critical(this, tr("Save Error"),
+                        tr("Failed to save canvas to:\n%1").arg(savePath));
+                    return;  // Don't close if save failed
+                }
+                
+                // Update tab title
+                m_tabManager->setTabTitle(index, QFileInfo(savePath).baseName());
+                m_tabManager->markTabModified(index, false);
+            }
+            // If Discard, fall through to close
+        }
+        
+        // Close the tab
+        m_tabManager->closeTab(index);
+    });
+    // ===========================================================================
+    
     QSettings settings("SpeedyNote", "App");
     pdfRenderDPI = settings.value("pdfRenderDPI", 192).toInt();
     setPdfDPI(pdfRenderDPI);
@@ -3193,22 +3276,24 @@ void MainWindow::centerViewportContent(int tabIndex) {
 
 void MainWindow::saveDocument()
 {
-    // Phase doc-1.1: Save current document to JSON file
+    // Phase doc-1.1: Save current document to file
     // Uses DocumentManager for proper document handling
+    // - Edgeless documents: saved as .snb bundles
+    // - Paged documents: saved as .json files
     // - If document has existing path: save in-place (no dialog)
     // - If new document: show Save As dialog
     
     if (!m_documentManager || !m_tabManager) {
         qWarning() << "saveDocument: DocumentManager or TabManager not initialized";
         return;
-            }
+    }
             
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
         QMessageBox::warning(this, tr("Save Document"), 
             tr("No document is open."));
-                return;
-            }
+        return;
+    }
             
     Document* doc = viewport->document();
     if (!doc) {
@@ -3217,11 +3302,14 @@ void MainWindow::saveDocument()
         return;
     }
     
-    // Check if document already has a path (previously saved)
+    bool isEdgeless = doc->isEdgeless();
+    
+    // Check if document already has a permanent path (not temp bundle)
     QString existingPath = m_documentManager->documentPath(doc);
+    bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
             
-    if (!existingPath.isEmpty()) {
-        // ✅ Document was previously saved - save in-place, no dialog
+    if (!existingPath.isEmpty() && !isUsingTemp) {
+        // ✅ Document was previously saved to permanent location - save in-place
         if (!m_documentManager->saveDocument(doc)) {
             QMessageBox::critical(this, tr("Save Error"),
                 tr("Failed to save document to:\n%1").arg(existingPath));
@@ -3232,20 +3320,33 @@ void MainWindow::saveDocument()
         int currentIndex = m_tabManager->currentIndex();
         if (currentIndex >= 0) {
             m_tabManager->markTabModified(currentIndex, false);
-                }
-                
-        qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << existingPath;
-                return;
-            }
+        }
+        
+        if (isEdgeless) {
+            qDebug() << "saveDocument: Saved edgeless canvas with" 
+                     << doc->tileIndexCount() << "tiles to" << existingPath;
+        } else {
+            qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << existingPath;
+        }
+        return;
+    }
     
-    // ✅ New document - show Save As dialog
-    QString defaultName = doc->name.isEmpty() ? "Untitled" : doc->name;
-    QString defaultPath = QDir::homePath() + "/" + defaultName + ".json";
+    // ✅ New document or temp bundle - show Save As dialog
+    QString defaultName = doc->name.isEmpty() ? 
+        (isEdgeless ? "Untitled Canvas" : "Untitled") : doc->name;
     
-    QString filter = tr("SpeedyNote JSON (*.json);;All Files (*)");
+    QString defaultExt = isEdgeless ? ".snb" : ".json";
+    QString defaultPath = QDir::homePath() + "/" + defaultName + defaultExt;
+    
+    QString filter = isEdgeless ? 
+        tr("SpeedyNote Bundle (*.snb);;All Files (*)") :
+        tr("SpeedyNote JSON (*.json);;All Files (*)");
+    
+    QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
+    
     QString filePath = QFileDialog::getSaveFileName(
         this,
-        tr("Save Document"),
+        dialogTitle,
         defaultPath,
         filter
     );
@@ -3255,10 +3356,16 @@ void MainWindow::saveDocument()
         return;
     }
     
-    // Ensure .json extension
-    if (!filePath.endsWith(".json", Qt::CaseInsensitive)) {
-        filePath += ".json";
+    // Ensure correct extension
+    if (isEdgeless) {
+        if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
+            filePath += ".snb";
         }
+    } else {
+        if (!filePath.endsWith(".json", Qt::CaseInsensitive)) {
+            filePath += ".json";
+        }
+    }
         
     // Update document name from file name (without extension)
     QFileInfo fileInfo(filePath);
@@ -3278,7 +3385,12 @@ void MainWindow::saveDocument()
         m_tabManager->markTabModified(currentIndex, false);
     }
     
-    qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath;
+    if (isEdgeless) {
+        qDebug() << "saveDocument: Saved edgeless canvas with"
+                 << doc->tileIndexCount() << "tiles to" << filePath;
+    } else {
+        qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath;
+    }
 }
 
 void MainWindow::loadDocument()
@@ -8462,17 +8574,74 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         concurrentSaveFuture.waitForFinished();
     }
     
-    // Temp folder path for comparison
-    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
+    // ========== CHECK FOR UNSAVED EDGELESS DOCUMENTS ==========
+    // Iterate through all tabs and prompt for unsaved edgeless documents
+    if (m_tabManager && m_documentManager) {
+        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+            Document* doc = m_tabManager->documentAt(i);
+            if (!doc || !doc->isEdgeless()) continue;
+            
+            // Check if this is an unsaved edgeless document with content
+            bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
+            bool isUnsaved = m_documentManager->isUsingTempBundle(doc);
+            
+            if (hasContent && isUnsaved) {
+                // Switch to this tab so user knows which canvas we're asking about
+                m_tabWidget->setCurrentIndex(i);
+                
+                QMessageBox::StandardButton reply = QMessageBox::question(
+                    this,
+                    tr("Save Canvas?"),
+                    tr("The canvas \"%1\" has unsaved changes. Do you want to save before quitting?")
+                        .arg(doc->displayName()),
+                    QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+                    QMessageBox::Save
+                );
+                
+                if (reply == QMessageBox::Cancel) {
+                    // User cancelled - abort quit
+                    event->ignore();
+                    return;
+                }
+                
+                if (reply == QMessageBox::Save) {
+                    // Show save dialog
+                    QString defaultName = doc->name.isEmpty() ? "Untitled Canvas" : doc->name;
+                    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                    
+                    QString savePath = QFileDialog::getSaveFileName(
+                        this,
+                        tr("Save Edgeless Canvas"),
+                        defaultPath,
+                        tr("SpeedyNote Bundle (*.snb)")
+                    );
+                    
+                    if (savePath.isEmpty()) {
+                        // User cancelled save dialog - abort quit
+                        event->ignore();
+                        return;
+                    }
+                    
+                    // Ensure .snb extension
+                    if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
+                        savePath += ".snb";
+                    }
+                    
+                    // Save to the chosen location
+                    if (!m_documentManager->saveDocumentAs(doc, savePath)) {
+                        QMessageBox::critical(this, tr("Save Error"),
+                            tr("Failed to save canvas to:\n%1\n\nQuit anyway?").arg(savePath));
+                        // Don't abort - let them quit without saving if save failed
+                    }
+                }
+                // If Discard, continue to next document
+            }
+        }
+    }
+    // ===========================================================
     
-    // Phase 3.1: Auto-save via DocumentManager and TabManager
-    // TODO Phase 3.5: Implement auto-save for DocumentViewports
-    // if (m_tabManager && m_documentManager) {
-    //     m_tabManager->saveAllTabs();
-    // }
-        
-        // ✅ Save current bookmarks before closing
-        saveBookmarks();
+    // ✅ Save current bookmarks before closing
+    saveBookmarks();
     
     // Accept the close event to allow the program to close
     event->accept();

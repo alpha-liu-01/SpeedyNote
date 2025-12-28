@@ -9,12 +9,18 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
+#include <QUuid>
 #include <QDebug>
 
 // Settings key for recent documents persistence
 const QString DocumentManager::SETTINGS_RECENT_KEY = QStringLiteral("RecentDocuments");
+
+// Temp bundle prefix (matches SpnPackageManager convention: "speedynote_")
+const QString DocumentManager::TEMP_EDGELESS_PREFIX = QStringLiteral("speedynote_edgeless_");
 
 // ============================================================================
 // Constructor / Destructor
@@ -28,11 +34,14 @@ DocumentManager::DocumentManager(QObject* parent)
 
 DocumentManager::~DocumentManager()
 {
-    // Delete all owned documents
+    // Clean up temp bundles and delete all owned documents
     for (Document* doc : m_documents) {
+        // Clean up temp bundle if exists (handles discarded edgeless docs)
+        cleanupTempBundle(doc);
         delete doc;
     }
     m_documents.clear();
+    m_tempBundlePaths.clear();
 }
 
 // ============================================================================
@@ -77,6 +86,27 @@ Document* DocumentManager::createEdgelessDocument(const QString& name)
     m_documents.append(doc);
     m_documentPaths[doc] = QString();  // New document has no path yet
     m_modifiedFlags[doc] = false;      // New document is not modified
+    
+    // ========== TEMP BUNDLE CREATION (A3: Create immediately) ==========
+    // Create a temp .snb bundle directory immediately to enable tile eviction.
+    // This prevents unbounded memory growth for unsaved edgeless canvases.
+    QString tempPath = createTempBundlePath(doc);
+    if (!tempPath.isEmpty()) {
+        m_tempBundlePaths[doc] = tempPath;
+        
+        // CRITICAL: Call saveBundle() to:
+        // 1. Write document.json manifest
+        // 2. Set m_lazyLoadEnabled = true (enables evictDistantTiles())
+        // Without this, eviction won't work and memory will grow unbounded.
+        if (doc->saveBundle(tempPath)) {
+            qDebug() << "DocumentManager: Initialized temp bundle at" << tempPath;
+        } else {
+            qWarning() << "DocumentManager: Failed to initialize temp bundle, tile eviction disabled";
+        }
+    } else {
+        qWarning() << "DocumentManager: Failed to create temp bundle dir, tile eviction disabled";
+    }
+    // ====================================================================
     
     qDebug() << "DocumentManager: Created edgeless document" << doc->name;
     
@@ -254,10 +284,19 @@ void DocumentManager::closeDocument(Document* doc)
     // Emit signal before deletion so receivers can clean up
     emit documentClosed(doc);
     
+    // ========== TEMP BUNDLE CLEANUP ==========
+    // If document was using a temp bundle and user didn't save,
+    // clean up the temp directory to prevent storage space leak.
+    // Note: If user saved to a permanent location, cleanupTempBundle()
+    // was already called in doSave(), so this is a no-op.
+    cleanupTempBundle(doc);
+    // ==========================================
+    
     // Remove from collections
     m_documents.removeAt(index);
     m_documentPaths.remove(doc);
     m_modifiedFlags.remove(doc);
+    // Note: m_tempBundlePaths already cleaned by cleanupTempBundle()
     
     // Delete the document
     delete doc;
@@ -431,6 +470,21 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
             return false;
         }
         
+        // ========== TEMP BUNDLE CLEANUP ==========
+        // If this was a temp bundle and now saving to a different location,
+        // update the bundle path and clean up the temp directory.
+        QString tempPath = m_tempBundlePaths.value(doc);
+        if (!tempPath.isEmpty() && tempPath != bundlePath) {
+            // Update document's bundle path to the new permanent location
+            doc->setBundlePath(bundlePath);
+            
+            // Clean up temp bundle
+            cleanupTempBundle(doc);
+            
+            qDebug() << "DocumentManager: Moved from temp bundle to" << bundlePath;
+        }
+        // ==========================================
+        
         // Update state
         clearModified(doc);
         addToRecent(bundlePath);
@@ -468,4 +522,77 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
     
     emit documentSaved(doc);
     return true;
+}
+
+// ============================================================================
+// Temp Bundle Management (Edgeless Auto-save)
+// ============================================================================
+
+QString DocumentManager::createTempBundlePath(Document* doc)
+{
+    if (!doc) {
+        return QString();
+    }
+    
+    // Create temp directory path similar to SpnPackageManager convention:
+    // QStandardPaths::TempLocation + "speedynote_edgeless_" + uuid
+    QString tempBase = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QString uuid = doc->id.left(8);  // Use first 8 chars of doc ID for uniqueness
+    QString tempPath = tempBase + "/" + TEMP_EDGELESS_PREFIX + uuid + ".snb";
+    
+    // Create the directory
+    QDir dir;
+    if (!dir.mkpath(tempPath)) {
+        qWarning() << "DocumentManager: Failed to create temp bundle directory:" << tempPath;
+        return QString();
+    }
+    
+    // Create tiles subdirectory
+    if (!dir.mkpath(tempPath + "/tiles")) {
+        qWarning() << "DocumentManager: Failed to create tiles subdirectory:" << tempPath + "/tiles";
+        return QString();
+    }
+    
+    return tempPath;
+}
+
+bool DocumentManager::isUsingTempBundle(Document* doc) const
+{
+    if (!doc) {
+        return false;
+    }
+    return m_tempBundlePaths.contains(doc) && !m_tempBundlePaths.value(doc).isEmpty();
+}
+
+QString DocumentManager::tempBundlePath(Document* doc) const
+{
+    if (!doc) {
+        return QString();
+    }
+    return m_tempBundlePaths.value(doc);
+}
+
+void DocumentManager::cleanupTempBundle(Document* doc)
+{
+    if (!doc) {
+        return;
+    }
+    
+    QString tempPath = m_tempBundlePaths.value(doc);
+    if (tempPath.isEmpty()) {
+        return;
+    }
+    
+    // Remove from tracking
+    m_tempBundlePaths.remove(doc);
+    
+    // Delete the temp directory recursively
+    QDir tempDir(tempPath);
+    if (tempDir.exists()) {
+        if (tempDir.removeRecursively()) {
+            qDebug() << "DocumentManager: Cleaned up temp bundle:" << tempPath;
+        } else {
+            qWarning() << "DocumentManager: Failed to clean up temp bundle:" << tempPath;
+        }
+    }
 }

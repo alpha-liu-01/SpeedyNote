@@ -61,9 +61,32 @@ public:
      * 
      * The document is owned by DocumentManager.
      * Creates an edgeless document with no tiles (tiles created on-demand).
+     * Immediately creates a temp .snb bundle directory to enable tile eviction.
      * Emits documentCreated() signal.
      */
     Document* createEdgelessDocument(const QString& name = QString());
+
+    /**
+     * @brief Check if a document is using a temporary bundle path.
+     * @param doc Document to check.
+     * @return True if the document has a temp bundle path (not user-saved).
+     */
+    bool isUsingTempBundle(Document* doc) const;
+
+    /**
+     * @brief Get the temp bundle path for a document.
+     * @param doc Document to check.
+     * @return Temp bundle path, or empty string if not using temp bundle.
+     */
+    QString tempBundlePath(Document* doc) const;
+
+    /**
+     * @brief Clean up temp bundle directory for a document.
+     * @param doc Document whose temp bundle should be cleaned up.
+     * 
+     * Call this after successfully saving to a user-specified location.
+     */
+    void cleanupTempBundle(Document* doc);
 
     /**
      * @brief Load a document from a file.
@@ -244,6 +267,7 @@ private:
     // Document metadata (keyed by Document pointer)
     QMap<Document*, QString> m_documentPaths;     // Document → file path
     QMap<Document*, bool> m_modifiedFlags;        // Document → has unsaved changes
+    QMap<Document*, QString> m_tempBundlePaths;   // Document → temp bundle path (for unsaved edgeless)
 
     // Recent documents
     QStringList m_recentPaths;
@@ -251,6 +275,9 @@ private:
 
     // Settings key for recent documents
     static const QString SETTINGS_RECENT_KEY;
+    
+    // Temp bundle prefix (matches SpnPackageManager convention)
+    static const QString TEMP_EDGELESS_PREFIX;
 
     // Load/save recent documents from/to QSettings
     void loadRecentFromSettings();
@@ -258,4 +285,7 @@ private:
 
     // Internal: actually perform the save
     bool doSave(Document* doc, const QString& path);
+    
+    // Create a unique temp bundle path for an edgeless document
+    QString createTempBundlePath(Document* doc);
 };

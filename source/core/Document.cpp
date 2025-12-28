@@ -1025,6 +1025,8 @@ void Document::evictTile(TileCoord coord)
 
 bool Document::saveBundle(const QString& path)
 {
+    // Save old bundle path before overwriting - needed for copying evicted tiles
+    QString oldBundlePath = m_bundlePath;
     m_bundlePath = path;
     
     // Create directory structure
@@ -1059,10 +1061,44 @@ bool Document::saveBundle(const QString& path)
     manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
     manifestFile.close();
     
-    // Save all tiles in memory (dirty or not yet on disk)
+    // ========== HANDLE TILES WHEN SAVING TO NEW LOCATION ==========
+    bool savingToNewLocation = !oldBundlePath.isEmpty() && oldBundlePath != path;
+    
+    if (savingToNewLocation) {
+        // Copy evicted tiles from old bundle (tiles on disk but not in memory)
+        for (const auto& coord : m_tileIndex) {
+            // Skip tiles that are in memory - they'll be saved below
+            if (m_tiles.find(coord) != m_tiles.end()) {
+                continue;
+            }
+            
+            QString tileFileName = QString("%1,%2.json").arg(coord.first).arg(coord.second);
+            QString oldTilePath = oldBundlePath + "/tiles/" + tileFileName;
+            QString newTilePath = path + "/tiles/" + tileFileName;
+            
+            // Copy tile file from old location to new location
+            if (QFile::exists(oldTilePath)) {
+                if (QFile::copy(oldTilePath, newTilePath)) {
+#ifdef QT_DEBUG
+                    qDebug() << "Copied evicted tile" << coord.first << "," << coord.second;
+#endif
+                } else {
+                    qWarning() << "Failed to copy tile" << oldTilePath << "to" << newTilePath;
+                }
+            }
+        }
+    }
+    // =============================================================
+    
+    // Save tiles in memory
     for (const auto& pair : m_tiles) {
         TileCoord coord = pair.first;
-        if (m_dirtyTiles.count(coord) > 0 || m_tileIndex.count(coord) == 0) {
+        // When saving to new location: save ALL in-memory tiles
+        // When saving to same location: only save dirty/new tiles
+        bool needsSave = savingToNewLocation || 
+                         m_dirtyTiles.count(coord) > 0 || 
+                         m_tileIndex.count(coord) == 0;
+        if (needsSave) {
             saveTile(coord);
         }
     }

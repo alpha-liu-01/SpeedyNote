@@ -2,7 +2,7 @@
 
 > **Purpose:** Implement infinite canvas support with tiled architecture
 > **Created:** Dec 27, 2024
-> **Status:** 🔄 IN PROGRESS - Core drawing works, persistence & undo pending
+> **Status:** 🔄 IN PROGRESS - Core drawing + persistence complete, eraser & undo pending
 > **Parent:** MIGRATION_DOC1_SUBPLAN.md (Phase 4)
 
 ---
@@ -142,13 +142,20 @@ Edgeless mode provides an infinite canvas for freeform note-taking. Unlike paged
 | **Min zoom limit** | ✅ Complete | Prevents zooming out too far (≤9 tiles visible) |
 | **Ctrl+Shift+N shortcut** | ✅ Complete | Creates new edgeless document |
 
-### ❌ Known Issues (Expected at This Stage)
+### ❌ Known Issues (Remaining)
 
 | Issue | Reason | Resolution |
 |-------|--------|------------|
-| **Undo doesn't work** | Phase E6 not implemented | Implement after persistence |
-| **Memory grows with tiles** | No tile cache eviction | Implement with persistence (E5) |
-| **Can't save/load** | Phase E5 not implemented | Next priority |
+| **Undo doesn't work** | Phase E6 not implemented | Implement after eraser |
+| **Eraser doesn't work across tiles** | Phase E4 not implemented | Next priority |
+
+### ✅ Issues Resolved
+
+| Issue | Resolution |
+|-------|------------|
+| **Memory grows with tiles** | ✅ Temp auto-save enables tile eviction even for unsaved docs |
+| **Can't save/load** | ✅ Bundle format (.snb) with O(1) tile loading |
+| **Unsaved canvas data lost on close** | ✅ Save prompt implemented |
 
 ### 🔧 Bugs Fixed During Testing
 
@@ -163,19 +170,79 @@ Edgeless mode provides an infinite canvas for freeform note-taking. Unlike paged
 
 ## Deferred Decisions
 
-### Tile Memory Management
+### Tile Memory Management - IMPLEMENTED ✅
 
-**Decision:** Delay stroke cache eviction until persistence (E5) is implemented.
+**Solution:** Temp auto-save for unsaved edgeless notebooks (Dec 28, 2024)
 
-**Rationale:**
-- Stroke cache eviction makes sense paired with dynamic disk loading/unloading
-- Without persistence, evicted caches would just need to be regenerated
-- Option B chosen: Full tile unloading to disk (not just cache eviction)
+**Architecture:**
+1. **Immediate temp bundle creation** (A3): When `DocumentManager::createEdgelessDocument()` is called, a temp `.snb` directory is immediately created at `QStandardPaths::TempLocation/speedynote_edgeless_<uuid>.snb`
+2. **saveBundle() called immediately**: CRITICAL - must call `doc->saveBundle(tempPath)` to:
+   - Write `document.json` manifest
+   - Set `m_lazyLoadEnabled = true` (required for `evictDistantTiles()` to work)
+3. **Tile eviction works normally**: `evictDistantTiles()` can now save dirty tiles to disk
 
-**Current behavior:**
-- Tiles stay in memory once created
-- Stroke caches (~4MB each) accumulate as user draws on more tiles
-- Acceptable for MVP testing; will be bounded after E5
+**Files modified:**
+- `DocumentManager.h/cpp`: Added `createTempBundlePath()`, `isUsingTempBundle()`, `tempBundlePath()`, `cleanupTempBundle()`, `m_tempBundlePaths` tracking map
+- Temp prefix: `"speedynote_edgeless_"` (matches `SpnPackageManager::TEMP_PREFIX` convention)
+
+**Cleanup:**
+- When saving to user location: `doSave()` detects if saving to different path than temp, cleans up temp
+- When closing without save: `closeDocument()` cleans up temp bundle
+- Prevents storage space leaks
+
+**User experience:**
+- Memory usage now bounded (tiles evicted when far from viewport)
+- Unsaved edgeless documents function just like saved ones internally
+
+**Bug Fix 1 (Dec 28):** Original implementation only created the temp directory and set `bundlePath`, but did NOT call `saveBundle()`. This meant `m_lazyLoadEnabled` remained `false`, so `evictDistantTiles()` returned immediately without evicting anything. Fixed by calling `saveBundle(tempPath)` right after creating the temp directory.
+
+**Bug Fix 2 (Dec 28):** When saving to a new location (temp → permanent), `saveBundle()` only saved tiles currently in memory (`m_tiles`). Evicted tiles existed on disk at the OLD temp path but were not copied to the new location. The manifest's `tile_index` was correct but the actual tile files were missing.
+
+**Bug Fix 3 (Dec 28):** Edge case - tiles that were evicted then re-loaded were in BOTH `m_tiles` AND `m_tileIndex`, but NOT dirty. The save logic skipped them because:
+- `m_dirtyTiles.count(coord) > 0` → FALSE (loaded from disk, not modified)
+- `m_tileIndex.count(coord) == 0` → FALSE (was on disk, so in index)
+Neither the copy loop (skipped tiles in `m_tiles`) nor the save loop (skipped non-dirty tiles in index) would handle them.
+
+**Final fix:**
+1. Save old bundle path before overwriting with new path
+2. Detect if saving to a DIFFERENT location (`savingToNewLocation`)
+3. For tiles in `m_tileIndex` but NOT in `m_tiles`: copy tile file from old to new location
+4. For tiles in `m_tiles`: if `savingToNewLocation`, save ALL; otherwise only save dirty/new
+
+### Save Prompt on Tab Close - IMPLEMENTED ✅
+
+**Decision:** Prompt user before closing unsaved edgeless documents (A2: Option B)
+
+**Implementation for tab close (X button on tab):**
+- `TabManager` now emits `tabCloseAttempted(index, viewport)` signal instead of directly closing
+- `MainWindow` connects to this signal and checks:
+  1. If last tab, show "At least one tab must remain open"
+  2. If unsaved edgeless with content, show Save/Discard/Cancel dialog
+  3. If Save: show file picker, save to user location, then close
+  4. If Discard: close (temp bundle cleaned up automatically)
+  5. If Cancel: don't close
+- `tabCloseRequested` signal is still emitted from `closeTab()` for Document cleanup
+
+**Implementation for app quit (X button on window):**
+- `MainWindow::closeEvent()` iterates through all tabs
+- For each unsaved edgeless document with content:
+  1. Switch to that tab (so user sees which canvas)
+  2. Show Save/Discard/Cancel dialog
+  3. If Cancel: call `event->ignore()` and abort quit
+  4. If Save: show file picker, save, continue to next
+  5. If Discard: continue to next
+- Only accepts close event after all documents are handled
+
+**Files modified:**
+- `TabManager.h/cpp`: Added `tabCloseAttempted` signal, modified `onTabCloseRequested()`
+- `MainWindow.cpp`: Added connection to `tabCloseAttempted` with save prompt logic
+- `MainWindow.cpp`: Added save prompt loop in `closeEvent()`
+
+**saveDocument() improvements:**
+- Now properly handles edgeless vs paged documents
+- Shows `.snb` filter for edgeless, `.json` for paged
+- Debug message shows tile count for edgeless, page count for paged
+- Recognizes when document is using temp bundle and prompts Save As
 
 ### Undo/Redo
 
