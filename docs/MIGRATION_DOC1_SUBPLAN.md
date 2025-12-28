@@ -623,33 +623,25 @@ User presses Ctrl+Shift+I
 
 ### Phase 4: Edgeless Mode
 
-#### 4.1 Implement New Edgeless Document
-**Goal:** Create new edgeless document in new tab
+> **See:** `docs/MIGRATION_EDGELESS_SUBPLAN.md` for detailed implementation plan.
 
-**Requirements:**
-- Create Document using `Document::createNew(name, Mode::Edgeless)`
-- Create new tab with DocumentViewport
-- Set document on viewport
-- Verify edgeless page renders correctly
+**Summary:** Edgeless mode requires significant architectural changes to support infinite canvas efficiently. The original single-page approach (4096×4096) doesn't scale.
 
-**Code flow:**
-```
-User presses Ctrl+Shift+N
-  → MainWindow::newEdgelessDocument()
-    → Document::createNew("Untitled", Document::Mode::Edgeless)
-    → Create new tab (via TabManager)
-    → Set document on viewport
-```
+**New Architecture:** Tiled canvas with sparse 2D storage
+- Each tile = 1024×1024 pixels (fixed)
+- Tiles created on-demand when user draws
+- Sparse storage: `QMap<QPair<int,int>, Page*>`
+- Supports infinite extension in all directions (including negative coords)
+- Bounded memory (cache per tile, not per canvas)
 
-#### 4.2 Test Edgeless Behavior
-**Goal:** Verify edgeless mode works correctly
-
-**Test cases:**
-- Edgeless page has large size (4096x4096 per Document.cpp)
-- Drawing works across the large canvas
-- Pan/zoom works correctly
-- Save/load preserves edgeless mode
-- Strokes are saved and loaded correctly
+**Phases:**
+- E1: Core tile infrastructure
+- E2: Viewport rendering for edgeless
+- E3: Stroke drawing in edgeless
+- E4: Eraser in edgeless
+- E5: Serialization
+- E6: Undo/redo for edgeless
+- E7: Connect shortcut & test
 
 ---
 
@@ -971,9 +963,13 @@ void MainWindow::deletePageInDocument()
 | Delete page while drawing | Finish stroke first, then delete |
 | Delete current page | Navigate to previous (or next if at page 0) |
 
-### Phase 4: Edgeless Mode
-- [ ] Can create edgeless document (Ctrl+Shift+N)
-- [ ] Edgeless mode works correctly (large canvas, drawing, save/load)
+### Phase 4: Edgeless Mode (See MIGRATION_EDGELESS_SUBPLAN.md)
+- [ ] Tiled canvas architecture implemented
+- [ ] Tiles created on-demand when drawing
+- [ ] Cross-tile strokes render correctly
+- [ ] Save/load works with tile format
+- [ ] Undo/redo works in edgeless mode
+- [ ] Ctrl+Shift+N creates edgeless document
 
 ### Phase 5: LayerPanel
 - [ ] LayerPanel shows in UI
