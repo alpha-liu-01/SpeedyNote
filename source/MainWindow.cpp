@@ -3313,9 +3313,9 @@ void MainWindow::saveDocument()
         if (!m_documentManager->saveDocument(doc)) {
             QMessageBox::critical(this, tr("Save Error"),
                 tr("Failed to save document to:\n%1").arg(existingPath));
-            return;
-        }
-        
+        return;
+    }
+
         // Update tab title (clear modified flag)
         int currentIndex = m_tabManager->currentIndex();
         if (currentIndex >= 0) {
@@ -3328,9 +3328,9 @@ void MainWindow::saveDocument()
         } else {
             qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << existingPath;
         }
-        return;
-    }
-    
+                return;
+            }
+            
     // ✅ New document or temp bundle - show Save As dialog
     QString defaultName = doc->name.isEmpty() ? 
         (isEdgeless ? "Untitled Canvas" : "Untitled") : doc->name;
@@ -3353,9 +3353,9 @@ void MainWindow::saveDocument()
     
     if (filePath.isEmpty()) {
         // User cancelled
-        return;
-    }
-    
+                return;
+            }
+            
     // Ensure correct extension
     if (isEdgeless) {
         if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
@@ -3388,7 +3388,7 @@ void MainWindow::saveDocument()
     if (isEdgeless) {
         qDebug() << "saveDocument: Saved edgeless canvas with"
                  << doc->tileIndexCount() << "tiles to" << filePath;
-    } else {
+                } else {
         qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath;
     }
 }
@@ -3400,8 +3400,8 @@ void MainWindow::loadDocument()
     
     if (!m_documentManager || !m_tabManager) {
         qWarning() << "loadDocument: DocumentManager or TabManager not initialized";
-        return;
-    }
+                return;
+            }
     
     // Open file dialog for file selection
     QString filter = tr("SpeedyNote Files (*.json *.snx);;All Files (*)");
@@ -3429,8 +3429,8 @@ void MainWindow::loadDocument()
     if (doc->name.isEmpty()) {
         QFileInfo fileInfo(filePath);
         doc->name = fileInfo.baseName();
-    }
-    
+        }
+        
     // Create new tab with the loaded document
     int tabIndex = m_tabManager->createTab(doc, doc->displayName());
     
@@ -3545,7 +3545,7 @@ void MainWindow::deletePageInDocument()
         qDebug() << "deletePageInDocument: No tab manager";
         return;
     }
-    
+
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
         qDebug() << "deletePageInDocument: No current viewport";
@@ -3590,12 +3590,12 @@ void MainWindow::deletePageInDocument()
     
     // Notify viewport that document structure changed
     viewport->notifyDocumentStructureChanged();
-    
+        
     // Mark tab as modified
     int tabIndex = m_tabManager->currentIndex();
     if (tabIndex >= 0) {
         m_tabManager->markTabModified(tabIndex, true);
-    }
+        }
 }
 
 void MainWindow::openPdfDocument()
@@ -3606,7 +3606,7 @@ void MainWindow::openPdfDocument()
     if (!m_documentManager || !m_tabManager) {
         qWarning() << "openPdfDocument: DocumentManager or TabManager not initialized";
         return;
-    }
+            }
 
     // Open file dialog for PDF selection
     QString filter = tr("PDF Files (*.pdf);;All Files (*)");
@@ -3676,8 +3676,8 @@ void MainWindow::handleSmartPdfButton() {
     // For now, show a message since loadPdf() is also stubbed
     QMessageBox::information(this, tr("PDF Management"), 
         tr("PDF import/management is being redesigned. Coming soon!"));
-}
-
+            }
+            
 
 void MainWindow::switchTab(int index) {
     // Phase 3.1.1: Simplified switchTab using TabManager
@@ -8635,13 +8635,13 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                     }
                 }
                 // If Discard, continue to next document
+                }
             }
         }
-    }
     // ===========================================================
-    
-    // ✅ Save current bookmarks before closing
-    saveBookmarks();
+        
+        // ✅ Save current bookmarks before closing
+        saveBookmarks();
     
     // Accept the close event to allow the program to close
     event->accept();

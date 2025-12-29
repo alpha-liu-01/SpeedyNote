@@ -472,15 +472,11 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
         
         // ========== TEMP BUNDLE CLEANUP ==========
         // If this was a temp bundle and now saving to a different location,
-        // update the bundle path and clean up the temp directory.
+        // clean up the temp directory. Note: saveBundle() already updated
+        // m_bundlePath to the new location, so no need to call setBundlePath().
         QString tempPath = m_tempBundlePaths.value(doc);
         if (!tempPath.isEmpty() && tempPath != bundlePath) {
-            // Update document's bundle path to the new permanent location
-            doc->setBundlePath(bundlePath);
-            
-            // Clean up temp bundle
             cleanupTempBundle(doc);
-            
             qDebug() << "DocumentManager: Moved from temp bundle to" << bundlePath;
         }
         // ==========================================

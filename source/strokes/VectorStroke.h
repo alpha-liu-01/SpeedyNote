@@ -67,14 +67,28 @@ struct VectorStroke {
      * @brief Check if a point is near this stroke (for eraser hit testing).
      * @param point The point to test.
      * @param tolerance Additional tolerance radius (eraser size).
-     * @return True if the point is within tolerance of any stroke segment.
+     * @return True if the point is within tolerance of any stroke segment or point.
      */
     bool containsPoint(const QPointF& point, qreal tolerance) const {
+        if (points.isEmpty()) {
+            return false;
+        }
+        
         // Quick rejection test using bounding box
         if (!boundingBox.adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(point)) {
             return false;
         }
-        // Check each segment
+        
+        // Single-point stroke (dot): check distance to the single point
+        if (points.size() == 1) {
+            qreal dx = point.x() - points[0].pos.x();
+            qreal dy = point.y() - points[0].pos.y();
+            qreal distSq = dx * dx + dy * dy;
+            qreal threshold = tolerance + baseThickness;
+            return distSq < threshold * threshold;
+        }
+        
+        // Multi-point stroke: check each segment
         for (int i = 1; i < points.size(); ++i) {
             if (distanceToSegment(point, points[i-1].pos, points[i].pos) < tolerance + baseThickness) {
                 return true;

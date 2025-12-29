@@ -264,28 +264,38 @@ User presses Ctrl+Shift+O
 
 ---
 
-### Deferred Zoom Rendering - Detailed Design
+### Deferred Viewport Gesture - Detailed Design ✅ IMPLEMENTED
+
+> **Note:** This section documents the ACTUAL implementation (unified zoom+pan system).
+> The original design was zoom-only; it has been extended to support pan gestures.
 
 #### Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    UNIFIED ZOOM GESTURE SYSTEM                   │
+│               UNIFIED VIEWPORT GESTURE SYSTEM                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  Input Sources (all feed into same state machine):              │
-│  ├─ Ctrl+Wheel (discrete, ~5 Hz)                                │
-│  ├─ Touch Pinch (continuous, ~120 Hz)                           │
-│  └─ Trackpad Pinch (continuous, ~60 Hz)                         │
+│  ├─ Ctrl+Wheel    → Deferred zoom                               │
+│  ├─ Shift+Wheel   → Deferred horizontal pan                     │
+│  ├─ `+Wheel       → Deferred vertical pan (backtick key)        │
+│  ├─ Plain Wheel   → Immediate scroll (unchanged)                │
+│  └─ Touch Pinch   → Deferred zoom+pan (future)                  │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    ZoomGestureState                         ││
-│  │  ├─ isActive: bool                                          ││
-│  │  ├─ startZoom: qreal          (zoom level when started)     ││
-│  │  ├─ targetZoom: qreal         (accumulates zoom changes)    ││
-│  │  ├─ centerPoint: QPointF      (zoom center in viewport)     ││
-│  │  └─ cachedFrame: QPixmap      (viewport snapshot)           ││
+│  │                  ViewportGestureState                       ││
+│  │  ├─ activeType: enum {None, Zoom, Pan, ZoomAndPan}         ││
+│  │  ├─ cachedFrame: QPixmap     (viewport snapshot)            ││
+│  │  ├─ frameDevicePixelRatio    (for high-DPI displays)        ││
+│  │  ├─ startZoom, targetZoom    (for zoom gestures)            ││
+│  │  ├─ zoomCenter               (zoom center point)            ││
+│  │  ├─ startPan, targetPan      (for pan gestures)             ││
+│  │  └─ isActive(), reset()      (helper methods)               ││
 │  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  Additional State:                                               │
+│  └─ m_backtickHeld: bool        (tracks ` key for pan)         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -298,214 +308,135 @@ User presses Ctrl+Shift+O
                     │  (normal render) │
                     └────────┬─────────┘
                              │
-         ┌───────────────────┼───────────────────┐
-         │                   │                   │
-    Ctrl+Wheel         Pinch Start         Trackpad Pinch
-         │                   │                   │
-         ▼                   ▼                   ▼
-    ┌─────────────────────────────────────────────────┐
-    │                  ZOOM GESTURE                    │
-    │  • Capture cachedFrame on first event           │
-    │  • Update targetZoom on each event              │
-    │  • paintEvent: scale cachedFrame (fast!)        │
-    │  • NO PDF re-rendering during gesture           │
-    └─────────────────────────┬───────────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-    Ctrl Release         Pinch End          Timeout (fallback)
-    (if in gesture)                         (300ms no events)
-         │                    │                    │
-         ▼                    ▼                    ▼
-    ┌─────────────────────────────────────────────────┐
-    │                  GESTURE END                     │
-    │  • m_zoomLevel = targetZoom                     │
-    │  • invalidatePdfCache()                         │
-    │  • Clear cachedFrame                            │
-    │  • Trigger full re-render at new DPI            │
-    │  • Return to IDLE                               │
-    └─────────────────────────────────────────────────┘
+    ┌────────────────────────┼────────────────────────┐
+    │                        │                        │
+Ctrl+Wheel              Shift+Wheel               `+Wheel
+    │                        │                        │
+    ▼                        ▼                        ▼
+┌────────────┐        ┌────────────┐          ┌────────────┐
+│ ZOOM MODE  │        │  H-PAN     │          │  V-PAN     │
+│            │        │  MODE      │          │  MODE      │
+│ scale frame│        │ shift frame│          │ shift frame│
+└─────┬──────┘        └─────┬──────┘          └─────┬──────┘
+      │                     │                       │
+      ▼                     ▼                       ▼
+ Ctrl release          Shift release            ` release
+ OR 3s timeout         OR 3s timeout            OR 3s timeout
+      │                     │                       │
+      ▼                     ▼                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     GESTURE END                              │
+│  • Apply final zoom/pan values                              │
+│  • Clear cachedFrame                                        │
+│  • Trigger full re-render                                   │
+│  • Resume tile eviction (edgeless)                          │
+│  • Return to IDLE                                           │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+#### Key Mappings
+
+| Input | Gesture Type | Gesture End |
+|-------|--------------|-------------|
+| **Ctrl + Wheel** | Deferred zoom | Ctrl release OR 3s timeout |
+| **Shift + Wheel** | Deferred horizontal pan | Shift release OR 3s timeout |
+| **` (backtick) + Wheel** | Deferred vertical pan | ` release OR 3s timeout |
+| **Plain Wheel** | Immediate scroll | N/A (not deferred) |
+| **Touch pinch** (future) | Zoom + pan | Gesture end event |
+
+**Design decisions:**
+- Alt key was NOT used because it conflicts with system menu access on Windows.
+- Backtick (`) was chosen as it's easy to reach (above Tab) and has no system conflicts.
+- Plain wheel remains immediate for quick navigation; deferred pan is for precision.
 
 #### Implementation Details
 
-**1. New Members in DocumentViewport.h:**
+**1. Unified Gesture State (DocumentViewport.h):**
 
 ```cpp
-// ===== Deferred Zoom Gesture State =====
-struct ZoomGestureState {
-    bool isActive = false;           ///< True during zoom gesture
-    qreal startZoom = 1.0;           ///< Zoom level when gesture started
-    qreal targetZoom = 1.0;          ///< Target zoom (accumulates changes)
-    QPointF centerPoint;             ///< Zoom center in viewport coords
-    QPixmap cachedFrame;             ///< Viewport snapshot for fast scaling
-    QPointF startPan;                ///< Pan offset when gesture started
+struct ViewportGestureState {
+    enum Type { None, Zoom, Pan, ZoomAndPan };  // ZoomAndPan for future touch
+    Type activeType = None;
     
-    void reset() {
-        isActive = false;
-        cachedFrame = QPixmap();
-    }
+    // Shared state
+    QPixmap cachedFrame;
+    qreal frameDevicePixelRatio = 1.0;
+    qreal startZoom = 1.0;
+    QPointF startPan;
+    
+    // Zoom-specific
+    qreal targetZoom = 1.0;
+    QPointF zoomCenter;
+    
+    // Pan-specific
+    QPointF targetPan;
+    
+    bool isActive() const { return activeType != None; }
+    void reset() { activeType = None; cachedFrame = QPixmap(); }
 };
 
-ZoomGestureState m_zoomGesture;
-QTimer* m_zoomGestureTimeoutTimer = nullptr;  ///< Fallback gesture end detection
-static constexpr int ZOOM_GESTURE_TIMEOUT_MS = 300;
+ViewportGestureState m_gesture;
+QTimer* m_gestureTimeoutTimer = nullptr;
+static constexpr int GESTURE_TIMEOUT_MS = 3000;  // 3 seconds
+bool m_backtickHeld = false;  // Track backtick key
 ```
 
-**2. Gesture Start (any source):**
+**2. paintEvent Fast Path:**
 
 ```cpp
-void DocumentViewport::beginZoomGesture(QPointF centerPoint)
-{
-    if (m_zoomGesture.isActive) return;  // Already in gesture
+if (m_gesture.isActive() && !m_gesture.cachedFrame.isNull()) {
+    painter.fillRect(rect(), QColor(64, 64, 64));
     
-    m_zoomGesture.isActive = true;
-    m_zoomGesture.startZoom = m_zoomLevel;
-    m_zoomGesture.targetZoom = m_zoomLevel;
-    m_zoomGesture.centerPoint = centerPoint;
-    m_zoomGesture.startPan = m_panOffset;
-    
-    // Capture current viewport as cached frame
-    m_zoomGesture.cachedFrame = grab();
-    
-    // Start timeout timer (fallback for gesture end detection)
-    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
-}
-```
-
-**3. During Gesture:**
-
-```cpp
-void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
-{
-    if (!m_zoomGesture.isActive) {
-        beginZoomGesture(centerPoint);
+    if (m_gesture.activeType == ViewportGestureState::Zoom) {
+        // Scale cached frame around zoom center
+        qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
+        QSizeF scaledSize = logicalSize * relativeScale;
+        QPointF scaledOrigin = center - (center * relativeScale);
+        painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_gesture.cachedFrame, ...);
+    } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+        // Shift cached frame by pan delta
+        QPointF panDeltaPixels = (m_gesture.targetPan - m_gesture.startPan) * m_gesture.startZoom * -1.0;
+        painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
     }
-    
-    // Accumulate zoom (multiplicative for smooth feel)
-    m_zoomGesture.targetZoom *= scaleFactor;
-    m_zoomGesture.targetZoom = qBound(MIN_ZOOM, m_zoomGesture.targetZoom, MAX_ZOOM);
-    m_zoomGesture.centerPoint = centerPoint;
-    
-    // Restart timeout timer
-    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
-    
-    // Trigger repaint (will use cached frame scaling)
-    update();
+    return;  // Skip expensive rendering
 }
 ```
 
-**4. Modified paintEvent (fast path during gesture):**
+**3. Backtick Key Tracking:**
 
 ```cpp
-void DocumentViewport::paintEvent(QPaintEvent* event)
-{
-    // FAST PATH: During zoom gesture, just scale the cached frame
-    if (m_zoomGesture.isActive && !m_zoomGesture.cachedFrame.isNull()) {
-        QPainter painter(this);
-        
-        // Calculate scale factor
-        qreal scale = m_zoomGesture.targetZoom / m_zoomGesture.startZoom;
-        
-        // Calculate transform to zoom at center point
-        QPointF center = m_zoomGesture.centerPoint;
-        
-        painter.translate(center);
-        painter.scale(scale, scale);
-        painter.translate(-center);
-        
-        // Draw scaled cached frame (fast GPU operation, may be blurry)
-        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.drawPixmap(0, 0, m_zoomGesture.cachedFrame);
-        
-        return;  // Skip expensive page rendering
+// keyPressEvent - ignore auto-repeat
+if (event->key() == Qt::Key_QuoteLeft && !event->isAutoRepeat()) {
+    m_backtickHeld = true;
+    event->accept();
+    return;
+}
+
+// keyReleaseEvent - ignore auto-repeat
+if (event->key() == Qt::Key_QuoteLeft && !event->isAutoRepeat()) {
+    m_backtickHeld = false;
+    if (m_gesture.activeType == ViewportGestureState::Pan) {
+        endPanGesture();
     }
-    
-    // NORMAL PATH: Full rendering (existing code)
-    // ... existing paintEvent code ...
+    event->accept();
+    return;
 }
 ```
 
-**5. Gesture End:**
+**4. wheelEvent with Deferred Pan:**
 
 ```cpp
-void DocumentViewport::endZoomGesture()
-{
-    if (!m_zoomGesture.isActive) return;
-    
-    // Stop timeout timer
-    m_zoomGestureTimeoutTimer->stop();
-    
-    // Apply final zoom level
-    qreal finalZoom = m_zoomGesture.targetZoom;
-    
-    // Calculate new pan offset to keep center point fixed
-    qreal scale = finalZoom / m_zoomGesture.startZoom;
-    QPointF center = m_zoomGesture.centerPoint;
-    QPointF docPtAtCenter = center / m_zoomGesture.startZoom + m_zoomGesture.startPan;
-    m_panOffset = docPtAtCenter - center / finalZoom;
-    
-    // Clear gesture state BEFORE setting zoom (to avoid recursion)
-    m_zoomGesture.reset();
-    
-    // Now set the zoom level (will invalidate PDF cache and trigger re-render)
-    setZoomLevel(finalZoom);
-    
-    // Clamp pan and emit signals
-    clampPanOffset();
-    emit panChanged(m_panOffset);
+// After Ctrl+wheel check for zoom...
+if (event->modifiers() & Qt::ShiftModifier) {
+    QPointF horizontalDelta(scrollDelta.y(), scrollDelta.x());  // Swap X/Y
+    updatePanGesture(horizontalDelta);
+    return;
 }
-```
-
-**6. Input Event Handlers:**
-
-```cpp
-// Ctrl+Wheel
-void DocumentViewport::wheelEvent(QWheelEvent* event)
-{
-    if (event->modifiers() & Qt::ControlModifier) {
-        qreal zoomDelta = event->angleDelta().y() / 120.0;
-        qreal scaleFactor = qPow(1.1, zoomDelta);
-        
-        updateZoomGesture(scaleFactor, event->position());
-        
-        event->accept();
-        return;
-    }
-    // ... existing scroll handling ...
+if (m_backtickHeld) {
+    updatePanGesture(scrollDelta);  // Vertical pan
+    return;
 }
-
-// Ctrl key release
-void DocumentViewport::keyReleaseEvent(QKeyEvent* event)
-{
-    if (event->key() == Qt::Key_Control && m_zoomGesture.isActive) {
-        endZoomGesture();
-        event->accept();
-        return;
-    }
-    QWidget::keyReleaseEvent(event);
-}
-
-// Touch pinch (future)
-void DocumentViewport::handlePinchGesture(qreal scaleFactor, QPointF center)
-{
-    updateZoomGesture(scaleFactor, center);
-}
-
-void DocumentViewport::handlePinchEnd()
-{
-    endZoomGesture();
-}
-```
-
-**7. Timeout Fallback:**
-
-```cpp
-// Constructor:
-m_zoomGestureTimeoutTimer = new QTimer(this);
-m_zoomGestureTimeoutTimer->setSingleShot(true);
-connect(m_zoomGestureTimeoutTimer, &QTimer::timeout, 
-        this, &DocumentViewport::endZoomGesture);
+scrollBy(scrollDelta);  // Immediate (plain wheel)
 ```
 
 #### Performance Characteristics
@@ -513,33 +444,32 @@ connect(m_zoomGestureTimeoutTimer, &QTimer::timeout,
 | Metric | Before | After |
 |--------|--------|-------|
 | Ctrl+wheel (5 clicks) | 5 PDF re-renders | 1 re-render at end |
-| Pinch gesture (2 sec @ 120Hz) | 240 PDF re-renders | 1 re-render at end |
-| Frame rate during gesture | Variable (depends on PDF) | Consistent 60+ FPS |
-| Visual quality during gesture | Sharp | May be blurry |
-| Visual quality after gesture | Sharp | Sharp |
+| Shift+wheel (5 clicks) | 5 tile loads | 1 tile load at end |
+| Frame rate during gesture | Variable | Consistent 60+ FPS |
+| Edgeless tile eviction | During pan | After pan ends |
 
-#### Edge Cases
+#### Edge Cases Handled
 
-1. **Zoom gesture abandoned** (e.g., Ctrl pressed, but no wheel events):
-   - Timeout timer fires after 300ms, calls `endZoomGesture()`
-   - If `targetZoom == startZoom`, no actual change occurs
+| Scenario | Handling |
+|----------|----------|
+| Window loses focus | `focusOutEvent` ends gesture and resets `m_backtickHeld` |
+| Window resized | `resizeEvent` ends gesture (cached frame size invalid) |
+| Document changed | `setDocument` resets gesture and `m_backtickHeld` |
+| Division by zero | Guard: `m_gesture.startZoom > 0` |
+| Backtick auto-repeat | Filtered via `event->isAutoRepeat()` |
+| 3s inactivity | `onGestureTimeout()` ends gesture |
 
-2. **Window loses focus during gesture**:
-   - `focusOutEvent` should call `endZoomGesture()` as safety measure
+#### Code Review (Dec 28, 2024)
 
-3. **Document changed during gesture**:
-   - `setDocument()` should call `endZoomGesture()` first
-
-4. **Very large zoom change** (e.g., 100% → 1000%):
-   - Cached frame will be very pixelated
-   - This is acceptable per design decision (prioritize frame rate)
-
-#### Files to Modify
-
-| File | Changes |
-|------|---------|
-| `source/core/DocumentViewport.h` | Add `ZoomGestureState`, timer member |
-| `source/core/DocumentViewport.cpp` | Implement gesture state machine, modify `paintEvent`, `wheelEvent`, add `keyReleaseEvent` |
+| Priority | Issue | Status |
+|----------|-------|--------|
+| 🟢 MINOR | `m_backtickHeld` not reset in `setDocument()` | ✅ FIXED |
+| ✅ GOOD | Division by zero guard | Already handled |
+| ✅ GOOD | Gesture ended on focus loss | Already handled |
+| ✅ GOOD | Gesture ended on resize | Already handled |
+| ✅ GOOD | Auto-repeat filtering | Already handled |
+| ✅ GOOD | Timer stopped in destructor | Already handled |
+| ✅ GOOD | Proper reset ordering | Already handled |
 
 ---
 
@@ -1480,6 +1410,117 @@ void onPinchEnd() {
 ```
 
 No changes to DocumentViewport needed for touch support - just call the API.
+
+---
+
+## Deferred Pan Rendering (Dec 28, 2024)
+
+### ✅ IMPLEMENTED: Unified Viewport Gesture System
+
+**Problem:** Pan operations (especially on edgeless canvas) can trigger expensive tile loading and rendering. Like zoom, we want to defer re-rendering until the gesture ends.
+
+**Solution:** Extend the deferred zoom system to support pan gestures with a unified `ViewportGestureState`.
+
+### Key Mappings
+
+| Input | Behavior | Gesture End |
+|-------|----------|-------------|
+| **Ctrl + Wheel** | Deferred zoom | Ctrl release OR 3s timeout |
+| **Shift + Wheel** | Deferred horizontal pan | Shift release OR 3s timeout |
+| **` (backtick) + Wheel** | Deferred vertical pan | ` release OR 3s timeout |
+| **Plain Wheel** | Immediate vertical pan | N/A (unchanged) |
+| **Touch pinch** (future) | Deferred zoom + pan | Gesture end event |
+
+**Design decisions:**
+- Plain wheel remains immediate (unchanged) because this application is designed primarily for tablet PCs with touch input. The key-based deferred pan is a stepping stone to touch support.
+- Alt key was replaced with backtick (`) because Alt has too many system-level uses on Windows (menu access, window management).
+
+### Unified Gesture State
+
+```cpp
+struct ViewportGestureState {
+    enum Type { None, Zoom, Pan, ZoomAndPan };  // ZoomAndPan for future touch
+    Type activeType = None;
+    
+    // Shared between all gesture types
+    QPixmap cachedFrame;              // Viewport snapshot
+    qreal frameDevicePixelRatio = 1.0;
+    QPointF startPan;                 // Pan offset when gesture started
+    
+    // Zoom-specific
+    qreal startZoom = 1.0;
+    qreal targetZoom = 1.0;
+    QPointF zoomCenter;
+    
+    // Pan-specific  
+    QPointF targetPan;                // Accumulated target pan
+    
+    bool isActive() const { return activeType != None; }
+    void reset() { activeType = None; cachedFrame = QPixmap(); }
+};
+```
+
+### Benefits of Unified State
+
+1. **Single cached frame** - only one gesture active at a time for keyboard/wheel
+2. **Future touch support** - `ZoomAndPan` type handles combined pinch-zoom-pan
+3. **Single paintEvent fast path** - handles all gesture types
+4. **Shared timer** - one timeout timer for all gesture types
+
+### paintEvent Fast Path
+
+```cpp
+void DocumentViewport::paintEvent(QPaintEvent* event)
+{
+    if (m_gesture.isActive() && !m_gesture.cachedFrame.isNull()) {
+        QPainter painter(this);
+        painter.fillRect(rect(), QColor(64, 64, 64));  // Background
+        
+        if (m_gesture.activeType == ViewportGestureState::Zoom) {
+            // Scale cached frame around zoom center
+            qreal scale = m_gesture.targetZoom / m_gesture.startZoom;
+            // ... transform and draw scaled ...
+        } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+            // Shift cached frame by pan delta
+            QPointF panDelta = (m_gesture.targetPan - m_gesture.startPan) * m_gesture.startZoom;
+            // ... draw shifted ...
+        }
+        return;  // Skip expensive rendering
+    }
+    
+    // NORMAL PATH: Full rendering
+    // ... existing code ...
+}
+```
+
+### API for Future Touch Support
+
+```cpp
+// Gesture lifecycle (same API for all input sources)
+void beginViewportGesture(ViewportGestureState::Type type, QPointF anchor);
+void updateZoomGesture(qreal scaleFactor, QPointF center);
+void updatePanGesture(QPointF panDelta);
+void endViewportGesture();
+bool isGestureActive() const;
+
+// Touch gesture module (future) calls:
+void onPinchUpdate(qreal scale, QPointF center, QPointF pan) {
+    viewport->updateZoomGesture(scale, center);
+    viewport->updatePanGesture(pan);  // Combined!
+}
+void onPinchEnd() {
+    viewport->endViewportGesture();
+}
+```
+
+### Paged vs Edgeless Compatibility
+
+| Mode | During Gesture | After Gesture End |
+|------|----------------|-------------------|
+| **Paged** | Cached frame shifted | Normal page rendering |
+| **Edgeless** | Cached frame shifted, tile eviction paused | Tile loading/eviction resumes |
+
+Both modes use the same code path - the cached frame approach abstracts away the underlying rendering complexity.
 
 ---
 

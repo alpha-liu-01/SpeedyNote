@@ -514,23 +514,26 @@ void Document::removeTileIfEmpty(int tx, int ty)
     auto it = m_tiles.find(coord);
     
     if (it == m_tiles.end()) {
-        return;  // Tile doesn't exist
+        return;  // Tile doesn't exist in memory
     }
     
     Page* tile = it->second.get();
     
-    // Check if tile has any content
-    bool hasContent = false;
-    
-    for (const auto& layer : tile->vectorLayers) {
-        if (!layer->strokes().isEmpty()) {
-            hasContent = true;
-            break;
-        }
-    }
-    
-    if (!hasContent && tile->objects.empty()) {
+    // Use Page::hasContent() to check if tile has any strokes or objects
+    if (!tile->hasContent()) {
+        // Remove from memory
         m_tiles.erase(it);
+        
+        // Remove from dirty tracking (don't need to save an empty tile)
+        m_dirtyTiles.erase(coord);
+        
+        // Track for deletion from disk on next saveBundle()
+        // If tile was in m_tileIndex, it exists on disk and needs deletion
+        if (m_tileIndex.count(coord) > 0) {
+            m_deletedTiles.insert(coord);
+            m_tileIndex.erase(coord);
+        }
+        
         markModified();
         
 #ifdef QT_DEBUG
@@ -1102,6 +1105,25 @@ bool Document::saveBundle(const QString& path)
             saveTile(coord);
         }
     }
+    
+    // ========== DELETE EMPTY TILES FROM DISK ==========
+    // Tiles that were erased empty are tracked in m_deletedTiles.
+    // Delete their files from disk now.
+    for (const auto& coord : m_deletedTiles) {
+        QString tileFileName = QString("%1,%2.json").arg(coord.first).arg(coord.second);
+        QString tilePath = path + "/tiles/" + tileFileName;
+        if (QFile::exists(tilePath)) {
+            if (QFile::remove(tilePath)) {
+#ifdef QT_DEBUG
+                qDebug() << "Deleted empty tile file:" << tileFileName;
+#endif
+            } else {
+                qWarning() << "Failed to delete empty tile file:" << tilePath;
+            }
+        }
+    }
+    m_deletedTiles.clear();
+    // ==================================================
     
     m_dirtyTiles.clear();
     m_tileIndex = allTileCoords;

@@ -2,7 +2,7 @@
 
 > **Purpose:** Implement infinite canvas support with tiled architecture
 > **Created:** Dec 27, 2024
-> **Status:** 🔄 IN PROGRESS - Core drawing + persistence complete, eraser & undo pending
+> **Status:** ✅ COMPLETE - All core phases (E1-E7) implemented
 > **Parent:** MIGRATION_DOC1_SUBPLAN.md (Phase 4)
 
 ---
@@ -60,6 +60,39 @@ static void renderBackgroundPattern(
 Now both paths use the same logic:
 - `Page::renderBackground()` calls helper for Grid/Lines
 - `renderEdgelessMode()` calls helper with document defaults (empty tiles) or tile settings (existing tiles)
+
+---
+
+## Code Review: Temp Bundle Handling (Dec 28, 2024)
+
+### ✅ No Critical Issues Found
+
+The temp edgeless canvas handling is correctly implemented:
+- Temp bundles are cleaned up on tab close (Discard), app quit (Discard), and destructor
+- Double cleanup calls are handled safely (no-op if already cleaned via `m_tempBundlePaths.value()` check)
+- Pointer lifetimes are correct (document deleted after viewport, no use-after-free)
+- App crash leaves temp bundle on disk (acceptable - system temp folder is occasionally cleaned)
+
+### 🟢 Minor Issues - FIXED ✅
+
+| Issue | Location | Description | Status |
+|-------|----------|-------------|--------|
+| **TH-1: Redundant setBundlePath()** | `DocumentManager.cpp:479` | `saveBundle()` already sets `m_bundlePath` at start, calling `setBundlePath()` again is redundant | ✅ Removed |
+| **TH-2: Duplicate save dialog code** | `MainWindow.cpp` | Same dialog code in `tabCloseAttempted` and `closeEvent()` | Accepted - extraction not worth complexity |
+| **TH-3: Temp dir cleanup on Discard** | `DocumentManager.cpp` destructor | Destructor didn't clean temp bundles for discarded docs | ✅ Fixed - destructor now calls `cleanupTempBundle()` |
+
+### Cleanup Flow Verification
+
+All scenarios properly clean up temp bundles:
+
+| Scenario | Cleanup Path | Status |
+|----------|--------------|--------|
+| User saves to permanent location | `doSave()` → `cleanupTempBundle()` | ✅ |
+| User closes tab with Discard | `closeDocument()` → `cleanupTempBundle()` | ✅ |
+| User quits app with Discard | `~DocumentManager()` → `cleanupTempBundle()` | ✅ |
+| App crashes | Temp bundle left on disk (acceptable) | ✅ |
+
+---
 
 ### 🔧 Proposed Fixes
 
@@ -142,12 +175,9 @@ Edgeless mode provides an infinite canvas for freeform note-taking. Unlike paged
 | **Min zoom limit** | ✅ Complete | Prevents zooming out too far (≤9 tiles visible) |
 | **Ctrl+Shift+N shortcut** | ✅ Complete | Creates new edgeless document |
 
-### ❌ Known Issues (Remaining)
+### ✅ All Core Issues Resolved
 
-| Issue | Reason | Resolution |
-|-------|--------|------------|
-| **Undo doesn't work** | Phase E6 not implemented | Implement after eraser |
-| **Eraser doesn't work across tiles** | Phase E4 not implemented | Next priority |
+No critical issues remaining. Future enhancements listed in "Post-MVP" section.
 
 ### ✅ Issues Resolved
 
@@ -156,6 +186,8 @@ Edgeless mode provides an infinite canvas for freeform note-taking. Unlike paged
 | **Memory grows with tiles** | ✅ Temp auto-save enables tile eviction even for unsaved docs |
 | **Can't save/load** | ✅ Bundle format (.snb) with O(1) tile loading |
 | **Unsaved canvas data lost on close** | ✅ Save prompt implemented |
+| **Eraser doesn't work in edgeless** | ✅ Implemented `eraseAtEdgeless()` checking 3x3 tile grid |
+| **Single-point strokes unerasable** | ✅ Fixed `VectorStroke::containsPoint()` for 1-point strokes |
 
 ### 🔧 Bugs Fixed During Testing
 
@@ -688,11 +720,60 @@ void DocumentViewport::finishStrokeEdgeless() {
 
 ---
 
-### Phase E4: Eraser in Edgeless
+### Phase E4: Eraser in Edgeless ✅ COMPLETE
 
 **Goal:** Eraser works across tile boundaries.
 
-#### E4.1: Update eraseAt() for Edgeless
+#### E4.0: Pre-E4 Bug Fix - Single-Point Stroke Erasing
+
+**Bug:** Single-point strokes (dots created by a single tap) could not be erased.
+
+**Root Cause:** `VectorStroke::containsPoint()` only checked line segments between consecutive points. With only one point, the segment loop never executed:
+```cpp
+for (int i = 1; i < points.size(); ++i) {  // Never runs when size==1
+    if (distanceToSegment(...)) return true;
+}
+return false;  // Always false for single-point strokes!
+```
+
+**Fix:** Added special case for single-point strokes in `VectorStroke::containsPoint()`:
+```cpp
+if (points.size() == 1) {
+    // Check direct distance to the single point
+    qreal dx = point.x() - points[0].pos.x();
+    qreal dy = point.y() - points[0].pos.y();
+    qreal distSq = dx * dx + dy * dy;
+    qreal threshold = tolerance + baseThickness;
+    return distSq < threshold * threshold;
+}
+```
+
+#### E4.1: Edgeless Eraser Implementation
+
+**Strategy:** In edgeless mode, strokes are split across tiles. The eraser must:
+1. Convert viewport position to document coordinates
+2. Check the center tile AND 8 neighboring tiles (3x3 grid)
+3. Convert document coords to tile-local coords for each tile
+4. Remove hit strokes and mark tiles dirty
+5. Remove tile from memory if now empty (tile file deleted on next save)
+
+#### E4.2: Empty Tile Deletion
+
+**Behavior:** When all strokes are erased from a tile:
+1. Tile is removed from `m_tiles` (memory)
+2. Tile is removed from `m_dirtyTiles` (no need to save empty tile)
+3. Tile is moved from `m_tileIndex` to `m_deletedTiles` (tracks files to delete)
+4. On next `saveBundle()`, tile JSON file is deleted from disk
+
+**Benefits:**
+- Memory savings (empty `Page` objects freed)
+- Disk space savings (empty tile files deleted)
+- Accurate `tileCount()` reflects actual content
+
+**Edge cases handled:**
+- Checks ALL layers for strokes, not just active layer
+- Checks for objects (images, etc.) not just strokes
+- Safe if tile was never saved to disk (not in `m_tileIndex`)
 
 ```cpp
 void DocumentViewport::eraseAt(const PointerEvent& pe) {
@@ -707,8 +788,9 @@ void DocumentViewport::eraseAt(const PointerEvent& pe) {
 
 void DocumentViewport::eraseAtEdgeless(QPointF viewportPos) {
     QPointF docPt = viewportToDocument(viewportPos);
+    Document::TileCoord centerTile = m_document->tileCoordForPoint(docPt);
     
-    // Check home tile + neighboring tiles (for cross-tile strokes)
+    // Check 3x3 grid of tiles around eraser position
     QPair<int,int> centerTile = m_document->tileCoordForPoint(docPt);
     
     for (int dx = -1; dx <= 1; ++dx) {
@@ -735,9 +817,43 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos) {
 }
 ```
 
+#### E4.3: Code Review - Eraser Implementation ✅
+
+**Date:** Dec 28, 2024
+
+**Files reviewed:**
+- `VectorStroke::containsPoint()` - single-point stroke detection
+- `DocumentViewport::eraseAt()` - eraser dispatch logic  
+- `DocumentViewport::eraseAtEdgeless()` - edgeless eraser implementation
+- `DocumentViewport::handlePointerMove()` - eraser drag handling
+- `Document::removeTileIfEmpty()` - empty tile cleanup
+- `Document::saveBundle()` - tile file deletion
+
+**Issues found and fixed:**
+
+| ID | Severity | Issue | Fix |
+|----|----------|-------|-----|
+| CR-E4-1 | Minor | `removeTileIfEmpty()` duplicated content check logic instead of using `Page::hasContent()` | Refactored to use `tile->hasContent()` |
+
+**Verified as correct:**
+- ✅ No use-after-free: `tile` and `layer` pointers not used after `removeTileIfEmpty()`
+- ✅ No memory leaks: `std::unique_ptr<Page>` auto-frees on `m_tiles.erase()`
+- ✅ Correct ordering: `markTileDirty()` before `removeTileIfEmpty()` is slightly inefficient but safe (dirty flag cleared by removeIfEmpty)
+- ✅ Correct manifest: `allTileCoords` properly unions `m_tileIndex` and `m_tiles` keys
+- ✅ Correct deletion: Deleted tiles removed from `m_tileIndex` so not copied/saved
+- ✅ Thread-safe: All eraser code runs on UI thread
+
+**Known limitations (acceptable):**
+- 3x3 grid check covers typical eraser sizes; very large erasers spanning 4+ tiles may miss strokes in distant tiles
+- No undo support for edgeless erasing (documented TODO, pending Phase E6)
+
+**Performance notes:**
+- `getTile()` is O(log n) map lookup - acceptable for 9 calls per erase position
+- Stroke cache invalidation on removeStroke() is automatic via `invalidateStrokeCache()`
+
 ---
 
-### Phase E5: Serialization 🔄 IN PROGRESS
+### Phase E5: Serialization ✅ COMPLETE
 
 **Goal:** Save/load tiled edgeless documents with O(1) tile access.
 
@@ -1034,27 +1150,49 @@ void DocumentViewport::evictDistantTiles() {
 
 ---
 
-### Phase E6: Undo/Redo for Edgeless
+### Phase E6: Undo/Redo for Edgeless ✅ COMPLETE
 
 **Goal:** Global undo stack for seamless edgeless experience.
+
+#### E6.0: Design Decisions (Agreed Dec 28, 2024)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Undo scope** | Global (all tiles) | User draws one stroke → expects one Undo removes it all |
+| **Multi-segment strokes** | Treated atomically | All segments from one draw action = one undo entry |
+| **Eraser undo granularity** | Per-move (matches paged mode) | Each move that erases = separate undo action |
+| **Performance** | O(1) push/pop, O(k) apply | k = segments per action (typically 1-3) |
+| **Memory bound** | 100 actions max | ~2MB worst case, acceptable |
+| **Empty tile recreation** | Auto via `getOrCreateTile()` | Tiles are cheap to recreate on undo |
+
+**Key insight:** Drawing and erasing have different semantics:
+- **Drawing:** One pen-down→pen-up = one logical stroke (all segments)
+- **Erasing:** Physical metaphor - erase what you touch (specific segments)
+
+Both undo correctly: undo reverses the specific action taken.
 
 #### E6.1: Global Undo Stack
 
 **File:** `source/core/DocumentViewport.h`
 
 ```cpp
-// Edgeless undo action (stores tile coordinate for applying undo)
+// Edgeless undo action - supports strokes spanning multiple tiles
 struct EdgelessUndoAction {
-    QPair<int,int> tileCoord;      // Which tile this action affects
-    PageUndoAction::Type type;      // AddStroke, RemoveStroke, RemoveMultiple
-    VectorStroke stroke;            // For single stroke actions
-    QVector<VectorStroke> strokes;  // For multi-stroke actions
+    PageUndoAction::Type type;  // AddStroke, RemoveStroke, RemoveMultiple
+    int layerIndex;             // Which layer was affected
+    
+    // Stroke segment with its tile coordinate
+    struct StrokeSegment {
+        Document::TileCoord tileCoord;
+        VectorStroke stroke;
+    };
+    QVector<StrokeSegment> segments;  // All segments in this action
 };
 
 // Global stacks for edgeless mode
 QStack<EdgelessUndoAction> m_edgelessUndoStack;
 QStack<EdgelessUndoAction> m_edgelessRedoStack;
-static constexpr int MAX_UNDO_GLOBAL = 100;  // Memory bound
+static constexpr int MAX_UNDO_EDGELESS = 100;  // Memory bound (~2MB worst case)
 ```
 
 #### E6.2: Implement undoEdgeless() and redoEdgeless()
@@ -1065,29 +1203,35 @@ void DocumentViewport::undoEdgeless() {
     
     EdgelessUndoAction action = m_edgelessUndoStack.pop();
     
-    // Get the tile this action affects
-    Page* tile = m_document->getTile(action.tileCoord.first, action.tileCoord.second);
-    if (!tile) return;  // Tile was removed? Skip.
-    
-    VectorLayer* layer = tile->activeLayer();
-    if (!layer) return;
-    
-    switch (action.type) {
-        case PageUndoAction::AddStroke:
-            layer->removeStroke(action.stroke.id);
-            break;
-        case PageUndoAction::RemoveStroke:
-            layer->addStroke(action.stroke);
-            break;
-        case PageUndoAction::RemoveMultiple:
-            for (const auto& s : action.strokes) {
-                layer->addStroke(s);
-            }
-            break;
+    // Apply undo to each segment (may span multiple tiles)
+    for (const auto& seg : action.segments) {
+        // Get or create tile (may have been removed if it became empty)
+        Page* tile = (action.type == PageUndoAction::AddStroke)
+            ? m_document->getTile(seg.tileCoord.first, seg.tileCoord.second)
+            : m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+        if (!tile) continue;
+        
+        // Ensure layer exists
+        while (tile->layerCount() <= action.layerIndex) {
+            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+        }
+        VectorLayer* layer = tile->layer(action.layerIndex);
+        if (!layer) continue;
+        
+        switch (action.type) {
+            case PageUndoAction::AddStroke:
+                layer->removeStroke(seg.stroke.id);
+                m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+                break;
+            case PageUndoAction::RemoveStroke:
+            case PageUndoAction::RemoveMultiple:
+                layer->addStroke(seg.stroke);
+                break;
+        }
+        m_document->markTileDirty(seg.tileCoord);
     }
     
     m_edgelessRedoStack.push(action);
-    trimEdgelessUndoStack();
     
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
@@ -1096,24 +1240,115 @@ void DocumentViewport::undoEdgeless() {
 }
 
 void DocumentViewport::trimEdgelessUndoStack() {
-    while (m_edgelessUndoStack.size() > MAX_UNDO_GLOBAL) {
-        m_edgelessUndoStack.remove(0);  // Remove oldest
+    while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+        m_edgelessUndoStack.removeFirst();  // Remove oldest
     }
 }
 ```
 
-#### E6.3: Update canUndo() and canRedo()
+#### E6.3: Update canUndo(), canRedo(), undo(), redo()
 
 ```cpp
 bool DocumentViewport::canUndo() const {
     if (m_document && m_document->isEdgeless()) {
         return !m_edgelessUndoStack.isEmpty();
     }
-    // Existing per-page logic for paged mode
     return m_undoStacks.contains(m_currentPageIndex) && 
            !m_undoStacks[m_currentPageIndex].isEmpty();
 }
+
+bool DocumentViewport::canRedo() const {
+    if (m_document && m_document->isEdgeless()) {
+        return !m_edgelessRedoStack.isEmpty();
+    }
+    return m_redoStacks.contains(m_currentPageIndex) && 
+           !m_redoStacks[m_currentPageIndex].isEmpty();
+}
+
+void DocumentViewport::undo() {
+    if (m_document && m_document->isEdgeless()) {
+        undoEdgeless();
+    } else {
+        // ... existing paged undo ...
+    }
+}
+
+void DocumentViewport::redo() {
+    if (m_document && m_document->isEdgeless()) {
+        redoEdgeless();
+    } else {
+        // ... existing paged redo ...
+    }
+}
 ```
+
+#### E6.4: Push Undo in finishStrokeEdgeless()
+
+After splitting stroke into segments and adding to tiles:
+```cpp
+// Build undo action with all segments
+EdgelessUndoAction undoAction;
+undoAction.type = PageUndoAction::AddStroke;
+undoAction.layerIndex = m_edgelessActiveLayerIndex;
+for (const auto& pair : addedStrokes) {
+    undoAction.segments.append({pair.first, pair.second});
+}
+pushEdgelessUndoAction(undoAction);
+```
+
+#### E6.5: Push Undo in eraseAtEdgeless()
+
+For each tile where strokes are erased:
+```cpp
+EdgelessUndoAction undoAction;
+undoAction.type = PageUndoAction::RemoveStroke;
+undoAction.layerIndex = m_edgelessActiveLayerIndex;
+
+// Collect erased strokes before removing
+for (const QString& id : hitIds) {
+    VectorStroke* s = layer->strokeById(id);
+    if (s) {
+        undoAction.segments.append({{tx, ty}, *s});
+    }
+}
+
+// Now remove strokes
+for (const QString& id : hitIds) {
+    layer->removeStroke(id);
+}
+
+if (!undoAction.segments.isEmpty()) {
+    pushEdgelessUndoAction(undoAction);
+}
+```
+
+#### E6.6: Code Review - Undo/Redo Implementation ✅
+
+**Date:** Dec 28, 2024
+
+**Files reviewed:**
+- `DocumentViewport.h` - `EdgelessUndoAction` struct
+- `DocumentViewport.cpp` - undo/redo methods, stack management
+
+**Issues found and fixed:**
+
+| ID | Severity | Issue | Fix |
+|----|----------|-------|-----|
+| CR-E6-1 | 🔴 Bug | `markTileDirty()` called AFTER `removeTileIfEmpty()` in undo/redo, causing inconsistent state (coord in both `m_dirtyTiles` and `m_deletedTiles`) | Moved `markTileDirty()` inside each switch case, BEFORE potential tile removal |
+| CR-E6-2 | 🟡 Minor | `EdgelessUndoAction::type` and `layerIndex` not default-initialized | Added `= PageUndoAction::AddStroke` and `= 0` defaults |
+| CR-E6-3 | 🟡 Pre-existing | Undo stacks not cleared on document change (old actions reference wrong document) | Added clearing of all undo/redo stacks in `setDocument()` |
+
+**Verified as correct:**
+- ✅ No use-after-free: `tile` pointer not used after `removeTileIfEmpty()` call
+- ✅ No memory leaks: `QStack` auto-cleanup, `QVector` in structs handled properly
+- ✅ Correct tile recreation: `getOrCreateTile()` recreates tiles when undoing erased strokes
+- ✅ Layer recreation: Layers created if needed (handles case where layer was deleted)
+- ✅ Redo stack clearing: New actions properly clear redo stack
+- ✅ Stack trimming: `MAX_UNDO_EDGELESS = 100` enforced correctly
+
+**Performance notes:**
+- Stroke lookup in eraser is O(n*m) but acceptable (hitIds typically 1-3, strokes per layer 10-100)
+- Stroke data copied on undo push (not moved), but VectorStroke is reasonably sized
 
 ---
 
@@ -1216,9 +1451,9 @@ void DocumentViewport::undo() {
 - [x] Cross-tile strokes render correctly ✅ (stroke splitting)
 - [x] Pan/scroll works infinitely ✅
 - [x] Zoom limits enforced (≤9 tiles visible) ✅
-- [ ] Save/load works with tile format (E5 pending)
-- [ ] Basic undo/redo works (E6 pending)
-- [ ] Eraser works across tiles (E4 pending)
+- [x] Save/load works with tile format ✅
+- [x] Basic undo/redo works ✅
+- [x] Eraser works across tiles ✅
 
 ### Memory Management (Deferred to E5)
 
@@ -1237,11 +1472,53 @@ void DocumentViewport::undo() {
 
 ## Next Steps
 
-1. **Phase E5: Serialization** - Save/load tile-based documents
-2. **Phase E4: Eraser** - Erase strokes across tile boundaries
-3. **Phase E6: Undo/Redo** - Global undo stack for edgeless
+1. ~~**Phase E5: Serialization** - Save/load tile-based documents~~ ✅ COMPLETE
+2. ~~**Phase E4: Eraser** - Erase strokes across tile boundaries~~ ✅ COMPLETE
+3. ~~**Phase E6: Undo/Redo** - Global undo stack for edgeless~~ ✅ COMPLETE
+
+**All core edgeless phases complete!** Future enhancements listed below.
 
 ---
 
-*Edgeless mode subplan for SpeedyNote - Dec 27, 2024*
+## Deferred Pan Gesture (Dec 28, 2024)
+
+### Summary
+
+Extended the deferred zoom rendering system to support deferred pan gestures. This is especially useful for edgeless canvas where panning can trigger expensive tile loading.
+
+### Key Mappings
+
+| Input | Behavior | Gesture End |
+|-------|----------|-------------|
+| **Ctrl + Wheel** | Deferred zoom | Ctrl release OR 3s timeout |
+| **Shift + Wheel** | Deferred horizontal pan | Shift release OR 3s timeout |
+| **` (backtick) + Wheel** | Deferred vertical pan | ` release OR 3s timeout |
+| **Plain Wheel** | Immediate scroll | N/A |
+
+**Note:** Alt key was not used because it conflicts with Windows system menu access.
+
+### Code Review
+
+| Priority | Issue | Status |
+|----------|-------|--------|
+| 🟢 MINOR | `m_backtickHeld` not reset in `setDocument()` | ✅ FIXED |
+| ✅ GOOD | Division by zero guard in paintEvent | Already handled |
+| ✅ GOOD | Gesture ended on focus loss | Already handled |
+| ✅ GOOD | Gesture ended on resize | Already handled |
+| ✅ GOOD | Auto-repeat filtering for backtick | Already handled |
+| ✅ GOOD | Timer stopped in destructor | Already handled |
+| ✅ GOOD | Proper reset ordering (before state changes) | Already handled |
+
+### Benefits for Edgeless Canvas
+
+1. **Tile eviction paused during gesture** - Tiles aren't loaded/evicted while panning
+2. **Smooth panning** - Cached frame shifts instead of re-rendering tiles
+3. **Consistent 60+ FPS** - No expensive tile operations during gesture
+4. **Full re-render on release** - Proper tile loading/eviction resumes
+
+See `MIGRATION_DOC1_SUBPLAN.md` for full implementation details.
+
+---
+
+*Edgeless mode subplan for SpeedyNote - Dec 28, 2024*
 

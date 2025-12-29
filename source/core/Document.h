@@ -735,6 +735,7 @@ private:
     QString m_bundlePath;                           ///< Path to .snb bundle directory
     mutable std::set<TileCoord> m_tileIndex;        ///< All tile coords that exist on disk (mutable for lazy-load failure cleanup)
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
+    std::set<TileCoord> m_deletedTiles;             ///< Tiles to delete from disk on next save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
     
     /**

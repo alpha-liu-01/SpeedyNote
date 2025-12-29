@@ -62,10 +62,10 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     m_pdfPreloadTimer->setSingleShot(true);
     connect(m_pdfPreloadTimer, &QTimer::timeout, this, &DocumentViewport::doAsyncPdfPreload);
     
-    // Zoom gesture timeout timer - fallback for detecting gesture end
-    m_zoomGestureTimeoutTimer = new QTimer(this);
-    m_zoomGestureTimeoutTimer->setSingleShot(true);
-    connect(m_zoomGestureTimeoutTimer, &QTimer::timeout, this, &DocumentViewport::endZoomGesture);
+    // Gesture timeout timer - fallback for detecting gesture end (zoom or pan)
+    m_gestureTimeoutTimer = new QTimer(this);
+    m_gestureTimeoutTimer->setSingleShot(true);
+    connect(m_gestureTimeoutTimer, &QTimer::timeout, this, &DocumentViewport::onGestureTimeout);
     
     // Initialize PDF cache capacity based on default layout mode
     updatePdfCacheCapacity();
@@ -78,13 +78,13 @@ DocumentViewport::~DocumentViewport()
         m_pdfPreloadTimer->stop();
     }
     
-    // Stop zoom gesture timer
-    if (m_zoomGestureTimeoutTimer) {
-        m_zoomGestureTimeoutTimer->stop();
+    // Stop gesture timer
+    if (m_gestureTimeoutTimer) {
+        m_gestureTimeoutTimer->stop();
     }
     
-    // Clear zoom gesture cached frame (releases memory)
-    m_zoomGesture.reset();
+    // Clear gesture cached frame (releases memory)
+    m_gesture.reset();
     
     // Wait for and clean up any active async PDF watchers
     for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
@@ -103,13 +103,26 @@ void DocumentViewport::setDocument(Document* doc)
         return;
     }
     
-    // End any active zoom gesture (cached frame is from old document)
-    if (m_zoomGesture.isActive) {
-        m_zoomGesture.reset();
-        m_zoomGestureTimeoutTimer->stop();
+    // End any active gesture (cached frame is from old document)
+    if (m_gesture.isActive()) {
+        m_gesture.reset();
+        m_gestureTimeoutTimer->stop();
     }
+    m_backtickHeld = false;  // Reset key tracking for new document
+    
+    // Clear undo/redo stacks (actions refer to old document)
+    bool hadUndo = canUndo();
+    bool hadRedo = canRedo();
+    m_undoStacks.clear();
+    m_redoStacks.clear();
+    m_edgelessUndoStack.clear();
+    m_edgelessRedoStack.clear();
     
     m_document = doc;
+    
+    // Emit signals if undo/redo availability changed
+    if (hadUndo) emit undoAvailableChanged(false);
+    if (hadRedo) emit redoAvailableChanged(false);
     
     // Invalidate caches for new document
     invalidatePdfCache();
@@ -767,35 +780,44 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     
-    // ========== FAST PATH: Zoom Gesture ==========
-    // During zoom gestures, draw scaled cached frame instead of re-rendering.
-    // This provides 60+ FPS during rapid zoom operations.
-    if (m_zoomGesture.isActive && !m_zoomGesture.cachedFrame.isNull() 
-        && m_zoomGesture.startZoom > 0) {  // Guard against division by zero
-        // Calculate scale factor relative to when frame was captured
-        qreal relativeScale = m_zoomGesture.targetZoom / m_zoomGesture.startZoom;
+    // ========== FAST PATH: Viewport Gesture (Zoom or Pan) ==========
+    // During viewport gestures, draw transformed cached frame instead of re-rendering.
+    // This provides 60+ FPS during rapid zoom/pan operations.
+    if (m_gesture.isActive() && !m_gesture.cachedFrame.isNull() 
+        && m_gesture.startZoom > 0) {  // Guard against division by zero
         
-        // Fill background (for areas outside scaled frame)
+        // Fill background (for areas outside transformed frame)
         painter.fillRect(rect(), QColor(64, 64, 64));
         
-        // Calculate scaled frame size in LOGICAL pixels (not physical)
+        // Calculate frame size in LOGICAL pixels (not physical)
         // grab() returns a pixmap at device pixel ratio, so we must divide by DPR
         // to get the logical size that matches the widget's coordinate system
-        qreal dpr = m_zoomGesture.frameDevicePixelRatio;
-        QSizeF logicalSize(m_zoomGesture.cachedFrame.width() / dpr,
-                           m_zoomGesture.cachedFrame.height() / dpr);
-        QSizeF scaledSize = logicalSize * relativeScale;
+        qreal dpr = m_gesture.frameDevicePixelRatio;
+        QSizeF logicalSize(m_gesture.cachedFrame.width() / dpr,
+                           m_gesture.cachedFrame.height() / dpr);
         
-        // The zoom center should remain fixed in viewport coords
-        // cachedFrame was captured at startZoom with centerPoint at some position
-        // We want centerPoint to remain at the same position after scaling
-        QPointF center = m_zoomGesture.centerPoint;
-        QPointF scaledOrigin = center - (center * relativeScale);
-        
-        // Draw scaled cached frame (may be blurry, but fast!)
+        // Draw based on gesture type
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed over quality
-        painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_zoomGesture.cachedFrame, 
-                          m_zoomGesture.cachedFrame.rect());
+        
+        if (m_gesture.activeType == ViewportGestureState::Zoom) {
+            // ZOOM: Scale the cached frame around zoom center
+            qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
+            QSizeF scaledSize = logicalSize * relativeScale;
+            
+            // The zoom center should remain fixed in viewport coords
+            QPointF center = m_gesture.zoomCenter;
+            QPointF scaledOrigin = center - (center * relativeScale);
+            
+            painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_gesture.cachedFrame, 
+                              m_gesture.cachedFrame.rect());
+        } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+            // PAN: Shift the cached frame by pan delta
+            // Pan delta in document coords → convert to viewport pixels
+            QPointF panDeltaDoc = m_gesture.targetPan - m_gesture.startPan;
+            QPointF panDeltaPixels = panDeltaDoc * m_gesture.startZoom * -1.0;  // Negate: pan offset increase = viewport moves opposite
+            
+            painter.drawPixmap(panDeltaPixels, m_gesture.cachedFrame);
+        }
         
         // Skip normal rendering during gesture
         return;
@@ -987,9 +1009,13 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
     
-    // End zoom gesture if active (cached frame size no longer matches)
-    if (m_zoomGesture.isActive) {
-        endZoomGesture();
+    // End any gesture if active (cached frame size no longer matches)
+    if (m_gesture.isActive()) {
+        if (m_gesture.activeType == ViewportGestureState::Zoom) {
+            endZoomGesture();
+        } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+            endPanGesture();
+        }
     }
     
     // Keep the same document point at viewport center after resize
@@ -1157,7 +1183,7 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         return;
     }
     
-    // Scroll
+    // Scroll with deferred rendering for Shift/backtick modifiers
     QPointF scrollDelta;
     
     if (!pixelDelta.isNull()) {
@@ -1174,12 +1200,25 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
     }
     
     if (!scrollDelta.isNull()) {
-        // Check for Shift modifier → Horizontal scroll
+        // Check for Shift modifier → Deferred horizontal pan
         if (event->modifiers() & Qt::ShiftModifier) {
-            // Swap X and Y for horizontal scroll
-            scrollDelta = QPointF(scrollDelta.y(), scrollDelta.x());
+            // Swap X and Y for horizontal scroll, then use deferred pan
+            QPointF horizontalDelta(scrollDelta.y(), scrollDelta.x());
+            updatePanGesture(horizontalDelta);
+            event->accept();
+            return;
         }
         
+        // Check for backtick (`) key → Deferred vertical pan
+        // Using custom key tracking since ` is not a modifier key
+        if (m_backtickHeld) {
+            // Vertical scroll with deferred rendering
+            updatePanGesture(scrollDelta);
+            event->accept();
+            return;
+        }
+        
+        // Plain wheel (no modifier) → Immediate scroll (unchanged behavior)
         scrollBy(scrollDelta);
     }
     
@@ -1188,6 +1227,14 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
 
 void DocumentViewport::keyPressEvent(QKeyEvent* event)
 {
+    // Track backtick key for deferred vertical pan
+    // Ignore auto-repeat events - only track actual key press
+    if (event->key() == Qt::Key_QuoteLeft && !event->isAutoRepeat()) {
+        m_backtickHeld = true;
+        event->accept();
+        return;
+    }
+    
     // Tool switching shortcuts (for testing and quick access)
     switch (event->key()) {
         case Qt::Key_P:
@@ -1239,8 +1286,26 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
 void DocumentViewport::keyReleaseEvent(QKeyEvent* event)
 {
     // Ctrl release ends zoom gesture (if active)
-    if (event->key() == Qt::Key_Control && m_zoomGesture.isActive) {
+    if (event->key() == Qt::Key_Control && m_gesture.activeType == ViewportGestureState::Zoom) {
         endZoomGesture();
+        event->accept();
+        return;
+    }
+    
+    // Shift release ends pan gesture (if active)
+    if (event->key() == Qt::Key_Shift && m_gesture.activeType == ViewportGestureState::Pan) {
+        endPanGesture();
+        event->accept();
+        return;
+    }
+    
+    // Backtick (`) release ends pan gesture (if active)
+    // Ignore auto-repeat events - only handle actual key release
+    if (event->key() == Qt::Key_QuoteLeft && !event->isAutoRepeat()) {
+        m_backtickHeld = false;
+        if (m_gesture.activeType == ViewportGestureState::Pan) {
+            endPanGesture();
+        }
         event->accept();
         return;
     }
@@ -1251,9 +1316,16 @@ void DocumentViewport::keyReleaseEvent(QKeyEvent* event)
 
 void DocumentViewport::focusOutEvent(QFocusEvent* event)
 {
-    // End zoom gesture if window loses focus (user can't release Ctrl otherwise)
-    if (m_zoomGesture.isActive) {
-        endZoomGesture();
+    // Reset backtick tracking (user can't release key if we don't have focus)
+    m_backtickHeld = false;
+    
+    // End any active gesture if window loses focus (user can't release modifier otherwise)
+    if (m_gesture.isActive()) {
+        if (m_gesture.activeType == ViewportGestureState::Zoom) {
+            endZoomGesture();
+        } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+            endPanGesture();
+        }
     }
     
     QWidget::focusOutEvent(event);
@@ -1398,42 +1470,43 @@ void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
 
 void DocumentViewport::beginZoomGesture(QPointF centerPoint)
 {
-    if (m_zoomGesture.isActive) {
+    if (m_gesture.isActive()) {
         return;  // Already in gesture
     }
     
-    m_zoomGesture.isActive = true;
-    m_zoomGesture.startZoom = m_zoomLevel;
-    m_zoomGesture.targetZoom = m_zoomLevel;
-    m_zoomGesture.centerPoint = centerPoint;
-    m_zoomGesture.startPan = m_panOffset;
+    m_gesture.activeType = ViewportGestureState::Zoom;
+    m_gesture.startZoom = m_zoomLevel;
+    m_gesture.targetZoom = m_zoomLevel;
+    m_gesture.zoomCenter = centerPoint;
+    m_gesture.startPan = m_panOffset;
+    m_gesture.targetPan = m_panOffset;
     
     // Capture current viewport as cached frame for fast scaling
-    m_zoomGesture.cachedFrame = grab();
+    m_gesture.cachedFrame = grab();
     // Store device pixel ratio for correct scaling on high-DPI displays
-    m_zoomGesture.frameDevicePixelRatio = m_zoomGesture.cachedFrame.devicePixelRatio();
+    m_gesture.frameDevicePixelRatio = m_gesture.cachedFrame.devicePixelRatio();
     
-    // Grab keyboard focus to receive keyReleaseEvent when Ctrl is released
+    // Grab keyboard focus to receive keyReleaseEvent when modifier is released
     setFocus(Qt::OtherFocusReason);
     
     // Start timeout timer (fallback for gesture end detection)
-    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
+    m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
 }
 
 void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
 {
     // Auto-begin gesture if not already active
-    if (!m_zoomGesture.isActive) {
+    if (!m_gesture.isActive()) {
         beginZoomGesture(centerPoint);
     }
     
     // Accumulate zoom (multiplicative for smooth feel)
-    m_zoomGesture.targetZoom *= scaleFactor;
-    m_zoomGesture.targetZoom = qBound(MIN_ZOOM, m_zoomGesture.targetZoom, MAX_ZOOM);
-    m_zoomGesture.centerPoint = centerPoint;
+    m_gesture.targetZoom *= scaleFactor;
+    m_gesture.targetZoom = qBound(MIN_ZOOM, m_gesture.targetZoom, MAX_ZOOM);
+    m_gesture.zoomCenter = centerPoint;
     
     // Restart timeout timer (each event resets the timeout)
-    m_zoomGestureTimeoutTimer->start(ZOOM_GESTURE_TIMEOUT_MS);
+    m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
     
     // Trigger repaint (will use fast cached frame scaling)
     update();
@@ -1441,27 +1514,27 @@ void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
 
 void DocumentViewport::endZoomGesture()
 {
-    if (!m_zoomGesture.isActive) {
-        return;  // Not in gesture
+    if (m_gesture.activeType != ViewportGestureState::Zoom) {
+        return;  // Not in zoom gesture
     }
     
     // Stop timeout timer
-    m_zoomGestureTimeoutTimer->stop();
+    m_gestureTimeoutTimer->stop();
     
     // Get final zoom level with mode-specific min zoom
     qreal minZ = (m_document && m_document->isEdgeless()) 
                  ? minZoomForEdgeless() 
                  : MIN_ZOOM;
-    qreal finalZoom = qBound(minZ, m_zoomGesture.targetZoom, MAX_ZOOM);
+    qreal finalZoom = qBound(minZ, m_gesture.targetZoom, MAX_ZOOM);
     
     // Calculate new pan offset to keep center point fixed
     // The center point should map to the same document point before and after zoom
-    QPointF center = m_zoomGesture.centerPoint;
-    QPointF docPtAtCenter = center / m_zoomGesture.startZoom + m_zoomGesture.startPan;
+    QPointF center = m_gesture.zoomCenter;
+    QPointF docPtAtCenter = center / m_gesture.startZoom + m_gesture.startPan;
     QPointF newPan = docPtAtCenter - center / finalZoom;
     
     // Clear gesture state BEFORE applying zoom (to avoid recursion in paintEvent)
-    m_zoomGesture.reset();
+    m_gesture.reset();
     
     // Apply final zoom and pan
     m_zoomLevel = finalZoom;
@@ -1483,6 +1556,97 @@ void DocumentViewport::endZoomGesture()
     
     // Preload PDF cache for new zoom level
     preloadPdfCache();
+}
+
+void DocumentViewport::beginPanGesture()
+{
+    if (m_gesture.isActive()) {
+        return;  // Already in gesture
+    }
+    
+    m_gesture.activeType = ViewportGestureState::Pan;
+    m_gesture.startZoom = m_zoomLevel;
+    m_gesture.targetZoom = m_zoomLevel;
+    m_gesture.startPan = m_panOffset;
+    m_gesture.targetPan = m_panOffset;
+    
+    // Capture current viewport as cached frame for fast shifting
+    m_gesture.cachedFrame = grab();
+    // Store device pixel ratio for correct positioning on high-DPI displays
+    m_gesture.frameDevicePixelRatio = m_gesture.cachedFrame.devicePixelRatio();
+    
+    // Grab keyboard focus to receive keyReleaseEvent when modifier is released
+    setFocus(Qt::OtherFocusReason);
+    
+    // Start timeout timer (fallback for gesture end detection)
+    m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
+}
+
+void DocumentViewport::updatePanGesture(QPointF panDelta)
+{
+    // Auto-begin gesture if not already active
+    if (!m_gesture.isActive()) {
+        beginPanGesture();
+    }
+    
+    // Accumulate pan offset (additive)
+    m_gesture.targetPan += panDelta;
+    
+    // Note: We don't clamp targetPan here - let endPanGesture handle clamping
+    // This allows the visual feedback to show unclamped pan during the gesture
+    
+    // Restart timeout timer (each event resets the timeout)
+    m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
+    
+    // Trigger repaint (will use fast cached frame shifting)
+    update();
+}
+
+void DocumentViewport::endPanGesture()
+{
+    if (m_gesture.activeType != ViewportGestureState::Pan) {
+        return;  // Not in pan gesture
+    }
+    
+    // Stop timeout timer
+    m_gestureTimeoutTimer->stop();
+    
+    // Get final pan offset
+    QPointF finalPan = m_gesture.targetPan;
+    
+    // Clear gesture state BEFORE applying pan (to avoid recursion in paintEvent)
+    m_gesture.reset();
+    
+    // Apply final pan
+    m_panOffset = finalPan;
+    
+    // Clamp and emit signals
+    clampPanOffset();
+    updateCurrentPageIndex();
+    
+    emit panChanged(m_panOffset);
+    emitScrollFractions();
+    
+    // Trigger full re-render
+    update();
+    
+    // Preload PDF cache for new viewport position
+    preloadPdfCache();
+    
+    // Evict distant tiles if in edgeless mode
+    if (m_document && m_document->isEdgeless()) {
+        evictDistantTiles();
+    }
+}
+
+void DocumentViewport::onGestureTimeout()
+{
+    // Timeout reached - end the active gesture
+    if (m_gesture.activeType == ViewportGestureState::Zoom) {
+        endZoomGesture();
+    } else if (m_gesture.activeType == ViewportGestureState::Pan) {
+        endPanGesture();
+    }
 }
 
 // ===== PDF Cache Helpers (Task 1.3.6) =====
@@ -2054,16 +2218,13 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         m_hardwareEraserActive = true;
     }
     
-    // Only process if we have an active drawing page
-    if (m_activeDrawingPage < 0) {
-        return;
-    }
-    
     // Handle tool-specific actions
     // Hardware eraser: use m_hardwareEraserActive because some tablets
     // don't consistently report pointerType() == Eraser in every move event
     bool isErasing = m_hardwareEraserActive || m_currentTool == ToolType::Eraser;
     
+    // Erasing works in edgeless mode even without a valid drawing page
+    // (eraseAtEdgeless uses document coordinates, not page coordinates)
     if (isErasing) {
         eraseAt(pe);
         // CRITICAL FIX: eraseAt() only calls update() when strokes are removed!
@@ -2075,7 +2236,15 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         QRectF newRect(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
                        eraserRadius * 2, eraserRadius * 2);
         update(oldRect.united(newRect).toRect());
-    } else if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
+        return;  // Don't fall through to stroke continuation
+    }
+    
+    // For stroke drawing, require an active drawing page
+    if (m_activeDrawingPage < 0) {
+        return;
+    }
+    
+    if (m_isDrawing && (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker)) {
         continueStroke(pe);
     }
 }
@@ -2381,10 +2550,17 @@ void DocumentViewport::finishStrokeEdgeless()
 #endif
     }
     
-    // TODO: Push to edgeless undo stack (Phase E6)
-    // For undo, we need to remove ALL segments as one action
-    // pushUndoActionEdgelessMulti(addedStrokes);
-    Q_UNUSED(addedStrokes);
+    // ========== PUSH TO EDGELESS UNDO STACK (Phase E6) ==========
+    // All segments from this stroke = one atomic undo action
+    if (!addedStrokes.isEmpty()) {
+        EdgelessUndoAction undoAction;
+        undoAction.type = PageUndoAction::AddStroke;
+        undoAction.layerIndex = m_edgelessActiveLayerIndex;
+        for (const auto& pair : addedStrokes) {
+            undoAction.segments.append({pair.first, pair.second});
+        }
+        pushEdgelessUndoAction(undoAction);
+    }
     
     // Clear stroke state
     m_currentStroke = VectorStroke();
@@ -2573,7 +2749,16 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 
 void DocumentViewport::eraseAt(const PointerEvent& pe)
 {
-    if (!m_document || !pe.pageHit.valid()) return;
+    if (!m_document) return;
+    
+    // Branch for edgeless mode (Phase E4)
+    if (m_document->isEdgeless()) {
+        eraseAtEdgeless(pe.viewportPos);
+        return;
+    }
+    
+    // Paged mode: require valid page hit
+    if (!pe.pageHit.valid()) return;
     
     Page* page = m_document->page(pe.pageHit.pageIndex);
     if (!page) return;
@@ -2624,6 +2809,91 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     QRectF dirtyRect(vpPos.x() - eraserRadius - 10, vpPos.y() - eraserRadius - 10,
                      (eraserRadius + 10) * 2, (eraserRadius + 10) * 2);
     update(dirtyRect.toRect());
+}
+
+void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
+{
+    // ========== EDGELESS ERASER (Phase E4) ==========
+    // In edgeless mode, strokes are split across tiles. The eraser must:
+    // 1. Convert viewport position to document coordinates
+    // 2. Check the center tile AND neighboring tiles (for cross-tile strokes)
+    // 3. Convert document coords to tile-local coords for hit testing
+    // 4. Collect strokes for undo, then remove them
+    // 5. Mark tiles dirty and remove if empty
+    
+    if (!m_document || !m_document->isEdgeless()) return;
+    
+    // Convert viewport position to document coordinates
+    QPointF docPt = viewportToDocument(viewportPos);
+    
+    // Get center tile coordinate
+    Document::TileCoord centerTile = m_document->tileCoordForPoint(docPt);
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+    
+    // Collect all erased strokes for undo (Phase E6)
+    EdgelessUndoAction undoAction;
+    undoAction.type = PageUndoAction::RemoveStroke;
+    undoAction.layerIndex = m_edgelessActiveLayerIndex;
+    
+    // Check center tile + 8 neighbors (3x3 grid)
+    // This catches strokes that span tile boundaries
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            int tx = centerTile.first + dx;
+            int ty = centerTile.second + dy;
+            
+            Page* tile = m_document->getTile(tx, ty);
+            if (!tile) continue;  // Empty tile
+            
+            // Get the active layer (use edgeless active layer index)
+            if (m_edgelessActiveLayerIndex >= tile->layerCount()) continue;
+            VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
+            if (!layer || layer->locked) continue;
+            
+            // Convert document point to tile-local coordinates
+            QPointF tileOrigin(tx * tileSize, ty * tileSize);
+            QPointF localPt = docPt - tileOrigin;
+            
+            // Find strokes at eraser position
+            QVector<QString> hitIds = layer->strokesAtPoint(localPt, m_eraserSize);
+            
+            if (hitIds.isEmpty()) continue;
+            
+            // Collect strokes for undo BEFORE removing (Phase E6)
+            for (const QString& id : hitIds) {
+                // Find the stroke by ID and copy it for undo
+                for (const VectorStroke& stroke : layer->strokes()) {
+                    if (stroke.id == id) {
+                        undoAction.segments.append({{tx, ty}, stroke});
+                        break;
+                    }
+                }
+            }
+            
+            // Remove strokes
+            for (const QString& id : hitIds) {
+                layer->removeStroke(id);
+            }
+            
+            // Mark tile as dirty for persistence (before potential removal)
+            m_document->markTileDirty({tx, ty});
+            
+            // Remove tile if now empty (saves memory, tile file deleted on next save)
+            m_document->removeTileIfEmpty(tx, ty);
+        }
+    }
+    
+    // Push undo action if any strokes were erased
+    if (!undoAction.segments.isEmpty()) {
+        pushEdgelessUndoAction(undoAction);
+        emit documentModified();
+        
+        // Dirty region update
+        qreal eraserRadius = m_eraserSize * m_zoomLevel;
+        QRectF dirtyRect(viewportPos.x() - eraserRadius - 10, viewportPos.y() - eraserRadius - 10,
+                         (eraserRadius + 10) * 2, (eraserRadius + 10) * 2);
+        update(dirtyRect.toRect());
+    }
 }
 
 void DocumentViewport::drawEraserCursor(QPainter& painter)
@@ -2740,8 +3010,151 @@ void DocumentViewport::trimUndoStack(int pageIndex)
     }
 }
 
+// ===== Edgeless Undo/Redo (Phase E6) =====
+
+void DocumentViewport::pushEdgelessUndoAction(const EdgelessUndoAction& action)
+{
+    m_edgelessUndoStack.push(action);
+    trimEdgelessUndoStack();
+    clearEdgelessRedoStack();
+    emit undoAvailableChanged(canUndo());
+}
+
+void DocumentViewport::undoEdgeless()
+{
+    if (m_edgelessUndoStack.isEmpty() || !m_document) return;
+    
+    EdgelessUndoAction action = m_edgelessUndoStack.pop();
+    
+    // Apply undo to each segment (may span multiple tiles)
+    for (const auto& seg : action.segments) {
+        Page* tile = nullptr;
+        
+        if (action.type == PageUndoAction::AddStroke) {
+            // Undoing an add = remove the stroke (tile might not exist if already removed)
+            tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
+        } else {
+            // Undoing a remove = add the stroke back (may need to recreate tile)
+            tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+        }
+        
+        if (!tile) continue;
+        
+        // Ensure layer exists
+        while (tile->layerCount() <= action.layerIndex) {
+            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+        }
+        VectorLayer* layer = tile->layer(action.layerIndex);
+        if (!layer) continue;
+        
+        switch (action.type) {
+            case PageUndoAction::AddStroke:
+                // Undo add = remove the stroke
+                layer->removeStroke(seg.stroke.id);
+                // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
+                m_document->markTileDirty(seg.tileCoord);
+                // Check if tile is now empty
+                m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+                break;
+                
+            case PageUndoAction::RemoveStroke:
+            case PageUndoAction::RemoveMultiple:
+                // Undo remove = add the stroke back
+                layer->addStroke(seg.stroke);
+                m_document->markTileDirty(seg.tileCoord);
+                break;
+        }
+    }
+    
+    // Push to redo stack
+    m_edgelessRedoStack.push(action);
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::redoEdgeless()
+{
+    if (m_edgelessRedoStack.isEmpty() || !m_document) return;
+    
+    EdgelessUndoAction action = m_edgelessRedoStack.pop();
+    
+    // Apply redo to each segment
+    for (const auto& seg : action.segments) {
+        Page* tile = nullptr;
+        
+        if (action.type == PageUndoAction::AddStroke) {
+            // Redoing an add = add the stroke back (may need to recreate tile)
+            tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+        } else {
+            // Redoing a remove = remove the stroke (tile might not exist if already removed)
+            tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
+        }
+        
+        if (!tile) continue;
+        
+        // Ensure layer exists
+        while (tile->layerCount() <= action.layerIndex) {
+            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+        }
+        VectorLayer* layer = tile->layer(action.layerIndex);
+        if (!layer) continue;
+        
+        switch (action.type) {
+            case PageUndoAction::AddStroke:
+                // Redo add = add the stroke again
+                layer->addStroke(seg.stroke);
+                m_document->markTileDirty(seg.tileCoord);
+                break;
+                
+            case PageUndoAction::RemoveStroke:
+            case PageUndoAction::RemoveMultiple:
+                // Redo remove = remove the stroke again
+                layer->removeStroke(seg.stroke.id);
+                // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
+                m_document->markTileDirty(seg.tileCoord);
+                // Check if tile is now empty
+                m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+                break;
+        }
+    }
+    
+    // Push to undo stack
+    m_edgelessUndoStack.push(action);
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::clearEdgelessRedoStack()
+{
+    if (!m_edgelessRedoStack.isEmpty()) {
+        m_edgelessRedoStack.clear();
+        emit redoAvailableChanged(canRedo());
+    }
+}
+
+void DocumentViewport::trimEdgelessUndoStack()
+{
+    while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+        // Remove oldest entry (at the bottom of the stack = index 0)
+        m_edgelessUndoStack.remove(0);
+    }
+}
+
 void DocumentViewport::undo()
 {
+    // Edgeless mode uses global undo stack
+    if (m_document && m_document->isEdgeless()) {
+        undoEdgeless();
+        return;
+    }
+    
+    // Paged mode: per-page undo
     int pageIdx = m_currentPageIndex;
     
     if (!m_undoStacks.contains(pageIdx) || m_undoStacks[pageIdx].isEmpty()) {
@@ -2786,6 +3199,13 @@ void DocumentViewport::undo()
 
 void DocumentViewport::redo()
 {
+    // Edgeless mode uses global redo stack
+    if (m_document && m_document->isEdgeless()) {
+        redoEdgeless();
+        return;
+    }
+    
+    // Paged mode: per-page redo
     int pageIdx = m_currentPageIndex;
     
     if (!m_redoStacks.contains(pageIdx) || m_redoStacks[pageIdx].isEmpty()) {
@@ -2830,12 +3250,22 @@ void DocumentViewport::redo()
 
 bool DocumentViewport::canUndo() const
 {
+    // Edgeless mode uses global undo stack
+    if (m_document && m_document->isEdgeless()) {
+        return !m_edgelessUndoStack.isEmpty();
+    }
+    // Paged mode: per-page undo
     return m_undoStacks.contains(m_currentPageIndex) && 
            !m_undoStacks[m_currentPageIndex].isEmpty();
 }
 
 bool DocumentViewport::canRedo() const
 {
+    // Edgeless mode uses global redo stack
+    if (m_document && m_document->isEdgeless()) {
+        return !m_edgelessRedoStack.isEmpty();
+    }
+    // Paged mode: per-page redo
     return m_redoStacks.contains(m_currentPageIndex) && 
            !m_redoStacks[m_currentPageIndex].isEmpty();
 }

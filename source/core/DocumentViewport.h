@@ -44,6 +44,35 @@ struct PageUndoAction {
     QVector<VectorStroke> strokes;      ///< For RemoveMultiple
 };
 
+// ============================================================================
+// EdgelessUndoAction - Undo action for edgeless mode (Phase E6)
+// ============================================================================
+
+/**
+ * @brief Represents an undoable action in edgeless mode.
+ * 
+ * Unlike paged mode, edgeless strokes can span multiple tiles. This struct
+ * stores all affected segments so the entire action can be undone atomically.
+ * 
+ * Memory bound: MAX_UNDO_EDGELESS actions × ~20KB avg = ~2MB max
+ */
+struct EdgelessUndoAction {
+    PageUndoAction::Type type = PageUndoAction::AddStroke;  ///< AddStroke or RemoveStroke
+    int layerIndex = 0;                 ///< Which layer was affected
+    
+    /**
+     * @brief A stroke segment with its tile coordinate.
+     * 
+     * When a stroke spans tiles, it's split into segments. Each segment
+     * is stored with its tile coordinate for correct undo/redo application.
+     */
+    struct StrokeSegment {
+        Document::TileCoord tileCoord;  ///< Tile containing this segment
+        VectorStroke stroke;            ///< The stroke data (in tile-local coords)
+    };
+    QVector<StrokeSegment> segments;    ///< All segments in this action
+};
+
 #include <QWidget>
 #include <QPointF>
 #include <QSizeF>
@@ -556,7 +585,47 @@ public slots:
      * @brief Check if a zoom gesture is currently active.
      * @return True if in a zoom gesture.
      */
-    bool isZoomGestureActive() const { return m_zoomGesture.isActive; }
+    bool isZoomGestureActive() const { return m_gesture.activeType == ViewportGestureState::Zoom; }
+    
+    // ===== Deferred Pan Gesture API =====
+    // These methods can be called by any input source (Shift/Alt+wheel, touch pan, etc.)
+    
+    /**
+     * @brief Begin a pan gesture.
+     * 
+     * Captures a snapshot of the current viewport for fast shifting during the gesture.
+     * If already in a gesture, this call is ignored.
+     */
+    void beginPanGesture();
+    
+    /**
+     * @brief Update the pan gesture with a pan delta.
+     * @param panDelta The pan offset to add in document coordinates.
+     * 
+     * If not in a gesture, automatically calls beginPanGesture first.
+     * The delta is accumulated for smooth panning.
+     */
+    void updatePanGesture(QPointF panDelta);
+    
+    /**
+     * @brief End the pan gesture and apply the final pan offset.
+     * 
+     * Re-renders the viewport at the correct position.
+     * If not in a gesture, this call is ignored.
+     */
+    void endPanGesture();
+    
+    /**
+     * @brief Check if a pan gesture is currently active.
+     * @return True if in a pan gesture.
+     */
+    bool isPanGestureActive() const { return m_gesture.activeType == ViewportGestureState::Pan; }
+    
+    /**
+     * @brief Check if any viewport gesture (zoom or pan) is currently active.
+     * @return True if in any gesture.
+     */
+    bool isGestureActive() const { return m_gesture.isActive(); }
     
 signals:
     // ===== View State Signals =====
@@ -710,45 +779,66 @@ private:
     QMap<int, QStack<PageUndoAction>> m_undoStacks;  ///< Per-page undo stacks
     QMap<int, QStack<PageUndoAction>> m_redoStacks;  ///< Per-page redo stacks
     
+    // ===== Edgeless Undo/Redo State (Phase E6) =====
+    QStack<EdgelessUndoAction> m_edgelessUndoStack;  ///< Global undo stack for edgeless mode
+    QStack<EdgelessUndoAction> m_edgelessRedoStack;  ///< Global redo stack for edgeless mode
+    static constexpr int MAX_UNDO_EDGELESS = 100;    ///< Max edgeless undo actions (~2MB)
+    
     // ===== Benchmark State (Task 2.6) =====
     bool m_benchmarking = false;                      ///< Whether benchmarking is active
     QElapsedTimer m_benchmarkTimer;                   ///< Timer for measuring intervals
     mutable std::deque<qint64> m_paintTimestamps;     ///< Timestamps of recent paints (mutable for const getPaintRate)
     QTimer m_benchmarkDisplayTimer;                   ///< Timer for periodic display updates
     
-    // ===== Deferred Zoom Gesture State (Task 2.3 - Zoom Optimization) =====
+    // ===== Deferred Viewport Gesture State (Task 2.3 - Zoom/Pan Optimization) =====
     /**
-     * @brief State for deferred zoom rendering.
+     * @brief State for deferred zoom and pan rendering.
      * 
-     * During zoom gestures (Ctrl+wheel, touch pinch), we defer expensive PDF
-     * re-rendering. Instead, we capture a snapshot of the viewport and scale
-     * it during the gesture. Only when the gesture ends do we re-render at
-     * the correct DPI.
+     * During viewport gestures (Ctrl+wheel for zoom, Shift+wheel for horizontal pan,
+     * Alt+wheel for vertical pan, touch pinch), we defer expensive rendering.
+     * Instead, we capture a snapshot of the viewport and transform it during the
+     * gesture. Only when the gesture ends do we re-render at the correct DPI.
      * 
-     * This provides consistent 60+ FPS during zoom operations regardless of
-     * PDF complexity.
+     * This provides consistent 60+ FPS during zoom and pan operations regardless
+     * of document complexity (PDF pages or edgeless tiles).
      * 
-     * The API (beginZoomGesture, updateZoomGesture, endZoomGesture) is designed
-     * to be called by any input source - currently Ctrl+wheel, but future
-     * gesture modules can call these methods directly.
+     * The API is designed to be called by any input source - currently keyboard+wheel,
+     * but future gesture modules can call these methods directly.
      */
-    struct ZoomGestureState {
-        bool isActive = false;           ///< True during zoom gesture
-        qreal startZoom = 1.0;           ///< Zoom level when gesture started
-        qreal targetZoom = 1.0;          ///< Target zoom (accumulates changes)
-        QPointF centerPoint;             ///< Zoom center in viewport coords
-        QPixmap cachedFrame;             ///< Viewport snapshot for fast scaling
-        QPointF startPan;                ///< Pan offset when gesture started
-        qreal frameDevicePixelRatio = 1.0; ///< Device pixel ratio when frame was captured
+    struct ViewportGestureState {
+        enum Type { None, Zoom, Pan, ZoomAndPan };  ///< ZoomAndPan for future touch
+        Type activeType = None;                      ///< Currently active gesture type
+        
+        // Shared state
+        QPixmap cachedFrame;                         ///< Viewport snapshot for fast transform
+        qreal frameDevicePixelRatio = 1.0;           ///< Device pixel ratio when frame was captured
+        qreal startZoom = 1.0;                       ///< Zoom level when gesture started
+        QPointF startPan;                            ///< Pan offset when gesture started
+        
+        // Zoom-specific state
+        qreal targetZoom = 1.0;                      ///< Target zoom (accumulates changes)
+        QPointF zoomCenter;                          ///< Zoom center in viewport coords
+        
+        // Pan-specific state
+        QPointF targetPan;                           ///< Target pan offset (accumulates changes)
+        
+        bool isActive() const { return activeType != None; }
         
         void reset() {
-            isActive = false;
+            activeType = None;
             cachedFrame = QPixmap();
         }
     };
-    ZoomGestureState m_zoomGesture;
-    QTimer* m_zoomGestureTimeoutTimer = nullptr;  ///< Fallback gesture end detection
-    static constexpr int ZOOM_GESTURE_TIMEOUT_MS = 3000;  ///< Timeout for gesture end fallback (3s)
+    ViewportGestureState m_gesture;
+    QTimer* m_gestureTimeoutTimer = nullptr;  ///< Fallback gesture end detection
+    static constexpr int GESTURE_TIMEOUT_MS = 3000;  ///< Timeout for gesture end fallback (3s)
+    bool m_backtickHeld = false;  ///< Track backtick (`) key for deferred vertical pan
+    
+    /**
+     * @brief Handle gesture timeout.
+     * Ends the active gesture (zoom or pan) when timeout expires.
+     */
+    void onGestureTimeout();
     
     // ===== Private Methods =====
     
@@ -946,6 +1036,15 @@ private:
     void eraseAt(const PointerEvent& pe);
     
     /**
+     * @brief Erase strokes in edgeless mode (Phase E4).
+     * @param viewportPos The eraser position in viewport coordinates.
+     * 
+     * Converts to document coordinates and checks the center tile plus
+     * 8 neighboring tiles for cross-tile stroke segments.
+     */
+    void eraseAtEdgeless(QPointF viewportPos);
+    
+    /**
      * @brief Draw the eraser cursor circle at the current pointer position.
      * @param painter The QPainter to render to (viewport coordinates).
      */
@@ -980,6 +1079,34 @@ private:
      * @param pageIndex The page whose undo stack to trim.
      */
     void trimUndoStack(int pageIndex);
+    
+    // ===== Edgeless Undo/Redo Helpers (Phase E6) =====
+    
+    /**
+     * @brief Push an undo action for edgeless mode.
+     * @param action The action containing all affected stroke segments.
+     */
+    void pushEdgelessUndoAction(const EdgelessUndoAction& action);
+    
+    /**
+     * @brief Undo the last action in edgeless mode.
+     */
+    void undoEdgeless();
+    
+    /**
+     * @brief Redo the last undone action in edgeless mode.
+     */
+    void redoEdgeless();
+    
+    /**
+     * @brief Clear the edgeless redo stack (called when new actions occur).
+     */
+    void clearEdgelessRedoStack();
+    
+    /**
+     * @brief Trim edgeless undo stack to MAX_UNDO_EDGELESS if exceeded.
+     */
+    void trimEdgelessUndoStack();
     
     // ===== Rendering Helpers (Task 1.3.3) =====
     
