@@ -68,6 +68,7 @@ enum class TouchGestureMode {
 class QTreeWidgetItem;
 class QProgressDialog;
 class DocumentViewport;
+class LayerPanel;
 namespace Poppler { 
     class Document; 
     class OutlineItem;
@@ -476,6 +477,7 @@ private slots:
     void updateDialDisplay();
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
+    void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
     
     // Phase doc-1: Document operations
     void saveDocument();          // doc-1.1: Save document to JSON file (Ctrl+S)
@@ -662,6 +664,10 @@ private:
     QPushButton *touchGesturesButton; // Touch gestures toggle button
     bool bookmarksSidebarVisible = false;
     
+    // Layer Panel (Phase 5: below left sidebars)
+    LayerPanel *m_layerPanel = nullptr;           // Layer management panel
+    QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
+    
     void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
     QMap<int, QString> bookmarks;  // Map of page number to bookmark title
     QPushButton *jumpToPageButton; // Button to jump to a specific page
@@ -808,6 +814,9 @@ private:
     QMetaObject::Connection m_hScrollConn;
     QMetaObject::Connection m_vScrollConn;
     QPointer<DocumentViewport> m_connectedViewport;  // QPointer for safe dangling check
+    
+    // Phase 5.1: LayerPanel page change connection
+    QMetaObject::Connection m_layerPanelPageConn;
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;

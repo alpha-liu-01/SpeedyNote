@@ -2996,6 +2996,16 @@ void DocumentViewport::clearUndoStacksFrom(int pageIndex)
     }
 }
 
+// ============================================================================
+// Layer Management (Phase 5)
+// ============================================================================
+
+void DocumentViewport::setEdgelessActiveLayerIndex(int layerIndex)
+{
+    if (layerIndex < 0) layerIndex = 0;
+    m_edgelessActiveLayerIndex = layerIndex;
+}
+
 void DocumentViewport::trimUndoStack(int pageIndex)
 {
     // Limit stack size to prevent unbounded memory growth

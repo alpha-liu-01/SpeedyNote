@@ -3,6 +3,7 @@
 // #include "VectorCanvas.h"  // REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
+#include "ui/LayerPanel.h"          // Phase 5: Layer management panel
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -157,6 +158,9 @@ MainWindow::MainWindow(QWidget *parent)
         // Phase 3.3: Connect scroll signals from current viewport
         connectViewportScrollSignals(vp);
         updateDialDisplay();
+        
+        // Phase 5.1 Task 4: Update LayerPanel when tab changes
+        updateLayerPanelForViewport(vp);
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
@@ -923,6 +927,52 @@ void MainWindow::setupUi() {
     // Connect bookmarks tree item clicks
     connect(bookmarksTree, &QTreeWidget::itemClicked, this, &MainWindow::onBookmarkItemClicked);
     
+    // 🌟 Layer Panel (Phase 5: below left sidebars)
+    m_layerPanel = new LayerPanel(this);
+    m_layerPanel->setFixedWidth(250);  // Match sidebar width
+    m_layerPanel->setMinimumHeight(180);
+    m_layerPanel->setMaximumHeight(300);
+    
+    // Phase 5.1: Connect LayerPanel signals
+    // Task 6: Visibility change triggers viewport repaint
+    connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int, bool) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->update();
+        }
+    });
+    
+    // Task 7: Active layer change updates drawing target
+    connect(m_layerPanel, &LayerPanel::activeLayerChanged, this, [this](int layerIndex) {
+        if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (doc && doc->isEdgeless()) {
+                // Edgeless mode: update global active layer index
+                vp->setEdgelessActiveLayerIndex(layerIndex);
+            }
+            // Paged mode: Page::activeLayerIndex already updated by LayerPanel
+        }
+    });
+    
+    // Task 8: Layer add/remove/move marks document as modified
+    connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int) {
+        if (DocumentViewport* vp = currentViewport()) {
+            emit vp->documentModified();
+            vp->update();
+        }
+    });
+    connect(m_layerPanel, &LayerPanel::layerRemoved, this, [this](int) {
+        if (DocumentViewport* vp = currentViewport()) {
+            emit vp->documentModified();
+            vp->update();
+        }
+    });
+    connect(m_layerPanel, &LayerPanel::layerMoved, this, [this](int, int) {
+        if (DocumentViewport* vp = currentViewport()) {
+            emit vp->documentModified();
+            vp->update();
+        }
+    });
+    
     // 🌟 Markdown Notes Sidebar
     markdownNotesSidebar = new MarkdownNotesSidebar(this);
     markdownNotesSidebar->setFixedWidth(300);
@@ -1495,8 +1545,26 @@ void MainWindow::setupUi() {
     QHBoxLayout *contentLayout = new QHBoxLayout;
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
-    contentLayout->addWidget(outlineSidebar, 0); // Fixed width outline sidebar
-    contentLayout->addWidget(bookmarksSidebar, 0); // Fixed width bookmarks sidebar
+    
+    // Phase 5: Left side container holds sidebars on top, layer panel at bottom
+    m_leftSideContainer = new QWidget(this);
+    m_leftSideContainer->setFixedWidth(250);  // Match sidebar width
+    QVBoxLayout *leftSideLayout = new QVBoxLayout(m_leftSideContainer);
+    leftSideLayout->setContentsMargins(0, 0, 0, 0);
+    leftSideLayout->setSpacing(0);
+    
+    // Top part: sidebars (can be hidden independently)
+    QWidget *leftSidebarsWidget = new QWidget(m_leftSideContainer);
+    QHBoxLayout *leftSidebarsLayout = new QHBoxLayout(leftSidebarsWidget);
+    leftSidebarsLayout->setContentsMargins(0, 0, 0, 0);
+    leftSidebarsLayout->setSpacing(0);
+    leftSidebarsLayout->addWidget(outlineSidebar);
+    leftSidebarsLayout->addWidget(bookmarksSidebar);
+    
+    leftSideLayout->addWidget(leftSidebarsWidget, 1);  // Takes remaining space
+    leftSideLayout->addWidget(m_layerPanel, 0);        // Fixed at bottom
+    
+    contentLayout->addWidget(m_leftSideContainer, 0); // Fixed width left container
     contentLayout->addWidget(canvasContainer, 1); // Canvas takes remaining space
     contentLayout->addWidget(dialToolbar, 0); // Dial mode toolbar (before markdown sidebar)
     contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
@@ -1608,6 +1676,9 @@ MainWindow::~MainWindow() {
     // Phase 3.3: Clean up viewport scroll connections
     if (m_hScrollConn) disconnect(m_hScrollConn);
     if (m_vScrollConn) disconnect(m_vScrollConn);
+    
+    // Phase 5.1: Clean up LayerPanel page connection
+    if (m_layerPanelPageConn) disconnect(m_layerPanelPageConn);
     if (m_connectedViewport) {
         m_connectedViewport->removeEventFilter(this);
     }
@@ -3267,6 +3338,67 @@ void MainWindow::centerViewportContent(int tabIndex) {
                  << "centeringOffset=" << centeringOffset
                  << "newPanX=" << -centeringOffset;
         */
+    }
+}
+
+// ============================================================================
+// Phase 5.1: LayerPanel Integration
+// ============================================================================
+
+void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
+    // Disconnect previous page change connection
+    if (m_layerPanelPageConn) {
+        disconnect(m_layerPanelPageConn);
+        m_layerPanelPageConn = {};
+    }
+    
+    if (!m_layerPanel) return;
+    
+    if (!viewport) {
+        m_layerPanel->setCurrentPage(nullptr);
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        m_layerPanel->setCurrentPage(nullptr);
+        return;
+    }
+    
+    // Get the appropriate page for LayerPanel
+    Page* page = nullptr;
+    if (doc->isEdgeless()) {
+        // Edgeless mode: use origin tile (0,0) as representative page
+        page = doc->getOrCreateTile(0, 0);
+    } else {
+        // Paged mode: use current page
+        int pageIndex = viewport->currentPageIndex();
+        page = doc->page(pageIndex);
+    }
+    
+    m_layerPanel->setCurrentPage(page);
+    
+    // Task 5: Connect viewport's currentPageChanged to update LayerPanel
+    // (Only relevant for paged mode - edgeless uses the same origin tile)
+    if (!doc->isEdgeless()) {
+        m_layerPanelPageConn = connect(viewport, &DocumentViewport::currentPageChanged, 
+                                        this, [this, viewport](int pageIndex) {
+            if (!m_layerPanel || !viewport) return;
+            Document* doc = viewport->document();
+            if (!doc || doc->isEdgeless()) return;
+            
+            Page* page = doc->page(pageIndex);
+            
+            // Task 9: Clamp activeLayerIndex if new page has fewer layers
+            if (page) {
+                int layerCount = page->layerCount();
+                if (page->activeLayerIndex >= layerCount) {
+                    page->activeLayerIndex = qMax(0, layerCount - 1);
+                }
+            }
+            
+            m_layerPanel->setCurrentPage(page);
+        });
     }
 }
 

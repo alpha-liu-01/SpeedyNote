@@ -358,6 +358,23 @@ public:
      */
     void clearUndoStacksFrom(int pageIndex);
     
+    // ===== Layer Management (Phase 5) =====
+    
+    /**
+     * @brief Set the active layer index for edgeless mode.
+     * @param layerIndex The layer index to draw on.
+     * 
+     * In edgeless mode, this is a global setting - all tiles share
+     * the same active layer. In paged mode, use Page::activeLayerIndex instead.
+     */
+    void setEdgelessActiveLayerIndex(int layerIndex);
+    
+    /**
+     * @brief Get the active layer index for edgeless mode.
+     * @return The current active layer index.
+     */
+    int edgelessActiveLayerIndex() const { return m_edgelessActiveLayerIndex; }
+    
     // ===== Benchmark (Task 2.6) =====
     
     /**

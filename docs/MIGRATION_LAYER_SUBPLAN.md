@@ -2,7 +2,7 @@
 
 > **Purpose:** Multi-layer support with LayerPanel UI integration
 > **Created:** Dec 28, 2024
-> **Status:** 🔄 NOT STARTED
+> **Status:** 🔄 IN PROGRESS (Phase 5.1 Complete)
 
 ---
 
@@ -107,21 +107,42 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 
 ## Phase Breakdown
 
-### Phase 5.1: LayerPanel Integration ⬜ NOT STARTED
+### Phase 5.1: LayerPanel Integration ✅ COMPLETE
 
 **Goal:** Connect existing LayerPanel to MainWindow and DocumentViewport.
 
 **Tasks:**
-1. Add `LayerPanel* m_layerPanel` member to MainWindow
-2. Create LayerPanel in MainWindow constructor
-3. Place below left sidebar (adjust layout)
-4. Connect `TabManager::currentViewportChanged` → update LayerPanel's page
-5. Connect `DocumentViewport::currentPageChanged` → update LayerPanel's page
-6. Connect `LayerPanel::layerVisibilityChanged` → `viewport->update()`
-7. Connect `LayerPanel::activeLayerChanged` → update drawing target
-8. Connect `LayerPanel::layerAdded/Removed/Moved` → mark document modified
-9. Handle page change: clamp `activeLayerIndex` if needed
-10. Add `m_edgelessActiveLayerIndex` to DocumentViewport for edgeless mode
+1. ✅ Add `LayerPanel* m_layerPanel` member to MainWindow
+2. ✅ Create LayerPanel in MainWindow constructor  
+3. ✅ Place below left sidebar (adjust layout)
+   - Created `m_leftSideContainer` (QWidget with QVBoxLayout)
+   - Top: `leftSidebarsWidget` with outline + bookmarks sidebars (stretch=1)
+   - Bottom: `m_layerPanel` (fixed 250px width, 180-300px height)
+
+4. ✅ Connect `TabManager::currentViewportChanged` → update LayerPanel's page
+   - Added `updateLayerPanelForViewport()` helper method
+   - For edgeless: uses origin tile (0,0) as representative page
+   - For paged: uses `doc->page(currentPageIndex())`
+
+5. ✅ Connect `DocumentViewport::currentPageChanged` → update LayerPanel's page
+   - Added `m_layerPanelPageConn` connection member
+   - Properly disconnects when switching viewports
+
+6. ✅ Connect `LayerPanel::layerVisibilityChanged` → `viewport->update()`
+7. ✅ Connect `LayerPanel::activeLayerChanged` → update drawing target
+   - Edgeless: calls `vp->setEdgelessActiveLayerIndex()`
+   - Paged: `Page::activeLayerIndex` already updated by LayerPanel
+
+8. ✅ Connect `LayerPanel::layerAdded/Removed/Moved` → mark document modified
+   - Emits `vp->documentModified()` signal
+   - Triggers viewport repaint
+
+9. ✅ Handle page change: clamp `activeLayerIndex` if needed
+   - In `currentPageChanged` handler, clamps to `layerCount - 1`
+
+10. ✅ Add `m_edgelessActiveLayerIndex` to DocumentViewport (already existed!)
+    - Added `setEdgelessActiveLayerIndex()` setter
+    - Added `edgelessActiveLayerIndex()` getter
 
 **Files to modify:**
 - `source/MainWindow.h` - Add m_layerPanel member
