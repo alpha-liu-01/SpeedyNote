@@ -12,6 +12,8 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QIcon>
+#include <QPalette>
+#include <QApplication>
 
 // ============================================================================
 // Constructor
@@ -20,8 +22,21 @@
 LayerPanel::LayerPanel(QWidget* parent)
     : QWidget(parent)
 {
+    // Phase 5.2: Load visibility icon with theme support
+    loadVisibilityIcon();
+    
     setupUI();
     updateButtonStates();
+}
+
+void LayerPanel::loadVisibilityIcon()
+{
+    // Detect dark mode from application palette
+    bool isDark = QApplication::palette().color(QPalette::Window).lightness() < 128;
+    QString iconPath = isDark
+        ? ":/resources/icons/notvisible_reversed.png"
+        : ":/resources/icons/notvisible.png";
+    m_notVisibleIcon = QIcon(iconPath);
 }
 
 // ============================================================================
@@ -52,6 +67,8 @@ void LayerPanel::setupUI()
             this, &LayerPanel::onLayerSelectionChanged);
     connect(m_layerList, &QListWidget::itemClicked,
             this, &LayerPanel::onItemClicked);
+    connect(m_layerList, &QListWidget::itemChanged,
+            this, &LayerPanel::onItemChanged);
 
     // Button bar
     QHBoxLayout* buttonLayout = new QHBoxLayout();
@@ -173,18 +190,19 @@ QListWidgetItem* LayerPanel::createLayerItem(int layerIndex)
         return nullptr;
     }
 
-    // Create item with visibility indicator and name
-    QString displayText;
-    if (layer->visible) {
-        displayText = QString("👁 %1").arg(layer->name);
-    } else {
-        displayText = QString("   %1").arg(layer->name);
+    // Phase 5.2: Create item with just the layer name
+    // Use icon for hidden layers, no icon for visible layers
+    QListWidgetItem* item = new QListWidgetItem(layer->name);
+    
+    if (!layer->visible) {
+        item->setIcon(m_notVisibleIcon);
     }
-
-    QListWidgetItem* item = new QListWidgetItem(displayText);
     
     // Store layer index as data
     item->setData(Qt::UserRole, layerIndex);
+    
+    // Phase 5.2: Enable editing (double-click to rename)
+    item->setFlags(item->flags() | Qt::ItemIsEditable);
 
     // Visual indication for locked layers
     if (layer->locked) {
@@ -270,17 +288,55 @@ void LayerPanel::onItemClicked(QListWidgetItem* item)
     if (clickPos.x() < itemRect.left() + 30) {
         layer->visible = !layer->visible;
         
-        // Update item display
-        QString displayText;
+        // Phase 5.2: Update item icon based on visibility
+        m_updatingList = true;
         if (layer->visible) {
-            displayText = QString("👁 %1").arg(layer->name);
+            item->setIcon(QIcon());  // No icon for visible layers
         } else {
-            displayText = QString("   %1").arg(layer->name);
+            item->setIcon(m_notVisibleIcon);  // Show "not visible" icon
         }
-        item->setText(displayText);
+        m_updatingList = false;
         
         emit layerVisibilityChanged(layerIndex, layer->visible);
     }
+}
+
+void LayerPanel::onItemChanged(QListWidgetItem* item)
+{
+    // Phase 5.2: Handle layer rename via inline editing
+    // Skip if we're programmatically updating the list
+    if (m_updatingList || !m_page || !item) {
+        return;
+    }
+    
+    int layerIndex = item->data(Qt::UserRole).toInt();
+    if (layerIndex < 0 || layerIndex >= m_page->layerCount()) {
+        return;
+    }
+    
+    VectorLayer* layer = m_page->layer(layerIndex);
+    if (!layer) {
+        return;
+    }
+    
+    // Get the edited text (no prefix to strip - we use icons now)
+    QString newText = item->text().trimmed();
+    
+    // Don't allow empty names
+    if (newText.isEmpty()) {
+        newText = QString("Layer %1").arg(layerIndex + 1);
+    }
+    
+    // Only update if name actually changed
+    if (layer->name != newText) {
+        layer->name = newText;
+        emit layerRenamed(layerIndex, newText);
+    }
+    
+    // Ensure the display text is correct (set to layer name)
+    m_updatingList = true;
+    item->setText(layer->name);
+    m_updatingList = false;
 }
 
 // ============================================================================

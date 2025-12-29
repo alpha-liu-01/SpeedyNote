@@ -927,7 +927,8 @@ void MainWindow::setupUi() {
     // Connect bookmarks tree item clicks
     connect(bookmarksTree, &QTreeWidget::itemClicked, this, &MainWindow::onBookmarkItemClicked);
     
-    // 🌟 Layer Panel (Phase 5: below left sidebars)
+    // 🌟 Layer Panel (Phase 5: below left sidebars)---------------------------------------------------------
+    // ---------------------------------------------------------------------------------------------------------
     m_layerPanel = new LayerPanel(this);
     m_layerPanel->setFixedWidth(250);  // Match sidebar width
     m_layerPanel->setMinimumHeight(180);
@@ -940,8 +941,7 @@ void MainWindow::setupUi() {
         if (DocumentViewport* vp = currentViewport()) {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
-                // Edgeless: propagate visibility to all loaded tiles
-                // CR-L3: Use getTile() since tiles are already loaded (from allLoadedTileCoords)
+                // Edgeless: propagate visibility to all loaded tiles and mark dirty
                 auto tiles = doc->allLoadedTileCoords();
                 for (const auto& coord : tiles) {
                     Page* tile = doc->getTile(coord.first, coord.second);
@@ -949,6 +949,7 @@ void MainWindow::setupUi() {
                         VectorLayer* layer = tile->layer(layerIndex);
                         if (layer) {
                             layer->visible = visible;
+                            doc->markTileDirty({coord.first, coord.second});
                         }
                     }
                 }
@@ -975,20 +976,21 @@ void MainWindow::setupUi() {
         if (DocumentViewport* vp = currentViewport()) {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
-                // Edgeless: add layer to all other loaded tiles
-                // Origin tile is never evicted, so getTile is safe here
+                // Edgeless: add layer to all loaded tiles and mark dirty
+                // Origin tile is modified by LayerPanel, mark it dirty
+                doc->markTileDirty({0, 0});
+                
                 Page* originTile = doc->getTile(0, 0);
                 if (originTile && layerIndex < originTile->layerCount()) {
                     VectorLayer* newLayer = originTile->layer(layerIndex);
                     if (newLayer) {
-                        // CR-L3: Use getTile() since tiles are already loaded
                         auto tiles = doc->allLoadedTileCoords();
                         for (const auto& coord : tiles) {
                             if (coord.first == 0 && coord.second == 0) continue; // Skip origin
                             Page* tile = doc->getTile(coord.first, coord.second);
                             if (tile) {
-                                // Add layer with same name at same index
                                 tile->addLayer(newLayer->name);
+                                doc->markTileDirty({coord.first, coord.second});
                             }
                         }
                     }
@@ -1002,14 +1004,17 @@ void MainWindow::setupUi() {
         if (DocumentViewport* vp = currentViewport()) {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
-                // Edgeless: remove layer from all other loaded tiles
-                // CR-L3: Use getTile() since tiles are already loaded
+                // Edgeless: remove layer from all loaded tiles and mark dirty
+                // Origin tile is modified by LayerPanel, mark it dirty
+                doc->markTileDirty({0, 0});
+                
                 auto tiles = doc->allLoadedTileCoords();
                 for (const auto& coord : tiles) {
-                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin (already done)
+                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin
                     Page* tile = doc->getTile(coord.first, coord.second);
                     if (tile && layerIndex < tile->layerCount()) {
                         tile->removeLayer(layerIndex);
+                        doc->markTileDirty({coord.first, coord.second});
                     }
                 }
             }
@@ -1021,19 +1026,49 @@ void MainWindow::setupUi() {
         if (DocumentViewport* vp = currentViewport()) {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
-                // Edgeless: move layer on all other loaded tiles
-                // CR-L3: Use getTile() since tiles are already loaded
+                // Edgeless: move layer on all loaded tiles and mark dirty
+                // Origin tile is modified by LayerPanel, mark it dirty
+                doc->markTileDirty({0, 0});
+                
                 auto tiles = doc->allLoadedTileCoords();
                 for (const auto& coord : tiles) {
-                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin (already done)
+                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin
                     Page* tile = doc->getTile(coord.first, coord.second);
                     if (tile) {
                         tile->moveLayer(fromIndex, toIndex);
+                        doc->markTileDirty({coord.first, coord.second});
                     }
                 }
             }
             emit vp->documentModified();
             vp->update();
+        }
+    });
+    
+    // Phase 5.2: Layer rename syncs to all tiles in edgeless mode
+    connect(m_layerPanel, &LayerPanel::layerRenamed, this, [this](int layerIndex, const QString& newName) {
+        if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (doc && doc->isEdgeless()) {
+                // Edgeless: sync rename to all loaded tiles and mark dirty
+                // Origin tile is modified by LayerPanel, mark it dirty
+                doc->markTileDirty({0, 0});
+                
+                auto tiles = doc->allLoadedTileCoords();
+                for (const auto& coord : tiles) {
+                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin
+                    Page* tile = doc->getTile(coord.first, coord.second);
+                    if (tile && layerIndex < tile->layerCount()) {
+                        VectorLayer* layer = tile->layer(layerIndex);
+                        if (layer) {
+                            layer->name = newName;
+                            doc->markTileDirty({coord.first, coord.second});
+                        }
+                    }
+                }
+            }
+            emit vp->documentModified();
+            // No need to update() - name change doesn't affect rendering
         }
     });
     

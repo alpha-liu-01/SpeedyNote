@@ -2,7 +2,7 @@
 
 > **Purpose:** Multi-layer support with LayerPanel UI integration
 > **Created:** Dec 28, 2024
-> **Status:** 🔄 IN PROGRESS (Phase 5.1 Complete)
+> **Status:** 🔄 IN PROGRESS (Phase 5.1, 5.2 Complete → Phase 5.6 Next)
 
 ---
 
@@ -20,14 +20,14 @@ This subplan covers the integration of multi-layer support into SpeedyNote. The 
 - Layer rendering with caching (`VectorLayer::renderWithZoomCache`)
 
 **Not Yet Implemented:**
-- LayerPanel not placed in MainWindow
-- LayerPanel not connected to DocumentViewport
-- Layer rename (double-click to edit)
-- Select/tick UI for batch operations
-- Merge layers
-- Duplicate layer
-- Edgeless global layer manifest
-- Multi-layer undo integration
+- ~~LayerPanel not placed in MainWindow~~ ✅ Phase 5.1
+- ~~LayerPanel not connected to DocumentViewport~~ ✅ Phase 5.1
+- ~~Layer rename (double-click to edit)~~ ✅ Phase 5.2
+- Edgeless global layer manifest ← **Phase 5.6 (NEXT)**
+- Duplicate layer ← Phase 5.5 (after 5.6)
+- Select/tick UI for batch operations ← Phase 5.3 (after 5.6)
+- Merge layers ← Phase 5.4 (after 5.3)
+- Multi-layer undo integration ← Phase 5.7 (after all operations)
 
 ---
 
@@ -166,6 +166,7 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 | CR-L1 | Unused variable `tileLayerCount` in `syncTileLayerStructure` | Removed dead code |
 | CR-L2 | Contradictory comment about ID sync | Clarified: IDs synced only when creating new layers, not for existing layers |
 | CR-L3 | Inefficient `getOrCreateTile()` on already-loaded tiles | Changed to `getTile()` since `allLoadedTileCoords()` returns loaded tiles |
+| CR-L4 | Layer changes not saved in edgeless mode | Added `markTileDirty()` calls for all layer operations (visibility, add, remove, move, rename) |
 
 **Additional Fixes for Edgeless Mode:**
 
@@ -176,24 +177,41 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 
 ---
 
-### Phase 5.2: Layer Rename ⬜ NOT STARTED
+### Phase 5.2: Layer Rename ✅ COMPLETE
 
 **Goal:** Double-click layer name to edit inline.
 
 **Tasks:**
-1. Enable `QListWidget` item editing on double-click
-2. Connect `itemChanged` signal to update `VectorLayer::name`
-3. Emit signal for document modified
-4. Ensure serialization saves updated name
+1. ✅ Enable `QListWidget` item editing on double-click
+   - Added `Qt::ItemIsEditable` flag to items in `createLayerItem()`
+2. ✅ Connect `itemChanged` signal to update `VectorLayer::name`
+   - Added `onItemChanged()` slot that strips visibility prefix and updates name
+3. ✅ Emit signal for document modified
+   - Added `layerRenamed(int index, const QString& newName)` signal
+   - Connected in MainWindow to emit `documentModified()`
+4. ✅ Ensure serialization saves updated name
+   - VectorLayer::name is already serialized - no changes needed
+5. ✅ Sync rename to all tiles in edgeless mode
+   - Connected `layerRenamed` signal to sync name across all loaded tiles
 
-**Files to modify:**
-- `source/ui/LayerPanel.cpp` - Add double-click edit support
+**Files modified:**
+- `source/ui/LayerPanel.h` - Added `layerRenamed` signal, `onItemChanged` slot, `m_notVisibleIcon` member
+- `source/ui/LayerPanel.cpp` - Implemented rename handling, icon-based visibility
+- `source/MainWindow.cpp` - Connected signal for edgeless sync and document modified
+
+**Visibility Display:**
+- Visible layers: just layer name (no icon)
+- Hidden layers: "notvisible" icon + layer name
+- Uses themed icon (`notvisible.png` / `notvisible_reversed.png`) for dark/light modes
 
 **Test cases:**
 - [ ] Double-click layer opens inline editor
 - [ ] Enter commits new name
 - [ ] Escape cancels edit
 - [ ] Name persists after save/load
+- [ ] In edgeless mode, rename syncs to all tiles
+- [ ] Hidden layers show notvisible icon
+- [ ] Visible layers show no icon
 
 ---
 
@@ -288,60 +306,420 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 
 ### Phase 5.6: Edgeless Layer Manifest ⬜ NOT STARTED
 
-**Goal:** Store layer definitions in edgeless document manifest.
+**Goal:** Store layer definitions in edgeless document manifest, enabling O(1) layer operations and removing the origin tile special handling.
 
-**Current:** Each tile stores full layer info (id, name, visible, etc.)
-**New:** Manifest stores layer definitions; tiles only store strokes.
+---
 
-**Tasks:**
-1. Add `layerDefinitions` to Document for edgeless mode
-2. Update `Document::saveBundle()`:
-   - Write layer definitions to `document.json`
-   - Tiles only save layers with strokes
-3. Update `Document::loadBundle()`:
-   - Load layer definitions from manifest
-   - When loading tile, create empty layers from manifest
-4. Update add/remove/rename layer:
-   - Modify manifest
-   - Don't touch tiles (lazy update)
-5. Sync active layer globally in DocumentViewport
+#### Current Architecture Problems
 
-**Files to modify:**
-- `source/core/Document.h` - Add layerDefinitions for edgeless
-- `source/core/Document.cpp` - Update save/load bundle
-- `source/core/DocumentViewport.cpp` - Global active layer for edgeless
+| Problem | Impact |
+|---------|--------|
+| Origin tile (0,0) cannot be evicted | Memory waste, crashes if user scrolls far |
+| Layer ops iterate ALL loaded tiles | O(n) disk writes for add/remove/rename |
+| Evicted tiles have stale layer data | Inconsistent state after layer changes |
+| MainWindow has ~145 lines sync logic | Violates "thin hub" principle |
+| Layer definitions duplicated per-tile | Wasteful storage, sync complexity |
 
-**Manifest format:**
-```json
-{
-  "format": "speedynote_edgeless",
-  "version": 1,
-  "layers": [
-    {"id": "uuid1", "name": "Sketch", "visible": true, "opacity": 1.0, "locked": false},
-    {"id": "uuid2", "name": "Ink", "visible": true, "opacity": 1.0, "locked": false}
-  ],
-  "active_layer_index": 0,
-  "tile_index": ["0,0", "1,0"]
+---
+
+#### New Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  document.json (MANIFEST - Single Source of Truth)                  │
+│  ├── layers: [                                                      │
+│  │     {id:"uuid1", name:"Sketch", visible:true, opacity:1, locked:false},│
+│  │     {id:"uuid2", name:"Ink", visible:true, opacity:1, locked:false}   │
+│  │   ]                                                              │
+│  ├── active_layer_index: 0                                          │
+│  └── tile_index: ["0,0", "1,0", "-1,0", ...]                       │
+├─────────────────────────────────────────────────────────────────────┤
+│  tiles/0,0.json (STROKES ONLY)                                      │
+│  └── layers: [                                                      │
+│        {id:"uuid1", strokes:[...]},  ← Only id + strokes            │
+│        {id:"uuid2", strokes:[...]}   ← No name/visible/opacity      │
+│      ]                                                              │
+├─────────────────────────────────────────────────────────────────────┤
+│  tiles/1,0.json                                                     │
+│  └── layers: [                                                      │
+│        {id:"uuid1", strokes:[...]}   ← uuid2 omitted (empty)        │
+│      ]                                                              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key behaviors:**
+- Add/remove/rename/reorder/visibility → 1 disk write (manifest only)
+- Tiles only store layers that have strokes
+- When loading tile: reconstruct VectorLayers from manifest + strokes from tile
+- No special "origin tile" needed - all tiles equal
+- Layer operations are O(1), not O(loaded_tiles)
+
+---
+
+#### Phase 5.6.1: LayerDefinition Struct & Document Members
+
+**Add to `Document.h`:**
+```cpp
+/**
+ * @brief Layer metadata for edgeless mode manifest.
+ * Strokes are stored per-tile, but layer definitions (name, visibility, etc.)
+ * are stored once in the manifest.
+ */
+struct LayerDefinition {
+    QString id;
+    QString name;
+    bool visible = true;
+    qreal opacity = 1.0;
+    bool locked = false;
+    
+    QJsonObject toJson() const;
+    static LayerDefinition fromJson(const QJsonObject& obj);
+};
+
+// In Document class:
+private:
+    // Edgeless layer manifest (Phase 5.6)
+    std::vector<LayerDefinition> m_edgelessLayers;
+    int m_edgelessActiveLayerIndex = 0;
+    bool m_edgelessManifestDirty = false;  // Track if manifest needs saving
+
+public:
+    // Edgeless layer manifest API
+    int edgelessLayerCount() const;
+    const LayerDefinition* edgelessLayerDef(int index) const;
+    QString edgelessLayerId(int index) const;
+    
+    int addEdgelessLayer(const QString& name);
+    bool removeEdgelessLayer(int index);
+    bool moveEdgelessLayer(int from, int to);
+    void setEdgelessLayerVisible(int index, bool visible);
+    void setEdgelessLayerName(int index, const QString& name);
+    void setEdgelessLayerOpacity(int index, qreal opacity);
+    void setEdgelessLayerLocked(int index, bool locked);
+    
+    int edgelessActiveLayerIndex() const;
+    void setEdgelessActiveLayerIndex(int index);
+    
+    // Signal when manifest changes (for UI updates)
+    bool isEdgelessManifestDirty() const { return m_edgelessManifestDirty; }
+```
+
+**Implementation notes:**
+- Layer operations modify `m_edgelessLayers` and set `m_edgelessManifestDirty = true`
+- No tile iteration needed for layer metadata changes
+- Loaded tiles are NOT updated in memory (lazy - will sync on next load)
+
+---
+
+#### Phase 5.6.2: Manifest Save/Load
+
+**Update `Document::saveBundle()`:**
+```cpp
+// In manifest building:
+QJsonArray layersArray;
+for (const auto& layerDef : m_edgelessLayers) {
+    layersArray.append(layerDef.toJson());
+}
+manifest["layers"] = layersArray;
+manifest["active_layer_index"] = m_edgelessActiveLayerIndex;
+
+// Clear manifest dirty flag after save
+m_edgelessManifestDirty = false;
+```
+
+**Update `Document::loadBundle()`:**
+```cpp
+// Parse layer definitions from manifest
+QJsonArray layersArray = obj["layers"].toArray();
+m_edgelessLayers.clear();
+for (const auto& val : layersArray) {
+    m_edgelessLayers.push_back(LayerDefinition::fromJson(val.toObject()));
+}
+
+// Ensure at least one layer exists
+if (m_edgelessLayers.empty()) {
+    LayerDefinition defaultLayer;
+    defaultLayer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    defaultLayer.name = "Layer 1";
+    m_edgelessLayers.push_back(defaultLayer);
+}
+
+m_edgelessActiveLayerIndex = obj["active_layer_index"].toInt(0);
+```
+
+**Update `Document::createNew()` for edgeless:**
+```cpp
+if (docMode == Mode::Edgeless) {
+    // Create default layer in manifest
+    LayerDefinition layer;
+    layer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    layer.name = "Layer 1";
+    doc->m_edgelessLayers.push_back(layer);
 }
 ```
 
-**Tile format (updated):**
-```json
-{
-  "coord": [0, 0],
-  "layers": {
-    "uuid1": {"strokes": [...]},
-    "uuid2": {"strokes": [...]}
-  }
+---
+
+#### Phase 5.6.3: Tile Save Format (Strokes Only)
+
+**Update `Document::saveTile()`:**
+```cpp
+// For edgeless mode, use compact format (id + strokes only)
+if (isEdgeless()) {
+    QJsonObject tileObj;
+    QJsonArray layersArray;
+    
+    Page* tile = it->second.get();
+    for (int i = 0; i < tile->layerCount(); ++i) {
+        VectorLayer* layer = tile->layer(i);
+        if (layer && !layer->isEmpty()) {
+            QJsonObject layerObj;
+            layerObj["id"] = layer->id;
+            
+            QJsonArray strokesArray;
+            for (const auto& stroke : layer->strokes()) {
+                strokesArray.append(stroke.toJson());
+            }
+            layerObj["strokes"] = strokesArray;
+            
+            layersArray.append(layerObj);
+        }
+    }
+    tileObj["layers"] = layersArray;
+    // ... write tileObj
 }
 ```
 
-**Test cases:**
-- [ ] Add layer = 1 disk write (manifest only)
-- [ ] Tiles without layer content don't store that layer
-- [ ] Loading reconstructs empty layers from manifest
-- [ ] Layer visibility synced across all tiles
-- [ ] Active layer selection applies globally
+**Key change:** Don't save `name`, `visible`, `opacity`, `locked` per-layer in tiles. Only `id` + `strokes`.
+
+---
+
+#### Phase 5.6.4: Tile Load with Manifest Reconstruction
+
+**Update `Document::loadTileFromDisk()`:**
+```cpp
+// For edgeless mode, reconstruct full layers from manifest
+if (isEdgeless()) {
+    QJsonArray tileLayersArray = jsonDoc["layers"].toArray();
+    
+    // Build map of layerId → strokes from tile
+    std::map<QString, QVector<VectorStroke>> strokesByLayerId;
+    for (const auto& val : tileLayersArray) {
+        QJsonObject layerObj = val.toObject();
+        QString layerId = layerObj["id"].toString();
+        QVector<VectorStroke> strokes;
+        for (const auto& strokeVal : layerObj["strokes"].toArray()) {
+            strokes.append(VectorStroke::fromJson(strokeVal.toObject()));
+        }
+        strokesByLayerId[layerId] = strokes;
+    }
+    
+    // Reconstruct full VectorLayers from manifest
+    tile->vectorLayers.clear();
+    for (const auto& layerDef : m_edgelessLayers) {
+        auto layer = std::make_unique<VectorLayer>(layerDef.name);
+        layer->id = layerDef.id;
+        layer->visible = layerDef.visible;
+        layer->opacity = layerDef.opacity;
+        layer->locked = layerDef.locked;
+        
+        // Add strokes if this tile has any for this layer
+        auto it = strokesByLayerId.find(layerDef.id);
+        if (it != strokesByLayerId.end()) {
+            for (const auto& stroke : it->second) {
+                layer->addStroke(stroke);
+            }
+        }
+        
+        tile->vectorLayers.push_back(std::move(layer));
+    }
+    
+    tile->activeLayerIndex = m_edgelessActiveLayerIndex;
+}
+```
+
+---
+
+#### Phase 5.6.5: Remove Origin Tile Special Handling
+
+**Delete from `DocumentViewport::evictDistantTiles()`:**
+```cpp
+// DELETE THIS:
+// Phase 5.1: Never evict the origin tile (0,0) - it's the LayerPanel representative
+if (coord.first == 0 && coord.second == 0) {
+    continue;
+}
+```
+
+**Delete from `Document.cpp`:**
+- Remove `syncTileLayerStructure()` method entirely
+- Remove calls to `syncTileLayerStructure()` in `getOrCreateTile()` and `loadTileFromDisk()`
+
+---
+
+#### Phase 5.6.6: Update getOrCreateTile for Manifest Layers
+
+**Update `Document::getOrCreateTile()`:**
+```cpp
+// When creating new tile, use manifest layer structure
+if (isEdgeless()) {
+    tile->vectorLayers.clear();
+    for (const auto& layerDef : m_edgelessLayers) {
+        auto layer = std::make_unique<VectorLayer>(layerDef.name);
+        layer->id = layerDef.id;
+        layer->visible = layerDef.visible;
+        layer->opacity = layerDef.opacity;
+        layer->locked = layerDef.locked;
+        tile->vectorLayers.push_back(std::move(layer));
+    }
+    tile->activeLayerIndex = m_edgelessActiveLayerIndex;
+}
+```
+
+---
+
+#### Phase 5.6.7: LayerPanel Connection Update
+
+**Option A: Virtual Page Adapter (Recommended)**
+Create a "virtual page" that wraps Document's layer manifest:
+
+```cpp
+// In Document.h:
+class EdgelessLayerAdapter {
+public:
+    EdgelessLayerAdapter(Document* doc) : m_doc(doc) {}
+    
+    int layerCount() const { return m_doc->edgelessLayerCount(); }
+    VectorLayer* layer(int index);  // Returns temporary VectorLayer
+    // ... other Page-like methods
+    
+private:
+    Document* m_doc;
+    std::vector<std::unique_ptr<VectorLayer>> m_tempLayers;  // For LayerPanel
+};
+```
+
+**Option B: Modify LayerPanel (Alternative)**
+Add `setEdgelessDocument(Document*)` to LayerPanel and have it read from `m_edgelessLayers` directly.
+
+---
+
+#### Phase 5.6.8: Simplify MainWindow Layer Logic
+
+**Replace ~145 lines with:**
+```cpp
+// Visibility change → just update manifest
+connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int idx, bool vis) {
+    if (auto* vp = currentViewport()) {
+        if (auto* doc = vp->document(); doc && doc->isEdgeless()) {
+            doc->setEdgelessLayerVisible(idx, vis);
+            vp->update();  // Repaint - loaded tiles already have correct VectorLayers
+        }
+    }
+});
+
+// Layer add → just update manifest
+connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int idx) {
+    // LayerPanel already called doc->addEdgelessLayer() via adapter
+    if (auto* vp = currentViewport()) {
+        emit vp->documentModified();
+        vp->update();
+    }
+});
+
+// Similar simplification for remove/move/rename
+```
+
+**Net result:** ~145 lines → ~30 lines
+
+---
+
+#### Phase 5.6.9: Migration & Backward Compatibility
+
+**Version detection in `loadBundle()`:**
+```cpp
+// Check manifest version
+int manifestVersion = obj["format_version"].toString("1.0").split('.')[0].toInt();
+
+if (manifestVersion < 2 || !obj.contains("layers")) {
+    // Old format: layers stored per-tile
+    // Migration: read layer structure from first available tile
+    migrateLayersFromTileToManifest();
+}
+```
+
+**Migration helper:**
+```cpp
+void Document::migrateLayersFromTileToManifest() {
+    // Load any existing tile to get layer structure
+    for (const auto& coord : m_tileIndex) {
+        if (loadTileFromDisk(coord)) {
+            Page* tile = m_tiles[coord].get();
+            for (int i = 0; i < tile->layerCount(); ++i) {
+                VectorLayer* layer = tile->layer(i);
+                LayerDefinition def;
+                def.id = layer->id;
+                def.name = layer->name;
+                def.visible = layer->visible;
+                def.opacity = layer->opacity;
+                def.locked = layer->locked;
+                m_edgelessLayers.push_back(def);
+            }
+            m_edgelessActiveLayerIndex = tile->activeLayerIndex;
+            break;  // Only need one tile for structure
+        }
+    }
+    
+    // Ensure at least one layer
+    if (m_edgelessLayers.empty()) {
+        LayerDefinition def;
+        def.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        def.name = "Layer 1";
+        m_edgelessLayers.push_back(def);
+    }
+    
+    m_edgelessManifestDirty = true;  // Save new format on next save
+}
+```
+
+---
+
+#### Files to Modify
+
+| File | Changes |
+|------|---------|
+| `Document.h` | Add `LayerDefinition`, `m_edgelessLayers`, layer API methods |
+| `Document.cpp` | Implement layer API, update saveBundle/loadBundle/saveTile/loadTile, add migration |
+| `DocumentViewport.cpp` | Remove origin tile special handling, update drawing to use manifest layer index |
+| `MainWindow.cpp` | Simplify layer signal handlers (~145 lines → ~30 lines) |
+| `LayerPanel.h/cpp` | Add `setEdgelessDocument()` or adapter pattern |
+
+---
+
+#### Test Cases
+
+| Test | Expected |
+|------|----------|
+| Add layer in edgeless | 1 disk write (manifest), no tile writes |
+| Rename layer | 1 disk write (manifest), loaded tiles unaffected |
+| Toggle visibility | Manifest updated, all loaded tiles respect new visibility |
+| Evict all tiles, reload | Layers reconstructed correctly from manifest |
+| Open old .snb (no manifest layers) | Migration creates manifest from first tile |
+| 100 loaded tiles, add layer | O(1) operation, not O(100) |
+| Origin tile (0,0) eviction | Should evict normally (no longer special) |
+| Save bundle after layer ops | Manifest has new structure, tiles unchanged |
+
+---
+
+#### Success Criteria
+
+- [ ] Layer operations are O(1) disk writes
+- [ ] No tile iteration for layer metadata changes
+- [ ] Origin tile can be evicted like any other tile
+- [ ] MainWindow layer logic reduced to ~30 lines
+- [ ] Old .snb files migrate transparently
+- [ ] All layer features work: visibility, rename, add, remove, reorder
+- [ ] Active layer selection is global and persistent
 
 ---
 
@@ -458,18 +836,28 @@ struct LayerUndoAction {
 
 ## Dependencies
 
-| Phase | Depends On |
-|-------|------------|
-| 5.1 | None (can start immediately) |
-| 5.2 | 5.1 (needs LayerPanel in UI) |
-| 5.3 | 5.1 (needs LayerPanel in UI) |
-| 5.4 | 5.3 (needs selection UI) |
-| 5.5 | 5.1 (needs LayerPanel in UI) |
-| 5.6 | 5.1 (needs basic layer ops working) |
-| 5.7 | 5.1-5.5 (needs all operations implemented) |
-| 5.8 | 5.1-5.7 (final testing) |
+| Phase | Depends On | Status |
+|-------|------------|--------|
+| 5.1 | None | ✅ Complete |
+| 5.2 | 5.1 | ✅ Complete |
+| 5.6 | 5.1, 5.2 | ⬜ **Next** |
+| 5.5 | 5.6 (benefits from manifest) | ⬜ Pending |
+| 5.3 | 5.6 (benefits from manifest) | ⬜ Pending |
+| 5.4 | 5.3 (needs selection UI) | ⬜ Pending |
+| 5.7 | 5.3-5.6 (needs operations) | ⬜ Pending |
+| 5.8 | 5.1-5.7 (final testing) | ⬜ Pending |
 
-**Recommended order:** 5.1 → 5.2 → 5.5 → 5.3 → 5.4 → 5.6 → 5.7 → 5.8
+**Revised order:** 5.1 ✅ → 5.2 ✅ → **5.6** → 5.5 → 5.3 → 5.4 → 5.7 → 5.8
+
+**Rationale for revised order:**
+- Phase 5.6 fundamentally changes edgeless layer architecture (manifest-based)
+- Implementing 5.3/5.4 now would require refactoring after 5.6
+- Doing 5.6 first provides:
+  - O(1) layer operations (no tile iteration)
+  - Clean separation of concerns (Document owns layer structure)
+  - Simpler MainWindow code
+  - No origin tile special handling
+- 5.5 (Duplicate) benefits from manifest because duplicating a layer = 1 manifest write
 
 ---
 
@@ -478,6 +866,7 @@ struct LayerUndoAction {
 - Opacity and Lock features deferred to future phase
 - Drag-and-drop reordering deferred (using buttons for now)
 - Layer blend modes not in scope
+- Phase 5.6 includes migration for old .snb files without manifest layers
 
 ---
 

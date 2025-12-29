@@ -116,6 +116,13 @@ signals:
      */
     void layerVisibilityChanged(int index, bool visible);
 
+    /**
+     * @brief Emitted when a layer is renamed.
+     * @param index The layer index.
+     * @param newName The new layer name.
+     */
+    void layerRenamed(int index, const QString& newName);
+
 private slots:
     /**
      * @brief Handle Add Layer button click.
@@ -149,6 +156,12 @@ private slots:
      */
     void onItemClicked(QListWidgetItem* item);
 
+    /**
+     * @brief Handle item text changed (rename).
+     * @param item The item that was changed.
+     */
+    void onItemChanged(QListWidgetItem* item);
+
 private:
     // Connected page (not owned)
     Page* m_page = nullptr;
@@ -160,12 +173,20 @@ private:
     QPushButton* m_moveUpButton = nullptr;
     QPushButton* m_moveDownButton = nullptr;
     QLabel* m_titleLabel = nullptr;
+    
+    // Phase 5.2: Visibility icon (loaded based on theme)
+    QIcon m_notVisibleIcon;
 
     // Flag to prevent recursive updates
     bool m_updatingList = false;
 
     // Setup methods
     void setupUI();
+    
+    /**
+     * @brief Load the visibility icon based on current theme.
+     */
+    void loadVisibilityIcon();
 
     /**
      * @brief Update button enabled states based on current selection.
