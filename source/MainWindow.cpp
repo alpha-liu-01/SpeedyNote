@@ -935,8 +935,23 @@ void MainWindow::setupUi() {
     
     // Phase 5.1: Connect LayerPanel signals
     // Task 6: Visibility change triggers viewport repaint
-    connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int, bool) {
+    // For edgeless mode: sync visibility to ALL loaded tiles
+    connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int layerIndex, bool visible) {
         if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (doc && doc->isEdgeless()) {
+                // Edgeless: propagate visibility to all loaded tiles
+                auto tiles = doc->allLoadedTileCoords();
+                for (const auto& coord : tiles) {
+                    Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                    if (tile && layerIndex < tile->layerCount()) {
+                        VectorLayer* layer = tile->layer(layerIndex);
+                        if (layer) {
+                            layer->visible = visible;
+                        }
+                    }
+                }
+            }
             vp->update();
         }
     });
@@ -954,20 +969,64 @@ void MainWindow::setupUi() {
     });
     
     // Task 8: Layer add/remove/move marks document as modified
-    connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int) {
+    // For edgeless mode: sync layer changes to ALL loaded tiles
+    connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int layerIndex) {
         if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (doc && doc->isEdgeless()) {
+                // Edgeless: add layer to all other loaded tiles
+                Page* originTile = doc->getOrCreateTile(0, 0);
+                if (originTile && layerIndex < originTile->layerCount()) {
+                    VectorLayer* newLayer = originTile->layer(layerIndex);
+                    if (newLayer) {
+                        auto tiles = doc->allLoadedTileCoords();
+                        for (const auto& coord : tiles) {
+                            if (coord.first == 0 && coord.second == 0) continue; // Skip origin
+                            Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                            if (tile) {
+                                // Add layer with same name at same index
+                                tile->addLayer(newLayer->name);
+                            }
+                        }
+                    }
+                }
+            }
             emit vp->documentModified();
             vp->update();
         }
     });
-    connect(m_layerPanel, &LayerPanel::layerRemoved, this, [this](int) {
+    connect(m_layerPanel, &LayerPanel::layerRemoved, this, [this](int layerIndex) {
         if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (doc && doc->isEdgeless()) {
+                // Edgeless: remove layer from all other loaded tiles
+                auto tiles = doc->allLoadedTileCoords();
+                for (const auto& coord : tiles) {
+                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin (already done)
+                    Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                    if (tile && layerIndex < tile->layerCount()) {
+                        tile->removeLayer(layerIndex);
+                    }
+                }
+            }
             emit vp->documentModified();
             vp->update();
         }
     });
-    connect(m_layerPanel, &LayerPanel::layerMoved, this, [this](int, int) {
+    connect(m_layerPanel, &LayerPanel::layerMoved, this, [this](int fromIndex, int toIndex) {
         if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (doc && doc->isEdgeless()) {
+                // Edgeless: move layer on all other loaded tiles
+                auto tiles = doc->allLoadedTileCoords();
+                for (const auto& coord : tiles) {
+                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin (already done)
+                    Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                    if (tile) {
+                        tile->moveLayer(fromIndex, toIndex);
+                    }
+                }
+            }
             emit vp->documentModified();
             vp->update();
         }
@@ -1604,6 +1663,10 @@ void MainWindow::setupUi() {
         updateTabSizes();
         positionLeftSidebarTabs();
         positionDialToolbarTab();
+        
+        // Phase 5.1: Initialize LayerPanel for the first tab
+        // currentViewportChanged may have been emitted before m_layerPanel was ready
+        updateLayerPanelForViewport(currentViewport());
     });
     
     // =========================================================================

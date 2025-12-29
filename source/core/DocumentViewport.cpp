@@ -2068,6 +2068,11 @@ void DocumentViewport::evictDistantTiles()
     
     int evictedCount = 0;
     for (const auto& coord : loadedTiles) {
+        // Phase 5.1: Never evict the origin tile (0,0) - it's the LayerPanel representative
+        if (coord.first == 0 && coord.second == 0) {
+            continue;
+        }
+        
         QRectF tileRect(coord.first * tileSize, coord.second * tileSize,
                         tileSize, tileSize);
         

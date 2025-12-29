@@ -427,7 +427,12 @@ Page* Document::getTile(int tx, int ty) const
     // m_tiles is mutable, so this works on const Document
     if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
         if (loadTileFromDisk(coord)) {
-            return m_tiles.at(coord).get();
+            Page* loadedTile = m_tiles.at(coord).get();
+            // Phase 5.1: Sync layer structure with origin tile (if this isn't the origin)
+            if (tx != 0 || ty != 0) {
+                syncTileLayerStructure(loadedTile);
+            }
+            return loadedTile;
         }
     }
     
@@ -448,7 +453,12 @@ Page* Document::getOrCreateTile(int tx, int ty)
     // 2. If lazy loading enabled, try to load from disk
     if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
         if (loadTileFromDisk(coord)) {
-            return m_tiles.at(coord).get();
+            Page* loadedTile = m_tiles.at(coord).get();
+            // Phase 5.1: Sync layer structure with origin tile (if this isn't the origin)
+            if (tx != 0 || ty != 0) {
+                syncTileLayerStructure(loadedTile);
+            }
+            return loadedTile;
         }
     }
     
@@ -473,7 +483,72 @@ Page* Document::getOrCreateTile(int tx, int ty)
 #ifdef QT_DEBUG
     qDebug() << "Document: Created tile at (" << tx << "," << ty << ") total tiles:" << m_tiles.size();
 #endif
-    return insertIt->second.get();
+    
+    Page* newTile = insertIt->second.get();
+    
+    // Phase 5.1: Sync layer structure with origin tile (if this isn't the origin)
+    if (tx != 0 || ty != 0) {
+        syncTileLayerStructure(newTile);
+    }
+    
+    return newTile;
+}
+
+void Document::syncTileLayerStructure(Page* tile) const
+{
+    if (!tile) return;
+    
+    // Get the origin tile (0,0) as the source of truth
+    TileCoord originCoord(0, 0);
+    auto originIt = m_tiles.find(originCoord);
+    if (originIt == m_tiles.end()) {
+        // Origin tile not loaded - nothing to sync with
+        return;
+    }
+    
+    Page* origin = originIt->second.get();
+    if (!origin) return;
+    
+    int originLayerCount = origin->layerCount();
+    int tileLayerCount = tile->layerCount();
+    
+    // Add layers if tile has fewer
+    while (tile->layerCount() < originLayerCount) {
+        int idx = tile->layerCount();
+        VectorLayer* srcLayer = origin->layer(idx);
+        if (srcLayer) {
+            VectorLayer* newLayer = tile->addLayer(srcLayer->name);
+            if (newLayer) {
+                newLayer->id = srcLayer->id;  // Same ID for consistency
+                newLayer->visible = srcLayer->visible;
+                newLayer->opacity = srcLayer->opacity;
+                newLayer->locked = srcLayer->locked;
+            }
+        } else {
+            tile->addLayer(QString("Layer %1").arg(idx + 1));
+        }
+    }
+    
+    // Remove layers if tile has more (shouldn't normally happen, but handle it)
+    while (tile->layerCount() > originLayerCount && tile->layerCount() > 1) {
+        tile->removeLayer(tile->layerCount() - 1);
+    }
+    
+    // Sync layer properties (visibility, name, etc.) but NOT strokes
+    for (int i = 0; i < qMin(tile->layerCount(), originLayerCount); ++i) {
+        VectorLayer* srcLayer = origin->layer(i);
+        VectorLayer* dstLayer = tile->layer(i);
+        if (srcLayer && dstLayer) {
+            dstLayer->name = srcLayer->name;
+            dstLayer->visible = srcLayer->visible;
+            dstLayer->opacity = srcLayer->opacity;
+            dstLayer->locked = srcLayer->locked;
+            // Don't sync id or strokes - those are tile-specific
+        }
+    }
+    
+    // Sync active layer index
+    tile->activeLayerIndex = origin->activeLayerIndex;
 }
 
 QVector<Document::TileCoord> Document::tilesInRect(QRectF docRect) const

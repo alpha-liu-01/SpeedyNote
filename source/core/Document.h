@@ -295,6 +295,17 @@ public:
     bool tileExistsOnDisk(TileCoord coord) const { return m_tileIndex.count(coord) > 0; }
     
     /**
+     * @brief Sync a tile's layer structure with the origin tile.
+     * 
+     * In edgeless mode, all tiles should have the same layer structure
+     * (same count, names, visibility, order). The origin tile (0,0) is
+     * the source of truth for this structure.
+     * 
+     * @param tile The tile to sync.
+     */
+    void syncTileLayerStructure(Page* tile) const;
+    
+    /**
      * @brief Save the entire document as a bundle.
      * @param path Path to the .snb directory.
      * @return True if saved successfully.
