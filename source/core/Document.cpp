@@ -510,7 +510,6 @@ void Document::syncTileLayerStructure(Page* tile) const
     if (!origin) return;
     
     int originLayerCount = origin->layerCount();
-    int tileLayerCount = tile->layerCount();
     
     // Add layers if tile has fewer
     while (tile->layerCount() < originLayerCount) {
@@ -519,7 +518,8 @@ void Document::syncTileLayerStructure(Page* tile) const
         if (srcLayer) {
             VectorLayer* newLayer = tile->addLayer(srcLayer->name);
             if (newLayer) {
-                newLayer->id = srcLayer->id;  // Same ID for consistency
+                // CR-L2: Sync ID for new layers to maintain cross-tile consistency
+                newLayer->id = srcLayer->id;
                 newLayer->visible = srcLayer->visible;
                 newLayer->opacity = srcLayer->opacity;
                 newLayer->locked = srcLayer->locked;
@@ -534,7 +534,8 @@ void Document::syncTileLayerStructure(Page* tile) const
         tile->removeLayer(tile->layerCount() - 1);
     }
     
-    // Sync layer properties (visibility, name, etc.) but NOT strokes
+    // Sync layer properties (visibility, name, etc.) but NOT strokes or IDs
+    // IDs are only synced when creating new layers above
     for (int i = 0; i < qMin(tile->layerCount(), originLayerCount); ++i) {
         VectorLayer* srcLayer = origin->layer(i);
         VectorLayer* dstLayer = tile->layer(i);
@@ -543,7 +544,7 @@ void Document::syncTileLayerStructure(Page* tile) const
             dstLayer->visible = srcLayer->visible;
             dstLayer->opacity = srcLayer->opacity;
             dstLayer->locked = srcLayer->locked;
-            // Don't sync id or strokes - those are tile-specific
+            // Strokes are tile-specific, don't sync
         }
     }
     

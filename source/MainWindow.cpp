@@ -941,9 +941,10 @@ void MainWindow::setupUi() {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
                 // Edgeless: propagate visibility to all loaded tiles
+                // CR-L3: Use getTile() since tiles are already loaded (from allLoadedTileCoords)
                 auto tiles = doc->allLoadedTileCoords();
                 for (const auto& coord : tiles) {
-                    Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                    Page* tile = doc->getTile(coord.first, coord.second);
                     if (tile && layerIndex < tile->layerCount()) {
                         VectorLayer* layer = tile->layer(layerIndex);
                         if (layer) {
@@ -975,14 +976,16 @@ void MainWindow::setupUi() {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
                 // Edgeless: add layer to all other loaded tiles
-                Page* originTile = doc->getOrCreateTile(0, 0);
+                // Origin tile is never evicted, so getTile is safe here
+                Page* originTile = doc->getTile(0, 0);
                 if (originTile && layerIndex < originTile->layerCount()) {
                     VectorLayer* newLayer = originTile->layer(layerIndex);
                     if (newLayer) {
+                        // CR-L3: Use getTile() since tiles are already loaded
                         auto tiles = doc->allLoadedTileCoords();
                         for (const auto& coord : tiles) {
                             if (coord.first == 0 && coord.second == 0) continue; // Skip origin
-                            Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                            Page* tile = doc->getTile(coord.first, coord.second);
                             if (tile) {
                                 // Add layer with same name at same index
                                 tile->addLayer(newLayer->name);
@@ -1000,10 +1003,11 @@ void MainWindow::setupUi() {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
                 // Edgeless: remove layer from all other loaded tiles
+                // CR-L3: Use getTile() since tiles are already loaded
                 auto tiles = doc->allLoadedTileCoords();
                 for (const auto& coord : tiles) {
                     if (coord.first == 0 && coord.second == 0) continue; // Skip origin (already done)
-                    Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                    Page* tile = doc->getTile(coord.first, coord.second);
                     if (tile && layerIndex < tile->layerCount()) {
                         tile->removeLayer(layerIndex);
                     }
@@ -1018,10 +1022,11 @@ void MainWindow::setupUi() {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
                 // Edgeless: move layer on all other loaded tiles
+                // CR-L3: Use getTile() since tiles are already loaded
                 auto tiles = doc->allLoadedTileCoords();
                 for (const auto& coord : tiles) {
                     if (coord.first == 0 && coord.second == 0) continue; // Skip origin (already done)
-                    Page* tile = doc->getOrCreateTile(coord.first, coord.second);
+                    Page* tile = doc->getTile(coord.first, coord.second);
                     if (tile) {
                         tile->moveLayer(fromIndex, toIndex);
                     }
@@ -3482,7 +3487,7 @@ void MainWindow::saveDocument()
         qWarning() << "saveDocument: DocumentManager or TabManager not initialized";
         return;
     }
-            
+
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
         QMessageBox::warning(this, tr("Save Document"), 
@@ -3494,9 +3499,9 @@ void MainWindow::saveDocument()
     if (!doc) {
         QMessageBox::warning(this, tr("Save Document"), 
             tr("No document is open."));
-        return;
-    }
-    
+                return;
+            }
+            
     bool isEdgeless = doc->isEdgeless();
     
     // Check if document already has a permanent path (not temp bundle)
@@ -3556,7 +3561,7 @@ void MainWindow::saveDocument()
         if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
             filePath += ".snb";
         }
-    } else {
+                } else {
         if (!filePath.endsWith(".json", Qt::CaseInsensitive)) {
             filePath += ".json";
         }
@@ -3570,8 +3575,8 @@ void MainWindow::saveDocument()
     if (!m_documentManager->saveDocumentAs(doc, filePath)) {
         QMessageBox::critical(this, tr("Save Error"),
             tr("Failed to save document to:\n%1").arg(filePath));
-        return;
-    }
+                return;
+            }
     
     // Update tab title (remove * prefix)
     int currentIndex = m_tabManager->currentIndex();

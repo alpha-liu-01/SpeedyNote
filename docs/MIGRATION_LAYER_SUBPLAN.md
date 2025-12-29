@@ -159,6 +159,21 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 - [ ] Drawing goes to selected layer
 - [ ] Move up/down changes render order
 
+**Code Review Fixes (Dec 29, 2024):**
+
+| ID | Issue | Fix |
+|----|-------|-----|
+| CR-L1 | Unused variable `tileLayerCount` in `syncTileLayerStructure` | Removed dead code |
+| CR-L2 | Contradictory comment about ID sync | Clarified: IDs synced only when creating new layers, not for existing layers |
+| CR-L3 | Inefficient `getOrCreateTile()` on already-loaded tiles | Changed to `getTile()` since `allLoadedTileCoords()` returns loaded tiles |
+
+**Additional Fixes for Edgeless Mode:**
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| LayerPanel locks up when scrolling far | Origin tile (0,0) was being evicted | Never evict origin tile in `evictDistantTiles()` |
+| Layer order inconsistent across tiles | Tiles loaded from disk had old structure | Added `syncTileLayerStructure()` called on tile load/create |
+
 ---
 
 ### Phase 5.2: Layer Rename ⬜ NOT STARTED
