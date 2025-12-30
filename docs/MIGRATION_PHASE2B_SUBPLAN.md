@@ -763,6 +763,144 @@ if (!m_lassoSelection.offset.isNull()) {
 **Files Modified:**
 - `source/core/DocumentViewport.cpp`
 
+---
+
+## 2.10 Performance Optimization Plan
+
+### Current Performance Issues
+
+The lasso tool currently has no caching or incremental rendering, causing performance issues:
+
+| State | Issue | Impact |
+|-------|-------|--------|
+| **Drawing lasso path** | Full polygon re-rendered every frame | Sluggish on long paths |
+| **Selection rendering** | All strokes transformed & re-rendered every frame | Heavy CPU load during transforms |
+| **Update calls** | `update()` repaints entire widget | Unnecessary repainting |
+
+### Applicable Optimizations from Stroke Rendering
+
+| Stroke Optimization | Lasso Applicability | Priority |
+|--------------------|---------------------|----------|
+| **Incremental Rendering** | ✅ Lasso path can accumulate line segments | High |
+| **Dirty Region Updates** | ✅ Both path and selection have bounded regions | High |
+| **Stroke Caching** | ✅ Selected strokes can be cached at identity | Medium |
+| **Zoom-Aware Cache** | ✅ Selection cache can track zoom level | Medium |
+| **Point Decimation** | ✅ Already implemented (2px threshold) | Done |
+| **Filled Polygon** | ⚠️ N/A - lasso path is thin dashed line | N/A |
+
+### Proposed Implementation
+
+#### 2.10.P1: Lasso Path Incremental Rendering (~50 lines)
+**Target:** Drawing state performance
+
+Similar to `m_currentStrokeCache`, create `m_lassoPathCache`:
+
+```cpp
+// New members
+QPixmap m_lassoPathCache;      ///< Accumulated lasso path segments
+int m_lastRenderedLassoIdx;    ///< Last rendered path point index
+qreal m_lassoPathCacheZoom;    ///< Zoom when cache was created
+
+// In handlePointerMove_Lasso:
+m_lassoPath << pt;
+// Don't call update() - renderCurrentLassoPathIncremental handles it
+
+// New method: renderCurrentLassoPathIncremental()
+// - Create/resize cache on first point or zoom change
+// - Only render new line segment (lastIdx to current)
+// - Blit cache to painter
+```
+
+**Expected Impact:** Smooth 360Hz lasso path drawing for long paths.
+
+#### 2.10.P2: Dirty Region Updates (~20 lines)
+**Target:** Both drawing and transform states
+
+```cpp
+// Lasso path drawing: update only the new segment's bounding rect
+QRectF dirtyRect = QRectF(lastPoint, currentPoint).normalized();
+dirtyRect.adjust(-2, -2, 2, 2);  // Account for line width
+update(dirtyRect.toRect());
+
+// Selection transform: update only selection bounding box + handles
+QRectF selectionRect = getVisualSelectionBounds();  // In viewport coords
+selectionRect.adjust(-HANDLE_SIZE, -ROTATE_HANDLE_OFFSET, HANDLE_SIZE, 0);
+update(selectionRect.toRect());
+```
+
+**Expected Impact:** CPU ~18% vs ~45% (based on stroke rendering benchmarks).
+
+#### 2.10.P3: Selection Stroke Caching (~80 lines)
+**Target:** Transform state performance
+
+Cache the selected strokes at identity transform:
+
+```cpp
+// New members
+QPixmap m_selectionStrokeCache;      ///< Strokes rendered at identity transform
+bool m_selectionCacheDirty = true;   ///< Needs rebuild
+qreal m_selectionCacheZoom = 0;      ///< Zoom level of cache
+
+// In renderLassoSelection:
+if (m_selectionCacheDirty || zoom changed) {
+    // Rebuild cache: render strokes at identity to cache pixmap
+    rebuildSelectionCache();
+}
+
+// Apply transform to painter, then draw cached pixmap
+// This transforms the entire cache image, NOT individual stroke points
+painter.setTransform(buildSelectionTransform());
+painter.drawPixmap(cacheBounds.topLeft(), m_selectionStrokeCache);
+```
+
+**Considerations:**
+- Cache must cover the bounding box at current zoom
+- Invalidate when: zoom changes, offset baked in (CR-2B-9)
+- Keep rotation/scale cumulative (apply via painter transform on blit)
+
+**Expected Impact:** 10x+ faster transform updates for selections with many strokes.
+
+#### 2.10.P4: Semi-Transparent Selection Handling
+**Target:** Marker strokes in selection
+
+Same approach as stroke rendering:
+```cpp
+if (hasTransparentStrokes) {
+    // Render to cache with full opacity
+    // Apply alpha when blitting cache to painter
+    painter.setOpacity(alpha);
+    painter.drawPixmap(...);
+    painter.setOpacity(1.0);
+}
+```
+
+### Implementation Order
+
+1. **P2 (Dirty Region)** - Simplest, immediate benefit, no new state
+2. **P1 (Lasso Path Cache)** - Moderate complexity, helps path drawing
+3. **P3 (Selection Cache)** - Most complex, biggest impact for large selections
+4. **P4 (Transparency)** - Builds on P3, handles edge case
+
+### Estimated Effort
+
+| Task | Lines | Complexity |
+|------|-------|------------|
+| 2.10.P1 | ~50 | Medium |
+| 2.10.P2 | ~20 | Low |
+| 2.10.P3 | ~80 | High |
+| 2.10.P4 | ~15 | Low |
+| **Total** | **~165** | |
+
+### Test Cases
+
+- [ ] Lasso path draws smoothly at 360Hz for 500+ points
+- [ ] Transform operations (move/scale/rotate) are fluid
+- [ ] Zoom during selection doesn't break rendering
+- [ ] Semi-transparent selected strokes display correctly
+- [ ] CPU usage comparable to stroke drawing (~18% vs current ~45%)
+
+---
+
 ### CR-2B-9: Rotation Lost After Baking Transform
 **Issue:** After rotating a selection and then performing another operation (like scale), the bounding box snapped to axis-aligned, losing the rotation. Scaling then happened along X/Y axes instead of along the rotated axes.
 
