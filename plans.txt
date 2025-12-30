@@ -2,8 +2,8 @@
                     SPEEDYNOTE VIEWPORT MIGRATION PLAN
 =============================================================================
 
-STATUS: Phase 1 ✅ | Phase 2A ✅ | Phase 3.0-3.2 ✅ | Phase 3.3 IN PROGRESS
-LAST UPDATED: Dec 24, 2024
+STATUS: Phase 1 ✅ | Phase 2A ✅ | Phase 3 ✅ COMPLETE | Phase 4 NEXT
+LAST UPDATED: Dec 29, 2024
 
 =============================================================================
                          ARCHITECTURE OVERVIEW
@@ -153,14 +153,29 @@ VectorCanvas is FROZEN and will be deleted in Phase 5.
 [✅] 2.7 Manual Testing Complete
      - All core drawing features verified in --test-viewport
 
------ Phase 2B: Additional Tools (DEFERRED to after Phase 3) -----
+----- Phase 2B: Additional Tools (READY TO IMPLEMENT) -----
+
+→ See: docs/MIGRATION_PHASE2B_SUBPLAN.md for detailed breakdown
 
 [  ] 2.8 Marker Tool (~150 lines)
-[  ] 2.9 Straight Line Mode (~200 lines)
-[  ] 2.10 Lasso Selection Tool (~400 lines)
-[  ] 2.11 Highlighter Tool (~100 lines)
+     - Fixed opacity (50%), fixed thickness, separate color (#E6FF6E)
+     - No pressure sensitivity, reuses pen stroke infrastructure
 
-NOTE: Phase 2B deferred - MainWindow UI makes testing these tools easier.
+[  ] 2.9 Straight Line Mode (~200 lines)
+     - Toggle mode works with Pen and Marker
+     - Preview line while dragging, free angle
+     - Future: ruler/angle snapping
+
+[  ] 2.10 Lasso Selection Tool (~400 lines)
+     - Freeform selection, entire strokes, active layer only
+     - Transform: move, scale, rotate
+     - Clipboard: copy, cut, paste (within/across pages/tiles)
+     - Marching ants or dashed selection border
+
+[  ] 2.11 Highlighter Tool - DEFERRED
+     - Requires PDF text box integration (Phase 4)
+
+NOTE: Phase 3 complete - MainWindow fully integrated, ready for 2B tools.
 
 =============================================================================
               PHASE 3: MAINWINDOW INTEGRATION BRIDGE
@@ -218,7 +233,7 @@ Disconnected files: LauncherWindow.cpp, ControlPanelDialog.cpp
 [✅] 3.2.3 Basic Rendering Verification
      - App launches, tabs work, drawing works
 
------ Phase 3.3: Core Features Reconnection (IN PROGRESS) -----
+----- Phase 3.3: Core Features Reconnection ✅ COMPLETE -----
 
 [✅] 3.3.1 Tool Selection
      - Pen/Eraser buttons → currentViewport()->setCurrentTool()
@@ -227,64 +242,110 @@ Disconnected files: LauncherWindow.cpp, ControlPanelDialog.cpp
      - Color buttons → currentViewport()->setPenColor()
      - Thickness slider → currentViewport()->setPenThickness()
 
-[✅] 3.3.3 Pan/Zoom Controls (PARTIAL)
-     - Zoom 50%/100%/200% buttons work
-     - Zoom slider → currentViewport()->setZoomLevel()
-     [  ] Scroll bars need reconnection (stubbed)
+[✅] 3.3.3 Pan/Zoom Controls
+     - Zoom 50%/100%/200% buttons, zoom slider
+     - Scroll bars connected to viewport
+     - Deferred zoom/pan rendering for smooth 60+ FPS gestures
 
-[  ] 3.3.4 Page Navigation
-     - Page spinbox, prev/next buttons (stubbed, needs DocumentViewport)
+[✅] 3.3.4 Page Navigation
+     - Page spinbox, prev/next buttons connected
 
-[  ] 3.3.5 Undo/Redo
-     - Edit menu Ctrl+Z/Y → currentViewport()->undo()/redo()
+[✅] 3.3.5 Undo/Redo
+     - Per-page undo for paged mode
+     - Global undo stack for edgeless mode (multi-tile strokes)
 
------ Phase 3.4: Layer Management UI -----
+----- Phase 3.4: Layer Management UI ✅ COMPLETE -----
 
-[  ] 3.4.1 Add LayerPanel to Sidebar (~60 lines)
-     - Below PDF outline/bookmarks
+[✅] 3.4.1 Add LayerPanel to Sidebar
+     - Bottom-left, below PDF outline/bookmarks
+     - Foldable toggle button (like other sidebars)
 
-[  ] 3.4.2 Connect LayerPanel to Current Page (~50 lines)
-     - Update when tab/page changes
+[✅] 3.4.2 Connect LayerPanel to Current Page/Document
+     - Paged mode: talks directly to Page
+     - Edgeless mode: talks to Document manifest
 
-[  ] 3.4.3 Connect LayerPanel Signals (~40 lines)
-     - Layer changes → document modified
+[✅] 3.4.3 Connect LayerPanel Signals
+     - Layer changes → document modified → tile dirty
 
-[  ] 3.4.4 Test Multi-Layer Editing
-     - Add/delete/reorder/select layers
-     - Drawing goes to active layer only
+[✅] 3.4.4 Multi-Layer Features (expanded from original plan)
+     - Add/delete/rename/reorder layers
+     - Toggle visibility, checkbox selection
+     - Merge selected layers, duplicate layer
+     - Edgeless: manifest-based layer definitions
+     → See: docs/MIGRATION_LAYER_SUBPLAN.md
 
------ Phase 3.5: File Operations -----
+----- Phase 3.5: File Operations ✅ COMPLETE -----
 
-[  ] 3.5.1 New Document (~30 lines)
-[  ] 3.5.2 Save Document (~80 lines) - New .snx format
-[  ] 3.5.3 Load Document (~80 lines) - New format only
-[  ] 3.5.4 PDF Loading (~60 lines)
+[✅] 3.5.1 New Document
+     - Paged notebook (Ctrl+N) and Edgeless canvas (Ctrl+Shift+N)
 
------ Phase 3.6: Verification -----
+[✅] 3.5.2 Save Document
+     - Paged: .json format (single file)
+     - Edgeless: .snb bundle (document.json + tiles/)
 
-[  ] 3.6.1 Feature Verification Checklist
-[  ] 3.6.2 Move Debug Overlay to Status Bar (~30 lines)
+[✅] 3.5.3 Load Document
+     - Both formats supported, lazy loading for edgeless
 
-PROGRESS: Phase 3.0-3.2 complete, 3.3 ~60% complete
+[✅] 3.5.4 PDF Loading
+     - Open PDF dialog, page-by-page backgrounds
+
+[✅] 3.5.5 Temp Auto-save (added)
+     - Unsaved edgeless documents get temp bundle
+     - Prompt save on close, cleanup on discard
+
+----- Phase 3.6: Verification ✅ COMPLETE -----
+
+[✅] 3.6.1 Feature Verification
+     - Core drawing, layers, save/load all tested
+
+[✅] 3.6.2 Debug Overlay Migration
+     - Moved from DocumentViewport to source/ui/DebugOverlay
+     - Modular, extensible, toggle with F12
+     - Timer-based updates, draggable
+
+----- Phase 3.E: Edgeless Mode (BONUS - not in original plan) -----
+
+[✅] E1: Core Tile Infrastructure
+     - 1024x1024 tiles, sparse 2D grid, lazy load/evict
+
+[✅] E2: Viewport Rendering
+     - Render visible tiles, min zoom enforcement
+
+[✅] E3: Stroke Drawing with Splitting
+     - Strokes split across tile boundaries
+
+[✅] E4: Eraser Across Tiles
+     - Per-tile erasing, empty tile deletion
+
+[✅] E5: Serialization
+     - Tile-based save/load, manifest for layer definitions
+
+[✅] E6: Undo/Redo (global stack)
+     - Multi-segment stroke undo/redo
+
+[✅] E7: Deferred Zoom/Pan
+     - Cached frame during gestures for smooth performance
+
+→ See: docs/MIGRATION_EDGELESS_SUBPLAN.md
+
+PROGRESS: Phase 3 COMPLETE ✅
 
 =============================================================================
                     PHASE 4: WIDGET MIGRATION
 =============================================================================
 
 Reconnect remaining MainWindow widgets to DocumentViewport.
-(Many widgets already connected in Phase 3.3)
+Most core features already working from Phase 3.
 
 Priority: HIGH (Core functionality)
-[  ] 4.1 Outline & Bookmarks
-     - outlineTree → scrollToPage()
-     - bookmarkList → scrollToPage()
-     - Data from Document::bookmarks()
+[  ] 4.1 Outline & Bookmarks (PARTIAL - outline works, bookmarks stubbed)
+     - outlineTree → scrollToPage() ✓
+     - bookmarkList → needs Document::bookmarks()
 
 [  ] 4.2 Touch Gestures
-     - Migrate gesture handling from InkCanvas
      - Two-finger pan, pinch zoom
-     - Trackpad gestures (already working in InkCanvas)
-     - Palm rejection
+     - Trackpad gestures
+     - Palm rejection (Linux)
 
 [  ] 4.3 Controller Support
      - MagicDial / Joy-Con integration
@@ -300,62 +361,64 @@ Priority: MEDIUM (Enhanced features)
      - Per-page markdown notes
 
 [  ] 4.6 ControlPanelDialog Migration
-     - Connect settings to DocumentViewport customizable values
-     - Load/save settings to QSettings
+     - Connect settings to DocumentViewport
+     - Currently disabled (Phase 3.1.8)
 
-Priority: LOW (Can be deferred further)
+Priority: LOW (Can be deferred)
 [  ] 4.7 Phase 2B Tools
      - Marker, Straight Line, Lasso, Highlighter
-     - Now easier with MainWindow UI
+     - Easier now with full MainWindow integration
 
 =============================================================================
                          PHASE 5: CLEANUP
 =============================================================================
 
-Remove old code once new viewport is proven stable.
+Remove old code once Phase 4 is complete.
 
-[  ] 5.1 Remove Feature Flag
-     - New viewport becomes default
-     - Remove --use-new-viewport flag
-
-[  ] 5.2 Delete InkCanvas (~7000 lines)
+[  ] 5.1 Delete InkCanvas (~7000 lines)
      - All pixmap-based canvas code
      - Combined canvas hack
+     - source/InkCanvas.h/.cpp
 
-[  ] 5.3 Delete VectorCanvas (~800 lines)
-     - Test overlay implementation
-     - All temporary toolbar buttons (VP, VE)
+[  ] 5.2 Delete VectorCanvas (~800 lines)
+     - Test overlay implementation (now in DebugOverlay)
+     - source/VectorCanvas.h/.cpp
 
-[  ] 5.4 MainWindow Cleanup
-     - Remove conditional code paths (if !m_useNewViewport)
-     - Consider extracting TabManager if not done
+[  ] 5.3 MainWindow Cleanup
+     - Remove any remaining InkCanvas references
+     - Remove stubbed/unused handlers
      - General code organization
+
+[  ] 5.4 Re-enable LauncherWindow
+     - Reconnect LauncherWindow.cpp
+     - Update for new Document/Viewport architecture
 
 [  ] 5.5 Final Testing & Performance Validation
      - Full feature regression test
-     - Performance on Clovertrail Atom target
+     - Performance on low-end hardware
 
 [  ] 5.6 Update Documentation
      - README updates
-     - User migration guide (if any existing users)
+     - File format documentation (.json, .snb)
 
 =============================================================================
                           FILE STRUCTURE
 =============================================================================
 
 source/
-├── core/                         ✅ COMPLETE (Phase 1-2)
-│   ├── Document.h / Document.cpp
-│   ├── DocumentManager.h / DocumentManager.cpp   ← NEW (Phase 3)
+├── core/                         ✅ COMPLETE (Phase 1-3)
+│   ├── Document.h / Document.cpp      (edgeless tile mgmt, layer manifest)
+│   ├── DocumentManager.h / .cpp       (owns Documents, file I/O)
 │   ├── DocumentTests.h
-│   ├── Page.h / Page.cpp
+│   ├── Page.h / Page.cpp              (tile for edgeless, page for paged)
 │   ├── PageTests.h
-│   ├── DocumentViewport.h / DocumentViewport.cpp
+│   ├── DocumentViewport.h / .cpp      (rendering, input, undo/redo)
 │   ├── DocumentViewportTests.h
-│   └── ToolType.h                ← SIMPLIFIED (Pen, Marker, Eraser, etc.)
-├── ui/                           ← NEW FOLDER (Phase 3)
-│   ├── TabManager.h / TabManager.cpp             ← NEW (Phase 3)
-│   └── LayerPanel.h / LayerPanel.cpp             ← NEW (Phase 3)
+│   └── ToolType.h
+├── ui/                           ✅ COMPLETE (Phase 3)
+│   ├── TabManager.h / TabManager.cpp
+│   ├── LayerPanel.h / LayerPanel.cpp  (full layer management UI)
+│   └── DebugOverlay.h / DebugOverlay.cpp  ← NEW (modular debug panel)
 ├── layers/                       ✅ COMPLETE
 │   └── VectorLayer.h
 ├── strokes/                      ✅ COMPLETE
@@ -367,9 +430,9 @@ source/
 ├── pdf/                          ✅ COMPLETE
 │   ├── PdfProvider.h
 │   └── PopplerPdfProvider.h / PopplerPdfProvider.cpp
-├── InkCanvas.h / InkCanvas.cpp   (legacy, conditional in Phase 3)
-├── VectorCanvas.h / VectorCanvas.cpp (frozen, removed in Phase 5)
-└── MainWindow.h / MainWindow.cpp (heavily modified in Phase 3-4)
+├── InkCanvas.h / InkCanvas.cpp   (legacy - to be removed in Phase 5)
+├── VectorCanvas.h / VectorCanvas.cpp (frozen - to be removed in Phase 5)
+└── MainWindow.h / MainWindow.cpp (Phase 3 integration complete)
 
 =============================================================================
                          TEST COMMANDS
@@ -378,7 +441,14 @@ source/
 ./NoteApp.exe --test-page        # Phase 1.1 tests (Page, Layer, Object)
 ./NoteApp.exe --test-document    # Phase 1.2 tests (Document, PDF)
 ./NoteApp.exe --test-viewport    # Phase 1.3/2 tests (DocumentViewport visual)
-./NoteApp.exe --use-new-viewport # Phase 3: Run app with new DocumentViewport
+./NoteApp.exe                    # Normal app (new architecture is default)
+
+Keyboard shortcuts:
+  Ctrl+N              New paged notebook
+  Ctrl+Shift+N        New edgeless canvas
+  Ctrl+Shift+L        Load edgeless (.snb)
+  F12                 Toggle debug overlay
+  B                   Toggle benchmark mode
 
 =============================================================================
                        ESTIMATED EFFORT
@@ -387,13 +457,13 @@ source/
 Phase 0: COMPLETE ✅
 Phase 1: COMPLETE ✅
 Phase 2A: COMPLETE ✅ (~1000 lines - core drawing)
-Phase 2B: DEFERRED (additional tools - ~850 lines, after Phase 3)
-Phase 3: ~4-5 days (~1630 lines - MainWindow integration + LayerPanel)
-Phase 4: ~3-4 days (widget migration - touch gestures, etc.)
+Phase 2B: DEFERRED (additional tools - ~850 lines)
+Phase 3: COMPLETE ✅ (MainWindow + LayerPanel + Edgeless mode)
+Phase 4: ~3-4 days (widget migration - touch gestures, controllers, etc.)
 Phase 5: ~1-2 days (cleanup - remove InkCanvas, VectorCanvas)
 
-Total for MVP: ~8-11 days remaining
-Total with Phase 2B tools: ~10-13 days remaining
+Remaining for MVP: ~4-6 days (Phase 4 + 5)
+Remaining with Phase 2B tools: ~6-8 days
 
 =============================================================================
                           KEY DECISIONS
@@ -401,50 +471,80 @@ Total with Phase 2B tools: ~10-13 days remaining
 
 PHASE 1-2 DECISIONS:
 1. ONE DocumentViewport per tab (like InkCanvas today)
-2. Per-page undo/redo (not global)
+2. Per-page undo/redo (not global) - for paged mode
 3. PDF cache: 2 pages (single col) / 4 pages (two col), single DPI
 4. Continuous scrolling (not snap-to-page)
-5. Edgeless canvas = single unbounded Page
+5. Edgeless canvas = sparse grid of 1024x1024 tiles
 
 PHASE 3 DECISIONS:
 6. DocumentManager: YES - owns all Documents, handles file I/O
-7. TabManager: YES - thin wrapper for code organization (~100 lines)
-8. LayerPanel: Talks directly to Page, NOT through DocumentViewport
+7. TabManager: YES - thin wrapper for code organization
+8. LayerPanel: Talks to Page (paged) or Document manifest (edgeless)
 9. Tool state: GLOBAL (industry standard - Photoshop, SAI2, etc.)
 10. View state: PER-DOCUMENT (zoom, pan, current page)
 11. Old .spn files: NOT SUPPORTED (breaking change for v1.0.0-rc1)
-12. New file format: .snx (SpeedyNote eXtended)
-13. Layer Panel location: Bottom-left sidebar, below PDF outline/bookmarks
+12. File formats: .json (paged), .snb bundle (edgeless)
+13. Layer Panel: Bottom-left sidebar, foldable toggle
+
+EDGELESS MODE DECISIONS (Phase 3.E):
+14. Tile size: 1024x1024 pixels (good balance of granularity vs overhead)
+15. Lazy loading: Tiles loaded on demand, evicted when distant
+16. Stroke splitting: Strokes crossing tile boundaries split into segments
+17. Layer manifest: Stored in document.json, NOT per-tile
+18. Undo/redo: Global stack for edgeless (handles multi-tile strokes)
+19. Temp auto-save: Unsaved edgeless gets temp .snb for lazy loading
+20. Deferred rendering: Cached frame during zoom/pan gestures
 
 =============================================================================
                        REFERENCE IMPLEMENTATIONS
 =============================================================================
 
 VectorCanvas (source/VectorCanvas.h/.cpp):
-⚠️  FROZEN - DO NOT UPDATE - Will be deleted in Phase 5
-    Was used as prototype for DocumentViewport.
-    All its features are now migrated to DocumentViewport.
+⚠️  FROZEN - Will be deleted in Phase 5
+    Was prototype for DocumentViewport.
 
 InkCanvas (source/InkCanvas.h/.cpp):
 ⚠️  LEGACY - Will be deleted in Phase 5
-    Only created when NOT using --use-new-viewport flag.
-    Used as reference for MainWindow widget connections.
+    Not used in new architecture.
 
 DocumentViewport (source/core/DocumentViewport.h/.cpp):
-✅  PRODUCTION IMPLEMENTATION
-    - All drawing features from VectorCanvas
-    - Multi-page, multi-layer architecture
-    - 360Hz input, ~18% CPU on N4000
-    - Zoom-aware caching (no aliasing)
+✅  PRODUCTION - ~3700 lines
+    - Paged mode: multi-page, continuous scroll
+    - Edgeless mode: infinite canvas with tiles
+    - Per-page undo (paged) / global undo (edgeless)
+    - Deferred zoom/pan for smooth gestures
 
-ToolType.h (source/core/ToolType.h):
-✅  SIMPLIFIED
-    - Pen, Marker, Eraser, Highlighter, Lasso
-    - All tools are vector-based
-    - VectorPen/VectorEraser REMOVED
+Document (source/core/Document.h/.cpp):
+✅  PRODUCTION - ~1800 lines
+    - Paged mode: list of Pages
+    - Edgeless mode: sparse tile grid + layer manifest
+    - Lazy load/evict tiles, temp bundle auto-save
 
-MainWindow temporary buttons (VP, VE):
-    - Will be removed in Phase 3-4
-    - Replaced by unified toolbar with global tool state
+LayerPanel (source/ui/LayerPanel.h/.cpp):
+✅  PRODUCTION - ~840 lines
+    - Full layer management UI (SAI2-style)
+    - Paged: talks to Page directly
+    - Edgeless: talks to Document manifest
+
+DebugOverlay (source/ui/DebugOverlay.h/.cpp):
+✅  DEVELOPMENT TOOL - ~340 lines
+    - Modular, extensible debug panel
+    - Toggle with F12, draggable
+    - Timer-based updates (30 FPS)
+
+=============================================================================
+                        DOCUMENTATION
+=============================================================================
+
+docs/
+├── MIGRATION_PHASE0_*.md          Phase 0 analysis
+├── MIGRATION_PHASE1_*.md          Phase 1 implementation
+├── MIGRATION_PHASE2_SUBPLAN.md    Phase 2A core drawing
+├── MIGRATION_PHASE2B_SUBPLAN.md   Phase 2B additional tools (Marker, Line, Lasso)
+├── MIGRATION_PHASE3_*.md          Phase 3 integration
+├── MIGRATION_EDGELESS_SUBPLAN.md  Edgeless mode implementation
+├── MIGRATION_LAYER_SUBPLAN.md     Layer panel + manifest architecture
+├── MIGRATION_DOC1_SUBPLAN.md      Deferred zoom/pan rendering
+└── VIEWPORT_RECONSTRUCTION_SUBPLAN.md  Viewport architecture
 
 =============================================================================
