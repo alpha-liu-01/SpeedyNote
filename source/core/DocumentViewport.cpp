@@ -256,6 +256,27 @@ void DocumentViewport::setEraserSize(qreal size)
     }
 }
 
+// ===== Marker Tool (Task 2.8) =====
+
+void DocumentViewport::setMarkerColor(const QColor& color)
+{
+    if (m_markerColor == color) {
+        return;
+    }
+    m_markerColor = color;
+}
+
+void DocumentViewport::setMarkerThickness(qreal thickness)
+{
+    // Clamp to reasonable range (marker is typically wider than pen)
+    thickness = qBound(1.0, thickness, 100.0);
+    
+    if (qFuzzyCompare(m_markerThickness, thickness)) {
+        return;
+    }
+    m_markerThickness = thickness;
+}
+
 // ===== View State Setters =====
 
 void DocumentViewport::setZoomLevel(qreal zoom)
@@ -2202,6 +2223,21 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         return;
     }
     
+    // Determine stroke properties based on current tool (Task 2.8: Marker support)
+    QColor strokeColor;
+    qreal strokeThickness;
+    bool useFixedPressure = false;  // Marker uses fixed thickness (ignores pressure)
+    
+    if (m_currentTool == ToolType::Marker) {
+        strokeColor = m_markerColor;        // Includes alpha for opacity
+        strokeThickness = m_markerThickness;
+        useFixedPressure = true;            // Fixed thickness, no pressure variation
+    } else {
+        strokeColor = m_penColor;
+        strokeThickness = m_penThickness;
+        useFixedPressure = false;           // Pen uses pressure for thickness
+    }
+    
     // For edgeless mode, we don't require a page hit - we use document coordinates
     if (m_document->isEdgeless()) {
         m_isDrawing = true;
@@ -2213,8 +2249,8 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         // Initialize new stroke
         m_currentStroke = VectorStroke();
         m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        m_currentStroke.color = m_penColor;
-        m_currentStroke.baseThickness = m_penThickness;
+        m_currentStroke.color = strokeColor;
+        m_currentStroke.baseThickness = strokeThickness;
         
         // Reset incremental rendering cache
         resetCurrentStrokeCache();
@@ -2226,9 +2262,10 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         m_edgelessDrawingTile = m_document->tileCoordForPoint(docPt);
         
         // Add first point (stored in DOCUMENT coordinates for edgeless)
+        // Marker uses fixed pressure (1.0) for consistent thickness
         StrokePoint pt;
         pt.pos = docPt;
-        pt.pressure = qBound(0.1, pe.pressure, 1.0);
+        pt.pressure = useFixedPressure ? 1.0 : qBound(0.1, pe.pressure, 1.0);
         m_currentStroke.points.append(pt);
         return;
     }
@@ -2242,19 +2279,25 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     // Initialize new stroke
     m_currentStroke = VectorStroke();
     m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    m_currentStroke.color = m_penColor;
-    m_currentStroke.baseThickness = m_penThickness;
+    m_currentStroke.color = strokeColor;
+    m_currentStroke.baseThickness = strokeThickness;
     
     // Reset incremental rendering cache (Task 2.3)
     resetCurrentStrokeCache();
     
     // Add first point (in page-local coordinates)
-    addPointToStroke(pe.pageHit.pagePoint, pe.pressure);
+    // Marker uses fixed pressure (1.0) for consistent thickness
+    qreal effectivePressure = useFixedPressure ? 1.0 : pe.pressure;
+    addPointToStroke(pe.pageHit.pagePoint, effectivePressure);
 }
 
 void DocumentViewport::continueStroke(const PointerEvent& pe)
 {
     if (!m_isDrawing || !m_document) return;
+    
+    // Task 2.8: Marker uses fixed pressure (1.0) for consistent thickness
+    bool useFixedPressure = (m_currentTool == ToolType::Marker);
+    qreal effectivePressure = useFixedPressure ? 1.0 : qBound(0.1, pe.pressure, 1.0);
     
     // For edgeless mode, use document coordinates directly
     if (m_document->isEdgeless()) {
@@ -2268,8 +2311,8 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
             qreal distSq = dx * dx + dy * dy;
             
             if (distSq < MIN_DISTANCE_SQ) {
-                // Point too close - but update pressure if higher
-                if (pe.pressure > m_currentStroke.points.last().pressure) {
+                // Point too close - but update pressure if higher (only for pen, not marker)
+                if (!useFixedPressure && pe.pressure > m_currentStroke.points.last().pressure) {
                     m_currentStroke.points.last().pressure = pe.pressure;
                 }
                 return;
@@ -2278,11 +2321,12 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
         
         StrokePoint pt;
         pt.pos = docPt;
-        pt.pressure = qBound(0.1, pe.pressure, 1.0);
+        pt.pressure = effectivePressure;
         m_currentStroke.points.append(pt);
         
         // Dirty region update for edgeless (document coords → viewport coords)
-        qreal padding = m_penThickness * 2 * m_zoomLevel;
+        // Use current stroke thickness (may be pen or marker)
+        qreal padding = m_currentStroke.baseThickness * 2 * m_zoomLevel;
         QPointF vpPos = documentToViewport(docPt);
         QRectF dirtyRect(vpPos.x() - padding, vpPos.y() - padding, padding * 2, padding * 2);
         
@@ -2313,7 +2357,8 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
         pagePos = docPos - pageOrigin;
     }
     
-    addPointToStroke(pagePos, pe.pressure);
+    // Use effective pressure (fixed 1.0 for marker, actual pressure for pen)
+    addPointToStroke(pagePos, effectivePressure);
 }
 
 void DocumentViewport::finishStroke()
@@ -2590,6 +2635,21 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         // Must re-render all points since transform changed
     }
     
+    // ========== FIX: Semi-Transparent Stroke Rendering ==========
+    // For strokes with alpha < 255 (e.g., marker at 50% opacity), we must draw
+    // with FULL OPACITY to the cache, then blit with the desired opacity.
+    // Otherwise, overlapping segments at joints would compound the alpha,
+    // making in-progress strokes appear darker than finished strokes.
+    
+    int strokeAlpha = m_currentStroke.color.alpha();
+    bool hasSemiTransparency = (strokeAlpha < 255);
+    
+    // Create the drawing color - use full opacity for cache, apply alpha on blit
+    QColor drawColor = m_currentStroke.color;
+    if (hasSemiTransparency) {
+        drawColor.setAlpha(255);  // Draw opaque to cache
+    }
+    
     // Render new segments to the cache (if any)
     if (n > m_lastRenderedPointIndex && n >= 2) {
         QPainter cachePainter(&m_currentStrokeCache);
@@ -2607,7 +2667,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         }
         
         // Use line-based rendering for incremental updates (fast)
-        QPen pen(m_currentStroke.color, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        QPen pen(drawColor, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         
         // Start from the last rendered point (or 1 if starting fresh)
         int startIdx = qMax(1, m_lastRenderedPointIndex);
@@ -2629,7 +2689,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         if (m_lastRenderedPointIndex == 0 && n >= 1) {
             qreal startRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[0].pressure, 1.0) / 2.0;
             cachePainter.setPen(Qt::NoPen);
-            cachePainter.setBrush(m_currentStroke.color);
+            cachePainter.setBrush(drawColor);
             cachePainter.drawEllipse(m_currentStroke.points[0].pos, startRadius, startRadius);
         }
         
@@ -2637,8 +2697,14 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     }
     
     // Blit the cached current stroke to the viewport
-    // The painter here should be in raw viewport coordinates (no transform)
+    // For semi-transparent strokes, apply the alpha here (not per-segment)
+    if (hasSemiTransparency) {
+        painter.setOpacity(strokeAlpha / 255.0);
+    }
     painter.drawPixmap(0, 0, m_currentStrokeCache);
+    if (hasSemiTransparency) {
+        painter.setOpacity(1.0);  // Restore full opacity
+    }
     
     // Draw end cap at current position (always needs updating as it moves)
     if (n >= 1) {

@@ -10,6 +10,14 @@ Phase 2B implements three additional drawing tools that were deferred during the
 
 **Deferred:** Highlighter Tool (2.11) - requires PDF text box integration
 
+## Current Progress
+
+| Tool | Status |
+|------|--------|
+| 2.8 Marker Tool | ✅ **COMPLETE** |
+| 2.9 Straight Line Mode | ⏳ Pending |
+| 2.10 Lasso Selection Tool | ⏳ Pending |
+
 ## Architecture Principles
 
 1. **Modular Design**: Each tool is self-contained with clear interfaces
@@ -75,21 +83,39 @@ if (m_currentTool == ToolType::Marker) {
 }
 ```
 
-#### 2.8.3 Stroke Rendering with Opacity (~30 lines)
+#### 2.8.3 Stroke Rendering with Opacity (~30 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-The existing stroke rendering already supports alpha in colors. Verify that:
-- `VectorStroke::render()` uses the stroke's color alpha correctly
-- QPainter composition mode is appropriate (SourceOver is default, should work)
+**Issue Found:** Incremental stroke rendering drew each segment with semi-transparent color, causing overlapping segments at joints to compound alpha (in-progress strokes appeared ~75% opaque while finished strokes were 50%).
 
-#### 2.8.4 MainWindow Integration (~50 lines)
-**File:** `source/MainWindow.cpp`
-
-- Connect existing Marker button to `currentViewport()->setCurrentTool(ToolType::Marker)`
-- Document interface for future marker color picker:
+**Fix Applied:** Modified `renderCurrentStrokeIncremental()` to:
+1. Detect semi-transparent strokes (alpha < 255)
+2. Draw with FULL OPACITY to the cache (prevents alpha compounding)
+3. Apply the stroke's opacity only when blitting the cache to viewport
 
 ```cpp
-// Future: Connect marker color picker
+// Key fix: Draw opaque to cache, apply alpha on final blit
+if (hasSemiTransparency) {
+    drawColor.setAlpha(255);  // Draw opaque to cache
+}
+// ... draw segments ...
+if (hasSemiTransparency) {
+    painter.setOpacity(strokeAlpha / 255.0);  // Apply alpha on blit
+}
+painter.drawPixmap(0, 0, m_currentStrokeCache);
+```
+
+#### 2.8.4 MainWindow Integration (~50 lines) ✅ ALREADY COMPLETE
+**File:** `source/MainWindow.cpp`
+
+**Pre-existing:** The marker button was already connected during the original Phase 2 tool infrastructure setup:
+- `markerToolButton` created and styled (line 717-720)
+- Connected to `MainWindow::setMarkerTool()` (line 721)
+- `setMarkerTool()` calls `vp->setCurrentTool(ToolType::Marker)` (line 1918-1921)
+- Button state updates in `updateToolButtonSelection()` (line 1963-1965)
+
+**Future interface for marker color picker:**
+```cpp
 // void MainWindow::onMarkerColorChanged(const QColor& color) {
 //     if (auto* vp = currentViewport()) {
 //         vp->setMarkerColor(color);
@@ -98,11 +124,18 @@ The existing stroke rendering already supports alpha in colors. Verify that:
 ```
 
 ### Test Cases
-- [ ] Marker strokes render with 50% opacity
-- [ ] Marker thickness is consistent (no pressure variation)
-- [ ] Marker color is separate from pen color
-- [ ] Works in both paged and edgeless modes
-- [ ] Marker strokes saved/loaded correctly (alpha preserved)
+- [x] Marker strokes render with 50% opacity
+- [x] Marker thickness is consistent (no pressure variation)
+- [x] Marker color is separate from pen color
+- [x] Works in both paged and edgeless modes
+- [x] Marker strokes saved/loaded correctly (alpha preserved)
+
+### 2.8 Status: ✅ COMPLETE
+All marker tool tasks have been implemented. The marker now has:
+- Fixed 50% opacity (consistent during drawing and after completion)
+- Fixed 8.0 thickness (no pressure variation)
+- Separate color from pen (#E6FF6E default, customizable via `setMarkerColor()`)
+- Works in both paged and edgeless modes
 
 ---
 
@@ -865,10 +898,10 @@ Recommended order for minimal dependencies:
 
 | Task | Status |
 |------|--------|
-| 2.8.1 Marker Tool State | [ ] |
-| 2.8.2 Marker Stroke Creation | [ ] |
-| 2.8.3 Marker Rendering | [ ] |
-| 2.8.4 Marker MainWindow Integration | [ ] |
+| 2.8.1 Marker Tool State | [x] COMPLETE |
+| 2.8.2 Marker Stroke Creation | [x] COMPLETE |
+| 2.8.3 Marker Rendering | [x] COMPLETE |
+| 2.8.4 Marker MainWindow Integration | [x] PRE-EXISTING |
 | 2.9.1 Straight Line Toggle | [ ] |
 | 2.9.2 Straight Line Stroke Creation | [ ] |
 | 2.9.3 Straight Line for Edgeless | [ ] |

@@ -325,6 +325,35 @@ public:
      */
     qreal eraserSize() const { return m_eraserSize; }
     
+    // ===== Marker Tool (Task 2.8) =====
+    
+    /**
+     * @brief Set the marker color.
+     * @param color The color to use (alpha channel sets opacity).
+     * 
+     * Marker has a separate color from pen. Default is #E6FF6E at 50% opacity.
+     * The alpha channel in the color controls the marker opacity.
+     */
+    void setMarkerColor(const QColor& color);
+    
+    /**
+     * @brief Get the current marker color (including opacity in alpha).
+     */
+    QColor markerColor() const { return m_markerColor; }
+    
+    /**
+     * @brief Set the marker thickness.
+     * @param thickness Thickness in document units.
+     * 
+     * Marker thickness is fixed (no pressure sensitivity).
+     */
+    void setMarkerThickness(qreal thickness);
+    
+    /**
+     * @brief Get the current marker thickness.
+     */
+    qreal markerThickness() const { return m_markerThickness; }
+    
     // ===== Undo/Redo (Task 2.5) =====
     
     /**
@@ -751,6 +780,10 @@ private:
     QColor m_penColor = Qt::black;    ///< CUSTOMIZABLE: Default pen color (user preference)
     qreal m_penThickness = 5.0;       ///< CUSTOMIZABLE: Default pen thickness (range: 1-50 document units)
     qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
+    
+    // Marker tool settings (Task 2.8)
+    QColor m_markerColor = QColor(0xE6, 0xFF, 0x6E, 128);  ///< CUSTOMIZABLE: Default marker color (#E6FF6E at 50% opacity)
+    qreal m_markerThickness = 8.0;    ///< CUSTOMIZABLE: Default marker thickness (wider than pen, no pressure)
     
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)

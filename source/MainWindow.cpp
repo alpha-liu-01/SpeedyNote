@@ -1487,7 +1487,7 @@ void MainWindow::setupUi() {
 // #else
     // m_debugOverlay->hide();  // Hidden in release builds
 // #endif
-    
+
     // Enable context menu for the workaround
     canvasContainer->setContextMenuPolicy(Qt::CustomContextMenu);
     
@@ -3527,7 +3527,7 @@ void MainWindow::saveDocument()
             tr("No document is open."));
         return;
     }
-            
+
     Document* doc = viewport->document();
     if (!doc) {
         QMessageBox::warning(this, tr("Save Document"), 
@@ -3702,7 +3702,7 @@ void MainWindow::addPageToDocument()
     if (newPage) {
         qDebug() << "addPageToDocument: Added page" << doc->pageCount() 
                  << "to document" << doc->name;
-        
+    
         // CRITICAL: Notify viewport that document structure changed
         // This invalidates layout cache and triggers repaint
         viewport->notifyDocumentStructureChanged();
