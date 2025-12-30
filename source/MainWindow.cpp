@@ -772,10 +772,16 @@ void MainWindow::setupUi() {
     ropeToolButton->setProperty("selected", false); // Initially disabled
     updateButtonIcon(ropeToolButton, "rope");
     connect(ropeToolButton, &QPushButton::clicked, this, [this]() {
-        // Phase 3.1.4: Rope tool mode stubbed - will be reimplemented for DocumentViewport
-        // TODO Phase 3.3: Implement rope/lasso tool in DocumentViewport
-        qDebug() << "Rope tool toggle: Not implemented yet (Phase 3.3)";
-        updateRopeToolButtonState();
+        // Task 2.10.9: Connect lasso/rope tool to DocumentViewport
+        if (DocumentViewport* vp = currentViewport()) {
+            // Toggle between Lasso and Pen - if already lasso, switch back to pen
+            if (vp->currentTool() == ToolType::Lasso) {
+                vp->setCurrentTool(ToolType::Pen);
+            } else {
+                vp->setCurrentTool(ToolType::Lasso);
+            }
+        }
+        updateToolButtonStates();
     });
     
     // Insert Picture Button
@@ -1965,11 +1971,13 @@ void MainWindow::updateToolButtonStates() {
     penToolButton->setProperty("selected", false);
     markerToolButton->setProperty("selected", false);
     eraserToolButton->setProperty("selected", false);
+    if (ropeToolButton) ropeToolButton->setProperty("selected", false);
     
     // Update icons for unselected state
     updateButtonIcon(penToolButton, "pen");
     updateButtonIcon(markerToolButton, "marker");
     updateButtonIcon(eraserToolButton, "eraser");
+    if (ropeToolButton) updateButtonIcon(ropeToolButton, "rope");
     
     // Set the selected property for the current tool
     ToolType tool = vp->currentTool();
@@ -1986,9 +1994,15 @@ void MainWindow::updateToolButtonStates() {
             eraserToolButton->setProperty("selected", true);
             updateButtonIcon(eraserToolButton, "eraser");
             break;
-        case ToolType::Highlighter:
         case ToolType::Lasso:
-            // Future tools - will be implemented in DocumentViewport (Phase 2B)
+            // Task 2.10.9: Lasso tool button state
+            if (ropeToolButton) {
+                ropeToolButton->setProperty("selected", true);
+                updateButtonIcon(ropeToolButton, "rope");
+            }
+            break;
+        case ToolType::Highlighter:
+            // Future tool
             break;
     }
     
@@ -1999,6 +2013,10 @@ void MainWindow::updateToolButtonStates() {
     markerToolButton->style()->polish(markerToolButton);
     eraserToolButton->style()->unpolish(eraserToolButton);
     eraserToolButton->style()->polish(eraserToolButton);
+    if (ropeToolButton) {
+        ropeToolButton->style()->unpolish(ropeToolButton);
+        ropeToolButton->style()->polish(ropeToolButton);
+    }
     // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton style updates
     
     // CR-2B-1: Sync straight line button state
@@ -7623,13 +7641,16 @@ void MainWindow::updateStraightLineButtonState() {
 }
 
 void MainWindow::updateRopeToolButtonState() {
-    // Phase 3.1.4: Stubbed - rope tool mode not implemented yet
-    if (ropeToolButton) {
-        ropeToolButton->setProperty("selected", false);
-        updateButtonIcon(ropeToolButton, "rope");
-        ropeToolButton->style()->unpolish(ropeToolButton);
-        ropeToolButton->style()->polish(ropeToolButton);
-    }
+    // Task 2.10.9: Update rope/lasso tool button to reflect viewport state
+    if (!ropeToolButton) return;
+    
+    DocumentViewport* vp = currentViewport();
+    bool isLasso = vp && (vp->currentTool() == ToolType::Lasso);
+    
+    ropeToolButton->setProperty("selected", isLasso);
+    updateButtonIcon(ropeToolButton, "rope");
+    ropeToolButton->style()->unpolish(ropeToolButton);
+    ropeToolButton->style()->polish(ropeToolButton);
 }
 
 void MainWindow::updatePictureButtonState() {

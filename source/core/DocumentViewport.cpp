@@ -210,13 +210,24 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         return;
     }
     
+    ToolType previousTool = m_currentTool;
     m_currentTool = tool;
     
-    // CR-2B-1: Disable straight line mode when switching to Eraser
+    // CR-2B-1: Disable straight line mode when switching to Eraser or Lasso
     // (straight lines only work with Pen and Marker)
-    if (tool == ToolType::Eraser && m_straightLineMode) {
+    if ((tool == ToolType::Eraser || tool == ToolType::Lasso) && m_straightLineMode) {
         m_straightLineMode = false;
         emit straightLineModeChanged(false);
+    }
+    
+    // Task 2.10.9: Clear lasso selection when switching away from Lasso tool
+    if (previousTool == ToolType::Lasso && tool != ToolType::Lasso) {
+        // Apply any pending transform before switching
+        if (m_lassoSelection.isValid() && m_lassoSelection.hasTransform()) {
+            applySelectionTransform();
+        } else {
+            clearLassoSelection();
+        }
     }
     
     // Update cursor and repaint for eraser cursor visibility
@@ -995,6 +1006,38 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.restore();
     }
     
+    // Task 2.10: Draw lasso selection path while drawing
+    if (m_isDrawingLasso && m_lassoPath.size() > 1) {
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Convert lasso path to viewport coordinates
+        QPolygonF vpPath;
+        if (m_document && m_document->isEdgeless()) {
+            for (const QPointF& pt : m_lassoPath) {
+                vpPath << documentToViewport(pt);
+            }
+        } else {
+            QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+            for (const QPointF& pt : m_lassoPath) {
+                vpPath << documentToViewport(pt + pageOrigin);
+            }
+        }
+        
+        // Draw lasso path with dashed line and light fill
+        QPen lassoPen(QColor(0, 120, 215), 1.5, Qt::DashLine);  // Windows blue
+        painter.setPen(lassoPen);
+        painter.setBrush(QColor(0, 120, 215, 30));  // Light blue fill
+        painter.drawPolygon(vpPath);
+        
+        painter.restore();
+    }
+    
+    // Task 2.10.3: Draw lasso selection (selected strokes + bounding box)
+    if (m_lassoSelection.isValid()) {
+        renderLassoSelection(painter);
+    }
+    
     // Draw eraser cursor (Task 2.4)
     // Skip during stroke drawing (partial updates for pen don't need eraser cursor)
     if (!m_isDrawing || !isPartialUpdate) {
@@ -1233,6 +1276,44 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         m_backtickHeld = true;
         event->accept();
         return;
+    }
+    
+    // Task 2.10.8: Lasso selection keyboard shortcuts
+    if (m_currentTool == ToolType::Lasso) {
+        // Copy (Ctrl+C)
+        if (event->matches(QKeySequence::Copy)) {
+            copySelection();
+            event->accept();
+            return;
+        }
+        // Cut (Ctrl+X)
+        if (event->matches(QKeySequence::Cut)) {
+            cutSelection();
+            event->accept();
+            return;
+        }
+        // Paste (Ctrl+V)
+        if (event->matches(QKeySequence::Paste)) {
+            pasteSelection();
+            event->accept();
+            return;
+        }
+        // Delete selection
+        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+            if (m_lassoSelection.isValid()) {
+                deleteSelection();
+                event->accept();
+                return;
+            }
+        }
+        // Cancel selection (Escape)
+        if (event->key() == Qt::Key_Escape) {
+            if (m_lassoSelection.isValid() || m_isDrawingLasso) {
+                cancelSelectionTransform();
+                event->accept();
+                return;
+            }
+        }
     }
     
     // Tool switching shortcuts (for testing and quick access)
@@ -2218,6 +2299,9 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
         }
         
         startStroke(pe);
+    } else if (m_currentTool == ToolType::Lasso) {
+        // Task 2.10: Lasso selection tool
+        handlePointerPress_Lasso(pe);
     }
 }
 
@@ -2276,6 +2360,13 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         return;
     }
     
+    // Task 2.10: Lasso tool - update lasso path OR handle transform
+    // CR-2B-5: Must check m_isTransformingSelection too, not just m_isDrawingLasso
+    if (m_isDrawingLasso || m_isTransformingSelection) {
+        handlePointerMove_Lasso(pe);
+        return;
+    }
+    
     // For stroke drawing, require an active drawing page
     if (m_activeDrawingPage < 0) {
         return;
@@ -2319,6 +2410,13 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
         
         update();
         preloadStrokeCaches();
+        return;
+    }
+    
+    // Task 2.10: Lasso tool - finalize lasso selection OR transform
+    // CR-2B-5: Must check m_isTransformingSelection too, not just m_isDrawingLasso
+    if (m_isDrawingLasso || m_isTransformingSelection) {
+        handlePointerRelease_Lasso(pe);
         return;
     }
     
@@ -2862,6 +2960,1171 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
     }
     
     emit documentModified();
+}
+
+// ===== Lasso Selection Tool (Task 2.10) =====
+
+void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Task 2.10.5: Check for handle/transform hit on existing selection
+    if (m_lassoSelection.isValid()) {
+        HandleHit hit = hitTestSelectionHandles(pe.viewportPos);
+        
+        if (hit != HandleHit::None) {
+            // Start transform operation
+            startSelectionTransform(hit, pe.viewportPos);
+            m_pointerActive = true;
+            return;
+        }
+        
+        // Task 2.10.6: Click outside selection - apply transform (if any) and clear
+        // Check if there's a non-identity transform to apply
+        bool hasTransform = !qFuzzyIsNull(m_lassoSelection.offset.x()) ||
+                            !qFuzzyIsNull(m_lassoSelection.offset.y()) ||
+                            !qFuzzyCompare(m_lassoSelection.scaleX, 1.0) ||
+                            !qFuzzyCompare(m_lassoSelection.scaleY, 1.0) ||
+                            !qFuzzyIsNull(m_lassoSelection.rotation);
+        
+        if (hasTransform) {
+            applySelectionTransform();  // This also clears the selection
+        } else {
+            clearLassoSelection();
+        }
+    }
+    
+    // Start new lasso path
+    m_lassoPath.clear();
+    
+    // Use appropriate coordinates based on mode
+    QPointF pt;
+    if (m_document->isEdgeless()) {
+        pt = viewportToDocument(pe.viewportPos);
+    } else if (pe.pageHit.valid()) {
+        pt = pe.pageHit.pagePoint;
+        m_lassoSelection.sourcePageIndex = pe.pageHit.pageIndex;
+    } else {
+        return;  // No valid page hit in paged mode
+    }
+    
+    m_lassoPath << pt;
+    m_isDrawingLasso = true;
+    m_pointerActive = true;
+    
+    update();
+}
+
+void DocumentViewport::handlePointerMove_Lasso(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Task 2.10.5: Handle transform updates
+    if (m_isTransformingSelection) {
+        updateSelectionTransform(pe.viewportPos);
+        return;
+    }
+    
+    if (!m_isDrawingLasso) return;
+    
+    // Add point to lasso path
+    QPointF pt;
+    if (m_document->isEdgeless()) {
+        pt = viewportToDocument(pe.viewportPos);
+    } else if (pe.pageHit.valid() && pe.pageHit.pageIndex == m_lassoSelection.sourcePageIndex) {
+        pt = pe.pageHit.pagePoint;
+    } else if (m_lassoSelection.sourcePageIndex >= 0) {
+        // Pointer moved off page - extrapolate
+        QPointF docPos = viewportToDocument(pe.viewportPos);
+        QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        pt = docPos - pageOrigin;
+    } else {
+        return;
+    }
+    
+    // Point decimation for lasso path (similar to stroke)
+    if (!m_lassoPath.isEmpty()) {
+        const QPointF& lastPt = m_lassoPath.last();
+        qreal dx = pt.x() - lastPt.x();
+        qreal dy = pt.y() - lastPt.y();
+        if (dx * dx + dy * dy < 4.0) {  // 2px minimum distance
+            return;  // Skip this point
+        }
+    }
+    
+    m_lassoPath << pt;
+    update();
+}
+
+void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Task 2.10.5: Finalize transform if active
+    if (m_isTransformingSelection) {
+        finalizeSelectionTransform();
+        m_pointerActive = false;
+        return;
+    }
+    
+    if (m_isDrawingLasso) {
+        // Add final point
+        QPointF pt;
+        if (m_document->isEdgeless()) {
+            pt = viewportToDocument(pe.viewportPos);
+        } else if (pe.pageHit.valid()) {
+            pt = pe.pageHit.pagePoint;
+        } else if (m_lassoSelection.sourcePageIndex >= 0) {
+            QPointF docPos = viewportToDocument(pe.viewportPos);
+            QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+            pt = docPos - pageOrigin;
+        }
+        
+        if (!pt.isNull()) {
+            m_lassoPath << pt;
+        }
+        
+        // Task 2.10.2: Find strokes within the lasso path
+        finalizeLassoSelection();
+        m_isDrawingLasso = false;
+    }
+    
+    m_pointerActive = false;
+    update();
+}
+
+void DocumentViewport::finalizeLassoSelection()
+{
+    if (!m_document || m_lassoPath.size() < 3) {
+        // Need at least 3 points to form a valid selection polygon
+        m_lassoPath.clear();
+        return;
+    }
+    
+    // BUG FIX: Save sourcePageIndex BEFORE clearing selection
+    // (it was set during handlePointerPress_Lasso)
+    int savedSourcePageIndex = m_lassoSelection.sourcePageIndex;
+    
+    // Clear any existing selection (but we saved the page index)
+    m_lassoSelection.clear();
+    
+    // Restore the source page index for paged mode
+    m_lassoSelection.sourcePageIndex = savedSourcePageIndex;
+    
+    if (m_document->isEdgeless()) {
+        // ========== EDGELESS MODE ==========
+        // Check strokes across all visible tiles
+        // Lasso path is in document coordinates
+        // Tile strokes are in tile-local coordinates
+        
+        m_lassoSelection.sourceLayerIndex = m_edgelessActiveLayerIndex;
+        
+        // Get all loaded tiles
+        auto tiles = m_document->allLoadedTileCoords();
+        
+        for (const auto& coord : tiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile || m_edgelessActiveLayerIndex >= tile->layerCount()) continue;
+            
+            VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
+            if (!layer || layer->isEmpty()) continue;
+            
+            // Calculate tile origin in document coordinates
+            QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                               coord.second * Document::EDGELESS_TILE_SIZE);
+            
+            const auto& strokes = layer->strokes();
+            for (int i = 0; i < strokes.size(); ++i) {
+                const VectorStroke& stroke = strokes[i];
+                
+                // Transform stroke to document coordinates for hit test
+                // We create a temporary copy with document coords
+                VectorStroke docStroke = stroke;
+                for (auto& pt : docStroke.points) {
+                    pt.pos += tileOrigin;
+                }
+                docStroke.updateBoundingBox();
+                
+                if (strokeIntersectsLasso(docStroke, m_lassoPath)) {
+                    // Store the document-coordinate version for rendering
+                    m_lassoSelection.selectedStrokes.append(docStroke);
+                    m_lassoSelection.originalIndices.append(i);
+                    // For edgeless, we store the tile coord; for simplicity,
+                    // just store the first tile's coord (cross-tile selection is complex)
+                    if (m_lassoSelection.sourceTileCoord == std::pair<int,int>(0,0) && 
+                        m_lassoSelection.selectedStrokes.size() == 1) {
+                        m_lassoSelection.sourceTileCoord = coord;
+                    }
+                }
+            }
+        }
+    } else {
+        // ========== PAGED MODE ==========
+        // Check strokes on the active layer of the current page
+        // Lasso path is in page-local coordinates
+        
+        if (m_lassoSelection.sourcePageIndex < 0 || 
+            m_lassoSelection.sourcePageIndex >= m_document->pageCount()) {
+            m_lassoPath.clear();
+            return;
+        }
+        
+        Page* page = m_document->page(m_lassoSelection.sourcePageIndex);
+        if (!page) {
+            m_lassoPath.clear();
+            return;
+        }
+        
+        VectorLayer* layer = page->activeLayer();
+        if (!layer) {
+            m_lassoPath.clear();
+            return;
+        }
+        
+        m_lassoSelection.sourceLayerIndex = page->activeLayerIndex;
+        
+        const auto& strokes = layer->strokes();
+        for (int i = 0; i < strokes.size(); ++i) {
+            const VectorStroke& stroke = strokes[i];
+            
+            if (strokeIntersectsLasso(stroke, m_lassoPath)) {
+                m_lassoSelection.selectedStrokes.append(stroke);
+                m_lassoSelection.originalIndices.append(i);
+            }
+        }
+    }
+    
+    // Calculate bounding box and transform origin if we have a selection
+    if (m_lassoSelection.isValid()) {
+        m_lassoSelection.boundingBox = calculateSelectionBoundingBox();
+        m_lassoSelection.transformOrigin = m_lassoSelection.boundingBox.center();
+    }
+    
+    // Clear the lasso path now that selection is complete
+    m_lassoPath.clear();
+    update();
+}
+
+bool DocumentViewport::strokeIntersectsLasso(const VectorStroke& stroke, 
+                                              const QPolygonF& lasso) const
+{
+    // Check if any point of the stroke is inside the lasso polygon
+    for (const auto& pt : stroke.points) {
+        if (lasso.containsPoint(pt.pos, Qt::OddEvenFill)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QRectF DocumentViewport::calculateSelectionBoundingBox() const
+{
+    if (m_lassoSelection.selectedStrokes.isEmpty()) {
+        return QRectF();
+    }
+    
+    QRectF bounds = m_lassoSelection.selectedStrokes[0].boundingBox;
+    for (int i = 1; i < m_lassoSelection.selectedStrokes.size(); ++i) {
+        bounds = bounds.united(m_lassoSelection.selectedStrokes[i].boundingBox);
+    }
+    return bounds;
+}
+
+QTransform DocumentViewport::buildSelectionTransform() const
+{
+    // Build transform: rotate/scale around origin, then apply offset
+    // 
+    // CR-2B-6: Qt transforms are composed in REVERSE order (last added = first applied)
+    // To achieve: 1) rotate/scale around origin, 2) then apply offset
+    // We must add offset FIRST (so it's applied LAST to points)
+    //
+    // Application order (to point P):
+    //   1. translate(-origin)     -> P - origin
+    //   2. scale                  -> scale * (P - origin)
+    //   3. rotate                 -> rotate * scale * (P - origin)
+    //   4. translate(+origin)     -> origin + rotate * scale * (P - origin)
+    //   5. translate(offset)      -> offset + origin + rotate * scale * (P - origin)
+    //
+    // Qt composition order (reverse):
+    QTransform t;
+    QPointF origin = m_lassoSelection.transformOrigin;
+    
+    t.translate(m_lassoSelection.offset.x(), m_lassoSelection.offset.y());  // Applied 5th (last)
+    t.translate(origin.x(), origin.y());                                      // Applied 4th
+    t.rotate(m_lassoSelection.rotation);                                      // Applied 3rd
+    t.scale(m_lassoSelection.scaleX, m_lassoSelection.scaleY);                // Applied 2nd
+    t.translate(-origin.x(), -origin.y());                                    // Applied 1st
+    
+    return t;
+}
+
+void DocumentViewport::renderLassoSelection(QPainter& painter)
+{
+    if (!m_lassoSelection.isValid()) {
+        return;
+    }
+    
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    
+    // Get the current selection transform
+    QTransform transform = buildSelectionTransform();
+    
+    // Render each selected stroke with transform applied
+    for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+        // Transform each point and render
+        VectorStroke transformedStroke;
+        transformedStroke.id = stroke.id;
+        transformedStroke.color = stroke.color;
+        transformedStroke.baseThickness = stroke.baseThickness;
+        
+        for (const StrokePoint& pt : stroke.points) {
+            StrokePoint tPt;
+            tPt.pos = transform.map(pt.pos);
+            tPt.pressure = pt.pressure;
+            transformedStroke.points.append(tPt);
+        }
+        transformedStroke.updateBoundingBox();
+        
+        // Convert from document/page coords to viewport and render
+        // We need to render at viewport scale
+        painter.save();
+        
+        if (m_document->isEdgeless()) {
+            // Edgeless: stroke coords are in document space
+            // Apply zoom and pan to get to viewport
+            painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+            painter.scale(m_zoomLevel, m_zoomLevel);
+        } else {
+            // Paged: stroke coords are in page-local space
+            // Need to add page offset first
+            QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+            painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+            painter.scale(m_zoomLevel, m_zoomLevel);
+            painter.translate(pageOrigin);
+        }
+        
+        VectorLayer::renderStroke(painter, transformedStroke);
+        painter.restore();
+    }
+    
+    // Draw the bounding box
+    drawSelectionBoundingBox(painter);
+    
+    // Draw transform handles
+    drawSelectionHandles(painter);
+    
+    painter.restore();
+}
+
+void DocumentViewport::drawSelectionBoundingBox(QPainter& painter)
+{
+    if (!m_lassoSelection.isValid()) {
+        return;
+    }
+    
+    QRectF box = m_lassoSelection.boundingBox;
+    QTransform transform = buildSelectionTransform();
+    
+    // Transform the four corners
+    QPolygonF corners;
+    corners << box.topLeft() << box.topRight() 
+            << box.bottomRight() << box.bottomLeft();
+    corners = transform.map(corners);
+    
+    // Convert to viewport coordinates
+    QPolygonF vpCorners;
+    if (m_document->isEdgeless()) {
+        for (const QPointF& pt : corners) {
+            vpCorners << documentToViewport(pt);
+        }
+    } else {
+        QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        for (const QPointF& pt : corners) {
+            vpCorners << documentToViewport(pt + pageOrigin);
+        }
+    }
+    
+    // Draw dashed bounding box (marching ants style)
+    // Use static offset that increments for animation effect
+    static int dashOffset = 0;
+    
+    QPen blackPen(Qt::black, 1, Qt::DashLine);
+    blackPen.setDashOffset(dashOffset);
+    QPen whitePen(Qt::white, 1, Qt::DashLine);
+    whitePen.setDashOffset(dashOffset + 4);  // Offset for contrast
+    
+    painter.setPen(whitePen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPolygon(vpCorners);
+    
+    painter.setPen(blackPen);
+    painter.drawPolygon(vpCorners);
+    
+    // Note: For animated marching ants, call update() from a timer
+    // and increment dashOffset. For now, static dashed line.
+    // dashOffset = (dashOffset + 1) % 16;
+}
+
+QVector<QPointF> DocumentViewport::getHandlePositions() const
+{
+    // Returns 9 positions: 8 scale handles + 1 rotation handle
+    // Positions are in document/page coordinates (before transform)
+    QRectF box = m_lassoSelection.boundingBox;
+    
+    QVector<QPointF> positions;
+    positions.reserve(9);
+    
+    // Scale handles: TL, T, TR, L, R, BL, B, BR (8 handles)
+    positions << box.topLeft();                                    // 0: TopLeft
+    positions << QPointF(box.center().x(), box.top());             // 1: Top
+    positions << box.topRight();                                   // 2: TopRight
+    positions << QPointF(box.left(), box.center().y());            // 3: Left
+    positions << QPointF(box.right(), box.center().y());           // 4: Right
+    positions << box.bottomLeft();                                 // 5: BottomLeft
+    positions << QPointF(box.center().x(), box.bottom());          // 6: Bottom
+    positions << box.bottomRight();                                // 7: BottomRight
+    
+    // Rotation handle: above top center
+    // Use a fixed offset in document coords (will scale with zoom)
+    qreal rotateOffset = ROTATE_HANDLE_OFFSET / m_zoomLevel;
+    positions << QPointF(box.center().x(), box.top() - rotateOffset);  // 8: Rotate
+    
+    return positions;
+}
+
+void DocumentViewport::drawSelectionHandles(QPainter& painter)
+{
+    if (!m_lassoSelection.isValid()) {
+        return;
+    }
+    
+    QTransform transform = buildSelectionTransform();
+    QVector<QPointF> handlePositions = getHandlePositions();
+    
+    // Determine page origin for coordinate conversion
+    QPointF pageOrigin;
+    if (!m_document->isEdgeless()) {
+        pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+    }
+    
+    // Convert handle positions to viewport coordinates
+    auto toViewport = [&](const QPointF& docPt) -> QPointF {
+        QPointF transformed = transform.map(docPt);
+        if (m_document->isEdgeless()) {
+            return documentToViewport(transformed);
+        } else {
+            return documentToViewport(transformed + pageOrigin);
+        }
+    };
+    
+    // Draw style for handles
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QPen handlePen(Qt::black, 1);
+    painter.setPen(handlePen);
+    painter.setBrush(Qt::white);
+    
+    // Draw the 8 scale handles (squares)
+    qreal halfSize = HANDLE_VISUAL_SIZE / 2.0;
+    for (int i = 0; i < 8; ++i) {
+        QPointF vpPos = toViewport(handlePositions[i]);
+        QRectF handleRect(vpPos.x() - halfSize, vpPos.y() - halfSize,
+                          HANDLE_VISUAL_SIZE, HANDLE_VISUAL_SIZE);
+        painter.drawRect(handleRect);
+    }
+    
+    // Draw rotation handle (circle) and connecting line
+    QPointF topCenterVp = toViewport(handlePositions[1]);  // Top center
+    QPointF rotateVp = toViewport(handlePositions[8]);     // Rotation handle
+    
+    // Line from top center to rotation handle
+    painter.setPen(QPen(Qt::black, 1));
+    painter.drawLine(topCenterVp, rotateVp);
+    
+    // Rotation handle circle
+    painter.setBrush(Qt::white);
+    painter.drawEllipse(rotateVp, halfSize, halfSize);
+    
+    // Draw a small rotation indicator inside the circle
+    painter.setPen(QPen(Qt::black, 1));
+    QPointF arrowStart(rotateVp.x() - halfSize * 0.4, rotateVp.y());
+    QPointF arrowEnd(rotateVp.x() + halfSize * 0.4, rotateVp.y() - halfSize * 0.3);
+    painter.drawLine(arrowStart, rotateVp);
+    painter.drawLine(rotateVp, arrowEnd);
+}
+
+DocumentViewport::HandleHit DocumentViewport::hitTestSelectionHandles(const QPointF& viewportPos) const
+{
+    if (!m_lassoSelection.isValid()) {
+        return HandleHit::None;
+    }
+    
+    QTransform transform = buildSelectionTransform();
+    QVector<QPointF> handlePositions = getHandlePositions();
+    
+    // Determine page origin for coordinate conversion
+    QPointF pageOrigin;
+    if (!m_document->isEdgeless()) {
+        pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+    }
+    
+    // Convert handle positions to viewport coordinates
+    auto toViewport = [&](const QPointF& docPt) -> QPointF {
+        QPointF transformed = transform.map(docPt);
+        if (m_document->isEdgeless()) {
+            return documentToViewport(transformed);
+        } else {
+            return documentToViewport(transformed + pageOrigin);
+        }
+    };
+    
+    // Touch-friendly hit area (larger than visual)
+    qreal hitRadius = HANDLE_HIT_SIZE / 2.0;
+    
+    // Map handle indices to HandleHit enum
+    // Order matches getHandlePositions(): TL(0), T(1), TR(2), L(3), R(4), BL(5), B(6), BR(7), Rotate(8)
+    static const HandleHit handleTypes[] = {
+        HandleHit::TopLeft, HandleHit::Top, HandleHit::TopRight,
+        HandleHit::Left, HandleHit::Right,
+        HandleHit::BottomLeft, HandleHit::Bottom, HandleHit::BottomRight,
+        HandleHit::Rotate
+    };
+    
+    // Test rotation handle first (highest priority, on top visually)
+    {
+        QPointF vpPos = toViewport(handlePositions[8]);
+        qreal dx = viewportPos.x() - vpPos.x();
+        qreal dy = viewportPos.y() - vpPos.y();
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+            return HandleHit::Rotate;
+        }
+    }
+    
+    // Test scale handles in reverse order (corners have priority over edges)
+    // Test corners: TL, TR, BL, BR (indices 0, 2, 5, 7)
+    int cornerIndices[] = {0, 2, 5, 7};
+    for (int idx : cornerIndices) {
+        QPointF vpPos = toViewport(handlePositions[idx]);
+        qreal dx = viewportPos.x() - vpPos.x();
+        qreal dy = viewportPos.y() - vpPos.y();
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+            return handleTypes[idx];
+        }
+    }
+    
+    // Test edge handles: T, L, R, B (indices 1, 3, 4, 6)
+    int edgeIndices[] = {1, 3, 4, 6};
+    for (int idx : edgeIndices) {
+        QPointF vpPos = toViewport(handlePositions[idx]);
+        qreal dx = viewportPos.x() - vpPos.x();
+        qreal dy = viewportPos.y() - vpPos.y();
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+            return handleTypes[idx];
+        }
+    }
+    
+    // Test if inside bounding box (for move)
+    // Transform the bounding box corners and check if point is inside
+    QRectF box = m_lassoSelection.boundingBox;
+    QPolygonF corners;
+    corners << box.topLeft() << box.topRight() 
+            << box.bottomRight() << box.bottomLeft();
+    corners = transform.map(corners);
+    
+    // Convert to viewport
+    QPolygonF vpCorners;
+    for (const QPointF& pt : corners) {
+        if (m_document->isEdgeless()) {
+            vpCorners << documentToViewport(pt);
+        } else {
+            vpCorners << documentToViewport(pt + pageOrigin);
+        }
+    }
+    
+    if (vpCorners.containsPoint(viewportPos, Qt::OddEvenFill)) {
+        return HandleHit::Inside;
+    }
+    
+    return HandleHit::None;
+}
+
+void DocumentViewport::startSelectionTransform(HandleHit handle, const QPointF& viewportPos)
+{
+    if (!m_lassoSelection.isValid() || handle == HandleHit::None) {
+        return;
+    }
+    
+    m_isTransformingSelection = true;
+    m_transformHandle = handle;
+    m_transformStartPos = viewportPos;
+    
+    // Store document position for coordinate-independent calculations
+    if (m_document->isEdgeless()) {
+        m_transformStartDocPos = viewportToDocument(viewportPos);
+    } else {
+        QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        m_transformStartDocPos = viewportToDocument(viewportPos) - pageOrigin;
+    }
+    
+    // CR-2B-8 + CR-2B-9: Before starting a new transform, "bake in" only the OFFSET.
+    // 
+    // We must NOT bake in rotation or scale because:
+    // - Rotation: Baking creates an axis-aligned bounding box, losing the tilt.
+    //   Subsequent operations would use X/Y axes instead of the rotated axes.
+    // - Scale: Similar issue - we'd lose the local coordinate orientation.
+    //
+    // ONLY offset is safe to bake in because it's pure translation.
+    // Rotation and scale remain as cumulative values.
+    if (!m_lassoSelection.offset.isNull()) {
+        // Translate bounding box and origin by the offset
+        m_lassoSelection.boundingBox.translate(m_lassoSelection.offset);
+        m_lassoSelection.transformOrigin += m_lassoSelection.offset;
+        
+        // Translate stored strokes to match
+        for (VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+            for (StrokePoint& pt : stroke.points) {
+                pt.pos += m_lassoSelection.offset;
+            }
+            stroke.updateBoundingBox();
+        }
+        
+        // Reset offset only (rotation and scale remain)
+        m_lassoSelection.offset = QPointF(0, 0);
+    }
+    
+    // Store current transform state so we can compute deltas
+    m_transformStartBounds = m_lassoSelection.boundingBox;
+    m_transformStartRotation = m_lassoSelection.rotation;
+    m_transformStartScaleX = m_lassoSelection.scaleX;
+    m_transformStartScaleY = m_lassoSelection.scaleY;
+    m_transformStartOffset = m_lassoSelection.offset;
+}
+
+void DocumentViewport::updateSelectionTransform(const QPointF& viewportPos)
+{
+    if (!m_isTransformingSelection || !m_lassoSelection.isValid()) {
+        return;
+    }
+    
+    // Get current document position
+    QPointF currentDocPos;
+    if (m_document->isEdgeless()) {
+        currentDocPos = viewportToDocument(viewportPos);
+    } else {
+        QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        currentDocPos = viewportToDocument(viewportPos) - pageOrigin;
+    }
+    
+    switch (m_transformHandle) {
+        case HandleHit::Inside: {
+            // Move: offset by delta in document coordinates
+            QPointF delta = currentDocPos - m_transformStartDocPos;
+            m_lassoSelection.offset = m_transformStartOffset + delta;
+            break;
+        }
+        
+        case HandleHit::Rotate: {
+            // Rotate around transform origin
+            // Calculate angle from origin to start and current positions
+            QPointF origin = m_lassoSelection.transformOrigin;
+            
+            // Use viewport coordinates for angle calculation (more intuitive for user)
+            QPointF originVp;
+            if (m_document->isEdgeless()) {
+                originVp = documentToViewport(origin);
+            } else {
+                QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+                originVp = documentToViewport(origin + pageOrigin);
+            }
+            
+            qreal startAngle = std::atan2(m_transformStartPos.y() - originVp.y(),
+                                          m_transformStartPos.x() - originVp.x());
+            qreal currentAngle = std::atan2(viewportPos.y() - originVp.y(),
+                                            viewportPos.x() - originVp.x());
+            
+            qreal deltaAngle = (currentAngle - startAngle) * 180.0 / M_PI;
+            m_lassoSelection.rotation = m_transformStartRotation + deltaAngle;
+            break;
+        }
+        
+        case HandleHit::TopLeft:
+        case HandleHit::Top:
+        case HandleHit::TopRight:
+        case HandleHit::Left:
+        case HandleHit::Right:
+        case HandleHit::BottomLeft:
+        case HandleHit::Bottom:
+        case HandleHit::BottomRight:
+            // Scale handles
+            updateScaleFromHandle(m_transformHandle, viewportPos);
+            break;
+            
+        case HandleHit::None:
+            break;
+    }
+    
+    update();
+}
+
+void DocumentViewport::updateScaleFromHandle(HandleHit handle, const QPointF& viewportPos)
+{
+    // Get current document position
+    QPointF currentDocPos;
+    if (m_document->isEdgeless()) {
+        currentDocPos = viewportToDocument(viewportPos);
+    } else {
+        QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        currentDocPos = viewportToDocument(viewportPos) - pageOrigin;
+    }
+    
+    QPointF origin = m_lassoSelection.transformOrigin;
+    QRectF startBounds = m_transformStartBounds;
+    
+    // Calculate original distances from center to edges
+    qreal origLeft = startBounds.left() - origin.x();
+    qreal origRight = startBounds.right() - origin.x();
+    qreal origTop = startBounds.top() - origin.y();
+    qreal origBottom = startBounds.bottom() - origin.y();
+    
+    // Calculate new distance from origin to current position
+    qreal dx = currentDocPos.x() - origin.x();
+    qreal dy = currentDocPos.y() - origin.y();
+    
+    // Apply rotation to get the position relative to the unrotated bounds
+    qreal rotRad = m_transformStartRotation * M_PI / 180.0;
+    qreal cosR = std::cos(-rotRad);
+    qreal sinR = std::sin(-rotRad);
+    qreal localX = dx * cosR - dy * sinR;
+    qreal localY = dx * sinR + dy * cosR;
+    
+    // Calculate scale factors based on which handle is being dragged
+    qreal newScaleX = m_transformStartScaleX;
+    qreal newScaleY = m_transformStartScaleY;
+    
+    switch (handle) {
+        case HandleHit::TopLeft:
+            if (std::abs(origLeft) > 0.001) newScaleX = localX / origLeft;
+            if (std::abs(origTop) > 0.001) newScaleY = localY / origTop;
+            break;
+            
+        case HandleHit::Top:
+            if (std::abs(origTop) > 0.001) newScaleY = localY / origTop;
+            break;
+            
+        case HandleHit::TopRight:
+            if (std::abs(origRight) > 0.001) newScaleX = localX / origRight;
+            if (std::abs(origTop) > 0.001) newScaleY = localY / origTop;
+            break;
+            
+        case HandleHit::Left:
+            if (std::abs(origLeft) > 0.001) newScaleX = localX / origLeft;
+            break;
+            
+        case HandleHit::Right:
+            if (std::abs(origRight) > 0.001) newScaleX = localX / origRight;
+            break;
+            
+        case HandleHit::BottomLeft:
+            if (std::abs(origLeft) > 0.001) newScaleX = localX / origLeft;
+            if (std::abs(origBottom) > 0.001) newScaleY = localY / origBottom;
+            break;
+            
+        case HandleHit::Bottom:
+            if (std::abs(origBottom) > 0.001) newScaleY = localY / origBottom;
+            break;
+            
+        case HandleHit::BottomRight:
+            if (std::abs(origRight) > 0.001) newScaleX = localX / origRight;
+            if (std::abs(origBottom) > 0.001) newScaleY = localY / origBottom;
+            break;
+            
+        default:
+            break;
+    }
+    
+    // Clamp scale to reasonable values (prevent inversion and extreme scaling)
+    // Use 0.1 minimum to allow shrinking but prevent disappearance
+    newScaleX = qBound(0.1, newScaleX, 10.0);
+    newScaleY = qBound(0.1, newScaleY, 10.0);
+    
+    m_lassoSelection.scaleX = newScaleX;
+    m_lassoSelection.scaleY = newScaleY;
+}
+
+void DocumentViewport::finalizeSelectionTransform()
+{
+    m_isTransformingSelection = false;
+    m_transformHandle = HandleHit::None;
+    // Transform is applied visually; actual stroke modification happens on:
+    // - Click elsewhere (apply and clear)
+    // - Paste (apply to new location)
+    // - Delete (remove originals)
+    update();
+}
+
+void DocumentViewport::transformStrokePoints(VectorStroke& stroke, const QTransform& transform)
+{
+    for (StrokePoint& pt : stroke.points) {
+        pt.pos = transform.map(pt.pos);
+    }
+    stroke.updateBoundingBox();
+}
+
+void DocumentViewport::applySelectionTransform()
+{
+    if (!m_lassoSelection.isValid() || !m_document) {
+        return;
+    }
+    
+    QTransform transform = buildSelectionTransform();
+    
+    if (m_document->isEdgeless()) {
+        // ========== EDGELESS MODE ==========
+        // More complex: strokes may span multiple tiles after transform
+        // Strategy: remove all original strokes, then add transformed strokes
+        // using the same tile-splitting logic as regular stroke creation
+        
+        // First, remove original strokes from their source tiles
+        auto tiles = m_document->allLoadedTileCoords();
+        for (const auto& coord : tiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile || m_lassoSelection.sourceLayerIndex >= tile->layerCount()) continue;
+            
+            VectorLayer* layer = tile->layer(m_lassoSelection.sourceLayerIndex);
+            if (!layer) continue;
+            
+            // Find and remove strokes that match our selection by ID
+            QVector<VectorStroke>& layerStrokes = layer->strokes();
+            for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+                for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
+                    if (layerStrokes[i].id == selectedStroke.id) {
+                        layerStrokes.removeAt(i);
+                        layer->invalidateStrokeCache();
+                        m_document->markTileDirty(coord);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Now add transformed strokes back (they will be placed in appropriate tiles)
+        for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+            VectorStroke transformedStroke = stroke;
+            transformStrokePoints(transformedStroke, transform);
+            transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            
+            // Find which tile(s) this stroke belongs to
+            // For simplicity, use the stroke's bounding box center to determine primary tile
+            QPointF center = transformedStroke.boundingBox.center();
+            Document::TileCoord tileCoord = m_document->tileCoordForPoint(center);
+            
+            // Get or create the tile
+            Page* tile = m_document->getOrCreateTile(tileCoord.first, tileCoord.second);
+            if (!tile) continue;
+            
+            // Ensure layer exists
+            while (tile->layerCount() <= m_lassoSelection.sourceLayerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            
+            VectorLayer* layer = tile->layer(m_lassoSelection.sourceLayerIndex);
+            if (!layer) continue;
+            
+            // Convert to tile-local coordinates
+            QPointF tileOrigin(tileCoord.first * Document::EDGELESS_TILE_SIZE,
+                               tileCoord.second * Document::EDGELESS_TILE_SIZE);
+            
+            VectorStroke localStroke = transformedStroke;
+            for (StrokePoint& pt : localStroke.points) {
+                pt.pos -= tileOrigin;
+            }
+            localStroke.updateBoundingBox();
+            
+            layer->addStroke(localStroke);
+            layer->invalidateStrokeCache();
+            m_document->markTileDirty(tileCoord);
+        }
+        
+        // TODO: Push to edgeless undo stack
+        
+    } else {
+        // ========== PAGED MODE ==========
+        // Simpler: all strokes are on the same page/layer
+        
+        if (m_lassoSelection.sourcePageIndex < 0 || 
+            m_lassoSelection.sourcePageIndex >= m_document->pageCount()) {
+            return;
+        }
+        
+        Page* page = m_document->page(m_lassoSelection.sourcePageIndex);
+        if (!page) return;
+        
+        VectorLayer* layer = page->layer(m_lassoSelection.sourceLayerIndex);
+        if (!layer) return;
+        
+        // Remove original strokes by ID
+        QVector<VectorStroke>& layerStrokes = layer->strokes();
+        for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+            for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
+                if (layerStrokes[i].id == selectedStroke.id) {
+                    layerStrokes.removeAt(i);
+                    break;
+                }
+            }
+        }
+        
+        // Add transformed strokes with new IDs
+        for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+            VectorStroke transformedStroke = stroke;
+            transformStrokePoints(transformedStroke, transform);
+            transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            layer->addStroke(transformedStroke);
+        }
+        
+        layer->invalidateStrokeCache();
+        
+        // Push to undo stack
+        // TODO: Create a compound undo action for remove + add
+    }
+    
+    clearLassoSelection();
+    emit documentModified();
+}
+
+void DocumentViewport::cancelSelectionTransform()
+{
+    // Simply clear the selection without applying the transform
+    // The original strokes remain untouched
+    clearLassoSelection();
+}
+
+// ===== Clipboard Operations (Task 2.10.7) =====
+
+void DocumentViewport::copySelection()
+{
+    if (!m_lassoSelection.isValid()) {
+        return;
+    }
+    
+    m_clipboard.clear();
+    
+    // Get current transform and apply it to strokes before copying
+    QTransform transform = buildSelectionTransform();
+    
+    for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+        VectorStroke transformedStroke = stroke;
+        transformStrokePoints(transformedStroke, transform);
+        // Give new ID to avoid conflicts when pasting
+        transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        m_clipboard.strokes.append(transformedStroke);
+    }
+    
+    m_clipboard.hasContent = true;
+}
+
+void DocumentViewport::cutSelection()
+{
+    if (!m_lassoSelection.isValid()) {
+        return;
+    }
+    
+    // Copy first
+    copySelection();
+    
+    // Then delete
+    deleteSelection();
+}
+
+void DocumentViewport::pasteSelection()
+{
+    if (!m_clipboard.hasContent || m_clipboard.strokes.isEmpty() || !m_document) {
+        return;
+    }
+    
+    // Calculate clipboard bounding box
+    QRectF clipboardBounds;
+    for (const VectorStroke& stroke : m_clipboard.strokes) {
+        if (clipboardBounds.isNull()) {
+            clipboardBounds = stroke.boundingBox;
+        } else {
+            clipboardBounds = clipboardBounds.united(stroke.boundingBox);
+        }
+    }
+    
+    // Calculate paste offset: center clipboard content at viewport center
+    QPointF viewCenter(width() / 2.0, height() / 2.0);
+    QPointF docCenter = viewportToDocument(viewCenter);
+    QPointF clipboardCenter = clipboardBounds.center();
+    QPointF offset = docCenter - clipboardCenter;
+    
+    if (m_document->isEdgeless()) {
+        // ========== EDGELESS MODE ==========
+        // Add strokes to appropriate tiles based on their position
+        
+        for (const VectorStroke& stroke : m_clipboard.strokes) {
+            VectorStroke pastedStroke = stroke;
+            
+            // Apply paste offset
+            for (StrokePoint& pt : pastedStroke.points) {
+                pt.pos += offset;
+            }
+            pastedStroke.updateBoundingBox();
+            pastedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            
+            // Determine which tile this stroke belongs to
+            QPointF center = pastedStroke.boundingBox.center();
+            Document::TileCoord tileCoord = m_document->tileCoordForPoint(center);
+            
+            Page* tile = m_document->getOrCreateTile(tileCoord.first, tileCoord.second);
+            if (!tile) continue;
+            
+            // Ensure layer exists
+            while (tile->layerCount() <= m_edgelessActiveLayerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            
+            VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
+            if (!layer) continue;
+            
+            // Convert to tile-local coordinates
+            QPointF tileOrigin(tileCoord.first * Document::EDGELESS_TILE_SIZE,
+                               tileCoord.second * Document::EDGELESS_TILE_SIZE);
+            
+            VectorStroke localStroke = pastedStroke;
+            for (StrokePoint& pt : localStroke.points) {
+                pt.pos -= tileOrigin;
+            }
+            localStroke.updateBoundingBox();
+            
+            layer->addStroke(localStroke);
+            layer->invalidateStrokeCache();
+            m_document->markTileDirty(tileCoord);
+        }
+        
+        // TODO: Push to edgeless undo stack
+        
+    } else {
+        // ========== PAGED MODE ==========
+        // Paste to current page's active layer
+        
+        int pageIndex = currentPageIndex();
+        if (pageIndex < 0 || pageIndex >= m_document->pageCount()) {
+            return;
+        }
+        
+        Page* page = m_document->page(pageIndex);
+        if (!page) return;
+        
+        VectorLayer* layer = page->activeLayer();
+        if (!layer) return;
+        
+        // Adjust offset for paged mode (use page-local coordinates)
+        QPointF pageOrigin = pagePosition(pageIndex);
+        QPointF pageCenter = docCenter - pageOrigin;
+        offset = pageCenter - clipboardCenter;
+        
+        for (const VectorStroke& stroke : m_clipboard.strokes) {
+            VectorStroke pastedStroke = stroke;
+            
+            // Apply paste offset
+            for (StrokePoint& pt : pastedStroke.points) {
+                pt.pos += offset;
+            }
+            pastedStroke.updateBoundingBox();
+            pastedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            
+            layer->addStroke(pastedStroke);
+        }
+        
+        layer->invalidateStrokeCache();
+        
+        // TODO: Push to undo stack
+    }
+    
+    update();
+    emit documentModified();
+}
+
+void DocumentViewport::deleteSelection()
+{
+    if (!m_lassoSelection.isValid() || !m_document) {
+        return;
+    }
+    
+    if (m_document->isEdgeless()) {
+        // ========== EDGELESS MODE ==========
+        // Remove strokes from their tiles by ID
+        
+        auto tiles = m_document->allLoadedTileCoords();
+        for (const auto& coord : tiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile || m_lassoSelection.sourceLayerIndex >= tile->layerCount()) continue;
+            
+            VectorLayer* layer = tile->layer(m_lassoSelection.sourceLayerIndex);
+            if (!layer) continue;
+            
+            QVector<VectorStroke>& layerStrokes = layer->strokes();
+            bool modified = false;
+            
+            for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+                for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
+                    if (layerStrokes[i].id == selectedStroke.id) {
+                        layerStrokes.removeAt(i);
+                        modified = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (modified) {
+                layer->invalidateStrokeCache();
+                m_document->markTileDirty(coord);
+            }
+        }
+        
+        // TODO: Push to edgeless undo stack
+        
+    } else {
+        // ========== PAGED MODE ==========
+        
+        if (m_lassoSelection.sourcePageIndex < 0 || 
+            m_lassoSelection.sourcePageIndex >= m_document->pageCount()) {
+            return;
+        }
+        
+        Page* page = m_document->page(m_lassoSelection.sourcePageIndex);
+        if (!page) return;
+        
+        VectorLayer* layer = page->layer(m_lassoSelection.sourceLayerIndex);
+        if (!layer) return;
+        
+        // Remove strokes by ID
+        QVector<VectorStroke>& layerStrokes = layer->strokes();
+        for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+            for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
+                if (layerStrokes[i].id == selectedStroke.id) {
+                    layerStrokes.removeAt(i);
+                    break;
+                }
+            }
+        }
+        
+        layer->invalidateStrokeCache();
+        
+        // TODO: Push to undo stack
+    }
+    
+    clearLassoSelection();
+    update();
+    emit documentModified();
+}
+
+void DocumentViewport::clearLassoSelection()
+{
+    m_lassoSelection.clear();
+    m_lassoPath.clear();
+    m_isDrawingLasso = false;
+    update();
 }
 
 void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
@@ -3701,12 +4964,30 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     painter.setRenderHint(QPainter::Antialiasing, true);
     qreal dpr = devicePixelRatioF();
     
+    // CR-2B-7: Check if this page has selected strokes that should be excluded
+    bool hasSelectionOnThisPage = m_lassoSelection.isValid() && 
+                                   m_lassoSelection.sourcePageIndex == pageIndex;
+    QSet<QString> excludeIds;
+    if (hasSelectionOnThisPage) {
+        excludeIds = m_lassoSelection.getSelectedIds();
+    }
+    
     for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
         VectorLayer* layer = page->layer(layerIdx);
         if (layer && layer->visible) {
-            // Use zoom-aware cache for maximum performance
-            // The painter is scaled by zoom, cache is at zoom * dpr resolution
-            layer->renderWithZoomCache(painter, pageSize, m_zoomLevel, dpr);
+            // CR-2B-7: If this layer contains selected strokes, render with exclusion
+            // to hide originals (they'll be rendered transformed in renderLassoSelection)
+            if (hasSelectionOnThisPage && layerIdx == m_lassoSelection.sourceLayerIndex) {
+                // Render manually, skipping selected strokes (bypasses cache)
+                painter.save();
+                painter.scale(m_zoomLevel, m_zoomLevel);
+                layer->renderExcluding(painter, excludeIds);
+                painter.restore();
+            } else {
+                // Use zoom-aware cache for maximum performance
+                // The painter is scaled by zoom, cache is at zoom * dpr resolution
+                layer->renderWithZoomCache(painter, pageSize, m_zoomLevel, dpr);
+            }
         }
     }
     
@@ -3849,6 +5130,31 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         
         painter.restore();
     }
+    
+    // Task 2.10: Draw lasso selection path (edgeless mode)
+    if (m_isDrawingLasso && m_lassoPath.size() > 1) {
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Convert lasso path to viewport coordinates (edgeless: document coords)
+        QPolygonF vpPath;
+        for (const QPointF& pt : m_lassoPath) {
+            vpPath << documentToViewport(pt);
+        }
+        
+        // Draw lasso path with dashed line and light fill
+        QPen lassoPen(QColor(0, 120, 215), 1.5, Qt::DashLine);  // Windows blue
+        painter.setPen(lassoPen);
+        painter.setBrush(QColor(0, 120, 215, 30));  // Light blue fill
+        painter.drawPolygon(vpPath);
+        
+        painter.restore();
+    }
+    
+    // Task 2.10.3: Draw lasso selection (edgeless mode)
+    if (m_lassoSelection.isValid()) {
+        renderLassoSelection(painter);
+    }
 }
 
 // NOTE: renderTile() was removed (CR-2) - it was dead code duplicating 
@@ -3856,8 +5162,6 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
 
 void DocumentViewport::renderTileStrokes(QPainter& painter, Page* tile, Document::TileCoord coord)
 {
-    Q_UNUSED(coord);
-    
     if (!tile) return;
     
     QSizeF tileSize = tile->size;
@@ -3866,10 +5170,26 @@ void DocumentViewport::renderTileStrokes(QPainter& painter, Page* tile, Document
     painter.setRenderHint(QPainter::Antialiasing, true);
     qreal dpr = devicePixelRatioF();
     
+    // CR-2B-7: Check if this tile has selected strokes that should be excluded
+    // Note: In edgeless mode, selected strokes are stored in document coordinates,
+    // but they originated from specific tiles. We check by ID across all tiles
+    // since a selection might span multiple tiles.
+    QSet<QString> excludeIds;
+    if (m_lassoSelection.isValid()) {
+        excludeIds = m_lassoSelection.getSelectedIds();
+    }
+    
     for (int layerIdx = 0; layerIdx < tile->layerCount(); ++layerIdx) {
         VectorLayer* layer = tile->layer(layerIdx);
         if (layer && layer->visible) {
-            layer->renderWithZoomCache(painter, tileSize, m_zoomLevel, dpr);
+            // CR-2B-7: If there's a selection on the active layer, exclude selected strokes
+            if (!excludeIds.isEmpty() && layerIdx == m_edgelessActiveLayerIndex) {
+                // Render manually, skipping selected strokes
+                // Note: painter is already in tile-local coordinates
+                layer->renderExcluding(painter, excludeIds);
+            } else {
+                layer->renderWithZoomCache(painter, tileSize, m_zoomLevel, dpr);
+            }
         }
     }
     

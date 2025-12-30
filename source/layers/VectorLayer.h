@@ -427,6 +427,30 @@ public:
         renderWithZoomCache(painter, size, 1.0, dpr);
     }
     
+    /**
+     * @brief Render layer strokes excluding specific stroke IDs.
+     * @param painter The QPainter to render to (assumed already scaled by zoom).
+     * @param excludeIds Set of stroke IDs to skip during rendering.
+     * 
+     * CR-2B-7: Used during lasso selection to hide original strokes while
+     * rendering the transformed copies separately. This bypasses the cache
+     * to allow per-stroke exclusion.
+     */
+    void renderExcluding(QPainter& painter, const QSet<QString>& excludeIds) {
+        if (!visible || m_strokes.isEmpty() || excludeIds.isEmpty()) {
+            // No exclusions needed, but caller expects direct render (no cache)
+            render(painter);
+            return;
+        }
+        
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        for (const VectorStroke& stroke : m_strokes) {
+            if (!excludeIds.contains(stroke.id)) {
+                renderStroke(painter, stroke);
+            }
+        }
+    }
+    
 private:
     QVector<VectorStroke> m_strokes;  ///< All strokes in this layer
     

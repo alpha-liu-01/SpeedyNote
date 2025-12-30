@@ -301,447 +301,231 @@ bool m_isDrawingLasso = false;
 
 ### Implementation Tasks
 
-#### 2.10.1 Lasso Path Drawing (~50 lines)
+#### 2.10.1 Lasso Path Drawing (~50 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& event) {
-    // If clicking on existing selection, start transform
-    if (m_lassoSelection.isValid()) {
-        HandleHit hit = hitTestSelectionHandles(event.viewportPos);
-        if (hit != HandleHit::None) {
-            startSelectionTransform(hit, event.viewportPos);
-            return;
-        }
-        if (m_lassoSelection.boundingBox.contains(event.pageHit.pagePoint)) {
-            startSelectionMove(event.viewportPos);
-            return;
-        }
-        // Click outside - clear selection
-        clearLassoSelection();
-    }
-    
-    // Start new lasso path
-    m_lassoPath.clear();
-    m_lassoPath << event.pageHit.pagePoint;
-    m_isDrawingLasso = true;
-}
+**Implemented:**
+1. **Data structures** in `DocumentViewport.h`:
+   - `LassoSelection` struct with strokes, indices, transform state
+   - `m_lassoPath` (QPolygonF) for the drawing path
+   - `m_isDrawingLasso` flag
 
-void DocumentViewport::handlePointerMove_Lasso(const PointerEvent& event) {
-    if (m_isDrawingLasso) {
-        m_lassoPath << event.pageHit.pagePoint;
-        update();
-    } else if (m_isTransformingSelection) {
-        updateSelectionTransform(event.viewportPos);
-    }
-}
+2. **Handler methods:**
+   - `handlePointerPress_Lasso()` - starts lasso path, clears existing selection
+   - `handlePointerMove_Lasso()` - adds points with decimation
+   - `handlePointerRelease_Lasso()` - finalizes path (selection in 2.10.2)
+   - `clearLassoSelection()` - clears all lasso state
 
-void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& event) {
-    if (m_isDrawingLasso) {
-        m_lassoPath << event.pageHit.pagePoint;
-        finalizeLassoSelection();
-        m_isDrawingLasso = false;
-    } else if (m_isTransformingSelection) {
-        finalizeSelectionTransform();
-    }
-}
-```
+3. **Integration:**
+   - Added `ToolType::Lasso` handling in `handlePointerPress/Move/Release`
 
-#### 2.10.2 Stroke Hit Detection (~60 lines)
+4. **Rendering:**
+   - Lasso path preview with dashed blue line and light fill
+   - Works in both paged and edgeless modes
+
+#### 2.10.2 Stroke Hit Detection (~60 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::finalizeLassoSelection() {
-    m_lassoSelection.clear();
-    
-    // Get strokes from active layer
-    VectorLayer* layer = getActiveLayer();  // Helper to get layer for current mode
-    if (!layer) return;
-    
-    const auto& strokes = layer->strokes();
-    
-    for (int i = 0; i < strokes.size(); ++i) {
-        const VectorStroke& stroke = strokes[i];
-        
-        // Check if stroke intersects with lasso path
-        if (strokeIntersectsLasso(stroke, m_lassoPath)) {
-            m_lassoSelection.selectedStrokes.append(stroke);
-            m_lassoSelection.originalIndices.append(i);
-        }
-    }
-    
-    if (m_lassoSelection.isValid()) {
-        // Calculate bounding box
-        m_lassoSelection.boundingBox = calculateSelectionBoundingBox();
-        m_lassoSelection.transformOrigin = m_lassoSelection.boundingBox.center();
-        
-        // Store source location
-        if (m_document->isEdgeless()) {
-            m_lassoSelection.sourceTileCoord = currentTileCoord();
-        } else {
-            m_lassoSelection.sourcePageIndex = m_currentPageIndex;
-        }
-        m_lassoSelection.sourceLayerIndex = getActiveLayerIndex();
-    }
-    
-    m_lassoPath.clear();
-    update();
-}
+**Implemented:**
+1. **`finalizeLassoSelection()`** - Finds strokes inside lasso path:
+   - **Paged mode:** Checks strokes on active layer of source page
+   - **Edgeless mode:** Iterates all loaded tiles, transforms stroke points from tile-local to document coordinates for hit testing
+   - Stores selected strokes, original indices, source location info
+   - Calculates bounding box and transform origin
 
-bool DocumentViewport::strokeIntersectsLasso(const VectorStroke& stroke, 
-                                              const QPolygonF& lasso) {
-    // Check if any point of the stroke is inside the lasso polygon
-    for (const auto& point : stroke.points()) {
-        if (lasso.containsPoint(QPointF(point.x, point.y), Qt::OddEvenFill)) {
-            return true;
-        }
-    }
-    return false;
-}
-```
+2. **`strokeIntersectsLasso()`** - Checks if any stroke point is inside lasso polygon using Qt's `containsPoint()` with OddEvenFill
 
-#### 2.10.3 Selection Rendering (~80 lines)
+3. **`calculateSelectionBoundingBox()`** - Computes unified bounding rect of all selected strokes
+
+#### 2.10.3 Selection Rendering (~80 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::renderLassoSelection(QPainter& painter) {
-    // Draw lasso path while drawing
-    if (m_isDrawingLasso && m_lassoPath.size() > 1) {
-        painter.save();
-        QPen lassoPen(Qt::blue, 1, Qt::DashLine);
-        painter.setPen(lassoPen);
-        painter.setBrush(QColor(0, 0, 255, 30));  // Light blue fill
-        
-        QPolygonF vpPath;
-        for (const QPointF& pt : m_lassoPath) {
-            vpPath << documentToViewport(pt);
-        }
-        painter.drawPolygon(vpPath);
-        painter.restore();
-    }
-    
-    // Draw selection with transforms applied
-    if (m_lassoSelection.isValid()) {
-        painter.save();
-        
-        // Apply current transform
-        QTransform transform = buildSelectionTransform();
-        
-        // Draw selected strokes with transform
-        for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
-            VectorStroke transformedStroke = stroke.transformed(transform);
-            transformedStroke.render(painter, m_zoomLevel, -m_panOffset);
-        }
-        
-        // Draw bounding box (marching ants or dashed)
-        drawSelectionBoundingBox(painter, transform);
-        
-        // Draw handles
-        drawSelectionHandles(painter, transform);
-        
-        painter.restore();
-    }
-}
+**Implemented:**
+1. **`renderLassoSelection()`** - Renders selected strokes with transforms:
+   - Applies current transform (offset, scale, rotation) via `buildSelectionTransform()`
+   - Transforms each stroke's points before rendering
+   - Handles coordinate conversion for both paged and edgeless modes
+   - Calls `drawSelectionBoundingBox()` for visual feedback
 
-void DocumentViewport::drawSelectionBoundingBox(QPainter& painter, 
-                                                 const QTransform& transform) {
-    QRectF box = m_lassoSelection.boundingBox;
-    QPolygonF corners;
-    corners << box.topLeft() << box.topRight() 
-            << box.bottomRight() << box.bottomLeft();
-    corners = transform.map(corners);
-    
-    // Convert to viewport
-    QPolygonF vpCorners;
-    for (const QPointF& pt : corners) {
-        vpCorners << documentToViewport(pt);
-    }
-    
-    // Marching ants effect (or static dashed line)
-    static int dashOffset = 0;
-    QPen pen(Qt::black, 1, Qt::DashLine);
-    pen.setDashOffset(dashOffset);
-    painter.setPen(pen);
-    painter.setBrush(Qt::NoBrush);
-    painter.drawPolygon(vpCorners);
-    
-    // Animate marching ants (called from timer if enabled)
-    // dashOffset = (dashOffset + 1) % 16;
-}
-```
+2. **`drawSelectionBoundingBox()`** - Draws dashed bounding box:
+   - Transforms bounding box corners with current selection transform
+   - Converts to viewport coordinates
+   - Draws black/white dashed lines for contrast
+   - Static dash offset (animation hook available for future marching ants)
 
-#### 2.10.4 Transform Handles (~60 lines)
+3. **`buildSelectionTransform()`** - Creates transform matrix:
+   - Translates to transform origin (center)
+   - Applies rotation
+   - Applies scale
+   - Translates back and applies offset
+
+4. **Integration:**
+   - Called from `paintEvent()` (paged mode) after lasso path rendering
+   - Called from `renderEdgelessMode()` (edgeless mode) after lasso path rendering
+
+#### 2.10.4 Transform Handles (~60 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-enum class HandleHit {
-    None,
-    TopLeft, Top, TopRight,
-    Left, Right,
-    BottomLeft, Bottom, BottomRight,
-    Rotate,  // Above top center
-    Inside   // For move
-};
+**Implemented with touch-friendly design:**
 
-void DocumentViewport::drawSelectionHandles(QPainter& painter, 
-                                            const QTransform& transform) {
-    QRectF box = m_lassoSelection.boundingBox;
-    
-    // 8 scale handles at corners and edge midpoints
-    QVector<QPointF> handlePositions = {
-        box.topLeft(), 
-        QPointF(box.center().x(), box.top()),
-        box.topRight(),
-        QPointF(box.left(), box.center().y()),
-        QPointF(box.right(), box.center().y()),
-        box.bottomLeft(),
-        QPointF(box.center().x(), box.bottom()),
-        box.bottomRight()
-    };
-    
-    // Rotation handle above top center
-    QPointF rotateHandle(box.center().x(), box.top() - 20 / m_zoomLevel);
-    
-    painter.setPen(Qt::black);
-    painter.setBrush(Qt::white);
-    
-    qreal handleSize = 8;  // pixels
-    for (const QPointF& pos : handlePositions) {
-        QPointF transformed = transform.map(pos);
-        QPointF vp = documentToViewport(transformed);
-        painter.drawRect(QRectF(vp.x() - handleSize/2, vp.y() - handleSize/2,
-                                handleSize, handleSize));
-    }
-    
-    // Rotation handle (circle)
-    QPointF rotateVp = documentToViewport(transform.map(rotateHandle));
-    painter.drawEllipse(rotateVp, handleSize/2, handleSize/2);
-    
-    // Line from top center to rotation handle
-    QPointF topCenterVp = documentToViewport(
-        transform.map(QPointF(box.center().x(), box.top())));
-    painter.drawLine(topCenterVp, rotateVp);
-}
+1. **`HandleHit` enum** - Defines all handle types:
+   - 8 scale handles: TopLeft, Top, TopRight, Left, Right, BottomLeft, Bottom, BottomRight
+   - Rotate handle above top center
+   - Inside (for move when clicking inside bounding box)
 
-HandleHit DocumentViewport::hitTestSelectionHandles(QPointF viewportPos) {
-    // Test each handle position (reverse order of drawing for correct z-order)
-    // Return HandleHit enum indicating which handle was hit
-    // ... implementation
-}
-```
+2. **Handle size constants** (touch-friendly):
+   - `HANDLE_VISUAL_SIZE = 8.0` pixels (visual appearance)
+   - `HANDLE_HIT_SIZE = 20.0` pixels (touch-friendly hit area)
+   - `ROTATE_HANDLE_OFFSET = 25.0` pixels (rotation handle distance)
 
-#### 2.10.5 Transform Operations (~80 lines)
+3. **`getHandlePositions()`** - Returns 9 positions (8 scale + 1 rotate)
+   - Positions in document/page coordinates
+   - Rotation handle offset scales with zoom for consistent visual
+
+4. **`drawSelectionHandles()`**:
+   - Draws 8 white square handles with black border (scale)
+   - Draws rotation handle (circle) with connecting line
+   - Small rotation indicator arrow inside circle
+   - Works in both paged and edgeless modes
+
+5. **`hitTestSelectionHandles()`**:
+   - Uses larger hit area (20px) for touch-friendly interaction
+   - Tests rotation handle first (highest priority)
+   - Tests corner handles before edge handles
+   - Tests bounding box interior last (for move)
+   - Returns HandleHit enum for use in transform operations
+
+#### 2.10.5 Transform Operations (~80 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::startSelectionTransform(HandleHit handle, QPointF startPos) {
-    m_transformHandle = handle;
-    m_transformStartPos = startPos;
-    m_transformStartBounds = m_lassoSelection.boundingBox;
-    m_isTransformingSelection = true;
-}
+**Implemented:**
 
-void DocumentViewport::updateSelectionTransform(QPointF currentPos) {
-    QPointF delta = currentPos - m_transformStartPos;
-    
-    switch (m_transformHandle) {
-        case HandleHit::Inside:
-            // Move
-            m_lassoSelection.offset = viewportToDocument(currentPos) - 
-                                      viewportToDocument(m_transformStartPos);
-            break;
-            
-        case HandleHit::Rotate: {
-            // Rotate around center
-            QPointF center = documentToViewport(m_lassoSelection.transformOrigin);
-            qreal startAngle = std::atan2(m_transformStartPos.y() - center.y(),
-                                          m_transformStartPos.x() - center.x());
-            qreal currentAngle = std::atan2(currentPos.y() - center.y(),
-                                            currentPos.x() - center.x());
-            m_lassoSelection.rotation = (currentAngle - startAngle) * 180 / M_PI;
-            break;
-        }
-            
-        case HandleHit::BottomRight:
-        case HandleHit::TopLeft:
-        // ... other scale handles
-            // Calculate scale factors based on handle position
-            updateScaleFromHandle(m_transformHandle, currentPos);
-            break;
-    }
-    
-    update();
-}
+1. **Transform state members:**
+   - `m_isTransformingSelection` - transform in progress flag
+   - `m_transformHandle` - which handle is being dragged
+   - `m_transformStartPos/DocPos` - starting positions
+   - `m_transformStartBounds/Rotation/ScaleX/ScaleY/Offset` - initial state
 
-QTransform DocumentViewport::buildSelectionTransform() {
-    QTransform t;
-    QPointF origin = m_lassoSelection.transformOrigin;
-    
-    // Order: translate to origin, scale, rotate, translate back, apply offset
-    t.translate(origin.x(), origin.y());
-    t.rotate(m_lassoSelection.rotation);
-    t.scale(m_lassoSelection.scaleX, m_lassoSelection.scaleY);
-    t.translate(-origin.x(), -origin.y());
-    t.translate(m_lassoSelection.offset.x(), m_lassoSelection.offset.y());
-    
-    return t;
-}
-```
+2. **`startSelectionTransform()`** (~25 lines):
+   - Stores initial transform state for delta calculations
+   - Works in both viewport and document coordinates
 
-#### 2.10.6 Apply/Cancel Transform (~40 lines)
+3. **`updateSelectionTransform()`** (~45 lines):
+   - **Move (Inside):** Offset by delta in document coordinates
+   - **Rotate:** Calculates angle from transform origin in viewport space
+   - **Scale:** Delegates to `updateScaleFromHandle()`
+
+4. **`updateScaleFromHandle()`** (~75 lines):
+   - Handles all 8 scale handles
+   - Applies inverse rotation to get local coordinates
+   - Calculates scale factors relative to transform origin
+   - Clamps scale to 0.1-10.0 range
+
+5. **`finalizeSelectionTransform()`** (~10 lines):
+   - Clears transform state
+   - Leaves visual transform applied (actual stroke modification in 2.10.6)
+
+6. **Handler integration:**
+   - `handlePointerPress_Lasso` - starts transform on handle hit
+   - `handlePointerMove_Lasso` - updates transform during drag
+   - `handlePointerRelease_Lasso` - finalizes transform
+
+#### 2.10.6 Apply/Cancel Transform (~40 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::finalizeSelectionTransform() {
-    m_isTransformingSelection = false;
-    // Transform is applied visually; actual stroke modification happens on:
-    // - Click elsewhere (apply and clear)
-    // - Paste (apply to new location)
-    // - Delete (remove originals)
-}
+**Implemented:**
 
-void DocumentViewport::applySelectionTransform() {
-    if (!m_lassoSelection.isValid()) return;
-    
-    QTransform transform = buildSelectionTransform();
-    
-    // Remove original strokes from source layer
-    VectorLayer* sourceLayer = getLayerAt(m_lassoSelection.sourcePageIndex,
-                                          m_lassoSelection.sourceLayerIndex);
-    // Remove in reverse order to maintain indices
-    for (int i = m_lassoSelection.originalIndices.size() - 1; i >= 0; --i) {
-        sourceLayer->removeStrokeAt(m_lassoSelection.originalIndices[i]);
-    }
-    
-    // Add transformed strokes back
-    for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
-        VectorStroke transformed = stroke.transformed(transform);
-        sourceLayer->addStroke(transformed);
-    }
-    
-    // Push undo action
-    // ...
-    
-    clearLassoSelection();
-}
+1. **`transformStrokePoints()`** (~5 lines):
+   - Static helper to apply a QTransform to all points in a stroke
+   - Updates bounding box after transformation
+
+2. **`applySelectionTransform()`** (~100 lines):
+   - **Paged mode:**
+     - Removes original strokes by ID from source layer
+     - Adds transformed strokes with new UUIDs
+     - Invalidates stroke cache
+   - **Edgeless mode:**
+     - Removes original strokes from all loaded tiles by ID
+     - Adds transformed strokes to appropriate tile based on bounding box center
+     - Converts to tile-local coordinates
+     - Marks tiles dirty
+
+3. **`cancelSelectionTransform()`** (~3 lines):
+   - Simply clears selection without applying
+   - Original strokes remain untouched
+
+4. **Handler integration:**
+   - `handlePointerPress_Lasso` detects non-identity transforms
+   - Calls `applySelectionTransform()` when clicking outside selection
+   - Falls back to `clearLassoSelection()` if no transform applied
+
+**Transform detection:**
+```cpp
+bool hasTransform = !qFuzzyIsNull(offset.x/y) ||
+                    !qFuzzyCompare(scaleX/Y, 1.0) ||
+                    !qFuzzyIsNull(rotation);
 ```
 
-#### 2.10.7 Clipboard Operations (~50 lines)
+#### 2.10.7 Clipboard Operations (~50 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::copySelection() {
-    if (!m_lassoSelection.isValid()) return;
-    
-    // Store in clipboard (internal clipboard, not system)
-    m_clipboard.strokes = m_lassoSelection.selectedStrokes;
-    m_clipboard.transform = buildSelectionTransform();
-    m_clipboard.hasContent = true;
-    
-    // Apply transform to clipboard strokes
-    for (VectorStroke& stroke : m_clipboard.strokes) {
-        stroke = stroke.transformed(m_clipboard.transform);
-    }
-}
+**Implemented:**
 
-void DocumentViewport::cutSelection() {
-    copySelection();
-    deleteSelection();
-}
+1. **`StrokeClipboard` struct:**
+   - `QVector<VectorStroke> strokes` - copied strokes (pre-transformed)
+   - `bool hasContent` - clipboard state flag
+   - `void clear()` - clears clipboard
 
-void DocumentViewport::pasteSelection() {
-    if (!m_clipboard.hasContent) return;
-    
-    // Paste at current view center (or last click position)
-    QPointF pasteCenter = viewportToDocument(QPointF(width()/2, height()/2));
-    QPointF clipboardCenter = calculateBoundingBox(m_clipboard.strokes).center();
-    QPointF offset = pasteCenter - clipboardCenter;
-    
-    // Add strokes to current active layer
-    VectorLayer* layer = getActiveLayer();
-    for (const VectorStroke& stroke : m_clipboard.strokes) {
-        VectorStroke translated = stroke.translated(offset);
-        layer->addStroke(translated);
-        
-        // For edgeless: handle tile placement
-        if (m_document->isEdgeless()) {
-            // Split stroke across tiles if needed
-        }
-    }
-    
-    // Create new selection from pasted strokes
-    // ...
-    
-    update();
-    emit documentModified();
-}
+2. **`copySelection()`** (~20 lines):
+   - Applies current transform to selection before copying
+   - Stores transformed strokes in clipboard with new UUIDs
+   - Sets `hasContent = true`
 
-void DocumentViewport::deleteSelection() {
-    if (!m_lassoSelection.isValid()) return;
-    
-    // Remove original strokes
-    // ... (similar to applySelectionTransform but without adding back)
-    
-    // Push undo action
-    // ...
-    
-    clearLassoSelection();
-    update();
-    emit documentModified();
-}
-```
+3. **`cutSelection()`** (~10 lines):
+   - Calls `copySelection()` then `deleteSelection()`
 
-#### 2.10.8 Keyboard Shortcuts (~30 lines)
+4. **`pasteSelection()`** (~85 lines):
+   - Calculates clipboard bounding box
+   - Centers pasted content at viewport center
+   - **Paged mode:** Adds strokes to current page's active layer
+   - **Edgeless mode:** Places strokes in appropriate tiles based on position
+   - All pasted strokes get new UUIDs
+   - Emits `documentModified()`
+
+5. **`deleteSelection()`** (~55 lines):
+   - **Paged mode:** Removes strokes by ID from source layer
+   - **Edgeless mode:** Iterates all loaded tiles, removes matching strokes
+   - Invalidates affected caches, marks tiles dirty
+   - Clears selection and emits `documentModified()`
+
+6. **`hasClipboardContent()`** - inline getter for clipboard state
+
+#### 2.10.8 Keyboard Shortcuts (~30 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::keyPressEvent(QKeyEvent* event) {
-    if (m_currentTool == ToolType::Lasso) {
-        if (event->matches(QKeySequence::Copy)) {
-            copySelection();
-            return;
-        }
-        if (event->matches(QKeySequence::Cut)) {
-            cutSelection();
-            return;
-        }
-        if (event->matches(QKeySequence::Paste)) {
-            pasteSelection();
-            return;
-        }
-        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-            deleteSelection();
-            return;
-        }
-        if (event->key() == Qt::Key_Escape) {
-            clearLassoSelection();
-            update();
-            return;
-        }
-    }
-    
-    // ... existing key handling
-}
-```
+**Implemented:** Added lasso shortcuts to `keyPressEvent()`:
 
-#### 2.10.9 MainWindow Integration (~30 lines)
-**File:** `source/MainWindow.cpp`
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+C | `copySelection()` |
+| Ctrl+X | `cutSelection()` |
+| Ctrl+V | `pasteSelection()` |
+| Delete / Backspace | `deleteSelection()` (if selection valid) |
+| Escape | `cancelSelectionTransform()` (cancels drawing or clears selection) |
 
-```cpp
-// Connect Lasso button
-connect(lassoButton, &QPushButton::clicked, this, [this]() {
-    if (auto* vp = currentViewport()) {
-        vp->setCurrentTool(ToolType::Lasso);
-    }
-});
+All shortcuts only active when `m_currentTool == ToolType::Lasso`.
 
-// Update tool button states
-void MainWindow::updateToolButtonStates() {
-    ToolType tool = currentViewport() ? currentViewport()->currentTool() : ToolType::Pen;
-    lassoButton->setChecked(tool == ToolType::Lasso);
-    // ... other buttons
-}
-```
+#### 2.10.9 MainWindow Integration (~30 lines) ✅ COMPLETE
+**File:** `source/MainWindow.cpp`, `source/core/DocumentViewport.cpp`
+
+**Implemented:**
+
+1. **`ropeToolButton` click handler** - Toggles between Lasso and Pen tools
+2. **`updateToolButtonStates()`** - Added Lasso case to reset/select rope button
+3. **`updateRopeToolButtonState()`** - Updated to properly reflect viewport state
+4. **`setCurrentTool()`** - Added logic to:
+   - Disable straight line mode when entering Lasso (like Eraser)
+   - Apply/clear lasso selection when switching away from Lasso tool
 
 ### VectorStroke Extensions Required
 
@@ -848,15 +632,15 @@ Recommended order for minimal dependencies:
 | 2.9.3 Straight Line for Edgeless | [x] COMPLETE |
 | 2.9.4 Straight Line Preview | [x] COMPLETE |
 | 2.9.5 Straight Line MainWindow Integration | [x] COMPLETE |
-| 2.10.1 Lasso Path Drawing | [ ] |
-| 2.10.2 Stroke Hit Detection | [ ] |
-| 2.10.3 Selection Rendering | [ ] |
-| 2.10.4 Transform Handles | [ ] |
-| 2.10.5 Transform Operations | [ ] |
-| 2.10.6 Apply/Cancel Transform | [ ] |
-| 2.10.7 Clipboard Operations | [ ] |
-| 2.10.8 Keyboard Shortcuts | [ ] |
-| 2.10.9 Lasso MainWindow Integration | [ ] |
+| 2.10.1 Lasso Path Drawing | [x] |
+| 2.10.2 Stroke Hit Detection | [x] |
+| 2.10.3 Selection Rendering | [x] |
+| 2.10.4 Transform Handles | [x] |
+| 2.10.5 Transform Operations | [x] |
+| 2.10.6 Apply/Cancel Transform | [x] |
+| 2.10.7 Clipboard Operations | [x] |
+| 2.10.8 Keyboard Shortcuts | [x] |
+| 2.10.9 Lasso MainWindow Integration | [x] |
 
 ---
 
@@ -891,3 +675,142 @@ Recommended order for minimal dependencies:
 
 **Files Modified:**
 - `source/MainWindow.cpp`
+
+### CR-2B-4: Lasso Selection Lost Immediately After Drawing
+**Issue:** In paged mode, after completing a lasso selection path (releasing stylus/mouse), the selection immediately disappeared instead of entering the selected state for transformations.
+
+**Root Cause:** In `finalizeLassoSelection()`:
+1. `m_lassoSelection.sourcePageIndex` was set during `handlePointerPress_Lasso()` (line 3004)
+2. `m_lassoSelection.clear()` was called at the start of `finalizeLassoSelection()`, which reset `sourcePageIndex` to -1
+3. The paged mode check `if (sourcePageIndex < 0)` then returned early, never processing any strokes
+
+**Fix:** Save `sourcePageIndex` before calling `clear()`, then restore it after:
+```cpp
+// BUG FIX: Save sourcePageIndex BEFORE clearing selection
+int savedSourcePageIndex = m_lassoSelection.sourcePageIndex;
+m_lassoSelection.clear();
+m_lassoSelection.sourcePageIndex = savedSourcePageIndex;
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+### CR-2B-6: Transform Offset Applied in Wrong Coordinate Space
+**Issue:** When moving a rotated/scaled selection, movement was applied BEFORE the rotation/scale transform, causing counter-intuitive behavior:
+- Moving "up" on a 180° rotated selection moved it "down" on screen
+- Scaled selections had proportionally scaled movement sensitivity
+
+**Root Cause:** In Qt's `QTransform` composition, operations are applied in **reverse order** (last added = first applied to point). The original code had:
+```cpp
+t.translate(origin.x(), origin.y());      // Line 1
+t.rotate(rotation);                        // Line 2
+t.scale(scaleX, scaleY);                   // Line 3
+t.translate(-origin.x(), -origin.y());    // Line 4
+t.translate(offset.x(), offset.y());      // Line 5 - WRONG POSITION
+```
+This applied the offset FIRST (Line 5 is last, so applied first), meaning the offset got rotated/scaled along with the content.
+
+**Fix:** Move offset to first line so it's applied LAST (after rotation/scale):
+```cpp
+t.translate(offset.x(), offset.y());      // Applied 5th (last) - CORRECT
+t.translate(origin.x(), origin.y());      // Applied 4th
+t.rotate(rotation);                        // Applied 3rd
+t.scale(scaleX, scaleY);                  // Applied 2nd
+t.translate(-origin.x(), -origin.y());   // Applied 1st
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+### CR-2B-7: Original Strokes Visible During Selection Transform
+**Issue:** When transforming (scale/rotate) a lasso selection, the original strokes remained visible on the page, only disappearing after the transform was applied. This created visual duplication.
+
+**Root Cause:** Layer rendering used cached pixmaps that included all strokes. During selection, the transformed copies were rendered on top, but the originals in the cache were still visible.
+
+**Fix:** Added stroke exclusion during layer rendering:
+1. Added `getSelectedIds()` helper to `LassoSelection` struct
+2. Added `renderExcluding()` method to `VectorLayer` that renders strokes while skipping specified IDs
+3. Modified paged mode rendering to use `renderExcluding()` for the source layer when there's an active selection
+4. Modified edgeless `renderTileStrokes()` to use `renderExcluding()` for the active layer when there's a selection
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (added `getSelectedIds()`)
+- `source/core/DocumentViewport.cpp` (modified paged and edgeless rendering)
+- `source/layers/VectorLayer.h` (added `renderExcluding()`)
+
+### CR-2B-8: Consecutive Transforms Referenced Original Position
+**Issue:** When performing multiple transform operations in a row (e.g., move then scale), the second operation referenced the original position instead of the position after the first operation. This caused:
+- Scale after move: scaling jumped back to original location
+- Rotate after scale: rotation used wrong center
+
+**Root Cause:** `startSelectionTransform()` stored `m_transformStartBounds = m_lassoSelection.boundingBox`, but `boundingBox` was always the ORIGINAL bounds from when the selection was first created. It was never updated to reflect applied transforms.
+
+Similarly, `transformOrigin` stayed at the original center, even after the selection had been moved.
+
+**Fix:** (Updated by CR-2B-9) "Bake in" ONLY the offset before starting a new transform:
+```cpp
+// Only offset is safe to bake - rotation/scale must remain cumulative
+if (!m_lassoSelection.offset.isNull()) {
+    m_lassoSelection.boundingBox.translate(offset);
+    m_lassoSelection.transformOrigin += offset;
+    for (stroke) translate points by offset;
+    
+    // Reset offset only - rotation and scale remain
+    m_lassoSelection.offset = QPointF(0, 0);
+}
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+### CR-2B-9: Rotation Lost After Baking Transform
+**Issue:** After rotating a selection and then performing another operation (like scale), the bounding box snapped to axis-aligned, losing the rotation. Scaling then happened along X/Y axes instead of along the rotated axes.
+
+Example: After rotating 45° counterclockwise, stretching "taller" should stretch along the 135° direction, not straight up.
+
+**Root Cause:** The original CR-2B-8 fix baked in ALL transforms including rotation:
+```cpp
+QRectF newBox = transformedCorners.boundingRect();  // Always axis-aligned!
+m_lassoSelection.rotation = 0;  // Rotation lost!
+```
+
+`boundingRect()` returns an axis-aligned rectangle, so the tilted orientation was lost.
+
+**Fix:** Only bake in the OFFSET (pure translation), preserve rotation and scale as cumulative values. This ensures the rotated coordinate system is preserved for subsequent operations.
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+### CR-2B-5: Transform Handles Couldn't Be Grabbed
+**Issue:** After completing a lasso selection, the transform handles were visible but couldn't be grabbed by mouse or stylus. Attempting to drag a handle would instead clear the selection and start a new lasso path.
+
+**Root Cause:** In `handlePointerMove()` and `handlePointerRelease()`, the lasso handlers were only called when `m_isDrawingLasso` was true:
+```cpp
+// BUG: Only checked m_isDrawingLasso
+if (m_isDrawingLasso) {
+    handlePointerMove_Lasso(pe);
+    return;
+}
+```
+
+When the user clicks a handle:
+1. `handlePointerPress_Lasso()` correctly detects the handle hit
+2. `startSelectionTransform()` sets `m_isTransformingSelection = true`
+3. But `m_isDrawingLasso = false` (finished drawing the path)
+4. Move events never reach `handlePointerMove_Lasso()` → transform updates ignored
+5. Release events never reach `handlePointerRelease_Lasso()` → transform never finalized
+
+**Fix:** Added `m_isTransformingSelection` check to both handlers:
+```cpp
+// FIX: Check both drawing and transforming states
+if (m_isDrawingLasso || m_isTransformingSelection) {
+    handlePointerMove_Lasso(pe);
+    return;
+}
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`

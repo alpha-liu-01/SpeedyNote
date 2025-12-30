@@ -205,6 +205,19 @@ class DocumentViewport : public QWidget {
     friend class DocumentViewportTests;
     
 public:
+    // ===== Handle Hit Types (for lasso selection) =====
+    /**
+     * @brief Handle hit types for lasso selection transform.
+     */
+    enum class HandleHit {
+        None,
+        TopLeft, Top, TopRight,
+        Left, Right,
+        BottomLeft, Bottom, BottomRight,
+        Rotate,   ///< Rotation handle above top center
+        Inside    ///< Inside bounding box (for move)
+    };
+    
     // ===== Constructor & Destructor =====
     
     /**
@@ -811,6 +824,81 @@ private:
     QPointF m_straightLinePreviewEnd;       ///< Current preview end point
     int m_straightLinePageIndex = -1;       ///< Page index for paged mode straight line
     
+    // Lasso Selection Tool (Task 2.10)
+    struct LassoSelection {
+        QVector<VectorStroke> selectedStrokes;  ///< Copies of selected strokes
+        QVector<int> originalIndices;            ///< Indices in the layer (for removal)
+        int sourcePageIndex = -1;                ///< Source page (paged mode)
+        std::pair<int, int> sourceTileCoord = {0, 0};  ///< Source tile (edgeless mode)
+        int sourceLayerIndex = 0;
+        
+        QRectF boundingBox;                      ///< Selection bounding box
+        QPointF transformOrigin;                 ///< Center for rotate/scale
+        qreal rotation = 0;                      ///< Current rotation angle
+        qreal scaleX = 1.0, scaleY = 1.0;        ///< Current scale factors
+        QPointF offset;                          ///< Move offset
+        
+        bool isValid() const { return !selectedStrokes.isEmpty(); }
+        bool hasTransform() const {
+            return !qFuzzyIsNull(rotation) || 
+                   !qFuzzyCompare(scaleX, 1.0) || 
+                   !qFuzzyCompare(scaleY, 1.0) || 
+                   !offset.isNull();
+        }
+        /// CR-2B-7: Get set of selected stroke IDs for exclusion during layer render
+        QSet<QString> getSelectedIds() const {
+            QSet<QString> ids;
+            for (const VectorStroke& s : selectedStrokes) {
+                ids.insert(s.id);
+            }
+            return ids;
+        }
+        void clear() { 
+            selectedStrokes.clear(); 
+            originalIndices.clear();
+            sourcePageIndex = -1;
+            sourceTileCoord = {0, 0};
+            sourceLayerIndex = 0;
+            boundingBox = QRectF();
+            transformOrigin = QPointF();
+            rotation = 0;
+            scaleX = 1.0;
+            scaleY = 1.0;
+            offset = QPointF();
+        }
+    };
+    LassoSelection m_lassoSelection;
+    QPolygonF m_lassoPath;               ///< The lasso path being drawn
+    bool m_isDrawingLasso = false;       ///< Currently drawing a lasso path
+    
+    // Handle sizes (touch-friendly design)
+    static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels
+    static constexpr qreal HANDLE_HIT_SIZE = 20.0;     ///< Hit area size in pixels (touch-friendly)
+    static constexpr qreal ROTATE_HANDLE_OFFSET = 25.0; ///< Distance of rotation handle from top
+    
+    // Transform operation state
+    bool m_isTransformingSelection = false;   ///< Currently dragging a handle
+    HandleHit m_transformHandle = HandleHit::None;  ///< Which handle is being dragged
+    QPointF m_transformStartPos;              ///< Viewport position where drag started
+    QPointF m_transformStartDocPos;           ///< Document position where drag started
+    QRectF m_transformStartBounds;            ///< Original bounding box when drag started
+    qreal m_transformStartRotation = 0;       ///< Original rotation when drag started
+    qreal m_transformStartScaleX = 1.0;       ///< Original scaleX when drag started
+    qreal m_transformStartScaleY = 1.0;       ///< Original scaleY when drag started
+    QPointF m_transformStartOffset;           ///< Original offset when drag started
+    
+    // Clipboard for copy/cut/paste operations
+    struct StrokeClipboard {
+        QVector<VectorStroke> strokes;        ///< Copied strokes (pre-transformed)
+        bool hasContent = false;              ///< Whether clipboard has content
+        
+        void clear() {
+            strokes.clear();
+            hasContent = false;
+        }
+    };
+    StrokeClipboard m_clipboard;
+    
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)
     int m_pdfCacheCapacity = 6;  // Default for single column (visible + ±2 buffer)
@@ -1090,6 +1178,155 @@ private:
      * For edgeless mode, handles tile splitting if the line crosses tile boundaries.
      */
     void createStraightLineStroke(const QPointF& start, const QPointF& end);
+    
+    // ===== Lasso Selection Tool (Task 2.10) =====
+    
+    /**
+     * @brief Handle pointer press for lasso tool.
+     */
+    void handlePointerPress_Lasso(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer move for lasso tool.
+     */
+    void handlePointerMove_Lasso(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer release for lasso tool.
+     */
+    void handlePointerRelease_Lasso(const PointerEvent& pe);
+    
+    /**
+     * @brief Clear the current lasso selection.
+     */
+    void clearLassoSelection();
+    
+    /**
+     * @brief Finalize lasso selection after path is complete.
+     * Finds all strokes on the active layer that intersect with the lasso path.
+     */
+    void finalizeLassoSelection();
+    
+    /**
+     * @brief Check if a stroke intersects with the lasso polygon.
+     * @param stroke The stroke to test.
+     * @param lasso The lasso polygon path.
+     * @return True if any point of the stroke is inside the lasso.
+     */
+    bool strokeIntersectsLasso(const VectorStroke& stroke, const QPolygonF& lasso) const;
+    
+    /**
+     * @brief Calculate the combined bounding box of selected strokes.
+     * @return Bounding rectangle in document/page coordinates.
+     */
+    QRectF calculateSelectionBoundingBox() const;
+    
+    /**
+     * @brief Render the lasso selection (selected strokes, bounding box, handles).
+     * @param painter The painter to render to.
+     */
+    void renderLassoSelection(QPainter& painter);
+    
+    /**
+     * @brief Draw the selection bounding box with dashed line.
+     * @param painter The painter to render to.
+     */
+    void drawSelectionBoundingBox(QPainter& painter);
+    
+    /**
+     * @brief Build transform matrix for current selection state.
+     * @return Transform incorporating offset, scale, and rotation.
+     */
+    QTransform buildSelectionTransform() const;
+    
+    /**
+     * @brief Draw selection transform handles.
+     * @param painter The painter to render to.
+     */
+    void drawSelectionHandles(QPainter& painter);
+    
+    /**
+     * @brief Hit test selection handles at viewport position.
+     * @param viewportPos Position in viewport coordinates.
+     * @return HandleHit indicating which handle was hit, or None.
+     */
+    HandleHit hitTestSelectionHandles(const QPointF& viewportPos) const;
+    
+    /**
+     * @brief Get handle positions in document/page coordinates.
+     * @return Vector of 8 scale handle positions + rotation handle position.
+     */
+    QVector<QPointF> getHandlePositions() const;
+    
+    /**
+     * @brief Start a selection transform operation.
+     * @param handle Which handle was grabbed.
+     * @param viewportPos Starting position in viewport coordinates.
+     */
+    void startSelectionTransform(HandleHit handle, const QPointF& viewportPos);
+    
+    /**
+     * @brief Update selection transform during drag.
+     * @param viewportPos Current position in viewport coordinates.
+     */
+    void updateSelectionTransform(const QPointF& viewportPos);
+    
+    /**
+     * @brief Finalize the current selection transform.
+     */
+    void finalizeSelectionTransform();
+    
+    /**
+     * @brief Update scale factors based on handle drag.
+     * @param handle Which scale handle is being dragged.
+     * @param viewportPos Current viewport position.
+     */
+    void updateScaleFromHandle(HandleHit handle, const QPointF& viewportPos);
+    
+    /**
+     * @brief Apply the current selection transform to actual strokes.
+     * Removes original strokes and adds transformed versions.
+     */
+    void applySelectionTransform();
+    
+    /**
+     * @brief Cancel the current selection (discard transform, restore originals).
+     */
+    void cancelSelectionTransform();
+    
+    /**
+     * @brief Apply a transform to a stroke's points.
+     * @param stroke The stroke to transform (modified in place).
+     * @param transform The transform to apply.
+     */
+    static void transformStrokePoints(VectorStroke& stroke, const QTransform& transform);
+    
+    // ===== Clipboard Operations (Task 2.10.7) =====
+    
+    /**
+     * @brief Copy current selection to clipboard.
+     */
+    void copySelection();
+    
+    /**
+     * @brief Cut current selection (copy + delete).
+     */
+    void cutSelection();
+    
+    /**
+     * @brief Paste clipboard content at viewport center.
+     */
+    void pasteSelection();
+    
+    /**
+     * @brief Delete current selection.
+     */
+    void deleteSelection();
+    
+    /**
+     * @brief Check if clipboard has content.
+     */
+    bool hasClipboardContent() const { return m_clipboard.hasContent; }
     
     /**
      * @brief Add a point to the current stroke with point decimation.
