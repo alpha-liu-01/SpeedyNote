@@ -35,6 +35,61 @@
 #include <set>
 #include <memory>
 
+// ============================================================================
+// LayerDefinition - Layer metadata for edgeless mode manifest (Phase 5.6)
+// ============================================================================
+
+/**
+ * @brief Layer metadata for edgeless mode manifest.
+ * 
+ * In edgeless mode, layer structure (name, visibility, opacity, locked) is
+ * stored once in the document manifest. Individual tiles only store strokes
+ * with layer IDs - they don't duplicate layer metadata.
+ * 
+ * This enables O(1) layer operations (add/remove/rename/reorder) without
+ * touching any tile files.
+ */
+struct LayerDefinition {
+    QString id;                     ///< UUID for tracking
+    QString name;                   ///< User-visible layer name
+    bool visible = true;            ///< Whether layer is rendered
+    qreal opacity = 1.0;            ///< Layer opacity (0.0 to 1.0)
+    bool locked = false;            ///< If true, layer cannot be edited
+    
+    /**
+     * @brief Serialize to JSON.
+     */
+    QJsonObject toJson() const {
+        QJsonObject obj;
+        obj["id"] = id;
+        obj["name"] = name;
+        obj["visible"] = visible;
+        obj["opacity"] = opacity;
+        obj["locked"] = locked;
+        return obj;
+    }
+    
+    /**
+     * @brief Deserialize from JSON.
+     */
+    static LayerDefinition fromJson(const QJsonObject& obj) {
+        LayerDefinition def;
+        def.id = obj["id"].toString();
+        def.name = obj["name"].toString("Layer");
+        def.visible = obj["visible"].toBool(true);
+        def.opacity = obj["opacity"].toDouble(1.0);
+        def.locked = obj["locked"].toBool(false);
+        
+        // Generate UUID if missing (for backwards compatibility)
+        if (def.id.isEmpty()) {
+            def.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
+        return def;
+    }
+};
+
+// ============================================================================
+
 /**
  * @brief The central data structure representing an open notebook.
  * 
@@ -294,16 +349,7 @@ public:
      */
     bool tileExistsOnDisk(TileCoord coord) const { return m_tileIndex.count(coord) > 0; }
     
-    /**
-     * @brief Sync a tile's layer structure with the origin tile.
-     * 
-     * In edgeless mode, all tiles should have the same layer structure
-     * (same count, names, visibility, order). The origin tile (0,0) is
-     * the source of truth for this structure.
-     * 
-     * @param tile The tile to sync.
-     */
-    void syncTileLayerStructure(Page* tile) const;
+    // Phase 5.6.5: syncTileLayerStructure() removed - layer structure now comes from manifest
     
     /**
      * @brief Save the entire document as a bundle.
@@ -323,6 +369,146 @@ public:
      * @brief Check if there are any unsaved tile changes.
      */
     bool hasUnsavedTileChanges() const { return !m_dirtyTiles.empty(); }
+    
+    // =========================================================================
+    // Edgeless Layer Manifest (Phase 5.6)
+    // =========================================================================
+    
+    /**
+     * @brief Get the number of layers in the edgeless manifest.
+     * @return Layer count. Note: createNew() and loadBundle() ensure >= 1.
+     */
+    int edgelessLayerCount() const { return static_cast<int>(m_edgelessLayers.size()); }
+    
+    /**
+     * @brief Get a layer definition by index.
+     * @param index 0-based layer index.
+     * @return Pointer to layer definition, or nullptr if out of range.
+     */
+    const LayerDefinition* edgelessLayerDef(int index) const;
+    
+    /**
+     * @brief Get layer ID by index.
+     * @param index 0-based layer index.
+     * @return Layer ID, or empty string if out of range.
+     */
+    QString edgelessLayerId(int index) const;
+    
+    /**
+     * @brief Add a new layer to the edgeless manifest.
+     * @param name Layer name.
+     * @return Index of the new layer.
+     * 
+     * Marks manifest as dirty. Does NOT touch any tiles.
+     */
+    int addEdgelessLayer(const QString& name);
+    
+    /**
+     * @brief Remove a layer from the edgeless manifest.
+     * @param index 0-based layer index.
+     * @return True if removed, false if invalid index or only one layer remains.
+     * 
+     * This operation loads ALL evicted tiles from disk to ensure strokes
+     * on the removed layer are properly deleted everywhere. This may be slow
+     * if many tiles are evicted.
+     */
+    bool removeEdgelessLayer(int index);
+    
+    /**
+     * @brief Move a layer in the edgeless manifest.
+     * @param from Source index.
+     * @param to Destination index.
+     * @return True if moved, false if indices invalid.
+     * 
+     * Marks manifest as dirty. Does NOT touch any tiles.
+     */
+    bool moveEdgelessLayer(int from, int to);
+    
+    /**
+     * @brief Phase 5.4: Merge multiple layers into one.
+     * @param targetIndex The layer that will receive all strokes.
+     * @param sourceIndices The layers to merge into target (will be removed).
+     * @return True if merge succeeded.
+     * 
+     * For each loaded tile:
+     * 1. Collects strokes from source layers
+     * 2. Adds them to target layer
+     * 3. Removes source layers from tile
+     * Then removes source layers from manifest.
+     */
+    bool mergeEdgelessLayers(int targetIndex, const QVector<int>& sourceIndices);
+    
+    /**
+     * @brief Phase 5.5: Duplicate a layer with all its strokes.
+     * @param index The layer to duplicate.
+     * @return Index of the new layer, or -1 on failure.
+     * 
+     * Creates a copy of the layer with name "OriginalName Copy".
+     * All strokes are deep-copied with new UUIDs.
+     * New layer is inserted above the original (at index + 1).
+     */
+    int duplicateEdgelessLayer(int index);
+    
+    /**
+     * @brief Set layer visibility in the edgeless manifest.
+     * @param index 0-based layer index.
+     * @param visible New visibility state.
+     * 
+     * Marks manifest as dirty. Does NOT touch any tiles.
+     */
+    void setEdgelessLayerVisible(int index, bool visible);
+    
+    /**
+     * @brief Set layer name in the edgeless manifest.
+     * @param index 0-based layer index.
+     * @param name New layer name.
+     * 
+     * Marks manifest as dirty. Does NOT touch any tiles.
+     */
+    void setEdgelessLayerName(int index, const QString& name);
+    
+    /**
+     * @brief Set layer opacity in the edgeless manifest.
+     * @param index 0-based layer index.
+     * @param opacity New opacity (0.0 to 1.0).
+     * 
+     * Marks manifest as dirty. Does NOT touch any tiles.
+     */
+    void setEdgelessLayerOpacity(int index, qreal opacity);
+    
+    /**
+     * @brief Set layer locked state in the edgeless manifest.
+     * @param index 0-based layer index.
+     * @param locked New locked state.
+     * 
+     * Marks manifest as dirty. Does NOT touch any tiles.
+     */
+    void setEdgelessLayerLocked(int index, bool locked);
+    
+    /**
+     * @brief Get the active layer index for edgeless mode.
+     * @return 0-based layer index.
+     */
+    int edgelessActiveLayerIndex() const { return m_edgelessActiveLayerIndex; }
+    
+    /**
+     * @brief Set the active layer index for edgeless mode.
+     * @param index 0-based layer index.
+     * 
+     * Marks manifest as dirty if changed.
+     */
+    void setEdgelessActiveLayerIndex(int index);
+    
+    /**
+     * @brief Check if the edgeless manifest has unsaved changes.
+     */
+    bool isEdgelessManifestDirty() const { return m_edgelessManifestDirty; }
+    
+    /**
+     * @brief Get all layer definitions (read-only).
+     * @return Const reference to the layer definitions vector.
+     */
+    const std::vector<LayerDefinition>& edgelessLayers() const { return m_edgelessLayers; }
     
     // =========================================================================
     // PDF Reference Management (Task 1.2.4)
@@ -748,6 +934,28 @@ private:
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
     std::set<TileCoord> m_deletedTiles;             ///< Tiles to delete from disk on next save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
+    
+    // ===== Edgeless Layer Manifest (Phase 5.6) =====
+    /// Layer definitions for edgeless mode. This is the single source of truth
+    /// for layer structure (name, visibility, order). Tiles only store strokes.
+    std::vector<LayerDefinition> m_edgelessLayers;
+    
+    /// Active layer index for edgeless mode (global across all tiles).
+    int m_edgelessActiveLayerIndex = 0;
+    
+    /// True if layer manifest has unsaved changes (need to save document.json).
+    bool m_edgelessManifestDirty = false;
+    
+    /**
+     * @brief CR-L13: Load all evicted tiles from disk into memory.
+     * 
+     * This is needed before destructive layer operations (remove, merge)
+     * to ensure strokes on affected layers are properly handled on ALL tiles,
+     * not just the ones currently in memory.
+     * 
+     * May be slow with many evicted tiles, but ensures data consistency.
+     */
+    void loadAllEvictedTiles();
     
     /**
      * @brief Create a new page with document defaults applied.

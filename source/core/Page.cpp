@@ -99,6 +99,98 @@ bool Page::moveLayer(int from, int to)
     return true;
 }
 
+bool Page::mergeLayers(int targetIndex, const QVector<int>& sourceIndices)
+{
+    int count = static_cast<int>(vectorLayers.size());
+    
+    // Validate target index
+    if (targetIndex < 0 || targetIndex >= count) {
+        return false;
+    }
+    
+    // Validate all source indices
+    for (int idx : sourceIndices) {
+        if (idx < 0 || idx >= count || idx == targetIndex) {
+            return false;
+        }
+    }
+    
+    // Ensure we don't remove all layers
+    if (sourceIndices.size() >= count) {
+        return false;
+    }
+    
+    VectorLayer* target = vectorLayers[targetIndex].get();
+    
+    // Collect strokes from source layers into target
+    for (int srcIdx : sourceIndices) {
+        VectorLayer* source = vectorLayers[srcIdx].get();
+        if (source) {
+            for (VectorStroke& stroke : source->strokes()) {
+                target->addStroke(std::move(stroke));
+            }
+            source->clear();
+        }
+    }
+    
+    // Remove source layers in reverse order to preserve indices
+    QVector<int> sortedSources = sourceIndices;
+    std::sort(sortedSources.begin(), sortedSources.end(), std::greater<int>());
+    
+    for (int srcIdx : sortedSources) {
+        vectorLayers.erase(vectorLayers.begin() + srcIdx);
+    }
+    
+    // Adjust active layer index if needed
+    if (activeLayerIndex >= static_cast<int>(vectorLayers.size())) {
+        activeLayerIndex = static_cast<int>(vectorLayers.size()) - 1;
+    }
+    
+    modified = true;
+    return true;
+}
+
+int Page::duplicateLayer(int index)
+{
+    int count = static_cast<int>(vectorLayers.size());
+    
+    // Validate index
+    if (index < 0 || index >= count) {
+        return -1;
+    }
+    
+    VectorLayer* source = vectorLayers[index].get();
+    if (!source) {
+        return -1;
+    }
+    
+    // Create new layer
+    auto newLayer = std::make_unique<VectorLayer>();
+    newLayer->name = source->name + " Copy";
+    newLayer->visible = source->visible;
+    newLayer->opacity = source->opacity;
+    newLayer->locked = false;  // Unlock the copy for immediate editing
+    
+    // Deep copy strokes with new UUIDs
+    for (const VectorStroke& stroke : source->strokes()) {
+        VectorStroke copy = stroke;  // Copy all properties
+        copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);  // New UUID
+        newLayer->addStroke(std::move(copy));
+    }
+    
+    // Insert above original (at index + 1)
+    int newIndex = index + 1;
+    vectorLayers.insert(vectorLayers.begin() + newIndex, std::move(newLayer));
+    
+    // Adjust active layer index if it's at or above the insertion point
+    if (activeLayerIndex >= newIndex) {
+        activeLayerIndex++;
+    }
+    
+    modified = true;
+    return newIndex;
+}
+
 VectorLayer* Page::layer(int index)
 {
     if (index >= 0 && index < static_cast<int>(vectorLayers.size())) {

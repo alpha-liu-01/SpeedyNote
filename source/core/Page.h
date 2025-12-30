@@ -141,6 +141,24 @@ public:
     bool moveLayer(int from, int to);
     
     /**
+     * @brief Phase 5.4: Merge multiple layers into one.
+     * @param targetIndex The layer that will receive all strokes.
+     * @param sourceIndices The layers to merge into target (will be removed).
+     * @return True if merge succeeded.
+     */
+    bool mergeLayers(int targetIndex, const QVector<int>& sourceIndices);
+    
+    /**
+     * @brief Phase 5.5: Duplicate a layer with all its strokes.
+     * @param index The layer to duplicate.
+     * @return Index of the new layer, or -1 on failure.
+     * 
+     * Creates a copy with name "OriginalName Copy", inserted above original.
+     * All strokes are deep-copied with new UUIDs.
+     */
+    int duplicateLayer(int index);
+    
+    /**
      * @brief Get the number of layers.
      */
     int layerCount() const { return static_cast<int>(vectorLayers.size()); }

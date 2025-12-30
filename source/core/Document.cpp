@@ -6,6 +6,7 @@
 
 #include "Document.h"
 #include <cmath>
+#include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 
 // ===== Constructor & Destructor =====
 
@@ -43,6 +44,12 @@ std::unique_ptr<Document> Document::createNew(const QString& docName, Mode docMo
     if (docMode == Mode::Edgeless) {
         // Don't create any tiles - they're created on-demand when user draws
         // m_tiles starts empty (default state)
+        
+        // Phase 5.6: Create default layer in manifest
+        LayerDefinition defaultLayer;
+        defaultLayer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        defaultLayer.name = "Layer 1";
+        doc->m_edgelessLayers.push_back(defaultLayer);
     } else {
         // Paged mode: ensure at least one page exists
         doc->ensureMinimumPages();
@@ -402,6 +409,34 @@ std::unique_ptr<Page> Document::createDefaultPage()
     return page;
 }
 
+void Document::loadAllEvictedTiles()
+{
+    // CR-L13: Load all tiles that exist on disk but aren't in memory.
+    // This ensures destructive layer operations affect ALL tiles.
+    
+    if (!m_lazyLoadEnabled) {
+        return;  // No evicted tiles if lazy loading isn't enabled
+    }
+    
+    // Copy tile index since loadTileFromDisk modifies m_tiles
+    std::set<TileCoord> tilesToLoad;
+    for (const auto& coord : m_tileIndex) {
+        if (m_tiles.find(coord) == m_tiles.end()) {
+            tilesToLoad.insert(coord);
+        }
+    }
+    
+    if (!tilesToLoad.empty()) {
+#ifdef QT_DEBUG
+        qDebug() << "CR-L13: Loading" << tilesToLoad.size() << "evicted tiles for layer operation";
+#endif
+    }
+    
+    for (const auto& coord : tilesToLoad) {
+        loadTileFromDisk(coord);
+    }
+}
+
 // =========================================================================
 // Edgeless Tile Management (Phase E1)
 // =========================================================================
@@ -427,12 +462,8 @@ Page* Document::getTile(int tx, int ty) const
     // m_tiles is mutable, so this works on const Document
     if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
         if (loadTileFromDisk(coord)) {
-            Page* loadedTile = m_tiles.at(coord).get();
-            // Phase 5.1: Sync layer structure with origin tile (if this isn't the origin)
-            if (tx != 0 || ty != 0) {
-                syncTileLayerStructure(loadedTile);
-            }
-            return loadedTile;
+            // Phase 5.6.5: No sync needed - loadTileFromDisk reconstructs layers from manifest
+            return m_tiles.at(coord).get();
         }
     }
     
@@ -453,12 +484,8 @@ Page* Document::getOrCreateTile(int tx, int ty)
     // 2. If lazy loading enabled, try to load from disk
     if (m_lazyLoadEnabled && m_tileIndex.count(coord) > 0) {
         if (loadTileFromDisk(coord)) {
-            Page* loadedTile = m_tiles.at(coord).get();
-            // Phase 5.1: Sync layer structure with origin tile (if this isn't the origin)
-            if (tx != 0 || ty != 0) {
-                syncTileLayerStructure(loadedTile);
-            }
-            return loadedTile;
+            // Phase 5.6.5: No sync needed - loadTileFromDisk reconstructs layers from manifest
+            return m_tiles.at(coord).get();
         }
     }
     
@@ -474,6 +501,20 @@ Page* Document::getOrCreateTile(int tx, int ty)
     // CR-8: Removed tile coord storage in pageIndex/pdfPageNumber - it was never read.
     // Tile coordinate is already the map key, no need to duplicate in Page.
     
+    // Phase 5.6.6: Initialize tile layer structure from manifest
+    if (isEdgeless() && !m_edgelessLayers.empty()) {
+        tile->vectorLayers.clear();  // Clear default layer from Page constructor
+        for (const auto& layerDef : m_edgelessLayers) {
+            auto layer = std::make_unique<VectorLayer>(layerDef.name);
+            layer->id = layerDef.id;
+            layer->visible = layerDef.visible;
+            layer->opacity = layerDef.opacity;
+            layer->locked = layerDef.locked;
+            tile->vectorLayers.push_back(std::move(layer));
+        }
+        tile->activeLayerIndex = m_edgelessActiveLayerIndex;
+    }
+    
     auto [insertIt, inserted] = m_tiles.emplace(coord, std::move(tile));
     
     // Mark new tile as dirty (needs saving)
@@ -484,72 +525,7 @@ Page* Document::getOrCreateTile(int tx, int ty)
     qDebug() << "Document: Created tile at (" << tx << "," << ty << ") total tiles:" << m_tiles.size();
 #endif
     
-    Page* newTile = insertIt->second.get();
-    
-    // Phase 5.1: Sync layer structure with origin tile (if this isn't the origin)
-    if (tx != 0 || ty != 0) {
-        syncTileLayerStructure(newTile);
-    }
-    
-    return newTile;
-}
-
-void Document::syncTileLayerStructure(Page* tile) const
-{
-    if (!tile) return;
-    
-    // Get the origin tile (0,0) as the source of truth
-    TileCoord originCoord(0, 0);
-    auto originIt = m_tiles.find(originCoord);
-    if (originIt == m_tiles.end()) {
-        // Origin tile not loaded - nothing to sync with
-        return;
-    }
-    
-    Page* origin = originIt->second.get();
-    if (!origin) return;
-    
-    int originLayerCount = origin->layerCount();
-    
-    // Add layers if tile has fewer
-    while (tile->layerCount() < originLayerCount) {
-        int idx = tile->layerCount();
-        VectorLayer* srcLayer = origin->layer(idx);
-        if (srcLayer) {
-            VectorLayer* newLayer = tile->addLayer(srcLayer->name);
-            if (newLayer) {
-                // CR-L2: Sync ID for new layers to maintain cross-tile consistency
-                newLayer->id = srcLayer->id;
-                newLayer->visible = srcLayer->visible;
-                newLayer->opacity = srcLayer->opacity;
-                newLayer->locked = srcLayer->locked;
-            }
-        } else {
-            tile->addLayer(QString("Layer %1").arg(idx + 1));
-        }
-    }
-    
-    // Remove layers if tile has more (shouldn't normally happen, but handle it)
-    while (tile->layerCount() > originLayerCount && tile->layerCount() > 1) {
-        tile->removeLayer(tile->layerCount() - 1);
-    }
-    
-    // Sync layer properties (visibility, name, etc.) but NOT strokes or IDs
-    // IDs are only synced when creating new layers above
-    for (int i = 0; i < qMin(tile->layerCount(), originLayerCount); ++i) {
-        VectorLayer* srcLayer = origin->layer(i);
-        VectorLayer* dstLayer = tile->layer(i);
-        if (srcLayer && dstLayer) {
-            dstLayer->name = srcLayer->name;
-            dstLayer->visible = srcLayer->visible;
-            dstLayer->opacity = srcLayer->opacity;
-            dstLayer->locked = srcLayer->locked;
-            // Strokes are tile-specific, don't sync
-        }
-    }
-    
-    // Sync active layer index
-    tile->activeLayerIndex = origin->activeLayerIndex;
+    return insertIt->second.get();
 }
 
 QVector<Document::TileCoord> Document::tilesInRect(QRectF docRect) const
@@ -1020,7 +996,40 @@ bool Document::saveTile(TileCoord coord)
         return false;
     }
     
-    QJsonDocument jsonDoc(it->second->toJson());
+    // Phase 5.6.3: For edgeless mode, use compact format (id + strokes only)
+    // Layer properties (name, visible, opacity, locked) are stored in manifest.
+    // Tiles only store layers that have strokes.
+    QJsonObject tileObj;
+    Page* tile = it->second.get();
+    
+    if (isEdgeless()) {
+        QJsonArray layersArray;
+        for (int i = 0; i < tile->layerCount(); ++i) {
+            VectorLayer* layer = tile->layer(i);
+            if (layer && !layer->isEmpty()) {
+                QJsonObject layerObj;
+                layerObj["id"] = layer->id;
+                
+                QJsonArray strokesArray;
+                for (const auto& stroke : layer->strokes()) {
+                    strokesArray.append(stroke.toJson());
+                }
+                layerObj["strokes"] = strokesArray;
+                
+                layersArray.append(layerObj);
+            }
+        }
+        tileObj["layers"] = layersArray;
+        
+        // Store tile coordinate for debugging/verification
+        tileObj["coord_x"] = coord.first;
+        tileObj["coord_y"] = coord.second;
+    } else {
+        // Paged mode: use full Page serialization (legacy behavior)
+        tileObj = tile->toJson();
+    }
+    
+    QJsonDocument jsonDoc(tileObj);
     file.write(jsonDoc.toJson(QJsonDocument::Compact));
     file.close();
     
@@ -1063,18 +1072,80 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         return false;
     }
     
-    auto tile = Page::fromJson(jsonDoc.object());
-    if (!tile) {
-        qWarning() << "Cannot load tile: Page::fromJson failed";
-        m_tileIndex.erase(coord);  // CR-6: Remove from index
-        return false;
-    }
+    QJsonObject obj = jsonDoc.object();
     
-    m_tiles[coord] = std::move(tile);
+    // Phase 5.6.4: For edgeless mode, reconstruct layers from manifest
+    // Tile files only contain {id, strokes} per layer, not full layer properties.
+    // We check for coord_x/coord_y as markers of the new compact format.
+    bool isNewFormat = obj.contains("coord_x") && obj.contains("coord_y");
     
+    if (mode == Mode::Edgeless && isNewFormat && !m_edgelessLayers.empty()) {
+        // New compact format: reconstruct full VectorLayers from manifest
+        
+        // Build map of layerId → strokes from tile file
+        std::map<QString, QVector<VectorStroke>> strokesByLayerId;
+        QJsonArray tileLayersArray = obj["layers"].toArray();
+        for (const auto& val : tileLayersArray) {
+            QJsonObject layerObj = val.toObject();
+            QString layerId = layerObj["id"].toString();
+            QVector<VectorStroke> strokes;
+            for (const auto& strokeVal : layerObj["strokes"].toArray()) {
+                strokes.append(VectorStroke::fromJson(strokeVal.toObject()));
+            }
+            strokesByLayerId[layerId] = strokes;
+        }
+        
+        // Create tile with default page settings
+        auto tile = std::make_unique<Page>();
+        tile->size = QSizeF(EDGELESS_TILE_SIZE, EDGELESS_TILE_SIZE);
+        tile->backgroundType = defaultBackgroundType;
+        tile->backgroundColor = defaultBackgroundColor;
+        tile->gridColor = defaultGridColor;
+        tile->gridSpacing = defaultGridSpacing;
+        tile->lineSpacing = defaultLineSpacing;
+        
+        // Clear default layer and reconstruct from manifest
+        tile->vectorLayers.clear();
+        for (const auto& layerDef : m_edgelessLayers) {
+            auto layer = std::make_unique<VectorLayer>(layerDef.name);
+            layer->id = layerDef.id;
+            layer->visible = layerDef.visible;
+            layer->opacity = layerDef.opacity;
+            layer->locked = layerDef.locked;
+            
+            // Add strokes if this tile has any for this layer
+            auto it = strokesByLayerId.find(layerDef.id);
+            if (it != strokesByLayerId.end()) {
+                for (const auto& stroke : it->second) {
+                    layer->addStroke(stroke);
+                }
+            }
+            
+            tile->vectorLayers.push_back(std::move(layer));
+        }
+        
+        tile->activeLayerIndex = m_edgelessActiveLayerIndex;
+        m_tiles[coord] = std::move(tile);
+        
 #ifdef QT_DEBUG
-    qDebug() << "Loaded tile" << coord.first << "," << coord.second << "from disk";
+        qDebug() << "Loaded tile" << coord.first << "," << coord.second 
+                 << "from disk (manifest reconstruction)";
 #endif
+    } else {
+        // Legacy format or paged mode: use full Page deserialization
+        auto tile = Page::fromJson(obj);
+        if (!tile) {
+            qWarning() << "Cannot load tile: Page::fromJson failed";
+            m_tileIndex.erase(coord);  // CR-6: Remove from index
+            return false;
+        }
+        
+        m_tiles[coord] = std::move(tile);
+        
+#ifdef QT_DEBUG
+        qDebug() << "Loaded tile" << coord.first << "," << coord.second << "from disk (legacy)";
+#endif
+    }
     
     return true;
 }
@@ -1129,6 +1200,17 @@ bool Document::saveBundle(const QString& path)
     }
     manifest["tile_index"] = tileIndexArray;
     manifest["tile_size"] = EDGELESS_TILE_SIZE;
+    
+    // Phase 5.6: Write layer definitions to manifest
+    QJsonArray layersArray;
+    for (const auto& layerDef : m_edgelessLayers) {
+        layersArray.append(layerDef.toJson());
+    }
+    manifest["layers"] = layersArray;
+    manifest["active_layer_index"] = m_edgelessActiveLayerIndex;
+    
+    // Clear manifest dirty flag after save
+    m_edgelessManifestDirty = false;
     
     // Write manifest
     QString manifestPath = path + "/document.json";
@@ -1260,9 +1342,455 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
         }
     }
     
+    // Phase 5.6: Parse layer definitions from manifest
+    if (obj.contains("layers")) {
+        QJsonArray layersArray = obj["layers"].toArray();
+        doc->m_edgelessLayers.clear();
+        for (const auto& val : layersArray) {
+            doc->m_edgelessLayers.push_back(LayerDefinition::fromJson(val.toObject()));
+        }
+        doc->m_edgelessActiveLayerIndex = obj["active_layer_index"].toInt(0);
+        
+        // Clamp active layer index
+        if (doc->m_edgelessActiveLayerIndex >= static_cast<int>(doc->m_edgelessLayers.size())) {
+            doc->m_edgelessActiveLayerIndex = qMax(0, static_cast<int>(doc->m_edgelessLayers.size()) - 1);
+        }
+    }
+    
+    // Ensure at least one layer exists for edgeless mode
+    if (doc->m_edgelessLayers.empty()) {
+        LayerDefinition defaultLayer;
+        defaultLayer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        defaultLayer.name = "Layer 1";
+        doc->m_edgelessLayers.push_back(defaultLayer);
+    }
+    
 #ifdef QT_DEBUG
-    qDebug() << "Loaded bundle from" << path << "with" << doc->m_tileIndex.size() << "tiles indexed";
+    qDebug() << "Loaded bundle from" << path << "with" << doc->m_tileIndex.size() 
+             << "tiles indexed," << doc->m_edgelessLayers.size() << "layers";
 #endif
     
     return doc;
+}
+
+// =============================================================================
+// Edgeless Layer Manifest API (Phase 5.6)
+// =============================================================================
+
+const LayerDefinition* Document::edgelessLayerDef(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return nullptr;
+    }
+    return &m_edgelessLayers[index];
+}
+
+QString Document::edgelessLayerId(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return QString();
+    }
+    return m_edgelessLayers[index].id;
+}
+
+int Document::addEdgelessLayer(const QString& name)
+{
+    LayerDefinition layerDef;
+    layerDef.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    layerDef.name = name.isEmpty() ? QString("Layer %1").arg(m_edgelessLayers.size() + 1) : name;
+    
+    m_edgelessLayers.push_back(layerDef);
+    m_edgelessManifestDirty = true;
+    markModified();
+    
+    int newIndex = static_cast<int>(m_edgelessLayers.size()) - 1;
+    
+    // Phase 5.6.8: Add layer to all loaded tiles
+    for (auto& [coord, tile] : m_tiles) {
+        auto layer = std::make_unique<VectorLayer>(layerDef.name);
+        layer->id = layerDef.id;
+        layer->visible = layerDef.visible;
+        layer->opacity = layerDef.opacity;
+        layer->locked = layerDef.locked;
+        tile->vectorLayers.push_back(std::move(layer));
+        m_dirtyTiles.insert(coord);
+    }
+    
+    return newIndex;
+}
+
+bool Document::removeEdgelessLayer(int index)
+{
+    // Don't remove the last layer
+    if (m_edgelessLayers.size() <= 1) {
+        return false;
+    }
+    
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return false;
+    }
+    
+    // CR-L13: Load all evicted tiles so we remove strokes everywhere
+    loadAllEvictedTiles();
+    
+    m_edgelessLayers.erase(m_edgelessLayers.begin() + index);
+    
+    // CR-L12: Properly adjust active layer index
+    if (index < m_edgelessActiveLayerIndex) {
+        // Removed layer was below active, shift down
+        m_edgelessActiveLayerIndex--;
+    } else if (m_edgelessActiveLayerIndex >= static_cast<int>(m_edgelessLayers.size())) {
+        // Active was the removed layer or above
+        m_edgelessActiveLayerIndex = static_cast<int>(m_edgelessLayers.size()) - 1;
+    }
+    if (m_edgelessActiveLayerIndex < 0) {
+        m_edgelessActiveLayerIndex = 0;
+    }
+    
+    m_edgelessManifestDirty = true;
+    markModified();
+    
+    // Phase 5.6.8: Remove layer from all loaded tiles
+    // Collect tile coords first since we may need to remove empty tiles
+    std::vector<TileCoord> tileCoords;
+    tileCoords.reserve(m_tiles.size());
+    for (const auto& [coord, tile] : m_tiles) {
+        tileCoords.push_back(coord);
+    }
+    
+    for (const auto& coord : tileCoords) {
+        auto it = m_tiles.find(coord);
+        if (it == m_tiles.end()) continue;
+        
+        Page* tile = it->second.get();
+        if (index < tile->layerCount()) {
+            tile->removeLayer(index);
+        }
+        // Also adjust tile's active layer index
+        if (tile->activeLayerIndex >= tile->layerCount()) {
+            tile->activeLayerIndex = tile->layerCount() - 1;
+        }
+        m_dirtyTiles.insert(coord);
+        
+        // CR-L13 fix: Remove tile if it's now empty
+        removeTileIfEmpty(coord.first, coord.second);
+    }
+    
+    return true;
+}
+
+bool Document::moveEdgelessLayer(int from, int to)
+{
+    int count = static_cast<int>(m_edgelessLayers.size());
+    
+    if (from < 0 || from >= count || to < 0 || to >= count || from == to) {
+        return false;
+    }
+    
+    // Extract the layer
+    LayerDefinition layer = std::move(m_edgelessLayers[from]);
+    m_edgelessLayers.erase(m_edgelessLayers.begin() + from);
+    m_edgelessLayers.insert(m_edgelessLayers.begin() + to, std::move(layer));
+    
+    // Adjust active layer index
+    if (m_edgelessActiveLayerIndex == from) {
+        m_edgelessActiveLayerIndex = to;
+    } else if (from < m_edgelessActiveLayerIndex && to >= m_edgelessActiveLayerIndex) {
+        m_edgelessActiveLayerIndex--;
+    } else if (from > m_edgelessActiveLayerIndex && to <= m_edgelessActiveLayerIndex) {
+        m_edgelessActiveLayerIndex++;
+    }
+    
+    m_edgelessManifestDirty = true;
+    markModified();
+    
+    // Phase 5.6.8: Move layer on all loaded tiles
+    for (auto& [coord, tile] : m_tiles) {
+        tile->moveLayer(from, to);
+        m_dirtyTiles.insert(coord);
+    }
+    
+    return true;
+}
+
+bool Document::mergeEdgelessLayers(int targetIndex, const QVector<int>& sourceIndices)
+{
+    // Validate target index
+    if (targetIndex < 0 || targetIndex >= static_cast<int>(m_edgelessLayers.size())) {
+        return false;
+    }
+    
+    // Validate all source indices
+    for (int idx : sourceIndices) {
+        if (idx < 0 || idx >= static_cast<int>(m_edgelessLayers.size())) {
+            return false;
+        }
+        if (idx == targetIndex) {
+            return false;  // Can't merge layer into itself
+        }
+    }
+    
+    // Ensure we don't remove all layers
+    if (sourceIndices.size() >= static_cast<int>(m_edgelessLayers.size())) {
+        return false;
+    }
+    
+    // CR-L13: Load all evicted tiles so we merge strokes everywhere
+    loadAllEvictedTiles();
+    
+    // For each loaded tile: move strokes from source layers to target layer
+    for (auto& [coord, tile] : m_tiles) {
+        VectorLayer* target = tile->layer(targetIndex);
+        if (!target) continue;
+        
+        // Collect strokes from all source layers
+        for (int srcIdx : sourceIndices) {
+            VectorLayer* source = tile->layer(srcIdx);
+            if (source) {
+                // Move all strokes to target
+                for (VectorStroke& stroke : source->strokes()) {
+                    target->addStroke(std::move(stroke));
+                }
+                source->clear();
+            }
+        }
+        
+        m_dirtyTiles.insert(coord);
+    }
+    
+    // Remove source layers from manifest and tiles (in reverse order to preserve indices)
+    QVector<int> sortedSources = sourceIndices;
+    std::sort(sortedSources.begin(), sortedSources.end(), std::greater<int>());
+    
+    // Collect tile coords first since we may need to remove empty tiles later
+    std::vector<TileCoord> tileCoords;
+    tileCoords.reserve(m_tiles.size());
+    for (const auto& [coord, tile] : m_tiles) {
+        tileCoords.push_back(coord);
+    }
+    
+    for (int srcIdx : sortedSources) {
+        // Remove from manifest
+        m_edgelessLayers.erase(m_edgelessLayers.begin() + srcIdx);
+        
+        // Remove from all tiles
+        for (const auto& coord : tileCoords) {
+            auto it = m_tiles.find(coord);
+            if (it == m_tiles.end()) continue;
+            
+            Page* tile = it->second.get();
+            if (srcIdx < tile->layerCount()) {
+                tile->removeLayer(srcIdx);
+            }
+        }
+        
+        // CR-L12: Adjust active layer index when removing layers below it
+        if (srcIdx < m_edgelessActiveLayerIndex) {
+            m_edgelessActiveLayerIndex--;
+        }
+    }
+    
+    // CR-L13: Check for empty tiles after all layer removals
+    // (In merge, strokes are moved to target, so tiles typically won't be empty,
+    // but check anyway for safety and code consistency)
+    for (const auto& coord : tileCoords) {
+        removeTileIfEmpty(coord.first, coord.second);
+    }
+    
+    // Final clamp in case active was one of the removed layers
+    if (m_edgelessActiveLayerIndex >= static_cast<int>(m_edgelessLayers.size())) {
+        m_edgelessActiveLayerIndex = static_cast<int>(m_edgelessLayers.size()) - 1;
+    }
+    if (m_edgelessActiveLayerIndex < 0) {
+        m_edgelessActiveLayerIndex = 0;
+    }
+    
+    m_edgelessManifestDirty = true;
+    markModified();
+    
+    return true;
+}
+
+int Document::duplicateEdgelessLayer(int index)
+{
+    // Validate index
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return -1;
+    }
+    
+    // Create new layer definition as a copy of the original
+    LayerDefinition newDef;
+    newDef.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    newDef.name = m_edgelessLayers[index].name + " Copy";
+    newDef.visible = m_edgelessLayers[index].visible;
+    newDef.opacity = m_edgelessLayers[index].opacity;
+    newDef.locked = false;  // Unlock the copy for immediate editing
+    
+    // Insert at index + 1 (above the original)
+    int newIndex = index + 1;
+    m_edgelessLayers.insert(m_edgelessLayers.begin() + newIndex, newDef);
+    
+    // For each loaded tile: duplicate the layer's strokes
+    for (auto& [coord, tile] : m_tiles) {
+        VectorLayer* source = tile->layer(index);
+        
+        // Create new layer in tile at the same position
+        // First, add a layer at the end, then move it to newIndex
+        VectorLayer* newLayer = tile->addLayer(newDef.name);
+        if (!newLayer) continue;
+        
+        // Copy properties
+        newLayer->visible = newDef.visible;
+        newLayer->opacity = newDef.opacity;
+        newLayer->locked = newDef.locked;
+        
+        // Deep copy strokes with new UUIDs
+        if (source) {
+            for (const VectorStroke& stroke : source->strokes()) {
+                VectorStroke copy = stroke;  // Copy all properties
+                copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);  // New UUID
+                newLayer->addStroke(std::move(copy));
+            }
+        }
+        
+        // Move the new layer from the end to the correct position
+        int lastIndex = tile->layerCount() - 1;
+        if (lastIndex != newIndex) {
+            tile->moveLayer(lastIndex, newIndex);
+        }
+        
+        m_dirtyTiles.insert(coord);
+    }
+    
+    // Adjust active layer index if it's at or above the insertion point
+    if (m_edgelessActiveLayerIndex >= newIndex) {
+        m_edgelessActiveLayerIndex++;
+    }
+    
+    m_edgelessManifestDirty = true;
+    markModified();
+    
+    return newIndex;
+}
+
+void Document::setEdgelessLayerVisible(int index, bool visible)
+{
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return;
+    }
+    
+    if (m_edgelessLayers[index].visible != visible) {
+        m_edgelessLayers[index].visible = visible;
+        m_edgelessManifestDirty = true;
+        markModified();
+        
+        // Phase 5.6.8: Sync visibility to all loaded tiles
+        for (auto& [coord, tile] : m_tiles) {
+            if (index < tile->layerCount()) {
+                VectorLayer* layer = tile->layer(index);
+                if (layer) {
+                    layer->visible = visible;
+                    m_dirtyTiles.insert(coord);  // CR-L5: Only mark dirty if layer was updated
+                }
+            }
+        }
+    }
+}
+
+void Document::setEdgelessLayerName(int index, const QString& name)
+{
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return;
+    }
+    
+    if (m_edgelessLayers[index].name != name) {
+        m_edgelessLayers[index].name = name;
+        m_edgelessManifestDirty = true;
+        markModified();
+        
+        // Phase 5.6.8: Sync name to all loaded tiles
+        for (auto& [coord, tile] : m_tiles) {
+            if (index < tile->layerCount()) {
+                VectorLayer* layer = tile->layer(index);
+                if (layer) {
+                    layer->name = name;
+                    m_dirtyTiles.insert(coord);  // CR-L5: Only mark dirty if layer was updated
+                }
+            }
+        }
+    }
+}
+
+void Document::setEdgelessLayerOpacity(int index, qreal opacity)
+{
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return;
+    }
+    
+    opacity = qBound(0.0, opacity, 1.0);
+    
+    if (!qFuzzyCompare(m_edgelessLayers[index].opacity, opacity)) {
+        m_edgelessLayers[index].opacity = opacity;
+        m_edgelessManifestDirty = true;
+        markModified();
+        
+        // Phase 5.6.8: Sync opacity to all loaded tiles
+        for (auto& [coord, tile] : m_tiles) {
+            if (index < tile->layerCount()) {
+                VectorLayer* layer = tile->layer(index);
+                if (layer) {
+                    layer->opacity = opacity;
+                    m_dirtyTiles.insert(coord);  // CR-L5: Only mark dirty if layer was updated
+                }
+            }
+        }
+    }
+}
+
+void Document::setEdgelessLayerLocked(int index, bool locked)
+{
+    if (index < 0 || index >= static_cast<int>(m_edgelessLayers.size())) {
+        return;
+    }
+    
+    if (m_edgelessLayers[index].locked != locked) {
+        m_edgelessLayers[index].locked = locked;
+        m_edgelessManifestDirty = true;
+        markModified();
+        
+        // Phase 5.6.8: Sync locked state to all loaded tiles
+        for (auto& [coord, tile] : m_tiles) {
+            if (index < tile->layerCount()) {
+                VectorLayer* layer = tile->layer(index);
+                if (layer) {
+                    layer->locked = locked;
+                    m_dirtyTiles.insert(coord);  // CR-L5: Only mark dirty if layer was updated
+                }
+            }
+        }
+    }
+}
+
+void Document::setEdgelessActiveLayerIndex(int index)
+{
+    // CR-L7: Defensive - handle empty layers case
+    if (m_edgelessLayers.empty()) {
+        return;
+    }
+    
+    // Clamp index to valid range
+    index = qBound(0, index, static_cast<int>(m_edgelessLayers.size()) - 1);
+    
+    if (m_edgelessActiveLayerIndex != index) {
+        m_edgelessActiveLayerIndex = index;
+        m_edgelessManifestDirty = true;
+        markModified();
+        
+        // Phase 5.6.8: Sync active layer index to all loaded tiles
+        // CR-L9: Don't mark tiles dirty - activeLayerIndex is stored in manifest,
+        // not per-tile. In-memory sync is for runtime use only.
+        for (auto& [coord, tile] : m_tiles) {
+            tile->activeLayerIndex = index;
+        }
+    }
 }

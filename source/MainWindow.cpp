@@ -170,6 +170,12 @@ MainWindow::MainWindow(QWidget *parent)
         if (vp && m_documentManager) {
             Document* doc = vp->document();
             if (doc) {
+                // CR-L8: Clear LayerPanel's document pointer BEFORE deleting Document
+                // to prevent dangling pointer if any code accesses LayerPanel during cleanup
+                if (m_layerPanel && m_layerPanel->edgelessDocument() == doc) {
+                    m_layerPanel->setCurrentPage(nullptr);
+                }
+                
                 m_documentManager->closeDocument(doc);
             }
         }
@@ -934,141 +940,81 @@ void MainWindow::setupUi() {
     m_layerPanel->setMinimumHeight(180);
     m_layerPanel->setMaximumHeight(300);
     
-    // Phase 5.1: Connect LayerPanel signals
-    // Task 6: Visibility change triggers viewport repaint
-    // For edgeless mode: sync visibility to ALL loaded tiles
-    connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int layerIndex, bool visible) {
+    // =========================================================================
+    // Phase 5.6.8: Simplified LayerPanel Signal Handlers
+    // =========================================================================
+    // LayerPanel now directly updates Document's manifest (for edgeless mode)
+    // or Page (for paged mode). Document methods sync changes to all loaded tiles.
+    // MainWindow just needs to handle viewport updates.
+    
+    // Visibility change → repaint viewport
+    connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int /*layerIndex*/, bool /*visible*/) {
         if (DocumentViewport* vp = currentViewport()) {
-            Document* doc = vp->document();
-            if (doc && doc->isEdgeless()) {
-                // Edgeless: propagate visibility to all loaded tiles and mark dirty
-                auto tiles = doc->allLoadedTileCoords();
-                for (const auto& coord : tiles) {
-                    Page* tile = doc->getTile(coord.first, coord.second);
-                    if (tile && layerIndex < tile->layerCount()) {
-                        VectorLayer* layer = tile->layer(layerIndex);
-                        if (layer) {
-                            layer->visible = visible;
-                            doc->markTileDirty({coord.first, coord.second});
-                        }
-                    }
-                }
-            }
+            // LayerPanel already updated manifest/page, Document synced to tiles
             vp->update();
         }
     });
     
-    // Task 7: Active layer change updates drawing target
+    // Active layer change → update drawing target for edgeless mode
     connect(m_layerPanel, &LayerPanel::activeLayerChanged, this, [this](int layerIndex) {
         if (DocumentViewport* vp = currentViewport()) {
             Document* doc = vp->document();
             if (doc && doc->isEdgeless()) {
-                // Edgeless mode: update global active layer index
+                // LayerPanel already updated manifest, sync to viewport
                 vp->setEdgelessActiveLayerIndex(layerIndex);
             }
             // Paged mode: Page::activeLayerIndex already updated by LayerPanel
         }
     });
     
-    // Task 8: Layer add/remove/move marks document as modified
-    // For edgeless mode: sync layer changes to ALL loaded tiles
-    connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int layerIndex) {
+    // Layer structural changes → mark modified and repaint
+    connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int /*layerIndex*/) {
         if (DocumentViewport* vp = currentViewport()) {
-            Document* doc = vp->document();
-            if (doc && doc->isEdgeless()) {
-                // Edgeless: add layer to all loaded tiles and mark dirty
-                // Origin tile is modified by LayerPanel, mark it dirty
-                doc->markTileDirty({0, 0});
-                
-                Page* originTile = doc->getTile(0, 0);
-                if (originTile && layerIndex < originTile->layerCount()) {
-                    VectorLayer* newLayer = originTile->layer(layerIndex);
-                    if (newLayer) {
-                        auto tiles = doc->allLoadedTileCoords();
-                        for (const auto& coord : tiles) {
-                            if (coord.first == 0 && coord.second == 0) continue; // Skip origin
-                            Page* tile = doc->getTile(coord.first, coord.second);
-                            if (tile) {
-                                tile->addLayer(newLayer->name);
-                                doc->markTileDirty({coord.first, coord.second});
-                            }
-                        }
-                    }
-                }
-            }
-            emit vp->documentModified();
-            vp->update();
-        }
-    });
-    connect(m_layerPanel, &LayerPanel::layerRemoved, this, [this](int layerIndex) {
-        if (DocumentViewport* vp = currentViewport()) {
-            Document* doc = vp->document();
-            if (doc && doc->isEdgeless()) {
-                // Edgeless: remove layer from all loaded tiles and mark dirty
-                // Origin tile is modified by LayerPanel, mark it dirty
-                doc->markTileDirty({0, 0});
-                
-                auto tiles = doc->allLoadedTileCoords();
-                for (const auto& coord : tiles) {
-                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin
-                    Page* tile = doc->getTile(coord.first, coord.second);
-                    if (tile && layerIndex < tile->layerCount()) {
-                        tile->removeLayer(layerIndex);
-                        doc->markTileDirty({coord.first, coord.second});
-                    }
-                }
-            }
-            emit vp->documentModified();
-            vp->update();
-        }
-    });
-    connect(m_layerPanel, &LayerPanel::layerMoved, this, [this](int fromIndex, int toIndex) {
-        if (DocumentViewport* vp = currentViewport()) {
-            Document* doc = vp->document();
-            if (doc && doc->isEdgeless()) {
-                // Edgeless: move layer on all loaded tiles and mark dirty
-                // Origin tile is modified by LayerPanel, mark it dirty
-                doc->markTileDirty({0, 0});
-                
-                auto tiles = doc->allLoadedTileCoords();
-                for (const auto& coord : tiles) {
-                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin
-                    Page* tile = doc->getTile(coord.first, coord.second);
-                    if (tile) {
-                        tile->moveLayer(fromIndex, toIndex);
-                        doc->markTileDirty({coord.first, coord.second});
-                    }
-                }
-            }
+            // LayerPanel already updated manifest/page, Document synced to tiles
             emit vp->documentModified();
             vp->update();
         }
     });
     
-    // Phase 5.2: Layer rename syncs to all tiles in edgeless mode
-    connect(m_layerPanel, &LayerPanel::layerRenamed, this, [this](int layerIndex, const QString& newName) {
+    connect(m_layerPanel, &LayerPanel::layerRemoved, this, [this](int /*layerIndex*/) {
         if (DocumentViewport* vp = currentViewport()) {
-            Document* doc = vp->document();
-            if (doc && doc->isEdgeless()) {
-                // Edgeless: sync rename to all loaded tiles and mark dirty
-                // Origin tile is modified by LayerPanel, mark it dirty
-                doc->markTileDirty({0, 0});
-                
-                auto tiles = doc->allLoadedTileCoords();
-                for (const auto& coord : tiles) {
-                    if (coord.first == 0 && coord.second == 0) continue; // Skip origin
-                    Page* tile = doc->getTile(coord.first, coord.second);
-                    if (tile && layerIndex < tile->layerCount()) {
-                        VectorLayer* layer = tile->layer(layerIndex);
-                        if (layer) {
-                            layer->name = newName;
-                            doc->markTileDirty({coord.first, coord.second});
-                        }
-                    }
-                }
-            }
+            // LayerPanel already updated manifest/page, Document synced to tiles
             emit vp->documentModified();
-            // No need to update() - name change doesn't affect rendering
+            vp->update();
+        }
+    });
+    
+    connect(m_layerPanel, &LayerPanel::layerMoved, this, [this](int /*fromIndex*/, int /*toIndex*/) {
+        if (DocumentViewport* vp = currentViewport()) {
+            // LayerPanel already updated manifest/page, Document synced to tiles
+            emit vp->documentModified();
+            vp->update();
+        }
+    });
+    
+    // Layer rename → mark modified (no repaint needed, name doesn't affect rendering)
+    connect(m_layerPanel, &LayerPanel::layerRenamed, this, [this](int /*layerIndex*/, const QString& /*newName*/) {
+        if (DocumentViewport* vp = currentViewport()) {
+            // LayerPanel already updated manifest/page, Document synced to tiles
+            emit vp->documentModified();
+        }
+    });
+    
+    // Phase 5.4: Layer merge → mark modified and repaint
+    connect(m_layerPanel, &LayerPanel::layersMerged, this, [this](int /*targetIndex*/, QVector<int> /*mergedIndices*/) {
+        if (DocumentViewport* vp = currentViewport()) {
+            // LayerPanel already updated manifest/page, Document synced to tiles
+            emit vp->documentModified();
+            vp->update();
+        }
+    });
+    
+    // Phase 5.5: Layer duplicate → mark modified and repaint
+    connect(m_layerPanel, &LayerPanel::layerDuplicated, this, [this](int /*originalIndex*/, int /*newIndex*/) {
+        if (DocumentViewport* vp = currentViewport()) {
+            // LayerPanel already updated manifest/page, Document synced to tiles
+            emit vp->documentModified();
+            vp->update();
         }
     });
     
@@ -3468,22 +3414,18 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
         return;
     }
     
-    // Get the appropriate page for LayerPanel
-    Page* page = nullptr;
+    // Phase 5.6.8: Use setEdgelessDocument for edgeless mode
     if (doc->isEdgeless()) {
-        // Edgeless mode: use origin tile (0,0) as representative page
-        page = doc->getOrCreateTile(0, 0);
+        // Edgeless mode: LayerPanel reads from document's manifest
+        m_layerPanel->setEdgelessDocument(doc);
+        // No page change connection needed - manifest is global
     } else {
-        // Paged mode: use current page
+        // Paged mode: LayerPanel reads from current page
         int pageIndex = viewport->currentPageIndex();
-        page = doc->page(pageIndex);
-    }
-    
-    m_layerPanel->setCurrentPage(page);
-    
-    // Task 5: Connect viewport's currentPageChanged to update LayerPanel
-    // (Only relevant for paged mode - edgeless uses the same origin tile)
-    if (!doc->isEdgeless()) {
+        Page* page = doc->page(pageIndex);
+        m_layerPanel->setCurrentPage(page);
+        
+        // Task 5: Connect viewport's currentPageChanged to update LayerPanel
         m_layerPanelPageConn = connect(viewport, &DocumentViewport::currentPageChanged, 
                                         this, [this, viewport](int pageIndex) {
             if (!m_layerPanel || !viewport) return;

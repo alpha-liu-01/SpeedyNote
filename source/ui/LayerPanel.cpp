@@ -1,11 +1,12 @@
 // ============================================================================
 // LayerPanel Implementation
 // ============================================================================
-// Part of the SpeedyNote document architecture (Phase 3.0.3)
+// Part of the SpeedyNote document architecture (Phase 3.0.3, 5.6.7)
 // ============================================================================
 
 #include "LayerPanel.h"
 #include "../core/Page.h"
+#include "../core/Document.h"
 #include "../layers/VectorLayer.h"
 
 #include <QVBoxLayout>
@@ -14,6 +15,7 @@
 #include <QIcon>
 #include <QPalette>
 #include <QApplication>
+#include <algorithm>  // Phase 5.4: for std::sort in merge
 
 // ============================================================================
 // Constructor
@@ -70,7 +72,32 @@ void LayerPanel::setupUI()
     connect(m_layerList, &QListWidget::itemChanged,
             this, &LayerPanel::onItemChanged);
 
-    // Button bar
+    // Phase 5.3: Selection buttons bar
+    QHBoxLayout* selectionLayout = new QHBoxLayout();
+    selectionLayout->setSpacing(2);
+    
+    m_selectAllButton = new QPushButton(tr("All"), this);
+    m_selectAllButton->setToolTip(tr("Select all layers"));
+    m_selectAllButton->setFixedHeight(22);
+    connect(m_selectAllButton, &QPushButton::clicked, this, &LayerPanel::onSelectAllClicked);
+    selectionLayout->addWidget(m_selectAllButton);
+    
+    m_deselectAllButton = new QPushButton(tr("None"), this);
+    m_deselectAllButton->setToolTip(tr("Deselect all layers"));
+    m_deselectAllButton->setFixedHeight(22);
+    connect(m_deselectAllButton, &QPushButton::clicked, this, &LayerPanel::onDeselectAllClicked);
+    selectionLayout->addWidget(m_deselectAllButton);
+    
+    m_mergeButton = new QPushButton(tr("Merge"), this);
+    m_mergeButton->setToolTip(tr("Merge selected layers (2+ required)"));
+    m_mergeButton->setFixedHeight(22);
+    connect(m_mergeButton, &QPushButton::clicked, this, &LayerPanel::onMergeClicked);
+    selectionLayout->addWidget(m_mergeButton);
+    
+    selectionLayout->addStretch();
+    mainLayout->addLayout(selectionLayout);
+
+    // Button bar (add/remove/move)
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->setSpacing(2);
 
@@ -98,21 +125,40 @@ void LayerPanel::setupUI()
     connect(m_moveDownButton, &QPushButton::clicked, this, &LayerPanel::onMoveDownClicked);
     buttonLayout->addWidget(m_moveDownButton);
 
+    // Phase 5.5: Duplicate button
+    m_duplicateButton = new QPushButton("⧉", this);  // Unicode clone/copy symbol
+    m_duplicateButton->setToolTip(tr("Duplicate selected layer"));
+    m_duplicateButton->setFixedSize(28, 28);
+    connect(m_duplicateButton, &QPushButton::clicked, this, &LayerPanel::onDuplicateClicked);
+    buttonLayout->addWidget(m_duplicateButton);
+
     buttonLayout->addStretch();
     mainLayout->addLayout(buttonLayout);
 }
 
 // ============================================================================
-// Page Connection
+// Page/Document Connection (Phase 5.6.7)
 // ============================================================================
 
 void LayerPanel::setCurrentPage(Page* page)
 {
-    if (m_page == page) {
+    if (m_page == page && m_edgelessDoc == nullptr) {
         return;
     }
 
     m_page = page;
+    m_edgelessDoc = nullptr;  // Clear edgeless mode
+    refreshLayerList();
+}
+
+void LayerPanel::setEdgelessDocument(Document* doc)
+{
+    if (m_edgelessDoc == doc && m_page == nullptr) {
+        return;
+    }
+
+    m_edgelessDoc = doc;
+    m_page = nullptr;  // Clear paged mode
     refreshLayerList();
 }
 
@@ -126,21 +172,24 @@ void LayerPanel::refreshLayerList()
 
     m_layerList->clear();
 
-    if (!m_page) {
+    // Phase 5.6.7: Check both page and edgeless doc
+    if (!m_page && !m_edgelessDoc) {
         m_updatingList = false;
         updateButtonStates();
         return;
     }
 
     // Add layers to list (top layer first, so reverse order)
-    int layerCount = m_page->layerCount();
+    int layerCount = getLayerCount();
     for (int i = layerCount - 1; i >= 0; --i) {
         QListWidgetItem* item = createLayerItem(i);
-        m_layerList->addItem(item);
+        if (item) {
+            m_layerList->addItem(item);
+        }
     }
 
     // Select the active layer
-    int activeIndex = m_page->activeLayerIndex;
+    int activeIndex = getActiveLayerIndex();
     if (activeIndex >= 0 && activeIndex < layerCount) {
         int row = layerIndexToRow(activeIndex);
         m_layerList->setCurrentRow(row);
@@ -156,23 +205,35 @@ void LayerPanel::refreshLayerList()
 
 void LayerPanel::updateButtonStates()
 {
-    bool hasPage = (m_page != nullptr);
-    int layerCount = hasPage ? m_page->layerCount() : 0;
+    // Phase 5.6.7: Check both page and edgeless doc
+    bool hasSource = (m_page != nullptr || m_edgelessDoc != nullptr);
+    int layerCount = hasSource ? getLayerCount() : 0;
     int currentRow = m_layerList->currentRow();
     int selectedLayerIndex = (currentRow >= 0) ? rowToLayerIndex(currentRow) : -1;
 
-    // Add: always enabled if we have a page
-    m_addButton->setEnabled(hasPage);
+    // Add: always enabled if we have a source
+    m_addButton->setEnabled(hasSource);
 
     // Remove: enabled if more than one layer and something selected
-    m_removeButton->setEnabled(hasPage && layerCount > 1 && selectedLayerIndex >= 0);
+    m_removeButton->setEnabled(hasSource && layerCount > 1 && selectedLayerIndex >= 0);
 
     // Move Up: enabled if not at top (layer index < layerCount - 1)
-    m_moveUpButton->setEnabled(hasPage && selectedLayerIndex >= 0 && 
+    m_moveUpButton->setEnabled(hasSource && selectedLayerIndex >= 0 && 
                                selectedLayerIndex < layerCount - 1);
 
     // Move Down: enabled if not at bottom (layer index > 0)
-    m_moveDownButton->setEnabled(hasPage && selectedLayerIndex > 0);
+    m_moveDownButton->setEnabled(hasSource && selectedLayerIndex > 0);
+    
+    // Phase 5.3: Selection buttons
+    m_selectAllButton->setEnabled(hasSource && layerCount > 0);
+    m_deselectAllButton->setEnabled(hasSource && layerCount > 0);
+    
+    // Merge: enabled if 2+ layers are checked
+    int checkedCount = selectedLayerCount();
+    m_mergeButton->setEnabled(hasSource && checkedCount >= 2);
+    
+    // Phase 5.5: Duplicate: enabled if a layer is selected
+    m_duplicateButton->setEnabled(hasSource && selectedLayerIndex >= 0);
 }
 
 // ============================================================================
@@ -181,31 +242,33 @@ void LayerPanel::updateButtonStates()
 
 QListWidgetItem* LayerPanel::createLayerItem(int layerIndex)
 {
-    if (!m_page || layerIndex < 0 || layerIndex >= m_page->layerCount()) {
+    // Phase 5.6.7: Use abstracted accessors
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount) {
         return nullptr;
     }
 
-    VectorLayer* layer = m_page->layer(layerIndex);
-    if (!layer) {
-        return nullptr;
-    }
+    QString name = getLayerName(layerIndex);
+    bool visible = getLayerVisible(layerIndex);
+    bool locked = getLayerLocked(layerIndex);
 
     // Phase 5.2: Create item with just the layer name
     // Use icon for hidden layers, no icon for visible layers
-    QListWidgetItem* item = new QListWidgetItem(layer->name);
+    QListWidgetItem* item = new QListWidgetItem(name);
     
-    if (!layer->visible) {
+    if (!visible) {
         item->setIcon(m_notVisibleIcon);
     }
     
     // Store layer index as data
     item->setData(Qt::UserRole, layerIndex);
     
-    // Phase 5.2: Enable editing (double-click to rename)
-    item->setFlags(item->flags() | Qt::ItemIsEditable);
+    // Phase 5.3: Add checkbox for selection
+    item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
+    item->setCheckState(Qt::Unchecked);
 
     // Visual indication for locked layers
-    if (layer->locked) {
+    if (locked) {
         item->setForeground(Qt::gray);
     }
 
@@ -218,20 +281,24 @@ QListWidgetItem* LayerPanel::createLayerItem(int layerIndex)
 
 int LayerPanel::rowToLayerIndex(int row) const
 {
-    if (!m_page || row < 0) {
+    // Phase 5.6.7: Use abstracted layer count
+    int layerCount = getLayerCount();
+    if (layerCount == 0 || row < 0) {
         return -1;
     }
     // List is reversed: row 0 = top layer = highest index
-    return m_page->layerCount() - 1 - row;
+    return layerCount - 1 - row;
 }
 
 int LayerPanel::layerIndexToRow(int layerIndex) const
 {
-    if (!m_page || layerIndex < 0) {
+    // Phase 5.6.7: Use abstracted layer count
+    int layerCount = getLayerCount();
+    if (layerCount == 0 || layerIndex < 0) {
         return -1;
     }
     // List is reversed: highest layer index = row 0
-    return m_page->layerCount() - 1 - layerIndex;
+    return layerCount - 1 - layerIndex;
 }
 
 // ============================================================================
@@ -240,20 +307,22 @@ int LayerPanel::layerIndexToRow(int layerIndex) const
 
 void LayerPanel::onLayerSelectionChanged(int currentRow)
 {
-    if (m_updatingList || !m_page || currentRow < 0) {
+    // Phase 5.6.7: Check both sources
+    if (m_updatingList || (!m_page && !m_edgelessDoc) || currentRow < 0) {
         updateButtonStates();
         return;
     }
 
     int layerIndex = rowToLayerIndex(currentRow);
-    if (layerIndex < 0 || layerIndex >= m_page->layerCount()) {
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount) {
         updateButtonStates();
         return;
     }
 
-    // Update active layer on the page
-    if (m_page->activeLayerIndex != layerIndex) {
-        m_page->activeLayerIndex = layerIndex;
+    // Update active layer
+    if (getActiveLayerIndex() != layerIndex) {
+        setActiveLayerIndex(layerIndex);
         emit activeLayerChanged(layerIndex);
     }
 
@@ -262,62 +331,63 @@ void LayerPanel::onLayerSelectionChanged(int currentRow)
 
 void LayerPanel::onItemClicked(QListWidgetItem* item)
 {
-    if (m_updatingList || !m_page || !item) {
+    // Phase 5.6.7: Check both sources
+    if (m_updatingList || (!m_page && !m_edgelessDoc) || !item) {
         return;
     }
 
     int layerIndex = item->data(Qt::UserRole).toInt();
-    if (layerIndex < 0 || layerIndex >= m_page->layerCount()) {
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
     }
 
-    VectorLayer* layer = m_page->layer(layerIndex);
-    if (!layer) {
-        return;
-    }
-
-    // Check if user clicked in the visibility area (first few characters)
-    // For simplicity, clicking anywhere toggles visibility
-    // In a more sophisticated UI, we'd use a custom widget with a checkbox
+    // Check if user clicked in the visibility area
+    // Phase 5.3: Checkbox is in the first ~20 pixels, visibility icon after that
+    // We detect clicks in the 20-50 pixel range for visibility toggle
     
-    // Get click position - if it's in the left part, toggle visibility
+    // Get click position
     QPoint clickPos = m_layerList->mapFromGlobal(QCursor::pos());
     QRect itemRect = m_layerList->visualItemRect(item);
     
-    // If click is in the first 30 pixels, toggle visibility
-    if (clickPos.x() < itemRect.left() + 30) {
-        layer->visible = !layer->visible;
+    // If click is after checkbox but in icon area (20-50 pixels), toggle visibility
+    int relativeX = clickPos.x() - itemRect.left();
+    if (relativeX >= 20 && relativeX < 50) {
+        bool newVisible = !getLayerVisible(layerIndex);
+        setLayerVisible(layerIndex, newVisible);
         
         // Phase 5.2: Update item icon based on visibility
         m_updatingList = true;
-        if (layer->visible) {
+        if (newVisible) {
             item->setIcon(QIcon());  // No icon for visible layers
         } else {
             item->setIcon(m_notVisibleIcon);  // Show "not visible" icon
         }
         m_updatingList = false;
         
-        emit layerVisibilityChanged(layerIndex, layer->visible);
+        emit layerVisibilityChanged(layerIndex, newVisible);
     }
 }
 
 void LayerPanel::onItemChanged(QListWidgetItem* item)
 {
-    // Phase 5.2: Handle layer rename via inline editing
+    // Phase 5.2/5.6.7: Handle layer rename via inline editing
+    // Phase 5.3: Also handle checkbox state changes
     // Skip if we're programmatically updating the list
-    if (m_updatingList || !m_page || !item) {
+    if (m_updatingList || (!m_page && !m_edgelessDoc) || !item) {
         return;
     }
     
     int layerIndex = item->data(Qt::UserRole).toInt();
-    if (layerIndex < 0 || layerIndex >= m_page->layerCount()) {
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
     }
     
-    VectorLayer* layer = m_page->layer(layerIndex);
-    if (!layer) {
-        return;
-    }
+    // Phase 5.3: Update button states when checkbox changes
+    // (Merge button depends on selection count)
+    updateButtonStates();
+    emit selectionChanged(selectedLayerIndices());
     
     // Get the edited text (no prefix to strip - we use icons now)
     QString newText = item->text().trimmed();
@@ -328,14 +398,15 @@ void LayerPanel::onItemChanged(QListWidgetItem* item)
     }
     
     // Only update if name actually changed
-    if (layer->name != newText) {
-        layer->name = newText;
+    QString currentName = getLayerName(layerIndex);
+    if (currentName != newText) {
+        setLayerName(layerIndex, newText);
         emit layerRenamed(layerIndex, newText);
     }
     
-    // Ensure the display text is correct (set to layer name)
+    // Ensure the display text is correct
     m_updatingList = true;
-    item->setText(layer->name);
+    item->setText(getLayerName(layerIndex));
     m_updatingList = false;
 }
 
@@ -345,24 +416,23 @@ void LayerPanel::onItemChanged(QListWidgetItem* item)
 
 void LayerPanel::onAddLayerClicked()
 {
-    if (!m_page) {
+    // Phase 5.6.7: Check both sources
+    if (!m_page && !m_edgelessDoc) {
         return;
     }
 
     // Generate a unique layer name
-    int layerCount = m_page->layerCount();
+    int layerCount = getLayerCount();
     QString layerName = QString("Layer %1").arg(layerCount + 1);
 
     // Add the layer
-    VectorLayer* newLayer = m_page->addLayer(layerName);
-    if (!newLayer) {
+    int newIndex = addLayer(layerName);
+    if (newIndex < 0) {
         return;
     }
 
-    int newIndex = m_page->layerCount() - 1;  // New layer is at the top
-
     // Set as active
-    m_page->activeLayerIndex = newIndex;
+    setActiveLayerIndex(newIndex);
 
     // Refresh and select
     refreshLayerList();
@@ -373,7 +443,8 @@ void LayerPanel::onAddLayerClicked()
 
 void LayerPanel::onRemoveLayerClicked()
 {
-    if (!m_page) {
+    // Phase 5.6.7: Check both sources
+    if (!m_page && !m_edgelessDoc) {
         return;
     }
 
@@ -383,35 +454,32 @@ void LayerPanel::onRemoveLayerClicked()
     }
 
     int layerIndex = rowToLayerIndex(currentRow);
-    if (layerIndex < 0 || layerIndex >= m_page->layerCount()) {
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
     }
 
     // Don't remove the last layer
-    if (m_page->layerCount() <= 1) {
+    if (layerCount <= 1) {
         return;
     }
 
     // Remove the layer
-    if (!m_page->removeLayer(layerIndex)) {
+    if (!removeLayer(layerIndex)) {
         return;
-    }
-
-    // Adjust active layer index if needed
-    if (m_page->activeLayerIndex >= m_page->layerCount()) {
-        m_page->activeLayerIndex = m_page->layerCount() - 1;
     }
 
     // Refresh
     refreshLayerList();
 
     emit layerRemoved(layerIndex);
-    emit activeLayerChanged(m_page->activeLayerIndex);
+    emit activeLayerChanged(getActiveLayerIndex());
 }
 
 void LayerPanel::onMoveUpClicked()
 {
-    if (!m_page) {
+    // Phase 5.6.7: Check both sources
+    if (!m_page && !m_edgelessDoc) {
         return;
     }
 
@@ -421,19 +489,15 @@ void LayerPanel::onMoveUpClicked()
     }
 
     int layerIndex = rowToLayerIndex(currentRow);
-    if (layerIndex < 0 || layerIndex >= m_page->layerCount() - 1) {
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount - 1) {
         return;  // Can't move up if already at top
     }
 
     // Move layer up (increase index)
     int newIndex = layerIndex + 1;
-    if (!m_page->moveLayer(layerIndex, newIndex)) {
+    if (!moveLayer(layerIndex, newIndex)) {
         return;
-    }
-
-    // Update active layer index
-    if (m_page->activeLayerIndex == layerIndex) {
-        m_page->activeLayerIndex = newIndex;
     }
 
     // Refresh and reselect
@@ -445,7 +509,8 @@ void LayerPanel::onMoveUpClicked()
 
 void LayerPanel::onMoveDownClicked()
 {
-    if (!m_page) {
+    // Phase 5.6.7: Check both sources
+    if (!m_page && !m_edgelessDoc) {
         return;
     }
 
@@ -461,13 +526,8 @@ void LayerPanel::onMoveDownClicked()
 
     // Move layer down (decrease index)
     int newIndex = layerIndex - 1;
-    if (!m_page->moveLayer(layerIndex, newIndex)) {
+    if (!moveLayer(layerIndex, newIndex)) {
         return;
-    }
-
-    // Update active layer index
-    if (m_page->activeLayerIndex == layerIndex) {
-        m_page->activeLayerIndex = newIndex;
     }
 
     // Refresh and reselect
@@ -475,4 +535,301 @@ void LayerPanel::onMoveDownClicked()
     m_layerList->setCurrentRow(layerIndexToRow(newIndex));
 
     emit layerMoved(layerIndex, newIndex);
+}
+
+// ============================================================================
+// Abstracted Layer Access (Phase 5.6.7)
+// ============================================================================
+// These helpers abstract whether we're working with Page or Document manifest.
+
+int LayerPanel::getLayerCount() const
+{
+    if (m_edgelessDoc) {
+        return m_edgelessDoc->edgelessLayerCount();
+    }
+    if (m_page) {
+        return m_page->layerCount();
+    }
+    return 0;
+}
+
+QString LayerPanel::getLayerName(int index) const
+{
+    if (m_edgelessDoc) {
+        const LayerDefinition* def = m_edgelessDoc->edgelessLayerDef(index);
+        return def ? def->name : QString();
+    }
+    if (m_page) {
+        VectorLayer* layer = m_page->layer(index);
+        return layer ? layer->name : QString();
+    }
+    return QString();
+}
+
+bool LayerPanel::getLayerVisible(int index) const
+{
+    if (m_edgelessDoc) {
+        const LayerDefinition* def = m_edgelessDoc->edgelessLayerDef(index);
+        return def ? def->visible : true;
+    }
+    if (m_page) {
+        VectorLayer* layer = m_page->layer(index);
+        return layer ? layer->visible : true;
+    }
+    return true;
+}
+
+bool LayerPanel::getLayerLocked(int index) const
+{
+    if (m_edgelessDoc) {
+        const LayerDefinition* def = m_edgelessDoc->edgelessLayerDef(index);
+        return def ? def->locked : false;
+    }
+    if (m_page) {
+        VectorLayer* layer = m_page->layer(index);
+        return layer ? layer->locked : false;
+    }
+    return false;
+}
+
+int LayerPanel::getActiveLayerIndex() const
+{
+    if (m_edgelessDoc) {
+        return m_edgelessDoc->edgelessActiveLayerIndex();
+    }
+    if (m_page) {
+        return m_page->activeLayerIndex;
+    }
+    return 0;
+}
+
+void LayerPanel::setLayerVisible(int index, bool visible)
+{
+    if (m_edgelessDoc) {
+        m_edgelessDoc->setEdgelessLayerVisible(index, visible);
+    } else if (m_page) {
+        VectorLayer* layer = m_page->layer(index);
+        if (layer) {
+            layer->visible = visible;
+        }
+    }
+}
+
+void LayerPanel::setLayerName(int index, const QString& name)
+{
+    if (m_edgelessDoc) {
+        m_edgelessDoc->setEdgelessLayerName(index, name);
+    } else if (m_page) {
+        VectorLayer* layer = m_page->layer(index);
+        if (layer) {
+            layer->name = name;
+        }
+    }
+}
+
+void LayerPanel::setActiveLayerIndex(int index)
+{
+    if (m_edgelessDoc) {
+        m_edgelessDoc->setEdgelessActiveLayerIndex(index);
+    } else if (m_page) {
+        m_page->activeLayerIndex = index;
+    }
+}
+
+int LayerPanel::addLayer(const QString& name)
+{
+    if (m_edgelessDoc) {
+        return m_edgelessDoc->addEdgelessLayer(name);
+    }
+    if (m_page) {
+        VectorLayer* layer = m_page->addLayer(name);
+        if (layer) {
+            return m_page->layerCount() - 1;
+        }
+    }
+    return -1;
+}
+
+bool LayerPanel::removeLayer(int index)
+{
+    if (m_edgelessDoc) {
+        return m_edgelessDoc->removeEdgelessLayer(index);
+    }
+    if (m_page) {
+        return m_page->removeLayer(index);
+    }
+    return false;
+}
+
+bool LayerPanel::moveLayer(int from, int to)
+{
+    if (m_edgelessDoc) {
+        return m_edgelessDoc->moveEdgelessLayer(from, to);
+    }
+    if (m_page) {
+        return m_page->moveLayer(from, to);
+    }
+    return false;
+}
+
+// ============================================================================
+// Phase 5.3: Selection API
+// ============================================================================
+
+QVector<int> LayerPanel::selectedLayerIndices() const
+{
+    QVector<int> indices;
+    
+    for (int row = 0; row < m_layerList->count(); ++row) {
+        QListWidgetItem* item = m_layerList->item(row);
+        if (item && item->checkState() == Qt::Checked) {
+            int layerIndex = rowToLayerIndex(row);
+            if (layerIndex >= 0) {
+                indices.append(layerIndex);
+            }
+        }
+    }
+    
+    // Sort in ascending order (bottom layer first)
+    std::sort(indices.begin(), indices.end());
+    return indices;
+}
+
+int LayerPanel::selectedLayerCount() const
+{
+    int count = 0;
+    for (int row = 0; row < m_layerList->count(); ++row) {
+        QListWidgetItem* item = m_layerList->item(row);
+        if (item && item->checkState() == Qt::Checked) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+void LayerPanel::selectAllLayers()
+{
+    m_updatingList = true;
+    for (int row = 0; row < m_layerList->count(); ++row) {
+        QListWidgetItem* item = m_layerList->item(row);
+        if (item) {
+            item->setCheckState(Qt::Checked);
+        }
+    }
+    m_updatingList = false;
+    
+    updateButtonStates();
+    emit selectionChanged(selectedLayerIndices());
+}
+
+void LayerPanel::deselectAllLayers()
+{
+    m_updatingList = true;
+    for (int row = 0; row < m_layerList->count(); ++row) {
+        QListWidgetItem* item = m_layerList->item(row);
+        if (item) {
+            item->setCheckState(Qt::Unchecked);
+        }
+    }
+    m_updatingList = false;
+    
+    updateButtonStates();
+    emit selectionChanged(selectedLayerIndices());
+}
+
+// ============================================================================
+// Phase 5.3: Selection Slots
+// ============================================================================
+
+void LayerPanel::onSelectAllClicked()
+{
+    selectAllLayers();
+}
+
+void LayerPanel::onDeselectAllClicked()
+{
+    deselectAllLayers();
+}
+
+void LayerPanel::onMergeClicked()
+{
+    // Phase 5.4: Merge selected layers
+    QVector<int> selected = selectedLayerIndices();
+    if (selected.size() < 2) {
+        return;  // Need at least 2 layers to merge
+    }
+    
+    // Sort to ensure we have the lowest index first
+    std::sort(selected.begin(), selected.end());
+    
+    // Target is the bottom-most selected layer (lowest index)
+    int targetIndex = selected.first();
+    
+    // Remove target from the list of layers to merge into it
+    selected.removeFirst();
+    
+    // Perform the actual merge
+    bool success = false;
+    if (m_edgelessDoc) {
+        // Edgeless mode: use Document's merge method
+        success = m_edgelessDoc->mergeEdgelessLayers(targetIndex, selected);
+    } else if (m_page) {
+        // Paged mode: use Page's merge method
+        success = m_page->mergeLayers(targetIndex, selected);
+    }
+    
+    if (success) {
+        // Refresh the layer list
+        refreshLayerList();
+        
+        // CRITICAL FIX: Emit activeLayerChanged to sync viewport's active layer index.
+        // After merge, the active layer should be the target layer.
+        // refreshLayerList() doesn't emit this signal because m_updatingList is true.
+        // Without this, the viewport's m_edgelessActiveLayerIndex may point to a removed
+        // layer, causing the eraser to check the wrong layer and fail to find strokes.
+        emit activeLayerChanged(targetIndex);
+        
+        // Emit signal for MainWindow to update viewport and undo system
+        emit layersMerged(targetIndex, selected);
+    }
+}
+
+void LayerPanel::onDuplicateClicked()
+{
+    // Phase 5.5: Duplicate selected layer
+    if (!m_page && !m_edgelessDoc) {
+        return;
+    }
+    
+    int currentRow = m_layerList->currentRow();
+    if (currentRow < 0) {
+        return;
+    }
+    
+    int layerIndex = rowToLayerIndex(currentRow);
+    int layerCount = getLayerCount();
+    if (layerIndex < 0 || layerIndex >= layerCount) {
+        return;
+    }
+    
+    // Perform the duplicate
+    int newIndex = -1;
+    if (m_edgelessDoc) {
+        // Edgeless mode: use Document's duplicate method
+        newIndex = m_edgelessDoc->duplicateEdgelessLayer(layerIndex);
+    } else if (m_page) {
+        // Paged mode: use Page's duplicate method
+        newIndex = m_page->duplicateLayer(layerIndex);
+    }
+    
+    if (newIndex >= 0) {
+        // Refresh the layer list
+        refreshLayerList();
+        
+        // Select the new layer and sync viewport
+        emit activeLayerChanged(newIndex);
+        
+        // Emit signal for MainWindow to update viewport
+        emit layerDuplicated(layerIndex, newIndex);
+    }
 }

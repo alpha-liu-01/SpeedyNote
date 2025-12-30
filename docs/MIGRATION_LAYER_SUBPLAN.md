@@ -215,38 +215,51 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 
 ---
 
-### Phase 5.3: Select/Tick UI ⬜ NOT STARTED
+### Phase 5.3: Select/Tick UI ✅ COMPLETE
 
 **Goal:** Add checkbox selection to layers for batch operations.
 
 **Design:** Each layer item shows:
 ```
-[✓] 👁 Layer Name
+[✓] [eye/empty] Layer Name
 ```
-- Checkbox for selection (left)
-- Eye icon for visibility (click to toggle)
+- Checkbox for selection (left, ~20px)
+- Eye icon for hidden layers (20-50px click area for visibility toggle)
 - Layer name (double-click to edit)
 
 **Tasks:**
-1. Add checkbox to layer items
-2. Track selected layers (can be multiple)
-3. Add "Select All" / "Select None" options
-4. Selection state is UI-only (not saved)
-5. Update button states based on selection (merge needs 2+)
+1. ✅ Add checkbox to layer items (`Qt::ItemIsUserCheckable`)
+2. ✅ Track selected layers via `selectedLayerIndices()` / `selectedLayerCount()`
+3. ✅ Add "All" / "None" / "Merge" buttons
+4. ✅ Selection state is UI-only (checkboxes reset on `refreshLayerList()`)
+5. ✅ Merge button enabled only when 2+ layers checked
 
-**Files to modify:**
-- `source/ui/LayerPanel.h` - Add selection tracking
-- `source/ui/LayerPanel.cpp` - Add checkboxes, selection logic
+**Files modified:**
+- `source/ui/LayerPanel.h` - Added selection API, signals, merge button
+- `source/ui/LayerPanel.cpp` - Added checkboxes, selection logic, button handlers
+
+**New API:**
+```cpp
+// Selection queries
+QVector<int> selectedLayerIndices() const;
+int selectedLayerCount() const;
+void selectAllLayers();
+void deselectAllLayers();
+
+// Signals
+void selectionChanged(QVector<int> selectedIndices);
+void layersMerged(int targetIndex, QVector<int> mergedIndices);
+```
 
 **Test cases:**
-- [ ] Checkboxes appear on each layer
-- [ ] Can select multiple layers
-- [ ] Selection persists while panel is open
-- [ ] Selection cleared when page changes
+- [x] Checkboxes appear on each layer
+- [x] Can select multiple layers
+- [x] Selection persists while panel is open
+- [x] Selection cleared when page changes (via `refreshLayerList()`)
 
 ---
 
-### Phase 5.4: Merge Layers ⬜ NOT STARTED
+### Phase 5.4: Merge Layers ✅ COMPLETE
 
 **Goal:** Merge selected layers into one.
 
@@ -257,54 +270,104 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 4. Other selected layers removed
 5. Layer order preserved for unselected layers
 
-**Tasks:**
-1. Add "Merge" button to LayerPanel
-2. Implement merge logic:
-   - Collect all strokes from selected layers
-   - Add to target layer (lowest index among selected)
-   - Remove other selected layers
-3. Emit signals for undo integration
-4. Refresh layer list
+**Implementation:**
 
-**Files to modify:**
-- `source/ui/LayerPanel.h` - Add merge button, signal
-- `source/ui/LayerPanel.cpp` - Implement merge logic
-- `source/core/Page.h` - Add mergeLayers() helper if needed
+1. **Page::mergeLayers(targetIndex, sourceIndices)** - `source/core/Page.cpp`
+   - Validates indices, ensures at least one layer remains
+   - Collects strokes from source layers into target layer
+   - Removes source layers in reverse order (highest index first)
+   - Adjusts activeLayerIndex if needed
+
+2. **Document::mergeEdgelessLayers(targetIndex, sourceIndices)** - `source/core/Document.cpp`
+   - Same logic but operates on all loaded tiles
+   - For each tile: moves strokes to target layer, clears source layers
+   - Then removes source layers from manifest and all tiles
+   - Marks tiles dirty and manifest dirty
+
+3. **LayerPanel::onMergeClicked()** - `source/ui/LayerPanel.cpp`
+   - Gets selected indices, sorts them to find lowest as target
+   - Calls Page::mergeLayers() or Document::mergeEdgelessLayers()
+   - Refreshes layer list
+   - Emits layersMerged signal
+
+**Files modified:**
+- `source/core/Document.h` - Added mergeEdgelessLayers() declaration
+- `source/core/Document.cpp` - Implemented mergeEdgelessLayers()
+- `source/core/Page.h` - Added mergeLayers() declaration  
+- `source/core/Page.cpp` - Implemented mergeLayers()
+- `source/ui/LayerPanel.cpp` - Implemented merge logic in onMergeClicked()
+
+**Bug Fix - CR-L10: Eraser fails on merged strokes**
+
+**Problem:** After merging layers, the eraser could not erase strokes that existed before the merge (but could erase strokes drawn after the merge). After save/reload, everything worked.
+
+**Root Cause:** `DocumentViewport` has its own `m_edgelessActiveLayerIndex` that was NOT synchronized after the merge:
+1. `Document::mergeEdgelessLayers()` removes source layers and adjusts `Document::m_edgelessActiveLayerIndex`
+2. `refreshLayerList()` is called with `m_updatingList = true`, which suppresses `activeLayerChanged` signal
+3. `DocumentViewport::m_edgelessActiveLayerIndex` remains at the OLD value (e.g., 1)
+4. The eraser checks `if (m_edgelessActiveLayerIndex >= tile->layerCount()) continue;`
+5. Since layer 1 was removed, index 1 is now out of bounds → all tiles skipped → no strokes found!
+
+**Fix:** In `LayerPanel::onMergeClicked()`, explicitly emit `activeLayerChanged(targetIndex)` after the merge to sync the viewport's active layer index. The target layer (lowest index among merged) becomes the new active layer.
 
 **Test cases:**
-- [ ] Merge button disabled with 0-1 selected
-- [ ] Merge combines strokes correctly
-- [ ] Layer order preserved
+- [x] Merge button disabled with 0-1 selected (enforced in updateButtonStates)
+- [x] Merge combines strokes correctly
+- [x] Layer order preserved (removes from highest to lowest index)
+- [x] Eraser works on merged strokes (CR-L10 fix)
 - [ ] Undo restores original layers (Phase 5.7)
 
 ---
 
-### Phase 5.5: Duplicate Layer ⬜ NOT STARTED
+### Phase 5.5: Duplicate Layer ✅ COMPLETE
 
 **Goal:** Copy a layer with all its strokes.
 
-**Tasks:**
-1. Add "Duplicate" button to LayerPanel
-2. Implement duplicate:
-   - Deep copy all strokes (new UUIDs)
-   - Create new layer with name "LayerName Copy"
-   - Insert above original
-3. Select the new layer
+**Implementation:**
 
-**Files to modify:**
-- `source/ui/LayerPanel.h` - Add duplicate button
-- `source/ui/LayerPanel.cpp` - Implement duplicate logic
-- `source/layers/VectorLayer.h` - Add clone() method if needed
+1. **Document::duplicateEdgelessLayer(index)** - `source/core/Document.cpp`
+   - Creates a new `LayerDefinition` with name "OriginalName Copy"
+   - Generates new UUID for the layer
+   - Inserts at `index + 1` (above original)
+   - For each loaded tile: creates a new VectorLayer with deep-copied strokes (new UUIDs)
+   - Moves the new layer to the correct position
+   - Marks tiles dirty and manifest dirty
+
+2. **Page::duplicateLayer(index)** - `source/core/Page.cpp`
+   - Creates a new `VectorLayer` with name "OriginalName Copy"
+   - Deep copies all strokes with new UUIDs
+   - Inserts at `index + 1` (above original)
+   - Adjusts active layer index if needed
+
+3. **LayerPanel::onDuplicateClicked()** - `source/ui/LayerPanel.cpp`
+   - Gets the currently selected layer
+   - Routes to Page::duplicateLayer() or Document::duplicateEdgelessLayer()
+   - Refreshes layer list
+   - Emits `activeLayerChanged(newIndex)` to sync viewport
+   - Emits `layerDuplicated(originalIndex, newIndex)` for MainWindow
+
+4. **MainWindow connections**
+   - Connects to `layersMerged` and `layerDuplicated` signals
+   - Emits `documentModified()` and calls `vp->update()`
+
+**Files modified:**
+- `source/core/Document.h` - Added duplicateEdgelessLayer() declaration
+- `source/core/Document.cpp` - Implemented duplicateEdgelessLayer()
+- `source/core/Page.h` - Added duplicateLayer() declaration
+- `source/core/Page.cpp` - Implemented duplicateLayer()
+- `source/ui/LayerPanel.h` - Added duplicate button, slot, and signal
+- `source/ui/LayerPanel.cpp` - Added button UI and onDuplicateClicked()
+- `source/MainWindow.cpp` - Connected layersMerged and layerDuplicated signals
 
 **Test cases:**
-- [ ] Duplicate creates new layer above original
-- [ ] All strokes copied with new IDs
-- [ ] New layer is selected
-- [ ] Original layer unchanged
+- [x] Duplicate creates new layer above original
+- [x] All strokes copied with new IDs (new UUIDs generated)
+- [x] New layer is selected (activeLayerChanged emitted)
+- [x] Original layer unchanged (deep copy, not move)
 
 ---
 
-### Phase 5.6: Edgeless Layer Manifest ⬜ NOT STARTED
+### Phase 5.6: Edgeless Layer Manifest ✅ COMPLETE
 
 **Goal:** Store layer definitions in edgeless document manifest, enabling O(1) layer operations and removing the origin tile special handling.
 
@@ -356,9 +419,9 @@ LayerPanel is placed **below** the left sidebar, sharing the vertical space.
 
 ---
 
-#### Phase 5.6.1: LayerDefinition Struct & Document Members
+#### Phase 5.6.1: LayerDefinition Struct & Document Members ✅ COMPLETE
 
-**Add to `Document.h`:**
+**Added to `Document.h`:**
 ```cpp
 /**
  * @brief Layer metadata for edgeless mode manifest.
@@ -411,7 +474,7 @@ public:
 
 ---
 
-#### Phase 5.6.2: Manifest Save/Load
+#### Phase 5.6.2: Manifest Save/Load ✅ COMPLETE
 
 **Update `Document::saveBundle()`:**
 ```cpp
@@ -460,7 +523,7 @@ if (docMode == Mode::Edgeless) {
 
 ---
 
-#### Phase 5.6.3: Tile Save Format (Strokes Only)
+#### Phase 5.6.3: Tile Save Format (Strokes Only) ✅ COMPLETE
 
 **Update `Document::saveTile()`:**
 ```cpp
@@ -494,7 +557,7 @@ if (isEdgeless()) {
 
 ---
 
-#### Phase 5.6.4: Tile Load with Manifest Reconstruction
+#### Phase 5.6.4: Tile Load with Manifest Reconstruction ✅ COMPLETE
 
 **Update `Document::loadTileFromDisk()`:**
 ```cpp
@@ -540,29 +603,36 @@ if (isEdgeless()) {
 
 ---
 
-#### Phase 5.6.5: Remove Origin Tile Special Handling
+#### Phase 5.6.5: Remove Origin Tile Special Handling ✅ COMPLETE
 
-**Delete from `DocumentViewport::evictDistantTiles()`:**
-```cpp
-// DELETE THIS:
-// Phase 5.1: Never evict the origin tile (0,0) - it's the LayerPanel representative
-if (coord.first == 0 && coord.second == 0) {
-    continue;
-}
-```
+**Deleted from `DocumentViewport::evictDistantTiles()`:**
+- Removed the `if (coord.first == 0 && coord.second == 0) { continue; }` check
+- Origin tile can now be evicted like any other tile
 
-**Delete from `Document.cpp`:**
-- Remove `syncTileLayerStructure()` method entirely
-- Remove calls to `syncTileLayerStructure()` in `getOrCreateTile()` and `loadTileFromDisk()`
+**Deleted from `Document.cpp`:**
+- ✅ Removed `syncTileLayerStructure()` method entirely (~55 lines)
+- ✅ Removed calls to `syncTileLayerStructure()` in `getTile()` and `getOrCreateTile()`
+
+**Deleted from `Document.h`:**
+- ✅ Removed `syncTileLayerStructure(Page* tile) const` declaration
+
+**Note:** New tiles created in `getOrCreateTile()` still get a default single layer from the `Page` constructor. Phase 5.6.6 will update this to initialize new tiles with the manifest layer structure.
 
 ---
 
-#### Phase 5.6.6: Update getOrCreateTile for Manifest Layers
+#### Phase 5.6.6: Update getOrCreateTile for Manifest Layers ✅ COMPLETE
 
-**Update `Document::getOrCreateTile()`:**
+**Updated `Document::getOrCreateTile()`:**
+- Added layer initialization from manifest BEFORE tile is inserted into `m_tiles`
+- For edgeless mode with non-empty manifest:
+  - Clears default layer from `Page` constructor
+  - Creates `VectorLayer` for each `LayerDefinition` in manifest
+  - Copies id, name, visible, opacity, locked from manifest
+  - Sets `activeLayerIndex` from manifest
+
 ```cpp
-// When creating new tile, use manifest layer structure
-if (isEdgeless()) {
+// Phase 5.6.6: Initialize tile layer structure from manifest
+if (isEdgeless() && !m_edgelessLayers.empty()) {
     tile->vectorLayers.clear();
     for (const auto& layerDef : m_edgelessLayers) {
         auto layer = std::make_unique<VectorLayer>(layerDef.name);
@@ -576,67 +646,88 @@ if (isEdgeless()) {
 }
 ```
 
+**Key behavior:** All new tiles now have the correct layer structure from creation, ensuring consistency across the entire edgeless canvas.
+
 ---
 
-#### Phase 5.6.7: LayerPanel Connection Update
+#### Phase 5.6.7: LayerPanel Connection Update ✅ COMPLETE
 
-**Option A: Virtual Page Adapter (Recommended)**
-Create a "virtual page" that wraps Document's layer manifest:
+**Implemented: Option A/B Hybrid - Direct Document Integration**
 
+Instead of a separate adapter class, modified LayerPanel to support dual modes:
+
+**New API in LayerPanel:**
+- `setCurrentPage(Page*)` - paged mode (existing, updated)
+- `setEdgelessDocument(Document*)` - edgeless mode (new)
+- `isEdgelessMode()` - check current mode
+
+**Private abstraction helpers:**
 ```cpp
-// In Document.h:
-class EdgelessLayerAdapter {
-public:
-    EdgelessLayerAdapter(Document* doc) : m_doc(doc) {}
-    
-    int layerCount() const { return m_doc->edgelessLayerCount(); }
-    VectorLayer* layer(int index);  // Returns temporary VectorLayer
-    // ... other Page-like methods
-    
-private:
-    Document* m_doc;
-    std::vector<std::unique_ptr<VectorLayer>> m_tempLayers;  // For LayerPanel
-};
+// Layer access (reads from Page or Document manifest)
+int getLayerCount() const;
+QString getLayerName(int index) const;
+bool getLayerVisible(int index) const;
+bool getLayerLocked(int index) const;
+int getActiveLayerIndex() const;
+
+// Layer modification (writes to Page or Document manifest)
+void setLayerVisible(int index, bool visible);
+void setLayerName(int index, const QString& name);
+void setActiveLayerIndex(int index);
+int addLayer(const QString& name);
+bool removeLayer(int index);
+bool moveLayer(int from, int to);
 ```
 
-**Option B: Modify LayerPanel (Alternative)**
-Add `setEdgelessDocument(Document*)` to LayerPanel and have it read from `m_edgelessLayers` directly.
+**Key changes:**
+- All slot handlers now use abstracted helpers
+- When in edgeless mode, operations go directly to `Document::m_edgelessLayers`
+- No temporary VectorLayer objects needed
+- Clean separation: LayerPanel doesn't know about tiles
 
 ---
 
-#### Phase 5.6.8: Simplify MainWindow Layer Logic
+#### Phase 5.6.8: Simplify MainWindow Layer Logic ✅ COMPLETE
 
-**Replace ~145 lines with:**
+**Document methods now sync to loaded tiles:**
+Updated all `Document::setEdgeless*()` and `Document::addEdgelessLayer/removeEdgelessLayer/moveEdgelessLayer` methods to automatically sync changes to all loaded tiles. This eliminates the need for MainWindow to iterate tiles.
+
+**Simplified signal handlers (~138 lines → ~55 lines):**
 ```cpp
-// Visibility change → just update manifest
-connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int idx, bool vis) {
+// Visibility change → just repaint (Document already synced tiles)
+connect(m_layerPanel, &LayerPanel::layerVisibilityChanged, this, [this](int, bool) {
+    if (auto* vp = currentViewport()) vp->update();
+});
+
+// Active layer → sync to viewport for edgeless drawing target
+connect(m_layerPanel, &LayerPanel::activeLayerChanged, this, [this](int idx) {
     if (auto* vp = currentViewport()) {
         if (auto* doc = vp->document(); doc && doc->isEdgeless()) {
-            doc->setEdgelessLayerVisible(idx, vis);
-            vp->update();  // Repaint - loaded tiles already have correct VectorLayers
+            vp->setEdgelessActiveLayerIndex(idx);
         }
     }
 });
 
-// Layer add → just update manifest
-connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int idx) {
-    // LayerPanel already called doc->addEdgelessLayer() via adapter
-    if (auto* vp = currentViewport()) {
-        emit vp->documentModified();
-        vp->update();
-    }
+// Structural changes → mark modified and repaint
+connect(m_layerPanel, &LayerPanel::layerAdded, this, [this](int) {
+    if (auto* vp = currentViewport()) { emit vp->documentModified(); vp->update(); }
 });
-
-// Similar simplification for remove/move/rename
+// Similar for layerRemoved, layerMoved, layerRenamed
 ```
 
-**Net result:** ~145 lines → ~30 lines
+**Updated `updateLayerPanelForViewport()`:**
+- For edgeless: calls `m_layerPanel->setEdgelessDocument(doc)` 
+- For paged: calls `m_layerPanel->setCurrentPage(page)` (unchanged)
+- No more origin tile (0,0) references
 
 ---
 
-#### Phase 5.6.9: Migration & Backward Compatibility
+#### Phase 5.6.9: Migration & Backward Compatibility ⏭️ SKIPPED
 
-**Version detection in `loadBundle()`:**
+> **Note:** Skipped because the old tile-based layer format was never released.
+> If needed in the future, implement version detection and migration from tile layer data.
+
+**Original plan (not implemented):**
 ```cpp
 // Check manifest version
 int manifestVersion = obj["format_version"].toString("1.0").split('.')[0].toInt();
@@ -713,63 +804,151 @@ void Document::migrateLayersFromTileToManifest() {
 
 #### Success Criteria
 
-- [ ] Layer operations are O(1) disk writes
-- [ ] No tile iteration for layer metadata changes
-- [ ] Origin tile can be evicted like any other tile
-- [ ] MainWindow layer logic reduced to ~30 lines
-- [ ] Old .snb files migrate transparently
-- [ ] All layer features work: visibility, rename, add, remove, reorder
-- [ ] Active layer selection is global and persistent
+- [x] Layer operations are O(1) disk writes
+- [x] No tile iteration for layer metadata changes
+- [x] Origin tile can be evicted like any other tile
+- [x] MainWindow layer logic reduced to ~55 lines (was 138)
+- [ ] ~~Old .snb files migrate transparently~~ (skipped - never released)
+- [x] All layer features work: visibility, rename, add, remove, reorder
+- [x] Active layer selection is global and persistent
 
 ---
 
-### Phase 5.7: Multi-Layer Undo/Redo ⬜ NOT STARTED
+#### Phase 5.6 Code Review (Dec 29, 2024)
+
+| ID | Issue | Severity | Fix |
+|----|-------|----------|-----|
+| CR-L5 | Property setters marked ALL tiles dirty, even if layer didn't exist | Minor (Perf) | Only mark tile dirty if layer was actually updated |
+| CR-L6 | `edgelessLayerCount()` comment claimed "always >= 1" but code didn't enforce | Minor (Doc) | Clarified comment: "createNew() and loadBundle() ensure >= 1" |
+| CR-L7 | `setEdgelessActiveLayerIndex()` could set index=-1 if layers empty | Minor (Edge) | Added early return for empty layers, use `qBound()` for clamping |
+| CR-L8 | LayerPanel could have dangling pointer when Document deleted | Medium (Crash) | Clear LayerPanel's document BEFORE calling `closeDocument()` |
+| CR-L9 | `setEdgelessActiveLayerIndex()` marked all tiles dirty unnecessarily | Minor (Perf) | Removed dirty marking - activeLayerIndex is in manifest, not per-tile |
+
+**All issues fixed in this review.**
+
+---
+
+### Phase 5.7: Multi-Layer Undo/Redo 🟡 PARTIAL
 
 **Goal:** Ensure undo/redo works correctly with multiple layers.
 
-**Current state:**
-- Stroke undo already tracks layer index
-- Layer operations (add/remove/merge) not undoable
+---
 
-**Tasks:**
-1. Verify stroke undo uses correct layer
-2. Add layer operation undo actions:
-   - `AddLayerAction` - stores layer data for undo
-   - `RemoveLayerAction` - stores removed layer for redo
-   - `MergeLayersAction` - stores original layers for undo
-   - `DuplicateLayerAction` - stores new layer id for undo
-3. Integrate with existing undo stack
+#### Analysis of Current State
 
-**Undo action types:**
-```cpp
-enum class LayerUndoType {
-    AddLayer,
-    RemoveLayer,
-    MergeLayers,
-    DuplicateLayer,
-    RenameLayer,
-    ReorderLayer
-};
+**✅ ALREADY WORKING: Stroke-level undo with layer awareness**
 
-struct LayerUndoAction {
-    LayerUndoType type;
-    int layerIndex;
-    VectorLayer savedLayer;  // For restore
-    // ... additional fields per type
-};
-```
+The existing undo system correctly handles strokes across layers:
 
-**Files to modify:**
-- `source/core/DocumentViewport.h` - Add layer undo types
-- `source/core/DocumentViewport.cpp` - Implement layer undo/redo
-- `source/ui/LayerPanel.cpp` - Push undo actions for operations
+1. **Stroke tracking includes layer index:**
+   ```cpp
+   // In EdgelessUndoAction (DocumentViewport.h):
+   int layerIndex = 0;  ///< Which layer was affected
+   ```
 
-**Test cases:**
-- [ ] Ctrl+Z after add layer removes it
-- [ ] Ctrl+Z after remove layer restores it
-- [ ] Ctrl+Z after merge restores original layers
-- [ ] Ctrl+Z after duplicate removes the copy
-- [ ] Redo works for all layer operations
+2. **When drawing/erasing, layer index is captured:**
+   ```cpp
+   // finishStrokeEdgeless() and eraseAtEdgeless():
+   undoAction.layerIndex = m_edgelessActiveLayerIndex;
+   ```
+
+3. **Undo/redo restores to correct layer:**
+   ```cpp
+   // undoEdgeless() and redoEdgeless():
+   while (tile->layerCount() <= action.layerIndex) {
+       tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+   }
+   VectorLayer* layer = tile->layer(action.layerIndex);
+   ```
+
+4. **Layer auto-creation on undo:** If a layer was deleted, undoing a stroke that was on that layer will auto-recreate the layer structure up to the needed index.
+
+**Test cases for existing functionality:**
+- [x] Draw on layer 1, undo → stroke removed from layer 1
+- [x] Draw on layer 2, undo → stroke removed from layer 2
+- [x] Draw on multiple layers, undo each → correct layer affected
+- [x] Delete layer, undo stroke that was on it → layer auto-recreated
+
+---
+
+**⬜ NOT IMPLEMENTED: Layer structural operations**
+
+The following layer operations are **NOT undoable**:
+
+| Operation | Undo Behavior Needed | Complexity |
+|-----------|---------------------|------------|
+| Add Layer | Remove the added layer | Low |
+| Remove Layer | Restore layer with ALL strokes | High - need to save all strokes |
+| Merge Layers | Restore original separate layers | High - need to save source layers |
+| Duplicate Layer | Remove the copy | Low |
+| Rename Layer | Restore old name | Low |
+| Reorder Layer | Restore old position | Low |
+
+**Why layer undo is complex:**
+- Layer operations affect the manifest (edgeless) or page structure
+- Remove/Merge need to save entire VectorLayer data for restoration
+- Need a new undo action type separate from stroke undo
+- Need to coordinate between LayerPanel (UI) and DocumentViewport (undo stacks)
+
+---
+
+#### Recommended Approach (If Implementing)
+
+**Option A: Minimal - Low priority operations only**
+- Skip Remove/Merge undo (these are destructive, users expect "are you sure?")
+- Implement Add/Duplicate undo (just remove the layer)
+- Implement Rename/Reorder undo (just store old values)
+
+**Option B: Full implementation**
+Would require significant changes:
+1. New `LayerUndoAction` struct with layer data
+2. Deep-copy VectorLayer for Remove/Merge
+3. Coordinate manifest vs tile layer data in edgeless mode
+
+---
+
+#### Decision: DEFER
+
+Given that:
+1. Stroke undo already works correctly across layers
+2. Layer operations are infrequent compared to strokes
+3. Full layer undo requires significant additional complexity
+4. Users can avoid data loss by:
+   - Not removing layers that have content
+   - Saving before merge (merge is explicitly requested)
+
+**Recommendation:** Mark Phase 5.7 as "DEFERRED" and move to Phase 5.8 (Polish & Testing).
+
+If layer undo is needed later, implement Option A first (low-complexity operations only).
+
+---
+
+**Current test cases:**
+- [x] Stroke undo uses correct layer
+- [x] Stroke redo uses correct layer  
+- [x] Undo after layer deletion auto-recreates layer
+- [ ] ~~Ctrl+Z after add layer removes it~~ (DEFERRED)
+- [ ] ~~Ctrl+Z after remove layer restores it~~ (DEFERRED)
+- [ ] ~~Ctrl+Z after merge restores original layers~~ (DEFERRED)
+- [ ] ~~Ctrl+Z after duplicate removes the copy~~ (DEFERRED)
+
+---
+
+#### Merge/Duplicate Layer Code Review (Dec 29, 2024)
+
+| ID | Issue | Severity | Fix |
+|----|-------|----------|-----|
+| CR-L10 | Eraser failed on merged strokes | High (Bug) | `onMergeClicked()` now emits `activeLayerChanged(targetIndex)` to sync viewport's active layer index after merge. The viewport's `m_edgelessActiveLayerIndex` was stale, pointing to a removed layer. |
+| CR-L12 | Active layer index not adjusted after removing lower-indexed layers | Medium (Bug) | In `removeEdgelessLayer()` and `mergeEdgelessLayers()`, now properly decrements `m_edgelessActiveLayerIndex` when removing layers below it. Previously only clamped to max size. |
+| CR-L13 | Merge/delete layer caused data loss for evicted tiles | Critical (Data Loss) | Added `loadAllEvictedTiles()` helper that loads all tiles from disk before destructive layer operations. This ensures strokes on removed/merged layers are properly handled on ALL tiles, not just the ones currently in memory. May be slow with many evicted tiles, but ensures data consistency. |
+| CR-L14 | Empty tiles not deleted after layer removal | Medium (Storage) | After removing layers in `removeEdgelessLayer()` and `mergeEdgelessLayers()`, now calls `removeTileIfEmpty()` for each tile. Tiles that become completely empty (no strokes on any layer) are removed from memory and marked for deletion on next save. |
+
+**All issues fixed.**
+
+**Files modified:**
+- `source/core/Document.h` - Added `loadAllEvictedTiles()` declaration, updated docs
+- `source/core/Document.cpp` - Implemented `loadAllEvictedTiles()`, fixed active layer adjustment, added calls before remove/merge, added empty tile cleanup after layer removal
+- `source/ui/LayerPanel.cpp` - Already fixed CR-L10 (emit `activeLayerChanged` after merge)
 
 ---
 
@@ -840,10 +1019,10 @@ struct LayerUndoAction {
 |-------|------------|--------|
 | 5.1 | None | ✅ Complete |
 | 5.2 | 5.1 | ✅ Complete |
-| 5.6 | 5.1, 5.2 | ⬜ **Next** |
+| 5.6 | 5.1, 5.2 | ✅ Complete |
+| 5.3 | 5.6 (benefits from manifest) | ✅ Complete |
+| 5.4 | 5.3 (needs selection UI) | ⬜ **Next** |
 | 5.5 | 5.6 (benefits from manifest) | ⬜ Pending |
-| 5.3 | 5.6 (benefits from manifest) | ⬜ Pending |
-| 5.4 | 5.3 (needs selection UI) | ⬜ Pending |
 | 5.7 | 5.3-5.6 (needs operations) | ⬜ Pending |
 | 5.8 | 5.1-5.7 (final testing) | ⬜ Pending |
 
