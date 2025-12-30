@@ -212,6 +212,13 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     
     m_currentTool = tool;
     
+    // CR-2B-1: Disable straight line mode when switching to Eraser
+    // (straight lines only work with Pen and Marker)
+    if (tool == ToolType::Eraser && m_straightLineMode) {
+        m_straightLineMode = false;
+        emit straightLineModeChanged(false);
+    }
+    
     // Update cursor and repaint for eraser cursor visibility
     update();
     
@@ -275,6 +282,31 @@ void DocumentViewport::setMarkerThickness(qreal thickness)
         return;
     }
     m_markerThickness = thickness;
+}
+
+// ===== Straight Line Mode (Task 2.9) =====
+
+void DocumentViewport::setStraightLineMode(bool enabled)
+{
+    if (m_straightLineMode == enabled) {
+        return;
+    }
+    
+    // If disabling while drawing, cancel the current straight line
+    if (!enabled && m_isDrawingStraightLine) {
+        m_isDrawingStraightLine = false;
+        update();  // Clear the preview
+    }
+    
+    // CR-2B-2: If enabling while on Eraser, switch to Pen first
+    // (straight lines only work with Pen and Marker)
+    if (enabled && m_currentTool == ToolType::Eraser) {
+        m_currentTool = ToolType::Pen;
+        emit toolChanged(ToolType::Pen);
+    }
+    
+    m_straightLineMode = enabled;
+    emit straightLineModeChanged(enabled);
 }
 
 // ===== View State Setters =====
@@ -929,6 +961,38 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     // is in viewport coordinates (not document coordinates)
     if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
         renderCurrentStrokeIncremental(painter);
+    }
+    
+    // Task 2.9: Draw straight line preview
+    if (m_isDrawingStraightLine) {
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Transform coordinates to viewport
+        QPointF vpStart, vpEnd;
+        if (m_document && m_document->isEdgeless()) {
+            // Edgeless: coordinates are in document space
+            vpStart = documentToViewport(m_straightLineStart);
+            vpEnd = documentToViewport(m_straightLinePreviewEnd);
+        } else {
+            // Paged: coordinates are in page-local space
+            QPointF pageOrigin = pagePosition(m_straightLinePageIndex);
+            vpStart = documentToViewport(m_straightLineStart + pageOrigin);
+            vpEnd = documentToViewport(m_straightLinePreviewEnd + pageOrigin);
+        }
+        
+        // Use current tool's color and thickness
+        QColor previewColor = (m_currentTool == ToolType::Marker) 
+                              ? m_markerColor : m_penColor;
+        qreal previewThickness = (m_currentTool == ToolType::Marker)
+                                 ? m_markerThickness : m_penThickness;
+        
+        QPen pen(previewColor, previewThickness * m_zoomLevel, 
+                 Qt::SolidLine, Qt::RoundCap);
+        painter.setPen(pen);
+        painter.drawLine(vpStart, vpEnd);
+        
+        painter.restore();
     }
     
     // Draw eraser cursor (Task 2.4)
@@ -2135,6 +2199,24 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
                           eraserRadius * 2, eraserRadius * 2);
         update(cursorRect.toRect());
     } else if (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker) {
+        // Task 2.9: Straight line mode - record start point instead of normal stroke
+        if (m_straightLineMode) {
+            // Use document coords for edgeless, page coords for paged mode
+            if (m_document->isEdgeless()) {
+                m_straightLineStart = viewportToDocument(pe.viewportPos);
+                m_straightLinePageIndex = -1;  // Not used in edgeless
+            } else if (pe.pageHit.valid()) {
+                m_straightLineStart = pe.pageHit.pagePoint;
+                m_straightLinePageIndex = pe.pageHit.pageIndex;
+            } else {
+                return;  // No valid page hit in paged mode
+            }
+            m_straightLinePreviewEnd = m_straightLineStart;
+            m_isDrawingStraightLine = true;
+            m_pointerActive = true;  // Keep pointer active for move/release
+            return;
+        }
+        
         startStroke(pe);
     }
 }
@@ -2177,6 +2259,23 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         return;  // Don't fall through to stroke continuation
     }
     
+    // Task 2.9: Straight line mode - update preview end point
+    if (m_isDrawingStraightLine) {
+        // Use document coords for edgeless, page coords for paged mode
+        if (m_document->isEdgeless()) {
+            m_straightLinePreviewEnd = viewportToDocument(pe.viewportPos);
+        } else if (pe.pageHit.valid() && pe.pageHit.pageIndex == m_straightLinePageIndex) {
+            m_straightLinePreviewEnd = pe.pageHit.pagePoint;
+        } else {
+            // Moved off the original page - extrapolate position
+            QPointF docPos = viewportToDocument(pe.viewportPos);
+            QPointF pageOrigin = pagePosition(m_straightLinePageIndex);
+            m_straightLinePreviewEnd = docPos - pageOrigin;
+        }
+        update();  // Trigger repaint for preview
+        return;
+    }
+    
     // For stroke drawing, require an active drawing page
     if (m_activeDrawingPage < 0) {
         return;
@@ -2190,6 +2289,38 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 {
     if (!m_document) return;
+    
+    // Task 2.9: Straight line mode - create the actual stroke
+    if (m_isDrawingStraightLine) {
+        // Get final end point
+        QPointF endPoint;
+        if (m_document->isEdgeless()) {
+            endPoint = viewportToDocument(pe.viewportPos);
+        } else if (pe.pageHit.valid() && pe.pageHit.pageIndex == m_straightLinePageIndex) {
+            endPoint = pe.pageHit.pagePoint;
+        } else {
+            // Moved off the original page - extrapolate position
+            QPointF docPos = viewportToDocument(pe.viewportPos);
+            QPointF pageOrigin = pagePosition(m_straightLinePageIndex);
+            endPoint = docPos - pageOrigin;
+        }
+        
+        // Create the straight line stroke
+        createStraightLineStroke(m_straightLineStart, endPoint);
+        
+        // Clear straight line state
+        m_isDrawingStraightLine = false;
+        m_straightLinePageIndex = -1;
+        
+        // Clear active state
+        m_pointerActive = false;
+        m_activeSource = PointerEvent::Unknown;
+        m_hardwareEraserActive = false;
+        
+        update();
+        preloadStrokeCaches();
+        return;
+    }
     
     Q_UNUSED(pe);
     
@@ -2532,6 +2663,203 @@ void DocumentViewport::finishStrokeEdgeless()
     
     // Trigger repaint
     update();
+    
+    emit documentModified();
+}
+
+// ===== Straight Line Mode (Task 2.9) =====
+
+void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPointF& end)
+{
+    if (!m_document) return;
+    
+    // Don't create zero-length lines
+    if ((start - end).manhattanLength() < 1.0) {
+        return;
+    }
+    
+    // Determine color and thickness based on current tool
+    QColor strokeColor;
+    qreal strokeThickness;
+    if (m_currentTool == ToolType::Marker) {
+        strokeColor = m_markerColor;
+        strokeThickness = m_markerThickness;
+    } else {
+        strokeColor = m_penColor;
+        strokeThickness = m_penThickness;
+    }
+    
+    // Create stroke with just two points (start and end)
+    VectorStroke stroke;
+    stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    stroke.color = strokeColor;
+    stroke.baseThickness = strokeThickness;
+    
+    // Both points have pressure 1.0 (no pressure variation for straight lines)
+    StrokePoint startPt;
+    startPt.pos = start;
+    startPt.pressure = 1.0;
+    stroke.points.append(startPt);
+    
+    StrokePoint endPt;
+    endPt.pos = end;
+    endPt.pressure = 1.0;
+    stroke.points.append(endPt);
+    
+    stroke.updateBoundingBox();
+    
+    if (m_document->isEdgeless()) {
+        // ========== EDGELESS MODE: Handle tile splitting ==========
+        // A straight line may cross multiple tiles. We use a simplified approach:
+        // Find all tiles the line passes through and add the appropriate segment.
+        
+        Document::TileCoord startTile = m_document->tileCoordForPoint(start);
+        Document::TileCoord endTile = m_document->tileCoordForPoint(end);
+        
+        if (startTile == endTile) {
+            // Simple case: line is within one tile
+            Page* tile = m_document->getOrCreateTile(startTile.first, startTile.second);
+            if (!tile) return;
+            
+            // Ensure tile has enough layers
+            while (tile->layerCount() <= m_edgelessActiveLayerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            
+            VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
+            if (!layer) return;
+            
+            // Convert to tile-local coordinates
+            QPointF tileOrigin(startTile.first * Document::EDGELESS_TILE_SIZE,
+                               startTile.second * Document::EDGELESS_TILE_SIZE);
+            VectorStroke localStroke = stroke;
+            localStroke.points[0].pos -= tileOrigin;
+            localStroke.points[1].pos -= tileOrigin;
+            localStroke.updateBoundingBox();
+            
+            layer->addStroke(localStroke);
+            layer->invalidateStrokeCache();
+            m_document->markTileDirty(startTile);
+            
+            // Push to undo stack
+            EdgelessUndoAction undoAction;
+            undoAction.type = PageUndoAction::AddStroke;
+            undoAction.layerIndex = m_edgelessActiveLayerIndex;
+            undoAction.segments.append({startTile, localStroke});
+            pushEdgelessUndoAction(undoAction);
+        } else {
+            // Line crosses tile boundaries - sample points along the line
+            // and split at tile boundaries (same algorithm as freehand strokes)
+            
+            // Generate intermediate points along the line
+            qreal lineLength = std::sqrt(std::pow(end.x() - start.x(), 2) + 
+                                         std::pow(end.y() - start.y(), 2));
+            int numPoints = qMax(2, static_cast<int>(lineLength / 10.0));  // ~10px spacing
+            
+            QVector<StrokePoint> linePoints;
+            for (int i = 0; i <= numPoints; ++i) {
+                qreal t = static_cast<qreal>(i) / numPoints;
+                StrokePoint pt;
+                pt.pos = start + t * (end - start);
+                pt.pressure = 1.0;
+                linePoints.append(pt);
+            }
+            
+            // Split at tile boundaries (same logic as finishStrokeEdgeless)
+            struct TileSegment {
+                Document::TileCoord coord;
+                QVector<StrokePoint> points;
+            };
+            QVector<TileSegment> segments;
+            
+            TileSegment currentSegment;
+            currentSegment.coord = m_document->tileCoordForPoint(linePoints.first().pos);
+            currentSegment.points.append(linePoints.first());
+            
+            for (int i = 1; i < linePoints.size(); ++i) {
+                const StrokePoint& pt = linePoints[i];
+                Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
+                
+                if (ptTile != currentSegment.coord) {
+                    currentSegment.points.append(pt);
+                    segments.append(currentSegment);
+                    
+                    currentSegment.coord = ptTile;
+                    currentSegment.points.clear();
+                    currentSegment.points.append(pt);
+                } else {
+                    currentSegment.points.append(pt);
+                }
+            }
+            if (!currentSegment.points.isEmpty()) {
+                segments.append(currentSegment);
+            }
+            
+            // Add each segment to its tile
+            QVector<QPair<Document::TileCoord, VectorStroke>> addedStrokes;
+            
+            for (const TileSegment& seg : segments) {
+                Page* tile = m_document->getOrCreateTile(seg.coord.first, seg.coord.second);
+                if (!tile) continue;
+                
+                while (tile->layerCount() <= m_edgelessActiveLayerIndex) {
+                    tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+                }
+                
+                VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
+                if (!layer) continue;
+                
+                VectorStroke localStroke;
+                localStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                localStroke.color = strokeColor;
+                localStroke.baseThickness = strokeThickness;
+                
+                QPointF tileOrigin(seg.coord.first * Document::EDGELESS_TILE_SIZE,
+                                   seg.coord.second * Document::EDGELESS_TILE_SIZE);
+                
+                for (const StrokePoint& pt : seg.points) {
+                    StrokePoint localPt = pt;
+                    localPt.pos -= tileOrigin;
+                    localStroke.points.append(localPt);
+                }
+                localStroke.updateBoundingBox();
+                
+                layer->addStroke(localStroke);
+                layer->invalidateStrokeCache();
+                m_document->markTileDirty(seg.coord);
+                
+                addedStrokes.append({seg.coord, localStroke});
+            }
+            
+            // Push to undo stack (all segments as one atomic action)
+            if (!addedStrokes.isEmpty()) {
+                EdgelessUndoAction undoAction;
+                undoAction.type = PageUndoAction::AddStroke;
+                undoAction.layerIndex = m_edgelessActiveLayerIndex;
+                for (const auto& pair : addedStrokes) {
+                    undoAction.segments.append({pair.first, pair.second});
+                }
+                pushEdgelessUndoAction(undoAction);
+            }
+        }
+    } else {
+        // ========== PAGED MODE: Add directly to page ==========
+        if (m_straightLinePageIndex < 0 || m_straightLinePageIndex >= m_document->pageCount()) {
+            return;
+        }
+        
+        Page* page = m_document->page(m_straightLinePageIndex);
+        if (!page) return;
+        
+        VectorLayer* layer = page->activeLayer();
+        if (!layer) return;
+        
+        layer->addStroke(stroke);
+        layer->invalidateStrokeCache();
+        
+        // Push to undo stack (same pattern as finishStroke)
+        pushUndoAction(m_straightLinePageIndex, PageUndoAction::AddStroke, stroke);
+    }
     
     emit documentModified();
 }
@@ -3497,6 +3825,29 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     // Render current stroke with incremental caching
     if (m_isDrawing && !m_currentStroke.points.isEmpty() && m_activeDrawingPage >= 0) {
         renderCurrentStrokeIncremental(painter);
+    }
+    
+    // Task 2.9: Draw straight line preview (edgeless mode)
+    if (m_isDrawingStraightLine) {
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Edgeless: coordinates are in document space
+        QPointF vpStart = documentToViewport(m_straightLineStart);
+        QPointF vpEnd = documentToViewport(m_straightLinePreviewEnd);
+        
+        // Use current tool's color and thickness
+        QColor previewColor = (m_currentTool == ToolType::Marker) 
+                              ? m_markerColor : m_penColor;
+        qreal previewThickness = (m_currentTool == ToolType::Marker)
+                                 ? m_markerThickness : m_penThickness;
+        
+        QPen pen(previewColor, previewThickness * m_zoomLevel, 
+                 Qt::SolidLine, Qt::RoundCap);
+        painter.setPen(pen);
+        painter.drawLine(vpStart, vpEnd);
+        
+        painter.restore();
     }
 }
 

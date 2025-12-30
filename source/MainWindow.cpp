@@ -167,6 +167,14 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_debugOverlay) {
             m_debugOverlay->setViewport(vp);
         }
+        
+        // Task 2.9.5: Sync straight line button state with new viewport
+        if (vp && straightLineToggleButton) {
+            bool isEnabled = vp->straightLineMode();
+            straightLineToggleButton->setProperty("selected", isEnabled);
+            straightLineToggleButton->style()->unpolish(straightLineToggleButton);
+            straightLineToggleButton->style()->polish(straightLineToggleButton);
+        }
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
@@ -745,9 +753,16 @@ void MainWindow::setupUi() {
     straightLineToggleButton->setProperty("selected", false); // Initially disabled
     updateButtonIcon(straightLineToggleButton, "straightLine");
     connect(straightLineToggleButton, &QPushButton::clicked, this, [this]() {
-        // Phase 3.1.4: Straight line mode stubbed - will be reimplemented for DocumentViewport
-        // TODO Phase 3.3: Implement straight line mode in DocumentViewport
-        qDebug() << "Straight line toggle: Not implemented yet (Phase 3.3)";
+        // Task 2.9.5: Toggle straight line mode on current viewport
+        if (DocumentViewport* vp = currentViewport()) {
+            bool newState = !vp->straightLineMode();
+            vp->setStraightLineMode(newState);
+            
+            // Update button visual state
+            straightLineToggleButton->setProperty("selected", newState);
+            straightLineToggleButton->style()->unpolish(straightLineToggleButton);
+            straightLineToggleButton->style()->polish(straightLineToggleButton);
+        }
     });
     
     ropeToolButton = new QPushButton(this);
@@ -1781,6 +1796,9 @@ MainWindow::~MainWindow() {
     // Phase 3.3: Clean up viewport scroll connections
     if (m_hScrollConn) disconnect(m_hScrollConn);
     if (m_vScrollConn) disconnect(m_vScrollConn);
+    // CR-2B: Cleanup tool/mode signal connections
+    if (m_toolChangedConn) disconnect(m_toolChangedConn);
+    if (m_straightLineModeConn) disconnect(m_straightLineModeConn);
     
     // Phase 5.1: Clean up LayerPanel page connection
     if (m_layerPanelPageConn) disconnect(m_layerPanelPageConn);
@@ -1982,6 +2000,15 @@ void MainWindow::updateToolButtonStates() {
     eraserToolButton->style()->unpolish(eraserToolButton);
     eraserToolButton->style()->polish(eraserToolButton);
     // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton style updates
+    
+    // CR-2B-1: Sync straight line button state
+    // (may have been auto-disabled when switching to eraser)
+    if (straightLineToggleButton) {
+        bool slEnabled = vp->straightLineMode();
+        straightLineToggleButton->setProperty("selected", slEnabled);
+        straightLineToggleButton->style()->unpolish(straightLineToggleButton);
+        straightLineToggleButton->style()->polish(straightLineToggleButton);
+    }
 }
 
 void MainWindow::handleColorButtonClick() {
@@ -3343,6 +3370,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_vScrollConn);
         m_vScrollConn = {};
     }
+    // CR-2B: Disconnect tool/mode signal connections
+    if (m_toolChangedConn) {
+        disconnect(m_toolChangedConn);
+        m_toolChangedConn = {};
+    }
+    if (m_straightLineModeConn) {
+        disconnect(m_straightLineModeConn);
+        m_straightLineModeConn = {};
+    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -3403,7 +3439,22 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 panYSlider->blockSignals(false);
             }
     });
+    
+    // CR-2B: Connect tool/mode signals for keyboard shortcut sync
+    m_toolChangedConn = connect(viewport, &DocumentViewport::toolChanged, this, [this](ToolType) {
+        updateToolButtonStates();
+        updateThicknessSliderForCurrentTool();
+        updateDialDisplay();
+    });
+    
+    m_straightLineModeConn = connect(viewport, &DocumentViewport::straightLineModeChanged, this, [this](bool enabled) {
+        if (straightLineToggleButton) {
+            straightLineToggleButton->setProperty("selected", enabled);
+            straightLineToggleButton->style()->unpolish(straightLineToggleButton);
+            straightLineToggleButton->style()->polish(straightLineToggleButton);
         }
+    });
+}
 
 void MainWindow::centerViewportContent(int tabIndex) {
     // Phase 3.3: One-time horizontal centering for new tabs

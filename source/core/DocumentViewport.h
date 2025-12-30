@@ -354,6 +354,19 @@ public:
      */
     qreal markerThickness() const { return m_markerThickness; }
     
+    // ===== Straight Line Mode (Task 2.9) =====
+    
+    /**
+     * @brief Enable or disable straight line mode.
+     * When enabled, Pen and Marker strokes are constrained to straight lines.
+     */
+    void setStraightLineMode(bool enabled);
+    
+    /**
+     * @brief Check if straight line mode is enabled.
+     */
+    bool straightLineMode() const { return m_straightLineMode; }
+    
     // ===== Undo/Redo (Task 2.5) =====
     
     /**
@@ -711,6 +724,12 @@ signals:
     void toolChanged(ToolType tool);
     
     /**
+     * @brief Emitted when straight line mode is toggled.
+     * @param enabled True if straight line mode is now enabled.
+     */
+    void straightLineModeChanged(bool enabled);
+    
+    /**
      * @brief Emitted when undo availability changes for current page.
      * @param available True if undo is now available.
      */
@@ -784,6 +803,13 @@ private:
     // Marker tool settings (Task 2.8)
     QColor m_markerColor = QColor(0xE6, 0xFF, 0x6E, 128);  ///< CUSTOMIZABLE: Default marker color (#E6FF6E at 50% opacity)
     qreal m_markerThickness = 8.0;    ///< CUSTOMIZABLE: Default marker thickness (wider than pen, no pressure)
+    
+    // Straight line mode (Task 2.9)
+    bool m_straightLineMode = false;        ///< Whether straight line mode is enabled
+    bool m_isDrawingStraightLine = false;   ///< Currently drawing a straight line
+    QPointF m_straightLineStart;            ///< Start point (document coords for edgeless, page coords for paged)
+    QPointF m_straightLinePreviewEnd;       ///< Current preview end point
+    int m_straightLinePageIndex = -1;       ///< Page index for paged mode straight line
     
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)
@@ -1054,6 +1080,16 @@ private:
      * and adds it to the appropriate tile.
      */
     void finishStrokeEdgeless();
+    
+    /**
+     * @brief Create a straight line stroke between two points (Task 2.9).
+     * @param start Start point (document coords for edgeless, page coords for paged).
+     * @param end End point (document coords for edgeless, page coords for paged).
+     * 
+     * Uses current tool (Pen/Marker) to determine color and thickness.
+     * For edgeless mode, handles tile splitting if the line crosses tile boundaries.
+     */
+    void createStraightLineStroke(const QPointF& start, const QPointF& end);
     
     /**
      * @brief Add a point to the current stroke with point decimation.

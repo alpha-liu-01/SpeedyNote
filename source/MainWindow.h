@@ -823,6 +823,10 @@ private:
     QMetaObject::Connection m_vScrollConn;
     QPointer<DocumentViewport> m_connectedViewport;  // QPointer for safe dangling check
     
+    // CR-2B: Tool/mode signal connections (for keyboard shortcut sync)
+    QMetaObject::Connection m_toolChangedConn;
+    QMetaObject::Connection m_straightLineModeConn;
+    
     // Phase 5.1: LayerPanel page change connection
     QMetaObject::Connection m_layerPanelPageConn;
     

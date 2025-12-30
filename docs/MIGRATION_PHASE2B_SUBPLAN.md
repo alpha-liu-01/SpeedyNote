@@ -15,7 +15,7 @@ Phase 2B implements three additional drawing tools that were deferred during the
 | Tool | Status |
 |------|--------|
 | 2.8 Marker Tool | ✅ **COMPLETE** |
-| 2.9 Straight Line Mode | ⏳ Pending |
+| 2.9 Straight Line Mode | ✅ **COMPLETE** |
 | 2.10 Lasso Selection Tool | ⏳ Pending |
 
 ## Architecture Principles
@@ -160,140 +160,73 @@ QPointF m_straightLinePreviewEnd; // Current end point for preview
 
 ### Implementation Tasks
 
-#### 2.9.1 Mode Toggle (~20 lines)
+#### 2.9.1 Mode Toggle (~20 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.h/.cpp`
 
-```cpp
-void setStraightLineMode(bool enabled);
-bool straightLineMode() const { return m_straightLineMode; }
+**Implemented:**
+- `void setStraightLineMode(bool enabled)` - setter with signal emission
+- `bool straightLineMode() const` - inline getter
+- Signal `straightLineModeChanged(bool enabled)` - for UI sync
+- Member variables:
+  - `m_straightLineMode` - toggle state
+  - `m_isDrawingStraightLine` - drawing state
+  - `m_straightLineStart` / `m_straightLinePreviewEnd` - coordinates
+  - `m_straightLinePageIndex` - for paged mode
 
-// Signal for UI sync
-signals:
-    void straightLineModeChanged(bool enabled);
-```
-
-#### 2.9.2 Modified Stroke Creation (~60 lines)
+#### 2.9.2 Modified Stroke Creation (~60 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-When straight line mode is active:
+**Implemented in `handlePointerPress()`:**
+- Intercepts Pen/Marker tools when `m_straightLineMode` is enabled
+- Records start point (document coords for edgeless, page coords for paged)
+- Sets `m_isDrawingStraightLine = true`
 
-```cpp
-void DocumentViewport::handlePointerPress(const PointerEvent& event) {
-    if (m_straightLineMode && (m_currentTool == ToolType::Pen || 
-                                m_currentTool == ToolType::Marker)) {
-        // Record start point, don't create stroke yet
-        m_straightLineStart = event.pageHit.pagePoint;  // or document coords for edgeless
-        m_straightLinePreviewEnd = m_straightLineStart;
-        m_isDrawingStraightLine = true;
-        return;
-    }
-    // ... existing pen/marker handling
-}
+**Implemented in `handlePointerMove()`:**
+- Updates `m_straightLinePreviewEnd` while drawing
+- Handles coordinate extrapolation when pointer moves off original page
 
-void DocumentViewport::handlePointerMove(const PointerEvent& event) {
-    if (m_isDrawingStraightLine) {
-        // Update preview end point
-        m_straightLinePreviewEnd = event.pageHit.pagePoint;
-        update();  // Trigger repaint for preview
-        return;
-    }
-    // ... existing handling
-}
+**Implemented in `handlePointerRelease()`:**
+- Gets final end point
+- Calls `createStraightLineStroke()` to create the actual stroke
+- Clears straight line state
 
-void DocumentViewport::handlePointerRelease(const PointerEvent& event) {
-    if (m_isDrawingStraightLine) {
-        // Create the actual stroke from start to end
-        createStraightLineStroke(m_straightLineStart, event.pageHit.pagePoint);
-        m_isDrawingStraightLine = false;
-        update();
-        return;
-    }
-    // ... existing handling
-}
-```
-
-#### 2.9.3 Straight Line Stroke Creation (~50 lines)
+#### 2.9.3 Straight Line Stroke Creation (~50 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-```cpp
-void DocumentViewport::createStraightLineStroke(QPointF start, QPointF end) {
-    // Determine color and thickness based on current tool
-    QColor color;
-    qreal thickness;
-    if (m_currentTool == ToolType::Marker) {
-        color = m_markerColor;
-        thickness = m_markerThickness;
-    } else {
-        color = m_penColor;
-        thickness = m_penThickness;  // No pressure for straight lines
-    }
-    
-    // Create stroke with just two points (start and end)
-    VectorStroke stroke;
-    stroke.setColor(color);
-    stroke.setThickness(thickness);
-    stroke.addPoint(StrokePoint(start.x(), start.y(), 1.0));
-    stroke.addPoint(StrokePoint(end.x(), end.y(), 1.0));
-    stroke.finalize();
-    
-    // Add to page/tile (reuse existing logic)
-    // For edgeless: handle tile splitting if line crosses boundaries
-    if (m_document->isEdgeless()) {
-        addEdgelessStroke(stroke);  // Existing method handles splitting
-    } else {
-        addPagedStroke(stroke);
-    }
-}
-```
+**Implemented `createStraightLineStroke()`:**
+- Uses Marker or Pen color/thickness based on current tool
+- Creates stroke with two points (pressure = 1.0)
+- **Paged mode:** Adds directly to page's active layer with undo support
+- **Edgeless mode:**
+  - If line is within one tile: adds directly
+  - If line crosses tiles: samples points along the line (~10px spacing), splits at tile boundaries using same algorithm as freehand strokes
+  - Full undo support (all segments as one atomic action)
 
-#### 2.9.4 Preview Line Rendering (~40 lines)
+#### 2.9.4 Preview Line Rendering (~40 lines) ✅ COMPLETE
 **File:** `source/core/DocumentViewport.cpp`
 
-In `paintEvent()`, after rendering strokes:
+**Implemented:** Added straight line preview rendering in two locations:
+1. **Paged mode paint section** (after current stroke rendering)
+   - Converts page-local coordinates to viewport coordinates
+2. **Edgeless mode paint section** (`renderEdgelessMode()`)
+   - Converts document coordinates to viewport coordinates
 
-```cpp
-// Draw straight line preview
-if (m_isDrawingStraightLine) {
-    painter.save();
-    
-    // Transform to viewport coordinates
-    QPointF vpStart = documentToViewport(m_straightLineStart);
-    QPointF vpEnd = documentToViewport(m_straightLinePreviewEnd);
-    
-    // Use current tool's color and thickness
-    QColor previewColor = (m_currentTool == ToolType::Marker) 
-                          ? m_markerColor : m_penColor;
-    qreal previewThickness = (m_currentTool == ToolType::Marker)
-                             ? m_markerThickness : m_penThickness;
-    
-    QPen pen(previewColor, previewThickness * m_zoomLevel, 
-             Qt::SolidLine, Qt::RoundCap);
-    painter.setPen(pen);
-    painter.drawLine(vpStart, vpEnd);
-    
-    painter.restore();
-}
-```
+**Features:**
+- Uses Marker or Pen color/thickness based on current tool
+- Proper antialiasing and round caps
+- Scales thickness by zoom level for consistent visual appearance
 
-#### 2.9.5 MainWindow Integration (~30 lines)
+#### 2.9.5 MainWindow Integration (~30 lines) ✅ COMPLETE
 **File:** `source/MainWindow.cpp`
 
-Connect existing line tool button:
+**Implemented:**
+1. **Button click handler** (replaced stub at line 747):
+   - Toggles `vp->straightLineMode()` on current viewport
+   - Updates button visual state ("selected" property)
 
-```cpp
-connect(straightLineButton, &QPushButton::toggled, this, [this](bool checked) {
-    if (auto* vp = currentViewport()) {
-        vp->setStraightLineMode(checked);
-    }
-});
-
-// Sync button state when viewport changes
-connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
-    if (vp && straightLineButton) {
-        straightLineButton->setChecked(vp->straightLineMode());
-    }
-});
-```
+2. **Viewport change sync** (added to `currentViewportChanged` handler):
+   - Syncs button state when switching tabs
+   - Updates visual appearance to match new viewport's straight line mode
 
 ### Future Extension Points
 
@@ -310,14 +243,22 @@ connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](Document
 ```
 
 ### Test Cases
-- [ ] Toggle straight line mode on/off
-- [ ] Preview line shows while dragging
-- [ ] Final stroke matches preview
-- [ ] Works with Pen tool
-- [ ] Works with Marker tool (correct color/opacity)
-- [ ] Works in paged mode
-- [ ] Works in edgeless mode (tile splitting)
-- [ ] Undo/redo works for straight line strokes
+- [x] Toggle straight line mode on/off
+- [x] Preview line shows while dragging
+- [x] Final stroke matches preview
+- [x] Works with Pen tool
+- [x] Works with Marker tool (correct color/opacity)
+- [x] Works in paged mode
+- [x] Works in edgeless mode (tile splitting)
+- [x] Undo/redo works for straight line strokes
+
+### 2.9 Status: ✅ COMPLETE
+All straight line mode tasks have been implemented:
+- Toggle via `straightLineToggleButton` in MainWindow
+- Works with both Pen and Marker tools
+- Preview line shows while dragging
+- Proper tile splitting for edgeless mode
+- Full undo/redo support
 
 ---
 
@@ -902,11 +843,11 @@ Recommended order for minimal dependencies:
 | 2.8.2 Marker Stroke Creation | [x] COMPLETE |
 | 2.8.3 Marker Rendering | [x] COMPLETE |
 | 2.8.4 Marker MainWindow Integration | [x] PRE-EXISTING |
-| 2.9.1 Straight Line Toggle | [ ] |
-| 2.9.2 Straight Line Stroke Creation | [ ] |
-| 2.9.3 Straight Line for Edgeless | [ ] |
-| 2.9.4 Straight Line Preview | [ ] |
-| 2.9.5 Straight Line MainWindow Integration | [ ] |
+| 2.9.1 Straight Line Toggle | [x] COMPLETE |
+| 2.9.2 Straight Line Stroke Creation | [x] COMPLETE |
+| 2.9.3 Straight Line for Edgeless | [x] COMPLETE |
+| 2.9.4 Straight Line Preview | [x] COMPLETE |
+| 2.9.5 Straight Line MainWindow Integration | [x] COMPLETE |
 | 2.10.1 Lasso Path Drawing | [ ] |
 | 2.10.2 Stroke Hit Detection | [ ] |
 | 2.10.3 Selection Rendering | [ ] |
@@ -916,3 +857,37 @@ Recommended order for minimal dependencies:
 | 2.10.7 Clipboard Operations | [ ] |
 | 2.10.8 Keyboard Shortcuts | [ ] |
 | 2.10.9 Lasso MainWindow Integration | [ ] |
+
+---
+
+## Code Review Fixes
+
+### CR-2B-1: Eraser + Straight Line Mode Conflict
+**Issue:** User could enable straight line mode while on Eraser tool, or switch to Eraser while in straight line mode, creating an invalid state.
+
+**Fix:** 
+- In `setCurrentTool()`: Auto-disable straight line mode when switching to Eraser
+- In `setStraightLineMode()`: Auto-switch to Pen tool when enabling while on Eraser
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+### CR-2B-2: Button State Sync for Keyboard Shortcuts
+**Issue:** When user changed tools via keyboard shortcuts (e.g., 'E' for eraser) in the viewport, the straight line button and tool buttons in MainWindow weren't updated.
+
+**Fix:** 
+- Added `m_toolChangedConn` and `m_straightLineModeConn` connections in `connectViewportScrollSignals()`
+- When viewport emits `toolChanged` or `straightLineModeChanged`, MainWindow updates button states
+- Added cleanup in destructor
+
+**Files Modified:**
+- `source/MainWindow.h` (new connection members)
+- `source/MainWindow.cpp` (connections, cleanup)
+
+### CR-2B-3: Straight Line Button Sync in updateToolButtonStates()
+**Issue:** `updateToolButtonStates()` didn't sync the straight line toggle button.
+
+**Fix:** Added straight line button state sync at end of `updateToolButtonStates()`.
+
+**Files Modified:**
+- `source/MainWindow.cpp`
