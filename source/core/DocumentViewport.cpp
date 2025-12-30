@@ -1007,30 +1007,9 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     }
     
     // Task 2.10: Draw lasso selection path while drawing
+    // P1: Use incremental rendering for O(1) per frame instead of O(n)
     if (m_isDrawingLasso && m_lassoPath.size() > 1) {
-        painter.save();
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        
-        // Convert lasso path to viewport coordinates
-        QPolygonF vpPath;
-        if (m_document && m_document->isEdgeless()) {
-            for (const QPointF& pt : m_lassoPath) {
-                vpPath << documentToViewport(pt);
-            }
-        } else {
-            QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
-            for (const QPointF& pt : m_lassoPath) {
-                vpPath << documentToViewport(pt + pageOrigin);
-            }
-        }
-        
-        // Draw lasso path with dashed line and light fill
-        QPen lassoPen(QColor(0, 120, 215), 1.5, Qt::DashLine);  // Windows blue
-        painter.setPen(lassoPen);
-        painter.setBrush(QColor(0, 120, 215, 30));  // Light blue fill
-        painter.drawPolygon(vpPath);
-        
-        painter.restore();
+        renderLassoPathIncremental(painter);
     }
     
     // Task 2.10.3: Draw lasso selection (selected strokes + bounding box)
@@ -2765,6 +2744,111 @@ void DocumentViewport::finishStrokeEdgeless()
     emit documentModified();
 }
 
+QVector<QPair<Document::TileCoord, VectorStroke>> DocumentViewport::addStrokeToEdgelessTiles(
+    const VectorStroke& stroke, int layerIndex)
+{
+    // ========== STROKE SPLITTING AT TILE BOUNDARIES ==========
+    // This method is shared by finishStrokeEdgeless() and applySelectionTransform()
+    // to ensure consistent behavior when strokes cross tile boundaries.
+    //
+    // Input: stroke with points in DOCUMENT coordinates
+    // Output: multiple segments, each added to appropriate tile in tile-local coords
+    
+    QVector<QPair<Document::TileCoord, VectorStroke>> addedStrokes;
+    
+    if (!m_document || stroke.points.isEmpty()) {
+        return addedStrokes;
+    }
+    
+    // Strategy: Walk through all points, group consecutive points by tile.
+    // When crossing a tile boundary, end current segment and start a new one.
+    // Overlapping point at boundary ensures visual continuity.
+    
+    struct TileSegment {
+        Document::TileCoord coord;
+        QVector<StrokePoint> points;
+    };
+    QVector<TileSegment> segments;
+    
+    // Start first segment
+    TileSegment currentSegment;
+    currentSegment.coord = m_document->tileCoordForPoint(stroke.points.first().pos);
+    currentSegment.points.append(stroke.points.first());
+    
+    // Walk through remaining points
+    for (int i = 1; i < stroke.points.size(); ++i) {
+        const StrokePoint& pt = stroke.points[i];
+        Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
+        
+        if (ptTile != currentSegment.coord) {
+            // Tile boundary crossed!
+            // End current segment (include this point for overlap at boundary)
+            currentSegment.points.append(pt);
+            segments.append(currentSegment);
+            
+            // Start new segment (also include this point for overlap)
+            currentSegment.coord = ptTile;
+            currentSegment.points.clear();
+            currentSegment.points.append(pt);  // Overlap point
+        } else {
+            // Same tile, just add point
+            currentSegment.points.append(pt);
+        }
+    }
+    
+    // Don't forget the last segment
+    if (!currentSegment.points.isEmpty()) {
+        segments.append(currentSegment);
+    }
+    
+#ifdef QT_DEBUG
+    if (segments.size() > 1) {
+        qDebug() << "addStrokeToEdgelessTiles: stroke split into" << segments.size() << "segments";
+    }
+#endif
+    
+    // ========== ADD EACH SEGMENT TO ITS TILE ==========
+    for (const TileSegment& seg : segments) {
+        // Get or create tile
+        Page* tile = m_document->getOrCreateTile(seg.coord.first, seg.coord.second);
+        if (!tile) continue;
+        
+        // Ensure tile has enough layers
+        while (tile->layerCount() <= layerIndex) {
+            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+        }
+        
+        VectorLayer* layer = tile->layer(layerIndex);
+        if (!layer) continue;
+        
+        // Create local stroke (convert from document coords to tile-local)
+        VectorStroke localStroke = stroke;  // Copy base properties (color, width, etc.)
+        localStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);  // New unique ID
+        localStroke.points.clear();
+        
+        QPointF tileOrigin(seg.coord.first * Document::EDGELESS_TILE_SIZE,
+                           seg.coord.second * Document::EDGELESS_TILE_SIZE);
+        
+        for (const StrokePoint& pt : seg.points) {
+            StrokePoint localPt = pt;
+            localPt.pos -= tileOrigin;
+            localStroke.points.append(localPt);
+        }
+        localStroke.updateBoundingBox();
+        
+        // Add to tile's layer
+        layer->addStroke(localStroke);
+        layer->invalidateStrokeCache();
+        
+        // Mark tile as dirty for persistence
+        m_document->markTileDirty(seg.coord);
+        
+        addedStrokes.append({seg.coord, localStroke});
+    }
+    
+    return addedStrokes;
+}
+
 // ===== Straight Line Mode (Task 2.9) =====
 
 void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPointF& end)
@@ -2964,6 +3048,86 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
 
 // ===== Lasso Selection Tool (Task 2.10) =====
 
+// P1: Reset lasso path cache for new drawing session
+void DocumentViewport::resetLassoPathCache()
+{
+    // Create cache at viewport size with device pixel ratio for high DPI
+    qreal dpr = devicePixelRatioF();
+    m_lassoPathCache = QPixmap(static_cast<int>(width() * dpr), 
+                               static_cast<int>(height() * dpr));
+    m_lassoPathCache.setDevicePixelRatio(dpr);
+    m_lassoPathCache.fill(Qt::transparent);
+    
+    m_lastRenderedLassoIdx = 0;
+    m_lassoPathCacheZoom = m_zoomLevel;
+    m_lassoPathCachePan = m_panOffset;
+    m_lassoPathLength = 0;
+}
+
+// P1: Incrementally render lasso path with consistent dash pattern
+void DocumentViewport::renderLassoPathIncremental(QPainter& painter)
+{
+    if (m_lassoPath.size() < 2) return;
+    
+    // Check if cache needs reset (zoom/pan changed)
+    if (m_lassoPathCache.isNull() ||
+        !qFuzzyCompare(m_lassoPathCacheZoom, m_zoomLevel) ||
+        m_lassoPathCachePan != m_panOffset) {
+        // Zoom or pan changed - need to re-render everything
+        resetLassoPathCache();
+    }
+    
+    // Render new segments to cache
+    if (m_lastRenderedLassoIdx < m_lassoPath.size() - 1) {
+        QPainter cachePainter(&m_lassoPathCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Determine coordinate conversion based on mode
+        bool isEdgeless = m_document && m_document->isEdgeless();
+        QPointF pageOrigin;
+        if (!isEdgeless && m_lassoSelection.sourcePageIndex >= 0) {
+            pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        }
+        
+        // Render each new segment with proper dash offset
+        for (int i = m_lastRenderedLassoIdx; i < m_lassoPath.size() - 1; ++i) {
+            QPointF pt1 = m_lassoPath.at(i);
+            QPointF pt2 = m_lassoPath.at(i + 1);
+            
+            // Convert to viewport coordinates
+            QPointF vp1, vp2;
+            if (isEdgeless) {
+                vp1 = documentToViewport(pt1);
+                vp2 = documentToViewport(pt2);
+            } else {
+                vp1 = documentToViewport(pt1 + pageOrigin);
+                vp2 = documentToViewport(pt2 + pageOrigin);
+            }
+            
+            // Calculate segment length in viewport coordinates
+            qreal segLen = QLineF(vp1, vp2).length();
+            
+            // Create pen with dash offset for continuous pattern
+            // Qt dash pattern: [dash, gap] - default DashLine is [4, 2] (in pen width units)
+            // For 1.5px pen: [6, 3] pixel pattern
+            QPen lassoPen(QColor(0, 120, 215), 1.5, Qt::DashLine);
+            lassoPen.setCosmetic(true);  // Constant width regardless of transform
+            lassoPen.setDashOffset(m_lassoPathLength / 1.5);  // Offset in pen-width units
+            cachePainter.setPen(lassoPen);
+            
+            cachePainter.drawLine(vp1, vp2);
+            
+            // Accumulate path length for next segment's dash offset
+            m_lassoPathLength += segLen;
+        }
+        
+        m_lastRenderedLassoIdx = m_lassoPath.size() - 1;
+    }
+    
+    // Blit cache to painter
+    painter.drawPixmap(0, 0, m_lassoPathCache);
+}
+
 void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
 {
     if (!m_document) return;
@@ -2996,6 +3160,7 @@ void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
     
     // Start new lasso path
     m_lassoPath.clear();
+    resetLassoPathCache();  // P1: Initialize cache for incremental rendering
     
     // Use appropriate coordinates based on mode
     QPointF pt;
@@ -3043,8 +3208,10 @@ void DocumentViewport::handlePointerMove_Lasso(const PointerEvent& pe)
     }
     
     // Point decimation for lasso path (similar to stroke)
-    if (!m_lassoPath.isEmpty()) {
-        const QPointF& lastPt = m_lassoPath.last();
+    QPointF lastPt;
+    bool hasLastPoint = !m_lassoPath.isEmpty();
+    if (hasLastPoint) {
+        lastPt = m_lassoPath.last();
         qreal dx = pt.x() - lastPt.x();
         qreal dy = pt.y() - lastPt.y();
         if (dx * dx + dy * dy < 4.0) {  // 2px minimum distance
@@ -3053,7 +3220,32 @@ void DocumentViewport::handlePointerMove_Lasso(const PointerEvent& pe)
     }
     
     m_lassoPath << pt;
-    update();
+    
+    // P2: Dirty region update - only repaint the new segment's bounding rect
+    if (hasLastPoint) {
+        // Convert both points to viewport coordinates
+        QPointF vpLast, vpCurrent;
+        if (m_document->isEdgeless()) {
+            vpLast = documentToViewport(lastPt);
+            vpCurrent = documentToViewport(pt);
+        } else {
+            QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+            vpLast = documentToViewport(lastPt + pageOrigin);
+            vpCurrent = documentToViewport(pt + pageOrigin);
+        }
+        
+        // Calculate dirty rect with padding for line width and antialiasing
+        QRectF dirtyRect = QRectF(vpLast, vpCurrent).normalized();
+        dirtyRect.adjust(-4, -4, 4, 4);  // Account for line width (1.5) + padding
+        update(dirtyRect.toRect());
+    } else {
+        // First point - update a small region around it
+        QPointF vpPt = m_document->isEdgeless() 
+            ? documentToViewport(pt)
+            : documentToViewport(pt + pagePosition(m_lassoSelection.sourcePageIndex));
+        QRectF dirtyRect(vpPt.x() - 5, vpPt.y() - 5, 10, 10);
+        update(dirtyRect.toRect());
+    }
 }
 
 void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& pe)
@@ -3098,6 +3290,9 @@ void DocumentViewport::finalizeLassoSelection()
     if (!m_document || m_lassoPath.size() < 3) {
         // Need at least 3 points to form a valid selection polygon
         m_lassoPath.clear();
+        // P1: Reset cache state
+        m_lastRenderedLassoIdx = 0;
+        m_lassoPathLength = 0;
         return;
     }
     
@@ -3202,6 +3397,11 @@ void DocumentViewport::finalizeLassoSelection()
     
     // Clear the lasso path now that selection is complete
     m_lassoPath.clear();
+    
+    // P1: Reset cache state (cache is no longer needed after selection)
+    m_lastRenderedLassoIdx = 0;
+    m_lassoPathLength = 0;
+    
     update();
 }
 
@@ -3663,7 +3863,53 @@ void DocumentViewport::updateSelectionTransform(const QPointF& viewportPos)
             break;
     }
     
-    update();
+    // P2: Dirty region update - only repaint selection area + handles
+    // Calculate visual bounds in viewport coordinates
+    QRectF visualBoundsVp = getSelectionVisualBounds();
+    if (!visualBoundsVp.isEmpty()) {
+        // Expand for handles and rotation handle offset
+        visualBoundsVp.adjust(
+            -HANDLE_HIT_SIZE, 
+            -ROTATE_HANDLE_OFFSET - HANDLE_HIT_SIZE,  // Rotation handle above
+            HANDLE_HIT_SIZE, 
+            HANDLE_HIT_SIZE
+        );
+        update(visualBoundsVp.toRect());
+    } else {
+        update();  // Fallback to full update
+    }
+}
+
+QRectF DocumentViewport::getSelectionVisualBounds() const
+{
+    // Calculate the visual bounding box of the selection in viewport coordinates
+    if (!m_lassoSelection.isValid()) {
+        return QRectF();
+    }
+    
+    QRectF box = m_lassoSelection.boundingBox;
+    QTransform transform = buildSelectionTransform();
+    
+    // Transform the four corners
+    QPolygonF corners;
+    corners << box.topLeft() << box.topRight() 
+            << box.bottomRight() << box.bottomLeft();
+    corners = transform.map(corners);
+    
+    // Convert to viewport coordinates and get bounding rect
+    QPolygonF vpCorners;
+    if (m_document && m_document->isEdgeless()) {
+        for (const QPointF& pt : corners) {
+            vpCorners << documentToViewport(pt);
+        }
+    } else {
+        QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        for (const QPointF& pt : corners) {
+            vpCorners << documentToViewport(pt + pageOrigin);
+        }
+    }
+    
+    return vpCorners.boundingRect();
 }
 
 void DocumentViewport::updateScaleFromHandle(HandleHit handle, const QPointF& viewportPos)
@@ -3807,42 +4053,15 @@ void DocumentViewport::applySelectionTransform()
             }
         }
         
-        // Now add transformed strokes back (they will be placed in appropriate tiles)
+        // Now add transformed strokes back using the same tile-splitting logic
+        // as finishStrokeEdgeless() to handle strokes crossing tile boundaries
         for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
             VectorStroke transformedStroke = stroke;
             transformStrokePoints(transformedStroke, transform);
-            transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            // Note: addStrokeToEdgelessTiles() generates new IDs for each segment
             
-            // Find which tile(s) this stroke belongs to
-            // For simplicity, use the stroke's bounding box center to determine primary tile
-            QPointF center = transformedStroke.boundingBox.center();
-            Document::TileCoord tileCoord = m_document->tileCoordForPoint(center);
-            
-            // Get or create the tile
-            Page* tile = m_document->getOrCreateTile(tileCoord.first, tileCoord.second);
-            if (!tile) continue;
-            
-            // Ensure layer exists
-            while (tile->layerCount() <= m_lassoSelection.sourceLayerIndex) {
-                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-            }
-            
-            VectorLayer* layer = tile->layer(m_lassoSelection.sourceLayerIndex);
-            if (!layer) continue;
-            
-            // Convert to tile-local coordinates
-            QPointF tileOrigin(tileCoord.first * Document::EDGELESS_TILE_SIZE,
-                               tileCoord.second * Document::EDGELESS_TILE_SIZE);
-            
-            VectorStroke localStroke = transformedStroke;
-            for (StrokePoint& pt : localStroke.points) {
-                pt.pos -= tileOrigin;
-            }
-            localStroke.updateBoundingBox();
-            
-            layer->addStroke(localStroke);
-            layer->invalidateStrokeCache();
-            m_document->markTileDirty(tileCoord);
+            // Use the shared helper that properly splits strokes at tile boundaries
+            addStrokeToEdgelessTiles(transformedStroke, m_lassoSelection.sourceLayerIndex);
         }
         
         // TODO: Push to edgeless undo stack
@@ -3959,46 +4178,21 @@ void DocumentViewport::pasteSelection()
     
     if (m_document->isEdgeless()) {
         // ========== EDGELESS MODE ==========
-        // Add strokes to appropriate tiles based on their position
+        // Add strokes to appropriate tiles, splitting at tile boundaries
+        // Uses the same logic as finishStrokeEdgeless() for consistency
         
         for (const VectorStroke& stroke : m_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
             
-            // Apply paste offset
+            // Apply paste offset (stroke is now in document coordinates)
             for (StrokePoint& pt : pastedStroke.points) {
                 pt.pos += offset;
             }
             pastedStroke.updateBoundingBox();
-            pastedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            // Note: addStrokeToEdgelessTiles() generates new IDs for each segment
             
-            // Determine which tile this stroke belongs to
-            QPointF center = pastedStroke.boundingBox.center();
-            Document::TileCoord tileCoord = m_document->tileCoordForPoint(center);
-            
-            Page* tile = m_document->getOrCreateTile(tileCoord.first, tileCoord.second);
-            if (!tile) continue;
-            
-            // Ensure layer exists
-            while (tile->layerCount() <= m_edgelessActiveLayerIndex) {
-                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-            }
-            
-            VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
-            if (!layer) continue;
-            
-            // Convert to tile-local coordinates
-            QPointF tileOrigin(tileCoord.first * Document::EDGELESS_TILE_SIZE,
-                               tileCoord.second * Document::EDGELESS_TILE_SIZE);
-            
-            VectorStroke localStroke = pastedStroke;
-            for (StrokePoint& pt : localStroke.points) {
-                pt.pos -= tileOrigin;
-            }
-            localStroke.updateBoundingBox();
-            
-            layer->addStroke(localStroke);
-            layer->invalidateStrokeCache();
-            m_document->markTileDirty(tileCoord);
+            // Use the shared helper that properly splits strokes at tile boundaries
+            addStrokeToEdgelessTiles(pastedStroke, m_edgelessActiveLayerIndex);
         }
         
         // TODO: Push to edgeless undo stack
@@ -4124,6 +4318,11 @@ void DocumentViewport::clearLassoSelection()
     m_lassoSelection.clear();
     m_lassoPath.clear();
     m_isDrawingLasso = false;
+    
+    // P1: Reset cache state
+    m_lastRenderedLassoIdx = 0;
+    m_lassoPathLength = 0;
+    
     update();
 }
 
@@ -5132,23 +5331,9 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     }
     
     // Task 2.10: Draw lasso selection path (edgeless mode)
+    // P1: Use incremental rendering for O(1) per frame instead of O(n)
     if (m_isDrawingLasso && m_lassoPath.size() > 1) {
-        painter.save();
-        painter.setRenderHint(QPainter::Antialiasing, true);
-        
-        // Convert lasso path to viewport coordinates (edgeless: document coords)
-        QPolygonF vpPath;
-        for (const QPointF& pt : m_lassoPath) {
-            vpPath << documentToViewport(pt);
-        }
-        
-        // Draw lasso path with dashed line and light fill
-        QPen lassoPen(QColor(0, 120, 215), 1.5, Qt::DashLine);  // Windows blue
-        painter.setPen(lassoPen);
-        painter.setBrush(QColor(0, 120, 215, 30));  // Light blue fill
-        painter.drawPolygon(vpPath);
-        
-        painter.restore();
+        renderLassoPathIncremental(painter);
     }
     
     // Task 2.10.3: Draw lasso selection (edgeless mode)

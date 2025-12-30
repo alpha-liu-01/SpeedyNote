@@ -871,6 +871,16 @@ private:
     QPolygonF m_lassoPath;               ///< The lasso path being drawn
     bool m_isDrawingLasso = false;       ///< Currently drawing a lasso path
     
+    // P1: Lasso path incremental rendering cache
+    QPixmap m_lassoPathCache;            ///< Cached lasso path segments at viewport resolution
+    int m_lastRenderedLassoIdx = 0;      ///< Index of last rendered path point
+    qreal m_lassoPathCacheZoom = 0;      ///< Zoom level when cache was created
+    QPointF m_lassoPathCachePan;         ///< Pan offset when cache was created
+    qreal m_lassoPathLength = 0;         ///< Cumulative path length for dash offset
+    
+    void resetLassoPathCache();          ///< Creates/resets the lasso path cache
+    void renderLassoPathIncremental(QPainter& painter);  ///< Renders lasso path incrementally
+    
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels
     static constexpr qreal HANDLE_HIT_SIZE = 20.0;     ///< Hit area size in pixels (touch-friendly)
@@ -1257,6 +1267,7 @@ private:
      * @return Vector of 8 scale handle positions + rotation handle position.
      */
     QVector<QPointF> getHandlePositions() const;
+    QRectF getSelectionVisualBounds() const;  ///< P2: Visual bounds in viewport coords for dirty region
     
     /**
      * @brief Start a selection transform operation.
@@ -1293,6 +1304,20 @@ private:
      * @brief Cancel the current selection (discard transform, restore originals).
      */
     void cancelSelectionTransform();
+    
+    /**
+     * @brief Add a stroke to edgeless tiles with proper splitting at tile boundaries.
+     * 
+     * Takes a stroke with points in DOCUMENT coordinates, splits it at tile boundaries,
+     * and adds each segment to the appropriate tile in tile-local coordinates.
+     * This is the same logic used by finishStrokeEdgeless() for consistent behavior.
+     * 
+     * @param stroke The stroke in document coordinates
+     * @param layerIndex Which layer to add the stroke to
+     * @return Vector of (tileCoord, localStroke) pairs for undo tracking
+     */
+    QVector<QPair<Document::TileCoord, VectorStroke>> addStrokeToEdgelessTiles(
+        const VectorStroke& stroke, int layerIndex);
     
     /**
      * @brief Apply a transform to a stroke's points.

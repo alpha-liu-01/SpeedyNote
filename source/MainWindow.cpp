@@ -7643,14 +7643,14 @@ void MainWindow::updateStraightLineButtonState() {
 void MainWindow::updateRopeToolButtonState() {
     // Task 2.10.9: Update rope/lasso tool button to reflect viewport state
     if (!ropeToolButton) return;
-    
+
     DocumentViewport* vp = currentViewport();
     bool isLasso = vp && (vp->currentTool() == ToolType::Lasso);
-    
+
     ropeToolButton->setProperty("selected", isLasso);
-    updateButtonIcon(ropeToolButton, "rope");
-    ropeToolButton->style()->unpolish(ropeToolButton);
-    ropeToolButton->style()->polish(ropeToolButton);
+        updateButtonIcon(ropeToolButton, "rope");
+        ropeToolButton->style()->unpolish(ropeToolButton);
+        ropeToolButton->style()->polish(ropeToolButton);
 }
 
 void MainWindow::updatePictureButtonState() {

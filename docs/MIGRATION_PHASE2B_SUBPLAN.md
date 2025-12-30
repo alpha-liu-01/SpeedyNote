@@ -790,43 +790,67 @@ The lasso tool currently has no caching or incremental rendering, causing perfor
 
 ### Proposed Implementation
 
-#### 2.10.P1: Lasso Path Incremental Rendering (~50 lines)
+#### 2.10.P1: Lasso Path Incremental Rendering (~50 lines) ✅ COMPLETE
 **Target:** Drawing state performance
 
-Similar to `m_currentStrokeCache`, create `m_lassoPathCache`:
+**Implemented:**
 
-```cpp
-// New members
-QPixmap m_lassoPathCache;      ///< Accumulated lasso path segments
-int m_lastRenderedLassoIdx;    ///< Last rendered path point index
-qreal m_lassoPathCacheZoom;    ///< Zoom when cache was created
+1. **New members** (`DocumentViewport.h`):
+   - `QPixmap m_lassoPathCache` - Cached lasso path segments at viewport resolution
+   - `int m_lastRenderedLassoIdx = 0` - Index of last rendered point
+   - `qreal m_lassoPathCacheZoom` - Zoom level when cache was created
+   - `QPointF m_lassoPathCachePan` - Pan offset when cache was created
+   - `qreal m_lassoPathLength = 0` - Cumulative path length for dash offset
 
-// In handlePointerMove_Lasso:
-m_lassoPath << pt;
-// Don't call update() - renderCurrentLassoPathIncremental handles it
+2. **New methods** (`DocumentViewport.cpp`):
+   - `resetLassoPathCache()` - Creates cache at viewport size with high DPI support
+   - `renderLassoPathIncremental(QPainter&)` - Incrementally renders new segments to cache
 
-// New method: renderCurrentLassoPathIncremental()
-// - Create/resize cache on first point or zoom change
-// - Only render new line segment (lastIdx to current)
-// - Blit cache to painter
-```
+3. **Dash pattern continuity**:
+   - Tracks cumulative path length in viewport coordinates (`m_lassoPathLength`)
+   - Uses `QPen::setDashOffset()` to offset dash pattern for each segment
+   - Result: Dashed line appears continuous despite being drawn segment-by-segment
 
-**Expected Impact:** Smooth 360Hz lasso path drawing for long paths.
+4. **Cache invalidation**:
+   - Cache is reset on `handlePointerPress_Lasso()` when starting new lasso
+   - Cache is reset if zoom or pan changes (detected in `renderLassoPathIncremental`)
+   - Cache state reset in `finalizeLassoSelection()` and `clearLassoSelection()`
 
-#### 2.10.P2: Dirty Region Updates (~20 lines)
+5. **Integration**:
+   - `paintEvent` / `renderEdgelessMode`: Replaced full path redraw with `renderLassoPathIncremental()`
+   - Works with P2 dirty region updates (incremental renders to cache, blits cache)
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (new members and method declarations)
+- `source/core/DocumentViewport.cpp` (implementation, integrated into rendering paths)
+
+**Expected Impact:** Smooth 360Hz lasso path drawing for long paths. O(1) per frame instead of O(n).
+
+#### 2.10.P2: Dirty Region Updates (~40 lines) ✅ COMPLETE
 **Target:** Both drawing and transform states
 
-```cpp
-// Lasso path drawing: update only the new segment's bounding rect
-QRectF dirtyRect = QRectF(lastPoint, currentPoint).normalized();
-dirtyRect.adjust(-2, -2, 2, 2);  // Account for line width
-update(dirtyRect.toRect());
+**Implemented:**
 
-// Selection transform: update only selection bounding box + handles
-QRectF selectionRect = getVisualSelectionBounds();  // In viewport coords
-selectionRect.adjust(-HANDLE_SIZE, -ROTATE_HANDLE_OFFSET, HANDLE_SIZE, 0);
-update(selectionRect.toRect());
-```
+1. **Lasso path drawing** (`handlePointerMove_Lasso`):
+   - Convert last point and current point to viewport coordinates
+   - Calculate bounding rect of the new line segment
+   - Add padding for line width (1.5px) + antialiasing
+   - Call `update(dirtyRect.toRect())` instead of `update()`
+
+2. **Selection transforms** (`updateSelectionTransform`):
+   - Added `getSelectionVisualBounds()` helper method
+   - Calculates visual bounds by transforming bounding box corners to viewport coords
+   - Expands for handle sizes and rotation handle offset
+   - Call `update(visualBoundsVp.toRect())` instead of `update()`
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp` (handlePointerMove_Lasso, updateSelectionTransform, getSelectionVisualBounds)
+- `source/core/DocumentViewport.h` (added getSelectionVisualBounds declaration)
+
+**Visual Fix:** Removed lasso path fill (changed `drawPolygon` to `drawPolyline` with `Qt::NoBrush`).
+The fill was incompatible with dirty region updates because only the new segment region
+was repainted, causing the fill to appear broken. Dashed-line-only matches industry
+standard lasso tools (Photoshop, Illustrator).
 
 **Expected Impact:** CPU ~18% vs ~45% (based on stroke rendering benchmarks).
 
@@ -883,13 +907,13 @@ if (hasTransparentStrokes) {
 
 ### Estimated Effort
 
-| Task | Lines | Complexity |
-|------|-------|------------|
-| 2.10.P1 | ~50 | Medium |
-| 2.10.P2 | ~20 | Low |
-| 2.10.P3 | ~80 | High |
-| 2.10.P4 | ~15 | Low |
-| **Total** | **~165** | |
+| Task | Lines | Complexity | Status |
+|------|-------|------------|--------|
+| 2.10.P1 | ~50 | Medium | Pending |
+| 2.10.P2 | ~40 | Low | ✅ COMPLETE |
+| 2.10.P3 | ~80 | High | Pending |
+| 2.10.P4 | ~15 | Low | Pending |
+| **Total** | **~185** | | |
 
 ### Test Cases
 
@@ -919,8 +943,32 @@ m_lassoSelection.rotation = 0;  // Rotation lost!
 **Files Modified:**
 - `source/core/DocumentViewport.cpp`
 
+### CR-2B-11: Strokes Not Split When Moved to Tile Boundaries (Edgeless Mode)
+**Issue:** When using lasso to move a stroke from within a single tile to a position crossing tile boundaries, the stroke was placed entirely in one tile (50/50 which side). Parts of the stroke extending beyond that tile's origin were rendered incorrectly or clipped.
+
+**Root Cause:** `applySelectionTransform()` and `pasteSelection()` used the stroke's bounding box center to determine which tile to place it in:
+```cpp
+// Find which tile(s) this stroke belongs to
+// For simplicity, use the stroke's bounding box center to determine primary tile
+QPointF center = transformedStroke.boundingBox.center();
+Document::TileCoord tileCoord = m_document->tileCoordForPoint(center);
+// ... added entire stroke to this single tile
+```
+
+This did NOT use the same stroke-splitting logic as `finishStrokeEdgeless()`, which properly splits strokes at tile boundaries when drawing.
+
+**Fix:** Created `addStrokeToEdgelessTiles()` helper method that:
+1. Takes a stroke with points in DOCUMENT coordinates
+2. Walks through all points, grouping consecutive points by tile
+3. When crossing a tile boundary, ends current segment and starts new one
+4. Includes overlap point at boundary for visual continuity
+5. Each segment gets a unique ID and is added to its tile
+
+Updated both `applySelectionTransform()` and `pasteSelection()` to use this shared helper, ensuring consistent behavior with stroke drawing.
+
 **Files Modified:**
-- `source/core/DocumentViewport.cpp`
+- `source/core/DocumentViewport.h` (added `addStrokeToEdgelessTiles()` declaration)
+- `source/core/DocumentViewport.cpp` (implemented helper, updated `applySelectionTransform()` and `pasteSelection()`)
 
 ### CR-2B-5: Transform Handles Couldn't Be Grabbed
 **Issue:** After completing a lasso selection, the transform handles were visible but couldn't be grabbed by mouse or stylus. Attempting to drag a handle would instead clear the selection and start a new lasso path.
