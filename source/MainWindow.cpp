@@ -4,6 +4,7 @@
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
 #include "ui/LayerPanel.h"          // Phase 5: Layer management panel
+#include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -161,6 +162,11 @@ MainWindow::MainWindow(QWidget *parent)
         
         // Phase 5.1 Task 4: Update LayerPanel when tab changes
         updateLayerPanelForViewport(vp);
+        
+        // Update DebugOverlay with current viewport
+        if (m_debugOverlay) {
+            m_debugOverlay->setViewport(vp);
+        }
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
@@ -417,6 +423,17 @@ void MainWindow::setupUi() {
     toggleBookmarksButton->setIconSize(QSize(18, 18));
     toggleBookmarksButton->raise();
     
+    // Layer Panel Toggle - Floating tab on left side (at layer panel height)
+    toggleLayerPanelButton = new QPushButton(this);
+    toggleLayerPanelButton->setObjectName("layerPanelTab");
+    toggleLayerPanelButton->setToolTip(tr("Show/Hide Layers"));
+    toggleLayerPanelButton->setFixedSize(28, 80);
+    toggleLayerPanelButton->setCursor(Qt::PointingHandCursor);
+    toggleLayerPanelButton->setProperty("selected", layerPanelVisible);
+    toggleLayerPanelButton->setIcon(loadThemedIcon("layer"));
+    toggleLayerPanelButton->setIconSize(QSize(18, 18));
+    toggleLayerPanelButton->raise();
+    
     // Apply floating tab styling for left sidebar tabs (using isDarkMode() to get current theme)
     {
         bool isDark = isDarkMode();
@@ -457,6 +474,23 @@ void MainWindow::setupUi() {
             "}"
         ).arg(tabBg, tabBorder, tabHover);
         toggleBookmarksButton->setStyleSheet(bookmarksStyle);
+        
+        QString layerPanelStyle = QString(
+            "QPushButton#layerPanelTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-left: none;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
+            "}"
+            "QPushButton#layerPanelTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#layerPanelTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBg, tabBorder, tabHover);
+        toggleLayerPanelButton->setStyleSheet(layerPanelStyle);
     }
     
     // Add/Remove Bookmark Toggle Button
@@ -1104,6 +1138,7 @@ void MainWindow::setupUi() {
     
     connect(toggleOutlineButton, &QPushButton::clicked, this, &MainWindow::toggleOutlineSidebar);
     connect(toggleBookmarksButton, &QPushButton::clicked, this, &MainWindow::toggleBookmarksSidebar);
+    connect(toggleLayerPanelButton, &QPushButton::clicked, this, &MainWindow::toggleLayerPanel);
     connect(toggleBookmarkButton, &QPushButton::clicked, this, &MainWindow::toggleCurrentPageBookmark);
     connect(toggleMarkdownNotesButton, &QPushButton::clicked, this, &MainWindow::toggleMarkdownNotesSidebar);
     connect(touchGesturesButton, &QPushButton::clicked, this, [this]() {
@@ -1440,6 +1475,19 @@ void MainWindow::setupUi() {
     canvasLayout->setContentsMargins(0, 0, 0, 0);
     canvasLayout->addWidget(m_tabWidget);  // Phase 3.1.1: Use m_tabWidget instead of canvasStack
 
+    // ========================================
+    // Debug Overlay (development tool)
+    // ========================================
+    // Create the debug overlay as a child of canvasContainer so it floats above the viewport.
+    // Toggle with 'D' key (defined in shortcuts below). Hidden by default in production.
+    m_debugOverlay = new DebugOverlay(canvasContainer);
+    m_debugOverlay->move(10, 10);  // Position at top-left
+// #ifdef SPEEDYNOTE_DEBUG
+    m_debugOverlay->show();  // Show by default in debug builds
+// #else
+    // m_debugOverlay->hide();  // Hidden in release builds
+// #endif
+    
     // Enable context menu for the workaround
     canvasContainer->setContextMenuPolicy(Qt::CustomContextMenu);
     
@@ -1592,24 +1640,21 @@ void MainWindow::setupUi() {
     contentLayout->setSpacing(0);
     
     // Phase 5: Left side container holds sidebars on top, layer panel at bottom
-    m_leftSideContainer = new QWidget(this);
-    m_leftSideContainer->setFixedWidth(250);  // Match sidebar width
-    QVBoxLayout *leftSideLayout = new QVBoxLayout(m_leftSideContainer);
-    leftSideLayout->setContentsMargins(0, 0, 0, 0);
-    leftSideLayout->setSpacing(0);
+    // NOTE: We no longer use a fixed-width container. The sidebars and layer panel
+    // are added directly to the content layout so they can be hidden independently.
     
-    // Top part: sidebars (can be hidden independently)
-    QWidget *leftSidebarsWidget = new QWidget(m_leftSideContainer);
-    QHBoxLayout *leftSidebarsLayout = new QHBoxLayout(leftSidebarsWidget);
+    // Top part: sidebars widget (can be hidden independently)
+    m_leftSideContainer = new QWidget(this);
+    QHBoxLayout *leftSidebarsLayout = new QHBoxLayout(m_leftSideContainer);
     leftSidebarsLayout->setContentsMargins(0, 0, 0, 0);
     leftSidebarsLayout->setSpacing(0);
     leftSidebarsLayout->addWidget(outlineSidebar);
     leftSidebarsLayout->addWidget(bookmarksSidebar);
     
-    leftSideLayout->addWidget(leftSidebarsWidget, 1);  // Takes remaining space
-    leftSideLayout->addWidget(m_layerPanel, 0);        // Fixed at bottom
-    
-    contentLayout->addWidget(m_leftSideContainer, 0); // Fixed width left container
+    // Sidebars container - only visible when at least one sidebar is showing
+    contentLayout->addWidget(m_leftSideContainer, 0);
+    // Layer panel - added separately so it can be hidden independently
+    contentLayout->addWidget(m_layerPanel, 0);
     contentLayout->addWidget(canvasContainer, 1); // Canvas takes remaining space
     contentLayout->addWidget(dialToolbar, 0); // Dial mode toolbar (before markdown sidebar)
     contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
@@ -1653,6 +1698,11 @@ void MainWindow::setupUi() {
         // Phase 5.1: Initialize LayerPanel for the first tab
         // currentViewportChanged may have been emitted before m_layerPanel was ready
         updateLayerPanelForViewport(currentViewport());
+        
+        // Initialize DebugOverlay with the first viewport
+        if (m_debugOverlay) {
+            m_debugOverlay->setViewport(currentViewport());
+        }
     });
     
     // =========================================================================
@@ -1701,6 +1751,12 @@ void MainWindow::setupUi() {
     QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
     openPdfShortcut->setContext(Qt::ApplicationShortcut);
     connect(openPdfShortcut, &QShortcut::activated, this, &MainWindow::openPdfDocument);
+    
+    // Debug Overlay toggle (F12) - developer tools style, like browser devtools
+    // Note: Ctrl+Shift+D is already used for Delete Page
+    QShortcut* debugOverlayShortcut = new QShortcut(QKeySequence(Qt::Key_F12), this);
+    debugOverlayShortcut->setContext(Qt::ApplicationShortcut);
+    connect(debugOverlayShortcut, &QShortcut::activated, this, &MainWindow::toggleDebugOverlay);
 
 }
 
@@ -4781,6 +4837,28 @@ void MainWindow::positionLeftSidebarTabs() {
         toggleBookmarksButton->move(tabX, tabY);
         toggleBookmarksButton->raise();
     }
+    
+    // Position layer panel tab at the right edge of the layer panel
+    if (toggleLayerPanelButton) {
+        int tabX;
+        int tabY;
+        
+        if (layerPanelVisible && m_layerPanel && m_layerPanel->isVisible()) {
+            // When visible: position at right edge of layer panel (sticking into viewport)
+            QPoint panelPos = m_layerPanel->mapTo(this, QPoint(0, 0));
+            tabX = panelPos.x() + m_layerPanel->width();
+            // Position at the vertical center of the layer panel
+            tabY = panelPos.y() + (m_layerPanel->height() - toggleLayerPanelButton->height()) / 2;
+        } else {
+            // When hidden: position at left edge (after sidebars if any)
+            tabX = leftOffset;
+            // Position near bottom of content area (where layer panel would be)
+            int contentBottom = height() - 20;  // 20px from bottom
+            tabY = contentBottom - toggleLayerPanelButton->height() - 50;  // A bit above bottom
+        }
+        toggleLayerPanelButton->move(tabX, tabY);
+        toggleLayerPanelButton->raise();
+    }
 }
 
 void MainWindow::updateDialDisplay() {
@@ -5870,6 +5948,27 @@ void MainWindow::updateTheme() {
         ).arg(tabBgColor, tabBorderColor, tabHoverColor);
         toggleBookmarksButton->setStyleSheet(bookmarksStyle);
         toggleBookmarksButton->setIcon(loadThemedIcon("bookmark"));
+    }
+    
+    // Update layer panel toggle button styling
+    if (toggleLayerPanelButton) {
+        QString layerPanelStyle = QString(
+            "QPushButton#layerPanelTab {"
+            "  background-color: %1;"
+            "  border: 1px solid %2;"
+            "  border-left: none;"
+            "  border-top-right-radius: 0px;"
+            "  border-bottom-right-radius: 0px;"
+            "}"
+            "QPushButton#layerPanelTab:hover {"
+            "  background-color: %3;"
+            "}"
+            "QPushButton#layerPanelTab:pressed {"
+            "  background-color: %1;"
+            "}"
+        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
+        toggleLayerPanelButton->setStyleSheet(layerPanelStyle);
+        toggleLayerPanelButton->setIcon(loadThemedIcon("layer"));
     }
     
     // Update dial background color
@@ -8131,6 +8230,12 @@ void MainWindow::toggleOutlineSidebar() {
     
     outlineSidebar->setVisible(outlineSidebarVisible);
     
+    // Update sidebar container visibility (hide if both sidebars are hidden)
+    if (m_leftSideContainer) {
+        bool anySidebarVisible = outlineSidebarVisible || bookmarksSidebarVisible;
+        m_leftSideContainer->setVisible(anySidebarVisible);
+    }
+    
     // Update button toggle state
     if (toggleOutlineButton) {
         toggleOutlineButton->setProperty("selected", outlineSidebarVisible);
@@ -8376,6 +8481,12 @@ void MainWindow::toggleBookmarksSidebar() {
     bookmarksSidebar->setVisible(!isVisible);
     bookmarksSidebarVisible = !isVisible;
     
+    // Update sidebar container visibility (hide if both sidebars are hidden)
+    if (m_leftSideContainer) {
+        bool anySidebarVisible = outlineSidebarVisible || bookmarksSidebarVisible;
+        m_leftSideContainer->setVisible(anySidebarVisible);
+    }
+    
     // Update button toggle state
     if (toggleBookmarksButton) {
         toggleBookmarksButton->setProperty("selected", bookmarksSidebarVisible);
@@ -8400,6 +8511,43 @@ void MainWindow::toggleBookmarksSidebar() {
             positionDialContainer();
         }
     });
+}
+
+void MainWindow::toggleLayerPanel() {
+    if (!m_layerPanel) return;
+    
+    layerPanelVisible = !layerPanelVisible;
+    m_layerPanel->setVisible(layerPanelVisible);
+    
+    // Update button toggle state
+    if (toggleLayerPanelButton) {
+        toggleLayerPanelButton->setProperty("selected", layerPanelVisible);
+        // Force style update
+        toggleLayerPanelButton->style()->unpolish(toggleLayerPanelButton);
+        toggleLayerPanelButton->style()->polish(toggleLayerPanelButton);
+    }
+    
+    // Force layout update and reposition floating tabs
+    if (centralWidget() && centralWidget()->layout()) {
+        centralWidget()->layout()->invalidate();
+        centralWidget()->layout()->activate();
+    }
+    // Use a slightly longer delay to ensure layout is complete before positioning
+    QTimer::singleShot(50, this, [this]() {
+        positionLeftSidebarTabs();
+        positionDialToolbarTab();
+    });
+}
+
+void MainWindow::toggleDebugOverlay() {
+    if (!m_debugOverlay) return;
+    
+    m_debugOverlay->toggle();
+    
+    // Connect to current viewport if shown
+    if (m_debugOverlay->isOverlayVisible()) {
+        m_debugOverlay->setViewport(currentViewport());
+    }
 }
 
 void MainWindow::onBookmarkItemClicked(QTreeWidgetItem *item, int column) {

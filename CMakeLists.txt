@@ -330,6 +330,7 @@ set(STROKE_SOURCES
 set(UI_SOURCES
         source/ui/TabManager.cpp             # Task 3.0.2
         source/ui/LayerPanel.cpp             # Task 3.0.3
+        source/ui/DebugOverlay.cpp           # Debug overlay widget
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)

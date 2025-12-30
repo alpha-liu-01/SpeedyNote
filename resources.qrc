@@ -98,6 +98,8 @@
     <file>resources/icons/rope_reversed.png</file>
     <file>resources/icons/recent.png</file>
     <file>resources/icons/recent_reversed.png</file>
+    <file>resources/icons/layer.png</file>
+    <file>resources/icons/layer_reversed.png</file>
     <file>resources/icons/hand.png</file>
     <file>resources/icons/hand_reversed.png</file>
     <file>resources/icons/clipboard.png</file>

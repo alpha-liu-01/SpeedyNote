@@ -401,6 +401,11 @@ public:
      */
     bool isBenchmarking() const { return m_benchmarking; }
     
+    /**
+     * @brief Check if the hardware eraser (stylus eraser end) is active.
+     */
+    bool isHardwareEraserActive() const { return m_hardwareEraserActive; }
+    
     // ===== Layout Engine (Task 1.3.2) =====
     
     /**

@@ -69,6 +69,7 @@ class QTreeWidgetItem;
 class QProgressDialog;
 class DocumentViewport;
 class LayerPanel;
+class DebugOverlay;
 namespace Poppler { 
     class Document; 
     class OutlineItem;
@@ -667,8 +668,15 @@ private:
     // Layer Panel (Phase 5: below left sidebars)
     LayerPanel *m_layerPanel = nullptr;           // Layer management panel
     QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
+    QPushButton *toggleLayerPanelButton = nullptr; // Floating tab button to toggle layer panel
+    bool layerPanelVisible = true;                 // Layer panel visible by default
     
     void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
+    void toggleLayerPanel();         // Toggle layer panel visibility
+    
+    // Debug Overlay (development tool - easily disabled for production)
+    class DebugOverlay* m_debugOverlay = nullptr;  // Floating debug info panel
+    void toggleDebugOverlay();                      // Toggle debug overlay visibility
     QMap<int, QString> bookmarks;  // Map of page number to bookmark title
     QPushButton *jumpToPageButton; // Button to jump to a specific page
     

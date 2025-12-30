@@ -49,11 +49,13 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     pal.setColor(QPalette::Window, QColor(64, 64, 64));  // Dark gray - TODO: Load from theme settings
     setPalette(pal);
     
-    // Benchmark display timer - updates debug overlay periodically when benchmarking
+    // Benchmark display timer - triggers repaint to update paint rate counter
+    // Note: Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
     connect(&m_benchmarkDisplayTimer, &QTimer::timeout, this, [this]() {
-        if (m_benchmarking && m_showDebugOverlay) {
-            // Only update the debug overlay region (top-left corner)
-            update(QRect(0, 0, 500, 100));
+        if (m_benchmarking) {
+            // DebugOverlay widget handles its own updates, but we may want
+            // to trigger viewport repaints for accurate paint rate measurement
+            // during benchmarking (disabled for now to avoid unnecessary repaints)
         }
     });
     
@@ -853,46 +855,9 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
             drawEraserCursor(painter);
         }
         
-        // Draw debug overlay for edgeless
-        QRect debugOverlayArea(0, 0, 500, 120);
-        if (m_showDebugOverlay && (!isPartialUpdate || dirtyRect.intersects(debugOverlayArea))) {
-            painter.setPen(Qt::white);
-            QFont smallFont = painter.font();
-            smallFont.setPointSize(10);
-            painter.setFont(smallFont);
-            
-            QString toolName;
-            switch (m_currentTool) {
-                case ToolType::Pen: toolName = "Pen"; break;
-                case ToolType::Marker: toolName = "Marker"; break;
-                case ToolType::Eraser: toolName = "Eraser"; break;
-                case ToolType::Highlighter: toolName = "Highlighter"; break;
-                case ToolType::Lasso: toolName = "Lasso"; break;
-            }
-            
-            QString info = QString("Edgeless Canvas | Tiles: %1\n"
-                                   "Zoom: %2% | Pan: (%3, %4)\n"
-                                   "Tool: %5%6 | Undo:%7 Redo:%8\n"
-                                   "Min Zoom: %9% | Paint Rate: %10")
-                .arg(m_document->tileCount())
-                .arg(m_zoomLevel * 100, 0, 'f', 0)
-                .arg(m_panOffset.x(), 0, 'f', 1)
-                .arg(m_panOffset.y(), 0, 'f', 1)
-                .arg(toolName)
-                .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
-                .arg(canUndo() ? "Y" : "N")
-                .arg(canRedo() ? "Y" : "N")
-                .arg(minZoomForEdgeless() * 100, 0, 'f', 0)
-                .arg(m_benchmarking ? QString("%1 Hz").arg(getPaintRate()) : "OFF");
-            
-            QRect textRect = painter.fontMetrics().boundingRect(
-                rect().adjusted(10, 10, -10, -10), 
-                Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, info);
-            textRect.adjust(-5, -5, 5, 5);
-            painter.fillRect(textRect, QColor(0, 0, 0, 180));
-            painter.drawText(rect().adjusted(10, 10, -10, -10), 
-                             Qt::AlignTop | Qt::AlignLeft, info);
-        }
+        // Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
+        // Toggle with Ctrl+Shift+D
+        
         return;  // Done with edgeless rendering
     }
     
@@ -951,58 +916,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         drawEraserCursor(painter);
     }
     
-    // Draw debug info overlay if enabled
-    // Skip during partial updates unless the dirty region includes the overlay area
-    
-    QRect debugOverlayArea(0, 0, 500, 120);
-    if (m_showDebugOverlay && (!isPartialUpdate || dirtyRect.intersects(debugOverlayArea))) {
-        painter.setPen(Qt::white);
-        QFont smallFont = painter.font();
-        smallFont.setPointSize(10);
-        painter.setFont(smallFont);
-        
-        QSizeF contentSize = totalContentSize();
-        
-        // Tool name for debug display
-        QString toolName;
-        switch (m_currentTool) {
-            case ToolType::Pen: toolName = "Pen"; break;
-            case ToolType::Marker: toolName = "Marker"; break;
-            case ToolType::Eraser: toolName = "Eraser"; break;
-            case ToolType::Highlighter: toolName = "Highlighter"; break;
-            case ToolType::Lasso: toolName = "Lasso"; break;
-        }
-        
-        QString info = QString("Document: %1 | Pages: %2 | Current: %3\n"
-                               "Zoom: %4% | Pan: (%5, %6)\n"
-                               "Layout: %7 | Content: %8x%9\n"
-                               "Tool: %10%11 | Undo:%12 Redo:%13\n"
-                               "Paint Rate: %14 [P=Pen, E=Eraser, B=Benchmark]")
-            .arg(m_document->displayName())
-            .arg(m_document->pageCount())
-            .arg(m_currentPageIndex + 1)
-            .arg(m_zoomLevel * 100, 0, 'f', 0)
-            .arg(m_panOffset.x(), 0, 'f', 1)
-            .arg(m_panOffset.y(), 0, 'f', 1)
-            .arg(m_layoutMode == LayoutMode::SingleColumn ? "Single Column" : "Two Column")
-            .arg(contentSize.width(), 0, 'f', 0)
-            .arg(contentSize.height(), 0, 'f', 0)
-            .arg(toolName)
-            .arg(m_hardwareEraserActive ? " (HW Eraser)" : "")
-            .arg(canUndo() ? "Y" : "N")
-            .arg(canRedo() ? "Y" : "N")
-            .arg(m_benchmarking ? QString("%1 Hz").arg(getPaintRate()) : "OFF (press B)");
-        
-        // Draw with background for readability
-        QRect textRect = painter.fontMetrics().boundingRect(
-            rect().adjusted(10, 10, -10, -10), 
-            Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, info);
-        textRect.adjust(-5, -5, 5, 5);
-        painter.fillRect(textRect, QColor(0, 0, 0, 180));
-        painter.drawText(rect().adjusted(10, 10, -10, -10), 
-                         Qt::AlignTop | Qt::AlignLeft, info);
-    }
-    
+    // Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
+    // Toggle with Ctrl+Shift+D
 }
 
 void DocumentViewport::resizeEvent(QResizeEvent* event)
