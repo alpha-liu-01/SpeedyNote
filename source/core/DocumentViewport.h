@@ -33,15 +33,19 @@
  */
 struct PageUndoAction {
     enum Type { 
-        AddStroke,       ///< A stroke was added (undo = remove it)
-        RemoveStroke,    ///< A single stroke was removed (undo = add it back)
-        RemoveMultiple   ///< Multiple strokes removed at once (undo = add all back)
+        AddStroke,          ///< A stroke was added (undo = remove it)
+        RemoveStroke,       ///< A single stroke was removed (undo = add it back)
+        RemoveMultiple,     ///< Multiple strokes removed at once (undo = add all back)
+        TransformSelection  ///< Lasso transform: removed originals, added transformed (undo = reverse)
     };
     
     Type type;
     int pageIndex;                      ///< The page this action occurred on
+    int layerIndex = 0;                 ///< Which layer was affected (for TransformSelection)
     VectorStroke stroke;                ///< For AddStroke and RemoveStroke
     QVector<VectorStroke> strokes;      ///< For RemoveMultiple
+    QVector<VectorStroke> removedStrokes;  ///< For TransformSelection: original strokes removed
+    QVector<VectorStroke> addedStrokes;    ///< For TransformSelection: new strokes added
 };
 
 // ============================================================================
@@ -57,7 +61,7 @@ struct PageUndoAction {
  * Memory bound: MAX_UNDO_EDGELESS actions × ~20KB avg = ~2MB max
  */
 struct EdgelessUndoAction {
-    PageUndoAction::Type type = PageUndoAction::AddStroke;  ///< AddStroke or RemoveStroke
+    PageUndoAction::Type type = PageUndoAction::AddStroke;  ///< Action type
     int layerIndex = 0;                 ///< Which layer was affected
     
     /**
@@ -70,7 +74,11 @@ struct EdgelessUndoAction {
         Document::TileCoord tileCoord;  ///< Tile containing this segment
         VectorStroke stroke;            ///< The stroke data (in tile-local coords)
     };
-    QVector<StrokeSegment> segments;    ///< All segments in this action
+    QVector<StrokeSegment> segments;    ///< For AddStroke/RemoveStroke: the stroke segments
+    
+    // For TransformSelection: compound action with both removed and added strokes
+    QVector<StrokeSegment> removedSegments;  ///< Original strokes that were removed
+    QVector<StrokeSegment> addedSegments;    ///< New strokes that were added
 };
 
 #include <QWidget>
@@ -1420,6 +1428,13 @@ private:
      * @param strokes The affected strokes.
      */
     void pushUndoAction(int pageIndex, PageUndoAction::Type type, const QVector<VectorStroke>& strokes);
+    
+    /**
+     * @brief Push a complete undo action (for complex operations like TransformSelection).
+     * @param pageIndex The page index.
+     * @param action The complete action with all fields populated.
+     */
+    void pushUndoAction(int pageIndex, const PageUndoAction& action);
     
     /**
      * @brief Clear the redo stack for a page (called when new actions occur).

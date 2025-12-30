@@ -16,7 +16,7 @@ Phase 2B implements three additional drawing tools that were deferred during the
 |------|--------|
 | 2.8 Marker Tool | ✅ **COMPLETE** |
 | 2.9 Straight Line Mode | ✅ **COMPLETE** |
-| 2.10 Lasso Selection Tool | ⏳ Pending |
+| 2.10 Lasso Selection Tool | ✅ **COMPLETE** |
 
 ## Architecture Principles
 
@@ -553,21 +553,21 @@ VectorStroke translated(const QPointF& offset) const;
 ```
 
 ### Test Cases
-- [ ] Draw lasso path to select strokes
-- [ ] Only strokes on active layer are selected
-- [ ] Entire strokes selected (not partial)
-- [ ] Bounding box and handles displayed correctly
-- [ ] Move selection by dragging inside
-- [ ] Scale selection using corner handles
-- [ ] Rotate selection using rotation handle
-- [ ] Ctrl+C copies selection
-- [ ] Ctrl+X cuts selection
-- [ ] Ctrl+V pastes at center of view
-- [ ] Delete/Backspace removes selected strokes
-- [ ] Escape clears selection
-- [ ] Undo/redo works for all operations
-- [ ] Works in paged mode
-- [ ] Works in edgeless mode (cross-tile paste)
+- [x] Draw lasso path to select strokes
+- [x] Only strokes on active layer are selected
+- [x] Entire strokes selected (not partial)
+- [x] Bounding box and handles displayed correctly
+- [x] Move selection by dragging inside
+- [x] Scale selection using corner handles
+- [x] Rotate selection using rotation handle
+- [x] Ctrl+C copies selection
+- [x] Ctrl+X cuts selection
+- [x] Ctrl+V pastes at center of view
+- [x] Delete/Backspace removes selected strokes
+- [x] Escape clears selection
+- [x] Undo/redo works for all operations
+- [x] Works in paged mode
+- [x] Works in edgeless mode (cross-tile paste)
 
 ---
 
@@ -969,6 +969,39 @@ Updated both `applySelectionTransform()` and `pasteSelection()` to use this shar
 **Files Modified:**
 - `source/core/DocumentViewport.h` (added `addStrokeToEdgelessTiles()` declaration)
 - `source/core/DocumentViewport.cpp` (implemented helper, updated `applySelectionTransform()` and `pasteSelection()`)
+
+### CR-2B-12: Lasso Operations Not Undoable/Redoable
+**Issue:** All lasso tool actions (move, scale, rotate, delete, cut, paste) could not be undone or redone. The TODO comments in the code indicated this was not implemented.
+
+**Root Cause:** The lasso operations modified strokes but never pushed undo actions to the undo stacks.
+
+**Fix:** Extended the undo system and added undo tracking to all lasso operations:
+
+1. **Extended `PageUndoAction` struct** (for paged mode):
+   - Added `TransformSelection` type for compound remove+add operations
+   - Added `layerIndex` field to track which layer was modified
+   - Added `removedStrokes` and `addedStrokes` vectors for transform actions
+
+2. **Extended `EdgelessUndoAction` struct** (for edgeless mode):
+   - Added `removedSegments` and `addedSegments` vectors for compound actions
+   - `TransformSelection` type stores both what was removed and what was added
+
+3. **Updated undo/redo handlers**:
+   - `undoEdgeless()` / `redoEdgeless()`: Added `TransformSelection` case that reverses/reapplies both remove and add operations
+   - `undo()` / `redo()` (paged): Added `TransformSelection` case, fixed layer lookup to use `action.layerIndex`, handle `addedStrokes` for paste
+
+4. **Added undo tracking to lasso operations**:
+   - `applySelectionTransform()`: Tracks removed segments (original strokes) and added segments (transformed strokes), pushes `TransformSelection` action
+   - `deleteSelection()`: Tracks removed strokes, pushes `RemoveMultiple` action
+   - `pasteSelection()`: Tracks added strokes, pushes `AddStroke` action (with `segments` or `addedStrokes`)
+
+**Multi-layer support:** The `layerIndex` field ensures undo/redo operates on the correct layer even if the user switched layers after the operation.
+
+**Edgeless tile support:** Uses the existing segment-based tracking to properly handle strokes split across tiles.
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (extended `PageUndoAction` and `EdgelessUndoAction` structs)
+- `source/core/DocumentViewport.cpp` (all undo/redo handlers and lasso operations)
 
 ### CR-2B-5: Transform Handles Couldn't Be Grabbed
 **Issue:** After completing a lasso selection, the transform handles were visible but couldn't be grabbed by mouse or stylus. Attempting to drag a handle would instead clear the selection and start a new lasso path.

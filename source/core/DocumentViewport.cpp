@@ -4030,7 +4030,11 @@ void DocumentViewport::applySelectionTransform()
         // Strategy: remove all original strokes, then add transformed strokes
         // using the same tile-splitting logic as regular stroke creation
         
-        // First, remove original strokes from their source tiles
+        EdgelessUndoAction undoAction;
+        undoAction.type = PageUndoAction::TransformSelection;
+        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
+        
+        // First, collect and remove original strokes from their source tiles
         auto tiles = m_document->allLoadedTileCoords();
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
@@ -4044,6 +4048,8 @@ void DocumentViewport::applySelectionTransform()
             for (int i = layerStrokes.size() - 1; i >= 0; --i) {
                 for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                     if (layerStrokes[i].id == selectedStroke.id) {
+                        // Store for undo (tile-local coords)
+                        undoAction.removedSegments.append({coord, layerStrokes[i]});
                         layerStrokes.removeAt(i);
                         layer->invalidateStrokeCache();
                         m_document->markTileDirty(coord);
@@ -4061,10 +4067,17 @@ void DocumentViewport::applySelectionTransform()
             // Note: addStrokeToEdgelessTiles() generates new IDs for each segment
             
             // Use the shared helper that properly splits strokes at tile boundaries
-            addStrokeToEdgelessTiles(transformedStroke, m_lassoSelection.sourceLayerIndex);
+            // It returns the added stroke segments for undo tracking
+            auto addedSegments = addStrokeToEdgelessTiles(transformedStroke, m_lassoSelection.sourceLayerIndex);
+            for (const auto& seg : addedSegments) {
+                undoAction.addedSegments.append({seg.first, seg.second});
+            }
         }
         
-        // TODO: Push to edgeless undo stack
+        // Push to edgeless undo stack
+        if (!undoAction.removedSegments.isEmpty() || !undoAction.addedSegments.isEmpty()) {
+            pushEdgelessUndoAction(undoAction);
+        }
         
     } else {
         // ========== PAGED MODE ==========
@@ -4081,11 +4094,18 @@ void DocumentViewport::applySelectionTransform()
         VectorLayer* layer = page->layer(m_lassoSelection.sourceLayerIndex);
         if (!layer) return;
         
-        // Remove original strokes by ID
+        // Prepare undo action
+        PageUndoAction undoAction;
+        undoAction.type = PageUndoAction::TransformSelection;
+        undoAction.pageIndex = m_lassoSelection.sourcePageIndex;
+        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
+        
+        // Remove original strokes by ID (and track for undo)
         QVector<VectorStroke>& layerStrokes = layer->strokes();
         for (int i = layerStrokes.size() - 1; i >= 0; --i) {
             for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                 if (layerStrokes[i].id == selectedStroke.id) {
+                    undoAction.removedStrokes.append(layerStrokes[i]);
                     layerStrokes.removeAt(i);
                     break;
                 }
@@ -4098,12 +4118,13 @@ void DocumentViewport::applySelectionTransform()
             transformStrokePoints(transformedStroke, transform);
             transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
             layer->addStroke(transformedStroke);
+            undoAction.addedStrokes.append(transformedStroke);
         }
         
         layer->invalidateStrokeCache();
         
-        // Push to undo stack
-        // TODO: Create a compound undo action for remove + add
+        // Push to paged undo stack
+        pushUndoAction(m_lassoSelection.sourcePageIndex, undoAction);
     }
     
     clearLassoSelection();
@@ -4181,6 +4202,10 @@ void DocumentViewport::pasteSelection()
         // Add strokes to appropriate tiles, splitting at tile boundaries
         // Uses the same logic as finishStrokeEdgeless() for consistency
         
+        EdgelessUndoAction undoAction;
+        undoAction.type = PageUndoAction::AddStroke;
+        undoAction.layerIndex = m_edgelessActiveLayerIndex;
+        
         for (const VectorStroke& stroke : m_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
             
@@ -4192,10 +4217,16 @@ void DocumentViewport::pasteSelection()
             // Note: addStrokeToEdgelessTiles() generates new IDs for each segment
             
             // Use the shared helper that properly splits strokes at tile boundaries
-            addStrokeToEdgelessTiles(pastedStroke, m_edgelessActiveLayerIndex);
+            auto addedSegments = addStrokeToEdgelessTiles(pastedStroke, m_edgelessActiveLayerIndex);
+            for (const auto& seg : addedSegments) {
+                undoAction.segments.append({seg.first, seg.second});
+            }
         }
         
-        // TODO: Push to edgeless undo stack
+        // Push to edgeless undo stack
+        if (!undoAction.segments.isEmpty()) {
+            pushEdgelessUndoAction(undoAction);
+        }
         
     } else {
         // ========== PAGED MODE ==========
@@ -4211,6 +4242,12 @@ void DocumentViewport::pasteSelection()
         
         VectorLayer* layer = page->activeLayer();
         if (!layer) return;
+        
+        // Prepare undo action
+        PageUndoAction undoAction;
+        undoAction.type = PageUndoAction::AddStroke;  // Will add multiple strokes
+        undoAction.pageIndex = pageIndex;
+        undoAction.layerIndex = page->activeLayerIndex;
         
         // Adjust offset for paged mode (use page-local coordinates)
         QPointF pageOrigin = pagePosition(pageIndex);
@@ -4228,11 +4265,13 @@ void DocumentViewport::pasteSelection()
             pastedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
             
             layer->addStroke(pastedStroke);
+            undoAction.addedStrokes.append(pastedStroke);
         }
         
         layer->invalidateStrokeCache();
         
-        // TODO: Push to undo stack
+        // Push to paged undo stack (use addedStrokes for multiple strokes)
+        pushUndoAction(pageIndex, undoAction);
     }
     
     update();
@@ -4249,6 +4288,10 @@ void DocumentViewport::deleteSelection()
         // ========== EDGELESS MODE ==========
         // Remove strokes from their tiles by ID
         
+        EdgelessUndoAction undoAction;
+        undoAction.type = PageUndoAction::RemoveMultiple;
+        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
+        
         auto tiles = m_document->allLoadedTileCoords();
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
@@ -4263,6 +4306,8 @@ void DocumentViewport::deleteSelection()
             for (int i = layerStrokes.size() - 1; i >= 0; --i) {
                 for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                     if (layerStrokes[i].id == selectedStroke.id) {
+                        // Store for undo (tile-local coords)
+                        undoAction.segments.append({coord, layerStrokes[i]});
                         layerStrokes.removeAt(i);
                         modified = true;
                         break;
@@ -4276,7 +4321,10 @@ void DocumentViewport::deleteSelection()
             }
         }
         
-        // TODO: Push to edgeless undo stack
+        // Push to edgeless undo stack
+        if (!undoAction.segments.isEmpty()) {
+            pushEdgelessUndoAction(undoAction);
+        }
         
     } else {
         // ========== PAGED MODE ==========
@@ -4292,11 +4340,18 @@ void DocumentViewport::deleteSelection()
         VectorLayer* layer = page->layer(m_lassoSelection.sourceLayerIndex);
         if (!layer) return;
         
+        // Prepare undo action
+        PageUndoAction undoAction;
+        undoAction.type = PageUndoAction::RemoveMultiple;
+        undoAction.pageIndex = m_lassoSelection.sourcePageIndex;
+        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
+        
         // Remove strokes by ID
         QVector<VectorStroke>& layerStrokes = layer->strokes();
         for (int i = layerStrokes.size() - 1; i >= 0; --i) {
             for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                 if (layerStrokes[i].id == selectedStroke.id) {
+                    undoAction.strokes.append(layerStrokes[i]);
                     layerStrokes.removeAt(i);
                     break;
                 }
@@ -4305,7 +4360,10 @@ void DocumentViewport::deleteSelection()
         
         layer->invalidateStrokeCache();
         
-        // TODO: Push to undo stack
+        // Push to paged undo stack
+        if (!undoAction.strokes.isEmpty()) {
+            pushUndoAction(m_lassoSelection.sourcePageIndex, undoAction);
+        }
     }
     
     clearLassoSelection();
@@ -4722,6 +4780,18 @@ void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, 
     emit undoAvailableChanged(canUndo());
 }
 
+void DocumentViewport::pushUndoAction(int pageIndex, const PageUndoAction& action)
+{
+    // For complete actions (TransformSelection, etc.)
+    PageUndoAction fullAction = action;
+    fullAction.pageIndex = pageIndex;  // Ensure page index is set
+    
+    m_undoStacks[pageIndex].push(fullAction);
+    trimUndoStack(pageIndex);
+    clearRedoStack(pageIndex);
+    emit undoAvailableChanged(canUndo());
+}
+
 void DocumentViewport::clearRedoStack(int pageIndex)
 {
     if (m_redoStacks.contains(pageIndex)) {
@@ -4809,43 +4879,80 @@ void DocumentViewport::undoEdgeless()
     
     EdgelessUndoAction action = m_edgelessUndoStack.pop();
     
-    // Apply undo to each segment (may span multiple tiles)
-    for (const auto& seg : action.segments) {
-        Page* tile = nullptr;
-        
-        if (action.type == PageUndoAction::AddStroke) {
-            // Undoing an add = remove the stroke (tile might not exist if already removed)
-            tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
-        } else {
-            // Undoing a remove = add the stroke back (may need to recreate tile)
-            tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
-        }
-        
-        if (!tile) continue;
-        
-        // Ensure layer exists
-        while (tile->layerCount() <= action.layerIndex) {
-            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-        }
-        VectorLayer* layer = tile->layer(action.layerIndex);
-        if (!layer) continue;
-        
-        switch (action.type) {
-            case PageUndoAction::AddStroke:
-                // Undo add = remove the stroke
+    // Handle TransformSelection specially (compound action)
+    if (action.type == PageUndoAction::TransformSelection) {
+        // Step 1: Remove the added strokes (undo the add)
+        for (const auto& seg : action.addedSegments) {
+            Page* tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
+            if (!tile) continue;
+            
+            VectorLayer* layer = tile->layer(action.layerIndex);
+            if (layer) {
                 layer->removeStroke(seg.stroke.id);
-                // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
-                m_document->markTileDirty(seg.tileCoord);
-                // Check if tile is now empty
-                m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-                break;
-                
-            case PageUndoAction::RemoveStroke:
-            case PageUndoAction::RemoveMultiple:
-                // Undo remove = add the stroke back
+                layer->invalidateStrokeCache();
+            }
+            m_document->markTileDirty(seg.tileCoord);
+            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+        }
+        
+        // Step 2: Add back the removed strokes (undo the remove)
+        for (const auto& seg : action.removedSegments) {
+            Page* tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+            if (!tile) continue;
+            
+            while (tile->layerCount() <= action.layerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            VectorLayer* layer = tile->layer(action.layerIndex);
+            if (layer) {
                 layer->addStroke(seg.stroke);
-                m_document->markTileDirty(seg.tileCoord);
-                break;
+                layer->invalidateStrokeCache();
+            }
+            m_document->markTileDirty(seg.tileCoord);
+        }
+    } else {
+        // Apply undo to each segment (may span multiple tiles)
+        for (const auto& seg : action.segments) {
+            Page* tile = nullptr;
+            
+            if (action.type == PageUndoAction::AddStroke) {
+                // Undoing an add = remove the stroke (tile might not exist if already removed)
+                tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
+            } else {
+                // Undoing a remove = add the stroke back (may need to recreate tile)
+                tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+            }
+            
+            if (!tile) continue;
+            
+            // Ensure layer exists
+            while (tile->layerCount() <= action.layerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            VectorLayer* layer = tile->layer(action.layerIndex);
+            if (!layer) continue;
+            
+            switch (action.type) {
+                case PageUndoAction::AddStroke:
+                    // Undo add = remove the stroke
+                    layer->removeStroke(seg.stroke.id);
+                    // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
+                    m_document->markTileDirty(seg.tileCoord);
+                    // Check if tile is now empty
+                    m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+                    break;
+                    
+                case PageUndoAction::RemoveStroke:
+                case PageUndoAction::RemoveMultiple:
+                    // Undo remove = add the stroke back
+                    layer->addStroke(seg.stroke);
+                    m_document->markTileDirty(seg.tileCoord);
+                    break;
+                    
+                case PageUndoAction::TransformSelection:
+                    // Handled above
+                    break;
+            }
         }
     }
     
@@ -4864,43 +4971,80 @@ void DocumentViewport::redoEdgeless()
     
     EdgelessUndoAction action = m_edgelessRedoStack.pop();
     
-    // Apply redo to each segment
-    for (const auto& seg : action.segments) {
-        Page* tile = nullptr;
-        
-        if (action.type == PageUndoAction::AddStroke) {
-            // Redoing an add = add the stroke back (may need to recreate tile)
-            tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
-        } else {
-            // Redoing a remove = remove the stroke (tile might not exist if already removed)
-            tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
-        }
-        
-        if (!tile) continue;
-        
-        // Ensure layer exists
-        while (tile->layerCount() <= action.layerIndex) {
-            tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-        }
-        VectorLayer* layer = tile->layer(action.layerIndex);
-        if (!layer) continue;
-        
-        switch (action.type) {
-            case PageUndoAction::AddStroke:
-                // Redo add = add the stroke again
-                layer->addStroke(seg.stroke);
-                m_document->markTileDirty(seg.tileCoord);
-                break;
-                
-            case PageUndoAction::RemoveStroke:
-            case PageUndoAction::RemoveMultiple:
-                // Redo remove = remove the stroke again
+    // Handle TransformSelection specially (compound action)
+    if (action.type == PageUndoAction::TransformSelection) {
+        // Step 1: Remove the original strokes again (redo the remove)
+        for (const auto& seg : action.removedSegments) {
+            Page* tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
+            if (!tile) continue;
+            
+            VectorLayer* layer = tile->layer(action.layerIndex);
+            if (layer) {
                 layer->removeStroke(seg.stroke.id);
-                // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
-                m_document->markTileDirty(seg.tileCoord);
-                // Check if tile is now empty
-                m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-                break;
+                layer->invalidateStrokeCache();
+            }
+            m_document->markTileDirty(seg.tileCoord);
+            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+        }
+        
+        // Step 2: Add the transformed strokes again (redo the add)
+        for (const auto& seg : action.addedSegments) {
+            Page* tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+            if (!tile) continue;
+            
+            while (tile->layerCount() <= action.layerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            VectorLayer* layer = tile->layer(action.layerIndex);
+            if (layer) {
+                layer->addStroke(seg.stroke);
+                layer->invalidateStrokeCache();
+            }
+            m_document->markTileDirty(seg.tileCoord);
+        }
+    } else {
+        // Apply redo to each segment
+        for (const auto& seg : action.segments) {
+            Page* tile = nullptr;
+            
+            if (action.type == PageUndoAction::AddStroke) {
+                // Redoing an add = add the stroke back (may need to recreate tile)
+                tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
+            } else {
+                // Redoing a remove = remove the stroke (tile might not exist if already removed)
+                tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
+            }
+            
+            if (!tile) continue;
+            
+            // Ensure layer exists
+            while (tile->layerCount() <= action.layerIndex) {
+                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
+            }
+            VectorLayer* layer = tile->layer(action.layerIndex);
+            if (!layer) continue;
+            
+            switch (action.type) {
+                case PageUndoAction::AddStroke:
+                    // Redo add = add the stroke again
+                    layer->addStroke(seg.stroke);
+                    m_document->markTileDirty(seg.tileCoord);
+                    break;
+                    
+                case PageUndoAction::RemoveStroke:
+                case PageUndoAction::RemoveMultiple:
+                    // Redo remove = remove the stroke again
+                    layer->removeStroke(seg.stroke.id);
+                    // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
+                    m_document->markTileDirty(seg.tileCoord);
+                    // Check if tile is now empty
+                    m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+                    break;
+                    
+                case PageUndoAction::TransformSelection:
+                    // Handled above
+                    break;
+            }
         }
     }
     
@@ -4947,15 +5091,30 @@ void DocumentViewport::undo()
     Page* page = m_document ? m_document->page(pageIdx) : nullptr;
     if (!page) return;
     
-    VectorLayer* layer = page->activeLayer();
-    if (!layer) return;
-    
     PageUndoAction action = m_undoStacks[pageIdx].pop();
+    
+    // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
+    VectorLayer* layer = nullptr;
+    if (action.type == PageUndoAction::TransformSelection || 
+        action.type == PageUndoAction::RemoveMultiple) {
+        layer = page->layer(action.layerIndex);
+    } else {
+        layer = page->activeLayer();
+    }
+    if (!layer) return;
     
     switch (action.type) {
         case PageUndoAction::AddStroke:
-            // Undo adding = remove the stroke
-            layer->removeStroke(action.stroke.id);
+            // Undo adding = remove the stroke(s)
+            if (!action.addedStrokes.isEmpty()) {
+                // Multiple strokes (paste or transform)
+                for (const auto& s : action.addedStrokes) {
+                    layer->removeStroke(s.id);
+                }
+            } else {
+                // Single stroke
+                layer->removeStroke(action.stroke.id);
+            }
             break;
             
         case PageUndoAction::RemoveStroke:
@@ -4969,7 +5128,19 @@ void DocumentViewport::undo()
                 layer->addStroke(s);
             }
             break;
+            
+        case PageUndoAction::TransformSelection:
+            // Undo transform: remove added strokes, restore removed strokes
+            for (const auto& s : action.addedStrokes) {
+                layer->removeStroke(s.id);
+            }
+            for (const auto& s : action.removedStrokes) {
+                layer->addStroke(s);
+            }
+            break;
     }
+    
+    layer->invalidateStrokeCache();
     
     // Push to redo stack
     m_redoStacks[pageIdx].push(action);
@@ -4998,15 +5169,30 @@ void DocumentViewport::redo()
     Page* page = m_document ? m_document->page(pageIdx) : nullptr;
     if (!page) return;
     
-    VectorLayer* layer = page->activeLayer();
-    if (!layer) return;
-    
     PageUndoAction action = m_redoStacks[pageIdx].pop();
+    
+    // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
+    VectorLayer* layer = nullptr;
+    if (action.type == PageUndoAction::TransformSelection || 
+        action.type == PageUndoAction::RemoveMultiple) {
+        layer = page->layer(action.layerIndex);
+    } else {
+        layer = page->activeLayer();
+    }
+    if (!layer) return;
     
     switch (action.type) {
         case PageUndoAction::AddStroke:
-            // Redo adding = add the stroke again
-            layer->addStroke(action.stroke);
+            // Redo adding = add the stroke(s) again
+            if (!action.addedStrokes.isEmpty()) {
+                // Multiple strokes (paste or transform)
+                for (const auto& s : action.addedStrokes) {
+                    layer->addStroke(s);
+                }
+            } else {
+                // Single stroke
+                layer->addStroke(action.stroke);
+            }
             break;
             
         case PageUndoAction::RemoveStroke:
@@ -5020,7 +5206,19 @@ void DocumentViewport::redo()
                 layer->removeStroke(s.id);
             }
             break;
+            
+        case PageUndoAction::TransformSelection:
+            // Redo transform: remove original strokes, add transformed strokes
+            for (const auto& s : action.removedStrokes) {
+                layer->removeStroke(s.id);
+            }
+            for (const auto& s : action.addedStrokes) {
+                layer->addStroke(s);
+            }
+            break;
     }
+    
+    layer->invalidateStrokeCache();
     
     // Push back to undo stack
     m_undoStacks[pageIdx].push(action);
