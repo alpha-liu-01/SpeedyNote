@@ -282,7 +282,7 @@ void MainWindow::toggleAutoLayout() {
 
 ---
 
-### Task 2C.6: Integration and Testing ⬜ PENDING
+### Task 2C.6: Integration and Testing ✅ COMPLETE
 
 **Test cases:**
 
@@ -448,3 +448,35 @@ Phase 2C is complete when:
 - Deferred zoom rendering: Auto-layout check happens AFTER zoom settles
 - PDF preloading: Already debounced, works with new capacity
 - Stroke cache: Unaffected (per-layer, not layout-dependent)
+
+---
+
+## Code Review Fixes (2C.CR)
+
+### CR-2C.1: Removed Unused Variable
+**Issue:** `contentCenterX` was declared in `updateCurrentPageIndex()` but never used (dead code from earlier design).
+**Fix:** Removed the unused variable declaration.
+
+### CR-2C.2: Thread Safety in `updatePdfCacheCapacity()`
+**Issue:** `m_pdfCacheCapacity` was updated outside the mutex lock, creating a brief window where other threads could see inconsistent state between capacity and actual cache size.
+**Fix:** Moved mutex acquisition to BEFORE updating `m_pdfCacheCapacity`, ensuring the capacity update and cache eviction happen atomically.
+
+```cpp
+// Before (race condition possible):
+if (m_pdfCacheCapacity != newCapacity) {
+    m_pdfCacheCapacity = newCapacity;  // Not protected!
+    QMutexLocker locker(&m_pdfCacheMutex);
+    evictFurthestCacheEntries();
+}
+
+// After (thread-safe):
+QMutexLocker locker(&m_pdfCacheMutex);
+if (m_pdfCacheCapacity != newCapacity) {
+    m_pdfCacheCapacity = newCapacity;  // Protected
+    evictFurthestCacheEntries();
+}
+```
+
+### CR-2C.3: Not Fixed (Acceptable)
+**Issue:** Fallback loop in `updateCurrentPageIndex()` iterates through all pages when none are visible (O(n)).
+**Decision:** Left as-is. This case is rare (only happens when viewport is completely outside document bounds) and document size is typically manageable. The overhead is negligible.

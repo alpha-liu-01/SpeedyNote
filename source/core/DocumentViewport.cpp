@@ -2132,12 +2132,15 @@ void DocumentViewport::updatePdfCacheCapacity()
     // New capacity with minimum of 4
     int newCapacity = qMax(4, visibleCount + buffer);
     
+    // Thread-safe capacity update and eviction
+    // Acquire mutex BEFORE updating capacity to prevent race conditions
+    QMutexLocker locker(&m_pdfCacheMutex);
+    
     // Only update if changed
     if (m_pdfCacheCapacity != newCapacity) {
         m_pdfCacheCapacity = newCapacity;
         
         // Immediately evict if over new capacity
-        QMutexLocker locker(&m_pdfCacheMutex);
         evictFurthestCacheEntries();
     }
 }
@@ -6134,11 +6137,7 @@ void DocumentViewport::updateCurrentPageIndex()
         if (!visible.isEmpty()) {
             if (m_layoutMode == LayoutMode::TwoColumn && visible.size() >= 2) {
                 // In 2-column mode, when center is in the gap between columns,
-                // determine which column based on X position relative to content center
-                QSizeF contentSize = totalContentSize();
-                qreal contentCenterX = contentSize.width() / 2.0;
-                
-                // Find the best page by checking distance to center for each visible page
+                // find the visible page whose center is closest to viewport center
                 qreal minDist = std::numeric_limits<qreal>::max();
                 int bestPage = visible.first();
                 
