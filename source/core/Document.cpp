@@ -52,7 +52,7 @@ std::unique_ptr<Document> Document::createNew(const QString& docName, Mode docMo
         doc->m_edgelessLayers.push_back(defaultLayer);
     } else {
         // Paged mode: ensure at least one page exists
-        doc->ensureMinimumPages();
+    doc->ensureMinimumPages();
     }
     
     return doc;

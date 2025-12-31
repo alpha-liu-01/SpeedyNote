@@ -1127,3 +1127,53 @@ if (m_isDrawingLasso || m_isTransformingSelection) {
 
 **Files Modified:**
 - `source/core/DocumentViewport.cpp`
+
+---
+
+## Post-Implementation Code Review
+
+### CR-2B-13: Inconsistent Transform Check
+**Issue:** In `handlePointerPress_Lasso()`, an inline transform check duplicated the logic in `LassoSelection::hasTransform()` but with subtle differences:
+- Inline: Used `qFuzzyIsNull(offset.x())` and `qFuzzyIsNull(offset.y())` separately
+- Method: Used `!offset.isNull()` which checks for exact zero
+
+**Fix:** 
+1. Updated inline code to use `m_lassoSelection.hasTransform()` method
+2. Updated `hasTransform()` to use fuzzy comparison for offset components
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (fixed `hasTransform()` method)
+- `source/core/DocumentViewport.cpp` (use method instead of inline check)
+
+### CR-2B-14: Performance - getSelectedIds() Rebuilt on Every Call
+**Issue:** `LassoSelection::getSelectedIds()` created a new `QSet<QString>` on every call. This method is called for every tile during edgeless rendering, causing unnecessary allocations.
+
+**Fix:** Added `mutable QSet<QString> m_cachedIds` member that is:
+- Built lazily on first access
+- Cleared in `clear()` method
+- Returned by const reference instead of by value
+
+**Performance Impact:** Reduces per-frame allocations during edgeless mode rendering.
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (added cached member, updated method)
+
+### Code Review Notes (No Fix Needed)
+
+**1. `originalIndices` field is unused:**
+The `LassoSelection::originalIndices` field is populated during selection but never used for removal (removal is done by ID matching). Marked as "legacy, unused" in comments. Kept for potential future use.
+
+**2. `sourceTileCoord` only stores first tile:**
+In edgeless mode with multi-tile selections, only the first tile's coord is stored. This is acceptable because actual removal/modification uses ID matching across all tiles. The field is informational only.
+
+**3. P4 temp buffer allocation is acceptable:**
+The per-stroke temp buffer allocation in `rebuildSelectionCache()` for semi-transparent strokes is acceptable because:
+- Only happens during cache rebuild (not every frame)
+- Size is limited to stroke bounds (not entire selection)
+- Has 4096px safety limit
+- Qt's QPixmap uses implicit sharing
+
+**4. Memory management is correct:**
+- All QPixmap caches are properly cleared in `clearLassoSelection()`
+- Background snapshot is cleared when selection changes
+- Selection cache is invalidated when strokes change or zoom changes

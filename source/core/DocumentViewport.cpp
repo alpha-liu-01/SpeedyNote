@@ -3169,14 +3169,7 @@ void DocumentViewport::handlePointerPress_Lasso(const PointerEvent& pe)
         }
         
         // Task 2.10.6: Click outside selection - apply transform (if any) and clear
-        // Check if there's a non-identity transform to apply
-        bool hasTransform = !qFuzzyIsNull(m_lassoSelection.offset.x()) ||
-                            !qFuzzyIsNull(m_lassoSelection.offset.y()) ||
-                            !qFuzzyCompare(m_lassoSelection.scaleX, 1.0) ||
-                            !qFuzzyCompare(m_lassoSelection.scaleY, 1.0) ||
-                            !qFuzzyIsNull(m_lassoSelection.rotation);
-        
-        if (hasTransform) {
+        if (m_lassoSelection.hasTransform()) {
             applySelectionTransform();  // This also clears the selection
         } else {
             clearLassoSelection();

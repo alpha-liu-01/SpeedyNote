@@ -835,9 +835,9 @@ private:
     // Lasso Selection Tool (Task 2.10)
     struct LassoSelection {
         QVector<VectorStroke> selectedStrokes;  ///< Copies of selected strokes
-        QVector<int> originalIndices;            ///< Indices in the layer (for removal)
+        QVector<int> originalIndices;            ///< Indices in the layer (legacy, unused)
         int sourcePageIndex = -1;                ///< Source page (paged mode)
-        std::pair<int, int> sourceTileCoord = {0, 0};  ///< Source tile (edgeless mode)
+        std::pair<int, int> sourceTileCoord = {0, 0};  ///< First source tile (edgeless mode)
         int sourceLayerIndex = 0;
         
         QRectF boundingBox;                      ///< Selection bounding box
@@ -846,22 +846,28 @@ private:
         qreal scaleX = 1.0, scaleY = 1.0;        ///< Current scale factors
         QPointF offset;                          ///< Move offset
         
+        mutable QSet<QString> m_cachedIds;       ///< Cached stroke IDs for CR-2B-7 exclusion
+        
         bool isValid() const { return !selectedStrokes.isEmpty(); }
         bool hasTransform() const {
             return !qFuzzyIsNull(rotation) || 
                    !qFuzzyCompare(scaleX, 1.0) || 
                    !qFuzzyCompare(scaleY, 1.0) || 
-                   !offset.isNull();
+                   !qFuzzyIsNull(offset.x()) ||
+                   !qFuzzyIsNull(offset.y());
         }
         /// CR-2B-7: Get set of selected stroke IDs for exclusion during layer render
-        QSet<QString> getSelectedIds() const {
-            QSet<QString> ids;
-            for (const VectorStroke& s : selectedStrokes) {
-                ids.insert(s.id);
+        /// Uses cached set for performance (rebuilt when selection changes)
+        const QSet<QString>& getSelectedIds() const {
+            if (m_cachedIds.isEmpty() && !selectedStrokes.isEmpty()) {
+                for (const VectorStroke& s : selectedStrokes) {
+                    m_cachedIds.insert(s.id);
+                }
             }
-            return ids;
+            return m_cachedIds;
         }
-        void clear() { 
+        void clear() {
+            m_cachedIds.clear();  // Clear cached IDs 
             selectedStrokes.clear(); 
             originalIndices.clear();
             sourcePageIndex = -1;
