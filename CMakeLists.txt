@@ -307,6 +307,7 @@ set(CORE_SOURCES
         source/core/Document.cpp       # Task 1.2.3
         source/core/DocumentViewport.cpp # Task 1.3.1
         source/core/DocumentManager.cpp  # Task 3.0.1
+        source/core/TouchGestureHandler.cpp # Task TG.1.R
 )
 
 # ✅ NEW ARCHITECTURE: Vector layer system

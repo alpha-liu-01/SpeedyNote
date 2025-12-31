@@ -14,6 +14,17 @@
 // Replaces: InkCanvas (view/input portions)
 // ============================================================================
 
+// TouchGestureMode enum - shared with MainWindow.h and InkCanvas.h
+// Guard prevents redefinition when multiple headers are included
+#ifndef TOUCHGESTUREMODE_DEFINED
+#define TOUCHGESTUREMODE_DEFINED
+enum class TouchGestureMode {
+    Disabled,     // Touch gestures completely off
+    YAxisOnly,    // Only Y-axis panning allowed (X-axis and zoom locked)
+    Full          // Full touch gestures (panning and zoom)
+};
+#endif
+
 #include "Document.h"
 #include "Page.h"
 #include "ToolType.h"
@@ -99,6 +110,7 @@ class QResizeEvent;
 class QMouseEvent;
 class QTabletEvent;
 class QWheelEvent;
+class TouchGestureHandler;
 
 /**
  * @brief Layout mode for page arrangement.
@@ -731,6 +743,25 @@ public slots:
      */
     bool isGestureActive() const { return m_gesture.isActive(); }
     
+    // ===== Touch Gesture Mode =====
+    
+    /**
+     * @brief Set the touch gesture mode.
+     * @param mode The new touch gesture mode.
+     * 
+     * Controls how touch input is handled:
+     * - Disabled: Touch gestures ignored
+     * - YAxisOnly: Single-finger vertical pan only (no zoom)
+     * - Full: Single-finger pan + pinch-to-zoom
+     */
+    void setTouchGestureMode(TouchGestureMode mode);
+    
+    /**
+     * @brief Get the current touch gesture mode.
+     * @return Current touch gesture mode.
+     */
+    TouchGestureMode touchGestureMode() const;
+    
 signals:
     // ===== View State Signals =====
     
@@ -806,6 +837,7 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
     void tabletEvent(QTabletEvent* event) override;
+    bool event(QEvent* event) override;  ///< Forwards touch events to handler
     
 private:
     // ===== Document Reference =====
@@ -815,6 +847,10 @@ private:
     qreal m_zoomLevel = 1.0;
     QPointF m_panOffset;
     int m_currentPageIndex = 0;
+    
+    // ===== Touch Gesture Handler =====
+    // Touch gesture logic is encapsulated in TouchGestureHandler (see TouchGestureHandler.h)
+    TouchGestureHandler* m_touchHandler = nullptr;  ///< Handles touch pan/zoom/tap
     
     // =========================================================================
     // CUSTOMIZABLE VALUES

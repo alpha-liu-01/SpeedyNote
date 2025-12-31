@@ -175,6 +175,11 @@ MainWindow::MainWindow(QWidget *parent)
             straightLineToggleButton->style()->unpolish(straightLineToggleButton);
             straightLineToggleButton->style()->polish(straightLineToggleButton);
         }
+        
+        // TG.6: Apply touch gesture mode to new viewport
+        if (vp) {
+            vp->setTouchGestureMode(touchGestureMode);
+        }
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
@@ -6468,13 +6473,13 @@ TouchGestureMode MainWindow::getTouchGestureMode() const {
 void MainWindow::setTouchGestureMode(TouchGestureMode mode) {
     touchGestureMode = mode;
     
-    // Phase 3.1: DocumentViewport handles touch gestures differently
-    // TODO Phase 3.3: Apply touch gesture mode to all DocumentViewports via TabManager
-    // if (m_tabManager) {
-    //     m_tabManager->applyToAllViewports([mode](DocumentViewport* vp) {
-    //         vp->setTouchGestureMode(mode);
-    //     });
-    // }
+    // TG.6: Apply touch gesture mode to current DocumentViewport
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->setTouchGestureMode(mode);
+    }
+    
+    // TODO: Apply to all viewports when TabManager supports iteration
+    // For now, each new viewport gets the mode applied in openDocumentInNewTab()
     
     QSettings settings("SpeedyNote", "App");
     settings.setValue("touchGestureMode", static_cast<int>(mode));

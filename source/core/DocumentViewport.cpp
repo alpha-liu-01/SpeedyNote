@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "DocumentViewport.h"
+#include "TouchGestureHandler.h"
 #include "../layers/VectorLayer.h"
 #include "../pdf/PopplerPdfProvider.h"
 
@@ -15,6 +16,7 @@
 #include <QTabletEvent>
 #include <QWheelEvent>
 #include <QKeyEvent>
+#include <QTouchEvent>
 #include <QtMath>     // For qPow
 #include <QtConcurrent>  // For async PDF rendering
 #include <cmath>      // For std::floor, std::ceil
@@ -35,9 +37,10 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Accept tablet events
     setAttribute(Qt::WA_TabletTracking, true);
     
-    // CRITICAL: Reject touch events - we only want stylus/mouse input for drawing
-    // Touch gestures are handled separately (will be added in Phase 4)
-    setAttribute(Qt::WA_AcceptTouchEvents, false);
+    // Enable touch events for touch gesture support (pan, zoom)
+    // Note: Touch-synthesized mouse events are still rejected in mouse handlers
+    // to prevent touch from triggering drawing (drawing is stylus/mouse only)
+    setAttribute(Qt::WA_AcceptTouchEvents, true);
     
     // Set focus policy for keyboard shortcuts
     setFocusPolicy(Qt::StrongFocus);
@@ -68,6 +71,9 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     m_gestureTimeoutTimer = new QTimer(this);
     m_gestureTimeoutTimer->setSingleShot(true);
     connect(m_gestureTimeoutTimer, &QTimer::timeout, this, &DocumentViewport::onGestureTimeout);
+    
+    // Touch gesture handler (encapsulates pan/zoom/tap logic)
+    m_touchHandler = new TouchGestureHandler(this, this);
     
     // Initialize PDF cache capacity based on default layout mode
     updatePdfCacheCapacity();
@@ -1858,6 +1864,39 @@ void DocumentViewport::onGestureTimeout()
     } else if (m_gesture.activeType == ViewportGestureState::Pan) {
         endPanGesture();   // No checkAutoLayout() needed - zoom unchanged
     }
+}
+
+// ===== Touch Gesture Mode (Task TG.1) =====
+
+void DocumentViewport::setTouchGestureMode(TouchGestureMode mode)
+{
+    if (m_touchHandler) {
+        m_touchHandler->setMode(mode);
+    }
+}
+
+TouchGestureMode DocumentViewport::touchGestureMode() const
+{
+    if (m_touchHandler) {
+        return m_touchHandler->mode();
+    }
+    return TouchGestureMode::Disabled;
+}
+
+bool DocumentViewport::event(QEvent* event)
+{
+    // Forward touch events to handler
+    if (event->type() == QEvent::TouchBegin ||
+        event->type() == QEvent::TouchUpdate ||
+        event->type() == QEvent::TouchEnd ||
+        event->type() == QEvent::TouchCancel) {
+        
+        if (m_touchHandler && m_touchHandler->handleTouchEvent(static_cast<QTouchEvent*>(event))) {
+            return true;
+        }
+    }
+    
+    return QWidget::event(event);
 }
 
 // ===== PDF Cache Helpers (Task 1.3.6) =====
