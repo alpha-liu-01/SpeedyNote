@@ -160,13 +160,38 @@ void DocumentViewport::setLayoutMode(LayoutMode mode)
         return;
     }
     
+    // Before switching: get the page currently at viewport center
+    int currentPage = m_currentPageIndex;
+    qreal oldPageY = 0;
+    if (m_document && !m_document->isEdgeless() && currentPage >= 0) {
+        oldPageY = pagePosition(currentPage).y();
+    }
+    
+    LayoutMode oldMode = m_layoutMode;
     m_layoutMode = mode;
     
     // Invalidate layout cache for new layout mode
     invalidatePageLayoutCache();
     
+    // After switching: adjust vertical offset to keep same page visible
+    if (m_document && !m_document->isEdgeless() && currentPage >= 0) {
+        qreal newPageY = pagePosition(currentPage).y();
+        
+        // Adjust pan offset to compensate for page position change
+        // Keep the same relative position within the viewport
+        qreal yDelta = newPageY - oldPageY;
+        m_panOffset.setY(m_panOffset.y() + yDelta);
+        
+        qDebug() << "Layout switch:" << (oldMode == LayoutMode::SingleColumn ? "1-col" : "2-col")
+                 << "->" << (mode == LayoutMode::SingleColumn ? "1-col" : "2-col")
+                 << "page" << currentPage << "yDelta" << yDelta;
+    }
+    
     // Update PDF cache capacity for new layout (Task 1.3.6)
     updatePdfCacheCapacity();
+    
+    // Recenter content horizontally for new layout width
+    recenterHorizontally();
     
     // Recalculate layout and repaint
     clampPanOffset();
@@ -186,6 +211,92 @@ void DocumentViewport::setPageGap(int gap)
     clampPanOffset();
     update();
     emitScrollFractions();
+}
+
+void DocumentViewport::setAutoLayoutEnabled(bool enabled)
+{
+    if (m_autoLayoutEnabled == enabled) {
+        return;
+    }
+    
+    m_autoLayoutEnabled = enabled;
+    
+    if (enabled) {
+        // Immediately check if layout should change
+        checkAutoLayout();
+    } else {
+        // When disabling auto mode, revert to single column
+        setLayoutMode(LayoutMode::SingleColumn);
+    }
+}
+
+void DocumentViewport::checkAutoLayout()
+{
+    // Only check if auto mode is enabled
+    if (!m_autoLayoutEnabled) {
+        return;
+    }
+    
+    // Skip for edgeless documents (no pages)
+    if (!m_document || m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Skip if no pages
+    if (m_document->pageCount() == 0) {
+        return;
+    }
+    
+    // Get typical page width from first page
+    const Page* page = m_document->page(0);
+    if (!page) {
+        return;
+    }
+    
+    // Calculate required width for 2-column layout (in viewport pixels)
+    qreal pageWidth = page->size.width() * m_zoomLevel;
+    qreal gapWidth = m_pageGap * m_zoomLevel;
+    qreal requiredWidth = 2 * pageWidth + gapWidth;
+    
+    // Determine target layout mode
+    LayoutMode targetMode = (width() >= requiredWidth) 
+        ? LayoutMode::TwoColumn 
+        : LayoutMode::SingleColumn;
+    
+    // Only switch if different (avoids redundant invalidation)
+    if (targetMode != m_layoutMode) {
+        setLayoutMode(targetMode);
+    }
+}
+
+void DocumentViewport::recenterHorizontally()
+{
+    // Skip for edgeless documents
+    if (!m_document || m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Guard against zero zoom
+    qreal zoomLevel = m_zoomLevel;
+    if (zoomLevel <= 0) zoomLevel = 1.0;
+    
+    // Get content size in document coordinates
+    QSizeF contentSize = totalContentSize();
+    
+    // Calculate viewport width in document coordinates
+    qreal viewportWidth = width() / zoomLevel;
+    
+    // Only center if content is narrower than viewport
+    if (contentSize.width() < viewportWidth) {
+        // Calculate the offset needed to center content
+        // Negative pan X shifts content to the right (toward center)
+        qreal centeringOffset = (viewportWidth - contentSize.width()) / 2.0;
+        
+        // Set pan with negative X to center horizontally, keep Y unchanged
+        m_panOffset.setX(-centeringOffset);
+        
+        emit panChanged(m_panOffset);
+    }
 }
 
 // ===== Document Change Notifications =====
@@ -1094,6 +1205,9 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     // Update current page index (visible area changed)
     updateCurrentPageIndex();
     
+    // Check if auto-layout should switch modes based on new viewport width
+    checkAutoLayout();
+    
     // Emit signals and repaint
     emit panChanged(m_panOffset);
     emitScrollFractions();
@@ -1542,6 +1656,9 @@ void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
     clampPanOffset();
     updateCurrentPageIndex();
     
+    // Check if auto-layout should switch modes (zoom level changed)
+    checkAutoLayout();
+    
     if (!qFuzzyCompare(oldZoom, m_zoomLevel)) {
         emit zoomChanged(m_zoomLevel);
     }
@@ -1639,6 +1756,12 @@ void DocumentViewport::endZoomGesture()
     // Trigger full re-render at new DPI
     update();
     
+    // Check if auto-layout should switch modes (zoom level changed)
+    checkAutoLayout();
+    
+    // Update PDF cache capacity (visible pages may have changed)
+    updatePdfCacheCapacity();
+    
     // Preload PDF cache for new zoom level
     preloadPdfCache();
 }
@@ -1715,6 +1838,9 @@ void DocumentViewport::endPanGesture()
     // Trigger full re-render
     update();
     
+    // Update PDF cache capacity (visible pages may have changed)
+    updatePdfCacheCapacity();
+    
     // Preload PDF cache for new viewport position
     preloadPdfCache();
     
@@ -1728,9 +1854,9 @@ void DocumentViewport::onGestureTimeout()
 {
     // Timeout reached - end the active gesture
     if (m_gesture.activeType == ViewportGestureState::Zoom) {
-        endZoomGesture();
+        endZoomGesture();  // This now calls checkAutoLayout() internally
     } else if (m_gesture.activeType == ViewportGestureState::Pan) {
-        endPanGesture();
+        endPanGesture();   // No checkAutoLayout() needed - zoom unchanged
     }
 }
 
@@ -1835,9 +1961,13 @@ void DocumentViewport::doAsyncPdfPreload()
     int first = visible.first();
     int last = visible.last();
     
-    // Pre-load ±1 pages beyond visible
-    int preloadStart = qMax(0, first - 1);
-    int preloadEnd = qMin(m_document->pageCount() - 1, last + 1);
+    // Pre-load buffer depends on layout mode:
+    // - Single column: ±1 page (above and below)
+    // - Two column: ±2 pages (1 row above + 1 row below = 4 pages)
+    int preloadBuffer = (m_layoutMode == LayoutMode::TwoColumn) ? 2 : 1;
+    
+    int preloadStart = qMax(0, first - preloadBuffer);
+    int preloadEnd = qMin(m_document->pageCount() - 1, last + preloadBuffer);
     
     qreal dpi = effectivePdfDpi();
     QString pdfPath = m_document->pdfPath();
@@ -1991,22 +2121,50 @@ void DocumentViewport::invalidatePdfCachePage(int pageIndex)
 
 void DocumentViewport::updatePdfCacheCapacity()
 {
-    // Set capacity based on layout mode:
-    // - Single column: visible (2) + ±2 buffer = 6 pages
-    // - Two column: visible (4) + ±1 row buffer = 12 pages
-    switch (m_layoutMode) {
-        case LayoutMode::SingleColumn:
-            m_pdfCacheCapacity = 6;  // Visible + generous buffer for scroll direction changes
-            break;
-        case LayoutMode::TwoColumn:
-            m_pdfCacheCapacity = 12;  // Visible + row buffer
-            break;
-    }
+    // Calculate visible page count
+    QVector<int> visible = visiblePages();
+    int visibleCount = visible.size();
     
-    // Thread-safe trim
-    QMutexLocker locker(&m_pdfCacheMutex);
+    // Buffer: 3 pages for 1-column (1 above + 2 below or vice versa)
+    //         6 pages for 2-column (1 row above + 1 row below = 4, plus margin)
+    int buffer = (m_layoutMode == LayoutMode::TwoColumn) ? 6 : 3;
+    
+    // New capacity with minimum of 4
+    int newCapacity = qMax(4, visibleCount + buffer);
+    
+    // Only update if changed
+    if (m_pdfCacheCapacity != newCapacity) {
+        m_pdfCacheCapacity = newCapacity;
+        
+        // Immediately evict if over new capacity
+        QMutexLocker locker(&m_pdfCacheMutex);
+        evictFurthestCacheEntries();
+    }
+}
+
+void DocumentViewport::evictFurthestCacheEntries()
+{
+    // Must be called with m_pdfCacheMutex locked
+    
+    // Get reference page for distance calculation
+    int centerPage = m_currentPageIndex;
+    
+    // Evict furthest entries until within capacity
     while (m_pdfCache.size() > m_pdfCacheCapacity) {
-        m_pdfCache.removeFirst();
+        int evictIdx = 0;
+        int maxDistance = -1;
+        
+        for (int i = 0; i < m_pdfCache.size(); ++i) {
+            int dist = qAbs(m_pdfCache[i].pageIndex - centerPage);
+            if (dist > maxDistance) {
+                maxDistance = dist;
+                evictIdx = i;
+            }
+        }
+        
+        qDebug() << "PDF cache evict: page" << m_pdfCache[evictIdx].pageIndex 
+                 << "distance" << maxDistance << "new size" << (m_pdfCache.size() - 1);
+        m_pdfCache.removeAt(evictIdx);
     }
 }
 
@@ -5971,20 +6129,44 @@ void DocumentViewport::updateCurrentPageIndex()
     if (centerPage >= 0) {
         m_currentPageIndex = centerPage;
     } else {
-        // No page at center - find the closest page
+        // No page at center (likely in a gap) - find the closest page
         QVector<int> visible = visiblePages();
         if (!visible.isEmpty()) {
-            // Use the first visible page
-            m_currentPageIndex = visible.first();
+            if (m_layoutMode == LayoutMode::TwoColumn && visible.size() >= 2) {
+                // In 2-column mode, when center is in the gap between columns,
+                // determine which column based on X position relative to content center
+                QSizeF contentSize = totalContentSize();
+                qreal contentCenterX = contentSize.width() / 2.0;
+                
+                // Find the best page by checking distance to center for each visible page
+                qreal minDist = std::numeric_limits<qreal>::max();
+                int bestPage = visible.first();
+                
+                for (int pageIdx : visible) {
+                    QRectF rect = pageRect(pageIdx);
+                    // Distance from viewport center to page center
+                    QPointF pageCenter = rect.center();
+                    qreal dist = QLineF(viewCenter, pageCenter).length();
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bestPage = pageIdx;
+                    }
+                }
+                m_currentPageIndex = bestPage;
+            } else {
+                // Single column mode or only one visible page
+                m_currentPageIndex = visible.first();
+            }
         } else {
             // No visible pages - estimate based on scroll position
-            // Find the page whose y-position is closest to pan offset
+            // Find the page whose center is closest to viewport center
             qreal minDist = std::numeric_limits<qreal>::max();
             int closestPage = 0;
             
             for (int i = 0; i < m_document->pageCount(); ++i) {
                 QRectF rect = pageRect(i);
-                qreal dist = qAbs(rect.top() - m_panOffset.y());
+                QPointF pageCenter = rect.center();
+                qreal dist = QLineF(viewCenter, pageCenter).length();
                 if (dist < minDist) {
                     minDist = dist;
                     closestPage = i;

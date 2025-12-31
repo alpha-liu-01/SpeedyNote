@@ -54,7 +54,7 @@ This phase enhances the existing two-column layout support with:
 
 ## Task Breakdown
 
-### Task 2C.1: Add Auto-Layout State (~30 lines) ⬜ PENDING
+### Task 2C.1: Add Auto-Layout State (~30 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
@@ -89,7 +89,7 @@ void DocumentViewport::setAutoLayoutEnabled(bool enabled) {
 
 ---
 
-### Task 2C.2: Implement Auto-Layout Check (~50 lines) ⬜ PENDING
+### Task 2C.2: Implement Auto-Layout Check (~50 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.cpp`
 
@@ -140,7 +140,7 @@ void DocumentViewport::checkAutoLayout() {
 
 ---
 
-### Task 2C.3: Dynamic PDF Cache Capacity (~60 lines) ⬜ PENDING
+### Task 2C.3: Dynamic PDF Cache Capacity (~60 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
@@ -212,7 +212,7 @@ void DocumentViewport::evictFurthestCacheEntries() {
 
 ---
 
-### Task 2C.4: Enhanced Preload for Two-Column (~20 lines) ⬜ PENDING
+### Task 2C.4: Enhanced Preload for Two-Column (~20 lines) ✅ COMPLETE
 
 **Files:** `source/core/DocumentViewport.cpp`
 
@@ -244,7 +244,7 @@ void DocumentViewport::doAsyncPdfPreload() {
 
 ---
 
-### Task 2C.5: MainWindow Integration (~30 lines) ⬜ PENDING
+### Task 2C.5: MainWindow Integration (~30 lines) ✅ COMPLETE
 
 **Files:** `source/ui/MainWindow.h`, `source/ui/MainWindow.cpp`
 
@@ -320,10 +320,76 @@ void MainWindow::toggleAutoLayout() {
 
 | File | Changes |
 |------|---------|
-| `DocumentViewport.h` | Add `m_autoLayoutEnabled`, `setAutoLayoutEnabled()`, `autoLayoutEnabled()`, declare `checkAutoLayout()`, `evictFurthestCacheEntries()` |
-| `DocumentViewport.cpp` | Implement new methods, modify `updatePdfCacheCapacity()`, modify `doAsyncPdfPreload()`, add `checkAutoLayout()` calls |
+| `DocumentViewport.h` | Add `m_autoLayoutEnabled`, `setAutoLayoutEnabled()`, `autoLayoutEnabled()`, declare `checkAutoLayout()`, `evictFurthestCacheEntries()`, `recenterHorizontally()` |
+| `DocumentViewport.cpp` | Implement new methods, modify `updatePdfCacheCapacity()`, modify `doAsyncPdfPreload()`, add `checkAutoLayout()` calls, add `recenterHorizontally()` for layout-aware centering |
 | `MainWindow.h` | Declare `toggleAutoLayout()` slot |
 | `MainWindow.cpp` | Add Ctrl+2 shortcut, implement `toggleAutoLayout()` |
+
+---
+
+## Content Centering Fix
+
+When switching between 1-column and 2-column layouts, the content width changes significantly:
+- **1-column**: Content width = 1 page width
+- **2-column**: Content width = 2 page widths + gap
+
+The original `centerViewportContent()` in MainWindow was only called once when a tab is created.
+To fix this, `recenterHorizontally()` was added to DocumentViewport and is called from `setLayoutMode()`.
+
+**Implementation:**
+```cpp
+void DocumentViewport::recenterHorizontally() {
+    if (!m_document || m_document->isEdgeless()) return;
+    
+    qreal viewportWidth = width() / m_zoomLevel;
+    QSizeF contentSize = totalContentSize();  // Width changes with layout mode
+    
+    if (contentSize.width() < viewportWidth) {
+        qreal centeringOffset = (viewportWidth - contentSize.width()) / 2.0;
+        m_panOffset.setX(-centeringOffset);
+        emit panChanged(m_panOffset);
+    }
+}
+```
+
+This ensures content is always centered regardless of layout mode changes.
+
+---
+
+## Two-Column Layout Bug Fixes
+
+### Fix 2C.F1: Zoom-in Not Triggering Layout Switch
+
+**Problem:** Zooming in too much didn't quit 2-column layout in auto mode.
+
+**Root Cause:** `checkAutoLayout()` was only called in `onGestureTimeout()`, but zoom level is applied in `endZoomGesture()`. For non-deferred zoom via `zoomAtPoint()`, it was never called.
+
+**Fix:** 
+- Added `checkAutoLayout()` call at end of `endZoomGesture()` 
+- Added `checkAutoLayout()` call in `zoomAtPoint()` for non-deferred zoom
+- Removed redundant call from `onGestureTimeout()` (now handled by `endZoomGesture()`)
+
+### Fix 2C.F2: Vertical Offset Not Scaled on Layout Switch
+
+**Problem:** When switching from 1-column to 2-column (or vice versa), user was taken to a different page because vertical positions change dramatically.
+
+**Root Cause:** `setLayoutMode()` only recentered horizontally, not adjusted Y offset.
+
+**Fix:** In `setLayoutMode()`:
+1. Before switching: Record current page and its Y position
+2. After switching: Get new Y position of same page  
+3. Adjust `m_panOffset.y()` by the delta to keep same page visible
+
+### Fix 2C.F3: Current Page Detection in Two-Column Mode
+
+**Problem:** In 2-column mode, current page was always an odd page (1, 3, 5...) because viewport center falls in the gap between columns.
+
+**Root Cause:** `updateCurrentPageIndex()` used `pageAtPoint(viewCenter)` which returns -1 when center is in a gap, then fell back to `visible.first()` (always left column).
+
+**Fix:** Improved fallback logic for 2-column mode:
+- When center is in gap, find visible page whose center is closest to viewport center
+- Uses Euclidean distance for accurate 2D proximity check
+- Works correctly regardless of which column the user is viewing
 
 ---
 

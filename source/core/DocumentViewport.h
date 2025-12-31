@@ -300,6 +300,25 @@ public:
      */
     void setPageGap(int gap);
     
+    /**
+     * @brief Check if auto-layout mode is enabled.
+     * @return true if auto 1/2 column switching is enabled.
+     * 
+     * When enabled, layout automatically switches between SingleColumn and
+     * TwoColumn based on whether viewport width >= 2 * page_width + gap.
+     * Default is disabled (1-column only mode).
+     */
+    bool autoLayoutEnabled() const { return m_autoLayoutEnabled; }
+    
+    /**
+     * @brief Enable or disable auto-layout mode.
+     * @param enabled true to enable auto 1/2 column switching.
+     * 
+     * When disabled, reverts to SingleColumn layout.
+     * Shortcut: Ctrl+2 toggles this setting.
+     */
+    void setAutoLayoutEnabled(bool enabled);
+    
     // ===== Tool Management (Task 2.1) =====
     
     /**
@@ -807,6 +826,7 @@ private:
     // ----- Layout Settings -----
     LayoutMode m_layoutMode = LayoutMode::SingleColumn;
     int m_pageGap = 20;  ///< CUSTOMIZABLE: Pixels between pages (range: 0-100)
+    bool m_autoLayoutEnabled = false;  ///< Auto 1/2 column mode (default: 1-column only)
     
     // ----- Zoom Limits -----
     /// CUSTOMIZABLE: Minimum zoom level (power user setting, range: 0.05-0.5)
@@ -1122,14 +1142,42 @@ private:
     void invalidatePdfCachePage(int pageIndex);
     
     /**
-     * @brief Update cache capacity based on layout mode.
+     * @brief Update cache capacity based on visible pages and layout mode.
+     * 
+     * Capacity = visible_pages + buffer (3 for 1-column, 6 for 2-column).
+     * If capacity decreases, immediately evicts furthest entries.
      */
     void updatePdfCacheCapacity();
+    
+    /**
+     * @brief Evict furthest cache entries until within capacity.
+     * 
+     * Must be called with m_pdfCacheMutex locked.
+     * Evicts pages furthest from m_currentPageIndex first.
+     */
+    void evictFurthestCacheEntries();
     
     /**
      * @brief Invalidate page layout cache - call when pages added/removed/resized.
      */
     void invalidatePageLayoutCache() { m_pageLayoutDirty = true; }
+    
+    /**
+     * @brief Check and apply auto-layout if enabled.
+     * 
+     * Called on resize and after zoom settles. Switches between SingleColumn
+     * and TwoColumn based on viewport width vs 2 * page_width + gap.
+     */
+    void checkAutoLayout();
+    
+    /**
+     * @brief Recenter content horizontally in viewport.
+     * 
+     * Called when layout mode changes to ensure content remains centered.
+     * Sets pan X to a negative value so content appears centered when
+     * narrower than the viewport.
+     */
+    void recenterHorizontally();
     
     /**
      * @brief Rebuild page layout cache if dirty.

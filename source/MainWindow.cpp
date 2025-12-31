@@ -1778,6 +1778,12 @@ void MainWindow::setupUi() {
     QShortcut* debugOverlayShortcut = new QShortcut(QKeySequence(Qt::Key_F12), this);
     debugOverlayShortcut->setContext(Qt::ApplicationShortcut);
     connect(debugOverlayShortcut, &QShortcut::activated, this, &MainWindow::toggleDebugOverlay);
+    
+    // Two-column auto layout toggle (Ctrl+2) - toggle between 1-column only and auto 1/2 column
+    // Only applies to paged documents (not edgeless)
+    QShortcut* autoLayoutShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_2), this);
+    autoLayoutShortcut->setContext(Qt::ApplicationShortcut);
+    connect(autoLayoutShortcut, &QShortcut::activated, this, &MainWindow::toggleAutoLayout);
 
 }
 
@@ -8619,6 +8625,28 @@ void MainWindow::toggleDebugOverlay() {
     // Connect to current viewport if shown
     if (m_debugOverlay->isOverlayVisible()) {
         m_debugOverlay->setViewport(currentViewport());
+    }
+}
+
+void MainWindow::toggleAutoLayout() {
+    DocumentViewport* viewport = currentViewport();
+    if (!viewport) return;
+    
+    Document* doc = viewport->document();
+    if (!doc || doc->isEdgeless()) {
+        // Auto layout only applies to paged documents
+        qDebug() << "Auto layout not available for edgeless canvas";
+        return;
+    }
+    
+    bool newState = !viewport->autoLayoutEnabled();
+    viewport->setAutoLayoutEnabled(newState);
+    
+    // Show status feedback via debug console
+    if (newState) {
+        qDebug() << "Auto layout enabled (1/2 columns)";
+    } else {
+        qDebug() << "Single column layout";
     }
 }
 

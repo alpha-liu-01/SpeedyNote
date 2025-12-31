@@ -677,6 +677,9 @@ private:
     // Debug Overlay (development tool - easily disabled for production)
     class DebugOverlay* m_debugOverlay = nullptr;  // Floating debug info panel
     void toggleDebugOverlay();                      // Toggle debug overlay visibility
+    
+    // Two-column layout toggle (Ctrl+2)
+    void toggleAutoLayout();                        // Toggle auto 1/2 column layout mode
     QMap<int, QString> bookmarks;  // Map of page number to bookmark title
     QPushButton *jumpToPageButton; // Button to jump to a specific page
     
