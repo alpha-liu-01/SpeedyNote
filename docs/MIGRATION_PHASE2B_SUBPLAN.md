@@ -854,66 +854,160 @@ standard lasso tools (Photoshop, Illustrator).
 
 **Expected Impact:** CPU ~18% vs ~45% (based on stroke rendering benchmarks).
 
-#### 2.10.P3: Selection Stroke Caching (~80 lines)
+#### 2.10.P3: Selection Stroke Caching (~120 lines) ✅ COMPLETE
 **Target:** Transform state performance
 
-Cache the selected strokes at identity transform:
+**Implemented:**
 
-```cpp
-// New members
-QPixmap m_selectionStrokeCache;      ///< Strokes rendered at identity transform
-bool m_selectionCacheDirty = true;   ///< Needs rebuild
-qreal m_selectionCacheZoom = 0;      ///< Zoom level of cache
+1. **New members** (`DocumentViewport.h`):
+   - `QPixmap m_selectionStrokeCache` - Strokes rendered at identity transform
+   - `bool m_selectionCacheDirty = true` - Cache needs rebuild flag
+   - `qreal m_selectionCacheZoom = 0` - Zoom level when cache was created
+   - `QRectF m_selectionCacheBounds` - Document-space bounds of cached strokes
 
-// In renderLassoSelection:
-if (m_selectionCacheDirty || zoom changed) {
-    // Rebuild cache: render strokes at identity to cache pixmap
-    rebuildSelectionCache();
-}
+2. **New methods** (`DocumentViewport.cpp`):
+   - `rebuildSelectionCache()` - Renders all selected strokes at identity to pixmap
+   - `invalidateSelectionCache()` - Marks cache as needing rebuild
 
-// Apply transform to painter, then draw cached pixmap
-// This transforms the entire cache image, NOT individual stroke points
-painter.setTransform(buildSelectionTransform());
-painter.drawPixmap(cacheBounds.topLeft(), m_selectionStrokeCache);
-```
+3. **Cache rendering approach**:
+   - Cache is created at bounding box + padding (20px for stroke thickness)
+   - Size is `bounds * zoom * devicePixelRatio` for sharp rendering
+   - Safety limit: MAX_CACHE_DIM = 4096 prevents memory issues for huge selections
+   - Falls back to direct rendering for very large selections
 
-**Considerations:**
-- Cache must cover the bounding box at current zoom
-- Invalidate when: zoom changes, offset baked in (CR-2B-9)
-- Keep rotation/scale cumulative (apply via painter transform on blit)
+4. **Transform blitting with quadToQuad**:
+   - Uses `QTransform::quadToQuad()` to map the cache rectangle to the transformed polygon
+   - This correctly handles rotation and scale without re-rendering strokes
+   - Works for both edgeless and paged modes
 
-**Expected Impact:** 10x+ faster transform updates for selections with many strokes.
+5. **Cache invalidation triggers**:
+   - New selection created (`finalizeLassoSelection`)
+   - Selection cleared (`clearLassoSelection`)
+   - Offset baked in during transform (CR-2B-9)
+   - Zoom level changes (checked in `renderLassoSelection`)
 
-#### 2.10.P4: Semi-Transparent Selection Handling
-**Target:** Marker strokes in selection
+6. **Memory safety**:
+   - Cache is cleared to empty QPixmap on `clearLassoSelection()`
+   - Size limit prevents allocation of very large pixmaps
+   - Graceful fallback to direct rendering when cache can't be created
 
-Same approach as stroke rendering:
-```cpp
-if (hasTransparentStrokes) {
-    // Render to cache with full opacity
-    // Apply alpha when blitting cache to painter
-    painter.setOpacity(alpha);
-    painter.drawPixmap(...);
-    painter.setOpacity(1.0);
-}
-```
+**Files Modified:**
+- `source/core/DocumentViewport.h` (new members and method declarations)
+- `source/core/DocumentViewport.cpp` (implementation, cache logic in renderLassoSelection)
+
+**Expected Impact:** 10x+ faster transform updates for selections with many strokes. O(1) per frame during transforms instead of O(strokes * points).
+
+#### 2.10.P4: Semi-Transparent Selection Handling (~60 lines) ✅ COMPLETE
+**Target:** Marker strokes in selection with correct per-stroke alpha
+
+**Problem:** When rendering semi-transparent strokes (like markers with 50% opacity), the filled
+polygon rendering could cause alpha compounding where the stroke outline self-intersects at
+sharp curves. The initial fix (applying uniform alpha to entire cache) incorrectly made
+opaque strokes semi-transparent when mixed with marker strokes.
+
+**Solution:** Per-stroke alpha handling:
+1. Opaque strokes (alpha = 255): Render directly to cache
+2. Semi-transparent strokes: Render to a temp buffer with full opacity, then composite
+   to the main cache with the stroke's actual alpha
+
+**Implemented:**
+
+1. **Member** (`DocumentViewport.h`):
+   - `bool m_selectionHasTransparency = false` - Whether selection contains transparent strokes
+
+2. **Modified `rebuildSelectionCache()`**:
+   - Detects if any stroke has alpha < 255
+   - For each stroke:
+     - **Opaque (alpha=255):** Render directly to cache
+     - **Semi-transparent:** 
+       1. Create temp buffer sized to stroke bounds
+       2. Render stroke with full opacity to temp buffer
+       3. Composite temp buffer to main cache with `painter.setOpacity(strokeAlpha)`
+   - This prevents alpha compounding within each semi-transparent stroke
+   - Preserves correct relative opacity between different strokes
+
+3. **Cache blitting** (in `renderLassoSelection()`):
+   - No uniform alpha applied - alpha is baked per-stroke in the cache
+   - Opaque strokes remain 100% opaque
+   - Marker strokes appear at their correct 50% opacity
+
+**Memory consideration:** Each semi-transparent stroke gets a temporary buffer during cache
+rebuild. This is acceptable because:
+- Cache rebuild only happens when selection changes or zoom changes
+- Temp buffers are released immediately after compositing
+- Size is limited to stroke bounds, not entire selection
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (member)
+- `source/core/DocumentViewport.cpp` (per-stroke rendering in rebuildSelectionCache)
+
+#### 2.10.P5: Background Snapshot for Transform (~60 lines) ✅ COMPLETE
+**Target:** Transform state performance - eliminate tile/page re-rendering
+
+**Problem Analysis:** P3 optimized the selection cache, but during transforms the underlying
+tiles/pages were still being re-rendered for each frame within the dirty region. This was
+the actual CPU bottleneck (not the selection strokes themselves).
+
+**Solution:** Reuse the same pattern as zoom/pan deferred rendering:
+1. Capture a snapshot of the viewport (excluding selection) when transform starts
+2. During transform, blit the cached background + selection cache (both are O(1))
+3. Clear snapshot when selection ends or changes
+
+**Implemented:**
+
+1. **New members** (`DocumentViewport.h`):
+   - `QPixmap m_selectionBackgroundSnapshot` - Viewport without selection
+   - `qreal m_backgroundSnapshotDpr` - Device pixel ratio of snapshot
+   - `bool m_skipSelectionRendering` - Temp flag during capture
+
+2. **New method** (`DocumentViewport.cpp`):
+   - `captureSelectionBackground()` - Sets skip flag, calls `grab()`, clears flag
+
+3. **Integration in `startSelectionTransform()`**:
+   - Captures background snapshot at start of first transform
+   - Consecutive transforms reuse existing snapshot (selection exclusion unchanged)
+
+4. **Fast path in `paintEvent()`**:
+   - Checks `m_isTransformingSelection && !m_selectionBackgroundSnapshot.isNull()`
+   - Blits background snapshot (O(1))
+   - Calls `renderLassoSelection()` which uses P3 cache (O(1))
+   - Skips all tile/page rendering
+
+5. **Selection rendering skip**:
+   - Added `&& !m_skipSelectionRendering` check to both paged and edgeless rendering
+   - Ensures `grab()` captures background without selection
+
+6. **Snapshot invalidation**:
+   - `clearLassoSelection()` - clears snapshot
+   - `finalizeLassoSelection()` - clears snapshot (new selection = new exclusion)
+
+**Memory:** ~30-50MB for snapshot (viewport size × 4 bytes × DPR²), same as zoom/pan gesture.
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (new members and method)
+- `source/core/DocumentViewport.cpp` (capture, fast path, invalidation)
+
+**Expected Impact:** Near-zero CPU during transform (just 2 pixmap blits). O(1) per frame
+regardless of canvas complexity. Same performance as zoom/pan gestures.
 
 ### Implementation Order
 
-1. **P2 (Dirty Region)** - Simplest, immediate benefit, no new state
-2. **P1 (Lasso Path Cache)** - Moderate complexity, helps path drawing
-3. **P3 (Selection Cache)** - Most complex, biggest impact for large selections
-4. **P4 (Transparency)** - Builds on P3, handles edge case
+1. **P2 (Dirty Region)** ✅ COMPLETE - Simplest, immediate benefit, no new state
+2. **P1 (Lasso Path Cache)** ✅ COMPLETE - Moderate complexity, helps path drawing
+3. **P3 (Selection Cache)** ✅ COMPLETE - Caches selection strokes at identity
+4. **P5 (Background Snapshot)** ✅ COMPLETE - Eliminates tile re-rendering during transform
+5. **P4 (Transparency)** ✅ COMPLETE - Handles marker strokes in selection correctly
 
 ### Estimated Effort
 
 | Task | Lines | Complexity | Status |
 |------|-------|------------|--------|
-| 2.10.P1 | ~50 | Medium | Pending |
+| 2.10.P1 | ~50 | Medium | ✅ COMPLETE |
 | 2.10.P2 | ~40 | Low | ✅ COMPLETE |
-| 2.10.P3 | ~80 | High | Pending |
-| 2.10.P4 | ~15 | Low | Pending |
-| **Total** | **~185** | | |
+| 2.10.P3 | ~120 | High | ✅ COMPLETE |
+| 2.10.P4 | ~60 | Medium | ✅ COMPLETE |
+| 2.10.P5 | ~60 | Medium | ✅ COMPLETE |
+| **Total** | **~330** | | **All Complete** |
 
 ### Test Cases
 

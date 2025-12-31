@@ -889,6 +889,26 @@ private:
     void resetLassoPathCache();          ///< Creates/resets the lasso path cache
     void renderLassoPathIncremental(QPainter& painter);  ///< Renders lasso path incrementally
     
+    // P3: Selection stroke caching
+    QPixmap m_selectionStrokeCache;      ///< Strokes rendered at identity transform
+    bool m_selectionCacheDirty = true;   ///< Cache needs rebuild
+    qreal m_selectionCacheZoom = 0;      ///< Zoom level when cache was created
+    QRectF m_selectionCacheBounds;       ///< Document-space bounds of cached strokes
+    
+    // P4: Semi-transparent selection handling
+    bool m_selectionHasTransparency = false;  ///< Whether selection contains transparent strokes
+    
+    void rebuildSelectionCache();        ///< Rebuild cache with strokes at identity
+    void invalidateSelectionCache();     ///< Mark cache as needing rebuild
+    
+    // P5: Background snapshot for transform performance
+    // Similar to zoom/pan gesture caching - captures viewport without selection
+    QPixmap m_selectionBackgroundSnapshot;   ///< Viewport snapshot excluding selection
+    qreal m_backgroundSnapshotDpr = 1.0;     ///< Device pixel ratio of snapshot
+    bool m_skipSelectionRendering = false;   ///< Temp flag during snapshot capture
+    
+    void captureSelectionBackground();       ///< Capture background for transform
+    
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels
     static constexpr qreal HANDLE_HIT_SIZE = 20.0;     ///< Hit area size in pixels (touch-friendly)

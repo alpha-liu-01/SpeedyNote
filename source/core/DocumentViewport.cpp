@@ -889,6 +889,30 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         return;
     }
     
+    // ========== FAST PATH: Selection Transform ==========
+    // During selection transform, draw cached background + transformed selection cache.
+    // This avoids re-rendering all tiles/pages, providing smooth transform performance.
+    if (m_isTransformingSelection && !m_selectionBackgroundSnapshot.isNull() 
+        && m_lassoSelection.isValid() && !m_skipSelectionRendering) {
+        
+        // Draw the cached background (viewport without selection)
+        qreal dpr = m_backgroundSnapshotDpr;
+        QSizeF logicalSize(m_selectionBackgroundSnapshot.width() / dpr,
+                           m_selectionBackgroundSnapshot.height() / dpr);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        painter.drawPixmap(QRectF(QPointF(0, 0), logicalSize), m_selectionBackgroundSnapshot,
+                          m_selectionBackgroundSnapshot.rect());
+        
+        // Render the selection with its current transform (uses P3 cache)
+        renderLassoSelection(painter);
+        
+        // Draw eraser cursor if needed
+        drawEraserCursor(painter);
+        
+        // Skip normal rendering during transform
+        return;
+    }
+    
     // ========== OPTIMIZATION: Dirty Region Rendering ==========
     // Only repaint what's needed. During stroke drawing, the dirty region is small.
     QRect dirtyRect = event->rect();
@@ -1013,7 +1037,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     }
     
     // Task 2.10.3: Draw lasso selection (selected strokes + bounding box)
-    if (m_lassoSelection.isValid()) {
+    // P5: Skip during background snapshot capture
+    if (m_lassoSelection.isValid() && !m_skipSelectionRendering) {
         renderLassoSelection(painter);
     }
     
@@ -3393,6 +3418,12 @@ void DocumentViewport::finalizeLassoSelection()
     if (m_lassoSelection.isValid()) {
         m_lassoSelection.boundingBox = calculateSelectionBoundingBox();
         m_lassoSelection.transformOrigin = m_lassoSelection.boundingBox.center();
+        
+        // P3: Invalidate selection cache so it rebuilds with new strokes
+        invalidateSelectionCache();
+        
+        // P5: Clear background snapshot (new selection = new excluded strokes)
+        m_selectionBackgroundSnapshot = QPixmap();
     }
     
     // Clear the lasso path now that selection is complete
@@ -3458,6 +3489,146 @@ QTransform DocumentViewport::buildSelectionTransform() const
     return t;
 }
 
+// ===== P3: Selection Stroke Caching =====
+
+void DocumentViewport::invalidateSelectionCache()
+{
+    m_selectionCacheDirty = true;
+}
+
+void DocumentViewport::captureSelectionBackground()
+{
+    // P5: Capture viewport without selection for fast transform rendering
+    // Uses same pattern as zoom/pan gesture caching
+    
+    // Temporarily disable selection rendering
+    m_skipSelectionRendering = true;
+    
+    // Capture the viewport (this triggers a paint without selection)
+    m_selectionBackgroundSnapshot = grab();
+    m_backgroundSnapshotDpr = m_selectionBackgroundSnapshot.devicePixelRatio();
+    
+    // Re-enable selection rendering
+    m_skipSelectionRendering = false;
+}
+
+void DocumentViewport::rebuildSelectionCache()
+{
+    if (!m_lassoSelection.isValid()) {
+        m_selectionStrokeCache = QPixmap();
+        m_selectionCacheDirty = true;
+        m_selectionHasTransparency = false;
+        return;
+    }
+    
+    qreal dpr = devicePixelRatioF();
+    QRectF bounds = m_lassoSelection.boundingBox;
+    
+    // Add padding for stroke thickness (strokes may extend beyond bounding box)
+    constexpr qreal STROKE_PADDING = 20.0;
+    bounds.adjust(-STROKE_PADDING, -STROKE_PADDING, STROKE_PADDING, STROKE_PADDING);
+    
+    // Calculate cache size at current zoom with high DPI support
+    int cacheW = qCeil(bounds.width() * m_zoomLevel * dpr);
+    int cacheH = qCeil(bounds.height() * m_zoomLevel * dpr);
+    
+    // Safety check: prevent excessively large caches
+    constexpr int MAX_CACHE_DIM = 4096;
+    if (cacheW > MAX_CACHE_DIM || cacheH > MAX_CACHE_DIM || cacheW <= 0 || cacheH <= 0) {
+        // Fall back to non-cached rendering for very large selections
+        m_selectionStrokeCache = QPixmap();
+        m_selectionCacheDirty = true;
+        m_selectionHasTransparency = false;
+        return;
+    }
+    
+    // P4: Detect semi-transparent strokes
+    // We need to handle semi-transparent strokes specially to prevent alpha compounding
+    // But we must preserve the relative opacity between different strokes
+    m_selectionHasTransparency = false;
+    for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+        if (stroke.color.alpha() < 255) {
+            m_selectionHasTransparency = true;
+            break;
+        }
+    }
+    
+    // Create cache pixmap
+    m_selectionStrokeCache = QPixmap(cacheW, cacheH);
+    m_selectionStrokeCache.setDevicePixelRatio(dpr);
+    m_selectionStrokeCache.fill(Qt::transparent);
+    
+    // Render strokes to cache at identity transform
+    QPainter cachePainter(&m_selectionStrokeCache);
+    cachePainter.setRenderHint(QPainter::Antialiasing, true);
+    
+    // Scale to current zoom and offset to cache origin
+    cachePainter.scale(m_zoomLevel, m_zoomLevel);
+    cachePainter.translate(-bounds.topLeft());
+    
+    // P4: Render each stroke at identity (no selection transform)
+    // For semi-transparent strokes, render to a temp buffer with full opacity,
+    // then composite with the stroke's alpha. Opaque strokes render directly.
+    for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+        int strokeAlpha = stroke.color.alpha();
+        
+        if (strokeAlpha < 255) {
+            // Semi-transparent stroke: render opaque to temp buffer, then composite
+            // This prevents alpha compounding within the stroke's self-intersections
+            QRectF strokeBounds = stroke.boundingBox;
+            strokeBounds.adjust(-stroke.baseThickness, -stroke.baseThickness,
+                               stroke.baseThickness, stroke.baseThickness);
+            
+            // Create temp buffer for this stroke
+            int tempW = qCeil(strokeBounds.width() * m_zoomLevel * dpr) + 4;
+            int tempH = qCeil(strokeBounds.height() * m_zoomLevel * dpr) + 4;
+            
+            // Safety check for temp buffer size
+            if (tempW > 0 && tempH > 0 && tempW <= 4096 && tempH <= 4096) {
+                QPixmap tempBuffer(tempW, tempH);
+                tempBuffer.setDevicePixelRatio(dpr);
+                tempBuffer.fill(Qt::transparent);
+                
+                QPainter tempPainter(&tempBuffer);
+                tempPainter.setRenderHint(QPainter::Antialiasing, true);
+                tempPainter.scale(m_zoomLevel, m_zoomLevel);
+                tempPainter.translate(-strokeBounds.topLeft());
+                
+                // Render stroke with full opacity
+                VectorStroke opaqueStroke = stroke;
+                opaqueStroke.color.setAlpha(255);
+                VectorLayer::renderStroke(tempPainter, opaqueStroke);
+                tempPainter.end();
+                
+                // Composite temp buffer to cache with stroke's alpha
+                cachePainter.save();
+                cachePainter.resetTransform();  // Work in cache pixel coords
+                cachePainter.setOpacity(strokeAlpha / 255.0);
+                
+                // Calculate where to blit in cache coordinates
+                QPointF cachePos = (strokeBounds.topLeft() - bounds.topLeft()) * m_zoomLevel;
+                cachePainter.drawPixmap(cachePos, tempBuffer);
+                
+                cachePainter.setOpacity(1.0);
+                cachePainter.restore();
+            } else {
+                // Fallback: render directly (may have alpha compounding)
+                VectorLayer::renderStroke(cachePainter, stroke);
+            }
+        } else {
+            // Opaque stroke: render directly
+            VectorLayer::renderStroke(cachePainter, stroke);
+        }
+    }
+    
+    cachePainter.end();
+    
+    // Store cache metadata
+    m_selectionCacheBounds = bounds;
+    m_selectionCacheZoom = m_zoomLevel;
+    m_selectionCacheDirty = false;
+}
+
 void DocumentViewport::renderLassoSelection(QPainter& painter)
 {
     if (!m_lassoSelection.isValid()) {
@@ -3467,45 +3638,107 @@ void DocumentViewport::renderLassoSelection(QPainter& painter)
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
     
-    // Get the current selection transform
-    QTransform transform = buildSelectionTransform();
+    // P3: Check if cache needs rebuild (dirty or zoom changed)
+    bool useCache = true;
+    if (m_selectionCacheDirty || !qFuzzyCompare(m_selectionCacheZoom, m_zoomLevel)) {
+        rebuildSelectionCache();
+    }
     
-    // Render each selected stroke with transform applied
-    for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
-        // Transform each point and render
-        VectorStroke transformedStroke;
-        transformedStroke.id = stroke.id;
-        transformedStroke.color = stroke.color;
-        transformedStroke.baseThickness = stroke.baseThickness;
+    // If cache is still invalid (very large selection), fall back to direct rendering
+    if (m_selectionStrokeCache.isNull()) {
+        useCache = false;
+    }
+    
+    if (useCache) {
+        // P3: Render using cached pixmap with transform applied
+        QTransform selectionTransform = buildSelectionTransform();
         
-        for (const StrokePoint& pt : stroke.points) {
-            StrokePoint tPt;
-            tPt.pos = transform.map(pt.pos);
-            tPt.pressure = pt.pressure;
-            transformedStroke.points.append(tPt);
+        // Calculate page origin for paged mode
+        QPointF pageOrigin;
+        if (!m_document->isEdgeless()) {
+            pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
         }
-        transformedStroke.updateBoundingBox();
         
-        // Convert from document/page coords to viewport and render
-        // We need to render at viewport scale
-        painter.save();
+        // The cache was rendered at identity with cache bounds as origin.
+        // We need to:
+        // 1. Position at cache bounds origin (in document coords)
+        // 2. Apply selection transform (rotate/scale around selection center, then offset)
+        // 3. Convert to viewport coordinates
         
-        if (m_document->isEdgeless()) {
-            // Edgeless: stroke coords are in document space
-            // Apply zoom and pan to get to viewport
-            painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-            painter.scale(m_zoomLevel, m_zoomLevel);
+        // Transform the cache bounds corners through the selection transform
+        QRectF cacheBounds = m_selectionCacheBounds;
+        QPolygonF corners;
+        corners << cacheBounds.topLeft() << cacheBounds.topRight()
+                << cacheBounds.bottomRight() << cacheBounds.bottomLeft();
+        
+        // Apply selection transform to corners
+        QPolygonF transformedCorners = selectionTransform.map(corners);
+        
+        // Convert to viewport coordinates
+        QPolygonF vpCorners;
+        for (const QPointF& pt : transformedCorners) {
+            if (m_document->isEdgeless()) {
+                vpCorners << documentToViewport(pt);
+            } else {
+                vpCorners << documentToViewport(pt + pageOrigin);
+            }
+        }
+        
+        // Use QTransform::quadToQuad to map the cache rectangle to the transformed polygon
+        QPolygonF sourceRect;
+        sourceRect << QPointF(0, 0)
+                   << QPointF(cacheBounds.width() * m_zoomLevel, 0)
+                   << QPointF(cacheBounds.width() * m_zoomLevel, cacheBounds.height() * m_zoomLevel)
+                   << QPointF(0, cacheBounds.height() * m_zoomLevel);
+        
+        QTransform blitTransform;
+        if (QTransform::quadToQuad(sourceRect, vpCorners, blitTransform)) {
+            painter.save();
+            painter.setTransform(blitTransform, true);
+            // P4: Alpha is now baked into the cache per-stroke, no uniform alpha needed
+            painter.drawPixmap(0, 0, m_selectionStrokeCache);
+            painter.restore();
         } else {
-            // Paged: stroke coords are in page-local space
-            // Need to add page offset first
-            QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
-            painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
-            painter.scale(m_zoomLevel, m_zoomLevel);
-            painter.translate(pageOrigin);
+            // Fallback: simple positioning (no rotation/scale - shouldn't normally happen)
+            QPointF vpOrigin = m_document->isEdgeless() 
+                ? documentToViewport(selectionTransform.map(cacheBounds.topLeft()))
+                : documentToViewport(selectionTransform.map(cacheBounds.topLeft()) + pageOrigin);
+            // P4: Alpha is now baked into the cache per-stroke, no uniform alpha needed
+            painter.drawPixmap(vpOrigin, m_selectionStrokeCache);
         }
+    } else {
+        // Fallback: Direct rendering for very large selections
+        QTransform transform = buildSelectionTransform();
         
-        VectorLayer::renderStroke(painter, transformedStroke);
-        painter.restore();
+        for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
+            VectorStroke transformedStroke;
+            transformedStroke.id = stroke.id;
+            transformedStroke.color = stroke.color;
+            transformedStroke.baseThickness = stroke.baseThickness;
+            
+            for (const StrokePoint& pt : stroke.points) {
+                StrokePoint tPt;
+                tPt.pos = transform.map(pt.pos);
+                tPt.pressure = pt.pressure;
+                transformedStroke.points.append(tPt);
+            }
+            transformedStroke.updateBoundingBox();
+            
+            painter.save();
+            
+            if (m_document->isEdgeless()) {
+                painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+                painter.scale(m_zoomLevel, m_zoomLevel);
+            } else {
+                QPointF pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+                painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
+                painter.scale(m_zoomLevel, m_zoomLevel);
+                painter.translate(pageOrigin);
+            }
+            
+            VectorLayer::renderStroke(painter, transformedStroke);
+            painter.restore();
+        }
     }
     
     // Draw the bounding box
@@ -3758,6 +3991,13 @@ void DocumentViewport::startSelectionTransform(HandleHit handle, const QPointF& 
     m_transformHandle = handle;
     m_transformStartPos = viewportPos;
     
+    // P5: Capture background snapshot for fast transform rendering
+    // Only capture if we don't already have a valid snapshot
+    // (consecutive transforms reuse the existing snapshot)
+    if (m_selectionBackgroundSnapshot.isNull()) {
+        captureSelectionBackground();
+    }
+    
     // Store document position for coordinate-independent calculations
     if (m_document->isEdgeless()) {
         m_transformStartDocPos = viewportToDocument(viewportPos);
@@ -3790,6 +4030,9 @@ void DocumentViewport::startSelectionTransform(HandleHit handle, const QPointF& 
         
         // Reset offset only (rotation and scale remain)
         m_lassoSelection.offset = QPointF(0, 0);
+        
+        // P3: Strokes changed, invalidate cache so it rebuilds with new positions
+        invalidateSelectionCache();
     }
     
     // Store current transform state so we can compute deltas
@@ -4380,6 +4623,13 @@ void DocumentViewport::clearLassoSelection()
     // P1: Reset cache state
     m_lastRenderedLassoIdx = 0;
     m_lassoPathLength = 0;
+    
+    // P3: Clear selection stroke cache
+    m_selectionStrokeCache = QPixmap();
+    m_selectionCacheDirty = true;
+    
+    // P5: Clear background snapshot
+    m_selectionBackgroundSnapshot = QPixmap();
     
     update();
 }
@@ -5535,7 +5785,8 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     }
     
     // Task 2.10.3: Draw lasso selection (edgeless mode)
-    if (m_lassoSelection.isValid()) {
+    // P5: Skip during background snapshot capture
+    if (m_lassoSelection.isValid() && !m_skipSelectionRendering) {
         renderLassoSelection(painter);
     }
 }
