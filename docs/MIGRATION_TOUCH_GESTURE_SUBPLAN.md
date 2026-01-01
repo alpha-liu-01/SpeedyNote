@@ -517,12 +517,15 @@ QPointF centroid = (pos1 + pos2) / 2.0;
 if (!m_pinchActive) {
     // Start pinch
     m_pinchStartDistance = distance;
+    m_pinchCentroid = centroid;  // Store original centroid
     m_viewport->beginZoomGesture(centroid);
 } else {
     // Frame-to-frame scale for smooth zoom
     qreal incrementalScale = distance / m_pinchStartDistance;
-    m_viewport->updateZoomGesture(incrementalScale, centroid);
+    // Use ORIGINAL centroid to prevent counterintuitive panning (see bug fix below)
+    m_viewport->updateZoomGesture(incrementalScale, m_pinchCentroid);
     m_pinchStartDistance = distance;  // Track for next frame
+    // Note: NOT updating m_pinchCentroid - zoom stays centered on initial touch
 }
 ```
 
@@ -530,6 +533,41 @@ if (!m_pinchActive) {
 
 - On finger lift: `endTouchPinch()` calls `m_viewport->endZoomGesture()`
 - Already implemented in TG.1.R
+
+#### Bug Fix: Pinch-to-Zoom "Opposite Direction" Panning
+
+**Problem**: When moving both fingers during a pinch gesture, the content panned in a counterintuitive direction. Moving fingers UP sometimes made content move DOWN (depending on zoom factor).
+
+**Root Cause**: The original code passed the **current** centroid to `updateZoomGesture()` each frame:
+```cpp
+m_viewport->updateZoomGesture(incrementalScale, centroid);  // Current centroid
+m_pinchCentroid = centroid;  // Updated each frame
+```
+
+When the zoom center changes frame-to-frame, it creates an implicit "pan" effect that's mathematically derived from the zoom transformation, NOT from finger movement direction. This causes unpredictable behavior.
+
+**Two UX Patterns**:
+| Pattern | Behavior | Implementation |
+|---------|----------|----------------|
+| **A: Fixed Center** | Zoom always centered on initial touch. Moving fingers only affects scale. | Simple - use original centroid |
+| **B: Mobile-like** | Content under fingers stays under fingers (zoom + pan). | Complex - requires explicit pan compensation |
+
+**Fix**: Implemented **Pattern A** - use original centroid for all zoom updates:
+```cpp
+// Use ORIGINAL centroid - zoom stays centered on initial touch
+m_viewport->updateZoomGesture(incrementalScale, m_pinchCentroid);
+
+// Update distance only (not centroid) for next frame
+m_pinchStartDistance = distance;
+// Note: NOT updating m_pinchCentroid
+```
+
+**Result**: Predictable zoom behavior. Moving fingers during pinch only changes zoom scale, not position. No "opposite direction" panning.
+
+**Future Enhancement**: Pattern B (true mobile-like pan-during-pinch) would require:
+1. Tracking centroid movement each frame
+2. Applying explicit pan compensation: `panDelta = -centroidDelta / zoomLevel`
+3. Either modifying viewport API to support combined zoom+pan, or computing an adjusted zoom center
 
 ---
 

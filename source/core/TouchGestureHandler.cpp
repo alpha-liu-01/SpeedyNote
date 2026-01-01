@@ -180,11 +180,17 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                 // Each frame: scaleFactor = currentDistance / previousDistance
                 // This compounds correctly: total scale = product of all frame ratios
                 qreal incrementalScale = distance / m_pinchStartDistance;
-                m_viewport->updateZoomGesture(incrementalScale, centroid);
                 
-                // Update tracking for next frame
+                // FIX: Use ORIGINAL centroid (m_pinchCentroid) instead of current centroid
+                // When zoom center changes frame-to-frame, it creates an implicit pan effect
+                // that's mathematically derived from the zoom transform, NOT from finger direction.
+                // This causes counterintuitive "opposite direction" panning.
+                // Using fixed center = predictable zoom behavior, no unexpected panning.
+                m_viewport->updateZoomGesture(incrementalScale, m_pinchCentroid);
+                
+                // Update distance tracking for next frame's scale calculation
                 m_pinchStartDistance = distance;
-                m_pinchCentroid = centroid;
+                // Note: NOT updating m_pinchCentroid - zoom stays centered on initial touch
             }
             
             event->accept();
