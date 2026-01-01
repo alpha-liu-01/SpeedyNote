@@ -1767,11 +1767,12 @@ void MainWindow::setupUi() {
     newEdgelessShortcut->setContext(Qt::ApplicationShortcut);
     connect(newEdgelessShortcut, &QShortcut::activated, this, &MainWindow::addNewEdgelessTab);
     
-    // TEMPORARY: Load Edgeless Canvas: Ctrl+Shift+L - opens .snb bundle folder
-    // TODO: Replace with unified file picker when .snb becomes a single file
-    QShortcut* loadEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), this);
-    loadEdgelessShortcut->setContext(Qt::ApplicationShortcut);
-    connect(loadEdgelessShortcut, &QShortcut::activated, this, &MainWindow::loadEdgelessDocument);
+    // TEMPORARY: Load Bundle (.snb folder): Ctrl+Shift+L
+    // Phase O1.7.6: Now handles BOTH paged and edgeless bundles
+    // TODO: Replace with unified file picker when .snb becomes a single file (QDataStream packaging)
+    QShortcut* loadBundleShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), this);
+    loadBundleShortcut->setContext(Qt::ApplicationShortcut);
+    connect(loadBundleShortcut, &QShortcut::activated, this, &MainWindow::loadFolderDocument);
     
     // Open PDF: Ctrl+Shift+O - open PDF file in new tab
     QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
@@ -3645,16 +3646,13 @@ void MainWindow::saveDocument()
             }
             
     // ✅ New document or temp bundle - show Save As dialog
+    // Phase O1.7.6: All documents now use unified .snb bundle format
     QString defaultName = doc->name.isEmpty() ? 
         (isEdgeless ? "Untitled Canvas" : "Untitled") : doc->name;
     
-    QString defaultExt = isEdgeless ? ".snb" : ".json";
-    QString defaultPath = QDir::homePath() + "/" + defaultName + defaultExt;
+    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
     
-    QString filter = isEdgeless ? 
-        tr("SpeedyNote Bundle (*.snb);;All Files (*)") :
-        tr("SpeedyNote JSON (*.json);;All Files (*)");
-    
+    QString filter = tr("SpeedyNote Bundle (*.snb);;All Files (*)");
     QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
     
     QString filePath = QFileDialog::getSaveFileName(
@@ -3669,15 +3667,9 @@ void MainWindow::saveDocument()
                 return;
             }
             
-    // Ensure correct extension
-    if (isEdgeless) {
-        if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
-            filePath += ".snb";
-        }
-                } else {
-        if (!filePath.endsWith(".json", Qt::CaseInsensitive)) {
-            filePath += ".json";
-        }
+    // Ensure .snb extension (Phase O1.7.6: unified bundle format)
+    if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
+        filePath += ".snb";
     }
         
     // Update document name from file name (without extension)
@@ -3717,7 +3709,8 @@ void MainWindow::loadDocument()
             }
     
     // Open file dialog for file selection
-    QString filter = tr("SpeedyNote Files (*.json *.snx);;All Files (*)");
+    // Phase O1.7.6: Include .snb bundles in the filter (unified format)
+    QString filter = tr("SpeedyNote Files (*.snb *.json *.snx);;SpeedyNote Bundle (*.snb);;Legacy JSON (*.json *.snx);;All Files (*)");
     QString filePath = QFileDialog::getOpenFileName(
         this,
         tr("Open Document"),
@@ -4192,24 +4185,27 @@ void MainWindow::addNewEdgelessTab()
     updateDialDisplay();
 }
 
-void MainWindow::loadEdgelessDocument()
+void MainWindow::loadFolderDocument()
 {
-    // TEMPORARY: Load edgeless document from .snb bundle directory
+    // TEMPORARY: Load .snb bundle document from directory
     // Uses directory selection because .snb is a folder, not a single file.
     // 
+    // Phase O1.7.6: This now handles BOTH paged and edgeless bundles.
+    // The mode is detected from the manifest and handled appropriately.
+    //
     // TODO: Replace with unified file handling after implementing:
     // 1. Single-file packaging (.snb as zip/tar), OR
     // 2. Unified file picker that handles both files and folders
     
     if (!m_documentManager || !m_tabManager) {
-        qWarning() << "loadEdgelessDocument: DocumentManager or TabManager not initialized";
+        qWarning() << "loadBundleDocument: DocumentManager or TabManager not initialized";
         return;
     }
     
     // Use directory dialog to select .snb bundle folder
     QString bundlePath = QFileDialog::getExistingDirectory(
         this,
-        tr("Open Edgeless Canvas (.snb folder)"),
+        tr("Open SpeedyNote Bundle (.snb folder)"),
         QDir::homePath(),
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
     );
@@ -4228,11 +4224,11 @@ void MainWindow::loadEdgelessDocument()
         return;
     }
     
-    // Load the bundle via DocumentManager
+    // Load the bundle via DocumentManager (handles both paged and edgeless)
     Document* doc = m_documentManager->loadDocument(bundlePath);
     if (!doc) {
         QMessageBox::critical(this, tr("Load Error"),
-            tr("Failed to load edgeless canvas from:\n%1").arg(bundlePath));
+            tr("Failed to load document from:\n%1").arg(bundlePath));
         return;
     }
     
@@ -4255,18 +4251,32 @@ void MainWindow::loadEdgelessDocument()
             m_tabWidget->setCurrentIndex(tabIndex);
         }
         
-        // Center on origin for edgeless
-        QTimer::singleShot(0, this, [this, tabIndex]() {
-            if (m_tabManager) {
-                DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
-                if (viewport) {
-                    viewport->setPanOffset(QPointF(-100, -100));
-                }
-            }
-        });
+        // Mode-specific setup
+        bool isEdgeless = doc->isEdgeless();
         
-        qDebug() << "loadEdgelessDocument: Loaded edgeless canvas with" 
-                 << doc->tileIndexCount() << "tiles indexed (lazy load) from" << bundlePath;
+        // Mode-specific initial positioning
+        if (isEdgeless) {
+            // Edgeless: Center on origin (use timer to ensure viewport is ready)
+            QTimer::singleShot(0, this, [this, tabIndex]() {
+                if (m_tabManager) {
+                    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+                    if (viewport) {
+                        viewport->setPanOffset(QPointF(-100, -100));
+                    }
+                }
+            });
+        } else {
+            // Paged: Center content horizontally (same as loadDocument)
+            centerViewportContent(tabIndex);
+        }
+        
+        if (isEdgeless) {
+            qDebug() << "loadBundleDocument: Loaded edgeless canvas with" 
+                     << doc->tileIndexCount() << "tiles indexed (lazy load) from" << bundlePath;
+        } else {
+            qDebug() << "loadBundleDocument: Loaded paged document with" 
+                     << doc->pageCount() << "pages (lazy load) from" << bundlePath;
+        }
     }
     
     updateDialDisplay();

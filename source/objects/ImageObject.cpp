@@ -162,7 +162,7 @@ QString ImageObject::fullPath(const QString& basePath) const
         return QString();
     }
     
-    // Check if path is already absolute
+    // Check if path is already absolute (legacy support)
     QFileInfo info(imagePath);
     if (info.isAbsolute()) {
         return imagePath;
@@ -173,5 +173,67 @@ QString ImageObject::fullPath(const QString& basePath) const
         return imagePath;
     }
     
-    return QDir(basePath).filePath(imagePath);
+    // Phase O1.6: Resolve against assets/images/ subdirectory
+    // New format stores just the filename (e.g., "a1b2c3d4.png")
+    // Full path becomes: bundlePath/assets/images/filename
+    return basePath + "/assets/images/" + imagePath;
+}
+
+bool ImageObject::saveToAssets(const QString& bundlePath)
+{
+    if (bundlePath.isEmpty()) {
+        qWarning() << "ImageObject::saveToAssets: bundlePath is empty";
+        return false;
+    }
+    
+    if (cachedPixmap.isNull()) {
+        qWarning() << "ImageObject::saveToAssets: no image loaded";
+        return false;
+    }
+    
+    // Calculate hash if not already set
+    if (imageHash.isEmpty()) {
+        calculateHash();
+    }
+    
+    if (imageHash.isEmpty()) {
+        qWarning() << "ImageObject::saveToAssets: failed to calculate hash";
+        return false;
+    }
+    
+    // Use first 16 characters of hash as filename
+    QString filename = imageHash.left(16) + ".png";
+    QString assetsPath = bundlePath + "/assets/images";
+    QString fullFilePath = assetsPath + "/" + filename;
+    
+    // Check if file already exists (deduplication)
+    if (QFile::exists(fullFilePath)) {
+        // Image already saved, just update path
+        imagePath = filename;
+#ifdef QT_DEBUG
+        qDebug() << "ImageObject: reusing existing asset" << filename;
+#endif
+        return true;
+    }
+    
+    // Ensure directory exists
+    if (!QDir().mkpath(assetsPath)) {
+        qWarning() << "ImageObject::saveToAssets: cannot create directory" << assetsPath;
+        return false;
+    }
+    
+    // Save image to assets folder
+    if (!cachedPixmap.save(fullFilePath, "PNG")) {
+        qWarning() << "ImageObject::saveToAssets: failed to save" << fullFilePath;
+        return false;
+    }
+    
+    // Update imagePath to just the filename
+    imagePath = filename;
+    
+#ifdef QT_DEBUG
+    qDebug() << "ImageObject: saved to assets" << filename;
+#endif
+    
+    return true;
 }

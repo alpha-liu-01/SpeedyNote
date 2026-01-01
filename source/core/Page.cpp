@@ -231,7 +231,13 @@ bool Page::hasLayerCachesAllocated() const
 void Page::addObject(std::unique_ptr<InsertedObject> obj)
 {
     if (obj) {
+        // Add to affinity map before moving
+        int affinity = obj->getLayerAffinity();
+        InsertedObject* ptr = obj.get();
+        
         objects.push_back(std::move(obj));
+        objectsByAffinity[affinity].push_back(ptr);
+        
         modified = true;
     }
 }
@@ -240,6 +246,24 @@ bool Page::removeObject(const QString& id)
 {
     for (size_t i = 0; i < objects.size(); ++i) {
         if (objects[i]->id == id) {
+            // Remove from affinity map first
+            InsertedObject* obj = objects[i].get();
+            int affinity = obj->getLayerAffinity();
+            
+            auto it = objectsByAffinity.find(affinity);
+            if (it != objectsByAffinity.end()) {
+                auto& group = it->second;
+                group.erase(
+                    std::remove(group.begin(), group.end(), obj),
+                    group.end()
+                );
+                // Clean up empty groups
+                if (group.empty()) {
+                    objectsByAffinity.erase(it);
+                }
+            }
+            
+            // Remove from objects vector
             objects.erase(objects.begin() + i);
             modified = true;
             return true;
@@ -289,8 +313,68 @@ void Page::sortObjectsByZOrder()
               });
 }
 
+void Page::rebuildAffinityMap()
+{
+    // Clear existing map
+    objectsByAffinity.clear();
+    
+    // Group objects by their layerAffinity value
+    for (auto& obj : objects) {
+        if (obj) {
+            int affinity = obj->getLayerAffinity();
+            objectsByAffinity[affinity].push_back(obj.get());
+        }
+    }
+}
+
+bool Page::updateObjectAffinity(const QString& id, int newAffinity)
+{
+    // Find the object
+    InsertedObject* obj = objectById(id);
+    if (!obj) {
+        return false;
+    }
+    
+    int oldAffinity = obj->getLayerAffinity();
+    
+    // If affinity unchanged, nothing to do
+    if (oldAffinity == newAffinity) {
+        return true;
+    }
+    
+    // Remove from old affinity group
+    auto oldIt = objectsByAffinity.find(oldAffinity);
+    if (oldIt != objectsByAffinity.end()) {
+        auto& oldGroup = oldIt->second;
+        oldGroup.erase(
+            std::remove(oldGroup.begin(), oldGroup.end(), obj),
+            oldGroup.end()
+        );
+        // Clean up empty groups
+        if (oldGroup.empty()) {
+            objectsByAffinity.erase(oldIt);
+        }
+    }
+    
+    // Update the object's affinity
+    obj->setLayerAffinity(newAffinity);
+    
+    // Add to new affinity group
+    objectsByAffinity[newAffinity].push_back(obj);
+    
+    modified = true;
+    return true;
+}
+
 // ===== Rendering =====
 
+/**
+ * @deprecated This method renders objects AFTER all layers, bypassing the affinity system.
+ * Use DocumentViewport::renderPage() which calls renderObjectsWithAffinity() for proper
+ * interleaved rendering based on layer affinity.
+ * 
+ * This method is kept for backward compatibility but should not be used for main rendering.
+ */
 void Page::render(QPainter& painter, const QPixmap* pdfBackground, qreal zoom) const
 {
     // 1. Render background
@@ -433,6 +517,32 @@ void Page::renderObjects(QPainter& painter, qreal zoom) const
     }
 }
 
+void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity) const
+{
+    // Find objects with the specified affinity
+    auto it = objectsByAffinity.find(affinity);
+    if (it == objectsByAffinity.end()) {
+        return;  // No objects with this affinity
+    }
+    
+    // Get the objects for this affinity group
+    // Note: We need to copy and sort because the map stores non-const pointers
+    // but we're in a const method. We sort by zOrder within this affinity group.
+    std::vector<InsertedObject*> objs = it->second;
+    
+    std::sort(objs.begin(), objs.end(),
+              [](InsertedObject* a, InsertedObject* b) {
+                  return a->zOrder < b->zOrder;
+              });
+    
+    // Render each visible object in this affinity group
+    for (InsertedObject* obj : objs) {
+        if (obj->visible) {
+            obj->render(painter, zoom);
+        }
+    }
+}
+
 // ===== Serialization =====
 
 QJsonObject Page::toJson() const
@@ -532,6 +642,9 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
         }
     }
     
+    // Build affinity map after loading all objects
+    page->rebuildAffinityMap();
+    
     page->modified = false;
     return page;
 }
@@ -589,8 +702,9 @@ void Page::clearContent()
         layer->clear();
     }
     
-    // Clear objects
+    // Clear objects and affinity map
     objects.clear();
+    objectsByAffinity.clear();
     
     modified = true;
 }

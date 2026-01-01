@@ -37,10 +37,24 @@ public:
     QString id;               ///< UUID for tracking
     QPointF position;         ///< Top-left position on page (in page coordinates)
     QSizeF size;              ///< Bounding size
-    int zOrder = 0;           ///< Stacking order (higher = on top)
+    int zOrder = 0;           ///< Stacking order within same affinity (higher = on top)
     bool locked = false;      ///< If true, object cannot be moved/resized/deleted
     bool visible = true;      ///< Whether object is rendered
     qreal rotation = 0.0;     ///< Rotation in degrees (for future use)
+    
+    /**
+     * @brief Layer affinity - determines rendering order relative to stroke layers.
+     * 
+     * Objects are rendered at specific points in the layer stack:
+     * - -1 (default): Rendered BELOW all stroke layers (e.g., background image)
+     * -  0: Rendered AFTER Layer 0 strokes, BEFORE Layer 1 strokes
+     * -  1: Rendered AFTER Layer 1 strokes, BEFORE Layer 2 strokes
+     * -  N: Rendered AFTER Layer N strokes, BEFORE Layer N+1 strokes
+     * 
+     * Use case: Paste a test paper image (affinity=-1), write strokes on top.
+     * The zOrder property only affects ordering among objects with the SAME affinity.
+     */
+    int layerAffinity = -1;
     
     /**
      * @brief Default constructor.
@@ -106,6 +120,21 @@ public:
     virtual bool containsPoint(const QPointF& pt) const;
     
     // ===== Common Helpers =====
+    
+    /**
+     * @brief Get the layer affinity.
+     * @return Layer index this object renders after (-1 = below all layers).
+     */
+    int getLayerAffinity() const { return layerAffinity; }
+    
+    /**
+     * @brief Set the layer affinity.
+     * @param affinity Layer index this object should render after (-1 = below all layers).
+     * 
+     * Note: Changing affinity requires updating the containing Page's affinity map.
+     * Use Page::updateObjectAffinity() to properly re-group the object.
+     */
+    void setLayerAffinity(int affinity) { layerAffinity = affinity; }
     
     /**
      * @brief Get the bounding rectangle of this object.

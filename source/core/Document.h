@@ -282,6 +282,36 @@ public:
     QVector<TileCoord> allLoadedTileCoords() const;
     
     // =========================================================================
+    // Object Extent Tracking (Phase O1.5)
+    // =========================================================================
+    
+    /**
+     * @brief Get the maximum object extent.
+     * @return Largest dimension (width or height) of any object in the document.
+     * 
+     * Used by DocumentViewport to calculate extra tile loading margin.
+     * If no objects exist, returns 0.
+     */
+    int maxObjectExtent() const { return m_maxObjectExtent; }
+    
+    /**
+     * @brief Update the maximum object extent based on an object's size.
+     * @param obj The object to consider.
+     * 
+     * Call this when adding an object or resizing an existing one.
+     * Updates m_maxObjectExtent if the object's largest dimension is greater.
+     */
+    void updateMaxObjectExtent(const InsertedObject* obj);
+    
+    /**
+     * @brief Recalculate the maximum object extent from all objects.
+     * 
+     * Call this after removing an object (the removed object might have been the largest).
+     * Scans all tiles/pages to find the new maximum. May be slow with many tiles.
+     */
+    void recalculateMaxObjectExtent();
+    
+    // =========================================================================
     // Tile Persistence (Phase E5)
     // =========================================================================
     
@@ -296,6 +326,18 @@ public:
      * @return Path to the .snb directory, or empty if not set.
      */
     QString bundlePath() const { return m_bundlePath; }
+    
+    /**
+     * @brief Get the path to the assets/images directory.
+     * @return Full path to assets/images, or empty if bundle path not set.
+     * 
+     * Phase O1.6: Used for storing image files with hash-based names.
+     * ImageObjects store just the filename, and this path is used
+     * to resolve the full path when loading/saving.
+     */
+    QString assetsImagePath() const { 
+        return m_bundlePath.isEmpty() ? QString() : m_bundlePath + "/assets/images"; 
+    }
     
     /**
      * @brief Check if lazy loading from disk is enabled.
@@ -640,8 +682,14 @@ public:
     /**
      * @brief Get the number of pages in the document.
      * @return Page count (always >= 1 after ensureMinimumPages).
+     * 
+     * Phase O1.7: Returns m_pageOrder.size() in lazy loading mode.
      */
-    int pageCount() const { return static_cast<int>(m_pages.size()); }
+    int pageCount() const { 
+        return m_pageOrder.isEmpty() 
+            ? static_cast<int>(m_pages.size()) 
+            : m_pageOrder.size(); 
+    }
     
     /**
      * @brief Get a page by index.
@@ -656,6 +704,73 @@ public:
      * @return Const pointer to the page, or nullptr if index is out of range.
      */
     const Page* page(int index) const;
+    
+    // ===== Paged Mode Lazy Loading Accessors (Phase O1.7) =====
+    
+    /**
+     * @brief Check if a page is currently loaded in memory.
+     * @param index 0-based page index.
+     * @return True if page is loaded, false if on disk or invalid index.
+     */
+    bool isPageLoaded(int index) const;
+    
+    /**
+     * @brief Get the UUID of a page by index.
+     * @param index 0-based page index.
+     * @return Page UUID, or empty string if index is out of range.
+     */
+    QString pageUuidAt(int index) const;
+    
+    /**
+     * @brief Get the size of a page without loading it.
+     * @param index 0-based page index.
+     * @return Page size from metadata, or invalid size if not available.
+     * 
+     * Used for layout calculations without loading full page content.
+     */
+    QSizeF pageSizeAt(int index) const;
+    
+    /**
+     * @brief Load a page from disk into memory.
+     * @param index 0-based page index.
+     * @return True if loaded successfully.
+     * 
+     * Only used in lazy loading mode (when m_pageOrder is populated).
+     * Loads from pages/{uuid}.json file.
+     */
+    bool loadPageFromDisk(int index) const;
+    
+    /**
+     * @brief Save a single page to disk.
+     * @param index 0-based page index.
+     * @return True if saved successfully.
+     * 
+     * Saves to pages/{uuid}.json file in the bundle.
+     * Clears the page's dirty flag.
+     */
+    bool savePage(int index);
+    
+    /**
+     * @brief Evict a page from memory (save if dirty first).
+     * @param index 0-based page index.
+     * 
+     * The page UUID remains in m_pageOrder so it can be reloaded later.
+     * Use for memory management when pages are no longer visible.
+     */
+    void evictPage(int index);
+    
+    /**
+     * @brief Mark a page as dirty (modified since last save).
+     * @param index 0-based page index.
+     */
+    void markPageDirty(int index);
+    
+    /**
+     * @brief Check if a page is dirty.
+     * @param index 0-based page index.
+     * @return True if page has unsaved changes.
+     */
+    bool isPageDirty(int index) const;
     
     /**
      * @brief Add a new page at the end of the document.
@@ -920,7 +1035,26 @@ private:
     std::unique_ptr<PdfProvider> m_pdfProvider;    ///< Loaded PDF (may be null)
     
     // ===== Pages (Task 1.2.5) =====
-    std::vector<std::unique_ptr<Page>> m_pages;    ///< All pages in paged mode
+    std::vector<std::unique_ptr<Page>> m_pages;    ///< All pages in paged mode (legacy, before O1.7)
+    
+    // ===== Paged Mode Lazy Loading (Phase O1.7) =====
+    /// Ordered list of page UUIDs. Defines page order in the document.
+    /// Pages are loaded on-demand from pages/{uuid}.json files.
+    QStringList m_pageOrder;
+    
+    /// Minimal metadata for layout calculations without loading full pages.
+    /// Key: page UUID, Value: page size (width, height).
+    std::map<QString, QSizeF> m_pageMetadata;
+    
+    /// Currently loaded pages. Key: page UUID, Value: Page object.
+    /// Mutable for lazy loading in const methods like page().
+    mutable std::map<QString, std::unique_ptr<Page>> m_loadedPages;
+    
+    /// Pages that have been modified since last save.
+    mutable std::set<QString> m_dirtyPages;
+    
+    /// Pages that have been deleted and need cleanup on next save.
+    std::set<QString> m_deletedPages;
     
     // ===== Tiles (Phase E1 - Edgeless Mode) =====
     /// Sparse 2D map of tiles for edgeless mode. Key = (tx, ty) tile coordinate.
@@ -934,6 +1068,13 @@ private:
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
     std::set<TileCoord> m_deletedTiles;             ///< Tiles to delete from disk on next save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
+    
+    // ===== Object Extent Tracking (Phase O1.5) =====
+    /// Maximum extent (largest dimension) of any object in the document.
+    /// Used to calculate extra tile loading margin in edgeless mode.
+    /// Updated when objects are added or resized.
+    /// Mutable because it can be updated during lazy tile loading (const method).
+    mutable int m_maxObjectExtent = 0;
     
     // ===== Edgeless Layer Manifest (Phase 5.6) =====
     /// Layer definitions for edgeless mode. This is the single source of truth

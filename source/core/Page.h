@@ -25,6 +25,7 @@
 #include <QJsonArray>
 #include <vector>
 #include <memory>
+#include <map>
 
 /**
  * @brief A single page in a document.
@@ -75,6 +76,18 @@ public:
     
     // ===== Inserted Objects =====
     std::vector<std::unique_ptr<InsertedObject>> objects;    ///< All inserted objects
+    
+    /**
+     * @brief Objects grouped by layer affinity for efficient rendering.
+     * 
+     * Non-owning pointers into the `objects` vector, grouped by affinity value.
+     * Key: layerAffinity value (-1, 0, 1, 2, ...)
+     * Value: vector of object pointers with that affinity
+     * 
+     * This map is maintained by addObject(), removeObject(), and updateObjectAffinity().
+     * Call rebuildAffinityMap() after bulk operations or loading from JSON.
+     */
+    std::map<int, std::vector<InsertedObject*>> objectsByAffinity;
     
     // ===== Constructors & Rule of Five =====
     
@@ -227,6 +240,29 @@ public:
      */
     void sortObjectsByZOrder();
     
+    /**
+     * @brief Rebuild the objectsByAffinity map from the objects vector.
+     * 
+     * Call this after:
+     * - Loading objects from JSON (Page::fromJson)
+     * - Bulk operations that bypass addObject/removeObject
+     * 
+     * Individual addObject/removeObject/updateObjectAffinity calls maintain
+     * the map incrementally, so this is not needed for single operations.
+     */
+    void rebuildAffinityMap();
+    
+    /**
+     * @brief Update an object's layer affinity and re-group it.
+     * @param id The object ID.
+     * @param newAffinity The new affinity value.
+     * @return True if object found and updated, false if not found.
+     * 
+     * This properly removes the object from its old affinity group
+     * and adds it to the new one.
+     */
+    bool updateObjectAffinity(const QString& id, int newAffinity);
+    
     // ===== Rendering =====
     
     /**
@@ -235,7 +271,11 @@ public:
      * @param pdfBackground Optional pre-rendered PDF background pixmap.
      * @param zoom Zoom level (1.0 = 100%).
      * 
-     * This is used for export/preview. Live rendering is handled by Viewport.
+     * @deprecated This method renders objects AFTER all layers, bypassing the affinity system.
+     * For live rendering, DocumentViewport::renderPage() calls renderObjectsWithAffinity() 
+     * for proper interleaved rendering based on layer affinity.
+     * 
+     * This method may be used for simple export/preview where affinity doesn't matter.
      * Renders in order: background → layers (bottom to top) → objects (by z-order).
      */
     void render(QPainter& painter, const QPixmap* pdfBackground = nullptr, qreal zoom = 1.0) const;
@@ -284,8 +324,26 @@ public:
      * 
      * This is separated from render() to allow DocumentViewport to use
      * cached layer rendering while still rendering objects.
+     * 
+     * @deprecated Use renderObjectsWithAffinity() for proper layer interleaving.
      */
     void renderObjects(QPainter& painter, qreal zoom = 1.0) const;
+    
+    /**
+     * @brief Render objects with a specific layer affinity.
+     * @param painter The QPainter to render to.
+     * @param zoom Zoom level.
+     * @param affinity The affinity value to render (-1, 0, 1, 2, ...).
+     * 
+     * This enables layer-interleaved rendering:
+     * - renderObjectsWithAffinity(painter, zoom, -1) → objects below all strokes
+     * - renderObjectsWithAffinity(painter, zoom, 0)  → objects above Layer 0
+     * - renderObjectsWithAffinity(painter, zoom, 1)  → objects above Layer 1
+     * - etc.
+     * 
+     * Objects within the same affinity group are sorted by zOrder.
+     */
+    void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity) const;
     
     // ===== Serialization =====
     
@@ -306,8 +364,11 @@ public:
     
     /**
      * @brief Load all images in objects from disk.
-     * @param basePath Base directory for resolving relative paths.
+     * @param basePath Bundle path (e.g., "/path/to/notebook.snb").
      * @return Number of images successfully loaded.
+     * 
+     * Phase O1.6: Images are stored in assets/images/ subdirectory.
+     * Each ImageObject's fullPath() resolves against basePath/assets/images/.
      */
     int loadImages(const QString& basePath);
     

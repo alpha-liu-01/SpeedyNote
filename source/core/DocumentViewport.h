@@ -1639,7 +1639,8 @@ private:
     void renderEdgelessMode(QPainter& painter);
     
     /**
-     * @brief Render a single tile.
+     * @brief Render a single tile's strokes and objects.
+     * @deprecated Use renderTileLayerStrokes() for proper layer interleaving.
      * Renders only the strokes/objects of a tile (no background).
      * Used when backgrounds are pre-rendered for the entire visible area.
      * @param painter The QPainter to render to (already translated to tile origin).
@@ -1647,6 +1648,32 @@ private:
      * @param coord The tile coordinate (for debugging).
      */
     void renderTileStrokes(QPainter& painter, Page* tile, Document::TileCoord coord);
+    
+    /**
+     * @brief Render a single layer's strokes from a tile.
+     * Used for multi-pass edgeless rendering with layer-interleaved objects.
+     * @param painter The QPainter to render to (already translated to tile origin).
+     * @param tile The tile (Page) to render from.
+     * @param layerIdx The layer index to render.
+     */
+    void renderTileLayerStrokes(QPainter& painter, Page* tile, int layerIdx);
+    
+    /**
+     * @brief Render objects with a specific affinity from all loaded tiles.
+     * This enables layer-interleaved rendering for edgeless mode:
+     * - renderEdgelessObjectsWithAffinity(-1) → objects below all strokes
+     * - renderEdgelessObjectsWithAffinity(0)  → objects above Layer 0
+     * - renderEdgelessObjectsWithAffinity(1)  → objects above Layer 1
+     * 
+     * Objects are rendered at document coordinates, allowing them to
+     * extend across tile boundaries without clipping.
+     * 
+     * @param painter The QPainter to render to (in document coordinates).
+     * @param affinity The layer affinity value to render.
+     * @param allTiles The list of all tiles to check for objects.
+     */
+    void renderEdgelessObjectsWithAffinity(QPainter& painter, int affinity, 
+                                            const QVector<Document::TileCoord>& allTiles);
     
     /**
      * @brief Draw tile boundary grid lines for debugging.

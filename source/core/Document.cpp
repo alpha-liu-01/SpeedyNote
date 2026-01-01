@@ -215,6 +215,29 @@ QVector<PdfOutlineItem> Document::pdfOutline() const
 
 Page* Document::page(int index)
 {
+    // Lazy loading mode: use m_pageOrder and m_loadedPages
+    if (!m_pageOrder.isEmpty()) {
+        if (index < 0 || index >= m_pageOrder.size()) {
+            return nullptr;
+        }
+        
+        QString uuid = m_pageOrder[index];
+        
+        // Check if already loaded
+        auto it = m_loadedPages.find(uuid);
+        if (it != m_loadedPages.end()) {
+            return it->second.get();
+        }
+        
+        // Load on demand
+        if (!loadPageFromDisk(index)) {
+            return nullptr;
+        }
+        
+        return m_loadedPages[uuid].get();
+    }
+    
+    // Legacy mode: use m_pages
     if (index < 0 || index >= static_cast<int>(m_pages.size())) {
         return nullptr;
     }
@@ -223,23 +246,288 @@ Page* Document::page(int index)
 
 const Page* Document::page(int index) const
 {
+    // Lazy loading mode: use m_pageOrder and m_loadedPages
+    if (!m_pageOrder.isEmpty()) {
+        if (index < 0 || index >= m_pageOrder.size()) {
+            return nullptr;
+        }
+        
+        QString uuid = m_pageOrder[index];
+        
+        // Check if already loaded
+        auto it = m_loadedPages.find(uuid);
+        if (it != m_loadedPages.end()) {
+            return it->second.get();
+        }
+        
+        // Load on demand
+        if (!loadPageFromDisk(index)) {
+            return nullptr;
+        }
+        
+        return m_loadedPages.at(uuid).get();
+    }
+    
+    // Legacy mode: use m_pages
     if (index < 0 || index >= static_cast<int>(m_pages.size())) {
         return nullptr;
     }
     return m_pages[index].get();
 }
 
+// ===== Paged Mode Lazy Loading Accessors (Phase O1.7) =====
+
+bool Document::isPageLoaded(int index) const
+{
+    // Currently using legacy m_pages - all pages are loaded
+    // TODO: When lazy loading is enabled, check m_loadedPages instead
+    if (m_pageOrder.isEmpty()) {
+        // Legacy mode: all pages in m_pages are loaded
+        return index >= 0 && index < static_cast<int>(m_pages.size());
+    }
+    
+    // Lazy loading mode: check if page is in m_loadedPages
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return false;
+    }
+    QString uuid = m_pageOrder[index];
+    return m_loadedPages.find(uuid) != m_loadedPages.end();
+}
+
+QString Document::pageUuidAt(int index) const
+{
+    // Currently using legacy m_pages - no UUIDs yet
+    // TODO: When lazy loading is enabled, use m_pageOrder
+    if (m_pageOrder.isEmpty()) {
+        // Legacy mode: no UUIDs, return empty
+        return QString();
+    }
+    
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return QString();
+    }
+    return m_pageOrder[index];
+}
+
+QSizeF Document::pageSizeAt(int index) const
+{
+    // First try metadata (for lazy loading without loading full page)
+    if (!m_pageOrder.isEmpty() && index >= 0 && index < m_pageOrder.size()) {
+        QString uuid = m_pageOrder[index];
+        auto it = m_pageMetadata.find(uuid);
+        if (it != m_pageMetadata.end()) {
+            return it->second;
+        }
+    }
+    
+    // Fallback to legacy m_pages
+    if (index >= 0 && index < static_cast<int>(m_pages.size())) {
+        return m_pages[index]->size;
+    }
+    
+    // Not found
+    return QSizeF();
+}
+
+bool Document::loadPageFromDisk(int index) const
+{
+    if (m_bundlePath.isEmpty()) {
+        return false;
+    }
+    
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return false;
+    }
+    
+    QString uuid = m_pageOrder[index];
+    QString pagePath = m_bundlePath + "/pages/" + uuid + ".json";
+    
+    QFile file(pagePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Cannot load page: file not found" << pagePath;
+        return false;
+    }
+    
+    QByteArray data = file.readAll();
+    file.close();
+    
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        qWarning() << "Cannot load page: JSON parse error" << parseError.errorString();
+        return false;
+    }
+    
+    auto page = Page::fromJson(jsonDoc.object());
+    if (!page) {
+        qWarning() << "Cannot load page: Page::fromJson failed";
+        return false;
+    }
+    
+    // Phase O1.5: Update max object extent from loaded objects
+    for (const auto& object : page->objects) {
+        int extent = static_cast<int>(qMax(object->size.width(), object->size.height()));
+        if (extent > m_maxObjectExtent) {
+            m_maxObjectExtent = extent;
+        }
+    }
+    
+    m_loadedPages[uuid] = std::move(page);
+    
+#ifdef QT_DEBUG
+    qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
+#endif
+    
+    return true;
+}
+
+bool Document::savePage(int index)
+{
+    if (m_bundlePath.isEmpty()) {
+        return false;
+    }
+    
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return false;
+    }
+    
+    QString uuid = m_pageOrder[index];
+    auto it = m_loadedPages.find(uuid);
+    if (it == m_loadedPages.end()) {
+        return false;  // Not loaded, nothing to save
+    }
+    
+    // Ensure pages directory exists
+    QDir().mkpath(m_bundlePath + "/pages");
+    
+    QString pagePath = m_bundlePath + "/pages/" + uuid + ".json";
+    QFile file(pagePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "Cannot save page:" << pagePath;
+        return false;
+    }
+    
+    QJsonDocument jsonDoc(it->second->toJson());
+    file.write(jsonDoc.toJson(QJsonDocument::Compact));
+    file.close();
+    
+    // Clear dirty flag
+    m_dirtyPages.erase(uuid);
+    
+    // Update metadata
+    m_pageMetadata[uuid] = it->second->size;
+    
+#ifdef QT_DEBUG
+    qDebug() << "Saved page" << index << "(" << uuid.left(8) << ") to disk";
+#endif
+    
+    return true;
+}
+
+void Document::evictPage(int index)
+{
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return;
+    }
+    
+    QString uuid = m_pageOrder[index];
+    auto it = m_loadedPages.find(uuid);
+    if (it == m_loadedPages.end()) {
+        return;  // Not loaded, nothing to evict
+    }
+    
+    // Save if dirty
+    if (m_dirtyPages.count(uuid) > 0) {
+        if (!savePage(index)) {
+            qWarning() << "Failed to save page before eviction" << index;
+            // Continue with eviction anyway to free memory
+        }
+    }
+    
+    // Remove from memory
+    m_loadedPages.erase(it);
+    
+#ifdef QT_DEBUG
+    qDebug() << "Evicted page" << index << "(" << uuid.left(8) << ") from memory";
+#endif
+}
+
+void Document::markPageDirty(int index)
+{
+    if (!m_pageOrder.isEmpty() && index >= 0 && index < m_pageOrder.size()) {
+        QString uuid = m_pageOrder[index];
+        m_dirtyPages.insert(uuid);
+        markModified();
+    }
+}
+
+bool Document::isPageDirty(int index) const
+{
+    if (m_pageOrder.isEmpty() || index < 0 || index >= m_pageOrder.size()) {
+        return false;
+    }
+    QString uuid = m_pageOrder[index];
+    return m_dirtyPages.count(uuid) > 0;
+}
+
 Page* Document::addPage()
 {
     auto newPage = createDefaultPage();
     Page* pagePtr = newPage.get();
-    m_pages.push_back(std::move(newPage));
+    
+    // Phase O1.7: Support lazy loading mode
+    if (!m_pageOrder.isEmpty()) {
+        // Generate UUID for the new page
+        QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        
+        // Add to page order and metadata
+        m_pageOrder.append(uuid);
+        m_pageMetadata[uuid] = newPage->size;
+        
+        // Store in loaded pages
+        m_loadedPages[uuid] = std::move(newPage);
+        
+        // Mark as dirty
+        m_dirtyPages.insert(uuid);
+    } else {
+        // Legacy mode
+        m_pages.push_back(std::move(newPage));
+    }
+    
     markModified();
     return pagePtr;
 }
 
 Page* Document::insertPage(int index)
 {
+    // Phase O1.7: Support lazy loading mode
+    if (!m_pageOrder.isEmpty()) {
+        // Allow inserting at the end (index == size)
+        if (index < 0 || index > m_pageOrder.size()) {
+            return nullptr;
+        }
+        
+        auto newPage = createDefaultPage();
+        Page* pagePtr = newPage.get();
+        
+        // Generate UUID for the new page
+        QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        
+        // Insert into page order
+        m_pageOrder.insert(index, uuid);
+        m_pageMetadata[uuid] = newPage->size;
+        
+        // Store in loaded pages
+        m_loadedPages[uuid] = std::move(newPage);
+        
+        // Mark as dirty
+        m_dirtyPages.insert(uuid);
+        
+        markModified();
+        return pagePtr;
+    }
+    
+    // Legacy mode
     // Allow inserting at the end (index == size)
     if (index < 0 || index > static_cast<int>(m_pages.size())) {
         return nullptr;
@@ -276,6 +564,40 @@ Page* Document::addPageForPdf(int pdfPageIndex)
 
 bool Document::removePage(int index)
 {
+    // Phase O1.7: Support lazy loading mode
+    if (!m_pageOrder.isEmpty()) {
+        // Cannot remove if index invalid
+        if (index < 0 || index >= m_pageOrder.size()) {
+            return false;
+        }
+        
+        // Cannot remove the last page
+        if (m_pageOrder.size() <= 1) {
+            return false;
+        }
+        
+        QString uuid = m_pageOrder[index];
+        
+        // Remove from page order
+        m_pageOrder.removeAt(index);
+        
+        // Evict from memory if loaded
+        m_loadedPages.erase(uuid);
+        
+        // Remove from dirty tracking
+        m_dirtyPages.erase(uuid);
+        
+        // Remove metadata
+        m_pageMetadata.erase(uuid);
+        
+        // Track for deletion on next save
+        m_deletedPages.insert(uuid);
+        
+        markModified();
+        return true;
+    }
+    
+    // Legacy mode
     // Cannot remove if index invalid
     if (index < 0 || index >= static_cast<int>(m_pages.size())) {
         return false;
@@ -293,6 +615,30 @@ bool Document::removePage(int index)
 
 bool Document::movePage(int from, int to)
 {
+    // Phase O1.7: Support lazy loading mode
+    if (!m_pageOrder.isEmpty()) {
+        int count = m_pageOrder.size();
+        
+        // Validate indices
+        if (from < 0 || from >= count || to < 0 || to >= count) {
+            return false;
+        }
+        
+        // No-op if same position
+        if (from == to) {
+            return true;
+        }
+        
+        // Just reorder the UUID list - no file changes needed!
+        QString uuid = m_pageOrder[from];
+        m_pageOrder.removeAt(from);
+        m_pageOrder.insert(to, uuid);
+        
+        markModified();
+        return true;
+    }
+    
+    // Legacy mode
     int count = static_cast<int>(m_pages.size());
     
     // Validate indices
@@ -595,6 +941,61 @@ void Document::removeTileIfEmpty(int tx, int ty)
 }
 
 // =========================================================================
+// Object Extent Tracking (Phase O1.5)
+// =========================================================================
+
+void Document::updateMaxObjectExtent(const InsertedObject* obj)
+{
+    if (!obj) return;
+    
+    // Get the largest dimension of this object
+    int extent = static_cast<int>(qMax(obj->size.width(), obj->size.height()));
+    
+    // Update maximum if this object is larger
+    if (extent > m_maxObjectExtent) {
+        m_maxObjectExtent = extent;
+#ifdef QT_DEBUG
+        qDebug() << "Document: Updated max object extent to" << m_maxObjectExtent;
+#endif
+    }
+}
+
+void Document::recalculateMaxObjectExtent()
+{
+    int newMax = 0;
+    
+    if (isEdgeless()) {
+        // Scan all loaded tiles
+        for (const auto& pair : m_tiles) {
+            Page* tile = pair.second.get();
+            for (const auto& obj : tile->objects) {
+                int extent = static_cast<int>(qMax(obj->size.width(), obj->size.height()));
+                newMax = qMax(newMax, extent);
+            }
+        }
+        
+        // Note: Evicted tiles are not scanned. This is acceptable because:
+        // - Evicted tiles will be loaded when viewport moves to them
+        // - When loaded, their objects will update maxObjectExtent via addObject
+        // - Worst case: margin is temporarily too small until tiles are loaded
+    } else {
+        // Scan all pages
+        for (const auto& page : m_pages) {
+            for (const auto& obj : page->objects) {
+                int extent = static_cast<int>(qMax(obj->size.width(), obj->size.height()));
+                newMax = qMax(newMax, extent);
+            }
+        }
+    }
+    
+    m_maxObjectExtent = newMax;
+    
+#ifdef QT_DEBUG
+    qDebug() << "Document: Recalculated max object extent =" << m_maxObjectExtent;
+#endif
+}
+
+// =========================================================================
 // Bookmarks (Task 1.2.6)
 // =========================================================================
 
@@ -847,6 +1248,9 @@ int Document::loadPagesFromJson(const QJsonArray& pagesArray)
     // Clear existing pages
     m_pages.clear();
     
+    // Phase O1.5: Reset max object extent when reloading pages
+    m_maxObjectExtent = 0;
+    
     // Pre-allocate to avoid repeated vector reallocations
     m_pages.reserve(static_cast<size_t>(pagesArray.size()));
     
@@ -855,6 +1259,13 @@ int Document::loadPagesFromJson(const QJsonArray& pagesArray)
     for (const auto& val : pagesArray) {
         auto page = Page::fromJson(val.toObject());
         if (page) {
+            // Phase O1.5: Update max object extent from loaded objects
+            for (const auto& object : page->objects) {
+                int extent = static_cast<int>(qMax(object->size.width(), object->size.height()));
+                if (extent > m_maxObjectExtent) {
+                    m_maxObjectExtent = extent;
+                }
+            }
             m_pages.push_back(std::move(page));
             ++loadedCount;
         }
@@ -1125,6 +1536,25 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         }
         
         tile->activeLayerIndex = m_edgelessActiveLayerIndex;
+        
+        // Phase O1.5: Load objects from tile file
+        if (obj.contains("objects")) {
+            QJsonArray objectsArray = obj["objects"].toArray();
+            for (const auto& val : objectsArray) {
+                auto object = InsertedObject::fromJson(val.toObject());
+                if (object) {
+                    // Update max object extent
+                    int extent = static_cast<int>(qMax(object->size.width(), object->size.height()));
+                    if (extent > m_maxObjectExtent) {
+                        m_maxObjectExtent = extent;
+                    }
+                    tile->objects.push_back(std::move(object));
+                }
+            }
+            // Rebuild affinity map after loading objects
+            tile->rebuildAffinityMap();
+        }
+        
         m_tiles[coord] = std::move(tile);
         
 #ifdef QT_DEBUG
@@ -1138,6 +1568,14 @@ bool Document::loadTileFromDisk(TileCoord coord) const
             qWarning() << "Cannot load tile: Page::fromJson failed";
             m_tileIndex.erase(coord);  // CR-6: Remove from index
             return false;
+        }
+        
+        // Phase O1.5: Update max object extent from loaded objects
+        for (const auto& object : tile->objects) {
+            int extent = static_cast<int>(qMax(object->size.width(), object->size.height()));
+            if (extent > m_maxObjectExtent) {
+                m_maxObjectExtent = extent;
+            }
         }
         
         m_tiles[coord] = std::move(tile);
@@ -1175,42 +1613,86 @@ void Document::evictTile(TileCoord coord)
 
 bool Document::saveBundle(const QString& path)
 {
-    // Save old bundle path before overwriting - needed for copying evicted tiles
+    // Save old bundle path before overwriting - needed for copying evicted tiles/pages
     QString oldBundlePath = m_bundlePath;
     m_bundlePath = path;
     
-    // Create directory structure
-    if (!QDir().mkpath(path + "/tiles")) {
-        qWarning() << "Cannot create bundle directory" << path;
+    // Phase O1.6: Create assets directory for object files (images, etc.)
+    if (!QDir().mkpath(path + "/assets/images")) {
+        qWarning() << "Cannot create assets/images directory" << path;
         return false;
     }
     
     // Build manifest
     QJsonObject manifest = toJson();  // Metadata only
     
-    // Build tile index (union of disk tiles and memory tiles)
-    std::set<TileCoord> allTileCoords = m_tileIndex;
-    for (const auto& pair : m_tiles) {
-        allTileCoords.insert(pair.first);
-    }
+    // For edgeless mode: track all tile coordinates (shared between blocks)
+    std::set<TileCoord> allTileCoords;
     
-    QJsonArray tileIndexArray;
-    for (const auto& coord : allTileCoords) {
-        tileIndexArray.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+    // ========== MODE-SPECIFIC SAVE ==========
+    if (mode == Mode::Edgeless) {
+        // Create tiles directory
+        if (!QDir().mkpath(path + "/tiles")) {
+            qWarning() << "Cannot create tiles directory" << path;
+            return false;
+        }
+        
+        // Build tile index (union of disk tiles and memory tiles)
+        allTileCoords = m_tileIndex;
+        for (const auto& pair : m_tiles) {
+            allTileCoords.insert(pair.first);
+        }
+        
+        QJsonArray tileIndexArray;
+        for (const auto& coord : allTileCoords) {
+            tileIndexArray.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+        }
+        manifest["tile_index"] = tileIndexArray;
+        manifest["tile_size"] = EDGELESS_TILE_SIZE;
+        
+        // Phase 5.6: Write layer definitions to manifest
+        QJsonArray layersArray;
+        for (const auto& layerDef : m_edgelessLayers) {
+            layersArray.append(layerDef.toJson());
+        }
+        manifest["layers"] = layersArray;
+        manifest["active_layer_index"] = m_edgelessActiveLayerIndex;
+    } else {
+        // ========== PAGED MODE SAVE (Phase O1.7.4) ==========
+        if (!QDir().mkpath(path + "/pages")) {
+            qWarning() << "Cannot create pages directory" << path;
+            return false;
+        }
+        
+        // Convert legacy pages to UUID-based format if needed
+        if (m_pageOrder.isEmpty() && !m_pages.empty()) {
+            for (auto& page : m_pages) {
+                QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                m_pageOrder.append(uuid);
+                m_pageMetadata[uuid] = page->size;
+                m_loadedPages[uuid] = std::move(page);
+                m_dirtyPages.insert(uuid);
+            }
+            m_pages.clear();
+        }
+        
+        // Write page_order to manifest
+        QJsonArray pageOrderArray;
+        for (const QString& uuid : m_pageOrder) {
+            pageOrderArray.append(uuid);
+        }
+        manifest["page_order"] = pageOrderArray;
+        
+        // Write page_metadata to manifest
+        QJsonObject pageMetadataObj;
+        for (const auto& [uuid, size] : m_pageMetadata) {
+            QJsonObject sizeObj;
+            sizeObj["width"] = size.width();
+            sizeObj["height"] = size.height();
+            pageMetadataObj[uuid] = sizeObj;
+        }
+        manifest["page_metadata"] = pageMetadataObj;
     }
-    manifest["tile_index"] = tileIndexArray;
-    manifest["tile_size"] = EDGELESS_TILE_SIZE;
-    
-    // Phase 5.6: Write layer definitions to manifest
-    QJsonArray layersArray;
-    for (const auto& layerDef : m_edgelessLayers) {
-        layersArray.append(layerDef.toJson());
-    }
-    manifest["layers"] = layersArray;
-    manifest["active_layer_index"] = m_edgelessActiveLayerIndex;
-    
-    // Clear manifest dirty flag after save
-    m_edgelessManifestDirty = false;
     
     // Write manifest
     QString manifestPath = path + "/document.json";
@@ -1222,76 +1704,170 @@ bool Document::saveBundle(const QString& path)
     manifestFile.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
     manifestFile.close();
     
-    // ========== HANDLE TILES WHEN SAVING TO NEW LOCATION ==========
     bool savingToNewLocation = !oldBundlePath.isEmpty() && oldBundlePath != path;
     
+    // ========== COPY ASSETS WHEN SAVING TO NEW LOCATION (Phase O1.6 fix) ==========
     if (savingToNewLocation) {
-        // Copy evicted tiles from old bundle (tiles on disk but not in memory)
-        for (const auto& coord : m_tileIndex) {
-            // Skip tiles that are in memory - they'll be saved below
-            if (m_tiles.find(coord) != m_tiles.end()) {
-                continue;
-            }
-            
-            QString tileFileName = QString("%1,%2.json").arg(coord.first).arg(coord.second);
-            QString oldTilePath = oldBundlePath + "/tiles/" + tileFileName;
-            QString newTilePath = path + "/tiles/" + tileFileName;
-            
-            // Copy tile file from old location to new location
-            if (QFile::exists(oldTilePath)) {
-                if (QFile::copy(oldTilePath, newTilePath)) {
+        QString oldAssetsPath = oldBundlePath + "/assets/images";
+        QString newAssetsPath = path + "/assets/images";
+        
+        QDir oldAssetsDir(oldAssetsPath);
+        if (oldAssetsDir.exists()) {
+            QStringList assetFiles = oldAssetsDir.entryList(QDir::Files);
+            for (const QString& fileName : assetFiles) {
+                QString oldFilePath = oldAssetsPath + "/" + fileName;
+                QString newFilePath = newAssetsPath + "/" + fileName;
+                
+                // Skip if already exists (e.g., newly added images saved above)
+                if (!QFile::exists(newFilePath)) {
+                    if (QFile::copy(oldFilePath, newFilePath)) {
 #ifdef QT_DEBUG
-                    qDebug() << "Copied evicted tile" << coord.first << "," << coord.second;
+                        qDebug() << "Copied asset" << fileName;
 #endif
-                } else {
-                    qWarning() << "Failed to copy tile" << oldTilePath << "to" << newTilePath;
+                    } else {
+                        qWarning() << "Failed to copy asset" << oldFilePath << "to" << newFilePath;
+                    }
                 }
             }
         }
     }
-    // =============================================================
     
-    // Save tiles in memory
-    for (const auto& pair : m_tiles) {
-        TileCoord coord = pair.first;
-        // When saving to new location: save ALL in-memory tiles
-        // When saving to same location: only save dirty/new tiles
-        bool needsSave = savingToNewLocation || 
-                         m_dirtyTiles.count(coord) > 0 || 
-                         m_tileIndex.count(coord) == 0;
-        if (needsSave) {
-            saveTile(coord);
-        }
-    }
-    
-    // ========== DELETE EMPTY TILES FROM DISK ==========
-    // Tiles that were erased empty are tracked in m_deletedTiles.
-    // Delete their files from disk now.
-    for (const auto& coord : m_deletedTiles) {
-        QString tileFileName = QString("%1,%2.json").arg(coord.first).arg(coord.second);
-        QString tilePath = path + "/tiles/" + tileFileName;
-        if (QFile::exists(tilePath)) {
-            if (QFile::remove(tilePath)) {
+    // ========== MODE-SPECIFIC FILE HANDLING ==========
+    if (mode == Mode::Edgeless) {
+        // Clear manifest dirty flag after save
+        m_edgelessManifestDirty = false;
+        
+        // ========== HANDLE TILES WHEN SAVING TO NEW LOCATION ==========
+        if (savingToNewLocation) {
+            // Copy evicted tiles from old bundle (tiles on disk but not in memory)
+            for (const auto& coord : m_tileIndex) {
+                // Skip tiles that are in memory - they'll be saved below
+                if (m_tiles.find(coord) != m_tiles.end()) {
+                    continue;
+                }
+                
+                QString tileFileName = QString("%1,%2.json").arg(coord.first).arg(coord.second);
+                QString oldTilePath = oldBundlePath + "/tiles/" + tileFileName;
+                QString newTilePath = path + "/tiles/" + tileFileName;
+                
+                // Copy tile file from old location to new location
+                if (QFile::exists(oldTilePath)) {
+                    if (QFile::copy(oldTilePath, newTilePath)) {
 #ifdef QT_DEBUG
-                qDebug() << "Deleted empty tile file:" << tileFileName;
+                        qDebug() << "Copied evicted tile" << coord.first << "," << coord.second;
 #endif
-            } else {
-                qWarning() << "Failed to delete empty tile file:" << tilePath;
+                    } else {
+                        qWarning() << "Failed to copy tile" << oldTilePath << "to" << newTilePath;
+                    }
+                }
             }
         }
-    }
-    m_deletedTiles.clear();
-    // ==================================================
-    
-    m_dirtyTiles.clear();
-    m_tileIndex = allTileCoords;
-    m_lazyLoadEnabled = true;
-    
-    clearModified();
-    
+        
+        // Save tiles in memory
+        for (const auto& pair : m_tiles) {
+            TileCoord coord = pair.first;
+            // When saving to new location: save ALL in-memory tiles
+            // When saving to same location: only save dirty/new tiles
+            bool needsSave = savingToNewLocation || 
+                             m_dirtyTiles.count(coord) > 0 || 
+                             m_tileIndex.count(coord) == 0;
+            if (needsSave) {
+                saveTile(coord);
+            }
+        }
+        
+        // ========== DELETE EMPTY TILES FROM DISK ==========
+        for (const auto& coord : m_deletedTiles) {
+            QString tileFileName = QString("%1,%2.json").arg(coord.first).arg(coord.second);
+            QString tilePath = path + "/tiles/" + tileFileName;
+            if (QFile::exists(tilePath)) {
+                if (QFile::remove(tilePath)) {
 #ifdef QT_DEBUG
-    qDebug() << "Saved bundle to" << path << "with" << allTileCoords.size() << "tiles";
+                    qDebug() << "Deleted empty tile file:" << tileFileName;
 #endif
+                } else {
+                    qWarning() << "Failed to delete empty tile file:" << tilePath;
+                }
+            }
+        }
+        m_deletedTiles.clear();
+        m_dirtyTiles.clear();
+        m_tileIndex = allTileCoords;
+        
+#ifdef QT_DEBUG
+        qDebug() << "Saved edgeless bundle to" << path << "with" << allTileCoords.size() << "tiles";
+#endif
+    } else {
+        // ========== PAGED MODE FILE HANDLING (Phase O1.7.4) ==========
+        
+        // Copy evicted pages when saving to new location
+        if (savingToNewLocation) {
+            for (const QString& uuid : m_pageOrder) {
+                // Skip pages that are in memory - they'll be saved below
+                if (m_loadedPages.find(uuid) != m_loadedPages.end()) {
+                    continue;
+                }
+                
+                QString pageFileName = uuid + ".json";
+                QString oldPagePath = oldBundlePath + "/pages/" + pageFileName;
+                QString newPagePath = path + "/pages/" + pageFileName;
+                
+                if (QFile::exists(oldPagePath)) {
+                    if (QFile::copy(oldPagePath, newPagePath)) {
+#ifdef QT_DEBUG
+                        qDebug() << "Copied evicted page" << uuid;
+#endif
+                    } else {
+                        qWarning() << "Failed to copy page" << oldPagePath << "to" << newPagePath;
+                    }
+                }
+            }
+        }
+        
+        // Save pages in memory
+        for (const auto& [uuid, pagePtr] : m_loadedPages) {
+            // When saving to new location: save ALL in-memory pages
+            // When saving to same location: only save dirty pages
+            bool needsSave = savingToNewLocation || m_dirtyPages.count(uuid) > 0;
+            if (needsSave) {
+                QString pagePath = path + "/pages/" + uuid + ".json";
+                QFile file(pagePath);
+                if (file.open(QIODevice::WriteOnly)) {
+                    QJsonDocument doc(pagePtr->toJson());
+                    file.write(doc.toJson(QJsonDocument::Compact));
+                    file.close();
+#ifdef QT_DEBUG
+                    qDebug() << "Saved page" << uuid;
+#endif
+                } else {
+                    qWarning() << "Failed to save page" << pagePath;
+                }
+            }
+        }
+        
+        // ========== DELETE REMOVED PAGES FROM DISK ==========
+        for (const QString& uuid : m_deletedPages) {
+            QString pagePath = path + "/pages/" + uuid + ".json";
+            if (QFile::exists(pagePath)) {
+                if (QFile::remove(pagePath)) {
+#ifdef QT_DEBUG
+                    qDebug() << "Deleted page file:" << uuid;
+#endif
+                } else {
+                    qWarning() << "Failed to delete page file:" << pagePath;
+                }
+            }
+        }
+        m_deletedPages.clear();
+        m_dirtyPages.clear();
+        
+#ifdef QT_DEBUG
+        qDebug() << "Saved paged bundle to" << path << "with" << m_pageOrder.size() << "pages";
+#endif
+    }
+    
+    m_lazyLoadEnabled = true;
+    clearModified();
     
     return true;
 }
@@ -1328,47 +1904,86 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
     doc->m_bundlePath = path;
     doc->m_lazyLoadEnabled = true;
     
-    // Parse tile index (just coordinates, no actual loading!)
-    QJsonArray tileIndexArray = obj["tile_index"].toArray();
-    for (const auto& val : tileIndexArray) {
-        QStringList parts = val.toString().split(',');
-        if (parts.size() == 2) {
-            bool okX, okY;
-            int tx = parts[0].toInt(&okX);
-            int ty = parts[1].toInt(&okY);
-            if (okX && okY) {
-                doc->m_tileIndex.insert({tx, ty});
+    // ========== MODE-SPECIFIC LOADING ==========
+    if (doc->mode == Mode::Edgeless) {
+        // Parse tile index (just coordinates, no actual loading!)
+        QJsonArray tileIndexArray = obj["tile_index"].toArray();
+        for (const auto& val : tileIndexArray) {
+            QStringList parts = val.toString().split(',');
+            if (parts.size() == 2) {
+                bool okX, okY;
+                int tx = parts[0].toInt(&okX);
+                int ty = parts[1].toInt(&okY);
+                if (okX && okY) {
+                    doc->m_tileIndex.insert({tx, ty});
+                }
             }
         }
-    }
-    
-    // Phase 5.6: Parse layer definitions from manifest
-    if (obj.contains("layers")) {
-        QJsonArray layersArray = obj["layers"].toArray();
-        doc->m_edgelessLayers.clear();
-        for (const auto& val : layersArray) {
-            doc->m_edgelessLayers.push_back(LayerDefinition::fromJson(val.toObject()));
-        }
-        doc->m_edgelessActiveLayerIndex = obj["active_layer_index"].toInt(0);
         
-        // Clamp active layer index
-        if (doc->m_edgelessActiveLayerIndex >= static_cast<int>(doc->m_edgelessLayers.size())) {
-            doc->m_edgelessActiveLayerIndex = qMax(0, static_cast<int>(doc->m_edgelessLayers.size()) - 1);
+        // Phase 5.6: Parse layer definitions from manifest
+        if (obj.contains("layers")) {
+            QJsonArray layersArray = obj["layers"].toArray();
+            doc->m_edgelessLayers.clear();
+            for (const auto& val : layersArray) {
+                doc->m_edgelessLayers.push_back(LayerDefinition::fromJson(val.toObject()));
+            }
+            doc->m_edgelessActiveLayerIndex = obj["active_layer_index"].toInt(0);
+            
+            // Clamp active layer index
+            if (doc->m_edgelessActiveLayerIndex >= static_cast<int>(doc->m_edgelessLayers.size())) {
+                doc->m_edgelessActiveLayerIndex = qMax(0, static_cast<int>(doc->m_edgelessLayers.size()) - 1);
+            }
+        }
+        
+        // Ensure at least one layer exists for edgeless mode
+        if (doc->m_edgelessLayers.empty()) {
+            LayerDefinition defaultLayer;
+            defaultLayer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            defaultLayer.name = "Layer 1";
+            doc->m_edgelessLayers.push_back(defaultLayer);
+        }
+        
+#ifdef QT_DEBUG
+        qDebug() << "Loaded edgeless bundle from" << path << "with" << doc->m_tileIndex.size() 
+                 << "tiles indexed," << doc->m_edgelessLayers.size() << "layers";
+#endif
+    } else {
+        // ========== PAGED MODE LOADING (Phase O1.7.4) ==========
+        // Parse page_order (just UUIDs, no actual content loading!)
+        if (obj.contains("page_order")) {
+            QJsonArray pageOrderArray = obj["page_order"].toArray();
+            for (const auto& val : pageOrderArray) {
+                doc->m_pageOrder.append(val.toString());
+            }
+            
+            // Parse page_metadata (sizes for layout calculations)
+            if (obj.contains("page_metadata")) {
+                QJsonObject pageMetadataObj = obj["page_metadata"].toObject();
+                for (auto it = pageMetadataObj.begin(); it != pageMetadataObj.end(); ++it) {
+                    QString uuid = it.key();
+                    QJsonObject sizeObj = it.value().toObject();
+                    QSizeF size(sizeObj["width"].toDouble(595.0), 
+                               sizeObj["height"].toDouble(842.0));
+                    doc->m_pageMetadata[uuid] = size;
+                }
+            } else {
+                // Fallback: assign default size to pages missing metadata
+                for (const QString& uuid : doc->m_pageOrder) {
+                    if (doc->m_pageMetadata.find(uuid) == doc->m_pageMetadata.end()) {
+                        doc->m_pageMetadata[uuid] = QSizeF(595.0, 842.0); // A4 default
+                    }
+                }
+            }
+            
+#ifdef QT_DEBUG
+            qDebug() << "Loaded paged bundle from" << path << "with" 
+                     << doc->m_pageOrder.size() << "pages indexed";
+#endif
+        } else {
+            // No page_order - this shouldn't happen for paged bundles
+            qWarning() << "Paged bundle missing page_order in manifest";
         }
     }
-    
-    // Ensure at least one layer exists for edgeless mode
-    if (doc->m_edgelessLayers.empty()) {
-        LayerDefinition defaultLayer;
-        defaultLayer.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        defaultLayer.name = "Layer 1";
-        doc->m_edgelessLayers.push_back(defaultLayer);
-    }
-    
-#ifdef QT_DEBUG
-    qDebug() << "Loaded bundle from" << path << "with" << doc->m_tileIndex.size() 
-             << "tiles indexed," << doc->m_edgelessLayers.size() << "layers";
-#endif
     
     return doc;
 }

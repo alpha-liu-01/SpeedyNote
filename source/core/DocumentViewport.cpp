@@ -2227,14 +2227,16 @@ void DocumentViewport::ensurePageLayoutCache() const
     }
     
     // Build cache based on layout mode
+    // Phase O1.7.5: Use pageSizeAt() instead of page()->size to avoid loading full page content
+    // This is critical for paged lazy loading - layout can be calculated from metadata alone
     switch (m_layoutMode) {
         case LayoutMode::SingleColumn: {
             qreal y = 0;
             for (int i = 0; i < pageCount; ++i) {
                 m_pageYCache[i] = y;
-                const Page* page = m_document->page(i);
-                if (page) {
-                    y += page->size.height() + m_pageGap;
+                QSizeF pageSize = m_document->pageSizeAt(i);
+                if (!pageSize.isEmpty()) {
+                    y += pageSize.height() + m_pageGap;
                 }
             }
             break;
@@ -2245,8 +2247,6 @@ void DocumentViewport::ensurePageLayoutCache() const
             // Y position is same for both pages in a row
             qreal y = 0;
             for (int i = 0; i < pageCount; ++i) {
-                int row = i / 2;
-                
                 if (i % 2 == 0) {
                     // First page of row - calculate and store Y
                     m_pageYCache[i] = y;
@@ -2254,12 +2254,12 @@ void DocumentViewport::ensurePageLayoutCache() const
                     // Second page of row - same Y as first
                     m_pageYCache[i] = m_pageYCache[i - 1];
                     
-                    // After second page, advance Y
+                    // After second page, advance Y using metadata sizes
                     qreal rowHeight = 0;
-                    const Page* leftPage = m_document->page(i - 1);
-                    const Page* rightPage = m_document->page(i);
-                    if (leftPage) rowHeight = qMax(rowHeight, leftPage->size.height());
-                    if (rightPage) rowHeight = qMax(rowHeight, rightPage->size.height());
+                    QSizeF leftSize = m_document->pageSizeAt(i - 1);
+                    QSizeF rightSize = m_document->pageSizeAt(i);
+                    if (!leftSize.isEmpty()) rowHeight = qMax(rowHeight, leftSize.height());
+                    if (!rightSize.isEmpty()) rowHeight = qMax(rowHeight, rightSize.height());
                     y += rowHeight + m_pageGap;
                 }
             }
@@ -2282,6 +2282,11 @@ void DocumentViewport::preloadStrokeCaches()
         return;
     }
     
+    // Skip for edgeless mode - uses tile-based loading
+    if (m_document->isEdgeless()) {
+        return;
+    }
+    
     QVector<int> visible = visiblePages();
     if (visible.isEmpty()) {
         return;
@@ -2295,19 +2300,28 @@ void DocumentViewport::preloadStrokeCaches()
     int preloadStart = qMax(0, first - 1);
     int preloadEnd = qMin(pageCount - 1, last + 1);
     
-    // MEMORY OPTIMIZATION: Evict stroke caches for pages far from visible area
-    // Keep caches for visible ±2 pages, release everything else
+    // MEMORY OPTIMIZATION: Keep caches/pages for visible ±2 pages, evict everything else
     // This prevents unbounded memory growth when scrolling through large documents
-    static constexpr int STROKE_CACHE_BUFFER = 2;
-    int keepStart = qMax(0, first - STROKE_CACHE_BUFFER);
-    int keepEnd = qMin(pageCount - 1, last + STROKE_CACHE_BUFFER);
+    static constexpr int PAGE_BUFFER = 2;
+    int keepStart = qMax(0, first - PAGE_BUFFER);
+    int keepEnd = qMin(pageCount - 1, last + PAGE_BUFFER);
     
-    // Evict caches for pages outside the keep range
+    // Phase O1.7.5: Evict pages far from visible area (lazy loading mode)
+    // Only evict if lazy loading is enabled (bundle format)
+    bool lazyLoadingEnabled = m_document->isLazyLoadEnabled();
+    
+    // Evict caches/pages outside the keep range
     for (int i = 0; i < pageCount; ++i) {
         if (i < keepStart || i > keepEnd) {
-            Page* page = m_document->page(i);
-            if (page && page->hasLayerCachesAllocated()) {
-                page->releaseLayerCaches();
+            if (lazyLoadingEnabled) {
+                // Evict entire page (saves if dirty, removes from memory)
+                m_document->evictPage(i);
+            } else {
+                // Legacy mode: only evict stroke caches, keep page in memory
+                Page* page = m_document->page(i);
+                if (page && page->hasLayerCachesAllocated()) {
+                    page->releaseLayerCaches();
+                }
             }
         }
     }
@@ -2315,9 +2329,10 @@ void DocumentViewport::preloadStrokeCaches()
     // Get device pixel ratio for cache
     qreal dpr = devicePixelRatioF();
     
-    // Preload nearby pages
+    // Phase O1.7.5: Preload nearby pages (triggers lazy loading if needed)
+    // page() will automatically load from disk if not already in memory
     for (int i = preloadStart; i <= preloadEnd; ++i) {
-        Page* page = m_document->page(i);
+        Page* page = m_document->page(i);  // This triggers lazy load
         if (!page) continue;
         
         // Pre-generate zoom-aware stroke cache for all layers on this page
@@ -5802,7 +5817,12 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             break;
     }
     
-    // 3. Render vector layers with ZOOM-AWARE stroke cache
+    // 3. Render objects with affinity = -1 (below all stroke layers)
+    // This is for objects like pasted test paper images that should appear
+    // underneath all strokes.
+    page->renderObjectsWithAffinity(painter, 1.0, -1);
+    
+    // 4. Render vector layers with ZOOM-AWARE stroke cache, interleaved with objects
     // The cache is built at pageSize * zoom * dpr physical pixels, ensuring
     // sharp rendering at any zoom level. The cache's devicePixelRatio is set
     // to zoom * dpr, so Qt handles coordinate mapping correctly.
@@ -5834,10 +5854,10 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
                 layer->renderWithZoomCache(painter, pageSize, m_zoomLevel, dpr);
             }
         }
+        
+        // Render objects with affinity = layerIdx (above this layer, below next layer)
+        page->renderObjectsWithAffinity(painter, 1.0, layerIdx);
     }
-    
-    // 4. Render inserted objects (sorted by z-order)
-    page->renderObjects(painter, 1.0);
     
     // 5. Draw page border (optional, for visual separation)
     // CUSTOMIZABLE: Page border color (theme setting)
@@ -5862,9 +5882,16 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     // CR-9: STROKE_MARGIN is max expected stroke width + anti-aliasing buffer
     constexpr int STROKE_MARGIN = 100;
     
-    // CR-5: Single tilesInRect() call - use stroke margin for all tiles
+    // Phase O1.5: Object margin - objects can extend beyond tile boundaries
+    // Calculate extra margin based on largest object in document
+    int objectMargin = m_document->maxObjectExtent();
+    
+    // Total margin is max of stroke margin and object margin
+    int totalMargin = qMax(STROKE_MARGIN, objectMargin);
+    
+    // CR-5: Single tilesInRect() call - use total margin for all tiles
     // Background pass will filter to viewRect bounds
-    QRectF strokeRect = viewRect.adjusted(-STROKE_MARGIN, -STROKE_MARGIN, STROKE_MARGIN, STROKE_MARGIN);
+    QRectF strokeRect = viewRect.adjusted(-totalMargin, -totalMargin, totalMargin, totalMargin);
     QVector<Document::TileCoord> allTiles = m_document->tilesInRect(strokeRect);
     
     // Pre-calculate visible tile range for background filtering
@@ -5925,20 +5952,41 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         }
     }
     
-    // ========== PASS 2: Render strokes (includes margin tiles for thick strokes) ==========
-    // Strokes are split at tile boundaries, so each tile renders its own segments.
-    // Margin tiles ensure thick strokes at edges are fully rendered.
+    // ========== PASS 2: Render objects with default affinity (-1) ==========
+    // These render BELOW all stroke layers (e.g., background images, pasted test papers)
+    renderEdgelessObjectsWithAffinity(painter, -1, allTiles);
+    
+    // ========== PASS 3: Interleaved layer strokes and objects ==========
+    // For each layer index, render strokes from all tiles, then objects with that affinity.
+    // This ensures correct z-order: Layer 0 strokes → Affinity 0 objects → Layer 1 strokes → ...
+    
+    // First, determine the maximum layer count across all visible tiles
+    int maxLayerCount = 0;
     for (const auto& coord : allTiles) {
         Page* tile = m_document->getTile(coord.first, coord.second);
-        if (!tile) continue;  // Skip empty tiles
+        if (tile) {
+            maxLayerCount = qMax(maxLayerCount, tile->layerCount());
+        }
+    }
+    
+    // Render layers interleaved with objects
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    for (int layerIdx = 0; layerIdx < maxLayerCount; ++layerIdx) {
+        // PASS 3a: Render this layer's strokes from all tiles
+        for (const auto& coord : allTiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            
+            QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+            
+            painter.save();
+            painter.translate(tileOrigin);
+            renderTileLayerStrokes(painter, tile, layerIdx);
+            painter.restore();
+        }
         
-        // Calculate tile origin in document coordinates
-        QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
-        
-        painter.save();
-        painter.translate(tileOrigin);
-        renderTileStrokes(painter, tile, coord);  // Only render strokes, not background
-        painter.restore();
+        // PASS 3b: Render objects with affinity = layerIdx
+        renderEdgelessObjectsWithAffinity(painter, layerIdx, allTiles);
     }
     
     // Draw tile boundary grid (debug)
@@ -6025,8 +6073,86 @@ void DocumentViewport::renderTileStrokes(QPainter& painter, Page* tile, Document
         }
     }
     
-    // Render inserted objects
-    tile->renderObjects(painter, 1.0);
+    // NOTE: Objects are now rendered via renderEdgelessObjectsWithAffinity()
+    // in the multi-pass rendering loop, not here.
+    // tile->renderObjects(painter, 1.0);  // REMOVED - handled by multi-pass
+}
+
+void DocumentViewport::renderTileLayerStrokes(QPainter& painter, Page* tile, int layerIdx)
+{
+    if (!tile) return;
+    if (layerIdx < 0 || layerIdx >= tile->layerCount()) return;
+    
+    VectorLayer* layer = tile->layer(layerIdx);
+    if (!layer || !layer->visible) return;
+    
+    QSizeF tileSize = tile->size;
+    qreal dpr = devicePixelRatioF();
+    
+    // CR-2B-7: Check if this layer has selected strokes that should be excluded
+    QSet<QString> excludeIds;
+    if (m_lassoSelection.isValid()) {
+        excludeIds = m_lassoSelection.getSelectedIds();
+    }
+    
+    // CR-2B-7: If there's a selection on the active layer, exclude selected strokes
+    if (!excludeIds.isEmpty() && layerIdx == m_edgelessActiveLayerIndex) {
+        // Render manually, skipping selected strokes
+        layer->renderExcluding(painter, excludeIds);
+    } else {
+        layer->renderWithZoomCache(painter, tileSize, m_zoomLevel, dpr);
+    }
+}
+
+void DocumentViewport::renderEdgelessObjectsWithAffinity(
+    QPainter& painter, int affinity, const QVector<Document::TileCoord>& allTiles)
+{
+    if (!m_document) return;
+    
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+    QRectF viewRect = visibleRect();
+    
+    // Iterate all loaded tiles and render objects with matching affinity
+    for (const auto& coord : allTiles) {
+        Page* tile = m_document->getTile(coord.first, coord.second);
+        if (!tile) continue;
+        
+        // Check if this tile has objects with this affinity
+        auto it = tile->objectsByAffinity.find(affinity);
+        if (it == tile->objectsByAffinity.end() || it->second.empty()) {
+            continue;
+        }
+        
+        // Calculate tile origin in document coordinates
+        QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+        
+        // Sort objects by zOrder within this affinity group
+        std::vector<InsertedObject*> objs = it->second;
+        std::sort(objs.begin(), objs.end(),
+                  [](InsertedObject* a, InsertedObject* b) {
+                      return a->zOrder < b->zOrder;
+                  });
+        
+        // Render each object at document coordinates
+        for (InsertedObject* obj : objs) {
+            if (!obj->visible) continue;
+            
+            // Convert tile-local position to document coordinates
+            QPointF docPos = tileOrigin + obj->position;
+            QRectF objRect(docPos, obj->size);
+            
+            // Skip if object doesn't intersect visible area (with some margin)
+            if (!objRect.intersects(viewRect.adjusted(-200, -200, 200, 200))) {
+                continue;
+            }
+            
+            // Render at document coordinates
+            painter.save();
+            painter.translate(docPos);
+            obj->render(painter, 1.0);  // zoom is already applied to painter
+            painter.restore();
+        }
+    }
 }
 
 void DocumentViewport::drawTileBoundaries(QPainter& painter, QRectF viewRect)

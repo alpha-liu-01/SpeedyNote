@@ -24,6 +24,7 @@ QJsonObject InsertedObject::toJson() const
     obj["locked"] = locked;
     obj["visible"] = visible;
     obj["rotation"] = rotation;
+    obj["layerAffinity"] = layerAffinity;
     
     return obj;
 }
@@ -38,6 +39,7 @@ void InsertedObject::loadFromJson(const QJsonObject& obj)
     locked = obj["locked"].toBool(false);
     visible = obj["visible"].toBool(true);
     rotation = obj["rotation"].toDouble(0.0);
+    layerAffinity = obj["layerAffinity"].toInt(-1);  // Default: below all strokes
     
     // Generate ID if missing (for backwards compatibility)
     if (id.isEmpty()) {

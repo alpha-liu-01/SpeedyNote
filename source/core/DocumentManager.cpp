@@ -453,69 +453,38 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
         return false;
     }
     
-    QFileInfo fileInfo(path);
-    QString suffix = fileInfo.suffix().toLower();
+    // ========== UNIFIED BUNDLE FORMAT (.snb) - Phase O1.7.6 ==========
+    // ALL documents (paged and edgeless) now use the bundle format.
+    // This enables:
+    // - Lazy loading for paged mode (pages loaded on demand)
+    // - Asset folder for images/objects
+    // - Consistent O(1) save/load for large documents
     
-    // ========== EDGELESS BUNDLE FORMAT (.snb) ==========
-    // Edgeless documents use bundle format for O(1) tile loading
-    if (doc->isEdgeless() || suffix == "snb") {
-        QString bundlePath = path;
-        // Ensure .snb extension
-        if (!bundlePath.endsWith(".snb", Qt::CaseInsensitive)) {
-            bundlePath += ".snb";
-        }
-        
-        if (!doc->saveBundle(bundlePath)) {
-            qWarning() << "DocumentManager::doSave: Failed to save bundle:" << bundlePath;
-            return false;
-        }
-        
-        // ========== TEMP BUNDLE CLEANUP ==========
-        // If this was a temp bundle and now saving to a different location,
-        // clean up the temp directory. Note: saveBundle() already updated
-        // m_bundlePath to the new location, so no need to call setBundlePath().
-        QString tempPath = m_tempBundlePaths.value(doc);
-        if (!tempPath.isEmpty() && tempPath != bundlePath) {
-            cleanupTempBundle(doc);
-            qDebug() << "DocumentManager: Moved from temp bundle to" << bundlePath;
-        }
-        // ==========================================
-        
-        // Update state
-        clearModified(doc);
-        addToRecent(bundlePath);
-        emit documentSaved(doc);
-        return true;
+    QString bundlePath = path;
+    // Ensure .snb extension
+    if (!bundlePath.endsWith(".snb", Qt::CaseInsensitive)) {
+        bundlePath += ".snb";
     }
     
-    // ========== PAGED DOCUMENT FORMAT (.json) ==========
-    // Serialize document to JSON
-    QJsonObject jsonObj = doc->toFullJson();
-    QJsonDocument jsonDoc(jsonObj);
-    
-    // Write to file
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) {
-        qWarning() << "DocumentManager::doSave: Cannot open file for writing:" << path;
+    if (!doc->saveBundle(bundlePath)) {
+        qWarning() << "DocumentManager::doSave: Failed to save bundle:" << bundlePath;
         return false;
     }
     
-    // Use indented format for readability (can be changed to Compact for smaller files)
-    QByteArray data = jsonDoc.toJson(QJsonDocument::Indented);
-    
-    qint64 bytesWritten = file.write(data);
-    file.close();
-    
-    if (bytesWritten != data.size()) {
-        qWarning() << "DocumentManager::doSave: Write failed, expected" << data.size() 
-                   << "bytes, wrote" << bytesWritten;
-        return false;
+    // ========== TEMP BUNDLE CLEANUP ==========
+    // If this was a temp bundle and now saving to a different location,
+    // clean up the temp directory. Note: saveBundle() already updated
+    // m_bundlePath to the new location, so no need to call setBundlePath().
+    QString tempPath = m_tempBundlePaths.value(doc);
+    if (!tempPath.isEmpty() && tempPath != bundlePath) {
+        cleanupTempBundle(doc);
+        qDebug() << "DocumentManager: Moved from temp bundle to" << bundlePath;
     }
+    // ==========================================
     
     // Update state
     clearModified(doc);
-    addToRecent(path);
-    
+    addToRecent(bundlePath);
     emit documentSaved(doc);
     return true;
 }

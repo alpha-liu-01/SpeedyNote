@@ -1150,11 +1150,12 @@ void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity
 
 ---
 
-### O1.3: Paged Mode Interleaved Rendering
+### O1.3: Paged Mode Interleaved Rendering ✅
 
 **Goal:** Render objects interleaved with layers based on affinity.
+**Status:** COMPLETE
 
-#### O1.3.1: Update Page::render() (if exists) or renderPage()
+#### O1.3.1: Update Page::render() (if exists) or renderPage() ✅
 **File:** `source/core/DocumentViewport.cpp` (renderPage function)
 
 **Current flow:**
@@ -1170,23 +1171,29 @@ void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity
 5. ... continue for all layers
 
 **Tasks:**
-- [ ] Modify `renderPage()` to call `page->renderObjectsWithAffinity(painter, zoom, -1)` after background
-- [ ] Modify layer loop to call `page->renderObjectsWithAffinity(painter, zoom, layerIdx)` after each layer
-- [ ] Remove old `page->renderObjects()` call (replaced by interleaved calls)
+- [x] Modify `renderPage()` to call `page->renderObjectsWithAffinity(painter, zoom, -1)` after background
+- [x] Modify layer loop to call `page->renderObjectsWithAffinity(painter, zoom, layerIdx)` after each layer
+- [x] Remove old `page->renderObjects()` call (replaced by interleaved calls)
 
 ---
 
-### O1.4: Edgeless Multi-Pass Rendering
+### O1.4: Edgeless Multi-Pass Rendering ✅
 
 **Goal:** Implement multi-pass rendering for correct cross-tile object display.
+**Status:** COMPLETE
 
-#### O1.4.1: Refactor renderEdgelessMode
+#### O1.4.1: Refactor renderEdgelessMode ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Extract background rendering into helper: `renderTileBackground()`
-- [ ] Extract stroke rendering into helper: `renderTileLayerStrokes(int layerIdx)`
-- [ ] Create `renderEdgelessObjectsWithAffinity(int affinity)` method
+- [x] Background rendering kept inline (already well-organized)
+- [x] Extract stroke rendering into helper: `renderTileLayerStrokes(int layerIdx)`
+- [x] Create `renderEdgelessObjectsWithAffinity(int affinity)` method
+
+**Implementation Notes:**
+- `renderTileLayerStrokes()` renders a single layer's strokes from a tile
+- `renderEdgelessObjectsWithAffinity()` renders objects from all tiles at document coordinates
+- Removed object rendering from `renderTileStrokes()` (now handled by multi-pass)
 
 #### O1.4.2: Implement Multi-Pass Structure
 **File:** `source/core/DocumentViewport.cpp`
@@ -1219,10 +1226,10 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
 ```
 
 **Tasks:**
-- [ ] Implement the multi-pass structure
-- [ ] Ensure correct painter state management (save/restore)
+- [x] Implement the multi-pass structure
+- [x] Ensure correct painter state management (save/restore)
 
-#### O1.4.3: Implement renderEdgelessObjectsWithAffinity
+#### O1.4.3: Implement renderEdgelessObjectsWithAffinity ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 ```cpp
@@ -1253,9 +1260,45 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(QPainter& painter, int 
 ```
 
 **Tasks:**
-- [ ] Implement the method
-- [ ] Add `tileToDocument()` helper if not exists
-- [ ] Add `loadedTiles()` accessor to Document if not exists
+- [x] Implement the method
+- [x] Uses tile coordinates × tileSize for document position (no separate helper needed)
+- [x] Uses `allTiles` parameter (from tilesInRect) rather than separate accessor
+
+**Actual Implementation:**
+```cpp
+void DocumentViewport::renderEdgelessObjectsWithAffinity(
+    QPainter& painter, int affinity, const QVector<Document::TileCoord>& allTiles)
+{
+    // Iterate all loaded tiles and render objects with matching affinity
+    for (const auto& coord : allTiles) {
+        Page* tile = m_document->getTile(coord.first, coord.second);
+        if (!tile) continue;
+        
+        auto it = tile->objectsByAffinity.find(affinity);
+        if (it == tile->objectsByAffinity.end() || it->second.empty()) continue;
+        
+        QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+        
+        // Sort and render objects at document coordinates
+        std::vector<InsertedObject*> objs = it->second;
+        std::sort(objs.begin(), objs.end(), [](auto* a, auto* b) {
+            return a->zOrder < b->zOrder;
+        });
+        
+        for (InsertedObject* obj : objs) {
+            if (!obj->visible) continue;
+            QPointF docPos = tileOrigin + obj->position;
+            QRectF objRect(docPos, obj->size);
+            if (!objRect.intersects(viewRect.adjusted(-200, -200, 200, 200))) continue;
+            
+            painter.save();
+            painter.translate(docPos);
+            obj->render(painter, 1.0);
+            painter.restore();
+        }
+    }
+}
+```
 
 ---
 
@@ -1263,21 +1306,35 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(QPainter& painter, int 
 
 **Goal:** Load extra tiles to capture objects that extend into viewport.
 
-#### O1.5.1: Track Maximum Object Extent
+#### O1.5.1: Track Maximum Object Extent ✅
 **File:** `source/core/Document.h/.cpp`
 
 **Tasks:**
-- [ ] Add `int m_maxObjectExtent = 0` member
-- [ ] Add `void updateMaxObjectExtent(const InsertedObject* obj)`
-- [ ] Call from tile's `addObject()` when object added
-- [ ] Add `int maxObjectExtent() const` accessor
+- [x] Add `mutable int m_maxObjectExtent = 0` member (mutable for lazy loading)
+- [x] Add `void updateMaxObjectExtent(const InsertedObject* obj)` - updates if obj is larger
+- [x] Add `void recalculateMaxObjectExtent()` - full scan after object removal
+- [x] Add `int maxObjectExtent() const` accessor
+- [x] Update `loadTileFromDisk()` to update extent when loading tiles with objects
+- [x] Update `loadPagesFromJson()` to update extent when loading pages with objects
 
-#### O1.5.2: Expand Tile Loading Range
+**Implementation Notes:**
+- `m_maxObjectExtent` is mutable because it's updated in `loadTileFromDisk()` which is const
+- Object extent updated automatically when tiles/pages are loaded
+- For object insertion (Phase O2), caller should call `updateMaxObjectExtent()`
+- For object removal, caller should call `recalculateMaxObjectExtent()` if needed
+
+#### O1.5.2: Expand Tile Loading Range ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In tile loading logic, add margin: `ceil(m_document->maxObjectExtent() / TILE_SIZE)`
-- [ ] Ensure margin tiles are loaded but backgrounds not rendered (stroke margin already exists)
+- [x] In `renderEdgelessMode()`, calculate `objectMargin = m_document->maxObjectExtent()`
+- [x] Use `totalMargin = qMax(STROKE_MARGIN, objectMargin)` for tile loading
+- [x] Existing background filtering already handles margin tiles (backgrounds not rendered for margin tiles)
+
+**Implementation Notes:**
+- Changed `strokeRect` calculation to use `totalMargin` instead of just `STROKE_MARGIN`
+- Margin tiles (outside visible rect) are loaded for objects/strokes but backgrounds are not rendered
+- This ensures objects extending from margin tiles into the viewport are fully rendered
 
 ---
 
@@ -1285,29 +1342,45 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(QPainter& painter, int 
 
 **Goal:** Both paged and edgeless use .snb bundle with assets folder.
 
-#### O1.6.1: Create Assets Directory Structure
-**File:** `source/core/Document.cpp`
+#### O1.6.1: Create Assets Directory Structure ✅
+**File:** `source/core/Document.cpp`, `source/core/Document.h`
 
 **Tasks:**
-- [ ] In `saveBundle()`, create `assets/images/` directory
-- [ ] Add helper: `QString assetsImagePath() const { return m_bundlePath + "/assets/images"; }`
+- [x] In `saveBundle()`, create `assets/images/` directory
+- [x] Add helper: `QString assetsImagePath() const` in Document.h
 
-#### O1.6.2: Update ImageObject Path Resolution
-**File:** `source/objects/ImageObject.cpp`
+**Implementation Notes:**
+- Directory created in `saveBundle()` alongside `tiles/` directory
+- Helper returns empty string if bundle path not set (handles unsaved documents)
 
-**Tasks:**
-- [ ] Modify `fullPath()` to resolve against `bundlePath/assets/images/`
-- [ ] Add `saveToAssets(const QString& bundlePath)` method:
-  - Calculate hash
-  - Save to `assets/images/{hash16}.png` if not exists
-  - Update `imagePath` to just filename
-
-#### O1.6.3: Update Image Loading
-**File:** `source/core/Page.cpp`
+#### O1.6.2: Update ImageObject Path Resolution ✅
+**File:** `source/objects/ImageObject.h/.cpp`
 
 **Tasks:**
-- [ ] Update `loadImages(basePath)` to pass `basePath + "/assets/images"`
-- [ ] Ensure relative path resolution works
+- [x] Modify `fullPath()` to resolve against `bundlePath/assets/images/`
+- [x] Add `saveToAssets(const QString& bundlePath)` method:
+  - Calculates hash if not already set
+  - Saves to `assets/images/{hash16}.png` if not exists
+  - Updates `imagePath` to just filename
+  - Returns true if already exists (deduplication)
+
+**Implementation Notes:**
+- `fullPath()` still handles absolute paths for legacy compatibility
+- Hash uses first 16 characters of SHA-256 (64-bit collision resistance)
+- PNG format used for lossless storage
+
+#### O1.6.3: Update Image Loading ✅
+**File:** `source/core/Page.h`
+
+**Tasks:**
+- [x] Update `loadImages()` docstring to clarify basePath is bundle path
+- [x] Relative path resolution works via `ImageObject::fullPath()` (O1.6.2)
+
+**Implementation Notes:**
+- No code change needed in `loadImages()` itself
+- Path resolution encapsulated in `ImageObject::fullPath()` which adds `/assets/images/`
+- Callers should pass bundle path (e.g., `/path/to/notebook.snb`)
+- Images are loaded on-demand when `loadImages()` is called (lazy loading)
 
 ---
 
@@ -1315,8 +1388,8 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(QPainter& painter, int 
 
 **Goal:** Implement lazy loading for paged mode pages.
 
-#### O1.7.1: Add Lazy Loading Members
-**File:** `source/core/Document.h`
+#### O1.7.1: Add Lazy Loading Members ✅
+**File:** `source/core/Document.h/.cpp`
 
 ```cpp
 // Paged mode lazy loading
@@ -1328,59 +1401,198 @@ std::set<QString> m_deletedPages;                     // For cleanup on save
 ```
 
 **Tasks:**
-- [ ] Add all member variables
-- [ ] Add accessors: `isPageLoaded()`, `pageUuidAt()`, `pageSizeAt()`
+- [x] Add all member variables to Document.h
+- [x] Add accessors: `isPageLoaded()`, `pageUuidAt()`, `pageSizeAt()`
+- [x] Implement accessors with legacy m_pages fallback
 
-#### O1.7.2: Implement page() with Lazy Loading
+**Implementation Notes:**
+- Accessors support both legacy mode (m_pages) and lazy loading mode (m_pageOrder)
+- Legacy mode detected by `m_pageOrder.isEmpty()`
+- `pageSizeAt()` checks metadata first, falls back to loading page
+
+#### O1.7.2: Implement page() with Lazy Loading ✅
+**File:** `source/core/Document.h/.cpp`
+
+**Tasks:**
+- [x] Modify `page(int index)` to check `m_loadedPages`, load on demand
+- [x] Implement `loadPageFromDisk(int index)` - loads from pages/{uuid}.json
+- [x] Implement `savePage(int index)` - saves to pages/{uuid}.json
+- [x] Implement `evictPage(int index)` - saves if dirty, then removes from memory
+- [x] Implement `markPageDirty(int index)` and `isPageDirty(int index)`
+
+**Implementation Notes:**
+- `page()` checks for lazy loading mode via `!m_pageOrder.isEmpty()`
+- Falls back to legacy `m_pages` when `m_pageOrder` is empty
+- `loadPageFromDisk()` updates `m_maxObjectExtent` for loaded objects
+- `savePage()` also updates `m_pageMetadata` with current page size
+
+#### O1.7.3: Update Page Insert/Remove/Move ✅
+**File:** `source/core/Document.h/.cpp`
+
+**Tasks:**
+- [x] Update `pageCount()` to return `m_pageOrder.size()` in lazy mode
+- [x] Update `addPage()` to generate UUID, update `m_pageOrder`
+- [x] Update `insertPage()` to use UUID, update `m_pageOrder`
+- [x] Update `removePage()` to track in `m_deletedPages`
+- [x] Update `movePage()` to just reorder `m_pageOrder`
+
+**Implementation Notes:**
+- All methods check `m_pageOrder.isEmpty()` for legacy vs lazy mode
+- `addPage()` / `insertPage()` generate UUID, add to metadata, mark dirty
+- `removePage()` adds UUID to `m_deletedPages` for cleanup on save
+- `movePage()` only reorders `m_pageOrder` - no file operations needed
+
+#### O1.7.4: Update Bundle Save/Load for Paged Mode ✅
 **File:** `source/core/Document.cpp`
 
 **Tasks:**
-- [ ] Modify `page(int index)` to check `m_loadedPages`, load on demand
-- [ ] Implement `loadPageFromDisk(int index)`
-- [ ] Implement `savePage(int index)`
-- [ ] Implement `evictPage(int index)`
+- [x] `saveBundle()`: Write pages to `pages/{uuid}.json`, include `page_order` and `page_metadata` in manifest
+- [x] `loadBundle()`: Parse `page_order`, `page_metadata`, enable lazy loading
+- [x] Delete files for pages in `m_deletedPages`
 
-#### O1.7.3: Update Page Insert/Remove/Move
-**File:** `source/core/Document.cpp`
+**Implementation Notes:**
 
-**Tasks:**
-- [ ] Update `insertPage()` to use UUID, update `m_pageOrder`
-- [ ] Update `removePage()` to track in `m_deletedPages`
-- [ ] Update `movePage()` to just reorder `m_pageOrder`
-- [ ] Ensure `pageCount()` returns `m_pageOrder.size()`
+**saveBundle() Changes:**
+- Mode-specific directory creation: `tiles/` for edgeless, `pages/` for paged
+- Legacy conversion: If `m_pageOrder` is empty but `m_pages` has content, converts to UUID-based format
+- Writes `page_order` array and `page_metadata` object to manifest
+- Copies evicted pages when saving to new location (similar to tile handling)
+- Saves only dirty pages (or all if saving to new location)
+- Deletes page files for pages in `m_deletedPages`
 
-#### O1.7.4: Update Bundle Save/Load for Paged Mode
-**File:** `source/core/Document.cpp`
+**loadBundle() Changes:**
+- Mode-specific parsing: tile_index for edgeless, page_order for paged
+- Parses `page_order` array into `m_pageOrder`
+- Parses `page_metadata` into `m_pageMetadata` (with A4 default fallback)
+- Does NOT load page contents - pages loaded on-demand via `page()` accessor
 
-**Tasks:**
-- [ ] `saveBundle()`: Write pages to `pages/{uuid}.json`, include `page_order` and `page_metadata` in manifest
-- [ ] `loadBundle()`: Parse `page_order`, `page_metadata`, enable lazy loading
-- [ ] Delete files for pages in `m_deletedPages`
+**Manifest Structure for Paged Bundle:**
+```json
+{
+  "format_version": "1.0",
+  "mode": "paged",
+  "page_order": ["uuid1", "uuid2", "uuid3"],
+  "page_metadata": {
+    "uuid1": { "width": 595.0, "height": 842.0 },
+    "uuid2": { "width": 595.0, "height": 842.0 }
+  }
+}
+```
 
-#### O1.7.5: Update DocumentViewport Page Access
+#### O1.7.5: Update DocumentViewport Page Access ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In `preloadNearbyPages()`, trigger page loading for visible ±2
-- [ ] Add page eviction for pages far from visible
-- [ ] Update `ensurePageLayoutCache()` to use `pageSizeAt()` instead of `page(i)->size`
+- [x] In `preloadStrokeCaches()`, page loading is now triggered via `page()` call for visible ±1 pages
+- [x] Add page eviction for pages far from visible (visible ±2 buffer)
+- [x] Update `ensurePageLayoutCache()` to use `pageSizeAt()` instead of `page(i)->size`
 
-#### O1.7.6: Route Paged Mode Through Bundle Save
-**File:** `source/core/DocumentManager.cpp`
+**Implementation Notes:**
+
+**preloadStrokeCaches() Changes:**
+- Added early return for edgeless mode (uses tile-based loading instead)
+- When lazy loading is enabled: evict entire pages outside keep range via `evictPage()`
+- When legacy mode: only evict stroke caches, keep pages in memory
+- Calling `page()` for pages in preload range automatically triggers lazy loading
+
+**ensurePageLayoutCache() Changes:**
+- Replaced `page()->size` with `pageSizeAt()` for both single-column and two-column layouts
+- This is critical for lazy loading: layout can now be calculated from manifest metadata alone
+- No pages are loaded during layout cache building, only metadata is accessed
+
+**Memory Management Pattern:**
+```
+Visible pages:     [5, 6, 7]
+Preload range:     [4, 5, 6, 7, 8]   (visible ±1, loaded)
+Keep range:        [3, 4, 5, 6, 7, 8, 9]   (visible ±2, not evicted)
+Eviction range:    [0, 1, 2] and [10, 11, ...]  (evicted to disk)
+```
+
+#### O1.7.6: Route Paged Mode Through Bundle Save ✅
+**Files:** `source/core/DocumentManager.cpp`, `source/MainWindow.cpp`
 
 **Tasks:**
-- [ ] Remove old single-file JSON save path
-- [ ] Route all documents through `saveBundle()`
-- [ ] Update file dialogs to use `.snb` extension
+- [x] Remove old single-file JSON save path
+- [x] Route all documents through `saveBundle()`
+- [x] Update file dialogs to use `.snb` extension
+
+**Implementation Notes:**
+
+**DocumentManager.cpp - doSave() Changes:**
+- Removed the separate paged document JSON save path (`toFullJson()` branch)
+- ALL documents (paged and edgeless) now go through `saveBundle()`
+- This enables lazy loading, asset storage, and consistent save/load for all document types
+
+**MainWindow.cpp - Save Dialog Changes:**
+- Save dialog now uses `.snb` extension for ALL documents (not just edgeless)
+- Filter simplified to: `"SpeedyNote Bundle (*.snb);;All Files (*)"`
+
+**MainWindow.cpp - Open Dialog Changes:**
+- Filter updated to prioritize `.snb` bundles: `"SpeedyNote Files (*.snb *.json *.snx);;..."`
+- Legacy `.json` and `.snx` files still loadable for backward compatibility
+
+**Backward Compatibility:**
+- Loading: Old `.json` files can still be loaded (DocumentManager.loadDocument handles this)
+- Saving: When an old `.json` file is resaved, it becomes a `.snb` bundle
+
+**Bundle Loading (Ctrl+Shift+L):**
+- Renamed `loadEdgelessDocument()` → `loadFolderDocument()` to reflect its purpose
+- Function now handles BOTH paged and edgeless `.snb` bundles
+- Detects mode from manifest and applies appropriate setup:
+  - Edgeless: Centers on origin (pan offset)
+  - Paged: Goes to first page (centered)
+- Dialog title: "Open SpeedyNote Bundle (.snb folder)"
+- Debug message correctly identifies document type
+
+**Why "loadFolderDocument":**
+- `.snb` bundles are currently directories (not single files)
+- `QFileDialog::getOpenFileName()` can't select directories
+- This function uses `QFileDialog::getExistingDirectory()` instead
+- Name distinguishes from future `loadDocument()` when `.snb` becomes a single file
 
 ---
 
-### O1.8: Testing & Verification
+### O1.8: Code Review & Bug Fixes ✅
+
+**Goal:** Review Phase O1 code for issues before proceeding.
+**Status:** COMPLETE
+
+#### Issues Found and Fixed
+
+**Issue 1: Assets Not Copied on "Save As" (CRITICAL - Fixed)**
+- **File:** `source/core/Document.cpp` - `saveBundle()`
+- **Problem:** When saving to a new location (`savingToNewLocation`), we copied evicted tiles/pages but NOT the `assets/images/` folder. This would cause all image references to break.
+- **Fix:** Added a new block after checking `savingToNewLocation` that copies all files from `oldBundlePath/assets/images/` to `path/assets/images/`.
+- **Impact:** Without fix, "Save As" would lose all inserted images.
+
+**Issue 2: Page::render() Bypasses Affinity System (Documented)**
+- **File:** `source/core/Page.h`, `source/core/Page.cpp`
+- **Problem:** The `Page::render()` method renders objects AFTER all layers, not interleaved based on affinity.
+- **Impact:** Low - this method is only used for export/preview, not live rendering. DocumentViewport::renderPage() uses the correct interleaved approach.
+- **Fix:** Added `@deprecated` documentation to clarify the limitation.
+
+**Issue 3: No Issues Found (Verified Correct)**
+- `Page::fromJson()` correctly calls `rebuildAffinityMap()` ✅
+- `Page::clearContent()` correctly clears `objectsByAffinity` ✅
+- `preloadStrokeCaches()` correctly handles lazy vs legacy mode ✅
+- Lazy loading mutable members are correctly declared ✅
+- Object grouping by affinity is maintained in addObject/removeObject ✅
+
+#### Performance Notes
+
+**Noted but not fixed (acceptable for current use cases):**
+- `preloadStrokeCaches()` iterates all pages when evicting. Could be optimized for very large documents (500+ pages) by tracking the previous keep range.
+- Object sorting in `renderObjectsWithAffinity()` creates a copy of the vector. For pages with many objects (100+), consider pre-sorting in the affinity map.
+
+---
+
+### O1.9: Testing & Verification
 
 **Tasks:**
 - [ ] Test: Create edgeless doc with objects, verify cross-tile rendering
 - [ ] Test: Create paged doc with objects, verify layer-interleaved rendering
 - [ ] Test: Save/load bundle with images, verify assets folder
+- [ ] Test: **"Save As" to new location with images - verify images copied**
 - [ ] Test: Lazy loading - load 100+ page doc, verify memory usage
 - [ ] Test: Object affinity -1, 0, 1 render in correct order
 
@@ -1390,6 +1602,20 @@ std::set<QString> m_deletedPages;                     // For cleanup on save
 
 **Goal:** Enable users to insert, select, and manipulate objects.
 
+**Prerequisites from O1:**
+- `layerAffinity` property on InsertedObject ✅
+- `objectsByAffinity` map in Page with `addObject()`/`removeObject()` ✅
+- `renderObjectsWithAffinity()` for correct rendering order ✅
+- `updateMaxObjectExtent()` / `recalculateMaxObjectExtent()` in Document ✅
+- `saveToAssets()` in ImageObject for hash-based storage ✅
+- `markPageDirty()` for lazy loading persistence ✅
+- `markTileDirty()` for edgeless persistence ✅
+
+**Helper Methods to Implement (O2.0):**
+- `viewportCenterInDocument()` - returns center of visible viewport in document coords
+- `pushObjectInsertUndo()` / `pushObjectDeleteUndo()` / `pushObjectMoveUndo()` - undo helpers
+- Object-specific undo handling in `undo()` / `redo()` methods
+
 ---
 
 ### O2.1: Object Select Tool
@@ -1397,10 +1623,14 @@ std::set<QString> m_deletedPages;                     // For cleanup on save
 **Goal:** Add dedicated tool for selecting objects.
 
 #### O2.1.1: Add ToolType::ObjectSelect
+**File:** `source/core/ToolType.h` (NOT DocumentViewport.h - ToolType is in separate file)
+
+**Tasks:**
+- [ ] Add `ObjectSelect` to `ToolType` enum in `ToolType.h`
+
 **File:** `source/core/DocumentViewport.h`
 
 **Tasks:**
-- [ ] Add `ObjectSelect` to `ToolType` enum
 - [ ] Add member: `QList<InsertedObject*> m_selectedObjects`
 - [ ] Add member: `InsertedObject* m_hoveredObject = nullptr`
 
@@ -1411,9 +1641,17 @@ std::set<QString> m_deletedPages;                     // For cleanup on save
 InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint)
 {
     if (m_document->isEdgeless()) {
-        // Check loaded tiles
-        for (auto& [coord, tile] : m_document->loadedTiles()) {
-            QPointF tileLocal = documentToTile(docPoint, coord);
+        // Check all loaded tiles (use allLoadedTileCoords, not loadedTiles which doesn't exist)
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            
+            // Convert document coords to tile-local coords
+            QPointF tileLocal = docPoint - QPointF(
+                coord.first * Document::EDGELESS_TILE_SIZE,
+                coord.second * Document::EDGELESS_TILE_SIZE
+            );
+            
             if (auto* obj = tile->objectAtPoint(tileLocal)) {
                 return obj;
             }
@@ -1431,8 +1669,8 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint)
 ```
 
 **Tasks:**
-- [ ] Implement `objectAtPoint()` as shown
-- [ ] Add `documentToTile()` helper if needed
+- [ ] Implement `objectAtPoint()` as shown above
+- [ ] Note: Tile-local conversion is inline (no separate helper needed)
 
 #### O2.1.3: Handle ObjectSelect Tool Input
 **File:** `source/core/DocumentViewport.cpp`
@@ -1501,13 +1739,41 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
     for (InsertedObject* obj : m_selectedObjects) {
         obj->position += delta;
     }
+    
+    // Mark affected pages/tiles as dirty for lazy save
+    if (m_document->isEdgeless()) {
+        // Find tiles containing moved objects and mark dirty
+        for (InsertedObject* obj : m_selectedObjects) {
+            // Object's tile might have changed - mark both old and new
+            // (Simplified: just mark any tile containing selected objects)
+            // Full tile-crossing logic in O2.3.4
+        }
+    } else {
+        m_document->markPageDirty(m_currentPageIndex);
+    }
+    
     update();
 }
 ```
 
 **Tasks:**
-- [ ] Implement the method
+- [ ] Implement the method as shown
+- [ ] Mark affected pages/tiles dirty
 - [ ] Handle page/tile boundary crossing (edgeless: move to new tile if needed)
+
+#### O2.3.4: Handle Tile Boundary Crossing (Edgeless)
+**File:** `source/core/DocumentViewport.cpp`
+
+When an object moves across tile boundaries in edgeless mode:
+1. Remove object from old tile
+2. Add object to new tile (with updated tile-local coordinates)
+3. Mark both tiles dirty
+
+**Tasks:**
+- [ ] Detect when object moves to different tile
+- [ ] Call `oldTile->removeObject(id)` and `newTile->addObject(obj)`
+- [ ] Recalculate tile-local position
+- [ ] Mark both tiles dirty
 
 ---
 
@@ -1537,46 +1803,62 @@ void DocumentViewport::insertImageFromClipboard()
     // Create ImageObject
     auto imgObj = std::make_unique<ImageObject>();
     imgObj->setPixmap(QPixmap::fromImage(image));
-    imgObj->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // NOTE: id is auto-generated in InsertedObject constructor
     
     // Position at viewport center
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width()/2, imgObj->size.height()/2);
     
     // Default affinity: -1 (below all strokes)
-    imgObj->layerAffinity = -1;
+    imgObj->setLayerAffinity(-1);
+    
+    // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
+    InsertedObject* rawPtr = imgObj.get();
     
     // Add to appropriate page/tile
+    Page* targetPage = nullptr;
     if (m_document->isEdgeless()) {
         auto coord = m_document->tileCoordForPoint(imgObj->position);
-        Page* tile = m_document->getOrCreateTile(coord.first, coord.second);
+        targetPage = m_document->getOrCreateTile(coord.first, coord.second);
+        
         // Convert to tile-local coordinates
-        imgObj->position = documentToTile(imgObj->position, coord);
-        tile->addObject(std::move(imgObj));
+        imgObj->position = imgObj->position - QPointF(
+            coord.first * Document::EDGELESS_TILE_SIZE,
+            coord.second * Document::EDGELESS_TILE_SIZE
+        );
+        
+        targetPage->addObject(std::move(imgObj));
+        m_document->markTileDirty(coord);
     } else {
-        Page* page = m_document->page(m_currentPageIndex);
-        page->addObject(std::move(imgObj));
+        targetPage = m_document->page(m_currentPageIndex);
+        targetPage->addObject(std::move(imgObj));
+        m_document->markPageDirty(m_currentPageIndex);
     }
     
-    // Save image to assets
-    // ... hash-based save logic ...
+    // Update max object extent for extended tile loading
+    m_document->updateMaxObjectExtent(rawPtr);
     
-    // Create undo entry
-    pushObjectInsertUndo(imgObj.get());
+    // Save image to assets folder (hash-based deduplication)
+    if (!m_document->bundlePath().isEmpty()) {
+        static_cast<ImageObject*>(rawPtr)->saveToAssets(m_document->bundlePath());
+    }
+    
+    // Create undo entry (uses rawPtr which is still valid - owned by page now)
+    pushObjectInsertUndo(rawPtr);
     
     // Select the new object
     deselectAllObjects();
-    selectObject(imgObj.get(), false);
+    selectObject(rawPtr, false);
     
     update();
 }
 ```
 
 **Tasks:**
-- [ ] Implement the method as outlined
+- [ ] Implement the method as shown (note: rawPtr saved before move!)
 - [ ] Add helper `viewportCenterInDocument()`
-- [ ] Save image to assets folder with hash
-- [ ] Create undo entry for insert
+- [ ] Ensure `markTileDirty()` exists in Document (check/add if needed)
+- [ ] Image saved to assets via `saveToAssets()` for persistence
 
 ---
 
@@ -1597,8 +1879,10 @@ void DocumentViewport::insertImageFromClipboard()
 **Tasks:**
 - [ ] For each selected object:
   - Find containing page/tile
-  - Create undo entry (store object data for restore)
+  - Create undo entry (store serialized object data for restore)
   - Call `page->removeObject(obj->id)`
+  - Mark page/tile dirty
+- [ ] Call `m_document->recalculateMaxObjectExtent()` (removed object might have been largest)
 - [ ] Clear selection
 - [ ] Update viewport
 
@@ -1639,26 +1923,74 @@ void DocumentViewport::insertImageFromClipboard()
 
 **Goal:** Make object operations undoable.
 
-#### O2.7.1: Object Undo Action Types
+**Note:** The existing undo structs (`PageUndoAction`, `EdgelessUndoAction`) are stroke-specific.
+We need to extend them or create parallel object undo types.
+
+#### O2.7.1: Extend Undo Action Types
 **File:** `source/core/DocumentViewport.h`
 
+**Current struct (stroke-only):**
+```cpp
+struct PageUndoAction {
+    enum Type { 
+        AddStroke, RemoveStroke, RemoveMultiple, TransformSelection
+    };
+    // ... stroke-specific fields
+};
+```
+
+**Extended struct (add object support):**
+```cpp
+struct PageUndoAction {
+    enum Type { 
+        // Stroke types (existing)
+        AddStroke, RemoveStroke, RemoveMultiple, TransformSelection,
+        // Object types (new)
+        ObjectInsert, ObjectDelete, ObjectMove, ObjectAffinityChange
+    };
+    
+    Type type;
+    int pageIndex;
+    int layerIndex = 0;
+    
+    // Stroke fields (existing)
+    VectorStroke stroke;
+    QVector<VectorStroke> strokes;
+    QVector<VectorStroke> removedStrokes;
+    QVector<VectorStroke> addedStrokes;
+    
+    // Object fields (new)
+    QJsonObject objectData;           ///< Serialized object for restore
+    QString objectId;                 ///< Object ID for lookup
+    QPointF objectOldPosition;        ///< For move undo
+    QPointF objectNewPosition;        ///< For move redo
+    int objectOldAffinity = -1;       ///< For affinity change undo
+    int objectNewAffinity = -1;       ///< For affinity change redo
+};
+```
+
 **Tasks:**
-- [ ] Add to undo action enum: `ObjectInsert`, `ObjectDelete`, `ObjectMove`, `ObjectResize`, `ObjectAffinityChange`
-- [ ] Add object-specific undo data structure
+- [ ] Add object action types to `PageUndoAction::Type` enum
+- [ ] Add object-specific fields to `PageUndoAction`
+- [ ] Add corresponding fields to `EdgelessUndoAction` (include tile coord)
 
 #### O2.7.2: Paged Mode Object Undo
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Object actions push to page's undo stack (same as strokes)
-- [ ] Implement undo/redo handlers for each object action type
+- [ ] Implement `pushObjectInsertUndo(InsertedObject* obj)` - stores serialized object
+- [ ] Implement `pushObjectDeleteUndo(InsertedObject* obj)` - stores serialized object
+- [ ] Implement `pushObjectMoveUndo(InsertedObject* obj, QPointF oldPos)` - stores positions
+- [ ] In `undo()`: handle ObjectInsert by removing, ObjectDelete by recreating, ObjectMove by restoring position
+- [ ] In `redo()`: inverse operations
 
 #### O2.7.3: Edgeless Mode Object Undo
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Object actions push to global edgeless undo stack
-- [ ] Store tile coordinate with action for proper restore
+- [ ] Same as paged mode but use `EdgelessUndoAction` with tile coordinate
+- [ ] Store `tileCoord` so object can be added back to correct tile on undo
+- [ ] Handle cross-tile moves (object moved to different tile)
 
 ---
 
@@ -1691,20 +2023,34 @@ void DocumentViewport::insertImageFromClipboard()
 
 **Goal:** Connect existing button to object tool.
 
+**Context:** The `insertPictureButton` already exists in MainWindow but is currently stubbed.
+It has a click handler that does nothing and `updatePictureButtonState()` that sets `isEnabled = false`.
+
 #### O2.9.1: Update insertPictureButton
 **File:** `source/MainWindow.cpp`
 
+**Current (stubbed):**
+```cpp
+connect(insertPictureButton, &QPushButton::clicked, this, [this]() {
+    // Phase 3.1.4: Picture insertion stubbed - will be reimplemented for DocumentViewport
+    // TODO Phase 4: Implement picture insertion in DocumentViewport via InsertedObject
+});
+```
+
 **Tasks:**
-- [ ] Change button to toggle ObjectSelect tool (not insert)
-- [ ] Update tooltip: "Object Select Tool"
-- [ ] When clicked, call `viewport->setToolType(ToolType::ObjectSelect)`
+- [ ] Change click handler to toggle ObjectSelect tool
+- [ ] Update tooltip: "Object Select Tool (O)"
+- [ ] Update `updatePictureButtonState()` to track if ObjectSelect tool is active
+- [ ] Add keyboard shortcut 'O' for ObjectSelect tool
 
 #### O2.9.2: Add Ctrl+V Handling in MainWindow
 **File:** `source/MainWindow.cpp`
 
 **Tasks:**
-- [ ] Ensure Ctrl+V reaches DocumentViewport
-- [ ] DocumentViewport checks for image → `insertImageFromClipboard()`
+- [ ] Ensure Ctrl+V reaches DocumentViewport (check if already works)
+- [ ] DocumentViewport's keyPressEvent checks clipboard for image
+- [ ] If image present: call `insertImageFromClipboard()`
+- [ ] If no image: fall back to lasso paste (existing behavior)
 
 ---
 
@@ -1719,6 +2065,9 @@ void DocumentViewport::insertImageFromClipboard()
 - [ ] Test: Ctrl+C then Ctrl+V duplicates object
 - [ ] Test: Ctrl+Z undoes insert/delete/move
 - [ ] Test: zOrder shortcuts work correctly
+- [ ] Test: Save and reload - inserted images persist (assets folder)
+- [ ] Test: Edgeless - object crossing tile boundary (drag to new tile)
+- [ ] Test: Paged lazy loading - objects on evicted pages persist
 
 ---
 

@@ -128,10 +128,28 @@ public:
     
     /**
      * @brief Get the full path to the image file.
-     * @param basePath Base directory for resolving relative paths.
-     * @return Full path to the image file.
+     * @param basePath Bundle path (e.g., "/path/to/notebook.snb").
+     * @return Full path to the image file (basePath/assets/images/filename).
+     * 
+     * Phase O1.6: Resolves against assets/images/ subdirectory.
+     * If imagePath is absolute (legacy), returns it unchanged.
      */
     QString fullPath(const QString& basePath) const;
+    
+    /**
+     * @brief Save the image to the bundle's assets folder.
+     * @param bundlePath Path to the .snb bundle directory.
+     * @return True if saved successfully (or already exists).
+     * 
+     * Phase O1.6: Hash-based naming for deduplication.
+     * - Calculates SHA-256 hash of image data
+     * - Saves to assets/images/{hash16}.png if not exists
+     * - Updates imagePath to just the filename
+     * 
+     * If an image with the same hash already exists, reuses it
+     * (deduplication - multiple ImageObjects can share one file).
+     */
+    bool saveToAssets(const QString& bundlePath);
     
 private:
     QPixmap cachedPixmap;  ///< Cached pixmap for rendering
