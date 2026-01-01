@@ -2454,6 +2454,11 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
 {
     if (!m_document) return;
     
+    // Ensure keyboard focus for shortcuts (stylus events don't auto-focus like mouse)
+    if (!hasFocus()) {
+        setFocus(Qt::OtherFocusReason);
+    }
+    
     // Set active state
     m_pointerActive = true;
     m_activeSource = pe.source;
@@ -5820,7 +5825,7 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             if (hasSelectionOnThisPage && layerIdx == m_lassoSelection.sourceLayerIndex) {
                 // Render manually, skipping selected strokes (bypasses cache)
                 painter.save();
-                painter.scale(m_zoomLevel, m_zoomLevel);
+                // painter.scale(m_zoomLevel, m_zoomLevel);
                 layer->renderExcluding(painter, excludeIds);
                 painter.restore();
             } else {

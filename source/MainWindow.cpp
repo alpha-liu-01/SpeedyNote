@@ -6476,7 +6476,7 @@ void MainWindow::setTouchGestureMode(TouchGestureMode mode) {
     // TG.6: Apply touch gesture mode to current DocumentViewport
     if (DocumentViewport* vp = currentViewport()) {
         vp->setTouchGestureMode(mode);
-    }
+        }
     
     // TODO: Apply to all viewports when TabManager supports iteration
     // For now, each new viewport gets the mode applied in openDocumentInNewTab()
@@ -8614,7 +8614,7 @@ void MainWindow::toggleLayerPanel() {
     if (centralWidget() && centralWidget()->layout()) {
         centralWidget()->layout()->invalidate();
         centralWidget()->layout()->activate();
-    }
+            }
     // Use a slightly longer delay to ensure layout is complete before positioning
     QTimer::singleShot(50, this, [this]() {
         positionLeftSidebarTabs();
@@ -8626,7 +8626,7 @@ void MainWindow::toggleDebugOverlay() {
     if (!m_debugOverlay) return;
     
     m_debugOverlay->toggle();
-    
+        
     // Connect to current viewport if shown
     if (m_debugOverlay->isOverlayVisible()) {
         m_debugOverlay->setViewport(currentViewport());
@@ -8668,7 +8668,7 @@ void MainWindow::onBookmarkItemClicked(QTreeWidgetItem *item, int column) {
         int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
         switchPageWithDirection(pageNumber, (pageNumber > currentPage) ? 1 : -1);
         pageInput->setValue(pageNumber);
-    }
+            }
 }
 
 void MainWindow::loadBookmarks() {
@@ -8677,7 +8677,7 @@ void MainWindow::loadBookmarks() {
     
     bookmarksTree->clear();
     bookmarks.clear();
-    
+        
     // TODO Phase 3.4: Load bookmarks from currentViewport()->document()
     
     updateBookmarkButtonState();

@@ -1158,6 +1158,67 @@ if (m_isDrawingLasso || m_isTransformingSelection) {
 **Files Modified:**
 - `source/core/DocumentViewport.h` (added cached member, updated method)
 
+### CR-2B-16: Background Shifted During Lasso Selection After Zoom (Paged Mode)
+**Issue:** In paged mode, after zooming and then creating a lasso selection, the background (non-selected strokes on the same layer) appeared shifted/scaled to a wrong position. The issue:
+- Only occurred in paged mode (edgeless mode was fine)
+- Only occurred after a zoom action (default zoom worked correctly)
+- Did not occur after window resize or other actions
+
+**Root Cause:** Double-scale bug in `renderPage()` when rendering with stroke exclusion. The painter passed to `renderPage()` is already scaled by `m_zoomLevel` in `paintEvent()` (around line 1076). The exclusion rendering path had an additional `painter.scale(m_zoomLevel, m_zoomLevel)`, causing:
+- Zoom 1.0: `1.0 × 1.0 = 1.0` (correct by coincidence - why it worked without zooming)
+- Zoom 2.0: `2.0 × 2.0 = 4.0` (4× zoom instead of 2×!)
+- Zoom 0.5: `0.5 × 0.5 = 0.25` (0.25× zoom instead of 0.5×!)
+
+The edgeless mode `renderTileStrokes()` was correct because it never applied an extra scale in its `renderExcluding()` path.
+
+**Fix:** Commented out the redundant scale transformation:
+```cpp
+if (hasSelectionOnThisPage && layerIdx == m_lassoSelection.sourceLayerIndex) {
+    // Render manually, skipping selected strokes (bypasses cache)
+    painter.save();
+    // painter.scale(m_zoomLevel, m_zoomLevel);  // REMOVED: painter is already scaled!
+    layer->renderExcluding(painter, excludeIds);
+    painter.restore();
+} else {
+    // Use zoom-aware cache for maximum performance
+    ...
+}
+```
+
+**Note:** The `painter.save()` and `painter.restore()` must remain to preserve painter state for subsequent layer rendering, even though the scale is removed.
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+---
+
+### CR-2B-15: Lasso Shortcuts Not Working with Stylus Input
+**Issue:** Keyboard shortcuts (Ctrl+C, Ctrl+V, Delete, etc.) for the lasso tool worked with mouse input but NOT with stylus/tablet input. The lasso selection, move, scale, and rotate all worked correctly with stylus.
+
+**Root Cause:** Qt's tablet/stylus events do not automatically grant keyboard focus to the widget, unlike mouse click events. The `keyPressEvent()` handler was never invoked because `DocumentViewport` didn't have keyboard focus.
+
+**Fix:** Added `setFocus()` call at the start of `handlePointerPress()`:
+```cpp
+void DocumentViewport::handlePointerPress(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Ensure keyboard focus for shortcuts (stylus events don't auto-focus like mouse)
+    if (!hasFocus()) {
+        setFocus(Qt::OtherFocusReason);
+    }
+    
+    // ... rest of handler
+}
+```
+
+**Why this works:** Now any pointer interaction (mouse, stylus, or touch) will ensure the widget has keyboard focus, allowing shortcuts to work regardless of input device.
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp`
+
+---
+
 ### Code Review Notes (No Fix Needed)
 
 **1. `originalIndices` field is unused:**
