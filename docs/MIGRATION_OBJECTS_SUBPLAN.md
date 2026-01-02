@@ -2901,21 +2901,630 @@ After this cleanup, adding new object types requires:
 
 ---
 
-## Phase O3: Enhanced Features (Minimal)
+## Phase O3: Enhanced Features (Testing Required)
 
-**Goal:** Document future enhancements, implement only critical items.
+**Goal:** Implement features needed for comprehensive testing of the object system.
+
+**Priority Items (Needed for Testing):**
+- **O3.1: Object Resize** - Test scaling, aspect ratio, undo/redo
+- **O3.6: Object Properties Panel** - Test/change affinity, position, size
 
 ---
 
-### O3.1: Object Resize (Deferred)
+### O3.1: Object Resize
 
-**Status:** Interface documented, implementation deferred.
+**Goal:** Enable users to resize selected objects via drag handles.
 
-**When needed:**
-- [ ] Add resize handles to selection box
-- [ ] Track resize drag state
-- [ ] Implement `resizeSelectedObject(newSize)`
-- [ ] Create undo entry for resize
+**Status:** Implementation required for testing.
+
+**Prerequisites:**
+- Selection box with 8 handles already renders ✅ (from O2.1.4)
+- `HandleHit` enum exists ✅ (reuse from lasso transform)
+- Object undo/redo infrastructure exists ✅ (from O2.7)
+
+---
+
+#### O3.1.1: Handle Hit Testing ✅
+
+**Goal:** Detect which resize handle (if any) is under the pointer.
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.cpp`
+
+```cpp
+// Reuse existing HandleHit enum from lasso transform
+HandleHit DocumentViewport::objectHandleAtPoint(const QPointF& viewportPos) const
+{
+    if (m_selectedObjects.size() != 1) return HandleHit::None;
+    
+    InsertedObject* obj = m_selectedObjects.first();
+    if (!obj) return HandleHit::None;
+    
+    // Convert object bounds to viewport coordinates
+    QRectF objRect = objectBoundsInViewport(obj);
+    
+    // Calculate handle positions (same as in renderObjectSelection)
+    QPointF handles[8] = {
+        objRect.topLeft(),                                    // TopLeft
+        QPointF(objRect.center().x(), objRect.top()),         // Top
+        objRect.topRight(),                                   // TopRight
+        QPointF(objRect.left(), objRect.center().y()),        // Left
+        QPointF(objRect.right(), objRect.center().y()),       // Right
+        objRect.bottomLeft(),                                 // BottomLeft
+        QPointF(objRect.center().x(), objRect.bottom()),      // Bottom
+        objRect.bottomRight()                                 // BottomRight
+    };
+    
+    // Rotation handle position
+    QPointF rotatePos(objRect.center().x(), objRect.top() - ROTATE_HANDLE_OFFSET);
+    
+    // Check rotation handle first (has priority)
+    if (QLineF(viewportPos, rotatePos).length() <= HANDLE_VISUAL_SIZE) {
+        return HandleHit::Rotate;
+    }
+    
+    // Check resize handles
+    static const HandleHit handleTypes[8] = {
+        HandleHit::TopLeft, HandleHit::Top, HandleHit::TopRight,
+        HandleHit::Left, HandleHit::Right,
+        HandleHit::BottomLeft, HandleHit::Bottom, HandleHit::BottomRight
+    };
+    
+    for (int i = 0; i < 8; ++i) {
+        if (QLineF(viewportPos, handles[i]).length() <= HANDLE_VISUAL_SIZE) {
+            return handleTypes[i];
+        }
+    }
+    
+    // Check if inside bounding box (for move - but this is handled by object drag)
+    return HandleHit::None;
+}
+```
+
+**Tasks:**
+- [x] Add `objectHandleAtPoint(QPointF)` method declaration to header
+- [x] Add helper `objectBoundsInViewport(InsertedObject*)` - converts object rect to viewport coords
+- [x] Implement handle hit testing as shown above
+
+**Implementation Notes:**
+- `objectBoundsInViewport()` searches for the object in tiles/pages to get correct document position
+- `objectHandleAtPoint()` uses `HANDLE_HIT_SIZE` (20px) for touch-friendly hit testing
+- Reuses existing `HandleHit` enum from lasso transform
+- Rotation handle checked first (has priority when overlapping)
+
+---
+
+#### O3.1.2: Resize Drag State ✅
+
+**Goal:** Track resize operation in progress.
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.h`
+
+```cpp
+// Add to Object Selection section (after m_objectOriginalPositions)
+
+// ===== Object Resize State (Phase O3.1) =====
+bool m_isResizingObject = false;          ///< Currently dragging a resize handle
+HandleHit m_objectResizeHandle = HandleHit::None;  ///< Which handle is being dragged
+QPointF m_resizeStartViewport;            ///< Viewport pos where resize started
+QSizeF m_resizeOriginalSize;              ///< Object size before resize
+QPointF m_resizeOriginalPosition;         ///< Object position before resize (for anchoring)
+```
+
+**Tasks:**
+- [x] Add state variables to `DocumentViewport.h`
+
+**Implementation Notes:**
+- Added 5 state variables after `m_objectClipboard` section
+- Each variable has documentation explaining its purpose
+- `m_objectResizeHandle` uses existing `HandleHit` enum
+- `m_resizeOriginalPosition` needed because corner handles change both position and size
+
+---
+
+#### O3.1.3: Handle Resize in Pointer Events ✅
+
+**Goal:** Start/update/finish resize when dragging handles.
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.cpp`
+
+**In `handlePointerPress_ObjectSelect()`:**
+```cpp
+// BEFORE checking if clicking on object to start drag:
+if (m_selectedObjects.size() == 1) {
+    HandleHit handle = objectHandleAtPoint(event->pos());
+    if (handle != HandleHit::None && handle != HandleHit::Inside) {
+        // Start resize operation
+        m_isResizingObject = true;
+        m_objectResizeHandle = handle;
+        m_resizeStartViewport = event->pos();
+        m_resizeOriginalSize = m_selectedObjects.first()->size;
+        m_resizeOriginalPosition = m_selectedObjects.first()->position;
+        return;  // Don't start object drag
+    }
+}
+```
+
+**In `handlePointerMove_ObjectSelect()`:**
+```cpp
+if (m_isResizingObject) {
+    // Calculate new size based on handle being dragged
+    updateObjectResize(event->pos());
+    update();
+    return;
+}
+```
+
+**In `handlePointerRelease_ObjectSelect()`:**
+```cpp
+if (m_isResizingObject) {
+    // Finalize resize
+    InsertedObject* obj = m_selectedObjects.first();
+    if (obj && (obj->size != m_resizeOriginalSize || obj->position != m_resizeOriginalPosition)) {
+        // Create undo entry for resize
+        pushObjectResizeUndo(obj, m_resizeOriginalPosition, m_resizeOriginalSize);
+        
+        // Mark dirty
+        if (m_document->isEdgeless()) {
+            // May need to relocate to different tile if position changed
+            relocateObjectsToCorrectTiles();
+        } else {
+            m_document->markPageDirty(m_currentPageIndex);
+        }
+    }
+    
+    m_isResizingObject = false;
+    m_objectResizeHandle = HandleHit::None;
+    emit documentModified();
+    return;
+}
+```
+
+**Tasks:**
+- [x] Modify `handlePointerPress_ObjectSelect()` to detect handle clicks
+- [x] Modify `handlePointerMove_ObjectSelect()` to call `updateObjectResize()`
+- [x] Modify `handlePointerRelease_ObjectSelect()` to finalize resize
+
+**Implementation Notes:**
+- Resize check happens FIRST in press handler (before object drag check)
+- Added `m_pointerActive = true` when starting resize for consistency
+- Release handler checks if size/position actually changed before marking dirty
+- Undo entry creation is a TODO placeholder (O3.1.5)
+- `updateObjectResize()` declaration added as stub, full logic in O3.1.4 ✅
+
+---
+
+#### O3.1.4: Implement updateObjectResize() ✅
+
+**Goal:** Calculate and apply new object size based on drag.
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.cpp`
+
+```cpp
+void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
+{
+    if (m_selectedObjects.size() != 1) return;
+    InsertedObject* obj = m_selectedObjects.first();
+    if (!obj) return;
+    
+    // Convert positions to document coordinates
+    QPointF startDoc = viewportToDocument(m_resizeStartViewport);
+    QPointF currentDoc = viewportToDocument(currentViewport);
+    QPointF delta = currentDoc - startDoc;
+    
+    // Original bounds
+    QRectF originalRect(m_resizeOriginalPosition, m_resizeOriginalSize);
+    QRectF newRect = originalRect;
+    
+    // Apply delta based on which handle is being dragged
+    switch (m_objectResizeHandle) {
+        case HandleHit::TopLeft:
+            newRect.setTopLeft(originalRect.topLeft() + delta);
+            break;
+        case HandleHit::Top:
+            newRect.setTop(originalRect.top() + delta.y());
+            break;
+        case HandleHit::TopRight:
+            newRect.setTopRight(originalRect.topRight() + delta);
+            break;
+        case HandleHit::Left:
+            newRect.setLeft(originalRect.left() + delta.x());
+            break;
+        case HandleHit::Right:
+            newRect.setRight(originalRect.right() + delta.x());
+            break;
+        case HandleHit::BottomLeft:
+            newRect.setBottomLeft(originalRect.bottomLeft() + delta);
+            break;
+        case HandleHit::Bottom:
+            newRect.setBottom(originalRect.bottom() + delta.y());
+            break;
+        case HandleHit::BottomRight:
+            newRect.setBottomRight(originalRect.bottomRight() + delta);
+            break;
+        case HandleHit::Rotate:
+            // Rotation not implemented yet
+            return;
+        default:
+            return;
+    }
+    
+    // Normalize rect (handle inverted dimensions)
+    newRect = newRect.normalized();
+    
+    // Enforce minimum size
+    const qreal MIN_SIZE = 10.0;
+    if (newRect.width() < MIN_SIZE) newRect.setWidth(MIN_SIZE);
+    if (newRect.height() < MIN_SIZE) newRect.setHeight(MIN_SIZE);
+    
+    // TODO: Aspect ratio lock (Shift key or ImageObject::maintainAspectRatio)
+    
+    // Apply to object
+    obj->position = newRect.topLeft();
+    obj->size = newRect.size();
+}
+```
+
+**Tasks:**
+- [x] Add `updateObjectResize(QPointF)` declaration to header (done in O3.1.3)
+- [x] Implement the method as shown
+- [ ] Add aspect ratio lock support (check Shift key or `maintainAspectRatio`) - deferred
+
+**Implementation Notes:**
+- Declaration was added in O3.1.3 with stub, now replaced with full implementation
+- Uses `QRectF::normalized()` to handle cases where user drags past opposite edge
+- Minimum size of 10.0 document units enforced
+- Aspect ratio lock is marked as TODO for future enhancement
+
+---
+
+#### O3.1.5: Resize Undo/Redo ✅
+
+**Goal:** Make resize operations undoable.
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.h`
+
+```cpp
+// Added to PageUndoAction::Type enum:
+ObjectResize        ///< An object was resized (undo = restore old pos+size)
+
+// Added to PageUndoAction:
+QSizeF objectOldSize;               ///< For ObjectResize: size before resize
+QSizeF objectNewSize;               ///< For ObjectResize: size after resize
+
+// Added to EdgelessUndoAction:
+QSizeF objectOldSize;                 ///< For ObjectResize: size before resize
+QSizeF objectNewSize;                 ///< For ObjectResize: size after resize
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+
+```cpp
+void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj, 
+                                            const QPointF& oldPos, 
+                                            const QSizeF& oldSize)
+{
+    if (!obj) return;
+    
+    if (m_document->isEdgeless()) {
+        EdgelessUndoAction action;
+        action.type = PageUndoAction::ObjectResize;
+        action.objectId = obj->id;
+        action.objectData = obj->toJson();
+        action.objectOldPosition = oldPos;
+        action.objectNewPosition = obj->position;
+        action.objectOldSize = oldSize;
+        action.objectNewSize = obj->size;
+        // Find tile
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                action.objectTileCoord = coord;
+                break;
+            }
+        }
+        m_edgelessUndoStack.push(action);
+        m_edgelessRedoStack.clear();
+    } else {
+        PageUndoAction action;
+        action.type = PageUndoAction::ObjectResize;
+        action.pageIndex = m_currentPageIndex;
+        action.objectId = obj->id;
+        action.objectData = obj->toJson();
+        action.objectOldPosition = oldPos;
+        action.objectNewPosition = obj->position;
+        action.objectOldSize = oldSize;
+        action.objectNewSize = obj->size;
+        m_undoStacks[m_currentPageIndex].push(action);
+        m_redoStacks[m_currentPageIndex].clear();
+    }
+}
+```
+
+**Tasks:**
+- [x] Add `ObjectResize` to `PageUndoAction::Type` enum
+- [x] Add `objectOldSize` and `objectNewSize` to both undo structs
+- [x] Implement `pushObjectResizeUndo()` helper
+- [x] Add `ObjectResize` case to `undo()` and `redo()` methods
+- [x] Enable `pushObjectResizeUndo()` call in `handlePointerRelease_ObjectSelect()`
+
+**Implementation Notes:**
+- Added clear comment blocks to each `ObjectResize` case in undo/redo for maintainability
+- Both paged and edgeless modes are supported with separate code paths
+- Resize can change both position (dragging corners) and size, so both are stored
+- Debug output included for troubleshooting (`qDebug()` statements)
+- Full object snapshot (`objectData`) stored for safety
+
+---
+
+#### O3.1.6: Cursor Feedback
+
+**Goal:** Show appropriate resize cursor when hovering over handles.
+
+**File:** `source/core/DocumentViewport.cpp`
+
+```cpp
+// In handlePointerMove_ObjectSelect() when not dragging:
+if (m_selectedObjects.size() == 1 && !m_isDraggingObjects && !m_isResizingObject) {
+    HandleHit handle = objectHandleAtPoint(event->pos());
+    switch (handle) {
+        case HandleHit::TopLeft:
+        case HandleHit::BottomRight:
+            setCursor(Qt::SizeFDiagCursor);
+            break;
+        case HandleHit::TopRight:
+        case HandleHit::BottomLeft:
+            setCursor(Qt::SizeBDiagCursor);
+            break;
+        case HandleHit::Top:
+        case HandleHit::Bottom:
+            setCursor(Qt::SizeVerCursor);
+            break;
+        case HandleHit::Left:
+        case HandleHit::Right:
+            setCursor(Qt::SizeHorCursor);
+            break;
+        case HandleHit::Rotate:
+            // TODO: custom rotation cursor
+            setCursor(Qt::CrossCursor);
+            break;
+        default:
+            setCursor(Qt::ArrowCursor);
+            break;
+    }
+}
+```
+
+**Tasks:**
+- [ ] Add cursor updates based on hovered handle
+- [ ] Reset cursor when leaving handle area
+
+---
+
+#### O3.1.7: Testing Checklist (Resize)
+
+- [ ] Resize from each of 8 handles works
+- [ ] Resize undo/redo works
+- [ ] Resize in edgeless mode works (including tile relocation)
+- [ ] Resize in paged mode works
+- [ ] Minimum size enforced
+- [ ] Cursor changes on hover
+- [ ] Aspect ratio lock works (optional)
+
+---
+
+### O3.1.8: Object Rotation
+
+**Goal:** Enable rotation of objects using the rotation handle.
+
+**Status:** PLANNED
+
+**Estimated Time:** 2-3 hours
+
+#### Existing Infrastructure (Already Implemented)
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| `rotation` property | `InsertedObject.h` | ✅ Exists |
+| Serialization | `InsertedObject.cpp` | ✅ `toJson()`/`loadFromJson()` |
+| Rendering | `ImageObject::render()` | ✅ Uses `painter.rotate(rotation)` |
+| Handle detection | `objectHandleAtPoint()` | ✅ Returns `HandleHit::Rotate` |
+| Handle drawing | `renderObjectSelection()` | ✅ Draws circle above object |
+
+#### O3.1.8.1: Rotation Drag Logic ✅
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.cpp`
+
+**In `updateObjectResize()`, replaced the `HandleHit::Rotate` case:**
+```cpp
+case HandleHit::Rotate: {
+    // Calculate angle from object center to current pointer position
+    QPointF objectCenter = m_resizeOriginalPosition + 
+                           QPointF(m_resizeOriginalSize.width() / 2, 
+                                   m_resizeOriginalSize.height() / 2);
+    
+    // Angle from center to current pointer (in document coords)
+    // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
+    // We add 90° because the rotation handle starts above the object (at 12 o'clock)
+    qreal angle = qRadiansToDegrees(
+        qAtan2(currentDoc.y() - objectCenter.y(), 
+               currentDoc.x() - objectCenter.x())
+    ) + 90.0;
+    
+    // Normalize to 0-360 range
+    while (angle < 0) angle += 360.0;
+    while (angle >= 360) angle -= 360.0;
+    
+    // Snap to 15° increments by default
+    // TODO O3.1.8.1: Check Shift key for free rotation (no snap)
+    angle = qRound(angle / 15.0) * 15.0;
+    
+    obj->rotation = angle;
+    return;  // Don't apply resize logic below
+}
+```
+
+**Tasks:**
+- [x] Implement rotation angle calculation
+- [x] Add snap to 15° increments
+- [ ] Optional: Free rotation when Shift held (deferred)
+
+**Implementation Notes:**
+- Uses `qAtan2` for angle calculation from object center to pointer
+- Adds 90° offset because rotation handle is at 12 o'clock position
+- Normalizes angle to 0-360 range
+- Snaps to 15° increments (0°, 15°, 30°, 45°, etc.)
+- Returns early to skip resize rect logic
+- Debug output included for testing
+
+---
+
+#### O3.1.8.2: Rotation State Variables ✅
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.h`
+
+```cpp
+// Added to private members (after m_resizeOriginalPosition):
+/**
+ * @brief Object rotation before resize/rotate started (Phase O3.1.8.2).
+ * 
+ * Stored when user starts dragging any handle, used for rotation undo.
+ */
+qreal m_resizeOriginalRotation = 0.0;
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+
+**In `handlePointerPress_ObjectSelect()`:**
+```cpp
+// When starting resize, also store original rotation:
+m_resizeOriginalRotation = m_selectedObjects.first()->rotation;  // Phase O3.1.8.2
+```
+
+**Tasks:**
+- [x] Add `m_resizeOriginalRotation` member
+- [x] Store original rotation when starting resize operation
+
+**Implementation Notes:**
+- Member initialized to 0.0 by default
+- Stored alongside size and position when any resize/rotate handle is grabbed
+- Will be used by O3.1.8.3 for undo/redo
+
+---
+
+#### O3.1.8.3: Rotation Undo/Redo ✅
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.h`
+
+```cpp
+// Added to PageUndoAction:
+// ===== Object rotation fields (Phase O3.1.8.3) =====
+qreal objectOldRotation = 0.0;      ///< For ObjectResize: rotation before (degrees)
+qreal objectNewRotation = 0.0;      ///< For ObjectResize: rotation after (degrees)
+
+// Added to EdgelessUndoAction:
+// ===== Object rotation fields (Phase O3.1.8.3) =====
+qreal objectOldRotation = 0.0;        ///< For ObjectResize: rotation before (degrees)
+qreal objectNewRotation = 0.0;        ///< For ObjectResize: rotation after (degrees)
+
+// Extended pushObjectResizeUndo() signature:
+void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos, 
+                          const QSizeF& oldSize, qreal oldRotation = 0.0);
+```
+
+**Implementation Choice:** Extended `ObjectResize` to include rotation (Option B), since both are "transform" operations. This avoids adding a new action type and keeps the undo system simpler.
+
+**Tasks:**
+- [x] Add `objectOldRotation` and `objectNewRotation` to both undo structs
+- [x] Extend `pushObjectResizeUndo()` to include rotation parameter
+- [x] Update call site to pass `m_resizeOriginalRotation`
+- [x] Update condition to check for rotation changes
+- [x] Update all 4 undo/redo cases (edgeless undo/redo, paged undo/redo)
+
+**Implementation Notes:**
+- Rotation parameter has default value of 0.0 for backward compatibility
+- Condition now checks `obj->rotation != m_resizeOriginalRotation` in addition to size/position
+- All 4 undo/redo cases now restore/apply rotation alongside position and size
+- Debug output updated to include rotation value
+
+---
+
+#### O3.1.8.4: Rotation Rendering Considerations ✅
+
+**Status:** VERIFIED (existing code already handles rotation correctly)
+
+**Note:** `ImageObject::render()` already handles rotation correctly:
+```cpp
+if (rotation != 0.0) {
+    painter.translate(position + QPointF(size.width() / 2, size.height() / 2));
+    painter.rotate(rotation);
+    painter.translate(-size.width() / 2, -size.height() / 2);
+    // Draw at origin
+}
+```
+
+**Selection box for rotated objects:**
+- Current selection box assumes axis-aligned bounds
+- For simplicity, keep selection box axis-aligned (don't rotate it)
+- Alternative: Rotate the selection box to match object (more complex)
+
+**Hit testing for rotated objects:**
+- Current hit testing uses axis-aligned bounds
+- For MVP: Keep axis-aligned hit testing (may feel slightly off for rotated objects)
+- Future: Transform pointer position into object-local coords for accurate hit testing
+
+---
+
+#### O3.1.8.BF.1: Memory Safety Fix - setDocument() ✅
+
+**Issue Found:** `setDocument()` did not clear `m_selectedObjects` and `m_hoveredObject` when changing documents. This could lead to dangling pointers if the user had objects selected and then opened a different document.
+
+**Fix Applied:** Added selection cleanup at the beginning of `setDocument()`:
+```cpp
+// Clear object selection (pointers refer to old document's objects)
+// Must be done BEFORE changing m_document to avoid dangling pointer access
+bool hadSelection = !m_selectedObjects.isEmpty();
+m_selectedObjects.clear();
+m_hoveredObject = nullptr;
+m_isDraggingObjects = false;
+m_isResizingObject = false;
+
+// ... later after document change ...
+if (hadSelection) {
+    emit objectSelectionChanged();
+}
+```
+
+**Abstraction Principle Verification:**
+- ✅ All rotation code accesses `obj->rotation` through the `InsertedObject` base class
+- ✅ No type-specific casting (e.g., `dynamic_cast<ImageObject*>`) in rotation logic
+- ✅ The only `ImageObject` references in `DocumentViewport.cpp` are in factory methods (`insertImageFromClipboard`, `insertImageFromFile`) which legitimately need to create specific object types
+
+---
+
+#### O3.1.8.5: Testing Checklist (Rotation)
+
+- [ ] Rotation handle drag rotates object
+- [ ] Rotation snaps to 15° increments
+- [ ] Rotation undo/redo works
+- [ ] Rotated objects render correctly
+- [ ] Rotation persists after save/load
+- [ ] Rotation cursor shows on hover (CrossCursor or custom)
 
 ---
 
@@ -2963,44 +3572,379 @@ After this cleanup, adding new object types requires:
 
 ---
 
-### O3.6: Object Properties Panel (Deferred)
+### O3.6: Object Properties Panel
 
-**Status:** Documented as future UI.
+**Goal:** Provide UI to view and edit object properties, especially layer affinity for testing.
 
-**When needed:**
-- [ ] Show panel when object selected
-- [ ] Display/edit: position, size, rotation, affinity, locked
-- [ ] ImageObject: show path, aspect ratio lock
+**Status:** Implementation required for affinity testing.
+
+**Design Decision:** Use a floating widget (QDockWidget or custom QWidget) that appears when objects are selected. Lightweight approach - no full property panel infrastructure.
+
+---
+
+#### O3.6.1: Properties Widget UI Design
+
+**Goal:** Create a minimal widget showing object properties.
+
+**Mockup:**
+```
+┌─────────────────────────────────────┐
+│ Object Properties              [×] │
+├─────────────────────────────────────┤
+│ Type: Image                         │
+│                                     │
+│ Position                            │
+│   X: [_____123.5___] px            │
+│   Y: [_____456.0___] px            │
+│                                     │
+│ Size                                │
+│   W: [_____300_____] px            │
+│   H: [_____200_____] px            │
+│   [ ] Lock aspect ratio            │
+│                                     │
+│ Layer                               │
+│   Affinity: [▼ Below all strokes ] │
+│     • Below all strokes (-1)       │
+│     • Above Layer 0                │
+│     • Above Layer 1                │
+│     • Above Layer 2                │
+│                                     │
+│ Stacking                            │
+│   zOrder: [____0____]              │
+│   [↑ Front] [↓ Back]               │
+│                                     │
+│ [ ] Locked                          │
+│ [ ] Visible                         │
+└─────────────────────────────────────┘
+```
+
+**Key Features:**
+- Shows when single object selected
+- Hides when no selection or multiple selection (future: show "Multiple objects selected")
+- Editable fields update object immediately
+- Changes trigger undo entries
+
+---
+
+#### O3.6.2: Create ObjectPropertiesWidget Class
+
+**New File:** `source/widgets/ObjectPropertiesWidget.h`
+
+```cpp
+#pragma once
+
+#include <QWidget>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QLabel>
+#include <QPushButton>
+
+class InsertedObject;
+class DocumentViewport;
+
+/**
+ * @brief Widget for viewing/editing selected object properties.
+ * 
+ * Phase O3.6: Provides UI for testing layer affinity and other properties.
+ */
+class ObjectPropertiesWidget : public QWidget
+{
+    Q_OBJECT
+    
+public:
+    explicit ObjectPropertiesWidget(QWidget* parent = nullptr);
+    
+    /**
+     * @brief Set the viewport this widget interacts with.
+     */
+    void setViewport(DocumentViewport* viewport);
+    
+    /**
+     * @brief Update display for selected object.
+     * @param obj The selected object (nullptr if no selection)
+     */
+    void setObject(InsertedObject* obj);
+    
+signals:
+    /**
+     * @brief Emitted when user changes a property value.
+     */
+    void propertyChanged();
+    
+private slots:
+    void onPositionChanged();
+    void onSizeChanged();
+    void onAffinityChanged(int index);
+    void onZOrderChanged(int value);
+    void onLockedChanged(bool locked);
+    void onVisibleChanged(bool visible);
+    void onBringToFront();
+    void onSendToBack();
+    
+private:
+    void setupUI();
+    void updateFromObject();
+    void blockSignalsForUpdate(bool block);
+    
+    DocumentViewport* m_viewport = nullptr;
+    InsertedObject* m_currentObject = nullptr;
+    
+    // UI elements
+    QLabel* m_typeLabel;
+    QDoubleSpinBox* m_posXSpinBox;
+    QDoubleSpinBox* m_posYSpinBox;
+    QDoubleSpinBox* m_widthSpinBox;
+    QDoubleSpinBox* m_heightSpinBox;
+    QCheckBox* m_aspectLockCheckBox;
+    QComboBox* m_affinityComboBox;
+    QSpinBox* m_zOrderSpinBox;
+    QPushButton* m_bringToFrontBtn;
+    QPushButton* m_sendToBackBtn;
+    QCheckBox* m_lockedCheckBox;
+    QCheckBox* m_visibleCheckBox;
+    
+    bool m_updatingFromObject = false;  // Prevent feedback loops
+};
+```
+
+**Tasks:**
+- [ ] Create `source/widgets/ObjectPropertiesWidget.h`
+- [ ] Create `source/widgets/ObjectPropertiesWidget.cpp`
+- [ ] Add to CMakeLists.txt
+
+---
+
+#### O3.6.3: Implement ObjectPropertiesWidget
+
+**File:** `source/widgets/ObjectPropertiesWidget.cpp`
+
+**Key Implementation Points:**
+
+1. **setupUI()** - Create layout with spin boxes, combo box, checkboxes
+2. **setObject()** - Store reference, update UI
+3. **updateFromObject()** - Populate fields from object properties
+4. **onAffinityChanged()** - Critical for testing:
+
+```cpp
+void ObjectPropertiesWidget::onAffinityChanged(int index)
+{
+    if (m_updatingFromObject || !m_currentObject || !m_viewport) return;
+    
+    // Combo box items: -1, 0, 1, 2, 3, ...
+    int newAffinity = index - 1;  // Index 0 = "Below all" = -1
+    
+    if (newAffinity != m_currentObject->getLayerAffinity()) {
+        // Get the page containing this object
+        Page* page = nullptr;
+        if (m_viewport->document()->isEdgeless()) {
+            // Find tile containing object
+            for (const auto& coord : m_viewport->document()->allLoadedTileCoords()) {
+                Page* tile = m_viewport->document()->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(m_currentObject->id)) {
+                    page = tile;
+                    break;
+                }
+            }
+        } else {
+            page = m_viewport->document()->page(m_viewport->currentPageIndex());
+        }
+        
+        if (page) {
+            // Create undo entry before changing
+            // pushObjectAffinityUndo(m_currentObject, oldAffinity);
+            
+            // Update affinity via Page method (rebuilds affinity map)
+            page->updateObjectAffinity(m_currentObject->id, newAffinity);
+            
+            // Mark dirty and trigger repaint
+            emit propertyChanged();
+        }
+    }
+}
+```
+
+**Tasks:**
+- [ ] Implement `setupUI()` with proper layout
+- [ ] Implement `setObject()` and `updateFromObject()`
+- [ ] Implement property change handlers
+- [ ] Connect signals to slots
+
+---
+
+#### O3.6.4: Integrate with MainWindow
+
+**Goal:** Show properties widget in a dock or side panel.
+
+**File:** `source/MainWindow.cpp`
+
+**Option A: QDockWidget (Recommended)**
+```cpp
+// In MainWindow constructor or setupUI:
+m_objectPropertiesWidget = new ObjectPropertiesWidget(this);
+m_objectPropertiesDock = new QDockWidget(tr("Object Properties"), this);
+m_objectPropertiesDock->setWidget(m_objectPropertiesWidget);
+m_objectPropertiesDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+addDockWidget(Qt::RightDockWidgetArea, m_objectPropertiesDock);
+m_objectPropertiesDock->hide();  // Hidden by default
+```
+
+**Option B: Floating Window**
+```cpp
+// Create as tool window
+m_objectPropertiesWidget = new ObjectPropertiesWidget(nullptr);
+m_objectPropertiesWidget->setWindowFlags(Qt::Tool);
+m_objectPropertiesWidget->setWindowTitle(tr("Object Properties"));
+```
+
+**Tasks:**
+- [ ] Add `ObjectPropertiesWidget*` member to MainWindow
+- [ ] Create and add dock widget in MainWindow constructor
+- [ ] Add menu item: View → Object Properties (toggle)
+
+---
+
+#### O3.6.5: Connect to Selection Changes
+
+**Goal:** Update properties widget when selection changes.
+
+**File:** `source/MainWindow.cpp`
+
+```cpp
+// Connect to DocumentViewport's selection signal
+connect(viewport, &DocumentViewport::objectSelectionChanged,
+        this, &MainWindow::onObjectSelectionChanged);
+
+void MainWindow::onObjectSelectionChanged()
+{
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    
+    const auto& selected = vp->selectedObjects();
+    
+    if (selected.size() == 1) {
+        m_objectPropertiesWidget->setObject(selected.first());
+        m_objectPropertiesDock->show();
+    } else if (selected.isEmpty()) {
+        m_objectPropertiesWidget->setObject(nullptr);
+        // Optionally hide: m_objectPropertiesDock->hide();
+    } else {
+        // Multiple selection - show "Multiple objects" or disable editing
+        m_objectPropertiesWidget->setObject(nullptr);
+    }
+}
+```
+
+**Tasks:**
+- [ ] Add `onObjectSelectionChanged()` slot to MainWindow
+- [ ] Connect signal to slot for each tab's viewport
+- [ ] Update on tab change
+
+---
+
+#### O3.6.6: Affinity Combo Box Population
+
+**Goal:** Dynamically populate affinity options based on document layers.
+
+```cpp
+void ObjectPropertiesWidget::populateAffinityComboBox()
+{
+    m_affinityComboBox->clear();
+    
+    // Always available: below all strokes
+    m_affinityComboBox->addItem(tr("Below all strokes"), -1);
+    
+    // Add one entry per layer
+    int layerCount = 4;  // TODO: get from document
+    if (m_viewport && m_viewport->document()) {
+        layerCount = m_viewport->document()->isEdgeless() 
+            ? m_viewport->document()->edgelessLayerCount()
+            : m_viewport->document()->page(0)->layers.size();
+    }
+    
+    for (int i = 0; i < layerCount; ++i) {
+        m_affinityComboBox->addItem(tr("Above Layer %1").arg(i), i);
+    }
+}
+```
+
+**Tasks:**
+- [ ] Implement dynamic layer enumeration
+- [ ] Call `populateAffinityComboBox()` when object changes
+
+---
+
+#### O3.6.7: Undo/Redo for Property Changes
+
+**Goal:** Make property edits undoable.
+
+**File:** `source/core/DocumentViewport.h`
+
+```cpp
+// Already exists: ObjectAffinityChange in PageUndoAction::Type
+// Need to add: ObjectPropertyChange for position/size/etc via properties panel
+```
+
+**Implementation Notes:**
+- Position/size changes via properties panel should create ObjectMove/ObjectResize undo entries
+- Affinity changes use existing ObjectAffinityChange type
+- zOrder changes: could use existing zOrder methods or add ObjectZOrderChange type
+
+**Tasks:**
+- [ ] Wire property changes to appropriate undo helpers
+- [ ] Test undo/redo of affinity changes
+- [ ] Test undo/redo of position/size changes from panel
+
+---
+
+#### O3.6.8: Testing Checklist
+
+- [ ] Panel appears when single object selected
+- [ ] Panel hides/updates when selection cleared
+- [ ] Position fields update object position
+- [ ] Size fields update object size
+- [ ] **Affinity dropdown changes layer affinity** (critical for testing)
+- [ ] Object renders in correct layer order after affinity change
+- [ ] zOrder changes work
+- [ ] Locked checkbox prevents editing
+- [ ] Visible checkbox toggles rendering
+- [ ] Changes are undoable
 
 ---
 
 ## Task Summary
 
-| Phase | Tasks | Priority | Est. Effort |
-|-------|-------|----------|-------------|
-| O1.1 | Layer affinity property | P0 | 1 hour |
-| O1.2 | Object grouping by affinity | P0 | 2 hours |
-| O1.3 | Paged mode interleaved rendering | P0 | 2 hours |
-| O1.4 | Edgeless multi-pass rendering | P0 | 4 hours |
-| O1.5 | Extended tile loading margin | P0 | 1 hour |
-| O1.6 | Unified bundle format | P0 | 3 hours |
-| O1.7 | Paged mode lazy loading | P0 | 6 hours |
-| O1.8 | Testing Phase 1 | P0 | 2 hours |
-| **Phase 1 Total** | | | **~21 hours** |
-| O2.1 | Object select tool | P1 | 3 hours |
-| O2.2 | Selection API | P1 | 1 hour |
-| O2.3 | Object movement | P1 | 2 hours |
-| O2.4 | Clipboard paste | P1 | 2 hours |
-| O2.5 | Object deletion | P1 | 1 hour |
-| O2.6 | Object copy/paste | P1 | 2 hours |
-| O2.7 | Undo/redo integration | P1 | 3 hours |
-| O2.8 | zOrder shortcuts | P1 | 1 hour |
-| O2.9 | MainWindow connection | P1 | 1 hour |
-| O2.10 | Testing Phase 2 | P1 | 2 hours |
-| **Phase 2 Total** | | | **~18 hours** |
-| O3.x | Deferred features | P2 | TBD |
+| Phase | Tasks | Priority | Status | Est. Effort |
+|-------|-------|----------|--------|-------------|
+| O1.1 | Layer affinity property | P0 | ✅ | 1 hour |
+| O1.2 | Object grouping by affinity | P0 | ✅ | 2 hours |
+| O1.3 | Paged mode interleaved rendering | P0 | ✅ | 2 hours |
+| O1.4 | Edgeless multi-pass rendering | P0 | ✅ | 4 hours |
+| O1.5 | Extended tile loading margin | P0 | ✅ | 1 hour |
+| O1.6 | Unified bundle format | P0 | ✅ | 3 hours |
+| O1.7 | Paged mode lazy loading | P0 | ✅ | 6 hours |
+| O1.8 | Testing Phase 1 | P0 | ✅ | 2 hours |
+| **Phase 1 Total** | | | ✅ | **~21 hours** |
+| O2.1 | Object select tool | P1 | ✅ | 3 hours |
+| O2.2 | Selection API | P1 | ✅ | 1 hour |
+| O2.3 | Object movement | P1 | ✅ | 2 hours |
+| O2.4 | Clipboard paste | P1 | ✅ | 2 hours |
+| O2.5 | Object deletion | P1 | ✅ | 1 hour |
+| O2.6 | Object copy/paste | P1 | ✅ | 2 hours |
+| O2.7 | Undo/redo integration | P1 | ✅ | 3 hours |
+| O2.8 | zOrder shortcuts | P1 | ✅ | 1 hour |
+| O2.9 | MainWindow connection | P1 | ✅ | 1 hour |
+| O2.BF | Bug fixes during testing | P1 | ✅ | 4 hours |
+| O2.C | Code cleanup (abstraction) | P1 | ✅ | 1 hour |
+| **Phase 2 Total** | | | ✅ | **~21 hours** |
+| **O3.1** | **Object Resize** | P1 | 🔲 | 3 hours |
+| **O3.1.8** | **Object Rotation** | P1 | 🔲 | 2-3 hours |
+| **O3.6** | **Object Properties Panel** | P1 | 🔲 | 4 hours |
+| O3.2-O3.5 | Deferred features | P2 | - | TBD |
+| **Phase 3 (Testing)** | | | 🔲 | **~7-8 hours** |
 
-**Total Estimated: ~39 hours for MVP (Phase 1 + Phase 2)**
+**Total Estimated: ~51-52 hours for Complete MVP (Phase 1 + Phase 2 + O3.1 + O3.1.8 + O3.6)**
 
 ---
 
@@ -3012,6 +3956,8 @@ O1.1 → O1.2 → O1.3 ─┬─→ O1.6 → O1.7 → O1.8
 O1.4 → O1.5 ────────┘
                     
 O2.1 → O2.2 → O2.3 → O2.4 → O2.5 → O2.6 → O2.7 → O2.8 → O2.9 → O2.10
+
+O3.1.1 → O3.1.2 → O3.1.3 → O3.1.4 → O3.1.5 → O3.1.6 → O3.1.7 → O3.1.8 → O3.6
 ```
 
 Phase 1 tasks can be parallelized:
@@ -3019,6 +3965,8 @@ Phase 1 tasks can be parallelized:
 - O1.6-O1.7 (bundle format) depends on both
 
 Phase 2 is mostly sequential (each builds on previous).
+
+Phase 3 (O3.1.x): Resize and rotation are sequential, rotation reuses resize infrastructure.
 
 ---
 

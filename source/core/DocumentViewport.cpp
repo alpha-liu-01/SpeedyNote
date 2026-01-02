@@ -121,6 +121,14 @@ void DocumentViewport::setDocument(Document* doc)
     }
     m_backtickHeld = false;  // Reset key tracking for new document
     
+    // Clear object selection (pointers refer to old document's objects)
+    // Must be done BEFORE changing m_document to avoid dangling pointer access
+    bool hadSelection = !m_selectedObjects.isEmpty();
+    m_selectedObjects.clear();
+    m_hoveredObject = nullptr;
+    m_isDraggingObjects = false;
+    m_isResizingObject = false;
+    
     // Clear undo/redo stacks (actions refer to old document)
     bool hadUndo = canUndo();
     bool hadRedo = canRedo();
@@ -130,6 +138,11 @@ void DocumentViewport::setDocument(Document* doc)
     m_edgelessRedoStack.clear();
     
     m_document = doc;
+    
+    // Emit selection changed signal after document change
+    if (hadSelection) {
+        emit objectSelectionChanged();
+    }
     
     // Emit signals if undo/redo availability changed
     if (hadUndo) emit undoAvailableChanged(false);
@@ -916,6 +929,196 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
     }
     
     return nullptr;
+}
+
+// ===== Object Resize (Phase O3.1) =====
+
+QRectF DocumentViewport::objectBoundsInViewport(InsertedObject* obj) const
+{
+    if (!obj || !m_document) {
+        return QRectF();
+    }
+    
+    // Get object's document-space position
+    QPointF docPos;
+    
+    if (m_document->isEdgeless()) {
+        // Edgeless: object position is tile-local, need to find the tile
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                // Found the tile containing this object
+                QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                   coord.second * Document::EDGELESS_TILE_SIZE);
+                docPos = tileOrigin + obj->position;
+                break;
+            }
+        }
+    } else {
+        // Paged: object position is page-local
+        // Find which page contains this object
+        for (int i = 0; i < m_document->pageCount(); ++i) {
+            Page* page = m_document->page(i);
+            if (page && page->objectById(obj->id)) {
+                docPos = pagePosition(i) + obj->position;
+                break;
+            }
+        }
+    }
+    
+    // Convert document position to viewport coordinates
+    QPointF vpTopLeft = documentToViewport(docPos);
+    QSizeF vpSize(obj->size.width() * m_zoomLevel, obj->size.height() * m_zoomLevel);
+    
+    return QRectF(vpTopLeft, vpSize);
+}
+
+DocumentViewport::HandleHit DocumentViewport::objectHandleAtPoint(const QPointF& viewportPos) const
+{
+    // Only works with single selection
+    if (m_selectedObjects.size() != 1) {
+        return HandleHit::None;
+    }
+    
+    InsertedObject* obj = m_selectedObjects.first();
+    if (!obj) {
+        return HandleHit::None;
+    }
+    
+    // Get object bounds in viewport coordinates
+    QRectF objRect = objectBoundsInViewport(obj);
+    if (objRect.isEmpty()) {
+        return HandleHit::None;
+    }
+    
+    // Calculate the 8 handle positions (same layout as in renderObjectSelection)
+    QPointF handles[8] = {
+        objRect.topLeft(),                                    // 0: TopLeft
+        QPointF(objRect.center().x(), objRect.top()),         // 1: Top
+        objRect.topRight(),                                   // 2: TopRight
+        QPointF(objRect.left(), objRect.center().y()),        // 3: Left
+        QPointF(objRect.right(), objRect.center().y()),       // 4: Right
+        objRect.bottomLeft(),                                 // 5: BottomLeft
+        QPointF(objRect.center().x(), objRect.bottom()),      // 6: Bottom
+        objRect.bottomRight()                                 // 7: BottomRight
+    };
+    
+    // Rotation handle position (above top center)
+    QPointF rotatePos(objRect.center().x(), objRect.top() - ROTATE_HANDLE_OFFSET);
+    
+    // Use HANDLE_HIT_SIZE for hit testing (touch-friendly)
+    qreal hitRadius = HANDLE_HIT_SIZE / 2.0;
+    
+    // Check rotation handle first (has priority)
+    if (QLineF(viewportPos, rotatePos).length() <= hitRadius) {
+        return HandleHit::Rotate;
+    }
+    
+    // Check the 8 resize handles
+    static const HandleHit handleTypes[8] = {
+        HandleHit::TopLeft, HandleHit::Top, HandleHit::TopRight,
+        HandleHit::Left, HandleHit::Right,
+        HandleHit::BottomLeft, HandleHit::Bottom, HandleHit::BottomRight
+    };
+    
+    for (int i = 0; i < 8; ++i) {
+        if (QLineF(viewportPos, handles[i]).length() <= hitRadius) {
+            return handleTypes[i];
+        }
+    }
+    
+    return HandleHit::None;
+}
+
+void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
+{
+    // Phase O3.1.4: Resize logic implementation
+    if (m_selectedObjects.size() != 1) return;
+    InsertedObject* obj = m_selectedObjects.first();
+    if (!obj) return;
+    
+    // Convert positions to document coordinates
+    QPointF startDoc = viewportToDocument(m_resizeStartViewport);
+    QPointF currentDoc = viewportToDocument(currentViewport);
+    QPointF delta = currentDoc - startDoc;
+    
+    // Original bounds
+    QRectF originalRect(m_resizeOriginalPosition, m_resizeOriginalSize);
+    QRectF newRect = originalRect;
+    
+    // Apply delta based on which handle is being dragged
+    switch (m_objectResizeHandle) {
+        case HandleHit::TopLeft:
+            newRect.setTopLeft(originalRect.topLeft() + delta);
+            break;
+        case HandleHit::Top:
+            newRect.setTop(originalRect.top() + delta.y());
+            break;
+        case HandleHit::TopRight:
+            newRect.setTopRight(originalRect.topRight() + delta);
+            break;
+        case HandleHit::Left:
+            newRect.setLeft(originalRect.left() + delta.x());
+            break;
+        case HandleHit::Right:
+            newRect.setRight(originalRect.right() + delta.x());
+            break;
+        case HandleHit::BottomLeft:
+            newRect.setBottomLeft(originalRect.bottomLeft() + delta);
+            break;
+        case HandleHit::Bottom:
+            newRect.setBottom(originalRect.bottom() + delta.y());
+            break;
+        case HandleHit::BottomRight:
+            newRect.setBottomRight(originalRect.bottomRight() + delta);
+            break;
+        // -----------------------------------------------------------------
+        // Rotation (Phase O3.1.8.1): Rotate object around its center
+        // -----------------------------------------------------------------
+        case HandleHit::Rotate: {
+            // Calculate angle from object center to current pointer position
+            QPointF objectCenter = m_resizeOriginalPosition + 
+                                   QPointF(m_resizeOriginalSize.width() / 2, 
+                                           m_resizeOriginalSize.height() / 2);
+            
+            // Angle from center to current pointer (in document coords)
+            // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
+            // We add 90° because the rotation handle starts above the object (at 12 o'clock)
+            qreal angle = qRadiansToDegrees(
+                qAtan2(currentDoc.y() - objectCenter.y(), 
+                       currentDoc.x() - objectCenter.x())
+            ) + 90.0;
+            
+            // Normalize to 0-360 range
+            while (angle < 0) angle += 360.0;
+            while (angle >= 360) angle -= 360.0;
+            
+            // Snap to 15° increments by default
+            // TODO O3.1.8.1: Check Shift key for free rotation (no snap)
+            angle = qRound(angle / 15.0) * 15.0;
+            
+            obj->rotation = angle;
+            
+            qDebug() << "Rotation: angle =" << angle << "degrees";
+            return;  // Don't apply resize logic below
+        }
+        default:
+            return;
+    }
+    
+    // Normalize rect (handle inverted dimensions from dragging past opposite edge)
+    newRect = newRect.normalized();
+    
+    // Enforce minimum size
+    const qreal MIN_SIZE = 10.0;
+    if (newRect.width() < MIN_SIZE) newRect.setWidth(MIN_SIZE);
+    if (newRect.height() < MIN_SIZE) newRect.setHeight(MIN_SIZE);
+    
+    // TODO O3.1.4: Aspect ratio lock (Shift key or ImageObject::maintainAspectRatio)
+    
+    // Apply to object
+    obj->position = newRect.topLeft();
+    obj->size = newRect.size();
 }
 
 QRectF DocumentViewport::visibleRect() const
@@ -3690,6 +3893,22 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 {
     if (!m_document) return;
     
+    // Phase O3.1.3: Check for resize handle click FIRST (single selection only)
+    if (m_selectedObjects.size() == 1) {
+        HandleHit handle = objectHandleAtPoint(pe.viewportPos);
+        if (handle != HandleHit::None && handle != HandleHit::Inside) {
+            // Start resize operation
+            m_isResizingObject = true;
+            m_objectResizeHandle = handle;
+            m_resizeStartViewport = pe.viewportPos;
+            m_resizeOriginalSize = m_selectedObjects.first()->size;
+            m_resizeOriginalPosition = m_selectedObjects.first()->position;
+            m_resizeOriginalRotation = m_selectedObjects.first()->rotation;  // Phase O3.1.8.2
+            m_pointerActive = true;
+            return;  // Don't start object drag
+        }
+    }
+    
     // Convert to document coordinates
     QPointF docPoint = viewportToDocument(pe.viewportPos);
     
@@ -3746,6 +3965,14 @@ void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
 {
     if (!m_document) return;
     
+    // Phase O3.1.3: Handle resize drag
+    if (m_isResizingObject) {
+        // Calculate new size based on handle being dragged
+        updateObjectResize(pe.viewportPos);
+        update();
+        return;
+    }
+    
     QPointF docPoint = viewportToDocument(pe.viewportPos);
     
     if (m_isDraggingObjects && !m_selectedObjects.isEmpty()) {
@@ -3771,6 +3998,46 @@ void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
 void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 {
     Q_UNUSED(pe);
+    
+    // Phase O3.1.3: Finalize resize/rotate operation
+    if (m_isResizingObject) {
+        InsertedObject* obj = m_selectedObjects.isEmpty() ? nullptr : m_selectedObjects.first();
+        // Check if any transform property changed (position, size, or rotation)
+        bool changed = obj && (obj->size != m_resizeOriginalSize || 
+                               obj->position != m_resizeOriginalPosition ||
+                               obj->rotation != m_resizeOriginalRotation);  // O3.1.8.3
+        if (changed) {
+            // Phase O3.1.5/O3.1.8.3: Create undo entry for resize/rotate
+            pushObjectResizeUndo(obj, m_resizeOriginalPosition, m_resizeOriginalSize, 
+                                 m_resizeOriginalRotation);
+            
+            // Mark dirty
+            if (m_document) {
+                if (m_document->isEdgeless()) {
+                    // May need to relocate to different tile if position changed
+                    relocateObjectsToCorrectTiles();
+                    // Mark tile dirty
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (tile && tile->objectById(obj->id)) {
+                            m_document->markTileDirty(coord);
+                            break;
+                        }
+                    }
+                } else {
+                    m_document->markPageDirty(m_currentPageIndex);
+                }
+            }
+            
+            emit documentModified();
+        }
+        
+        m_isResizingObject = false;
+        m_objectResizeHandle = HandleHit::None;
+        m_pointerActive = false;
+        update();
+        return;
+    }
     
     if (m_isDraggingObjects) {
         // O2.3.2: Finalize drag
@@ -6848,6 +7115,29 @@ void DocumentViewport::undoEdgeless()
                 }
                 break;
                 
+            // -----------------------------------------------------------------
+            // ObjectResize (Phase O3.1.5, O3.1.8.3): Undo resize/rotate
+            // Restores old position, size, and rotation.
+            // -----------------------------------------------------------------
+            case PageUndoAction::ObjectResize:
+                {
+                    Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                     action.objectTileCoord.second);
+                    if (tile) {
+                        InsertedObject* obj = tile->objectById(action.objectId);
+                        if (obj) {
+                            obj->position = action.objectOldPosition;
+                            obj->size = action.objectOldSize;
+                            obj->rotation = action.objectOldRotation;  // O3.1.8.3
+                            qDebug() << "Undo ObjectResize (edgeless): obj" << action.objectId
+                                     << "pos" << obj->position << "size" << obj->size 
+                                     << "rot" << obj->rotation;
+                        }
+                        m_document->markTileDirty(action.objectTileCoord);
+                    }
+                }
+                break;
+                
             default:
                 break;
         }
@@ -7028,6 +7318,29 @@ void DocumentViewport::redoEdgeless()
                                                      action.objectTileCoord.second);
                     if (tile) {
                         tile->updateObjectAffinity(action.objectId, action.objectNewAffinity);
+                        m_document->markTileDirty(action.objectTileCoord);
+                    }
+                }
+                break;
+                
+            // -----------------------------------------------------------------
+            // ObjectResize (Phase O3.1.5, O3.1.8.3): Redo resize/rotate
+            // Applies new position, size, and rotation.
+            // -----------------------------------------------------------------
+            case PageUndoAction::ObjectResize:
+                {
+                    Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                     action.objectTileCoord.second);
+                    if (tile) {
+                        InsertedObject* obj = tile->objectById(action.objectId);
+                        if (obj) {
+                            obj->position = action.objectNewPosition;
+                            obj->size = action.objectNewSize;
+                            obj->rotation = action.objectNewRotation;  // O3.1.8.3
+                            qDebug() << "Redo ObjectResize (edgeless): obj" << action.objectId
+                                     << "pos" << obj->position << "size" << obj->size
+                                     << "rot" << obj->rotation;
+                        }
                         m_document->markTileDirty(action.objectTileCoord);
                     }
                 }
@@ -7253,6 +7566,24 @@ void DocumentViewport::undo()
                 page->updateObjectAffinity(action.objectId, action.objectOldAffinity);
                 break;
                 
+            // -----------------------------------------------------------------
+            // ObjectResize (Phase O3.1.5, O3.1.8.3): Undo resize/rotate
+            // Restores old position, size, and rotation.
+            // -----------------------------------------------------------------
+            case PageUndoAction::ObjectResize:
+                {
+                    InsertedObject* obj = page->objectById(action.objectId);
+                    if (obj) {
+                        obj->position = action.objectOldPosition;
+                        obj->size = action.objectOldSize;
+                        obj->rotation = action.objectOldRotation;  // O3.1.8.3
+                        qDebug() << "Undo ObjectResize (paged): obj" << action.objectId
+                                 << "pos" << obj->position << "size" << obj->size
+                                 << "rot" << obj->rotation;
+                    }
+                }
+                break;
+                
             default:
                 break;
         }
@@ -7384,6 +7715,24 @@ void DocumentViewport::redo()
             case PageUndoAction::ObjectAffinityChange:
                 // Redo affinity change = apply new affinity
                 page->updateObjectAffinity(action.objectId, action.objectNewAffinity);
+                break;
+                
+            // -----------------------------------------------------------------
+            // ObjectResize (Phase O3.1.5, O3.1.8.3): Redo resize/rotate
+            // Applies new position, size, and rotation.
+            // -----------------------------------------------------------------
+            case PageUndoAction::ObjectResize:
+                {
+                    InsertedObject* obj = page->objectById(action.objectId);
+                    if (obj) {
+                        obj->position = action.objectNewPosition;
+                        obj->size = action.objectNewSize;
+                        obj->rotation = action.objectNewRotation;  // O3.1.8.3
+                        qDebug() << "Redo ObjectResize (paged): obj" << action.objectId
+                                 << "pos" << obj->position << "size" << obj->size
+                                 << "rot" << obj->rotation;
+                    }
+                }
                 break;
                 
             default:
@@ -7546,6 +7895,74 @@ void DocumentViewport::pushObjectMoveUndo(InsertedObject* obj, const QPointF& ol
         
         m_undoStacks[idx].push(action);
         m_redoStacks[idx].clear();
+    }
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+}
+
+// -----------------------------------------------------------------------------
+// pushObjectResizeUndo - Phase O3.1.5, extended O3.1.8.3
+// Records object resize/rotate for undo/redo. Stores position, size, and rotation
+// since resizing from corners can change position, and rotation is a transform.
+// -----------------------------------------------------------------------------
+void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj, 
+                                            const QPointF& oldPos, 
+                                            const QSizeF& oldSize,
+                                            qreal oldRotation)
+{
+    if (!obj) return;
+    
+    qDebug() << "pushObjectResizeUndo: obj" << obj->id 
+             << "oldPos =" << oldPos << "newPos =" << obj->position
+             << "oldSize =" << oldSize << "newSize =" << obj->size
+             << "oldRot =" << oldRotation << "newRot =" << obj->rotation;
+    
+    if (m_document && m_document->isEdgeless()) {
+        // ===== Edgeless mode: use global stack =====
+        EdgelessUndoAction action;
+        action.type = PageUndoAction::ObjectResize;
+        action.objectId = obj->id;
+        action.objectData = obj->toJson();  // Full snapshot for safety
+        action.objectOldPosition = oldPos;
+        action.objectNewPosition = obj->position;
+        action.objectOldSize = oldSize;
+        action.objectNewSize = obj->size;
+        action.objectOldRotation = oldRotation;        // Phase O3.1.8.3
+        action.objectNewRotation = obj->rotation;      // Phase O3.1.8.3
+        
+        // Find which tile contains this object
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                action.objectTileCoord = coord;
+                break;
+            }
+        }
+        
+        m_edgelessUndoStack.push(action);
+        m_edgelessRedoStack.clear();
+        
+        // Enforce max stack size
+        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+            m_edgelessUndoStack.removeFirst();
+        }
+    } else {
+        // ===== Paged mode: use per-page stack =====
+        PageUndoAction action;
+        action.type = PageUndoAction::ObjectResize;
+        action.pageIndex = m_currentPageIndex;
+        action.objectId = obj->id;
+        action.objectData = obj->toJson();  // Full snapshot for safety
+        action.objectOldPosition = oldPos;
+        action.objectNewPosition = obj->position;
+        action.objectOldSize = oldSize;
+        action.objectNewSize = obj->size;
+        action.objectOldRotation = oldRotation;        // Phase O3.1.8.3
+        action.objectNewRotation = obj->rotation;      // Phase O3.1.8.3
+        
+        m_undoStacks[m_currentPageIndex].push(action);
+        m_redoStacks[m_currentPageIndex].clear();
     }
     
     emit undoAvailableChanged(canUndo());

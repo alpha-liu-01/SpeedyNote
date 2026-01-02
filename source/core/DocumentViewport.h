@@ -54,7 +54,10 @@ struct PageUndoAction {
         ObjectInsert,       ///< An object was inserted (undo = remove it)
         ObjectDelete,       ///< An object was deleted (undo = restore it)
         ObjectMove,         ///< An object was moved (undo = move back)
-        ObjectAffinityChange ///< Object layer affinity changed (undo = restore old affinity)
+        ObjectAffinityChange, ///< Object layer affinity changed (undo = restore old affinity)
+        
+        // ===== Object resize (Phase O3.1.5) =====
+        ObjectResize        ///< An object was resized (undo = restore old pos+size)
     };
     
     Type type;
@@ -69,11 +72,19 @@ struct PageUndoAction {
     
     // ===== Object fields (Phase O2.7) =====
     QJsonObject objectData;             ///< Serialized object for ObjectInsert/ObjectDelete restore
-    QString objectId;                   ///< Object ID for lookup (ObjectMove, ObjectAffinityChange)
-    QPointF objectOldPosition;          ///< For ObjectMove: position before move
-    QPointF objectNewPosition;          ///< For ObjectMove: position after move
+    QString objectId;                   ///< Object ID for lookup (ObjectMove, ObjectAffinityChange, ObjectResize)
+    QPointF objectOldPosition;          ///< For ObjectMove/ObjectResize: position before
+    QPointF objectNewPosition;          ///< For ObjectMove/ObjectResize: position after
     int objectOldAffinity = -1;         ///< For ObjectAffinityChange: affinity before change
     int objectNewAffinity = -1;         ///< For ObjectAffinityChange: affinity after change
+    
+    // ===== Object resize fields (Phase O3.1.5) =====
+    QSizeF objectOldSize;               ///< For ObjectResize: size before resize
+    QSizeF objectNewSize;               ///< For ObjectResize: size after resize
+    
+    // ===== Object rotation fields (Phase O3.1.8.3) =====
+    qreal objectOldRotation = 0.0;      ///< For ObjectResize: rotation before (degrees)
+    qreal objectNewRotation = 0.0;      ///< For ObjectResize: rotation after (degrees)
 };
 
 // ============================================================================
@@ -112,12 +123,20 @@ struct EdgelessUndoAction {
     Document::TileCoord objectTileCoord;  ///< Tile containing the object
     QJsonObject objectData;               ///< Serialized object for ObjectInsert/ObjectDelete restore
     QString objectId;                     ///< Object ID for lookup
-    QPointF objectOldPosition;            ///< For ObjectMove: position before move (tile-local)
-    QPointF objectNewPosition;            ///< For ObjectMove: position after move (tile-local)
+    QPointF objectOldPosition;            ///< For ObjectMove/ObjectResize: position before (tile-local)
+    QPointF objectNewPosition;            ///< For ObjectMove/ObjectResize: position after (tile-local)
     Document::TileCoord objectOldTile;    ///< For ObjectMove across tiles: original tile
     Document::TileCoord objectNewTile;    ///< For ObjectMove across tiles: destination tile
     int objectOldAffinity = -1;           ///< For ObjectAffinityChange: affinity before change
     int objectNewAffinity = -1;           ///< For ObjectAffinityChange: affinity after change
+    
+    // ===== Object resize fields (Phase O3.1.5) =====
+    QSizeF objectOldSize;                 ///< For ObjectResize: size before resize
+    QSizeF objectNewSize;                 ///< For ObjectResize: size after resize
+    
+    // ===== Object rotation fields (Phase O3.1.8.3) =====
+    qreal objectOldRotation = 0.0;        ///< For ObjectResize: rotation before (degrees)
+    qreal objectNewRotation = 0.0;        ///< For ObjectResize: rotation after (degrees)
 };
 
 #include <QWidget>
@@ -519,6 +538,19 @@ public:
                             Document::TileCoord oldTile = {0, 0},
                             Document::TileCoord newTile = {0, 0});
     
+    /**
+     * @brief Push an undo action for object resize/rotate (Phase O3.1.5, O3.1.8.3).
+     * @param obj The object that was resized/rotated.
+     * @param oldPos Position before resize.
+     * @param oldSize Size before resize.
+     * @param oldRotation Rotation before rotate (degrees).
+     * 
+     * Undo will restore old position+size+rotation; redo will apply new values.
+     * Extended in O3.1.8.3 to include rotation.
+     */
+    void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos, 
+                              const QSizeF& oldSize, qreal oldRotation = 0.0);
+    
     // ===== Layer Management (Phase 5) =====
     
     /**
@@ -661,6 +693,39 @@ public:
      * @return True if at least one object is selected.
      */
     bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
+    
+    // ===== Object Resize (Phase O3.1) =====
+    
+    /**
+     * @brief Get the bounding rectangle of an object in viewport coordinates.
+     * @param obj The object to get bounds for.
+     * @return Bounding rectangle in viewport coordinates.
+     * 
+     * Converts the object's document-space bounds to viewport coordinates,
+     * accounting for zoom and pan. Used for hit-testing resize handles.
+     */
+    QRectF objectBoundsInViewport(InsertedObject* obj) const;
+    
+    /**
+     * @brief Detect which resize handle is at the given viewport position.
+     * @param viewportPos Position in viewport coordinates.
+     * @return The handle hit, or HandleHit::None if no handle hit.
+     * 
+     * Checks the 8 resize handles (corners + edges) and the rotation handle.
+     * Only works when exactly one object is selected.
+     * Reuses HandleHit enum from lasso transform.
+     */
+    HandleHit objectHandleAtPoint(const QPointF& viewportPos) const;
+    
+    /**
+     * @brief Update object size during resize drag.
+     * @param currentViewport Current viewport position of the pointer.
+     * 
+     * Called from handlePointerMove_ObjectSelect() during resize.
+     * Calculates new size based on which handle is being dragged.
+     * Implemented in O3.1.4.
+     */
+    void updateObjectResize(const QPointF& currentViewport);
     
     // ===== Object Z-Order (Phase O2.8) =====
     
@@ -1255,6 +1320,53 @@ private:
      * Each entry is a complete JSON representation of an InsertedObject.
      */
     QList<QJsonObject> m_objectClipboard;
+    
+    // ===== Object Resize State (Phase O3.1) =====
+    
+    /**
+     * @brief Whether a resize operation is in progress.
+     * 
+     * Set to true when user starts dragging a resize handle,
+     * set to false when drag is released or cancelled.
+     */
+    bool m_isResizingObject = false;
+    
+    /**
+     * @brief Which resize handle is being dragged.
+     * 
+     * Valid when m_isResizingObject is true.
+     * Determines how mouse movement affects object size.
+     */
+    HandleHit m_objectResizeHandle = HandleHit::None;
+    
+    /**
+     * @brief Viewport position where resize drag started.
+     * 
+     * Used to calculate drag delta during resize operation.
+     */
+    QPointF m_resizeStartViewport;
+    
+    /**
+     * @brief Object size before resize started.
+     * 
+     * Used for undo and to calculate new size based on drag delta.
+     */
+    QSizeF m_resizeOriginalSize;
+    
+    /**
+     * @brief Object position before resize started.
+     * 
+     * Needed because some resize handles (e.g., TopLeft) change both
+     * position and size. Used for undo entry.
+     */
+    QPointF m_resizeOriginalPosition;
+    
+    /**
+     * @brief Object rotation before resize/rotate started (Phase O3.1.8.2).
+     * 
+     * Stored when user starts dragging any handle, used for rotation undo.
+     */
+    qreal m_resizeOriginalRotation = 0.0;
     
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels
