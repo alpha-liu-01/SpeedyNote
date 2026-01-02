@@ -2728,6 +2728,179 @@ if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_Brac
 
 ---
 
+## Phase O2.C: Code Cleanup - Abstraction Enforcement ✅
+
+**Goal:** Ensure DocumentViewport works with the abstract `InsertedObject` interface, not concrete types like `ImageObject`. This prepares the system for future object types (TextBox, Shape, Link, etc.).
+
+**Status:** COMPLETE
+
+---
+
+### O2.C.1: Current Abstraction Violations
+
+**Analysis:** DocumentViewport currently has **5 places** that check `obj->type() == "image"` and cast to `ImageObject*`:
+
+| Location | Purpose | Current Code |
+|----------|---------|--------------|
+| `pasteObjects()` | Load image from assets after paste | `if (obj->type() == "image") { ImageObject* imgObj = static_cast<...>; imgObj->loadImage(...); }` |
+| `undo()` (paged) ObjectDelete | Load image when restoring | Same pattern |
+| `undo()` (paged) ObjectInsert redo | Load image when redoing insert | Same pattern |
+| `undoEdgeless()` ObjectDelete | Load image when restoring | Same pattern |
+| `redoEdgeless()` ObjectInsert | Load image when redoing insert | Same pattern |
+
+**Additionally**, 2 places call `saveToAssets()` after insertion:
+- `insertImageFromClipboard()` - calls `imgObj->saveToAssets()`
+- `insertImageFromFile()` - calls `imgObj->saveToAssets()`
+
+**Problem:** When we add `TextBoxObject`, `ShapeObject`, or `LinkObject`, DocumentViewport would need type-specific handling for each. This violates the Open-Closed Principle.
+
+---
+
+### O2.C.2: Solution - Add Virtual Asset Methods ✅
+
+**Added to `InsertedObject` base class:**
+
+```cpp
+// ===== Virtual Asset Management Methods =====
+
+/**
+ * @brief Load external assets (e.g., images) from the bundle.
+ * @param bundlePath Path to the .snb bundle directory.
+ * @return True if successful or no assets to load.
+ * 
+ * Default implementation does nothing (for objects without external assets).
+ * ImageObject overrides to load the pixmap from assets/images/.
+ */
+virtual bool loadAssets(const QString& bundlePath) { 
+    Q_UNUSED(bundlePath);
+    return true; 
+}
+
+/**
+ * @brief Save external assets (e.g., images) to the bundle.
+ * @param bundlePath Path to the .snb bundle directory.
+ * @return True if successful or no assets to save.
+ * 
+ * Default implementation does nothing (for objects without external assets).
+ * ImageObject overrides to save the pixmap to assets/images/.
+ */
+virtual bool saveAssets(const QString& bundlePath) { 
+    Q_UNUSED(bundlePath);
+    return true; 
+}
+
+/**
+ * @brief Check if this object's assets are loaded and ready to render.
+ * @return True if ready (or no assets needed).
+ * 
+ * Default returns true. ImageObject returns !cachedPixmap.isNull().
+ */
+virtual bool isLoaded() const { return true; }
+```
+
+**ImageObject overrides:**
+
+```cpp
+bool ImageObject::loadAssets(const QString& bundlePath) override {
+    return loadImage(bundlePath);
+}
+
+bool ImageObject::saveAssets(const QString& bundlePath) override {
+    return saveToAssets(bundlePath);
+}
+
+bool ImageObject::isLoaded() const override {
+    return !cachedPixmap.isNull();
+}
+```
+
+---
+
+### O2.C.3: Refactor DocumentViewport ✅
+
+**Before (type-specific):**
+```cpp
+// 5 places like this:
+if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
+    ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+    imgObj->loadImage(m_document->bundlePath());
+}
+```
+
+**After (generic):**
+```cpp
+// Single line, works for ANY object type:
+obj->loadAssets(m_document->bundlePath());
+```
+
+**Changes needed in DocumentViewport.cpp:**
+
+| Location | Change |
+|----------|--------|
+| `pasteObjects()` | Replace type check + cast with `obj->loadAssets(bundlePath)` |
+| `undo()` ObjectDelete | Replace with `obj->loadAssets(bundlePath)` |
+| `undo()` ObjectInsert redo | Replace with `obj->loadAssets(bundlePath)` |
+| `undoEdgeless()` ObjectDelete | Replace with `obj->loadAssets(bundlePath)` |
+| `redoEdgeless()` ObjectInsert | Replace with `obj->loadAssets(bundlePath)` |
+| `insertImageFromClipboard()` | Replace cast+saveToAssets with `rawPtr->saveAssets(bundlePath)` |
+| `insertImageFromFile()` | Replace cast+saveToAssets with `rawPtr->saveAssets(bundlePath)` |
+
+---
+
+### O2.C.4: What SHOULD Remain Type-Specific (Verified ✅)
+
+These are **correctly** type-specific and were NOT abstracted:
+
+1. **`insertImageFromClipboard()`** - Creates `ImageObject` directly. This is the entry point for image insertion and MUST know the type.
+
+2. **`insertImageFromFile()`** - Creates `ImageObject` directly. Same rationale.
+
+3. **Future entry points:**
+   - `insertTextBox()` - will create `TextBoxObject`
+   - `insertShape()` - will create `ShapeObject`
+   - `insertLink()` - will create `LinkObject`
+
+The key principle: **Entry points know the type, everything else works with `InsertedObject*`**.
+
+---
+
+### O2.C.5: Implementation Summary ✅
+
+| Task | Status | Files Changed |
+|------|--------|---------------|
+| Add virtual methods to InsertedObject.h | ✅ | InsertedObject.h |
+| Add overrides to ImageObject | ✅ | ImageObject.h/.cpp |
+| Refactor 5 type checks in DocumentViewport | ✅ | DocumentViewport.cpp |
+| Refactor 2 saveAssets calls | ✅ | DocumentViewport.cpp |
+| Test undo/redo/paste still work | ⏳ Pending | - |
+
+**Changes Made:**
+1. **InsertedObject.h**: Added `loadAssets()`, `saveAssets()`, `isAssetLoaded()` virtual methods with default no-op implementations
+2. **ImageObject.h**: Added override declarations for the 3 virtual methods
+3. **ImageObject.cpp**: Added implementations that delegate to existing `loadImage()` and `saveToAssets()`
+4. **DocumentViewport.cpp**: Replaced 5 type-specific `loadImage()` calls and 2 `saveToAssets()` calls with generic `loadAssets()`/`saveAssets()` calls
+
+---
+
+### O2.C.6: Future Object Types Enabled ✅
+
+After this cleanup, adding new object types requires:
+
+1. Create new class (e.g., `TextBoxObject : public InsertedObject`)
+2. Implement `render()`, `type()`, `toJson()`, `loadFromJson()`
+3. If has external assets: override `loadAssets()`, `saveAssets()`, `isLoaded()`
+4. Register type in `InsertedObject::fromJson()` factory
+5. Add entry point method (e.g., `insertTextBox()`) to DocumentViewport
+
+**NO changes needed to:**
+- Undo/redo system
+- Copy/paste system
+- Selection/movement system
+- zOrder system
+- Rendering system
+
+---
+
 ## Phase O3: Enhanced Features (Minimal)
 
 **Goal:** Document future enhancements, implement only critical items.

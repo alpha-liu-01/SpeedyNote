@@ -4192,12 +4192,11 @@ void DocumentViewport::insertImageFromClipboard()
     // 5. Update max object extent for extended tile loading
     m_document->updateMaxObjectExtent(rawPtr);
     
-    // 6. Save image to assets folder (hash-based deduplication)
+    // 6. Save to assets folder (hash-based deduplication) - Phase O2.C: type-agnostic
     if (!m_document->bundlePath().isEmpty()) {
-        ImageObject* imgRawPtr = static_cast<ImageObject*>(rawPtr);
-        if (!imgRawPtr->saveToAssets(m_document->bundlePath())) {
-            qWarning() << "insertImageFromClipboard: Failed to save image to assets";
-            // Continue anyway - image is in memory and will be saved on document save
+        if (!rawPtr->saveAssets(m_document->bundlePath())) {
+            qWarning() << "insertImageFromClipboard: Failed to save assets";
+            // Continue anyway - data is in memory and will be saved on document save
         }
     }
     
@@ -4288,11 +4287,10 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     // 5. Update max object extent
     m_document->updateMaxObjectExtent(rawPtr);
     
-    // 6. Save image to assets folder
+    // 6. Save to assets folder - Phase O2.C: type-agnostic
     if (!m_document->bundlePath().isEmpty()) {
-        ImageObject* imgRawPtr = static_cast<ImageObject*>(rawPtr);
-        if (!imgRawPtr->saveToAssets(m_document->bundlePath())) {
-            qWarning() << "insertImageFromFile: Failed to save image to assets";
+        if (!rawPtr->saveAssets(m_document->bundlePath())) {
+            qWarning() << "insertImageFromFile: Failed to save assets";
         }
     }
     
@@ -4454,14 +4452,11 @@ void DocumentViewport::pasteObjects()
         // Offset position from original
         obj->position += QPointF(PASTE_OFFSET, PASTE_OFFSET);
         
-        // For ImageObject, load the pixmap from assets
-        if (obj->type() == "image") {
-            ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
-            if (!m_document->bundlePath().isEmpty()) {
-                if (!imgObj->loadImage(m_document->bundlePath())) {
-                    qWarning() << "pasteObjects: Failed to load image for pasted object";
-                    // Continue anyway - object will render as empty
-                }
+        // Phase O2.C: Load any external assets (type-agnostic)
+        if (!m_document->bundlePath().isEmpty()) {
+            if (!obj->loadAssets(m_document->bundlePath())) {
+                qWarning() << "pasteObjects: Failed to load assets for pasted object";
+                // Continue anyway - object will render as empty
             }
         }
         
@@ -6794,11 +6789,8 @@ void DocumentViewport::undoEdgeless()
                     if (tile) {
                         auto obj = InsertedObject::fromJson(action.objectData);
                         if (obj) {
-                            // For ImageObject, load the image from assets
-                            if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
-                                ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
-                                imgObj->loadImage(m_document->bundlePath());
-                            }
+                            // Phase O2.C: Load any external assets (type-agnostic)
+                            obj->loadAssets(m_document->bundlePath());
                             m_document->updateMaxObjectExtent(obj.get());
                             tile->addObject(std::move(obj));
                             m_document->markTileDirty(action.objectTileCoord);
@@ -6967,11 +6959,8 @@ void DocumentViewport::redoEdgeless()
                     if (tile) {
                         auto obj = InsertedObject::fromJson(action.objectData);
                         if (obj) {
-                            // For ImageObject, load the image from assets
-                            if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
-                                ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
-                                imgObj->loadImage(m_document->bundlePath());
-                            }
+                            // Phase O2.C: Load any external assets (type-agnostic)
+                            obj->loadAssets(m_document->bundlePath());
                             m_document->updateMaxObjectExtent(obj.get());
                             tile->addObject(std::move(obj));
                             m_document->markTileDirty(action.objectTileCoord);
@@ -7241,11 +7230,8 @@ void DocumentViewport::undo()
                 {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
-                        // For ImageObject, load the image from assets
-                        if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
-                            ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
-                            imgObj->loadImage(m_document->bundlePath());
-                        }
+                        // Phase O2.C: Load any external assets (type-agnostic)
+                        obj->loadAssets(m_document->bundlePath());
                         m_document->updateMaxObjectExtent(obj.get());
                         page->addObject(std::move(obj));
                     }
@@ -7369,11 +7355,8 @@ void DocumentViewport::redo()
                     if (obj) {
                         qDebug() << "redo ObjectInsert: restored position =" << obj->position
                                  << "size =" << obj->size;
-                        // For ImageObject, load the image from assets
-                        if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
-                            ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
-                            imgObj->loadImage(m_document->bundlePath());
-                        }
+                        // Phase O2.C: Load any external assets (type-agnostic)
+                        obj->loadAssets(m_document->bundlePath());
                         m_document->updateMaxObjectExtent(obj.get());
                         InsertedObject* rawPtr = obj.get();
                         page->addObject(std::move(obj));

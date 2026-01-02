@@ -119,6 +119,49 @@ public:
      */
     virtual bool containsPoint(const QPointF& pt) const;
     
+    // ===== Virtual Asset Management Methods (Phase O2.C) =====
+    
+    /**
+     * @brief Load external assets (e.g., images) from the bundle.
+     * @param bundlePath Path to the .snb bundle directory.
+     * @return True if successful or no assets to load.
+     * 
+     * Default implementation does nothing (for objects without external assets).
+     * ImageObject overrides to load the pixmap from assets/images/.
+     * 
+     * This abstraction allows DocumentViewport to work with InsertedObject*
+     * without knowing the concrete type.
+     */
+    virtual bool loadAssets(const QString& bundlePath) { 
+        Q_UNUSED(bundlePath);
+        return true; 
+    }
+    
+    /**
+     * @brief Save external assets (e.g., images) to the bundle.
+     * @param bundlePath Path to the .snb bundle directory.
+     * @return True if successful or no assets to save.
+     * 
+     * Default implementation does nothing (for objects without external assets).
+     * ImageObject overrides to save the pixmap to assets/images/.
+     * 
+     * This abstraction allows DocumentViewport to work with InsertedObject*
+     * without knowing the concrete type.
+     */
+    virtual bool saveAssets(const QString& bundlePath) { 
+        Q_UNUSED(bundlePath);
+        return true; 
+    }
+    
+    /**
+     * @brief Check if this object's assets are loaded and ready to render.
+     * @return True if ready (or no assets needed).
+     * 
+     * Default returns true (objects without external assets are always ready).
+     * ImageObject returns !cachedPixmap.isNull().
+     */
+    virtual bool isAssetLoaded() const { return true; }
+    
     // ===== Common Helpers =====
     
     /**

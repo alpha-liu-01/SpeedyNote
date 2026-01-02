@@ -65,6 +65,32 @@ public:
      */
     void loadFromJson(const QJsonObject& obj) override;
     
+    // ===== Asset Management Overrides (Phase O2.C) =====
+    
+    /**
+     * @brief Load image from the bundle's assets folder.
+     * @param bundlePath Path to the .snb bundle directory.
+     * @return True if image loaded successfully.
+     * 
+     * Delegates to loadImage(bundlePath).
+     */
+    bool loadAssets(const QString& bundlePath) override;
+    
+    /**
+     * @brief Save image to the bundle's assets folder.
+     * @param bundlePath Path to the .snb bundle directory.
+     * @return True if saved successfully.
+     * 
+     * Delegates to saveToAssets(bundlePath).
+     */
+    bool saveAssets(const QString& bundlePath) override;
+    
+    /**
+     * @brief Check if the image pixmap is loaded and ready to render.
+     * @return True if cachedPixmap is valid.
+     */
+    bool isAssetLoaded() const override { return !cachedPixmap.isNull(); }
+    
     // ===== Image-specific Methods =====
     
     /**

@@ -260,3 +260,17 @@ bool ImageObject::saveToAssets(const QString& bundlePath)
     
     return true;
 }
+
+// ===== Asset Management Overrides (Phase O2.C) =====
+
+bool ImageObject::loadAssets(const QString& bundlePath)
+{
+    // Delegate to existing loadImage() method
+    return loadImage(bundlePath);
+}
+
+bool ImageObject::saveAssets(const QString& bundlePath)
+{
+    // Delegate to existing saveToAssets() method
+    return saveToAssets(bundlePath);
+}
