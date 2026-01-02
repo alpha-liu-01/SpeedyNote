@@ -551,6 +551,31 @@ public:
     void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos, 
                               const QSizeF& oldSize, qreal oldRotation = 0.0);
     
+    /**
+     * @brief Push an undo action for object affinity change (Phase O3.5.3).
+     * @param obj The object that had its affinity changed.
+     * @param oldAffinity The affinity value before the change.
+     * 
+     * Undo will restore old affinity; redo will apply new affinity.
+     */
+    void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
+    
+    // ===== Affinity Helpers (Phase O3.5.3) =====
+    
+    /**
+     * @brief Find the Page containing the given object.
+     * @param obj The object to find.
+     * @param outTileCoord Output: tile coordinate if in edgeless mode.
+     * @return Pointer to the Page, or nullptr if not found.
+     */
+    Page* findPageContainingObject(InsertedObject* obj, Document::TileCoord* outTileCoord = nullptr);
+    
+    /**
+     * @brief Get the maximum valid affinity value.
+     * @return layerCount - 1 for the current document mode.
+     */
+    int getMaxAffinity() const;
+    
     // ===== Layer Management (Phase 5) =====
     
     /**
@@ -756,6 +781,31 @@ public:
      * Swaps with the next lower zOrder object in the same affinity group.
      */
     void sendSelectedBackward();
+    
+    // ===== Layer Affinity Shortcuts (Phase O3.5.2) =====
+    
+    /**
+     * @brief Increase affinity of selected objects (move up in layer stack).
+     * 
+     * Moves objects to render after the next higher layer.
+     * Maximum affinity is layerCount - 1 (on top of all strokes).
+     */
+    void increaseSelectedAffinity();
+    
+    /**
+     * @brief Decrease affinity of selected objects (move down in layer stack).
+     * 
+     * Moves objects to render after the previous layer.
+     * Minimum affinity is -1 (background, below all strokes).
+     */
+    void decreaseSelectedAffinity();
+    
+    /**
+     * @brief Send selected objects to background (affinity = -1).
+     * 
+     * Objects will render below all stroke layers.
+     */
+    void sendSelectedToBackground();
     
     /**
      * @brief Paste handler for ObjectSelect tool.

@@ -6,6 +6,7 @@
 
 #include "Page.h"
 #include <algorithm>
+#include <climits>  // For INT_MIN (Phase O3.5.5: affinity filtering)
 
 // ===== Constructors =====
 
@@ -61,6 +62,9 @@ bool Page::removeLayer(int index)
         return false;
     }
     
+    // Phase O3.5.7: Adjust object affinities before removing the layer
+    handleLayerDeleted(index);
+    
     vectorLayers.erase(vectorLayers.begin() + index);
     
     // Adjust active layer index
@@ -70,6 +74,35 @@ bool Page::removeLayer(int index)
     
     modified = true;
     return true;
+}
+
+// -----------------------------------------------------------------------------
+// Phase O3.5.7: Handle object affinities when a layer is deleted
+// Option C: Move objects to layer below, shift higher affinities down
+// -----------------------------------------------------------------------------
+void Page::handleLayerDeleted(int deletedLayerIndex)
+{
+    if (objects.empty()) {
+        return;  // No objects to adjust
+    }
+    
+    // Objects with affinity = deletedLayerIndex - 1 are tied to the deleted layer
+    // Option C: Move them down by 1 (to the layer below)
+    // Objects with higher affinity also shift down by 1
+    
+    int deletedAffinity = deletedLayerIndex - 1;
+    
+    for (auto& obj : objects) {
+        if (obj->layerAffinity >= deletedAffinity) {
+            // This object was tied to the deleted layer or a layer above it
+            // Shift down by 1 (but not below -1, the background)
+            obj->layerAffinity = std::max(-1, obj->layerAffinity - 1);
+        }
+        // Objects with lower affinity are unaffected
+    }
+    
+    // Rebuild the affinity map since affinities changed
+    rebuildAffinityMap();
 }
 
 bool Page::moveLayer(int from, int to)
@@ -96,7 +129,61 @@ bool Page::moveLayer(int from, int to)
     }
     
     modified = true;
+    
+    // Phase O3.5.6: Adjust object affinities after layer move
+    adjustObjectAffinitiesAfterLayerMove(from, to);
+    
     return true;
+}
+
+// -----------------------------------------------------------------------------
+// Phase O3.5.6: Adjust object affinities after a layer move
+// -----------------------------------------------------------------------------
+void Page::adjustObjectAffinitiesAfterLayerMove(int from, int to)
+{
+    if (objects.empty()) {
+        return;  // No objects to adjust
+    }
+    
+    // When a layer moves from index `from` to index `to`:
+    // - The layer that was at `from` is now at `to`
+    // - Layers between them shift by 1 in the opposite direction
+    //
+    // For affinity (which is layerIndex - 1):
+    // - Objects with affinity (from - 1) should get affinity (to - 1)
+    // - Other objects need adjustment based on the shift direction
+    
+    // Calculate the new affinity for each original affinity value
+    // using the layer index remapping logic
+    for (auto& obj : objects) {
+        int oldAffinity = obj->layerAffinity;
+        int oldLayerIndex = oldAffinity + 1;  // The layer this object was tied to
+        int newLayerIndex = oldLayerIndex;
+        
+        // Determine new layer index based on how layers shifted
+        if (oldLayerIndex == from) {
+            // This object was tied to the moved layer
+            newLayerIndex = to;
+        } else if (from < to) {
+            // Layer moved up: layers from (from+1) to (to) shift down by 1
+            if (oldLayerIndex > from && oldLayerIndex <= to) {
+                newLayerIndex = oldLayerIndex - 1;
+            }
+        } else if (from > to) {
+            // Layer moved down: layers from (to) to (from-1) shift up by 1
+            if (oldLayerIndex >= to && oldLayerIndex < from) {
+                newLayerIndex = oldLayerIndex + 1;
+            }
+        }
+        
+        int newAffinity = newLayerIndex - 1;
+        if (newAffinity != oldAffinity) {
+            obj->layerAffinity = newAffinity;
+        }
+    }
+    
+    // Rebuild the affinity map since affinities changed
+    rebuildAffinityMap();
 }
 
 bool Page::mergeLayers(int targetIndex, const QVector<int>& sourceIndices)
@@ -138,6 +225,9 @@ bool Page::mergeLayers(int targetIndex, const QVector<int>& sourceIndices)
     std::sort(sortedSources.begin(), sortedSources.end(), std::greater<int>());
     
     for (int srcIdx : sortedSources) {
+        // Phase O3.5.7: Adjust object affinities before removing the layer
+        handleLayerDeleted(srcIdx);
+        
         vectorLayers.erase(vectorLayers.begin() + srcIdx);
     }
     
@@ -302,7 +392,7 @@ std::unique_ptr<InsertedObject> Page::extractObject(const QString& id)
     return nullptr;
 }
 
-InsertedObject* Page::objectAtPoint(const QPointF& pt)
+InsertedObject* Page::objectAtPoint(const QPointF& pt, int affinityFilter)
 {
     // Check in reverse order (topmost first by z-order)
     // First, create a sorted list by z-order (descending)
@@ -317,6 +407,14 @@ InsertedObject* Page::objectAtPoint(const QPointF& pt)
               });
     
     for (InsertedObject* obj : sortedObjects) {
+        // Phase O3.5.5: Affinity filtering (Option A - Strict)
+        // If an affinity filter is provided (not INT_MIN), only consider objects
+        // with matching affinity. This ensures users can only select objects
+        // "tied to" the current layer.
+        if (affinityFilter != INT_MIN && obj->layerAffinity != affinityFilter) {
+            continue;  // Skip objects with non-matching affinity
+        }
+        
         if (obj->visible && obj->containsPoint(pt)) {
             return obj;
         }
@@ -547,8 +645,15 @@ void Page::renderObjects(QPainter& painter, qreal zoom) const
     }
 }
 
-void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity) const
+void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, bool layerVisible) const
 {
+    // Phase O3.5.8: If the tied layer is hidden, skip rendering objects
+    // Objects with affinity = K are tied to Layer K+1. When that layer is hidden,
+    // the caller passes layerVisible=false.
+    if (!layerVisible) {
+        return;  // Layer is hidden, don't render its tied objects
+    }
+    
     // Find objects with the specified affinity
     auto it = objectsByAffinity.find(affinity);
     if (it == objectsByAffinity.end()) {

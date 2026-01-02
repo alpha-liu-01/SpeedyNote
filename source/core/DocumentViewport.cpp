@@ -22,6 +22,7 @@
 #include <cmath>      // For std::floor, std::ceil
 #include <algorithm>  // For std::remove_if
 #include <limits>
+#include <climits>    // For INT_MIN (Phase O3.5.5: affinity filtering)
 #include <QDateTime>  // For timestamp
 #include <QUuid>      // For stroke IDs
 #include <QSet>       // For efficient ID lookup in eraseAt
@@ -890,7 +891,15 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
         return nullptr;
     }
     
+    // Phase O3.5.5: Affinity filtering (Option A - Strict)
+    // Only select objects where affinity == activeLayerIndex - 1
+    // This ensures users can only select objects "tied to" the current layer.
+    int affinityFilter = INT_MIN;  // Default: no filtering (for safety)
+    
     if (m_document->isEdgeless()) {
+        // Edgeless mode: use viewport-level active layer index
+        affinityFilter = m_edgelessActiveLayerIndex - 1;
+        
         // Edgeless mode: check all loaded tiles
         // Objects are stored with tile-local coordinates
         for (const auto& coord : m_document->allLoadedTileCoords()) {
@@ -911,7 +920,7 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
                 // Still check - Page::objectAtPoint handles this
             }
             
-            if (InsertedObject* obj = tile->objectAtPoint(tileLocal)) {
+            if (InsertedObject* obj = tile->objectAtPoint(tileLocal, affinityFilter)) {
                 return obj;
             }
         }
@@ -921,9 +930,12 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
         if (pageIdx >= 0) {
             Page* page = m_document->page(pageIdx);
             if (page) {
+                // Paged mode: use page-level active layer index
+                affinityFilter = page->activeLayerIndex - 1;
+                
                 // Convert to page-local coordinates
                 QPointF pageLocal = docPoint - pagePosition(pageIdx);
-                return page->objectAtPoint(pageLocal);
+                return page->objectAtPoint(pageLocal, affinityFilter);
             }
         }
     }
@@ -1728,6 +1740,37 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
                 deleteSelectedObjects();
                 event->accept();
                 return;
+            }
+        }
+        
+        // Phase O3.5.2: Layer affinity shortcuts (Alt+[ / Alt+] / Alt+\)
+        // These change which layer the object renders relative to
+        if (hasSelectedObjects()) {
+            bool alt = event->modifiers() & Qt::AltModifier;
+            bool ctrl = event->modifiers() & Qt::ControlModifier;
+            
+            if (alt && !ctrl) {
+                // Alt+] - Increase affinity (move object up in layer stack)
+                if (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight) {
+                    qDebug() << "keyPressEvent: Alt+] detected - increaseSelectedAffinity";
+                    increaseSelectedAffinity();
+                    event->accept();
+                    return;
+                }
+                // Alt+[ - Decrease affinity (move object down in layer stack)
+                if (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft) {
+                    qDebug() << "keyPressEvent: Alt+[ detected - decreaseSelectedAffinity";
+                    decreaseSelectedAffinity();
+                    event->accept();
+                    return;
+                }
+                // Alt+\ - Send to background (affinity = -1)
+                if (event->key() == Qt::Key_Backslash || event->key() == Qt::Key_Bar) {
+                    qDebug() << "keyPressEvent: Alt+\\ detected - sendSelectedToBackground";
+                    sendSelectedToBackground();
+                    event->accept();
+                    return;
+                }
             }
         }
         
@@ -4412,8 +4455,16 @@ void DocumentViewport::insertImageFromClipboard()
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
-    // Default affinity: -1 (below all strokes)
-    imgObj->setLayerAffinity(-1);
+    // Phase O3.5.1: Default affinity based on active layer
+    // Formula: activeLayer - 1, so image appears BELOW active layer's strokes
+    // This allows user to immediately annotate the image with the active layer
+    int activeLayer = m_document->isEdgeless() 
+        ? m_edgelessActiveLayerIndex 
+        : m_document->page(m_currentPageIndex)->activeLayerIndex;
+    int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
+    imgObj->setLayerAffinity(defaultAffinity);
+    qDebug() << "insertImageFromClipboard: activeLayer =" << activeLayer 
+             << "defaultAffinity =" << defaultAffinity;
     
     // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
     InsertedObject* rawPtr = imgObj.get();
@@ -4508,8 +4559,16 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
-    // Default affinity: -1 (below all strokes)
-    imgObj->setLayerAffinity(-1);
+    // Phase O3.5.1: Default affinity based on active layer
+    // Formula: activeLayer - 1, so image appears BELOW active layer's strokes
+    // This allows user to immediately annotate the image with the active layer
+    int activeLayer = m_document->isEdgeless() 
+        ? m_edgelessActiveLayerIndex 
+        : m_document->page(m_currentPageIndex)->activeLayerIndex;
+    int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
+    imgObj->setLayerAffinity(defaultAffinity);
+    qDebug() << "insertImageFromFile: activeLayer =" << activeLayer 
+             << "defaultAffinity =" << defaultAffinity;
     
     // Store raw pointer BEFORE std::move
     InsertedObject* rawPtr = imgObj.get();
@@ -5026,6 +5085,130 @@ void DocumentViewport::sendSelectedBackward()
             } else {
                 m_document->markPageDirty(m_currentPageIndex);
             }
+        }
+    }
+    
+    emit documentModified();
+    update();
+}
+
+// =============================================================================
+// Layer Affinity Shortcuts (Phase O3.5.2)
+// =============================================================================
+
+void DocumentViewport::increaseSelectedAffinity()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    int maxAffinity = getMaxAffinity();
+    qDebug() << "increaseSelectedAffinity: maxAffinity =" << maxAffinity;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        int currentAffinity = obj->getLayerAffinity();
+        if (currentAffinity >= maxAffinity) {
+            qDebug() << "  obj" << obj->id << "already at max affinity" << currentAffinity;
+            continue;
+        }
+        
+        Document::TileCoord tileCoord = {0, 0};
+        Page* page = findPageContainingObject(obj, &tileCoord);
+        if (!page) continue;
+        
+        int oldAffinity = currentAffinity;
+        page->updateObjectAffinity(obj->id, currentAffinity + 1);
+        
+        qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
+                 << "->" << obj->getLayerAffinity();
+        
+        // Phase O3.5.3: Push undo entry for affinity change
+        pushObjectAffinityUndo(obj, oldAffinity);
+        
+        if (m_document->isEdgeless()) {
+            m_document->markTileDirty(tileCoord);
+        } else {
+            m_document->markPageDirty(m_currentPageIndex);
+        }
+    }
+    
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::decreaseSelectedAffinity()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    const int minAffinity = -1;  // Background
+    qDebug() << "decreaseSelectedAffinity: minAffinity =" << minAffinity;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        int currentAffinity = obj->getLayerAffinity();
+        if (currentAffinity <= minAffinity) {
+            qDebug() << "  obj" << obj->id << "already at min affinity" << currentAffinity;
+            continue;
+        }
+        
+        Document::TileCoord tileCoord = {0, 0};
+        Page* page = findPageContainingObject(obj, &tileCoord);
+        if (!page) continue;
+        
+        int oldAffinity = currentAffinity;
+        page->updateObjectAffinity(obj->id, currentAffinity - 1);
+        
+        qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
+                 << "->" << obj->getLayerAffinity();
+        
+        // Phase O3.5.3: Push undo entry for affinity change
+        pushObjectAffinityUndo(obj, oldAffinity);
+        
+        if (m_document->isEdgeless()) {
+            m_document->markTileDirty(tileCoord);
+        } else {
+            m_document->markPageDirty(m_currentPageIndex);
+        }
+    }
+    
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::sendSelectedToBackground()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    const int backgroundAffinity = -1;
+    qDebug() << "sendSelectedToBackground: setting affinity to" << backgroundAffinity;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        int currentAffinity = obj->getLayerAffinity();
+        if (currentAffinity == backgroundAffinity) {
+            qDebug() << "  obj" << obj->id << "already at background";
+            continue;
+        }
+        
+        Document::TileCoord tileCoord = {0, 0};
+        Page* page = findPageContainingObject(obj, &tileCoord);
+        if (!page) continue;
+        
+        int oldAffinity = currentAffinity;
+        page->updateObjectAffinity(obj->id, backgroundAffinity);
+        
+        qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
+                 << "->" << backgroundAffinity;
+        
+        // Phase O3.5.3: Push undo entry for affinity change
+        pushObjectAffinityUndo(obj, oldAffinity);
+        
+        if (m_document->isEdgeless()) {
+            m_document->markTileDirty(tileCoord);
+        } else {
+            m_document->markPageDirty(m_currentPageIndex);
         }
     }
     
@@ -7969,6 +8152,103 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
     emit redoAvailableChanged(canRedo());
 }
 
+// -----------------------------------------------------------------------------
+// pushObjectAffinityUndo - Phase O3.5.3
+// Records object affinity change for undo/redo.
+// -----------------------------------------------------------------------------
+void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity)
+{
+    if (!obj) return;
+    
+    qDebug() << "pushObjectAffinityUndo: obj" << obj->id 
+             << "oldAffinity =" << oldAffinity 
+             << "newAffinity =" << obj->getLayerAffinity();
+    
+    if (m_document && m_document->isEdgeless()) {
+        // ===== Edgeless mode: use global stack =====
+        EdgelessUndoAction action;
+        action.type = PageUndoAction::ObjectAffinityChange;
+        action.objectId = obj->id;
+        action.objectOldAffinity = oldAffinity;
+        action.objectNewAffinity = obj->getLayerAffinity();
+        
+        // Find which tile contains this object
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                action.objectTileCoord = coord;
+                break;
+            }
+        }
+        
+        m_edgelessUndoStack.push(action);
+        m_edgelessRedoStack.clear();
+        
+        // Enforce max stack size
+        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+            m_edgelessUndoStack.removeFirst();
+        }
+    } else {
+        // ===== Paged mode: use per-page stack =====
+        PageUndoAction action;
+        action.type = PageUndoAction::ObjectAffinityChange;
+        action.pageIndex = m_currentPageIndex;
+        action.objectId = obj->id;
+        action.objectOldAffinity = oldAffinity;
+        action.objectNewAffinity = obj->getLayerAffinity();
+        
+        m_undoStacks[m_currentPageIndex].push(action);
+        m_redoStacks[m_currentPageIndex].clear();
+    }
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+}
+
+// -----------------------------------------------------------------------------
+// findPageContainingObject - Phase O3.5.3
+// Helper to find the Page (or tile) containing a given object.
+// -----------------------------------------------------------------------------
+Page* DocumentViewport::findPageContainingObject(InsertedObject* obj, Document::TileCoord* outTileCoord)
+{
+    if (!m_document || !obj) return nullptr;
+    
+    if (m_document->isEdgeless()) {
+        // Search all loaded tiles
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                if (outTileCoord) *outTileCoord = coord;
+                return tile;
+            }
+        }
+        return nullptr;
+    } else {
+        // Paged mode: object should be on current page
+        if (outTileCoord) *outTileCoord = {0, 0};
+        return m_document->page(m_currentPageIndex);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// getMaxAffinity - Phase O3.5.3
+// Returns the maximum valid affinity value (layerCount - 1).
+// -----------------------------------------------------------------------------
+int DocumentViewport::getMaxAffinity() const
+{
+    if (!m_document) return 0;
+    
+    if (m_document->isEdgeless()) {
+        return m_document->edgelessLayerCount() - 1;
+    } else {
+        Page* page = m_document->page(m_currentPageIndex);
+        if (page) {
+            return page->layerCount() - 1;
+        }
+        return 0;
+    }
+}
+
 // ===== Benchmark (Task 2.6) =====
 
 void DocumentViewport::startBenchmark()
@@ -8075,7 +8355,10 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     // 3. Render objects with affinity = -1 (below all stroke layers)
     // This is for objects like pasted test paper images that should appear
     // underneath all strokes.
-    page->renderObjectsWithAffinity(painter, 1.0, -1);
+    // Phase O3.5.8: Objects with affinity -1 are tied to Layer 0, so check Layer 0 visibility
+    VectorLayer* layer0 = page->layer(0);
+    bool layer0Visible = layer0 && layer0->visible;
+    page->renderObjectsWithAffinity(painter, 1.0, -1, layer0Visible);
     
     // 4. Render vector layers with ZOOM-AWARE stroke cache, interleaved with objects
     // The cache is built at pageSize * zoom * dpr physical pixels, ensuring
@@ -8094,7 +8377,9 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     
     for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
         VectorLayer* layer = page->layer(layerIdx);
-        if (layer && layer->visible) {
+        bool layerIsVisible = layer && layer->visible;
+        
+        if (layerIsVisible) {
             // CR-2B-7: If this layer contains selected strokes, render with exclusion
             // to hide originals (they'll be rendered transformed in renderLassoSelection)
             if (hasSelectionOnThisPage && layerIdx == m_lassoSelection.sourceLayerIndex) {
@@ -8110,8 +8395,11 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
             }
         }
         
-        // Render objects with affinity = layerIdx (above this layer, below next layer)
-        page->renderObjectsWithAffinity(painter, 1.0, layerIdx);
+        // Phase O3.5.8: Render objects with affinity = layerIdx
+        // Objects with affinity K are tied to Layer K+1, so check visibility of Layer K+1
+        VectorLayer* nextLayer = page->layer(layerIdx + 1);
+        bool nextLayerVisible = nextLayer ? nextLayer->visible : true;  // If no next layer, show objects
+        page->renderObjectsWithAffinity(painter, 1.0, layerIdx, nextLayerVisible);
     }
     
     // 5. Draw page border (optional, for visual separation)
@@ -8379,6 +8667,19 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(
     QPainter& painter, int affinity, const QVector<Document::TileCoord>& allTiles)
 {
     if (!m_document) return;
+    
+    // Phase O3.5.8: Check if the tied layer is visible
+    // Objects with affinity = K are tied to Layer K+1
+    // Special case: affinity = -1 is tied to Layer 0
+    int tiedLayerIndex = affinity + 1;
+    const auto& layers = m_document->edgelessLayers();
+    
+    if (tiedLayerIndex >= 0 && tiedLayerIndex < static_cast<int>(layers.size())) {
+        if (!layers[tiedLayerIndex].visible) {
+            return;  // Layer is hidden, don't render its tied objects
+        }
+    }
+    // If tiedLayerIndex is out of range (no such layer), show objects by default
     
     int tileSize = Document::EDGELESS_TILE_SIZE;
     QRectF viewRect = visibleRect();

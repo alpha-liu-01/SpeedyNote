@@ -146,12 +146,38 @@ public:
     bool removeLayer(int index);
     
     /**
+     * @brief Phase O3.5.7: Handle object affinities when a layer is deleted.
+     * @param deletedLayerIndex The index of the deleted layer (0-based).
+     * 
+     * Uses Option C (Move to layer below):
+     * - Objects tied to deleted layer (affinity = deletedLayerIndex - 1) move down
+     *   to affinity = deletedLayerIndex - 2 (or -1 if at bottom)
+     * - Objects with higher affinity shift down by 1
+     * 
+     * Called automatically by removeLayer().
+     */
+    void handleLayerDeleted(int deletedLayerIndex);
+    
+    /**
      * @brief Move a layer from one position to another.
      * @param from Source index.
      * @param to Destination index.
      * @return True if moved, false if indices out of range.
      */
     bool moveLayer(int from, int to);
+    
+    /**
+     * @brief Phase O3.5.6: Adjust object affinities after a layer move.
+     * @param from Original layer index (before move).
+     * @param to New layer index (after move).
+     * 
+     * When a layer moves from index `from` to index `to`:
+     * - Objects tied to the moved layer (affinity = from - 1) get affinity = to - 1
+     * - Objects tied to layers that shifted have their affinity adjusted
+     * 
+     * Called automatically by moveLayer().
+     */
+    void adjustObjectAffinitiesAfterLayerMove(int from, int to);
     
     /**
      * @brief Phase 5.4: Merge multiple layers into one.
@@ -225,11 +251,14 @@ public:
     /**
      * @brief Find an object at a given point.
      * @param pt Point in page coordinates.
+     * @param affinityFilter Optional affinity filter. If provided (not INT_MIN),
+     *        only objects with this exact affinity are considered.
+     *        Phase O3.5.5: Strict filtering - only select objects tied to current layer.
      * @return Pointer to topmost object containing the point, or nullptr.
      * 
      * Objects are checked in reverse z-order (topmost first).
      */
-    InsertedObject* objectAtPoint(const QPointF& pt);
+    InsertedObject* objectAtPoint(const QPointF& pt, int affinityFilter = INT_MIN);
     
     /**
      * @brief Get an object by ID.
@@ -344,6 +373,9 @@ public:
      * @param painter The QPainter to render to.
      * @param zoom Zoom level.
      * @param affinity The affinity value to render (-1, 0, 1, 2, ...).
+     * @param layerVisible Phase O3.5.8: If false, skip rendering (layer is hidden).
+     *        Objects with affinity = K are tied to Layer K+1. When that layer is hidden,
+     *        pass layerVisible=false to hide objects too.
      * 
      * This enables layer-interleaved rendering:
      * - renderObjectsWithAffinity(painter, zoom, -1) → objects below all strokes
@@ -353,7 +385,7 @@ public:
      * 
      * Objects within the same affinity group are sorted by zOrder.
      */
-    void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity) const;
+    void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, bool layerVisible = true) const;
     
     // ===== Serialization =====
     

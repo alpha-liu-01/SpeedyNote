@@ -3561,28 +3561,429 @@ if (hadSelection) {
 
 ---
 
-### O3.5: Layer Panel Integration (Deferred)
+### O3.5: Layer Affinity Controls (Simplified Approach)
 
-**Status:** Documented in DD-9.
+**Status:** PLANNED - Simplified approach chosen over UI integration.
 
-**When needed:**
-- [ ] Show objects in layer panel under affiliated layer
-- [ ] Allow drag to change affinity
-- [ ] Right-click menu for "Move to Layer X"
+**Design Decision (DD-10):** Instead of adding UI elements to the layer panel, use:
+1. Automatic default affinity based on active layer
+2. Keyboard shortcuts for manual affinity adjustment
+
+This allows immediate affinity testing with minimal implementation. Touch-friendly UI can be added later.
 
 ---
 
-### O3.6: Object Properties Panel
+#### O3.5.1: Default Affinity Based on Active Layer ✅
 
-**Goal:** Provide UI to view and edit object properties, especially layer affinity for testing.
+**Status:** COMPLETE
 
-**Status:** Implementation required for affinity testing.
+**Goal:** When inserting objects, set affinity so the object appears BELOW the active layer's strokes.
+
+**Formula:** `defaultAffinity = activeLayerIndex - 1`
+
+| Active Layer | Default Affinity | Render Position |
+|--------------|------------------|-----------------|
+| Layer 0 | -1 | Background (below all strokes) |
+| Layer 1 | 0 | Between Layer 0 and Layer 1 |
+| Layer 2 | 1 | Between Layer 1 and Layer 2 |
+| Layer N | N-1 | Between Layer N-1 and Layer N |
+
+**Rationale:** Users typically want to annotate images they just inserted. By placing the image BELOW the active layer's strokes, users can immediately draw on top of it.
+
+**File:** `source/core/DocumentViewport.cpp`
+
+**In `insertImageFromClipboard()` and `insertImageFromFile()`:**
+```cpp
+// Phase O3.5.1: Default affinity based on active layer
+int activeLayer = m_document->isEdgeless() 
+    ? m_edgelessActiveLayerIndex 
+    : m_document->page(m_currentPageIndex)->activeLayerIndex;
+int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
+imgObj->setLayerAffinity(defaultAffinity);
+```
+
+**Tasks:**
+- [x] Update `insertImageFromClipboard()` to use active layer - 1
+- [x] Update `insertImageFromFile()` to use active layer - 1
+- [ ] Test: Insert image on Layer 0 → affinity -1
+- [ ] Test: Insert image on Layer 2 → affinity 1
+
+**Implementation Notes:**
+- Both functions now calculate default affinity from active layer index
+- Debug output shows activeLayer and defaultAffinity for testing
+- Works in both paged mode (`page->activeLayerIndex`) and edgeless mode (`m_edgelessActiveLayerIndex`)
+
+---
+
+#### O3.5.2: Keyboard Shortcuts for Affinity Change ✅
+
+**Status:** COMPLETE
+
+**Goal:** Allow users to manually change selected object's affinity.
+
+**Note:** `Ctrl+[` / `Ctrl+]` are used for zOrder (within same affinity). `Ctrl+Shift+[` / `Ctrl+Shift+]` are also taken. Use `Alt+` modifiers for affinity.
+
+**Shortcuts:**
+| Shortcut | Action | Description |
+|----------|--------|-------------|
+| `Alt+[` | Decrease affinity | Move object down in layer stack |
+| `Alt+]` | Increase affinity | Move object up in layer stack |
+| `Alt+\` | Send to background | Set affinity to -1 |
+
+**Bounds:**
+- Minimum affinity: -1 (background)
+- Maximum affinity: layerCount - 1 (on top of all strokes)
+
+**File:** `source/core/DocumentViewport.h`
+
+Added declarations:
+```cpp
+void increaseSelectedAffinity();
+void decreaseSelectedAffinity();
+void sendSelectedToBackground();
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+
+**In `keyPressEvent()`:**
+```cpp
+// Phase O3.5.2: Layer affinity shortcuts (Alt+[ / Alt+] / Alt+\)
+if (hasSelectedObjects()) {
+    bool alt = event->modifiers() & Qt::AltModifier;
+    bool ctrl = event->modifiers() & Qt::ControlModifier;
+    
+    if (alt && !ctrl) {
+        if (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight) {
+            increaseSelectedAffinity();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft) {
+            decreaseSelectedAffinity();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Backslash || event->key() == Qt::Key_Bar) {
+            sendSelectedToBackground();
+            event->accept();
+            return;
+        }
+    }
+}
+```
+
+**Tasks:**
+- [x] Implement `increaseSelectedAffinity()` helper
+- [x] Implement `decreaseSelectedAffinity()` helper
+- [x] Implement `sendSelectedToBackground()` helper
+- [x] Add keyboard handling in `keyPressEvent()`
+- [ ] Create undo entries for affinity changes (TODO placeholder added)
+
+**Implementation Notes:**
+- Keyboard handling added BEFORE zOrder shortcuts to avoid conflicts
+- Checks `alt && !ctrl` to distinguish from zOrder shortcuts
+- Also handles shifted keys (BraceRight/BraceLeft/Bar) for keyboard layout compatibility
+- Each helper finds the page/tile containing the object and calls `page->updateObjectAffinity()`
+- Undo entries marked as TODO - can be added later using existing `pushObjectAffinityUndo()`
+
+---
+
+#### O3.5.3: Affinity Change Helpers ✅
+
+**Status:** COMPLETE
+
+**File:** `source/core/DocumentViewport.h`
+
+Added declarations:
+```cpp
+void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
+Page* findPageContainingObject(InsertedObject* obj, Document::TileCoord* outTileCoord = nullptr);
+int getMaxAffinity() const;
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+
+Implemented helper methods:
+- `pushObjectAffinityUndo()` - Creates undo entry for affinity changes
+- `findPageContainingObject()` - Finds page/tile containing an object
+- `getMaxAffinity()` - Returns layerCount - 1
+
+Refactored affinity methods to use helpers:
+- `increaseSelectedAffinity()` - Now uses `findPageContainingObject()`, `getMaxAffinity()`, `pushObjectAffinityUndo()`
+- `decreaseSelectedAffinity()` - Now uses `findPageContainingObject()`, `pushObjectAffinityUndo()`
+- `sendSelectedToBackground()` - Now uses `findPageContainingObject()`, `pushObjectAffinityUndo()`
+
+**Tasks:**
+- [x] Implement `decreaseSelectedAffinity()` (refactored in O3.5.2, now uses helpers)
+- [x] Implement `increaseSelectedAffinity()` (refactored in O3.5.2, now uses helpers)
+- [x] Implement `sendSelectedToBackground()` (refactored in O3.5.2, now uses helpers)
+- [x] Implement `findPageContainingObject()` helper
+- [x] Implement `getMaxAffinity()` helper
+- [x] Implement `pushObjectAffinityUndo()` helper
+- [x] Enable undo entries in all affinity methods
+
+**Implementation Notes:**
+- `findPageContainingObject()` returns both the Page pointer and optionally the tile coordinate
+- `getMaxAffinity()` works for both paged and edgeless modes
+- Undo/redo for `ObjectAffinityChange` was already implemented in Phase O2.7
+- All methods now create proper undo entries
+
+---
+
+#### O3.5.4: Testing Checklist
+
+- [ ] Insert image on Layer 0 → affinity is -1, image below all strokes
+- [ ] Insert image on Layer 2 → affinity is 1, image between Layer 1 and 2
+- [ ] Draw on Layer 2 after inserting → strokes appear ON TOP of image
+- [ ] Alt+] increases affinity (moves image up)
+- [ ] Alt+[ decreases affinity (moves image down)
+- [ ] Alt+\ sends to background (affinity = -1)
+- [ ] Affinity changes are undoable
+- [ ] Affinity persists after save/load
+
+---
+
+#### O3.5.5: Object Selection Affinity Filtering ✅
+
+**Status:** COMPLETE
+
+**Problem:** The ObjectSelect tool can currently select inserted objects with any affinity value. This is confusing because objects are conceptually "tied to" specific layers.
+
+**Affinity-Layer Relationship:**
+```
+activeLayerIndex = N  →  defaultAffinity = N - 1
+```
+
+An object with `affinity = K` is conceptually "tied to" Layer `K + 1`:
+- Object with affinity -1 → "Below all layers" (selectable when on Layer 0)
+- Object with affinity 0 → "Tied to Layer 1" (renders below Layer 1, above nothing)
+- Object with affinity 1 → "Tied to Layer 2" (renders below Layer 2, above Layer 1)
+- etc.
+
+**Design Decision:** Option A (Strict) - Only select objects where `affinity == activeLayerIndex - 1`
+
+**Implementation:**
+
+**File:** `source/core/Page.h`
+- Updated `objectAtPoint()` signature to accept optional affinity filter:
+```cpp
+InsertedObject* objectAtPoint(const QPointF& pt, int affinityFilter = INT_MIN);
+```
+
+**File:** `source/core/Page.cpp`
+- Added `#include <climits>` for `INT_MIN`
+- Modified `objectAtPoint()` to skip objects with non-matching affinity:
+```cpp
+// If affinityFilter is provided (not INT_MIN), only consider matching objects
+if (affinityFilter != INT_MIN && obj->layerAffinity != affinityFilter) {
+    continue;  // Skip objects with non-matching affinity
+}
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+- Added `#include <climits>` for `INT_MIN`
+- Modified `objectAtPoint()` to calculate and pass affinity filter:
+  - Edgeless mode: `affinityFilter = m_edgelessActiveLayerIndex - 1`
+  - Paged mode: `affinityFilter = page->activeLayerIndex - 1`
+
+**Tasks:**
+- [x] Decide on selection filtering behavior (Option A/B/C) → **Option A**
+- [x] Modify `objectAtPoint()` to check affinity against active layer
+- [x] Handle special case for affinity = -1 (selected when on Layer 0)
+- [ ] Test selection filtering works in both paged and edgeless modes
+- [ ] Consider adding visual feedback for non-selectable objects (deferred)
+
+---
+
+#### O3.5.6: Layer Swap Updates Object Affinity ✅
+
+**Status:** COMPLETE
+
+**Problem:** When layers are swapped/reordered in the LayerPanel, the affinity of inserted objects is not updated. Objects should maintain their "attached to layer" relationship.
+
+**Expected Behavior:**
+- Move Layer from index A to index B
+- Objects tied to the moved layer follow it
+- Objects tied to shifted layers have their affinity adjusted
+
+**Example:**
+```
+Before move (Layer 1 moves to position 2):
+  Object X: affinity = 0 (tied to Layer 1)
+  Object Y: affinity = 1 (tied to Layer 2)
+
+After move:
+  Object X: affinity = 1 (still tied to what was Layer 1, now at index 2)
+  Object Y: affinity = 0 (tied to what was Layer 2, now shifted to index 1)
+```
+
+**Implementation:**
+
+**File:** `source/core/Page.h`
+- Added `adjustObjectAffinitiesAfterLayerMove(int from, int to)` declaration
+
+**File:** `source/core/Page.cpp`
+- Implemented `adjustObjectAffinitiesAfterLayerMove(int from, int to)`:
+  - Calculates new layer index for each object based on layer movement
+  - Objects tied to the moved layer: affinity = to - 1
+  - Objects tied to shifted layers: affinity adjusted based on shift direction
+  - Rebuilds affinity map after adjustment
+- Modified `Page::moveLayer()` to call `adjustObjectAffinitiesAfterLayerMove()`
+
+**Code Flow:**
+- **Paged mode:** `LayerPanel::moveLayer()` → `Page::moveLayer()` → `adjustObjectAffinitiesAfterLayerMove()`
+- **Edgeless mode:** `LayerPanel::moveLayer()` → `Document::moveEdgelessLayer()` → `tile->moveLayer()` (for all tiles) → `adjustObjectAffinitiesAfterLayerMove()`
+
+**Tasks:**
+- [x] Identify where layer swap is handled → `Page::moveLayer()` and `Document::moveEdgelessLayer()`
+- [x] Add `Page::adjustObjectAffinitiesAfterLayerMove(int from, int to)` method
+- [x] Hook affinity adjustment into `Page::moveLayer()`
+- [ ] Test in paged mode
+- [ ] Test in edgeless mode
+- [x] Verify affinity map is correctly rebuilt (calls `rebuildAffinityMap()`)
+- [ ] Consider undo/redo for layer swap + affinity change (deferred - layer operations already have undo)
+
+---
+
+#### O3.5.7: Layer Delete/Merge Handles Objects ✅
+
+**Status:** COMPLETE
+
+**Problem:** When a layer is deleted or merged, the inserted objects tied to that layer are not handled. They remain with an orphaned affinity value.
+
+**Design Decision:** Option C (Move to layer below) - preserves user content while maintaining order.
+
+**Delete Layer Behavior:**
+When Layer N is deleted:
+- Objects with `affinity = N-1` (tied to this layer) → affinity = N-2 (or -1 if at bottom)
+- Objects with `affinity > N-1` → affinity -= 1 (shift down)
+
+**Merge Layer Behavior:**
+Same as delete - when source layers are removed, their objects move down.
+
+**Implementation:**
+
+**File:** `source/core/Page.h`
+- Added `handleLayerDeleted(int deletedLayerIndex)` declaration
+
+**File:** `source/core/Page.cpp`
+- Implemented `handleLayerDeleted()`:
+  ```cpp
+  void Page::handleLayerDeleted(int deletedLayerIndex)
+  {
+      int deletedAffinity = deletedLayerIndex - 1;
+      for (auto& obj : objects) {
+          if (obj->layerAffinity >= deletedAffinity) {
+              // Shift down by 1 (but not below -1)
+              obj->layerAffinity = std::max(-1, obj->layerAffinity - 1);
+          }
+      }
+      rebuildAffinityMap();
+  }
+  ```
+- Modified `Page::removeLayer()` to call `handleLayerDeleted()` before erasing
+- Modified `Page::mergeLayers()` to call `handleLayerDeleted()` for each source layer
+
+**Code Flow:**
+- **Delete (paged):** `Page::removeLayer()` → `handleLayerDeleted()`
+- **Delete (edgeless):** `Document::removeEdgelessLayer()` → `tile->removeLayer()` → `handleLayerDeleted()`
+- **Merge (paged):** `Page::mergeLayers()` → `handleLayerDeleted()` for each source
+- **Merge (edgeless):** `Document::mergeEdgelessLayers()` → `tile->removeLayer()` → `handleLayerDeleted()`
+
+**Tasks:**
+- [x] Decide on delete behavior → **Option C (Move to layer below)**
+- [x] Implement `Page::handleLayerDeleted(int deletedLayerIndex)`
+- [x] Hook into `Page::removeLayer()`
+- [x] Hook into `Page::mergeLayers()`
+- [ ] Test delete: objects move to correct affinity
+- [ ] Test delete: higher affinity objects shift down
+- [ ] Test merge: same as delete behavior
+- [ ] Verify edgeless mode works correctly
+- [ ] Consider undo/redo integration (deferred - layer operations already have undo)
+
+---
+
+#### O3.5.8: Layer Visibility Hides Objects ✅
+
+**Status:** COMPLETE
+
+**Problem:** When a layer is hidden via the LayerPanel visibility toggle, the strokes on that layer are hidden, but objects tied to that layer (via affinity) remain visible.
+
+**Affinity-Layer Relationship:**
+```
+Object with affinity = K  →  tied to Layer K+1 (was inserted when activeLayerIndex = K+1)
+When Layer L is hidden → objects with affinity = L-1 should be hidden
+```
+
+**Examples:**
+- Hide Layer 0 → hide objects with affinity -1
+- Hide Layer 2 → hide objects with affinity 1
+
+**Implementation:**
+
+**File:** `source/core/Page.h`
+- Updated `renderObjectsWithAffinity()` signature:
+```cpp
+void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, bool layerVisible = true) const;
+```
+
+**File:** `source/core/Page.cpp`
+- Added early return in `renderObjectsWithAffinity()` if `layerVisible` is false
+
+**File:** `source/core/DocumentViewport.cpp`
+- **In `renderPage()` (paged mode):**
+  - For affinity -1: Check Layer 0 visibility
+  - For affinity K: Check Layer K+1 visibility (next layer)
+  - Pass visibility flag to `page->renderObjectsWithAffinity()`
+- **In `renderEdgelessObjectsWithAffinity()` (edgeless mode):**
+  - Check `m_document->edgelessLayers()[affinity + 1].visible`
+  - Early return if layer is hidden
+
+**Visibility Logic:**
+- Objects with affinity = K are tied to Layer K+1
+- When Layer K+1 is hidden, objects with affinity K are hidden
+- Special case: affinity = -1 → check Layer 0 visibility
+
+**Tasks:**
+- [x] Update `Page::renderObjectsWithAffinity()` signature
+- [x] Implement visibility check in `Page::renderObjectsWithAffinity()`
+- [x] Update call sites in `DocumentViewport::renderPage()`
+- [x] Update `DocumentViewport::renderEdgelessObjectsWithAffinity()`
+- [ ] Test: Hide Layer 2 → objects with affinity 1 disappear
+- [ ] Test: Show Layer 2 → objects reappear
+- [ ] Test in edgeless mode
+
+---
+
+#### O3.5.9: Updated Testing Checklist
+
+After O3.5.5-O3.5.8 are complete:
+
+- [ ] Selection filtering: Can only select objects tied to current layer
+- [ ] Layer swap: Objects maintain relationship with their "owner" layer
+- [ ] Layer delete: Objects are moved to layer below, not orphaned
+- [ ] Layer merge: Objects are moved to layer below, not orphaned
+- [ ] Layer visibility: Objects hide/show with their tied layer
+- [ ] Higher affinity objects are shifted when layers are deleted/merged
+- [ ] All operations work in paged mode
+- [ ] All operations work in edgeless mode
+- [ ] Undo/redo works for layer operations that affect objects
+
+---
+
+### O3.6: Object Properties Panel (Deferred)
+
+**Goal:** Provide UI to view and edit object properties.
+
+**Status:** DEFERRED - O3.5 (keyboard shortcuts) provides sufficient affinity testing capability.
+
+**When needed:** Touch-friendly UI for affinity and other properties.
 
 **Design Decision:** Use a floating widget (QDockWidget or custom QWidget) that appears when objects are selected. Lightweight approach - no full property panel infrastructure.
 
 ---
 
-#### O3.6.1: Properties Widget UI Design
+#### O3.6.1: Properties Widget UI Design (Deferred)
 
 **Goal:** Create a minimal widget showing object properties.
 
@@ -3939,12 +4340,13 @@ void ObjectPropertiesWidget::populateAffinityComboBox()
 | O2.C | Code cleanup (abstraction) | P1 | ✅ | 1 hour |
 | **Phase 2 Total** | | | ✅ | **~21 hours** |
 | **O3.1** | **Object Resize** | P1 | 🔲 | 3 hours |
-| **O3.1.8** | **Object Rotation** | P1 | 🔲 | 2-3 hours |
-| **O3.6** | **Object Properties Panel** | P1 | 🔲 | 4 hours |
-| O3.2-O3.5 | Deferred features | P2 | - | TBD |
-| **Phase 3 (Testing)** | | | 🔲 | **~7-8 hours** |
+| **O3.1.8** | **Object Rotation** | P1 | ✅ | 2-3 hours |
+| **O3.5** | **Layer Affinity Controls** | P1 | 🔲 | 1-2 hours |
+| O3.6 | Object Properties Panel | P2 | - | Deferred |
+| O3.2-O3.4 | Other deferred features | P2 | - | TBD |
+| **Phase 3 (Testing)** | | | 🔲 | **~6-8 hours** |
 
-**Total Estimated: ~51-52 hours for Complete MVP (Phase 1 + Phase 2 + O3.1 + O3.1.8 + O3.6)**
+**Total Estimated: ~48-50 hours for Complete MVP (Phase 1 + Phase 2 + O3.1 + O3.1.8 + O3.5)**
 
 ---
 
