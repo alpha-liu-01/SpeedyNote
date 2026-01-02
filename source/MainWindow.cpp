@@ -3698,8 +3698,8 @@ void MainWindow::saveDocument()
         QMessageBox::critical(this, tr("Save Error"),
             tr("Failed to save document to:\n%1").arg(filePath));
                 return;
-            }
-    
+        }
+        
     // Update tab title (remove * prefix)
     int currentIndex = m_tabManager->currentIndex();
     if (currentIndex >= 0) {
@@ -3816,7 +3816,7 @@ void MainWindow::insertPageInDocument()
     if (!m_tabManager) {
         qDebug() << "insertPageInDocument: No tab manager";
         return;
-    }
+        }
     
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
@@ -3829,7 +3829,7 @@ void MainWindow::insertPageInDocument()
         qDebug() << "insertPageInDocument: No document in viewport";
         return;
     }
-    
+
     // Get current page index and insert after it
     int currentPageIndex = viewport->currentPageIndex();
     int insertIndex = currentPageIndex + 1;
@@ -3879,7 +3879,7 @@ void MainWindow::deletePageInDocument()
     if (!doc) {
         qDebug() << "deletePageInDocument: No document in viewport";
         return;
-    }
+                }
     
     // Guard 1: Cannot delete the last page
     if (doc->pageCount() <= 1) {
@@ -3900,7 +3900,7 @@ void MainWindow::deletePageInDocument()
         QMessageBox::information(this, tr("Cannot Delete"),
             tr("Cannot delete PDF pages. Use an external tool to modify the PDF."));
         return;
-    }
+            }
     
     // Clear undo/redo for pages >= currentPageIndex (they're shifting or being deleted)
     viewport->clearUndoStacksFrom(currentPageIndex);
@@ -7701,7 +7701,7 @@ void MainWindow::updateRopeToolButtonState() {
 void MainWindow::updatePictureButtonState() {
     // Phase O2.9: Track ObjectSelect tool state
     bool isActive = false;
-    
+
     if (DocumentViewport* vp = currentViewport()) {
         isActive = (vp->currentTool() == ToolType::ObjectSelect);
     }

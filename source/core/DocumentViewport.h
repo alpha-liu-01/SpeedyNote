@@ -634,6 +634,14 @@ public:
     void deselectAllObjects();
     
     /**
+     * @brief Deselect an object by its ID.
+     * @param objectId The ID of the object to deselect.
+     * 
+     * Emits objectSelectionChanged() if the object was found and deselected.
+     */
+    void deselectObjectById(const QString& objectId);
+    
+    /**
      * @brief Move all selected objects by a delta.
      * @param delta The offset to add to each object's position.
      * 

@@ -3803,8 +3803,40 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                 }
             }
             
-            // TODO O2.7: Create undo entry for move using m_objectOriginalPositions
-            // pushObjectMoveUndo(m_objectOriginalPositions);
+            // O2.7/BF.8: Create undo entry for each moved object
+            for (InsertedObject* obj : m_selectedObjects) {
+                if (!obj) continue;
+                
+                auto it = m_objectOriginalPositions.find(obj->id);
+                if (it == m_objectOriginalPositions.end()) continue;
+                
+                QPointF oldPos = it.value();
+                
+                // Only create undo if position actually changed
+                if (oldPos != obj->position) {
+                    // For edgeless mode, we need to track tile changes
+                    Document::TileCoord oldTile = {0, 0};
+                    Document::TileCoord newTile = {0, 0};
+                    
+                    if (m_document->isEdgeless()) {
+                        // Calculate tile coords from positions
+                        // oldPos and obj->position are tile-local, so we need to find tiles
+                        // For now, use object's current tile (relocateObjectsToCorrectTiles already handled movement)
+                        for (const auto& coord : m_document->allLoadedTileCoords()) {
+                            Page* tile = m_document->getTile(coord.first, coord.second);
+                            if (tile && tile->objectById(obj->id)) {
+                                newTile = coord;
+                                break;
+                            }
+                        }
+                        // Old tile is same as new if no relocation happened
+                        // (tracking across tiles would require storing tile info in m_objectOriginalPositions)
+                        oldTile = newTile;
+                    }
+                    
+                    pushObjectMoveUndo(obj, oldPos, m_currentPageIndex, oldTile, newTile);
+                }
+            }
         }
         
         // Clear original positions
@@ -3974,6 +4006,18 @@ void DocumentViewport::deselectAllObjects()
     update();
 }
 
+void DocumentViewport::deselectObjectById(const QString& objectId)
+{
+    for (int i = m_selectedObjects.size() - 1; i >= 0; --i) {
+        if (m_selectedObjects[i] && m_selectedObjects[i]->id == objectId) {
+            m_selectedObjects.removeAt(i);
+            emit objectSelectionChanged();
+            update();
+            return;
+        }
+    }
+}
+
 void DocumentViewport::moveSelectedObjects(const QPointF& delta)
 {
     if (m_selectedObjects.isEmpty() || delta.isNull()) {
@@ -4096,6 +4140,9 @@ void DocumentViewport::insertImageFromClipboard()
     // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
     InsertedObject* rawPtr = imgObj.get();
     
+    // Track tile coord for undo (edgeless mode)
+    Document::TileCoord insertedTileCoord = {0, 0};
+    
     // 4. Add to appropriate page/tile
     if (m_document->isEdgeless()) {
         // Edgeless mode: find tile for the center position
@@ -4114,6 +4161,7 @@ void DocumentViewport::insertImageFromClipboard()
         
         targetTile->addObject(std::move(imgObj));
         m_document->markTileDirty(coord);
+        insertedTileCoord = coord;  // Save for undo
     } else {
         // Paged mode: add to current page
         Page* targetPage = m_document->page(m_currentPageIndex);
@@ -4142,8 +4190,8 @@ void DocumentViewport::insertImageFromClipboard()
         }
     }
     
-    // 7. Create undo entry
-    // TODO O2.7: pushObjectInsertUndo(rawPtr);
+    // 7. Create undo entry (BF.6)
+    pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
     
     // 8. Select the new object
     deselectAllObjects();
@@ -4189,6 +4237,9 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     // Store raw pointer BEFORE std::move
     InsertedObject* rawPtr = imgObj.get();
     
+    // Track tile coord for undo (edgeless mode)
+    Document::TileCoord insertedTileCoord = {0, 0};
+    
     // 4. Add to appropriate page/tile
     if (m_document->isEdgeless()) {
         auto coord = m_document->tileCoordForPoint(imgObj->position);
@@ -4206,6 +4257,7 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         
         targetTile->addObject(std::move(imgObj));
         m_document->markTileDirty(coord);
+        insertedTileCoord = coord;  // Save for undo
     } else {
         // Paged mode: add to current page
         Page* targetPage = m_document->page(m_currentPageIndex);
@@ -4233,7 +4285,10 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         }
     }
     
-    // 7. Select the new object
+    // 7. Create undo entry (BF.6)
+    pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
+    
+    // 8. Select the new object
     deselectAllObjects();
     selectObject(rawPtr, false);
     
@@ -6684,8 +6739,9 @@ void DocumentViewport::undoEdgeless()
         // Object actions (Phase O2.7.3)
         switch (action.type) {
             case PageUndoAction::ObjectInsert:
-                // Undo insert = remove the object
+                // Undo insert = remove the object (BF.6)
                 {
+                    deselectObjectById(action.objectId);
                     Page* tile = m_document->getTile(action.objectTileCoord.first, 
                                                      action.objectTileCoord.second);
                     if (tile) {
@@ -7142,7 +7198,8 @@ void DocumentViewport::undo()
         // Object actions (Phase O2.7)
         switch (action.type) {
             case PageUndoAction::ObjectInsert:
-                // Undo insert = remove the object
+                // Undo insert = remove the object (BF.6)
+                deselectObjectById(action.objectId);
                 page->removeObject(action.objectId);
                 m_document->recalculateMaxObjectExtent();
                 break;
@@ -7278,13 +7335,17 @@ void DocumentViewport::redo()
                 {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
+                        qDebug() << "redo ObjectInsert: restored position =" << obj->position
+                                 << "size =" << obj->size;
                         // For ImageObject, load the image from assets
                         if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
                             ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
                             imgObj->loadImage(m_document->bundlePath());
                         }
                         m_document->updateMaxObjectExtent(obj.get());
+                        InsertedObject* rawPtr = obj.get();
                         page->addObject(std::move(obj));
+                        qDebug() << "redo ObjectInsert: AFTER addObject, rawPtr->position =" << rawPtr->position;
                     }
                 }
                 break;
@@ -7352,6 +7413,11 @@ void DocumentViewport::pushObjectInsertUndo(InsertedObject* obj, int pageIndex,
                                             Document::TileCoord tileCoord)
 {
     if (!obj) return;
+    
+    qDebug() << "pushObjectInsertUndo: obj->position =" << obj->position
+             << "obj->size =" << obj->size
+             << "obj->zOrder =" << obj->zOrder
+             << "obj->layerAffinity =" << obj->layerAffinity;
     
     if (m_document && m_document->isEdgeless()) {
         // Edgeless mode: use global stack
@@ -7430,6 +7496,9 @@ void DocumentViewport::pushObjectMoveUndo(InsertedObject* obj, const QPointF& ol
                                           Document::TileCoord newTile)
 {
     if (!obj) return;
+    
+    qDebug() << "pushObjectMoveUndo: obj" << obj->id << "oldPos =" << oldPos 
+             << "newPos =" << obj->position;
     
     if (m_document && m_document->isEdgeless()) {
         // Edgeless mode: use global stack

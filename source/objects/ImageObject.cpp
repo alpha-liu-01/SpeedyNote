@@ -50,6 +50,16 @@ QJsonObject ImageObject::toJson() const
     obj["maintainAspectRatio"] = maintainAspectRatio;
     obj["originalAspectRatio"] = originalAspectRatio;
     
+    // BF.7: If imagePath is empty but we have a cached pixmap (unsaved document),
+    // embed the image data as base64 so undo/redo works correctly
+    if (imagePath.isEmpty() && !cachedPixmap.isNull()) {
+        QByteArray imageData;
+        QBuffer buffer(&imageData);
+        buffer.open(QIODevice::WriteOnly);
+        cachedPixmap.save(&buffer, "PNG");
+        obj["embeddedImageData"] = QString::fromLatin1(imageData.toBase64());
+    }
+    
     return obj;
 }
 
@@ -64,8 +74,21 @@ void ImageObject::loadFromJson(const QJsonObject& obj)
     maintainAspectRatio = obj["maintainAspectRatio"].toBool(true);
     originalAspectRatio = obj["originalAspectRatio"].toDouble(1.0);
     
-    // Note: cachedPixmap is NOT loaded here
-    // Caller should call loadImage() with the appropriate base path
+    // BF.7: Check for embedded image data (unsaved document case)
+    // This allows undo/redo to work even when the document hasn't been saved yet
+    if (obj.contains("embeddedImageData")) {
+        QString base64Data = obj["embeddedImageData"].toString();
+        QByteArray imageData = QByteArray::fromBase64(base64Data.toLatin1());
+        QPixmap pixmap;
+        if (pixmap.loadFromData(imageData, "PNG")) {
+            cachedPixmap = pixmap;
+            // Update size if not already set
+            if (size.isEmpty() && !cachedPixmap.isNull()) {
+                size = cachedPixmap.size();
+            }
+        }
+    }
+    // Note: If no embedded data, caller should call loadImage() with the appropriate base path
 }
 
 bool ImageObject::loadImage(const QString& basePath)

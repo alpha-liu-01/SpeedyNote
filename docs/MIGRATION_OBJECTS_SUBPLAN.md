@@ -2405,6 +2405,157 @@ if (isEdgeless()) {
 
 ---
 
+#### O2.BF.6: Object Insert Undo Not Working ✅
+
+**Problem:** After pasting an image to the canvas, pressing Ctrl+Z did not undo the insertion. The image remained on screen despite multiple undo attempts.
+
+**Symptoms:**
+- Paste image successfully with Ctrl+V
+- Press Ctrl+Z - nothing happens
+- Image remains on canvas
+- Debug output shows `undo(): Called` but no actual undo action
+
+**Root Cause:** Both `insertImageFromClipboard()` and `insertImageFromFile()` were **not calling** `pushObjectInsertUndo()`. The call was left as a TODO comment:
+```cpp
+// 7. Create undo entry
+// TODO O2.7: pushObjectInsertUndo(rawPtr);
+```
+
+The undo stack never received the insert action, so there was nothing to undo.
+
+**Fix:**
+1. Track the tile coordinate where the object is inserted (for edgeless mode)
+2. Call `pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord)`
+3. Added `deselectObjectById()` helper to safely remove objects from selection before deleting
+4. Updated both `undoEdgeless()` and paged `undo()` to deselect the object before removing it
+
+**After (fixed) - insertImageFromFile():**
+```cpp
+// Track tile coord for undo (edgeless mode)
+Document::TileCoord insertedTileCoord = {0, 0};
+
+// 4. Add to appropriate page/tile
+if (m_document->isEdgeless()) {
+    auto coord = m_document->tileCoordForPoint(imgObj->position);
+    // ... add to tile ...
+    insertedTileCoord = coord;  // Save for undo
+} else {
+    // ... add to page ...
+}
+
+// ... other steps ...
+
+// 7. Create undo entry (BF.6)
+pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
+```
+
+**After (fixed) - undoEdgeless() ObjectInsert case:**
+```cpp
+case PageUndoAction::ObjectInsert:
+    // Undo insert = remove the object (BF.6)
+    deselectObjectById(action.objectId);  // Prevent dangling pointer
+    Page* tile = m_document->getTile(...);
+    if (tile) {
+        tile->removeObject(action.objectId);
+        // ...
+    }
+    break;
+```
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`: 
+  - Fixed `insertImageFromClipboard()` to call `pushObjectInsertUndo()`
+  - Fixed `insertImageFromFile()` to call `pushObjectInsertUndo()`
+  - Added `deselectObjectById()` helper function
+  - Updated `undoEdgeless()` ObjectInsert case to deselect before removing
+  - Updated paged `undo()` ObjectInsert case to deselect before removing
+- `source/core/DocumentViewport.h`: Added `deselectObjectById()` declaration
+
+---
+
+#### O2.BF.7: Object Redo Not Working for Unsaved Documents ✅
+
+**Problem:** After undoing an image insertion with Ctrl+Z, pressing Ctrl+Y (redo) did not restore the image. This was specific to unsaved documents where images only existed in memory.
+
+**Symptoms:**
+- Paste image successfully with Ctrl+V
+- Press Ctrl+Z - image disappears (undo works)
+- Press Ctrl+Y - image does NOT reappear (redo fails)
+- Only affects unsaved documents (no `imagePath` set)
+
+**Root Cause:** The undo/redo system serializes objects to JSON via `toJson()` and restores them via `fromJson()`. However, `ImageObject::toJson()` only stored `imagePath` and `imageHash`, NOT the actual pixel data. For unsaved documents:
+1. `imagePath` is empty (not saved to disk yet)
+2. `cachedPixmap` exists in memory
+3. `toJson()` stores `imagePath = ""`
+4. On redo, `loadFromJson()` sets `imagePath = ""`, no pixmap loaded
+5. `loadImage()` fails because `imagePath.isEmpty()` returns `true`
+6. Object is added but has no image data - invisible/broken
+
+**Memory Safety Concern:** The fix must not cause memory leaks or dangling pointers. By embedding image data in JSON (owned by the action struct), the data lifecycle is tied to the undo/redo stack, which is properly managed.
+
+**Fix:** Embed image data as base64 in JSON when `imagePath` is empty:
+
+**ImageObject::toJson() - After:**
+```cpp
+QJsonObject ImageObject::toJson() const
+{
+    QJsonObject obj = InsertedObject::toJson();
+    
+    obj["imagePath"] = imagePath;
+    obj["imageHash"] = imageHash;
+    // ... other properties ...
+    
+    // BF.7: If imagePath is empty but we have a cached pixmap (unsaved document),
+    // embed the image data as base64 so undo/redo works correctly
+    if (imagePath.isEmpty() && !cachedPixmap.isNull()) {
+        QByteArray imageData;
+        QBuffer buffer(&imageData);
+        buffer.open(QIODevice::WriteOnly);
+        cachedPixmap.save(&buffer, "PNG");
+        obj["embeddedImageData"] = QString::fromLatin1(imageData.toBase64());
+    }
+    
+    return obj;
+}
+```
+
+**ImageObject::loadFromJson() - After:**
+```cpp
+void ImageObject::loadFromJson(const QJsonObject& obj)
+{
+    InsertedObject::loadFromJson(obj);
+    
+    imagePath = obj["imagePath"].toString();
+    // ... other properties ...
+    
+    // BF.7: Check for embedded image data (unsaved document case)
+    if (obj.contains("embeddedImageData")) {
+        QString base64Data = obj["embeddedImageData"].toString();
+        QByteArray imageData = QByteArray::fromBase64(base64Data.toLatin1());
+        QPixmap pixmap;
+        if (pixmap.loadFromData(imageData, "PNG")) {
+            cachedPixmap = pixmap;
+            if (size.isEmpty() && !cachedPixmap.isNull()) {
+                size = cachedPixmap.size();
+            }
+        }
+    }
+}
+```
+
+**Design Notes:**
+- Embedding only occurs when `imagePath` is empty (unsaved case)
+- Once document is saved, `imagePath` is set and no embedding needed
+- Embedded data is temporary - only needed for undo/redo during session
+- `loadImage()` safely ignores empty `imagePath` without clearing `cachedPixmap`
+
+**Files Changed:**
+- `source/objects/ImageObject.cpp`: 
+  - Updated `toJson()` to embed image data when `imagePath` is empty
+  - Updated `loadFromJson()` to decode embedded image data
+
+---
+
 ### O2.10: Testing & Verification
 
 **Tasks:**
@@ -2414,7 +2565,9 @@ if (isEdgeless()) {
 - [ ] Test: Drag selected objects, moves them
 - [ ] Test: Delete key removes selected objects
 - [ ] Test: Ctrl+C then Ctrl+V duplicates object
-- [ ] Test: Ctrl+Z undoes insert/delete/move
+- [ ] Test: Ctrl+Z undoes insert (image disappears)
+- [ ] Test: Ctrl+Y redoes insert (image reappears) - **unsaved document**
+- [ ] Test: Ctrl+Y redoes insert (image reappears) - **saved document**
 - [ ] Test: zOrder shortcuts work correctly
 - [ ] Test: Save and reload - inserted images persist (assets folder)
 - [ ] Test: Edgeless - object crossing tile boundary (drag to new tile)
