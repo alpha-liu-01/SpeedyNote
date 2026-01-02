@@ -44,19 +44,36 @@ enum class TouchGestureMode {
  */
 struct PageUndoAction {
     enum Type { 
+        // ===== Stroke types (existing) =====
         AddStroke,          ///< A stroke was added (undo = remove it)
         RemoveStroke,       ///< A single stroke was removed (undo = add it back)
         RemoveMultiple,     ///< Multiple strokes removed at once (undo = add all back)
-        TransformSelection  ///< Lasso transform: removed originals, added transformed (undo = reverse)
+        TransformSelection, ///< Lasso transform: removed originals, added transformed (undo = reverse)
+        
+        // ===== Object types (Phase O2.7) =====
+        ObjectInsert,       ///< An object was inserted (undo = remove it)
+        ObjectDelete,       ///< An object was deleted (undo = restore it)
+        ObjectMove,         ///< An object was moved (undo = move back)
+        ObjectAffinityChange ///< Object layer affinity changed (undo = restore old affinity)
     };
     
     Type type;
     int pageIndex;                      ///< The page this action occurred on
     int layerIndex = 0;                 ///< Which layer was affected (for TransformSelection)
+    
+    // ===== Stroke fields (existing) =====
     VectorStroke stroke;                ///< For AddStroke and RemoveStroke
     QVector<VectorStroke> strokes;      ///< For RemoveMultiple
     QVector<VectorStroke> removedStrokes;  ///< For TransformSelection: original strokes removed
     QVector<VectorStroke> addedStrokes;    ///< For TransformSelection: new strokes added
+    
+    // ===== Object fields (Phase O2.7) =====
+    QJsonObject objectData;             ///< Serialized object for ObjectInsert/ObjectDelete restore
+    QString objectId;                   ///< Object ID for lookup (ObjectMove, ObjectAffinityChange)
+    QPointF objectOldPosition;          ///< For ObjectMove: position before move
+    QPointF objectNewPosition;          ///< For ObjectMove: position after move
+    int objectOldAffinity = -1;         ///< For ObjectAffinityChange: affinity before change
+    int objectNewAffinity = -1;         ///< For ObjectAffinityChange: affinity after change
 };
 
 // ============================================================================
@@ -90,6 +107,17 @@ struct EdgelessUndoAction {
     // For TransformSelection: compound action with both removed and added strokes
     QVector<StrokeSegment> removedSegments;  ///< Original strokes that were removed
     QVector<StrokeSegment> addedSegments;    ///< New strokes that were added
+    
+    // ===== Object fields (Phase O2.7) =====
+    Document::TileCoord objectTileCoord;  ///< Tile containing the object
+    QJsonObject objectData;               ///< Serialized object for ObjectInsert/ObjectDelete restore
+    QString objectId;                     ///< Object ID for lookup
+    QPointF objectOldPosition;            ///< For ObjectMove: position before move (tile-local)
+    QPointF objectNewPosition;            ///< For ObjectMove: position after move (tile-local)
+    Document::TileCoord objectOldTile;    ///< For ObjectMove across tiles: original tile
+    Document::TileCoord objectNewTile;    ///< For ObjectMove across tiles: destination tile
+    int objectOldAffinity = -1;           ///< For ObjectAffinityChange: affinity before change
+    int objectNewAffinity = -1;           ///< For ObjectAffinityChange: affinity after change
 };
 
 #include <QWidget>
@@ -452,6 +480,45 @@ public:
      */
     void clearUndoStacksFrom(int pageIndex);
     
+    // ===== Object Undo Helpers (Phase O2.7) =====
+    
+    /**
+     * @brief Push an undo action for object insertion.
+     * @param obj The inserted object (will be serialized to JSON).
+     * @param pageIndex Page index (paged mode) or -1 for edgeless.
+     * @param tileCoord Tile coordinate (edgeless mode only).
+     * 
+     * Undo will remove the object; redo will re-add it.
+     */
+    void pushObjectInsertUndo(InsertedObject* obj, int pageIndex = -1,
+                              Document::TileCoord tileCoord = {0, 0});
+    
+    /**
+     * @brief Push an undo action for object deletion.
+     * @param obj The deleted object (will be serialized to JSON).
+     * @param pageIndex Page index (paged mode) or -1 for edgeless.
+     * @param tileCoord Tile coordinate (edgeless mode only).
+     * 
+     * Undo will restore the object; redo will re-delete it.
+     */
+    void pushObjectDeleteUndo(InsertedObject* obj, int pageIndex = -1,
+                              Document::TileCoord tileCoord = {0, 0});
+    
+    /**
+     * @brief Push an undo action for object move.
+     * @param obj The moved object.
+     * @param oldPos Position before move.
+     * @param pageIndex Page index (paged mode) or -1 for edgeless.
+     * @param oldTile Original tile (edgeless cross-tile move).
+     * @param newTile New tile (edgeless cross-tile move).
+     * 
+     * Undo will restore old position; redo will apply new position.
+     */
+    void pushObjectMoveUndo(InsertedObject* obj, const QPointF& oldPos,
+                            int pageIndex = -1,
+                            Document::TileCoord oldTile = {0, 0},
+                            Document::TileCoord newTile = {0, 0});
+    
     // ===== Layer Management (Phase 5) =====
     
     /**
@@ -587,6 +654,36 @@ public:
      */
     bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
     
+    // ===== Object Z-Order (Phase O2.8) =====
+    
+    /**
+     * @brief Bring selected objects to front (highest zOrder in their affinity group).
+     * 
+     * Sets zOrder = max + 1 for each selected object within its affinity group.
+     */
+    void bringSelectedToFront();
+    
+    /**
+     * @brief Send selected objects to back (lowest zOrder in their affinity group).
+     * 
+     * Sets zOrder = min - 1 for each selected object within its affinity group.
+     */
+    void sendSelectedToBack();
+    
+    /**
+     * @brief Bring selected objects forward one step in z-order.
+     * 
+     * Swaps with the next higher zOrder object in the same affinity group.
+     */
+    void bringSelectedForward();
+    
+    /**
+     * @brief Send selected objects backward one step in z-order.
+     * 
+     * Swaps with the next lower zOrder object in the same affinity group.
+     */
+    void sendSelectedBackward();
+    
     /**
      * @brief Paste handler for ObjectSelect tool.
      * 
@@ -612,6 +709,23 @@ public:
      * creates undo entries, marks pages dirty, and clears selection.
      */
     void deleteSelectedObjects();
+    
+    /**
+     * @brief Copy selected objects to internal clipboard.
+     * 
+     * Phase O2.6: Serializes each selected object to JSON and stores
+     * in m_objectClipboard. Does not modify selection.
+     */
+    void copySelectedObjects();
+    
+    /**
+     * @brief Paste objects from internal clipboard.
+     * 
+     * Phase O2.6.3: Deserializes objects from m_objectClipboard,
+     * assigns new UUIDs, offsets positions, adds to current page/tile,
+     * and selects the pasted objects.
+     */
+    void pasteObjects();
     
     /**
      * @brief Get the list of pages currently visible in the viewport.
@@ -1114,6 +1228,15 @@ private:
      * Cleared when drag ends or is cancelled.
      */
     QMap<QString, QPointF> m_objectOriginalPositions;
+    
+    /**
+     * @brief Internal clipboard for copied objects.
+     * 
+     * Phase O2.6: Stores serialized objects (via toJson()) for paste.
+     * Separate from system clipboard - only for internal object copy/paste.
+     * Each entry is a complete JSON representation of an InsertedObject.
+     */
+    QList<QJsonObject> m_objectClipboard;
     
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels

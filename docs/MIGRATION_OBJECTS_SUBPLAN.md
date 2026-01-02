@@ -1992,32 +1992,50 @@ void DocumentViewport::pasteForObjectSelect()
 **Integration with O2.4:** `pasteForObjectSelect()` checks system clipboard for images first,
 then falls back to `pasteObjects()` for internal object clipboard.
 
-#### O2.6.1: Internal Object Clipboard
+#### O2.6.1: Internal Object Clipboard ✅
 **File:** `source/core/DocumentViewport.h`
 
 **Tasks:**
-- [ ] Add `QList<QJsonObject> m_objectClipboard` (serialized objects)
+- [x] Add `QList<QJsonObject> m_objectClipboard` (serialized objects)
 
-#### O2.6.2: Implement copySelectedObjects
+**Implementation Notes:**
+- Added after `m_objectOriginalPositions` in Object Selection section
+- Each entry is a complete JSON representation of an InsertedObject
+- Separate from system clipboard (for internal object copy/paste only)
+
+#### O2.6.2: Implement copySelectedObjects ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Serialize each selected object to JSON via `obj->toJson()`
-- [ ] Store in `m_objectClipboard`
-- [ ] Wire Ctrl+C to call this when ObjectSelect tool is active
+- [x] Serialize each selected object to JSON via `obj->toJson()`
+- [x] Store in `m_objectClipboard`
+- [x] Wire Ctrl+C to call this when ObjectSelect tool is active
 
-#### O2.6.3: Implement pasteObjects
+**Implementation Notes:**
+- Declaration added to `DocumentViewport.h` after `deleteSelectedObjects()`
+- Implementation clears clipboard, then appends each selected object's JSON
+- Ctrl+C wired in `keyPressEvent()` before paste handling (Copy before Paste order)
+- Only copies if `hasSelectedObjects()` returns true
+
+#### O2.6.3: Implement pasteObjects ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Called from `pasteForObjectSelect()` when no system clipboard image
-- [ ] If `m_objectClipboard` not empty:
+- [x] Called from `pasteForObjectSelect()` when no system clipboard image
+- [x] If `m_objectClipboard` not empty:
   - Deserialize each object via `InsertedObject::fromJson()`
   - Assign new UUIDs
-  - Offset position (e.g., +20, +20) from original
+  - Offset position (+20, +20) from original
   - Add to current page/tile
-  - Create undo entries
+  - ~~Create undo entries~~ (TODO O2.7)
   - Select pasted objects
+
+**Implementation Notes:**
+- Declaration added to `DocumentViewport.h` after `copySelectedObjects()`
+- For ImageObjects, calls `loadImage()` to load pixmap from assets folder
+- Uses same tile/page logic as `insertImageFromClipboard()`
+- Stores raw pointers before std::move for selection tracking
+- Updated `pasteForObjectSelect()` to call `pasteObjects()` as Priority 2
 
 ---
 
@@ -2072,27 +2090,47 @@ struct PageUndoAction {
 ```
 
 **Tasks:**
-- [ ] Add object action types to `PageUndoAction::Type` enum
-- [ ] Add object-specific fields to `PageUndoAction`
-- [ ] Add corresponding fields to `EdgelessUndoAction` (include tile coord)
+- [x] Add object action types to `PageUndoAction::Type` enum
+- [x] Add object-specific fields to `PageUndoAction`
+- [x] Add corresponding fields to `EdgelessUndoAction` (include tile coord)
 
-#### O2.7.2: Paged Mode Object Undo
+**Implementation Notes:**
+- Added 4 new object action types: `ObjectInsert`, `ObjectDelete`, `ObjectMove`, `ObjectAffinityChange`
+- `PageUndoAction` fields: `objectData`, `objectId`, `objectOldPosition`, `objectNewPosition`, `objectOldAffinity`, `objectNewAffinity`
+- `EdgelessUndoAction` adds tile coordinates: `objectTileCoord`, `objectOldTile`, `objectNewTile` for cross-tile moves
+
+#### O2.7.2: Paged Mode Object Undo ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Implement `pushObjectInsertUndo(InsertedObject* obj)` - stores serialized object
-- [ ] Implement `pushObjectDeleteUndo(InsertedObject* obj)` - stores serialized object
-- [ ] Implement `pushObjectMoveUndo(InsertedObject* obj, QPointF oldPos)` - stores positions
-- [ ] In `undo()`: handle ObjectInsert by removing, ObjectDelete by recreating, ObjectMove by restoring position
-- [ ] In `redo()`: inverse operations
+- [x] Implement `pushObjectInsertUndo(InsertedObject* obj)` - stores serialized object
+- [x] Implement `pushObjectDeleteUndo(InsertedObject* obj)` - stores serialized object
+- [x] Implement `pushObjectMoveUndo(InsertedObject* obj, QPointF oldPos)` - stores positions
+- [x] In `undo()`: handle ObjectInsert by removing, ObjectDelete by recreating, ObjectMove by restoring position
+- [x] In `redo()`: inverse operations
 
-#### O2.7.3: Edgeless Mode Object Undo
+**Implementation Notes:**
+- Added 3 push helper functions: `pushObjectInsertUndo()`, `pushObjectDeleteUndo()`, `pushObjectMoveUndo()`
+- All helpers support both paged (per-page stack) and edgeless (global stack) modes
+- Refactored `undo()`/`redo()` to distinguish stroke vs object actions
+- Object actions work directly with Page, not VectorLayer
+- For ImageObject undo/redo, loads image from assets via `loadImage()`
+- ObjectAffinityChange also implemented (uses `page->updateObjectAffinity()`)
+
+#### O2.7.3: Edgeless Mode Object Undo ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Same as paged mode but use `EdgelessUndoAction` with tile coordinate
-- [ ] Store `tileCoord` so object can be added back to correct tile on undo
-- [ ] Handle cross-tile moves (object moved to different tile)
+- [x] Same as paged mode but use `EdgelessUndoAction` with tile coordinate
+- [x] Store `tileCoord` so object can be added back to correct tile on undo
+- [x] Handle cross-tile moves (object moved to different tile)
+
+**Implementation Notes:**
+- Extended `undoEdgeless()` and `redoEdgeless()` with object action handling
+- Uses `objectTileCoord` for same-tile operations (insert/delete/affinity)
+- Cross-tile moves use `objectOldTile`/`objectNewTile` with `extractObject()` for transfer
+- Properly handles tile creation/removal (`getOrCreateTile`, `removeTileIfEmpty`)
+- For ImageObject, loads image from assets via `loadImage()` on restore
 
 ---
 
@@ -2100,24 +2138,37 @@ struct PageUndoAction {
 
 **Goal:** Implement Ctrl+[ and Ctrl+] for z-order changes.
 
-#### O2.8.1: Implement zOrder Methods
+#### O2.8.1: Implement zOrder Methods ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] `bringSelectedToFront()` - set zOrder = max + 1 in affinity group
-- [ ] `sendSelectedToBack()` - set zOrder = min - 1 in affinity group
-- [ ] `bringSelectedForward()` - swap with next higher zOrder
-- [ ] `sendSelectedBackward()` - swap with next lower zOrder
+- [x] `bringSelectedToFront()` - set zOrder = max + 1 in affinity group
+- [x] `sendSelectedToBack()` - set zOrder = min - 1 in affinity group
+- [x] `bringSelectedForward()` - swap with next higher zOrder
+- [x] `sendSelectedBackward()` - swap with next lower zOrder
 
-#### O2.8.2: Wire Up Shortcuts
+**Implementation Notes:**
+- All methods work for both paged and edgeless modes
+- zOrder changes are scoped to objects with the same layerAffinity
+- `bringToFront`/`sendToBack`: set to max+1 or min-1 respectively
+- `bringForward`/`sendBackward`: swap zOrder with adjacent object
+- Calls `page->rebuildAffinityMap()` after changes to update rendering order
+- Marks page/tile dirty after modification
+
+#### O2.8.2: Wire Up Shortcuts ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In `keyPressEvent()`:
+- [x] In `keyPressEvent()`:
   - Ctrl+] → `bringSelectedForward()`
   - Ctrl+[ → `sendSelectedBackward()`
   - Ctrl+Shift+] → `bringSelectedToFront()`
   - Ctrl+Shift+[ → `sendSelectedToBack()`
+
+**Implementation Notes:**
+- Added in ObjectSelect tool section of keyPressEvent()
+- Only active when `hasSelectedObjects()` returns true
+- Uses `Qt::Key_BracketRight` (]) and `Qt::Key_BracketLeft` ([)
 
 ---
 
@@ -2128,31 +2179,40 @@ struct PageUndoAction {
 **Context:** The `insertPictureButton` already exists in MainWindow but is currently stubbed.
 It has a click handler that does nothing and `updatePictureButtonState()` that sets `isEnabled = false`.
 
-#### O2.9.1: Update insertPictureButton
-**File:** `source/MainWindow.cpp`
-
-**Current (stubbed):**
-```cpp
-connect(insertPictureButton, &QPushButton::clicked, this, [this]() {
-    // Phase 3.1.4: Picture insertion stubbed - will be reimplemented for DocumentViewport
-    // TODO Phase 4: Implement picture insertion in DocumentViewport via InsertedObject
-});
-```
-
-**Tasks:**
-- [ ] Change click handler to toggle ObjectSelect tool
-- [ ] Update tooltip: "Object Select Tool (O)"
-- [ ] Update `updatePictureButtonState()` to track if ObjectSelect tool is active
-- [ ] Add keyboard shortcut 'O' for ObjectSelect tool
-
-#### O2.9.2: Add Ctrl+V Handling in MainWindow
+#### O2.9.1: Update insertPictureButton ✅
 **File:** `source/MainWindow.cpp`
 
 **Tasks:**
-- [ ] Ensure Ctrl+V reaches DocumentViewport (check if already works)
-- [ ] DocumentViewport's keyPressEvent checks clipboard for image
-- [ ] If image present: call `insertImageFromClipboard()`
-- [ ] If no image: fall back to lasso paste (existing behavior)
+- [x] Change click handler to toggle ObjectSelect tool
+- [x] Update tooltip: "Object Select Tool (O)"
+- [x] Update `updatePictureButtonState()` to track if ObjectSelect tool is active
+- [x] Add keyboard shortcut 'O' for ObjectSelect tool
+
+**Implementation Notes:**
+- Click handler now calls `vp->setCurrentTool(ToolType::ObjectSelect)`
+- Tooltip changed to "Object Select Tool (O)"
+- `updateToolButtonStates()` now resets/sets insertPictureButton like other tool buttons
+- `updatePictureButtonState()` checks `vp->currentTool() == ToolType::ObjectSelect`
+- Added `Qt::Key_O` case in `DocumentViewport::keyPressEvent()` for keyboard shortcut
+
+#### O2.9.2: Add Ctrl+V Handling in MainWindow ✅
+**File:** `source/MainWindow.cpp`
+
+**Tasks:**
+- [x] Ensure Ctrl+V reaches DocumentViewport (check if already works)
+- [x] DocumentViewport's keyPressEvent checks clipboard for image
+- [x] If image present: call `insertImageFromClipboard()`
+- [x] If no image: fall back to lasso paste (existing behavior)
+
+**Verification Notes:**
+- Ctrl+V already reaches DocumentViewport - MainWindow has no paste shortcut intercepting it
+- Tool-aware paste implemented in O2.4:
+  - **Lasso tool**: `pasteSelection()` (pastes strokes from lasso clipboard)
+  - **ObjectSelect tool**: `pasteForObjectSelect()` which:
+    1. Checks system clipboard for image → `insertImageFromClipboard()`
+    2. Checks internal object clipboard → `pasteObjects()`
+- This tool-aware design is superior to a global "if image, insert" approach
+- No additional changes needed - functionality complete from O2.4
 
 ---
 

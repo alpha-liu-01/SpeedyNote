@@ -789,17 +789,21 @@ void MainWindow::setupUi() {
         updateToolButtonStates();
     });
     
-    // Insert Picture Button
+    // Insert Picture Button (Phase O2.9: repurposed as Object Select Tool)
     insertPictureButton = new QPushButton(this);
     insertPictureButton->setFixedSize(36, 36);
     insertPictureButton->setStyleSheet(buttonStyle);
-    insertPictureButton->setToolTip(tr("Insert Picture"));
-    insertPictureButton->setProperty("selected", false); // Initially disabled
+    insertPictureButton->setToolTip(tr("Object Select Tool (O)"));
+    insertPictureButton->setProperty("selected", false);
     updateButtonIcon(insertPictureButton, "background");
     connect(insertPictureButton, &QPushButton::clicked, this, [this]() {
-        // Phase 3.1.4: Picture insertion stubbed - will be reimplemented for DocumentViewport
-        // TODO Phase 4: Implement picture insertion in DocumentViewport via InsertedObject
-        qDebug() << "Insert picture: Not implemented yet (Phase 4)";
+        // Phase O2.9: Toggle ObjectSelect tool
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setCurrentTool(ToolType::ObjectSelect);
+        }
+        updateToolButtonStates();
+        updateThicknessSliderForCurrentTool();
+        updateDialDisplay();
     });
     
     deletePageButton = new QPushButton(this);
@@ -1984,12 +1988,14 @@ void MainWindow::updateToolButtonStates() {
     markerToolButton->setProperty("selected", false);
     eraserToolButton->setProperty("selected", false);
     if (ropeToolButton) ropeToolButton->setProperty("selected", false);
+    if (insertPictureButton) insertPictureButton->setProperty("selected", false);
     
     // Update icons for unselected state
     updateButtonIcon(penToolButton, "pen");
     updateButtonIcon(markerToolButton, "marker");
     updateButtonIcon(eraserToolButton, "eraser");
     if (ropeToolButton) updateButtonIcon(ropeToolButton, "rope");
+    if (insertPictureButton) updateButtonIcon(insertPictureButton, "background");
     
     // Set the selected property for the current tool
     ToolType tool = vp->currentTool();
@@ -2035,6 +2041,10 @@ void MainWindow::updateToolButtonStates() {
     if (ropeToolButton) {
         ropeToolButton->style()->unpolish(ropeToolButton);
         ropeToolButton->style()->polish(ropeToolButton);
+    }
+    if (insertPictureButton) {
+        insertPictureButton->style()->unpolish(insertPictureButton);
+        insertPictureButton->style()->polish(insertPictureButton);
     }
     // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton style updates
     
@@ -7689,12 +7699,16 @@ void MainWindow::updateRopeToolButtonState() {
 }
 
 void MainWindow::updatePictureButtonState() {
-    // Phase 3.1.4: Stubbed - picture insertion not implemented yet
-    bool isEnabled = false;
+    // Phase O2.9: Track ObjectSelect tool state
+    bool isActive = false;
+    
+    if (DocumentViewport* vp = currentViewport()) {
+        isActive = (vp->currentTool() == ToolType::ObjectSelect);
+    }
 
     // Set visual indicator that the button is active/inactive
     if (insertPictureButton) {
-        insertPictureButton->setProperty("selected", isEnabled);
+        insertPictureButton->setProperty("selected", isActive);
         updateButtonIcon(insertPictureButton, "background");
 
         // Force style update

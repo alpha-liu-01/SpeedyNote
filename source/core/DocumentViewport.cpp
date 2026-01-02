@@ -1497,18 +1497,56 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     
     // Phase O2.4: ObjectSelect tool keyboard shortcuts
     if (m_currentTool == ToolType::ObjectSelect) {
+        // Copy (Ctrl+C) - copy selected objects to internal clipboard (O2.6)
+        if (event->matches(QKeySequence::Copy)) {
+            if (hasSelectedObjects()) {
+                copySelectedObjects();
+                event->accept();
+                return;
+            }
+        }
+        
         // Paste (Ctrl+V) - tool-aware paste for objects
         if (event->matches(QKeySequence::Paste)) {
             pasteForObjectSelect();
             event->accept();
             return;
         }
-        // TODO O2.6: Copy (Ctrl+C) for objects
         
         // Delete key - remove selected objects (O2.5)
         if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
             if (hasSelectedObjects()) {
                 deleteSelectedObjects();
+                event->accept();
+                return;
+            }
+        }
+        
+        // Z-order shortcuts (O2.8.2)
+        if (hasSelectedObjects()) {
+            bool ctrl = event->modifiers() & Qt::ControlModifier;
+            bool shift = event->modifiers() & Qt::ShiftModifier;
+            
+            if (event->key() == Qt::Key_BracketRight && ctrl) {
+                if (shift) {
+                    // Ctrl+Shift+] → bring to front
+                    bringSelectedToFront();
+                } else {
+                    // Ctrl+] → bring forward
+                    bringSelectedForward();
+                }
+                event->accept();
+                return;
+            }
+            
+            if (event->key() == Qt::Key_BracketLeft && ctrl) {
+                if (shift) {
+                    // Ctrl+Shift+[ → send to back
+                    sendSelectedToBack();
+                } else {
+                    // Ctrl+[ → send backward
+                    sendSelectedBackward();
+                }
                 event->accept();
                 return;
             }
@@ -1526,6 +1564,12 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         case Qt::Key_E:
             // E = Eraser tool
             setCurrentTool(ToolType::Eraser);
+            event->accept();
+            return;
+            
+        case Qt::Key_O:
+            // O = Object Select tool (Phase O2.9)
+            setCurrentTool(ToolType::ObjectSelect);
             event->accept();
             return;
             
@@ -3955,12 +3999,11 @@ void DocumentViewport::pasteForObjectSelect()
         return;
     }
     
-    // Priority 2: Internal object clipboard (O2.6 will add m_objectClipboard)
-    // TODO O2.6: Check m_objectClipboard and call pasteObjects()
-    // if (!m_objectClipboard.isEmpty()) {
-    //     pasteObjects();
-    //     return;
-    // }
+    // Priority 2: Internal object clipboard (O2.6.3)
+    if (!m_objectClipboard.isEmpty()) {
+        pasteObjects();
+        return;
+    }
     
     // If neither clipboard has content, do nothing
     // (No fallback to lasso paste - that's a separate tool)
@@ -4148,6 +4191,352 @@ void DocumentViewport::deleteSelectedObjects()
     update();
     
     qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "objects";
+}
+
+void DocumentViewport::copySelectedObjects()
+{
+    // Phase O2.6.2: Copy selected objects to internal clipboard
+    if (m_selectedObjects.isEmpty()) {
+        return;
+    }
+    
+    // Clear previous clipboard contents
+    m_objectClipboard.clear();
+    
+    // Serialize each selected object to JSON
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (obj) {
+            m_objectClipboard.append(obj->toJson());
+        }
+    }
+    
+    qDebug() << "copySelectedObjects: Copied" << m_objectClipboard.size() << "objects to internal clipboard";
+}
+
+void DocumentViewport::pasteObjects()
+{
+    // Phase O2.6.3: Paste objects from internal clipboard
+    if (!m_document || m_objectClipboard.isEmpty()) {
+        return;
+    }
+    
+    // Clear current selection - we'll select the pasted objects
+    deselectAllObjects();
+    
+    // Track newly pasted objects for selection
+    QList<InsertedObject*> pastedObjects;
+    
+    // Paste offset to avoid placing directly on top of original
+    constexpr qreal PASTE_OFFSET = 20.0;
+    
+    for (const QJsonObject& jsonObj : m_objectClipboard) {
+        // Deserialize object
+        std::unique_ptr<InsertedObject> obj = InsertedObject::fromJson(jsonObj);
+        if (!obj) {
+            qWarning() << "pasteObjects: Failed to deserialize object from clipboard";
+            continue;
+        }
+        
+        // Assign new UUID (critical for uniqueness)
+        obj->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        
+        // Offset position from original
+        obj->position += QPointF(PASTE_OFFSET, PASTE_OFFSET);
+        
+        // For ImageObject, load the pixmap from assets
+        if (obj->type() == "image") {
+            ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+            if (!m_document->bundlePath().isEmpty()) {
+                if (!imgObj->loadImage(m_document->bundlePath())) {
+                    qWarning() << "pasteObjects: Failed to load image for pasted object";
+                    // Continue anyway - object will render as empty
+                }
+            }
+        }
+        
+        // Store raw pointer BEFORE std::move
+        InsertedObject* rawPtr = obj.get();
+        
+        // Add to appropriate page/tile
+        if (m_document->isEdgeless()) {
+            // Calculate which tile the object belongs to based on its position
+            auto coord = m_document->tileCoordForPoint(obj->position);
+            Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+            if (!targetTile) {
+                qWarning() << "pasteObjects: Failed to get/create tile";
+                continue;
+            }
+            
+            // Convert to tile-local coordinates
+            obj->position = obj->position - QPointF(
+                coord.first * Document::EDGELESS_TILE_SIZE,
+                coord.second * Document::EDGELESS_TILE_SIZE
+            );
+            
+            targetTile->addObject(std::move(obj));
+            m_document->markTileDirty(coord);
+        } else {
+            // Paged mode: add to current page
+            Page* targetPage = m_document->page(m_currentPageIndex);
+            if (!targetPage) {
+                qWarning() << "pasteObjects: No page at index" << m_currentPageIndex;
+                continue;
+            }
+            
+            targetPage->addObject(std::move(obj));
+            m_document->markPageDirty(m_currentPageIndex);
+        }
+        
+        // Update max object extent
+        m_document->updateMaxObjectExtent(rawPtr);
+        
+        // Track for selection
+        pastedObjects.append(rawPtr);
+    }
+    
+    // Select all pasted objects
+    for (InsertedObject* obj : pastedObjects) {
+        selectObject(obj, true);  // addToSelection = true
+    }
+    
+    // TODO O2.7: Create undo entries for paste
+    
+    if (!pastedObjects.isEmpty()) {
+        emit documentModified();
+    }
+    
+    update();
+    
+    qDebug() << "pasteObjects: Pasted" << pastedObjects.size() << "objects from internal clipboard";
+}
+
+// ===== Object Z-Order (Phase O2.8) =====
+
+void DocumentViewport::bringSelectedToFront()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        // Find the page/tile containing this object
+        Page* page = nullptr;
+        Document::TileCoord tileCoord = {0, 0};
+        
+        if (m_document->isEdgeless()) {
+            // Search loaded tiles for this object
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    page = tile;
+                    tileCoord = coord;
+                    break;
+                }
+            }
+        } else {
+            page = m_document->page(m_currentPageIndex);
+        }
+        
+        if (!page) continue;
+        
+        // Find max zOrder among objects with same affinity
+        int affinity = obj->getLayerAffinity();
+        int maxZOrder = obj->zOrder;
+        
+        for (const auto& otherObj : page->objects) {
+            if (otherObj.get() != obj && otherObj->getLayerAffinity() == affinity) {
+                maxZOrder = qMax(maxZOrder, otherObj->zOrder);
+            }
+        }
+        
+        // Set zOrder to max + 1
+        if (obj->zOrder != maxZOrder + 1) {
+            obj->zOrder = maxZOrder + 1;
+            page->rebuildAffinityMap();  // Rebuild since zOrder changed
+            
+            if (m_document->isEdgeless()) {
+                m_document->markTileDirty(tileCoord);
+            } else {
+                m_document->markPageDirty(m_currentPageIndex);
+            }
+        }
+    }
+    
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::sendSelectedToBack()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        // Find the page/tile containing this object
+        Page* page = nullptr;
+        Document::TileCoord tileCoord = {0, 0};
+        
+        if (m_document->isEdgeless()) {
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    page = tile;
+                    tileCoord = coord;
+                    break;
+                }
+            }
+        } else {
+            page = m_document->page(m_currentPageIndex);
+        }
+        
+        if (!page) continue;
+        
+        // Find min zOrder among objects with same affinity
+        int affinity = obj->getLayerAffinity();
+        int minZOrder = obj->zOrder;
+        
+        for (const auto& otherObj : page->objects) {
+            if (otherObj.get() != obj && otherObj->getLayerAffinity() == affinity) {
+                minZOrder = qMin(minZOrder, otherObj->zOrder);
+            }
+        }
+        
+        // Set zOrder to min - 1
+        if (obj->zOrder != minZOrder - 1) {
+            obj->zOrder = minZOrder - 1;
+            page->rebuildAffinityMap();
+            
+            if (m_document->isEdgeless()) {
+                m_document->markTileDirty(tileCoord);
+            } else {
+                m_document->markPageDirty(m_currentPageIndex);
+            }
+        }
+    }
+    
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::bringSelectedForward()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        // Find the page/tile containing this object
+        Page* page = nullptr;
+        Document::TileCoord tileCoord = {0, 0};
+        
+        if (m_document->isEdgeless()) {
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    page = tile;
+                    tileCoord = coord;
+                    break;
+                }
+            }
+        } else {
+            page = m_document->page(m_currentPageIndex);
+        }
+        
+        if (!page) continue;
+        
+        // Find the object with the next higher zOrder in same affinity group
+        int affinity = obj->getLayerAffinity();
+        InsertedObject* nextHigher = nullptr;
+        int nextHigherZOrder = INT_MAX;
+        
+        for (const auto& otherObj : page->objects) {
+            if (otherObj.get() != obj && 
+                otherObj->getLayerAffinity() == affinity &&
+                otherObj->zOrder > obj->zOrder &&
+                otherObj->zOrder < nextHigherZOrder) {
+                nextHigher = otherObj.get();
+                nextHigherZOrder = otherObj->zOrder;
+            }
+        }
+        
+        // Swap zOrders if found
+        if (nextHigher) {
+            int temp = obj->zOrder;
+            obj->zOrder = nextHigher->zOrder;
+            nextHigher->zOrder = temp;
+            page->rebuildAffinityMap();
+            
+            if (m_document->isEdgeless()) {
+                m_document->markTileDirty(tileCoord);
+            } else {
+                m_document->markPageDirty(m_currentPageIndex);
+            }
+        }
+    }
+    
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::sendSelectedBackward()
+{
+    if (!m_document || m_selectedObjects.isEmpty()) return;
+    
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        // Find the page/tile containing this object
+        Page* page = nullptr;
+        Document::TileCoord tileCoord = {0, 0};
+        
+        if (m_document->isEdgeless()) {
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    page = tile;
+                    tileCoord = coord;
+                    break;
+                }
+            }
+        } else {
+            page = m_document->page(m_currentPageIndex);
+        }
+        
+        if (!page) continue;
+        
+        // Find the object with the next lower zOrder in same affinity group
+        int affinity = obj->getLayerAffinity();
+        InsertedObject* nextLower = nullptr;
+        int nextLowerZOrder = INT_MIN;
+        
+        for (const auto& otherObj : page->objects) {
+            if (otherObj.get() != obj && 
+                otherObj->getLayerAffinity() == affinity &&
+                otherObj->zOrder < obj->zOrder &&
+                otherObj->zOrder > nextLowerZOrder) {
+                nextLower = otherObj.get();
+                nextLowerZOrder = otherObj->zOrder;
+            }
+        }
+        
+        // Swap zOrders if found
+        if (nextLower) {
+            int temp = obj->zOrder;
+            obj->zOrder = nextLower->zOrder;
+            nextLower->zOrder = temp;
+            page->rebuildAffinityMap();
+            
+            if (m_document->isEdgeless()) {
+                m_document->markTileDirty(tileCoord);
+            } else {
+                m_document->markPageDirty(m_currentPageIndex);
+            }
+        }
+    }
+    
+    emit documentModified();
+    update();
 }
 
 void DocumentViewport::renderObjectSelection(QPainter& painter)
@@ -6109,8 +6498,105 @@ void DocumentViewport::undoEdgeless()
     
     EdgelessUndoAction action = m_edgelessUndoStack.pop();
     
-    // Handle TransformSelection specially (compound action)
-    if (action.type == PageUndoAction::TransformSelection) {
+    // Check if this is an object action (Phase O2.7)
+    bool isObjectAction = (action.type == PageUndoAction::ObjectInsert ||
+                           action.type == PageUndoAction::ObjectDelete ||
+                           action.type == PageUndoAction::ObjectMove ||
+                           action.type == PageUndoAction::ObjectAffinityChange);
+    
+    if (isObjectAction) {
+        // Object actions (Phase O2.7.3)
+        switch (action.type) {
+            case PageUndoAction::ObjectInsert:
+                // Undo insert = remove the object
+                {
+                    Page* tile = m_document->getTile(action.objectTileCoord.first, 
+                                                     action.objectTileCoord.second);
+                    if (tile) {
+                        tile->removeObject(action.objectId);
+                        m_document->markTileDirty(action.objectTileCoord);
+                        m_document->removeTileIfEmpty(action.objectTileCoord.first,
+                                                      action.objectTileCoord.second);
+                    }
+                    m_document->recalculateMaxObjectExtent();
+                }
+                break;
+                
+            case PageUndoAction::ObjectDelete:
+                // Undo delete = restore the object to the tile
+                {
+                    Page* tile = m_document->getOrCreateTile(action.objectTileCoord.first,
+                                                             action.objectTileCoord.second);
+                    if (tile) {
+                        auto obj = InsertedObject::fromJson(action.objectData);
+                        if (obj) {
+                            // For ImageObject, load the image from assets
+                            if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
+                                ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+                                imgObj->loadImage(m_document->bundlePath());
+                            }
+                            m_document->updateMaxObjectExtent(obj.get());
+                            tile->addObject(std::move(obj));
+                            m_document->markTileDirty(action.objectTileCoord);
+                        }
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectMove:
+                // Undo move = restore old position (may involve cross-tile move)
+                {
+                    if (action.objectOldTile != action.objectNewTile) {
+                        // Cross-tile move: move object back from new tile to old tile
+                        Page* newTile = m_document->getTile(action.objectNewTile.first,
+                                                            action.objectNewTile.second);
+                        if (newTile) {
+                            std::unique_ptr<InsertedObject> obj = newTile->extractObject(action.objectId);
+                            if (obj) {
+                                obj->position = action.objectOldPosition;
+                                Page* oldTile = m_document->getOrCreateTile(action.objectOldTile.first,
+                                                                            action.objectOldTile.second);
+                                if (oldTile) {
+                                    oldTile->addObject(std::move(obj));
+                                    m_document->markTileDirty(action.objectOldTile);
+                                }
+                                m_document->markTileDirty(action.objectNewTile);
+                                m_document->removeTileIfEmpty(action.objectNewTile.first,
+                                                              action.objectNewTile.second);
+                            }
+                        }
+                    } else {
+                        // Same-tile move: just restore position
+                        Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                         action.objectTileCoord.second);
+                        if (tile) {
+                            InsertedObject* obj = tile->objectById(action.objectId);
+                            if (obj) {
+                                obj->position = action.objectOldPosition;
+                            }
+                            m_document->markTileDirty(action.objectTileCoord);
+                        }
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectAffinityChange:
+                // Undo affinity change = restore old affinity
+                {
+                    Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                     action.objectTileCoord.second);
+                    if (tile) {
+                        tile->updateObjectAffinity(action.objectId, action.objectOldAffinity);
+                        m_document->markTileDirty(action.objectTileCoord);
+                    }
+                }
+                break;
+                
+            default:
+                break;
+        }
+    } else if (action.type == PageUndoAction::TransformSelection) {
+        // Handle TransformSelection specially (compound action)
         // Step 1: Remove the added strokes (undo the add)
         for (const auto& seg : action.addedSegments) {
             Page* tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
@@ -6179,8 +6665,7 @@ void DocumentViewport::undoEdgeless()
                     m_document->markTileDirty(seg.tileCoord);
                     break;
                     
-                case PageUndoAction::TransformSelection:
-                    // Handled above
+                default:
                     break;
             }
         }
@@ -6201,8 +6686,105 @@ void DocumentViewport::redoEdgeless()
     
     EdgelessUndoAction action = m_edgelessRedoStack.pop();
     
-    // Handle TransformSelection specially (compound action)
-    if (action.type == PageUndoAction::TransformSelection) {
+    // Check if this is an object action (Phase O2.7)
+    bool isObjectAction = (action.type == PageUndoAction::ObjectInsert ||
+                           action.type == PageUndoAction::ObjectDelete ||
+                           action.type == PageUndoAction::ObjectMove ||
+                           action.type == PageUndoAction::ObjectAffinityChange);
+    
+    if (isObjectAction) {
+        // Object actions (Phase O2.7.3)
+        switch (action.type) {
+            case PageUndoAction::ObjectInsert:
+                // Redo insert = re-add the object from JSON
+                {
+                    Page* tile = m_document->getOrCreateTile(action.objectTileCoord.first,
+                                                             action.objectTileCoord.second);
+                    if (tile) {
+                        auto obj = InsertedObject::fromJson(action.objectData);
+                        if (obj) {
+                            // For ImageObject, load the image from assets
+                            if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
+                                ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+                                imgObj->loadImage(m_document->bundlePath());
+                            }
+                            m_document->updateMaxObjectExtent(obj.get());
+                            tile->addObject(std::move(obj));
+                            m_document->markTileDirty(action.objectTileCoord);
+                        }
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectDelete:
+                // Redo delete = remove the object again
+                {
+                    Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                     action.objectTileCoord.second);
+                    if (tile) {
+                        tile->removeObject(action.objectId);
+                        m_document->markTileDirty(action.objectTileCoord);
+                        m_document->removeTileIfEmpty(action.objectTileCoord.first,
+                                                      action.objectTileCoord.second);
+                    }
+                    m_document->recalculateMaxObjectExtent();
+                }
+                break;
+                
+            case PageUndoAction::ObjectMove:
+                // Redo move = apply new position (may involve cross-tile move)
+                {
+                    if (action.objectOldTile != action.objectNewTile) {
+                        // Cross-tile move: move object from old tile to new tile
+                        Page* oldTile = m_document->getTile(action.objectOldTile.first,
+                                                            action.objectOldTile.second);
+                        if (oldTile) {
+                            std::unique_ptr<InsertedObject> obj = oldTile->extractObject(action.objectId);
+                            if (obj) {
+                                obj->position = action.objectNewPosition;
+                                Page* newTile = m_document->getOrCreateTile(action.objectNewTile.first,
+                                                                            action.objectNewTile.second);
+                                if (newTile) {
+                                    newTile->addObject(std::move(obj));
+                                    m_document->markTileDirty(action.objectNewTile);
+                                }
+                                m_document->markTileDirty(action.objectOldTile);
+                                m_document->removeTileIfEmpty(action.objectOldTile.first,
+                                                              action.objectOldTile.second);
+                            }
+                        }
+                    } else {
+                        // Same-tile move: just apply new position
+                        Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                         action.objectTileCoord.second);
+                        if (tile) {
+                            InsertedObject* obj = tile->objectById(action.objectId);
+                            if (obj) {
+                                obj->position = action.objectNewPosition;
+                            }
+                            m_document->markTileDirty(action.objectTileCoord);
+                        }
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectAffinityChange:
+                // Redo affinity change = apply new affinity
+                {
+                    Page* tile = m_document->getTile(action.objectTileCoord.first,
+                                                     action.objectTileCoord.second);
+                    if (tile) {
+                        tile->updateObjectAffinity(action.objectId, action.objectNewAffinity);
+                        m_document->markTileDirty(action.objectTileCoord);
+                    }
+                }
+                break;
+                
+            default:
+                break;
+        }
+    } else if (action.type == PageUndoAction::TransformSelection) {
+        // Handle TransformSelection specially (compound action)
         // Step 1: Remove the original strokes again (redo the remove)
         for (const auto& seg : action.removedSegments) {
             Page* tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
@@ -6271,8 +6853,7 @@ void DocumentViewport::redoEdgeless()
                     m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
                     break;
                     
-                case PageUndoAction::TransformSelection:
-                    // Handled above
+                default:
                     break;
             }
         }
@@ -6323,54 +6904,108 @@ void DocumentViewport::undo()
     
     PageUndoAction action = m_undoStacks[pageIdx].pop();
     
-    // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
-    VectorLayer* layer = nullptr;
-    if (action.type == PageUndoAction::TransformSelection || 
-        action.type == PageUndoAction::RemoveMultiple) {
-        layer = page->layer(action.layerIndex);
-    } else {
-        layer = page->activeLayer();
-    }
-    if (!layer) return;
+    // Check if this is a stroke action (needs layer) or object action (works on page)
+    bool isStrokeAction = (action.type == PageUndoAction::AddStroke ||
+                           action.type == PageUndoAction::RemoveStroke ||
+                           action.type == PageUndoAction::RemoveMultiple ||
+                           action.type == PageUndoAction::TransformSelection);
     
-    switch (action.type) {
-        case PageUndoAction::AddStroke:
-            // Undo adding = remove the stroke(s)
-            if (!action.addedStrokes.isEmpty()) {
-                // Multiple strokes (paste or transform)
+    if (isStrokeAction) {
+        // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
+        VectorLayer* layer = nullptr;
+        if (action.type == PageUndoAction::TransformSelection || 
+            action.type == PageUndoAction::RemoveMultiple) {
+            layer = page->layer(action.layerIndex);
+        } else {
+            layer = page->activeLayer();
+        }
+        if (!layer) return;
+        
+        switch (action.type) {
+            case PageUndoAction::AddStroke:
+                // Undo adding = remove the stroke(s)
+                if (!action.addedStrokes.isEmpty()) {
+                    // Multiple strokes (paste or transform)
+                    for (const auto& s : action.addedStrokes) {
+                        layer->removeStroke(s.id);
+                    }
+                } else {
+                    // Single stroke
+                    layer->removeStroke(action.stroke.id);
+                }
+                break;
+                
+            case PageUndoAction::RemoveStroke:
+                // Undo removing = add the stroke back
+                layer->addStroke(action.stroke);
+                break;
+                
+            case PageUndoAction::RemoveMultiple:
+                // Undo removing multiple = add all strokes back
+                for (const auto& s : action.strokes) {
+                    layer->addStroke(s);
+                }
+                break;
+                
+            case PageUndoAction::TransformSelection:
+                // Undo transform: remove added strokes, restore removed strokes
                 for (const auto& s : action.addedStrokes) {
                     layer->removeStroke(s.id);
                 }
-            } else {
-                // Single stroke
-                layer->removeStroke(action.stroke.id);
-            }
-            break;
-            
-        case PageUndoAction::RemoveStroke:
-            // Undo removing = add the stroke back
-            layer->addStroke(action.stroke);
-            break;
-            
-        case PageUndoAction::RemoveMultiple:
-            // Undo removing multiple = add all strokes back
-            for (const auto& s : action.strokes) {
-                layer->addStroke(s);
-            }
-            break;
-            
-        case PageUndoAction::TransformSelection:
-            // Undo transform: remove added strokes, restore removed strokes
-            for (const auto& s : action.addedStrokes) {
-                layer->removeStroke(s.id);
-            }
-            for (const auto& s : action.removedStrokes) {
-                layer->addStroke(s);
-            }
-            break;
+                for (const auto& s : action.removedStrokes) {
+                    layer->addStroke(s);
+                }
+                break;
+                
+            default:
+                break;  // Handled below
+        }
+        
+        layer->invalidateStrokeCache();
+    } else {
+        // Object actions (Phase O2.7)
+        switch (action.type) {
+            case PageUndoAction::ObjectInsert:
+                // Undo insert = remove the object
+                page->removeObject(action.objectId);
+                m_document->recalculateMaxObjectExtent();
+                break;
+                
+            case PageUndoAction::ObjectDelete:
+                // Undo delete = restore the object from JSON
+                {
+                    auto obj = InsertedObject::fromJson(action.objectData);
+                    if (obj) {
+                        // For ImageObject, load the image from assets
+                        if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
+                            ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+                            imgObj->loadImage(m_document->bundlePath());
+                        }
+                        m_document->updateMaxObjectExtent(obj.get());
+                        page->addObject(std::move(obj));
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectMove:
+                // Undo move = restore old position
+                {
+                    InsertedObject* obj = page->objectById(action.objectId);
+                    if (obj) {
+                        obj->position = action.objectOldPosition;
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectAffinityChange:
+                // Undo affinity change = restore old affinity
+                page->updateObjectAffinity(action.objectId, action.objectOldAffinity);
+                break;
+                
+            default:
+                break;
+        }
     }
-    
-    layer->invalidateStrokeCache();
     
     // Push to redo stack
     m_redoStacks[pageIdx].push(action);
@@ -6401,54 +7036,108 @@ void DocumentViewport::redo()
     
     PageUndoAction action = m_redoStacks[pageIdx].pop();
     
-    // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
-    VectorLayer* layer = nullptr;
-    if (action.type == PageUndoAction::TransformSelection || 
-        action.type == PageUndoAction::RemoveMultiple) {
-        layer = page->layer(action.layerIndex);
-    } else {
-        layer = page->activeLayer();
-    }
-    if (!layer) return;
+    // Check if this is a stroke action (needs layer) or object action (works on page)
+    bool isStrokeAction = (action.type == PageUndoAction::AddStroke ||
+                           action.type == PageUndoAction::RemoveStroke ||
+                           action.type == PageUndoAction::RemoveMultiple ||
+                           action.type == PageUndoAction::TransformSelection);
     
-    switch (action.type) {
-        case PageUndoAction::AddStroke:
-            // Redo adding = add the stroke(s) again
-            if (!action.addedStrokes.isEmpty()) {
-                // Multiple strokes (paste or transform)
+    if (isStrokeAction) {
+        // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
+        VectorLayer* layer = nullptr;
+        if (action.type == PageUndoAction::TransformSelection || 
+            action.type == PageUndoAction::RemoveMultiple) {
+            layer = page->layer(action.layerIndex);
+        } else {
+            layer = page->activeLayer();
+        }
+        if (!layer) return;
+        
+        switch (action.type) {
+            case PageUndoAction::AddStroke:
+                // Redo adding = add the stroke(s) again
+                if (!action.addedStrokes.isEmpty()) {
+                    // Multiple strokes (paste or transform)
+                    for (const auto& s : action.addedStrokes) {
+                        layer->addStroke(s);
+                    }
+                } else {
+                    // Single stroke
+                    layer->addStroke(action.stroke);
+                }
+                break;
+                
+            case PageUndoAction::RemoveStroke:
+                // Redo removing = remove the stroke again
+                layer->removeStroke(action.stroke.id);
+                break;
+                
+            case PageUndoAction::RemoveMultiple:
+                // Redo removing multiple = remove all strokes again
+                for (const auto& s : action.strokes) {
+                    layer->removeStroke(s.id);
+                }
+                break;
+                
+            case PageUndoAction::TransformSelection:
+                // Redo transform: remove original strokes, add transformed strokes
+                for (const auto& s : action.removedStrokes) {
+                    layer->removeStroke(s.id);
+                }
                 for (const auto& s : action.addedStrokes) {
                     layer->addStroke(s);
                 }
-            } else {
-                // Single stroke
-                layer->addStroke(action.stroke);
-            }
-            break;
-            
-        case PageUndoAction::RemoveStroke:
-            // Redo removing = remove the stroke again
-            layer->removeStroke(action.stroke.id);
-            break;
-            
-        case PageUndoAction::RemoveMultiple:
-            // Redo removing multiple = remove all strokes again
-            for (const auto& s : action.strokes) {
-                layer->removeStroke(s.id);
-            }
-            break;
-            
-        case PageUndoAction::TransformSelection:
-            // Redo transform: remove original strokes, add transformed strokes
-            for (const auto& s : action.removedStrokes) {
-                layer->removeStroke(s.id);
-            }
-            for (const auto& s : action.addedStrokes) {
-                layer->addStroke(s);
-            }
-            break;
+                break;
+                
+            default:
+                break;  // Handled below
+        }
+        
+        layer->invalidateStrokeCache();
+    } else {
+        // Object actions (Phase O2.7)
+        switch (action.type) {
+            case PageUndoAction::ObjectInsert:
+                // Redo insert = re-add the object from JSON
+                {
+                    auto obj = InsertedObject::fromJson(action.objectData);
+                    if (obj) {
+                        // For ImageObject, load the image from assets
+                        if (obj->type() == "image" && !m_document->bundlePath().isEmpty()) {
+                            ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+                            imgObj->loadImage(m_document->bundlePath());
+                        }
+                        m_document->updateMaxObjectExtent(obj.get());
+                        page->addObject(std::move(obj));
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectDelete:
+                // Redo delete = remove the object again
+                page->removeObject(action.objectId);
+                m_document->recalculateMaxObjectExtent();
+                break;
+                
+            case PageUndoAction::ObjectMove:
+                // Redo move = apply new position
+                {
+                    InsertedObject* obj = page->objectById(action.objectId);
+                    if (obj) {
+                        obj->position = action.objectNewPosition;
+                    }
+                }
+                break;
+                
+            case PageUndoAction::ObjectAffinityChange:
+                // Redo affinity change = apply new affinity
+                page->updateObjectAffinity(action.objectId, action.objectNewAffinity);
+                break;
+                
+            default:
+                break;
+        }
     }
-    
-    layer->invalidateStrokeCache();
     
     // Push back to undo stack
     m_undoStacks[pageIdx].push(action);
@@ -6479,6 +7168,128 @@ bool DocumentViewport::canRedo() const
     // Paged mode: per-page redo
     return m_redoStacks.contains(m_currentPageIndex) && 
            !m_redoStacks[m_currentPageIndex].isEmpty();
+}
+
+// ===== Object Undo Helpers (Phase O2.7) =====
+
+void DocumentViewport::pushObjectInsertUndo(InsertedObject* obj, int pageIndex,
+                                            Document::TileCoord tileCoord)
+{
+    if (!obj) return;
+    
+    if (m_document && m_document->isEdgeless()) {
+        // Edgeless mode: use global stack
+        EdgelessUndoAction action;
+        action.type = PageUndoAction::ObjectInsert;
+        action.objectTileCoord = tileCoord;
+        action.objectData = obj->toJson();
+        action.objectId = obj->id;
+        
+        m_edgelessUndoStack.push(action);
+        m_edgelessRedoStack.clear();
+        
+        // Enforce max stack size
+        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+            m_edgelessUndoStack.removeFirst();
+        }
+    } else {
+        // Paged mode: use per-page stack
+        int idx = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
+        
+        PageUndoAction action;
+        action.type = PageUndoAction::ObjectInsert;
+        action.pageIndex = idx;
+        action.objectData = obj->toJson();
+        action.objectId = obj->id;
+        
+        m_undoStacks[idx].push(action);
+        m_redoStacks[idx].clear();
+    }
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+}
+
+void DocumentViewport::pushObjectDeleteUndo(InsertedObject* obj, int pageIndex,
+                                            Document::TileCoord tileCoord)
+{
+    if (!obj) return;
+    
+    if (m_document && m_document->isEdgeless()) {
+        // Edgeless mode: use global stack
+        EdgelessUndoAction action;
+        action.type = PageUndoAction::ObjectDelete;
+        action.objectTileCoord = tileCoord;
+        action.objectData = obj->toJson();
+        action.objectId = obj->id;
+        
+        m_edgelessUndoStack.push(action);
+        m_edgelessRedoStack.clear();
+        
+        // Enforce max stack size
+        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+            m_edgelessUndoStack.removeFirst();
+        }
+    } else {
+        // Paged mode: use per-page stack
+        int idx = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
+        
+        PageUndoAction action;
+        action.type = PageUndoAction::ObjectDelete;
+        action.pageIndex = idx;
+        action.objectData = obj->toJson();
+        action.objectId = obj->id;
+        
+        m_undoStacks[idx].push(action);
+        m_redoStacks[idx].clear();
+    }
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
+}
+
+void DocumentViewport::pushObjectMoveUndo(InsertedObject* obj, const QPointF& oldPos,
+                                          int pageIndex,
+                                          Document::TileCoord oldTile,
+                                          Document::TileCoord newTile)
+{
+    if (!obj) return;
+    
+    if (m_document && m_document->isEdgeless()) {
+        // Edgeless mode: use global stack
+        EdgelessUndoAction action;
+        action.type = PageUndoAction::ObjectMove;
+        action.objectId = obj->id;
+        action.objectOldPosition = oldPos;
+        action.objectNewPosition = obj->position;
+        action.objectOldTile = oldTile;
+        action.objectNewTile = newTile;
+        action.objectTileCoord = newTile;  // Current location
+        
+        m_edgelessUndoStack.push(action);
+        m_edgelessRedoStack.clear();
+        
+        // Enforce max stack size
+        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
+            m_edgelessUndoStack.removeFirst();
+        }
+    } else {
+        // Paged mode: use per-page stack
+        int idx = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
+        
+        PageUndoAction action;
+        action.type = PageUndoAction::ObjectMove;
+        action.pageIndex = idx;
+        action.objectId = obj->id;
+        action.objectOldPosition = oldPos;
+        action.objectNewPosition = obj->position;
+        
+        m_undoStacks[idx].push(action);
+        m_redoStacks[idx].clear();
+    }
+    
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(canRedo());
 }
 
 // ===== Benchmark (Task 2.6) =====
