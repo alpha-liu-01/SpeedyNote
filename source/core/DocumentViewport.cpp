@@ -1529,13 +1529,22 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         }
         
         // Z-order shortcuts (O2.8.2)
+        // Note: On most keyboards, Shift+[ = { and Shift+] = }
+        // Qt reports the character produced, not the physical key, so we need to check
+        // for both bracket keys (Ctrl+[/]) and brace keys (Ctrl+Shift produces {/})
         if (hasSelectedObjects()) {
             bool ctrl = event->modifiers() & Qt::ControlModifier;
             bool shift = event->modifiers() & Qt::ShiftModifier;
             
-            if (event->key() == Qt::Key_BracketRight && ctrl) {
-                if (shift) {
-                    // Ctrl+Shift+] → bring to front
+            qDebug() << "keyPressEvent: hasSelectedObjects, key =" << event->key() 
+                     << "ctrl =" << ctrl << "shift =" << shift
+                     << "BracketRight(93) BraceRight(125) BracketLeft(91) BraceLeft(123)";
+            
+            // Ctrl+] = bring forward, Ctrl+Shift+] (which produces }) = bring to front
+            if (ctrl && (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight)) {
+                qDebug() << "keyPressEvent: Bracket/BraceRight with ctrl detected!";
+                if (shift || event->key() == Qt::Key_BraceRight) {
+                    // Ctrl+Shift+] (or Ctrl+}) → bring to front
                     bringSelectedToFront();
                 } else {
                     // Ctrl+] → bring forward
@@ -1545,9 +1554,11 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
                 return;
             }
             
-            if (event->key() == Qt::Key_BracketLeft && ctrl) {
-                if (shift) {
-                    // Ctrl+Shift+[ → send to back
+            // Ctrl+[ = send backward, Ctrl+Shift+[ (which produces {) = send to back
+            if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft)) {
+                qDebug() << "keyPressEvent: Bracket/BraceLeft with ctrl detected!";
+                if (shift || event->key() == Qt::Key_BraceLeft) {
+                    // Ctrl+Shift+[ (or Ctrl+{) → send to back
                     sendSelectedToBack();
                 } else {
                     // Ctrl+[ → send backward
@@ -4514,10 +4525,18 @@ void DocumentViewport::pasteObjects()
 
 void DocumentViewport::bringSelectedToFront()
 {
-    if (!m_document || m_selectedObjects.isEmpty()) return;
+    qDebug() << "bringSelectedToFront: called, selectedObjects count =" << m_selectedObjects.size();
+    if (!m_document || m_selectedObjects.isEmpty()) {
+        qDebug() << "bringSelectedToFront: early return - document:" << (m_document != nullptr) 
+                 << "selectedObjects empty:" << m_selectedObjects.isEmpty();
+        return;
+    }
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
+        
+        qDebug() << "bringSelectedToFront: processing obj" << obj->id 
+                 << "current zOrder =" << obj->zOrder;
         
         // Find the page/tile containing this object
         Page* page = nullptr;
@@ -4537,21 +4556,32 @@ void DocumentViewport::bringSelectedToFront()
             page = m_document->page(m_currentPageIndex);
         }
         
-        if (!page) continue;
+        if (!page) {
+            qDebug() << "bringSelectedToFront: page not found for obj" << obj->id;
+            continue;
+        }
         
         // Find max zOrder among objects with same affinity
         int affinity = obj->getLayerAffinity();
         int maxZOrder = obj->zOrder;
         
+        qDebug() << "bringSelectedToFront: obj affinity =" << affinity 
+                 << "page has" << page->objects.size() << "objects";
+        
         for (const auto& otherObj : page->objects) {
             if (otherObj.get() != obj && otherObj->getLayerAffinity() == affinity) {
+                qDebug() << "  other obj" << otherObj->id << "zOrder =" << otherObj->zOrder;
                 maxZOrder = qMax(maxZOrder, otherObj->zOrder);
             }
         }
         
+        qDebug() << "bringSelectedToFront: maxZOrder found =" << maxZOrder;
+        
         // Set zOrder to max + 1
         if (obj->zOrder != maxZOrder + 1) {
+            int oldZOrder = obj->zOrder;
             obj->zOrder = maxZOrder + 1;
+            qDebug() << "bringSelectedToFront: changed zOrder from" << oldZOrder << "to" << obj->zOrder;
             page->rebuildAffinityMap();  // Rebuild since zOrder changed
             
             if (m_document->isEdgeless()) {
@@ -4559,6 +4589,8 @@ void DocumentViewport::bringSelectedToFront()
             } else {
                 m_document->markPageDirty(m_currentPageIndex);
             }
+        } else {
+            qDebug() << "bringSelectedToFront: zOrder unchanged (already at max+1)";
         }
     }
     

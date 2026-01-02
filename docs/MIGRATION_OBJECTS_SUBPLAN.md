@@ -2556,6 +2556,155 @@ void ImageObject::loadFromJson(const QJsonObject& obj)
 
 ---
 
+#### O2.BF.8: Object Move Undo Not Working ✅
+
+**Problem:** After inserting images and moving them, the undo/redo sequence did not restore the images to their moved positions. Instead, redo would restore images to their original insertion positions, ignoring all subsequent moves.
+
+**Symptoms:**
+- Insert image at position A
+- Move image to position B
+- Save document (position B saved correctly)
+- Undo multiple times
+- Redo → image appears at position A (original insert), NOT position B (moved)
+- After save/reload → images at correct position B
+
+**Root Cause:** The `pushObjectMoveUndo()` call was **commented out as a TODO** in `handlePointerRelease_ObjectSelect()`:
+```cpp
+// TODO O2.7: Create undo entry for move using m_objectOriginalPositions
+// pushObjectMoveUndo(m_objectOriginalPositions);
+```
+
+When objects were moved, no undo entry was created. The undo stack only had the original `ObjectInsert` actions with the insertion positions. On redo, the insert action restored the object at its insertion position, not the moved position.
+
+**Fix:** Implemented the object move undo in `handlePointerRelease_ObjectSelect()`:
+
+```cpp
+// O2.7/BF.8: Create undo entry for each moved object
+for (InsertedObject* obj : m_selectedObjects) {
+    if (!obj) continue;
+    
+    auto it = m_objectOriginalPositions.find(obj->id);
+    if (it == m_objectOriginalPositions.end()) continue;
+    
+    QPointF oldPos = it.value();
+    
+    // Only create undo if position actually changed
+    if (oldPos != obj->position) {
+        // For edgeless mode, track tile coordinates
+        Document::TileCoord oldTile = {0, 0};
+        Document::TileCoord newTile = {0, 0};
+        
+        if (m_document->isEdgeless()) {
+            // Find current tile containing object
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    newTile = coord;
+                    break;
+                }
+            }
+            oldTile = newTile;  // Cross-tile tracking deferred
+        }
+        
+        pushObjectMoveUndo(obj, oldPos, m_currentPageIndex, oldTile, newTile);
+    }
+}
+```
+
+**Key Implementation Details:**
+- `m_objectOriginalPositions` is a `QMap<QString, QPointF>` keyed by object ID
+- Original positions are stored when drag starts in `handlePointerPress_ObjectSelect()`
+- Only creates undo entry if position actually changed (avoids spurious entries from clicks)
+- For edgeless mode, tile coordinates tracked for cross-tile moves
+- For paged mode, tile coordinates not used (set to {0,0})
+
+**Undo/Redo Sequence Now Works Correctly:**
+1. Insert image at A → pushes `ObjectInsert` (position A)
+2. Move to B → pushes `ObjectMove` (oldPos=A, newPos=B)
+3. Ctrl+Z (undo move) → restores position A
+4. Ctrl+Z (undo insert) → removes image
+5. Ctrl+Y (redo insert) → adds image at position A
+6. Ctrl+Y (redo move) → moves image to position B ✓
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`:
+  - Implemented object move undo in `handlePointerRelease_ObjectSelect()`
+  - Added debug output to `pushObjectMoveUndo()` for testing
+- `source/objects/InsertedObject.cpp`:
+  - Added debug output to `loadFromJson()` for testing
+
+**Debug Output (kept for future testing):**
+```
+pushObjectMoveUndo: obj "xxx" oldPos = QPointF(259.5,-17) newPos = QPointF(24,32)
+InsertedObject::loadFromJson: loaded position = QPointF(24,32) size = QSizeF(297, 550) ...
+```
+
+---
+
+#### O2.BF.9: zOrder Shortcuts Not Working (Keyboard Layout Issue) ✅
+
+**Problem:** Pressing Ctrl+Shift+] to bring objects to front did nothing. The zOrder methods were implemented correctly but never called. Debug output showed the key press was detected but the shortcut matching failed.
+
+**Symptoms:**
+- Select object, press Ctrl+Shift+] - nothing happens
+- `bringSelectedToFront()` never called
+- Debug shows: `key = 125 ctrl = true shift = true BracketRight = Qt::Key_BracketRight`
+- Key code 125 doesn't match `Qt::Key_BracketRight` (which is 93)
+
+**Root Cause:** Qt reports the **character produced**, not the physical key pressed. On a US keyboard:
+- `]` (bracket right) has key code 93 (`Qt::Key_BracketRight`)
+- `}` (brace right) has key code 125 (`Qt::Key_BraceRight`)
+
+When pressing `Ctrl+Shift+]`:
+1. Physical key is `]`
+2. Shift modifier changes the character to `}`
+3. Qt reports key = 125 (`Qt::Key_BraceRight`), NOT key = 93
+4. Our code checked for `Qt::Key_BracketRight` (93) → no match
+
+Same issue for `[` (91) vs `{` (123).
+
+**Fix:** Check for BOTH the bracket keys (without shift) AND brace keys (with shift):
+
+```cpp
+// Note: On most keyboards, Shift+[ = { and Shift+] = }
+// Qt reports the character produced, not the physical key
+
+// Ctrl+] = bring forward, Ctrl+Shift+] (which produces }) = bring to front
+if (ctrl && (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight)) {
+    if (shift || event->key() == Qt::Key_BraceRight) {
+        bringSelectedToFront();   // Ctrl+Shift+] or Ctrl+}
+    } else {
+        bringSelectedForward();   // Ctrl+]
+    }
+    event->accept();
+    return;
+}
+
+// Ctrl+[ = send backward, Ctrl+Shift+[ (which produces {) = send to back  
+if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft)) {
+    if (shift || event->key() == Qt::Key_BraceLeft) {
+        sendSelectedToBack();     // Ctrl+Shift+[ or Ctrl+{
+    } else {
+        sendSelectedBackward();   // Ctrl+[
+    }
+    event->accept();
+    return;
+}
+```
+
+**Key Code Reference:**
+| Physical Key | Key Code | Qt Constant |
+|--------------|----------|-------------|
+| `[` | 91 | `Qt::Key_BracketLeft` |
+| `]` | 93 | `Qt::Key_BracketRight` |
+| `{` (Shift+[) | 123 | `Qt::Key_BraceLeft` |
+| `}` (Shift+]) | 125 | `Qt::Key_BraceRight` |
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`: Updated zOrder shortcut handling to check for both bracket and brace keys
+
+---
+
 ### O2.10: Testing & Verification
 
 **Tasks:**
@@ -2568,7 +2717,11 @@ void ImageObject::loadFromJson(const QJsonObject& obj)
 - [ ] Test: Ctrl+Z undoes insert (image disappears)
 - [ ] Test: Ctrl+Y redoes insert (image reappears) - **unsaved document**
 - [ ] Test: Ctrl+Y redoes insert (image reappears) - **saved document**
+- [ ] Test: Ctrl+Z/Y for object move (insert → move → undo all → redo all)
 - [ ] Test: zOrder shortcuts work correctly
+- [ ] Test: zOrder undo/redo (future)
+- [ ] Test: Object affinity change undo/redo (future)
+- [ ] Test: Object resize undo/redo (future, when resize implemented)
 - [ ] Test: Save and reload - inserted images persist (assets folder)
 - [ ] Test: Edgeless - object crossing tile boundary (drag to new tile)
 - [ ] Test: Paged lazy loading - objects on evicted pages persist
