@@ -530,6 +530,90 @@ public:
     int pageAtPoint(QPointF documentPt) const;
     
     /**
+     * @brief Find an inserted object at a point in document coordinates.
+     * @param docPoint Point in document coordinates.
+     * @return Pointer to the topmost object at the point, or nullptr if none.
+     * 
+     * Phase O2: For paged mode, checks the page containing the point.
+     * For edgeless mode, checks all loaded tiles.
+     * Objects are checked in reverse z-order (topmost first) via Page::objectAtPoint().
+     */
+    InsertedObject* objectAtPoint(const QPointF& docPoint) const;
+    
+    // ===== Object Selection API (Phase O2) =====
+    
+    /**
+     * @brief Select an object.
+     * @param obj The object to select.
+     * @param addToSelection If true, add to existing selection; if false, replace selection.
+     * 
+     * Emits objectSelectionChanged() if selection changes.
+     */
+    void selectObject(InsertedObject* obj, bool addToSelection = false);
+    
+    /**
+     * @brief Deselect a specific object.
+     * @param obj The object to deselect.
+     * 
+     * Emits objectSelectionChanged() if object was selected.
+     */
+    void deselectObject(InsertedObject* obj);
+    
+    /**
+     * @brief Deselect all objects.
+     * 
+     * Emits objectSelectionChanged() if any objects were selected.
+     */
+    void deselectAllObjects();
+    
+    /**
+     * @brief Move all selected objects by a delta.
+     * @param delta The offset to add to each object's position.
+     * 
+     * Phase O2.3.3: Moves objects and triggers viewport update.
+     * Does NOT mark pages dirty (caller handles that on drag end).
+     */
+    void moveSelectedObjects(const QPointF& delta);
+    
+    /**
+     * @brief Get the list of currently selected objects.
+     * @return List of selected object pointers (non-owning).
+     */
+    const QList<InsertedObject*>& selectedObjects() const { return m_selectedObjects; }
+    
+    /**
+     * @brief Check if any objects are selected.
+     * @return True if at least one object is selected.
+     */
+    bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
+    
+    /**
+     * @brief Paste handler for ObjectSelect tool.
+     * 
+     * Phase O2.4: Tool-aware paste behavior.
+     * Priority 1: System clipboard has image → insertImageFromClipboard()
+     * Priority 2: Internal object clipboard → pasteObjects() (O2.6)
+     * Does NOT fall back to lasso paste.
+     */
+    void pasteForObjectSelect();
+    
+    /**
+     * @brief Insert image from system clipboard as an ImageObject.
+     * 
+     * Phase O2.4.3: Creates ImageObject at viewport center, adds to current page/tile,
+     * saves to assets folder, creates undo entry, and selects the new object.
+     */
+    void insertImageFromClipboard();
+    
+    /**
+     * @brief Delete all currently selected objects.
+     * 
+     * Phase O2.5: Removes each selected object from its page/tile,
+     * creates undo entries, marks pages dirty, and clears selection.
+     */
+    void deleteSelectedObjects();
+    
+    /**
      * @brief Get the list of pages currently visible in the viewport.
      * @return Vector of page indices that intersect the viewport.
      */
@@ -560,6 +644,15 @@ public:
      * This is the inverse of viewportToDocument().
      */
     QPointF documentToViewport(QPointF docPt) const;
+    
+    /**
+     * @brief Get the center of the viewport in document coordinates.
+     * @return Center point in document coordinates.
+     * 
+     * Useful for centering new objects at the current view position.
+     * Phase O2.4.3: Used for image insertion from clipboard.
+     */
+    QPointF viewportCenterInDocument() const;
     
     /**
      * @brief Convert viewport pixel coordinates to page-local coordinates.
@@ -813,6 +906,14 @@ signals:
     void redoAvailableChanged(bool available);
     
     /**
+     * @brief Emitted when the object selection changes.
+     * 
+     * Phase O2: Notifies UI when objects are selected/deselected.
+     * Connect to this to update toolbar state, properties panel, etc.
+     */
+    void objectSelectionChanged();
+    
+    /**
      * @brief Emitted when horizontal scroll position changes.
      * @param fraction Scroll position as fraction (0.0 to 1.0).
      */
@@ -970,6 +1071,49 @@ private:
     bool m_skipSelectionRendering = false;   ///< Temp flag during snapshot capture
     
     void captureSelectionBackground();       ///< Capture background for transform
+    
+    // ===== Object Selection (Phase O2) =====
+    
+    /**
+     * @brief Currently selected inserted objects.
+     * 
+     * Non-owning pointers to objects in pages/tiles.
+     * Objects are owned by Page::objects vector.
+     * Selection is cleared when switching pages/tiles or when objects are deleted.
+     */
+    QList<InsertedObject*> m_selectedObjects;
+    
+    /**
+     * @brief Object currently under the cursor (for hover highlight).
+     * 
+     * Non-owning pointer, nullptr if no object is hovered.
+     * Updated on mouse move when ObjectSelect tool is active.
+     */
+    InsertedObject* m_hoveredObject = nullptr;
+    
+    /**
+     * @brief Whether we're currently dragging selected objects.
+     */
+    bool m_isDraggingObjects = false;
+    
+    /**
+     * @brief Viewport position where object drag started.
+     */
+    QPointF m_objectDragStartViewport;
+    
+    /**
+     * @brief Document position where object drag started.
+     */
+    QPointF m_objectDragStartDoc;
+    
+    /**
+     * @brief Original positions of objects before drag started.
+     * 
+     * Maps object ID to its position at drag start.
+     * Used to create undo entry when drag completes.
+     * Cleared when drag ends or is cancelled.
+     */
+    QMap<QString, QPointF> m_objectOriginalPositions;
     
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels
@@ -1328,6 +1472,49 @@ private:
      * @brief Clear the current lasso selection.
      */
     void clearLassoSelection();
+    
+    // ===== Object Selection Tool Handlers (Phase O2) =====
+    
+    /**
+     * @brief Handle pointer press for object selection tool.
+     * Hit tests for objects, handles selection with Shift modifier.
+     */
+    void handlePointerPress_ObjectSelect(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer move for object selection tool.
+     * Updates hover state and handles object dragging.
+     */
+    void handlePointerMove_ObjectSelect(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer release for object selection tool.
+     * Finalizes object drag operation.
+     */
+    void handlePointerRelease_ObjectSelect(const PointerEvent& pe);
+    
+    /**
+     * @brief Clear the current object selection.
+     */
+    void clearObjectSelection();
+    
+    /**
+     * @brief Relocate selected objects to correct tiles after movement (edgeless mode).
+     * 
+     * Phase O2.3.4: Called after drag ends to handle tile boundary crossing.
+     * For each selected object, checks if its position puts it in a different tile.
+     * If so, extracts from old tile and adds to new tile with adjusted position.
+     * 
+     * @return Number of objects that were relocated to different tiles.
+     */
+    int relocateObjectsToCorrectTiles();
+    
+    /**
+     * @brief Render object selection visual feedback.
+     * Draws bounding boxes, handles (for single selection), and hover highlight.
+     * @param painter The painter to render to.
+     */
+    void renderObjectSelection(QPainter& painter);
     
     /**
      * @brief Finalize lasso selection after path is complete.

@@ -2016,6 +2016,13 @@ void MainWindow::updateToolButtonStates() {
         case ToolType::Highlighter:
             // Future tool
             break;
+        case ToolType::ObjectSelect:
+            // Phase O2: Object selection tool - uses insertPictureButton (O2.9)
+            if (insertPictureButton) {
+                insertPictureButton->setProperty("selected", true);
+                updateButtonIcon(insertPictureButton, "background");
+            }
+            break;
     }
     
     // Force style update
@@ -4993,6 +5000,9 @@ void MainWindow::updateDialDisplay() {
                     case ToolType::Lasso:
                         toolName = tr("Lasso");
                         break;
+                    case ToolType::ObjectSelect:
+                        toolName = tr("Object");
+                        break;
             }
                 dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(vp->penThickness(), 'f', 1))));
             dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
@@ -5025,6 +5035,10 @@ void MainWindow::updateDialDisplay() {
                 case ToolType::Lasso:
                     dialDisplay->setText(tr("\n\n\nLasso"));
                     dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    break;
+                case ToolType::ObjectSelect:
+                    dialDisplay->setText(tr("\n\n\nObject"));
+                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/background_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                     break;
             }
             break;

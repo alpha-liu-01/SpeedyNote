@@ -272,6 +272,36 @@ bool Page::removeObject(const QString& id)
     return false;
 }
 
+std::unique_ptr<InsertedObject> Page::extractObject(const QString& id)
+{
+    for (size_t i = 0; i < objects.size(); ++i) {
+        if (objects[i]->id == id) {
+            // Remove from affinity map first
+            InsertedObject* obj = objects[i].get();
+            int affinity = obj->getLayerAffinity();
+            
+            auto it = objectsByAffinity.find(affinity);
+            if (it != objectsByAffinity.end()) {
+                auto& group = it->second;
+                group.erase(
+                    std::remove(group.begin(), group.end(), obj),
+                    group.end()
+                );
+                if (group.empty()) {
+                    objectsByAffinity.erase(it);
+                }
+            }
+            
+            // Extract from objects vector (move ownership out)
+            std::unique_ptr<InsertedObject> extracted = std::move(objects[i]);
+            objects.erase(objects.begin() + i);
+            modified = true;
+            return extracted;
+        }
+    }
+    return nullptr;
+}
+
 InsertedObject* Page::objectAtPoint(const QPointF& pt)
 {
     // Check in reverse order (topmost first by z-order)

@@ -213,6 +213,16 @@ public:
     bool removeObject(const QString& id);
     
     /**
+     * @brief Extract an object by ID (removes from page but returns ownership).
+     * @param id The object ID to extract.
+     * @return The extracted object, or nullptr if not found.
+     * 
+     * Phase O2.3.4: Used for moving objects between tiles in edgeless mode.
+     * Unlike removeObject(), this returns the object instead of destroying it.
+     */
+    std::unique_ptr<InsertedObject> extractObject(const QString& id);
+    
+    /**
      * @brief Find an object at a given point.
      * @param pt Point in page coordinates.
      * @return Pointer to topmost object containing the point, or nullptr.

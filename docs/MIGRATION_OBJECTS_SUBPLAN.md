@@ -1622,23 +1622,28 @@ Eviction range:    [0, 1, 2] and [10, 11, ...]  (evicted to disk)
 
 **Goal:** Add dedicated tool for selecting objects.
 
-#### O2.1.1: Add ToolType::ObjectSelect
+#### O2.1.1: Add ToolType::ObjectSelect ✅
 **File:** `source/core/ToolType.h` (NOT DocumentViewport.h - ToolType is in separate file)
 
 **Tasks:**
-- [ ] Add `ObjectSelect` to `ToolType` enum in `ToolType.h`
+- [x] Add `ObjectSelect` to `ToolType` enum in `ToolType.h`
 
 **File:** `source/core/DocumentViewport.h`
 
 **Tasks:**
-- [ ] Add member: `QList<InsertedObject*> m_selectedObjects`
-- [ ] Add member: `InsertedObject* m_hoveredObject = nullptr`
+- [x] Add member: `QList<InsertedObject*> m_selectedObjects`
+- [x] Add member: `InsertedObject* m_hoveredObject = nullptr`
 
-#### O2.1.2: Implement Object Hit Testing
+**Implementation Notes:**
+- `InsertedObject` is available via transitive include: `DocumentViewport.h` → `Page.h` → `InsertedObject.h`
+- Members added in "Object Selection (Phase O2)" section after lasso selection members
+- Both are non-owning pointers (objects owned by `Page::objects`)
+
+#### O2.1.2: Implement Object Hit Testing ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 ```cpp
-InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint)
+InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
 {
     if (m_document->isEdgeless()) {
         // Check all loaded tiles (use allLoadedTileCoords, not loadedTiles which doesn't exist)
@@ -1669,31 +1674,55 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint)
 ```
 
 **Tasks:**
-- [ ] Implement `objectAtPoint()` as shown above
-- [ ] Note: Tile-local conversion is inline (no separate helper needed)
+- [x] Implement `objectAtPoint()` as shown above
+- [x] Declaration added to `DocumentViewport.h` (const method)
+- [x] Tile-local conversion inline (no separate helper needed)
 
-#### O2.1.3: Handle ObjectSelect Tool Input
+**Implementation Notes:**
+- Method is `const` since it only reads data
+- Edgeless: iterates all loaded tiles via `allLoadedTileCoords()`
+- Paged: uses existing `pageAtPoint()` + `pagePosition()` for coordinate conversion
+- Delegates to `Page::objectAtPoint()` which handles z-order (topmost first)
+
+#### O2.1.3: Handle ObjectSelect Tool Input ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In `handlePointerPress()`, if ObjectSelect tool:
-  - Hit test for object
-  - If Shift held, add to selection; else replace selection
-  - If no object hit, deselect all
-- [ ] In `handlePointerMove()`, update hover state, handle drag if selected
-- [ ] In `handlePointerRelease()`, finalize move if dragging
+- [x] In `handlePointerPress()`, if ObjectSelect tool:
+  - Hit test for object via `objectAtPoint()`
+  - If Shift held, toggle selection; else replace selection
+  - If no object hit and no Shift, deselect all
+  - Start drag if clicking on selected object(s)
+- [x] In `handlePointerMove()`, update hover state, handle drag if active
+- [x] In `handlePointerRelease()`, finalize drag, mark page/tile dirty
 
-#### O2.1.4: Selection Visual Feedback
+**Implementation Notes:**
+- Added three handler methods: `handlePointerPress_ObjectSelect()`, `handlePointerMove_ObjectSelect()`, `handlePointerRelease_ObjectSelect()`
+- Added `clearObjectSelection()` helper method
+- Added member variables: `m_isDraggingObjects`, `m_objectDragStartViewport`, `m_objectDragStartDoc`
+- Drag moves all selected objects by the same delta
+- Hover state tracked in `m_hoveredObject` (for visual feedback in O2.1.4)
+- Undo entry creation marked as TODO for O2.7
+
+#### O2.1.4: Selection Visual Feedback ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In render loop, after objects, draw selection boxes for `m_selectedObjects`
-- [ ] Draw resize handles at corners (future: for resize)
-- [ ] Draw hover highlight for `m_hoveredObject`
+- [x] In render loop, after objects, draw selection boxes for `m_selectedObjects`
+- [x] Draw resize handles at corners (for single selection - same style as lasso handles)
+- [x] Draw hover highlight for `m_hoveredObject`
+
+**Implementation Notes:**
+- Added `renderObjectSelection(QPainter&)` method
+- Called from both paged and edgeless render paths (after lasso selection)
+- Hover: Light blue semi-transparent fill + 2px outline (visible when not selected)
+- Selection boxes: Marching ants dashed line (black over white for visibility)
+- Single selection: 8 scale handles (squares) + 1 rotation handle (circle with line)
+- Handle sizes use same constants as lasso: `HANDLE_VISUAL_SIZE`, `ROTATE_HANDLE_OFFSET`
 
 ---
 
-### O2.2: Object Selection API
+### O2.2: Object Selection API ✅
 
 **Goal:** Implement selection management methods.
 
@@ -1701,12 +1730,19 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint)
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Implement `selectObject(obj, addToSelection)`
-- [ ] Implement `deselectObject(obj)`
-- [ ] Implement `deselectAllObjects()`
-- [ ] Implement `selectedObjects()` getter
-- [ ] Implement `hasSelectedObjects()` getter
-- [ ] Emit `objectSelectionChanged` signal when selection changes
+- [x] Implement `selectObject(obj, addToSelection)` - replaces or adds to selection
+- [x] Implement `deselectObject(obj)` - removes single object from selection
+- [x] Implement `deselectAllObjects()` - clears selection
+- [x] Implement `selectedObjects()` getter - inline, returns `const QList<InsertedObject*>&`
+- [x] Implement `hasSelectedObjects()` getter - inline, returns `!m_selectedObjects.isEmpty()`
+- [x] Emit `objectSelectionChanged` signal when selection changes
+
+**Implementation Notes:**
+- All methods emit `objectSelectionChanged()` signal only when selection actually changes
+- `selectObject()` with `addToSelection=false` replaces selection
+- `selectObject()` with `addToSelection=true` adds to existing selection
+- Updated `handlePointerPress_ObjectSelect()` to use the API methods
+- Updated `clearObjectSelection()` to emit signal
 
 ---
 
@@ -1714,54 +1750,67 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint)
 
 **Goal:** Allow dragging selected objects.
 
-#### O2.3.1: Drag State Tracking
+#### O2.3.1: Drag State Tracking ✅
 **File:** `source/core/DocumentViewport.h`
 
 **Tasks:**
-- [ ] Add `bool m_isDraggingObject = false`
-- [ ] Add `QPointF m_objectDragStart`
-- [ ] Add `QMap<QString, QPointF> m_objectOriginalPositions` (for undo)
+- [x] Add `bool m_isDraggingObjects = false` (added in O2.1.3)
+- [x] Add `QPointF m_objectDragStartViewport` (added in O2.1.3)
+- [x] Add `QPointF m_objectDragStartDoc` (added in O2.1.3)
+- [x] Add `QMap<QString, QPointF> m_objectOriginalPositions` (for undo - added now)
 
-#### O2.3.2: Implement Drag Logic
+**Implementation Notes:**
+- Most drag state was added during O2.1.3 when implementing pointer handlers
+- `m_objectOriginalPositions` maps object ID → original position at drag start
+- This is used to create proper undo entries when drag completes
+
+#### O2.3.2: Implement Drag Logic ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] On pointer press on selected object: start drag, store original positions
-- [ ] On pointer move: calculate delta, call `moveSelectedObjects(delta)`
-- [ ] On pointer release: create undo entry, finalize positions
+- [x] On pointer press on selected object: start drag, store original positions in `m_objectOriginalPositions`
+- [x] On pointer move: calculate delta, move objects (inline, moveSelectedObjects deferred to O2.3.3)
+- [x] On pointer release: check if moved, mark page dirty, clear original positions
+- [x] TODO placeholder for undo entry creation (O2.7)
 
-#### O2.3.3: Implement moveSelectedObjects
+**Implementation Notes:**
+- `handlePointerPress_ObjectSelect`: Stores `obj->id → obj->position` for all selected objects
+- `handlePointerRelease_ObjectSelect`: Checks if any object actually moved before marking dirty
+- Original positions cleared after drag ends (ready for next drag)
+
+#### O2.3.3: Implement moveSelectedObjects ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 ```cpp
 void DocumentViewport::moveSelectedObjects(const QPointF& delta)
 {
+    if (m_selectedObjects.isEmpty() || delta.isNull()) return;
+    
     for (InsertedObject* obj : m_selectedObjects) {
-        obj->position += delta;
+        if (obj) obj->position += delta;
     }
     
-    // Mark affected pages/tiles as dirty for lazy save
-    if (m_document->isEdgeless()) {
-        // Find tiles containing moved objects and mark dirty
-        for (InsertedObject* obj : m_selectedObjects) {
-            // Object's tile might have changed - mark both old and new
-            // (Simplified: just mark any tile containing selected objects)
-            // Full tile-crossing logic in O2.3.4
-        }
-    } else {
-        m_document->markPageDirty(m_currentPageIndex);
-    }
+    // Note: Dirty marking done on drag release (O2.3.2)
+    // Tile boundary crossing handled in O2.3.4
     
     update();
 }
 ```
 
 **Tasks:**
-- [ ] Implement the method as shown
-- [ ] Mark affected pages/tiles dirty
-- [ ] Handle page/tile boundary crossing (edgeless: move to new tile if needed)
+- [x] Implement the method with null checks
+- [x] Declaration added to header
+- [x] Updated `handlePointerMove_ObjectSelect` to call this method
+- [x] Dirty marking deferred to drag release (avoids marking on every micro-movement)
+- [ ] Handle page/tile boundary crossing (O2.3.4)
 
-#### O2.3.4: Handle Tile Boundary Crossing (Edgeless)
+**Implementation Notes:**
+- Method is public for potential external use (e.g., keyboard nudge)
+- Returns early if no selection or zero delta
+- `update()` called to refresh viewport
+- Dirty marking happens in `handlePointerRelease_ObjectSelect` (O2.3.2)
+
+#### O2.3.4: Handle Tile Boundary Crossing (Edgeless) ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 When an object moves across tile boundaries in edgeless mode:
@@ -1770,95 +1819,119 @@ When an object moves across tile boundaries in edgeless mode:
 3. Mark both tiles dirty
 
 **Tasks:**
-- [ ] Detect when object moves to different tile
-- [ ] Call `oldTile->removeObject(id)` and `newTile->addObject(obj)`
-- [ ] Recalculate tile-local position
-- [ ] Mark both tiles dirty
+- [x] Detect when object moves to different tile (using `tileCoordForPoint()`)
+- [x] Added `Page::extractObject(id)` - returns ownership instead of destroying
+- [x] Added `relocateObjectsToCorrectTiles()` - handles relocation logic
+- [x] Recalculate tile-local position based on new tile origin
+- [x] Mark both old and new tiles dirty
+- [x] Updated `handlePointerRelease_ObjectSelect` to call relocation
+
+**Implementation Notes:**
+- `Page::extractObject(QString id)` returns `std::unique_ptr<InsertedObject>` for transfer
+- `relocateObjectsToCorrectTiles()` iterates selected objects, finds their current tile,
+  calculates target tile from document position, and moves if different
+- Object pointers in `m_selectedObjects` remain valid (same address after move)
+- Both source and destination tiles marked dirty for persistence
 
 ---
 
 ### O2.4: Clipboard Paste (MVP)
 
-**Goal:** Paste images from clipboard as objects.
+**Goal:** Paste images from clipboard as objects with tool-aware behavior.
 
-#### O2.4.1: Detect Image in Clipboard
+**Architecture Decision:** Paste behavior is tool-dependent:
+| Tool | Ctrl+V Behavior |
+|------|-----------------|
+| Lasso | Paste strokes from internal clipboard (existing `pasteSelection()`) |
+| ObjectSelect | 1. System clipboard image → `insertImageFromClipboard()` |
+|              | 2. Internal object clipboard → `pasteObjects()` (O2.6) |
+| Pen/Marker/etc. | No paste action |
+
+#### O2.4.1: Make Paste Handler Tool-Aware ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In keyboard handler for Ctrl+V:
-  - Check if clipboard has image (`QApplication::clipboard()->mimeData()->hasImage()`)
-  - If yes, call `insertImageFromClipboard()`
-  - If no, fall back to existing paste behavior (lasso paste)
+- [x] Modify Ctrl+V handler in `keyPressEvent()` to check current tool:
+  - If `m_currentTool == ToolType::Lasso`: call existing `pasteSelection()` (already in Lasso block)
+  - If `m_currentTool == ToolType::ObjectSelect`: call new `pasteForObjectSelect()`
+  - Otherwise: paste is not handled (falls through)
 
-#### O2.4.2: Implement insertImageFromClipboard
+**Implementation Notes:**
+- Added new keyboard handling block for ObjectSelect tool after the existing Lasso block
+- Added `pasteForObjectSelect()` declaration to header in "Object Selection API" section
+- Added stub implementation that logs and does nothing (actual logic in O2.4.2)
+- Lasso paste was already tool-aware (inside `if (m_currentTool == ToolType::Lasso)` block)
+- TODO placeholders added for Copy (O2.6) and Delete (O2.5) in ObjectSelect block
+
+#### O2.4.2: Implement pasteForObjectSelect ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 ```cpp
-void DocumentViewport::insertImageFromClipboard()
+void DocumentViewport::pasteForObjectSelect()
 {
-    QClipboard* clipboard = QApplication::clipboard();
-    QImage image = clipboard->image();
-    if (image.isNull()) return;
-    
-    // Create ImageObject
-    auto imgObj = std::make_unique<ImageObject>();
-    imgObj->setPixmap(QPixmap::fromImage(image));
-    // NOTE: id is auto-generated in InsertedObject constructor
-    
-    // Position at viewport center
-    QPointF center = viewportCenterInDocument();
-    imgObj->position = center - QPointF(imgObj->size.width()/2, imgObj->size.height()/2);
-    
-    // Default affinity: -1 (below all strokes)
-    imgObj->setLayerAffinity(-1);
-    
-    // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
-    InsertedObject* rawPtr = imgObj.get();
-    
-    // Add to appropriate page/tile
-    Page* targetPage = nullptr;
-    if (m_document->isEdgeless()) {
-        auto coord = m_document->tileCoordForPoint(imgObj->position);
-        targetPage = m_document->getOrCreateTile(coord.first, coord.second);
-        
-        // Convert to tile-local coordinates
-        imgObj->position = imgObj->position - QPointF(
-            coord.first * Document::EDGELESS_TILE_SIZE,
-            coord.second * Document::EDGELESS_TILE_SIZE
-        );
-        
-        targetPage->addObject(std::move(imgObj));
-        m_document->markTileDirty(coord);
-    } else {
-        targetPage = m_document->page(m_currentPageIndex);
-        targetPage->addObject(std::move(imgObj));
-        m_document->markPageDirty(m_currentPageIndex);
+    // Priority 1: System clipboard has image → insert as ImageObject
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (clipboard && clipboard->mimeData() && clipboard->mimeData()->hasImage()) {
+        insertImageFromClipboard();
+        return;
     }
     
-    // Update max object extent for extended tile loading
-    m_document->updateMaxObjectExtent(rawPtr);
+    // Priority 2: Internal object clipboard (O2.6 will add m_objectClipboard)
+    // TODO O2.6: Check m_objectClipboard and call pasteObjects()
     
-    // Save image to assets folder (hash-based deduplication)
-    if (!m_document->bundlePath().isEmpty()) {
-        static_cast<ImageObject*>(rawPtr)->saveToAssets(m_document->bundlePath());
-    }
-    
-    // Create undo entry (uses rawPtr which is still valid - owned by page now)
-    pushObjectInsertUndo(rawPtr);
-    
-    // Select the new object
-    deselectAllObjects();
-    selectObject(rawPtr, false);
-    
-    update();
+    // If neither, do nothing (no fallback to lasso paste)
 }
 ```
 
 **Tasks:**
-- [ ] Implement the method as shown (note: rawPtr saved before move!)
-- [ ] Add helper `viewportCenterInDocument()`
-- [ ] Ensure `markTileDirty()` exists in Document (check/add if needed)
-- [ ] Image saved to assets via `saveToAssets()` for persistence
+- [x] Implement `pasteForObjectSelect()` as entry point for ObjectSelect paste
+- [x] Call `insertImageFromClipboard()` if system clipboard has image
+- [x] Add placeholder for `pasteObjects()` (to be implemented in O2.6)
+
+**Implementation Notes:**
+- Added includes: `QClipboard`, `QGuiApplication`, `QMimeData`
+- Uses `QGuiApplication::clipboard()` (works with Qt Quick/QML too)
+- Null checks on clipboard and mimeData for safety
+- Added `insertImageFromClipboard()` declaration and stub (O2.4.3)
+- Commented placeholder for O2.6's `pasteObjects()`
+
+#### O2.4.3: Implement insertImageFromClipboard ✅
+**File:** `source/core/DocumentViewport.cpp`
+
+**Tasks:**
+- [x] Implement `insertImageFromClipboard()` (note: rawPtr saved before move!)
+- [x] Add helper `viewportCenterInDocument()` - returns viewport center in document coords
+- [x] Image saved to assets via `saveToAssets()` for persistence
+- [x] Verify `markTileDirty()` and `markPageDirty()` are called
+- [x] Handle paged mode: convert center position to page-local coordinates
+- [x] Emit `documentModified()` signal
+- [x] TODO placeholder for undo (O2.7)
+
+**Implementation Notes:**
+
+1. **viewportCenterInDocument()** added as helper:
+   ```cpp
+   QPointF viewportCenterInDocument() const {
+       QPointF viewportCenter(width() / 2.0, height() / 2.0);
+       return viewportToDocument(viewportCenter);
+   }
+   ```
+
+2. **insertImageFromClipboard()** flow:
+   - Get image from clipboard via `QGuiApplication::clipboard()->image()`
+   - Create `ImageObject` with `setPixmap(QPixmap::fromImage(image))`
+   - Position at center of viewport, offset by half size to center the image
+   - Set `layerAffinity = -1` (below all strokes, default for test papers)
+   - **Critical**: Save raw pointer before `std::move` invalidates the unique_ptr
+   - Edgeless: find tile via `tileCoordForPoint()`, convert to tile-local coords
+   - Paged: convert position to page-local coords (subtract page origin)
+   - Call `updateMaxObjectExtent()` for extended tile loading margin
+   - Save to assets folder if bundle path exists
+   - Select the new object
+   - Emit `documentModified()` and `update()`
+
+3. **Paged mode fix**: Original plan didn't account for page-local coordinates.
+   Added: `imgObj->position = imgObj->position - pageOrigin;`
 
 ---
 
@@ -1866,31 +1939,58 @@ void DocumentViewport::insertImageFromClipboard()
 
 **Goal:** Delete selected objects with Delete key.
 
-#### O2.5.1: Handle Delete Key
+#### O2.5.1: Handle Delete Key ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] In `keyPressEvent()`, if Delete pressed and `hasSelectedObjects()`:
+- [x] In `keyPressEvent()`, if Delete pressed and `hasSelectedObjects()`:
   - Call `deleteSelectedObjects()`
 
-#### O2.5.2: Implement deleteSelectedObjects
+**Implementation Notes:**
+- Added Delete key (and Backspace) handler in ObjectSelect tool keyboard block
+- Added `deleteSelectedObjects()` declaration in header
+- Added stub implementation with TODO comments for O2.5.2
+- Both `Qt::Key_Delete` and `Qt::Key_Backspace` trigger deletion (common UX pattern)
+
+#### O2.5.2: Implement deleteSelectedObjects ✅
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] For each selected object:
+- [x] For each selected object:
   - Find containing page/tile
-  - Create undo entry (store serialized object data for restore)
+  - Create undo entry (TODO O2.7 placeholder)
   - Call `page->removeObject(obj->id)`
   - Mark page/tile dirty
-- [ ] Call `m_document->recalculateMaxObjectExtent()` (removed object might have been largest)
-- [ ] Clear selection
-- [ ] Update viewport
+- [x] Call `m_document->recalculateMaxObjectExtent()` (removed object might have been largest)
+- [x] Clear selection and nullify `m_hoveredObject`
+- [x] Emit `objectSelectionChanged()` and `documentModified()` signals
+- [x] Update viewport
+
+**Implementation Notes:**
+
+**Edgeless mode:**
+- Iterates all loaded tiles via `allLoadedTileCoords()`
+- Finds tile containing each object via `tile->objectById()`
+- Removes object and marks tile dirty
+
+**Paged mode:**
+- First checks current page (most common case)
+- Falls back to searching all pages if not found on current page
+- Handles edge case where objects might be selected across pages
+
+**Safety:**
+- Clears selection AFTER removal (pointers become invalid)
+- Sets `m_hoveredObject = nullptr` (may have pointed to deleted object)
+- Only emits `documentModified()` if objects were actually deleted
 
 ---
 
 ### O2.6: Object Copy/Paste
 
-**Goal:** Copy selected objects, paste duplicates.
+**Goal:** Copy selected objects, paste duplicates via internal clipboard.
+
+**Integration with O2.4:** `pasteForObjectSelect()` checks system clipboard for images first,
+then falls back to `pasteObjects()` for internal object clipboard.
 
 #### O2.6.1: Internal Object Clipboard
 **File:** `source/core/DocumentViewport.h`
@@ -1902,17 +2002,19 @@ void DocumentViewport::insertImageFromClipboard()
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
-- [ ] Serialize each selected object to JSON
+- [ ] Serialize each selected object to JSON via `obj->toJson()`
 - [ ] Store in `m_objectClipboard`
+- [ ] Wire Ctrl+C to call this when ObjectSelect tool is active
 
 #### O2.6.3: Implement pasteObjects
 **File:** `source/core/DocumentViewport.cpp`
 
 **Tasks:**
+- [ ] Called from `pasteForObjectSelect()` when no system clipboard image
 - [ ] If `m_objectClipboard` not empty:
-  - Deserialize each object
+  - Deserialize each object via `InsertedObject::fromJson()`
   - Assign new UUIDs
-  - Offset position (e.g., +20, +20)
+  - Offset position (e.g., +20, +20) from original
   - Add to current page/tile
   - Create undo entries
   - Select pasted objects

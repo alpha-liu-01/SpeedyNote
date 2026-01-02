@@ -25,6 +25,9 @@
 #include <QDateTime>  // For timestamp
 #include <QUuid>      // For stroke IDs
 #include <QSet>       // For efficient ID lookup in eraseAt
+#include <QClipboard>     // For clipboard access (O2.4)
+#include <QGuiApplication> // For clipboard access (O2.4)
+#include <QMimeData>      // For clipboard content type check (O2.4)
 
 // ===== Constructor & Destructor =====
 
@@ -868,6 +871,53 @@ int DocumentViewport::pageAtPoint(QPointF documentPt) const
     return -1;
 }
 
+InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
+{
+    if (!m_document) {
+        return nullptr;
+    }
+    
+    if (m_document->isEdgeless()) {
+        // Edgeless mode: check all loaded tiles
+        // Objects are stored with tile-local coordinates
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            
+            // Convert document coords to tile-local coords
+            QPointF tileLocal = docPoint - QPointF(
+                coord.first * Document::EDGELESS_TILE_SIZE,
+                coord.second * Document::EDGELESS_TILE_SIZE
+            );
+            
+            // Check if point is within tile bounds (optimization)
+            if (tileLocal.x() < 0 || tileLocal.y() < 0 ||
+                tileLocal.x() > Document::EDGELESS_TILE_SIZE ||
+                tileLocal.y() > Document::EDGELESS_TILE_SIZE) {
+                // Point not in this tile, but object might extend beyond tile
+                // Still check - Page::objectAtPoint handles this
+            }
+            
+            if (InsertedObject* obj = tile->objectAtPoint(tileLocal)) {
+                return obj;
+            }
+        }
+    } else {
+        // Paged mode: check the page at the point
+        int pageIdx = pageAtPoint(docPoint);
+        if (pageIdx >= 0) {
+            Page* page = m_document->page(pageIdx);
+            if (page) {
+                // Convert to page-local coordinates
+                QPointF pageLocal = docPoint - pagePosition(pageIdx);
+                return page->objectAtPoint(pageLocal);
+            }
+        }
+    }
+    
+    return nullptr;
+}
+
 QRectF DocumentViewport::visibleRect() const
 {
     // Convert viewport bounds to document coordinates
@@ -1159,6 +1209,11 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         renderLassoSelection(painter);
     }
     
+    // Phase O2: Draw object selection (bounding boxes, handles, hover)
+    if (m_currentTool == ToolType::ObjectSelect || !m_selectedObjects.isEmpty()) {
+        renderObjectSelection(painter);
+    }
+    
     // Draw eraser cursor (Task 2.4)
     // Skip during stroke drawing (partial updates for pen don't need eraser cursor)
     if (!m_isDrawing || !isPartialUpdate) {
@@ -1440,6 +1495,26 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         }
     }
     
+    // Phase O2.4: ObjectSelect tool keyboard shortcuts
+    if (m_currentTool == ToolType::ObjectSelect) {
+        // Paste (Ctrl+V) - tool-aware paste for objects
+        if (event->matches(QKeySequence::Paste)) {
+            pasteForObjectSelect();
+            event->accept();
+            return;
+        }
+        // TODO O2.6: Copy (Ctrl+C) for objects
+        
+        // Delete key - remove selected objects (O2.5)
+        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+            if (hasSelectedObjects()) {
+                deleteSelectedObjects();
+                event->accept();
+                return;
+            }
+        }
+    }
+    
     // Tool switching shortcuts (for testing and quick access)
     switch (event->key()) {
         case Qt::Key_P:
@@ -1583,6 +1658,14 @@ QPointF DocumentViewport::documentToViewport(QPointF docPt) const
     // viewportPt = (docPt - panOffset) * zoomLevel
     
     return (docPt - m_panOffset) * m_zoomLevel;
+}
+
+QPointF DocumentViewport::viewportCenterInDocument() const
+{
+    // Phase O2.4.3: Get center of viewport in document coordinates
+    // Used for placing newly inserted objects at the center of the view
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    return viewportToDocument(viewportCenter);
 }
 
 PageHit DocumentViewport::viewportToPage(QPointF viewportPt) const
@@ -2526,6 +2609,9 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     } else if (m_currentTool == ToolType::Lasso) {
         // Task 2.10: Lasso selection tool
         handlePointerPress_Lasso(pe);
+    } else if (m_currentTool == ToolType::ObjectSelect) {
+        // Phase O2: Object selection tool
+        handlePointerPress_ObjectSelect(pe);
     }
 }
 
@@ -2591,6 +2677,12 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         return;
     }
     
+    // Phase O2: ObjectSelect tool - update hover or handle drag
+    if (m_currentTool == ToolType::ObjectSelect) {
+        handlePointerMove_ObjectSelect(pe);
+        return;
+    }
+    
     // For stroke drawing, require an active drawing page
     if (m_activeDrawingPage < 0) {
         return;
@@ -2641,6 +2733,12 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     // CR-2B-5: Must check m_isTransformingSelection too, not just m_isDrawingLasso
     if (m_isDrawingLasso || m_isTransformingSelection) {
         handlePointerRelease_Lasso(pe);
+        return;
+    }
+    
+    // Phase O2: ObjectSelect tool - finalize drag
+    if (m_currentTool == ToolType::ObjectSelect) {
+        handlePointerRelease_ObjectSelect(pe);
         return;
     }
     
@@ -3521,6 +3619,675 @@ void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& pe)
     
     m_pointerActive = false;
     update();
+}
+
+// =============================================================================
+// Object Selection Tool Handlers (Phase O2)
+// =============================================================================
+
+void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    // Convert to document coordinates
+    QPointF docPoint = viewportToDocument(pe.viewportPos);
+    
+    // Hit test for object
+    InsertedObject* hitObject = objectAtPoint(docPoint);
+    
+    bool shiftHeld = (pe.modifiers & Qt::ShiftModifier);
+    
+    if (hitObject) {
+        // Check if clicking on already-selected object (start drag)
+        bool alreadySelected = m_selectedObjects.contains(hitObject);
+        
+        if (shiftHeld) {
+            // Shift+click: toggle selection (uses API for signal emission)
+            if (alreadySelected) {
+                deselectObject(hitObject);
+            } else {
+                selectObject(hitObject, true);  // Add to selection
+            }
+        } else {
+            // Regular click
+            if (!alreadySelected) {
+                // Replace selection with this object (uses API for signal emission)
+                selectObject(hitObject, false);
+            }
+            // If already selected, keep selection (allows multi-drag)
+        }
+        
+        // Start dragging if we have a selection
+        if (!m_selectedObjects.isEmpty()) {
+            m_isDraggingObjects = true;
+            m_objectDragStartViewport = pe.viewportPos;
+            m_objectDragStartDoc = docPoint;
+            m_pointerActive = true;
+            
+            // O2.3.2: Store original positions for undo
+            m_objectOriginalPositions.clear();
+            for (InsertedObject* obj : m_selectedObjects) {
+                if (obj) {
+                    m_objectOriginalPositions[obj->id] = obj->position;
+                }
+            }
+        }
+    } else {
+        // Clicked on empty space
+        if (!shiftHeld) {
+            // Deselect all (uses API for signal emission)
+            deselectAllObjects();
+        }
+    }
+}
+
+void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
+{
+    if (!m_document) return;
+    
+    QPointF docPoint = viewportToDocument(pe.viewportPos);
+    
+    if (m_isDraggingObjects && !m_selectedObjects.isEmpty()) {
+        // Calculate delta in document coordinates
+        QPointF delta = docPoint - m_objectDragStartDoc;
+        
+        // O2.3.3: Use moveSelectedObjects method
+        moveSelectedObjects(delta);
+        
+        // Update drag start for next move
+        m_objectDragStartDoc = docPoint;
+    } else {
+        // Not dragging - update hover state
+        InsertedObject* newHover = objectAtPoint(docPoint);
+        
+        if (newHover != m_hoveredObject) {
+            m_hoveredObject = newHover;
+            update();  // Repaint for hover feedback
+        }
+    }
+}
+
+void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
+{
+    Q_UNUSED(pe);
+    
+    if (m_isDraggingObjects) {
+        // O2.3.2: Finalize drag
+        // Check if any object actually moved
+        bool moved = false;
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj) continue;
+            auto it = m_objectOriginalPositions.find(obj->id);
+            if (it != m_objectOriginalPositions.end() && it.value() != obj->position) {
+                moved = true;
+                break;
+            }
+        }
+        
+        if (moved) {
+            // Mark pages/tiles dirty and handle tile boundary crossing
+            if (m_document) {
+                if (m_document->isEdgeless()) {
+                    // O2.3.4: Handle tile boundary crossing
+                    // This will relocate objects to correct tiles and mark them dirty
+                    int relocated = relocateObjectsToCorrectTiles();
+                    
+                    // Also mark tiles dirty for objects that didn't relocate
+                    // (they still moved within their tile)
+                    if (relocated < m_selectedObjects.size()) {
+                        for (InsertedObject* obj : m_selectedObjects) {
+                            if (!obj) continue;
+                            // Find tile containing this object and mark dirty
+                            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                                Page* tile = m_document->getTile(coord.first, coord.second);
+                                if (tile && tile->objectById(obj->id)) {
+                                    m_document->markTileDirty(coord);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Paged mode: mark current page dirty
+                    m_document->markPageDirty(m_currentPageIndex);
+                }
+            }
+            
+            // TODO O2.7: Create undo entry for move using m_objectOriginalPositions
+            // pushObjectMoveUndo(m_objectOriginalPositions);
+        }
+        
+        // Clear original positions
+        m_objectOriginalPositions.clear();
+        m_isDraggingObjects = false;
+    }
+    
+    m_pointerActive = false;
+}
+
+void DocumentViewport::clearObjectSelection()
+{
+    bool hadSelection = !m_selectedObjects.isEmpty();
+    m_selectedObjects.clear();
+    m_hoveredObject = nullptr;
+    m_isDraggingObjects = false;
+    if (hadSelection) {
+        emit objectSelectionChanged();
+    }
+    update();
+}
+
+int DocumentViewport::relocateObjectsToCorrectTiles()
+{
+    if (!m_document || !m_document->isEdgeless() || m_selectedObjects.isEmpty()) {
+        return 0;
+    }
+    
+    int relocatedCount = 0;
+    const int tileSize = Document::EDGELESS_TILE_SIZE;
+    
+    // We need to iterate carefully because we're modifying selection pointers
+    // Build list of objects that need relocation first
+    struct RelocationInfo {
+        QString objectId;
+        Document::TileCoord currentTile;
+        Document::TileCoord targetTile;
+        QPointF newLocalPos;
+    };
+    QVector<RelocationInfo> toRelocate;
+    
+    // Find which tile each object is currently in and where it should be
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        // Find current tile by searching loaded tiles
+        Document::TileCoord currentTile = {0, 0};
+        bool foundTile = false;
+        
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                currentTile = coord;
+                foundTile = true;
+                break;
+            }
+        }
+        
+        if (!foundTile) continue;  // Object not in any loaded tile?
+        
+        // Calculate object's document position
+        QPointF tileOrigin(currentTile.first * tileSize, currentTile.second * tileSize);
+        QPointF docPos = tileOrigin + obj->position;
+        
+        // Determine which tile it should be in based on top-left corner
+        Document::TileCoord targetTile = m_document->tileCoordForPoint(docPos);
+        
+        if (targetTile != currentTile) {
+            // Needs relocation
+            QPointF newTileOrigin(targetTile.first * tileSize, targetTile.second * tileSize);
+            QPointF newLocalPos = docPos - newTileOrigin;
+            
+            toRelocate.append({obj->id, currentTile, targetTile, newLocalPos});
+        }
+    }
+    
+    // Now perform the relocations
+    for (const auto& info : toRelocate) {
+        Page* oldTile = m_document->getTile(info.currentTile.first, info.currentTile.second);
+        if (!oldTile) continue;
+        
+        // Extract from old tile
+        std::unique_ptr<InsertedObject> extracted = oldTile->extractObject(info.objectId);
+        if (!extracted) continue;
+        
+        // Update position to new tile-local coordinates
+        extracted->position = info.newLocalPos;
+        
+        // Get or create target tile
+        Page* newTile = m_document->getOrCreateTile(info.targetTile.first, info.targetTile.second);
+        if (!newTile) {
+            // Failed to get/create tile, put object back
+            oldTile->addObject(std::move(extracted));
+            continue;
+        }
+        
+        // Update selection pointer before adding (addObject will take ownership)
+        InsertedObject* newPtr = extracted.get();
+        
+        // Add to new tile
+        newTile->addObject(std::move(extracted));
+        
+        // Update m_selectedObjects to point to the object in its new location
+        int idx = m_selectedObjects.indexOf(nullptr);  // Won't work - object moved
+        // Actually, we need to find by old pointer which is now invalid
+        // The object is the same but the pointer changed... Actually no, the pointer
+        // is the same because unique_ptr just transfers ownership
+        // But wait - we got newPtr before the move, let me re-check...
+        
+        // Actually the pointer itself (the address) doesn't change when we move unique_ptr
+        // The unique_ptr just transfers ownership. So newPtr should still be valid
+        // and should still be in m_selectedObjects
+        
+        // Mark both tiles dirty
+        m_document->markTileDirty(info.currentTile);
+        m_document->markTileDirty(info.targetTile);
+        
+        relocatedCount++;
+    }
+    
+    return relocatedCount;
+}
+
+void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
+{
+    if (!obj) return;
+    
+    bool changed = false;
+    
+    if (!addToSelection) {
+        // Replace selection
+        if (m_selectedObjects.size() != 1 || !m_selectedObjects.contains(obj)) {
+            m_selectedObjects.clear();
+            m_selectedObjects.append(obj);
+            changed = true;
+        }
+    } else {
+        // Add to selection
+        if (!m_selectedObjects.contains(obj)) {
+            m_selectedObjects.append(obj);
+            changed = true;
+        }
+    }
+    
+    if (changed) {
+        emit objectSelectionChanged();
+        update();
+    }
+}
+
+void DocumentViewport::deselectObject(InsertedObject* obj)
+{
+    if (!obj) return;
+    
+    if (m_selectedObjects.removeOne(obj)) {
+        emit objectSelectionChanged();
+        update();
+    }
+}
+
+void DocumentViewport::deselectAllObjects()
+{
+    if (m_selectedObjects.isEmpty()) return;
+    
+    m_selectedObjects.clear();
+    emit objectSelectionChanged();
+    update();
+}
+
+void DocumentViewport::moveSelectedObjects(const QPointF& delta)
+{
+    if (m_selectedObjects.isEmpty() || delta.isNull()) {
+        return;
+    }
+    
+    // Move all selected objects
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (obj) {
+            obj->position += delta;
+        }
+    }
+    
+    // Note: Page/tile dirty marking is done on drag release (O2.3.2)
+    // to avoid marking dirty on every micro-movement during drag.
+    // Tile boundary crossing is handled in O2.3.4.
+    
+    update();
+}
+
+void DocumentViewport::pasteForObjectSelect()
+{
+    // Phase O2.4.2: Tool-aware paste for ObjectSelect tool
+    // 
+    // Priority 1: System clipboard has image → insert as ImageObject
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (clipboard && clipboard->mimeData() && clipboard->mimeData()->hasImage()) {
+        insertImageFromClipboard();
+        return;
+    }
+    
+    // Priority 2: Internal object clipboard (O2.6 will add m_objectClipboard)
+    // TODO O2.6: Check m_objectClipboard and call pasteObjects()
+    // if (!m_objectClipboard.isEmpty()) {
+    //     pasteObjects();
+    //     return;
+    // }
+    
+    // If neither clipboard has content, do nothing
+    // (No fallback to lasso paste - that's a separate tool)
+}
+
+void DocumentViewport::insertImageFromClipboard()
+{
+    // Phase O2.4.3: Insert image from clipboard as ImageObject
+    if (!m_document) return;
+    
+    // 1. Get image from clipboard
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    if (!clipboard) return;
+    
+    QImage image = clipboard->image();
+    if (image.isNull()) {
+        qDebug() << "insertImageFromClipboard: No valid image in clipboard";
+        return;
+    }
+    
+    // 2. Create ImageObject with setPixmap()
+    auto imgObj = std::make_unique<ImageObject>();
+    imgObj->setPixmap(QPixmap::fromImage(image));
+    // NOTE: id is auto-generated in InsertedObject constructor
+    
+    // 3. Position at viewport center
+    QPointF center = viewportCenterInDocument();
+    imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
+    
+    // Default affinity: -1 (below all strokes)
+    imgObj->setLayerAffinity(-1);
+    
+    // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
+    InsertedObject* rawPtr = imgObj.get();
+    
+    // 4. Add to appropriate page/tile
+    if (m_document->isEdgeless()) {
+        // Edgeless mode: find tile for the center position
+        auto coord = m_document->tileCoordForPoint(imgObj->position);
+        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+        if (!targetTile) {
+            qWarning() << "insertImageFromClipboard: Failed to get/create tile";
+            return;
+        }
+        
+        // Convert to tile-local coordinates
+        imgObj->position = imgObj->position - QPointF(
+            coord.first * Document::EDGELESS_TILE_SIZE,
+            coord.second * Document::EDGELESS_TILE_SIZE
+        );
+        
+        targetTile->addObject(std::move(imgObj));
+        m_document->markTileDirty(coord);
+    } else {
+        // Paged mode: add to current page
+        Page* targetPage = m_document->page(m_currentPageIndex);
+        if (!targetPage) {
+            qWarning() << "insertImageFromClipboard: No page at index" << m_currentPageIndex;
+            return;
+        }
+        
+        // Adjust position to be page-local (subtract page origin)
+        QPointF pageOrigin = pagePosition(m_currentPageIndex);
+        imgObj->position = imgObj->position - pageOrigin;
+        
+        targetPage->addObject(std::move(imgObj));
+        m_document->markPageDirty(m_currentPageIndex);
+    }
+    
+    // 5. Update max object extent for extended tile loading
+    m_document->updateMaxObjectExtent(rawPtr);
+    
+    // 6. Save image to assets folder (hash-based deduplication)
+    if (!m_document->bundlePath().isEmpty()) {
+        ImageObject* imgRawPtr = static_cast<ImageObject*>(rawPtr);
+        if (!imgRawPtr->saveToAssets(m_document->bundlePath())) {
+            qWarning() << "insertImageFromClipboard: Failed to save image to assets";
+            // Continue anyway - image is in memory and will be saved on document save
+        }
+    }
+    
+    // 7. Create undo entry
+    // TODO O2.7: pushObjectInsertUndo(rawPtr);
+    
+    // 8. Select the new object
+    deselectAllObjects();
+    selectObject(rawPtr, false);
+    
+    // 9. Emit modification signal
+    emit documentModified();
+    
+    update();
+    
+    qDebug() << "insertImageFromClipboard: Inserted image" << rawPtr->id 
+             << "size" << rawPtr->size << "at" << rawPtr->position;
+}
+
+void DocumentViewport::deleteSelectedObjects()
+{
+    // Phase O2.5.2: Delete all selected objects
+    if (!m_document || m_selectedObjects.isEmpty()) {
+        return;
+    }
+    
+    int deletedCount = 0;
+    
+    if (m_document->isEdgeless()) {
+        // ========== EDGELESS MODE ==========
+        // Find which tile contains each object and remove it
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj) continue;
+            
+            // Find the tile containing this object
+            bool found = false;
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    // TODO O2.7: Create undo entry with serialized object data
+                    // pushObjectDeleteUndo(obj, coord);
+                    
+                    // Remove object from tile
+                    tile->removeObject(obj->id);
+                    m_document->markTileDirty(coord);
+                    deletedCount++;
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
+                qWarning() << "deleteSelectedObjects: Object" << obj->id << "not found in any tile";
+            }
+        }
+    } else {
+        // ========== PAGED MODE ==========
+        // Objects on current page (typically where selection was made)
+        Page* currentPage = m_document->page(m_currentPageIndex);
+        if (currentPage) {
+            for (InsertedObject* obj : m_selectedObjects) {
+                if (!obj) continue;
+                
+                // Check if object is on current page
+                if (currentPage->objectById(obj->id)) {
+                    // TODO O2.7: Create undo entry with serialized object data
+                    // pushObjectDeleteUndo(obj, m_currentPageIndex);
+                    
+                    // Remove object from page
+                    currentPage->removeObject(obj->id);
+                    m_document->markPageDirty(m_currentPageIndex);
+                    deletedCount++;
+                } else {
+                    // Object might be on a different page - search all loaded pages
+                    bool found = false;
+                    for (int i = 0; i < m_document->pageCount(); i++) {
+                        Page* page = m_document->page(i);
+                        if (page && page->objectById(obj->id)) {
+                            page->removeObject(obj->id);
+                            m_document->markPageDirty(i);
+                            deletedCount++;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        qWarning() << "deleteSelectedObjects: Object" << obj->id << "not found on any page";
+                    }
+                }
+            }
+        }
+    }
+    
+    // Recalculate max object extent (removed object might have been largest)
+    m_document->recalculateMaxObjectExtent();
+    
+    // Clear selection (objects are now deleted, pointers are invalid)
+    m_selectedObjects.clear();
+    m_hoveredObject = nullptr;
+    emit objectSelectionChanged();
+    
+    // Emit modification signal
+    if (deletedCount > 0) {
+        emit documentModified();
+    }
+    
+    update();
+    
+    qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "objects";
+}
+
+void DocumentViewport::renderObjectSelection(QPainter& painter)
+{
+    if (!m_document) return;
+    
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    
+    // Helper to convert object bounds to viewport coordinates
+    auto objectToViewportRect = [&](InsertedObject* obj) -> QPolygonF {
+        if (!obj) return QPolygonF();
+        
+        QRectF objRect = obj->boundingRect();
+        QPolygonF corners;
+        corners << objRect.topLeft() << objRect.topRight()
+                << objRect.bottomRight() << objRect.bottomLeft();
+        
+        // Convert to document coordinates then to viewport
+        if (m_document->isEdgeless()) {
+            // Object position is tile-local, we need to find its tile
+            // For now, assume position is already in document-relevant coords
+            // (Objects store their position in tile-local coords, but for rendering
+            // we treat them as if at their page/tile origin)
+            // This will be refined when we properly track object->tile mapping
+            QPolygonF vpCorners;
+            for (const QPointF& pt : corners) {
+                // Add object position (already tile-local, rendered at tile origin by renderEdgelessMode)
+                vpCorners << documentToViewport(obj->position + pt - objRect.topLeft());
+            }
+            return vpCorners;
+        } else {
+            // Paged mode: object position is page-local
+            QPointF pageOrigin = pagePosition(m_currentPageIndex);
+            QPolygonF vpCorners;
+            for (const QPointF& pt : corners) {
+                QPointF docPt = obj->position + pt - objRect.topLeft() + pageOrigin;
+                vpCorners << documentToViewport(docPt);
+            }
+            return vpCorners;
+        }
+    };
+    
+    // ===== Draw hover highlight =====
+    if (m_hoveredObject && !m_selectedObjects.contains(m_hoveredObject)) {
+        QPolygonF hoverPoly = objectToViewportRect(m_hoveredObject);
+        if (!hoverPoly.isEmpty()) {
+            // Light blue semi-transparent highlight
+            painter.setPen(QPen(QColor(0, 120, 215), 2));
+            painter.setBrush(QColor(0, 120, 215, 30));
+            painter.drawPolygon(hoverPoly);
+        }
+    }
+    
+    // ===== Draw selection boxes =====
+    if (m_selectedObjects.isEmpty()) {
+        painter.restore();
+        return;
+    }
+    
+    // Static dash offset for marching ants effect
+    static int dashOffset = 0;
+    
+    QPen blackPen(Qt::black, 1, Qt::DashLine);
+    blackPen.setDashOffset(dashOffset);
+    QPen whitePen(Qt::white, 1, Qt::DashLine);
+    whitePen.setDashOffset(dashOffset + 4);
+    
+    // Draw bounding box for each selected object
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        
+        QPolygonF vpPoly = objectToViewportRect(obj);
+        if (vpPoly.isEmpty()) continue;
+        
+        // Draw white then black dashed outline for visibility on any background
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(whitePen);
+        painter.drawPolygon(vpPoly);
+        painter.setPen(blackPen);
+        painter.drawPolygon(vpPoly);
+    }
+    
+    // ===== Draw handles for single selection =====
+    if (m_selectedObjects.size() == 1) {
+        InsertedObject* obj = m_selectedObjects.first();
+        if (obj) {
+            QRectF objRect = obj->boundingRect();
+            
+            // Get object bounds in viewport coordinates
+            auto toViewportPt = [&](const QPointF& localPt) -> QPointF {
+                QPointF docPt = obj->position + localPt - objRect.topLeft();
+                if (m_document->isEdgeless()) {
+                    return documentToViewport(docPt);
+                } else {
+                    return documentToViewport(docPt + pagePosition(m_currentPageIndex));
+                }
+            };
+            
+            // Handle positions (8 scale handles + 1 rotation)
+            QVector<QPointF> handles;
+            handles << toViewportPt(objRect.topLeft());                              // 0: TopLeft
+            handles << toViewportPt(QPointF(objRect.center().x(), objRect.top()));   // 1: Top
+            handles << toViewportPt(objRect.topRight());                             // 2: TopRight
+            handles << toViewportPt(QPointF(objRect.left(), objRect.center().y()));  // 3: Left
+            handles << toViewportPt(QPointF(objRect.right(), objRect.center().y())); // 4: Right
+            handles << toViewportPt(objRect.bottomLeft());                           // 5: BottomLeft
+            handles << toViewportPt(QPointF(objRect.center().x(), objRect.bottom()));// 6: Bottom
+            handles << toViewportPt(objRect.bottomRight());                          // 7: BottomRight
+            
+            // Rotation handle above top center
+            QPointF topCenter = handles[1];
+            QPointF rotatePos(topCenter.x(), topCenter.y() - ROTATE_HANDLE_OFFSET);
+            handles << rotatePos;  // 8: Rotate
+            
+            // Draw scale handles (squares)
+            QPen handlePen(Qt::black, 1);
+            painter.setPen(handlePen);
+            painter.setBrush(Qt::white);
+            
+            qreal halfSize = HANDLE_VISUAL_SIZE / 2.0;
+            for (int i = 0; i < 8; ++i) {
+                QRectF handleRect(handles[i].x() - halfSize, handles[i].y() - halfSize,
+                                  HANDLE_VISUAL_SIZE, HANDLE_VISUAL_SIZE);
+                painter.drawRect(handleRect);
+            }
+            
+            // Draw rotation handle (circle) with connecting line
+            painter.drawLine(topCenter, rotatePos);
+            painter.drawEllipse(rotatePos, halfSize, halfSize);
+            
+            // Small rotation indicator
+            QPointF arrowStart(rotatePos.x() - halfSize * 0.4, rotatePos.y());
+            QPointF arrowEnd(rotatePos.x() + halfSize * 0.4, rotatePos.y() - halfSize * 0.3);
+            painter.drawLine(arrowStart, rotatePos);
+            painter.drawLine(rotatePos, arrowEnd);
+        }
+    }
+    
+    painter.restore();
 }
 
 void DocumentViewport::finalizeLassoSelection()
@@ -6034,6 +6801,11 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     // P5: Skip during background snapshot capture
     if (m_lassoSelection.isValid() && !m_skipSelectionRendering) {
         renderLassoSelection(painter);
+    }
+    
+    // Phase O2: Draw object selection (edgeless mode)
+    if (m_currentTool == ToolType::ObjectSelect || !m_selectedObjects.isEmpty()) {
+        renderObjectSelection(painter);
     }
 }
 

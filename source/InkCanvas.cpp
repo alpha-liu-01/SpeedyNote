@@ -1709,6 +1709,9 @@ void InkCanvas::tabletEvent(QTabletEvent *event) {
                 case ToolType::Lasso:
                     // Future tools - not implemented yet in InkCanvas
                     break;
+                case ToolType::ObjectSelect:
+                    // Future tools - not implemented yet in InkCanvas
+                    break;
             }
         }
 
@@ -2369,6 +2372,7 @@ void InkCanvas::setPenThickness(qreal thickness) {
             break;
         case ToolType::Highlighter:
         case ToolType::Lasso:
+        case ToolType::ObjectSelect:
             // Future tools - not implemented yet in InkCanvas
             break;
     }
@@ -2402,6 +2406,7 @@ void InkCanvas::adjustAllToolThicknesses(qreal zoomRatio) {
             break;
         case ToolType::Highlighter:
         case ToolType::Lasso:
+        case ToolType::ObjectSelect:
             // Future tools - not implemented yet in InkCanvas
             break;
     }
@@ -2423,7 +2428,8 @@ void InkCanvas::setTool(ToolType tool) {
             break;
         case ToolType::Highlighter:
         case ToolType::Lasso:
-            // Future tools - will be implemented in DocumentViewport (Phase 2B)
+        case ToolType::ObjectSelect:
+            // Future tools - will be implemented in DocumentViewport (Phase 2B/O2)
             // For now, fall back to pen behavior
             penThickness = penToolThickness;
             break;

@@ -18,5 +18,6 @@ enum class ToolType {
     Marker,     ///< Vector marker - semi-transparent strokes
     Eraser,     ///< Vector eraser - stroke-based removal
     Highlighter,///< Vector highlighter - highlight blend mode (Phase 2B)
-    Lasso       ///< Selection tool - select and manipulate strokes (Phase 2B)
+    Lasso,      ///< Selection tool - select and manipulate strokes (Phase 2B)
+    ObjectSelect///< Object selection tool - select and manipulate inserted objects (Phase O2)
 };
