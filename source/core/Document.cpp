@@ -364,6 +364,14 @@ bool Document::loadPageFromDisk(int index) const
         return false;
     }
     
+    // Phase O2 (BF.3): Load image objects from assets folder.
+    // Page::fromJson() only sets imagePath; it does NOT load the actual pixmap.
+    // We must call loadImages() to load image files into memory for rendering.
+    int imagesLoaded = page->loadImages(m_bundlePath);
+    if (imagesLoaded > 0) {
+        qDebug() << "loadPageFromDisk: Loaded" << imagesLoaded << "images for page" << index;
+    }
+    
     // Phase O1.5: Update max object extent from loaded objects
     for (const auto& object : page->objects) {
         int extent = static_cast<int>(qMax(object->size.width(), object->size.height()));
@@ -1259,6 +1267,13 @@ int Document::loadPagesFromJson(const QJsonArray& pagesArray)
     for (const auto& val : pagesArray) {
         auto page = Page::fromJson(val.toObject());
         if (page) {
+            // Phase O2 (BF.3): Load image objects from assets folder.
+            // Page::fromJson() only sets imagePath; it does NOT load the actual pixmap.
+            // We must call loadImages() to load the image files into memory.
+            if (!m_bundlePath.isEmpty()) {
+                page->loadImages(m_bundlePath);
+            }
+            
             // Phase O1.5: Update max object extent from loaded objects
             for (const auto& object : page->objects) {
                 int extent = static_cast<int>(qMax(object->size.width(), object->size.height()));
@@ -1407,9 +1422,10 @@ bool Document::saveTile(TileCoord coord)
         return false;
     }
     
-    // Phase 5.6.3: For edgeless mode, use compact format (id + strokes only)
-    // Layer properties (name, visible, opacity, locked) are stored in manifest.
-    // Tiles only store layers that have strokes.
+    // Phase 5.6.3: For edgeless mode, use compact format:
+    // - layers: array of {id, strokes} (layer properties stored in manifest)
+    // - objects: array of InsertedObjects (Phase O2)
+    // - coord_x, coord_y: tile coordinates for debugging
     QJsonObject tileObj;
     Page* tile = it->second.get();
     
@@ -1431,6 +1447,16 @@ bool Document::saveTile(TileCoord coord)
             }
         }
         tileObj["layers"] = layersArray;
+        
+        // Phase O2: Save objects to tile (BF.5)
+        // Objects are stored in tile-local coordinates
+        if (!tile->objects.empty()) {
+            QJsonArray objectsArray;
+            for (const auto& obj : tile->objects) {
+                objectsArray.append(obj->toJson());
+            }
+            tileObj["objects"] = objectsArray;
+        }
         
         // Store tile coordinate for debugging/verification
         tileObj["coord_x"] = coord.first;
@@ -1553,6 +1579,10 @@ bool Document::loadTileFromDisk(TileCoord coord) const
             }
             // Rebuild affinity map after loading objects
             tile->rebuildAffinityMap();
+            
+            // Phase O2 (BF.3): Load image objects from assets folder.
+            // InsertedObject::fromJson() only sets imagePath; it does NOT load the pixmap.
+            tile->loadImages(m_bundlePath);
         }
         
         m_tiles[coord] = std::move(tile);
@@ -1569,6 +1599,10 @@ bool Document::loadTileFromDisk(TileCoord coord) const
             m_tileIndex.erase(coord);  // CR-6: Remove from index
             return false;
         }
+        
+        // Phase O2 (BF.3): Load image objects from assets folder.
+        // Page::fromJson() only sets imagePath; it does NOT load the actual pixmap.
+        tile->loadImages(m_bundlePath);
         
         // Phase O1.5: Update max object extent from loaded objects
         for (const auto& object : tile->objects) {
@@ -1611,6 +1645,63 @@ void Document::evictTile(TileCoord coord)
 #endif
 }
 
+int Document::saveUnsavedImages(const QString& bundlePath)
+{
+    if (bundlePath.isEmpty()) {
+        return 0;
+    }
+    
+    int savedCount = 0;
+    
+    // Helper to process objects in a page
+    auto processPage = [&](Page* page) {
+        if (!page) return;
+        
+        for (auto& obj : page->objects) {
+            if (obj->type() == "image") {
+                ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+                
+                // Check if image needs saving (has pixmap but no path)
+                if (imgObj->imagePath.isEmpty() && imgObj->isLoaded()) {
+                    if (imgObj->saveToAssets(bundlePath)) {
+                        savedCount++;
+                        qDebug() << "saveUnsavedImages: Saved image" << imgObj->id 
+                                 << "as" << imgObj->imagePath;
+                    } else {
+                        qWarning() << "saveUnsavedImages: Failed to save image" << imgObj->id;
+                    }
+                }
+            }
+        }
+    };
+    
+    if (mode == Mode::Edgeless) {
+        // Process all loaded tiles
+        for (auto& pair : m_tiles) {
+            processPage(pair.second.get());
+        }
+    } else {
+        // Paged mode: process both legacy pages and lazy-loaded pages
+        if (m_pageOrder.isEmpty()) {
+            // Legacy paged mode
+            for (auto& page : m_pages) {
+                processPage(page.get());
+            }
+        } else {
+            // Lazy-loaded paged mode
+            for (auto& pair : m_loadedPages) {
+                processPage(pair.second.get());
+            }
+        }
+    }
+    
+    if (savedCount > 0) {
+        qDebug() << "saveUnsavedImages: Saved" << savedCount << "images to assets";
+    }
+    
+    return savedCount;
+}
+
 bool Document::saveBundle(const QString& path)
 {
     // Save old bundle path before overwriting - needed for copying evicted tiles/pages
@@ -1622,6 +1713,15 @@ bool Document::saveBundle(const QString& path)
         qWarning() << "Cannot create assets/images directory" << path;
         return false;
     }
+    
+    // Phase O2 (BF.2): Save any unsaved images to assets folder BEFORE saving page JSON.
+    // 
+    // This is critical for images pasted into a NEW document before first save:
+    // - When paste happens, bundlePath is empty, so saveToAssets() is skipped
+    // - The image exists only as cachedPixmap with imagePath = ""
+    // - Here we finally have a bundle path, so we can save images and set imagePath
+    // - Then the serialized page JSON will have the correct imagePath reference
+    saveUnsavedImages(path);
     
     // Build manifest
     QJsonObject manifest = toJson();  // Metadata only

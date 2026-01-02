@@ -681,12 +681,22 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
 
 int Page::loadImages(const QString& basePath)
 {
+    if (basePath.isEmpty()) {
+        qDebug() << "Page::loadImages: basePath is empty, skipping";
+        return 0;
+    }
+    
     int loaded = 0;
     for (auto& obj : objects) {
         if (obj->type() == "image") {
             ImageObject* img = static_cast<ImageObject*>(obj.get());
+            qDebug() << "Page::loadImages: Loading image" << img->id 
+                     << "path:" << img->imagePath << "from base:" << basePath;
             if (img->loadImage(basePath)) {
                 loaded++;
+                qDebug() << "Page::loadImages: Successfully loaded image" << img->id;
+            } else {
+                qWarning() << "Page::loadImages: Failed to load image" << img->id;
             }
         }
     }

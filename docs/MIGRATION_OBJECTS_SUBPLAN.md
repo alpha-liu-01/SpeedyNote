@@ -2216,6 +2216,195 @@ It has a click handler that does nothing and `updatePictureButtonState()` that s
 
 ---
 
+### O2.BF: Bug Fixes During Testing
+
+#### O2.BF.1: File URL Paste Support (Windows File Explorer) ✅
+
+**Problem:** When copying a PNG file from Windows File Explorer, the clipboard contains file URLs (`hasUrls = true`), not raw image data (`hasImage = false`). Our original code only checked `hasImage()`.
+
+**Solution:** Updated `pasteForObjectSelect()` to also check `hasUrls()`:
+
+```cpp
+// Priority 1: System clipboard has raw image data
+if (mimeData->hasImage()) { ... }
+
+// Priority 2: File URLs (e.g., copied from File Explorer)
+if (mimeData->hasUrls()) {
+    for (const QUrl& url : mimeData->urls()) {
+        if (url.isLocalFile()) {
+            QString filePath = url.toLocalFile();
+            // Check if it's an image file (.png, .jpg, .jpeg, .bmp, .gif, .webp)
+            insertImageFromFile(filePath);
+            return;
+        }
+    }
+}
+```
+
+**Files Changed:**
+- `source/core/DocumentViewport.h`: Added `insertImageFromFile(const QString& filePath)` declaration
+- `source/core/DocumentViewport.cpp`: Updated `pasteForObjectSelect()`, added `insertImageFromFile()` implementation
+
+---
+
+#### O2.BF.2: Save Unsaved Images Before Document Save ✅
+
+**Problem:** When pasting an image into a NEW unsaved document, `m_document->bundlePath()` is empty, so `saveToAssets()` was skipped. The image existed in memory (`cachedPixmap`) but `imagePath` stayed empty, resulting in images not being persisted.
+
+**Solution:** Added `Document::saveUnsavedImages()` called at the start of `saveBundle()`:
+
+```cpp
+int Document::saveUnsavedImages(const QString& bundlePath)
+{
+    // Iterate all pages/tiles
+    // For each ImageObject with empty imagePath but valid isLoaded():
+    //   Call saveToAssets(bundlePath)
+}
+
+bool Document::saveBundle(const QString& path)
+{
+    // Create assets/images directory
+    QDir().mkpath(path + "/assets/images");
+    
+    // Phase O2: Save unsaved images BEFORE saving page JSON
+    saveUnsavedImages(path);
+    
+    // ... rest of save logic ...
+}
+```
+
+**Files Changed:**
+- `source/core/Document.h`: Added `saveUnsavedImages()` declaration
+- `source/core/Document.cpp`: Implemented `saveUnsavedImages()`, called it in `saveBundle()`
+
+---
+
+#### O2.BF.3: Load Images After Loading Pages/Tiles ✅
+
+**Problem:** After `Page::fromJson()`, `loadImages()` was never called. `ImageObject::loadFromJson()` only sets `imagePath` but doesn't load the actual pixmap. The image files existed in `assets/images/` but weren't loaded into memory.
+
+**Solution:** Added `page->loadImages(m_bundlePath)` calls after every `Page::fromJson()`:
+
+1. **`loadPageFromDisk()`** (lazy paged mode)
+2. **`loadPagesFromJson()`** (legacy paged mode)
+3. **`loadTileFromDisk()`** (edgeless mode - manifest reconstruction)
+4. **`loadTileFromDisk()`** (edgeless mode - legacy format)
+
+```cpp
+auto page = Page::fromJson(jsonDoc.object());
+// ... error handling ...
+
+// Phase O2: Load image objects from assets folder
+int imagesLoaded = page->loadImages(m_bundlePath);
+
+// ... rest of loading logic ...
+```
+
+**Files Changed:**
+- `source/core/Document.cpp`: Added `loadImages()` calls in 4 locations
+- `source/core/Page.cpp`: Added debug output to `loadImages()`
+
+---
+
+#### O2.BF.4: Object Rendered at 2× Distance in Edgeless Mode ✅
+
+**Problem:** In edgeless mode, objects appeared at approximately twice the distance from the origin as expected, and the selection box was misaligned with the actual image. Moving the selection box caused the image to move "more" than expected.
+
+**Symptoms:**
+- Object appears much further from origin than expected
+- Selection box appears at different position than the actual image
+- Dragging feels like image moves 2× the mouse movement
+- Issue only occurs in edgeless mode (paged mode works correctly)
+
+**Root Cause:** The object's `position` was being applied **twice**:
+
+1. In `renderEdgelessObjectsWithAffinity()`:
+```cpp
+painter.translate(docPos);  // docPos = tileOrigin + obj->position
+obj->render(painter, 1.0);
+```
+
+2. In `ImageObject::render()`:
+```cpp
+QRectF targetRect(
+    position.x() * zoom,  // obj->position applied AGAIN!
+    position.y() * zoom,
+    ...
+);
+```
+
+Result: Object rendered at `tileOrigin + obj->position + obj->position` = `tileOrigin + 2×position`
+
+**Solution:** In edgeless rendering, only translate to tile origin, not to the full document position:
+```cpp
+// FIXED: Only translate to tile origin
+// render() will internally add obj->position
+painter.save();
+painter.translate(tileOrigin);  // NOT tileOrigin + obj->position
+obj->render(painter, 1.0);
+painter.restore();
+```
+
+Also fixed selection box to correctly add tile origin for coordinate conversion.
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`: 
+  - Fixed `renderEdgelessObjectsWithAffinity()` to only translate to tileOrigin
+  - Fixed `renderObjectSelection()` to add tile origin when converting coords
+
+---
+
+#### O2.BF.5: Objects Not Serialized in Edgeless Tile Save ✅
+
+**Problem:** When saving an edgeless canvas, inserted objects were not being saved to the tile JSON files. Objects existed in memory but were lost on save/reload.
+
+**Symptoms:**
+- Insert image in edgeless mode works
+- Save document successfully
+- Reload document - image is gone
+- No error messages
+
+**Root Cause:** In `Document::saveTile()`, the edgeless mode serialization only saved:
+- `layers` array (layer ID + strokes)
+- `coord_x` and `coord_y`
+
+It did NOT save the `objects` array, even though `loadTileFromDisk()` was correctly looking for and loading objects.
+
+**Before (broken):**
+```cpp
+if (isEdgeless()) {
+    // ... layers serialization ...
+    tileObj["layers"] = layersArray;
+    tileObj["coord_x"] = coord.first;
+    tileObj["coord_y"] = coord.second;
+}
+```
+
+**After (fixed):**
+```cpp
+if (isEdgeless()) {
+    // ... layers serialization ...
+    tileObj["layers"] = layersArray;
+    
+    // Phase O2: Save objects to tile (BF.5)
+    if (!tile->objects.empty()) {
+        QJsonArray objectsArray;
+        for (const auto& obj : tile->objects) {
+            objectsArray.append(obj->toJson());
+        }
+        tileObj["objects"] = objectsArray;
+    }
+    
+    tileObj["coord_x"] = coord.first;
+    tileObj["coord_y"] = coord.second;
+}
+```
+
+**Files Changed:**
+- `source/core/Document.cpp`: Added object serialization to `saveTile()` for edgeless mode
+
+---
+
 ### O2.10: Testing & Verification
 
 **Tasks:**

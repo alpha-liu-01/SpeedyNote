@@ -703,6 +703,16 @@ public:
     void insertImageFromClipboard();
     
     /**
+     * @brief Insert image from a file path as an ImageObject.
+     * @param filePath Path to the image file.
+     * 
+     * Phase O2.4: Handles pasting files copied from File Explorer.
+     * Creates ImageObject at viewport center, adds to current page/tile,
+     * saves to assets folder, and selects the new object.
+     */
+    void insertImageFromFile(const QString& filePath);
+    
+    /**
      * @brief Delete all currently selected objects.
      * 
      * Phase O2.5: Removes each selected object from its page/tile,

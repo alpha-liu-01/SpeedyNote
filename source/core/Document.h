@@ -340,6 +340,16 @@ public:
     }
     
     /**
+     * @brief Save all unsaved ImageObjects to the assets folder.
+     * @param bundlePath Path to the bundle directory.
+     * @return Number of images saved.
+     * 
+     * Phase O2: Called during saveBundle() to ensure all images are persisted.
+     * ImageObjects with empty imagePath but valid cachedPixmap are saved.
+     */
+    int saveUnsavedImages(const QString& bundlePath);
+    
+    /**
      * @brief Check if lazy loading from disk is enabled.
      */
     bool isLazyLoadEnabled() const { return m_lazyLoadEnabled; }

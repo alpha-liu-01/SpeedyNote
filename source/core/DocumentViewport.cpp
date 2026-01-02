@@ -1496,7 +1496,12 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     }
     
     // Phase O2.4: ObjectSelect tool keyboard shortcuts
+    qDebug() << "keyPressEvent: currentTool =" << static_cast<int>(m_currentTool) 
+             << "(ObjectSelect=" << static_cast<int>(ToolType::ObjectSelect) << ")";
+    
     if (m_currentTool == ToolType::ObjectSelect) {
+        qDebug() << "keyPressEvent: In ObjectSelect block, key =" << event->key();
+        
         // Copy (Ctrl+C) - copy selected objects to internal clipboard (O2.6)
         if (event->matches(QKeySequence::Copy)) {
             if (hasSelectedObjects()) {
@@ -1508,6 +1513,7 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         
         // Paste (Ctrl+V) - tool-aware paste for objects
         if (event->matches(QKeySequence::Paste)) {
+            qDebug() << "keyPressEvent: Paste detected, calling pasteForObjectSelect()";
             pasteForObjectSelect();
             event->accept();
             return;
@@ -3990,20 +3996,61 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
 
 void DocumentViewport::pasteForObjectSelect()
 {
+    qDebug() << "pasteForObjectSelect: Called";
+    
     // Phase O2.4.2: Tool-aware paste for ObjectSelect tool
-    // 
-    // Priority 1: System clipboard has image → insert as ImageObject
     QClipboard* clipboard = QGuiApplication::clipboard();
-    if (clipboard && clipboard->mimeData() && clipboard->mimeData()->hasImage()) {
+    if (!clipboard || !clipboard->mimeData()) {
+        qDebug() << "pasteForObjectSelect: No clipboard or mimeData";
+        return;
+    }
+    
+    const QMimeData* mimeData = clipboard->mimeData();
+    qDebug() << "pasteForObjectSelect: hasImage =" << mimeData->hasImage()
+             << "hasUrls =" << mimeData->hasUrls();
+    
+    // Priority 1: System clipboard has raw image data (e.g., copied from browser/image editor)
+    if (mimeData->hasImage()) {
+        qDebug() << "pasteForObjectSelect: Clipboard has raw image, calling insertImageFromClipboard()";
         insertImageFromClipboard();
         return;
     }
     
-    // Priority 2: Internal object clipboard (O2.6.3)
+    // Priority 2 (BF.1): File URLs (e.g., copied from Windows File Explorer)
+    // When you copy a PNG file in Explorer, the clipboard has URLs, not raw image data.
+    // hasImage() returns false, but hasUrls() returns true with the file path.
+    if (mimeData->hasUrls()) {
+        QList<QUrl> urls = mimeData->urls();
+        qDebug() << "pasteForObjectSelect: Clipboard has URLs:" << urls;
+        
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile()) {
+                QString filePath = url.toLocalFile();
+                qDebug() << "pasteForObjectSelect: Checking file:" << filePath;
+                
+                // Check if it's an image file
+                QString lower = filePath.toLower();
+                if (lower.endsWith(".png") || lower.endsWith(".jpg") || 
+                    lower.endsWith(".jpeg") || lower.endsWith(".bmp") ||
+                    lower.endsWith(".gif") || lower.endsWith(".webp")) {
+                    
+                    qDebug() << "pasteForObjectSelect: Loading image from file:" << filePath;
+                    insertImageFromFile(filePath);
+                    return;  // Only insert first image
+                }
+            }
+        }
+        qDebug() << "pasteForObjectSelect: No valid image files in URLs";
+    }
+    
+    // Priority 3: Internal object clipboard (O2.6.3)
     if (!m_objectClipboard.isEmpty()) {
+        qDebug() << "pasteForObjectSelect: Internal clipboard has" << m_objectClipboard.size() << "objects";
         pasteObjects();
         return;
     }
+    
+    qDebug() << "pasteForObjectSelect: Nothing to paste";
     
     // If neither clipboard has content, do nothing
     // (No fallback to lasso paste - that's a separate tool)
@@ -4011,14 +4058,24 @@ void DocumentViewport::pasteForObjectSelect()
 
 void DocumentViewport::insertImageFromClipboard()
 {
+    qDebug() << "insertImageFromClipboard: Called";
+    
     // Phase O2.4.3: Insert image from clipboard as ImageObject
-    if (!m_document) return;
+    if (!m_document) {
+        qDebug() << "insertImageFromClipboard: No document!";
+        return;
+    }
     
     // 1. Get image from clipboard
     QClipboard* clipboard = QGuiApplication::clipboard();
-    if (!clipboard) return;
+    if (!clipboard) {
+        qDebug() << "insertImageFromClipboard: No clipboard!";
+        return;
+    }
     
     QImage image = clipboard->image();
+    qDebug() << "insertImageFromClipboard: image.isNull() =" << image.isNull() 
+             << "size =" << image.size();
     if (image.isNull()) {
         qDebug() << "insertImageFromClipboard: No valid image in clipboard";
         return;
@@ -4098,6 +4155,94 @@ void DocumentViewport::insertImageFromClipboard()
     update();
     
     qDebug() << "insertImageFromClipboard: Inserted image" << rawPtr->id 
+             << "size" << rawPtr->size << "at" << rawPtr->position;
+}
+
+void DocumentViewport::insertImageFromFile(const QString& filePath)
+{
+    qDebug() << "insertImageFromFile: Called with path:" << filePath;
+    
+    if (!m_document) {
+        qDebug() << "insertImageFromFile: No document!";
+        return;
+    }
+    
+    // 1. Load image from file
+    QImage image(filePath);
+    if (image.isNull()) {
+        qWarning() << "insertImageFromFile: Failed to load image from" << filePath;
+        return;
+    }
+    qDebug() << "insertImageFromFile: Loaded image, size =" << image.size();
+    
+    // 2. Create ImageObject with setPixmap()
+    auto imgObj = std::make_unique<ImageObject>();
+    imgObj->setPixmap(QPixmap::fromImage(image));
+    
+    // 3. Position at viewport center
+    QPointF center = viewportCenterInDocument();
+    imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
+    
+    // Default affinity: -1 (below all strokes)
+    imgObj->setLayerAffinity(-1);
+    
+    // Store raw pointer BEFORE std::move
+    InsertedObject* rawPtr = imgObj.get();
+    
+    // 4. Add to appropriate page/tile
+    if (m_document->isEdgeless()) {
+        auto coord = m_document->tileCoordForPoint(imgObj->position);
+        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+        if (!targetTile) {
+            qWarning() << "insertImageFromFile: Failed to get/create tile";
+            return;
+        }
+        
+        // Convert to tile-local coordinates
+        imgObj->position = imgObj->position - QPointF(
+            coord.first * Document::EDGELESS_TILE_SIZE,
+            coord.second * Document::EDGELESS_TILE_SIZE
+        );
+        
+        targetTile->addObject(std::move(imgObj));
+        m_document->markTileDirty(coord);
+    } else {
+        // Paged mode: add to current page
+        Page* targetPage = m_document->page(m_currentPageIndex);
+        if (!targetPage) {
+            qWarning() << "insertImageFromFile: No page at index" << m_currentPageIndex;
+            return;
+        }
+        
+        // Adjust position to be page-local
+        QPointF pageOrigin = pagePosition(m_currentPageIndex);
+        imgObj->position = imgObj->position - pageOrigin;
+        
+        targetPage->addObject(std::move(imgObj));
+        m_document->markPageDirty(m_currentPageIndex);
+    }
+    
+    // 5. Update max object extent
+    m_document->updateMaxObjectExtent(rawPtr);
+    
+    // 6. Save image to assets folder
+    if (!m_document->bundlePath().isEmpty()) {
+        ImageObject* imgRawPtr = static_cast<ImageObject*>(rawPtr);
+        if (!imgRawPtr->saveToAssets(m_document->bundlePath())) {
+            qWarning() << "insertImageFromFile: Failed to save image to assets";
+        }
+    }
+    
+    // 7. Select the new object
+    deselectAllObjects();
+    selectObject(rawPtr, false);
+    
+    // 8. Emit modification signal
+    emit documentModified();
+    
+    update();
+    
+    qDebug() << "insertImageFromFile: Inserted image" << rawPtr->id 
              << "size" << rawPtr->size << "at" << rawPtr->position;
 }
 
@@ -4546,6 +4691,20 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
     
+    // BF.4: Helper to find the tile containing an object (edgeless mode).
+    // Objects store their position in tile-local coordinates, so we need to
+    // find which tile they're in to convert to document coordinates.
+    auto findTileForObject = [&](InsertedObject* obj) -> Document::TileCoord {
+        if (!obj) return {0, 0};
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                return coord;
+            }
+        }
+        return {0, 0};  // Fallback
+    };
+    
     // Helper to convert object bounds to viewport coordinates
     auto objectToViewportRect = [&](InsertedObject* obj) -> QPolygonF {
         if (!obj) return QPolygonF();
@@ -4557,15 +4716,21 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
         
         // Convert to document coordinates then to viewport
         if (m_document->isEdgeless()) {
-            // Object position is tile-local, we need to find its tile
-            // For now, assume position is already in document-relevant coords
-            // (Objects store their position in tile-local coords, but for rendering
-            // we treat them as if at their page/tile origin)
-            // This will be refined when we properly track object->tile mapping
+            // BF.4: Object position is tile-local, find its tile and add tile origin.
+            // Without this, the selection box would be drawn near the origin instead
+            // of around the actual image, because tile-local coords were incorrectly
+            // treated as document coords.
+            Document::TileCoord coord = findTileForObject(obj);
+            QPointF tileOrigin(
+                coord.first * Document::EDGELESS_TILE_SIZE,
+                coord.second * Document::EDGELESS_TILE_SIZE
+            );
+            
             QPolygonF vpCorners;
             for (const QPointF& pt : corners) {
-                // Add object position (already tile-local, rendered at tile origin by renderEdgelessMode)
-                vpCorners << documentToViewport(obj->position + pt - objRect.topLeft());
+                // Convert tile-local to document coords, then to viewport
+                QPointF docPt = tileOrigin + obj->position + pt - objRect.topLeft();
+                vpCorners << documentToViewport(docPt);
             }
             return vpCorners;
         } else {
@@ -4626,11 +4791,22 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
         if (obj) {
             QRectF objRect = obj->boundingRect();
             
+            // BF.4: For edgeless, find tile origin to convert tile-local to document coords
+            QPointF tileOrigin(0, 0);
+            if (m_document->isEdgeless()) {
+                Document::TileCoord coord = findTileForObject(obj);
+                tileOrigin = QPointF(
+                    coord.first * Document::EDGELESS_TILE_SIZE,
+                    coord.second * Document::EDGELESS_TILE_SIZE
+                );
+            }
+            
             // Get object bounds in viewport coordinates
             auto toViewportPt = [&](const QPointF& localPt) -> QPointF {
                 QPointF docPt = obj->position + localPt - objRect.topLeft();
                 if (m_document->isEdgeless()) {
-                    return documentToViewport(docPt);
+                    // Add tile origin to convert tile-local to document coords
+                    return documentToViewport(tileOrigin + docPt);
                 } else {
                     return documentToViewport(docPt + pagePosition(m_currentPageIndex));
                 }
@@ -7687,6 +7863,17 @@ void DocumentViewport::renderTileLayerStrokes(QPainter& painter, Page* tile, int
     }
 }
 
+/**
+ * @brief Render objects with a specific layer affinity across all tiles.
+ * 
+ * IMPORTANT (BF.4): Objects store position in tile-local coordinates.
+ * The render() function internally applies obj->position, so we must ONLY
+ * translate the painter to the tile origin, NOT to (tileOrigin + obj->position).
+ * Otherwise position gets applied twice, causing objects to appear at 2× distance.
+ * 
+ * Compare with paged mode: Page::renderObjectsWithAffinity() doesn't translate
+ * at all because objects are already in page-local coords and render() handles it.
+ */
 void DocumentViewport::renderEdgelessObjectsWithAffinity(
     QPainter& painter, int affinity, const QVector<Document::TileCoord>& allTiles)
 {
@@ -7716,11 +7903,11 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(
                       return a->zOrder < b->zOrder;
                   });
         
-        // Render each object at document coordinates
+        // Render each object
         for (InsertedObject* obj : objs) {
             if (!obj->visible) continue;
             
-            // Convert tile-local position to document coordinates
+            // Convert tile-local position to document coordinates for visibility check
             QPointF docPos = tileOrigin + obj->position;
             QRectF objRect(docPos, obj->size);
             
@@ -7729,10 +7916,12 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(
                 continue;
             }
             
-            // Render at document coordinates
+            // BF.4: Only translate to tile origin, NOT to docPos.
+            // The object's render() function already applies obj->position internally.
+            // If we translate to docPos AND render applies position, position gets doubled!
             painter.save();
-            painter.translate(docPos);
-            obj->render(painter, 1.0);  // zoom is already applied to painter
+            painter.translate(tileOrigin);
+            obj->render(painter, 1.0);  // render() will add obj->position
             painter.restore();
         }
     }
