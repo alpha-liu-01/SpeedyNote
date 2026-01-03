@@ -611,7 +611,7 @@ These items are identified but NOT part of this cleanup:
 ## Summary Checklist
 
 ### Phase 1: Delete Dead Code
-- [ ] MW1.1: Delete #if 0 export blocks
+- [x] MW1.1: Delete #if 0 export blocks ✅ (1,314 lines deleted - 9,722 → 8,408)
 - [ ] MW1.2: Delete background selection
 - [ ] MW1.3: Delete prev/next page buttons
 - [ ] MW1.4: Delete InkCanvas references
