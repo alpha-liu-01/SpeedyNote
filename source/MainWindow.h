@@ -225,7 +225,7 @@ public:
     
     // REMOVED Phase 3.1: isUsingNewViewport() - always using new architecture
     // REMOVED Phase 3.1: s_useNewViewport - no longer needed
-    int getCurrentPageForCanvas(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - returns 0 
+    int getCurrentPageForCanvas(InkCanvas *canvas);  // MW1.4: Stub - returns 0
 
     bool lowResPreviewEnabled = true;
 
@@ -326,7 +326,7 @@ public:
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
     void openFileInNewTab(const QString &filePath); // ✅ Open .spn package directly
-    bool showLastAccessedPageDialog(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - returns false
+    // REMOVED MW1.4: showLastAccessedPageDialog(InkCanvas*) - InkCanvas obsolete
 
     int getPdfDPI() const { return pdfRenderDPI; }
     void setPdfDPI(int dpi);
@@ -338,7 +338,7 @@ public:
     // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
     void saveDefaultBackgroundSettings(Page::BackgroundType style, QColor bgColor, QColor gridColor, int density);
     void loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density);
-    void applyDefaultBackgroundToCanvas(InkCanvas *canvas);  // Phase 3.1.7: Stubbed - no-op
+    // REMOVED MW1.4: applyDefaultBackgroundToCanvas(InkCanvas*) - use Page background settings
     
     void saveThemeSettings();
     void loadThemeSettings();
@@ -349,7 +349,7 @@ public:
     QString migrateOldDialModeString(const QString &oldString);
     QString migrateOldActionString(const QString &oldString);
 
-    InkCanvas* currentCanvas();  // Phase 3.1.7: Returns nullptr - kept for legacy code paths, use currentViewport()
+    InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     void saveCurrentPage(); // Made public for RecentNotebooksDialog
     void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
@@ -357,8 +357,7 @@ public:
     void switchPageWithDirection(int pageNumber, int direction); // Enhanced page switching with direction tracking
     void updateTabLabel(); // Made public for RecentNotebooksDialog
     QSpinBox *pageInput; // Made public for RecentNotebooksDialog
-    QPushButton *prevPageButton; // Previous page button
-    QPushButton *nextPageButton; // Next page button
+    // REMOVED MW1.3: prevPageButton, nextPageButton - feature was dropped
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
     void addKeyboardMapping(const QString &keySequence, const QString &action);
@@ -804,7 +803,7 @@ private:
     void saveKeyboardMappings();
     void loadKeyboardMappings();
 
-    bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas);  // Phase 3.1.7: Stubbed - returns true
+    bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas);  // MW1.4: Stub - returns true
 
     RecentNotebooksManager *recentNotebooksManager; // Added manager instance
 
@@ -877,8 +876,7 @@ private:
     // Update scrollbar positions based on container size
     void updateScrollbarPositions();
     
-    // Handle edge proximity detection for scrollbar visibility
-    void handleEdgeProximity(InkCanvas* canvas, const QPoint& pos);  // Phase 3.1.7: Stubbed - no-op
+    // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
     
     // Responsive toolbar management
     bool isToolbarTwoRows = false;

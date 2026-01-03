@@ -1177,13 +1177,7 @@ void MainWindow::setupUi() {
     
 
 
-    // Previous page button
-    prevPageButton = new QPushButton(this);
-    prevPageButton->setFixedSize(24, 30);
-    prevPageButton->setText("◀");
-    prevPageButton->setStyleSheet(buttonStyle);
-    prevPageButton->setToolTip(tr("Previous Page"));
-    connect(prevPageButton, &QPushButton::clicked, this, &MainWindow::goToPreviousPage);
+    // REMOVED MW1.3: prevPageButton - feature was dropped (already hidden)
 
     pageInput = new QSpinBox(this);
     pageInput->setFixedSize(36, 30);
@@ -1193,13 +1187,7 @@ void MainWindow::setupUi() {
     pageInput->setMaximumWidth(100);
     connect(pageInput, QOverload<int>::of(&QSpinBox::valueChanged), this, &MainWindow::onPageInputChanged);
 
-    // Next page button
-    nextPageButton = new QPushButton(this);
-    nextPageButton->setFixedSize(24, 30);
-    nextPageButton->setText("▶");
-    nextPageButton->setStyleSheet(buttonStyle);
-    nextPageButton->setToolTip(tr("Next Page"));
-    connect(nextPageButton, &QPushButton::clicked, this, &MainWindow::goToNextPage);
+    // REMOVED MW1.3: nextPageButton - feature was dropped (already hidden)
 
     jumpToPageButton = new QPushButton(this);
     // QIcon jumpIcon(":/resources/icons/bookpage.png");  // Path to your icon in resources
@@ -1474,10 +1462,7 @@ void MainWindow::setupUi() {
     openRecentNotebooksButton->setVisible(false);
     benchmarkButton->setVisible(false);  // Hidden by default, toggle via Settings > Features
     benchmarkLabel->setVisible(false);
-    prevPageButton->setVisible(false);
-    nextPageButton->setVisible(false);
-    
-    
+    // REMOVED MW1.3: prevPageButton->setVisible(false), nextPageButton->setVisible(false)
     
     controlBar = new QWidget;  // Use member variable instead of local
     controlBar->setObjectName("controlBar");
@@ -3720,21 +3705,15 @@ void MainWindow::removeTabAt(int index) {
     }
 }
 
+// MW1.4: Kept as stubs - still called from legacy InkCanvas code paths
 bool MainWindow::ensureTabHasUniqueSaveFolder(InkCanvas* canvas) {
-    // Phase 3.1.2: Stubbed - will use new save logic in Phase 3.5
     Q_UNUSED(canvas);
-    // TODO Phase 3.5: Implement save-before-close logic with DocumentManager
-    return true; // Allow closure for now
+    return true; // Allow closure
 }
 
-
-
 InkCanvas* MainWindow::currentCanvas() {
-    // WILL BE REMOVED Phase 3.1.7 - Use currentViewport() instead
-    // For now, this returns nullptr since canvasStack is replaced with m_tabWidget
-    // which contains DocumentViewports, not InkCanvases
-    return nullptr;
-            }
+    return nullptr; // Use currentViewport() instead
+}
 
 // Phase 3.1.4: New accessor for DocumentViewport
 DocumentViewport* MainWindow::currentViewport() const {
@@ -3751,11 +3730,10 @@ void MainWindow::updateTabLabel() {
     qDebug() << "updateTabLabel(): Using TabManager (Phase 3.3)";
 }
 
+// MW1.4: Kept as stub - still called from legacy InkCanvas code paths
 int MainWindow::getCurrentPageForCanvas(InkCanvas *canvas) {
-    // Phase 3.1.6: Stubbed - use DocumentViewport::currentPageIndex() instead
     Q_UNUSED(canvas);
-    // TODO Phase 3.3: Remove this method entirely
-    return 0;
+    return 0; // Use DocumentViewport::currentPageIndex() instead
 }
 
 void MainWindow::toggleZoomSlider() {
@@ -5518,8 +5496,7 @@ void MainWindow::updateTheme() {
     if (zoom50Button) zoom50Button->setStyleSheet(newButtonStyle);
     if (dezoomButton) dezoomButton->setStyleSheet(newButtonStyle);
     if (zoom200Button) zoom200Button->setStyleSheet(newButtonStyle);
-    if (prevPageButton) prevPageButton->setStyleSheet(newButtonStyle);
-    if (nextPageButton) nextPageButton->setStyleSheet(newButtonStyle);
+    // REMOVED MW1.3: prevPageButton, nextPageButton style updates
     
     // Update color buttons with palette-based icons
     // Removed colorPreview widget - no longer needed
@@ -6571,12 +6548,8 @@ void MainWindow::updateScrollbarPositions() {
     panXSlider->raise();
     panYSlider->raise();
 }
-void MainWindow::handleEdgeProximity(InkCanvas* canvas, const QPoint& pos) {
-    // Phase 3.1.7: Stubbed - InkCanvas-specific edge detection
-    Q_UNUSED(canvas);
-    Q_UNUSED(pos);
-    // TODO Phase 3.3: Implement for DocumentViewport if needed
-}
+
+// REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
 
 void MainWindow::returnToLauncher() {
     // Phase 3.1: LauncherWindow disconnected - will be re-linked later
@@ -7337,11 +7310,7 @@ void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QCol
     }
 }
 
-void MainWindow::applyDefaultBackgroundToCanvas(InkCanvas *canvas) {
-    // Phase 3.1.7: Stubbed - InkCanvas-specific background handling
-    Q_UNUSED(canvas);
-    // TODO Phase 3.3: Implement for DocumentViewport via Page background settings
-}
+// REMOVED MW1.4: applyDefaultBackgroundToCanvas(InkCanvas*) - use Page background settings
 
 void MainWindow::showRopeSelectionMenu(const QPoint &position) {
     // Phase 3.1.5: Stubbed - Lasso/rope tool will be reimplemented in Phase 2B
@@ -7901,11 +7870,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     event->accept();
 }
 
-bool MainWindow::showLastAccessedPageDialog(InkCanvas *canvas) {
-    // Phase 3.1.7: Stubbed - InkCanvas-specific
-    Q_UNUSED(canvas);
-    return false;
-}
+// REMOVED MW1.4: showLastAccessedPageDialog(InkCanvas*) - InkCanvas obsolete
 
 void MainWindow::openSpnPackage(const QString &spnPath)
 {

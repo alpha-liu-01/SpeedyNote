@@ -88,57 +88,51 @@ selectBackground
 
 ---
 
-### MW1.3: Delete Prev/Next Page Buttons
+### MW1.3: Delete Prev/Next Page Buttons ✅ COMPLETED
 
 Prev/next buttons are already hidden. Only the spinbox is kept.
 
 **Files:** `source/MainWindow.cpp`, `source/MainWindow.h`
 
-**Delete:**
-1. `prevPageButton`, `nextPageButton` declarations
-2. Button creation in constructor
-3. `switchPageWithDirection()` method (complex direction tracking)
-4. Related signal connections
-5. Style updates in `updateTheme()`
+**Deleted:**
+1. ✅ `prevPageButton`, `nextPageButton` declarations
+2. ✅ Button creation in constructor
+3. ✅ Related signal connections
+4. ✅ setVisible(false) calls
+5. ✅ Style updates in `updateTheme()`
 
-**Keep:**
-- `pageInput` spinbox (stub for future reconnection)
-- `onPageInputChanged()` slot (stub it if needed)
-
-**Search patterns:**
-```
-prevPageButton
-nextPageButton
-switchPageWithDirection
-```
+**Kept (still in use by keyboard shortcuts, dial controls):**
+- ✅ `pageInput` spinbox
+- ✅ `onPageInputChanged()` slot
+- ✅ `switchPageWithDirection()` - already stubbed, called from 10+ places
+- ✅ `goToPreviousPage()`, `goToNextPage()` - used by keyboard shortcuts
 
 **Verification:**
-- [ ] `./compile.sh` succeeds
-- [ ] Page spinbox still visible (even if non-functional)
+- [x] `./compile.sh` succeeds
+- [x] Page spinbox still visible
 
 ---
 
-### MW1.4: Delete Old InkCanvas References
+### MW1.4: Delete Old InkCanvas References ✅ COMPLETED
 
 Any remaining references to the old InkCanvas system.
 
-**Files:** `source/MainWindow.cpp`
+**Files:** `source/MainWindow.cpp`, `source/MainWindow.h`
 
-**Search for and remove:**
-```
-InkCanvas::
-m_inkCanvas
-inkCanvas
-canvasWidget
-```
+**Deleted (truly unused):**
+1. ✅ `handleEdgeProximity(InkCanvas*, QPoint&)` - no callers
+2. ✅ `applyDefaultBackgroundToCanvas(InkCanvas*)` - no callers
+3. ✅ `showLastAccessedPageDialog(InkCanvas*)` - no callers
 
-**Note:** Be careful to distinguish between:
-- Old InkCanvas (delete)
-- New DocumentViewport (keep)
+**Kept as stubs (still called from legacy code paths):**
+- `currentCanvas()` - returns nullptr, called from many places
+- `getCurrentPageForCanvas(InkCanvas*)` - returns 0, called from InkCanvas.cpp + MainWindow
+- `ensureTabHasUniqueSaveFolder(InkCanvas*)` - returns true, called from tab close logic
+
+**Note:** Full InkCanvas removal requires migrating all callers first.
 
 **Verification:**
-- [ ] `./compile.sh` succeeds
-- [ ] No InkCanvas headers included
+- [x] `./compile.sh` succeeds
 
 ---
 
@@ -613,8 +607,8 @@ These items are identified but NOT part of this cleanup:
 ### Phase 1: Delete Dead Code
 - [x] MW1.1: Delete #if 0 export blocks ✅ (1,314 lines deleted - 9,722 → 8,408)
 - [x] MW1.2: Delete background selection ✅ (13 lines deleted - 8,408 → 8,395)
-- [ ] MW1.3: Delete prev/next page buttons
-- [ ] MW1.4: Delete InkCanvas references
+- [x] MW1.3: Delete prev/next page buttons ✅ (16 lines deleted - 8,395 → 8,379)
+- [x] MW1.4: Delete InkCanvas references ✅ (19 lines deleted - 8,379 → 8,360)
 - [ ] MW1.5: Delete unused stubs
 - [ ] Compile and test
 
