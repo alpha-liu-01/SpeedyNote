@@ -4650,7 +4650,8 @@ void MainWindow::toggleFullscreen() {
 }
 
 void MainWindow::showJumpToPageDialog() {
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    // Phase 3.1.8: Use currentViewport() instead of currentCanvas().
+    // This one doesn't work yet. 
     DocumentViewport* vp = currentViewport();
     int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     
