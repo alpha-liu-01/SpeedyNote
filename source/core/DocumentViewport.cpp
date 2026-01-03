@@ -4565,6 +4565,14 @@ void DocumentViewport::insertImageFromClipboard()
     imgObj->setPixmap(QPixmap::fromImage(image));
     // NOTE: id is auto-generated in InsertedObject constructor
     
+    // Scale size for high DPI displays
+    // The pixmap dimensions are in physical pixels, but document coordinates
+    // are in logical pixels. Dividing by DPR ensures 1:1 pixel mapping on screen.
+    qreal dpr = devicePixelRatioF();
+    if (dpr > 1.0) {
+        imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
+    }
+    
     // 3. Position at viewport center
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
@@ -4668,6 +4676,14 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     // 2. Create ImageObject with setPixmap()
     auto imgObj = std::make_unique<ImageObject>();
     imgObj->setPixmap(QPixmap::fromImage(image));
+    
+    // Scale size for high DPI displays
+    // The pixmap dimensions are in physical pixels, but document coordinates
+    // are in logical pixels. Dividing by DPR ensures 1:1 pixel mapping on screen.
+    qreal dpr = devicePixelRatioF();
+    if (dpr > 1.0) {
+        imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
+    }
     
     // 3. Position at viewport center
     QPointF center = viewportCenterInDocument();

@@ -2705,6 +2705,79 @@ if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_Brac
 
 ---
 
+#### O2.BF.10: Rotated Object Selection/Resize Handles and Cache Rendering ✅
+
+**Problem:** When an inserted object was rotated, the selection box, resize handles, and cached image during drag/resize behaved incorrectly:
+1. **Resize handles didn't follow rotation** - Dragging a corner handle on a rotated object moved the object along global X/Y axes instead of the object's local rotated axes
+2. **Cached image stretched incorrectly** - During drag/resize, the cache was rendered with rotation baked in, then scaled along axis-aligned bounds, causing visual distortion
+3. **Final result was correct** - After releasing, the object rendered correctly because `ImageObject::render()` properly applies rotation
+
+**Root Cause:** The object selection implementation differed from the lasso selection (which worked correctly):
+
+| Aspect | Lasso Selection (✅ Correct) | Object Selection (❌ Buggy) |
+|--------|------------------------------|----------------------------|
+| Cache Rendering | At **identity** transform, apply full transform when blitting via `quadToQuad()` | With **rotation baked in**, apply delta rotation during blit |
+| Resize Delta | Converts delta to **local coordinates** using inverse rotation before calculating scale | Applies delta directly in **document coordinates** ignoring rotation |
+| Handle Positions | Computed from original bounds, then transformed via `buildSelectionTransform()` | Computed from axis-aligned viewport bounds, then rotated manually |
+
+**Solution:** Refactored object selection to match the lasso selection approach:
+
+1. **`updateObjectResize()`** - Rewrote resize logic to convert pointer delta to local coordinates using inverse rotation, then calculate scale factors relative to object center (matching `updateScaleFromHandle()`)
+
+2. **`renderSelectedObjectsOnly()`** - Rewrote to use `QTransform::quadToQuad()`:
+   - Calculate 4 corners of rotated object in document coordinates
+   - Convert to viewport coordinates polygon
+   - Use `quadToQuad()` to map cache rectangle to rotated viewport polygon
+
+3. **`cacheSelectedObjectsForDrag()`** - Modified to render at identity rotation:
+   - Temporarily set `obj->rotation = 0` during cache rendering
+   - Restore original rotation afterward
+   - Matches lasso selection's approach where cache is at identity
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`:
+  - `updateObjectResize()` - Complete rewrite (~80 lines)
+  - `renderSelectedObjectsOnly()` - Complete rewrite (~50 lines)
+  - `cacheSelectedObjectsForDrag()` - Added identity rotation rendering
+
+---
+
+#### O2.BF.11: High DPI Object Size Scaling ✅
+
+**Problem:** On high DPI devices (e.g., 200% scaling), inserted images appeared twice as large as expected. A 1000×1000 pixel image would display as 2000×2000 physical pixels on screen.
+
+**Root Cause:** In `ImageObject::setPixmap()`, the object size is set to the pixmap's physical pixel dimensions:
+```cpp
+size = cachedPixmap.size();  // Physical pixels, not logical pixels
+```
+
+But document coordinates are in **logical pixels**. On a 200% DPI device:
+- A 1000×1000 pixel image gets `size = QSizeF(1000, 1000)` logical units
+- When rendered at zoom 1.0, that becomes 2000×2000 physical pixels (2× too large)
+
+**Solution:** Added DPR scaling after `setPixmap()` in both insertion functions:
+
+```cpp
+// Scale size for high DPI displays
+// The pixmap dimensions are in physical pixels, but document coordinates
+// are in logical pixels. Dividing by DPR ensures 1:1 pixel mapping on screen.
+qreal dpr = devicePixelRatioF();
+if (dpr > 1.0) {
+    imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
+}
+```
+
+**Why Not Fix in Other Places:**
+- **`pasteObjects()`**: Size comes from serialized JSON which was already DPR-scaled at original insertion
+- **`ImageObject::setPixmap()`**: The pixmap may not have correct DPR set (clipboard images often have DPR=1.0), so using viewport's `devicePixelRatioF()` is more reliable
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`:
+  - `insertImageFromClipboard()` - Added DPR scaling after `setPixmap()`
+  - `insertImageFromFile()` - Added DPR scaling after `setPixmap()`
+
+---
+
 ### O2.10: Testing & Verification
 
 **Tasks:**
@@ -2725,6 +2798,9 @@ if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_Brac
 - [ ] Test: Save and reload - inserted images persist (assets folder)
 - [ ] Test: Edgeless - object crossing tile boundary (drag to new tile)
 - [ ] Test: Paged lazy loading - objects on evicted pages persist
+- [x] Test: **Rotated object resize** - handles follow rotation, cached image scales correctly (BF.10)
+- [x] Test: **Rotated object drag** - cached image displays at correct rotated position (BF.10)
+- [x] Test: **High DPI insert** - image appears at 1:1 pixel size on 200% display (BF.11)
 
 ---
 
