@@ -1063,90 +1063,132 @@ DocumentViewport::HandleHit DocumentViewport::objectHandleAtPoint(const QPointF&
 void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
 {
     // Phase O3.1.4: Resize logic implementation
+    // BF-Rotation: Fixed to work correctly with rotated objects by converting
+    // delta to local coordinates (same approach as lasso updateScaleFromHandle)
+    
     if (m_selectedObjects.size() != 1) return;
     InsertedObject* obj = m_selectedObjects.first();
     if (!obj) return;
     
     // Convert positions to document coordinates
-    QPointF startDoc = viewportToDocument(m_resizeStartViewport);
     QPointF currentDoc = viewportToDocument(currentViewport);
-    QPointF delta = currentDoc - startDoc;
     
-    // Original bounds
-    QRectF originalRect(m_resizeOriginalPosition, m_resizeOriginalSize);
-    QRectF newRect = originalRect;
+    // -----------------------------------------------------------------
+    // Rotation (Phase O3.1.8.1): Rotate object around its center
+    // -----------------------------------------------------------------
+    if (m_objectResizeHandle == HandleHit::Rotate) {
+        // Calculate angle from object center to current pointer position
+        QPointF objectCenter = m_resizeOriginalPosition + 
+                               QPointF(m_resizeOriginalSize.width() / 2, 
+                                       m_resizeOriginalSize.height() / 2);
+        
+        // Angle from center to current pointer (in document coords)
+        // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
+        // We add 90° because the rotation handle starts above the object (at 12 o'clock)
+        qreal angle = qRadiansToDegrees(
+            qAtan2(currentDoc.y() - objectCenter.y(), 
+                   currentDoc.x() - objectCenter.x())
+        ) + 90.0;
+        
+        // Normalize to 0-360 range
+        while (angle < 0) angle += 360.0;
+        while (angle >= 360) angle -= 360.0;
+        
+        // Snap to 15° increments by default
+        // TODO O3.1.8.1: Check Shift key for free rotation (no snap)
+        angle = qRound(angle / 15.0) * 15.0;
+        
+        obj->rotation = angle;
+        return;  // Don't apply resize logic below
+    }
     
-    // Apply delta based on which handle is being dragged
+    // -----------------------------------------------------------------
+    // Scale: Use same approach as lasso selection (updateScaleFromHandle)
+    // Convert delta to local coordinates using inverse rotation
+    // -----------------------------------------------------------------
+    
+    // Object center is the transform origin (same as lasso's transformOrigin)
+    QPointF center = m_resizeOriginalPosition + 
+                     QPointF(m_resizeOriginalSize.width() / 2, 
+                             m_resizeOriginalSize.height() / 2);
+    
+    // Original half-sizes (distances from center to edges in local space)
+    qreal halfW = m_resizeOriginalSize.width() / 2.0;
+    qreal halfH = m_resizeOriginalSize.height() / 2.0;
+    
+    // Get current pointer position relative to center
+    qreal dx = currentDoc.x() - center.x();
+    qreal dy = currentDoc.y() - center.y();
+    
+    // Convert to local coordinates using inverse rotation
+    // (same math as lasso updateScaleFromHandle)
+    qreal rotRad = qDegreesToRadians(m_resizeOriginalRotation);
+    qreal cosR = qCos(-rotRad);  // Inverse rotation
+    qreal sinR = qSin(-rotRad);
+    qreal localX = dx * cosR - dy * sinR;
+    qreal localY = dx * sinR + dy * cosR;
+    
+    // Calculate scale factors based on which handle is being dragged
+    qreal scaleX = 1.0;
+    qreal scaleY = 1.0;
+    
+    // Determine which edges are being scaled
+    // Positive half-size = right/bottom edge, negative = left/top edge
     switch (m_objectResizeHandle) {
         case HandleHit::TopLeft:
-            newRect.setTopLeft(originalRect.topLeft() + delta);
+            if (halfW > 0.001) scaleX = -localX / halfW;  // Left edge: -halfW
+            if (halfH > 0.001) scaleY = -localY / halfH;  // Top edge: -halfH
             break;
         case HandleHit::Top:
-            newRect.setTop(originalRect.top() + delta.y());
+            if (halfH > 0.001) scaleY = -localY / halfH;
             break;
         case HandleHit::TopRight:
-            newRect.setTopRight(originalRect.topRight() + delta);
+            if (halfW > 0.001) scaleX = localX / halfW;   // Right edge: +halfW
+            if (halfH > 0.001) scaleY = -localY / halfH;
             break;
         case HandleHit::Left:
-            newRect.setLeft(originalRect.left() + delta.x());
+            if (halfW > 0.001) scaleX = -localX / halfW;
             break;
         case HandleHit::Right:
-            newRect.setRight(originalRect.right() + delta.x());
+            if (halfW > 0.001) scaleX = localX / halfW;
             break;
         case HandleHit::BottomLeft:
-            newRect.setBottomLeft(originalRect.bottomLeft() + delta);
+            if (halfW > 0.001) scaleX = -localX / halfW;
+            if (halfH > 0.001) scaleY = localY / halfH;   // Bottom edge: +halfH
             break;
         case HandleHit::Bottom:
-            newRect.setBottom(originalRect.bottom() + delta.y());
+            if (halfH > 0.001) scaleY = localY / halfH;
             break;
         case HandleHit::BottomRight:
-            newRect.setBottomRight(originalRect.bottomRight() + delta);
+            if (halfW > 0.001) scaleX = localX / halfW;
+            if (halfH > 0.001) scaleY = localY / halfH;
             break;
-        // -----------------------------------------------------------------
-        // Rotation (Phase O3.1.8.1): Rotate object around its center
-        // -----------------------------------------------------------------
-        case HandleHit::Rotate: {
-            // Calculate angle from object center to current pointer position
-            QPointF objectCenter = m_resizeOriginalPosition + 
-                                   QPointF(m_resizeOriginalSize.width() / 2, 
-                                           m_resizeOriginalSize.height() / 2);
-            
-            // Angle from center to current pointer (in document coords)
-            // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
-            // We add 90° because the rotation handle starts above the object (at 12 o'clock)
-            qreal angle = qRadiansToDegrees(
-                qAtan2(currentDoc.y() - objectCenter.y(), 
-                       currentDoc.x() - objectCenter.x())
-            ) + 90.0;
-            
-            // Normalize to 0-360 range
-            while (angle < 0) angle += 360.0;
-            while (angle >= 360) angle -= 360.0;
-            
-            // Snap to 15° increments by default
-            // TODO O3.1.8.1: Check Shift key for free rotation (no snap)
-            angle = qRound(angle / 15.0) * 15.0;
-            
-            obj->rotation = angle;
-            return;  // Don't apply resize logic below
-        }
         default:
             return;
     }
     
-    // Normalize rect (handle inverted dimensions from dragging past opposite edge)
-    newRect = newRect.normalized();
+    // Clamp scale factors (prevent flip and ensure minimum size)
+    const qreal MIN_SCALE = 0.1;
+    const qreal MAX_SCALE = 10.0;
+    scaleX = qBound(MIN_SCALE, scaleX, MAX_SCALE);
+    scaleY = qBound(MIN_SCALE, scaleY, MAX_SCALE);
+    
+    // Calculate new size
+    QSizeF newSize(m_resizeOriginalSize.width() * scaleX,
+                   m_resizeOriginalSize.height() * scaleY);
     
     // Enforce minimum size
     const qreal MIN_SIZE = 10.0;
-    if (newRect.width() < MIN_SIZE) newRect.setWidth(MIN_SIZE);
-    if (newRect.height() < MIN_SIZE) newRect.setHeight(MIN_SIZE);
+    if (newSize.width() < MIN_SIZE) newSize.setWidth(MIN_SIZE);
+    if (newSize.height() < MIN_SIZE) newSize.setHeight(MIN_SIZE);
     
-    // TODO O3.1.4: Aspect ratio lock (Shift key or ImageObject::maintainAspectRatio)
+    // Calculate new position (keeping center fixed)
+    // Position is top-left corner, which is center - half of new size
+    QPointF newPos = center - QPointF(newSize.width() / 2.0, newSize.height() / 2.0);
     
     // Apply to object
-    obj->position = newRect.topLeft();
-    obj->size = newRect.size();
+    obj->position = newPos;
+    obj->size = newSize;
 }
 
 QRectF DocumentViewport::visibleRect() const
@@ -5676,51 +5718,88 @@ void DocumentViewport::captureObjectDragBackground()
 void DocumentViewport::renderSelectedObjectsOnly(QPainter& painter)
 {
     // Phase O4.1.2: Use pre-rendered cache if available (FAST!)
-    // The cache was rendered at current zoom level, so no scaling needed.
+    // BF-Rotation: Fixed to use quadToQuad for proper rotated object rendering
+    // (same approach as lasso selection's renderLassoSelection)
+    
     if (!m_dragObjectRenderedCache.isNull() && m_selectedObjects.size() == 1) {
         InsertedObject* obj = m_selectedObjects.first();
         if (obj) {
             
-            // Calculate current viewport position of the object
+            // Calculate current document position of the object
             // Use cached page/tile location (no searching!)
-            QPointF origin;
+            QPointF docOrigin;
             if (m_document->isEdgeless()) {
-                origin = QPointF(m_dragObjectTileCoord.first * Document::EDGELESS_TILE_SIZE,
-                                m_dragObjectTileCoord.second * Document::EDGELESS_TILE_SIZE);
+                docOrigin = QPointF(m_dragObjectTileCoord.first * Document::EDGELESS_TILE_SIZE,
+                                    m_dragObjectTileCoord.second * Document::EDGELESS_TILE_SIZE);
             } else {
-                origin = pagePosition(m_dragObjectPageIndex);
+                docOrigin = pagePosition(m_dragObjectPageIndex);
             }
             
-            // The cache has the object at (0,0), so we need to draw at:
-            // viewport position of (origin + obj->position)
-            QPointF docPos = origin + obj->position;
-            QPointF viewportPos = documentToViewport(docPos);
+            // Object's document position (top-left of unrotated local bounds)
+            QPointF docPos = docOrigin + obj->position;
             
-            // Phase O4.1.3: Handle resize/rotate - transform cached image as needed
-            if (m_isResizingObject) {
-                // During resize/rotate, transform the cached image to match current object state
-                QSizeF currentSize = obj->size * m_zoomLevel;
-                QPointF center = viewportPos + QPointF(currentSize.width() / 2, currentSize.height() / 2);
-                
+            // Current object size (may have changed during resize)
+            QSizeF currentSize = obj->size;
+            
+            // Object's center in document coordinates
+            QPointF docCenter = docPos + QPointF(currentSize.width() / 2.0, 
+                                                  currentSize.height() / 2.0);
+            
+            // Helper to rotate a point around center
+            auto rotatePoint = [](const QPointF& pt, const QPointF& center, qreal angleDegrees) -> QPointF {
+                if (qAbs(angleDegrees) < 0.01) return pt;
+                qreal rad = qDegreesToRadians(angleDegrees);
+                qreal cosA = qCos(rad);
+                qreal sinA = qSin(rad);
+                QPointF translated = pt - center;
+                return QPointF(
+                    translated.x() * cosA - translated.y() * sinA + center.x(),
+                    translated.x() * sinA + translated.y() * cosA + center.y()
+                );
+            };
+            
+            // Calculate the 4 corners of the object in document coordinates
+            // These are rotated around the object's center
+            qreal rotation = obj->rotation;
+            QPolygonF docCorners;
+            docCorners << rotatePoint(docPos, docCenter, rotation)
+                       << rotatePoint(docPos + QPointF(currentSize.width(), 0), docCenter, rotation)
+                       << rotatePoint(docPos + QPointF(currentSize.width(), currentSize.height()), docCenter, rotation)
+                       << rotatePoint(docPos + QPointF(0, currentSize.height()), docCenter, rotation);
+            
+            // Convert corners to viewport coordinates
+            QPolygonF vpCorners;
+            for (const QPointF& pt : docCorners) {
+                vpCorners << documentToViewport(pt);
+            }
+            
+            // Source rect: the cache was rendered at original size at zoom level
+            // Cache size in logical pixels (accounting for DPR)
+            qreal cacheDpr = m_dragObjectRenderedCache.devicePixelRatio();
+            QSizeF cacheLogicalSize(m_dragObjectRenderedCache.width() / cacheDpr,
+                                    m_dragObjectRenderedCache.height() / cacheDpr);
+            
+            // The source rectangle maps to the original object's corners
+            // (cache was rendered at m_resizeOriginalSize * m_zoomLevel)
+            QPolygonF sourceRect;
+            sourceRect << QPointF(0, 0)
+                       << QPointF(cacheLogicalSize.width(), 0)
+                       << QPointF(cacheLogicalSize.width(), cacheLogicalSize.height())
+                       << QPointF(0, cacheLogicalSize.height());
+            
+            // Use quadToQuad to create transform from cache to viewport polygon
+            // This correctly handles rotation, scaling, and perspective
+            QTransform blitTransform;
+            if (QTransform::quadToQuad(sourceRect, vpCorners, blitTransform)) {
                 painter.save();
                 painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-                
-                // Apply DELTA rotation only (current - original)
-                // The cached image already has the original rotation baked in!
-                qreal deltaRotation = obj->rotation - m_resizeOriginalRotation;
-                if (qAbs(deltaRotation) > 0.01) {
-                    painter.translate(center);
-                    painter.rotate(deltaRotation);
-                    painter.translate(-center);
-                }
-                
-                // Scale the cached image to current size
-                QRectF targetRect(viewportPos, currentSize);
-                painter.drawPixmap(targetRect.toRect(), m_dragObjectRenderedCache);
+                painter.setTransform(blitTransform, true);
+                painter.drawPixmap(0, 0, m_dragObjectRenderedCache);
                 painter.restore();
             } else {
-                // Draw cache at native size - NO SCALING (fast path for drag)
-                painter.drawPixmap(viewportPos.toPoint(), m_dragObjectRenderedCache);
+                // Fallback: simple draw at viewport position (shouldn't normally happen)
+                QPointF vpPos = documentToViewport(docPos);
+                painter.drawPixmap(vpPos.toPoint(), m_dragObjectRenderedCache);
             }
         }
     } else {
@@ -5779,7 +5858,8 @@ void DocumentViewport::renderSelectedObjectsOnly(QPainter& painter)
 
 // -----------------------------------------------------------------------------
 // Phase O4.1.2: Pre-render selected objects to cache at current zoom level
-// This is the key optimization - render once at drag start, then just blit!
+// BF-Rotation: Renders at IDENTITY rotation (like lasso selection cache).
+// The rotation is applied during rendering via quadToQuad in renderSelectedObjectsOnly().
 // -----------------------------------------------------------------------------
 void DocumentViewport::cacheSelectedObjectsForDrag()
 {
@@ -5833,7 +5913,6 @@ void DocumentViewport::cacheSelectedObjectsForDrag()
     
     // Calculate the size of the rendered object at current zoom
     // FIX: Only create cache for the object SIZE, not position + size!
-    // Previously we were creating huge caches if position was large.
     qreal dpr = devicePixelRatioF();
     QSizeF objectSize = obj->size * m_zoomLevel;
     
@@ -5851,10 +5930,15 @@ void DocumentViewport::cacheSelectedObjectsForDrag()
     m_dragObjectRenderedCache.setDevicePixelRatio(dpr);
     m_dragObjectRenderedCache.fill(Qt::transparent);
     
+    // BF-Rotation: Render at IDENTITY rotation (rotation = 0)
+    // This matches the lasso selection approach where cache is at identity
+    // and the transform is applied during rendering via quadToQuad.
+    qreal originalRotation = obj->rotation;
+    obj->rotation = 0.0;  // Temporarily set to identity
+    
     // Render the object to the cache
     // IMPORTANT: Translate by -position so object renders at (0,0) in cache
     // ImageObject::render() internally draws at (position.x * zoom, position.y * zoom)
-    // So we need to offset by -position to get it at the cache origin
     QPainter cachePainter(&m_dragObjectRenderedCache);
     cachePainter.setRenderHint(QPainter::Antialiasing, true);
     cachePainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
@@ -5862,6 +5946,9 @@ void DocumentViewport::cacheSelectedObjectsForDrag()
     cachePainter.translate(-obj->position);  // Offset so object renders at (0,0)
     obj->render(cachePainter, 1.0);
     cachePainter.end();
+    
+    // Restore original rotation
+    obj->rotation = originalRotation;
 }
 
 void DocumentViewport::rebuildSelectionCache()
