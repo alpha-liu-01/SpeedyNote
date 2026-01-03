@@ -4547,6 +4547,123 @@ void ObjectPropertiesWidget::populateAffinityComboBox()
 
 ---
 
+## Code Review: Memory Safety and Quality (Post-MVP)
+
+### CR-O1: Page/Tile Eviction Must Clear Object Selection ✅
+
+**Problem:** When pages (paged mode) or tiles (edgeless mode) are evicted from memory, any `InsertedObject*` pointers in `m_selectedObjects` or `m_hoveredObject` become dangling pointers. Subsequent access would cause crashes or undefined behavior.
+
+**Scenario:**
+1. User selects an object on a page
+2. User scrolls far away (page is evicted to save memory)
+3. User presses Delete or tries to drag the selection
+4. **CRASH**: Access to freed memory through dangling pointer
+
+**Fix:** Before evicting a page/tile, scan its objects and remove any from the selection:
+
+```cpp
+// In preloadStrokeCaches() before evictPage():
+Page* page = m_document->page(i);
+if (page && !page->objects.empty()) {
+    for (const auto& obj : page->objects) {
+        if (m_hoveredObject == obj.get()) {
+            m_hoveredObject = nullptr;
+        }
+        m_selectedObjects.removeOne(obj.get());
+    }
+    // Emit signal if selection changed
+}
+
+// Same pattern in evictDistantTiles() before evictTile()
+```
+
+**Files Changed:**
+- `source/core/DocumentViewport.cpp`: `preloadStrokeCaches()`, `evictDistantTiles()`
+
+---
+
+### CR-O2: saveUnsavedImages() Abstraction Violation ✅
+
+**Problem:** `Document::saveUnsavedImages()` used type-specific code:
+```cpp
+if (obj->type() == "image") {
+    ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
+    if (imgObj->imagePath.isEmpty() && imgObj->isLoaded()) { ... }
+}
+```
+
+This violated the O2.C abstraction principle and would require modification for each new object type with assets.
+
+**Fix:** Use virtual methods from `InsertedObject`:
+```cpp
+if (obj->isAssetLoaded()) {
+    obj->saveAssets(bundlePath);
+}
+```
+
+**Files Changed:**
+- `source/core/Document.cpp`: `saveUnsavedImages()`
+
+---
+
+### CR-O3: Orphaned Asset Files (Known Limitation - By Design)
+
+**Observation:** When an image is deleted, its asset file in `assets/images/` is NOT deleted. This is intentional:
+
+1. **Deduplication Complexity:** Multiple ImageObjects can share the same asset file. Tracking reference counts would add complexity.
+
+2. **Undo/Redo Safety:** If user deletes an image then undoes, the asset file must still exist.
+
+3. **Copy/Paste Across Documents:** Future feature may allow pasting images from one document to another by referencing assets.
+
+**Impact:** Over many edit sessions, unused asset files may accumulate. A future "Compact Bundle" feature could scan for unused assets and remove them.
+
+**Decision:** Accept as known limitation. Document bundle may grow with unused assets over time.
+
+---
+
+### CR-O4: Repeated Tile Search in Object Operations (Performance Note)
+
+**Observation:** Many object operations in edgeless mode search all loaded tiles to find the tile containing an object:
+
+```cpp
+for (const auto& coord : m_document->allLoadedTileCoords()) {
+    Page* tile = m_document->getTile(coord.first, coord.second);
+    if (tile && tile->objectById(obj->id)) {
+        // Found tile
+    }
+}
+```
+
+This is O(T × O) where T = loaded tiles and O = objects per tile. For typical use (few tiles, few objects per tile), this is fast enough.
+
+**Potential Future Optimization:** If performance becomes an issue with many objects:
+1. Cache `std::map<QString, TileCoord> m_objectToTileMap`
+2. Update on object add/remove/relocate
+3. O(1) lookup instead of O(T × O) scan
+
+**Decision:** Current implementation is acceptable. The pattern appears ~15 times in DocumentViewport.cpp but is only executed during user interactions (not every frame). Optimize only if profiling shows it's a bottleneck.
+
+---
+
+### CR-O5: Verified Correct Patterns ✅
+
+The following were reviewed and found correct:
+
+1. **setDocument() clears selection** - Added in O3.1.8.BF.1, prevents dangling pointers when switching documents.
+
+2. **Page::removeObject() updates affinity map** - Object is removed from `objectsByAffinity` before being deleted.
+
+3. **Page::extractObject() for cross-tile moves** - Returns ownership via `std::unique_ptr`, properly cleans up affinity map.
+
+4. **Undo/redo restores assets** - ObjectDelete undo calls `loadAssets()` after recreating object from JSON.
+
+5. **saveTile() includes objects** - Fixed in O2.BF.5, objects are serialized to tile JSON.
+
+6. **saveUnsavedImages() called before page JSON** - Ensures imagePath is set before serialization.
+
+---
+
 ## Execution Order
 
 ```

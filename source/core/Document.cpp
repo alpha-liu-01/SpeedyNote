@@ -1653,23 +1653,27 @@ int Document::saveUnsavedImages(const QString& bundlePath)
     
     int savedCount = 0;
     
-    // Helper to process objects in a page
+    // CR-O2: Use virtual saveAssets() instead of type-specific code
+    // This allows future object types with assets (audio, video, etc.) to work automatically.
+    // 
+    // Note: saveAssets() handles already-saved assets gracefully (deduplication check).
+    // We call it for all objects with loaded assets - the virtual method no-ops for
+    // objects without external assets (base class returns true immediately).
     auto processPage = [&](Page* page) {
         if (!page) return;
         
         for (auto& obj : page->objects) {
-            if (obj->type() == "image") {
-                ImageObject* imgObj = static_cast<ImageObject*>(obj.get());
-                
-                // Check if image needs saving (has pixmap but no path)
-                if (imgObj->imagePath.isEmpty() && imgObj->isLoaded()) {
-                    if (imgObj->saveToAssets(bundlePath)) {
-                        savedCount++;
-                        qDebug() << "saveUnsavedImages: Saved image" << imgObj->id 
-                                 << "as" << imgObj->imagePath;
-                    } else {
-                        qWarning() << "saveUnsavedImages: Failed to save image" << imgObj->id;
-                    }
+            // Only process objects with loaded assets that might need saving
+            // isAssetLoaded() returns false for objects without external assets (base class)
+            // For ImageObject, it returns !cachedPixmap.isNull()
+            if (obj->isAssetLoaded()) {
+                // saveAssets() handles deduplication internally - safe to call even
+                // if asset was previously saved (just updates imagePath if needed)
+                if (!obj->saveAssets(bundlePath)) {
+                    qWarning() << "saveUnsavedImages: Failed to save asset for" 
+                               << obj->type() << "object" << obj->id;
+                } else {
+                    savedCount++;
                 }
             }
         }

@@ -2786,6 +2786,24 @@ void DocumentViewport::preloadStrokeCaches()
     for (int i = 0; i < pageCount; ++i) {
         if (i < keepStart || i > keepEnd) {
             if (lazyLoadingEnabled) {
+                // CR-O1: Clear selection for objects on pages about to be evicted
+                // This prevents dangling pointers in m_selectedObjects and m_hoveredObject
+                Page* page = m_document->page(i);
+                if (page && !page->objects.empty()) {
+                    bool selectionChanged = false;
+                    for (const auto& obj : page->objects) {
+                        if (m_hoveredObject == obj.get()) {
+                            m_hoveredObject = nullptr;
+                        }
+                        if (m_selectedObjects.removeOne(obj.get())) {
+                            selectionChanged = true;
+                        }
+                    }
+                    if (selectionChanged) {
+                        emit objectSelectionChanged();
+                    }
+                }
+                
                 // Evict entire page (saves if dirty, removes from memory)
                 m_document->evictPage(i);
             } else {
@@ -2839,6 +2857,8 @@ void DocumentViewport::evictDistantTiles()
     QVector<Document::TileCoord> loadedTiles = m_document->allLoadedTileCoords();
     
     int evictedCount = 0;
+    bool selectionChanged = false;
+    
     for (const auto& coord : loadedTiles) {
         // Phase 5.6.5: No longer need to protect origin tile - layer structure comes from manifest
         
@@ -2846,9 +2866,27 @@ void DocumentViewport::evictDistantTiles()
                         tileSize, tileSize);
         
         if (!keepRect.intersects(tileRect)) {
+            // CR-O1: Clear selection for objects on tiles about to be evicted
+            // This prevents dangling pointers in m_selectedObjects and m_hoveredObject
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && !tile->objects.empty()) {
+                for (const auto& obj : tile->objects) {
+                    if (m_hoveredObject == obj.get()) {
+                        m_hoveredObject = nullptr;
+                    }
+                    if (m_selectedObjects.removeOne(obj.get())) {
+                        selectionChanged = true;
+                    }
+                }
+            }
+            
             m_document->evictTile(coord);
             ++evictedCount;
         }
+    }
+    
+    if (selectionChanged) {
+        emit objectSelectionChanged();
     }
     
 #ifdef QT_DEBUG

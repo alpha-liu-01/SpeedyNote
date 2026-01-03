@@ -797,17 +797,22 @@ int Page::loadImages(const QString& basePath)
         return 0;
     }
     
+    // CR-O2: Use virtual loadAssets() instead of type-specific code
+    // This allows future object types with assets to work automatically.
     int loaded = 0;
     for (auto& obj : objects) {
-        if (obj->type() == "image") {
-            ImageObject* img = static_cast<ImageObject*>(obj.get());
-            qDebug() << "Page::loadImages: Loading image" << img->id 
-                     << "path:" << img->imagePath << "from base:" << basePath;
-            if (img->loadImage(basePath)) {
+        // loadAssets() returns true for objects without external assets (base class)
+        // For ImageObject, it loads the pixmap from the assets folder
+        if (!obj->isAssetLoaded()) {  // Only load if not already loaded
+            if (obj->loadAssets(basePath)) {
                 loaded++;
-                qDebug() << "Page::loadImages: Successfully loaded image" << img->id;
+#ifdef QT_DEBUG
+                qDebug() << "Page::loadImages: Loaded asset for" << obj->type() 
+                         << "object" << obj->id;
+#endif
             } else {
-                qWarning() << "Page::loadImages: Failed to load image" << img->id;
+                qWarning() << "Page::loadImages: Failed to load asset for" 
+                           << obj->type() << "object" << obj->id;
             }
         }
     }
