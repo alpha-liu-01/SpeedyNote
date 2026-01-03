@@ -23,6 +23,7 @@
 #include <QPixmap>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QSet>        // Phase O4.1: For excludeIds parameter
 #include <vector>
 #include <memory>
 #include <map>
@@ -384,8 +385,13 @@ public:
      * - etc.
      * 
      * Objects within the same affinity group are sorted by zOrder.
+     * 
+     * @param excludeIds Phase O4.1: Optional set of object IDs to skip rendering.
+     *        Used during background snapshot capture to exclude selected objects.
      */
-    void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, bool layerVisible = true) const;
+    void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, 
+                                    bool layerVisible = true,
+                                    const QSet<QString>* excludeIds = nullptr) const;
     
     // ===== Serialization =====
     

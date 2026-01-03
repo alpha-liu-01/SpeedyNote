@@ -645,7 +645,8 @@ void Page::renderObjects(QPainter& painter, qreal zoom) const
     }
 }
 
-void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, bool layerVisible) const
+void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, 
+                                      bool layerVisible, const QSet<QString>* excludeIds) const
 {
     // Phase O3.5.8: If the tied layer is hidden, skip rendering objects
     // Objects with affinity = K are tied to Layer K+1. When that layer is hidden,
@@ -672,6 +673,11 @@ void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity
     
     // Render each visible object in this affinity group
     for (InsertedObject* obj : objs) {
+        // Phase O4.1: Skip excluded objects (used during background snapshot capture)
+        if (excludeIds && excludeIds->contains(obj->id)) {
+            continue;
+        }
+        
         if (obj->visible) {
             obj->render(painter, zoom);
         }

@@ -3971,6 +3971,127 @@ After O3.5.5-O3.5.8 are complete:
 
 ---
 
+## Phase O4: Performance Optimization
+
+### O4.1: Object Drag/Resize Performance ✅
+
+**Status:** COMPLETE
+
+**Problem:** When dragging or resizing a selected object, the entire viewport is re-rendered on every mouse move, causing significant lag (especially with complex documents or large images).
+
+**Solution:** Same pattern as lasso selection - cache background, overlay objects during drag.
+
+**Implementation:**
+
+**File:** `source/core/DocumentViewport.h`
+Added state variables:
+```cpp
+QPixmap m_objectDragBackgroundSnapshot;   // Viewport without selected objects
+qreal m_objectDragSnapshotDpr = 1.0;      // Device pixel ratio of snapshot
+bool m_skipSelectedObjectRendering = false; // Flag to exclude objects during capture
+void captureObjectDragBackground();        // Capture background snapshot
+void renderSelectedObjectsOnly(QPainter&); // Render only selected objects
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+1. **`captureObjectDragBackground()`** - Captures viewport without selected objects
+2. **`renderSelectedObjectsOnly()`** - Renders only selected objects at current position
+3. **Fast path in `paintEvent()`** - Draws cached background + objects during drag/resize
+4. **Snapshot capture on start** - Called in `handlePointerPress_ObjectSelect()` for drag/resize
+5. **Snapshot clear on release** - Cleared in `handlePointerRelease_ObjectSelect()`
+6. **Object exclusion in rendering:**
+   - `renderEdgelessObjectsWithAffinity()` skips selected objects if `m_skipSelectedObjectRendering`
+   - `renderObjectSelection()` skipped during snapshot capture
+
+**File:** `source/core/Page.h` and `source/core/Page.cpp`
+- Added `excludeIds` parameter to `renderObjectsWithAffinity()`:
+```cpp
+void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, 
+                                bool layerVisible = true,
+                                const QSet<QString>* excludeIds = nullptr) const;
+```
+
+**Performance Flow:**
+```
+Drag/Resize Start → captureObjectDragBackground() → snapshot stored
+                                ↓
+Mouse Move → update() → paintEvent fast path:
+           1. Draw cached background (snapshot)
+           2. renderSelectedObjectsOnly() (just the objects)
+           → ~60+ FPS!
+                                ↓
+Drag/Resize End → Clear snapshot → update() → full re-render once
+```
+
+**Tasks:**
+- [x] Add state variables for object drag snapshot
+- [x] Implement `captureObjectDragBackground()` method
+- [x] Add fast path in `paintEvent()` for object dragging
+- [x] Add fast path for object resizing
+- [x] Implement `renderSelectedObjectsOnly()` method
+- [x] Clear snapshot on drag/resize release
+- [x] Skip selected objects during snapshot capture (paged + edgeless)
+- [x] **Phase O4.1.2:** Pre-render object to cache at current zoom (no scaling during drag!)
+- [ ] Test drag performance in paged mode
+- [ ] Test drag performance in edgeless mode
+- [ ] Test resize performance
+
+---
+
+### O4.1.2: Pre-Rendered Object Cache (Addon) ✅
+
+**Status:** COMPLETE
+
+**Problem:** Even with background caching, `ImageObject::render()` was still scaling the source image on every frame during drag.
+
+**Solution:** Pre-render the selected object to a pixmap at current zoom level when drag starts. During drag, just blit this cache - no scaling!
+
+**Implementation:**
+
+**File:** `source/core/DocumentViewport.h`
+Added:
+```cpp
+QPixmap m_dragObjectRenderedCache;          // Object pre-rendered at current zoom
+QPointF m_dragObjectCacheOrigin;            // Viewport origin for cache
+int m_dragObjectPageIndex = -1;             // Cached page index (no searching!)
+Document::TileCoord m_dragObjectTileCoord;  // Cached tile coord (no searching!)
+void cacheSelectedObjectsForDrag();         // Pre-render to cache
+```
+
+**File:** `source/core/DocumentViewport.cpp`
+- `cacheSelectedObjectsForDrag()`: Pre-renders object to pixmap at current zoom, caches page/tile location
+- `renderSelectedObjectsOnly()`: Uses cache if available (single selection) - just `drawPixmap()`, no scaling!
+- `captureObjectDragBackground()`: Now also calls `cacheSelectedObjectsForDrag()`
+- Release handlers: Clear both `m_objectDragBackgroundSnapshot` and `m_dragObjectRenderedCache`
+
+**Performance Flow:**
+```
+Drag Start:
+  1. captureObjectDragBackground() - background without object
+  2. cacheSelectedObjectsForDrag() - object pre-rendered at zoom level
+       ↓
+Mouse Move → paintEvent fast path:
+  1. Draw cached background (no scaling)
+  2. Draw cached object (no scaling!) - just drawPixmap()
+       → ~60+ FPS!
+       ↓
+Drag End → Clear both caches, full re-render once
+```
+
+---
+
+### O4.2: Object Rendering Cache (Future)
+
+**Status:** DEFERRED
+
+**Goal:** Cache rendered objects at current zoom level to avoid re-rendering images on every paint.
+
+**When Needed:** If object rendering itself is slow (large images, many objects).
+
+**Approach:** Similar to `VectorLayer::ensureStrokeCacheValid()`.
+
+---
+
 ### O3.6: Object Properties Panel (Deferred)
 
 **Goal:** Provide UI to view and edit object properties.

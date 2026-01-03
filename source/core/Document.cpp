@@ -499,7 +499,7 @@ Page* Document::addPage()
         m_dirtyPages.insert(uuid);
     } else {
         // Legacy mode
-        m_pages.push_back(std::move(newPage));
+    m_pages.push_back(std::move(newPage));
     }
     
     markModified();

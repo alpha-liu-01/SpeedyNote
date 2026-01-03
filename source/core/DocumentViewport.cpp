@@ -997,26 +997,44 @@ DocumentViewport::HandleHit DocumentViewport::objectHandleAtPoint(const QPointF&
         return HandleHit::None;
     }
     
-    // Get object bounds in viewport coordinates
+    // Get unrotated object bounds in viewport coordinates
     QRectF objRect = objectBoundsInViewport(obj);
     if (objRect.isEmpty()) {
         return HandleHit::None;
     }
     
-    // Calculate the 8 handle positions (same layout as in renderObjectSelection)
-    QPointF handles[8] = {
-        objRect.topLeft(),                                    // 0: TopLeft
-        QPointF(objRect.center().x(), objRect.top()),         // 1: Top
-        objRect.topRight(),                                   // 2: TopRight
-        QPointF(objRect.left(), objRect.center().y()),        // 3: Left
-        QPointF(objRect.right(), objRect.center().y()),       // 4: Right
-        objRect.bottomLeft(),                                 // 5: BottomLeft
-        QPointF(objRect.center().x(), objRect.bottom()),      // 6: Bottom
-        objRect.bottomRight()                                 // 7: BottomRight
+    // Helper to rotate a point around center
+    auto rotatePoint = [](const QPointF& pt, const QPointF& center, qreal angleDegrees) -> QPointF {
+        if (qAbs(angleDegrees) < 0.01) return pt;
+        qreal rad = qDegreesToRadians(angleDegrees);
+        qreal cosA = qCos(rad);
+        qreal sinA = qSin(rad);
+        QPointF translated = pt - center;
+        return QPointF(
+            translated.x() * cosA - translated.y() * sinA + center.x(),
+            translated.x() * sinA + translated.y() * cosA + center.y()
+        );
     };
     
-    // Rotation handle position (above top center)
-    QPointF rotatePos(objRect.center().x(), objRect.top() - ROTATE_HANDLE_OFFSET);
+    QPointF vpCenter = objRect.center();
+    
+    // Calculate the 8 handle positions with rotation
+    QPointF handles[8] = {
+        rotatePoint(objRect.topLeft(), vpCenter, obj->rotation),                           // 0: TopLeft
+        rotatePoint(QPointF(objRect.center().x(), objRect.top()), vpCenter, obj->rotation),// 1: Top
+        rotatePoint(objRect.topRight(), vpCenter, obj->rotation),                          // 2: TopRight
+        rotatePoint(QPointF(objRect.left(), objRect.center().y()), vpCenter, obj->rotation),  // 3: Left
+        rotatePoint(QPointF(objRect.right(), objRect.center().y()), vpCenter, obj->rotation), // 4: Right
+        rotatePoint(objRect.bottomLeft(), vpCenter, obj->rotation),                        // 5: BottomLeft
+        rotatePoint(QPointF(objRect.center().x(), objRect.bottom()), vpCenter, obj->rotation),// 6: Bottom
+        rotatePoint(objRect.bottomRight(), vpCenter, obj->rotation)                        // 7: BottomRight
+    };
+    
+    // Rotation handle position (offset from top center in rotated direction)
+    QPointF topCenter = handles[1];
+    qreal rad = qDegreesToRadians(obj->rotation);
+    QPointF rotateOffset(ROTATE_HANDLE_OFFSET * qSin(rad), -ROTATE_HANDLE_OFFSET * qCos(rad));
+    QPointF rotatePos = topCenter + rotateOffset;
     
     // Use HANDLE_HIT_SIZE for hit testing (touch-friendly)
     qreal hitRadius = HANDLE_HIT_SIZE / 2.0;
@@ -1110,8 +1128,6 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
             angle = qRound(angle / 15.0) * 15.0;
             
             obj->rotation = angle;
-            
-            qDebug() << "Rotation: angle =" << angle << "degrees";
             return;  // Don't apply resize logic below
         }
         default:
@@ -1295,6 +1311,28 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         return;
     }
     
+    // ========== FAST PATH: Object Drag/Resize (Phase O4.1) ==========
+    // During object drag/resize, draw cached background + objects at current position.
+    // Same optimization pattern as lasso selection transform above.
+    if ((m_isDraggingObjects || m_isResizingObject) 
+        && !m_objectDragBackgroundSnapshot.isNull()
+        && !m_skipSelectedObjectRendering) {
+        
+        // Draw the cached background (viewport without selected objects)
+        qreal dpr = m_objectDragSnapshotDpr;
+        QSizeF logicalSize(m_objectDragBackgroundSnapshot.width() / dpr,
+                           m_objectDragBackgroundSnapshot.height() / dpr);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        painter.drawPixmap(QRectF(QPointF(0, 0), logicalSize), m_objectDragBackgroundSnapshot,
+                          m_objectDragBackgroundSnapshot.rect());
+        
+        // Render only the selected objects at their current positions
+        renderSelectedObjectsOnly(painter);
+        
+        // Skip normal rendering during drag/resize
+        return;
+    }
+    
     // ========== OPTIMIZATION: Dirty Region Rendering ==========
     // Only repaint what's needed. During stroke drawing, the dirty region is small.
     QRect dirtyRect = event->rect();
@@ -1425,7 +1463,9 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     }
     
     // Phase O2: Draw object selection (bounding boxes, handles, hover)
-    if (m_currentTool == ToolType::ObjectSelect || !m_selectedObjects.isEmpty()) {
+    // Phase O4.1: Skip during background snapshot capture
+    if ((m_currentTool == ToolType::ObjectSelect || !m_selectedObjects.isEmpty()) 
+        && !m_skipSelectedObjectRendering) {
         renderObjectSelection(painter);
     }
     
@@ -3948,6 +3988,10 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             m_resizeOriginalPosition = m_selectedObjects.first()->position;
             m_resizeOriginalRotation = m_selectedObjects.first()->rotation;  // Phase O3.1.8.2
             m_pointerActive = true;
+            
+            // Phase O4.1: Capture background for fast resize rendering
+            captureObjectDragBackground();
+            
             return;  // Don't start object drag
         }
     }
@@ -3994,6 +4038,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
                     m_objectOriginalPositions[obj->id] = obj->position;
                 }
             }
+            
+            // Phase O4.1: Capture background for fast drag rendering
+            captureObjectDragBackground();
         }
     } else {
         // Clicked on empty space
@@ -4010,6 +4057,14 @@ void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
     
     // Phase O3.1.3: Handle resize drag
     if (m_isResizingObject) {
+        // Phase O4.1.3: Throttle ALL resize/rotate processing to ~60fps
+        // This prevents excessive computation, not just excessive repaints
+        if (m_dragUpdateTimer.isValid() && 
+            m_dragUpdateTimer.elapsed() < DRAG_UPDATE_INTERVAL_MS) {
+            return;  // Skip this event entirely - too soon since last update
+        }
+        m_dragUpdateTimer.restart();
+        
         // Calculate new size based on handle being dragged
         updateObjectResize(pe.viewportPos);
         update();
@@ -4078,6 +4133,10 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         m_isResizingObject = false;
         m_objectResizeHandle = HandleHit::None;
         m_pointerActive = false;
+        
+        // Phase O4.1: Clear background snapshot and object cache, trigger full re-render
+        m_objectDragBackgroundSnapshot = QPixmap();
+        m_dragObjectRenderedCache = QPixmap();
         update();
         return;
     }
@@ -4163,6 +4222,11 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         // Clear original positions
         m_objectOriginalPositions.clear();
         m_isDraggingObjects = false;
+        
+        // Phase O4.1: Clear background snapshot and object cache, trigger full re-render
+        m_objectDragBackgroundSnapshot = QPixmap();
+        m_dragObjectRenderedCache = QPixmap();
+        update();
     }
     
     m_pointerActive = false;
@@ -4356,7 +4420,15 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
     // to avoid marking dirty on every micro-movement during drag.
     // Tile boundary crossing is handled in O2.3.4.
     
-    update();
+    // Phase O4.1.3: Throttle updates to ~60fps
+    // High-DPI mice/tablets can send 100s of events per second.
+    // Only trigger repaint if enough time has passed since last update.
+    if (!m_dragUpdateTimer.isValid() || 
+        m_dragUpdateTimer.elapsed() >= DRAG_UPDATE_INTERVAL_MS) {
+        m_dragUpdateTimer.restart();
+        update();
+    }
+    // If throttled, the final position will be rendered on pointer release.
 }
 
 void DocumentViewport::pasteForObjectSelect()
@@ -5224,57 +5296,58 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     painter.setRenderHint(QPainter::Antialiasing, true);
     
     // BF.4: Helper to find the tile containing an object (edgeless mode).
-    // Objects store their position in tile-local coordinates, so we need to
-    // find which tile they're in to convert to document coordinates.
+    // Phase O4.1.2: Use cached tile coord during drag to avoid expensive search!
     auto findTileForObject = [&](InsertedObject* obj) -> Document::TileCoord {
         if (!obj) return {0, 0};
+        
+        // During drag/resize with single selection, use cached tile coord
+        if ((m_isDraggingObjects || m_isResizingObject) && 
+            m_selectedObjects.size() == 1 && m_selectedObjects.first() == obj) {
+            return m_dragObjectTileCoord;
+        }
+        
+        // Fallback: search all tiles (only when not dragging)
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (tile && tile->objectById(obj->id)) {
                 return coord;
             }
         }
-        return {0, 0};  // Fallback
+        return {0, 0};
     };
     
-    // Helper to convert object bounds to viewport coordinates
+    // Helper to rotate a point around a center
+    auto rotatePoint = [](const QPointF& pt, const QPointF& center, qreal angleDegrees) -> QPointF {
+        if (qAbs(angleDegrees) < 0.01) return pt;  // No rotation
+        qreal rad = qDegreesToRadians(angleDegrees);
+        qreal cosA = qCos(rad);
+        qreal sinA = qSin(rad);
+        QPointF translated = pt - center;
+        return QPointF(
+            translated.x() * cosA - translated.y() * sinA + center.x(),
+            translated.x() * sinA + translated.y() * cosA + center.y()
+        );
+    };
+    
+    // Helper to convert object bounds to viewport coordinates (with rotation!)
+    // Uses same approach as objectHandleAtPoint: get viewport rect, then rotate in viewport space
     auto objectToViewportRect = [&](InsertedObject* obj) -> QPolygonF {
         if (!obj) return QPolygonF();
         
-        QRectF objRect = obj->boundingRect();
-        QPolygonF corners;
-        corners << objRect.topLeft() << objRect.topRight()
-                << objRect.bottomRight() << objRect.bottomLeft();
+        // Get axis-aligned bounding box in viewport coordinates (same as objectBoundsInViewport)
+        QRectF vpRect = objectBoundsInViewport(obj);
+        if (vpRect.isEmpty()) return QPolygonF();
         
-        // Convert to document coordinates then to viewport
-        if (m_document->isEdgeless()) {
-            // BF.4: Object position is tile-local, find its tile and add tile origin.
-            // Without this, the selection box would be drawn near the origin instead
-            // of around the actual image, because tile-local coords were incorrectly
-            // treated as document coords.
-            Document::TileCoord coord = findTileForObject(obj);
-            QPointF tileOrigin(
-                coord.first * Document::EDGELESS_TILE_SIZE,
-                coord.second * Document::EDGELESS_TILE_SIZE
-            );
-            
-            QPolygonF vpCorners;
-            for (const QPointF& pt : corners) {
-                // Convert tile-local to document coords, then to viewport
-                QPointF docPt = tileOrigin + obj->position + pt - objRect.topLeft();
-                vpCorners << documentToViewport(docPt);
-            }
-            return vpCorners;
-        } else {
-            // Paged mode: object position is page-local
-            QPointF pageOrigin = pagePosition(m_currentPageIndex);
-            QPolygonF vpCorners;
-            for (const QPointF& pt : corners) {
-                QPointF docPt = obj->position + pt - objRect.topLeft() + pageOrigin;
-                vpCorners << documentToViewport(docPt);
-            }
-            return vpCorners;
-        }
+        QPointF vpCenter = vpRect.center();
+        
+        // Rotate corners in viewport space (consistent with objectHandleAtPoint)
+        QPolygonF vpCorners;
+        vpCorners << rotatePoint(vpRect.topLeft(), vpCenter, obj->rotation)
+                  << rotatePoint(vpRect.topRight(), vpCenter, obj->rotation)
+                  << rotatePoint(vpRect.bottomRight(), vpCenter, obj->rotation)
+                  << rotatePoint(vpRect.bottomLeft(), vpCenter, obj->rotation);
+        
+        return vpCorners;
     };
     
     // ===== Draw hover highlight =====
@@ -5321,66 +5394,53 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     if (m_selectedObjects.size() == 1) {
         InsertedObject* obj = m_selectedObjects.first();
         if (obj) {
-            QRectF objRect = obj->boundingRect();
-            
-            // BF.4: For edgeless, find tile origin to convert tile-local to document coords
-            QPointF tileOrigin(0, 0);
-            if (m_document->isEdgeless()) {
-                Document::TileCoord coord = findTileForObject(obj);
-                tileOrigin = QPointF(
-                    coord.first * Document::EDGELESS_TILE_SIZE,
-                    coord.second * Document::EDGELESS_TILE_SIZE
-                );
+            // Get axis-aligned bounding box in viewport coordinates
+            // (consistent with objectHandleAtPoint hit testing)
+            QRectF vpRect = objectBoundsInViewport(obj);
+            if (vpRect.isEmpty()) {
+                painter.restore();
+                return;
             }
             
-            // Get object bounds in viewport coordinates
-            auto toViewportPt = [&](const QPointF& localPt) -> QPointF {
-                QPointF docPt = obj->position + localPt - objRect.topLeft();
-                if (m_document->isEdgeless()) {
-                    // Add tile origin to convert tile-local to document coords
-                    return documentToViewport(tileOrigin + docPt);
-                } else {
-                    return documentToViewport(docPt + pagePosition(m_currentPageIndex));
-                }
-            };
+            QPointF vpCenter = vpRect.center();
             
-            // Handle positions (8 scale handles + 1 rotation)
+            // Handle positions (8 scale handles + 1 rotation) - rotate in viewport space
             QVector<QPointF> handles;
-            handles << toViewportPt(objRect.topLeft());                              // 0: TopLeft
-            handles << toViewportPt(QPointF(objRect.center().x(), objRect.top()));   // 1: Top
-            handles << toViewportPt(objRect.topRight());                             // 2: TopRight
-            handles << toViewportPt(QPointF(objRect.left(), objRect.center().y()));  // 3: Left
-            handles << toViewportPt(QPointF(objRect.right(), objRect.center().y())); // 4: Right
-            handles << toViewportPt(objRect.bottomLeft());                           // 5: BottomLeft
-            handles << toViewportPt(QPointF(objRect.center().x(), objRect.bottom()));// 6: Bottom
-            handles << toViewportPt(objRect.bottomRight());                          // 7: BottomRight
+            handles << rotatePoint(vpRect.topLeft(), vpCenter, obj->rotation);                            // 0: TopLeft
+            handles << rotatePoint(QPointF(vpRect.center().x(), vpRect.top()), vpCenter, obj->rotation);  // 1: Top
+            handles << rotatePoint(vpRect.topRight(), vpCenter, obj->rotation);                           // 2: TopRight
+            handles << rotatePoint(QPointF(vpRect.left(), vpRect.center().y()), vpCenter, obj->rotation); // 3: Left
+            handles << rotatePoint(QPointF(vpRect.right(), vpRect.center().y()), vpCenter, obj->rotation);// 4: Right
+            handles << rotatePoint(vpRect.bottomLeft(), vpCenter, obj->rotation);                         // 5: BottomLeft
+            handles << rotatePoint(QPointF(vpRect.center().x(), vpRect.bottom()), vpCenter, obj->rotation);// 6: Bottom
+            handles << rotatePoint(vpRect.bottomRight(), vpCenter, obj->rotation);                        // 7: BottomRight
             
-            // Rotation handle above top center
+            // Rotation handle: offset from top center in the rotated direction
             QPointF topCenter = handles[1];
-            QPointF rotatePos(topCenter.x(), topCenter.y() - ROTATE_HANDLE_OFFSET);
+            qreal rad = qDegreesToRadians(obj->rotation);
+            QPointF rotateOffset(ROTATE_HANDLE_OFFSET * qSin(rad), 
+                                -ROTATE_HANDLE_OFFSET * qCos(rad));
+            QPointF rotatePos = topCenter + rotateOffset;
             handles << rotatePos;  // 8: Rotate
             
-            // Draw scale handles (squares)
+            // Draw scale handles (squares) - rotated with the object
             QPen handlePen(Qt::black, 1);
             painter.setPen(handlePen);
             painter.setBrush(Qt::white);
             
             qreal halfSize = HANDLE_VISUAL_SIZE / 2.0;
             for (int i = 0; i < 8; ++i) {
-                QRectF handleRect(handles[i].x() - halfSize, handles[i].y() - halfSize,
-                                  HANDLE_VISUAL_SIZE, HANDLE_VISUAL_SIZE);
-                painter.drawRect(handleRect);
+                // Draw rotated rectangles for handles
+                painter.save();
+                painter.translate(handles[i]);
+                painter.rotate(obj->rotation);
+                painter.drawRect(QRectF(-halfSize, -halfSize, HANDLE_VISUAL_SIZE, HANDLE_VISUAL_SIZE));
+                painter.restore();
             }
             
             // Draw rotation handle (circle) with connecting line
             painter.drawLine(topCenter, rotatePos);
             painter.drawEllipse(rotatePos, halfSize, halfSize);
-            
-            // Small rotation indicator
-            QPointF arrowStart(rotatePos.x() - halfSize * 0.4, rotatePos.y());
-            QPointF arrowEnd(rotatePos.x() + halfSize * 0.4, rotatePos.y() - halfSize * 0.3);
-            painter.drawLine(arrowStart, rotatePos);
-            painter.drawLine(rotatePos, arrowEnd);
         }
     }
     
@@ -5587,6 +5647,221 @@ void DocumentViewport::captureSelectionBackground()
     
     // Re-enable selection rendering
     m_skipSelectionRendering = false;
+}
+
+// -----------------------------------------------------------------------------
+// Phase O4.1: Object Drag/Resize Performance Optimization
+// Same pattern as captureSelectionBackground() for lasso selection.
+// -----------------------------------------------------------------------------
+void DocumentViewport::captureObjectDragBackground()
+{
+    // Phase O4.1.3: Start throttle timer for drag updates
+    m_dragUpdateTimer.start();
+    
+    // Temporarily disable selected object rendering
+    m_skipSelectedObjectRendering = true;
+    
+    // Capture the viewport (this triggers a paint without selected objects)
+    m_objectDragBackgroundSnapshot = grab();
+    m_objectDragSnapshotDpr = m_objectDragBackgroundSnapshot.devicePixelRatio();
+    
+    // Re-enable selected object rendering
+    m_skipSelectedObjectRendering = false;
+    
+    // Phase O4.1.2: Pre-render selected objects to cache at current zoom
+    // This is the key optimization - no image scaling needed during drag!
+    cacheSelectedObjectsForDrag();
+}
+
+void DocumentViewport::renderSelectedObjectsOnly(QPainter& painter)
+{
+    // Phase O4.1.2: Use pre-rendered cache if available (FAST!)
+    // The cache was rendered at current zoom level, so no scaling needed.
+    if (!m_dragObjectRenderedCache.isNull() && m_selectedObjects.size() == 1) {
+        InsertedObject* obj = m_selectedObjects.first();
+        if (obj) {
+            
+            // Calculate current viewport position of the object
+            // Use cached page/tile location (no searching!)
+            QPointF origin;
+            if (m_document->isEdgeless()) {
+                origin = QPointF(m_dragObjectTileCoord.first * Document::EDGELESS_TILE_SIZE,
+                                m_dragObjectTileCoord.second * Document::EDGELESS_TILE_SIZE);
+            } else {
+                origin = pagePosition(m_dragObjectPageIndex);
+            }
+            
+            // The cache has the object at (0,0), so we need to draw at:
+            // viewport position of (origin + obj->position)
+            QPointF docPos = origin + obj->position;
+            QPointF viewportPos = documentToViewport(docPos);
+            
+            // Phase O4.1.3: Handle resize/rotate - transform cached image as needed
+            if (m_isResizingObject) {
+                // During resize/rotate, transform the cached image to match current object state
+                QSizeF currentSize = obj->size * m_zoomLevel;
+                QPointF center = viewportPos + QPointF(currentSize.width() / 2, currentSize.height() / 2);
+                
+                painter.save();
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                
+                // Apply DELTA rotation only (current - original)
+                // The cached image already has the original rotation baked in!
+                qreal deltaRotation = obj->rotation - m_resizeOriginalRotation;
+                if (qAbs(deltaRotation) > 0.01) {
+                    painter.translate(center);
+                    painter.rotate(deltaRotation);
+                    painter.translate(-center);
+                }
+                
+                // Scale the cached image to current size
+                QRectF targetRect(viewportPos, currentSize);
+                painter.drawPixmap(targetRect.toRect(), m_dragObjectRenderedCache);
+                painter.restore();
+            } else {
+                // Draw cache at native size - NO SCALING (fast path for drag)
+                painter.drawPixmap(viewportPos.toPoint(), m_dragObjectRenderedCache);
+            }
+        }
+    } else {
+        // Fallback: render objects directly (multi-selection or no cache)
+        if (m_selectedObjects.isEmpty()) return;
+        
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj || !obj->visible) continue;
+            
+            // BF.4 FIX: Only calculate the page/tile ORIGIN, not origin + obj->position.
+            QPointF origin;
+            
+            if (m_document->isEdgeless()) {
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (!tile) continue;
+                    
+                    for (const auto& tileObj : tile->objects) {
+                        if (tileObj.get() == obj) {
+                            origin = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                            coord.second * Document::EDGELESS_TILE_SIZE);
+                            break;
+                        }
+                    }
+                }
+            } else {
+                for (int i = 0; i < m_document->pageCount(); ++i) {
+                    Page* page = m_document->page(i);
+                    if (!page) continue;
+                    
+                    for (const auto& pageObj : page->objects) {
+                        if (pageObj.get() == obj) {
+                            origin = pagePosition(i);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            QPointF viewportOrigin = documentToViewport(origin);
+            
+            painter.save();
+            painter.translate(viewportOrigin);
+            painter.scale(m_zoomLevel, m_zoomLevel);
+            obj->render(painter, 1.0);
+            painter.restore();
+        }
+    }
+    
+    // Also render the selection handles
+    renderObjectSelection(painter);
+}
+
+// -----------------------------------------------------------------------------
+// Phase O4.1.2: Pre-render selected objects to cache at current zoom level
+// This is the key optimization - render once at drag start, then just blit!
+// -----------------------------------------------------------------------------
+void DocumentViewport::cacheSelectedObjectsForDrag()
+{
+    
+    if (m_selectedObjects.isEmpty() || !m_document) {
+        m_dragObjectRenderedCache = QPixmap();
+        return;
+    }
+    
+    // For now, only cache single object selection (most common case)
+    if (m_selectedObjects.size() != 1) {
+        m_dragObjectRenderedCache = QPixmap();
+        return;
+    }
+    
+    InsertedObject* obj = m_selectedObjects.first();
+    if (!obj || !obj->visible) {
+        m_dragObjectRenderedCache = QPixmap();
+        return;
+    }
+    
+    // Find and cache which page/tile contains this object
+    m_dragObjectPageIndex = -1;
+    m_dragObjectTileCoord = {0, 0};
+    
+    if (m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            
+            for (const auto& tileObj : tile->objects) {
+                if (tileObj.get() == obj) {
+                    m_dragObjectTileCoord = coord;
+                    break;
+                }
+            }
+        }
+    } else {
+        for (int i = 0; i < m_document->pageCount(); ++i) {
+            Page* page = m_document->page(i);
+            if (!page) continue;
+            
+            for (const auto& pageObj : page->objects) {
+                if (pageObj.get() == obj) {
+                    m_dragObjectPageIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Calculate the size of the rendered object at current zoom
+    // FIX: Only create cache for the object SIZE, not position + size!
+    // Previously we were creating huge caches if position was large.
+    qreal dpr = devicePixelRatioF();
+    QSizeF objectSize = obj->size * m_zoomLevel;
+    
+    // Cache should only be the size of the object itself
+    QSize cacheSize(qCeil(objectSize.width() * dpr) + 2,
+                    qCeil(objectSize.height() * dpr) + 2);
+    
+    if (cacheSize.width() <= 0 || cacheSize.height() <= 0) {
+        m_dragObjectRenderedCache = QPixmap();
+        return;
+    }
+    
+    // Create the cache pixmap
+    m_dragObjectRenderedCache = QPixmap(cacheSize);
+    m_dragObjectRenderedCache.setDevicePixelRatio(dpr);
+    m_dragObjectRenderedCache.fill(Qt::transparent);
+    
+    // Render the object to the cache
+    // IMPORTANT: Translate by -position so object renders at (0,0) in cache
+    // ImageObject::render() internally draws at (position.x * zoom, position.y * zoom)
+    // So we need to offset by -position to get it at the cache origin
+    QPainter cachePainter(&m_dragObjectRenderedCache);
+    cachePainter.setRenderHint(QPainter::Antialiasing, true);
+    cachePainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    cachePainter.scale(m_zoomLevel, m_zoomLevel);
+    cachePainter.translate(-obj->position);  // Offset so object renders at (0,0)
+    obj->render(cachePainter, 1.0);
+    cachePainter.end();
 }
 
 void DocumentViewport::rebuildSelectionCache()
@@ -8358,7 +8633,17 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     // Phase O3.5.8: Objects with affinity -1 are tied to Layer 0, so check Layer 0 visibility
     VectorLayer* layer0 = page->layer(0);
     bool layer0Visible = layer0 && layer0->visible;
-    page->renderObjectsWithAffinity(painter, 1.0, -1, layer0Visible);
+    
+    // Phase O4.1: Prepare object exclude set for background snapshot capture
+    QSet<QString> objectExcludeIds;
+    if (m_skipSelectedObjectRendering) {
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (obj) objectExcludeIds.insert(obj->id);
+        }
+    }
+    const QSet<QString>* objectExcludePtr = objectExcludeIds.isEmpty() ? nullptr : &objectExcludeIds;
+    
+    page->renderObjectsWithAffinity(painter, 1.0, -1, layer0Visible, objectExcludePtr);
     
     // 4. Render vector layers with ZOOM-AWARE stroke cache, interleaved with objects
     // The cache is built at pageSize * zoom * dpr physical pixels, ensuring
@@ -8399,7 +8684,7 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
         // Objects with affinity K are tied to Layer K+1, so check visibility of Layer K+1
         VectorLayer* nextLayer = page->layer(layerIdx + 1);
         bool nextLayerVisible = nextLayer ? nextLayer->visible : true;  // If no next layer, show objects
-        page->renderObjectsWithAffinity(painter, 1.0, layerIdx, nextLayerVisible);
+        page->renderObjectsWithAffinity(painter, 1.0, layerIdx, nextLayerVisible, objectExcludePtr);
     }
     
     // 5. Draw page border (optional, for visual separation)
@@ -8580,7 +8865,9 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
     }
     
     // Phase O2: Draw object selection (edgeless mode)
-    if (m_currentTool == ToolType::ObjectSelect || !m_selectedObjects.isEmpty()) {
+    // Phase O4.1: Skip during background snapshot capture
+    if ((m_currentTool == ToolType::ObjectSelect || !m_selectedObjects.isEmpty())
+        && !m_skipSelectedObjectRendering) {
         renderObjectSelection(painter);
     }
 }
@@ -8708,6 +8995,11 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(
         // Render each object
         for (InsertedObject* obj : objs) {
             if (!obj->visible) continue;
+            
+            // Phase O4.1: Skip selected objects during background snapshot capture
+            if (m_skipSelectedObjectRendering && m_selectedObjects.contains(obj)) {
+                continue;
+            }
             
             // Convert tile-local position to document coordinates for visibility check
             QPointF docPos = tileOrigin + obj->position;

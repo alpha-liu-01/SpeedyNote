@@ -1418,6 +1418,88 @@ private:
      */
     qreal m_resizeOriginalRotation = 0.0;
     
+    // =========================================================================
+    // Phase O4.1: Object Drag/Resize Performance Optimization
+    // =========================================================================
+    // Same pattern as lasso selection (m_selectionBackgroundSnapshot):
+    // 1. Capture viewport without selected objects when drag/resize starts
+    // 2. During drag/resize, draw cached background + objects at current position
+    // 3. On release, clear snapshot and do full re-render
+    
+    /**
+     * @brief Viewport snapshot excluding selected objects.
+     * 
+     * Captured when drag/resize starts. During drag/resize, this is drawn
+     * as background instead of re-rendering everything.
+     */
+    QPixmap m_objectDragBackgroundSnapshot;
+    
+    /**
+     * @brief Device pixel ratio of the object drag snapshot.
+     */
+    qreal m_objectDragSnapshotDpr = 1.0;
+    
+    /**
+     * @brief Temporary flag to exclude selected objects during snapshot capture.
+     * 
+     * Set true before grab(), false after. paintEvent checks this to skip
+     * rendering selected objects.
+     */
+    bool m_skipSelectedObjectRendering = false;
+    
+    /**
+     * @brief Phase O4.1.3: Throttle drag updates to ~60fps.
+     * 
+     * High-DPI mice/tablets can send 100s of events per second.
+     * We throttle repaints to avoid excessive CPU usage.
+     */
+    QElapsedTimer m_dragUpdateTimer;
+    static constexpr qint64 DRAG_UPDATE_INTERVAL_MS = 16;  // ~60fps
+    
+    /**
+     * @brief Capture background snapshot for object drag/resize optimization.
+     * 
+     * Similar to captureSelectionBackground() for lasso selection.
+     */
+    void captureObjectDragBackground();
+    
+    /**
+     * @brief Render only the selected objects (for fast path during drag/resize).
+     */
+    void renderSelectedObjectsOnly(QPainter& painter);
+    
+    /**
+     * @brief Phase O4.1.2: Pre-rendered cache of selected objects at current zoom.
+     * 
+     * When drag/resize starts, we render the selected objects to this pixmap
+     * at the current zoom level. During drag, we just draw this cache at the
+     * new position - no image scaling needed! This is much faster than calling
+     * ImageObject::render() which scales the source image every frame.
+     */
+    QPixmap m_dragObjectRenderedCache;
+    
+    /**
+     * @brief Offset from viewport origin to where the cache should be drawn.
+     * 
+     * This is the viewport position of the object's origin (page/tile origin
+     * in viewport coords) at the time the cache was created. During drag,
+     * we calculate the new position based on drag delta.
+     */
+    QPointF m_dragObjectCacheOrigin;
+    
+    /**
+     * @brief Page index or tile coord where the dragged object lives.
+     * 
+     * Cached at drag start to avoid searching all pages/tiles every frame.
+     */
+    int m_dragObjectPageIndex = -1;
+    Document::TileCoord m_dragObjectTileCoord = {0, 0};
+    
+    /**
+     * @brief Pre-render selected objects to cache at current zoom level.
+     */
+    void cacheSelectedObjectsForDrag();
+    
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels
     static constexpr qreal HANDLE_HIT_SIZE = 20.0;     ///< Hit area size in pixels (touch-friendly)
