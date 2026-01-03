@@ -447,7 +447,7 @@ private slots:
     void updatePanX(int value);
     void updatePanY(int value);
 
-    void selectBackground(); // Added back
+    // REMOVED MW1.2: selectBackground() - feature was dropped
 
     void forceUIRefresh();
 
@@ -622,7 +622,7 @@ private:
     // Page tracking now done by DocumentViewport internally
     
 
-    QPushButton *backgroundButton; // New button to set background
+    // REMOVED MW1.2: backgroundButton - feature was dropped
     QPushButton *straightLineToggleButton; // Button to toggle straight line mode
     QPushButton *ropeToolButton; // Button to toggle rope tool mode
     QPushButton *insertPictureButton; // Button to insert pictures

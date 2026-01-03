@@ -612,7 +612,7 @@ These items are identified but NOT part of this cleanup:
 
 ### Phase 1: Delete Dead Code
 - [x] MW1.1: Delete #if 0 export blocks ✅ (1,314 lines deleted - 9,722 → 8,408)
-- [ ] MW1.2: Delete background selection
+- [x] MW1.2: Delete background selection ✅ (13 lines deleted - 8,408 → 8,395)
 - [ ] MW1.3: Delete prev/next page buttons
 - [ ] MW1.4: Delete InkCanvas references
 - [ ] MW1.5: Delete unused stubs

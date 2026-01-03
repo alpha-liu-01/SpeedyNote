@@ -742,13 +742,7 @@ void MainWindow::setupUi() {
     // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
     // Features migrated to DocumentViewport - all pens now use vector layers
 
-    backgroundButton = new QPushButton(this);
-    backgroundButton->setFixedSize(26, 30);
-    QIcon bgIcon(loadThemedIcon("background"));  // Path to your icon in resources
-    backgroundButton->setIcon(bgIcon);
-    backgroundButton->setStyleSheet(buttonStyle);
-    backgroundButton->setToolTip(tr("Set Background Pic"));
-    connect(backgroundButton, &QPushButton::clicked, this, &MainWindow::selectBackground);
+    // REMOVED MW1.2: backgroundButton - feature was dropped
 
     // Initialize straight line toggle button
     straightLineToggleButton = new QPushButton(this);
@@ -2159,12 +2153,7 @@ void MainWindow::saveCurrentPageConcurrent() {
     qDebug() << "saveCurrentPageConcurrent(): Not implemented yet (Phase 3.4)";
 }
 
-void MainWindow::selectBackground() {
-    // Phase 3.1.8: Stubbed - background selection will use DocumentViewport
-    // TODO Phase 3.3: Implement background selection for DocumentViewport
-    QMessageBox::information(this, tr("Background"), 
-        tr("Background selection is being redesigned. Coming soon!"));
-}
+// REMOVED MW1.2: selectBackground() - feature was dropped
 
 // Helper function to show page range selection dialog
 bool MainWindow::showPageRangeDialog(int totalPages, bool &exportWholeDocument, int &startPage, int &endPage) {
@@ -5455,7 +5444,6 @@ void MainWindow::updateTheme() {
     if (saveButton) saveButton->setIcon(loadThemedIcon("save"));
     if (exportPdfButton) exportPdfButton->setIcon(loadThemedIcon("export"));
     if (fullscreenButton) fullscreenButton->setIcon(loadThemedIcon("fullscreen"));
-    // if (backgroundButton) backgroundButton->setIcon(loadThemedIcon("background"));
     updateButtonIcon(straightLineToggleButton, "straightLine");
     updateButtonIcon(ropeToolButton, "rope");
     if (deletePageButton) deletePageButton->setIcon(loadThemedIcon("trash"));
@@ -5509,7 +5497,6 @@ void MainWindow::updateTheme() {
     if (penToolButton) penToolButton->setStyleSheet(newButtonStyle);
     if (markerToolButton) markerToolButton->setStyleSheet(newButtonStyle);
     if (eraserToolButton) eraserToolButton->setStyleSheet(newButtonStyle);
-    // if (backgroundButton) backgroundButton->setStyleSheet(newButtonStyle);
     if (straightLineToggleButton) straightLineToggleButton->setStyleSheet(newButtonStyle);
     if (ropeToolButton) ropeToolButton->setStyleSheet(newButtonStyle);
     if (insertPictureButton) insertPictureButton->setStyleSheet(newButtonStyle);
