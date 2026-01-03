@@ -1077,17 +1077,15 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     // Rotation (Phase O3.1.8.1): Rotate object around its center
     // -----------------------------------------------------------------
     if (m_objectResizeHandle == HandleHit::Rotate) {
-        // Calculate angle from object center to current pointer position
-        QPointF objectCenter = m_resizeOriginalPosition + 
-                               QPointF(m_resizeOriginalSize.width() / 2, 
-                                       m_resizeOriginalSize.height() / 2);
+        // BF: Use m_resizeObjectDocCenter (document-global) for consistent coordinates
+        // with the pointer position from viewportToDocument()
         
         // Angle from center to current pointer (in document coords)
         // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
         // We add 90° because the rotation handle starts above the object (at 12 o'clock)
         qreal angle = qRadiansToDegrees(
-            qAtan2(currentDoc.y() - objectCenter.y(), 
-                   currentDoc.x() - objectCenter.x())
+            qAtan2(currentDoc.y() - m_resizeObjectDocCenter.y(), 
+                   currentDoc.x() - m_resizeObjectDocCenter.x())
         ) + 90.0;
         
         // Normalize to 0-360 range
@@ -1107,18 +1105,24 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     // Convert delta to local coordinates using inverse rotation
     // -----------------------------------------------------------------
     
-    // Object center is the transform origin (same as lasso's transformOrigin)
+    // BF: Use m_resizeObjectDocCenter (document-global) for scale factor calculation
+    // because the pointer position from viewportToDocument() is document-global.
+    // In edgeless mode, m_resizeOriginalPosition is tile-local but currentDoc is
+    // document-global - this mismatch caused extreme scaling jumps!
+    
+    // Tile-local center (for final position calculation - obj->position is tile-local)
     QPointF center = m_resizeOriginalPosition + 
-                     QPointF(m_resizeOriginalSize.width() / 2, 
-                             m_resizeOriginalSize.height() / 2);
+                     QPointF(m_resizeOriginalSize.width() / 2.0, 
+                             m_resizeOriginalSize.height() / 2.0);
     
     // Original half-sizes (distances from center to edges in local space)
     qreal halfW = m_resizeOriginalSize.width() / 2.0;
     qreal halfH = m_resizeOriginalSize.height() / 2.0;
     
-    // Get current pointer position relative to center
-    qreal dx = currentDoc.x() - center.x();
-    qreal dy = currentDoc.y() - center.y();
+    // Get current pointer position relative to document-global center
+    // (both values are now in document coordinates)
+    qreal dx = currentDoc.x() - m_resizeObjectDocCenter.x();
+    qreal dy = currentDoc.y() - m_resizeObjectDocCenter.y();
     
     // Convert to local coordinates using inverse rotation
     // (same math as lasso updateScaleFromHandle)
@@ -4060,14 +4064,44 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     if (m_selectedObjects.size() == 1) {
         HandleHit handle = objectHandleAtPoint(pe.viewportPos);
         if (handle != HandleHit::None && handle != HandleHit::Inside) {
+            InsertedObject* obj = m_selectedObjects.first();
+            
             // Start resize operation
             m_isResizingObject = true;
             m_objectResizeHandle = handle;
             m_resizeStartViewport = pe.viewportPos;
-            m_resizeOriginalSize = m_selectedObjects.first()->size;
-            m_resizeOriginalPosition = m_selectedObjects.first()->position;
-            m_resizeOriginalRotation = m_selectedObjects.first()->rotation;  // Phase O3.1.8.2
+            m_resizeOriginalSize = obj->size;
+            m_resizeOriginalPosition = obj->position;  // Tile-local, for undo
+            m_resizeOriginalRotation = obj->rotation;  // Phase O3.1.8.2
             m_pointerActive = true;
+            
+            // BF: Calculate document-global center for scale calculations
+            // In edgeless mode, obj->position is tile-local, but pointer events
+            // give document-global coordinates. Must use consistent coordinate system!
+            QPointF docPos;
+            if (m_document->isEdgeless()) {
+                // Find tile containing this object and add tile origin
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (tile && tile->objectById(obj->id)) {
+                        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                           coord.second * Document::EDGELESS_TILE_SIZE);
+                        docPos = tileOrigin + obj->position;
+                        break;
+                    }
+                }
+            } else {
+                // Paged: find page containing object
+                for (int i = 0; i < m_document->pageCount(); ++i) {
+                    Page* page = m_document->page(i);
+                    if (page && page->objectById(obj->id)) {
+                        docPos = pagePosition(i) + obj->position;
+                        break;
+                    }
+                }
+            }
+            m_resizeObjectDocCenter = docPos + QPointF(obj->size.width() / 2.0, 
+                                                        obj->size.height() / 2.0);
             
             // Phase O4.1: Capture background for fast resize rendering
             captureObjectDragBackground();

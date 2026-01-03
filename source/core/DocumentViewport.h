@@ -1418,6 +1418,18 @@ private:
      */
     qreal m_resizeOriginalRotation = 0.0;
     
+    /**
+     * @brief Object center in DOCUMENT coordinates at resize start.
+     * 
+     * In edgeless mode, object positions are tile-local, but pointer events
+     * give document-global coordinates. This member stores the document-global
+     * center for correct scale calculations in updateObjectResize().
+     * 
+     * BF: Without this, edgeless resize mixed tile-local and document-global
+     * coordinates, causing extreme scaling jumps.
+     */
+    QPointF m_resizeObjectDocCenter;
+    
     // =========================================================================
     // Phase O4.1: Object Drag/Resize Performance Optimization
     // =========================================================================

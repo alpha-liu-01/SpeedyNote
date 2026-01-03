@@ -2778,6 +2778,74 @@ if (dpr > 1.0) {
 
 ---
 
+#### O2.BF.12: Edgeless Mode Resize Coordinate System Mismatch ✅
+
+**Problem:** In edgeless mode, resizing objects via handles caused extreme scaling jumps. The height handle would immediately stretch the object to ~5× its size. This only affected edgeless mode; paged mode worked correctly.
+
+**Terminal Output Example:**
+```
+insertImageFromFile: Inserted image size QSizeF(748, 466) at QPointF(230.5,868)
+pushObjectResizeUndo: oldSize = QSizeF(748, 466) newSize = QSizeF(748, 2514)
+```
+The object jumped from 466 to 2514 pixels tall instantly!
+
+**Root Cause:** Coordinate system mismatch in `updateObjectResize()`:
+
+| Variable | Coordinate System | Problem |
+|----------|-------------------|---------|
+| `obj->position` | **Tile-local** (relative to tile origin) | ✓ Correct for object storage |
+| `m_resizeOriginalPosition` | **Tile-local** (copied from `obj->position`) | ✗ Mixed with document coords |
+| `currentDoc` from `viewportToDocument()` | **Document-global** | ✓ Correct |
+| `center` calculation | Mixed tile-local + doc-global | ✗ BUG! |
+
+When calculating `dx = currentDoc.x() - center.x()`, we subtracted a tile-local value from a document-global value. In edgeless mode with the tile at, say, (0, 1), the tile origin is (0, 1024). So:
+- `center.x()` = tile-local position ≈ 600
+- `currentDoc.x()` = document-global ≈ 600
+- **But** the actual document center should be 600 + 0 = 600 (correct only if tile is at origin!)
+
+If the object was in tile (0, 1):
+- True document center.y = tile_local_y + 1024
+- We calculated center.y = tile_local_y (missing the 1024!)
+- This caused delta to be off by 1024 pixels, creating extreme scaling
+
+**Solution:** Added `m_resizeObjectDocCenter` member that stores the document-global center at resize start. Key insight: we need **two** centers:
+
+1. **Document-global center** (`m_resizeObjectDocCenter`) - for scale factor calculation, because `currentDoc` from `viewportToDocument()` is document-global
+2. **Tile-local center** (local variable) - for final position calculation, because `obj->position` is tile-local
+
+```cpp
+// In handlePointerPress_ObjectSelect when resize starts:
+if (m_document->isEdgeless()) {
+    // Find tile and add origin to convert to document-global
+    QPointF tileOrigin(coord.first * TILE_SIZE, coord.second * TILE_SIZE);
+    docPos = tileOrigin + obj->position;
+}
+m_resizeObjectDocCenter = docPos + QPointF(width/2, height/2);
+
+// In updateObjectResize:
+// Tile-local center for final position (obj->position is tile-local)
+QPointF center = m_resizeOriginalPosition + QPointF(width/2, height/2);
+
+// Document-global for scale calculation (matches currentDoc coordinate system)
+qreal dx = currentDoc.x() - m_resizeObjectDocCenter.x();
+qreal dy = currentDoc.y() - m_resizeObjectDocCenter.y();
+
+// ... calculate scaleX, scaleY, newSize ...
+
+// Final position uses tile-local center
+obj->position = center - QPointF(newSize.width()/2, newSize.height()/2);
+```
+
+**Files Changed:**
+- `source/core/DocumentViewport.h`: Added `m_resizeObjectDocCenter` member
+- `source/core/DocumentViewport.cpp`:
+  - `handlePointerPress_ObjectSelect()` - Calculate document-global center at resize start
+  - `updateObjectResize()` - Use `m_resizeObjectDocCenter` instead of tile-local position
+
+**Relation to O2.BF.10:** This is a separate but related issue. O2.BF.10 fixed rotated object rendering/caching. This fix addresses the coordinate system mismatch that affected ALL edgeless resizes (rotated or not). Both issues stemmed from mixing tile-local and document-global coordinates.
+
+---
+
 ### O2.10: Testing & Verification
 
 **Tasks:**
@@ -2801,6 +2869,7 @@ if (dpr > 1.0) {
 - [x] Test: **Rotated object resize** - handles follow rotation, cached image scales correctly (BF.10)
 - [x] Test: **Rotated object drag** - cached image displays at correct rotated position (BF.10)
 - [x] Test: **High DPI insert** - image appears at 1:1 pixel size on 200% display (BF.11)
+- [x] Test: **Edgeless resize** - height/width handles work correctly, no extreme scaling (BF.12)
 
 ---
 
