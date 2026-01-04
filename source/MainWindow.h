@@ -314,9 +314,10 @@ public:
     void loadMouseDialMappings();
 
 
-    void openPdfFile(const QString &pdfPath); // ✅ Open PDF file directly
     void openSpnPackage(const QString &spnPath);
     void createNewSpnPackage(const QString &spnPath); // ✅ Create new empty SPN package
+    void openPdfFile(const QString &pdfPath); // MW1.5: Stub
+    bool switchToExistingNotebook(const QString &spnPath); // MW1.5: Stub
     
     // Single instance functionality
     static bool isInstanceRunning();
@@ -354,7 +355,7 @@ public:
     void saveCurrentPage(); // Made public for RecentNotebooksDialog
     void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
-    void switchPageWithDirection(int pageNumber, int direction); // Enhanced page switching with direction tracking
+    void switchPageWithDirection(int pageNumber, int direction); // MW1.5: Stub
     void updateTabLabel(); // Made public for RecentNotebooksDialog
     QSpinBox *pageInput; // Made public for RecentNotebooksDialog
     // REMOVED MW1.3: prevPageButton, nextPageButton - feature was dropped
@@ -396,12 +397,6 @@ public:
      */
     void loadFolderDocument();
 
-    // Find tab with given notebook ID, returns tab index or -1 if not found
-    int findTabWithNotebookId(const QString &notebookId);
-    
-    // Check if notebook is already open, switch to it if so
-    // Returns true if notebook was already open (and switched to), false otherwise
-    bool switchToExistingNotebook(const QString &spnPath);
 
     // Phase 3.1: sharedLauncher disconnected - will be re-linked later
     // static LauncherWindow *sharedLauncher;
@@ -419,13 +414,9 @@ private slots:
     void updateThickness(int value); // New function for thickness control
     void adjustThicknessForZoom(int oldZoom, int newZoom); // Adjust thickness when zoom changes
     void changeTool(int index);
-    void saveCanvas(); // Save canvas to file
     void deleteCurrentPage();
 
     void loadPdf();
-    void clearPdf();
-    void handleSmartPdfButton(); // ✅ Smart PDF button that handles all PDF operations
-    void exportAnnotatedPdf(); // Export PDF with all annotations overlaid
     void exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId); // Export canvas-only notebook (no PDF)
     void exportAnnotatedPdfFullRender(const QString &exportPath, const QSet<int> &annotatedPages, bool exportWholeDocument = true, int exportStartPage = 0, int exportEndPage = -1); // Full render fallback
     bool createAnnotatedPagesPdf(const QString &outputPath, const QList<int> &pages, QProgressDialog &progress); // Create temp PDF
@@ -441,7 +432,6 @@ private slots:
 
     void updateZoom();
     void onZoomSliderChanged(int value); // Handle manual zoom slider changes
-    void applyZoom();
     void updatePanRange();
     void updatePanX(int value);
     void updatePanY(int value);
@@ -509,11 +499,6 @@ private slots:
     void handleDialPanScroll(int angle);  // Add missing function declaration
     void onPanScrollReleased();           // Add missing function declaration
 
-    // Touch gesture handlers
-    void handleTouchZoomChange(int newZoom);
-    void handleTouchPanChange(int panX, int panY);
-    void handleTouchGestureEnd(); // Add handler for touch gesture completion
-    void handleTouchPanningChanged(bool active); // Handler for touch panning start/stop (window performance optimization)
     
     // Color button state management
     void updateColorButtonStates();
@@ -527,7 +512,6 @@ private slots:
 public slots:
     void updatePictureButtonState(); // Public slot for picture button state
     void onAutoScrollRequested(int direction);
-    void onEarlySaveRequested();
 
 private:
     void setPenTool();               // Set pen tool
@@ -543,7 +527,6 @@ private:
     
     void showPendingTooltip(); // Show tooltip with throttling
     
-    void showRopeSelectionMenu(const QPoint &position); // Show context menu for rope tool selection
     
     // PDF Outline functionality
     void toggleOutlineSidebar();     // Toggle PDF outline sidebar
@@ -557,17 +540,10 @@ private:
     void toggleBookmarksSidebar();   // Toggle bookmarks sidebar
     void onBookmarkItemClicked(QTreeWidgetItem *item, int column); // Handle bookmark item clicks
     void loadBookmarks();            // Load bookmarks from file
-    void saveBookmarks();            // Save bookmarks to file
-    void toggleCurrentPageBookmark(); // Add/remove current page from bookmarks
+    void saveBookmarks();            // MW1.5: Stub
     
     // Markdown notes sidebar functionality
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
-    void onMarkdownNotesUpdated();      // Handle markdown notes updates
-    void onMarkdownNoteContentChanged(const QString &noteId, const MarkdownNoteData &data); // Handle note content changes
-    void onMarkdownNoteDeleted(const QString &noteId); // Handle note deletion
-    void onHighlightLinkClicked(const QString &highlightId); // Handle highlight link clicks
-    void onHighlightDoubleClicked(const QString &highlightId); // Handle highlight double-clicks
-    void loadMarkdownNotesForCurrentPage(); // Load notes for currently visible page(s)
 
 private:
     // =========================================================================
@@ -864,11 +840,10 @@ private:
     bool textSelectionPendingDisable = false; // True when waiting for text selection interaction to complete
     bool textSelectionWasButtonA = false; // Track which button enabled text selection
     
-    void enableStylusButtonMode(Qt::MouseButton button);
-    void disableStylusButtonMode(Qt::MouseButton button);
+    void enableStylusButtonMode(Qt::MouseButton button); // MW1.5: Stub
+    void disableStylusButtonMode(Qt::MouseButton button); // MW1.5: Stub
     void handleStylusButtonPress(Qt::MouseButtons buttons);
     void handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton);
-    void onPdfTextSelectionCleared(); // Called when text selection is cleared, auto-disables if pending
     
     // Event filter for scrollbar hover detection and dial container drag
     bool eventFilter(QObject *obj, QEvent *event) override;

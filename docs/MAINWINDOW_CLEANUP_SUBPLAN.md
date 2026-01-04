@@ -136,19 +136,32 @@ Any remaining references to the old InkCanvas system.
 
 ---
 
-### MW1.5: Delete Unused Method Stubs
+### MW1.5: Delete Unused Method Stubs ✅ COMPLETED
 
-Methods that are stubbed and will never be implemented.
+User manually deleted many stubs. Fixed compilation by:
 
-**Files:** `source/MainWindow.cpp`, `source/MainWindow.h`
+**Deleted (user manually removed):**
+- `saveCanvas()`, `saveCurrentPageConcurrent()`
+- `exportAnnotatedPdf()`, `clearPdf()`, `handleSmartPdfButton()`
+- `applyZoom()`, `findTabWithNotebookId()`
+- `handleTouchZoomChange()`, `handleTouchPanChange()`, `handleTouchGestureEnd()`, `handleTouchPanningChanged()`
+- `showRopeSelectionMenu()`, `onMarkdownNotesUpdated()`
+- `onMarkdownNoteContentChanged()`, `onMarkdownNoteDeleted()`, `onHighlightLinkClicked()`, `onHighlightDoubleClicked()`
+- `loadMarkdownNotesForCurrentPage()`, `toggleCurrentPageBookmark()`
+- `onEarlySaveRequested()`
 
-**Review and delete if completely unused:**
-- Empty slot implementations with just `// TODO: stub`
-- Methods that only reference deleted features
+**Kept as stubs (still referenced):**
+- `switchPage()`, `switchPageWithDirection()`, `saveCurrentPage()`
+- `enableStylusButtonMode()`, `disableStylusButtonMode()`
+- `saveBookmarks()`, `openPdfFile()`, `switchToExistingNotebook()`
+
+**Disconnected signals (commented out):**
+- PDF buttons: `handleSmartPdfButton`, `clearPdf`, `exportAnnotatedPdf`
+- Markdown sidebar: `noteContentChanged`, `noteDeleted`, `highlightLinkClicked`
+- Bookmark toggle button
 
 **Verification:**
-- [ ] `./compile.sh` succeeds
-- [ ] Check for any signal-slot disconnections
+- [x] `./compile.sh` succeeds
 
 ---
 
@@ -609,8 +622,8 @@ These items are identified but NOT part of this cleanup:
 - [x] MW1.2: Delete background selection ✅ (13 lines deleted - 8,408 → 8,395)
 - [x] MW1.3: Delete prev/next page buttons ✅ (16 lines deleted - 8,395 → 8,379)
 - [x] MW1.4: Delete InkCanvas references ✅ (19 lines deleted - 8,379 → 8,360)
-- [ ] MW1.5: Delete unused stubs
-- [ ] Compile and test
+- [x] MW1.5: Delete unused stubs ✅ (174 lines deleted - 8,360 → 8,186)
+- [x] Compile and test ✅
 
 ### Phase 2: Extract Dial Controller
 - [ ] MW2.1: Create directory structure

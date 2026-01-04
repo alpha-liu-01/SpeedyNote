@@ -380,8 +380,9 @@ void MainWindow::setupUi() {
     loadPdfButton->setToolTip(tr("Import/Clear Document"));
     clearPdfButton->setToolTip(tr("Clear PDF"));
     clearPdfButton->setVisible(false); // ✅ Hide clearPdfButton to save space
-    connect(loadPdfButton, &QPushButton::clicked, this, &MainWindow::handleSmartPdfButton);
-    connect(clearPdfButton, &QPushButton::clicked, this, &MainWindow::clearPdf);
+    // MW1.5: PDF buttons disabled - will be reimplemented
+    // connect(loadPdfButton, &QPushButton::clicked, this, &MainWindow::handleSmartPdfButton);
+    // connect(clearPdfButton, &QPushButton::clicked, this, &MainWindow::clearPdf);
 
     pdfTextSelectButton = new QPushButton(this);
     pdfTextSelectButton->setFixedSize(36, 36);
@@ -557,7 +558,8 @@ void MainWindow::setupUi() {
     exportPdfButton->setIcon(exportPdfIcon);
     exportPdfButton->setStyleSheet(buttonStyle);
     exportPdfButton->setToolTip(tr("Export Annotated PDF"));
-    connect(exportPdfButton, &QPushButton::clicked, this, &MainWindow::exportAnnotatedPdf);
+    // MW1.5: Export disabled - will be reimplemented
+    // connect(exportPdfButton, &QPushButton::clicked, this, &MainWindow::exportAnnotatedPdf);
 
     fullscreenButton = new QPushButton(this);
     fullscreenButton->setIcon(loadThemedIcon("fullscreen"));  // Load from resources
@@ -1081,10 +1083,10 @@ void MainWindow::setupUi() {
     markdownNotesSidebar->setFixedWidth(300);
     markdownNotesSidebar->setVisible(false); // Hidden by default
     
-    // Connect markdown notes signals
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteContentChanged, this, &MainWindow::onMarkdownNoteContentChanged);
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeleted, this, &MainWindow::onMarkdownNoteDeleted);
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::highlightLinkClicked, this, &MainWindow::onHighlightLinkClicked);
+    // MW1.5: Markdown notes signals disabled - will be reimplemented
+    // connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteContentChanged, this, &MainWindow::onMarkdownNoteContentChanged);
+    // connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeleted, this, &MainWindow::onMarkdownNoteDeleted);
+    // connect(markdownNotesSidebar, &MarkdownNotesSidebar::highlightLinkClicked, this, &MainWindow::onHighlightLinkClicked);
     
     // Set up note provider for search functionality
     // Phase 3.1.8: Stubbed - markdown notes will use DocumentViewport in Phase 3.3
@@ -1163,7 +1165,8 @@ void MainWindow::setupUi() {
     connect(toggleOutlineButton, &QPushButton::clicked, this, &MainWindow::toggleOutlineSidebar);
     connect(toggleBookmarksButton, &QPushButton::clicked, this, &MainWindow::toggleBookmarksSidebar);
     connect(toggleLayerPanelButton, &QPushButton::clicked, this, &MainWindow::toggleLayerPanel);
-    connect(toggleBookmarkButton, &QPushButton::clicked, this, &MainWindow::toggleCurrentPageBookmark);
+    // MW1.5: Bookmark toggle disabled - will be reimplemented
+    // connect(toggleBookmarkButton, &QPushButton::clicked, this, &MainWindow::toggleCurrentPageBookmark);
     connect(toggleMarkdownNotesButton, &QPushButton::clicked, this, &MainWindow::toggleMarkdownNotesSidebar);
     connect(touchGesturesButton, &QPushButton::clicked, this, [this]() {
         cycleTouchGestureMode();
@@ -1369,12 +1372,11 @@ void MainWindow::setupUi() {
     overflowMenu = new QMenu(this);
     overflowMenu->setObjectName("overflowMenu");
     
-    // Add actions to the overflow menu
-    QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Import/Clear Document"));
-    connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
-    
-    QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
-    connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportAnnotatedPdf);
+    // MW1.5: PDF menu actions disabled - will be reimplemented
+    // QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Import/Clear Document"));
+    // connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
+    // QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
+    // connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportAnnotatedPdf);
     
     overflowMenu->addSeparator();
     
@@ -2083,25 +2085,20 @@ bool MainWindow::selectFolder() {
                     return false;
 }
 
-void MainWindow::saveCanvas() {
-    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
-    // TODO Phase 3.4: Implement document saving to new .snx format
-    qDebug() << "saveCanvas(): Not implemented yet (Phase 3.4)";
-}
-
-
+// MW1.5: Kept as stubs - still called from many places
 void MainWindow::switchPage(int pageNumber) {
-    // Phase 3.1.6: Stubbed - will use DocumentViewport::scrollToPage() in Phase 3.3
     Q_UNUSED(pageNumber);
-    // TODO Phase 3.3.4: Use currentViewport()->scrollToPage()
-    qDebug() << "switchPage(): Not implemented yet (Phase 3.3.4)";
+    qDebug() << "switchPage(): Stub (Phase 3.3.4)";
 }
+
 void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
-    // Phase 3.1.6: Stubbed - will use DocumentViewport::scrollToPage() in Phase 3.3
     Q_UNUSED(pageNumber);
     Q_UNUSED(direction);
-    // TODO Phase 3.3.4: Use currentViewport()->scrollToPage() with scroll direction
-    qDebug() << "switchPageWithDirection(): Not implemented yet (Phase 3.3.4)";
+    qDebug() << "switchPageWithDirection(): Stub (Phase 3.3.4)";
+}
+
+void MainWindow::saveCurrentPage() {
+    qDebug() << "saveCurrentPage(): Stub (Phase 3.4)";
 }
 
 void MainWindow::deleteCurrentPage() {
@@ -2126,17 +2123,6 @@ void MainWindow::deleteCurrentPage() {
     }
 }
 
-void MainWindow::saveCurrentPage() {
-    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
-    // TODO Phase 3.4: Implement page saving to new .snx format
-    qDebug() << "saveCurrentPage(): Not implemented yet (Phase 3.4)";
-}
-
-void MainWindow::saveCurrentPageConcurrent() {
-    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
-    // TODO Phase 3.4: Implement concurrent page saving to new .snx format
-    qDebug() << "saveCurrentPageConcurrent(): Not implemented yet (Phase 3.4)";
-}
 
 // REMOVED MW1.2: selectBackground() - feature was dropped
 
@@ -2236,12 +2222,6 @@ bool MainWindow::showPageRangeDialog(int totalPages, bool &exportWholeDocument, 
     return false; // User cancelled
 }
 
-void MainWindow::exportAnnotatedPdf() {
-    // Phase 3.1.8: Stubbed - PDF export will be reimplemented for DocumentViewport
-    QMessageBox::information(this, tr("Export PDF"), 
-        tr("PDF export is being redesigned. Coming soon!"));
-    return;
-}
 
 // Phase 3.1.8: Stub implementation - function disabled
 void MainWindow::exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId) {
@@ -3105,11 +3085,6 @@ void MainWindow::openPdfDocument()
     }
 }
 
-void MainWindow::applyZoom() {
-    // Phase 3.1.8: Stubbed - DocumentViewport handles zoom via zoomSlider
-    // TODO Phase 3.3: Connect to currentViewport()->setZoom() if needed
-    qDebug() << "applyZoom(): Not implemented yet (Phase 3.3)";
-        }
         
 void MainWindow::forceUIRefresh() {
     setWindowState(Qt::WindowNoState);  // Restore first
@@ -3122,18 +3097,7 @@ void MainWindow::loadPdf() {
     openPdfDocument();
 }
 
-void MainWindow::clearPdf() {
-    // Phase 3.1.8: Stubbed - PDF clearing will use DocumentViewport
-    // TODO Phase 3.4: Implement PDF clearing for DocumentViewport
-    qDebug() << "clearPdf(): Not implemented yet (Phase 3.4)";
-            }
 
-void MainWindow::handleSmartPdfButton() {
-    // Phase 3.1.8: Stubbed - PDF management will use DocumentViewport
-    // For now, show a message since loadPdf() is also stubbed
-    QMessageBox::information(this, tr("PDF Management"), 
-        tr("PDF import/management is being redesigned. Coming soon!"));
-            }
             
 
 void MainWindow::switchTab(int index) {
@@ -3177,22 +3141,7 @@ void MainWindow::switchTab(int index) {
     }
 }
 
-int MainWindow::findTabWithNotebookId(const QString &notebookId) {
-    // Phase 3.1.1: Stubbed - will be implemented with DocumentManager
-    // TODO Phase 3.5: Use DocumentManager to find document by notebook ID
-    if (!m_tabWidget || notebookId.isEmpty()) return -1;
-    
-    // For now, return -1 (not found) - will be implemented with new save/load system
-    return -1;
-}
 
-bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
-    // Phase 3.1.1: Stubbed - will be implemented with DocumentManager in Phase 3.5
-    Q_UNUSED(spnPath);
-    // TODO Phase 3.5: Use DocumentManager to check if document is already open
-    // For now, always return false (allow opening)
-        return false;
-    }
     
 void MainWindow::addNewTab() {
     // Phase 3.1.1: Simplified addNewTab using DocumentManager and TabManager
@@ -5781,32 +5730,15 @@ void MainWindow::loadStylusButtonSettings() {
         settings.value("stylusButtonBQt", static_cast<int>(Qt::RightButton)).toInt());
 }
 
+// MW1.5: Kept as stubs - still called from stylus button handlers
 void MainWindow::enableStylusButtonMode(Qt::MouseButton button) {
-    // Phase 3.1.8: Stubbed - stylus button modes will use DocumentViewport
     Q_UNUSED(button);
-    // TODO Phase 3.3: Implement stylus button modes with DocumentViewport
-    qDebug() << "enableStylusButtonMode(): Not implemented yet (Phase 3.3)";
-    return;
-
+    qDebug() << "enableStylusButtonMode(): Stub (Phase 3.3)";
 }
 
 void MainWindow::disableStylusButtonMode(Qt::MouseButton button) {
-    // Phase 3.1.8: Stubbed - stylus button modes will use DocumentViewport
     Q_UNUSED(button);
-    // TODO Phase 3.3: Implement stylus button modes with DocumentViewport
-    qDebug() << "disableStylusButtonMode(): Not implemented yet (Phase 3.3)";
-    return;
-
- // Phase 3.1.8: disableStylusButtonMode disabled
-}
-
-void MainWindow::onPdfTextSelectionCleared() {
-    // Phase 3.1.8: Stubbed - text selection will use DocumentViewport
-    // TODO Phase 3.4: Implement text selection with DocumentViewport
-    textSelectionPendingDisable = false;
-    return;
-
-
+    qDebug() << "disableStylusButtonMode(): Stub (Phase 3.3)";
 }
 
 void MainWindow::handleStylusButtonPress(Qt::MouseButtons buttons) {
@@ -6154,15 +6086,6 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
 
 
 
-void MainWindow::openPdfFile(const QString &pdfPath) {
-    // Phase 3.1.8: Stubbed - PDF opening will use DocumentViewport
-    Q_UNUSED(pdfPath);
-    QMessageBox::information(this, tr("Open PDF"), 
-        tr("PDF opening from file association is being redesigned. Coming soon!"));
-    return;
-
-
-}
 
 void MainWindow::setPdfDPI(int dpi) {
     if (dpi != pdfRenderDPI) {
@@ -6321,29 +6244,6 @@ void MainWindow::cycleZoomLevels() {
     updateDialDisplay();
 }
 
-void MainWindow::handleTouchZoomChange(int newZoom) {
-    // Phase 3.1.5: Stubbed - will connect to DocumentViewport in Phase 3.3
-    Q_UNUSED(newZoom);
-    // TODO Phase 3.3: Connect to DocumentViewport zoom handling
-}
-
-void MainWindow::handleTouchPanChange(int panX, int panY) {
-    // Phase 3.1.5: Stubbed - will connect to DocumentViewport in Phase 3.3
-    Q_UNUSED(panX);
-    Q_UNUSED(panY);
-    // TODO Phase 3.3: Connect to DocumentViewport pan handling
-}
-
-void MainWindow::handleTouchGestureEnd() {
-    // Phase 3.1.5: Stubbed - will connect to DocumentViewport in Phase 3.3
-    // TODO Phase 3.3: Hide scrollbars after gesture ends
-}
-
-void MainWindow::handleTouchPanningChanged(bool active) {
-    // Phase 3.1.5: Stubbed - InkCanvas-specific PictureWindowManager optimization
-    Q_UNUSED(active);
-    // TODO Phase 4: Reimplement for DocumentViewport if picture windows are added
-}
 
 void MainWindow::updateColorButtonStates() {
     // Phase 3.1.4: Use currentViewport()
@@ -7312,11 +7212,6 @@ void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QCol
 
 // REMOVED MW1.4: applyDefaultBackgroundToCanvas(InkCanvas*) - use Page background settings
 
-void MainWindow::showRopeSelectionMenu(const QPoint &position) {
-    // Phase 3.1.5: Stubbed - Lasso/rope tool will be reimplemented in Phase 2B
-    Q_UNUSED(position);
-    // TODO Phase 2B: Reimplement rope selection menu for DocumentViewport
-}
 void MainWindow::updatePdfTextSelectButtonState() {
     // Phase 3.1.5: Stubbed - PDF text selection not yet implemented in DocumentViewport
     if (pdfTextSelectButton) {
@@ -7476,6 +7371,11 @@ void MainWindow::loadBookmarks() {
     updateBookmarkButtonState();
 }
 
+// MW1.5: Kept as stub - called from multiple places
+void MainWindow::saveBookmarks() {
+    qDebug() << "saveBookmarks(): Stub (Phase 3.4)";
+}
+
 // Markdown Notes Sidebar functionality
 void MainWindow::toggleMarkdownNotesSidebar() {
     if (!markdownNotesSidebar) return;
@@ -7498,7 +7398,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     }
     
     if (markdownNotesSidebarVisible) {
-        loadMarkdownNotesForCurrentPage(); // Load notes when opening
+        // MW1.5: loadMarkdownNotesForCurrentPage() removed - will be reimplemented
     }
     
     // Force immediate layout update so canvas repositions correctly
@@ -7526,88 +7426,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     });
 }
 
-void MainWindow::onMarkdownNotesUpdated() {
-    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
-    // This was triggered by InkCanvas::markdownNotesUpdated signal (now disconnected)
-    qDebug() << "onMarkdownNotesUpdated(): Not implemented yet (Phase 3.4)";
-    
-    // Still handle sidebar visibility for future use
-    if (markdownNotesSidebar && !markdownNotesSidebarVisible) {
-        // Don't auto-open sidebar when note is created (will be re-enabled in Phase 3.4)
-    }
-}
 
-void MainWindow::onMarkdownNoteContentChanged(const QString &noteId, const MarkdownNoteData &data) {
-    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
-    Q_UNUSED(noteId);
-    Q_UNUSED(data);
-    qDebug() << "onMarkdownNoteContentChanged(): Not implemented yet (Phase 3.4)";
-}
-
-void MainWindow::onMarkdownNoteDeleted(const QString &noteId) {
-    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
-    Q_UNUSED(noteId);
-    qDebug() << "onMarkdownNoteDeleted(): Not implemented yet (Phase 3.4)";
-}
-
-void MainWindow::onHighlightLinkClicked(const QString &highlightId) {
-    // Phase 3.1.9: Stubbed - text highlights will use Document in Phase 3.4
-    Q_UNUSED(highlightId);
-    qDebug() << "onHighlightLinkClicked(): Not implemented yet (Phase 3.4)";
-}
-
-void MainWindow::onHighlightDoubleClicked(const QString &highlightId) {
-    // Phase 3.1.9: Stubbed - text highlights will use Document in Phase 3.4
-    Q_UNUSED(highlightId);
-    qDebug() << "onHighlightDoubleClicked(): Not implemented yet (Phase 3.4)";
-}
-
-void MainWindow::loadMarkdownNotesForCurrentPage() {
-    // Phase 3.1.9: Stubbed - markdown notes will use Document in Phase 3.4
-    if (!markdownNotesSidebar) return;
-    
-    // Clear sidebar since we don't have InkCanvas notes anymore
-        if (markdownNotesSidebar->isInSearchMode()) {
-            markdownNotesSidebar->exitSearchMode();
-        }
-        markdownNotesSidebar->clearNotes();
-    
-    DocumentViewport* vp = currentViewport();
-    if (vp) {
-        // TODO Phase 3.4: Get notes from vp->document()->currentPage()
-        markdownNotesSidebar->setCurrentPageInfo(vp->currentPageIndex(), 1);
-    }
-}
-
-void MainWindow::saveBookmarks() {
-    // Phase 3.1.9: Stubbed - bookmarks will use Document in Phase 3.4
-    qDebug() << "saveBookmarks(): Not implemented yet (Phase 3.4)";
-}
-
-void MainWindow::toggleCurrentPageBookmark() {
-    // Phase 3.1.9: Stubbed - bookmarks will use Document in Phase 3.4
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
-    
-    int currentPage = vp->currentPageIndex() + 1; // Convert to 1-based
-    
-    if (bookmarks.contains(currentPage)) {
-        // Remove bookmark
-        bookmarks.remove(currentPage);
-    } else {
-        // Add bookmark with default title
-        QString defaultTitle = QString(tr("Bookmark %1")).arg(currentPage);
-        bookmarks[currentPage] = defaultTitle;
-    }
-    
-    // TODO Phase 3.4: Save bookmarks to Document
-    updateBookmarkButtonState();
-    
-    // Refresh bookmarks view if visible
-    if (bookmarksSidebarVisible) {
-        loadBookmarks();
-    }
-}
 
 void MainWindow::updateBookmarkButtonState() {
     // Phase 3.1.9: Use currentViewport() instead of currentCanvas()
@@ -7890,6 +7709,18 @@ void MainWindow::createNewSpnPackage(const QString &spnPath)
     QMessageBox::information(this, tr("Create Notebook"), 
         tr("Creating .spn packages is being redesigned. Coming soon with .snx format!"));
     return;
+}
+
+// MW1.5: Kept as stubs - still called from openFileInNewTab
+void MainWindow::openPdfFile(const QString &pdfPath) {
+    Q_UNUSED(pdfPath);
+    QMessageBox::information(this, tr("Open PDF"), 
+        tr("PDF opening is being redesigned. Coming soon!"));
+}
+
+bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
+    Q_UNUSED(spnPath);
+    return false; // Always return false - allow opening
 }
 
 // ========================================
@@ -8353,8 +8184,3 @@ void MainWindow::onAutoScrollRequested(int direction)
     // DocumentViewport handles infinite scrolling internally
 }
 
-void MainWindow::onEarlySaveRequested()
-{
-    // Phase 3.1.5: Stubbed - will be reimplemented in Phase 3.5 (file operations)
-    // TODO Phase 3.5: Connect to DocumentManager save operations
-}
