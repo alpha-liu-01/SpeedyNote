@@ -300,11 +300,6 @@ public:
     DialMode dialModeFromString(const QString &mode);
     
     // ✅ Mouse dial mapping management
-    void setMouseDialMapping(const QString &combination, const QString &dialMode);
-    QString getMouseDialMapping(const QString &combination) const;
-    QMap<QString, QString> getMouseDialMappings() const;
-    void saveMouseDialMappings();
-    void loadMouseDialMappings();
 
 
     void openSpnPackage(const QString &spnPath);
@@ -446,16 +441,9 @@ private slots:
 
     void toggleDial();  // ✅ Show/Hide dial
     void positionDialContainer(); // ✅ Position dial container intelligently
-    void handleDialInput(int angle);  // ✅ Handle touch input
-    void onDialReleased();
     // void processPageSwitch();
     void initializeDialSound();
 
-    void changeDialMode(DialMode mode);
-    void handleDialZoom(int angle);
-    void handleDialThickness(int angle); // Added function to handle thickness control
-    void onZoomReleased();
-    void onThicknessReleased(); // Added function to handle thickness control
     // void updateCustomColor();
     void updateDialDisplay();
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
@@ -472,12 +460,8 @@ private slots:
     
     // void handleModeSelection(int angle);
 
-    void handleToolSelection(int angle);
-    void onToolReleased();
 
 
-    void handlePresetSelection(int angle);
-    void onPresetReleased();
     void addColorPreset();
     void updateColorPalette(); // Update colors based on current palette mode
     QColor getPaletteColor(const QString &colorName); // Get color based on current palette
@@ -489,8 +473,6 @@ private slots:
     void updateButtonIcon(QPushButton* button, const QString& iconName);
     QString createButtonStyle(bool darkMode);
 
-    void handleDialPanScroll(int angle);  // Add missing function declaration
-    void onPanScrollReleased();           // Add missing function declaration
 
     
     // Color button state management
@@ -657,37 +639,7 @@ private:
     bool markdownNotesSidebarVisible = false;
 
     // Dial Mode Toolbar (vertical, right side)
-    QWidget *dialToolbar = nullptr;           // Foldable vertical toolbar for dial mode buttons
-    QPushButton *dialToolbarToggle = nullptr; // Floating tab button to fold/unfold the dial toolbar
-    bool dialToolbarExpanded = true;          // Track expanded/collapsed state
-    void positionDialToolbarTab();            // Position the floating tab at the edge of the toolbar
-
-    QWidget *dialContainer = nullptr;  // ✅ Floating dial container
-    QDial *pageDial = nullptr;  // ✅ The dial itself
-    QDial *modeDial = nullptr;  // ✅ Mode dial
-    QPushButton *dialToggleButton;  // ✅ Toggle button
-    bool fastForwardMode = false;  // ✅ Toggle fast forward
-    QPushButton *fastForwardButton;  // ✅ Fast forward button    
-    int lastAngle = 0;
-    int startAngle = 0;
-    bool tracking = false;
-    int accumulatedRotation = 0;
-    SimpleAudio *dialClickSound = nullptr;
-
-    int grossTotalClicks = 0;
-
-    DialMode temporaryDialMode = None;
-    
-    // ✅ Mouse dial control system
-    QTimer *mouseDialTimer;
-    QSet<Qt::MouseButton> pressedMouseButtons;
-    bool mouseDialModeActive = false;
-    QString currentMouseDialCombination;
-    QMap<QString, QString> mouseDialMappings; // combination -> dial mode
-
-    QComboBox *dialModeSelector; // ✅ Mode selector
-
-    DialMode currentDialMode = PanAndPageScroll; // ✅ Default mode
+    // MW2.2: Removed all dial-related variables
 
     // Removed unused colorPreview widget
 
@@ -699,16 +651,7 @@ private:
     // QLabel *modeIndicator; ✅ Indicator for mode selection
     // QLabel *dialNeedle;
 
-    QPushButton *btnPageSwitch;
-    QPushButton *btnZoom;
-    QPushButton *btnThickness;
 
-    QPushButton *btnTool;
-    QPushButton *btnPresets;
-    QPushButton *btnPannScroll;
-    int tempClicks = 0;
-
-    QPushButton *dialHiddenButton; // ✅ Invisible tap button over OLED display
 
     QQueue<QColor> colorPresets; // ✅ FIFO queue for color presets
     QPushButton *addPresetButton; // ✅ Button to add current color to queue
@@ -726,10 +669,6 @@ private:
     void clearTemporaryDialMode();
     
     // ✅ Mouse dial controls
-    void startMouseDialMode(const QString &combination);
-    void stopMouseDialMode();
-    void handleMouseWheelDial(int delta);
-    QString mouseButtonCombinationToString(const QSet<Qt::MouseButton> &buttons) const;
     
     // ✅ Override mouse events for dial control
     void mousePressEvent(QMouseEvent *event) override;
@@ -741,9 +680,6 @@ private:
     void cycleZoomLevels();         // Function to cycle through 0.5x, 1x, 2x zoom levels
     bool sidebarWasVisibleBeforeFullscreen = true;  // Track sidebar state before fullscreen
 
-    int accumulatedRotationAfterLimit = 0; 
-
-    int pendingPageFlip = 0;  // -1 for previous, +1 for next, 0 for no flip. This is used for mode PanAndPageScroll
 
     // Add in MainWindow class:
     QMap<QString, QString> buttonHoldMapping;

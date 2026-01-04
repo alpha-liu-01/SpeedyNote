@@ -198,9 +198,9 @@ source/ui/
 
 ---
 
-### MW2.2: Delete Dial Mode System from MainWindow
+### MW2.2: Delete Dial Mode System from MainWindow ✅ COMPLETED
 
-**DELETE from MainWindow.cpp (~600 lines):**
+**DELETED from MainWindow.cpp (~1,190 lines!):**
 
 1. **Mode handler functions (14 functions):**
    - `handleDialInput()`, `onDialReleased()`
@@ -215,21 +215,27 @@ source/ui/
    - `pageDial` (QDial widget)
    - Mode selection buttons and container
    - All dial styling code
+   - `dialContainer` and related drag handling
 
 3. **Mouse dial system:**
    - `handleMouseWheelDial()`
    - `startMouseDialMode()`, `stopMouseDialMode()`
    - Mouse button combination tracking
 
-4. **Dial state variables:**
-   - `currentDialMode`, `temporaryDialMode`
-   - `tracking`, `startAngle`, `lastAngle`, `accumulatedRotation`
-   - `pendingPageFlip`, `tempClicks`, `grossTotalClicks`
-   - `mouseDialModeActive`, `mouseDialMappings`
+4. **Removed from header (~65 lines)**
 
-**KEEP from MainWindow:**
-- `dialDisplay` widget (QLabel) - relocate to new DialDisplay class
-- `updateDialDisplay()` - move to DialDisplay class
+**KEPT as stubs (for moc compatibility):**
+- `toggleDial()`, `positionDialContainer()`, `initializeDialSound()` - empty stubs
+- `updateDialButtonState()`, `updateFastForwardButtonState()` - empty stubs
+- `wheelEvent()` - forwards to base class
+
+**KEPT:**
+- `dialDisplay` widget (QLabel) - still used for status display
+- `updateDialDisplay()` - simplified to just show page info
+
+**Line count:**
+- MainWindow.cpp: 8,186 → 6,996 (**-1,190 lines!**)
+- MainWindow.h: 887 → 822 (**-65 lines**)
 
 ---
 
@@ -598,7 +604,7 @@ These items are identified but NOT part of this cleanup:
 
 ### Phase 2: Simplify Dial System (Revised - Q3 Approach)
 - [x] MW2.1: Create directory structure ✅ (will be simplified)
-- [ ] MW2.2: Delete dial mode system from MainWindow (~600 lines)
+- [x] MW2.2: Delete dial mode system from MainWindow ✅ (**-1,190 lines!**)
 - [ ] MW2.3: Create simple DialDisplay widget
 - [ ] MW2.4: Simplify/delete DialTypes.h
 - [ ] MW2.5: Delete unused skeleton files

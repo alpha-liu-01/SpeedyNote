@@ -294,15 +294,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     controllerManager->moveToThread(controllerThread);
     
-    // ✅ Initialize mouse dial control system
-    mouseDialTimer = new QTimer(this);
-    mouseDialTimer->setSingleShot(true);
-    mouseDialTimer->setInterval(500); // 0.5 seconds
-    connect(mouseDialTimer, &QTimer::timeout, this, [this]() {
-        if (!pressedMouseButtons.isEmpty()) {
-            startMouseDialMode(mouseButtonCombinationToString(pressedMouseButtons));
-        }
-    });
+    // MW2.2: Removed mouse dial control system
     connect(controllerThread, &QThread::started, controllerManager, &SDLControllerManager::start);
     connect(controllerThread, &QThread::finished, controllerManager, &SDLControllerManager::deleteLater);
 
@@ -323,12 +315,7 @@ MainWindow::MainWindow(QWidget *parent)
     
     recentNotebooksManager = RecentNotebooksManager::getInstance(this); // Use singleton instance
 
-    // Show dial by default after UI is fully initialized
-    QTimer::singleShot(200, this, [this]() {
-        if (!dialContainer) {
-            toggleDial(); // This will create and show the dial
-        }
-    });
+    // MW2.2: Removed dial initialization
     
     // Force IME activation after a short delay to ensure proper initialization
     QTimer::singleShot(500, this, [this]() {
@@ -1199,86 +1186,18 @@ void MainWindow::setupUi() {
     jumpToPageButton->setIcon(loadThemedIcon("bookpage"));
     connect(jumpToPageButton, &QPushButton::clicked, this, &MainWindow::showJumpToPageDialog);
 
-    // ✅ Dial Toggle Button
-    dialToggleButton = new QPushButton(this);
-    dialToggleButton->setFixedSize(26, 30);
-    dialToggleButton->setToolTip(tr("Toggle Magic Dial"));
-    dialToggleButton->setStyleSheet(buttonStyle);
-    dialToggleButton->setProperty("selected", false); // Initially hidden
-    updateButtonIcon(dialToggleButton, "dial");
+    // MW2.2: Removed dial toggle button
+    // MW2.2: Removed fast forward button - keeping only essential controls
 
-    // ✅ Connect to toggle function
-    connect(dialToggleButton, &QPushButton::clicked, this, &MainWindow::toggleDial);
+    // MW2.2: Removed fast forward button connection
 
-    // toggleDial();
-
-    
-
-    fastForwardButton = new QPushButton(this);
-    fastForwardButton->setFixedSize(26, 30);
-    fastForwardButton->setToolTip(tr("Toggle Fast Forward 8x"));
-    fastForwardButton->setStyleSheet(buttonStyle);
-    fastForwardButton->setProperty("selected", false); // Initially disabled
-    updateButtonIcon(fastForwardButton, "fastforward");
-
-    // ✅ Toggle fast-forward mode
-    connect(fastForwardButton, &QPushButton::clicked, [this]() {
-        fastForwardMode = !fastForwardMode;
-        updateFastForwardButtonState();
-    });
-
-    QComboBox *dialModeSelector = new QComboBox(this);
-    dialModeSelector->addItem("Page Switch", PageSwitching);
-    dialModeSelector->addItem("Zoom", ZoomControl);
-    dialModeSelector->addItem("Thickness", ThicknessControl);
-
-    dialModeSelector->addItem("Tool Switch", ToolSwitching);
-    dialModeSelector->setFixedWidth(120);
-
-    connect(dialModeSelector, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-        [this](int index) { changeDialMode(static_cast<DialMode>(index)); });
-
-    // Hide the dialModeSelector since it's not used in the layout but needed for compilation
-    dialModeSelector->hide();
-    dialModeSelector->setFixedSize(0, 0); // Make it invisible by setting size to 0
+    // MW2.2: Removed dialModeSelector
 
 
 
     // Removed unused colorPreview widget that was causing UI artifacts
 
-    btnPageSwitch = new QPushButton(loadThemedIcon("bookpage"), "", this);
-    btnPageSwitch->setStyleSheet(buttonStyle);
-    btnPageSwitch->setFixedSize(26, 30);
-    btnPageSwitch->setToolTip(tr("Set Dial Mode to Page Switching"));
-    btnZoom = new QPushButton(loadThemedIcon("zoom"), "", this);
-    btnZoom->setStyleSheet(buttonStyle);
-    btnZoom->setFixedSize(26, 30);
-    btnZoom->setToolTip(tr("Set Dial Mode to Zoom Ctrl"));
-    btnThickness = new QPushButton(loadThemedIcon("thickness"), "", this);
-    btnThickness->setStyleSheet(buttonStyle);
-    btnThickness->setFixedSize(26, 30);
-    btnThickness->setToolTip(tr("Set Dial Mode to Pen Tip Thickness Ctrl"));
-
-    btnTool = new QPushButton(loadThemedIcon("pen"), "", this);
-    btnTool->setStyleSheet(buttonStyle);
-    btnTool->setFixedSize(26, 30);
-    btnTool->setToolTip(tr("Set Dial Mode to Tool Switching"));
-    btnPresets = new QPushButton(loadThemedIcon("preset"), "", this);
-    btnPresets->setStyleSheet(buttonStyle);
-    btnPresets->setFixedSize(26, 30);
-    btnPresets->setToolTip(tr("Set Dial Mode to Color Preset Selection"));
-    btnPannScroll = new QPushButton(loadThemedIcon("scroll"), "", this);
-    btnPannScroll->setStyleSheet(buttonStyle);
-    btnPannScroll->setFixedSize(26, 30);
-    btnPannScroll->setToolTip(tr("Slide and turn pages with the dial"));
-
-    connect(btnPageSwitch, &QPushButton::clicked, this, [this]() { changeDialMode(PageSwitching); });
-    connect(btnZoom, &QPushButton::clicked, this, [this]() { changeDialMode(ZoomControl); });
-    connect(btnThickness, &QPushButton::clicked, this, [this]() { changeDialMode(ThicknessControl); });
-
-    connect(btnTool, &QPushButton::clicked, this, [this]() { changeDialMode(ToolSwitching); });
-    connect(btnPresets, &QPushButton::clicked, this, [this]() { changeDialMode(PresetSelection); }); 
-    connect(btnPannScroll, &QPushButton::clicked, this, [this]() { changeDialMode(PanAndPageScroll); });
+    // MW2.2: Removed mode selection buttons
 
 
     // ✅ Initialize color presets based on palette mode (will be updated after UI setup)
@@ -1524,114 +1443,9 @@ void MainWindow::setupUi() {
         updateScrollbarPositions();
     });
 
-    // ========================================
-    // Dial Mode Toolbar (retractable, vertical, right side)
-    // ========================================
-    // The toolbar panel - this is what takes up layout space
-    dialToolbar = new QWidget(this);
-    dialToolbar->setObjectName("dialToolbar");
-    dialToolbar->setFixedWidth(50);
+    // MW2.2: Removed dial mode toolbar
     
-    QVBoxLayout *dialToolbarLayout = new QVBoxLayout(dialToolbar);
-    dialToolbarLayout->setContentsMargins(4, 8, 4, 8);
-    dialToolbarLayout->setSpacing(6);
-    dialToolbarLayout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
-    
-    // Add dial mode buttons to vertical toolbar with larger sizes for touch
-    QSize dialBtnSize(42, 38);
-    
-    dialToggleButton->setFixedSize(dialBtnSize);
-    fastForwardButton->setFixedSize(dialBtnSize);
-    btnPannScroll->setFixedSize(dialBtnSize);
-    btnPageSwitch->setFixedSize(dialBtnSize);
-    btnZoom->setFixedSize(dialBtnSize);
-    btnThickness->setFixedSize(dialBtnSize);
-    btnTool->setFixedSize(dialBtnSize);
-    btnPresets->setFixedSize(dialBtnSize);
-    addPresetButton->setFixedSize(dialBtnSize);
-    
-    dialToolbarLayout->addWidget(dialToggleButton);
-    dialToolbarLayout->addWidget(fastForwardButton);
-    dialToolbarLayout->addWidget(btnPannScroll);
-    dialToolbarLayout->addWidget(btnPageSwitch);
-    dialToolbarLayout->addWidget(btnZoom);
-    dialToolbarLayout->addWidget(btnThickness);
-    dialToolbarLayout->addWidget(btnTool);
-    dialToolbarLayout->addWidget(btnPresets);
-    dialToolbarLayout->addWidget(addPresetButton);
-    
-    dialToolbarLayout->addStretch(); // Push buttons to top
-    
-    // Apply theme-aware styling to toolbar panel (solid background)
-    {
-        bool isDark = isDarkMode();
-        QString panelBg = isDark ? "#2D2D2D" : "#F5F5F5";
-        QString panelBorder = isDark ? "#555555" : "#CCCCCC";
-        QString panelStyle = QString(
-            "QWidget#dialToolbar {"
-            "  background-color: %1;"
-            "  border-left: 1px solid %2;"
-            "}"
-        ).arg(panelBg, panelBorder);
-        dialToolbar->setStyleSheet(panelStyle);
-    }
-    
-    // Dial toolbar floating tab - floats on top of the canvas, positioned absolutely
-    // This is a child of MainWindow so it can overlay the canvas area
-    dialToolbarToggle = new QPushButton(this);
-    dialToolbarToggle->setObjectName("dialToolbarTab");
-    dialToolbarToggle->setFixedSize(28, 80);
-    dialToolbarToggle->setToolTip(tr("Toggle Dial Mode Toolbar"));
-    dialToolbarToggle->setCursor(Qt::PointingHandCursor);
-    dialToolbarToggle->setIcon(loadThemedIcon("dial"));
-    dialToolbarToggle->setIconSize(QSize(18, 18));
-    dialToolbarToggle->raise(); // Ensure it's on top
-    
-    // Apply floating tab styling (solid background, right side tabs have left-rounded corners)
-    {
-        bool isDark = isDarkMode();
-        QString tabBg = isDark ? "#3A3A3A" : "#EAEAEA";
-        QString tabHover = isDark ? "#4A4A4A" : "#DADADA";
-        QString tabBorder = isDark ? "#555555" : "#CCCCCC";
-        
-        QString dialTabStyle = QString(
-            "QPushButton#dialToolbarTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-right: none;"
-            "  border-top-left-radius: 0px;"
-            "  border-bottom-left-radius: 0px;"
-            "}"
-            "QPushButton#dialToolbarTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#dialToolbarTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBg, tabBorder, tabHover);
-        dialToolbarToggle->setStyleSheet(dialTabStyle);
-    }
-    
-    // Connect toggle tab to show/hide toolbar panel
-    connect(dialToolbarToggle, &QPushButton::clicked, this, [this]() {
-        dialToolbarExpanded = !dialToolbarExpanded;
-        
-        // Show/hide the toolbar panel
-        dialToolbar->setVisible(dialToolbarExpanded);
-        
-        // Icon already indicates state, no need for arrow text
-        
-        // Update toggle button state for styling
-        dialToolbarToggle->setProperty("selected", dialToolbarExpanded);
-        dialToolbarToggle->style()->unpolish(dialToolbarToggle);
-        dialToolbarToggle->style()->polish(dialToolbarToggle);
-        
-        // Reposition the tab and dial container
-        positionDialToolbarTab();
-        if (dialContainer && dialContainer->isVisible()) {
-            positionDialContainer();
-        }
-    });
+    // MW2.2: Removed dial toolbar toggle
 
     // Main layout: tab bar -> toolbar -> canvas (vertical stack)
     QWidget *container = new QWidget;
@@ -1667,7 +1481,7 @@ void MainWindow::setupUi() {
     // Layer panel - added separately so it can be hidden independently
     contentLayout->addWidget(m_layerPanel, 0);
     contentLayout->addWidget(canvasContainer, 1); // Canvas takes remaining space
-    contentLayout->addWidget(dialToolbar, 0); // Dial mode toolbar (before markdown sidebar)
+    // MW2.2: Removed dialToolbar from layout
     contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
     
     QWidget *contentWidget = new QWidget;
@@ -1704,7 +1518,7 @@ void MainWindow::setupUi() {
     QTimer::singleShot(100, this, [this]() {
         updateTabSizes();
         positionLeftSidebarTabs();
-        positionDialToolbarTab();
+        // MW2.2: Removed positionDialToolbarTab()
         
         // Phase 5.1: Initialize LayerPanel for the first tab
         // currentViewportChanged may have been emitted before m_layerPanel was ready
@@ -3134,8 +2948,7 @@ void MainWindow::switchTab(int index) {
         // updatePictureButtonState();
         // updatePdfTextSelectButtonState();
         // updateBookmarkButtonState();
-        updateDialButtonState();
-        updateFastForwardButtonState();
+        // MW2.2: Removed dial button state updates
         // updateToolButtonStates();
         // updateThicknessSliderForCurrentTool();
     }
@@ -3620,8 +3433,7 @@ void MainWindow::loadFolderDocument()
     updatePdfTextSelectButtonState(); // Initialize PDF text selection button state for the new tab
     updateBookmarkButtonState(); // Initialize bookmark button state for the new tab
     updatePictureButtonState(); // Initialize picture button state for the new tab
-    updateDialButtonState();     // Initialize dial button state for the new tab
-    updateFastForwardButtonState(); // Initialize fast forward button state for the new tab
+    // MW2.2: Removed dial button state updates
     updateToolButtonStates();   // Initialize tool button states for the new tab
 
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
@@ -3784,211 +3596,7 @@ void MainWindow::onPageInputChanged(int newPage) {
     }
 }
 
-void MainWindow::toggleDial() {
-    if (!dialContainer) {  
-        // ✅ Create floating container for the dial
-        dialContainer = new QWidget(this);
-        dialContainer->setObjectName("dialContainer");
-        dialContainer->setFixedSize(140, 140);
-        dialContainer->setAttribute(Qt::WA_TranslucentBackground);
-        dialContainer->setAttribute(Qt::WA_NoSystemBackground);
-        dialContainer->setAttribute(Qt::WA_OpaquePaintEvent);
-        dialContainer->setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-        dialContainer->setStyleSheet("background: transparent; border-radius: 100px;");  // ✅ More transparent
-
-        // ✅ Create dial
-        pageDial = new QDial(dialContainer);
-        pageDial->setFixedSize(140, 140);
-        pageDial->setMinimum(0);
-        pageDial->setMaximum(360);
-        pageDial->setWrapping(true);  // ✅ Allow full-circle rotation
-        
-        // Apply theme color immediately when dial is created
-        QColor accentColor = getAccentColor();
-        pageDial->setStyleSheet(QString(R"(
-        QDial {
-            background-color: %1;
-            }
-        )").arg(accentColor.name()));
-
-        /*
-
-        modeDial = new QDial(dialContainer);
-        modeDial->setFixedSize(150, 150);
-        modeDial->setMinimum(0);
-        modeDial->setMaximum(300);  // 6 modes, 60° each
-        modeDial->setSingleStep(60);
-        modeDial->setWrapping(true);
-        modeDial->setStyleSheet("background:rgb(0, 76, 147);");
-        modeDial->move(25, 25);
-        
-        */
-        
-
-        dialColorPreview = new QFrame(dialContainer);
-        dialColorPreview->setFixedSize(30, 30);
-        dialColorPreview->setStyleSheet("border-radius: 15px; border: 1px solid black;");
-        dialColorPreview->move(55, 35); // Center of dial
-
-        dialIconView = new QLabel(dialContainer);
-        dialIconView->setFixedSize(30, 30);
-        dialIconView->setStyleSheet("border-radius: 1px; border: 1px solid black;");
-        dialIconView->move(55, 35); // Center of dial
-
-        // ✅ Position dial near top-right corner initially
-        positionDialContainer();
-
-        dialDisplay = new QLabel(dialContainer);
-        dialDisplay->setAlignment(Qt::AlignCenter);
-        dialDisplay->setFixedSize(80, 80);
-        dialDisplay->move(30, 30);  // Center position inside the dial
-        
-
-        int fontId = QFontDatabase::addApplicationFont(":/resources/fonts/Jersey20-Regular.ttf");
-        // int chnFontId = QFontDatabase::addApplicationFont(":/resources/fonts/NotoSansSC-Medium.ttf");
-        QStringList fontFamilies = QFontDatabase::applicationFontFamilies(fontId);
-
-        if (!fontFamilies.isEmpty()) {
-            QFont pixelFont(fontFamilies.at(0), 11);
-            dialDisplay->setFont(pixelFont);
-        }
-
-        dialDisplay->setStyleSheet("background-color: black; color: white; font-size: 14px; border-radius: 4px;");
-
-        dialHiddenButton = new QPushButton(dialContainer);
-        dialHiddenButton->setFixedSize(80, 80);
-        dialHiddenButton->move(30, 30); // Same position as dialDisplay
-        dialHiddenButton->setStyleSheet("background: transparent; border: none;"); // ✅ Fully invisible
-        dialHiddenButton->setFocusPolicy(Qt::NoFocus); // ✅ Prevents accidental focus issues
-        dialHiddenButton->setEnabled(false);  // ✅ Disabled by default
-
-        // ✅ Connection will be set in changeDialMode() based on current mode
-
-        dialColorPreview->raise();  // ✅ Ensure it's on top
-        dialIconView->raise();
-        // ✅ Connect dial input and release
-        // connect(pageDial, &QDial::valueChanged, this, &MainWindow::handleDialInput);
-        // connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onDialReleased);
-
-        // connect(modeDial, &QDial::valueChanged, this, &MainWindow::handleModeSelection);
-        changeDialMode(currentDialMode);  // ✅ Set initial mode
-
-        // ✅ Enable drag detection
-        dialContainer->installEventFilter(this);
-    }
-
-    // ✅ Ensure that `dialContainer` is always initialized before setting visibility
-    if (dialContainer) {
-        dialContainer->setVisible(!dialContainer->isVisible());
-    }
-
-    initializeDialSound();  // ✅ Ensure sound is loaded
-
-    // Inside toggleDial():
-    
-    if (!dialDisplay) {
-        dialDisplay = new QLabel(dialContainer);
-    }
-    updateDialDisplay(); // ✅ Ensure it's updated before showing
-
-    if (controllerManager) {
-        connect(controllerManager, &SDLControllerManager::buttonHeld, this, &MainWindow::handleButtonHeld);
-        connect(controllerManager, &SDLControllerManager::buttonReleased, this, &MainWindow::handleButtonReleased);
-        connect(controllerManager, &SDLControllerManager::leftStickAngleChanged, pageDial, &QDial::setValue);
-        connect(controllerManager, &SDLControllerManager::leftStickReleased, pageDial, &QDial::sliderReleased);
-        connect(controllerManager, &SDLControllerManager::buttonSinglePress, this, &MainWindow::handleControllerButton);
-    }
-
-    loadButtonMappings();  // ✅ Load button mappings for the controller
-    loadMouseDialMappings(); // ✅ Load mouse dial mappings
-
-    // Update button state to reflect dial visibility
-    updateDialButtonState();
-}
-
-void MainWindow::positionDialContainer() {
-    if (!dialContainer) return;
-    
-    // Get window dimensions
-    int windowWidth = width();
-    int windowHeight = height();
-    
-    // Get dial dimensions
-    int dialWidth = dialContainer->width();   // 140px
-    int dialHeight = dialContainer->height(); // 140px
-    
-    // Calculate heights based on current layout (tab bar is now above toolbar)
-    int tabBarHeight = (tabBarContainer && tabBarContainer->isVisible()) ? 38 : 0; // Tab bar height
-    int toolbarHeight = isToolbarTwoRows ? 80 : 50; // Toolbar height
-
-    // Define margins from edges
-    int rightMargin = 20;  // Distance from right edge
-    int topMargin = 20;    // Distance from top edge (below tab bar and toolbar)
-    
-    // Calculate total width of visible right-side sidebars
-    int rightSidebarWidth = 0;
-    // Tab overlays canvas, so only count the panel width when expanded
-    if (dialToolbarExpanded && dialToolbar && dialToolbar->isVisible()) {
-        rightSidebarWidth += dialToolbar->width(); // 50px panel
-    }
-    if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-        rightSidebarWidth += markdownNotesSidebar->width();
-    }
-    
-    // Calculate total width of visible left-side sidebars
-    int leftSidebarWidth = 0;
-    if (outlineSidebar && outlineSidebar->isVisible()) {
-        leftSidebarWidth += outlineSidebar->width();
-    }
-    if (bookmarksSidebar && bookmarksSidebar->isVisible()) {
-        leftSidebarWidth += bookmarksSidebar->width();
-    }
-
-    // Calculate ideal position (top-right corner with margins, accounting for sidebars)
-    int idealX = windowWidth - dialWidth - rightMargin - rightSidebarWidth;
-    int idealY = tabBarHeight + toolbarHeight + topMargin;
-    
-    // Ensure dial stays within window bounds with minimum margins
-    int minMargin = 10;
-    int maxX = windowWidth - dialWidth - minMargin - rightSidebarWidth;
-    int maxY = windowHeight - dialHeight - minMargin;
-    
-    // Clamp position to stay within bounds (accounting for left sidebars too)
-    int finalX = qBound(leftSidebarWidth + minMargin, idealX, maxX);
-    int finalY = qBound(tabBarHeight + toolbarHeight + minMargin, idealY, maxY);
-    
-    // Move the dial to the calculated position
-    dialContainer->move(finalX, finalY);
-}
-
-void MainWindow::positionDialToolbarTab() {
-    if (!dialToolbarToggle) return;
-    
-    // Calculate position: tab should be at the left edge of dialToolbar (or right edge of canvas if collapsed)
-    int windowWidth = width();
-    int tabWidth = dialToolbarToggle->width();  // 20px
-    
-    // Calculate heights for vertical positioning
-    int tabBarHeight = (tabBarContainer && tabBarContainer->isVisible()) ? 38 : 0;
-    int toolbarHeight = isToolbarTwoRows ? 80 : 50;
-    int topOffset = tabBarHeight + toolbarHeight + 60; // 60px margin from top of content area
-    
-    // Calculate x position based on visible right sidebars
-    int rightOffset = 0;
-    if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-        rightOffset += markdownNotesSidebar->width();
-    }
-    if (dialToolbarExpanded && dialToolbar && dialToolbar->isVisible()) {
-        rightOffset += dialToolbar->width(); // 50px
-    }
-    
-    // Position the tab: right edge minus sidebars minus tab width
-    int tabX = windowWidth - rightOffset - tabWidth;
-    int tabY = topOffset;
-    
-    dialToolbarToggle->move(tabX, tabY);
-    dialToolbarToggle->raise(); // Ensure it stays on top
-}
+// MW2.2: toggleDial() removed - dial system deleted
 
 void MainWindow::positionLeftSidebarTabs() {
     // Calculate heights for vertical positioning
@@ -4046,267 +3654,29 @@ void MainWindow::positionLeftSidebarTabs() {
 }
 
 void MainWindow::updateDialDisplay() {
+    // MW2.2: Simplified updateDialDisplay - dial system removed
     if (!dialDisplay) return;
-    if (!dialColorPreview) return;
-    if (!dialIconView) return;
-    
+
     // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
     DocumentViewport* vp = currentViewport();
     if (!vp) {
         dialDisplay->setText(tr("\n\nNo Canvas"));
         return;
     }
-    
-    dialIconView->show();
-    switch (currentDialMode) {
-        case DialMode::PageSwitching:
-            if (fastForwardMode){
-                dialDisplay->setText(QString(tr("\n\nPage\n%1").arg(vp->currentPageIndex() + 1 + tempClicks * 8)));
-            }
-            else {
-                dialDisplay->setText(QString(tr("\n\nPage\n%1").arg(vp->currentPageIndex() + 1 + tempClicks)));
-            }
-            dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/bookpage_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            break;
-        case DialMode::ThicknessControl:
-            {
-                QString toolName;
-                switch (vp->currentTool()) {
-                    case ToolType::Pen:
-                        toolName = tr("Pen");
-            break;
-                    case ToolType::Marker:
-                        toolName = tr("Marker");
-            break;
-                    case ToolType::Eraser:
-                        toolName = tr("Eraser");
-                    break;
-                    case ToolType::Highlighter:
-                        toolName = tr("Highlighter");
-                        break;
-                    case ToolType::Lasso:
-                        toolName = tr("Lasso");
-                        break;
-                    case ToolType::ObjectSelect:
-                        toolName = tr("Object");
-                        break;
-            }
-                dialDisplay->setText(QString(tr("\n\n%1\n%2").arg(toolName).arg(QString::number(vp->penThickness(), 'f', 1))));
-            dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/thickness_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            }
-            break;  
-        case DialMode::ZoomControl:
-            dialDisplay->setText(QString(tr("\n\nZoom\n%1%").arg(vp ? qRound(vp->zoomLevel() * 100.0 * initialDpr) : qRound(zoomSlider->value() * initialDpr))));
-            dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/zoom_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            break;
-  
-        case DialMode::ToolSwitching:
-            // ✅ Convert ToolType to QString for display
-            switch (vp->currentTool()) {
-                case ToolType::Pen:
-                    dialDisplay->setText(tr("\n\n\nPen"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    break;
-                case ToolType::Marker:
-                    dialDisplay->setText(tr("\n\n\nMarker"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/marker_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    break;
-                case ToolType::Eraser:
-                    dialDisplay->setText(tr("\n\n\nEraser"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/eraser_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    break;
-                case ToolType::Highlighter:
-                    dialDisplay->setText(tr("\n\n\nHighlighter"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/marker_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    break;
-                case ToolType::Lasso:
-                    dialDisplay->setText(tr("\n\n\nLasso"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/pen_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    break;
-                case ToolType::ObjectSelect:
-                    dialDisplay->setText(tr("\n\n\nObject"));
-                    dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/background_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                    break;
-            }
-            break;
-        case PresetSelection:
-            dialColorPreview->show();
-            dialIconView->hide();
-            dialColorPreview->setStyleSheet(QString("background-color: %1; border-radius: 15px; border: 1px solid black;")
-                                            .arg(colorPresets[currentPresetIndex].name()));
-            dialDisplay->setText(QString(tr("\n\nPreset %1\n#%2"))
-                                            .arg(currentPresetIndex + 1)  // ✅ Display preset index (1-based)
-                                            .arg(colorPresets[currentPresetIndex].name().remove("#"))); // ✅ Display hex color
-            // dialIconView->setPixmap(QPixmap(":/resources/reversed_icons/preset_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-            break;
-        case DialMode::PanAndPageScroll:
-            {
-                dialIconView->setPixmap(QPixmap(":/resources/icons/scroll_reversed.png").scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-                QString fullscreenStatus = controlBarVisible ? tr("Etr") : tr("Exit");
-                int pageNum = vp ? vp->currentPageIndex() + 1 : 1;
-                dialDisplay->setText(QString(tr("\n\nPage %1\n%2 FulScr")).arg(pageNum).arg(fullscreenStatus));
-            }
-            break;
-        case None:
-            // No dial mode active, do nothing
-            break;
-    }
+
+    // MW2.2: Removed dial mode switching - keeping basic display
+    dialDisplay->setText(QString(tr("\n\nPage\n%1")).arg(vp->currentPageIndex() + 1));
 }
 
-/*
-
-void MainWindow::handleModeSelection(int angle) {
-    static int lastModeIndex = -1;  // ✅ Store last mode index
-
-    // ✅ Snap to closest fixed 60° step
-    int snappedAngle = (angle + 30) / 60 * 60;  // Round to nearest 60°
-    int modeIndex = snappedAngle / 60;  // Convert to mode index
-
-    if (modeIndex >= 6) modeIndex = 0;  // ✅ Wrap around (if 360°, reset to 0° mode)
-
-    if (modeIndex != lastModeIndex) {  // ✅ Only switch mode if it's different
-        changeDialMode(static_cast<DialMode>(modeIndex));
-
-        // ✅ Play click sound when snapping to new mode
-        if (dialClickSound) {
-            dialClickSound->play();
-        }
-
-        lastModeIndex = modeIndex;  // ✅ Update last mode
-    }
-}
-
-*/
+// MW2.2: handleModeSelection() removed - dial system deleted
 
 
 
-void MainWindow::handleDialInput(int angle) {
-    if (!tracking) {
-        startAngle = angle;  // ✅ Set initial position
-        accumulatedRotation = 0;  // ✅ Reset tracking
-        tracking = true;
-        lastAngle = angle;
-        return;
-    }
-
-    int delta = angle - lastAngle;
-
-    // ✅ Handle 360-degree wrapping
-    if (delta > 180) delta -= 360;  // Example: 350° → 10° should be -20° instead of +340°
-    if (delta < -180) delta += 360; // Example: 10° → 350° should be +20° instead of -340°
-
-    accumulatedRotation += delta;  // ✅ Accumulate movement
-
-    // ✅ Detect crossing a 45-degree boundary
-    int currentClicks = accumulatedRotation / 45; // Total number of "clicks" crossed
-    int previousClicks = (accumulatedRotation - delta) / 45; // Previous click count
-
-    if (currentClicks != previousClicks) {  // ✅ Play sound if a new boundary is crossed
-        
-        if (dialClickSound) {
-            dialClickSound->play();
-    
-            // ✅ Vibrate controller
-            SDL_Joystick *joystick = controllerManager->getJoystick();
-            if (joystick) {
-                // Note: SDL_JoystickRumble requires SDL 2.0.9+
-                // For older versions, this will be a no-op
-                #if SDL_VERSION_ATLEAST(2, 0, 9)
-                SDL_JoystickRumble(joystick, 0xA000, 0xF000, 10);  // Vibrate shortly
-                #endif
-            }
-    
-            grossTotalClicks += 1;
-            tempClicks = currentClicks;
-            updateDialDisplay();
-    
-            // Phase 3.1.8: PDF preview stubbed - DocumentViewport handles its own rendering
-            // TODO Phase 3.4: Implement low-res preview for DocumentViewport if needed
-        }
-    }
-
-    lastAngle = angle;  // ✅ Store last position
-}
 
 
 
-void MainWindow::onDialReleased() {
-    if (!tracking) return;  // ✅ Ignore if no tracking
-
-    int pagesToAdvance = fastForwardMode ? 8 : 1;
-    int totalClicks = accumulatedRotation / 45;  // ✅ Convert degrees to pages
-
-    /*
-    int leftOver = accumulatedRotation % 45;  // ✅ Track remaining rotation
-    if (leftOver > 22 && totalClicks >= 0) {
-        totalClicks += 1;  // ✅ Round up if more than halfway
-    } 
-    else if (leftOver <= -22 && totalClicks >= 0) {
-        totalClicks -= 1;  // ✅ Round down if more than halfway
-    }
-    */
-    
-
-    if (totalClicks != 0 || grossTotalClicks != 0) {  // ✅ Only switch pages if movement happened
-        // Phase 3.1.8: Autosave stubbed - DocumentViewport handles undo/redo, not file saving
-
-        DocumentViewport* vp = currentViewport();
-        int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
-        int newPage = qBound(1, currentPage + totalClicks * pagesToAdvance, 99999);
-        
-        // ✅ Use direction-aware page switching for dial
-        int direction = (totalClicks * pagesToAdvance > 0) ? 1 : -1;
-        switchPageWithDirection(newPage, direction);
-        pageInput->setValue(newPage);
-        tempClicks = 0;
-        updateDialDisplay(); 
-        /*
-        if (dialClickSound) {
-            dialClickSound->play();
-        }
-        */
-    }
-
-    accumulatedRotation = 0;  // ✅ Reset tracking
-    grossTotalClicks = 0;
-    tracking = false;
-}
 
 
-void MainWindow::handleToolSelection(int angle) {
-    static int lastToolIndex = -1;  // ✅ Track last tool index
-
-    // ✅ Snap to closest fixed 120° step
-    int snappedAngle = (angle + 60) / 120 * 120;  // Round to nearest 120°
-    int toolIndex = snappedAngle / 120;  // Convert to tool index (0, 1, 2)
-
-    if (toolIndex >= 3) toolIndex = 0;  // ✅ Wrap around at 360° → Back to Pen (0)
-
-    if (toolIndex != lastToolIndex) {  // ✅ Only switch if tool actually changes
-        toolSelector->setCurrentIndex(toolIndex);  // ✅ Change tool
-        lastToolIndex = toolIndex;  // ✅ Update last selected tool
-
-        // ✅ Play click sound when tool changes
-        if (dialClickSound) {
-            dialClickSound->play();
-        }
-
-        SDL_Joystick *joystick = controllerManager->getJoystick();
-
-        if (joystick) {
-            #if SDL_VERSION_ATLEAST(2, 0, 9)
-            SDL_JoystickRumble(joystick, 0xA000, 0xF000, 20);  // ✅ Vibrate controller
-            #endif
-        }
-
-        updateToolButtonStates();  // ✅ Update tool button states
-        updateDialDisplay();  // ✅ Update dial display]
-    }
-}
-
-void MainWindow::onToolReleased() {
-    
-}
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     static bool dragging = false;
     static QPoint lastMousePos;
@@ -4432,9 +3802,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         // - Everything else: treated as trackpad (safer default)
         // ========================================================================
         else if (event->type() == QEvent::Wheel) {
-            if (mouseDialModeActive) {
-                return false;
-            }
+            // MW2.2: Removed mouseDialModeActive check
 
             // Phase 3.1.8: Use touchGestureMode member directly instead of InkCanvas
             
@@ -4488,298 +3856,22 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         }
     }
 
-    // Handle dial container drag events
-    if (obj == dialContainer) {
-        if (event->type() == QEvent::MouseButtonPress) {
-            QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
-            lastMousePos = mouseEvent->globalPosition().toPoint();
-            dragging = false;
-
-            if (!longPressTimer) {
-                longPressTimer = new QTimer(this);
-                longPressTimer->setSingleShot(true);
-                connect(longPressTimer, &QTimer::timeout, [this]() {
-                    dragging = true;  // ✅ Allow movement after long press
-                });
-            }
-            longPressTimer->start(1500);  // ✅ Start long press timer (500ms)
-            return true;
-        }
-
-        if (event->type() == QEvent::MouseMove && dragging) {
-            QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
-            QPoint delta = mouseEvent->globalPosition().toPoint() - lastMousePos;
-            dialContainer->move(dialContainer->pos() + delta);
-            lastMousePos = mouseEvent->globalPosition().toPoint();
-            return true;
-        }
-
-        if (event->type() == QEvent::MouseButtonRelease) {
-            if (longPressTimer) longPressTimer->stop();
-            dragging = false;  // ✅ Stop dragging on release
-            return true;
-        }
-    }
+    // MW2.2: dialContainer drag handling removed - dial system deleted
 
     return QObject::eventFilter(obj, event);
 }
 
 
-void MainWindow::initializeDialSound() {
-    if (!dialClickSound) {
-        dialClickSound = new SimpleAudio();
-        if (!dialClickSound->loadWavFile(":/resources/sounds/dial_click.wav")) {
-            qWarning() << "Failed to load dial click sound - audio will be disabled";
-        }
-        dialClickSound->setVolume(0.8);  // ✅ Set volume (0.0 - 1.0)
-        dialClickSound->setMinimumInterval(5); // ✅ DirectSound can handle much faster rates (5ms minimum)
-    }
-}
-
-void MainWindow::changeDialMode(DialMode mode) {
-
-    if (!dialContainer) return;  // ✅ Ensure dial container exists
-    currentDialMode = mode; // ✅ Set new mode
-    updateDialDisplay();
-
-    // ✅ Enable dialHiddenButton for PanAndPageScroll and ZoomControl modes
-    dialHiddenButton->setEnabled(currentDialMode == PanAndPageScroll || currentDialMode == ZoomControl);
-
-    // ✅ Disconnect previous slots
-    disconnect(pageDial, &QDial::valueChanged, nullptr, nullptr);
-    disconnect(pageDial, &QDial::sliderReleased, nullptr, nullptr);
-    
-    // ✅ Disconnect dialHiddenButton to reconnect with appropriate function
-    disconnect(dialHiddenButton, &QPushButton::clicked, nullptr, nullptr);
-    
-    // ✅ Connect dialHiddenButton to appropriate function based on mode
-    if (currentDialMode == PanAndPageScroll) {
-        connect(dialHiddenButton, &QPushButton::clicked, this, &MainWindow::toggleControlBar);
-    } else if (currentDialMode == ZoomControl) {
-        connect(dialHiddenButton, &QPushButton::clicked, this, &MainWindow::cycleZoomLevels);
-    }
-
-    dialColorPreview->hide();
-    dialDisplay->setStyleSheet("background-color: black; color: white; font-size: 14px; border-radius: 40px;");
-
-    // ✅ Connect the correct function set for the current mode
-    switch (currentDialMode) {
-        case PageSwitching:
-            connect(pageDial, &QDial::valueChanged, this, &MainWindow::handleDialInput);
-            connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onDialReleased);
-            break;
-        case ZoomControl:
-            connect(pageDial, &QDial::valueChanged, this, &MainWindow::handleDialZoom);
-            connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onZoomReleased);
-            break;
-        case ThicknessControl:
-            connect(pageDial, &QDial::valueChanged, this, &MainWindow::handleDialThickness);
-            connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onThicknessReleased);
-            break;
-
-        case ToolSwitching:
-            connect(pageDial, &QDial::valueChanged, this, &MainWindow::handleToolSelection);
-            connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onToolReleased);
-            break;
-        case PresetSelection:
-            connect(pageDial, &QDial::valueChanged, this, &MainWindow::handlePresetSelection);
-            connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onPresetReleased);
-            break;
-        case PanAndPageScroll:
-            connect(pageDial, &QDial::valueChanged, this, &MainWindow::handleDialPanScroll);
-            connect(pageDial, &QDial::sliderReleased, this, &MainWindow::onPanScrollReleased);
-            break;
-        case None:
-            // No dial mode active, do nothing
-            break;
-    }
-}
-
-void MainWindow::handleDialZoom(int angle) {
-    if (!tracking) {
-        startAngle = angle;  
-        accumulatedRotation = 0;  
-        tracking = true;
-        lastAngle = angle;
-        return;
-    }
-
-    int delta = angle - lastAngle;
-
-    // ✅ Handle 360-degree wrapping
-    if (delta > 180) delta -= 360;
-    if (delta < -180) delta += 360;
-
-    accumulatedRotation += delta;
-
-    if (abs(delta) < 4) {  
-        return;  
-    }
-
-    // ✅ Apply zoom dynamically (instead of waiting for release)
-    int oldZoom = zoomSlider->value();
-    int newZoom = qBound(10, oldZoom + (delta / 4), 400);  
-    zoomSlider->setValue(newZoom);
-    updateZoom();  // ✅ Ensure zoom updates immediately
-    updateDialDisplay(); 
-
-    lastAngle = angle;
-}
-
-void MainWindow::onZoomReleased() {
-    accumulatedRotation = 0;
-    tracking = false;
-}
-
-// New variable (add to MainWindow.h near accumulatedRotation)
-int accumulatedRotationAfterLimit = 0;
-
-void MainWindow::handleDialPanScroll(int angle) {
-    if (!tracking) {
-        startAngle = angle;
-        accumulatedRotation = 0;
-        accumulatedRotationAfterLimit = 0;
-        tracking = true;
-        lastAngle = angle;
-        pendingPageFlip = 0;
-        return;
-    }
-
-    int delta = angle - lastAngle;
-
-    // Handle 360 wrap
-    if (delta > 180) delta -= 360;
-    if (delta < -180) delta += 360;
-
-    accumulatedRotation += delta;
-
-    // Pan scroll
-    int panDelta = delta * 4;  // Adjust scroll sensitivity here
-    int currentPan = panYSlider->value();
-    int newPan = currentPan + panDelta;
-
-    // Clamp pan slider
-    newPan = qBound(panYSlider->minimum(), newPan, panYSlider->maximum());
-    panYSlider->setValue(newPan);
-
-    // ✅ NEW → if slider reached top/bottom, accumulate AFTER LIMIT
-    if (newPan == panYSlider->maximum()) {
-        accumulatedRotationAfterLimit += delta;
-
-        if (accumulatedRotationAfterLimit >= 120) {
-            pendingPageFlip = +1;  // Flip next when released
-        }
-    } 
-    else if (newPan == panYSlider->minimum()) {
-        accumulatedRotationAfterLimit += delta;
-
-        if (accumulatedRotationAfterLimit <= -120) {
-            pendingPageFlip = -1;  // Flip previous when released
-        }
-    } 
-    else {
-        // Reset after limit accumulator when not at limit
-        accumulatedRotationAfterLimit = 0;
-        pendingPageFlip = 0;
-    }
-
-    lastAngle = angle;
-}
-
-void MainWindow::onPanScrollReleased() {
-    // ✅ Perform page flip only when dial released and flip is pending
-    if (pendingPageFlip != 0) {
-        // Phase 3.1.8: Autosave stubbed - DocumentViewport handles undo/redo
-
-        DocumentViewport* vp = currentViewport();
-        int currentPage = vp ? vp->currentPageIndex() : 0;
-        int newPage = qBound(1, currentPage + pendingPageFlip + 1, 99999);
-        
-        // ✅ Use direction-aware page switching for pan-and-scroll dial
-        switchPageWithDirection(newPage, pendingPageFlip);
-        pageInput->setValue(newPage);
-        updateDialDisplay();
-
-        SDL_Joystick *joystick = controllerManager->getJoystick();
-        if (joystick) {
-            #if SDL_VERSION_ATLEAST(2, 0, 9)
-            SDL_JoystickRumble(joystick, 0xA000, 0xF000, 25);  // Vibrate shortly
-            #endif
-        }
-    }
-
-    // Reset states
-    pendingPageFlip = 0;
-    accumulatedRotation = 0;
-    accumulatedRotationAfterLimit = 0;
-    tracking = false;
-}
+// MW2.2: initializeDialSound function removed - dial system deleted
 
 
 
-void MainWindow::handleDialThickness(int angle) {
-    if (!tracking) {
-        startAngle = angle;
-        tracking = true;
-        lastAngle = angle;
-        return;
-    }
+// MW2.2: Removed accumulatedRotationAfterLimit variable
 
-    int delta = angle - lastAngle;
-    if (delta > 180) delta -= 360;
-    if (delta < -180) delta += 360;
 
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
 
-    int thicknessStep = fastForwardMode ? 5 : 1;
-    vp->setPenThickness(qBound<qreal>(1.0, vp->penThickness() + (delta / 10.0) * thicknessStep, 50.0));
 
-    updateDialDisplay();
-    lastAngle = angle;
-}
 
-void MainWindow::onThicknessReleased() {
-    accumulatedRotation = 0;
-    tracking = false;
-}
-
-void MainWindow::handlePresetSelection(int angle) {
-    static int lastAngle = angle;
-    int delta = angle - lastAngle;
-
-    // ✅ Handle 360-degree wrapping
-    if (delta > 180) delta -= 360;
-    if (delta < -180) delta += 360;
-
-    if (abs(delta) >= 60) {  // ✅ Change preset every 60° (6 presets)
-        lastAngle = angle;
-        currentPresetIndex = (currentPresetIndex + (delta > 0 ? 1 : -1) + colorPresets.size()) % colorPresets.size();
-        
-        QColor selectedColor = colorPresets[currentPresetIndex];
-        // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->setPenColor(selectedColor);
-        }
-        updateCustomColorButtonStyle(selectedColor);
-        updateDialDisplay();
-        updateColorButtonStates();  // Update button states when preset is selected
-        
-        if (dialClickSound) dialClickSound->play();  // ✅ Provide feedback
-        SDL_Joystick *joystick = controllerManager->getJoystick();
-            if (joystick) {
-                #if SDL_VERSION_ATLEAST(2, 0, 9)
-                SDL_JoystickRumble(joystick, 0xA000, 0xF000, 25);  // Vibrate shortly
-                #endif
-            }
-    }
-}
-
-void MainWindow::onPresetReleased() {
-    accumulatedRotation = 0;
-    tracking = false;
-}
 
 
 
@@ -5068,37 +4160,7 @@ void MainWindow::updateTheme() {
     QString tabHoverColor = darkMode ? "#4A4A4A" : "#DADADA";
     QString tabBorderColor = darkMode ? "#555555" : "#CCCCCC";
     
-    // Update dial toolbar tab styling (right side, rounded left)
-    if (dialToolbarToggle) {
-        QString dialTabStyle = QString(
-            "QPushButton#dialToolbarTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-right: none;"
-            "  border-top-left-radius: 0px;"
-            "  border-bottom-left-radius: 0px;"
-            "}"
-            "QPushButton#dialToolbarTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#dialToolbarTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
-        dialToolbarToggle->setStyleSheet(dialTabStyle);
-        dialToolbarToggle->setIcon(loadThemedIcon("dial"));
-    }
-    
-    if (dialToolbar) {
-        QString panelBg = darkMode ? "#2D2D2D" : "#F5F5F5";
-        QString panelStyle = QString(
-            "QWidget#dialToolbar {"
-            "  background-color: %1;"
-            "  border-left: 1px solid %2;"
-            "}"
-        ).arg(panelBg, tabBorderColor);
-        dialToolbar->setStyleSheet(panelStyle);
-    }
+    // MW2.2: Removed dial toolbar styling
     
     // Update left sidebar tabs styling (left side, rounded right)
     if (toggleOutlineButton) {
@@ -5162,14 +4224,7 @@ void MainWindow::updateTheme() {
         toggleLayerPanelButton->setIcon(loadThemedIcon("layer"));
     }
     
-    // Update dial background color
-    if (pageDial) {
-        pageDial->setStyleSheet(QString(R"(
-        QDial {
-            background-color: %1;
-            }
-        )").arg(accentColor.name()));
-    }
+    // MW2.2: Removed dial styling - dial system deleted
     
     // Update add tab button styling
     if (addTabButton) {
@@ -5375,16 +4430,11 @@ void MainWindow::updateTheme() {
     updateButtonIcon(ropeToolButton, "rope");
     if (deletePageButton) deletePageButton->setIcon(loadThemedIcon("trash"));
     if (zoomButton) zoomButton->setIcon(loadThemedIcon("zoom"));
-    updateButtonIcon(dialToggleButton, "dial");
-    updateButtonIcon(fastForwardButton, "fastforward");
+    // MW2.2: Removed dialToggleButton icon update
+    // MW2.2: Removed fastForwardButton icon update
     if (jumpToPageButton) jumpToPageButton->setIcon(loadThemedIcon("bookpage"));
     if (thicknessButton) thicknessButton->setIcon(loadThemedIcon("thickness"));
-    if (btnPageSwitch) btnPageSwitch->setIcon(loadThemedIcon("bookpage"));
-    if (btnZoom) btnZoom->setIcon(loadThemedIcon("zoom"));
-    if (btnThickness) btnThickness->setIcon(loadThemedIcon("thickness"));
-    if (btnTool) btnTool->setIcon(loadThemedIcon("pen"));
-    if (btnPresets) btnPresets->setIcon(loadThemedIcon("preset"));
-    if (btnPannScroll) btnPannScroll->setIcon(loadThemedIcon("scroll"));
+    // MW2.2: Removed dial button icon updates
     if (addPresetButton) addPresetButton->setIcon(loadThemedIcon("savepreset"));
     if (openControlPanelButton) openControlPanelButton->setIcon(loadThemedIcon("settings"));
     if (openRecentNotebooksButton) {
@@ -5430,15 +4480,8 @@ void MainWindow::updateTheme() {
     if (deletePageButton) deletePageButton->setStyleSheet(newButtonStyle);
     if (overflowMenuButton) overflowMenuButton->setStyleSheet(newButtonStyle);
     if (zoomButton) zoomButton->setStyleSheet(newButtonStyle);
-    if (dialToggleButton) dialToggleButton->setStyleSheet(newButtonStyle);
-    if (fastForwardButton) fastForwardButton->setStyleSheet(newButtonStyle);
+    // MW2.2: Removed dialToggleButton, fastForwardButton style updates
     if (jumpToPageButton) jumpToPageButton->setStyleSheet(newButtonStyle);
-    if (btnPageSwitch) btnPageSwitch->setStyleSheet(newButtonStyle);
-    if (btnZoom) btnZoom->setStyleSheet(newButtonStyle);
-    if (btnThickness) btnThickness->setStyleSheet(newButtonStyle);
-    if (btnTool) btnTool->setStyleSheet(newButtonStyle);
-    if (btnPresets) btnPresets->setStyleSheet(newButtonStyle);
-    if (btnPannScroll) btnPannScroll->setStyleSheet(newButtonStyle);
     if (addPresetButton) addPresetButton->setStyleSheet(newButtonStyle);
     if (openControlPanelButton) openControlPanelButton->setStyleSheet(newButtonStyle);
     if (openRecentNotebooksButton) openRecentNotebooksButton->setStyleSheet(newButtonStyle);
@@ -5765,35 +4808,18 @@ void MainWindow::handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseBu
     }
 }
 
-void MainWindow::setTemporaryDialMode(DialMode mode) {
-    if (temporaryDialMode == None) {
-        temporaryDialMode = currentDialMode;
-    }
-    changeDialMode(mode);
-}
-
-void MainWindow::clearTemporaryDialMode() {
-    if (temporaryDialMode != None) {
-        changeDialMode(temporaryDialMode);
-        temporaryDialMode = None;
-    }
-}
+// MW2.2: setTemporaryDialMode and clearTemporaryDialMode functions removed - dial system deleted
 
 
 
+// MW2.2: handleButtonHeld simplified - dial system removed
 void MainWindow::handleButtonHeld(const QString &buttonName) {
-    QString mode = buttonHoldMapping.value(buttonName, "None");
-    if (mode != "None") {
-        setTemporaryDialMode(dialModeFromString(mode));
-        return;
-    }
+    // MW2.2: Removed dial mode switching
 }
 
+// MW2.2: handleButtonReleased simplified - dial system removed
 void MainWindow::handleButtonReleased(const QString &buttonName) {
-    QString mode = buttonHoldMapping.value(buttonName, "None");
-    if (mode != "None") {
-        clearTemporaryDialMode();
-    }
+    // MW2.2: Removed dial mode switching
 }
 
 void MainWindow::setHoldMapping(const QString &buttonName, const QString &dialMode) {
@@ -6010,7 +5036,7 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
             deletePageButton->click();  // assuming you have this
             break;
         case ControllerAction::FastForward:
-            fastForwardButton->click();  // assuming you have this
+            // MW2.2: Removed fastForwardButton click - dial system deleted
             break;
         case ControllerAction::OpenControlPanel:
             openControlPanelButton->click();
@@ -6380,29 +5406,16 @@ void MainWindow::updatePictureButtonState() {
     }
 }
 
-void MainWindow::updateDialButtonState() {
-    // Check if dial is visible
-    bool isDialVisible = dialContainer && dialContainer->isVisible();
-    
-    if (dialToggleButton) {
-        dialToggleButton->setProperty("selected", isDialVisible);
-        updateButtonIcon(dialToggleButton, "dial");
-        
-        // Force style update
-        dialToggleButton->style()->unpolish(dialToggleButton);
-        dialToggleButton->style()->polish(dialToggleButton);
-    }
-}
+// MW2.2: Dial system stubs - kept for moc compatibility
+void MainWindow::updateDialButtonState() { }
+void MainWindow::updateFastForwardButtonState() { }
+void MainWindow::toggleDial() { }
+void MainWindow::positionDialContainer() { }
+void MainWindow::initializeDialSound() { }
 
-void MainWindow::updateFastForwardButtonState() {
-    if (fastForwardButton) {
-        fastForwardButton->setProperty("selected", fastForwardMode);
-        updateButtonIcon(fastForwardButton, "fastforward");
-        
-        // Force style update
-        fastForwardButton->style()->unpolish(fastForwardButton);
-        fastForwardButton->style()->polish(fastForwardButton);
-    }
+void MainWindow::wheelEvent(QWheelEvent *event) {
+    // MW2.2: Forward to base class - dial wheel handling removed
+    QMainWindow::wheelEvent(event);
 }
 
 // Add this new method
@@ -6470,11 +5483,7 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
             updateTabSizes(); // Update tab widths when window resizes
             // Reposition floating sidebar tabs
             positionLeftSidebarTabs();
-            positionDialToolbarTab();
-            // Also reposition dial after resize finishes
-            if (dialContainer && dialContainer->isVisible()) {
-                positionDialContainer();
-            }
+            // MW2.2: Removed dial container positioning
         });
     }
     
@@ -6728,7 +5737,7 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
             deletePageButton->click();
             break;
         case ControllerAction::FastForward:
-            fastForwardButton->click();
+            // MW2.2: Removed fastForwardButton click - dial system deleted
             break;
         case ControllerAction::OpenControlPanel:
             openControlPanelButton->click();
@@ -7043,10 +6052,7 @@ void MainWindow::toggleOutlineSidebar() {
     }
     QTimer::singleShot(0, this, [this]() {
         positionLeftSidebarTabs();
-        positionDialToolbarTab();
-        if (dialContainer && dialContainer->isVisible()) {
-            positionDialContainer();
-        }
+        // MW2.2: Removed dial container positioning
     });
 }
 
@@ -7277,10 +6283,7 @@ void MainWindow::toggleBookmarksSidebar() {
     }
     QTimer::singleShot(0, this, [this]() {
         positionLeftSidebarTabs();
-        positionDialToolbarTab();
-        if (dialContainer && dialContainer->isVisible()) {
-            positionDialContainer();
-        }
+        // MW2.2: Removed dial container positioning
     });
 }
 
@@ -7306,7 +6309,7 @@ void MainWindow::toggleLayerPanel() {
     // Use a slightly longer delay to ensure layout is complete before positioning
     QTimer::singleShot(50, this, [this]() {
         positionLeftSidebarTabs();
-        positionDialToolbarTab();
+        // MW2.2: Removed positionDialToolbarTab()
     });
 }
 
@@ -7415,14 +6418,10 @@ void MainWindow::toggleMarkdownNotesSidebar() {
         vp->update();
     }
     
-    // Reposition dial toolbar tab and dial container after layout settles
-    // Use a short delay to ensure the layout has fully completed
+    // Reposition floating tabs after layout settles
     QTimer::singleShot(0, this, [this]() {
-        positionDialToolbarTab();
-        positionLeftSidebarTabs();  // Also reposition left tabs for consistency
-    if (dialContainer && dialContainer->isVisible()) {
-        positionDialContainer();
-    }
+        positionLeftSidebarTabs();
+        // MW2.2: Removed dial container positioning
     });
 }
 
@@ -7546,40 +6545,21 @@ QColor MainWindow::getPaletteColor(const QString &colorName) {
     return QColor("#000000"); // Default fallback
 }
 
+// MW2.2: reconnectControllerSignals simplified - dial system removed
 void MainWindow::reconnectControllerSignals() {
-    if (!controllerManager || !pageDial) {
+    if (!controllerManager) {
         return;
     }
-    
-    // Reset internal dial state
-    tracking = false;
-    accumulatedRotation = 0;
-    grossTotalClicks = 0;
-    tempClicks = 0;
-    lastAngle = 0;
-    startAngle = 0;
-    pendingPageFlip = 0;
-    accumulatedRotationAfterLimit = 0;
-    
+
     // Disconnect all existing connections to avoid duplicates
     disconnect(controllerManager, nullptr, this, nullptr);
-    disconnect(controllerManager, nullptr, pageDial, nullptr);
-    
-    // Reconnect all controller signals
+
+    // Reconnect controller signals (excluding dial-specific ones)
     connect(controllerManager, &SDLControllerManager::buttonHeld, this, &MainWindow::handleButtonHeld);
     connect(controllerManager, &SDLControllerManager::buttonReleased, this, &MainWindow::handleButtonReleased);
-    connect(controllerManager, &SDLControllerManager::leftStickAngleChanged, pageDial, &QDial::setValue);
-    connect(controllerManager, &SDLControllerManager::leftStickReleased, pageDial, &QDial::sliderReleased);
     connect(controllerManager, &SDLControllerManager::buttonSinglePress, this, &MainWindow::handleControllerButton);
-    
-    // Re-establish dial mode connections by changing to current mode
-    DialMode currentMode = currentDialMode;
-    changeDialMode(currentMode);
-    
-    // Update dial display to reflect current state
-    updateDialDisplay();
-    
-    // qDebug() << "Controller signals reconnected successfully";
+
+    // MW2.2: Removed dial-related connections and state resets
 }
 
 #ifdef Q_OS_WIN
@@ -7981,201 +6961,31 @@ void MainWindow::openFileInNewTab(const QString &filePath)
 
 // ✅ MOUSE DIAL CONTROL IMPLEMENTATION
 
+// MW2.2: mousePressEvent simplified - dial system removed
 void MainWindow::mousePressEvent(QMouseEvent *event) {
-    // Only track side buttons and right button for dial combinations
-    if (event->button() == Qt::RightButton || 
-        event->button() == Qt::BackButton || 
-        event->button() == Qt::ForwardButton) {
-        
-        pressedMouseButtons.insert(event->button());
-        
-        // Start timer for long press detection
-        if (!mouseDialTimer->isActive()) {
-            mouseDialTimer->start();
-        }
-    }
-    
+    // MW2.2: Removed mouse dial tracking
     QMainWindow::mousePressEvent(event);
 }
 
+// MW2.2: mouseReleaseEvent simplified - dial system removed
 void MainWindow::mouseReleaseEvent(QMouseEvent *event) {
-    if (pressedMouseButtons.contains(event->button())) {
-        // Check if this was a short press (timer still running) for page navigation
-        bool wasShortPress = mouseDialTimer->isActive();
-        // Check if this button was part of a combination (more than one button pressed)
-        bool wasPartOfCombination = pressedMouseButtons.size() > 1;
-        
-        pressedMouseButtons.remove(event->button());
-        
-        // If this was the last button released and we're in dial mode, stop it
-        if (pressedMouseButtons.isEmpty()) {
-            mouseDialTimer->stop();
-            if (mouseDialModeActive) {
-                stopMouseDialMode();
-            } else if (wasShortPress && !wasPartOfCombination) {
-                // Only handle short press if it was NOT part of a combination
-                if (event->button() == Qt::BackButton) {
-                    goToPreviousPage();
-                } else if (event->button() == Qt::ForwardButton) {
-                    goToNextPage();
-                }
-            }
-        }
+    // MW2.2: Removed mouse dial tracking - keeping only basic functionality
+    if (event->button() == Qt::BackButton) {
+        goToPreviousPage();
+    } else if (event->button() == Qt::ForwardButton) {
+        goToNextPage();
     }
-    
+
     QMainWindow::mouseReleaseEvent(event);
 }
 
-void MainWindow::wheelEvent(QWheelEvent *event) {
-    // Only handle wheel events if mouse dial mode is active
-    if (mouseDialModeActive) {
-        handleMouseWheelDial(event->angleDelta().y());
-        event->accept();
-        return;
-    }
-    
-    QMainWindow::wheelEvent(event);
-}
-QString MainWindow::mouseButtonCombinationToString(const QSet<Qt::MouseButton> &buttons) const {
-    QStringList buttonNames;
-    
-    if (buttons.contains(Qt::RightButton)) {
-        buttonNames << "Right";
-    }
-    if (buttons.contains(Qt::BackButton)) {
-        buttonNames << "Side1";
-    }
-    if (buttons.contains(Qt::ForwardButton)) {
-        buttonNames << "Side2";
-    }
-    
-    // Sort to ensure consistent combination strings
-    buttonNames.sort();
-    return buttonNames.join("+");
-}
 
-void MainWindow::startMouseDialMode(const QString &combination) {
-    if (mouseDialMappings.contains(combination)) {
-        QString dialModeKey = mouseDialMappings[combination];
-        DialMode mode = dialModeFromString(dialModeKey);
-        
-        mouseDialModeActive = true;
-        currentMouseDialCombination = combination;
-        setTemporaryDialMode(mode);
-        
-        // Show brief tooltip to indicate mode activation
-        QToolTip::showText(QCursor::pos(), 
-            tr("Mouse Dial: %1").arg(ButtonMappingHelper::internalKeyToDisplay(dialModeKey, true)),
-            this, QRect(), 1500);
-    }
-}
 
-void MainWindow::stopMouseDialMode() {
-    if (mouseDialModeActive) {
-        // ✅ Trigger the appropriate dial release function before stopping
-        if (pageDial) {
-            // Emit the sliderReleased signal to trigger the current mode's release function
-            emit pageDial->sliderReleased();
-        }
-        
-        mouseDialModeActive = false;
-        currentMouseDialCombination.clear();
-        clearTemporaryDialMode();
-    }
-}
 
-void MainWindow::handleMouseWheelDial(int delta) {
-    if (!mouseDialModeActive || !dialContainer) return;
-    
-    // Calculate step size based on current dial mode
-    int stepDegrees = 15; // Default step
-    
-    switch (currentDialMode) {
-        case PageSwitching:
-            stepDegrees = 45; // 45 degrees per page (8 pages per full rotation)
-            break;
-        case PresetSelection:
-            stepDegrees = 60; // 60 degrees per preset (6 presets per full rotation)
-            break;
-        case ZoomControl:
-            stepDegrees = 30; // 30 degrees per zoom step (12 steps per rotation)
-            break;
-        case ThicknessControl:
-            stepDegrees = 20; // 20 degrees per thickness step (18 steps per rotation)
-            break;
-        case ToolSwitching:
-            stepDegrees = 120; // 120 degrees per tool (3 tools per rotation)
-            break;
-        case PanAndPageScroll:
-            stepDegrees = 15; // 15 degrees per pan step (24 steps per rotation)
-            break;
-        default:
-            stepDegrees = 15;
-            break;
-    }
-    
-    // Convert wheel delta to dial angle change (reversed: down = increase, up = decrease)
-    int angleChange = (delta > 0) ? -stepDegrees : stepDegrees;
-    
-    // Apply the angle change to the dial
-    int currentAngle = pageDial->value();
-    int newAngle = (currentAngle + angleChange + 360) % 360;
-    
-    pageDial->setValue(newAngle);
-    
-    // Trigger the dial input handling
-    handleDialInput(newAngle);
-}
 
-void MainWindow::setMouseDialMapping(const QString &combination, const QString &dialMode) {
-    mouseDialMappings[combination] = dialMode;
-    saveMouseDialMappings();
-}
 
-QString MainWindow::getMouseDialMapping(const QString &combination) const {
-    return mouseDialMappings.value(combination, "none");
-}
 
-QMap<QString, QString> MainWindow::getMouseDialMappings() const {
-    return mouseDialMappings;
-}
 
-void MainWindow::saveMouseDialMappings() {
-    QSettings settings("SpeedyNote", "App");
-    settings.beginGroup("MouseDialMappings");
-    
-    for (auto it = mouseDialMappings.begin(); it != mouseDialMappings.end(); ++it) {
-        settings.setValue(it.key(), it.value());
-    }
-    
-    settings.endGroup();
-}
-
-void MainWindow::loadMouseDialMappings() {
-    QSettings settings("SpeedyNote", "App");
-    settings.beginGroup("MouseDialMappings");
-    
-    QStringList keys = settings.allKeys();
-    
-    if (keys.isEmpty()) {
-        // Set default mappings
-        mouseDialMappings["Right"] = "page_switching";
-        mouseDialMappings["Side1"] = "zoom_control";
-        mouseDialMappings["Side2"] = "thickness_control";
-        mouseDialMappings["Right+Side1"] = "tool_switching";
-        mouseDialMappings["Right+Side2"] = "preset_selection";
-        mouseDialMappings["Side1+Side2"] = "pan_and_page_scroll"; // ✅ Added 6th combination
-        
-        saveMouseDialMappings(); // Save defaults
-    } else {
-        // Load saved mappings
-        for (const QString &key : keys) {
-            mouseDialMappings[key] = settings.value(key).toString();
-        }
-    }
-    
-    settings.endGroup();
-}
 
 void MainWindow::onAutoScrollRequested(int direction)
 {
