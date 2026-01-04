@@ -334,6 +334,27 @@ set(UI_SOURCES
         source/ui/DebugOverlay.cpp           # Debug overlay widget
 )
 
+# ✅ MW2.1: Dial Controller Module (optional - can be disabled for Android)
+option(ENABLE_DIAL_CONTROLLER "Enable MagicDial/Surface Dial support (desktop only)" ON)
+
+# Auto-disable on Android
+if(ANDROID)
+    set(ENABLE_DIAL_CONTROLLER OFF CACHE BOOL "" FORCE)
+    message(STATUS "Dial Controller disabled for Android build")
+endif()
+
+if(ENABLE_DIAL_CONTROLLER)
+    message(STATUS "✅ Dial Controller enabled")
+    set(DIAL_SOURCES
+        source/input/DialController.cpp
+        source/input/MouseDialHandler.cpp
+        source/ui/DialModeToolbar.cpp
+    )
+else()
+    message(STATUS "❌ Dial Controller disabled")
+    set(DIAL_SOURCES "")
+endif()
+
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
 set(PDF_SOURCES
         source/pdf/PopplerPdfProvider.cpp  # Task 1.2.2
@@ -373,6 +394,7 @@ add_executable(${PROJECT_NAME}
         ${OBJECT_SOURCES}
         ${STROKE_SOURCES}
         ${PDF_SOURCES}
+        ${DIAL_SOURCES}  # MW2.1: Dial Controller (optional)
         
         ${QRCC_FILES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
@@ -380,6 +402,11 @@ add_executable(${PROJECT_NAME}
         ${QMARKDOWNTEXTEDIT_MOC_SOURCES}
         ${WIN_RESOURCES}
 )
+
+# ✅ MW2.1: Add compile definition for dial controller
+if(ENABLE_DIAL_CONTROLLER)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_DIAL_CONTROLLER)
+endif()
 
 # ✅ Compile .ts → .qm using Qt's lrelease
 find_program(LRELEASE_EXECUTABLE

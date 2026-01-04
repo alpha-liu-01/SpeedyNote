@@ -165,213 +165,184 @@ User manually deleted many stubs. Fixed compilation by:
 
 ---
 
-## Phase 2: Extract Dial Controller Module
+## Phase 2: Simplify Dial System (Revised Q3 Approach)
 
-**Goal:** Create modular dial system that can be excluded on Android builds.  
-**Estimated savings:** ~800 lines moved out of MainWindow  
-**Risk:** Medium (requires careful signal/slot restructuring)
+**Goal:** Remove complex dial logic, keep only essential display widget.  
+**Estimated savings:** ~800 lines DELETED from MainWindow (not just moved)  
+**Risk:** Low (removing unused complexity)
 
-### MW2.1: Create DialController Directory Structure
+### Rationale (from Q&A discussion):
+- The QDial widget and 7-mode system is overengineered
+- Most functionality works fine via mouse/touch/keyboard
+- The dial display is useful feedback UI - worth keeping
+- Surface Dial hardware users are a tiny minority
+- Fresh minimal implementation beats migrating messy code
 
-**Create:**
+### MW2.1: Create Directory Structure ✅ COMPLETED
+
+**Created skeleton files** (will be simplified/removed based on new approach):
 ```
 source/input/
-├── DialController.h
+├── DialTypes.h           (keep - shared enum, simplify to fewer modes)
+├── DialController.h      (simplify - minimal input handler only)
 ├── DialController.cpp
-├── DialModeToolbar.h
-├── DialModeToolbar.cpp
-├── MouseDialHandler.h
-├── MouseDialHandler.cpp
-├── CMakeLists.txt
+├── MouseDialHandler.h    (DELETE - not needed in simplified approach)
+├── MouseDialHandler.cpp  (DELETE)
+
+source/ui/
+├── DialModeToolbar.h     (DELETE - mode switching removed)
+├── DialModeToolbar.cpp   (DELETE)
+├── DialDisplay.h         (NEW - keep the display widget)
+├── DialDisplay.cpp       (NEW)
 ```
 
-**CMakeLists.txt content:**
+---
+
+### MW2.2: Delete Dial Mode System from MainWindow
+
+**DELETE from MainWindow.cpp (~600 lines):**
+
+1. **Mode handler functions (14 functions):**
+   - `handleDialInput()`, `onDialReleased()`
+   - `handleDialZoom()`, `onZoomReleased()`
+   - `handleDialThickness()`, `onThicknessReleased()`
+   - `handleToolSelection()`, `onToolReleased()`
+   - `handlePresetSelection()`, `onPresetReleased()`
+   - `handleDialPanScroll()`, `onPanScrollReleased()`
+   - `changeDialMode()` (mode switching with connect/disconnect mess)
+
+2. **QDial widget and mode toolbar:**
+   - `pageDial` (QDial widget)
+   - Mode selection buttons and container
+   - All dial styling code
+
+3. **Mouse dial system:**
+   - `handleMouseWheelDial()`
+   - `startMouseDialMode()`, `stopMouseDialMode()`
+   - Mouse button combination tracking
+
+4. **Dial state variables:**
+   - `currentDialMode`, `temporaryDialMode`
+   - `tracking`, `startAngle`, `lastAngle`, `accumulatedRotation`
+   - `pendingPageFlip`, `tempClicks`, `grossTotalClicks`
+   - `mouseDialModeActive`, `mouseDialMappings`
+
+**KEEP from MainWindow:**
+- `dialDisplay` widget (QLabel) - relocate to new DialDisplay class
+- `updateDialDisplay()` - move to DialDisplay class
+
+---
+
+### MW2.3: Create Simple DialDisplay Widget
+
+**New `source/ui/DialDisplay.h/cpp`:**
+
+A simple floating display widget showing context-sensitive feedback.
+No input handling - just visual feedback.
+
+```cpp
+class DialDisplay : public QWidget {
+    Q_OBJECT
+public:
+    explicit DialDisplay(QWidget *parent = nullptr);
+    
+    // Display different contexts
+    void showZoomLevel(int percent);
+    void showToolInfo(const QString &toolName);
+    void showPageInfo(int current, int total);
+    void showThickness(int value);
+    void showMessage(const QString &text);
+    
+    void setDarkMode(bool dark);
+    
+private:
+    QLabel *m_label;
+    // OLED-style circular display (keep the nice visual)
+};
+```
+
+**Use cases for DialDisplay:**
+- Show current zoom level during zoom gestures
+- Show tool name on tool switch
+- Show page number during page navigation
+- Show thickness value during thickness adjustment
+- General status messages
+
+---
+
+### MW2.4: Simplify DialTypes.h
+
+**Reduce from 7 modes to minimal set:**
+
+```cpp
+// OLD (delete):
+enum DialMode {
+    None,
+    PageSwitching,
+    ZoomControl,
+    ThicknessControl,
+    ToolSwitching,
+    PresetSelection,
+    PanAndPageScroll
+};
+
+// NEW (if any dial input support kept):
+// May not even need this - DialDisplay just shows context
+```
+
+---
+
+### MW2.5: Delete Skeleton Files
+
+**Delete the files we created in MW2.1 that are no longer needed:**
+- `source/input/DialController.h/cpp` (unless keeping minimal hardware dial support)
+- `source/input/MouseDialHandler.h/cpp`
+- `source/ui/DialModeToolbar.h/cpp`
+
+**Keep:**
+- `source/input/DialTypes.h` (simplify or delete if not needed)
+- Create `source/ui/DialDisplay.h/cpp` instead
+
+---
+
+### MW2.6: Update CMakeLists.txt
+
+Remove dial controller conditional compilation (no longer needed):
+
 ```cmake
-# source/input/CMakeLists.txt
+# DELETE:
+option(ENABLE_DIAL_CONTROLLER ...)
+set(DIAL_SOURCES ...)
 
-option(ENABLE_DIAL_CONTROLLER "Enable MagicDial support (desktop only)" ON)
-
-if(ANDROID)
-    set(ENABLE_DIAL_CONTROLLER OFF CACHE BOOL "" FORCE)
-endif()
-
-if(ENABLE_DIAL_CONTROLLER)
-    target_sources(SpeedyNote PRIVATE
-        DialController.cpp
-        DialModeToolbar.cpp
-        MouseDialHandler.cpp
-    )
-    target_compile_definitions(SpeedyNote PRIVATE ENABLE_DIAL_CONTROLLER)
-endif()
+# ADD:
+# DialDisplay is always included (it's just a display widget)
+set(UI_SOURCES
+    ...
+    source/ui/DialDisplay.cpp
+)
 ```
 
 ---
 
-### MW2.2: Extract MagicDial Widget
+### MW2.7: Decide on SDLControllerManager
 
-The OLED-style circular controller widget.
+**Options:**
+A) **Keep as-is** - It's for gamepad support, separate from dial
+B) **Simplify** - Remove dial-related mappings, keep only gamepad actions
+C) **Delete entirely** - If gamepad support not needed
 
-**From MainWindow, extract:**
-- Dial widget creation and styling
-- `handleDialInput()` - main dial rotation handler
-- `handleToolSelection()` - tool selection mode
-- `handleDialZoom()` - zoom mode
-- `handleDialPanScroll()` - pan/scroll mode
-- `handleDialThickness()` - thickness mode
-- `handlePresetSelection()` - preset selection mode
-- `changeDialMode()` - mode switching
-- Dial mode enum and state
-
-**Into `DialController.cpp`:**
-```cpp
-class DialController : public QWidget {
-    Q_OBJECT
-public:
-    explicit DialController(QWidget *parent = nullptr);
-    
-    // Mode management
-    void setMode(DialMode mode);
-    DialMode currentMode() const;
-    
-signals:
-    // Emit actions that MainWindow connects to
-    void toolChangeRequested(ToolType tool);
-    void zoomChangeRequested(int delta);
-    void panScrollRequested(int delta);
-    void thicknessChangeRequested(int value);
-    void colorPresetSelected(int index);
-    
-private slots:
-    void handleDialInput(int angle);
-    
-private:
-    // All dial state and widgets
-};
-```
+**Recommendation:** Option B - Keep SDLControllerManager for gamepad, 
+but remove any dial mode switching it does. Gamepad buttons can directly 
+trigger actions (zoom, tool switch) without going through dial modes
 
 ---
 
-### MW2.3: Extract Dial Mode Toolbar
+### MW2.8: Verification
 
-The vertical strip with mode selection buttons.
-
-**From MainWindow, extract:**
-- Mode toolbar widget and buttons
-- Mode button styling
-- Mode switching logic
-
-**Into `DialModeToolbar.cpp`:**
-```cpp
-class DialModeToolbar : public QWidget {
-    Q_OBJECT
-public:
-    explicit DialModeToolbar(DialController *controller, QWidget *parent = nullptr);
-    
-signals:
-    void modeChangeRequested(DialMode mode);
-    
-private:
-    QPushButton *m_toolButton;
-    QPushButton *m_zoomButton;
-    QPushButton *m_panButton;
-    QPushButton *m_thicknessButton;
-    QPushButton *m_presetButton;
-};
-```
-
----
-
-### MW2.4: Extract Mouse Dial Handler
-
-Mouse button + scroll wheel → dial control.
-
-**From MainWindow, extract:**
-- `handleMouseWheelDial()` method
-- Mouse dial state tracking
-- Related event handling
-
-**Into `MouseDialHandler.cpp`:**
-```cpp
-class MouseDialHandler : public QObject {
-    Q_OBJECT
-public:
-    explicit MouseDialHandler(DialController *controller, QObject *parent = nullptr);
-    
-    bool handleWheelEvent(QWheelEvent *event);
-    bool handleMousePress(QMouseEvent *event);
-    bool handleMouseRelease(QMouseEvent *event);
-    
-private:
-    DialController *m_dialController;
-    bool m_leftHeld = false;
-    bool m_rightHeld = false;
-};
-```
-
----
-
-### MW2.5: Move SDLControllerManager into Dial Module
-
-**Current:** `source/SDLControllerManager.cpp/h`  
-**Move to:** `source/input/SDLControllerHandler.cpp/h`
-
-**Changes:**
-- Rename to `SDLControllerHandler` for consistency
-- Connect to `DialController` instead of directly to MainWindow
-- Include in conditional compilation
-
-**Update CMakeLists.txt:**
-```cmake
-if(ENABLE_DIAL_CONTROLLER)
-    find_package(SDL2 QUIET)
-    if(SDL2_FOUND)
-        target_sources(SpeedyNote PRIVATE SDLControllerHandler.cpp)
-        target_link_libraries(SpeedyNote PRIVATE SDL2::SDL2)
-    endif()
-endif()
-```
-
----
-
-### MW2.6: Update MainWindow to Use DialController
-
-**MainWindow.cpp changes:**
-```cpp
-#ifdef ENABLE_DIAL_CONTROLLER
-#include "input/DialController.h"
-#include "input/DialModeToolbar.h"
-#include "input/MouseDialHandler.h"
-#endif
-
-// In constructor:
-#ifdef ENABLE_DIAL_CONTROLLER
-    m_dialController = new DialController(this);
-    m_dialModeToolbar = new DialModeToolbar(m_dialController, this);
-    m_mouseDialHandler = new MouseDialHandler(m_dialController, this);
-    
-    connect(m_dialController, &DialController::toolChangeRequested,
-            this, &MainWindow::changeTool);
-    connect(m_dialController, &DialController::zoomChangeRequested,
-            this, &MainWindow::handleZoomDelta);
-    // ... other connections
-#endif
-
-// In wheelEvent:
-#ifdef ENABLE_DIAL_CONTROLLER
-    if (m_mouseDialHandler->handleWheelEvent(event)) {
-        return;
-    }
-#endif
-```
-
----
-
-### MW2.7: Verification
-
-**Compile tests:**
-- [ ] `./compile.sh` succeeds with `ENABLE_DIAL_CONTROLLER=ON`
-- [ ] `./compile.sh` succeeds with `ENABLE_DIAL_CONTROLLER=OFF`
-- [ ] `cmake -DANDROID=ON` excludes dial code
+**Compile and test:**
+- [ ] `./compile.sh` succeeds
+- [ ] Application runs without dial code
+- [ ] DialDisplay shows appropriate feedback during operations
 
 **Functional tests:**
 - [ ] MagicDial rotates and changes tools
@@ -625,14 +596,15 @@ These items are identified but NOT part of this cleanup:
 - [x] MW1.5: Delete unused stubs ✅ (174 lines deleted - 8,360 → 8,186)
 - [x] Compile and test ✅
 
-### Phase 2: Extract Dial Controller
-- [ ] MW2.1: Create directory structure
-- [ ] MW2.2: Extract MagicDial widget
-- [ ] MW2.3: Extract Dial Mode Toolbar
-- [ ] MW2.4: Extract Mouse Dial Handler
-- [ ] MW2.5: Move SDLControllerManager
-- [ ] MW2.6: Update MainWindow
-- [ ] MW2.7: Verify both compile modes
+### Phase 2: Simplify Dial System (Revised - Q3 Approach)
+- [x] MW2.1: Create directory structure ✅ (will be simplified)
+- [ ] MW2.2: Delete dial mode system from MainWindow (~600 lines)
+- [ ] MW2.3: Create simple DialDisplay widget
+- [ ] MW2.4: Simplify/delete DialTypes.h
+- [ ] MW2.5: Delete unused skeleton files
+- [ ] MW2.6: Update CMakeLists.txt
+- [ ] MW2.7: Decide on SDLControllerManager
+- [ ] MW2.8: Verification
 
 ### Phase 3: Simplify Toolbar
 - [ ] MW3.1: Delete 2-row layout

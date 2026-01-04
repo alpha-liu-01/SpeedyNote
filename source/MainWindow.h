@@ -77,15 +77,8 @@ namespace Poppler {
 
 // #include "HandwritingLineEdit.h"
 
-enum DialMode {
-    None,
-    PageSwitching,
-    ZoomControl,
-    ThicknessControl,
-    ToolSwitching,
-    PresetSelection,
-    PanAndPageScroll
-};
+// MW2.1: DialMode moved to shared header
+#include "input/DialTypes.h"
 
 enum class ControllerAction {
     None,
