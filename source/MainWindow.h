@@ -75,11 +75,6 @@ namespace Poppler {
     class OutlineItem;
 }
 
-// #include "HandwritingLineEdit.h"
-
-// MW2.1: DialMode moved to shared header
-#include "input/DialTypes.h"
-
 enum class ControllerAction {
     None,
     ToggleFullscreen,
@@ -289,15 +284,13 @@ public:
     SDLControllerManager *controllerManager = nullptr;
     QThread *controllerThread = nullptr;
 
-    QString getHoldMapping(const QString &buttonName);
     QString getPressMapping(const QString &buttonName);
 
     void saveButtonMappings();
     void loadButtonMappings();
 
-    void setHoldMapping(const QString &buttonName, const QString &dialMode);
     void setPressMapping(const QString &buttonName, const QString &action);
-    DialMode dialModeFromString(const QString &mode);
+
     
     // ✅ Mouse dial mapping management
 
@@ -335,7 +328,6 @@ public:
     void updateTabSizes(); // Update tab widths adaptively
     
     void migrateOldButtonMappings();
-    QString migrateOldDialModeString(const QString &oldString);
     QString migrateOldActionString(const QString &oldString);
 
     InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
@@ -665,8 +657,6 @@ private:
     QWidget *sidebarContainer;  // Container for sidebar
     QWidget *controlBar;        // Control toolbar
 
-    void setTemporaryDialMode(DialMode mode);
-    void clearTemporaryDialMode();
     
     // ✅ Mouse dial controls
     
@@ -682,7 +672,6 @@ private:
 
 
     // Add in MainWindow class:
-    QMap<QString, QString> buttonHoldMapping;
     QMap<QString, QString> buttonPressMapping;
     QMap<QString, ControllerAction> buttonPressActionMapping;
 

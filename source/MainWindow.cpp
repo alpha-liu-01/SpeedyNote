@@ -4822,38 +4822,9 @@ void MainWindow::handleButtonReleased(const QString &buttonName) {
     // MW2.2: Removed dial mode switching
 }
 
-void MainWindow::setHoldMapping(const QString &buttonName, const QString &dialMode) {
-    buttonHoldMapping[buttonName] = dialMode;
-}
 
-void MainWindow::setPressMapping(const QString &buttonName, const QString &action) {
-    buttonPressMapping[buttonName] = action;
-    buttonPressActionMapping[buttonName] = stringToAction(action);  // ✅ THIS LINE WAS MISSING
-}
-
-
-DialMode MainWindow::dialModeFromString(const QString &mode) {
-    // Convert internal key to our existing DialMode enum
-    InternalDialMode internalMode = ButtonMappingHelper::internalKeyToDialMode(mode);
-    
-    switch (internalMode) {
-        case InternalDialMode::None: return PageSwitching; // Default fallback
-        case InternalDialMode::PageSwitching: return PageSwitching;
-        case InternalDialMode::ZoomControl: return ZoomControl;
-        case InternalDialMode::ThicknessControl: return ThicknessControl;
-
-        case InternalDialMode::ToolSwitching: return ToolSwitching;
-        case InternalDialMode::PresetSelection: return PresetSelection;
-        case InternalDialMode::PanAndPageScroll: return PanAndPageScroll;
-    }
-    return PanAndPageScroll;  // Default fallback
-}
 
 // MainWindow.cpp
-
-QString MainWindow::getHoldMapping(const QString &buttonName) {
-    return buttonHoldMapping.value(buttonName, "None");
-}
 
 QString MainWindow::getPressMapping(const QString &buttonName) {
     return buttonPressMapping.value(buttonName, "None");
@@ -4861,12 +4832,6 @@ QString MainWindow::getPressMapping(const QString &buttonName) {
 
 void MainWindow::saveButtonMappings() {
     QSettings settings("SpeedyNote", "App");
-
-    settings.beginGroup("ButtonHoldMappings");
-    for (auto it = buttonHoldMapping.begin(); it != buttonHoldMapping.end(); ++it) {
-        settings.setValue(it.key(), it.value());
-    }
-    settings.endGroup();
 
     settings.beginGroup("ButtonPressMappings");
     for (auto it = buttonPressMapping.begin(); it != buttonPressMapping.end(); ++it) {
@@ -4880,13 +4845,6 @@ void MainWindow::loadButtonMappings() {
 
     // First, check if we need to migrate old settings
     migrateOldButtonMappings();
-
-    settings.beginGroup("ButtonHoldMappings");
-    QStringList holdKeys = settings.allKeys();
-    for (const QString &key : holdKeys) {
-        buttonHoldMapping[key] = settings.value(key, "none").toString();
-    }
-    settings.endGroup();
 
     settings.beginGroup("ButtonPressMappings");
     QStringList pressKeys = settings.allKeys();
@@ -4903,59 +4861,28 @@ void MainWindow::loadButtonMappings() {
 void MainWindow::migrateOldButtonMappings() {
     QSettings settings("SpeedyNote", "App");
     
-    // Check if migration is needed by looking for old format strings
-    settings.beginGroup("ButtonHoldMappings");
-    QStringList holdKeys = settings.allKeys();
+    // Check if migration is needed by looking for old format strings in press mappings
+    settings.beginGroup("ButtonPressMappings");
+    QStringList pressKeys = settings.allKeys();
     bool needsMigration = false;
     
-    for (const QString &key : holdKeys) {
+    for (const QString &key : pressKeys) {
         QString value = settings.value(key).toString();
-        // If we find old English strings, we need to migrate
-        if (value == "PageSwitching" || value == "ZoomControl" || value == "ThicknessControl" ||
-            value == "ToolSwitching" || value == "PresetSelection" ||
-            value == "PanAndPageScroll") {
+        // Check for old English action strings
+        if (value == "Toggle Fullscreen" || value == "Toggle Dial" || value == "Zoom 50%" ||
+            value == "Add Preset" || value == "Delete Page" || value == "Fast Forward" ||
+            value == "Open Control Panel" || value == "Custom Color") {
             needsMigration = true;
             break;
         }
     }
     settings.endGroup();
     
-    if (!needsMigration) {
-        settings.beginGroup("ButtonPressMappings");
-        QStringList pressKeys = settings.allKeys();
-        for (const QString &key : pressKeys) {
-            QString value = settings.value(key).toString();
-            // Check for old English action strings
-            if (value == "Toggle Fullscreen" || value == "Toggle Dial" || value == "Zoom 50%" ||
-                value == "Add Preset" || value == "Delete Page" || value == "Fast Forward" ||
-                value == "Open Control Panel" || value == "Custom Color") {
-                needsMigration = true;
-                break;
-            }
-        }
-        settings.endGroup();
-    }
-    
     if (!needsMigration) return;
-    
-    // Perform migration
-    // qDebug() << "Migrating old button mappings to new format...";
-    
-    // Migrate hold mappings
-    settings.beginGroup("ButtonHoldMappings");
-    holdKeys = settings.allKeys();
-    for (const QString &key : holdKeys) {
-        QString oldValue = settings.value(key).toString();
-        QString newValue = migrateOldDialModeString(oldValue);
-        if (newValue != oldValue) {
-            settings.setValue(key, newValue);
-        }
-    }
-    settings.endGroup();
     
     // Migrate press mappings
     settings.beginGroup("ButtonPressMappings");
-    QStringList pressKeys = settings.allKeys();
+    pressKeys = settings.allKeys();
     for (const QString &key : pressKeys) {
         QString oldValue = settings.value(key).toString();
         QString newValue = migrateOldActionString(oldValue);
@@ -4964,22 +4891,8 @@ void MainWindow::migrateOldButtonMappings() {
         }
     }
     settings.endGroup();
-    
-   // qDebug() << "Button mapping migration completed.";
 }
 
-QString MainWindow::migrateOldDialModeString(const QString &oldString) {
-    // Convert old English strings to new internal keys
-    if (oldString == "None") return "none";
-    if (oldString == "PageSwitching") return "page_switching";
-    if (oldString == "ZoomControl") return "zoom_control";
-    if (oldString == "ThicknessControl") return "thickness_control";
-
-    if (oldString == "ToolSwitching") return "tool_switching";
-    if (oldString == "PresetSelection") return "preset_selection";
-    if (oldString == "PanAndPageScroll") return "pan_and_page_scroll";
-    return oldString; // Return as-is if not found (might already be new format)
-}
 
 QString MainWindow::migrateOldActionString(const QString &oldString) {
     // Convert old English strings to new internal keys

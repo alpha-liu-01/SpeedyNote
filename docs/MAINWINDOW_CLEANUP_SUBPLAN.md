@@ -1,8 +1,8 @@
 # MainWindow Cleanup Subplan
 
-**Document Version:** 1.0  
+**Document Version:** 1.1  
 **Date:** January 3, 2026  
-**Status:** Ready for Implementation  
+**Status:** Phase 1 & 2 Complete, Phase 3 Ready  
 **Prerequisites:** Q&A completed in `MAINWINDOW_CLEANUP_QA.md`
 
 ---
@@ -12,18 +12,18 @@
 MainWindow.cpp (~9,700 lines) is the last major piece of legacy code in SpeedyNote. This subplan details how to clean it up systematically, making it maintainable and ready for new features.
 
 ### Goals
-1. Delete dead code (~1,500+ lines saved)
-2. Extract dial-related code to modular `DialController` (with Android compile exclusion)
+1. ✅ Delete dead code (~2,800 lines saved!)
+2. ✅ Delete dial system entirely (simpler than extraction)
 3. Simplify toolbar (prepare for subtoolbar system)
 4. Clean up remaining code structure
 
-### Expected Results
-| Metric | Before | After |
-|--------|--------|-------|
-| MainWindow.cpp lines | ~9,700 | ~5,500 |
-| Dead code blocks | ~1,500 | 0 |
-| Conditional compilation | None | Android dial exclusion |
-| Module structure | Monolithic | Modular dial system |
+### Results So Far
+| Metric | Before | Current | Target |
+|--------|--------|---------|--------|
+| MainWindow.cpp lines | 9,722 | 6,910 | ~5,500 |
+| MainWindow.h lines | 887 | 812 | ~700 |
+| Dead code blocks | ~1,500 | 0 | 0 |
+| Dial system | Complex 7-mode | Deleted | N/A |
 
 ---
 
@@ -165,42 +165,40 @@ User manually deleted many stubs. Fixed compilation by:
 
 ---
 
-## Phase 2: Simplify Dial System (Revised Q3 Approach)
+## Phase 2: Delete Dial System ✅ COMPLETED
 
-**Goal:** Remove complex dial logic, keep only essential display widget.  
-**Estimated savings:** ~800 lines DELETED from MainWindow (not just moved)  
+**Goal:** Remove entire dial system - it's overengineered and unnecessary.  
+**Actual savings:** ~1,240 lines from MainWindow + all dial files deleted  
 **Risk:** Low (removing unused complexity)
 
 ### Rationale (from Q&A discussion):
-- The QDial widget and 7-mode system is overengineered
+- The QDial widget and 7-mode system was overengineered
 - Most functionality works fine via mouse/touch/keyboard
-- The dial display is useful feedback UI - worth keeping
 - Surface Dial hardware users are a tiny minority
 - Fresh minimal implementation beats migrating messy code
+- The dial display doesn't belong in a dial anymore - it can be a simple status widget later
 
-### MW2.1: Create Directory Structure ✅ COMPLETED
+### MW2.1: Create Directory Structure ✅ COMPLETED (then deleted)
 
-**Created skeleton files** (will be simplified/removed based on new approach):
+Initially created skeleton files, then decided to delete everything:
 ```
-source/input/
-├── DialTypes.h           (keep - shared enum, simplify to fewer modes)
-├── DialController.h      (simplify - minimal input handler only)
-├── DialController.cpp
-├── MouseDialHandler.h    (DELETE - not needed in simplified approach)
-├── MouseDialHandler.cpp  (DELETE)
+source/input/           # ENTIRE FOLDER DELETED
+├── DialTypes.h         # DELETED
+├── DialController.h    # DELETED
+├── DialController.cpp  # DELETED
+├── MouseDialHandler.h  # DELETED
+├── MouseDialHandler.cpp # DELETED
 
 source/ui/
-├── DialModeToolbar.h     (DELETE - mode switching removed)
-├── DialModeToolbar.cpp   (DELETE)
-├── DialDisplay.h         (NEW - keep the display widget)
-├── DialDisplay.cpp       (NEW)
+├── DialModeToolbar.h   # DELETED
+├── DialModeToolbar.cpp # DELETED
 ```
 
 ---
 
 ### MW2.2: Delete Dial Mode System from MainWindow ✅ COMPLETED
 
-**DELETED from MainWindow.cpp (~1,190 lines!):**
+**DELETED from MainWindow.cpp (~1,190 lines):**
 
 1. **Mode handler functions (14 functions):**
    - `handleDialInput()`, `onDialReleased()`
@@ -224,137 +222,61 @@ source/ui/
 
 4. **Removed from header (~65 lines)**
 
-**KEPT as stubs (for moc compatibility):**
-- `toggleDial()`, `positionDialContainer()`, `initializeDialSound()` - empty stubs
-- `updateDialButtonState()`, `updateFastForwardButtonState()` - empty stubs
-- `wheelEvent()` - forwards to base class
+---
 
-**KEPT:**
-- `dialDisplay` widget (QLabel) - still used for status display
-- `updateDialDisplay()` - simplified to just show page info
+### MW2.3: Delete Button Hold Mappings ✅ COMPLETED
 
-**Line count:**
-- MainWindow.cpp: 8,186 → 6,996 (**-1,190 lines!**)
-- MainWindow.h: 887 → 822 (**-65 lines**)
+Hold mappings only served dial mode purposes. Removed:
+
+**MainWindow.cpp:**
+- `getHoldMapping()` function
+- Hold mapping code from `saveButtonMappings()`
+- Hold mapping code from `loadButtonMappings()`
+- Dial mode migration from `migrateOldButtonMappings()`
+
+**MainWindow.h:**
+- `getHoldMapping()` declaration
+- `buttonHoldMapping` member variable
 
 ---
 
-### MW2.3: Create Simple DialDisplay Widget
+### MW2.4: Delete Skeleton Files ✅ COMPLETED
 
-**New `source/ui/DialDisplay.h/cpp`:**
-
-A simple floating display widget showing context-sensitive feedback.
-No input handling - just visual feedback.
-
-```cpp
-class DialDisplay : public QWidget {
-    Q_OBJECT
-public:
-    explicit DialDisplay(QWidget *parent = nullptr);
-    
-    // Display different contexts
-    void showZoomLevel(int percent);
-    void showToolInfo(const QString &toolName);
-    void showPageInfo(int current, int total);
-    void showThickness(int value);
-    void showMessage(const QString &text);
-    
-    void setDarkMode(bool dark);
-    
-private:
-    QLabel *m_label;
-    // OLED-style circular display (keep the nice visual)
-};
-```
-
-**Use cases for DialDisplay:**
-- Show current zoom level during zoom gestures
-- Show tool name on tool switch
-- Show page number during page navigation
-- Show thickness value during thickness adjustment
-- General status messages
-
----
-
-### MW2.4: Simplify DialTypes.h
-
-**Reduce from 7 modes to minimal set:**
-
-```cpp
-// OLD (delete):
-enum DialMode {
-    None,
-    PageSwitching,
-    ZoomControl,
-    ThicknessControl,
-    ToolSwitching,
-    PresetSelection,
-    PanAndPageScroll
-};
-
-// NEW (if any dial input support kept):
-// May not even need this - DialDisplay just shows context
-```
-
----
-
-### MW2.5: Delete Skeleton Files
-
-**Delete the files we created in MW2.1 that are no longer needed:**
-- `source/input/DialController.h/cpp` (unless keeping minimal hardware dial support)
-- `source/input/MouseDialHandler.h/cpp`
+All dial-related files deleted:
+- `source/input/` folder entirely (DialTypes.h, DialController.h/cpp, MouseDialHandler.h/cpp)
 - `source/ui/DialModeToolbar.h/cpp`
 
-**Keep:**
-- `source/input/DialTypes.h` (simplify or delete if not needed)
-- Create `source/ui/DialDisplay.h/cpp` instead
+---
+
+### MW2.5: Update CMakeLists.txt ✅ COMPLETED
+
+Removed dial controller conditional compilation (~20 lines):
+- `option(ENABLE_DIAL_CONTROLLER ...)` 
+- `DIAL_SOURCES` variable
+- Android conditional logic for dial
 
 ---
 
-### MW2.6: Update CMakeLists.txt
+### MW2.6: SDLControllerManager Decision ✅ KEPT
 
-Remove dial controller conditional compilation (no longer needed):
-
-```cmake
-# DELETE:
-option(ENABLE_DIAL_CONTROLLER ...)
-set(DIAL_SOURCES ...)
-
-# ADD:
-# DialDisplay is always included (it's just a display widget)
-set(UI_SOURCES
-    ...
-    source/ui/DialDisplay.cpp
-)
-```
+**Decision:** Keep SDLControllerManager for future gamepad support.
+- Dial mode switching will be removed from it later
+- Gamepad buttons can directly trigger actions without dial modes
+- This is a separate cleanup task (not blocking)
 
 ---
 
-### MW2.7: Decide on SDLControllerManager
-
-**Options:**
-A) **Keep as-is** - It's for gamepad support, separate from dial
-B) **Simplify** - Remove dial-related mappings, keep only gamepad actions
-C) **Delete entirely** - If gamepad support not needed
-
-**Recommendation:** Option B - Keep SDLControllerManager for gamepad, 
-but remove any dial mode switching it does. Gamepad buttons can directly 
-trigger actions (zoom, tool switch) without going through dial modes
-
----
-
-### MW2.8: Verification
+### MW2.7: Verification ✅ COMPLETED
 
 **Compile and test:**
-- [ ] `./compile.sh` succeeds
-- [ ] Application runs without dial code
-- [ ] DialDisplay shows appropriate feedback during operations
+- [x] `./compile.sh` succeeds
+- [x] Application builds without dial code
 
-**Functional tests:**
-- [ ] MagicDial rotates and changes tools
-- [ ] Mode switching works
-- [ ] Mouse dial (hold button + scroll) works
-- [ ] SDL controller (if connected) works
+**Line count results:**
+- MainWindow.cpp: 8,186 → 6,910 (**-1,276 lines total in Phase 2**)
+- MainWindow.h: 887 → 812 (**-75 lines**)
+- CMakeLists.txt: 518 → 497 (**-21 lines**)
+- Deleted files: 7 files in source/input/ and source/ui/
 
 ---
 
@@ -557,22 +479,9 @@ Mark sections as complete:
 
 ---
 
-### MW5.2: Create source/input/README.md
+### MW5.2: ~~Create source/input/README.md~~ ✅ N/A
 
-```markdown
-# Input Module
-
-Dial controller system for SpeedyNote. Excluded on Android builds.
-
-## Components
-- `DialController` - MagicDial widget and rotation handling
-- `DialModeToolbar` - Mode selection buttons
-- `MouseDialHandler` - Mouse button + scroll wheel input
-- `SDLControllerHandler` - Gamepad support (optional, requires SDL2)
-
-## Compile Flags
-- `ENABLE_DIAL_CONTROLLER` - ON by default, OFF on Android
-```
+**No longer needed** - dial system was deleted entirely instead of extracted.
 
 ---
 
@@ -602,15 +511,14 @@ These items are identified but NOT part of this cleanup:
 - [x] MW1.5: Delete unused stubs ✅ (174 lines deleted - 8,360 → 8,186)
 - [x] Compile and test ✅
 
-### Phase 2: Simplify Dial System (Revised - Q3 Approach)
-- [x] MW2.1: Create directory structure ✅ (will be simplified)
-- [x] MW2.2: Delete dial mode system from MainWindow ✅ (**-1,190 lines!**)
-- [ ] MW2.3: Create simple DialDisplay widget
-- [ ] MW2.4: Simplify/delete DialTypes.h
-- [ ] MW2.5: Delete unused skeleton files
-- [ ] MW2.6: Update CMakeLists.txt
-- [ ] MW2.7: Decide on SDLControllerManager
-- [ ] MW2.8: Verification
+### Phase 2: Delete Dial System ✅ COMPLETED
+- [x] MW2.1: Create directory structure ✅ (then deleted)
+- [x] MW2.2: Delete dial mode system from MainWindow ✅ (**-1,190 lines**)
+- [x] MW2.3: Delete button hold mappings ✅ (**-50 lines**)
+- [x] MW2.4: Delete skeleton files ✅ (7 files deleted)
+- [x] MW2.5: Update CMakeLists.txt ✅ (**-21 lines**)
+- [x] MW2.6: SDLControllerManager kept for future gamepad support
+- [x] MW2.7: Verification ✅ (compiles successfully)
 
 ### Phase 3: Simplify Toolbar
 - [ ] MW3.1: Delete 2-row layout
@@ -628,27 +536,37 @@ These items are identified but NOT part of this cleanup:
 
 ### Phase 5: Documentation
 - [ ] MW5.1: Update analysis doc
-- [ ] MW5.2: Create input module README
+- [x] MW5.2: ~~Create input module README~~ (N/A - dial system deleted)
 
 ---
 
 ## Appendix: File Changes Summary
 
+### Phase 1 & 2 Completed Changes
+
+| File | Action | Lines Changed |
+|------|--------|---------------|
+| `source/MainWindow.cpp` | Major cleanup | 9,722 → 6,910 (**-2,812 lines**) |
+| `source/MainWindow.h` | Remove unused declarations | 887 → 812 (**-75 lines**) |
+| `CMakeLists.txt` | Remove dial options | 518 → 497 (**-21 lines**) |
+| `source/input/DialTypes.h` | DELETED | - |
+| `source/input/DialController.h` | DELETED | - |
+| `source/input/DialController.cpp` | DELETED | - |
+| `source/input/MouseDialHandler.h` | DELETED | - |
+| `source/input/MouseDialHandler.cpp` | DELETED | - |
+| `source/ui/DialModeToolbar.h` | DELETED | - |
+| `source/ui/DialModeToolbar.cpp` | DELETED | - |
+
+### Kept (for future use)
+
+| File | Status |
+|------|--------|
+| `source/SDLControllerManager.cpp` | Kept for gamepad support |
+| `source/SDLControllerManager.h` | Kept for gamepad support |
+
+### Future Work (Phase 3+)
+
 | File | Action |
 |------|--------|
-| `source/MainWindow.cpp` | Major cleanup, ~4,200 lines removed/moved |
-| `source/MainWindow.h` | Remove unused declarations |
-| `source/SDLControllerManager.cpp` | Move to input/ module |
-| `source/SDLControllerManager.h` | Move to input/ module |
-| `source/input/DialController.cpp` | NEW |
-| `source/input/DialController.h` | NEW |
-| `source/input/DialModeToolbar.cpp` | NEW |
-| `source/input/DialModeToolbar.h` | NEW |
-| `source/input/MouseDialHandler.cpp` | NEW |
-| `source/input/MouseDialHandler.h` | NEW |
-| `source/input/SDLControllerHandler.cpp` | NEW (renamed) |
-| `source/input/SDLControllerHandler.h` | NEW (renamed) |
-| `source/input/CMakeLists.txt` | NEW |
-| `source/ui/SubToolbar.h` | NEW (stub only) |
-| `CMakeLists.txt` | Add input/ subdirectory |
+| `source/ui/SubToolbar.h` | NEW (stub for subtoolbar system) |
 
