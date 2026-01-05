@@ -3474,7 +3474,7 @@ bool MainWindow::ensureTabHasUniqueSaveFolder(InkCanvas* canvas) {
 
 InkCanvas* MainWindow::currentCanvas() {
     return nullptr; // Use currentViewport() instead
-}
+            }
 
 // Phase 3.1.4: New accessor for DocumentViewport
 DocumentViewport* MainWindow::currentViewport() const {
@@ -3656,17 +3656,17 @@ void MainWindow::positionLeftSidebarTabs() {
 void MainWindow::updateDialDisplay() {
     // MW2.2: Simplified updateDialDisplay - dial system removed
     if (!dialDisplay) return;
-
+    
     // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
     DocumentViewport* vp = currentViewport();
     if (!vp) {
         dialDisplay->setText(tr("\n\nNo Canvas"));
         return;
     }
-
+    
     // MW2.2: Removed dial mode switching - keeping basic display
     dialDisplay->setText(QString(tr("\n\nPage\n%1")).arg(vp->currentPageIndex() + 1));
-}
+            }
 
 // MW2.2: handleModeSelection() removed - dial system deleted
 
@@ -4862,21 +4862,21 @@ void MainWindow::migrateOldButtonMappings() {
     QSettings settings("SpeedyNote", "App");
     
     // Check if migration is needed by looking for old format strings in press mappings
-    settings.beginGroup("ButtonPressMappings");
-    QStringList pressKeys = settings.allKeys();
+        settings.beginGroup("ButtonPressMappings");
+        QStringList pressKeys = settings.allKeys();
     bool needsMigration = false;
     
-    for (const QString &key : pressKeys) {
-        QString value = settings.value(key).toString();
-        // Check for old English action strings
-        if (value == "Toggle Fullscreen" || value == "Toggle Dial" || value == "Zoom 50%" ||
-            value == "Add Preset" || value == "Delete Page" || value == "Fast Forward" ||
-            value == "Open Control Panel" || value == "Custom Color") {
-            needsMigration = true;
-            break;
+        for (const QString &key : pressKeys) {
+            QString value = settings.value(key).toString();
+            // Check for old English action strings
+            if (value == "Toggle Fullscreen" || value == "Toggle Dial" || value == "Zoom 50%" ||
+                value == "Add Preset" || value == "Delete Page" || value == "Fast Forward" ||
+                value == "Open Control Panel" || value == "Custom Color") {
+                needsMigration = true;
+                break;
+            }
         }
-    }
-    settings.endGroup();
+        settings.endGroup();
     
     if (!needsMigration) return;
     
@@ -6463,15 +6463,15 @@ void MainWindow::reconnectControllerSignals() {
     if (!controllerManager) {
         return;
     }
-
+    
     // Disconnect all existing connections to avoid duplicates
     disconnect(controllerManager, nullptr, this, nullptr);
-
+    
     // Reconnect controller signals (excluding dial-specific ones)
     connect(controllerManager, &SDLControllerManager::buttonHeld, this, &MainWindow::handleButtonHeld);
     connect(controllerManager, &SDLControllerManager::buttonReleased, this, &MainWindow::handleButtonReleased);
     connect(controllerManager, &SDLControllerManager::buttonSinglePress, this, &MainWindow::handleControllerButton);
-
+    
     // MW2.2: Removed dial-related connections and state resets
 }
 
@@ -6601,9 +6601,9 @@ void MainWindow::createNewSpnPackage(const QString &spnPath)
     Q_UNUSED(spnPath);
     QMessageBox::information(this, tr("Create Notebook"), 
         tr("Creating .spn packages is being redesigned. Coming soon with .snx format!"));
-    return;
-}
-
+        return;
+    }
+    
 // MW1.5: Kept as stubs - still called from openFileInNewTab
 void MainWindow::openPdfFile(const QString &pdfPath) {
     Q_UNUSED(pdfPath);
@@ -6883,12 +6883,12 @@ void MainWindow::mousePressEvent(QMouseEvent *event) {
 // MW2.2: mouseReleaseEvent simplified - dial system removed
 void MainWindow::mouseReleaseEvent(QMouseEvent *event) {
     // MW2.2: Removed mouse dial tracking - keeping only basic functionality
-    if (event->button() == Qt::BackButton) {
-        goToPreviousPage();
-    } else if (event->button() == Qt::ForwardButton) {
-        goToNextPage();
+                if (event->button() == Qt::BackButton) {
+                    goToPreviousPage();
+                } else if (event->button() == Qt::ForwardButton) {
+                    goToNextPage();
     }
-
+    
     QMainWindow::mouseReleaseEvent(event);
 }
 

@@ -1672,7 +1672,7 @@ int Document::saveUnsavedImages(const QString& bundlePath)
                 if (!obj->saveAssets(bundlePath)) {
                     qWarning() << "saveUnsavedImages: Failed to save asset for" 
                                << obj->type() << "object" << obj->id;
-                } else {
+                    } else {
                     savedCount++;
                 }
             }

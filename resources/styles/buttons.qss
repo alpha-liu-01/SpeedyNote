@@ -1,0 +1,113 @@
+/*
+ * SpeedyNote Toolbar Button Styles
+ * 
+ * Button Types:
+ * - ActionButton: Instant action, no persistent state
+ * - ToggleButton: On/off state (uses :checked pseudo-state)
+ * - ThreeStateButton: Cycles 0→1→2 (uses [state="N"] property)
+ * - ToolButton: Same as ToggleButton, exclusive selection
+ *
+ * Theme Handling:
+ * - This file contains structural styles (size, border-radius)
+ * - Color styles are applied dynamically via setDarkMode()
+ * - Colors use rgba() for transparency over any background
+ */
+
+/* ==========================================================================
+   Base Toolbar Button Styles (all types)
+   ========================================================================== */
+
+QPushButton#ActionButton,
+QPushButton#ToggleButton,
+QPushButton#ThreeStateButton,
+QPushButton#ToolButton {
+    min-width: 36px;
+    min-height: 36px;
+    max-width: 36px;
+    max-height: 36px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    padding: 0px;
+}
+
+/* ==========================================================================
+   Light Mode Styles
+   Applied when parent has [darkMode="false"] or by default
+   ========================================================================== */
+
+/* Action Button - Light Mode */
+QPushButton#ActionButton:hover {
+    background: rgba(0, 0, 0, 25);
+}
+
+QPushButton#ActionButton:pressed {
+    background: rgba(0, 0, 0, 50);
+}
+
+/* Toggle Button - Light Mode */
+QPushButton#ToggleButton:hover {
+    background: rgba(0, 0, 0, 25);
+}
+
+QPushButton#ToggleButton:checked {
+    background: rgba(0, 0, 0, 40);
+}
+
+QPushButton#ToggleButton:checked:hover {
+    background: rgba(0, 0, 0, 55);
+}
+
+QPushButton#ToggleButton:pressed {
+    background: rgba(0, 0, 0, 70);
+}
+
+/* Tool Button - Light Mode (same as Toggle) */
+QPushButton#ToolButton:hover {
+    background: rgba(0, 0, 0, 25);
+}
+
+QPushButton#ToolButton:checked {
+    background: rgba(0, 0, 0, 40);
+}
+
+QPushButton#ToolButton:checked:hover {
+    background: rgba(0, 0, 0, 55);
+}
+
+QPushButton#ToolButton:pressed {
+    background: rgba(0, 0, 0, 70);
+}
+
+/* Three-State Button - Light Mode */
+QPushButton#ThreeStateButton:hover {
+    background: rgba(0, 0, 0, 25);
+}
+
+QPushButton#ThreeStateButton:pressed {
+    background: rgba(0, 0, 0, 50);
+}
+
+/* State 0: Default/Off (no special background) */
+QPushButton#ThreeStateButton[state="0"] {
+    background: transparent;
+}
+
+/* State 1: Middle/Y-Axis Only (red shade) */
+QPushButton#ThreeStateButton[state="1"] {
+    background: rgba(255, 100, 100, 80);
+}
+
+QPushButton#ThreeStateButton[state="1"]:hover {
+    background: rgba(255, 100, 100, 110);
+}
+
+/* State 2: Full/On */
+QPushButton#ThreeStateButton[state="2"] {
+    background: rgba(0, 0, 0, 40);
+}
+
+QPushButton#ThreeStateButton[state="2"]:hover {
+    background: rgba(0, 0, 0, 55);
+}
+

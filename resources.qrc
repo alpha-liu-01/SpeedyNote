@@ -120,6 +120,8 @@
     <file>resources/translations/app_zh.qm</file>
     <file>resources/translations/app_es.qm</file>
     <file>resources/translations/app_fr.qm</file>
+    <file>resources/styles/buttons.qss</file>
+    <file>resources/styles/buttons_dark.qss</file>
     
 </qresource>
 </RCC>

@@ -1073,32 +1073,32 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     // Convert positions to document coordinates
     QPointF currentDoc = viewportToDocument(currentViewport);
     
-    // -----------------------------------------------------------------
-    // Rotation (Phase O3.1.8.1): Rotate object around its center
-    // -----------------------------------------------------------------
+        // -----------------------------------------------------------------
+        // Rotation (Phase O3.1.8.1): Rotate object around its center
+        // -----------------------------------------------------------------
     if (m_objectResizeHandle == HandleHit::Rotate) {
         // BF: Use m_resizeObjectDocCenter (document-global) for consistent coordinates
         // with the pointer position from viewportToDocument()
-        
-        // Angle from center to current pointer (in document coords)
-        // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
-        // We add 90° because the rotation handle starts above the object (at 12 o'clock)
-        qreal angle = qRadiansToDegrees(
+            
+            // Angle from center to current pointer (in document coords)
+            // atan2 returns radians, with 0 pointing right (+X), positive going counterclockwise
+            // We add 90° because the rotation handle starts above the object (at 12 o'clock)
+            qreal angle = qRadiansToDegrees(
             qAtan2(currentDoc.y() - m_resizeObjectDocCenter.y(), 
                    currentDoc.x() - m_resizeObjectDocCenter.x())
-        ) + 90.0;
-        
-        // Normalize to 0-360 range
-        while (angle < 0) angle += 360.0;
-        while (angle >= 360) angle -= 360.0;
-        
-        // Snap to 15° increments by default
-        // TODO O3.1.8.1: Check Shift key for free rotation (no snap)
-        angle = qRound(angle / 15.0) * 15.0;
-        
-        obj->rotation = angle;
-        return;  // Don't apply resize logic below
-    }
+            ) + 90.0;
+            
+            // Normalize to 0-360 range
+            while (angle < 0) angle += 360.0;
+            while (angle >= 360) angle -= 360.0;
+            
+            // Snap to 15° increments by default
+            // TODO O3.1.8.1: Check Shift key for free rotation (no snap)
+            angle = qRound(angle / 15.0) * 15.0;
+            
+            obj->rotation = angle;
+            return;  // Don't apply resize logic below
+        }
     
     // -----------------------------------------------------------------
     // Scale: Use same approach as lasso selection (updateScaleFromHandle)
@@ -5818,7 +5818,7 @@ void DocumentViewport::renderSelectedObjectsOnly(QPainter& painter)
             QPointF docOrigin;
             if (m_document->isEdgeless()) {
                 docOrigin = QPointF(m_dragObjectTileCoord.first * Document::EDGELESS_TILE_SIZE,
-                                    m_dragObjectTileCoord.second * Document::EDGELESS_TILE_SIZE);
+                                m_dragObjectTileCoord.second * Document::EDGELESS_TILE_SIZE);
             } else {
                 docOrigin = pagePosition(m_dragObjectPageIndex);
             }

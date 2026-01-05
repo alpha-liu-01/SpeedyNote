@@ -11,6 +11,8 @@
 
 Extract toolbar-related UI from MainWindow (~6900 lines) into modular components. This creates a clean separation between app chrome (navigation, tabs, tools) and document content (DocumentViewport).
 
+**Phase order:** Define button types first (Phase 0), then build bars using those types.
+
 ### Target Architecture
 
 ```
@@ -33,6 +35,162 @@ Extract toolbar-related UI from MainWindow (~6900 lines) into modular components
 
 ---
 
+## Phase 0: Define Button Types
+
+### Task 0.1: Create ToolbarButtons Module
+**Status:** ✅ Complete
+
+**Files to create:**
+- `source/ui/ToolbarButtons.h`
+- `source/ui/ToolbarButtons.cpp`
+
+**Button types to define:**
+
+#### ActionButton
+- **Behavior:** Click triggers instant action, no persistent state
+- **States:** idle, hover, pressed
+- **Examples:** Save, Undo, Redo, Menu, Launcher (back)
+
+#### ToggleButton  
+- **Behavior:** Click toggles on/off state
+- **States:** off, off+hover, on, on+hover, pressed
+- **Examples:** Bookmarks, Outline, Layers, Fullscreen, Markdown Notes
+
+#### ThreeStateButton
+- **Behavior:** Click cycles through 3 states
+- **States:** state1, state2 (red shade), state3, hover variants, pressed
+- **Examples:** Touch gesture mode (off / y-axis only / on)
+- **Reference:** Current touch gesture button behavior in MainWindow
+
+#### ToolButton
+- **Behavior:** Exclusive selection (radio group), opens associated subtoolbar
+- **States:** Same as ToggleButton (visually identical)
+- **Examples:** Pen, Marker, Eraser, Lasso, Object Selection, Text
+- **Note:** Uses QButtonGroup for exclusive selection
+
+**Common properties (all button types):**
+- Size: 36×36 logical pixels
+- Icon support (light/dark variants)
+- Theme-aware styling
+- Same appearance whether on NavigationBar or Toolbar
+
+---
+
+### Task 0.2: Define Button QSS Styling
+**Status:** ✅ Complete
+
+**Files created:**
+- `resources/styles/buttons.qss` - Light mode styles
+- `resources/styles/buttons_dark.qss` - Dark mode styles
+- Added to `resources.qrc`
+
+**Added to ToolbarButtons module:**
+- `ButtonStyles::applyToWidget(widget, darkMode)` - Apply styles to parent widget
+- `ButtonStyles::getStylesheet(darkMode)` - Get stylesheet string
+
+**QSS uses objectName selectors:**
+```css
+QPushButton#ActionButton { ... }
+QPushButton#ToggleButton:checked { ... }
+QPushButton#ThreeStateButton[state="1"] { ... }  /* Red shade */
+QPushButton#ToolButton { ... }
+```
+
+**Theme colors:**
+- Light mode: dark highlights (`rgba(0,0,0,N)`)
+- Dark mode: white highlights (`rgba(255,255,255,N)`)
+- State 1 (3-state): red shade (`rgba(255,100,100,N)`)
+
+---
+
+### Task 0.3: Implement Button Classes
+**Status:** ⬜ Not Started
+
+**Class structure:**
+
+```cpp
+// source/ui/ToolbarButtons.h
+
+// Base class (optional, or just use QPushButton directly)
+class ToolbarButton : public QPushButton {
+    Q_OBJECT
+public:
+    explicit ToolbarButton(QWidget *parent = nullptr);
+    void setDarkMode(bool dark);
+    void setIcon(const QString &lightIcon, const QString &darkIcon);
+protected:
+    QString lightIconPath;
+    QString darkIconPath;
+    bool darkMode = false;
+};
+
+class ActionButton : public ToolbarButton {
+    Q_OBJECT
+public:
+    explicit ActionButton(QWidget *parent = nullptr);
+    // No additional state - just styled differently
+};
+
+class ToggleButton : public ToolbarButton {
+    Q_OBJECT
+public:
+    explicit ToggleButton(QWidget *parent = nullptr);
+    // Uses setCheckable(true)
+};
+
+class ThreeStateButton : public ToolbarButton {
+    Q_OBJECT
+    Q_PROPERTY(int state READ state WRITE setState NOTIFY stateChanged)
+public:
+    explicit ThreeStateButton(QWidget *parent = nullptr);
+    
+    int state() const;
+    void setState(int state);
+    
+signals:
+    void stateChanged(int newState);
+    
+protected:
+    void mousePressEvent(QMouseEvent *event) override;
+    
+private:
+    int m_state = 0; // 0, 1, or 2
+    QString stateIcons[3];
+};
+
+class ToolButton : public ToggleButton {
+    Q_OBJECT
+public:
+    explicit ToolButton(QWidget *parent = nullptr);
+    // Same as ToggleButton, but semantically for tools
+    // Used with QButtonGroup for exclusive selection
+};
+```
+
+**Checklist:**
+- [ ] Create header with class definitions
+- [ ] Implement ToolbarButton base (icon handling, dark mode)
+- [ ] Implement ActionButton (minimal, just applies style class)
+- [ ] Implement ToggleButton (setCheckable, style class)
+- [ ] Implement ThreeStateButton (state cycling, Q_PROPERTY for QSS)
+- [ ] Implement ToolButton (same as Toggle, semantic distinction)
+- [ ] Add to CMakeLists.txt
+
+---
+
+### Task 0.4: Test Button Types
+**Status:** ⬜ Not Started
+
+**Verification:**
+- [ ] Create simple test widget with one of each button type
+- [ ] Verify hover states work
+- [ ] Verify toggle on/off visually distinct
+- [ ] Verify 3-state cycles correctly with visual feedback
+- [ ] Verify dark mode icon switching
+- [ ] Verify 36×36 sizing
+
+---
+
 ## Phase A: NavigationBar
 
 ### Task A.1: Create NavigationBar Class
@@ -42,8 +200,12 @@ Extract toolbar-related UI from MainWindow (~6900 lines) into modular components
 - `source/ui/NavigationBar.h`
 - `source/ui/NavigationBar.cpp`
 
+**Prerequisites:** Phase 0 complete (button types defined)
+
 **Class structure:**
 ```cpp
+#include "ui/ToolbarButtons.h"
+
 class NavigationBar : public QWidget {
     Q_OBJECT
 public:
@@ -54,34 +216,34 @@ public:
     
 signals:
     // Left side - layout toggles
-    void launcherToggled();
-    void pdfOutlineToggled();
-    void bookmarksToggled();
-    void layerPanelToggled();
+    void launcherClicked();
+    void pdfOutlineToggled(bool checked);
+    void bookmarksToggled(bool checked);
+    void layerPanelToggled(bool checked);
     
     // Right side - actions
-    void markdownNotesToggled();
+    void markdownNotesToggled(bool checked);
     void saveClicked();
-    void fullscreenToggled();
-    void touchGestureModeChanged(int mode); // 3-state
+    void fullscreenToggled(bool checked);
+    void touchGestureModeChanged(int mode); // 0, 1, or 2
     void menuRequested();
     
 private:
-    // Left buttons
-    QPushButton *launcherButton;
-    QPushButton *outlineButton;
-    QPushButton *bookmarksButton;
-    QPushButton *layerPanelButton;
+    // Left buttons (using Phase 0 button types)
+    ActionButton *launcherButton;      // Back to launcher
+    ToggleButton *outlineButton;
+    ToggleButton *bookmarksButton;
+    ToggleButton *layerPanelButton;
     
     // Center
     QLabel *filenameLabel;
     
     // Right buttons
-    QPushButton *markdownNotesButton;
-    QPushButton *saveButton;
-    QPushButton *fullscreenButton;
-    QPushButton *touchGestureButton; // 3-state toggle
-    QPushButton *menuButton;
+    ToggleButton *markdownNotesButton;
+    ActionButton *saveButton;
+    ToggleButton *fullscreenButton;
+    ThreeStateButton *touchGestureButton;
+    ActionButton *menuButton;
 };
 ```
 
@@ -157,8 +319,12 @@ connect(navigationBar, &NavigationBar::saveClicked,
 - `source/ui/Toolbar.h`
 - `source/ui/Toolbar.cpp`
 
+**Prerequisites:** Phase 0 complete (button types defined)
+
 **Class structure:**
 ```cpp
+#include "ui/ToolbarButtons.h"
+
 class Toolbar : public QWidget {
     Q_OBJECT
 public:
@@ -173,17 +339,19 @@ signals:
     void redoClicked();
     
 private:
-    QButtonGroup *toolGroup; // Exclusive selection
+    QButtonGroup *toolGroup; // Exclusive selection for ToolButtons
     
-    QPushButton *penButton;
-    QPushButton *markerButton;
-    QPushButton *eraserButton;
-    QPushButton *lassoButton;
-    QPushButton *objectSelectionButton;
-    QPushButton *textButton;
+    // Tool buttons (using Phase 0 button types)
+    ToolButton *penButton;
+    ToolButton *markerButton;
+    ToolButton *eraserButton;
+    ToolButton *lassoButton;
+    ToolButton *objectSelectionButton;
+    ToolButton *textButton;
     
-    QPushButton *undoButton;  // Not in group (instant action)
-    QPushButton *redoButton;  // Not in group (instant action)
+    // Action buttons (instant, not in group)
+    ActionButton *undoButton;
+    ActionButton *redoButton;
     
     ToolType currentTool;
 };
@@ -413,13 +581,14 @@ SubToolbar { ... }
 
 | Phase | Description | Status | Tasks |
 |-------|-------------|--------|-------|
+| 0 | Button Types | 🔄 In Progress | 2/4 |
 | A | NavigationBar | ⬜ Not Started | 0/4 |
 | B | Toolbar | ⬜ Not Started | 0/4 |
 | C | TabBar | ⬜ Not Started | 0/2 |
 | D | Subtoolbars | ⬜ Deferred | 0/6 |
 | E | Cleanup | ⬜ Not Started | 0/3 |
 
-**Overall:** 0/19 tasks complete
+**Overall:** 2/23 tasks complete
 
 ---
 
@@ -440,4 +609,6 @@ Check MainWindow.cpp for:
 - Tool switching: search for `changeTool`
 - Layout code: search for `createSingleRowLayout`, `createDoubleRowLayout`
 - Style code: search for `createButtonStyle`, `setStyleSheet`
+
+
 
