@@ -1,6 +1,8 @@
 #include "NavigationBar.h"
 #include <QHBoxLayout>
 #include <QFontMetrics>
+#include <QPalette>
+#include <QDebug>
 
 NavigationBar::NavigationBar(QWidget *parent)
     : QWidget(parent)
@@ -135,12 +137,25 @@ void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor)
     m_darkMode = darkMode;
     m_accentColor = accentColor;
     
-    // Apply background color to navigation bar
-    setStyleSheet(QString("NavigationBar { background-color: %1; }")
-                  .arg(accentColor.name()));
+    // Debug: Print what color we're receiving
+    qDebug() << "NavigationBar::updateTheme - accentColor:" << accentColor.name();
     
-    // Apply button styles
-    ButtonStyles::applyToWidget(this, darkMode);
+    // Clear any existing stylesheet that might interfere with palette
+    setStyleSheet(QString());
+    
+    // Apply background color using palette ONLY (most reliable for custom widgets)
+    setAutoFillBackground(true);
+    QPalette pal = palette();
+    pal.setColor(QPalette::Window, accentColor);
+    setPalette(pal);
+    
+    // Apply button styles to each button individually instead of parent widget
+    // This avoids the stylesheet interfering with our palette background
+    for (QObject *child : children()) {
+        if (auto *button = qobject_cast<ToolbarButton*>(child)) {
+            button->setDarkMode(darkMode);
+        }
+    }
     
     // Update all button icons for theme
     m_launcherButton->setDarkMode(darkMode);

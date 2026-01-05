@@ -1,12 +1,12 @@
 #pragma once
 
 // ============================================================================
-// TabManager - Thin wrapper for QTabWidget tab operations
+// TabManager - Manages QTabBar + QStackedWidget for document tabs
 // ============================================================================
-// Part of the SpeedyNote document architecture (Phase 3.0.2)
+// Part of the SpeedyNote document architecture (Phase C - Toolbar Extraction)
 //
 // TabManager encapsulates tab-related operations for code organization.
-// It does NOT own the QTabWidget (MainWindow owns it).
+// It does NOT own the QTabBar or QStackedWidget (MainWindow owns them).
 // It DOES own the DocumentViewport widgets it creates.
 //
 // Responsibilities:
@@ -23,14 +23,15 @@
 // ============================================================================
 
 #include <QObject>
-#include <QTabWidget>
+#include <QTabBar>
+#include <QStackedWidget>
 #include <QVector>
 
 class Document;
 class DocumentViewport;
 
 /**
- * @brief Thin wrapper around QTabWidget for tab operations.
+ * @brief Manages QTabBar + QStackedWidget for document tabs.
  * 
  * TabManager manages the relationship between tabs and DocumentViewports.
  * It creates viewports when tabs are opened and deletes them when closed.
@@ -41,10 +42,11 @@ class TabManager : public QObject {
 public:
     /**
      * @brief Constructor.
-     * @param tabWidget The QTabWidget to manage (not owned).
+     * @param tabBar The QTabBar to manage (not owned).
+     * @param viewportStack The QStackedWidget for viewports (not owned).
      * @param parent Parent QObject.
      */
-    explicit TabManager(QTabWidget* tabWidget, QObject* parent = nullptr);
+    explicit TabManager(QTabBar* tabBar, QStackedWidget* viewportStack, QObject* parent = nullptr);
     
     /**
      * @brief Destructor.
@@ -62,7 +64,8 @@ public:
      * @param title The tab title.
      * @return The index of the new tab.
      * 
-     * Creates a DocumentViewport, sets its document, and adds it to the tab widget.
+     * Creates a DocumentViewport, sets its document, and adds it to both
+     * the tab bar and viewport stack.
      * The viewport is owned by TabManager and will be deleted when the tab closes.
      */
     int createTab(Document* doc, const QString& title);
@@ -71,7 +74,7 @@ public:
      * @brief Close a tab by index.
      * @param index The tab index to close.
      * 
-     * Removes the tab from the widget and deletes the DocumentViewport.
+     * Removes the tab from both tab bar and viewport stack, deletes the viewport.
      * Does NOT delete the Document - that's DocumentManager's responsibility.
      * Emits tabCloseRequested before closing.
      */
@@ -176,17 +179,18 @@ signals:
 
 private slots:
     /**
-     * @brief Handle QTabWidget::currentChanged signal.
+     * @brief Handle QTabBar::currentChanged signal.
      */
     void onCurrentChanged(int index);
 
     /**
-     * @brief Handle QTabWidget::tabCloseRequested signal.
+     * @brief Handle QTabBar::tabCloseRequested signal.
      */
     void onTabCloseRequested(int index);
 
 private:
-    QTabWidget* m_tabWidget;                    // Not owned - MainWindow owns
+    QTabBar* m_tabBar;                          // Not owned - MainWindow owns
+    QStackedWidget* m_viewportStack;            // Not owned - MainWindow owns
     QVector<DocumentViewport*> m_viewports;    // Owned - created by createTab()
     QVector<QString> m_baseTitles;             // Base titles (without * prefix)
     QVector<bool> m_modifiedFlags;             // Track modified state per tab

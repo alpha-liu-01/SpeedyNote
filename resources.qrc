@@ -53,6 +53,10 @@
     <file>resources/icons/up_arrow_reversed.png</file>
     <file>resources/icons/down_arrow.png</file>
     <file>resources/icons/down_arrow_reversed.png</file>
+    <file>resources/icons/left_arrow.png</file>
+    <file>resources/icons/left_arrow_reversed.png</file>
+    <file>resources/icons/right_arrow.png</file>
+    <file>resources/icons/right_arrow_reversed.png</file>
     <file>resources/icons/outline.png</file>
     <file>resources/icons/outline_reversed.png</file>
     <file>resources/icons/bookmark.png</file>
@@ -110,6 +114,16 @@
     <file>resources/icons/leftsidebar_reversed.png</file>
     <file>resources/icons/rightsidebar.png</file>
     <file>resources/icons/rightsidebar_reversed.png</file>
+    <file>resources/icons/undo.png</file>
+    <file>resources/icons/undo_reversed.png</file>
+    <file>resources/icons/redo.png</file>
+    <file>resources/icons/redo_reversed.png</file>
+    <file>resources/icons/shape.png</file>
+    <file>resources/icons/shape_reversed.png</file>
+    <file>resources/icons/objectinsert.png</file>
+    <file>resources/icons/objectinsert_reversed.png</file>
+    <file>resources/icons/text.png</file>
+    <file>resources/icons/text_reversed.png</file>
     <file>resources/reversed_icons/color_reversed.png</file>
     <file>resources/reversed_icons/bookpage_reversed.png</file>
     <file>resources/reversed_icons/zoom_reversed.png</file>
@@ -126,6 +140,8 @@
     <file>resources/translations/app_fr.qm</file>
     <file>resources/styles/buttons.qss</file>
     <file>resources/styles/buttons_dark.qss</file>
+    <file>resources/styles/tabs.qss</file>
+    <file>resources/styles/tabs_dark.qss</file>
     
 </qresource>
 </RCC>

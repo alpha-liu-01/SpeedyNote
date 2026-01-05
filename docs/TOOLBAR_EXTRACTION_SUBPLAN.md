@@ -294,22 +294,26 @@ connect(navigationBar, &NavigationBar::menuRequested,
 ---
 
 ### Task A.4: Verify NavigationBar
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 **Verification checklist:**
-- [ ] All buttons visible and clickable
-- [ ] Filename displays correctly
-- [ ] Theme changes apply (dark/light, accent color)
-- [ ] All signals trigger correct MainWindow actions
-- [ ] Layout fits within 768px minimum width
-- [ ] Compile with no warnings
+- [x] All buttons visible and clickable
+- [x] Filename displays correctly
+- [x] Theme changes apply (dark/light, accent color)
+- [x] All signals trigger correct MainWindow actions
+- [x] Layout fits within 768px minimum width
+- [x] Compile with no warnings
+- [x] Memory: No leak - NavigationBar has MainWindow as parent (auto-cleanup)
+
+**Known issue (deferred):**
+- Filename doesn't refresh when tab title changes - will be fixed when tab layout is redesigned
 
 ---
 
 ## Phase B: Toolbar
 
 ### Task B.1: Create Toolbar Class
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 **Files to create:**
 - `source/ui/Toolbar.h`
@@ -317,19 +321,20 @@ connect(navigationBar, &NavigationBar::menuRequested,
 
 **Prerequisites:** Phase 0 complete (button types defined)
 
-**Layout:**
+**Layout (center-aligned):**
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ [🖊️][🖍️][⌫][◯][📝][T]              [↩️][↪️]  [👆]                     │
-│  │   │   │  │  │  │                  │   │    │                        │
-│  │   │   │  │  │  └─ Text            │   │    └─ Touch Gesture (3-st) │
-│  │   │   │  │  └─ Object Selection   │   └─ Redo                       │
-│  │   │   │  └─ Lasso                 └─ Undo                           │
-│  │   │   └─ Eraser                                                     │
-│  │   └─ Marker                                                         │
-│  └─ Pen                                                                │
-└─────────────────────────────────────────────────────────────────────────┘
-  [---- Tool Buttons (exclusive) ----]  [Actions]  [Tab-specific]
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│        [🖊️][🖍️][⌫][📐][🔗][📷][T]    ─gap─    [↩️][↪️]  [👆]                 │
+│          │   │   │  │  │  │  │                  │   │    │                     │
+│          │   │   │  │  │  │  └─ Text            │   │    └─ Touch Gesture      │
+│          │   │   │  │  │  └─ Object Insert      │   └─ Redo                    │
+│          │   │   │  │  └─ Lasso (rope)          └─ Undo                        │
+│          │   │   │  └─ Shape (→straight line)                                  │
+│          │   │   └─ Eraser                                                     │
+│          │   └─ Marker                                                         │
+│          └─ Pen                                                                │
+└─────────────────────────────────────────────────────────────────────────────────┘
+         [------ Tool Buttons (exclusive) ------]      [Actions] [Tab-specific]
 ```
 
 **Class structure:**
@@ -347,6 +352,7 @@ public:
     
 signals:
     void toolSelected(ToolType tool);
+    void shapeClicked();  // For now → straight line mode
     void undoClicked();
     void redoClicked();
     void touchGestureModeChanged(int mode);
@@ -354,15 +360,16 @@ signals:
 private:
     QButtonGroup *toolGroup; // Exclusive selection for ToolButtons
     
-    // Tool buttons (exclusive selection)
+    // Tool buttons (exclusive selection, center-aligned)
     ToolButton *penButton;
     ToolButton *markerButton;
     ToolButton *eraserButton;
-    ToolButton *lassoButton;
-    ToolButton *objectSelectionButton;
+    ToolButton *shapeButton;           // NEW - currently → straight line
+    ToolButton *lassoButton;           // rope.png
+    ToolButton *objectInsertButton;    // objectinsert.png
     ToolButton *textButton;
     
-    // Action buttons
+    // Action buttons (after gap)
     ActionButton *undoButton;
     ActionButton *redoButton;
     
@@ -374,44 +381,53 @@ private:
 };
 ```
 
+**Notes:**
+- Shape button uses `shape.png`, connects to straight line functionality for now
+- Future: Shape will have subtoolbar with shape options (line, rectangle, etc.)
+- All tool buttons center-aligned with slight gap before Undo/Redo
+- **Known Issue (deferred):** Shape button enables straight line mode but cannot be untoggled. Will be resolved when subtoolbars are implemented - the Shape subtoolbar will include a "freehand/none" option, or clicking another tool (Pen/Marker/Eraser) will automatically disable straight line mode.
+
 **Checklist:**
-- [ ] Create header with class definition
-- [ ] Create cpp with constructor and button setup
-- [ ] Use QButtonGroup for exclusive tool selection
-- [ ] Undo/Redo as separate instant-action buttons
-- [ ] Implement `setCurrentTool()` for external sync
-- [ ] Implement `updateTheme()` for gray background
-- [ ] Add to CMakeLists.txt
+- [x] Create header with class definition
+- [x] Create cpp with constructor and button setup
+- [x] Use QButtonGroup for exclusive tool selection
+- [x] Undo/Redo as separate instant-action buttons
+- [x] Implement `setCurrentTool()` for external sync
+- [x] Implement `updateTheme()` for gray background
+- [x] Add to CMakeLists.txt
 
 ---
 
 ### Task B.2: Tool Button Icons
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete (all icons exist)
 
-**Icons needed (light + dark variants):**
-- [ ] `pen.svg` / `pen_dark.svg`
-- [ ] `marker.svg` / `marker_dark.svg`
-- [ ] `eraser.svg` / `eraser_dark.svg`
-- [ ] `lasso.svg` / `lasso_dark.svg`
-- [ ] `object_selection.svg` / `object_selection_dark.svg`
-- [ ] `text.svg` / `text_dark.svg`
-- [ ] `undo.svg` / `undo_dark.svg`
-- [ ] `redo.svg` / `redo_dark.svg`
-
-**Note:** Most should already exist in `resources/icons/`.
+**Icons verified (all have `_reversed` variants):**
+| Button | Icon | Exists |
+|--------|------|--------|
+| Pen | `pen.png` | ✓ |
+| Marker | `marker.png` | ✓ |
+| Eraser | `eraser.png` | ✓ |
+| Shape | `shape.png` | ✓ |
+| Lasso | `rope.png` | ✓ |
+| Object Insert | `objectinsert.png` | ✓ |
+| Text | `text.png` | ✓ |
+| Undo | `undo.png` | ✓ |
+| Redo | `redo.png` | ✓ |
+| Touch Gesture | `hand.png` | ✓ |
 
 ---
 
 ### Task B.3: Integrate Toolbar into MainWindow
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 **Changes to MainWindow:**
-- [ ] Add `#include "ui/Toolbar.h"`
-- [ ] Create `Toolbar *toolbar` member
-- [ ] Add to main layout (below TabBar)
-- [ ] Connect `toolSelected` to DocumentViewport tool switching
-- [ ] Connect `undoClicked`/`redoClicked` to undo/redo logic
-- [ ] Remove old tool buttons from MainWindow
+- [x] Add `#include "ui/Toolbar.h"`
+- [x] Create `Toolbar *m_toolbar` member
+- [x] Add to main layout (after NavigationBar)
+- [x] Connect `toolSelected` to DocumentViewport tool switching
+- [x] Connect `undoClicked`/`redoClicked` to undo/redo logic
+- [x] Update theme in `updateTheme()`
+- [ ] Remove old tool buttons from MainWindow (deferred to Phase E cleanup)
 
 **Signal connections:**
 ```cpp
@@ -439,22 +455,270 @@ connect(toolbar, &Toolbar::redoClicked,
 
 ---
 
-## Phase C: TabBar (Optional)
+## Phase C: TabBar
+
+### Architecture Analysis
+
+**Current State:**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ MainWindow                                                           │
+│   mainLayout (QVBoxLayout)                                          │
+│   ├── NavigationBar                                                  │
+│   ├── Toolbar                                                        │
+│   ├── controlBar (old toolbar - to be removed)                       │
+│   └── contentWidget                                                  │
+│       contentLayout (QHBoxLayout)                                    │
+│       ├── leftSideContainer (sidebars)                               │
+│       ├── layerPanel                                                 │
+│       ├── canvasContainer                                            │
+│       │   └── m_tabWidget (QTabWidget) ← TAB BAR IS HERE            │
+│       │       ├── [Tab bar at top of tab widget]                     │
+│       │       │   ├── Corner: openRecentNotebooksButton (left)       │
+│       │       │   └── Corner: addTabButton (right)                   │
+│       │       └── [Stacked DocumentViewports]                        │
+│       └── markdownNotesSidebar                                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Problem:** QTabWidget combines tab bar + content, making it impossible to position the tab bar between NavigationBar/Toolbar and content area (as shown in the target architecture diagrams).
+
+**Target Layout (confirmed):**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ MainWindow                                                           │
+│   mainLayout (QVBoxLayout)                                          │
+│   ├── NavigationBar         ← Global actions, accent background     │
+│   ├── TabBar (QTabBar)      ← Document tabs, accent background      │
+│   ├── Toolbar               ← Tool buttons, gray background         │
+│   └── contentWidget                                                  │
+│       contentLayout (QHBoxLayout)                                    │
+│       ├── leftSideContainer                                          │
+│       ├── layerPanel                                                 │
+│       ├── canvasContainer                                            │
+│       │   └── viewportStack (QStackedWidget) ← VIEWPORTS ONLY       │
+│       └── markdownNotesSidebar                                       │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**TabManager Current State:**
+- Wraps QTabWidget (doesn't own it)
+- Creates/owns DocumentViewport instances (stored in m_viewports)
+- Tracks base titles and modified flags separately
+- Emits: `currentViewportChanged`, `tabCloseRequested`, `tabCloseAttempted`
+
+### Migration Options
+
+**Option A: Keep QTabWidget, Just Restyle**
+- Minimal code changes
+- Tab bar remains inside canvas area
+- ❌ Doesn't match target architecture
+
+**Option B: Separate QTabBar + QStackedWidget (Recommended)**
+- Create standalone QTabBar in main layout
+- Use QStackedWidget in canvasContainer for viewports
+- Modify TabManager to manage both separately
+- ✅ Matches target architecture
+- ✅ Tab bar position is flexible
+
+**Option C: Remove TabManager, Direct Management**
+- MainWindow directly manages QTabBar + viewports
+- Simplifies architecture
+- ❌ Increases MainWindow complexity (opposite of our goal)
+
+### Recommended Approach (Option B)
+
+**TabManager Changes:**
+```cpp
+class TabManager : public QObject {
+    // Remove: QTabWidget* m_tabWidget
+    // Add:
+    QTabBar* m_tabBar;              // Tab strip (not owned)
+    QStackedWidget* m_viewportStack; // Viewport container (not owned)
+    
+    // Existing members stay:
+    QVector<DocumentViewport*> m_viewports;  // Owned
+    QVector<QString> m_baseTitles;
+    QVector<bool> m_modifiedFlags;
+};
+```
+
+**MainWindow Changes:**
+1. Create `QTabBar* m_tabBar` (in main layout after NavigationBar or after Toolbar)
+2. Create `QStackedWidget* m_viewportStack` (in canvasContainer)
+3. Update TabManager constructor: `TabManager(QTabBar*, QStackedWidget*, QObject*)`
+4. Move corner widgets (launcher, add) to NavigationBar (already there!)
+5. Remove old `m_tabWidget`
+
+**Signal Connections:**
+```cpp
+// TabManager internally connects:
+connect(m_tabBar, &QTabBar::currentChanged, m_viewportStack, &QStackedWidget::setCurrentIndex);
+connect(m_tabBar, &QTabBar::currentChanged, this, &TabManager::onCurrentChanged);
+connect(m_tabBar, &QTabBar::tabCloseRequested, this, &TabManager::onTabCloseRequested);
+```
 
 ### Task C.1: Convert to QTabBar
+
+---
+
+#### Task C.1.1: Create New Widgets
+**Status:** ✅ Complete
+
+Create the replacement widgets in MainWindow:
+- [x] Add `QTabBar* m_tabBar` member to MainWindow.h
+- [x] Add `QStackedWidget* m_viewportStack` member to MainWindow.h
+- [x] Create `m_tabBar` in setupUi (after NavigationBar, before Toolbar)
+- [x] Create `m_viewportStack` in canvasContainer (created but hidden, will be added to layout in C.1.5)
+- [x] Add m_tabBar to main layout (m_viewportStack stays hidden until C.1.5)
+- [x] Basic theme styling for m_tabBar in updateTheme()
+- [x] Verify compiles successfully
+
+---
+
+#### Task C.1.2: Refactor TabManager
+**Status:** ✅ Complete
+
+Update TabManager to use separate QTabBar + QStackedWidget:
+- [x] Change constructor: `TabManager(QTabBar*, QStackedWidget*, QObject*)`
+- [x] Replace `m_tabWidget` with `m_tabBar` and `m_viewportStack`
+- [x] Update `createTab()`: add tab to QTabBar, add viewport to QStackedWidget
+- [x] Update `closeTab()`: remove from both QTabBar and QStackedWidget
+- [x] Update `currentViewport()`: use `m_viewportStack->currentIndex()`
+- [x] Update `viewportAt()`: use `m_viewports` vector (unchanged)
+- [x] Connect `QTabBar::currentChanged` → `QStackedWidget::setCurrentIndex`
+- [x] Connect `QTabBar::tabCloseRequested` → `onTabCloseRequested`
+- [x] Update title/modified methods to use `m_tabBar->setTabText()`
+- [x] Update MainWindow to create TabManager with new parameters
+- [x] Hide old m_tabWidget, use m_viewportStack in canvasLayout
+- [x] Verify: compiles successfully
+
+---
+
+#### Task C.1.3: Apply Tab Styling
+**Status:** ✅ Complete
+
+Style the QTabBar to match design:
+- [x] Tab bar background: accent color
+- [x] Inactive tabs: washed out accent (darkened/desaturated for better contrast)
+- [x] Active/selected tab: gray (`#f0f0f0` light / `#2d2d2d` dark)
+- [x] Tab text color: theme-aware (black/white)
+- [x] Set min/max tab width: 80px-200px
+- [x] Enable scroll buttons: already enabled in constructor
+- [x] Close button styling with `cross.png` icon
+- [x] Scroll button styling with `left_arrow.png`/`right_arrow.png` icons
+- [x] Hover states for tabs and buttons
+- [x] Theme-aware icons (normal/_reversed variants)
+
+---
+
+#### Task C.1.4: Custom Close Buttons
+**Status:** ✅ Complete (via QSS approach)
+
+~~Implement close buttons on LEFT side of tab title:~~
+- ~~Disable default close buttons: `m_tabBar->setTabsClosable(false)`~~
+- ~~Create helper function: `createTabCloseButton(int index)`~~
+- ~~Use `m_tabBar->setTabButton(index, QTabBar::LeftSide, closeButton)`~~
+
+**Actual Implementation (simpler):**
+- [x] Used QSS `subcontrol-position: left;` in `tabs.qss` / `tabs_dark.qss`
+- [x] Applied minimal stylesheet in constructor BEFORE first tab is created
+- [x] Close button icons theme-aware via `{{CLOSE_ICON}}` placeholder
+- [x] Hover styling in QSS
+
+**Note:** The original plan called for custom `setTabButton()` approach, but QSS `subcontrol-position` works correctly and is simpler to maintain.
+
+---
+
+#### Task C.1.5: Cleanup Old QTabWidget
+**Status:** ✅ Complete
+
+**Removed 43+ references to `m_tabWidget`**
+
+**Constructor cleanup:**
+- [x] Removed `m_tabWidget = new QTabWidget(this);` and configuration
+
+**setupUi() cleanup:**
+- [x] Removed `m_tabWidget` configuration
+- [x] Removed `connect(m_tabWidget, &QTabWidget::currentChanged, ...)`
+- [x] Removed corner widget setup: `openRecentNotebooksButton`, `addTabButton` (now in NavigationBar)
+- [x] Updated `toggleTabBarButton` to use `m_tabBar`
+- [x] Removed `m_tabWidget->setSizePolicy()` and `m_tabWidget->hide()`
+- [x] Updated NavigationBar filename click handler to use `m_tabBar`
+
+**switchTab() and tab switching:**
+- [x] Updated `switchTab()` to use `m_tabManager->tabCount()`
+- [x] Updated all `setCurrentIndex()` calls to use `m_tabBar->setCurrentIndex()`
+
+**Fullscreen toggle:**
+- [x] Updated `toggleControlBar()` to use `m_tabBar`
+
+**updateTheme() cleanup:**
+- [x] Removed old `m_tabWidget` styling block
+
+**Other references:**
+- [x] Updated container calculations (`eventFilter`, `updateScrollbarPositions`) to use `m_viewportStack`
+
+**Header cleanup:**
+- [x] Removed `QTabWidget *m_tabWidget = nullptr;`
+- [x] Removed `#include <QTabWidget>` (no longer needed)
+- [x] Removed `QPushButton *openRecentNotebooksButton;` (now in NavigationBar)
+- [x] Removed `QPushButton *addTabButton;` (now in NavigationBar)
+
+---
+
+#### Task C.1.6: NavigationBar Filename Sync
+**Status:** ✅ Complete
+
+Update NavigationBar to show current document's filename:
+- [x] In `currentViewportChanged` handler, call `m_navigationBar->setFilename()`
+- [x] Get filename from `viewport->document()->displayName()` (returns name or "Untitled")
+- [ ] Test: filename updates when switching tabs (manual verification needed)
+- [ ] Test: filename shows correctly for new/loaded documents (manual verification needed)
+
+**Implementation:**
+```cpp
+// In currentViewportChanged handler:
+if (m_navigationBar) {
+    QString filename = tr("Untitled");
+    if (vp && vp->document()) {
+        filename = vp->document()->displayName();
+    }
+    m_navigationBar->setFilename(filename);
+}
+```
+
+---
+
+#### Task C.1.7: Verification
 **Status:** ⬜ Not Started
 
-**Current:** QTabWidget (manages tabs + content)  
-**Target:** QTabBar (tabs only) + QStackedWidget or manual viewport management
+Full testing of tab functionality:
+- [ ] Tab switching works (clicks, keyboard)
+- [ ] Tab closing works (close button, middle-click if supported)
+- [ ] Modified indicator (*) appears/disappears correctly
+- [ ] Tab titles update correctly
+- [ ] Scroll buttons appear when many tabs
+- [ ] Styling matches in light and dark mode
+- [ ] NavigationBar filename updates on tab switch
+- [ ] No crashes on edge cases (close last tab, rapid switching)
 
-**Changes:**
-- [ ] Replace QTabWidget with QTabBar
-- [ ] Manage DocumentViewport visibility separately
-- [ ] Connect `QTabBar::currentChanged` to viewport switching
-- [ ] Preserve tab close buttons
-- [ ] Preserve tab styling (accent for inactive, gray for active)
+### Decisions
 
-**Note:** This phase is lower priority. Can be deferred if Phase A+B take longer than expected.
+1. **Tab bar position:** NavigationBar → TabBar → Toolbar ✅
+   - Matches architecture diagrams
+   - Tab bar sits directly below navigation, above tools
+
+2. **Hide tab bar with single tab?** No ✅
+   - Tab bar always visible regardless of tab count
+   - Consistent UI, no layout shifts
+
+3. **Priority:** Phase C is NOT low priority ✅
+   - Should be tackled while architecture is fresh
+
+4. **Tab overflow handling:**
+   - QTabWidget handles scrolling automatically
+   - QTabBar needs explicit scroll button configuration (use `setUsesScrollButtons(true)`)
 
 ---
 
@@ -599,13 +863,23 @@ SubToolbar { ... }
 | Phase | Description | Status | Tasks |
 |-------|-------------|--------|-------|
 | 0 | Button Types | ✅ Complete | 4/4 |
-| A | NavigationBar | 🔄 In Progress | 3/4 |
-| B | Toolbar | ⬜ Not Started | 0/4 |
-| C | TabBar | ⬜ Not Started | 0/2 |
+| A | NavigationBar | ✅ Complete | 4/4 |
+| B | Toolbar | 🔄 In Progress | 3/4 |
+| C | TabBar | 🔄 In Progress | 5/8 |
 | D | Subtoolbars | ⬜ Deferred | 0/6 |
 | E | Cleanup | ⬜ Not Started | 0/3 |
 
-**Overall:** 7/23 tasks complete
+**Overall:** 17/29 tasks complete
+
+**Phase C subtask status:**
+- C.1.1: ✅ Create New Widgets
+- C.1.2: ✅ Refactor TabManager
+- C.1.3: ✅ Apply Tab Styling
+- C.1.4: ✅ Custom Close Buttons (via QSS)
+- C.1.5: ✅ Cleanup Old QTabWidget (43+ refs removed)
+- C.1.6: ✅ NavigationBar Filename Sync
+- C.1.7: ⬜ Verification
+- C.2: ⬜ Extract TabBar to Separate File (Optional)
 
 ---
 
@@ -649,3 +923,256 @@ One toggle on NavigationBar shows/hides the entire container.
 
 ### Default Accent Color
 `#2277CC` - can be customized via Control Panel in future. 
+
+---
+
+## Reference: Theme Interface
+
+### QSettings Keys (Organization: "SpeedyNote", App: "App")
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `useCustomAccentColor` | bool | `false` | If true, use `customAccentColor`; otherwise use system highlight |
+| `customAccentColor` | QString | `"#0078D4"` | User's custom accent color (hex format) |
+| `useBrighterPalette` | bool | `false` | Whether to use brighter palette variant |
+
+### MainWindow Theme Methods
+
+```cpp
+// Get current accent color (returns custom or system highlight)
+QColor getAccentColor() const;
+
+// Set custom accent color (saves to QSettings, triggers updateTheme if enabled)
+void setCustomAccentColor(const QColor &color);
+
+// Enable/disable custom accent color (triggers updateTheme, saves to QSettings)
+void setUseCustomAccentColor(bool use);
+
+// Check if dark mode is active
+bool isDarkMode() const;
+
+// Apply theme to all components
+void updateTheme();
+
+// Save/load theme settings to/from QSettings
+void saveThemeSettings();
+void loadThemeSettings();
+```
+
+### Component Theme Update Pattern
+
+```cpp
+void MainWindow::updateTheme() {
+    QColor accentColor = getAccentColor();
+    bool darkMode = isDarkMode();
+    
+    // NavigationBar: accent background + icon theme
+    if (m_navigationBar) {
+        m_navigationBar->updateTheme(darkMode, accentColor);
+    }
+    
+    // Toolbar: gray background + icon theme
+    if (m_toolbar) {
+        m_toolbar->updateTheme(darkMode);
+    }
+    
+    // ... other components
+}
+```
+
+### NavigationBar Theme Interface
+
+```cpp
+// Updates background color and icon themes
+void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor);
+```
+
+**Implementation:** Uses `QPalette` with `setAutoFillBackground(true)` for reliable background coloring.
+
+### Toolbar Theme Interface
+
+```cpp
+// Updates background (gray) and icon themes
+void Toolbar::updateTheme(bool darkMode);
+```
+
+**Background:** Light mode = `#f0f0f0`, Dark mode = `#2d2d2d`
+
+### Load Order
+
+1. `MainWindow()` constructor calls `setupUi()` - creates NavigationBar/Toolbar with defaults
+2. `MainWindow()` calls `loadUserSettings()` → `loadThemeSettings()` → `updateTheme()`
+3. Theme is applied to all components with loaded QSettings values
+
+**Note:** Components are created with hardcoded defaults, then immediately updated with user settings. This is intentional to avoid blocking the constructor on settings load.
+
+### Styling Troubleshooting / Fixes
+
+#### NavigationBar Background Color Issue (Fixed)
+
+**Problem:** NavigationBar was not displaying the custom accent color loaded from QSettings. Instead, it showed the KDE Plasma default system color (`#2a2e32`) while the TabBar correctly displayed the custom accent (`#343a46`).
+
+**Root Cause:** Using `QPalette` to set the NavigationBar background color did not work reliably. Despite setting `setAutoFillBackground(true)` and `QPalette::Window`, the palette was being overridden by the desktop environment's theme.
+
+**Solution:** Use `setStyleSheet()` with `setObjectName()` to apply the background color:
+
+```cpp
+void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor) {
+    // ... icon updates ...
+    
+    // Use setObjectName + stylesheet for reliable background color
+    setObjectName("NavigationBar");
+    setStyleSheet(QString("#NavigationBar { background-color: %1; }").arg(accentColor.name()));
+}
+```
+
+**Why This Works:**
+- `setStyleSheet()` with an ID selector (`#ObjectName`) has higher specificity than palette-based styling
+- It bypasses the Qt platform theme's palette overrides
+- The TabBar was already using stylesheets (via `QTabBar::tab { ... }`), which is why it worked correctly
+
+**Lesson Learned:** When setting background colors on custom widgets that need to match other styled components (like QTabBar), prefer `setStyleSheet()` over `QPalette` for consistency and reliability across different desktop environments.
+
+#### QTabBar Close Button Position Issue (Fixed)
+
+**Problem:** The first tab created on application launch had its close button on the RIGHT side, while tabs created later had close buttons correctly positioned on the LEFT.
+
+**Root Cause:** The sequence of operations was:
+1. `m_tabBar` is created with `setTabsClosable(true)` (default close button on right)
+2. First tab is created via `addNewTab()` inside `setupUi()`
+3. `updateTheme()` is called AFTER `setupUi()`, applying `subcontrol-position: left;`
+
+Qt creates the close button widget when a tab is added. If no stylesheet specifying `subcontrol-position` exists at that moment, Qt uses the default right-side position. Applying the stylesheet later does NOT reposition existing close buttons.
+
+**Solution:** Apply a minimal stylesheet with close button positioning BEFORE the first tab is created:
+
+```cpp
+// In constructor, immediately after m_tabBar configuration:
+m_tabBar->setStyleSheet(R"(
+    QTabBar::close-button {
+        subcontrol-position: left;
+    }
+)");
+```
+
+This ensures ALL tabs (including the first) have close buttons positioned on the left. The full styling (colors, hover effects, etc.) is applied later in `updateTheme()` and will extend/override this initial stylesheet.
+
+**Lesson Learned:** For QTabBar styling that affects widget positioning (like `subcontrol-position`), the stylesheet must be applied BEFORE any tabs are added. Styling properties that only affect appearance (colors, padding) can be applied later.
+
+
+### StyleLoader - External QSS with Placeholders
+
+**Files created:**
+- `source/ui/StyleLoader.h/cpp` - Helper class for loading QSS with placeholder substitution
+- `resources/styles/tabs.qss` - Light mode tab styling
+- `resources/styles/tabs_dark.qss` - Dark mode tab styling
+
+**Placeholder syntax:** `{{PLACEHOLDER_NAME}}`
+
+**Available placeholders for tabs:**
+| Placeholder | Description | Example Value |
+|-------------|-------------|---------------|
+| `{{TAB_BAR_BG}}` | Tab bar background (accent) | `#343a46` |
+| `{{TAB_BG}}` | Inactive tab background (washed) | `#2a2d33` |
+| `{{TAB_TEXT}}` | Tab text color | `#ffffff` |
+| `{{TAB_SELECTED_BG}}` | Selected tab background (system) | `#2d2d2d` |
+| `{{TAB_HOVER_BG}}` | Tab hover background | `#3a3d44` |
+| `{{CLOSE_ICON}}` | Close button icon filename | `cross_reversed.png` |
+| `{{RIGHT_ARROW}}` | Right scroll arrow icon | `right_arrow_reversed.png` |
+| `{{LEFT_ARROW}}` | Left scroll arrow icon | `left_arrow_reversed.png` |
+
+**Usage in MainWindow:**
+```cpp
+#include "ui/StyleLoader.h"
+
+// In updateTheme():
+QString tabStylesheet = StyleLoader::loadTabStylesheet(
+    darkMode,
+    accentColor,    // Tab bar background
+    washedColor,    // Inactive tab background
+    textColor,      // Text color
+    selectedBg,     // Selected tab background
+    hoverColor      // Hover background
+);
+m_tabBar->setStyleSheet(tabStylesheet);
+```
+
+**Benefits:**
+- Styling separated from code (easier to modify)
+- Consistent placeholder pattern for all QSS files
+- Light/dark mode variants in separate files
+- Dynamic colors calculated at runtime, structural styling in QSS
+
+---
+
+### Tab Bar Styling (Confirmed)
+
+| Element | Light Mode | Dark Mode |
+|---------|------------|-----------|
+| Tab bar background | Accent color | Accent color |
+| Inactive tabs | Washed out accent (lighter/desaturated) | Washed out accent |
+| Active/selected tab | Light gray (`#f0f0f0`) | Dark gray (`#2d2d2d`) |
+| Tab text | Black on light, White on dark | Context-dependent |
+| Close button icon | `cross.png` / `cross_reversed.png` | Theme-aware |
+| Close button position | LEFT of tab title | (custom, not Qt default) |
+
+**Tab Size Constraints:**
+- Minimum width: ~80px (enough for short filename + close button)
+- Maximum width: ~200px (prevents single tab from taking entire bar)
+- Elide long names in the middle (preserve extension)
+
+**Overflow Handling:**
+- Yes, overflow menu on far right is possible! QTabBar supports `setUsesScrollButtons(true)` for scroll arrows, but a custom overflow dropdown would require subclassing QTabBar or adding a separate button
+- Recommendation: Start with scroll buttons, consider overflow menu as enhancement
+
+**Close Button Implementation:**
+- QTabBar's default close button is on the RIGHT side
+- To put it on the LEFT, we need `QTabBar::setTabButton(index, QTabBar::LeftSide, closeButton)`
+- This means creating custom close buttons per tab (not a new button type, just ActionButton with cross icon, 16x16 size)
+
+### Tab Switch Actions (Analysis)
+
+**Question:** Upon switching tabs, what actions need to happen?
+
+**Current Implementation (`MainWindow::switchTab` + `TabManager::currentViewportChanged`):**
+
+Already implemented:
+- ✅ `connectViewportScrollSignals(vp)` - scroll sync
+- ✅ `updateDialDisplay()` - dial UI sync (now mostly removed)
+- ✅ `updateLayerPanelForViewport(vp)` - layer panel sync
+- ✅ `m_debugOverlay->setViewport(vp)` - debug overlay sync
+
+Stubbed/TODO (in `switchTab`):
+- ⏳ Update page spinbox from viewport
+- ⏳ Update zoom slider from viewport
+- ⏳ `updateColorButtonStates()` - color button highlights
+- ⏳ `updateStraightLineButtonState()` - straight line toggle
+- ⏳ `updateRopeToolButtonState()` - lasso tool toggle
+- ⏳ `updateToolButtonStates()` - pen/marker/eraser selection
+- ⏳ `updateThicknessSliderForCurrentTool()` - thickness UI
+
+**Recommendation:** Most of these are already stubbed and ready for connection. With the new Toolbar:
+- `Toolbar::setCurrentTool()` can be called on tab switch to sync tool buttons
+- Tool state should be per-document (stored in Document or DocumentViewport)
+- For now: Plan to connect in Phase C, but defer full per-tab tool state until later
+
+### NavigationBar Filename Update (Task for Phase C)
+
+**Current state:** `m_navigationBar->setFilename(tr("Untitled"))` only called once at startup.
+
+**Required:** Update filename when:
+1. Tab switches → show current document's filename
+2. Document saved/renamed → update displayed name
+3. Document modified → could show asterisk (but TabManager already handles this for tabs)
+
+**Implementation in Phase C:**
+```cpp
+// In switchTab or currentViewportChanged handler:
+if (m_navigationBar && viewport && viewport->document()) {
+    QString filename = viewport->document()->filename();
+    if (filename.isEmpty()) filename = tr("Untitled");
+    m_navigationBar->setFilename(filename);
+}
+```
+
+This should be added to Task C.1 checklist.

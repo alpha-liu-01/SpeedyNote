@@ -5,6 +5,7 @@
 #include "core/Document.h"          // Phase 3.1: Document class
 #include "ui/LayerPanel.h"          // Phase 5: Layer management panel
 #include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
+#include "ui/StyleLoader.h"         // QSS stylesheet loader
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -142,17 +143,30 @@ MainWindow::MainWindow(QWidget *parent)
         QSize logicalSize = screen->availableGeometry().size() * 0.89;
         resize(logicalSize);
     }
-    // Phase 3.1.1: Create QTabWidget to hold DocumentViewports
-    // Replaces old canvasStack (QStackedWidget)
-    m_tabWidget = new QTabWidget(this);
-    m_tabWidget->setTabsClosable(true);
-    m_tabWidget->setMovable(true);
-    m_tabWidget->setDocumentMode(true);
-    // Note: m_tabWidget will be positioned in setupUi(), not set as central widget directly
+    // Phase C.1.1: Create new tab system (QTabBar + QStackedWidget)
+    m_tabBar = new QTabBar(this);
+    m_tabBar->setExpanding(false);
+    m_tabBar->setMovable(true);
+    m_tabBar->setTabsClosable(true);
+    m_tabBar->setUsesScrollButtons(true);
+    m_tabBar->setElideMode(Qt::ElideRight);
+    
+    // Apply close button positioning BEFORE any tabs are created
+    // This ensures all tabs (including the first) have close buttons on the left
+    // Full styling is applied later in updateTheme(), but subcontrol-position must be set early
+    m_tabBar->setStyleSheet(R"(
+        QTabBar::close-button {
+            subcontrol-position: left;
+        }
+    )");
+    
+    m_viewportStack = new QStackedWidget(this);
+    m_viewportStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
     // Phase 3.1.1: Initialize DocumentManager and TabManager
     m_documentManager = new DocumentManager(this);
-    m_tabManager = new TabManager(m_tabWidget, this);
+    // Phase C.1.2: TabManager now uses QTabBar + QStackedWidget
+    m_tabManager = new TabManager(m_tabBar, m_viewportStack, this);
     
     // Connect TabManager signals
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
@@ -179,6 +193,15 @@ MainWindow::MainWindow(QWidget *parent)
         // TG.6: Apply touch gesture mode to new viewport
         if (vp) {
             vp->setTouchGestureMode(touchGestureMode);
+        }
+        
+        // Phase C.1.6: Update NavigationBar with current document's filename
+        if (m_navigationBar) {
+            QString filename = tr("Untitled");
+            if (vp && vp->document()) {
+                filename = vp->document()->displayName();
+            }
+            m_navigationBar->setFilename(filename);
         }
     });
 
@@ -1082,66 +1105,26 @@ void MainWindow::setupUi() {
         return QList<MarkdownNoteData>();
     });
     
-    // Phase 3.1.1: QTabWidget replaces old QListWidget tabList
-    // m_tabWidget was created in constructor, configure it here
-    m_tabWidget->setTabPosition(QTabWidget::North);
-    m_tabWidget->setElideMode(Qt::ElideRight);
-    // Stylesheet will be applied in updateTheme() to match dark/light mode
-
-    // Connect tab changes to switchTab
-    connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::switchTab);
-
-    // Phase 3.1: Consolidate tab bars - use m_tabWidget's corner widgets instead of separate container
-    // Create "Return to Launcher" button as left corner widget
-    openRecentNotebooksButton = new QPushButton(this);
-    openRecentNotebooksButton->setIcon(loadThemedIcon("recent"));
-    openRecentNotebooksButton->setStyleSheet(buttonStyle);
-    openRecentNotebooksButton->setToolTip(tr("Return to Launcher"));
-    openRecentNotebooksButton->setFixedSize(30, 30);
-    connect(openRecentNotebooksButton, &QPushButton::clicked, this, &MainWindow::returnToLauncher);
-    m_tabWidget->setCornerWidget(openRecentNotebooksButton, Qt::TopLeftCorner);
-    
-    // Add Button for New Tab as right corner widget
-    addTabButton = new QPushButton(this);
-    QIcon addTab(loadThemedIcon("addtab"));
-    addTabButton->setIcon(addTab);
-    addTabButton->setFixedSize(30, 30);
-    addTabButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: rgba(220, 220, 220, 0);
-            border-radius: 0px;
-            margin: 2px;
-        }
-        QPushButton:hover {
-            background-color: rgba(200, 200, 200, 255);
-        }
-        QPushButton:pressed {
-            background-color: rgba(180, 180, 180, 255);
-        }
-    )");
-    addTabButton->setToolTip(tr("Add New Tab"));
-    connect(addTabButton, &QPushButton::clicked, this, &MainWindow::addNewTab);
-    m_tabWidget->setCornerWidget(addTabButton, Qt::TopRightCorner);
+    // Phase C.1.5: Removed old m_tabWidget configuration - now using m_tabBar + m_viewportStack
+    // Corner widgets (launcher button, add tab button) are now in NavigationBar
     
     // Phase 3.1: Old tabBarContainer kept but hidden (for reference, will be removed later)
     tabBarContainer = new QWidget(this);
     tabBarContainer->setObjectName("tabBarContainer");
-    tabBarContainer->setVisible(false);  // Hidden - using m_tabWidget's tab bar instead
-    
-    // Phase 3.1: Tab scroll handled by QTabWidget internally
-    // QTabWidget handles tab scrolling automatically
+    tabBarContainer->setVisible(false);  // Hidden - using m_tabBar now
 
     connect(toggleTabBarButton, &QPushButton::clicked, this, [=]() {
-        // Phase 3.1: Toggle the tab bar visibility via m_tabWidget
-        QTabBar* tabBar = m_tabWidget->tabBar();
-        bool isVisible = tabBar->isVisible();
-        tabBar->setVisible(!isVisible);
-        
-        // Update button toggle state
-        toggleTabBarButton->setProperty("selected", !isVisible);
-        updateButtonIcon(toggleTabBarButton, "tabs");
-        toggleTabBarButton->style()->unpolish(toggleTabBarButton);
-        toggleTabBarButton->style()->polish(toggleTabBarButton);
+        // Phase C.1.5: Toggle the tab bar visibility via m_tabBar
+        if (m_tabBar) {
+            bool isVisible = m_tabBar->isVisible();
+            m_tabBar->setVisible(!isVisible);
+            
+            // Update button toggle state
+            toggleTabBarButton->setProperty("selected", !isVisible);
+            updateButtonIcon(toggleTabBarButton, "tabs");
+            toggleTabBarButton->style()->unpolish(toggleTabBarButton);
+            toggleTabBarButton->style()->polish(toggleTabBarButton);
+        }
 
         // Phase 3.1.8: Stubbed - DocumentViewport handles its own sizing
         QTimer::singleShot(0, this, [this]() {
@@ -1232,7 +1215,7 @@ void MainWindow::setupUi() {
         // TODO Phase 4.6: Reconnect ControlPanelDialog with DocumentViewport
     });
 
-    // openRecentNotebooksButton created earlier and added to tab bar layout
+    // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
 
     customColorButton = new QPushButton(this);
     customColorButton->setFixedSize(62, 30);
@@ -1380,7 +1363,7 @@ void MainWindow::setupUi() {
     zoom50Button->setVisible(false);
     dezoomButton->setVisible(false);
     zoom200Button->setVisible(false);
-    openRecentNotebooksButton->setVisible(false);
+    // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
     benchmarkButton->setVisible(false);  // Hidden by default, toggle via Settings > Features
     benchmarkLabel->setVisible(false);
     // REMOVED MW1.3: prevPageButton->setVisible(false), nextPageButton->setVisible(false)
@@ -1393,17 +1376,17 @@ void MainWindow::setupUi() {
     // Theme will be applied later in loadUserSettings -> updateTheme()
     controlBar->setStyleSheet("");
 
-    
-        
+    // Phase C.1.5: Removed m_tabWidget - now using m_tabBar + m_viewportStack
 
-    // Phase 3.1.1: m_tabWidget was created in constructor, just configure size policy
-    m_tabWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-
-    // Create a container for the tab widget and scrollbars with relative positioning
+    // Create a container for the viewport stack and scrollbars with relative positioning
     QWidget *canvasContainer = new QWidget;
     QVBoxLayout *canvasLayout = new QVBoxLayout(canvasContainer);
     canvasLayout->setContentsMargins(0, 0, 0, 0);
-    canvasLayout->addWidget(m_tabWidget);  // Phase 3.1.1: Use m_tabWidget instead of canvasStack
+    
+    // Phase C.1.2: Use m_viewportStack instead of m_tabWidget
+    // m_viewportStack was created in constructor, just add to layout here
+    canvasLayout->addWidget(m_viewportStack);
+    // ------------------ End of viewport stack layout ------------------
 
     // ========================================
     // Debug Overlay (development tool)
@@ -1483,10 +1466,10 @@ void MainWindow::setupUi() {
         addNewTab();  // For now, just add a new tab
     });
     connect(m_navigationBar, &NavigationBar::filenameClicked, this, [this]() {
-        // Stub - toggle tab bar visibility
-        qDebug() << "NavigationBar: Filename clicked - toggle tabs (stub)";
-        if (m_tabWidget) {
-            m_tabWidget->tabBar()->setVisible(!m_tabWidget->tabBar()->isVisible());
+        // Toggle tab bar visibility
+        qDebug() << "NavigationBar: Filename clicked - toggle tabs";
+        if (m_tabBar) {
+            m_tabBar->setVisible(!m_tabBar->isVisible());
         }
     });
     connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this](bool checked) {
@@ -1512,10 +1495,68 @@ void MainWindow::setupUi() {
     });
     // ------------------ End of NavigationBar signal connections ------------------
 
+    // =========================================================================
+    // Phase C: TabBar (Toolbar Extraction)
+    // =========================================================================
+    // m_tabBar was created in constructor, just add to layout here
+    mainLayout->addWidget(m_tabBar);
+    // Note: TabBar signals are connected via TabManager (created in constructor)
+    // ------------------ End of TabBar setup ------------------
+
+    // =========================================================================
+    // Phase B: Toolbar (Toolbar Extraction)
+    // =========================================================================
+    m_toolbar = new Toolbar(this);
+    mainLayout->addWidget(m_toolbar);
+    
+    // Connect Toolbar signals
+    connect(m_toolbar, &Toolbar::toolSelected, this, [this](ToolType tool) {
+        // Set tool on current viewport
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setCurrentTool(tool);
+        }
+        updateToolButtonStates();
+        qDebug() << "Toolbar: Tool selected:" << static_cast<int>(tool);
+    });
+    connect(m_toolbar, &Toolbar::shapeClicked, this, [this]() {
+        // Shape tool → straight line mode for now
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setStraightLineMode(true);
+            if (straightLineToggleButton) {
+                straightLineToggleButton->setChecked(true);
+            }
+        }
+        qDebug() << "Toolbar: Shape clicked → straight line mode";
+    });
+    connect(m_toolbar, &Toolbar::objectInsertClicked, this, [this]() {
+        // Stub - will show object insert menu in future
+        qDebug() << "Toolbar: Object insert clicked (stub)";
+    });
+    connect(m_toolbar, &Toolbar::textClicked, this, [this]() {
+        // Stub - will activate text tool in future
+        qDebug() << "Toolbar: Text clicked (stub)";
+    });
+    connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->undo();
+        }
+    });
+    connect(m_toolbar, &Toolbar::redoClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->redo();
+        }
+    });
+    connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
+        // Touch gesture mode: 0=off, 1=y-axis, 2=full
+        qDebug() << "Toolbar: Touch gesture mode changed to" << mode;
+        // TODO: Connect to TouchGestureHandler when ready
+    });
+    // ------------------ End of Toolbar signal connections ------------------
+
     // Add components in vertical order
-    // Phase 3.1: tabBarContainer hidden - buttons moved to m_tabWidget corner widgets
+    // Phase C.1.5: tabBarContainer hidden - buttons now in NavigationBar
     // mainLayout->addWidget(tabBarContainer);   // Old tab bar - now hidden
-    mainLayout->addWidget(controlBar);        // Toolbar below nav bar
+    mainLayout->addWidget(controlBar);        // Legacy toolbar (to be removed in Phase E)
     
     // Content area with sidebars and canvas
     QHBoxLayout *contentLayout = new QHBoxLayout;
@@ -2973,16 +3014,15 @@ void MainWindow::loadPdf() {
             
 
 void MainWindow::switchTab(int index) {
-    // Phase 3.1.1: Simplified switchTab using TabManager
+    // Phase C.1.5: Updated to use m_tabManager instead of m_tabWidget
     // Many InkCanvas-specific features are stubbed for now
     
-    if (!m_tabWidget || !pageInput || !zoomSlider) {
+    if (!m_tabManager || !pageInput || !zoomSlider) {
         return;
     }
 
-    if (index >= 0 && index < m_tabWidget->count()) {
-        // QTabWidget handles the tab switch internally
-        // m_tabWidget->setCurrentIndex(index) is called by QTabWidget's signal
+    if (index >= 0 && index < m_tabManager->tabCount()) {
+        // QTabBar handles the tab switch internally via TabManager
         
         DocumentViewport *viewport = currentViewport();
         if (viewport) {
@@ -3063,9 +3103,9 @@ void MainWindow::addNewTab() {
     
     qDebug() << "Created new tab at index" << tabIndex << "with document:" << tabTitle;
     
-    // Switch to the new tab
-    if (m_tabWidget) {
-        m_tabWidget->setCurrentIndex(tabIndex);
+    // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
+    if (m_tabBar) {
+        m_tabBar->setCurrentIndex(tabIndex);
     }
     
     // Phase 3.3: Center content horizontally (one-time initial offset)
@@ -3137,9 +3177,9 @@ void MainWindow::addNewEdgelessTab()
     
     qDebug() << "Created new edgeless tab at index" << tabIndex << "with document:" << tabTitle;
     
-    // Switch to the new tab
-    if (m_tabWidget) {
-        m_tabWidget->setCurrentIndex(tabIndex);
+    // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
+    if (m_tabBar) {
+        m_tabBar->setCurrentIndex(tabIndex);
     }
     
     // For edgeless, center on origin (0,0)
@@ -3217,9 +3257,9 @@ void MainWindow::loadFolderDocument()
     int tabIndex = m_tabManager->createTab(doc, doc->displayName());
     
     if (tabIndex >= 0) {
-        // Switch to the new tab
-        if (m_tabWidget) {
-            m_tabWidget->setCurrentIndex(tabIndex);
+        // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
+        if (m_tabBar) {
+            m_tabBar->setCurrentIndex(tabIndex);
         }
         
         // Mode-specific setup
@@ -3761,8 +3801,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     }
 
     // Handle resize events for canvas container
-    // Phase 3.1: Use m_tabWidget instead of canvasStack
-    QWidget *container = m_tabWidget ? m_tabWidget->parentWidget() : nullptr;
+    // Phase C.1.5: Use m_viewportStack instead of m_tabWidget
+    QWidget *container = m_viewportStack ? m_viewportStack->parentWidget() : nullptr;
     if (obj == container && event->type() == QEvent::Resize) {
         updateScrollbarPositions();
         return false; // Let the event propagate
@@ -4208,6 +4248,49 @@ void MainWindow::updateTheme() {
         m_navigationBar->updateTheme(darkMode, accentColor);
     }
     
+    // Phase B: Update Toolbar theme
+    if (m_toolbar) {
+        m_toolbar->updateTheme(darkMode);
+    }
+    
+    // Phase C.1.3: Update TabBar theme using external QSS
+    if (m_tabBar) {
+        // Use system window color for selected tab (follows KDE/system theme)
+        QPalette sysPalette = QGuiApplication::palette();
+        QColor selectedBg = sysPalette.color(QPalette::Window);
+        QColor textColor = sysPalette.color(QPalette::WindowText);
+        
+        // Washed out accent: lighter and desaturated for inactive tabs
+        QColor washedColor = accentColor;
+        if (darkMode) {
+            // Dark mode: darken and desaturate
+            washedColor = washedColor.darker(120);
+            washedColor.setHsl(washedColor.hslHue(), 
+                              washedColor.hslSaturation() * 0.6, 
+                              washedColor.lightness());
+        } else {
+            // Light mode: lighten significantly
+            washedColor = washedColor.lighter(150);
+            washedColor.setHsl(washedColor.hslHue(), 
+                              washedColor.hslSaturation() * 0.5, 
+                              qMin(washedColor.lightness() + 30, 255));
+        }
+        
+        // Hover color: between washed and full accent
+        QColor hoverColor = darkMode ? accentColor.darker(105) : accentColor.lighter(115);
+        
+        // Load stylesheet from QSS file with placeholder substitution
+        QString tabStylesheet = StyleLoader::loadTabStylesheet(
+            darkMode,
+            accentColor,    // Tab bar background
+            washedColor,    // Inactive tab background
+            textColor,      // Text color
+            selectedBg,     // Selected tab background
+            hoverColor      // Hover background
+        );
+        m_tabBar->setStyleSheet(tabStylesheet);
+    }
+    
     if (controlBar) {
         // Use same background as unselected tab color
         QString toolbarBgColor = darkMode ? "rgba(80, 80, 80, 255)" : "rgba(220, 220, 220, 255)";
@@ -4288,30 +4371,7 @@ void MainWindow::updateTheme() {
     }
     
     // MW2.2: Removed dial styling - dial system deleted
-    
-    // Update add tab button styling
-    if (addTabButton) {
-        bool darkMode = isDarkMode();
-        QString buttonBgColor = darkMode ? "rgba(80, 80, 80, 0)" : "rgba(220, 220, 220, 0)";
-        QString buttonHoverColor = darkMode ? "rgba(90, 90, 90, 255)" : "rgba(200, 200, 200, 255)";
-        QString buttonPressColor = darkMode ? "rgba(70, 70, 70, 255)" : "rgba(180, 180, 180, 255)";
-        QString borderColor = darkMode ? "rgba(100, 100, 100, 255)" : "rgba(180, 180, 180, 255)";
-        
-        addTabButton->setStyleSheet(QString(R"(
-            QPushButton {
-                background-color: %1;
-                /*border: 1px solid %2;*/
-                border-radius: 0px;
-                margin: 2px;
-            }
-            QPushButton:hover {
-                background-color: %3;
-            }
-            QPushButton:pressed {
-                background-color: %4;
-            }
-        )").arg(buttonBgColor).arg(borderColor).arg(buttonHoverColor).arg(buttonPressColor));
-    }
+    // Phase C.1.5: Removed addTabButton styling - functionality now in NavigationBar
     
     // Update PDF outline sidebar styling
     if (outlineSidebar && outlineTree) {
@@ -4447,31 +4507,7 @@ void MainWindow::updateTheme() {
         )").arg(bgColor).arg(textColor).arg(hoverColor).arg(selectedColor));
     }
     
-    // Phase 3.1: Tab bar styling now uses QTabWidget
-    if (m_tabWidget) {
-        // Style the tab bar with accent color
-        m_tabWidget->setStyleSheet(QString(R"(
-        QTabBar {
-            background-color: %1;
-        }
-        QTabBar::tab {
-            background-color: %1;
-            color: %2;
-            padding: 8px 16px;
-            border: none;
-        }
-        QTabBar::tab:selected {
-            background-color: %3;
-        }
-        QTabBar::tab:hover:!selected {
-            background-color: %4;
-        }
-        )").arg(accentColor.name())
-           .arg(darkMode ? "#ffffff" : "#000000")
-           .arg(accentColor.darker(110).name())
-           .arg(accentColor.lighter(110).name()));
-    }
-    
+    // Phase C.1.5: Removed old m_tabWidget styling - now using m_tabBar with StyleLoader
 
     
     // Force icon reload for all buttons that use themed icons
@@ -4500,12 +4536,7 @@ void MainWindow::updateTheme() {
     // MW2.2: Removed dial button icon updates
     if (addPresetButton) addPresetButton->setIcon(loadThemedIcon("savepreset"));
     if (openControlPanelButton) openControlPanelButton->setIcon(loadThemedIcon("settings"));
-    if (openRecentNotebooksButton) {
-        openRecentNotebooksButton->setIcon(loadThemedIcon("recent"));
-        // Update button style for theme
-        QString buttonStyle = createButtonStyle(darkMode);
-        openRecentNotebooksButton->setStyleSheet(buttonStyle);
-    }
+    // Phase C.1.5: Removed openRecentNotebooksButton - functionality now in NavigationBar
     updateButtonIcon(penToolButton, "pen");
     updateButtonIcon(markerToolButton, "marker");
     updateButtonIcon(eraserToolButton, "eraser");
@@ -4547,7 +4578,7 @@ void MainWindow::updateTheme() {
     if (jumpToPageButton) jumpToPageButton->setStyleSheet(newButtonStyle);
     if (addPresetButton) addPresetButton->setStyleSheet(newButtonStyle);
     if (openControlPanelButton) openControlPanelButton->setStyleSheet(newButtonStyle);
-    if (openRecentNotebooksButton) openRecentNotebooksButton->setStyleSheet(newButtonStyle);
+    // Phase C.1.5: Removed openRecentNotebooksButton style update
     if (zoom50Button) zoom50Button->setStyleSheet(newButtonStyle);
     if (dezoomButton) dezoomButton->setStyleSheet(newButtonStyle);
     if (zoom200Button) zoom200Button->setStyleSheet(newButtonStyle);
@@ -4581,9 +4612,7 @@ void MainWindow::updateTheme() {
         whiteButton->setIcon(QIcon(whiteIconPath));
     }
     
-    // Phase 3.1: Tab styling now uses QTabWidget
-    // QTabWidget provides built-in close buttons via setTabsClosable(true)
-    // TODO Phase 3.3: Apply custom styling to m_tabWidget tabs if needed
+    // Phase C.1.5: Tab styling now uses m_tabBar with StyleLoader (QSS files)
     
     // Update dial display
     updateDialDisplay();
@@ -5165,12 +5194,13 @@ void MainWindow::toggleControlBar() {
         // Going into fullscreen mode
         
         // First, remember current tab bar state
-        QTabBar* tabBar = m_tabWidget->tabBar();
-        sidebarWasVisibleBeforeFullscreen = tabBar->isVisible();
-        
-        // Hide tab bar if it's visible
-        if (tabBar->isVisible()) {
-            tabBar->setVisible(false);
+        if (m_tabBar) {
+            sidebarWasVisibleBeforeFullscreen = m_tabBar->isVisible();
+            
+            // Hide tab bar if it's visible
+            if (m_tabBar->isVisible()) {
+                m_tabBar->setVisible(false);
+            }
         }
         
         // Hide control bar
@@ -5207,7 +5237,9 @@ void MainWindow::toggleControlBar() {
         controlBar->setVisible(true);
         
         // Restore tab bar to its previous state
-        m_tabWidget->tabBar()->setVisible(sidebarWasVisibleBeforeFullscreen);
+        if (m_tabBar) {
+            m_tabBar->setVisible(sidebarWasVisibleBeforeFullscreen);
+        }
         
         // Show widgets that are now properly in the layout
         // thicknessButton and jumpToPageButton are now in the layout so they'll be visible automatically
@@ -5396,12 +5428,12 @@ void MainWindow::wheelEvent(QWheelEvent *event) {
 
 // Add this new method
 void MainWindow::updateScrollbarPositions() {
-    // Phase 3.1: Use m_tabWidget instead of canvasStack
-    QWidget *container = m_tabWidget ? m_tabWidget->parentWidget() : nullptr;
-    if (!container || !panXSlider || !panYSlider || !m_tabWidget) return;
+    // Phase C.1.5: Use m_viewportStack instead of m_tabWidget
+    QWidget *container = m_viewportStack ? m_viewportStack->parentWidget() : nullptr;
+    if (!container || !panXSlider || !panYSlider || !m_viewportStack) return;
     
     // Get tab bar height to offset positions (sliders should be below tab bar)
-    int tabBarHeight = m_tabWidget->tabBar()->isVisible() ? m_tabWidget->tabBar()->height() : 0;
+    int tabBarHeight = (m_tabBar && m_tabBar->isVisible()) ? m_tabBar->height() : 0;
     
     // Add small margins for better visibility
     const int margin = 3;
@@ -6585,7 +6617,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
             
             if (hasContent && isUnsaved) {
                 // Switch to this tab so user knows which canvas we're asking about
-                m_tabWidget->setCurrentIndex(i);
+                if (m_tabBar) {
+                    m_tabBar->setCurrentIndex(i);
+                }
                 
                 QMessageBox::StandardButton reply = QMessageBox::question(
                     this,

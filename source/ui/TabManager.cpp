@@ -1,7 +1,7 @@
 // ============================================================================
 // TabManager Implementation
 // ============================================================================
-// Part of the SpeedyNote document architecture (Phase 3.0.2)
+// Part of the SpeedyNote document architecture (Phase C - Toolbar Extraction)
 // ============================================================================
 
 #include "TabManager.h"
@@ -12,23 +12,30 @@
 // Constructor / Destructor
 // ============================================================================
 
-TabManager::TabManager(QTabWidget* tabWidget, QObject* parent)
+TabManager::TabManager(QTabBar* tabBar, QStackedWidget* viewportStack, QObject* parent)
     : QObject(parent)
-    , m_tabWidget(tabWidget)
+    , m_tabBar(tabBar)
+    , m_viewportStack(viewportStack)
 {
-    if (m_tabWidget) {
-        // Connect tab widget signals
-        connect(m_tabWidget, &QTabWidget::currentChanged,
+    if (m_tabBar) {
+        // Connect tab bar signals
+        connect(m_tabBar, &QTabBar::currentChanged,
                 this, &TabManager::onCurrentChanged);
-        connect(m_tabWidget, &QTabWidget::tabCloseRequested,
+        connect(m_tabBar, &QTabBar::tabCloseRequested,
                 this, &TabManager::onTabCloseRequested);
+    }
+    
+    // Sync tab bar selection with viewport stack
+    if (m_tabBar && m_viewportStack) {
+        connect(m_tabBar, &QTabBar::currentChanged,
+                m_viewportStack, &QStackedWidget::setCurrentIndex);
     }
 }
 
 TabManager::~TabManager()
 {
     // Delete all owned viewports
-    // Note: QTabWidget will have already removed them as widgets,
+    // Note: QStackedWidget will have already removed them as widgets,
     // but we still own the objects
     for (DocumentViewport* viewport : m_viewports) {
         delete viewport;
@@ -42,16 +49,19 @@ TabManager::~TabManager()
 
 int TabManager::createTab(Document* doc, const QString& title)
 {
-    if (!m_tabWidget) {
+    if (!m_tabBar || !m_viewportStack) {
         return -1;
     }
     
     // Create the viewport
-    DocumentViewport* viewport = new DocumentViewport(m_tabWidget);
+    DocumentViewport* viewport = new DocumentViewport(m_viewportStack);
     viewport->setDocument(doc);
     
-    // Add to tab widget
-    int index = m_tabWidget->addTab(viewport, title);
+    // Add to tab bar
+    int index = m_tabBar->addTab(title);
+    
+    // Add to viewport stack
+    m_viewportStack->addWidget(viewport);
     
     // Track in our vectors
     m_viewports.append(viewport);
@@ -59,14 +69,14 @@ int TabManager::createTab(Document* doc, const QString& title)
     m_modifiedFlags.append(false);
     
     // Make the new tab active
-    m_tabWidget->setCurrentIndex(index);
+    m_tabBar->setCurrentIndex(index);
     
     return index;
 }
 
 void TabManager::closeTab(int index)
 {
-    if (!m_tabWidget || index < 0 || index >= m_viewports.size()) {
+    if (!m_tabBar || !m_viewportStack || index < 0 || index >= m_viewports.size()) {
         return;
     }
     
@@ -75,8 +85,14 @@ void TabManager::closeTab(int index)
     // Emit signal before closing (for unsaved changes check)
     emit tabCloseRequested(index, viewport);
     
-    // Remove from tab widget (this removes the widget but doesn't delete it)
-    m_tabWidget->removeTab(index);
+    // Block signals during removal to prevent currentChanged from firing
+    // with stale indices (Qt emits currentChanged when a tab is removed)
+    m_tabBar->blockSignals(true);
+    m_tabBar->removeTab(index);
+    m_tabBar->blockSignals(false);
+    
+    // Remove from viewport stack
+    m_viewportStack->removeWidget(viewport);
     
     // Remove from our tracking
     m_viewports.removeAt(index);
@@ -85,12 +101,24 @@ void TabManager::closeTab(int index)
     
     // Delete the viewport (we own it)
     delete viewport;
+    
+    // Sync stacked widget with tab bar (since we blocked signals)
+    if (m_viewportStack && m_tabBar) {
+        int newIndex = m_tabBar->currentIndex();
+        if (newIndex >= 0 && newIndex < m_viewportStack->count()) {
+            m_viewportStack->setCurrentIndex(newIndex);
+        }
+    }
+    
+    // Now manually emit currentViewportChanged with the correct viewport
+    // (after vectors are updated and viewport is deleted)
+    emit currentViewportChanged(currentViewport());
 }
 
 void TabManager::closeCurrentTab()
 {
-    if (m_tabWidget) {
-        closeTab(m_tabWidget->currentIndex());
+    if (m_tabBar) {
+        closeTab(m_tabBar->currentIndex());
     }
 }
 
@@ -100,10 +128,10 @@ void TabManager::closeCurrentTab()
 
 DocumentViewport* TabManager::currentViewport() const
 {
-    if (!m_tabWidget || m_tabWidget->currentIndex() < 0) {
+    if (!m_viewportStack || m_viewportStack->currentIndex() < 0) {
         return nullptr;
     }
-    return viewportAt(m_tabWidget->currentIndex());
+    return viewportAt(m_viewportStack->currentIndex());
 }
 
 DocumentViewport* TabManager::viewportAt(int index) const
@@ -125,7 +153,7 @@ Document* TabManager::documentAt(int index) const
 
 int TabManager::currentIndex() const
 {
-    return m_tabWidget ? m_tabWidget->currentIndex() : -1;
+    return m_tabBar ? m_tabBar->currentIndex() : -1;
 }
 
 int TabManager::tabCount() const
@@ -139,7 +167,7 @@ int TabManager::tabCount() const
 
 void TabManager::setTabTitle(int index, const QString& title)
 {
-    if (!m_tabWidget || index < 0 || index >= m_baseTitles.size()) {
+    if (!m_tabBar || index < 0 || index >= m_baseTitles.size()) {
         return;
     }
     
@@ -147,15 +175,15 @@ void TabManager::setTabTitle(int index, const QString& title)
     
     // Update display title (with or without * prefix)
     if (m_modifiedFlags.at(index)) {
-        m_tabWidget->setTabText(index, QStringLiteral("* ") + title);
+        m_tabBar->setTabText(index, QStringLiteral("* ") + title);
     } else {
-        m_tabWidget->setTabText(index, title);
+        m_tabBar->setTabText(index, title);
     }
 }
 
 void TabManager::markTabModified(int index, bool modified)
 {
-    if (!m_tabWidget || index < 0 || index >= m_modifiedFlags.size()) {
+    if (!m_tabBar || index < 0 || index >= m_modifiedFlags.size()) {
         return;
     }
     
@@ -169,9 +197,9 @@ void TabManager::markTabModified(int index, bool modified)
     // Update display title
     const QString& baseTitle = m_baseTitles.at(index);
     if (modified) {
-        m_tabWidget->setTabText(index, QStringLiteral("* ") + baseTitle);
+        m_tabBar->setTabText(index, QStringLiteral("* ") + baseTitle);
     } else {
-        m_tabWidget->setTabText(index, baseTitle);
+        m_tabBar->setTabText(index, baseTitle);
     }
 }
 

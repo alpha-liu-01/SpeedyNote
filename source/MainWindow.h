@@ -44,7 +44,9 @@ class InkCanvas;
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSharedMemory>
-#include <QTabWidget>
+// Phase C.1.5: QTabWidget removed - using QTabBar + QStackedWidget
+#include <QTabBar>
+#include <QStackedWidget>
 
 // Phase 3.1: New architecture includes
 #include "ui/TabManager.h"
@@ -54,6 +56,7 @@ class InkCanvas;
 
 // Toolbar extraction includes
 #include "ui/NavigationBar.h"
+#include "ui/Toolbar.h"
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
 // Will be reimplemented in Phase 3.3 if needed
@@ -551,7 +554,7 @@ private:
     QPushButton *saveButton; // Button to save file
     QPushButton *fullscreenButton;
     QPushButton *openControlPanelButton;
-    QPushButton *openRecentNotebooksButton; // Added button
+    // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
 
     QPushButton *loadPdfButton;
     QPushButton *clearPdfButton;
@@ -588,16 +591,20 @@ private:
     // QListWidget *tabList;          // Horizontal tab bar
     // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
     
-    // Phase 3.1.1: New tab system
-    QTabWidget *m_tabWidget = nullptr;      // Replaces tabList + canvasStack
+    // Phase C.1.5: New tab system (QTabBar + QStackedWidget via TabManager)
     TabManager *m_tabManager = nullptr;     // Manages tabs and DocumentViewports
     DocumentManager *m_documentManager = nullptr;  // Manages Document lifecycle
+    QTabBar *m_tabBar = nullptr;           // Standalone tab bar
+    QStackedWidget *m_viewportStack = nullptr;  // Viewport container
     
     // Toolbar extraction: NavigationBar (Phase A)
     NavigationBar *m_navigationBar = nullptr;
     
-    QPushButton *addTabButton;     // Button to add tabs
-    QWidget *tabBarContainer;      // Container for horizontal tab bar
+    // Toolbar extraction: Toolbar (Phase B)
+    Toolbar *m_toolbar = nullptr;
+    
+    // Phase C.1.5: addTabButton removed - functionality now in NavigationBar
+    QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)
     
     // PDF Outline Sidebar
     QWidget *outlineSidebar;       // Container for PDF outline
