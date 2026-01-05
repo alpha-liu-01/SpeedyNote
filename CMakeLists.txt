@@ -337,7 +337,8 @@ set(UI_SOURCES
         source/ui/ToolbarButtonTestWidget.cpp # Toolbar button visual test
         source/ui/NavigationBar.cpp          # Navigation bar (Phase A)
         source/ui/Toolbar.cpp                 # Toolbar (Phase B)
-        source/ui/StyleLoader.cpp            # QSS stylesheet loader with placeholders
+        source/ui/StyleLoader.cpp             # QSS stylesheet loader with placeholders
+        source/ui/TabBar.cpp                  # Custom tab bar (Phase C.2)
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)

@@ -45,7 +45,8 @@ class InkCanvas;
 #include <QLocalSocket>
 #include <QSharedMemory>
 // Phase C.1.5: QTabWidget removed - using QTabBar + QStackedWidget
-#include <QTabBar>
+// Phase C.2: Using custom TabBar class
+#include "ui/TabBar.h"
 #include <QStackedWidget>
 
 // Phase 3.1: New architecture includes
@@ -592,9 +593,10 @@ private:
     // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
     
     // Phase C.1.5: New tab system (QTabBar + QStackedWidget via TabManager)
+    // Phase C.2: Using custom TabBar class for theming
     TabManager *m_tabManager = nullptr;     // Manages tabs and DocumentViewports
     DocumentManager *m_documentManager = nullptr;  // Manages Document lifecycle
-    QTabBar *m_tabBar = nullptr;           // Standalone tab bar
+    TabBar *m_tabBar = nullptr;            // Custom tab bar with built-in theming
     QStackedWidget *m_viewportStack = nullptr;  // Viewport container
     
     // Toolbar extraction: NavigationBar (Phase A)

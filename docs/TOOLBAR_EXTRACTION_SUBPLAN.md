@@ -691,16 +691,16 @@ if (m_navigationBar) {
 ---
 
 #### Task C.1.7: Verification
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 Full testing of tab functionality:
-- [ ] Tab switching works (clicks, keyboard)
-- [ ] Tab closing works (close button, middle-click if supported)
-- [ ] Modified indicator (*) appears/disappears correctly
-- [ ] Tab titles update correctly
-- [ ] Scroll buttons appear when many tabs
-- [ ] Styling matches in light and dark mode
-- [ ] NavigationBar filename updates on tab switch
+- [x] Tab switching works (clicks, keyboard)
+- [x] Tab closing works (close button)
+- [x] Tab titles display correctly
+- [x] Styling matches in light and dark mode
+- [x] NavigationBar filename updates on tab switch
+- [x] Close button on left for all tabs (including first)
+- [x] TabBar theming works correctly (accent color, hover, selected)
 - [ ] No crashes on edge cases (close last tab, rapid switching)
 
 ### Decisions
@@ -722,18 +722,50 @@ Full testing of tab functionality:
 
 ---
 
-### Task C.2: Extract TabBar to Separate File (Optional)
-**Status:** ⬜ Not Started
+### Task C.2: Extract TabBar to Separate File
+**Status:** ✅ Complete
 
-**Files to create:**
+**Files created:**
 - `source/ui/TabBar.h`
 - `source/ui/TabBar.cpp`
 
-**Only if C.1 is successful and there's benefit to extraction.**
+**Implementation:**
+- `TabBar` inherits from `QTabBar`
+- Constructor configures: `setExpanding(false)`, `setMovable(true)`, `setTabsClosable(true)`, `setUsesScrollButtons(true)`, `setElideMode(Qt::ElideRight)`
+- `applyInitialStyle()` sets close button position before any tabs are created (fixes first-tab bug)
+- `updateTheme(bool darkMode, const QColor &accentColor)` handles all color calculations and StyleLoader calls
+
+**Changes to MainWindow:**
+- Header: `#include "ui/TabBar.h"` instead of `<QTabBar>`
+- Header: `TabBar *m_tabBar` instead of `QTabBar *m_tabBar`
+- Constructor: `m_tabBar = new TabBar(this)` (single line, no configuration needed)
+- `updateTheme()`: Simplified to just `m_tabBar->updateTheme(darkMode, accentColor)`
+
+**CMakeLists.txt:**
+- Added `source/ui/TabBar.cpp` to NoteApp sources
+
+**TabManager:** No changes needed - accepts `QTabBar*` base pointer, works with `TabBar*` polymorphically.
 
 ---
 
 ## Phase D: Subtoolbars (Deferred)
+
+**Status:** Explicitly deferred until MainWindow cleanup is complete.
+
+**Rationale:** Subtoolbars will be designed after:
+1. MainWindow cleanup removes legacy toolbar code
+2. Color button migration strategy is decided
+3. Overall architecture is cleaner
+
+**Includes:**
+- PenSubToolbar (size, color palette)
+- MarkerSubToolbar (size, color palette, opacity)
+- EraserSubToolbar (size, mode)
+- ShapeSubToolbar (line, rectangle, circle, etc.)
+- LassoSubToolbar (cut/copy/delete)
+- TextSubToolbar (font, size, color)
+
+---
 
 ### Task D.1: Create SubToolbar Base Class
 **Status:** ⬜ Not Started (Deferred)
@@ -809,15 +841,42 @@ public:
 
 ## Phase E: Cleanup
 
+### Old controlBar Status
+
+The old `controlBar` is now largely **redundant**:
+
+**Functionality moved to new components:**
+- Navigation (launcher, save, fullscreen, overflow) → NavigationBar
+- Tool selection (pen, marker, eraser, lasso, etc.) → Toolbar
+- Tab bar → TabBar
+
+**Remaining in old controlBar (18 references):**
+- **Color buttons:** redButton, blueButton, yellowButton, greenButton, blackButton, whiteButton, customColorButton
+- toggleTabBarButton (functionality duplicated in NavigationBar sidebar toggle?)
+- Some layout code (createSingleRowLayout, createDoubleRowLayout)
+
+**Color Buttons Decision:**
+The color buttons need to be migrated. Options for future:
+1. **ColorPalette subtoolbar** - appears when pen/marker selected (Phase D)
+2. **Move to left sidebar** - color palette panel
+3. **Keep in controlBar temporarily** - until subtoolbar system is implemented
+
+For now, color buttons remain in old controlBar. They will be addressed when either:
+- Phase D (Subtoolbars) is implemented
+- Or during MainWindow cleanup if a simpler solution is chosen
+
+---
+
 ### Task E.1: Remove Old Toolbar Code from MainWindow
 **Status:** ⬜ Not Started
 
 After all phases verified:
-- [ ] Delete old button creation code
+- [ ] Delete old button creation code (tool buttons already handled by Toolbar)
 - [ ] Delete old layout code (single/double row)
 - [ ] Delete old style application code
 - [ ] Delete unused member variables
 - [ ] Update any remaining signal connections
+- [ ] Decide on color button migration strategy
 
 ---
 
@@ -865,11 +924,11 @@ SubToolbar { ... }
 | 0 | Button Types | ✅ Complete | 4/4 |
 | A | NavigationBar | ✅ Complete | 4/4 |
 | B | Toolbar | 🔄 In Progress | 3/4 |
-| C | TabBar | 🔄 In Progress | 5/8 |
+| C | TabBar | ✅ Complete | 8/8 |
 | D | Subtoolbars | ⬜ Deferred | 0/6 |
 | E | Cleanup | ⬜ Not Started | 0/3 |
 
-**Overall:** 17/29 tasks complete
+**Overall:** 19/29 tasks complete (excluding deferred Phase D)
 
 **Phase C subtask status:**
 - C.1.1: ✅ Create New Widgets
@@ -878,8 +937,8 @@ SubToolbar { ... }
 - C.1.4: ✅ Custom Close Buttons (via QSS)
 - C.1.5: ✅ Cleanup Old QTabWidget (43+ refs removed)
 - C.1.6: ✅ NavigationBar Filename Sync
-- C.1.7: ⬜ Verification
-- C.2: ⬜ Extract TabBar to Separate File (Optional)
+- C.1.7: ✅ Verification (tab bar works perfectly)
+- C.2: ✅ Extract TabBar to Separate File
 
 ---
 

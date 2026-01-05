@@ -144,21 +144,8 @@ MainWindow::MainWindow(QWidget *parent)
         resize(logicalSize);
     }
     // Phase C.1.1: Create new tab system (QTabBar + QStackedWidget)
-    m_tabBar = new QTabBar(this);
-    m_tabBar->setExpanding(false);
-    m_tabBar->setMovable(true);
-    m_tabBar->setTabsClosable(true);
-    m_tabBar->setUsesScrollButtons(true);
-    m_tabBar->setElideMode(Qt::ElideRight);
-    
-    // Apply close button positioning BEFORE any tabs are created
-    // This ensures all tabs (including the first) have close buttons on the left
-    // Full styling is applied later in updateTheme(), but subcontrol-position must be set early
-    m_tabBar->setStyleSheet(R"(
-        QTabBar::close-button {
-            subcontrol-position: left;
-        }
-    )");
+    // Phase C.2: Using custom TabBar class (handles configuration and initial styling)
+    m_tabBar = new TabBar(this);
     
     m_viewportStack = new QStackedWidget(this);
     m_viewportStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -1118,12 +1105,12 @@ void MainWindow::setupUi() {
         if (m_tabBar) {
             bool isVisible = m_tabBar->isVisible();
             m_tabBar->setVisible(!isVisible);
-            
-            // Update button toggle state
-            toggleTabBarButton->setProperty("selected", !isVisible);
-            updateButtonIcon(toggleTabBarButton, "tabs");
-            toggleTabBarButton->style()->unpolish(toggleTabBarButton);
-            toggleTabBarButton->style()->polish(toggleTabBarButton);
+        
+        // Update button toggle state
+        toggleTabBarButton->setProperty("selected", !isVisible);
+        updateButtonIcon(toggleTabBarButton, "tabs");
+        toggleTabBarButton->style()->unpolish(toggleTabBarButton);
+        toggleTabBarButton->style()->polish(toggleTabBarButton);
         }
 
         // Phase 3.1.8: Stubbed - DocumentViewport handles its own sizing
@@ -4253,42 +4240,9 @@ void MainWindow::updateTheme() {
         m_toolbar->updateTheme(darkMode);
     }
     
-    // Phase C.1.3: Update TabBar theme using external QSS
+    // Phase C.2: TabBar handles its own theming
     if (m_tabBar) {
-        // Use system window color for selected tab (follows KDE/system theme)
-        QPalette sysPalette = QGuiApplication::palette();
-        QColor selectedBg = sysPalette.color(QPalette::Window);
-        QColor textColor = sysPalette.color(QPalette::WindowText);
-        
-        // Washed out accent: lighter and desaturated for inactive tabs
-        QColor washedColor = accentColor;
-        if (darkMode) {
-            // Dark mode: darken and desaturate
-            washedColor = washedColor.darker(120);
-            washedColor.setHsl(washedColor.hslHue(), 
-                              washedColor.hslSaturation() * 0.6, 
-                              washedColor.lightness());
-        } else {
-            // Light mode: lighten significantly
-            washedColor = washedColor.lighter(150);
-            washedColor.setHsl(washedColor.hslHue(), 
-                              washedColor.hslSaturation() * 0.5, 
-                              qMin(washedColor.lightness() + 30, 255));
-        }
-        
-        // Hover color: between washed and full accent
-        QColor hoverColor = darkMode ? accentColor.darker(105) : accentColor.lighter(115);
-        
-        // Load stylesheet from QSS file with placeholder substitution
-        QString tabStylesheet = StyleLoader::loadTabStylesheet(
-            darkMode,
-            accentColor,    // Tab bar background
-            washedColor,    // Inactive tab background
-            textColor,      // Text color
-            selectedBg,     // Selected tab background
-            hoverColor      // Hover background
-        );
-        m_tabBar->setStyleSheet(tabStylesheet);
+        m_tabBar->updateTheme(darkMode, accentColor);
     }
     
     if (controlBar) {
@@ -5196,8 +5150,8 @@ void MainWindow::toggleControlBar() {
         // First, remember current tab bar state
         if (m_tabBar) {
             sidebarWasVisibleBeforeFullscreen = m_tabBar->isVisible();
-            
-            // Hide tab bar if it's visible
+        
+        // Hide tab bar if it's visible
             if (m_tabBar->isVisible()) {
                 m_tabBar->setVisible(false);
             }
