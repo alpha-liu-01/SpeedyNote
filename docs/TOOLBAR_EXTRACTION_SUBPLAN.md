@@ -104,97 +104,53 @@ QPushButton#ToolButton { ... }
 ---
 
 ### Task 0.3: Implement Button Classes
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete (merged with Task 0.1)
 
-**Class structure:**
+Button classes were implemented in Task 0.1. All classes verified working by Task 0.4 unit tests.
 
-```cpp
-// source/ui/ToolbarButtons.h
-
-// Base class (optional, or just use QPushButton directly)
-class ToolbarButton : public QPushButton {
-    Q_OBJECT
-public:
-    explicit ToolbarButton(QWidget *parent = nullptr);
-    void setDarkMode(bool dark);
-    void setIcon(const QString &lightIcon, const QString &darkIcon);
-protected:
-    QString lightIconPath;
-    QString darkIconPath;
-    bool darkMode = false;
-};
-
-class ActionButton : public ToolbarButton {
-    Q_OBJECT
-public:
-    explicit ActionButton(QWidget *parent = nullptr);
-    // No additional state - just styled differently
-};
-
-class ToggleButton : public ToolbarButton {
-    Q_OBJECT
-public:
-    explicit ToggleButton(QWidget *parent = nullptr);
-    // Uses setCheckable(true)
-};
-
-class ThreeStateButton : public ToolbarButton {
-    Q_OBJECT
-    Q_PROPERTY(int state READ state WRITE setState NOTIFY stateChanged)
-public:
-    explicit ThreeStateButton(QWidget *parent = nullptr);
-    
-    int state() const;
-    void setState(int state);
-    
-signals:
-    void stateChanged(int newState);
-    
-protected:
-    void mousePressEvent(QMouseEvent *event) override;
-    
-private:
-    int m_state = 0; // 0, 1, or 2
-    QString stateIcons[3];
-};
-
-class ToolButton : public ToggleButton {
-    Q_OBJECT
-public:
-    explicit ToolButton(QWidget *parent = nullptr);
-    // Same as ToggleButton, but semantically for tools
-    // Used with QButtonGroup for exclusive selection
-};
-```
-
-**Checklist:**
-- [ ] Create header with class definitions
-- [ ] Implement ToolbarButton base (icon handling, dark mode)
-- [ ] Implement ActionButton (minimal, just applies style class)
-- [ ] Implement ToggleButton (setCheckable, style class)
-- [ ] Implement ThreeStateButton (state cycling, Q_PROPERTY for QSS)
-- [ ] Implement ToolButton (same as Toggle, semantic distinction)
-- [ ] Add to CMakeLists.txt
+**Implemented classes:**
+- `ToolbarButton` - Base class: 36×36 size, `setThemedIcon()`, `setDarkMode()`
+- `ActionButton` - Not checkable, instant action
+- `ToggleButton` - Checkable, on/off state
+- `ThreeStateButton` - Cycles 0→1→2, Q_PROPERTY for QSS `[state="N"]`
+- `ToolButton` - Same as ToggleButton, for use with QButtonGroup
 
 ---
 
 ### Task 0.4: Test Button Types
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-**Verification:**
-- [ ] Create simple test widget with one of each button type
-- [ ] Verify hover states work
-- [ ] Verify toggle on/off visually distinct
-- [ ] Verify 3-state cycles correctly with visual feedback
-- [ ] Verify dark mode icon switching
-- [ ] Verify 36×36 sizing
+**Files created:**
+- `source/ui/ToolbarButtonTests.h/cpp` - Unit tests using QTest
+- `source/ui/ToolbarButtonTestWidget.h/cpp` - Visual test widget
+
+**Unit tests (all passing):**
+- [x] testActionButton - Not checkable, correct objectName, 36×36 size
+- [x] testToggleButton - Checkable, toggle behavior
+- [x] testThreeStateButton - State cycling 0→1→2→0, bounds clamping
+- [x] testToolButton - Checkable, correct objectName
+- [x] testToolButtonGroup - Exclusive selection with QButtonGroup
+- [x] testIconLoading - Icon loading, dark mode switching
+- [x] testButtonStyles - QSS loading for light/dark themes
+
+**Run commands:**
+```bash
+./build/NoteApp --test-buttons        # Unit tests
+./build/NoteApp --test-buttons-visual # Visual test widget
+```
+
+**Visual test widget features:**
+- All 4 button types displayed
+- Dark mode toggle
+- Status labels showing state changes
+- Tool buttons in exclusive group
 
 ---
 
 ## Phase A: NavigationBar
 
 ### Task A.1: Create NavigationBar Class
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 **Files to create:**
 - `source/ui/NavigationBar.h`
@@ -202,9 +158,23 @@ public:
 
 **Prerequisites:** Phase 0 complete (button types defined)
 
+**Layout:**
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ [←][📁][💾][+]          document_name.snb          [⛶][📤][📝][⋮] │
+│  │   │   │  │                  │                     │   │   │  │       │
+│  │   │   │  └─ Add (stub)      │                     │   │   │  └─ Menu │
+│  │   │   └─ Save               │                     │   │   └─ Right   │
+│  │   └─ Left Sidebar Toggle    │                     │   │      Sidebar │
+│  └─ Back to Launcher           └─ Filename           │   └─ Share(stub)│
+│                                   (click=toggle tabs)└─ Fullscreen     │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
 **Class structure:**
 ```cpp
 #include "ui/ToolbarButtons.h"
+#include <QLabel>
 
 class NavigationBar : public QWidget {
     Q_OBJECT
@@ -215,64 +185,70 @@ public:
     void updateTheme(bool darkMode, const QColor &accentColor);
     
 signals:
-    // Left side - layout toggles
+    // Left side
     void launcherClicked();
-    void pdfOutlineToggled(bool checked);
-    void bookmarksToggled(bool checked);
-    void layerPanelToggled(bool checked);
-    
-    // Right side - actions
-    void markdownNotesToggled(bool checked);
+    void leftSidebarToggled(bool checked);
     void saveClicked();
+    void addClicked();  // Stubbed - will show menu in future
+    
+    // Center
+    void filenameClicked();  // Toggle tab container visibility
+    
+    // Right side
     void fullscreenToggled(bool checked);
-    void touchGestureModeChanged(int mode); // 0, 1, or 2
+    void shareClicked();  // Stubbed - placeholder
+    void rightSidebarToggled(bool checked);  // Markdown notes
     void menuRequested();
     
 private:
-    // Left buttons (using Phase 0 button types)
-    ActionButton *launcherButton;      // Back to launcher
-    ToggleButton *outlineButton;
-    ToggleButton *bookmarksButton;
-    ToggleButton *layerPanelButton;
+    // Left buttons
+    ActionButton *launcherButton;
+    ToggleButton *leftSidebarButton;
+    ActionButton *saveButton;
+    ActionButton *addButton;  // Stubbed
     
     // Center
-    QLabel *filenameLabel;
+    QPushButton *filenameButton;  // Clickable label
     
     // Right buttons
-    ToggleButton *markdownNotesButton;
-    ActionButton *saveButton;
     ToggleButton *fullscreenButton;
-    ThreeStateButton *touchGestureButton;
+    ActionButton *shareButton;  // Stubbed
+    ToggleButton *rightSidebarButton;
     ActionButton *menuButton;
+    
+    // State
+    bool m_darkMode = false;
+    QColor m_accentColor;
 };
 ```
 
 **Checklist:**
-- [ ] Create header with class definition
-- [ ] Create cpp with constructor and button setup
-- [ ] Implement `setFilename()` with elision for long names
-- [ ] Implement `updateTheme()` for accent color
-- [ ] Add to CMakeLists.txt
+- [x] Create header with class definition
+- [x] Create cpp with constructor and button setup
+- [x] Implement `setFilename()` with elision for long names
+- [x] Implement `updateTheme()` for accent color (#2277CC default)
+- [x] Make filename clickable (emits filenameClicked)
+- [x] Add to CMakeLists.txt
 
 ---
 
-### Task A.2: Create Button Icons
-**Status:** ⬜ Not Started
+### Task A.2: Check/Create Button Icons
+**Status:** ✅ Complete
 
-**Icons needed (light + dark variants):**
-- [ ] `launcher.svg` / `launcher_dark.svg` (back/home arrow)
-- [ ] `outline.svg` / `outline_dark.svg` (PDF outline)
-- [ ] `bookmarks.svg` / `bookmarks_dark.svg`
-- [ ] `layers.svg` / `layers_dark.svg`
-- [ ] `markdown.svg` / `markdown_dark.svg`
-- [ ] `save.svg` / `save_dark.svg`
-- [ ] `fullscreen.svg` / `fullscreen_dark.svg`
-- [ ] `touch_gesture_0.svg` (off)
-- [ ] `touch_gesture_1.svg` (mode 1)
-- [ ] `touch_gesture_2.svg` (mode 2)
-- [ ] `menu.svg` / `menu_dark.svg` (three dots)
+**Icons needed (check existing in `resources/icons/` first):**
 
-**Note:** Check existing icons in `resources/icons/` - many may already exist.
+| Button | Icon Base Name | Exists? |
+|--------|---------------|---------|
+| Back to Launcher | `folder` or new `back` | recent.png ✓ |
+| Left Sidebar Toggle | `outline` or new `sidebar` | leftsidebar.png ✓ |
+| Save | `save` | save.png ✓ |
+| Add | `addtab` | addtab.png ✓ |
+| Fullscreen | `fullscreen` | fullscreen.png ✓ |
+| Share | new `share` or `export` | export.png ✓ |
+| Right Sidebar Toggle | `markdown` | rightsidebar.png ✓ |
+| Menu | `menu` | menu.png ✓ |
+
+**Note:** Most icons already exist. May need to verify they look appropriate for nav bar context. I manually corrected the file names. Since the reversed icons always have a "_reversed" suffix, and it's handled by buttons themselves, so no worries here. 
 
 ---
 
@@ -282,18 +258,38 @@ private:
 **Changes to MainWindow:**
 - [ ] Add `#include "ui/NavigationBar.h"`
 - [ ] Create `NavigationBar *navigationBar` member
-- [ ] Add to main layout (top position)
+- [ ] Add to main layout (top position, above tab bar)
 - [ ] Connect signals to existing MainWindow slots
 - [ ] Remove old navigation-related buttons from MainWindow
 
 **Signal connections:**
 ```cpp
-connect(navigationBar, &NavigationBar::launcherToggled, 
-        this, &MainWindow::toggleLauncher);
+// Left side
+connect(navigationBar, &NavigationBar::launcherClicked, 
+        this, &MainWindow::showLauncher);  // Or stub
+connect(navigationBar, &NavigationBar::leftSidebarToggled,
+        this, &MainWindow::toggleLeftSidebar);  // Stub initially
 connect(navigationBar, &NavigationBar::saveClicked,
         this, &MainWindow::saveDocument);
-// ... etc
+connect(navigationBar, &NavigationBar::addClicked,
+        this, &MainWindow::showAddMenu);  // Stub
+
+// Center
+connect(navigationBar, &NavigationBar::filenameClicked,
+        this, &MainWindow::toggleTabBarVisibility);  // Stub
+
+// Right side
+connect(navigationBar, &NavigationBar::fullscreenToggled,
+        this, &MainWindow::setFullscreen);
+connect(navigationBar, &NavigationBar::shareClicked,
+        []() { /* Stub - do nothing */ });
+connect(navigationBar, &NavigationBar::rightSidebarToggled,
+        this, &MainWindow::toggleMarkdownNotes);  // Or stub
+connect(navigationBar, &NavigationBar::menuRequested,
+        this, &MainWindow::showOverflowMenu);
 ```
+
+**Note:** Many slots will be stubs initially. Core functionality (save, fullscreen) should work.
 
 ---
 
@@ -321,6 +317,21 @@ connect(navigationBar, &NavigationBar::saveClicked,
 
 **Prerequisites:** Phase 0 complete (button types defined)
 
+**Layout:**
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ [🖊️][🖍️][⌫][◯][📝][T]              [↩️][↪️]  [👆]                     │
+│  │   │   │  │  │  │                  │   │    │                        │
+│  │   │   │  │  │  └─ Text            │   │    └─ Touch Gesture (3-st) │
+│  │   │   │  │  └─ Object Selection   │   └─ Redo                       │
+│  │   │   │  └─ Lasso                 └─ Undo                           │
+│  │   │   └─ Eraser                                                     │
+│  │   └─ Marker                                                         │
+│  └─ Pen                                                                │
+└─────────────────────────────────────────────────────────────────────────┘
+  [---- Tool Buttons (exclusive) ----]  [Actions]  [Tab-specific]
+```
+
 **Class structure:**
 ```cpp
 #include "ui/ToolbarButtons.h"
@@ -331,17 +342,19 @@ public:
     explicit Toolbar(QWidget *parent = nullptr);
     
     void setCurrentTool(ToolType tool);
+    void setTouchGestureMode(int mode);  // 0, 1, or 2
     void updateTheme(bool darkMode);
     
 signals:
     void toolSelected(ToolType tool);
     void undoClicked();
     void redoClicked();
+    void touchGestureModeChanged(int mode);
     
 private:
     QButtonGroup *toolGroup; // Exclusive selection for ToolButtons
     
-    // Tool buttons (using Phase 0 button types)
+    // Tool buttons (exclusive selection)
     ToolButton *penButton;
     ToolButton *markerButton;
     ToolButton *eraserButton;
@@ -349,11 +362,15 @@ private:
     ToolButton *objectSelectionButton;
     ToolButton *textButton;
     
-    // Action buttons (instant, not in group)
+    // Action buttons
     ActionButton *undoButton;
     ActionButton *redoButton;
     
+    // Tab-specific settings
+    ThreeStateButton *touchGestureButton;  // Off / Y-axis / Full
+    
     ToolType currentTool;
+    bool m_darkMode = false;
 };
 ```
 
@@ -581,14 +598,14 @@ SubToolbar { ... }
 
 | Phase | Description | Status | Tasks |
 |-------|-------------|--------|-------|
-| 0 | Button Types | 🔄 In Progress | 2/4 |
-| A | NavigationBar | ⬜ Not Started | 0/4 |
+| 0 | Button Types | ✅ Complete | 4/4 |
+| A | NavigationBar | 🔄 In Progress | 2/4 |
 | B | Toolbar | ⬜ Not Started | 0/4 |
 | C | TabBar | ⬜ Not Started | 0/2 |
 | D | Subtoolbars | ⬜ Deferred | 0/6 |
 | E | Cleanup | ⬜ Not Started | 0/3 |
 
-**Overall:** 2/23 tasks complete
+**Overall:** 6/23 tasks complete
 
 ---
 
@@ -612,3 +629,23 @@ Check MainWindow.cpp for:
 
 
 
+## Design Notes
+
+### UI Hierarchy
+| Layer | Scope | Location |
+|-------|-------|----------|
+| NavigationBar | Global/App-wide | Top of window |
+| Toolbar | Tab/Document-specific | Below tab bar |
+| Subtoolbars | Tool-specific | Left side, floating |
+
+### Left Sidebar Container
+Contains internal switches for:
+- PDF Outline
+- Bookmarks  
+- Page Preview / Jump to Page
+- Layer Panel
+
+One toggle on NavigationBar shows/hides the entire container.
+
+### Default Accent Color
+`#2277CC` - can be customized via Control Panel in future. 

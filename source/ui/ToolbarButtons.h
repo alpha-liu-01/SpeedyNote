@@ -133,7 +133,6 @@ signals:
     void stateChanged(int newState);
 
 protected:
-    void mousePressEvent(QMouseEvent *event) override;
     void updateIcon() override;
 
 private:

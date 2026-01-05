@@ -104,7 +104,7 @@ if (WIN32)
     set(WIN_RESOURCES app_icon.rc)
 
     # Find dependencies for Windows
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     # Poppler is already found via pkg-config above
     find_package(SDL2 REQUIRED CONFIG)
     unset(SDL2main CACHE)
@@ -133,7 +133,7 @@ elseif (APPLE)
     )
     
     # Find Qt6 from Homebrew
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     
     # Find SDL2 from Homebrew via pkg-config
     find_package(PkgConfig REQUIRED)
@@ -202,7 +202,7 @@ elseif (APPLE)
 elseif (UNIX)
     # Linux-specific configuration
     # Use system paths for Linux
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
 
@@ -333,6 +333,9 @@ set(UI_SOURCES
         source/ui/LayerPanel.cpp             # Task 3.0.3
         source/ui/DebugOverlay.cpp           # Debug overlay widget
         source/ui/ToolbarButtons.cpp         # Toolbar button types
+        source/ui/ToolbarButtonTests.cpp     # Toolbar button unit tests
+        source/ui/ToolbarButtonTestWidget.cpp # Toolbar button visual test
+        source/ui/NavigationBar.cpp          # Navigation bar (Phase A)
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
@@ -422,7 +425,7 @@ endif ()
 # ✅ Link libraries - platform specific
 if (WIN32)
     target_link_libraries(NoteApp
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
             SDL2::SDL2
             PkgConfig::POPPLER
             dsound  # For DirectSound API
@@ -430,7 +433,7 @@ if (WIN32)
     )
 elseif (APPLE)
     target_link_libraries(NoteApp
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
             PkgConfig::SDL2
             ${POPPLER_LIBRARIES}
             ${COREAUDIO_FRAMEWORK}
@@ -439,7 +442,7 @@ elseif (APPLE)
     )
 elseif (UNIX)
     target_link_libraries(NoteApp
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
             PkgConfig::SDL2
             PkgConfig::POPPLER
             asound  # For ALSA audio

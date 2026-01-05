@@ -20,6 +20,8 @@
 #include "core/PageTests.h" // Phase 1.1.7: Page unit tests
 #include "core/DocumentTests.h" // Phase 1.2.8: Document unit tests
 #include "core/DocumentViewportTests.h" // Phase 1.3.11: Viewport tests
+#include "ui/ToolbarButtonTests.h" // Toolbar button unit tests
+#include "ui/ToolbarButtonTestWidget.h" // Toolbar button visual test
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -247,6 +249,8 @@ int main(int argc, char *argv[]) {
     bool runPageTests = false;
     bool runDocumentTests = false;
     bool runViewportTests = false;
+    bool runButtonTests = false;
+    bool runButtonVisualTest = false;
     // REMOVED Phase 3.1: useNewViewport - always using new architecture
     
     // Parse command line arguments
@@ -271,6 +275,12 @@ int main(int argc, char *argv[]) {
         } else if (arg == "--test-viewport") {
             // Phase 1.3.11: Run DocumentViewport visual test
             runViewportTests = true;
+        } else if (arg == "--test-buttons") {
+            // Run toolbar button unit tests
+            runButtonTests = true;
+        } else if (arg == "--test-buttons-visual") {
+            // Run toolbar button visual test widget
+            runButtonVisualTest = true;
         } else if (!arg.startsWith("--") && inputFile.isEmpty()) {
             // Regular file argument (first non-flag argument)
             inputFile = arg;
@@ -313,6 +323,29 @@ int main(int argc, char *argv[]) {
         freopen("CONOUT$", "w", stderr);
 #endif
         int result = DocumentViewportTests::runVisualTest();
+        SDL_Quit();
+        return result;
+    }
+    
+    // Handle --test-buttons command (unit tests)
+    if (runButtonTests) {
+#ifdef _WIN32
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+#endif
+        int result = runButtonTests ? runButtonTests : 0;
+        result = runButtonTests ? QTest::qExec(new ToolbarButtonTests()) : 0;
+        SDL_Quit();
+        return result;
+    }
+    
+    // Handle --test-buttons-visual command (visual test widget)
+    if (runButtonVisualTest) {
+        ToolbarButtonTestWidget *testWidget = new ToolbarButtonTestWidget();
+        testWidget->setAttribute(Qt::WA_DeleteOnClose);
+        testWidget->show();
+        int result = app.exec();
         SDL_Quit();
         return result;
     }

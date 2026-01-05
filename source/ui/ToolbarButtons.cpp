@@ -116,6 +116,12 @@ ThreeStateButton::ThreeStateButton(QWidget *parent)
     
     // Set object name for QSS styling
     setObjectName("ThreeStateButton");
+    
+    // Handle click signal to cycle states
+    // (mousePressEvent is not called by QPushButton::click())
+    connect(this, &QPushButton::clicked, this, [this]() {
+        setState((m_state + 1) % 3);
+    });
 }
 
 void ThreeStateButton::setState(int state)
@@ -145,16 +151,8 @@ void ThreeStateButton::setStateIcons(const QString &baseName0,
     updateIcon();
 }
 
-void ThreeStateButton::mousePressEvent(QMouseEvent *event)
-{
-    if (event->button() == Qt::LeftButton) {
-        // Cycle through states: 0 -> 1 -> 2 -> 0
-        setState((m_state + 1) % 3);
-    }
-    
-    // Still call base for visual feedback
-    QPushButton::mousePressEvent(event);
-}
+// Note: State cycling is handled via clicked() signal connection in constructor
+// This allows both real clicks and programmatic click() to work
 
 void ThreeStateButton::updateIcon()
 {

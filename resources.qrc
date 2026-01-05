@@ -106,6 +106,10 @@
     <file>resources/icons/clipboard_reversed.png</file>
     <file>resources/icons/notvisible.png</file>
     <file>resources/icons/notvisible_reversed.png</file>
+    <file>resources/icons/leftsidebar.png</file>
+    <file>resources/icons/leftsidebar_reversed.png</file>
+    <file>resources/icons/rightsidebar.png</file>
+    <file>resources/icons/rightsidebar_reversed.png</file>
     <file>resources/reversed_icons/color_reversed.png</file>
     <file>resources/reversed_icons/bookpage_reversed.png</file>
     <file>resources/reversed_icons/zoom_reversed.png</file>
