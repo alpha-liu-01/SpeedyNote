@@ -52,6 +52,9 @@ class InkCanvas;
 #include "core/ToolType.h"
 #include <QElapsedTimer>
 
+// Toolbar extraction includes
+#include "ui/NavigationBar.h"
+
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
 // Will be reimplemented in Phase 3.3 if needed
 // Guard to prevent redefinition if InkCanvas.h is also included
@@ -589,6 +592,9 @@ private:
     QTabWidget *m_tabWidget = nullptr;      // Replaces tabList + canvasStack
     TabManager *m_tabManager = nullptr;     // Manages tabs and DocumentViewports
     DocumentManager *m_documentManager = nullptr;  // Manages Document lifecycle
+    
+    // Toolbar extraction: NavigationBar (Phase A)
+    NavigationBar *m_navigationBar = nullptr;
     
     QPushButton *addTabButton;     // Button to add tabs
     QWidget *tabBarContainer;      // Container for horizontal tab bar

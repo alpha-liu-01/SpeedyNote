@@ -1447,17 +1447,75 @@ void MainWindow::setupUi() {
     
     // MW2.2: Removed dial toolbar toggle
 
-    // Main layout: tab bar -> toolbar -> canvas (vertical stack)
+    // Main layout: navigation bar -> tab bar -> toolbar -> canvas (vertical stack)
     QWidget *container = new QWidget;
     container->setObjectName("container");
     QVBoxLayout *mainLayout = new QVBoxLayout(container);
     mainLayout->setContentsMargins(0, 0, 0, 0);  // ✅ Remove extra margins
     mainLayout->setSpacing(0); // ✅ Remove spacing between components
 
+    // =========================================================================
+    // Phase A: NavigationBar (Toolbar Extraction)
+    // =========================================================================
+    m_navigationBar = new NavigationBar(this);
+    m_navigationBar->setFilename(tr("Untitled"));
+    mainLayout->addWidget(m_navigationBar);
+    
+    // Connect NavigationBar signals
+    connect(m_navigationBar, &NavigationBar::launcherClicked, this, [this]() {
+        // Stub - will show launcher in future
+        qDebug() << "NavigationBar: Launcher clicked (stub)";
+    });
+    connect(m_navigationBar, &NavigationBar::leftSidebarToggled, this, [this](bool checked) {
+        // Stub - toggle left sidebar container
+        qDebug() << "NavigationBar: Left sidebar toggled:" << checked;
+        if (m_leftSideContainer) {
+            m_leftSideContainer->setVisible(checked);
+        }
+        if (m_layerPanel) {
+            m_layerPanel->setVisible(checked);
+        }
+    });
+    connect(m_navigationBar, &NavigationBar::saveClicked, this, &MainWindow::saveDocument);
+    connect(m_navigationBar, &NavigationBar::addClicked, this, [this]() {
+        // Stub - will show add menu in future
+        qDebug() << "NavigationBar: Add clicked (stub)";
+        addNewTab();  // For now, just add a new tab
+    });
+    connect(m_navigationBar, &NavigationBar::filenameClicked, this, [this]() {
+        // Stub - toggle tab bar visibility
+        qDebug() << "NavigationBar: Filename clicked - toggle tabs (stub)";
+        if (m_tabWidget) {
+            m_tabWidget->tabBar()->setVisible(!m_tabWidget->tabBar()->isVisible());
+        }
+    });
+    connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this](bool checked) {
+        Q_UNUSED(checked);
+        toggleFullscreen();
+    });
+    connect(m_navigationBar, &NavigationBar::shareClicked, this, []() {
+        // Stub - placeholder, does nothing
+        qDebug() << "NavigationBar: Share clicked (stub - not implemented)";
+    });
+    connect(m_navigationBar, &NavigationBar::rightSidebarToggled, this, [this](bool checked) {
+        // Toggle markdown notes sidebar
+        if (markdownNotesSidebar) {
+            markdownNotesSidebar->setVisible(checked);
+        }
+    });
+    connect(m_navigationBar, &NavigationBar::menuRequested, this, [this]() {
+        // Show overflow menu at menu button position
+        if (overflowMenu && m_navigationBar) {
+            overflowMenu->popup(m_navigationBar->mapToGlobal(
+                QPoint(m_navigationBar->width() - 10, m_navigationBar->height())));
+        }
+    });
+    // ------------------ End of NavigationBar signal connections ------------------
+
     // Add components in vertical order
     // Phase 3.1: tabBarContainer hidden - buttons moved to m_tabWidget corner widgets
     // mainLayout->addWidget(tabBarContainer);   // Old tab bar - now hidden
-    mainLayout->addWidget(controlBar);        // Toolbar at top
+    mainLayout->addWidget(controlBar);        // Toolbar below nav bar
     
     // Content area with sidebars and canvas
     QHBoxLayout *contentLayout = new QHBoxLayout;
@@ -4144,6 +4202,11 @@ void MainWindow::updateTheme() {
     // Update control bar background color to match tab list brightness
     QColor accentColor = getAccentColor();
     bool darkMode = isDarkMode();
+    
+    // Phase A: Update NavigationBar theme
+    if (m_navigationBar) {
+        m_navigationBar->updateTheme(darkMode, accentColor);
+    }
     
     if (controlBar) {
         // Use same background as unselected tab color

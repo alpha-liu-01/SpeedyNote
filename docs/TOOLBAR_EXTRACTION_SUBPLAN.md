@@ -253,20 +253,20 @@ private:
 ---
 
 ### Task A.3: Integrate NavigationBar into MainWindow
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 **Changes to MainWindow:**
-- [ ] Add `#include "ui/NavigationBar.h"`
-- [ ] Create `NavigationBar *navigationBar` member
-- [ ] Add to main layout (top position, above tab bar)
-- [ ] Connect signals to existing MainWindow slots
-- [ ] Remove old navigation-related buttons from MainWindow
+- [x] Add `#include "ui/NavigationBar.h"`
+- [x] Create `NavigationBar *m_navigationBar` member
+- [x] Add to main layout (top position, above controlBar)
+- [x] Connect signals to existing MainWindow slots/stubs
+- [ ] Remove old navigation-related buttons from MainWindow (deferred to Phase E)
 
 **Signal connections:**
 ```cpp
 // Left side
 connect(navigationBar, &NavigationBar::launcherClicked, 
-        this, &MainWindow::showLauncher);  // Or stub
+        this, &MainWindow::showLauncher);  // Or stub, since we don't have the new left sidebar yet.
 connect(navigationBar, &NavigationBar::leftSidebarToggled,
         this, &MainWindow::toggleLeftSidebar);  // Stub initially
 connect(navigationBar, &NavigationBar::saveClicked,
@@ -599,13 +599,13 @@ SubToolbar { ... }
 | Phase | Description | Status | Tasks |
 |-------|-------------|--------|-------|
 | 0 | Button Types | ✅ Complete | 4/4 |
-| A | NavigationBar | 🔄 In Progress | 2/4 |
+| A | NavigationBar | 🔄 In Progress | 3/4 |
 | B | Toolbar | ⬜ Not Started | 0/4 |
 | C | TabBar | ⬜ Not Started | 0/2 |
 | D | Subtoolbars | ⬜ Deferred | 0/6 |
 | E | Cleanup | ⬜ Not Started | 0/3 |
 
-**Overall:** 6/23 tasks complete
+**Overall:** 7/23 tasks complete
 
 ---
 
