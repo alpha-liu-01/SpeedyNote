@@ -1,8 +1,8 @@
 # MainWindow Cleanup Subplan
 
-**Document Version:** 1.2  
+**Document Version:** 1.3  
 **Date:** January 5, 2026  
-**Status:** Phase 1, 2, & 3 Complete, Phase 4 Ready  
+**Status:** Phase 1-3 Complete, Phase 5 Planned  
 **Prerequisites:** Q&A completed in `MAINWINDOW_CLEANUP_QA.md`  
 **Related:** `TOOLBAR_EXTRACTION_SUBPLAN.md` (Phase 3 details)
 
@@ -16,7 +16,8 @@ MainWindow.cpp (~9,700 lines) is the last major piece of legacy code in SpeedyNo
 1. ✅ Delete dead code (~2,800 lines saved!)
 2. ✅ Delete dial system entirely (simpler than extraction)
 3. ✅ Extract toolbar components (NavigationBar, Toolbar, TabBar)
-4. Clean up remaining code structure
+4. ⬜ Clean up remaining obsolete code (Phase 5)
+5. ⬜ Extract input handling to hub classes (Phase 6)
 
 ### Results So Far
 | Metric | Before | Current | Target |
@@ -633,4 +634,570 @@ These items are identified but NOT part of this cleanup:
 
 
 
-## Next Step
+## Next Steps
+
+### Options:
+
+- Implement subtoolbars for each tool. But the mainwindow still has a lot of code for other widgets. 
+- Add PDF features back (PDF outline and PDF Text Selection), but PDF outline actually requires a convenient page switching method (which hasn't been connected yet)
+- ~~Reconnect switch to page methods. Clean up ALL the page switching code before (because InkCanvas worked totally differently) and connect to the new DocumentViewport.~~ 
+- Sorting minor things out, like where the pan sliders are supposed to be positioned, and continue cleaning up the mainwindow, extracting other components out (like a shortcut hub or something), because there are still a lot of code in mainwindow for the keyboard/SDLController controller mappings. 
+- Continue implementing more InsertedObject types, like a shortcut object (which will be connected to the markdown notes on the markdown sidebar later, and also help the UX design of the subtoolbar of ObjectInsert tool)
+
+Which one of these is the thing to do now that makes the most sense? 
+
+
+
+### Answers: 
+
+0. Option 3 it is. Page switching has a high priority. 
+1. It does support paged documents and edgeless documents. Paged documents has 2 layouts, 1 column and 2 column, from here
+
+```cpp
+// ===== Layout =====
+
+void DocumentViewport::setLayoutMode(LayoutMode mode)
+{
+    if (m_layoutMode == mode) {
+        return;
+    }
+    
+    // Before switching: get the page currently at viewport center
+    int currentPage = m_currentPageIndex;
+    qreal oldPageY = 0;
+    if (m_document && !m_document->isEdgeless() && currentPage >= 0) {
+        oldPageY = pagePosition(currentPage).y();
+    }
+    
+    LayoutMode oldMode = m_layoutMode;
+    m_layoutMode = mode;
+    
+    // Invalidate layout cache for new layout mode
+    invalidatePageLayoutCache();
+    
+    // After switching: adjust vertical offset to keep same page visible
+    if (m_document && !m_document->isEdgeless() && currentPage >= 0) {
+        qreal newPageY = pagePosition(currentPage).y();
+        
+        // Adjust pan offset to compensate for page position change
+        // Keep the same relative position within the viewport
+        qreal yDelta = newPageY - oldPageY;
+        m_panOffset.setY(m_panOffset.y() + yDelta);
+        
+        qDebug() << "Layout switch:" << (oldMode == LayoutMode::SingleColumn ? "1-col" : "2-col")
+                 << "->" << (mode == LayoutMode::SingleColumn ? "1-col" : "2-col")
+                 << "page" << currentPage << "yDelta" << yDelta;
+    }
+    
+    // Update PDF cache capacity for new layout (Task 1.3.6)
+    updatePdfCacheCapacity();
+    
+    // Recenter content horizontally for new layout width
+    recenterHorizontally();
+    
+    // Recalculate layout and repaint
+    clampPanOffset();
+    update();
+    emitScrollFractions();
+}
+```
+
+you can see that how 1 column and 2 column layout switch back and forth. And this function
+```cpp
+// ===== Layout Engine (Task 1.3.2) =====
+
+QPointF DocumentViewport::pagePosition(int pageIndex) const
+{
+    if (!m_document || pageIndex < 0 || pageIndex >= m_document->pageCount()) {
+        return QPointF(0, 0);
+    }
+    
+    // For edgeless documents, there's only one page at origin
+    if (m_document->isEdgeless()) {
+        return QPointF(0, 0);
+    }
+    
+    // Ensure cache is valid - O(n) rebuild only when dirty
+    ensurePageLayoutCache();
+    
+    // O(1) lookup from cache
+    qreal y = (pageIndex < m_pageYCache.size()) ? m_pageYCache[pageIndex] : 0;
+    
+    switch (m_layoutMode) {
+        case LayoutMode::SingleColumn:
+            // X is always 0 for single column
+            return QPointF(0, y);
+        
+        case LayoutMode::TwoColumn: {
+            // Y comes from cache, just need to calculate X for right column
+            int col = pageIndex % 2;
+            qreal x = 0;
+            
+            if (col == 1) {
+                // Right column - offset by left page width + gap
+                int leftIdx = (pageIndex / 2) * 2;
+                const Page* leftPage = m_document->page(leftIdx);
+                if (leftPage) {
+                    x = leftPage->size.width() + m_pageGap;
+                }
+            }
+            
+            return QPointF(x, y);
+        }
+    }
+    
+    return QPointF(0, 0);
+}
+```
+is supposed to find the position of a page. So page switching should be VERY straightfoward. But you need to read the documents in phase 1.3 and think twice before we make the plan. 
+
+
+2. The Page Switching UI (apart from touch gestures and keyboard shortcuts) only exists in page panel, and I haven't decided on the style yet. But visual changes should be easy after we sort all the logic out. 
+
+3. They are equally as important. 
+
+### Extra details
+
+- There should be one and only one switch page function in mainwindow. All other UI components in mainwindow should only be accessing this. 
+
+- None of the old page related logic works. InkCanvas is permanently dead. 
+
+
+### More Answers
+
+A6: Apart from what the user can SEE, everything else should stay 0-based for consistency, including the values stored in mainwindow. I don't know if this makes sense. What do you think? 
+A7: We don't need this any more. This was built for magicdial, which was removed. 
+A8: I don't even think goToNextPage needs to exist now... It only served a few shortcut buttons that we already removed...
+
+---
+
+## Phase S4: Page Switching Implementation ✅ COMPLETED
+
+**Date:** January 5, 2026
+
+### What Was Done
+
+Implemented page switching with ~25 lines of code:
+
+1. **`switchPage(int pageIndex)`** - Main function (0-based)
+   - Calls `vp->scrollToPage(pageIndex)`
+   - pageInput update handled by signal
+
+2. **`switchPageWithDirection(int pageIndex, int direction)`**
+   - Now just calls `switchPage()` (direction was for magicdial)
+
+3. **`goToPreviousPage()` / `goToNextPage()`**
+   - Thin wrappers: `switchPage(currentPageIndex ± 1)`
+
+4. **`onPageInputChanged(int newPage)`**
+   - Simplified: `switchPage(newPage - 1)` (convert 1-based to 0-based)
+
+5. **Connected `currentPageChanged` signal to update `pageInput`**
+   - pageInput now auto-updates when page changes (scroll, touch, keyboard, etc.)
+
+### Code Changes
+
+```cpp
+void MainWindow::switchPage(int pageIndex) {
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    vp->scrollToPage(pageIndex);  // 0-based
+}
+
+void MainWindow::goToNextPage() {
+    if (auto* vp = currentViewport())
+        switchPage(vp->currentPageIndex() + 1);
+}
+
+void MainWindow::goToPreviousPage() {
+    if (auto* vp = currentViewport())
+        switchPage(vp->currentPageIndex() - 1);
+}
+```
+
+### Verification
+
+- [x] Build successful
+- [ ] Manual test: pageInput spinbox changes page
+- [ ] Manual test: Mouse back/forward buttons work
+- [ ] Manual test: Gamepad controller navigation works
+- [ ] Manual test: Page scrolling updates pageInput 
+
+
+## Answers for further cleanup
+
+1. The issues is on the pan X slider. When the tab bar folds (by clicking the title on navigation bar), everything is fine. But when tab bar appears, (upon launching the application or adjusting any other layouts), the pan X slider is about 1 tab bar height lower than where it's supposed to be. Folding and unfolding the tab bar fixes this problem, but if I change the layout again (by resizing the window or opening a side bar), the pan X slider misposition happens again. 
+
+2. We need a new folder `controls` in the `source` folder, and it should contain a keyboardshortcuthub, a mouseshortcuthub, and a controllershortcuthub? After we recover the keyboard shortcut settings from the control panel `ControlPanelDialog.cpp`, we can change the hard coded defaults to editable ones. 
+
+3. Fix (1) first, because it's obvious, then 
+
+
+(2) delete the functions that don't make sense any more, like `onZoomSliderChanged` (because the zoom slider doesn't exist any more), 
+
+(3) any interactions with PDF (like `getPdfDocument`, or anything related to the PDF outline. I find it insane that the PDF loads the PDF outline itself before). 
+
+(4) Then all toggle functions for old panels (since we already replaced them with sidebar containers, except for the markdown container on the right). 
+
+(5) Then bookmark related functions. 
+
+(6) Then everything about color presets (we don't have hard coded color presets any more.)
+
+(7) Everything related to the old spn format packages. New packaging TBD (`.snb` is temporarily a loose folder, and we will finalize the packaging after we finalize everything about persistence)
+
+(8) Other useless logic, like `onAutoScrollRequested`.
+
+## Questions: 
+
+1. Does `setupSingleInstanceServer()` sound like a good and efficient idea to stay single instance? This needs Qt network module.
+
+2. Is my plan above (in Answer 3) reasonable? 
+
+
+## More answers about further cleanup
+
+1. From what I can see, MainWindow line 5063 `updateScrollbarPositions()`. There may be more. 
+
+2. Sorry for making this mistake. What I meant was "'MainWindow loads the PDF outline' was ridiculous". 
+Now it's (supposed to be) handled by DocumentViewport
+```cpp
+QVector<PdfOutlineItem> Document::pdfOutline() const
+{
+    if (!isPdfLoaded()) {
+        return QVector<PdfOutlineItem>();
+    }
+    return m_pdfProvider->outline();
+}
+```
+And it fetches PDF Outline from the pdf provider abstraction layer, and then it fetches the actual data from one of the PDF providers (for now there is only Poppler). 
+
+3. Previously, it was both (since the PDF pages HAD to be tied to pages 1 to 1). But now, it is NEITHER, and how bookmarks should work now is TBD. 
+The page index and the PDF page index ARE SEPARATE AND CAN BE DIFFERENT, because it allows empty pages to be inserted between 2 PDF pages. PDF outline should follow PDF page index obviously, but bookmarks... we may need to record both. 
+
+4. The `controlBar` IS the old tool bar, and it needs to be removed. THE NEW UI NO LONGER NEEDS THE `controlBar` ANY MORE. It used to hold the old buttons. 
+
+5. Making the 3 hubs independent makes the most sense. 
+
+6. Since the pan slider positioning is also a temporary hack after we connected the new DocumentViewport, the way they arer positioned need to be modified completely. 
+
+(1). When no keyboard is detected - HIDE COMPLETELY (I don't know if this is possible)
+(2). When a keyboard is detected - Position it like it does now, right below the tool bar (not tab bar) (for the pan X slider), and to the right of the left side container (for the pan Y slider). They should float on the top side and the left side of the DocumentViewport. 
+
+7. Delete all controlBar related code. 
+
+8. You already answered this question (but you forgot). `setupSingleInstanceServer()` is supposedly good and we don't need to worry about that now. 
+
+9. You can make a detailed plan on this cleanup process, and we can follow the plan later. I'm going to ask you for help and do some work manually myself.
+
+---
+
+## Phase 5: Comprehensive MainWindow Cleanup
+
+**Goal:** Remove obsolete code, rework pan sliders, and prepare for input hub extraction.  
+**Estimated savings:** ~1,000-1,500 lines  
+**Current MainWindow.cpp:** 6,396 lines  
+**Target:** ~5,000 lines
+
+### Scope Summary (from grep analysis)
+
+| Category | Matches | Action |
+|----------|---------|--------|
+| controlBar | 14 | DELETE |
+| zoomSlider | 21 | DELETE |
+| getPdfDocument/pdfOutline | 6 | DELETE |
+| colorPreset | 21 | DELETE |
+| .spn format | 8 | DELETE |
+| autoScroll | 2 | DELETE |
+| toggleOutline/Bookmark/Layer (old) | 30 | DELETE |
+| panXSlider/panYSlider | 47 | REWORK |
+| bookmark | 130 | DEFER (TBD) |
+| keyboard events | 18 | EXTRACT (later) |
+| SDL/controller/gamepad | 82 | EXTRACT (later) |
+
+---
+
+### MW5.1: Delete controlBar
+
+**Priority:** HIGH  
+**Matches:** 14  
+**Risk:** Low
+
+The `controlBar` was the old toolbar container. It's been replaced by NavigationBar and Toolbar.
+
+**Tasks:**
+- [ ] Find controlBar declaration in MainWindow.h
+- [ ] Delete controlBar creation code
+- [ ] Delete controlBar layout code
+- [ ] Delete controlBar styling code
+- [ ] Delete controlBar show/hide logic
+- [ ] Remove controlBar member variable
+- [ ] Verify build
+
+**Search pattern:** `controlBar`
+
+---
+
+### MW5.2: Delete zoomSlider
+
+**Priority:** HIGH  
+**Matches:** 21  
+**Risk:** Low
+
+The zoom slider was in the old toolbar. Zoom is now controlled differently.
+
+**Tasks:**
+- [ ] Find zoomSlider declaration in MainWindow.h
+- [ ] Delete zoomSlider creation code
+- [ ] Delete `onZoomSliderChanged()` function
+- [ ] Delete zoomSlider signal connections
+- [ ] Delete zoomSlider styling
+- [ ] Remove zoomSlider member variable
+- [ ] Verify build
+
+**Search pattern:** `zoomSlider|onZoomSliderChanged`
+
+---
+
+### MW5.3: Delete PDF-related functions from MainWindow
+
+**Priority:** HIGH  
+**Matches:** 6  
+**Risk:** Low
+
+PDF outline and document access is now handled by Document/DocumentViewport.
+
+**Tasks:**
+- [ ] Delete `getPdfDocument()` if it exists
+- [ ] Delete any PDF outline loading code in MainWindow
+- [ ] Ensure Document::pdfOutline() is the only path
+- [ ] Verify build
+
+**Search pattern:** `getPdfDocument|pdfOutline|PdfOutline`
+
+---
+
+### MW5.4: Delete old toggle panel functions
+
+**Priority:** HIGH  
+**Matches:** 30  
+**Risk:** Low
+
+Old floating sidebar buttons have been replaced by LeftSidebarContainer.
+
+**Tasks:**
+- [ ] Delete `toggleOutlinePanel()` function
+- [ ] Delete `toggleBookmarksPanel()` function (if separate from bookmark data)
+- [ ] Delete `toggleLayerPanel()` function (now handled by sidebar container)
+- [ ] Delete any positioning code for old floating buttons
+- [ ] Verify build
+
+**Search pattern:** `toggleOutline|toggleBookmark|toggleLayer`
+
+---
+
+### MW5.5: Delete colorPreset code
+
+**Priority:** MEDIUM  
+**Matches:** 21  
+**Risk:** Low
+
+Hard-coded color presets are no longer used. Colors are now handled differently.
+
+**Tasks:**
+- [ ] Find colorPreset declarations
+- [ ] Delete colorPreset array/list
+- [ ] Delete colorPreset loading/saving
+- [ ] Delete colorPreset button creation
+- [ ] Delete colorPreset UI logic
+- [ ] Verify build
+
+**Search pattern:** `colorPreset|ColorPreset`
+
+---
+
+### MW5.6: Delete old .spn format code
+
+**Priority:** MEDIUM  
+**Matches:** 8  
+**Risk:** Low
+
+Old spn format is deprecated. New packaging (.snb as loose folder) is TBD.
+
+**Tasks:**
+- [ ] Find .spn format references
+- [ ] Delete old packaging/unpackaging code
+- [ ] Keep any code that might be useful for migration (comment clearly)
+- [ ] Verify build
+
+**Search pattern:** `\.spn|spnFormat`
+
+---
+
+### MW5.7: Delete autoScroll code
+
+**Priority:** LOW  
+**Matches:** 2  
+**Risk:** Low
+
+Auto-scroll was a legacy feature.
+
+**Tasks:**
+- [ ] Delete `onAutoScrollRequested()` function
+- [ ] Delete any autoScroll signal connections
+- [ ] Verify build
+
+**Search pattern:** `onAutoScrollRequested|autoScroll`
+
+---
+
+### MW5.8: Rework Pan Sliders
+
+**Priority:** HIGH  
+**Matches:** 47  
+**Risk:** MEDIUM
+
+Pan sliders need complete repositioning logic overhaul.
+
+**Current Issues:**
+- Pan X slider mispositioning when tab bar appears/layout changes
+- Sliders positioned relative to tab bar (wrong reference point)
+
+**New Behavior:**
+1. **No keyboard detected:** HIDE sliders completely
+2. **Keyboard detected:** 
+   - Pan X slider: Below Toolbar (not tab bar), floating on top of DocumentViewport
+   - Pan Y slider: To the right of LeftSidebarContainer, floating on left of DocumentViewport
+
+**Tasks:**
+- [ ] Add keyboard detection logic (if not exists)
+- [ ] Modify `updateScrollbarPositions()` to use Toolbar as reference for Pan X
+- [ ] Modify `updateScrollbarPositions()` to use LeftSidebarContainer as reference for Pan Y
+- [ ] Add hide/show logic based on keyboard presence
+- [ ] Test with tab bar visible/hidden
+- [ ] Test with sidebar visible/hidden
+- [ ] Test window resize
+- [ ] Verify build
+
+**Search pattern:** `panXSlider|panYSlider|updateScrollbarPositions`
+
+---
+
+### MW5.9: Bookmark Code (DEFERRED)
+
+**Priority:** DEFERRED  
+**Matches:** 130  
+**Risk:** HIGH
+
+**Reason for deferral:** Bookmarks need architectural decisions first.
+- Page index ≠ PDF page index now (empty pages can be inserted)
+- PDF outline → follows PDF page index
+- Bookmarks → need to record BOTH page index and PDF page index
+
+**Decision needed:** How should bookmarks work with the new page model?
+
+---
+
+## Phase 6: Input Hub Extraction (Future)
+
+**Goal:** Extract keyboard, mouse, and controller input handling into separate hub classes.  
+**Estimated savings:** ~500-800 lines  
+**Dependencies:** Phase 5 should be mostly complete
+
+### Folder Structure
+
+```
+source/
+└── controls/
+    ├── KeyboardShortcutHub.h
+    ├── KeyboardShortcutHub.cpp
+    ├── MouseShortcutHub.h
+    ├── MouseShortcutHub.cpp
+    ├── ControllerShortcutHub.h
+    └── ControllerShortcutHub.cpp
+```
+
+### MW6.1: Create KeyboardShortcutHub
+
+**Matches in MainWindow:** 18 (keyPressEvent, keyReleaseEvent, QKeySequence)
+
+**Responsibilities:**
+- Handle all keyboard shortcuts
+- Load/save shortcut configurations from QSettings
+- Emit signals for actions (e.g., `undoRequested()`, `redoRequested()`)
+- Support customizable shortcuts (from ControlPanelDialog)
+
+**Tasks:**
+- [ ] Create `source/controls/` folder
+- [ ] Create KeyboardShortcutHub class
+- [ ] Move keyPressEvent logic to hub
+- [ ] Move keyReleaseEvent logic to hub
+- [ ] Define shortcut configuration format
+- [ ] Connect hub signals to MainWindow slots
+- [ ] Update CMakeLists.txt
+- [ ] Verify build
+
+---
+
+### MW6.2: Create MouseShortcutHub
+
+**Responsibilities:**
+- Handle mouse button mappings (e.g., side buttons for page navigation)
+- Support customizable mouse actions
+- Emit signals for actions
+
+**Tasks:**
+- [ ] Create MouseShortcutHub class
+- [ ] Move mouse button handling logic
+- [ ] Define mouse action configuration format
+- [ ] Connect hub signals to MainWindow slots
+- [ ] Update CMakeLists.txt
+- [ ] Verify build
+
+---
+
+### MW6.3: Create ControllerShortcutHub
+
+**Matches in MainWindow:** 82 (SDL, controller, gamepad)
+
+**Responsibilities:**
+- Handle SDL controller/gamepad input
+- Map controller buttons to actions
+- Support customizable controller mappings
+- Emit signals for actions
+
+**Tasks:**
+- [ ] Create ControllerShortcutHub class
+- [ ] Move SDL controller initialization
+- [ ] Move controller event handling
+- [ ] Define controller mapping configuration format
+- [ ] Connect hub signals to MainWindow slots
+- [ ] Update CMakeLists.txt
+- [ ] Verify build
+
+---
+
+## Execution Order
+
+**Recommended order for Phase 5:**
+
+1. **MW5.1** - Delete controlBar (foundational, unblocks other deletions)
+2. **MW5.2** - Delete zoomSlider (related to old toolbar)
+3. **MW5.4** - Delete old toggle panel functions (already replaced)
+4. **MW5.3** - Delete PDF functions from MainWindow
+5. **MW5.5** - Delete colorPreset code
+6. **MW5.6** - Delete old .spn format code
+7. **MW5.7** - Delete autoScroll code
+8. **MW5.8** - Rework pan sliders (do last, as it involves rework not just deletion)
+
+**MW5.9 (bookmarks):** Defer until architectural decision made.
+
+**Phase 6:** Start after Phase 5 is complete and tested.
+
+---
+
+## Notes
+
+- Each task should be followed by a build verification
+- Manual testing is recommended after major deletions
+- Some code may have unexpected dependencies - proceed carefully
+- Keep backup of MainWindow.cpp before starting (git commit) 

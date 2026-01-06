@@ -529,6 +529,10 @@ void DocumentViewport::scrollToPage(int pageIndex)
     
     setPanOffset(pos);
     
+    // Phase S4: Re-center horizontally after positioning
+    // This ensures the document stays centered when content is narrower than viewport
+    recenterHorizontally();
+    
     m_currentPageIndex = pageIndex;
     emit currentPageChanged(m_currentPageIndex);
 }

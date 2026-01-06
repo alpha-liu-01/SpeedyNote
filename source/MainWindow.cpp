@@ -1785,15 +1785,20 @@ bool MainWindow::selectFolder() {
 }
 
 // MW1.5: Kept as stubs - still called from many places
-void MainWindow::switchPage(int pageNumber) {
-    Q_UNUSED(pageNumber);
-    qDebug() << "switchPage(): Stub (Phase 3.3.4)";
+void MainWindow::switchPage(int pageIndex) {
+    // Phase S4: Main page switching function - everything goes through here
+    // pageIndex is 0-based internally
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    
+    vp->scrollToPage(pageIndex);
+    // pageInput update is handled by currentPageChanged signal connection
 }
 
-void MainWindow::switchPageWithDirection(int pageNumber, int direction) {
-    Q_UNUSED(pageNumber);
+void MainWindow::switchPageWithDirection(int pageIndex, int direction) {
+    // Phase S4: direction parameter no longer used (was for magicdial animation)
     Q_UNUSED(direction);
-    qDebug() << "switchPageWithDirection(): Stub (Phase 3.3.4)";
+    switchPage(pageIndex);
 }
 
 void MainWindow::saveCurrentPage() {
@@ -2407,6 +2412,16 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
             }
             
             m_layerPanel->setCurrentPage(page);
+        });
+        
+        // Phase S4: Connect viewport's currentPageChanged to update pageInput spinbox
+        connect(viewport, &DocumentViewport::currentPageChanged, 
+                this, [this](int pageIndex) {
+            if (pageInput) {
+                pageInput->blockSignals(true);
+                pageInput->setValue(pageIndex + 1);  // Convert 0-based to 1-based for display
+                pageInput->blockSignals(false);
+            }
         });
     }
 }
@@ -3441,41 +3456,22 @@ void MainWindow::showJumpToPageDialog() {
 }
 
 void MainWindow::goToPreviousPage() {
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    // Phase S4: Thin wrapper - go to previous page (0-based)
     DocumentViewport* vp = currentViewport();
-    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
-    if (currentPage > 1) {
-        int newPage = currentPage - 1;
-        switchPageWithDirection(newPage, -1); // -1 indicates backward
-        pageInput->blockSignals(true);
-        pageInput->setValue(newPage);
-        pageInput->blockSignals(false);
-    }
+    if (!vp) return;
+    switchPage(vp->currentPageIndex() - 1);
 }
 
 void MainWindow::goToNextPage() {
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+    // Phase S4: Thin wrapper - go to next page (0-based)
     DocumentViewport* vp = currentViewport();
-    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
-    int newPage = currentPage + 1;
-    switchPageWithDirection(newPage, 1); // 1 indicates forward
-    pageInput->blockSignals(true);
-    pageInput->setValue(newPage);
-    pageInput->blockSignals(false);
+    if (!vp) return;
+    switchPage(vp->currentPageIndex() + 1);
 }
 
 void MainWindow::onPageInputChanged(int newPage) {
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
-    DocumentViewport* vp = currentViewport();
-    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
-    
-    // ✅ Use direction-aware page switching for spinbox
-    int direction = (newPage > currentPage) ? 1 : (newPage < currentPage) ? -1 : 0;
-    if (direction != 0) {
-        switchPageWithDirection(newPage, direction);
-    } else {
-        switchPage(newPage); // Same page, no direction needed
-    }
+    // Phase S4: newPage is 1-based (from spinbox), convert to 0-based for switchPage
+    switchPage(newPage - 1);
 }
 
 // MW2.2: toggleDial() removed - dial system deleted
