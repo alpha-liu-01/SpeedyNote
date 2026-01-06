@@ -335,6 +335,12 @@ private:
 
     bool scrollbarsVisible = false;
     QTimer *scrollbarHideTimer = nullptr;
+    bool m_hasKeyboard = false;  // MW5.8: Cached keyboard detection result
+    
+    // MW5.8: Keyboard detection and scrollbar visibility
+    bool hasPhysicalKeyboard();   // Check if physical keyboard is connected
+    void showScrollbars();        // Show scrollbars and reset hide timer
+    void hideScrollbars();        // Hide scrollbars
     
     // Phase 3.3: Viewport scroll signal connections (for proper cleanup)
     QMetaObject::Connection m_hScrollConn;

@@ -44,6 +44,7 @@
 #include <QWheelEvent>
 #include <QTimer>
 #include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
+#include <QInputDevice>  // MW5.8: For keyboard detection
 #include <QColorDialog>  // Phase 3.1.8: For custom color picker
 #include <QPdfWriter>
 #include <QProgressDialog>
@@ -389,17 +390,21 @@ void MainWindow::setupUi() {
     panXSlider->setFixedHeight(16);
     panYSlider->setFixedWidth(16);
     
-    // Phase 3.3: Sliders always visible (auto-hide deferred to Phase 3.4)
+    // MW5.8: Keyboard detection and auto-hide scrollbars
     panXSlider->setMouseTracking(true);
     panYSlider->setMouseTracking(true);
-    panXSlider->setVisible(true);
-    panYSlider->setVisible(true);
     
-    // Create timer for auto-hiding (disabled for now - Phase 3.4)
+    // Detect keyboard and set initial visibility
+    m_hasKeyboard = hasPhysicalKeyboard();
+    scrollbarsVisible = m_hasKeyboard;
+    panXSlider->setVisible(scrollbarsVisible);
+    panYSlider->setVisible(scrollbarsVisible);
+    
+    // Create timer for auto-hiding (3 seconds of inactivity)
     scrollbarHideTimer = new QTimer(this);
     scrollbarHideTimer->setSingleShot(true);
-    scrollbarHideTimer->setInterval(200);
-    // Timer not connected - sliders stay visible
+    scrollbarHideTimer->setInterval(3000);  // 3 seconds
+    connect(scrollbarHideTimer, &QTimer::timeout, this, &MainWindow::hideScrollbars);
     
     // Trackpad mode timer: maintains trackpad state across rapid events
     trackpadModeTimer = new QTimer(this);
@@ -1078,8 +1083,9 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         panYSlider->blockSignals(false);
         }
     
-    // Connect signals - sliders stay visible (auto-hide deferred to Phase 3.4)
+    // MW5.8: Connect scroll signals - show scrollbars on scroll, with auto-hide
     m_hScrollConn = connect(viewport, &DocumentViewport::horizontalScrollChanged, this, [this](qreal fraction) {
+        showScrollbars();  // MW5.8: Show on scroll activity
         if (panXSlider) {
             panXSlider->blockSignals(true);
             panXSlider->setValue(qRound(fraction * 10000));
@@ -1088,11 +1094,12 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     });
     
     m_vScrollConn = connect(viewport, &DocumentViewport::verticalScrollChanged, this, [this](qreal fraction) {
+        showScrollbars();  // MW5.8: Show on scroll activity
         if (panYSlider) {
-                panYSlider->blockSignals(true);
+            panYSlider->blockSignals(true);
             panYSlider->setValue(qRound(fraction * 10000));
-                panYSlider->blockSignals(false);
-            }
+            panYSlider->blockSignals(false);
+        }
     });
     
     // CR-2B: Connect tool/mode signals for keyboard shortcut sync
@@ -1976,18 +1983,19 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         return false; // Let the event propagate
     }
 
-    // Handle scrollbar visibility
+    // MW5.8: Handle scrollbar visibility with auto-hide
     if (obj == panXSlider || obj == panYSlider) {
         if (event->type() == QEvent::Enter) {
-            // Mouse entered scrollbar area
-            if (scrollbarHideTimer->isActive()) {
-                scrollbarHideTimer->stop();
+            // Mouse entered scrollbar area - keep visible
+            showScrollbars();
+            if (scrollbarHideTimer && scrollbarHideTimer->isActive()) {
+                scrollbarHideTimer->stop();  // Don't hide while hovering
             }
             return false;
         } 
         else if (event->type() == QEvent::Leave) {
-            // Mouse left scrollbar area - start timer to hide
-            if (!scrollbarHideTimer->isActive()) {
+            // Mouse left scrollbar area - start hide timer
+            if (scrollbarHideTimer && scrollbarsVisible) {
                 scrollbarHideTimer->start();
             }
             return false;
@@ -2312,13 +2320,57 @@ void MainWindow::wheelEvent(QWheelEvent *event) {
     QMainWindow::wheelEvent(event);
 }
 
+// ==================== MW5.8: Pan Slider Management ====================
+
+bool MainWindow::hasPhysicalKeyboard() {
+    // Check if any keyboard device is connected using Qt 6.4+ API
+    // On desktop systems, this typically returns true
+    // On tablets without attached keyboards, this may return false
+    const auto devices = QInputDevice::devices();
+    for (const QInputDevice *device : devices) {
+        if (device->type() == QInputDevice::DeviceType::Keyboard) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void MainWindow::showScrollbars() {
+    // Only show if keyboard is connected
+    if (!m_hasKeyboard) {
+        m_hasKeyboard = hasPhysicalKeyboard();  // Re-check in case keyboard was plugged in
+        if (!m_hasKeyboard) return;
+    }
+    
+    if (!scrollbarsVisible) {
+        scrollbarsVisible = true;
+        if (panXSlider) panXSlider->setVisible(true);
+        if (panYSlider) panYSlider->setVisible(true);
+        updateScrollbarPositions();
+    }
+    
+    // Reset the hide timer
+    if (scrollbarHideTimer) {
+        scrollbarHideTimer->stop();
+        scrollbarHideTimer->start();
+    }
+}
+
+void MainWindow::hideScrollbars() {
+    if (scrollbarsVisible) {
+        scrollbarsVisible = false;
+        if (panXSlider) panXSlider->setVisible(false);
+        if (panYSlider) panYSlider->setVisible(false);
+    }
+}
+
 void MainWindow::updateScrollbarPositions() {
-    // Phase C.1.5: Use m_viewportStack instead of m_tabWidget
+    // MW5.8: Position sliders relative to Toolbar and LeftSidebarContainer
     QWidget *container = m_viewportStack ? m_viewportStack->parentWidget() : nullptr;
     if (!container || !panXSlider || !panYSlider || !m_viewportStack) return;
     
-    // Get tab bar height to offset positions (sliders should be below tab bar)
-    int tabBarHeight = (m_tabBar && m_tabBar->isVisible()) ? m_tabBar->height() : 0;
+    // Don't position if not visible
+    if (!scrollbarsVisible) return;
     
     // Add small margins for better visibility
     const int margin = 3;
@@ -2327,27 +2379,35 @@ void MainWindow::updateScrollbarPositions() {
     const int scrollbarWidth = 16;  // panYSlider fixed width
     const int scrollbarHeight = 16; // panXSlider fixed height
     
-    // Calculate sizes based on container
+    // Calculate container dimensions
     int containerWidth = container->width();
     int containerHeight = container->height();
+    
+    // Calculate left offset based on LeftSidebarContainer
+    int leftOffset = 0;
+    if (m_leftSidebar && m_leftSidebar->isVisible()) {
+        leftOffset = m_leftSidebar->width();
+    }
     
     // Leave a bit of space for the corner
     int cornerOffset = 15;
     
-    // Position horizontal scrollbar at top (BELOW tab bar)
+    // Position horizontal scrollbar at top (below Toolbar, which is handled by layout)
+    // Pan X: Full width of viewport area, starting after left sidebar
     panXSlider->setGeometry(
-        cornerOffset + margin,  // Leave space at left corner
-        tabBarHeight + margin,  // Below tab bar
-        containerWidth - cornerOffset - margin*2,  // Full width minus corner and right margin
+        leftOffset + cornerOffset + margin,  // After left sidebar + corner space
+        margin,  // At top of container (Toolbar is above in main layout)
+        containerWidth - leftOffset - cornerOffset - margin*2,  // Width minus sidebar and margins
         scrollbarHeight
     );
     
-    // Position vertical scrollbar at left (starting below tab bar)
+    // Position vertical scrollbar at left (to the right of LeftSidebarContainer)
+    // Pan Y: On the LEFT side to avoid arm/wrist interference
     panYSlider->setGeometry(
-        margin,
-        tabBarHeight + cornerOffset + margin,  // Below tab bar + corner offset
+        leftOffset + margin,  // Right after left sidebar
+        cornerOffset + margin,  // Below corner offset
         scrollbarWidth,
-        containerHeight - tabBarHeight - cornerOffset - margin*2  // Height minus tab bar
+        containerHeight - cornerOffset - margin*2  // Full height minus corners
     );
     
     // Ensure sliders are raised above content
