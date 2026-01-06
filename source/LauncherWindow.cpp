@@ -914,7 +914,7 @@ void LauncherWindow::openNotebook(const QString &path)
         if (canvas) {
             canvas->setSaveFolder(path);
             if (!targetMainWindow->showLastAccessedPageDialog(canvas)) {
-                targetMainWindow->switchPageWithDirection(1, 1);
+                targetMainWindow->switchPage(1);
                 targetMainWindow->pageInput->setValue(1);
             } else {
                 targetMainWindow->pageInput->setValue(targetMainWindow->getCurrentPageForCanvas(canvas) + 1);

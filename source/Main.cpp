@@ -450,7 +450,7 @@ int main(int argc, char *argv[]) {
         } else {
             if (inputFile.toLower().endsWith(".pdf")) {
                 w->show();
-                w->openPdfFile(inputFile);
+                w->openPdfDocument(inputFile);
             } else if (inputFile.toLower().endsWith(".spn")) {
                 w->show();
                 w->openSpnPackage(inputFile);

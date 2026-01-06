@@ -287,18 +287,17 @@ public:
     SDLControllerManager *controllerManager = nullptr;
     QThread *controllerThread = nullptr;
 
-    QString getPressMapping(const QString &buttonName);
+    // REMOVED MW7.6: getPressMapping removed - old mapping system deleted
 
-    void saveButtonMappings();
-    void loadButtonMappings();
+    // REMOVED MW7.6: saveButtonMappings and loadButtonMappings removed - old mapping system deleted
 
-    void setPressMapping(const QString &buttonName, const QString &action);
+    // REMOVED MW7.6: setPressMapping removed - old mapping system deleted
 
     
     // ✅ Mouse dial mapping management
 
 
-    void openPdfFile(const QString &pdfPath); // MW1.5: Stub
+    // REMOVED MW7.7: openPdfFile stub removed - replaced with openPdfDocument(filePath)
     
     // Single instance functionality
     static bool isInstanceRunning();
@@ -310,7 +309,7 @@ public:
     void openFileInNewTab(const QString &filePath); // ✅ Open .spn package directly
 
     int getPdfDPI() const { return pdfRenderDPI; }
-    void setPdfDPI(int dpi);
+    // REMOVED: setPdfDPI removed - PDF DPI functionality deleted
 
     // void loadUserSettings();  // New
     void savePdfDPI(int dpi); // New
@@ -323,24 +322,21 @@ public:
     void saveThemeSettings();
     void loadThemeSettings();
     void updateTheme(); // Apply current theme settings
-    void updateTabSizes(); // Update tab widths adaptively
+    // REMOVED: updateTabSizes removed - tab sizing functionality deleted
     
-    void migrateOldButtonMappings();
-    QString migrateOldActionString(const QString &oldString);
+    // REMOVED MW7.6: migrateOldButtonMappings and migrateOldActionString removed - old mapping system deleted
 
     // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     void saveCurrentPage(); // Made public for RecentNotebooksDialog
     void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
-    void switchPageWithDirection(int pageNumber, int direction); // MW1.5: Stub
+    // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
     void updateTabLabel(); // Made public for RecentNotebooksDialog
     QSpinBox *pageInput; // Made public for RecentNotebooksDialog
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
-    void addKeyboardMapping(const QString &keySequence, const QString &action);
-    void removeKeyboardMapping(const QString &keySequence);
-    QMap<QString, QString> getKeyboardMappings() const;
+    // REMOVED MW7.6: addKeyboardMapping, removeKeyboardMapping, and getKeyboardMappings removed - old mapping system deleted
     
     // Controller access
     SDLControllerManager* getControllerManager() const { return controllerManager; }
@@ -348,7 +344,7 @@ public:
 
     void updateDialButtonState();     // Update dial button state when switching tabs
     void updateFastForwardButtonState(); // Update fast forward button state when switching tabs
-    void updateToolButtonStates();   // Update tool button states when switching tabs
+    // REMOVED: updateToolButtonStates removed - tool button state functionality deleted
     // void handleColorButtonClick();    // Handle tool switching when color buttons are clicked
     // void updateThicknessSliderForCurrentTool(); // Update thickness slider to reflect current tool's thickness
     void updatePdfTextSelectButtonState(); // Update PDF text selection button state when switching tabs
@@ -386,14 +382,14 @@ private slots:
     void toggleBenchmark();
     void updateBenchmarkDisplay();
     void onNewConnection(); // Handle new instance connections
-    void applyCustomColor(); // Added function for custom color input
-    void updateThickness(int value); // New function for thickness control
-    void adjustThicknessForZoom(int oldZoom, int newZoom); // Adjust thickness when zoom changes
-    void changeTool(int index);
+    // REMOVED: applyCustomColor removed - custom color functionality deleted
+    // REMOVED: updateThickness removed - thickness control functionality deleted
+    // REMOVED: adjustThicknessForZoom removed - zoom thickness adjustment deleted
+    // REMOVED: changeTool removed - tool changing functionality deleted
     void deleteCurrentPage();
 
     // REMOVED MW7.3: loadPdf removed - old PDF loading function
-    void exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId); // Export canvas-only notebook (no PDF)
+    // REMOVED: exportCanvasOnlyNotebook removed - canvas export functionality deleted
     // REMOVED MW7.3: exportAnnotatedPdfFullRender removed - pdftk export function
     // REMOVED MW7.3: createAnnotatedPagesPdf removed - temp PDF creation function
     // REMOVED MW7.3: mergePdfWithPdftk removed - PDF merging function
@@ -405,8 +401,7 @@ private slots:
     // Helper function to show page range dialog (returns false if cancelled)
     // REMOVED MW7.3: showPageRangeDialog removed - export dialog function
 
-    void updateZoom();
-    void updatePanRange();
+    // REMOVED: updateZoom and updatePanRange removed - zoom/pan update functionality deleted
     void updatePanX(int value);
     void updatePanY(int value);
 
@@ -440,29 +435,25 @@ private slots:
     void addPageToDocument();     // doc-1.0: Add page at end of document (Ctrl+Shift+A)
     void insertPageInDocument();  // Phase 3: Insert page after current (Ctrl+Shift+I)
     void deletePageInDocument();  // Phase 3B: Delete current page (Ctrl+Shift+D)
-    void openPdfDocument();       // doc-1.4: Open PDF file (Ctrl+Shift+O)
+    void openPdfDocument(const QString &filePath = QString());       // doc-1.4: Open PDF file (Ctrl+Shift+O)
     
     // void handleModeSelection(int angle);
 
 
 
     // void updateColorPalette(); // Update colors based on current palette mode
-    QColor getPaletteColor(const QString &colorName); // Get color based on current palette
+    // REMOVED: getPaletteColor removed - palette color functionality deleted
     qreal getDevicePixelRatio(); 
 
     bool isDarkMode();
-    QIcon loadThemedIcon(const QString& baseName);
-    QIcon loadThemedIconReversed(const QString& baseName);
-    void updateButtonIcon(QPushButton* button, const QString& iconName);
+    // REMOVED: loadThemedIcon, loadThemedIconReversed, and updateButtonIcon removed - themed icon functionality deleted
     // REMOVED: createButtonStyle removed - button styling no longer needed in MainWindow
 
 
     
     // Color button state management
     // void updateColorButtonStates();
-    void selectColorButton(QPushButton* selectedButton);
-    void updateStraightLineButtonState();
-    void updateRopeToolButtonState(); // New slot for rope tool button
+    // REMOVED: selectColorButton, updateStraightLineButtonState, and updateRopeToolButtonState removed - button state functionality deleted
     
     
     
@@ -481,7 +472,7 @@ private:
     
     void returnToLauncher(); // Return to launcher window
     
-    void showPendingTooltip(); // Show tooltip with throttling
+    // REMOVED: showPendingTooltip removed - tooltip functionality deleted
     
     
     // PDF Outline functionality
@@ -535,8 +526,7 @@ private:
     // QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
     // QPushButton *toggleTabBarButton;
     
-    // Overflow menu for infrequently used actions
-    QPushButton *overflowMenuButton;
+    // Overflow menu for infrequently used actions (shown via NavigationBar menu button)
     QMenu *overflowMenu;
 
     // Page tracking now done by DocumentViewport internally
@@ -640,12 +630,10 @@ private:
 
 
     // Add in MainWindow class:
-    QMap<QString, QString> buttonPressMapping;
-    QMap<QString, ControllerAction> buttonPressActionMapping;
+    // REMOVED MW7.6: buttonPressMapping and buttonPressActionMapping removed - old mapping system deleted
 
     // New: Keyboard mapping support
-    QMap<QString, QString> keyboardMappings;  // keySequence -> action internal key
-    QMap<QString, ControllerAction> keyboardActionMapping;  // keySequence -> action enum
+    // REMOVED MW7.6: keyboardMappings and keyboardActionMapping removed - old mapping system deleted
 
     // Tooltip handling for pen input
     QTimer *tooltipTimer;
@@ -655,15 +643,13 @@ private:
     // Concurrent save handling for autoscroll synchronization
     QFuture<void> concurrentSaveFuture;
 
-    void handleButtonHeld(const QString &buttonName);
-    void handleButtonReleased(const QString &buttonName);
+    // REMOVED MW7.6: handleButtonHeld and handleButtonReleased removed - old mapping system deleted
 
-    void handleControllerButton(const QString &buttonName);
+    // REMOVED MW7.6: handleControllerButton removed - old mapping system deleted
     
     // New: Keyboard mapping methods
-    void handleKeyboardShortcut(const QString &keySequence);
-    void saveKeyboardMappings();
-    void loadKeyboardMappings();
+    // REMOVED MW7.6: handleKeyboardShortcut removed - old mapping system deleted
+    // REMOVED MW7.6: saveKeyboardMappings and loadKeyboardMappings removed - old mapping system deleted
 
     // bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas);  // MW1.4: Stub - returns true
 
@@ -705,9 +691,7 @@ private:
     TouchGestureMode palmRejectionOriginalMode = TouchGestureMode::Full; // Original mode before suppression
     QTimer *palmRejectionTimer = nullptr; // Timer for delayed restore
     
-    void onStylusProximityEnter(); // Called when stylus enters proximity or touches
-    void onStylusProximityLeave(); // Called when stylus leaves proximity or releases
-    void restoreTouchGestureMode(); // Called by timer to restore original mode
+    // REMOVED: onStylusProximityEnter, onStylusProximityLeave, and restoreTouchGestureMode removed - stylus proximity functionality deleted
 #endif
     
     // Stylus button state tracking (hold-to-enable)
@@ -726,8 +710,7 @@ private:
     bool textSelectionPendingDisable = false; // True when waiting for text selection interaction to complete
     bool textSelectionWasButtonA = false; // Track which button enabled text selection
     
-    void enableStylusButtonMode(Qt::MouseButton button); // MW1.5: Stub
-    void disableStylusButtonMode(Qt::MouseButton button); // MW1.5: Stub
+    // REMOVED MW7.7: enableStylusButtonMode and disableStylusButtonMode stubs removed
     void handleStylusButtonPress(Qt::MouseButtons buttons);
     void handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton);
     
@@ -749,9 +732,9 @@ protected:
     void resizeEvent(QResizeEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;  // New: Handle keyboard shortcuts
     void keyReleaseEvent(QKeyEvent *event) override; // Track Ctrl key release for trackpad pinch-zoom detection
-    void tabletEvent(QTabletEvent *event) override; // Handle pen hover for tooltips
+    // REMOVED: tabletEvent removed - tablet event handling deleted
 #ifdef Q_OS_LINUX
-    bool event(QEvent *event) override; // Handle tablet proximity events for palm rejection
+    // REMOVED: event removed - event handling functionality deleted
 #endif
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override; // Handle Windows theme changes
