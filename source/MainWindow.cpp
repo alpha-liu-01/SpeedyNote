@@ -3,7 +3,7 @@
 // #include "VectorCanvas.h"  // REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
-#include "ui/LayerPanel.h"          // Phase 5: Layer management panel
+#include "ui/sidebars/LayerPanel.h" // Phase S1: Moved to sidebars folder
 #include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
 #include "ui/StyleLoader.h"         // QSS stylesheet loader
 #include "ButtonMappingTypes.h"
@@ -169,13 +169,7 @@ MainWindow::MainWindow(QWidget *parent)
             m_debugOverlay->setViewport(vp);
         }
         
-        // Task 2.9.5: Sync straight line button state with new viewport
-        if (vp && straightLineToggleButton) {
-            bool isEnabled = vp->straightLineMode();
-            straightLineToggleButton->setProperty("selected", isEnabled);
-            straightLineToggleButton->style()->unpolish(straightLineToggleButton);
-            straightLineToggleButton->style()->polish(straightLineToggleButton);
-        }
+        // REMOVED E.1: straightLineToggleButton moved to Toolbar - no longer need to sync button state
         
         // TG.6: Apply touch gesture mode to new viewport
         if (vp) {
@@ -405,104 +399,17 @@ void MainWindow::setupUi() {
     benchmarkLabel->setFixedHeight(30);  // Make the benchmark bar smaller
     updateButtonIcon(benchmarkButton, "benchmark");
 
-    toggleTabBarButton = new QPushButton(this);
-    toggleTabBarButton->setToolTip(tr("Show/Hide Tab Bar"));
-    toggleTabBarButton->setFixedSize(36, 36);
-    toggleTabBarButton->setStyleSheet(buttonStyle);
-    toggleTabBarButton->setProperty("selected", true); // Initially visible
+    // REMOVED E.1: toggleTabBarButton moved to NavigationBar
+    // toggleTabBarButton = new QPushButton(this);
+    // toggleTabBarButton->setToolTip(tr("Show/Hide Tab Bar"));
+    // toggleTabBarButton->setFixedSize(36, 36);
+    // toggleTabBarButton->setStyleSheet(buttonStyle);
+    // toggleTabBarButton->setProperty("selected", true); // Initially visible
     
-    // PDF Outline Toggle Button
-    // PDF Outline Toggle - Floating tab on left side (created here, positioned later)
-    toggleOutlineButton = new QPushButton(this);
-    toggleOutlineButton->setObjectName("outlineSidebarTab");
-    toggleOutlineButton->setToolTip(tr("Show/Hide PDF Outline"));
-    toggleOutlineButton->setFixedSize(28, 80);
-    toggleOutlineButton->setCursor(Qt::PointingHandCursor);
-    toggleOutlineButton->setProperty("selected", false);
-    toggleOutlineButton->setIcon(loadThemedIcon("outline"));
-    toggleOutlineButton->setIconSize(QSize(18, 18));
-    toggleOutlineButton->raise();
+    // Phase S3: Floating toggle buttons removed - replaced by LeftSidebarContainer
+    // toggleOutlineButton, toggleBookmarksButton, toggleLayerPanelButton are now tabs in m_leftSidebar
     
-    // Bookmarks Toggle - Floating tab on left side (below outline tab)
-    toggleBookmarksButton = new QPushButton(this);
-    toggleBookmarksButton->setObjectName("bookmarksSidebarTab");
-    toggleBookmarksButton->setToolTip(tr("Show/Hide Bookmarks"));
-    toggleBookmarksButton->setFixedSize(28, 80);
-    toggleBookmarksButton->setCursor(Qt::PointingHandCursor);
-    toggleBookmarksButton->setProperty("selected", false);
-    toggleBookmarksButton->setIcon(loadThemedIcon("bookmark"));
-    toggleBookmarksButton->setIconSize(QSize(18, 18));
-    toggleBookmarksButton->raise();
-    
-    // Layer Panel Toggle - Floating tab on left side (at layer panel height)
-    toggleLayerPanelButton = new QPushButton(this);
-    toggleLayerPanelButton->setObjectName("layerPanelTab");
-    toggleLayerPanelButton->setToolTip(tr("Show/Hide Layers"));
-    toggleLayerPanelButton->setFixedSize(28, 80);
-    toggleLayerPanelButton->setCursor(Qt::PointingHandCursor);
-    toggleLayerPanelButton->setProperty("selected", layerPanelVisible);
-    toggleLayerPanelButton->setIcon(loadThemedIcon("layer"));
-    toggleLayerPanelButton->setIconSize(QSize(18, 18));
-    toggleLayerPanelButton->raise();
-    
-    // Apply floating tab styling for left sidebar tabs (using isDarkMode() to get current theme)
-    {
-        bool isDark = isDarkMode();
-        QString tabBg = isDark ? "#3A3A3A" : "#EAEAEA";
-        QString tabHover = isDark ? "#4A4A4A" : "#DADADA";
-        QString tabBorder = isDark ? "#555555" : "#CCCCCC";
-        
-        QString outlineStyle = QString(
-            "QPushButton#outlineSidebarTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-left: none;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-right-radius: 0px;"
-            "}"
-            "QPushButton#outlineSidebarTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#outlineSidebarTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBg, tabBorder, tabHover);
-        toggleOutlineButton->setStyleSheet(outlineStyle);
-        
-        QString bookmarksStyle = QString(
-            "QPushButton#bookmarksSidebarTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-left: none;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-right-radius: 0px;"
-            "}"
-            "QPushButton#bookmarksSidebarTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#bookmarksSidebarTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBg, tabBorder, tabHover);
-        toggleBookmarksButton->setStyleSheet(bookmarksStyle);
-        
-        QString layerPanelStyle = QString(
-            "QPushButton#layerPanelTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-left: none;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-right-radius: 0px;"
-            "}"
-            "QPushButton#layerPanelTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#layerPanelTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBg, tabBorder, tabHover);
-        toggleLayerPanelButton->setStyleSheet(layerPanelStyle);
-    }
+    // Phase S3: Floating tab styling removed - LeftSidebarContainer uses QTabWidget styling
     
     // Add/Remove Bookmark Toggle Button
     toggleBookmarkButton = new QPushButton(this);
@@ -512,24 +419,24 @@ void MainWindow::setupUi() {
     toggleBookmarkButton->setProperty("selected", false); // For toggle state styling
     updateButtonIcon(toggleBookmarkButton, "star");
     
-    // Markdown Notes Toggle Button
-    toggleMarkdownNotesButton = new QPushButton(this);
-    toggleMarkdownNotesButton->setToolTip(tr("Show/Hide Markdown Notes"));
-    toggleMarkdownNotesButton->setFixedSize(36, 36);
-    toggleMarkdownNotesButton->setStyleSheet(buttonStyle);
-    toggleMarkdownNotesButton->setProperty("selected", false); // Initially hidden
-    // Try "note" icon, fallback to text if icon doesn't exist
-    updateButtonIcon(toggleMarkdownNotesButton, "markdown");
+    // REMOVED E.1: toggleMarkdownNotesButton moved to NavigationBar
+    // toggleMarkdownNotesButton = new QPushButton(this);
+    // toggleMarkdownNotesButton->setToolTip(tr("Show/Hide Markdown Notes"));
+    // toggleMarkdownNotesButton->setFixedSize(36, 36);
+    // toggleMarkdownNotesButton->setStyleSheet(buttonStyle);
+    // toggleMarkdownNotesButton->setProperty("selected", false); // Initially hidden
+    // // Try "note" icon, fallback to text if icon doesn't exist
+    // updateButtonIcon(toggleMarkdownNotesButton, "markdown");
 
 
-    // Touch Gestures Toggle Button
-    touchGesturesButton = new QPushButton(this);
-    touchGesturesButton->setToolTip(tr("Cycle Touch Gestures (Off/Y-Only/Full)"));
-    touchGesturesButton->setFixedSize(36, 36);
-    touchGesturesButton->setStyleSheet(buttonStyle);
-    touchGesturesButton->setProperty("selected", touchGestureMode != TouchGestureMode::Disabled); // For toggle state styling
-    touchGesturesButton->setProperty("yAxisOnly", touchGestureMode == TouchGestureMode::YAxisOnly); // For Y-only styling
-    updateButtonIcon(touchGesturesButton, "hand");
+    // REMOVED E.1: touchGesturesButton moved to Toolbar
+    // touchGesturesButton = new QPushButton(this);
+    // touchGesturesButton->setToolTip(tr("Cycle Touch Gestures (Off/Y-Only/Full)"));
+    // touchGesturesButton->setFixedSize(36, 36);
+    // touchGesturesButton->setStyleSheet(buttonStyle);
+    // touchGesturesButton->setProperty("selected", touchGestureMode != TouchGestureMode::Disabled); // For toggle state styling
+    // touchGesturesButton->setProperty("yAxisOnly", touchGestureMode == TouchGestureMode::YAxisOnly); // For Y-only styling
+    // updateButtonIcon(touchGesturesButton, "hand");
 
     selectFolderButton = new QPushButton(this);
     selectFolderButton->setFixedSize(0, 0);
@@ -541,13 +448,14 @@ void MainWindow::setupUi() {
     connect(selectFolderButton, &QPushButton::clicked, this, &MainWindow::selectFolder);
     
     
-    saveButton = new QPushButton(this);
-    saveButton->setFixedSize(36, 36);
-    QIcon saveIcon(loadThemedIcon("save"));  // Path to your icon in resources
-    saveButton->setIcon(saveIcon);
-    saveButton->setStyleSheet(buttonStyle);
-    saveButton->setToolTip(tr("Save Notebook"));
-    connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveCurrentPage);
+    // REMOVED E.1: saveButton moved to NavigationBar
+    // saveButton = new QPushButton(this);
+    // saveButton->setFixedSize(36, 36);
+    // QIcon saveIcon(loadThemedIcon("save"));  // Path to your icon in resources
+    // saveButton->setIcon(saveIcon);
+    // saveButton->setStyleSheet(buttonStyle);
+    // saveButton->setToolTip(tr("Save Notebook"));
+    // connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveCurrentPage);
 
     exportPdfButton = new QPushButton(this);
     exportPdfButton->setFixedSize(26, 30);
@@ -558,14 +466,15 @@ void MainWindow::setupUi() {
     // MW1.5: Export disabled - will be reimplemented
     // connect(exportPdfButton, &QPushButton::clicked, this, &MainWindow::exportAnnotatedPdf);
 
-    fullscreenButton = new QPushButton(this);
-    fullscreenButton->setIcon(loadThemedIcon("fullscreen"));  // Load from resources
-    fullscreenButton->setFixedSize(36, 36);
-    fullscreenButton->setToolTip(tr("Toggle Fullscreen"));
-    fullscreenButton->setStyleSheet(buttonStyle);
-
-    // ✅ Connect button click to toggleFullscreen() function
-    connect(fullscreenButton, &QPushButton::clicked, this, &MainWindow::toggleFullscreen);
+    // REMOVED E.1: fullscreenButton moved to NavigationBar
+    // fullscreenButton = new QPushButton(this);
+    // fullscreenButton->setIcon(loadThemedIcon("fullscreen"));  // Load from resources
+    // fullscreenButton->setFixedSize(36, 36);
+    // fullscreenButton->setToolTip(tr("Toggle Fullscreen"));
+    // fullscreenButton->setStyleSheet(buttonStyle);
+    //
+    // // ✅ Connect button click to toggleFullscreen() function
+    // connect(fullscreenButton, &QPushButton::clicked, this, &MainWindow::toggleFullscreen);
 
     // Use the darkMode variable already declared at the beginning of setupUi()
 
@@ -719,68 +628,68 @@ void MainWindow::setupUi() {
     toolSelector->hide();
     toolSelector->setFixedSize(0, 0); // Make it invisible by setting size to 0
 
-    // ✅ Individual tool buttons
-    penToolButton = new QPushButton(this);
-    penToolButton->setFixedSize(36, 36);
-    penToolButton->setStyleSheet(buttonStyle);
-    penToolButton->setToolTip(tr("Pen Tool"));
-    connect(penToolButton, &QPushButton::clicked, this, &MainWindow::setPenTool);
-
-    markerToolButton = new QPushButton(this);
-    markerToolButton->setFixedSize(36, 36);
-    markerToolButton->setStyleSheet(buttonStyle);
-    markerToolButton->setToolTip(tr("Marker Tool"));
-    connect(markerToolButton, &QPushButton::clicked, this, &MainWindow::setMarkerTool);
-
-    eraserToolButton = new QPushButton(this);
-    eraserToolButton->setFixedSize(36, 36);
-    eraserToolButton->setStyleSheet(buttonStyle);
-    eraserToolButton->setToolTip(tr("Eraser Tool"));
-    connect(eraserToolButton, &QPushButton::clicked, this, &MainWindow::setEraserTool);
+    // REMOVED E.1: Tool buttons moved to Toolbar
+    // penToolButton = new QPushButton(this);
+    // penToolButton->setFixedSize(36, 36);
+    // penToolButton->setStyleSheet(buttonStyle);
+    // penToolButton->setToolTip(tr("Pen Tool"));
+    // connect(penToolButton, &QPushButton::clicked, this, &MainWindow::setPenTool);
+    //
+    // markerToolButton = new QPushButton(this);
+    // markerToolButton->setFixedSize(36, 36);
+    // markerToolButton->setStyleSheet(buttonStyle);
+    // markerToolButton->setToolTip(tr("Marker Tool"));
+    // connect(markerToolButton, &QPushButton::clicked, this, &MainWindow::setMarkerTool);
+    //
+    // eraserToolButton = new QPushButton(this);
+    // eraserToolButton->setFixedSize(36, 36);
+    // eraserToolButton->setStyleSheet(buttonStyle);
+    // eraserToolButton->setToolTip(tr("Eraser Tool"));
+    // connect(eraserToolButton, &QPushButton::clicked, this, &MainWindow::setEraserTool);
 
     // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
     // Features migrated to DocumentViewport - all pens now use vector layers
 
     // REMOVED MW1.2: backgroundButton - feature was dropped
 
-    // Initialize straight line toggle button
-    straightLineToggleButton = new QPushButton(this);
-    straightLineToggleButton->setFixedSize(36, 36);
-    straightLineToggleButton->setStyleSheet(buttonStyle);
-    straightLineToggleButton->setToolTip(tr("Toggle Straight Line Mode"));
-    straightLineToggleButton->setProperty("selected", false); // Initially disabled
-    updateButtonIcon(straightLineToggleButton, "straightLine");
-    connect(straightLineToggleButton, &QPushButton::clicked, this, [this]() {
-        // Task 2.9.5: Toggle straight line mode on current viewport
-        if (DocumentViewport* vp = currentViewport()) {
-            bool newState = !vp->straightLineMode();
-            vp->setStraightLineMode(newState);
-            
-            // Update button visual state
-            straightLineToggleButton->setProperty("selected", newState);
-            straightLineToggleButton->style()->unpolish(straightLineToggleButton);
-            straightLineToggleButton->style()->polish(straightLineToggleButton);
-        }
-    });
-    
-    ropeToolButton = new QPushButton(this);
-    ropeToolButton->setFixedSize(36, 36);
-    ropeToolButton->setStyleSheet(buttonStyle);
-    ropeToolButton->setToolTip(tr("Toggle Rope Tool Mode"));
-    ropeToolButton->setProperty("selected", false); // Initially disabled
-    updateButtonIcon(ropeToolButton, "rope");
-    connect(ropeToolButton, &QPushButton::clicked, this, [this]() {
-        // Task 2.10.9: Connect lasso/rope tool to DocumentViewport
-        if (DocumentViewport* vp = currentViewport()) {
-            // Toggle between Lasso and Pen - if already lasso, switch back to pen
-            if (vp->currentTool() == ToolType::Lasso) {
-                vp->setCurrentTool(ToolType::Pen);
-            } else {
-                vp->setCurrentTool(ToolType::Lasso);
-            }
-        }
-        updateToolButtonStates();
-    });
+    // REMOVED E.1: straightLineToggleButton moved to Toolbar, ropeToolButton deprecated
+    // straightLineToggleButton = new QPushButton(this);
+    // straightLineToggleButton->setFixedSize(36, 36);
+    // straightLineToggleButton->setStyleSheet(buttonStyle);
+    // straightLineToggleButton->setToolTip(tr("Toggle Straight Line Mode"));
+    // straightLineToggleButton->setProperty("selected", false); // Initially disabled
+    // updateButtonIcon(straightLineToggleButton, "straightLine");
+    // connect(straightLineToggleButton, &QPushButton::clicked, this, [this]() {
+    //     // Task 2.9.5: Toggle straight line mode on current viewport
+    //     if (DocumentViewport* vp = currentViewport()) {
+    //         bool newState = !vp->straightLineMode();
+    //         vp->setStraightLineMode(newState);
+    //
+    //         // Update button visual state
+    //         straightLineToggleButton->setProperty("selected", newState);
+    //         straightLineToggleButton->style()->unpolish(straightLineToggleButton);
+    //         straightLineToggleButton->style()->polish(straightLineToggleButton);
+    //     }
+    // });
+    //
+    // ropeToolButton = new QPushButton(this);
+    // ropeToolButton->setFixedSize(36, 36);
+    // ropeToolButton->setStyleSheet(buttonStyle);
+    // ropeToolButton->setToolTip(tr("Toggle Rope Tool Mode"));
+    // ropeToolButton->setProperty("selected", false); // Initially disabled
+    // updateButtonIcon(ropeToolButton, "rope");
+    // connect(ropeToolButton, &QPushButton::clicked, this, [this]() {
+    //     // Task 2.10.9: Connect lasso/rope tool to DocumentViewport
+    //     if (DocumentViewport* vp = currentViewport()) {
+    //         // Toggle between Lasso and Pen - if already lasso, switch back to pen
+    //         if (vp->currentTool() == ToolType::Lasso) {
+    //             vp->setCurrentTool(ToolType::Pen);
+    //         } else {
+    //             vp->setCurrentTool(ToolType::Lasso);
+    //         }
+    //     }
+    //     updateToolButtonStates();
+    // });
     
     // Insert Picture Button (Phase O2.9: repurposed as Object Select Tool)
     insertPictureButton = new QPushButton(this);
@@ -990,12 +899,12 @@ void MainWindow::setupUi() {
     // Connect bookmarks tree item clicks
     connect(bookmarksTree, &QTreeWidget::itemClicked, this, &MainWindow::onBookmarkItemClicked);
     
-    // 🌟 Layer Panel (Phase 5: below left sidebars)---------------------------------------------------------
+    // 🌟 Phase S3: Left Sidebar Container (replaces floating tabs)
     // ---------------------------------------------------------------------------------------------------------
-    m_layerPanel = new LayerPanel(this);
-    m_layerPanel->setFixedWidth(250);  // Match sidebar width
-    m_layerPanel->setMinimumHeight(180);
-    m_layerPanel->setMaximumHeight(300);
+    m_leftSidebar = new LeftSidebarContainer(this);
+    m_leftSidebar->setFixedWidth(250);  // Match sidebar width
+    m_leftSidebar->setVisible(false);   // Hidden by default, toggled via NavigationBar
+    m_layerPanel = m_leftSidebar->layerPanel();  // Get reference for signal connections
     
     // =========================================================================
     // Phase 5.6.8: Simplified LayerPanel Signal Handlers
@@ -1100,39 +1009,12 @@ void MainWindow::setupUi() {
     tabBarContainer->setObjectName("tabBarContainer");
     tabBarContainer->setVisible(false);  // Hidden - using m_tabBar now
 
-    connect(toggleTabBarButton, &QPushButton::clicked, this, [=]() {
-        // Phase C.1.5: Toggle the tab bar visibility via m_tabBar
-        if (m_tabBar) {
-            bool isVisible = m_tabBar->isVisible();
-            m_tabBar->setVisible(!isVisible);
-        
-        // Update button toggle state
-        toggleTabBarButton->setProperty("selected", !isVisible);
-        updateButtonIcon(toggleTabBarButton, "tabs");
-        toggleTabBarButton->style()->unpolish(toggleTabBarButton);
-        toggleTabBarButton->style()->polish(toggleTabBarButton);
-        }
-
-        // Phase 3.1.8: Stubbed - DocumentViewport handles its own sizing
-        QTimer::singleShot(0, this, [this]() {
-            // TODO Phase 3.3: Handle viewport sizing if needed
-        });
-    });
-    
-    connect(toggleOutlineButton, &QPushButton::clicked, this, &MainWindow::toggleOutlineSidebar);
-    connect(toggleBookmarksButton, &QPushButton::clicked, this, &MainWindow::toggleBookmarksSidebar);
-    connect(toggleLayerPanelButton, &QPushButton::clicked, this, &MainWindow::toggleLayerPanel);
-    // MW1.5: Bookmark toggle disabled - will be reimplemented
-    // connect(toggleBookmarkButton, &QPushButton::clicked, this, &MainWindow::toggleCurrentPageBookmark);
-    connect(toggleMarkdownNotesButton, &QPushButton::clicked, this, &MainWindow::toggleMarkdownNotesSidebar);
-    connect(touchGesturesButton, &QPushButton::clicked, this, [this]() {
-        cycleTouchGestureMode();
-        touchGesturesButton->setProperty("selected", touchGestureMode != TouchGestureMode::Disabled);
-        touchGesturesButton->setProperty("yAxisOnly", touchGestureMode == TouchGestureMode::YAxisOnly);
-        updateButtonIcon(touchGesturesButton, "hand");
-        touchGesturesButton->style()->unpolish(touchGesturesButton);
-        touchGesturesButton->style()->polish(touchGesturesButton);
-    });
+    // REMOVED E.1: toggleTabBarButton moved to NavigationBar
+    // Phase S3: Floating toggle buttons removed - sidebars now in LeftSidebarContainer tabs
+    // connect(toggleOutlineButton, &QPushButton::clicked, this, &MainWindow::toggleOutlineSidebar);
+    // connect(toggleBookmarksButton, &QPushButton::clicked, this, &MainWindow::toggleBookmarksSidebar);
+    // connect(toggleLayerPanelButton, &QPushButton::clicked, this, &MainWindow::toggleLayerPanel);
+    // REMOVED E.1: toggleMarkdownNotesButton and touchGesturesButton moved to new components
 
     
 
@@ -1301,11 +1183,12 @@ void MainWindow::setupUi() {
     controlLayout->addStretch();
     
     // Centered buttons - toggle and utility
-    controlLayout->addWidget(toggleTabBarButton);
-    controlLayout->addWidget(toggleMarkdownNotesButton);
-    controlLayout->addWidget(touchGesturesButton);
-    controlLayout->addWidget(pdfTextSelectButton);
-    controlLayout->addWidget(saveButton);
+    // REMOVED E.1: toggleTabBarButton, toggleMarkdownNotesButton, touchGesturesButton, saveButton moved to new components
+    // controlLayout->addWidget(toggleTabBarButton);
+    // controlLayout->addWidget(toggleMarkdownNotesButton);
+    // controlLayout->addWidget(touchGesturesButton);
+    // controlLayout->addWidget(pdfTextSelectButton);
+    // controlLayout->addWidget(saveButton);
     
     // Color buttons
     controlLayout->addWidget(redButton);
@@ -1317,14 +1200,15 @@ void MainWindow::setupUi() {
     controlLayout->addWidget(customColorButton);
     
     // Tool buttons
-    controlLayout->addWidget(penToolButton);
-    controlLayout->addWidget(markerToolButton);
-    controlLayout->addWidget(eraserToolButton);
-    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
-    controlLayout->addWidget(straightLineToggleButton);
-    controlLayout->addWidget(ropeToolButton);
-    controlLayout->addWidget(insertPictureButton);
-    controlLayout->addWidget(fullscreenButton);
+    // REMOVED E.1: Tool buttons moved to Toolbar
+    // controlLayout->addWidget(penToolButton);
+    // controlLayout->addWidget(markerToolButton);
+    // controlLayout->addWidget(eraserToolButton);
+    // // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
+    // controlLayout->addWidget(straightLineToggleButton);
+    // controlLayout->addWidget(ropeToolButton);
+    // controlLayout->addWidget(insertPictureButton);
+    // controlLayout->addWidget(fullscreenButton);
     
     // Right stretch to center the main buttons
     controlLayout->addStretch();
@@ -1437,13 +1321,9 @@ void MainWindow::setupUi() {
         qDebug() << "NavigationBar: Launcher clicked (stub)";
     });
     connect(m_navigationBar, &NavigationBar::leftSidebarToggled, this, [this](bool checked) {
-        // Stub - toggle left sidebar container
-        qDebug() << "NavigationBar: Left sidebar toggled:" << checked;
-        if (m_leftSideContainer) {
-            m_leftSideContainer->setVisible(checked);
-        }
-        if (m_layerPanel) {
-            m_layerPanel->setVisible(checked);
+        // Phase S3: Toggle left sidebar container
+        if (m_leftSidebar) {
+            m_leftSidebar->setVisible(checked);
         }
     });
     connect(m_navigationBar, &NavigationBar::saveClicked, this, &MainWindow::saveDocument);
@@ -1509,9 +1389,7 @@ void MainWindow::setupUi() {
         // Shape tool → straight line mode for now
         if (DocumentViewport* vp = currentViewport()) {
             vp->setStraightLineMode(true);
-            if (straightLineToggleButton) {
-                straightLineToggleButton->setChecked(true);
-            }
+            // REMOVED E.1: straightLineToggleButton moved to Toolbar
         }
         qDebug() << "Toolbar: Shape clicked → straight line mode";
     });
@@ -1551,21 +1429,18 @@ void MainWindow::setupUi() {
     contentLayout->setSpacing(0);
     
     // Phase 5: Left side container holds sidebars on top, layer panel at bottom
-    // NOTE: We no longer use a fixed-width container. The sidebars and layer panel
-    // are added directly to the content layout so they can be hidden independently.
+    // Phase S3: Old sidebar container removed - outline/bookmarks will be moved to LeftSidebarContainer
+    // m_leftSideContainer = new QWidget(this);
+    // QHBoxLayout *leftSidebarsLayout = new QHBoxLayout(m_leftSideContainer);
+    // leftSidebarsLayout->setContentsMargins(0, 0, 0, 0);
+    // leftSidebarsLayout->setSpacing(0);
+    // leftSidebarsLayout->addWidget(outlineSidebar);
+    // leftSidebarsLayout->addWidget(bookmarksSidebar);
     
-    // Top part: sidebars widget (can be hidden independently)
-    m_leftSideContainer = new QWidget(this);
-    QHBoxLayout *leftSidebarsLayout = new QHBoxLayout(m_leftSideContainer);
-    leftSidebarsLayout->setContentsMargins(0, 0, 0, 0);
-    leftSidebarsLayout->setSpacing(0);
-    leftSidebarsLayout->addWidget(outlineSidebar);
-    leftSidebarsLayout->addWidget(bookmarksSidebar);
-    
-    // Sidebars container - only visible when at least one sidebar is showing
-    contentLayout->addWidget(m_leftSideContainer, 0);
-    // Layer panel - added separately so it can be hidden independently
-    contentLayout->addWidget(m_layerPanel, 0);
+    // Phase S3: Left sidebar container (replaces separate sidebars and floating tabs)
+    contentLayout->addWidget(m_leftSidebar, 0);
+    // Note: m_leftSideContainer kept for now (outline/bookmarks) but hidden
+    // contentLayout->addWidget(m_leftSideContainer, 0);  // Old outline/bookmarks - to be removed
     contentLayout->addWidget(canvasContainer, 1); // Canvas takes remaining space
     // MW2.2: Removed dialToolbar from layout
     contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
@@ -1594,8 +1469,7 @@ void MainWindow::setupUi() {
     // Setup single instance server
     setupSingleInstanceServer();
 
-    // Initialize responsive toolbar layout
-    createSingleRowLayout();  // Start with single row layout
+    // REMOVED E.1: Layout functions removed - new components handle their own layout
     
     // Now that all UI components are created, update the color palette
     updateColorPalette();
@@ -1603,7 +1477,7 @@ void MainWindow::setupUi() {
     // Position add tab button and floating sidebar tabs initially
     QTimer::singleShot(100, this, [this]() {
         updateTabSizes();
-        positionLeftSidebarTabs();
+        // Phase S3: positionLeftSidebarTabs() removed - using LeftSidebarContainer
         // MW2.2: Removed positionDialToolbarTab()
         
         // Phase 5.1: Initialize LayerPanel for the first tab
@@ -1860,83 +1734,8 @@ void MainWindow::setEraserTool() {
 // Features migrated to DocumentViewport
 
 void MainWindow::updateToolButtonStates() {
-    // Phase 3.1.4: Use currentViewport()
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
-    
-    // Reset all tool buttons
-    penToolButton->setProperty("selected", false);
-    markerToolButton->setProperty("selected", false);
-    eraserToolButton->setProperty("selected", false);
-    if (ropeToolButton) ropeToolButton->setProperty("selected", false);
-    if (insertPictureButton) insertPictureButton->setProperty("selected", false);
-    
-    // Update icons for unselected state
-    updateButtonIcon(penToolButton, "pen");
-    updateButtonIcon(markerToolButton, "marker");
-    updateButtonIcon(eraserToolButton, "eraser");
-    if (ropeToolButton) updateButtonIcon(ropeToolButton, "rope");
-    if (insertPictureButton) updateButtonIcon(insertPictureButton, "background");
-    
-    // Set the selected property for the current tool
-    ToolType tool = vp->currentTool();
-    switch (tool) {
-        case ToolType::Pen:
-            penToolButton->setProperty("selected", true);
-            updateButtonIcon(penToolButton, "pen");
-            break;
-        case ToolType::Marker:
-            markerToolButton->setProperty("selected", true);
-            updateButtonIcon(markerToolButton, "marker");
-            break;
-        case ToolType::Eraser:
-            eraserToolButton->setProperty("selected", true);
-            updateButtonIcon(eraserToolButton, "eraser");
-            break;
-        case ToolType::Lasso:
-            // Task 2.10.9: Lasso tool button state
-            if (ropeToolButton) {
-                ropeToolButton->setProperty("selected", true);
-                updateButtonIcon(ropeToolButton, "rope");
-            }
-            break;
-        case ToolType::Highlighter:
-            // Future tool
-            break;
-        case ToolType::ObjectSelect:
-            // Phase O2: Object selection tool - uses insertPictureButton (O2.9)
-            if (insertPictureButton) {
-                insertPictureButton->setProperty("selected", true);
-                updateButtonIcon(insertPictureButton, "background");
-            }
-            break;
-    }
-    
-    // Force style update
-    penToolButton->style()->unpolish(penToolButton);
-    penToolButton->style()->polish(penToolButton);
-    markerToolButton->style()->unpolish(markerToolButton);
-    markerToolButton->style()->polish(markerToolButton);
-    eraserToolButton->style()->unpolish(eraserToolButton);
-    eraserToolButton->style()->polish(eraserToolButton);
-    if (ropeToolButton) {
-        ropeToolButton->style()->unpolish(ropeToolButton);
-        ropeToolButton->style()->polish(ropeToolButton);
-    }
-    if (insertPictureButton) {
-        insertPictureButton->style()->unpolish(insertPictureButton);
-        insertPictureButton->style()->polish(insertPictureButton);
-    }
-    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton style updates
-    
-    // CR-2B-1: Sync straight line button state
-    // (may have been auto-disabled when switching to eraser)
-    if (straightLineToggleButton) {
-        bool slEnabled = vp->straightLineMode();
-        straightLineToggleButton->setProperty("selected", slEnabled);
-        straightLineToggleButton->style()->unpolish(straightLineToggleButton);
-        straightLineToggleButton->style()->polish(straightLineToggleButton);
-    }
+    // REMOVED E.1: All tool buttons moved to Toolbar component
+    // Toolbar component handles its own visual state updates
 }
 
 void MainWindow::handleColorButtonClick() {
@@ -2508,13 +2307,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         updateDialDisplay();
     });
     
-    m_straightLineModeConn = connect(viewport, &DocumentViewport::straightLineModeChanged, this, [this](bool enabled) {
-        if (straightLineToggleButton) {
-            straightLineToggleButton->setProperty("selected", enabled);
-            straightLineToggleButton->style()->unpolish(straightLineToggleButton);
-            straightLineToggleButton->style()->polish(straightLineToggleButton);
-        }
-    });
+    // REMOVED E.1: straightLineToggleButton moved to Toolbar - no need to sync button state
+    // m_straightLineModeConn = connect(viewport, &DocumentViewport::straightLineModeChanged, this, [this](bool enabled) {
+    //     // Button state sync removed
+    // });
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -3513,8 +3309,9 @@ void MainWindow::loadFolderDocument()
 
     zoomSlider->setValue(qRound(100.0 / initialDpr)); // Set initial zoom level based on DPR
     updateDialDisplay();
-    updateStraightLineButtonState();  // Initialize straight line button state for the new tab
-    updateRopeToolButtonState(); // Initialize rope tool button state for the new tab
+    // REMOVED E.1: Button state functions no longer needed - Toolbar handles its own state
+    // updateStraightLineButtonState();  // Initialize straight line button state for the new tab
+    // updateRopeToolButtonState(); // Initialize rope tool button state for the new tab
     updatePdfTextSelectButtonState(); // Initialize PDF text selection button state for the new tab
     updateBookmarkButtonState(); // Initialize bookmark button state for the new tab
     updatePictureButtonState(); // Initialize picture button state for the new tab
@@ -3683,60 +3480,8 @@ void MainWindow::onPageInputChanged(int newPage) {
 
 // MW2.2: toggleDial() removed - dial system deleted
 
-void MainWindow::positionLeftSidebarTabs() {
-    // Calculate heights for vertical positioning
-    int tabBarHeight = (tabBarContainer && tabBarContainer->isVisible()) ? 38 : 0;
-    int toolbarHeight = isToolbarTwoRows ? 80 : 50;
-    int topOffset = tabBarHeight + toolbarHeight + 60; // 60px margin from top of content area
-    int tabSpacing = 10; // Space between tabs
-    
-    // Calculate x position based on visible left sidebars
-    int leftOffset = 0;
-    if (outlineSidebarVisible && outlineSidebar && outlineSidebar->isVisible()) {
-        leftOffset += outlineSidebar->width();
-    }
-    if (bookmarksSidebarVisible && bookmarksSidebar && bookmarksSidebar->isVisible()) {
-        leftOffset += bookmarksSidebar->width();
-    }
-    
-    // Position outline tab
-    if (toggleOutlineButton) {
-        int tabX = leftOffset; // At the right edge of visible sidebars
-        int tabY = topOffset;
-        toggleOutlineButton->move(tabX, tabY);
-        toggleOutlineButton->raise();
-    }
-    
-    // Position bookmarks tab below outline tab
-    if (toggleBookmarksButton) {
-        int tabX = leftOffset;
-        int tabY = topOffset + 80 + tabSpacing; // Below outline tab
-        toggleBookmarksButton->move(tabX, tabY);
-        toggleBookmarksButton->raise();
-    }
-    
-    // Position layer panel tab at the right edge of the layer panel
-    if (toggleLayerPanelButton) {
-        int tabX;
-        int tabY;
-        
-        if (layerPanelVisible && m_layerPanel && m_layerPanel->isVisible()) {
-            // When visible: position at right edge of layer panel (sticking into viewport)
-            QPoint panelPos = m_layerPanel->mapTo(this, QPoint(0, 0));
-            tabX = panelPos.x() + m_layerPanel->width();
-            // Position at the vertical center of the layer panel
-            tabY = panelPos.y() + (m_layerPanel->height() - toggleLayerPanelButton->height()) / 2;
-        } else {
-            // When hidden: position at left edge (after sidebars if any)
-            tabX = leftOffset;
-            // Position near bottom of content area (where layer panel would be)
-            int contentBottom = height() - 20;  // 20px from bottom
-            tabY = contentBottom - toggleLayerPanelButton->height() - 50;  // A bit above bottom
-        }
-        toggleLayerPanelButton->move(tabX, tabY);
-        toggleLayerPanelButton->raise();
-    }
-}
+// Phase S3: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
+// void MainWindow::positionLeftSidebarTabs() { ... }
 
 void MainWindow::updateDialDisplay() {
     // MW2.2: Simplified updateDialDisplay - dial system removed
@@ -4262,66 +4007,10 @@ void MainWindow::updateTheme() {
     
     // MW2.2: Removed dial toolbar styling
     
-    // Update left sidebar tabs styling (left side, rounded right)
-    if (toggleOutlineButton) {
-        QString outlineStyle = QString(
-            "QPushButton#outlineSidebarTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-left: none;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-right-radius: 0px;"
-            "}"
-            "QPushButton#outlineSidebarTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#outlineSidebarTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
-        toggleOutlineButton->setStyleSheet(outlineStyle);
-        toggleOutlineButton->setIcon(loadThemedIcon("outline"));
-    }
-    
-    if (toggleBookmarksButton) {
-        QString bookmarksStyle = QString(
-            "QPushButton#bookmarksSidebarTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-left: none;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-right-radius: 0px;"
-            "}"
-            "QPushButton#bookmarksSidebarTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#bookmarksSidebarTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
-        toggleBookmarksButton->setStyleSheet(bookmarksStyle);
-        toggleBookmarksButton->setIcon(loadThemedIcon("bookmark"));
-    }
-    
-    // Update layer panel toggle button styling
-    if (toggleLayerPanelButton) {
-        QString layerPanelStyle = QString(
-            "QPushButton#layerPanelTab {"
-            "  background-color: %1;"
-            "  border: 1px solid %2;"
-            "  border-left: none;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-right-radius: 0px;"
-            "}"
-            "QPushButton#layerPanelTab:hover {"
-            "  background-color: %3;"
-            "}"
-            "QPushButton#layerPanelTab:pressed {"
-            "  background-color: %1;"
-            "}"
-        ).arg(tabBgColor, tabBorderColor, tabHoverColor);
-        toggleLayerPanelButton->setStyleSheet(layerPanelStyle);
-        toggleLayerPanelButton->setIcon(loadThemedIcon("layer"));
+    // Phase S3: Floating sidebar tab styling removed - using LeftSidebarContainer
+    // Update left sidebar container theme
+    if (m_leftSidebar) {
+        m_leftSidebar->updateTheme(darkMode);
     }
     
     // MW2.2: Removed dial styling - dial system deleted
@@ -4471,16 +4160,14 @@ void MainWindow::updateTheme() {
     updateButtonIcon(pdfTextSelectButton, "ibeam");
 
     updateButtonIcon(benchmarkButton, "benchmark");
-    updateButtonIcon(toggleTabBarButton, "tabs");
-    updateButtonIcon(toggleOutlineButton, "outline");
-    updateButtonIcon(toggleBookmarksButton, "bookmark");
+    // REMOVED E.1: toggleTabBarButton moved to NavigationBar
+    // REMOVED S1: Floating sidebar buttons moved to LeftSidebarContainer
     updateButtonIcon(toggleBookmarkButton, "star");
     if (selectFolderButton) selectFolderButton->setIcon(loadThemedIcon("folder"));
-    if (saveButton) saveButton->setIcon(loadThemedIcon("save"));
+    // REMOVED E.1: saveButton moved to NavigationBar
     if (exportPdfButton) exportPdfButton->setIcon(loadThemedIcon("export"));
-    if (fullscreenButton) fullscreenButton->setIcon(loadThemedIcon("fullscreen"));
-    updateButtonIcon(straightLineToggleButton, "straightLine");
-    updateButtonIcon(ropeToolButton, "rope");
+    // REMOVED E.1: fullscreenButton moved to NavigationBar
+    // REMOVED E.1: straightLineToggleButton and ropeToolButton moved to Toolbar
     if (deletePageButton) deletePageButton->setIcon(loadThemedIcon("trash"));
     if (zoomButton) zoomButton->setIcon(loadThemedIcon("zoom"));
     // MW2.2: Removed dialToggleButton icon update
@@ -4491,11 +4178,12 @@ void MainWindow::updateTheme() {
     if (addPresetButton) addPresetButton->setIcon(loadThemedIcon("savepreset"));
     if (openControlPanelButton) openControlPanelButton->setIcon(loadThemedIcon("settings"));
     // Phase C.1.5: Removed openRecentNotebooksButton - functionality now in NavigationBar
-    updateButtonIcon(penToolButton, "pen");
-    updateButtonIcon(markerToolButton, "marker");
-    updateButtonIcon(eraserToolButton, "eraser");
+    // REMOVED E.1: Tool buttons moved to Toolbar
+    // updateButtonIcon(penToolButton, "pen");
+    // updateButtonIcon(markerToolButton, "marker");
+    // updateButtonIcon(eraserToolButton, "eraser");
     updateButtonIcon(insertPictureButton, "background");
-    updateButtonIcon(touchGesturesButton, "hand");
+    // REMOVED E.1: touchGesturesButton moved to Toolbar
     
     // Update button styles with new theme (darkMode already declared at top of function)
     QString newButtonStyle = createButtonStyle(darkMode);
@@ -4506,12 +4194,13 @@ void MainWindow::updateTheme() {
     if (pdfTextSelectButton) pdfTextSelectButton->setStyleSheet(newButtonStyle);
 
     if (benchmarkButton) benchmarkButton->setStyleSheet(newButtonStyle);
-    if (toggleTabBarButton) toggleTabBarButton->setStyleSheet(newButtonStyle);
+    // REMOVED E.1: toggleTabBarButton, saveButton, fullscreenButton moved to new components
+    // if (toggleTabBarButton) toggleTabBarButton->setStyleSheet(newButtonStyle);
     // toggleOutlineButton and toggleBookmarksButton use custom floating tab styles, not buttonStyle
     if (toggleBookmarkButton) toggleBookmarkButton->setStyleSheet(newButtonStyle);
     if (selectFolderButton) selectFolderButton->setStyleSheet(newButtonStyle);
-    if (saveButton) saveButton->setStyleSheet(newButtonStyle);
-    if (fullscreenButton) fullscreenButton->setStyleSheet(newButtonStyle);
+    // if (saveButton) saveButton->setStyleSheet(newButtonStyle);
+    // if (fullscreenButton) fullscreenButton->setStyleSheet(newButtonStyle);
     if (redButton) redButton->setStyleSheet(newButtonStyle);
     if (blueButton) blueButton->setStyleSheet(newButtonStyle);
     if (yellowButton) yellowButton->setStyleSheet(newButtonStyle);
@@ -4519,11 +4208,12 @@ void MainWindow::updateTheme() {
     if (blackButton) blackButton->setStyleSheet(newButtonStyle);
     if (whiteButton) whiteButton->setStyleSheet(newButtonStyle);
     if (thicknessButton) thicknessButton->setStyleSheet(newButtonStyle);
-    if (penToolButton) penToolButton->setStyleSheet(newButtonStyle);
-    if (markerToolButton) markerToolButton->setStyleSheet(newButtonStyle);
-    if (eraserToolButton) eraserToolButton->setStyleSheet(newButtonStyle);
-    if (straightLineToggleButton) straightLineToggleButton->setStyleSheet(newButtonStyle);
-    if (ropeToolButton) ropeToolButton->setStyleSheet(newButtonStyle);
+    // REMOVED E.1: Tool buttons moved to Toolbar
+    // if (penToolButton) penToolButton->setStyleSheet(newButtonStyle);
+    // if (markerToolButton) markerToolButton->setStyleSheet(newButtonStyle);
+    // if (eraserToolButton) eraserToolButton->setStyleSheet(newButtonStyle);
+    // if (straightLineToggleButton) straightLineToggleButton->setStyleSheet(newButtonStyle);
+    // if (ropeToolButton) ropeToolButton->setStyleSheet(newButtonStyle);
     if (insertPictureButton) insertPictureButton->setStyleSheet(newButtonStyle);
     if (deletePageButton) deletePageButton->setStyleSheet(newButtonStyle);
     if (overflowMenuButton) overflowMenuButton->setStyleSheet(newButtonStyle);
@@ -4641,13 +4331,14 @@ void MainWindow::setZoomButtonsVisible(bool visible) {
     // Update zoomButtonsVisible flag and trigger layout update
     zoomButtonsVisible = visible;
     
-    // Trigger layout update to adjust responsive thresholds
-    if (layoutUpdateTimer) {
-        layoutUpdateTimer->stop();
-        layoutUpdateTimer->start(50); // Quick update for settings change
-    } else {
-        updateToolbarLayout(); // Direct update if no timer exists yet
-    }
+    // REMOVED E.1: layoutUpdateTimer no longer needed
+    // // Trigger layout update to adjust responsive thresholds
+    // if (layoutUpdateTimer) {
+    //     layoutUpdateTimer->stop();
+    //     layoutUpdateTimer->start(50); // Quick update for settings change
+    // } else {
+    //     // REMOVED E.1: updateToolbarLayout no longer needed
+    // }
 }
 
 
@@ -4974,7 +4665,7 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
 
     switch (action) {
         case ControllerAction::ToggleFullscreen:
-            fullscreenButton->click();
+            toggleFullscreen();
             break;
         case ControllerAction::ToggleDial:
             toggleDial();
@@ -5022,16 +4713,26 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
             customColorButton->click();
             break;
         case ControllerAction::ToggleSidebar:
-            toggleTabBarButton->click();
+            // REMOVED E.1: toggleTabBarButton moved to NavigationBar
+            if (m_tabBar) {
+                bool isVisible = m_tabBar->isVisible();
+                m_tabBar->setVisible(!isVisible);
+            }
             break;
         case ControllerAction::Save:
-            saveButton->click();
+            saveCurrentPage();
             break;
         case ControllerAction::StraightLineTool:
-            straightLineToggleButton->click();
+            // REMOVED E.1: straightLineToggleButton moved to Toolbar
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setStraightLineMode(true);
+            }
             break;
         case ControllerAction::RopeTool:
-            ropeToolButton->click();
+            // REMOVED E.1: ropeToolButton moved to Toolbar
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setCurrentTool(ToolType::Lasso);
+            }
             break;
         case ControllerAction::SetPenTool:
             setPenTool();
@@ -5046,16 +4747,16 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
             pdfTextSelectButton->click();
             break;
         case ControllerAction::ToggleOutline:
-            toggleOutlineButton->click();
+            toggleOutlineSidebar();
             break;
         case ControllerAction::ToggleBookmarks:
-            toggleBookmarksButton->click();
+            toggleBookmarksSidebar();
             break;
         case ControllerAction::AddBookmark:
             toggleBookmarkButton->click();
             break;
         case ControllerAction::ToggleTouchGestures:
-            touchGesturesButton->click();
+            cycleTouchGestureMode();
             break;
         case ControllerAction::PreviousPage:
             goToPreviousPage();
@@ -5106,12 +4807,7 @@ void MainWindow::loadUserSettings() {
     touchGestureMode = static_cast<TouchGestureMode>(savedMode);
     setTouchGestureMode(touchGestureMode);
     
-    // Update button visual state to match loaded setting
-    touchGesturesButton->setProperty("selected", touchGestureMode != TouchGestureMode::Disabled);
-    touchGesturesButton->setProperty("yAxisOnly", touchGestureMode == TouchGestureMode::YAxisOnly);
-    updateButtonIcon(touchGesturesButton, "hand");
-    touchGesturesButton->style()->unpolish(touchGesturesButton);
-    touchGesturesButton->style()->polish(touchGesturesButton);
+    // REMOVED E.1: touchGesturesButton moved to Toolbar - no need to update button state
     
 #ifdef Q_OS_LINUX
     // Load palm rejection settings (Linux only)
@@ -5327,26 +5023,13 @@ void MainWindow::updateCustomColorButtonStyle(const QColor &color) {
 }
 
 void MainWindow::updateStraightLineButtonState() {
-    // Phase 3.1.4: Stubbed - straight line mode not implemented yet
-    if (straightLineToggleButton) {
-        straightLineToggleButton->setProperty("selected", false);
-        updateButtonIcon(straightLineToggleButton, "straightLine");
-        straightLineToggleButton->style()->unpolish(straightLineToggleButton);
-        straightLineToggleButton->style()->polish(straightLineToggleButton);
-    }
+    // REMOVED E.1: straightLineToggleButton moved to Toolbar
+    // Function kept as stub for compatibility
 }
 
 void MainWindow::updateRopeToolButtonState() {
-    // Task 2.10.9: Update rope/lasso tool button to reflect viewport state
-    if (!ropeToolButton) return;
-
-    DocumentViewport* vp = currentViewport();
-    bool isLasso = vp && (vp->currentTool() == ToolType::Lasso);
-
-    ropeToolButton->setProperty("selected", isLasso);
-        updateButtonIcon(ropeToolButton, "rope");
-        ropeToolButton->style()->unpolish(ropeToolButton);
-        ropeToolButton->style()->polish(ropeToolButton);
+    // REMOVED E.1: ropeToolButton moved to Toolbar
+    // Function kept as stub for compatibility
 }
 
 void MainWindow::updatePictureButtonState() {
@@ -5436,249 +5119,31 @@ void MainWindow::returnToLauncher() {
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
     
-    // Use a timer to delay layout updates during resize to prevent excessive switching
-    if (!layoutUpdateTimer) {
-        layoutUpdateTimer = new QTimer(this);
-        layoutUpdateTimer->setSingleShot(true);
-        connect(layoutUpdateTimer, &QTimer::timeout, this, [this]() {
-            updateToolbarLayout();
-            updateTabSizes(); // Update tab widths when window resizes
-            // Reposition floating sidebar tabs
-            positionLeftSidebarTabs();
-            // MW2.2: Removed dial container positioning
-        });
-    }
-    
-    layoutUpdateTimer->stop();
-    layoutUpdateTimer->start(100); // Wait 100ms after resize stops
+    // REMOVED E.1: layoutUpdateTimer no longer needed
+    // // Use a timer to delay layout updates during resize to prevent excessive switching
+    // if (!layoutUpdateTimer) {
+    //     layoutUpdateTimer = new QTimer(this);
+    //     layoutUpdateTimer->setSingleShot(true);
+    //     connect(layoutUpdateTimer, &QTimer::timeout, this, [this]() {
+    //         // REMOVED E.1: updateToolbarLayout no longer needed
+    //         updateTabSizes(); // Update tab widths when window resizes
+    //         // Reposition floating sidebar tabs
+    //         // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
+    //         // MW2.2: Removed dial container positioning
+    //     });
+    // }
+    //
+    // layoutUpdateTimer->stop();
+    // layoutUpdateTimer->start(100); // Wait 100ms after resize stops
 }
 
-void MainWindow::updateToolbarLayout() {
-    int windowWidth = width();
-    
-    // Thresholds:
-    // >= 1090: Single row with centered buttons (left spacer compensates for right buttons)
-    // < 1090 and >= 1020: Single row without centering (left spacer removed, buttons can use full width)
-    // < 1020: Two-row layout
-    const int centeringThreshold = 1090;
-    const int twoRowThreshold = 1020;
-    
-    bool shouldBeTwoRows = windowWidth < twoRowThreshold;
-    bool shouldBeCentered = windowWidth >= centeringThreshold;
-    
-    // Track if we need to recreate the layout
-    static bool wasCentered = true;  // Start with centered assumption
-    
-    if (shouldBeTwoRows != isToolbarTwoRows) {
-        isToolbarTwoRows = shouldBeTwoRows;
-        
-        if (isToolbarTwoRows) {
-            createTwoRowLayout();
-        } else {
-            createSingleRowLayout(shouldBeCentered);
-        }
-        wasCentered = shouldBeCentered;
-    } else if (!isToolbarTwoRows && shouldBeCentered != wasCentered) {
-        // Still single row, but centering mode changed
-        createSingleRowLayout(shouldBeCentered);
-        wasCentered = shouldBeCentered;
-    }
-}
-
-void MainWindow::createSingleRowLayout(bool centered) {
-    // Delete separator line if it exists (from previous 2-row layout)
-    if (separatorLine) {
-        delete separatorLine;
-        separatorLine = nullptr;
-    }
-    
-    // Create new single row layout
-    QHBoxLayout *newLayout = new QHBoxLayout;
-    
-    // When centered mode is enabled (wide window), add a left spacer to compensate
-    // for the right-aligned buttons, making the center buttons truly centered.
-    // When not centered (narrower window), skip the spacer so buttons can use full width.
-    if (centered) {
-        // Right buttons: toggleBookmarkButton(36) + pageInput(36) + overflowMenuButton(30) + deletePageButton(22) + spacing
-        const int rightButtonsWidth = 130;
-        QSpacerItem *leftSpacer = new QSpacerItem(rightButtonsWidth, 0, QSizePolicy::Preferred, QSizePolicy::Minimum);
-        newLayout->addSpacerItem(leftSpacer);
-    }
-    
-    // Left stretch to center the main buttons
-    newLayout->addStretch();
-    
-    // Centered buttons - toggle and utility
-    newLayout->addWidget(toggleTabBarButton);
-        newLayout->addWidget(toggleMarkdownNotesButton);
-        newLayout->addWidget(touchGesturesButton);
-    newLayout->addWidget(pdfTextSelectButton);
-    newLayout->addWidget(saveButton);
-    
-    // Color buttons
-    newLayout->addWidget(redButton);
-    newLayout->addWidget(blueButton);
-    newLayout->addWidget(yellowButton);
-    newLayout->addWidget(greenButton);
-    newLayout->addWidget(blackButton);
-    newLayout->addWidget(whiteButton);
-    newLayout->addWidget(customColorButton);
-    
-    // Tool buttons
-    newLayout->addWidget(penToolButton);
-    newLayout->addWidget(markerToolButton);
-    newLayout->addWidget(eraserToolButton);
-    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
-    newLayout->addWidget(straightLineToggleButton);
-    newLayout->addWidget(ropeToolButton);
-    newLayout->addWidget(insertPictureButton);
-    newLayout->addWidget(fullscreenButton);
-    
-    // Right stretch to center the main buttons
-    newLayout->addStretch();
-    
-    // Page controls and overflow menu on the right (fixed position)
-    newLayout->addWidget(toggleBookmarkButton);
-    newLayout->addWidget(pageInput);
-    newLayout->addWidget(overflowMenuButton);
-    newLayout->addWidget(deletePageButton);
-    
-    // Benchmark controls (visibility controlled by settings)
-    newLayout->addWidget(benchmarkButton);
-    newLayout->addWidget(benchmarkLabel);
-    
-    // Safely replace the layout
-    QLayout* oldLayout = controlBar->layout();
-    if (oldLayout) {
-        // Remove all items from old layout (but don't delete widgets)
-        QLayoutItem* item;
-        while ((item = oldLayout->takeAt(0)) != nullptr) {
-            // Just removing, not deleting widgets
-        }
-        delete oldLayout;
-    }
-    
-    // Set the new layout
-    controlBar->setLayout(newLayout);
-    controlLayoutSingle = newLayout;
-    
-    // Clean up other layout pointers
-    controlLayoutVertical = nullptr;
-    controlLayoutFirstRow = nullptr;
-    controlLayoutSecondRow = nullptr;
-    
-    // Update pan range after layout change
-    updatePanRange();
-}
-
-void MainWindow::createTwoRowLayout() {
-    // Two-row layout for narrow windows
-    
-    // Create new layouts
-    QVBoxLayout *newVerticalLayout = new QVBoxLayout;
-    QHBoxLayout *newFirstRowLayout = new QHBoxLayout;
-    QHBoxLayout *newSecondRowLayout = new QHBoxLayout;
-    
-    // Add comfortable spacing and margins
-    newFirstRowLayout->setContentsMargins(8, 8, 8, 6);
-    newFirstRowLayout->setSpacing(3);
-    newSecondRowLayout->setContentsMargins(8, 6, 8, 8);
-    newSecondRowLayout->setSpacing(3);
-    
-    // First row: toggle buttons and colors (centered - no right buttons, so no compensation needed)
-    newFirstRowLayout->addStretch();
-    newFirstRowLayout->addWidget(toggleTabBarButton);
-        newFirstRowLayout->addWidget(toggleMarkdownNotesButton);
-        newFirstRowLayout->addWidget(touchGesturesButton);
-    newFirstRowLayout->addWidget(pdfTextSelectButton);
-    newFirstRowLayout->addWidget(saveButton);
-    newFirstRowLayout->addWidget(redButton);
-    newFirstRowLayout->addWidget(blueButton);
-    newFirstRowLayout->addWidget(yellowButton);
-    newFirstRowLayout->addWidget(greenButton);
-    newFirstRowLayout->addWidget(blackButton);
-    newFirstRowLayout->addWidget(whiteButton);
-    newFirstRowLayout->addWidget(customColorButton);
-    newFirstRowLayout->addStretch();
-    
-    // Create a separator line
-    if (!separatorLine) {
-        separatorLine = new QFrame();
-        separatorLine->setFrameShape(QFrame::HLine);
-        separatorLine->setFrameShadow(QFrame::Sunken);
-        separatorLine->setLineWidth(1);
-        separatorLine->setStyleSheet("QFrame { color: rgba(255, 255, 255, 255); }");
-    }
-    
-    // Calculate the width of right-aligned buttons to create a compensating left spacer
-    // Right buttons: toggleBookmarkButton(36) + pageInput(36) + overflowMenuButton(30) + deletePageButton(22) + spacing
-    const int rightButtonsWidth = 130;
-    
-    // Second row: tool buttons (centered) and page controls (right)
-    // Left spacer to compensate for right-aligned buttons (can shrink when window is narrow)
-    QSpacerItem *leftSpacer = new QSpacerItem(rightButtonsWidth, 0, QSizePolicy::Preferred, QSizePolicy::Minimum);
-    newSecondRowLayout->addSpacerItem(leftSpacer);
-    
-    newSecondRowLayout->addStretch();
-    newSecondRowLayout->addWidget(penToolButton);
-    newSecondRowLayout->addWidget(markerToolButton);
-    newSecondRowLayout->addWidget(eraserToolButton);
-    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
-    newSecondRowLayout->addWidget(straightLineToggleButton);
-    newSecondRowLayout->addWidget(ropeToolButton);
-    newSecondRowLayout->addWidget(insertPictureButton);
-    newSecondRowLayout->addWidget(fullscreenButton);
-    
-    newSecondRowLayout->addStretch();
-    
-    newSecondRowLayout->addWidget(toggleBookmarkButton);
-    newSecondRowLayout->addWidget(pageInput);
-    newSecondRowLayout->addWidget(overflowMenuButton);
-    newSecondRowLayout->addWidget(deletePageButton);
-    
-    // Benchmark controls (visibility controlled by settings)
-    newSecondRowLayout->addWidget(benchmarkButton);
-    newSecondRowLayout->addWidget(benchmarkLabel);
-    
-    // Add layouts to vertical layout with separator
-    newVerticalLayout->addLayout(newFirstRowLayout);
-    newVerticalLayout->addWidget(separatorLine);
-    newVerticalLayout->addLayout(newSecondRowLayout);
-    newVerticalLayout->setContentsMargins(0, 0, 0, 0);
-    newVerticalLayout->setSpacing(0);
-    
-    // Safely replace the layout
-    QLayout* oldLayout = controlBar->layout();
-    if (oldLayout) {
-        // Remove all items from old layout (but don't delete widgets)
-        QLayoutItem* item;
-        while ((item = oldLayout->takeAt(0)) != nullptr) {
-            // Just removing, not deleting widgets
-        }
-        delete oldLayout;
-    }
-    
-    // Set the new layout
-    controlBar->setLayout(newVerticalLayout);
-    controlLayoutVertical = newVerticalLayout;
-    controlLayoutFirstRow = newFirstRowLayout;
-    controlLayoutSecondRow = newSecondRowLayout;
-    
-    // Clean up other layout pointer
-    controlLayoutSingle = nullptr;
-    
-    // Update pan range after layout change
-    updatePanRange();
-}
-
-// New: Keyboard mapping implementation
 void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
     ControllerAction action = keyboardActionMapping.value(keySequence, ControllerAction::None);
     
     // Use the same handler as Joy-Con buttons
     switch (action) {
         case ControllerAction::ToggleFullscreen:
-            fullscreenButton->click();
+            toggleFullscreen();
             break;
         case ControllerAction::ToggleDial:
             toggleDial();
@@ -5726,16 +5191,26 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
             customColorButton->click();
             break;
         case ControllerAction::ToggleSidebar:
-            toggleTabBarButton->click();
+            // REMOVED E.1: toggleTabBarButton moved to NavigationBar
+            if (m_tabBar) {
+                bool isVisible = m_tabBar->isVisible();
+                m_tabBar->setVisible(!isVisible);
+            }
             break;
         case ControllerAction::Save:
-            saveButton->click();
+            saveCurrentPage();
             break;
         case ControllerAction::StraightLineTool:
-            straightLineToggleButton->click();
+            // REMOVED E.1: straightLineToggleButton moved to Toolbar
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setStraightLineMode(true);
+            }
             break;
         case ControllerAction::RopeTool:
-            ropeToolButton->click();
+            // REMOVED E.1: ropeToolButton moved to Toolbar
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setCurrentTool(ToolType::Lasso);
+            }
             break;
         case ControllerAction::SetPenTool:
             setPenTool();
@@ -5750,16 +5225,16 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
             pdfTextSelectButton->click();
             break;
         case ControllerAction::ToggleOutline:
-            toggleOutlineButton->click();
+            toggleOutlineSidebar();
             break;
         case ControllerAction::ToggleBookmarks:
-            toggleBookmarksButton->click();
+            toggleBookmarksSidebar();
             break;
         case ControllerAction::AddBookmark:
             toggleBookmarkButton->click();
             break;
         case ControllerAction::ToggleTouchGestures:
-            touchGesturesButton->click();
+            cycleTouchGestureMode();
             break;
         case ControllerAction::PreviousPage:
             goToPreviousPage();
@@ -5970,30 +5445,18 @@ void MainWindow::toggleOutlineSidebar() {
     if (outlineSidebarVisible && bookmarksSidebar && bookmarksSidebar->isVisible()) {
         bookmarksSidebar->setVisible(false);
         bookmarksSidebarVisible = false;
-        // Update bookmarks button state
-        if (toggleBookmarksButton) {
-            toggleBookmarksButton->setProperty("selected", false);
-            updateButtonIcon(toggleBookmarksButton, "bookmark");
-            toggleBookmarksButton->style()->unpolish(toggleBookmarksButton);
-            toggleBookmarksButton->style()->polish(toggleBookmarksButton);
-        }
+        // REMOVED S1: Bookmarks button moved to LeftSidebarContainer
     }
     
     outlineSidebar->setVisible(outlineSidebarVisible);
     
     // Update sidebar container visibility (hide if both sidebars are hidden)
-    if (m_leftSideContainer) {
+    if (m_leftSidebar) {
         bool anySidebarVisible = outlineSidebarVisible || bookmarksSidebarVisible;
-        m_leftSideContainer->setVisible(anySidebarVisible);
+        m_leftSidebar->setVisible(anySidebarVisible);
     }
     
-    // Update button toggle state
-    if (toggleOutlineButton) {
-        toggleOutlineButton->setProperty("selected", outlineSidebarVisible);
-        updateButtonIcon(toggleOutlineButton, "outline");
-        toggleOutlineButton->style()->unpolish(toggleOutlineButton);
-        toggleOutlineButton->style()->polish(toggleOutlineButton);
-    }
+    // REMOVED S1: Outline button moved to LeftSidebarContainer
     
     // Load PDF outline when showing sidebar for the first time
     if (outlineSidebarVisible) {
@@ -6013,7 +5476,7 @@ void MainWindow::toggleOutlineSidebar() {
         centralWidget()->layout()->activate();
     }
     QTimer::singleShot(0, this, [this]() {
-        positionLeftSidebarTabs();
+        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
         // MW2.2: Removed dial container positioning
     });
 }
@@ -6208,31 +5671,19 @@ void MainWindow::toggleBookmarksSidebar() {
     if (!isVisible && outlineSidebar && outlineSidebar->isVisible()) {
         outlineSidebar->setVisible(false);
         outlineSidebarVisible = false;
-        // Update outline button state
-        if (toggleOutlineButton) {
-            toggleOutlineButton->setProperty("selected", false);
-            updateButtonIcon(toggleOutlineButton, "outline");
-            toggleOutlineButton->style()->unpolish(toggleOutlineButton);
-            toggleOutlineButton->style()->polish(toggleOutlineButton);
-        }
+        // REMOVED S1: Outline button moved to LeftSidebarContainer
     }
     
     bookmarksSidebar->setVisible(!isVisible);
     bookmarksSidebarVisible = !isVisible;
     
     // Update sidebar container visibility (hide if both sidebars are hidden)
-    if (m_leftSideContainer) {
+    if (m_leftSidebar) {
         bool anySidebarVisible = outlineSidebarVisible || bookmarksSidebarVisible;
-        m_leftSideContainer->setVisible(anySidebarVisible);
+        m_leftSidebar->setVisible(anySidebarVisible);
     }
     
-    // Update button toggle state
-    if (toggleBookmarksButton) {
-        toggleBookmarksButton->setProperty("selected", bookmarksSidebarVisible);
-        updateButtonIcon(toggleBookmarksButton, "bookmark");
-        toggleBookmarksButton->style()->unpolish(toggleBookmarksButton);
-        toggleBookmarksButton->style()->polish(toggleBookmarksButton);
-    }
+    // REMOVED S1: Bookmarks button moved to LeftSidebarContainer
     
     if (bookmarksSidebarVisible) {
         loadBookmarks(); // Refresh bookmarks when opening
@@ -6244,7 +5695,7 @@ void MainWindow::toggleBookmarksSidebar() {
         centralWidget()->layout()->activate();
     }
     QTimer::singleShot(0, this, [this]() {
-        positionLeftSidebarTabs();
+        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
         // MW2.2: Removed dial container positioning
     });
 }
@@ -6255,13 +5706,7 @@ void MainWindow::toggleLayerPanel() {
     layerPanelVisible = !layerPanelVisible;
     m_layerPanel->setVisible(layerPanelVisible);
     
-    // Update button toggle state
-    if (toggleLayerPanelButton) {
-        toggleLayerPanelButton->setProperty("selected", layerPanelVisible);
-        // Force style update
-        toggleLayerPanelButton->style()->unpolish(toggleLayerPanelButton);
-        toggleLayerPanelButton->style()->polish(toggleLayerPanelButton);
-    }
+    // REMOVED S1: Layer panel button moved to LeftSidebarContainer
     
     // Force layout update and reposition floating tabs
     if (centralWidget() && centralWidget()->layout()) {
@@ -6270,7 +5715,7 @@ void MainWindow::toggleLayerPanel() {
             }
     // Use a slightly longer delay to ensure layout is complete before positioning
     QTimer::singleShot(50, this, [this]() {
-        positionLeftSidebarTabs();
+        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
         // MW2.2: Removed positionDialToolbarTab()
     });
 }
@@ -6354,13 +5799,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     markdownNotesSidebar->setVisible(!isVisible);
     markdownNotesSidebarVisible = !isVisible;
     
-    // Update button toggle state
-    if (toggleMarkdownNotesButton) {
-        toggleMarkdownNotesButton->setProperty("selected", markdownNotesSidebarVisible);
-        updateButtonIcon(toggleMarkdownNotesButton, "markdown");
-        toggleMarkdownNotesButton->style()->unpolish(toggleMarkdownNotesButton);
-        toggleMarkdownNotesButton->style()->polish(toggleMarkdownNotesButton);
-    }
+    // REMOVED E.1: toggleMarkdownNotesButton moved to NavigationBar - no need to update button state
     
     if (markdownNotesSidebarVisible) {
         // MW1.5: loadMarkdownNotesForCurrentPage() removed - will be reimplemented
@@ -6382,7 +5821,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     // Reposition floating tabs after layout settles
     QTimer::singleShot(0, this, [this]() {
-        positionLeftSidebarTabs();
+        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
         // MW2.2: Removed dial container positioning
     });
 }

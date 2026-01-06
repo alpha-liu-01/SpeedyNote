@@ -58,6 +58,7 @@ class InkCanvas;
 // Toolbar extraction includes
 #include "ui/NavigationBar.h"
 #include "ui/Toolbar.h"
+#include "ui/sidebars/LeftSidebarContainer.h"  // Phase S3: Left sidebar container
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
 // Will be reimplemented in Phase 3.3 if needed
@@ -545,15 +546,17 @@ private:
     QSlider *thicknessSlider; // Added thickness slider
     QFrame *thicknessFrame; // Added thickness frame
     QComboBox *toolSelector;
-    QPushButton *penToolButton;    // Individual pen tool button
-    QPushButton *markerToolButton; // Individual marker tool button
-    QPushButton *eraserToolButton; // Individual eraser tool button
+    // REMOVED E.1: Tool buttons moved to Toolbar
+    // QPushButton *penToolButton;    // Individual pen tool button
+    // QPushButton *markerToolButton; // Individual marker tool button
+    // QPushButton *eraserToolButton; // Individual eraser tool button
     // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
     // Features migrated to DocumentViewport - pen/eraser now use vector layers directly
     QPushButton *deletePageButton;
     QPushButton *selectFolderButton; // Button to select folder
-    QPushButton *saveButton; // Button to save file
-    QPushButton *fullscreenButton;
+    // REMOVED E.1: Moved to NavigationBar
+    // QPushButton *saveButton; // Button to save file
+    // QPushButton *fullscreenButton;
     QPushButton *openControlPanelButton;
     // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
 
@@ -561,7 +564,8 @@ private:
     QPushButton *clearPdfButton;
     QPushButton *exportPdfButton; // Button to export annotated PDF
     QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
-    QPushButton *toggleTabBarButton;
+    // REMOVED E.1: Moved to NavigationBar
+    // QPushButton *toggleTabBarButton;
     
     // Overflow menu for infrequently used actions
     QPushButton *overflowMenuButton;
@@ -572,8 +576,9 @@ private:
     
 
     // REMOVED MW1.2: backgroundButton - feature was dropped
-    QPushButton *straightLineToggleButton; // Button to toggle straight line mode
-    QPushButton *ropeToolButton; // Button to toggle rope tool mode
+    // REMOVED E.1: straightLineToggleButton moved to Toolbar, ropeToolButton deprecated
+    // QPushButton *straightLineToggleButton; // Button to toggle straight line mode
+    // QPushButton *ropeToolButton; // Button to toggle rope tool mode
     QPushButton *insertPictureButton; // Button to insert pictures
 
     QSlider *zoomSlider;
@@ -611,25 +616,31 @@ private:
     // PDF Outline Sidebar
     QWidget *outlineSidebar;       // Container for PDF outline
     QTreeWidget *outlineTree;      // Tree widget for PDF bookmarks/outline
-    QPushButton *toggleOutlineButton; // Floating tab button to toggle outline sidebar
+    // Phase S3: Removed - floating buttons replaced by LeftSidebarContainer
+    // QPushButton *toggleOutlineButton; // Floating tab button to toggle outline sidebar
     bool outlineSidebarVisible = false;
     
     // Bookmarks Sidebar
     QWidget *bookmarksSidebar;     // Container for bookmarks
     QTreeWidget *bookmarksTree;    // Tree widget for bookmarks
-    QPushButton *toggleBookmarksButton; // Floating tab button to toggle bookmarks sidebar
+    // Phase S3: Removed - floating buttons replaced by LeftSidebarContainer
+    // QPushButton *toggleBookmarksButton; // Floating tab button to toggle bookmarks sidebar
     QPushButton *toggleBookmarkButton; // Button to add/remove current page bookmark
-    QPushButton *touchGesturesButton; // Touch gestures toggle button
+    // REMOVED E.1: Moved to Toolbar
+    // QPushButton *touchGesturesButton; // Touch gestures toggle button
     bool bookmarksSidebarVisible = false;
     
-    // Layer Panel (Phase 5: below left sidebars)
-    LayerPanel *m_layerPanel = nullptr;           // Layer management panel
-    QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
-    QPushButton *toggleLayerPanelButton = nullptr; // Floating tab button to toggle layer panel
-    bool layerPanelVisible = true;                 // Layer panel visible by default
+    // Phase S3: Left Sidebar Container (replaces floating tabs)
+    LeftSidebarContainer *m_leftSidebar = nullptr;  // Tabbed container for left panels
+    LayerPanel *m_layerPanel = nullptr;             // Reference to LayerPanel in container
+    // Phase S3: Removed - replaced by LeftSidebarContainer
+    // QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
+    // QPushButton *toggleLayerPanelButton = nullptr; // Floating tab button to toggle layer panel
+    bool layerPanelVisible = true;                   // Layer panel visible by default
     
-    void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
-    void toggleLayerPanel();         // Toggle layer panel visibility
+    // Phase S3: Removed - no longer needed with new container
+    // void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
+    void toggleLayerPanel();         // Toggle layer panel visibility (kept for compatibility)
     
     // Debug Overlay (development tool - easily disabled for production)
     class DebugOverlay* m_debugOverlay = nullptr;  // Floating debug info panel
@@ -642,7 +653,8 @@ private:
     
     // Markdown Notes Sidebar
     MarkdownNotesSidebar *markdownNotesSidebar;  // Sidebar for markdown notes
-    QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
+    // REMOVED E.1: Moved to NavigationBar
+    // QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
     bool markdownNotesSidebarVisible = false;
 
     // Dial Mode Toolbar (vertical, right side)
@@ -787,23 +799,27 @@ private:
     // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
     
     // Responsive toolbar management
-    bool isToolbarTwoRows = false;
-    QVBoxLayout *controlLayoutVertical = nullptr;
-    QHBoxLayout *controlLayoutSingle = nullptr;
-    QHBoxLayout *controlLayoutFirstRow = nullptr;
-    QHBoxLayout *controlLayoutSecondRow = nullptr;
-    void updateToolbarLayout();
-    void createSingleRowLayout(bool centered = true);
-    void createTwoRowLayout();
+    // REMOVED E.1: Layout variables no longer needed
+    // bool isToolbarTwoRows = false;
+    // QVBoxLayout *controlLayoutVertical = nullptr;
+    // QHBoxLayout *controlLayoutSingle = nullptr;
+    // QHBoxLayout *controlLayoutFirstRow = nullptr;
+    // QHBoxLayout *controlLayoutSecondRow = nullptr;
+    // REMOVED E.1: Layout functions no longer needed - new components have fixed layouts
+    // void updateToolbarLayout();
+    // void createSingleRowLayout(bool centered = true);
+    // void createTwoRowLayout();
     
     // Helper function for tab text eliding
     QString elideTabText(const QString &text, int maxWidth);
     
     // Add timer for delayed layout updates
-    QTimer *layoutUpdateTimer = nullptr;
+    // REMOVED E.1: layoutUpdateTimer no longer needed
+    // QTimer *layoutUpdateTimer = nullptr;
     
     // Separator line for 2-row layout
-    QFrame *separatorLine = nullptr;
+    // REMOVED E.1: separatorLine no longer needed
+    // QFrame *separatorLine = nullptr;
     
 protected:
     void resizeEvent(QResizeEvent *event) override;

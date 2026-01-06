@@ -870,13 +870,196 @@ For now, color buttons remain in old controlBar. They will be addressed when eit
 ### Task E.1: Remove Old Toolbar Code from MainWindow
 **Status:** ⬜ Not Started
 
-After all phases verified:
-- [ ] Delete old button creation code (tool buttons already handled by Toolbar)
-- [ ] Delete old layout code (single/double row)
-- [ ] Delete old style application code
-- [ ] Delete unused member variables
-- [ ] Update any remaining signal connections
-- [ ] Decide on color button migration strategy
+---
+
+## Cleanup Rules
+
+### CATEGORY 1: SAFE TO REMOVE (functionality moved to new components)
+
+**Tool Buttons (→ now in Toolbar):**
+```
+penToolButton          → Toolbar::m_penButton
+markerToolButton       → Toolbar::m_markerButton  
+eraserToolButton       → Toolbar::m_eraserButton
+```
+- Remove declaration in MainWindow.h
+- Remove creation code (new QPushButton...)
+- Remove signal connections (connect(...clicked...))
+- Remove from controlLayout->addWidget()
+- Remove any style updates in updateTheme()
+
+**Mode/Action Buttons (→ now in Toolbar or NavigationBar):**
+```
+straightLineToggleButton  → Toolbar::m_shapeButton (connected to straight line)
+ropeToolButton            → Can be removed (deprecated feature?)
+saveButton                → NavigationBar::saveClicked signal
+fullscreenButton          → NavigationBar::fullscreenToggled signal
+toggleTabBarButton        → NavigationBar::filenameClicked toggles tab bar
+touchGesturesButton       → Toolbar::m_touchGestureButton
+toggleMarkdownNotesButton → NavigationBar::rightSidebarToggled
+```
+
+**Layout Functions (→ no longer needed, new components have fixed layouts):**
+```cpp
+void createSingleRowLayout(bool centered = true);
+void createTwoRowLayout();
+void updateToolbarLayout();
+```
+- Remove function declarations from .h
+- Remove function implementations from .cpp
+- Remove calls to these functions
+
+**Layout Variables:**
+```cpp
+bool isToolbarTwoRows = false;
+QVBoxLayout *controlLayoutVertical = nullptr;
+QHBoxLayout *controlLayoutSingle = nullptr;
+QHBoxLayout *controlLayoutFirstRow = nullptr;
+QHBoxLayout *controlLayoutSecondRow = nullptr;
+```
+
+**State Variables (if only used by removed buttons):**
+```cpp
+bool controlBarVisible = true;
+void toggleControlBar();
+```
+Note: Check if these are used for anything else before removing.
+
+---
+
+### CATEGORY 2: KEEP FOR NOW (color buttons - defer to Phase D subtoolbars)
+
+**Color Buttons (still functional, needed until PenSubToolbar exists):**
+```cpp
+QPushButton *redButton;
+QPushButton *blueButton;
+QPushButton *yellowButton;
+QPushButton *greenButton;
+QPushButton *blackButton;
+QPushButton *whiteButton;
+QPushButton *customColorButton;
+```
+
+**Color Button Functions (keep):**
+```cpp
+void handleColorButtonClick();
+void updateColorButtonStates();
+void selectColorButton(QPushButton* selectedButton);
+void updateCustomColorButtonStyle(const QColor &color);
+```
+
+**Palette System (keep - used by color buttons):**
+```cpp
+QColor getPaletteColor(const QString &name);
+// etc.
+```
+
+---
+
+### CATEGORY 3: REVIEW CAREFULLY (may have other uses)
+
+**controlBar widget:**
+- KEEP if color buttons remain there
+- If removing most buttons, consider slimming down to just color buttons
+- Or hide entirely and move colors elsewhere
+
+**Overflow Menu (overflowMenuButton, overflowMenu):**
+- NavigationBar has menuRequested signal that shows this menu
+- The menu itself may still be needed
+- Button can be removed from controlBar
+
+**These buttons may be used elsewhere (check before removing):**
+```cpp
+insertPictureButton      // Check if used outside controlBar
+pdfTextSelectButton      // PDF-specific, might be needed
+toggleBookmarkButton     // Bookmark functionality
+deletePageButton         // Page management
+pageInput               // Page navigation QLineEdit
+benchmarkButton         // Debug/dev tool
+```
+
+---
+
+### CATEGORY 4: DEFINITELY KEEP (unrelated to toolbar extraction)
+
+**Floating sidebar tabs (separate from controlBar):**
+```cpp
+toggleOutlineButton      // Floating tab for outline sidebar
+toggleBookmarksButton    // Floating tab for bookmarks sidebar  
+toggleLayerPanelButton   // Floating tab for layer panel
+```
+These are positioned independently and not part of controlBar.
+
+**Zoom controls (may want to review separately):**
+```cpp
+zoomButton, dezoomButton, zoom50Button, zoom200Button
+zoomSlider
+```
+
+---
+
+### Cleanup Procedure
+
+1. **Start with declarations in MainWindow.h:**
+   - Comment out (don't delete yet) Category 1 button declarations
+   - Compile to see what breaks
+
+2. **Fix compilation errors in MainWindow.cpp:**
+   - Remove/comment creation code for those buttons
+   - Remove signal connections
+   - Remove controlLayout->addWidget() calls
+   - Remove style updates
+
+3. **Remove layout functions:**
+   - Comment out createSingleRowLayout, createTwoRowLayout, updateToolbarLayout
+   - Remove calls to them
+   - Remove layout member variables
+
+4. **Test the app:**
+   - Verify new Toolbar works for tool selection
+   - Verify NavigationBar works for save/fullscreen
+   - Verify color buttons still work (they should be in controlBar still)
+
+5. **Clean up comments:**
+   - Once confirmed working, delete commented code
+   - Update any TODO comments
+
+---
+
+### Quick Reference: What's in controlBar Now
+
+```cpp
+controlLayout->addWidget(toggleTabBarButton);        // REMOVE - NavigationBar handles
+controlLayout->addWidget(toggleMarkdownNotesButton); // REMOVE - NavigationBar handles
+controlLayout->addWidget(touchGesturesButton);       // REMOVE - Toolbar handles
+controlLayout->addWidget(pdfTextSelectButton);       // REVIEW - PDF specific
+controlLayout->addWidget(saveButton);                // REMOVE - NavigationBar handles
+
+// Color buttons - KEEP
+controlLayout->addWidget(redButton);
+controlLayout->addWidget(blueButton);
+controlLayout->addWidget(yellowButton);
+controlLayout->addWidget(greenButton);
+controlLayout->addWidget(blackButton);
+controlLayout->addWidget(whiteButton);
+controlLayout->addWidget(customColorButton);
+
+// Tool buttons - REMOVE (Toolbar handles)
+controlLayout->addWidget(penToolButton);
+controlLayout->addWidget(markerToolButton);
+controlLayout->addWidget(eraserToolButton);
+controlLayout->addWidget(straightLineToggleButton);
+controlLayout->addWidget(ropeToolButton);
+
+controlLayout->addWidget(insertPictureButton);       // REVIEW
+controlLayout->addWidget(fullscreenButton);          // REMOVE - NavigationBar handles
+controlLayout->addWidget(toggleBookmarkButton);      // REVIEW
+controlLayout->addWidget(pageInput);                 // REVIEW
+controlLayout->addWidget(overflowMenuButton);        // REMOVE - NavigationBar handles
+controlLayout->addWidget(deletePageButton);          // REVIEW
+controlLayout->addWidget(benchmarkButton);           // REVIEW - dev tool
+controlLayout->addWidget(benchmarkLabel);            // REVIEW - dev tool
+```
 
 ---
 

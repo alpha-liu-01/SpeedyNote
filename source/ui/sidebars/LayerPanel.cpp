@@ -5,9 +5,9 @@
 // ============================================================================
 
 #include "LayerPanel.h"
-#include "../core/Page.h"
-#include "../core/Document.h"
-#include "../layers/VectorLayer.h"
+#include "../../core/Page.h"
+#include "../../core/Document.h"
+#include "../../layers/VectorLayer.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>

@@ -1,9 +1,10 @@
 # MainWindow Cleanup Subplan
 
-**Document Version:** 1.1  
-**Date:** January 3, 2026  
-**Status:** Phase 1 & 2 Complete, Phase 3 Ready  
-**Prerequisites:** Q&A completed in `MAINWINDOW_CLEANUP_QA.md`
+**Document Version:** 1.2  
+**Date:** January 5, 2026  
+**Status:** Phase 1, 2, & 3 Complete, Phase 4 Ready  
+**Prerequisites:** Q&A completed in `MAINWINDOW_CLEANUP_QA.md`  
+**Related:** `TOOLBAR_EXTRACTION_SUBPLAN.md` (Phase 3 details)
 
 ---
 
@@ -14,16 +15,26 @@ MainWindow.cpp (~9,700 lines) is the last major piece of legacy code in SpeedyNo
 ### Goals
 1. ✅ Delete dead code (~2,800 lines saved!)
 2. ✅ Delete dial system entirely (simpler than extraction)
-3. Simplify toolbar (prepare for subtoolbar system)
+3. ✅ Extract toolbar components (NavigationBar, Toolbar, TabBar)
 4. Clean up remaining code structure
 
 ### Results So Far
 | Metric | Before | Current | Target |
 |--------|--------|---------|--------|
-| MainWindow.cpp lines | 9,722 | 6,910 | ~5,500 |
-| MainWindow.h lines | 887 | 812 | ~700 |
+| MainWindow.cpp lines | 9,722 | 6,633 | ~5,500 |
+| MainWindow.h lines | 887 | 836 | ~700 |
 | Dead code blocks | ~1,500 | 0 | 0 |
 | Dial system | Complex 7-mode | Deleted | N/A |
+| Toolbar | Monolithic | Extracted | ✅ |
+
+### New Components Created (Phase 3)
+| Component | File | Purpose |
+|-----------|------|---------|
+| NavigationBar | `source/ui/NavigationBar.h/cpp` | Top bar: launcher, save, fullscreen, etc. |
+| Toolbar | `source/ui/Toolbar.h/cpp` | Tool selection: pen, marker, eraser, etc. |
+| TabBar | `source/ui/TabBar.h/cpp` | Custom tab bar with theming |
+| StyleLoader | `source/ui/StyleLoader.h/cpp` | QSS loading with placeholders |
+| ToolbarButtons | `source/ui/ToolbarButtons.h/cpp` | Reusable button types |
 
 ---
 
@@ -272,187 +283,190 @@ Removed dial controller conditional compilation (~20 lines):
 - [x] `./compile.sh` succeeds
 - [x] Application builds without dial code
 
-**Line count results:**
-- MainWindow.cpp: 8,186 → 6,910 (**-1,276 lines total in Phase 2**)
+**Line count results (Phase 2):**
+- MainWindow.cpp: 8,186 → 6,910 (**-1,276 lines**)
 - MainWindow.h: 887 → 812 (**-75 lines**)
 - CMakeLists.txt: 518 → 497 (**-21 lines**)
 - Deleted files: 7 files in source/input/ and source/ui/
 
----
-
-## Phase 3: Simplify Toolbar
-
-**Goal:** Remove 2-row responsive layout, prepare for subtoolbar system.  
-**Estimated savings:** ~400 lines  
-**Risk:** Medium (visual layout changes)
-
-### MW3.1: Delete 2-Row Responsive Layout Code
-
-**Files:** `source/MainWindow.cpp`
-
-**Delete:**
-- `createSingleRowLayout()` method
-- `createTwoRowLayout()` method (if exists)
-- `adjustToolbarLayout()` resize handling
-- All row/column tracking variables
-
-**Replace with:**
-```cpp
-void MainWindow::setupToolbar() {
-    // Simple single-row layout
-    m_toolbarLayout = new QHBoxLayout(m_toolbar);
-    m_toolbarLayout->setSpacing(4);
-    m_toolbarLayout->setContentsMargins(8, 4, 8, 4);
-    
-    // Add only essential buttons
-    m_toolbarLayout->addWidget(m_penButton);
-    m_toolbarLayout->addWidget(m_markerButton);
-    m_toolbarLayout->addWidget(m_eraserButton);
-    m_toolbarLayout->addWidget(m_lassoButton);
-    m_toolbarLayout->addWidget(m_objectSelectButton);
-    m_toolbarLayout->addStretch();
-    m_toolbarLayout->addWidget(m_undoButton);
-    m_toolbarLayout->addWidget(m_redoButton);
-    m_toolbarLayout->addWidget(m_fullscreenButton);
-}
-```
+**Line count results (after Phase 3):**
+- MainWindow.cpp: 6,910 → 6,633 (**-277 lines**)
+- MainWindow.h: 812 → 836 (+24 lines for new component members)
+- New UI components: ~1,000 lines (modular, maintainable)
 
 ---
 
-### MW3.2: Remove Button State Tracking Complexity
+## Phase 3: Toolbar Extraction ✅ COMPLETED
 
-**Current:** Complex tracking of which buttons are visible, which row they're on.
+**Goal:** Extract toolbar components from MainWindow into reusable classes.  
+**Actual savings:** ~280 lines from MainWindow + new modular components  
+**Risk:** Medium (visual layout changes) - Successfully completed
 
-**Delete:**
-- `m_toolbarRowStates`
-- `m_buttonVisibility` maps
-- `updateToolbarButtonStates()` method
+**See:** `TOOLBAR_EXTRACTION_SUBPLAN.md` for full implementation details.
 
-**Simplify to:**
-- Buttons are either in toolbar or not
-- No dynamic repositioning
+### MW3.1: Create NavigationBar ✅ COMPLETED
 
----
+**Created:** `source/ui/NavigationBar.h/cpp`
 
-### MW3.3: Remove Obsolete Toolbar Buttons
+**Features:**
+- Launcher button (stub)
+- Left sidebar toggle
+- Save button
+- Add button (stub)
+- Filename display (updates on tab switch)
+- Fullscreen toggle
+- Share button (stub)
+- Right sidebar toggle
+- Menu button (overflow menu)
 
-**Delete widgets that are moving to subtoolbars:**
-- Color buttons (except maybe one "current color" indicator)
-- Thickness slider from toolbar
-- Zoom slider from toolbar
-
-**Keep as stubs for subtoolbar implementation:**
-- Color selection logic (just not in toolbar)
-- Thickness logic
-- Zoom logic
+**Theming:** `updateTheme(bool darkMode, QColor accentColor)`
 
 ---
 
-### MW3.4: Stub Subtoolbar Infrastructure
+### MW3.2: Create Toolbar ✅ COMPLETED
 
-**Create placeholder for future:**
-```cpp
-// source/ui/SubToolbar.h (stub)
-class SubToolbar : public QWidget {
-    Q_OBJECT
-public:
-    enum Type { Pen, Marker, Eraser, Lasso, ObjectSelect };
-    explicit SubToolbar(Type type, QWidget *parent = nullptr);
-    void showAt(const QPoint &position);
-    void hide();
-};
-```
+**Created:** `source/ui/Toolbar.h/cpp`
 
-This is just a placeholder - full implementation is a future task.
+**Features:**
+- Tool buttons (exclusive): Pen, Marker, Eraser, Shape, Lasso, ObjectInsert, Text
+- Action buttons: Undo, Redo
+- Mode button: Touch Gesture (3-state)
+
+**Theming:** `updateTheme(bool darkMode)`
 
 ---
 
-### MW3.5: Verification
+### MW3.3: Create TabBar ✅ COMPLETED
 
-- [ ] `./compile.sh` succeeds
-- [ ] Toolbar displays correctly (single row)
-- [ ] Tool buttons work
-- [ ] No layout errors on resize
+**Created:** `source/ui/TabBar.h/cpp`
+
+**Features:**
+- Inherits from QTabBar
+- Self-configuring (expanding, movable, closable, scroll buttons, elide)
+- Close button on left (applied before first tab creation)
+- Theme-aware styling via QSS
+
+**Theming:** `updateTheme(bool darkMode, QColor accentColor)`
+
+---
+
+### MW3.4: Comment Out Old Buttons ✅ COMPLETED
+
+**Commented out from controlBar (functionality moved to new components):**
+- `toggleTabBarButton` → NavigationBar::filenameClicked
+- `toggleMarkdownNotesButton` → NavigationBar::rightSidebarToggled
+- `touchGesturesButton` → Toolbar::m_touchGestureButton
+- `pdfTextSelectButton` → Review
+- `saveButton` → NavigationBar::saveClicked
+- `penToolButton`, `markerToolButton`, `eraserToolButton` → Toolbar
+- `straightLineToggleButton`, `ropeToolButton` → Toolbar::m_shapeButton
+- `insertPictureButton` → Review
+- `fullscreenButton` → NavigationBar::fullscreenToggled
+
+**Kept in controlBar (color buttons - for future PenSubToolbar):**
+- `redButton`, `blueButton`, `yellowButton`, `greenButton`
+- `blackButton`, `whiteButton`, `customColorButton`
+
+**Kept in controlBar (needs review):**
+- `toggleBookmarkButton`, `pageInput`, `deletePageButton`
+- `overflowMenuButton` (redundant with NavigationBar?)
+- `benchmarkButton`, `benchmarkLabel` (dev tools)
+
+---
+
+### MW3.5: Verification ✅ COMPLETED
+
+- [x] `./compile.sh` succeeds
+- [x] NavigationBar displays correctly
+- [x] Toolbar tool selection works
+- [x] TabBar displays and themes correctly
+- [x] Tab switching works
+- [x] Filename updates on tab switch
 
 ---
 
 ## Phase 4: Clean Up Remaining Code
 
-**Goal:** Improve code quality and structure.  
-**Estimated savings:** ~200 lines (mostly simplification)  
+**Goal:** Delete commented code, decide on remaining controlBar items.  
+**Estimated savings:** ~300 lines (commented code deletion)  
 **Risk:** Low
 
-### MW4.1: Simplify Save Button Logic
+### MW4.1: Delete Commented Button Code
 
-**Current:** Complex conditional logic for different save scenarios.
+**Status:** ⬜ Not Started
 
-**Replace with:**
+The following were commented out in Phase 3 and can now be deleted:
+
+**Button declarations in MainWindow.h:**
 ```cpp
-void MainWindow::onSaveButtonClicked() {
-    saveDocument();  // Same as Ctrl+S
-}
+// DELETE these declarations:
+QPushButton *toggleTabBarButton;
+QPushButton *toggleMarkdownNotesButton;
+QPushButton *touchGesturesButton;
+QPushButton *pdfTextSelectButton;
+QPushButton *saveButton;
+QPushButton *penToolButton;
+QPushButton *markerToolButton;
+QPushButton *eraserToolButton;
+QPushButton *straightLineToggleButton;
+QPushButton *ropeToolButton;
+QPushButton *insertPictureButton;
+QPushButton *fullscreenButton;
 ```
 
-**Delete:**
-- Old save path detection logic
-- Canvas-based save logic
-- Temporary file handling for old save
+**Button creation/connection code in MainWindow.cpp:**
+- Search for commented `// penToolButton = new QPushButton` blocks
+- Search for commented `// controlLayout->addWidget(penToolButton)` lines
+- Delete all commented-out button code
 
 ---
 
-### MW4.2: Clean Up updateTheme()
+### MW4.2: Decide on Category 3 Items
 
-**Current:** 300+ line function updating 50+ widgets individually.
+**Status:** ⬜ Not Started
 
-**Improve to:**
-- Use stylesheets more effectively
-- Group widgets by type
-- Consider theme signal subscriptions (future)
+These items are still active in controlBar and need decisions:
 
-**Example cleanup:**
-```cpp
-void MainWindow::updateTheme() {
-    // Get theme colors once
-    QColor bg = m_darkMode ? QColor(30, 30, 30) : QColor(245, 245, 245);
-    QColor fg = m_darkMode ? QColor(255, 255, 255) : QColor(0, 0, 0);
-    
-    // Apply base stylesheet to all buttons at once
-    QString buttonStyle = QString(
-        "QPushButton { background: %1; color: %2; }"
-    ).arg(bg.name(), fg.name());
-    
-    for (QPushButton *btn : m_toolButtons) {
-        btn->setStyleSheet(buttonStyle);
-    }
-    
-    // ... grouped updates instead of 50 individual calls
-}
-```
+| Item | Options | Decision |
+|------|---------|----------|
+| `toggleBookmarkButton` | Keep (bookmark toggle) or move to sidebar | ? |
+| `pageInput` | Keep (page navigation spinbox) | Keep |
+| `overflowMenuButton` | Remove (NavigationBar has menu) | Remove? |
+| `deletePageButton` | Keep or move to page context menu | ? |
+| `benchmarkButton/Label` | Remove (dev-only) or hide | ? |
 
 ---
 
-### MW4.3: Remove Commented-Out Code
+### MW4.3: Remove Layout Functions
 
-Search and remove:
-```cpp
-// Old code that was commented out
-/* Unused blocks */
-// TODO: delete this
-```
+**Status:** ⬜ Not Started
 
-If code is valuable for reference, note it in documentation instead.
+**Delete these functions (no longer needed):**
+- `createSingleRowLayout()` - mostly commented out
+- `createTwoRowLayout()` - if exists
+- Layout tracking variables
+
+**Keep:**
+- Basic controlBar setup (for color buttons)
 
 ---
 
-### MW4.4: Organize Method Order
+### MW4.4: Clean Up updateTheme()
 
-Reorder methods by category:
-1. Constructor / Destructor
-2. Setup methods (setupUi, setupToolbar, setupSignals)
-3. Tool handling
-4. Document operations
-5. UI state (theme, layout)
-6. Event handlers
+**Status:** ⬜ Not Started
+
+**Current:** Still updates many individual widgets.
+
+**Now simpler because:**
+- NavigationBar has `updateTheme()`
+- Toolbar has `updateTheme()`
+- TabBar has `updateTheme()`
+
+**Remaining in MainWindow::updateTheme():**
+- Call component `updateTheme()` methods ✅ (already done)
+- controlBar styling (for color buttons)
+- Floating sidebar tabs styling
+- Sidebar styling
 
 ---
 
@@ -460,11 +474,11 @@ Reorder methods by category:
 
 - [ ] `./compile.sh` succeeds
 - [ ] All keyboard shortcuts work
-- [ ] Tool switching works
-- [ ] Save/load works
-- [ ] Tab switching works
+- [ ] Tool switching works (via new Toolbar)
+- [ ] Save/load works (via NavigationBar)
+- [ ] Tab switching works (via TabBar)
 - [ ] Theme switching works
-- [ ] No memory leaks (basic test)
+- [ ] Color buttons still work
 
 ---
 
@@ -474,14 +488,20 @@ Reorder methods by category:
 
 Mark sections as complete:
 - Dead code: ✅ Deleted
-- Dial system: ✅ Extracted to module
-- Toolbar: ✅ Simplified
+- Dial system: ✅ Deleted entirely
+- Toolbar: ✅ Extracted to NavigationBar, Toolbar, TabBar
 
 ---
 
 ### MW5.2: ~~Create source/input/README.md~~ ✅ N/A
 
 **No longer needed** - dial system was deleted entirely instead of extracted.
+
+---
+
+### MW5.3: Update TOOLBAR_EXTRACTION_SUBPLAN.md ✅ COMPLETED
+
+Full documentation of toolbar extraction in separate document.
 
 ---
 
@@ -520,23 +540,24 @@ These items are identified but NOT part of this cleanup:
 - [x] MW2.6: SDLControllerManager kept for future gamepad support
 - [x] MW2.7: Verification ✅ (compiles successfully)
 
-### Phase 3: Simplify Toolbar
-- [ ] MW3.1: Delete 2-row layout
-- [ ] MW3.2: Remove state tracking
-- [ ] MW3.3: Remove obsolete buttons
-- [ ] MW3.4: Stub subtoolbar
-- [ ] MW3.5: Verify layout
+### Phase 3: Toolbar Extraction ✅ COMPLETED
+- [x] MW3.1: Create NavigationBar ✅
+- [x] MW3.2: Create Toolbar ✅
+- [x] MW3.3: Create TabBar ✅
+- [x] MW3.4: Comment out old buttons ✅
+- [x] MW3.5: Verify components ✅
 
-### Phase 4: Clean Up
-- [ ] MW4.1: Simplify save logic
-- [ ] MW4.2: Clean updateTheme()
-- [ ] MW4.3: Remove comments
-- [ ] MW4.4: Organize methods
+### Phase 4: Clean Up Remaining Code
+- [ ] MW4.1: Delete commented button code
+- [ ] MW4.2: Decide on Category 3 items
+- [ ] MW4.3: Remove layout functions
+- [ ] MW4.4: Clean updateTheme()
 - [ ] MW4.5: Final verification
 
 ### Phase 5: Documentation
 - [ ] MW5.1: Update analysis doc
 - [x] MW5.2: ~~Create input module README~~ (N/A - dial system deleted)
+- [x] MW5.3: Update TOOLBAR_EXTRACTION_SUBPLAN.md ✅
 
 ---
 
@@ -557,6 +578,27 @@ These items are identified but NOT part of this cleanup:
 | `source/ui/DialModeToolbar.h` | DELETED | - |
 | `source/ui/DialModeToolbar.cpp` | DELETED | - |
 
+### Phase 3 Completed Changes
+
+| File | Action | Lines |
+|------|--------|-------|
+| `source/MainWindow.cpp` | Toolbar extraction + cleanup | 6,910 → 6,633 (**-277 lines**) |
+| `source/MainWindow.h` | Add new component members | 812 → 836 (+24 lines) |
+| `source/ui/NavigationBar.h` | NEW | 85 lines |
+| `source/ui/NavigationBar.cpp` | NEW | 202 lines |
+| `source/ui/Toolbar.h` | NEW | 97 lines |
+| `source/ui/Toolbar.cpp` | NEW | 218 lines |
+| `source/ui/TabBar.h` | NEW | 60 lines |
+| `source/ui/TabBar.cpp` | NEW | 70 lines |
+| `source/ui/StyleLoader.h` | NEW | 58 lines |
+| `source/ui/StyleLoader.cpp` | NEW | 56 lines |
+| `source/ui/ToolbarButtons.h` | NEW | 150 lines |
+| `source/ui/ToolbarButtons.cpp` | NEW | 180 lines |
+| `resources/styles/tabs.qss` | NEW | 88 lines |
+| `resources/styles/tabs_dark.qss` | NEW | 88 lines |
+| `resources/styles/buttons.qss` | NEW | ~50 lines |
+| `resources/styles/buttons_dark.qss` | NEW | ~50 lines |
+
 ### Kept (for future use)
 
 | File | Status |
@@ -564,9 +606,31 @@ These items are identified but NOT part of this cleanup:
 | `source/SDLControllerManager.cpp` | Kept for gamepad support |
 | `source/SDLControllerManager.h` | Kept for gamepad support |
 
-### Future Work (Phase 3+)
+### Future Work (Phase 4+)
 
 | File | Action |
 |------|--------|
-| `source/ui/SubToolbar.h` | NEW (stub for subtoolbar system) |
+| `source/ui/SubToolbar.h` | Future: subtoolbar system |
+| `source/ui/PenSubToolbar.h` | Future: pen color/size selection |
 
+
+
+## Phase 4.5: Sidebar Extraction
+
+**See:** `SIDEBAR_EXTRACTION_SUBPLAN.md` for full implementation details.
+
+**Summary:**
+- Create `source/ui/sidebars/` folder
+- Create `LeftSidebarContainer` (QTabWidget-based)
+- Move `LayerPanel` into sidebars folder
+- Remove floating toggle buttons (`toggleOutlineButton`, `toggleBookmarksButton`, `toggleLayerPanelButton`)
+- Connect NavigationBar's left sidebar toggle to container
+
+**Deferred:**
+- OutlinePanel, BookmarksPanel connections (not implemented yet)
+- PagePanel (doesn't exist yet)
+- Panel visibility memory via QSettings 
+
+
+
+## Next Step
