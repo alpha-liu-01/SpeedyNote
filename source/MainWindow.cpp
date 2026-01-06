@@ -716,53 +716,10 @@ void MainWindow::setupUi() {
     deletePageButton->setToolTip(tr("Clear All Content"));
     connect(deletePageButton, &QPushButton::clicked, this, &MainWindow::deleteCurrentPage);
 
-    zoomButton = new QPushButton(this);
-    zoomButton->setIcon(loadThemedIcon("zoom"));
-    zoomButton->setFixedSize(26, 30);
-    zoomButton->setStyleSheet(buttonStyle);
-    connect(zoomButton, &QPushButton::clicked, this, &MainWindow::toggleZoomSlider);
-
-    // ✅ Create the floating frame (Initially Hidden)
-    zoomFrame = new QFrame(this);
-    zoomFrame->setFrameShape(QFrame::StyledPanel);
-    zoomFrame->setStyleSheet(R"(
-        background-color: black;
-        border: 1px solid black;
-        padding: 5px;
-    )");
-    zoomFrame->setVisible(false);
-    zoomFrame->setFixedSize(440, 40); // Adjust width/height as needed
-
-    zoomSlider = new QSlider(Qt::Horizontal, this);
-    zoomSlider->setRange(10, 400);
-    zoomSlider->setValue(100);
-    zoomSlider->setMaximumWidth(405);
-
-    connect(zoomSlider, &QSlider::valueChanged, this, &MainWindow::onZoomSliderChanged);
-
-    QVBoxLayout *popupLayout = new QVBoxLayout();
-    popupLayout->setContentsMargins(10, 5, 10, 5);
-    popupLayout->addWidget(zoomSlider);
-    zoomFrame->setLayout(popupLayout);
+    // REMOVED MW5.2+: Zoom buttons and frame moved to NavigationBar/Toolbar
   
 
-    zoom50Button = new QPushButton("0.5x", this);
-    zoom50Button->setFixedSize(35, 30);
-    zoom50Button->setStyleSheet(buttonStyle);
-    zoom50Button->setToolTip(tr("Set Zoom to 50%"));
-    connect(zoom50Button, &QPushButton::clicked, [this]() { zoomSlider->setValue(qRound(50.0 / initialDpr)); updateDialDisplay(); });
-
-    dezoomButton = new QPushButton("1x", this);
-    dezoomButton->setFixedSize(26, 30);
-    dezoomButton->setStyleSheet(buttonStyle);
-    dezoomButton->setToolTip(tr("Set Zoom to 100%"));
-    connect(dezoomButton, &QPushButton::clicked, [this]() { zoomSlider->setValue(qRound(100.0 / initialDpr)); updateDialDisplay(); });
-
-    zoom200Button = new QPushButton("2x", this);
-    zoom200Button->setFixedSize(31, 30);
-    zoom200Button->setStyleSheet(buttonStyle);
-    zoom200Button->setToolTip(tr("Set Zoom to 200%"));
-    connect(zoom200Button, &QPushButton::clicked, [this]() { zoomSlider->setValue(qRound(200.0 / initialDpr)); updateDialDisplay(); });
+    // REMOVED MW5.2+: Zoom buttons moved to NavigationBar/Toolbar
 
     panXSlider = new QScrollBar(Qt::Horizontal, this);
     panYSlider = new QScrollBar(Qt::Vertical, this);
@@ -1152,13 +1109,28 @@ void MainWindow::setupUi() {
     overflowMenu->addSeparator();
     
     QAction *zoom50Action = overflowMenu->addAction(tr("Zoom 50%"));
-    connect(zoom50Action, &QAction::triggered, this, [this]() { zoom50Button->click(); });
-    
+    connect(zoom50Action, &QAction::triggered, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setZoomLevel(0.5);
+            updateDialDisplay();
+        }
+    });
+
     QAction *zoomResetAction = overflowMenu->addAction(tr("Zoom Reset"));
-    connect(zoomResetAction, &QAction::triggered, this, [this]() { dezoomButton->click(); });
-    
+    connect(zoomResetAction, &QAction::triggered, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setZoomLevel(1.0);
+            updateDialDisplay();
+        }
+    });
+
     QAction *zoom200Action = overflowMenu->addAction(tr("Zoom 200%"));
-    connect(zoom200Action, &QAction::triggered, this, [this]() { zoom200Button->click(); });
+    connect(zoom200Action, &QAction::triggered, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setZoomLevel(2.0);
+            updateDialDisplay();
+        }
+    });
     
     overflowMenu->addSeparator();
     
@@ -1231,21 +1203,13 @@ void MainWindow::setupUi() {
     openControlPanelButton->setVisible(false);
     selectFolderButton->setVisible(false);
     jumpToPageButton->setVisible(false);
-    zoom50Button->setVisible(false);
-    dezoomButton->setVisible(false);
-    zoom200Button->setVisible(false);
+    // REMOVED MW5.2+: zoom buttons moved to NavigationBar/Toolbar
     // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
     benchmarkButton->setVisible(false);  // Hidden by default, toggle via Settings > Features
     benchmarkLabel->setVisible(false);
     // REMOVED MW1.3: prevPageButton->setVisible(false), nextPageButton->setVisible(false)
     
-    controlBar = new QWidget;  // Use member variable instead of local
-    controlBar->setObjectName("controlBar");
-    // controlBar->setLayout(controlLayout);  // Commented out - responsive layout will handle this
-    controlBar->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Minimum);
-
-    // Theme will be applied later in loadUserSettings -> updateTheme()
-    controlBar->setStyleSheet("");
+    // REMOVED MW5.1: controlBar creation removed - replaced by NavigationBar and Toolbar
 
     // Phase C.1.5: Removed m_tabWidget - now using m_tabBar + m_viewportStack
 
@@ -1421,7 +1385,7 @@ void MainWindow::setupUi() {
     // Add components in vertical order
     // Phase C.1.5: tabBarContainer hidden - buttons now in NavigationBar
     // mainLayout->addWidget(tabBarContainer);   // Old tab bar - now hidden
-    mainLayout->addWidget(controlBar);        // Legacy toolbar (to be removed in Phase E)
+    // REMOVED MW5.1: controlBar layout removed - replaced by NavigationBar and Toolbar
     
     // Content area with sidebars and canvas
     QHBoxLayout *contentLayout = new QHBoxLayout;
@@ -1981,22 +1945,7 @@ bool MainWindow::mergePdfWithPdftk(const QString &originalPdf, const QString &an
 
 // Extract PDF metadata including outline/bookmarks using pdftk
 // Note: This function doesn't use InkCanvas, so it's not disabled
-bool MainWindow::extractPdfOutlineData(const QString &pdfPath, QString &outlineData) {
-    QProcess process;
-    process.start("pdftk", QStringList() << pdfPath << "dump_data");
-    
-    // Increase timeout to 60 seconds for large PDFs
-    if (!process.waitForFinished(60000)) {
-        return false;
-    }
-    
-    if (process.exitCode() != 0) {
-        return false;
-    }
-    
-    outlineData = QString::fromUtf8(process.readAllStandardOutput());
-    return !outlineData.isEmpty();
-}
+// REMOVED MW5.3: extractPdfOutlineData function removed - PDF outline extraction now handled by Document/DocumentViewport
 
 // Filter outline entries to only include those pointing to pages in the export range,
 // and adjust page numbers to match the new PDF (0-indexed)
@@ -2147,10 +2096,10 @@ bool MainWindow::applyOutlineToPdf(const QString &pdfPath, const QString &outlin
 
 
 void MainWindow::updateZoom() {
+    // REMOVED MW5.2: zoomSlider reference removed - zoom now controlled by NavigationBar/Toolbar
     // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
     DocumentViewport* vp = currentViewport();
-    if (vp && zoomSlider) {
-        vp->setZoomLevel(zoomSlider->value() / 100.0); // Convert slider value to zoom factor
+    if (vp) {
         updatePanRange();
     }
 }
@@ -2815,7 +2764,7 @@ void MainWindow::switchTab(int index) {
     // Phase C.1.5: Updated to use m_tabManager instead of m_tabWidget
     // Many InkCanvas-specific features are stubbed for now
     
-    if (!m_tabManager || !pageInput || !zoomSlider) {
+    if (!m_tabManager || !pageInput) {
         return;
     }
 
@@ -2830,10 +2779,7 @@ void MainWindow::switchTab(int index) {
             // pageInput->setValue(currentPage + 1);
             // pageInput->blockSignals(false);
             
-            // TODO Phase 3.3: Update zoom from viewport
-            // zoomSlider->blockSignals(true);
-            // zoomSlider->setValue(viewport->zoomLevel() * 100);
-            // zoomSlider->blockSignals(false);
+            // REMOVED MW5.2: zoomSlider removed - zoom now controlled by NavigationBar/Toolbar
         }
         
         updateDialDisplay();
@@ -3285,12 +3231,13 @@ void MainWindow::loadFolderDocument()
             pageInput->setValue(targetPage + 1);
         }
     });
-    connect(newCanvas, &InkCanvas::pdfLoaded, this, [this]() {
-        // Refresh PDF outline if sidebar is visible
-        if (outlineSidebarVisible) {
-            loadPdfOutline();
-        }
-    });
+    // REMOVED MW5.3: PDF outline loading removed - now handled by Document/DocumentViewport
+    // connect(newCanvas, &InkCanvas::pdfLoaded, this, [this]() {
+    //     // Refresh PDF outline if sidebar is visible
+    //     if (outlineSidebarVisible) {
+    //         loadPdfOutline();
+    //     }
+    // });
     connect(newCanvas, &InkCanvas::autoScrollRequested, this, &MainWindow::onAutoScrollRequested);
     connect(newCanvas, &InkCanvas::earlySaveRequested, this, &MainWindow::onEarlySaveRequested);
     connect(newCanvas, &InkCanvas::markdownNotesUpdated, this, &MainWindow::onMarkdownNotesUpdated);
@@ -3322,7 +3269,7 @@ void MainWindow::loadFolderDocument()
     tabList->setCurrentItem(tabItem);
     canvasStack->setCurrentWidget(newCanvas);
 
-    zoomSlider->setValue(qRound(100.0 / initialDpr)); // Set initial zoom level based on DPR
+    // REMOVED MW5.2: zoomSlider removed - zoom now controlled by NavigationBar/Toolbar
     updateDialDisplay();
     // REMOVED E.1: Button state functions no longer needed - Toolbar handles its own state
     // updateStraightLineButtonState();  // Initialize straight line button state for the new tab
@@ -3394,20 +3341,7 @@ int MainWindow::getCurrentPageForCanvas(InkCanvas *canvas) {
     return 0; // Use DocumentViewport::currentPageIndex() instead
 }
 
-void MainWindow::toggleZoomSlider() {
-    if (zoomFrame->isVisible()) {
-        zoomFrame->hide();
-        return;
-    }
-
-    // ✅ Set as a standalone pop-up window so it can receive events
-    zoomFrame->setWindowFlags(Qt::Popup);
-
-    // ✅ Position it right below the button
-    QPoint buttonPos = zoomButton->mapToGlobal(QPoint(0, zoomButton->height()));
-    zoomFrame->move(buttonPos.x(), buttonPos.y() + 5);
-    zoomFrame->show();
-}
+// REMOVED MW5.2+: toggleZoomSlider function removed - zoom buttons moved to NavigationBar/Toolbar
 
 void MainWindow::toggleThicknessSlider() {
     if (thicknessFrame->isVisible()) {
@@ -3986,15 +3920,7 @@ void MainWindow::updateTheme() {
         m_tabBar->updateTheme(darkMode, accentColor);
     }
     
-    if (controlBar) {
-        // Use same background as unselected tab color
-        QString toolbarBgColor = darkMode ? "rgba(80, 80, 80, 255)" : "rgba(220, 220, 220, 255)";
-        controlBar->setStyleSheet(QString(R"(
-        QWidget#controlBar {
-            background-color: %1;
-            }
-        )").arg(toolbarBgColor));
-    }
+    // REMOVED MW5.1: controlBar styling removed - replaced by NavigationBar and Toolbar
     
     // Common floating tab styling colors (solid, not transparent)
     QString tabBgColor = darkMode ? "#3A3A3A" : "#EAEAEA";
@@ -4165,7 +4091,7 @@ void MainWindow::updateTheme() {
     // REMOVED E.1: fullscreenButton moved to NavigationBar
     // REMOVED E.1: straightLineToggleButton and ropeToolButton moved to Toolbar
     if (deletePageButton) deletePageButton->setIcon(loadThemedIcon("trash"));
-    if (zoomButton) zoomButton->setIcon(loadThemedIcon("zoom"));
+    // REMOVED MW5.2+: zoomButton moved to NavigationBar/Toolbar
     // MW2.2: Removed dialToggleButton icon update
     // MW2.2: Removed fastForwardButton icon update
     if (jumpToPageButton) jumpToPageButton->setIcon(loadThemedIcon("bookpage"));
@@ -4213,15 +4139,13 @@ void MainWindow::updateTheme() {
     if (insertPictureButton) insertPictureButton->setStyleSheet(newButtonStyle);
     if (deletePageButton) deletePageButton->setStyleSheet(newButtonStyle);
     if (overflowMenuButton) overflowMenuButton->setStyleSheet(newButtonStyle);
-    if (zoomButton) zoomButton->setStyleSheet(newButtonStyle);
+    // REMOVED MW5.2+: zoom buttons moved to NavigationBar/Toolbar
     // MW2.2: Removed dialToggleButton, fastForwardButton style updates
     if (jumpToPageButton) jumpToPageButton->setStyleSheet(newButtonStyle);
     if (addPresetButton) addPresetButton->setStyleSheet(newButtonStyle);
     if (openControlPanelButton) openControlPanelButton->setStyleSheet(newButtonStyle);
     // Phase C.1.5: Removed openRecentNotebooksButton style update
-    if (zoom50Button) zoom50Button->setStyleSheet(newButtonStyle);
-    if (dezoomButton) dezoomButton->setStyleSheet(newButtonStyle);
-    if (zoom200Button) zoom200Button->setStyleSheet(newButtonStyle);
+    // REMOVED MW5.2+: zoom buttons moved to NavigationBar/Toolbar
     // REMOVED MW1.3: prevPageButton, nextPageButton style updates
     
     // Update color buttons with palette-based icons
@@ -4312,30 +4236,9 @@ void MainWindow::setBenchmarkControlsVisible(bool visible) {
     benchmarkLabel->setVisible(visible);
 }
 
-bool MainWindow::areZoomButtonsVisible() const {
-    return zoomButtonsVisible;
-}
+// REMOVED MW5.2+: areZoomButtonsVisible function removed - zoom buttons moved to NavigationBar/Toolbar
 
-void MainWindow::setZoomButtonsVisible(bool visible) {
-    zoom50Button->setVisible(visible);
-    dezoomButton->setVisible(visible);
-    zoom200Button->setVisible(visible);
-
-    QSettings settings("SpeedyNote", "App");
-    settings.setValue("zoomButtonsVisible", visible);
-    
-    // Update zoomButtonsVisible flag and trigger layout update
-    zoomButtonsVisible = visible;
-    
-    // REMOVED E.1: layoutUpdateTimer no longer needed
-    // // Trigger layout update to adjust responsive thresholds
-    // if (layoutUpdateTimer) {
-    //     layoutUpdateTimer->stop();
-    //     layoutUpdateTimer->start(50); // Quick update for settings change
-    // } else {
-    //     // REMOVED E.1: updateToolbarLayout no longer needed
-    // }
-}
+// REMOVED MW5.2+: setZoomButtonsVisible function removed - zoom buttons moved to NavigationBar/Toolbar
 
 
 
@@ -4667,13 +4570,22 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
             toggleDial();
             break;
         case ControllerAction::Zoom50:
-            zoom50Button->click();
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setZoomLevel(0.5);
+                updateDialDisplay();
+            }
             break;
         case ControllerAction::ZoomOut:
-            dezoomButton->click();
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setZoomLevel(1.0);
+                updateDialDisplay();
+            }
             break;
         case ControllerAction::Zoom200:
-            zoom200Button->click();
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setZoomLevel(2.0);
+                updateDialDisplay();
+            }
             break;
         case ControllerAction::AddPreset:
             addPresetButton->click();
@@ -4791,9 +4703,7 @@ void MainWindow::loadUserSettings() {
     lowResPreviewEnabled = settings.value("lowResPreviewEnabled", true).toBool();
     setLowResPreviewEnabled(lowResPreviewEnabled);
 
-    
-    zoomButtonsVisible = settings.value("zoomButtonsVisible", true).toBool();
-    setZoomButtonsVisible(zoomButtonsVisible);
+    // REMOVED MW5.2+: zoomButtonsVisible moved to NavigationBar/Toolbar
 
     scrollOnTopEnabled = settings.value("scrollOnTopEnabled", true).toBool();
     setScrollOnTopEnabled(scrollOnTopEnabled);
@@ -4833,96 +4743,9 @@ void MainWindow::loadUserSettings() {
     loadThemeSettings();
 }
 
-void MainWindow::toggleControlBar() {
-    // Proper fullscreen toggle: handle both sidebar and control bar
-    
-    if (controlBarVisible) {
-        // Going into fullscreen mode
-        
-        // First, remember current tab bar state
-        if (m_tabBar) {
-            sidebarWasVisibleBeforeFullscreen = m_tabBar->isVisible();
-        
-        // Hide tab bar if it's visible
-            if (m_tabBar->isVisible()) {
-                m_tabBar->setVisible(false);
-            }
-        }
-        
-        // Hide control bar
-        controlBarVisible = false;
-        controlBar->setVisible(false);
-        
-        // Hide floating popup widgets when control bar is hidden to prevent stacking
-        if (zoomFrame && zoomFrame->isVisible()) zoomFrame->hide();
-        if (thicknessFrame && thicknessFrame->isVisible()) thicknessFrame->hide();
-        
-        // Hide orphaned widgets that are not added to any layout
-        // Removed colorPreview widget - no longer needed
-        // thicknessButton and jumpToPageButton are now properly in the layout
+// REMOVED MW5.1: toggleControlBar function removed - controlBar deleted and fullscreen handled by NavigationBar
 
-        // toolSelector is now properly hidden with size 0x0
-        if (zoomButton) zoomButton->hide();
-        if (customColorInput) customColorInput->hide();
-        
-        // Find and hide local widgets that might be orphaned
-        QList<QComboBox*> comboBoxes = findChildren<QComboBox*>();
-        for (QComboBox* combo : comboBoxes) {
-            if (combo->parent() == this && !combo->isVisible()) {
-                // Already hidden, keep it hidden
-            } else if (combo->parent() == this) {
-                // This might be other orphaned combo boxes
-                combo->hide();
-            }
-        }
-    } else {
-        // Coming out of fullscreen mode
-        
-        // Restore control bar
-        controlBarVisible = true;
-        controlBar->setVisible(true);
-        
-        // Restore tab bar to its previous state
-        if (m_tabBar) {
-            m_tabBar->setVisible(sidebarWasVisibleBeforeFullscreen);
-        }
-        
-        // Show widgets that are now properly in the layout
-        // thicknessButton and jumpToPageButton are now in the layout so they'll be visible automatically
-    }
-    
-    // Update dial display to reflect new status
-    updateDialDisplay();
-    
-    // Phase 3.1.8: Canvas size management stubbed - DocumentViewport handles its own size
-    // Force layout update to recalculate space
-    // TODO Phase 3.3: Implement viewport size management if needed
-}
-
-void MainWindow::cycleZoomLevels() {
-    if (!zoomSlider) return;
-    
-    int currentZoom = zoomSlider->value();
-    int targetZoom;
-    
-    // Calculate the scaled zoom levels based on initial DPR
-    int zoom50 = qRound(50.0 / initialDpr);
-    int zoom100 = qRound(100.0 / initialDpr);
-    int zoom200 = qRound(200.0 / initialDpr);
-    
-    // Cycle through 0.5x -> 1x -> 2x -> 0.5x...
-    if (currentZoom <= zoom50 + 5) { // Close to 0.5x (with small tolerance)
-        targetZoom = zoom100; // Go to 1x
-    } else if (currentZoom <= zoom100 + 5) { // Close to 1x
-        targetZoom = zoom200; // Go to 2x
-    } else { // Any other zoom level or close to 2x
-        targetZoom = zoom50; // Go to 0.5x
-    }
-    
-    zoomSlider->setValue(targetZoom);
-    updateZoom();
-    updateDialDisplay();
-}
+// REMOVED MW5.2+: cycleZoomLevels function removed - zoom controls moved to NavigationBar/Toolbar
 
 
 void MainWindow::updateColorButtonStates() {
@@ -5145,13 +4968,22 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
             toggleDial();
             break;
         case ControllerAction::Zoom50:
-            zoom50Button->click();
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setZoomLevel(0.5);
+                updateDialDisplay();
+            }
             break;
         case ControllerAction::ZoomOut:
-            dezoomButton->click();
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setZoomLevel(1.0);
+                updateDialDisplay();
+            }
             break;
         case ControllerAction::Zoom200:
-            zoom200Button->click();
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setZoomLevel(2.0);
+                updateDialDisplay();
+            }
             break;
         case ControllerAction::AddPreset:
             addPresetButton->click();
@@ -5414,15 +5246,7 @@ void MainWindow::showPendingTooltip() {
     // Keeping the function for potential future use
 }
 
-void MainWindow::onZoomSliderChanged(int value) {
-    // Phase 3.1.4: Use currentViewport() for zoom
-    DocumentViewport* vp = currentViewport();
-    int oldZoom = vp ? qRound(vp->zoomLevel() * 100.0) : 100;
-    int newZoom = value;
-    
-    updateZoom();
-    adjustThicknessForZoom(oldZoom, newZoom); // Maintain visual thickness consistency
-}
+// REMOVED MW5.2: onZoomSliderChanged function removed - zoomSlider deleted
 
 void MainWindow::saveDefaultBackgroundSettings(Page::BackgroundType style, QColor bgColor, QColor gridColor, int density) {
     // Phase doc-1: Using new key "defaultBgType" to avoid stale values from old BackgroundStyle enum
@@ -5454,17 +5278,8 @@ void MainWindow::toggleOutlineSidebar() {
     
     // REMOVED S1: Outline button moved to LeftSidebarContainer
     
-    // Load PDF outline when showing sidebar for the first time
-    if (outlineSidebarVisible) {
-        loadPdfOutline();
-        
-        // Phase 3.1.8: Use currentViewport() for page tracking
-        DocumentViewport* viewport = currentViewport();
-        if (viewport) {
-            int currentPage = viewport->currentPageIndex() + 1; // Convert to 1-based
-            updateOutlineSelection(currentPage);
-        }
-    }
+    // REMOVED MW5.3: PDF outline loading removed - now handled by Document/DocumentViewport
+    // Load PDF outline when showing sidebar for the first time - functionality removed
     
     // Force layout update and reposition floating tabs after sidebar visibility change
     if (centralWidget() && centralWidget()->layout()) {
@@ -5494,70 +5309,7 @@ void MainWindow::onOutlineItemClicked(QTreeWidgetItem *item, int column) {
     }
 }
 
-void MainWindow::loadPdfOutline() {
-    if (!outlineTree) return;
-    
-    outlineTree->clear();
-    
-    // Get current PDF document
-    Poppler::Document* pdfDoc = getPdfDocument();
-    if (!pdfDoc) return;
-    
-    // Get the outline from the PDF document
-    QVector<Poppler::OutlineItem> outlineItems = pdfDoc->outline();
-    
-    if (outlineItems.isEmpty()) {
-        // If no outline exists, show page numbers as fallback
-        int pageCount = pdfDoc->numPages();
-        for (int i = 0; i < pageCount; ++i) {
-            QTreeWidgetItem* item = new QTreeWidgetItem(outlineTree);
-            item->setText(0, QString(tr("Page %1")).arg(i + 1));
-            item->setData(0, Qt::UserRole, i + 1); // Store 1-based page index to match outline behavior
-        }
-    } else {
-        // Process the actual PDF outline
-        for (const Poppler::OutlineItem& outlineItem : outlineItems) {
-            addOutlineItem(outlineItem, nullptr);
-        }
-    }
-    
-    // Expand the first level by default
-    outlineTree->expandToDepth(0);
-}
-
-void MainWindow::addOutlineItem(const Poppler::OutlineItem& outlineItem, QTreeWidgetItem* parentItem) {
-    if (outlineItem.isNull()) return;
-    
-    QTreeWidgetItem* item;
-    if (parentItem) {
-        item = new QTreeWidgetItem(parentItem);
-    } else {
-        item = new QTreeWidgetItem(outlineTree);
-    }
-    
-    // Set the title
-    item->setText(0, outlineItem.name());
-    
-    // Try to get the page number from the destination
-    int pageNumber = -1;
-    auto destination = outlineItem.destination();
-    if (destination) {
-        pageNumber = destination->pageNumber();
-    }
-    
-    // Store the page number (already 1-based from PDF) in the item data
-    if (pageNumber >= 0) {
-        item->setData(0, Qt::UserRole, pageNumber); // pageNumber is already 1-based from PDF outline
-    }
-    
-    // Add child items recursively
-    if (outlineItem.hasChildren()) {
-        QVector<Poppler::OutlineItem> children = outlineItem.children();
-        for (const Poppler::OutlineItem& child : children) {
-            addOutlineItem(child, item);
-        }
-    }
-}
+// REMOVED MW5.3: loadPdfOutline and addOutlineItem functions removed - PDF outline now handled by Document/DocumentViewport
 
 void MainWindow::updateOutlineSelection(int pageNumber) {
     // ✅ EFFICIENCY: Only update if outline sidebar is visible
@@ -5610,11 +5362,7 @@ void MainWindow::updateOutlineSelection(int pageNumber) {
     }
 }
 
-Poppler::Document* MainWindow::getPdfDocument() {
-    // Phase 3.1.8: Stubbed - PDF document access will use DocumentViewport
-    // TODO Phase 3.4: Implement PDF access through DocumentViewport
-        return nullptr;
-}
+// REMOVED MW5.3: getPdfDocument function removed - PDF document access now handled by Document/DocumentViewport
 
 void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density) {
     // Phase doc-1: Using new key "defaultBgType" to avoid stale values from old BackgroundStyle enum

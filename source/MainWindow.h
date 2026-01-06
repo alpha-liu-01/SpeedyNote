@@ -231,7 +231,8 @@ public:
     bool areBenchmarkControlsVisible() const;
     void setBenchmarkControlsVisible(bool visible);
 
-    bool zoomButtonsVisible = true;
+    // REMOVED MW5.2+: Zoom buttons moved to NavigationBar/Toolbar
+    // bool zoomButtonsVisible = true;
     bool areZoomButtonsVisible() const;
     void setZoomButtonsVisible(bool visible);
 
@@ -411,7 +412,7 @@ private slots:
     bool mergePdfWithPdftk(const QString &originalPdf, const QString &annotatedPagesPdf, const QString &outputPdf, const QList<int> &annotatedPageNumbers, QString *errorMsg = nullptr, bool exportWholeDocument = true, int exportStartPage = 0, int exportEndPage = -1); // Merge using pdftk
     
     // PDF outline preservation helpers
-    bool extractPdfOutlineData(const QString &pdfPath, QString &outlineData); // Extract PDF metadata including outline
+    // REMOVED MW5.3: extractPdfOutlineData removed - PDF outline now handled by Document/DocumentViewport
     QString filterAndAdjustOutline(const QString &metadataContent, int startPage, int endPage, int pageOffset); // Filter and adjust outline for page range
     bool applyOutlineToPdf(const QString &pdfPath, const QString &outlineData); // Apply outline to PDF using pdftk
     
@@ -419,7 +420,7 @@ private slots:
     bool showPageRangeDialog(int totalPages, bool &exportWholeDocument, int &startPage, int &endPage);
 
     void updateZoom();
-    void onZoomSliderChanged(int value); // Handle manual zoom slider changes
+    // REMOVED MW5.2: onZoomSliderChanged function removed - zoomSlider deleted
     void updatePanRange();
     void updatePanX(int value);
     void updatePanY(int value);
@@ -429,9 +430,9 @@ private slots:
     void forceUIRefresh();
 
     void switchTab(int index);
-    
+
     void removeTabAt(int index);
-    void toggleZoomSlider();
+    // REMOVED MW5.2+: toggleZoomSlider function removed - zoom buttons moved to NavigationBar/Toolbar
     void toggleThicknessSlider(); // Added function to toggle thickness slider
     void toggleFullscreen();
     void showJumpToPageDialog();
@@ -506,9 +507,9 @@ private:
     // PDF Outline functionality
     void toggleOutlineSidebar();     // Toggle PDF outline sidebar
     void onOutlineItemClicked(QTreeWidgetItem *item, int column); // Handle outline item clicks
-    void loadPdfOutline();           // Load PDF outline/bookmarks
+    // REMOVED MW5.3: loadPdfOutline removed - PDF outline now handled by Document/DocumentViewport
     void addOutlineItem(const Poppler::OutlineItem& outlineItem, QTreeWidgetItem* parentItem); // Add outline item recursively
-    Poppler::Document* getPdfDocument(); // Get PDF document from current canvas
+    // REMOVED MW5.3: getPdfDocument removed - PDF document access now handled by Document/DocumentViewport
     void updateOutlineSelection(int pageNumber); // Update outline selection based on current page
     
     // Bookmark sidebar functionality
@@ -581,12 +582,13 @@ private:
     // QPushButton *ropeToolButton; // Button to toggle rope tool mode
     QPushButton *insertPictureButton; // Button to insert pictures
 
-    QSlider *zoomSlider;
-    QPushButton *zoomButton;
-    QFrame *zoomFrame;
-    QPushButton *dezoomButton;
-    QPushButton *zoom50Button;
-    QPushButton *zoom200Button;
+    // REMOVED MW5.2: zoomSlider deleted - zoom now controlled by NavigationBar/Toolbar
+    // REMOVED MW5.2+: Zoom buttons moved to NavigationBar/Toolbar
+    // QPushButton *zoomButton;
+    // QFrame *zoomFrame;
+    // QPushButton *dezoomButton;
+    // QPushButton *zoom50Button;
+    // QPushButton *zoom200Button;
     QWidget *zoomContainer;
     QLineEdit *zoomInput;
     QScrollBar *panXSlider;
@@ -682,7 +684,7 @@ private:
     qreal initialDpr = 1.0; // Will be set in constructor
 
     QWidget *sidebarContainer;  // Container for sidebar
-    QWidget *controlBar;        // Control toolbar
+    // REMOVED MW5.1: controlBar deleted - replaced by NavigationBar and Toolbar
 
     
     // ✅ Mouse dial controls
@@ -692,8 +694,7 @@ private:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
-    bool controlBarVisible = true;  // Track controlBar visibility state
-    void toggleControlBar();        // Function to toggle controlBar visibility
+    // REMOVED MW5.1: controlBar visibility tracking removed - controlBar deleted
     void cycleZoomLevels();         // Function to cycle through 0.5x, 1x, 2x zoom levels
     bool sidebarWasVisibleBeforeFullscreen = true;  // Track sidebar state before fullscreen
 
@@ -798,28 +799,12 @@ private:
     
     // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
     
-    // Responsive toolbar management
-    // REMOVED E.1: Layout variables no longer needed
-    // bool isToolbarTwoRows = false;
-    // QVBoxLayout *controlLayoutVertical = nullptr;
-    // QHBoxLayout *controlLayoutSingle = nullptr;
-    // QHBoxLayout *controlLayoutFirstRow = nullptr;
-    // QHBoxLayout *controlLayoutSecondRow = nullptr;
-    // REMOVED E.1: Layout functions no longer needed - new components have fixed layouts
-    // void updateToolbarLayout();
-    // void createSingleRowLayout(bool centered = true);
-    // void createTwoRowLayout();
+    // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     
     // Helper function for tab text eliding
     QString elideTabText(const QString &text, int maxWidth);
     
-    // Add timer for delayed layout updates
-    // REMOVED E.1: layoutUpdateTimer no longer needed
-    // QTimer *layoutUpdateTimer = nullptr;
-    
-    // Separator line for 2-row layout
-    // REMOVED E.1: separatorLine no longer needed
-    // QFrame *separatorLine = nullptr;
+    // Layout timers and separators - REMOVED MW4.3: No longer needed
     
 protected:
     void resizeEvent(QResizeEvent *event) override;
