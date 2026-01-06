@@ -27,7 +27,7 @@
 #include <QSpinBox>
 #include <QTextStream>
 #include <QInputDialog>
-#include <QDial>
+// REMOVED MW7.2: QDial include removed - dial functionality deleted
 #include <QFontDatabase>
 #include <QStandardPaths>
 #include <QSettings>
@@ -159,7 +159,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
         // Phase 3.3: Connect scroll signals from current viewport
         connectViewportScrollSignals(vp);
-        updateDialDisplay();
+        // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
         
         // Phase 5.1 Task 4: Update LayerPanel when tab changes
         updateLayerPanelForViewport(vp);
@@ -315,7 +315,8 @@ MainWindow::MainWindow(QWidget *parent)
     
     loadUserSettings();
 
-    setBenchmarkControlsVisible(false);
+    // REMOVED: Benchmark controls removed - buttons deleted
+    // setBenchmarkControlsVisible(false);
     
     recentNotebooksManager = RecentNotebooksManager::getInstance(this); // Use singleton instance
 
@@ -355,49 +356,16 @@ void MainWindow::setupUi() {
     
     // Create theme-aware button style
     bool darkMode = isDarkMode();
-    QString buttonStyle = createButtonStyle(darkMode);
+    // QString buttonStyle = createButtonStyle(darkMode);
 
 
-    loadPdfButton = new QPushButton(this);
-    clearPdfButton = new QPushButton(this);
-    loadPdfButton->setFixedSize(26, 30);
-    clearPdfButton->setFixedSize(26, 30);
-    QIcon pdfIcon(loadThemedIcon("pdf"));  // Path to your icon in resources
-    QIcon pdfDeleteIcon(loadThemedIcon("pdfdelete"));  // Path to your icon in resources
-    loadPdfButton->setIcon(pdfIcon);
-    clearPdfButton->setIcon(pdfDeleteIcon);
-    loadPdfButton->setStyleSheet(buttonStyle);
-    clearPdfButton->setStyleSheet(buttonStyle);
-    loadPdfButton->setToolTip(tr("Import/Clear Document"));
-    clearPdfButton->setToolTip(tr("Clear PDF"));
-    clearPdfButton->setVisible(false); // ✅ Hide clearPdfButton to save space
-    // MW1.5: PDF buttons disabled - will be reimplemented
-    // connect(loadPdfButton, &QPushButton::clicked, this, &MainWindow::handleSmartPdfButton);
-    // connect(clearPdfButton, &QPushButton::clicked, this, &MainWindow::clearPdf);
-
-    pdfTextSelectButton = new QPushButton(this);
-    pdfTextSelectButton->setFixedSize(36, 36);
-    pdfTextSelectButton->setStyleSheet(buttonStyle);
-    pdfTextSelectButton->setToolTip(tr("Toggle PDF Text Selection"));
-    pdfTextSelectButton->setProperty("selected", false); // Initially disabled
-    updateButtonIcon(pdfTextSelectButton, "ibeam");
-    connect(pdfTextSelectButton, &QPushButton::clicked, this, [this]() {
-        // Phase 3.1.4: PDF text selection stubbed - will be reimplemented for DocumentViewport
-        // TODO Phase 3.4: Implement PDF text selection in DocumentViewport
-        qDebug() << "PDF text select: Not implemented yet (Phase 3.4)";
-    });
+    // REMOVED: PDF buttons removed - sizes (26, 30) and (36, 36)
 
 
 
-    benchmarkButton = new QPushButton(this);
-    // QIcon benchmarkIcon(loadThemedIcon("benchmark"));  // Path to your icon in resources
-    // benchmarkButton->setIcon(benchmarkIcon);
-    benchmarkButton->setFixedSize(26, 30); // Make the benchmark button smaller
-    benchmarkButton->setStyleSheet(buttonStyle);
-    benchmarkButton->setToolTip(tr("Toggle Benchmark"));
-    benchmarkLabel = new QLabel("PR:N/A", this);
-    benchmarkLabel->setFixedHeight(30);  // Make the benchmark bar smaller
-    updateButtonIcon(benchmarkButton, "benchmark");
+    // REMOVED: benchmarkButton removed - size (26, 30)
+    // benchmarkLabel = new QLabel("PR:N/A", this);
+    // benchmarkLabel->setFixedHeight(30);  // Make the benchmark bar smaller
 
     // REMOVED E.1: toggleTabBarButton moved to NavigationBar
     // toggleTabBarButton = new QPushButton(this);
@@ -412,12 +380,7 @@ void MainWindow::setupUi() {
     // Phase S3: Floating tab styling removed - LeftSidebarContainer uses QTabWidget styling
     
     // Add/Remove Bookmark Toggle Button
-    toggleBookmarkButton = new QPushButton(this);
-    toggleBookmarkButton->setToolTip(tr("Add/Remove Bookmark"));
-    toggleBookmarkButton->setFixedSize(36, 36);
-    toggleBookmarkButton->setStyleSheet(buttonStyle);
-    toggleBookmarkButton->setProperty("selected", false); // For toggle state styling
-    updateButtonIcon(toggleBookmarkButton, "star");
+    // REMOVED: toggleBookmarkButton removed - size (36, 36)
     
     // REMOVED E.1: toggleMarkdownNotesButton moved to NavigationBar
     // toggleMarkdownNotesButton = new QPushButton(this);
@@ -438,14 +401,7 @@ void MainWindow::setupUi() {
     // touchGesturesButton->setProperty("yAxisOnly", touchGestureMode == TouchGestureMode::YAxisOnly); // For Y-only styling
     // updateButtonIcon(touchGesturesButton, "hand");
 
-    selectFolderButton = new QPushButton(this);
-    selectFolderButton->setFixedSize(0, 0);
-    QIcon folderIcon(loadThemedIcon("folder"));  // Path to your icon in resources
-    selectFolderButton->setIcon(folderIcon);
-    selectFolderButton->setStyleSheet(buttonStyle);
-    selectFolderButton->setToolTip(tr("Select Save Folder"));
-    selectFolderButton->setVisible(false); // ✅ Hide deprecated folder selection button
-    connect(selectFolderButton, &QPushButton::clicked, this, &MainWindow::selectFolder);
+    // REMOVED MW5.6+: selectFolderButton creation removed - .spn format deprecated
     
     
     // REMOVED E.1: saveButton moved to NavigationBar
@@ -457,14 +413,7 @@ void MainWindow::setupUi() {
     // saveButton->setToolTip(tr("Save Notebook"));
     // connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveCurrentPage);
 
-    exportPdfButton = new QPushButton(this);
-    exportPdfButton->setFixedSize(26, 30);
-    QIcon exportPdfIcon(loadThemedIcon("export"));  // Using PDF icon for export
-    exportPdfButton->setIcon(exportPdfIcon);
-    exportPdfButton->setStyleSheet(buttonStyle);
-    exportPdfButton->setToolTip(tr("Export Annotated PDF"));
-    // MW1.5: Export disabled - will be reimplemented
-    // connect(exportPdfButton, &QPushButton::clicked, this, &MainWindow::exportAnnotatedPdf);
+    // REMOVED: exportPdfButton removed - size (26, 30)
 
     // REMOVED E.1: fullscreenButton moved to NavigationBar
     // fullscreenButton = new QPushButton(this);
@@ -478,101 +427,7 @@ void MainWindow::setupUi() {
 
     // Use the darkMode variable already declared at the beginning of setupUi()
 
-    redButton = new QPushButton(this);
-    redButton->setFixedSize(24, 36);  // Color button
-    QString redIconPath = darkMode ? ":/resources/icons/pen_light_red.png" : ":/resources/icons/pen_dark_red.png";
-    QIcon redIcon(redIconPath);
-    redButton->setIcon(redIcon);
-    redButton->setStyleSheet(buttonStyle);
-    connect(redButton, &QPushButton::clicked, [this]() { 
-        // Phase 3.1.4: Use currentViewport()
-        if (DocumentViewport* vp = currentViewport()) {
-        handleColorButtonClick();
-            vp->setPenColor(getPaletteColor("red")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
-        }
-    });
-    
-    blueButton = new QPushButton(this);
-    blueButton->setFixedSize(24, 36);  // Color button
-    QString blueIconPath = darkMode ? ":/resources/icons/pen_light_blue.png" : ":/resources/icons/pen_dark_blue.png";
-    QIcon blueIcon(blueIconPath);
-    blueButton->setIcon(blueIcon);
-    blueButton->setStyleSheet(buttonStyle);
-    connect(blueButton, &QPushButton::clicked, [this]() { 
-        // Phase 3.1.4: Use currentViewport()
-        if (DocumentViewport* vp = currentViewport()) {
-        handleColorButtonClick();
-            vp->setPenColor(getPaletteColor("blue")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
-        }
-    });
-
-    yellowButton = new QPushButton(this);
-    yellowButton->setFixedSize(24, 36);  // Color button
-    QString yellowIconPath = darkMode ? ":/resources/icons/pen_light_yellow.png" : ":/resources/icons/pen_dark_yellow.png";
-    QIcon yellowIcon(yellowIconPath);
-    yellowButton->setIcon(yellowIcon);
-    yellowButton->setStyleSheet(buttonStyle);
-    connect(yellowButton, &QPushButton::clicked, [this]() { 
-        // Phase 3.1.4: Use currentViewport()
-        if (DocumentViewport* vp = currentViewport()) {
-        handleColorButtonClick();
-            vp->setPenColor(getPaletteColor("yellow")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
-        }
-    });
-
-    greenButton = new QPushButton(this);
-    greenButton->setFixedSize(24, 36);  // Color button
-    QString greenIconPath = darkMode ? ":/resources/icons/pen_light_green.png" : ":/resources/icons/pen_dark_green.png";
-    QIcon greenIcon(greenIconPath);
-    greenButton->setIcon(greenIcon);
-    greenButton->setStyleSheet(buttonStyle);
-    connect(greenButton, &QPushButton::clicked, [this]() { 
-        // Phase 3.1.4: Use currentViewport()
-        if (DocumentViewport* vp = currentViewport()) {
-        handleColorButtonClick();
-            vp->setPenColor(getPaletteColor("green")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
-        }
-    });
-
-    blackButton = new QPushButton(this);
-    blackButton->setFixedSize(24, 36);  // Color button
-    QString blackIconPath = darkMode ? ":/resources/icons/pen_light_black.png" : ":/resources/icons/pen_dark_black.png";
-    QIcon blackIcon(blackIconPath);
-    blackButton->setIcon(blackIcon);
-    blackButton->setStyleSheet(buttonStyle);
-    connect(blackButton, &QPushButton::clicked, [this]() { 
-        // Phase 3.1.4: Use currentViewport()
-        if (DocumentViewport* vp = currentViewport()) {
-        handleColorButtonClick();
-            vp->setPenColor(QColor("#000000")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
-        }
-    });
-
-    whiteButton = new QPushButton(this);
-    whiteButton->setFixedSize(24, 36);  // Color button
-    QString whiteIconPath = darkMode ? ":/resources/icons/pen_light_white.png" : ":/resources/icons/pen_dark_white.png";
-    QIcon whiteIcon(whiteIconPath);
-    whiteButton->setIcon(whiteIcon);
-    whiteButton->setStyleSheet(buttonStyle);
-    connect(whiteButton, &QPushButton::clicked, [this]() { 
-        // Phase 3.1.4: Use currentViewport()
-        if (DocumentViewport* vp = currentViewport()) {
-        handleColorButtonClick();
-            vp->setPenColor(QColor("#FFFFFF")); 
-        updateDialDisplay(); 
-        updateColorButtonStates();
-        }
-    });
+    // REMOVED: Color buttons removed - size (24, 36)
     
     customColorInput = new QLineEdit(this);
     customColorInput->setPlaceholderText("Custom HEX");
@@ -586,34 +441,7 @@ void MainWindow::setupUi() {
     connect(customColorInput, &QLineEdit::returnPressed, this, &MainWindow::applyCustomColor);
 
     
-    thicknessButton = new QPushButton(this);
-    thicknessButton->setIcon(loadThemedIcon("thickness"));
-    thicknessButton->setFixedSize(26, 30);
-    thicknessButton->setStyleSheet(buttonStyle);
-    connect(thicknessButton, &QPushButton::clicked, this, &MainWindow::toggleThicknessSlider);
-
-    thicknessFrame = new QFrame(this);
-    thicknessFrame->setFrameShape(QFrame::StyledPanel);
-    thicknessFrame->setStyleSheet(R"(
-        background-color: black;
-        border: 1px solid black;
-        padding: 5px;
-    )");
-    thicknessFrame->setVisible(false);
-    thicknessFrame->setFixedSize(220, 40); // Adjust width/height as needed
-
-    thicknessSlider = new QSlider(Qt::Horizontal, this);
-    thicknessSlider->setRange(1, 50);
-    thicknessSlider->setValue(5);
-    thicknessSlider->setMaximumWidth(200);
-
-
-    connect(thicknessSlider, &QSlider::valueChanged, this, &MainWindow::updateThickness);
-
-    QVBoxLayout *popupLayoutThickness = new QVBoxLayout();
-    popupLayoutThickness->setContentsMargins(10, 5, 10, 5);
-    popupLayoutThickness->addWidget(thicknessSlider);
-    thicknessFrame->setLayout(popupLayoutThickness);
+    // REMOVED: thicknessButton and related UI removed - size (26, 30)
 
 
     toolSelector = new QComboBox(this);
@@ -692,27 +520,13 @@ void MainWindow::setupUi() {
     // });
     
     // Insert Picture Button (Phase O2.9: repurposed as Object Select Tool)
-    insertPictureButton = new QPushButton(this);
-    insertPictureButton->setFixedSize(36, 36);
-    insertPictureButton->setStyleSheet(buttonStyle);
-    insertPictureButton->setToolTip(tr("Object Select Tool (O)"));
-    insertPictureButton->setProperty("selected", false);
-    updateButtonIcon(insertPictureButton, "background");
-    connect(insertPictureButton, &QPushButton::clicked, this, [this]() {
-        // Phase O2.9: Toggle ObjectSelect tool
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->setCurrentTool(ToolType::ObjectSelect);
-        }
-        updateToolButtonStates();
-        updateThicknessSliderForCurrentTool();
-        updateDialDisplay();
-    });
+    // REMOVED: insertPictureButton removed - size (36, 36)
     
     deletePageButton = new QPushButton(this);
     deletePageButton->setFixedSize(22, 30);
     QIcon trashIcon(loadThemedIcon("trash"));  // Path to your icon in resources
     deletePageButton->setIcon(trashIcon);
-    deletePageButton->setStyleSheet(buttonStyle);
+    // deletePageButton->setStyleSheet(buttonStyle);
     deletePageButton->setToolTip(tr("Clear All Content"));
     connect(deletePageButton, &QPushButton::clicked, this, &MainWindow::deleteCurrentPage);
 
@@ -818,43 +632,9 @@ void MainWindow::setupUi() {
 
 
 
-    // 🌟 PDF Outline Sidebar
-    outlineSidebar = new QWidget(this);
-    outlineSidebar->setFixedWidth(250);
-    outlineSidebar->setVisible(false); // Hidden by default
+    // REMOVED MW7.5: PDF Outline Sidebar creation removed - outline sidebar deleted
     
-    QVBoxLayout *outlineLayout = new QVBoxLayout(outlineSidebar);
-    outlineLayout->setContentsMargins(5, 5, 5, 5);
-    
-    QLabel *outlineLabel = new QLabel(tr("PDF Outline"), outlineSidebar);
-    outlineLabel->setStyleSheet("font-weight: bold; padding: 5px;");
-    outlineLayout->addWidget(outlineLabel);
-    
-    outlineTree = new QTreeWidget(outlineSidebar);
-    outlineTree->setHeaderHidden(true);
-    outlineTree->setRootIsDecorated(true);
-    outlineTree->setIndentation(15);
-    outlineLayout->addWidget(outlineTree);
-    
-    // Connect outline tree item clicks
-    connect(outlineTree, &QTreeWidget::itemClicked, this, &MainWindow::onOutlineItemClicked);
-    
-    // 🌟 Bookmarks Sidebar
-    bookmarksSidebar = new QWidget(this);
-    bookmarksSidebar->setFixedWidth(250);
-    bookmarksSidebar->setVisible(false); // Hidden by default
-    QVBoxLayout *bookmarksLayout = new QVBoxLayout(bookmarksSidebar);
-    bookmarksLayout->setContentsMargins(5, 5, 5, 5);
-    QLabel *bookmarksLabel = new QLabel(tr("Bookmarks"), bookmarksSidebar);
-    bookmarksLabel->setStyleSheet("font-weight: bold; padding: 5px;");
-    bookmarksLayout->addWidget(bookmarksLabel);
-    bookmarksTree = new QTreeWidget(bookmarksSidebar);
-    bookmarksTree->setHeaderHidden(true);
-    bookmarksTree->setRootIsDecorated(false);
-    bookmarksTree->setIndentation(0);
-    bookmarksLayout->addWidget(bookmarksTree);
-    // Connect bookmarks tree item clicks
-    connect(bookmarksTree, &QTreeWidget::itemClicked, this, &MainWindow::onBookmarkItemClicked);
+    // REMOVED MW7.4: Bookmarks Sidebar creation removed - bookmark implementation deleted
     
     // 🌟 Phase S3: Left Sidebar Container (replaces floating tabs)
     // ---------------------------------------------------------------------------------------------------------
@@ -988,12 +768,7 @@ void MainWindow::setupUi() {
 
     // REMOVED MW1.3: nextPageButton - feature was dropped (already hidden)
 
-    jumpToPageButton = new QPushButton(this);
-    // QIcon jumpIcon(":/resources/icons/bookpage.png");  // Path to your icon in resources
-    jumpToPageButton->setFixedSize(26, 30);
-    jumpToPageButton->setStyleSheet(buttonStyle);
-    jumpToPageButton->setIcon(loadThemedIcon("bookpage"));
-    connect(jumpToPageButton, &QPushButton::clicked, this, &MainWindow::showJumpToPageDialog);
+    // REMOVED: jumpToPageButton removed - size (26, 30)
 
     // MW2.2: Removed dial toggle button
     // MW2.2: Removed fast forward button - keeping only essential controls
@@ -1009,37 +784,14 @@ void MainWindow::setupUi() {
     // MW2.2: Removed mode selection buttons
 
 
-    // ✅ Initialize color presets based on palette mode (will be updated after UI setup)
-    colorPresets.enqueue(getDefaultPenColor());
-    colorPresets.enqueue(QColor("#AA0000"));  // Temporary - will be updated later
-    colorPresets.enqueue(QColor("#997700"));
-    colorPresets.enqueue(QColor("#0000AA"));
-    colorPresets.enqueue(QColor("#007700"));
-    colorPresets.enqueue(QColor("#000000"));
-    colorPresets.enqueue(QColor("#FFFFFF"));
+    // REMOVED MW5.5: colorPresets initialization removed - color presets no longer used
 
-    // ✅ Button to add current color to presets
-    addPresetButton = new QPushButton(loadThemedIcon("savepreset"), "", this);
-    addPresetButton->setStyleSheet(buttonStyle);
-    addPresetButton->setToolTip(tr("Add Current Color to Presets"));
-    addPresetButton->setFixedSize(26, 30);
-    connect(addPresetButton, &QPushButton::clicked, this, &MainWindow::addColorPreset);
+    // REMOVED MW5.5: addPresetButton creation removed - color presets no longer used
 
 
 
 
-    openControlPanelButton = new QPushButton(this);
-    openControlPanelButton->setIcon(loadThemedIcon("settings"));  // Replace with your actual settings icon
-    openControlPanelButton->setStyleSheet(buttonStyle);
-    openControlPanelButton->setToolTip(tr("Open Control Panel"));
-    openControlPanelButton->setFixedSize(26, 30);  // Adjust to match your other buttons
-
-    connect(openControlPanelButton, &QPushButton::clicked, this, [=]() {
-        // Phase 3.1.8: ControlPanelDialog disabled - depends on InkCanvas
-        QMessageBox::information(const_cast<MainWindow*>(this), tr("Control Panel"), 
-            tr("Control Panel is being redesigned. Coming soon!"));
-        // TODO Phase 4.6: Reconnect ControlPanelDialog with DocumentViewport
-    });
+    // REMOVED: openControlPanelButton removed - size (26, 30)
 
     // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
 
@@ -1061,7 +813,7 @@ void MainWindow::setupUi() {
             DocumentViewport* vp = currentViewport();
             if (!vp) return;
             
-            handleColorButtonClick();
+            // REMOVED: handleColorButtonClick removed - color buttons deleted
             
             // Get the current custom color from the button text
             QString buttonText = customColorButton->text();
@@ -1074,14 +826,16 @@ void MainWindow::setupUi() {
             if (chosen.isValid()) {
                     vp->setPenColor(chosen);
                     updateCustomColorButtonStyle(chosen);
-                updateDialDisplay();
-                    updateColorButtonStates();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+                    // REMOVED: Color button updates removed - buttons deleted
+    // updateColorButtonStates();
                 }
             } else {
                 // First click - apply the custom color
                 vp->setPenColor(customColor);
-                updateDialDisplay();
-                updateColorButtonStates();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+                // REMOVED: Color button updates removed - buttons deleted
+    // updateColorButtonStates();
             }
         });
     });
@@ -1095,7 +849,7 @@ void MainWindow::setupUi() {
     overflowMenuButton->setToolTip(tr("More Actions"));
     overflowMenuButton->setIcon(loadThemedIcon("menu"));  // Will use menu icon
     overflowMenuButton->setCursor(Qt::PointingHandCursor);
-    overflowMenuButton->setStyleSheet(buttonStyle);
+    // overflowMenuButton->setStyleSheet(buttonStyle);
     
     overflowMenu = new QMenu(this);
     overflowMenu->setObjectName("overflowMenu");
@@ -1112,23 +866,23 @@ void MainWindow::setupUi() {
     connect(zoom50Action, &QAction::triggered, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->setZoomLevel(0.5);
-            updateDialDisplay();
+            // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
         }
     });
-
+    
     QAction *zoomResetAction = overflowMenu->addAction(tr("Zoom Reset"));
     connect(zoomResetAction, &QAction::triggered, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->setZoomLevel(1.0);
-            updateDialDisplay();
+            // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
         }
     });
-
+    
     QAction *zoom200Action = overflowMenu->addAction(tr("Zoom 200%"));
     connect(zoom200Action, &QAction::triggered, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->setZoomLevel(2.0);
-            updateDialDisplay();
+            // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
         }
     });
     
@@ -1139,7 +893,8 @@ void MainWindow::setupUi() {
     
     QAction *openControlPanelAction = overflowMenu->addAction(loadThemedIcon("settings"), tr("Settings"));
     connect(openControlPanelAction, &QAction::triggered, this, [this]() {
-        openControlPanelButton->click();
+        // REMOVED: openControlPanelButton removed - use direct action
+        QMessageBox::information(this, tr("Control Panel"), tr("Control Panel is being redesigned. Coming soon!"));
     });
     
     // Connect button to show menu
@@ -1162,13 +917,13 @@ void MainWindow::setupUi() {
     // controlLayout->addWidget(pdfTextSelectButton);
     // controlLayout->addWidget(saveButton);
     
-    // Color buttons
-    controlLayout->addWidget(redButton);
-    controlLayout->addWidget(blueButton);
-    controlLayout->addWidget(yellowButton);
-    controlLayout->addWidget(greenButton);
-    controlLayout->addWidget(blackButton);
-    controlLayout->addWidget(whiteButton);
+    // REMOVED: Color buttons removed - sizes (24, 36)
+    // controlLayout->addWidget(redButton);
+    // controlLayout->addWidget(blueButton);
+    // controlLayout->addWidget(yellowButton);
+    // controlLayout->addWidget(greenButton);
+    // controlLayout->addWidget(blackButton);
+    // controlLayout->addWidget(whiteButton);
     controlLayout->addWidget(customColorButton);
     
     // Tool buttons
@@ -1186,27 +941,28 @@ void MainWindow::setupUi() {
     controlLayout->addStretch();
     
     // Page controls and overflow menu on the right (fixed position)
-    controlLayout->addWidget(toggleBookmarkButton);
+    // REMOVED: toggleBookmarkButton removed - size (36, 36)
+    // controlLayout->addWidget(toggleBookmarkButton);
     controlLayout->addWidget(pageInput);
     controlLayout->addWidget(overflowMenuButton);
     controlLayout->addWidget(deletePageButton);
     
-    // Benchmark controls (hidden by default, can be enabled in settings)
-    controlLayout->addWidget(benchmarkButton);
-    controlLayout->addWidget(benchmarkLabel);
+    // REMOVED: Benchmark controls removed - button size (26, 30)
+    // controlLayout->addWidget(benchmarkButton);
+    // controlLayout->addWidget(benchmarkLabel);
     
-    // Hide buttons that are now in overflow menu or obsolete (keep for functionality)
-    thicknessButton->setVisible(false);
-    loadPdfButton->setVisible(false);
-    clearPdfButton->setVisible(false);
-    exportPdfButton->setVisible(false);
-    openControlPanelButton->setVisible(false);
-    selectFolderButton->setVisible(false);
-    jumpToPageButton->setVisible(false);
+    // REMOVED: Button visibility settings removed - buttons deleted
+    // thicknessButton->setVisible(false);
+    // loadPdfButton->setVisible(false);
+    // clearPdfButton->setVisible(false);
+    // exportPdfButton->setVisible(false);
+    // openControlPanelButton->setVisible(false);
+    // REMOVED MW5.6+: selectFolderButton removed - .spn format deprecated
+    // jumpToPageButton->setVisible(false);
     // REMOVED MW5.2+: zoom buttons moved to NavigationBar/Toolbar
     // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
-    benchmarkButton->setVisible(false);  // Hidden by default, toggle via Settings > Features
-    benchmarkLabel->setVisible(false);
+    // benchmarkButton->setVisible(false);  // Hidden by default, toggle via Settings > Features
+    // benchmarkLabel->setVisible(false);
     // REMOVED MW1.3: prevPageButton->setVisible(false), nextPageButton->setVisible(false)
     
     // REMOVED MW5.1: controlBar creation removed - replaced by NavigationBar and Toolbar
@@ -1416,7 +1172,7 @@ void MainWindow::setupUi() {
     setCentralWidget(container);
 
     benchmarkTimer = new QTimer(this);
-    connect(benchmarkButton, &QPushButton::clicked, this, &MainWindow::toggleBenchmark);
+    // REMOVED: benchmarkButton connection removed - button deleted
     connect(benchmarkTimer, &QTimer::timeout, this, &MainWindow::updateBenchmarkDisplay);
 
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
@@ -1436,7 +1192,7 @@ void MainWindow::setupUi() {
     // REMOVED E.1: Layout functions removed - new components handle their own layout
     
     // Now that all UI components are created, update the color palette
-    updateColorPalette();
+    // REMOVED: updateColorPalette removed - color buttons deleted
     
     // Position add tab button and floating sidebar tabs initially
     QTimer::singleShot(100, this, [this]() {
@@ -1618,7 +1374,7 @@ void MainWindow::applyCustomColor() {
         colorCode.prepend("#");
     }
         vp->setPenColor(QColor(colorCode));
-    updateDialDisplay(); 
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted 
     }
 }
 
@@ -1643,8 +1399,9 @@ void MainWindow::adjustThicknessForZoom(int oldZoom, int newZoom) {
     
     // TODO Phase 3.3: If needed, adjust thickness on DocumentViewport
     // DocumentViewport already handles zoom-aware pen thickness
-    updateThicknessSliderForCurrentTool();
-    updateDialDisplay();
+    // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 
@@ -1660,8 +1417,9 @@ void MainWindow::changeTool(int index) {
         }
     }
     updateToolButtonStates();
-    updateThicknessSliderForCurrentTool();
-    updateDialDisplay();
+    // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 void MainWindow::setPenTool() {
@@ -1670,8 +1428,9 @@ void MainWindow::setPenTool() {
         vp->setCurrentTool(ToolType::Pen);
     }
     updateToolButtonStates();
-    updateThicknessSliderForCurrentTool();
-    updateDialDisplay();
+    // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 void MainWindow::setMarkerTool() {
@@ -1680,8 +1439,9 @@ void MainWindow::setMarkerTool() {
         vp->setCurrentTool(ToolType::Marker);
     }
     updateToolButtonStates();
-    updateThicknessSliderForCurrentTool();
-    updateDialDisplay();
+    // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 void MainWindow::setEraserTool() {
@@ -1690,8 +1450,9 @@ void MainWindow::setEraserTool() {
         vp->setCurrentTool(ToolType::Eraser);
     }
     updateToolButtonStates();
-    updateThicknessSliderForCurrentTool();
-    updateDialDisplay();
+    // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 // REMOVED Phase 3.1.3: setVectorPenTool(), setVectorEraserTool(), vectorUndo()
@@ -1702,51 +1463,48 @@ void MainWindow::updateToolButtonStates() {
     // Toolbar component handles its own visual state updates
 }
 
-void MainWindow::handleColorButtonClick() {
-    // Phase 3.1.4: Use currentViewport()
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
-    
-    ToolType tool = vp->currentTool();
-    
-    // If in eraser mode, switch back to pen mode
-    if (tool == ToolType::Eraser) {
-        vp->setCurrentTool(ToolType::Pen);
-        updateToolButtonStates();
-        updateThicknessSliderForCurrentTool();
-    }
-    
-    // TODO Phase 3.3: Rope tool mode handling (if implemented)
-    // For now, rope tool is InkCanvas-only and will be reimplemented later
-}
+// REMOVED: handleColorButtonClick function removed - color buttons deleted
+// void MainWindow::handleColorButtonClick() {
+//     // Phase 3.1.4: Use currentViewport()
+//     DocumentViewport* vp = currentViewport();
+//     if (!vp) return;
+//
+//     ToolType tool = vp->currentTool();
+//
+//     // If in eraser mode, switch back to pen mode
+//     if (tool == ToolType::Eraser) {
+//         vp->setCurrentTool(ToolType::Pen);
+//         updateToolButtonStates();
+//         // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+//     }
+//
+//     // TODO Phase 3.3: Rope tool mode handling (if implemented)
+//     // For now, rope tool is InkCanvas-only and will be reimplemented later
+// }
 
-void MainWindow::updateThicknessSliderForCurrentTool() {
-    // Phase 3.1.4: Use currentViewport()
-    DocumentViewport* vp = currentViewport();
-    if (!vp || !thicknessSlider) return;
-    
-    // Block signals to prevent recursive calls
-    thicknessSlider->blockSignals(true);
-    
-    // Update slider to reflect current tool's thickness
-    qreal currentThickness = vp->penThickness();
-    
-    // Convert thickness back to slider value (reverse of updateThickness calculation)
-    qreal zoomPercent = vp->zoomLevel() * 100.0;
-    qreal visualThickness = currentThickness * (zoomPercent / 100.0);
-    int sliderValue = qBound(1, static_cast<int>(qRound(visualThickness)), 50);
-    
-    thicknessSlider->setValue(sliderValue);
-    thicknessSlider->blockSignals(false);
-}
+// REMOVED: updateThicknessSliderForCurrentTool function removed - thicknessSlider deleted
+// void MainWindow::updateThicknessSliderForCurrentTool() {
+//     // Phase 3.1.4: Use currentViewport()
+//     DocumentViewport* vp = currentViewport();
+//     if (!vp || !thicknessSlider) return;
+//
+//     // Block signals to prevent recursive calls
+//     thicknessSlider->blockSignals(true);
+//
+//     // Update slider to reflect current tool's thickness
+//     qreal currentThickness = vp->penThickness();
+//
+//     // Convert thickness back to slider value (reverse of updateThickness calculation)
+//     qreal zoomPercent = vp->zoomLevel() * 100.0;
+//     qreal visualThickness = currentThickness * (zoomPercent / 100.0);
+//     int sliderValue = qBound(1, static_cast<int>(qRound(visualThickness)), 50);
+//
+//     thicknessSlider->setValue(sliderValue);
+//     thicknessSlider->blockSignals(false);
+// }
 
-bool MainWindow::selectFolder() {
-    // Phase 3.1.8: Stubbed - old .spn format is being replaced with .snx
-    // TODO Phase 3.4: Implement save folder selection for new .snx format
-    QMessageBox::information(this, tr("Save Location"), 
-        tr("Saving to folder is being redesigned. Coming soon with .snx format!"));
-                    return false;
-}
+// REMOVED MW5.6: selectFolder function removed - .spn format deprecated
 
 // MW1.5: Kept as stubs - still called from many places
 void MainWindow::switchPage(int pageIndex) {
@@ -1794,101 +1552,7 @@ void MainWindow::deleteCurrentPage() {
 
 // REMOVED MW1.2: selectBackground() - feature was dropped
 
-// Helper function to show page range selection dialog
-bool MainWindow::showPageRangeDialog(int totalPages, bool &exportWholeDocument, int &startPage, int &endPage) {
-    QDialog dialog(this);
-    dialog.setWindowTitle(tr("Select Page Range to Export"));
-    dialog.setMinimumWidth(400);
-    
-    QVBoxLayout *mainLayout = new QVBoxLayout(&dialog);
-    
-    // Info label
-    QLabel *infoLabel = new QLabel(tr("Choose which pages to export:"));
-    mainLayout->addWidget(infoLabel);
-    
-    mainLayout->addSpacing(10);
-    
-    // Radio button for whole document
-    QRadioButton *wholeDocRadio = new QRadioButton(tr("Whole document (pages 1-%1)").arg(totalPages));
-    wholeDocRadio->setChecked(true);
-    mainLayout->addWidget(wholeDocRadio);
-    
-    mainLayout->addSpacing(5);
-    
-    // Radio button for page range
-    QRadioButton *rangeRadio = new QRadioButton(tr("Page range:"));
-    mainLayout->addWidget(rangeRadio);
-    
-    // Range input layout
-    QHBoxLayout *rangeLayout = new QHBoxLayout();
-    rangeLayout->addSpacing(30); // Indent
-    
-    QLabel *fromLabel = new QLabel(tr("From:"));
-    rangeLayout->addWidget(fromLabel);
-    
-    QSpinBox *fromSpinBox = new QSpinBox();
-    fromSpinBox->setMinimum(1);
-    fromSpinBox->setMaximum(totalPages);
-    fromSpinBox->setValue(1);
-    fromSpinBox->setEnabled(false); // Initially disabled
-    rangeLayout->addWidget(fromSpinBox);
-    
-    QLabel *toLabel = new QLabel(tr("To:"));
-    rangeLayout->addWidget(toLabel);
-    
-    QSpinBox *toSpinBox = new QSpinBox();
-    toSpinBox->setMinimum(1);
-    toSpinBox->setMaximum(totalPages);
-    toSpinBox->setValue(totalPages);
-    toSpinBox->setEnabled(false); // Initially disabled
-    rangeLayout->addWidget(toSpinBox);
-    
-    rangeLayout->addStretch();
-    mainLayout->addLayout(rangeLayout);
-    
-    mainLayout->addSpacing(20);
-    
-    // Buttons
-    QHBoxLayout *buttonLayout = new QHBoxLayout();
-    buttonLayout->addStretch();
-    
-    QPushButton *okButton = new QPushButton(tr("OK"));
-    QPushButton *cancelButton = new QPushButton(tr("Cancel"));
-    
-    buttonLayout->addWidget(okButton);
-    buttonLayout->addWidget(cancelButton);
-    mainLayout->addLayout(buttonLayout);
-    
-    // Connect radio button to enable/disable spin boxes
-    connect(rangeRadio, &QRadioButton::toggled, fromSpinBox, &QSpinBox::setEnabled);
-    connect(rangeRadio, &QRadioButton::toggled, toSpinBox, &QSpinBox::setEnabled);
-    
-    // Connect buttons
-    connect(okButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
-    
-    // Ensure 'from' <= 'to'
-    connect(fromSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), [=](int value) {
-        if (value > toSpinBox->value()) {
-            toSpinBox->setValue(value);
-        }
-    });
-    connect(toSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), [=](int value) {
-        if (value < fromSpinBox->value()) {
-            fromSpinBox->setValue(value);
-        }
-    });
-    
-    // Show dialog
-    if (dialog.exec() == QDialog::Accepted) {
-        exportWholeDocument = wholeDocRadio->isChecked();
-        startPage = fromSpinBox->value() - 1; // Convert to 0-based
-        endPage = toSpinBox->value() - 1; // Convert to 0-based
-        return true;
-    }
-    
-    return false; // User cancelled
-}
+// REMOVED MW7.3: showPageRangeDialog function removed - export dialog function
 
 
 // Phase 3.1.8: Stub implementation - function disabled
@@ -1902,197 +1566,25 @@ void MainWindow::exportCanvasOnlyNotebook(const QString &saveFolder, const QStri
 
 
 // Phase 3.1.8: Stub implementation - function disabled
-void MainWindow::exportAnnotatedPdfFullRender(const QString &exportPath, const QSet<int> &annotatedPages, 
-                                               bool exportWholeDocument, int exportStartPage, int exportEndPage) {
-    Q_UNUSED(exportPath);
-    Q_UNUSED(annotatedPages);
-    Q_UNUSED(exportWholeDocument);
-    Q_UNUSED(exportStartPage);
-    Q_UNUSED(exportEndPage);
-    qDebug() << "exportAnnotatedPdfFullRender(): Disabled in Phase 3.1.8";
-}
+// REMOVED MW7.3: exportAnnotatedPdfFullRender function removed - pdftk export function
 
 // Phase 3.1.8: Entire function disabled - uses InkCanvas
 
 
-// Phase 3.1.8: Stub implementation - function disabled
-bool MainWindow::createAnnotatedPagesPdf(const QString &outputPath, const QList<int> &pages, QProgressDialog &progress) {
-    Q_UNUSED(outputPath);
-    Q_UNUSED(pages);
-    Q_UNUSED(progress);
-    qDebug() << "createAnnotatedPagesPdf(): Disabled in Phase 3.1.8";
-    return false;
-}
+// REMOVED MW7.3: createAnnotatedPagesPdf function removed - temp PDF creation function
 
 // Phase 3.1.8: Entire function disabled - uses InkCanvas
 // Phase 3.1.8: mergePdfWithPdftk disabled
 
-// Phase 3.1.8: Stub implementation - function disabled
-bool MainWindow::mergePdfWithPdftk(const QString &originalPdf, const QString &annotatedPagesPdf, 
-                                    const QString &outputPdf, const QList<int> &annotatedPageNumbers,
-                                    QString *errorMsg, bool exportWholeDocument, int exportStartPage, int exportEndPage) {
-    Q_UNUSED(originalPdf);
-    Q_UNUSED(annotatedPagesPdf);
-    Q_UNUSED(outputPdf);
-    Q_UNUSED(annotatedPageNumbers);
-    Q_UNUSED(exportWholeDocument);
-    Q_UNUSED(exportStartPage);
-    Q_UNUSED(exportEndPage);
-    if (errorMsg) *errorMsg = "Disabled in Phase 3.1.8";
-    qDebug() << "mergePdfWithPdftk(): Disabled in Phase 3.1.8";
-    return false;
-}
+// REMOVED MW7.3: mergePdfWithPdftk function removed - PDF merging function
 
 // Extract PDF metadata including outline/bookmarks using pdftk
 // Note: This function doesn't use InkCanvas, so it's not disabled
 // REMOVED MW5.3: extractPdfOutlineData function removed - PDF outline extraction now handled by Document/DocumentViewport
 
-// Filter outline entries to only include those pointing to pages in the export range,
-// and adjust page numbers to match the new PDF (0-indexed)
-QString MainWindow::filterAndAdjustOutline(const QString &metadataContent, int startPage, int endPage, int pageOffset) {
-    QStringList lines = metadataContent.split('\n');
-    QStringList filteredLines;
-    
-    // First, extract and preserve non-bookmark metadata
-    QStringList metadataLines;
-    bool inMetadata = true;
-    
-    for (const QString &line : lines) {
-        if (line.startsWith("BookmarkBegin")) {
-            inMetadata = false;
-            break;
-        }
-        // Collect metadata but skip NumberOfPages (it will be wrong after extraction)
-        if (inMetadata && !line.startsWith("NumberOfPages:")) {
-            if (line.startsWith("InfoBegin") || line.startsWith("InfoKey:") || line.startsWith("InfoValue:") ||
-                line.startsWith("PdfID0:") || line.startsWith("PdfID1:") || 
-                line.trimmed().isEmpty()) {
-                metadataLines.append(line);
-            }
-        }
-    }
-    
-    // Add metadata to output
-    filteredLines.append(metadataLines);
-    
-    // Now process bookmarks
-    QStringList currentBookmark;
-    int bookmarkPage = -1;
-    bool inBookmark = false;
-    
-    // Lambda to process a completed bookmark
-    auto processBookmark = [&]() {
-        // Only include bookmarks that:
-        // 1. Have a valid page number
-        // 2. Point to a page within the export range
-        if (bookmarkPage > 0 && bookmarkPage >= startPage + 1 && bookmarkPage <= endPage + 1) {
-            // Adjust the page number (pdftk uses 1-based indexing)
-            int newPageNumber = bookmarkPage - startPage;  // Subtract the offset
-            
-            // Write out the bookmark with adjusted page number
-            for (const QString &bmLine : currentBookmark) {
-                if (bmLine.startsWith("BookmarkPageNumber: ")) {
-                    filteredLines.append(QString("BookmarkPageNumber: %1").arg(newPageNumber));
-                } else {
-                    filteredLines.append(bmLine);
-                }
-            }
-        }
-    };
-    
-    // Parse bookmark entries
-    for (int i = 0; i < lines.size(); ++i) {
-        const QString &line = lines[i];
-        
-        // Detect start of a new bookmark
-        if (line.startsWith("BookmarkBegin")) {
-            // Process the previous bookmark if we were in one
-            if (inBookmark) {
-                processBookmark();
-            }
-            
-            // Start a new bookmark
-            inBookmark = true;
-            currentBookmark.clear();
-            currentBookmark.append(line);
-            bookmarkPage = -1;
-        }
-        // If we're in a bookmark, collect its lines
-        else if (inBookmark) {
-            // Check for various bookmark fields
-            if (line.startsWith("BookmarkTitle:") || 
-                line.startsWith("BookmarkLevel:") || 
-                line.startsWith("BookmarkPageNumber:")) {
-                
-                // Extract page number if this is the PageNumber line
-                if (line.startsWith("BookmarkPageNumber: ")) {
-                    QString pageStr = line.mid(20).trimmed();
-                    bool ok = false;
-                    bookmarkPage = pageStr.toInt(&ok);
-                    if (!ok) {
-                        bookmarkPage = -1; // Invalid page number
-                    }
-                }
-                
-                currentBookmark.append(line);
-            }
-            // Empty line might indicate end of bookmark (some PDFs format this way)
-            else if (line.trimmed().isEmpty()) {
-                // Don't add empty lines to bookmark, but don't end it yet either
-                // We'll end on the next BookmarkBegin
-                continue;
-            }
-        }
-    }
-    
-    // Process the last bookmark if we ended while in one
-    if (inBookmark) {
-        processBookmark();
-    }
-    
-    return filteredLines.join('\n');
-}
+// REMOVED MW7.3: filterAndAdjustOutline function removed - outline manipulation function
 
-// Apply outline metadata to an existing PDF using pdftk update_info
-bool MainWindow::applyOutlineToPdf(const QString &pdfPath, const QString &outlineData) {
-    if (outlineData.isEmpty()) {
-        return true;  // Nothing to apply, not an error
-    }
-    
-    // Create temporary file for metadata
-    QString tempMetadataFile = QDir::temp().filePath("speedynote_outline_temp.txt");
-    QFile metaFile(tempMetadataFile);
-    if (!metaFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        return false;
-    }
-    
-    QTextStream out(&metaFile);
-    out << outlineData;
-    metaFile.close();
-    
-    // Create temporary output file
-    QString tempOutputFile = QDir::temp().filePath("speedynote_with_outline_temp.pdf");
-    
-    // Use pdftk to apply metadata
-    QProcess process;
-    process.start("pdftk", QStringList() << pdfPath << "update_info" << tempMetadataFile << "output" << tempOutputFile);
-    
-    bool success = false;
-    if (process.waitForFinished(30000) && process.exitCode() == 0) {
-        // Replace original with the one that has outline
-        QFile::remove(pdfPath);
-        if (QFile::copy(tempOutputFile, pdfPath)) {
-            QFile::setPermissions(pdfPath, QFile::WriteOwner | QFile::ReadOwner | QFile::ReadGroup | QFile::ReadOther);
-            success = true;
-        }
-    }
-    
-    // Cleanup
-    QFile::remove(tempMetadataFile);
-    QFile::remove(tempOutputFile);
-    
-    return success;
-}
+// REMOVED MW7.3: applyOutlineToPdf function removed - outline application function
 
 
 void MainWindow::updateZoom() {
@@ -2257,8 +1749,9 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // CR-2B: Connect tool/mode signals for keyboard shortcut sync
     m_toolChangedConn = connect(viewport, &DocumentViewport::toolChanged, this, [this](ToolType) {
         updateToolButtonStates();
-        updateThicknessSliderForCurrentTool();
-        updateDialDisplay();
+        // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
+    // updateThicknessSliderForCurrentTool();
+        // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     });
     
     // REMOVED E.1: straightLineToggleButton moved to Toolbar - no need to sync button state
@@ -2751,11 +2244,7 @@ void MainWindow::forceUIRefresh() {
     setWindowState(Qt::WindowMaximized);  // Maximize again
 }
 
-void MainWindow::loadPdf() {
-    // Phase doc-1.4: Redirect to openPdfDocument() for PDF loading
-    // This stub exists for backward compatibility with menu items
-    openPdfDocument();
-}
+// REMOVED MW7.3: loadPdf function removed - old PDF loading function
 
 
             
@@ -2782,7 +2271,7 @@ void MainWindow::switchTab(int index) {
             // REMOVED MW5.2: zoomSlider removed - zoom now controlled by NavigationBar/Toolbar
         }
         
-        updateDialDisplay();
+        // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
         // TODO Phase 3.3: Reconnect these update functions to work with DocumentViewport
         // updateColorButtonStates();
         // updateStraightLineButtonState();
@@ -2858,7 +2347,7 @@ void MainWindow::addNewTab() {
         centerViewportContent(tabIndex);
     });
     
-    updateDialDisplay();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     
     return;
     
@@ -2937,7 +2426,7 @@ void MainWindow::addNewEdgelessTab()
         }
     });
     
-    updateDialDisplay();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 void MainWindow::loadFolderDocument()
@@ -3034,7 +2523,7 @@ void MainWindow::loadFolderDocument()
         }
     }
     
-    updateDialDisplay();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
 }
 
 // ========== LEGACY CODE BELOW ==========
@@ -3105,37 +2594,39 @@ void MainWindow::loadFolderDocument()
         // At this point, newCanvas is the InkCanvas instance for the tab being closed.
         // And indexToRemove is its index in tabList and canvasStack.
 
-        // ✅ Auto-save the current page before closing the tab
-        if (newCanvas && newCanvas->isEdited()) {
-            int pageNumber = getCurrentPageForCanvas(newCanvas);
-            newCanvas->saveToFile(pageNumber);
-            
-            // ✅ COMBINED MODE FIX: Use combined-aware save for markdown/picture windows
-            newCanvas->saveCombinedWindowsForPage(pageNumber);
-            
-            // ✅ Mark as not edited to prevent double-saving in destructor
-            newCanvas->setEdited(false);
-        }
-        
-        // ✅ Save the last accessed page and bookmarks before closing tab
-        if (newCanvas) {
-            // ✅ Additional safety check before accessing canvas methods
-            try {
-                int currentPage = getCurrentPageForCanvas(newCanvas);
-                newCanvas->setLastAccessedPage(currentPage);
-                
-                // ✅ Save current bookmarks to JSON metadata
-                saveBookmarks();
-            } catch (...) {
-                qWarning() << "Exception occurred while saving last accessed page";
-            }
-        }
+        // REMOVED: InkCanvas-related saving removed - InkCanvas being deleted
+        // // ✅ Auto-save the current page before closing the tab
+        // if (newCanvas && newCanvas->isEdited()) {
+        //     int pageNumber = getCurrentPageForCanvas(newCanvas);
+        //     newCanvas->saveToFile(pageNumber);
+        //
+        //     // ✅ COMBINED MODE FIX: Use combined-aware save for markdown/picture windows
+        //     newCanvas->saveCombinedWindowsForPage(pageNumber);
+        //
+        //     // ✅ Mark as not edited to prevent double-saving in destructor
+        //     newCanvas->setEdited(false);
+        // }
+        //
+        // // ✅ Save the last accessed page and bookmarks before closing tab
+        // if (newCanvas) {
+        //     // ✅ Additional safety check before accessing canvas methods
+        //     try {
+        //         int currentPage = getCurrentPageForCanvas(newCanvas);
+        //         newCanvas->setLastAccessedPage(currentPage);
+        //
+        //         // ✅ Save current bookmarks to JSON metadata
+        //         saveBookmarks();
+        //     } catch (...) {
+        //         qWarning() << "Exception occurred while saving last accessed page";
+        //     }
+        // }
 
-        // ✅ 1. PRIORITY: Handle saving first - user can cancel here
-        if (!ensureTabHasUniqueSaveFolder(newCanvas)) {
-            closeButton->setEnabled(true); // Re-enable on cancellation
-            return; // User cancelled saving, don't close tab
-        }
+        // REMOVED: InkCanvas-related folder check removed - InkCanvas being deleted
+        // // ✅ 1. PRIORITY: Handle saving first - user can cancel here
+        // if (!ensureTabHasUniqueSaveFolder(newCanvas)) {
+        //     closeButton->setEnabled(true); // Re-enable on cancellation
+        //     return; // User cancelled saving, don't close tab
+        // }
 
         // ✅ 2. ONLY AFTER SAVING: Check if it's the last remaining tab
         if (tabList->count() <= 1) {
@@ -3227,7 +2718,8 @@ void MainWindow::loadFolderDocument()
     connect(newCanvas, &InkCanvas::pdfLinkClicked, this, [this](int targetPage) {
         // Navigate to the target page when a PDF link is clicked
         if (targetPage >= 0 && targetPage < 9999) {
-            switchPageWithDirection(targetPage + 1, (targetPage + 1 > getCurrentPageForCanvas(currentCanvas()) + 1) ? 1 : -1);
+            // REMOVED: InkCanvas page navigation removed - use DocumentViewport instead
+            switchPageWithDirection(targetPage + 1, 1); // Default to forward direction
             pageInput->setValue(targetPage + 1);
         }
     });
@@ -3238,7 +2730,7 @@ void MainWindow::loadFolderDocument()
     //         loadPdfOutline();
     //     }
     // });
-    connect(newCanvas, &InkCanvas::autoScrollRequested, this, &MainWindow::onAutoScrollRequested);
+    // REMOVED MW5.7: autoScroll signal connection removed - auto-scroll feature deprecated
     connect(newCanvas, &InkCanvas::earlySaveRequested, this, &MainWindow::onEarlySaveRequested);
     connect(newCanvas, &InkCanvas::markdownNotesUpdated, this, &MainWindow::onMarkdownNotesUpdated);
     connect(newCanvas, &InkCanvas::highlightDoubleClicked, this, &MainWindow::onHighlightDoubleClicked);
@@ -3270,13 +2762,13 @@ void MainWindow::loadFolderDocument()
     canvasStack->setCurrentWidget(newCanvas);
 
     // REMOVED MW5.2: zoomSlider removed - zoom now controlled by NavigationBar/Toolbar
-    updateDialDisplay();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     // REMOVED E.1: Button state functions no longer needed - Toolbar handles its own state
     // updateStraightLineButtonState();  // Initialize straight line button state for the new tab
     // updateRopeToolButtonState(); // Initialize rope tool button state for the new tab
-    updatePdfTextSelectButtonState(); // Initialize PDF text selection button state for the new tab
-    updateBookmarkButtonState(); // Initialize bookmark button state for the new tab
-    updatePictureButtonState(); // Initialize picture button state for the new tab
+    // REMOVED: updatePdfTextSelectButtonState removed - pdfTextSelectButton deleted
+    // REMOVED: updateBookmarkButtonState removed - toggleBookmarkButton deleted
+    // REMOVED: updatePictureButtonState removed - insertPictureButton deleted
     // MW2.2: Removed dial button state updates
     updateToolButtonStates();   // Initialize tool button states for the new tab
 
@@ -3299,7 +2791,8 @@ void MainWindow::loadFolderDocument()
     newCanvas->setPDFRenderDPI(getPdfDPI());
     
     // Update color button states for the new tab
-    updateColorButtonStates();
+    // REMOVED: Color button updates removed - buttons deleted
+    // updateColorButtonStates();
     ========== END OLD INKCANVAS CODE ==========*/
 
 void MainWindow::removeTabAt(int index) {
@@ -3311,14 +2804,15 @@ void MainWindow::removeTabAt(int index) {
 }
 
 // MW1.4: Kept as stubs - still called from legacy InkCanvas code paths
-bool MainWindow::ensureTabHasUniqueSaveFolder(InkCanvas* canvas) {
-    Q_UNUSED(canvas);
-    return true; // Allow closure
-}
-
-InkCanvas* MainWindow::currentCanvas() {
-    return nullptr; // Use currentViewport() instead
-            }
+// REMOVED: InkCanvas-related functions removed - InkCanvas being deleted
+// bool MainWindow::ensureTabHasUniqueSaveFolder(InkCanvas* canvas) {
+//     Q_UNUSED(canvas);
+//     return true; // Allow closure
+// }
+//
+// InkCanvas* MainWindow::currentCanvas() {
+//     return nullptr; // Use currentViewport() instead
+// }
 
 // Phase 3.1.4: New accessor for DocumentViewport
 DocumentViewport* MainWindow::currentViewport() const {
@@ -3335,29 +2829,31 @@ void MainWindow::updateTabLabel() {
     qDebug() << "updateTabLabel(): Using TabManager (Phase 3.3)";
 }
 
-// MW1.4: Kept as stub - still called from legacy InkCanvas code paths
-int MainWindow::getCurrentPageForCanvas(InkCanvas *canvas) {
-    Q_UNUSED(canvas);
-    return 0; // Use DocumentViewport::currentPageIndex() instead
-}
+// REMOVED: getCurrentPageForCanvas removed - InkCanvas being deleted
+// // MW1.4: Kept as stub - still called from legacy InkCanvas code paths
+// int MainWindow::getCurrentPageForCanvas(InkCanvas *canvas) {
+//     Q_UNUSED(canvas);
+//     return 0; // Use DocumentViewport::currentPageIndex() instead
+// }
 
 // REMOVED MW5.2+: toggleZoomSlider function removed - zoom buttons moved to NavigationBar/Toolbar
 
-void MainWindow::toggleThicknessSlider() {
-    if (thicknessFrame->isVisible()) {
-        thicknessFrame->hide();
-        return;
-    }
-
-    // ✅ Set as a standalone pop-up window so it can receive events
-    thicknessFrame->setWindowFlags(Qt::Popup);
-
-    // ✅ Position it right below the button
-    QPoint buttonPos = thicknessButton->mapToGlobal(QPoint(0, thicknessButton->height()));
-    thicknessFrame->move(buttonPos.x(), buttonPos.y() + 5);
-
-    thicknessFrame->show();
-}
+// REMOVED: toggleThicknessSlider function removed - thicknessFrame and thicknessButton deleted
+// void MainWindow::toggleThicknessSlider() {
+//     if (thicknessFrame->isVisible()) {
+//         thicknessFrame->hide();
+//         return;
+//     }
+//
+//     // ✅ Set as a standalone pop-up window so it can receive events
+//     thicknessFrame->setWindowFlags(Qt::Popup);
+//
+//     // ✅ Position it right below the button
+//     QPoint buttonPos = thicknessButton->mapToGlobal(QPoint(0, thicknessButton->height()));
+//     thicknessFrame->move(buttonPos.x(), buttonPos.y() + 5);
+//
+//     thicknessFrame->show();
+// }
 
 
 void MainWindow::toggleFullscreen() {
@@ -3413,20 +2909,21 @@ void MainWindow::onPageInputChanged(int newPage) {
 // Phase S3: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
 // void MainWindow::positionLeftSidebarTabs() { ... }
 
-void MainWindow::updateDialDisplay() {
-    // MW2.2: Simplified updateDialDisplay - dial system removed
-    if (!dialDisplay) return;
-    
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
-    DocumentViewport* vp = currentViewport();
-    if (!vp) {
-        dialDisplay->setText(tr("\n\nNo Canvas"));
-        return;
-    }
-    
-    // MW2.2: Removed dial mode switching - keeping basic display
-    dialDisplay->setText(QString(tr("\n\nPage\n%1")).arg(vp->currentPageIndex() + 1));
-            }
+// REMOVED MW7.2: updateDialDisplay function removed - dial functionality deleted
+// void MainWindow::updateDialDisplay() {
+//     // MW2.2: Simplified updateDialDisplay - dial system removed
+//     if (!dialDisplay) return;
+//
+//     // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
+//     DocumentViewport* vp = currentViewport();
+//     if (!vp) {
+//         dialDisplay->setText(tr("\n\nNo Canvas"));
+//         return;
+//     }
+//
+//     // MW2.2: Removed dial mode switching - keeping basic display
+//     dialDisplay->setText(QString(tr("\n\nPage\n%1")).arg(vp->currentPageIndex() + 1));
+// }
 
 // MW2.2: handleModeSelection() removed - dial system deleted
 
@@ -3638,21 +3135,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
 
 
 
-void MainWindow::addColorPreset() {
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas()
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
-    
-    QColor currentColor = vp->penColor();
-
-    // ✅ Prevent duplicates
-    if (!colorPresets.contains(currentColor)) {
-        if (colorPresets.size() >= 6) {
-            colorPresets.dequeue();  // ✅ Remove oldest color
-        }
-        colorPresets.enqueue(currentColor);
-    }
-}
+// REMOVED MW5.5: addColorPreset function removed - color presets no longer used
 
 // Static method to update Qt application palette based on Windows dark mode
 void MainWindow::updateApplicationPalette() {
@@ -3788,87 +3271,7 @@ void MainWindow::updateButtonIcon(QPushButton* button, const QString& iconName) 
     }
 }
 
-QString MainWindow::createButtonStyle(bool darkMode) {
-    if (darkMode) {
-        // Dark mode: Keep current white highlights (good contrast)
-        return R"(
-            QPushButton {
-                background: transparent;
-                border: none;
-                padding: 6px;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 50);
-            }
-            QPushButton:pressed {
-                background: rgba(0, 0, 0, 50);
-            }
-            QPushButton[selected="true"] {
-                background: rgba(255, 255, 255, 100);
-                /*border: 1px solid rgba(255, 255, 255, 150);*/
-                padding: 4px;
-                border-radius: 0px;
-            }
-            QPushButton[selected="true"]:hover {
-                background: rgba(255, 255, 255, 120);
-            }
-            QPushButton[selected="true"]:pressed {
-                background: rgba(0, 0, 0, 50);
-            }
-            QPushButton[yAxisOnly="true"] {
-                background: rgba(255, 100, 100, 120);
-                /*border: 1px solid rgba(255, 100, 100, 180);*/
-                padding: 4px;
-                border-radius: 0px;
-            }
-            QPushButton[yAxisOnly="true"]:hover {
-                background: rgba(255, 120, 120, 140);
-            }
-            QPushButton[yAxisOnly="true"]:pressed {
-                background: rgba(200, 50, 50, 100);
-            }
-        )";
-    } else {
-        // Light mode: Use darker colors for better visibility
-        return R"(
-            QPushButton {
-                background: transparent;
-                border: none;
-                padding: 6px;
-            }
-            QPushButton:hover {
-                background: rgba(0, 0, 0, 30);
-            }
-            QPushButton:pressed {
-                background: rgba(0, 0, 0, 60);
-            }
-            QPushButton[selected="true"] {
-                background: rgba(0, 0, 0, 80);
-                /*border: 2px solid rgba(0, 0, 0, 120);*/
-                padding: 4px;
-                border-radius: 0px;
-            }
-            QPushButton[selected="true"]:hover {
-                background: rgba(0, 0, 0, 100);
-            }
-            QPushButton[selected="true"]:pressed {
-                background: rgba(0, 0, 0, 140);
-            }
-            QPushButton[yAxisOnly="true"] {
-                background: rgba(255, 60, 60, 100);
-                /*border: 2px solid rgba(255, 60, 60, 150);*/
-                padding: 4px;
-                border-radius: 0px;
-            }
-            QPushButton[yAxisOnly="true"]:hover {
-                background: rgba(255, 80, 80, 120);
-            }
-            QPushButton[yAxisOnly="true"]:pressed {
-                background: rgba(200, 40, 40, 140);
-            }
-        )";
-    }
-}
+// REMOVED: createButtonStyle function removed - button styling no longer needed in MainWindow
 
 
 
@@ -3938,249 +3341,124 @@ void MainWindow::updateTheme() {
     // MW2.2: Removed dial styling - dial system deleted
     // Phase C.1.5: Removed addTabButton styling - functionality now in NavigationBar
     
-    // Update PDF outline sidebar styling
-    if (outlineSidebar && outlineTree) {
-        bool darkMode = isDarkMode();
-        QString bgColor = darkMode ? "rgba(45, 45, 45, 255)" : "rgba(250, 250, 250, 255)";
-        QString borderColor = darkMode ? "rgba(80, 80, 80, 255)" : "rgba(200, 200, 200, 255)";
-        QString textColor = darkMode ? "#E0E0E0" : "#333";
-        QString hoverColor = darkMode ? "rgba(60, 60, 60, 255)" : "rgba(240, 240, 240, 255)";
-        QString selectedColor = QString("rgba(%1, %2, %3, 100)").arg(accentColor.red()).arg(accentColor.green()).arg(accentColor.blue());
-        
-        outlineSidebar->setStyleSheet(QString(R"(
-            QWidget {
-                background-color: %1;
-                border-right: 1px solid %2;
-            }
-            QLabel {
-                color: %3;
-                background: transparent;
-            }
-        )").arg(bgColor).arg(borderColor).arg(textColor));
-        
-        outlineTree->setStyleSheet(QString(R"(
-            QTreeWidget {
-                background-color: %1;
-                border: none;
-                color: %2;
-                outline: none;
-            }
-            QTreeWidget::item {
-                padding: 4px;
-                border: none;
-            }
-            QTreeWidget::item:hover {
-                background-color: %3;
-            }
-            QTreeWidget::item:selected {
-                background-color: %4;
-                color: %2;
-            }
-            QTreeWidget::branch {
-                background: transparent;
-            }
-            QTreeWidget::branch:has-children:!has-siblings:closed,
-            QTreeWidget::branch:closed:has-children:has-siblings {
-                border-image: none;
-                image: url(:/resources/icons/down_arrow.png);
-            }
-            QTreeWidget::branch:open:has-children:!has-siblings,
-            QTreeWidget::branch:open:has-children:has-siblings {
-                border-image: none;
-                image: url(:/resources/icons/up_arrow.png);
-            }
-            QScrollBar:vertical {
-                background: rgba(200, 200, 200, 80);
-                border: none;
-                margin: 0px;
-                width: 16px !important;
-                max-width: 16px !important;
-            }
-            QScrollBar:vertical:hover {
-                background: rgba(200, 200, 200, 120);
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(100, 100, 100, 150);
-                border-radius: 2px;
-                min-height: 120px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: rgba(80, 80, 80, 210);
-            }
-            QScrollBar::add-line:vertical, 
-            QScrollBar::sub-line:vertical {
-                width: 0px;
-                height: 0px;
-                background: none;
-                border: none;
-            }
-            QScrollBar::add-page:vertical, 
-            QScrollBar::sub-page:vertical {
-                background: transparent;
-            }
-        )").arg(bgColor).arg(textColor).arg(hoverColor).arg(selectedColor));
-        
-        // Apply same styling to bookmarks tree
-        bookmarksTree->setStyleSheet(QString(R"(
-            QTreeWidget {
-                background-color: %1;
-                border: none;
-                color: %2;
-                outline: none;
-            }
-            QTreeWidget::item {
-                padding: 2px;
-                border: none;
-                min-height: 26px;
-            }
-            QTreeWidget::item:hover {
-                background-color: %3;
-            }
-            QTreeWidget::item:selected {
-                background-color: %4;
-                color: %2;
-            }
-            QScrollBar:vertical {
-                background: rgba(200, 200, 200, 80);
-                border: none;
-                margin: 0px;
-                width: 16px !important;
-                max-width: 16px !important;
-            }
-            QScrollBar:vertical:hover {
-                background: rgba(200, 200, 200, 120);
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(100, 100, 100, 150);
-                border-radius: 2px;
-                min-height: 120px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: rgba(80, 80, 80, 210);
-            }
-            QScrollBar::add-line:vertical, 
-            QScrollBar::sub-line:vertical {
-                width: 0px;
-                height: 0px;
-                background: none;
-                border: none;
-            }
-            QScrollBar::add-page:vertical, 
-            QScrollBar::sub-page:vertical {
-                background: transparent;
-            }
-        )").arg(bgColor).arg(textColor).arg(hoverColor).arg(selectedColor));
+    // REMOVED MW7.5: PDF outline sidebar styling removed - outline sidebar deleted
+    // // if (outlineSidebar && outlineTree) {
+    //     bool darkMode = isDarkMode();
+    //     QString bgColor = darkMode ? "rgba(45, 45, 45, 255)" : "rgba(250, 250, 250, 255)";
+    //     QString borderColor = darkMode ? "rgba(80, 80, 80, 255)" : "rgba(200, 200, 200, 255)";
+    //     QString textColor = darkMode ? "#E0E0E0" : "#333";
+    //     QString hoverColor = darkMode ? "rgba(60, 60, 60, 255)" : "rgba(240, 240, 240, 255)";
+    //     QString selectedColor = QString("rgba(%1, %2, %3, 100)").arg(accentColor.red()).arg(accentColor.green()).arg(accentColor.blue());
+    //
+    //     outlineSidebar->setStyleSheet(QString(R"(
+    //         QWidget {
+    //             background-color: %1;
+    //             border-right: 1px solid %2;
+    //         }
+    //         QLabel {
+    //             color: %3;
+    //             background: transparent;
+    //         }
+    //     )").arg(bgColor).arg(borderColor).arg(textColor));
+    //
+    //     outlineTree->setStyleSheet(QString(R"(
+    //         QTreeWidget {
+    //             background-color: %1;
+    //             border: none;
+    //             color: %2;
+    //             outline: none;
+    //         }
+    //         QTreeWidget::item {
+    //             padding: 4px;
+    //             border: none;
+    //         }
+    //         QTreeWidget::item:hover {
+    //             background-color: %3;
+    //         }
+    //         QTreeWidget::item:selected {
+    //             background-color: %4;
+    //             color: %2;
+    //         }
+    //         QTreeWidget::branch {
+    //             background: transparent;
+    //         }
+    //         QTreeWidget::branch:has-children:!has-siblings:closed,
+    //         QTreeWidget::branch:closed:has-children:has-siblings {
+    //             border-image: none;
+    //             image: url(:/resources/icons/down_arrow.png);
+    //         }
+    //         QTreeWidget::branch:open:has-children:!has-siblings,
+    //         QTreeWidget::branch:open:has-children:has-siblings {
+    //             border-image: none;
+    //             image: url(:/resources/icons/up_arrow.png);
+    //         }
+    //         QScrollBar:vertical {
+    //             background: rgba(200, 200, 200, 80);
+    //             border: none;
+    //             margin: 0px;
+    //             width: 16px !important;
+    //             max-width: 16px !important;
+    //         }
+    //         QScrollBar:vertical:hover {
+    //             background: rgba(200, 200, 200, 120);
+    //         }
+    //         QScrollBar::handle:vertical {
+    //             background: rgba(100, 100, 100, 150);
+    //             border-radius: 2px;
+    //             min-height: 120px;
+    //         }
+    //         QScrollBar::handle:vertical:hover {
+    //             background: rgba(80, 80, 80, 210);
+    //         }
+    //         QScrollBar::add-line:vertical,
+    //         QScrollBar::sub-line:vertical {
+    //             width: 0px;
+    //             height: 0px;
+    //             background: none;
+    //             border: none;
+    //         }
+    //         QScrollBar::add-page:vertical,
+    //         QScrollBar::sub-page:vertical {
+    //             background: transparent;
+    //         }
+    //     )").arg(bgColor).arg(textColor).arg(hoverColor).arg(selectedColor));
+    //  }
+        // REMOVED MW7.4: Bookmarks tree styling removed - bookmark implementation deleted
     }
     
     // Phase C.1.5: Removed old m_tabWidget styling - now using m_tabBar with StyleLoader
 
     
-    // Force icon reload for all buttons that use themed icons
-    // Use updateButtonIcon for buttons with selectable states, direct setIcon for others
-    if (loadPdfButton) loadPdfButton->setIcon(loadThemedIcon("pdf"));
-    if (clearPdfButton) clearPdfButton->setIcon(loadThemedIcon("pdfdelete"));
-    updateButtonIcon(pdfTextSelectButton, "ibeam");
-
-    updateButtonIcon(benchmarkButton, "benchmark");
-    // REMOVED E.1: toggleTabBarButton moved to NavigationBar
-    // REMOVED S1: Floating sidebar buttons moved to LeftSidebarContainer
-    updateButtonIcon(toggleBookmarkButton, "star");
-    if (selectFolderButton) selectFolderButton->setIcon(loadThemedIcon("folder"));
-    // REMOVED E.1: saveButton moved to NavigationBar
-    if (exportPdfButton) exportPdfButton->setIcon(loadThemedIcon("export"));
-    // REMOVED E.1: fullscreenButton moved to NavigationBar
-    // REMOVED E.1: straightLineToggleButton and ropeToolButton moved to Toolbar
-    if (deletePageButton) deletePageButton->setIcon(loadThemedIcon("trash"));
-    // REMOVED MW5.2+: zoomButton moved to NavigationBar/Toolbar
-    // MW2.2: Removed dialToggleButton icon update
-    // MW2.2: Removed fastForwardButton icon update
-    if (jumpToPageButton) jumpToPageButton->setIcon(loadThemedIcon("bookpage"));
-    if (thicknessButton) thicknessButton->setIcon(loadThemedIcon("thickness"));
-    // MW2.2: Removed dial button icon updates
-    if (addPresetButton) addPresetButton->setIcon(loadThemedIcon("savepreset"));
-    if (openControlPanelButton) openControlPanelButton->setIcon(loadThemedIcon("settings"));
+    // REMOVED: Button icon updates removed - buttons deleted
+    // // Force icon reload for all buttons that use themed icons
+    // // Use updateButtonIcon for buttons with selectable states, direct setIcon for others
+    // if (loadPdfButton) loadPdfButton->setIcon(loadThemedIcon("pdf"));
+    // if (clearPdfButton) clearPdfButton->setIcon(loadThemedIcon("pdfdelete"));
+    // updateButtonIcon(pdfTextSelectButton, "ibeam");
+    //
+    // updateButtonIcon(benchmarkButton, "benchmark");
+    // // REMOVED E.1: toggleTabBarButton moved to NavigationBar
+    // // REMOVED S1: Floating sidebar buttons moved to LeftSidebarContainer
+    // updateButtonIcon(toggleBookmarkButton, "star");
+    // // REMOVED MW5.6+: selectFolderButton removed - .spn format deprecated
+    // // REMOVED E.1: saveButton moved to NavigationBar
+    // if (exportPdfButton) exportPdfButton->setIcon(loadThemedIcon("export"));
+    // // REMOVED E.1: fullscreenButton moved to NavigationBar
+    // // REMOVED E.1: straightLineToggleButton and ropeToolButton moved to Toolbar
+    // if (deletePageButton) deletePageButton->setIcon(loadThemedIcon("trash"));
+    // // REMOVED MW5.2+: zoomButton moved to NavigationBar/Toolbar
+    // // MW2.2: Removed dialToggleButton icon update
+    // // MW2.2: Removed fastForwardButton icon update
+    // if (jumpToPageButton) jumpToPageButton->setIcon(loadThemedIcon("bookpage"));
+    // if (thicknessButton) thicknessButton->setIcon(loadThemedIcon("thickness"));
+    // // REMOVED MW5.5: addPresetButton removed - color presets no longer used
+    // if (openControlPanelButton) openControlPanelButton->setIcon(loadThemedIcon("settings"));
     // Phase C.1.5: Removed openRecentNotebooksButton - functionality now in NavigationBar
     // REMOVED E.1: Tool buttons moved to Toolbar
     // updateButtonIcon(penToolButton, "pen");
     // updateButtonIcon(markerToolButton, "marker");
-    // updateButtonIcon(eraserToolButton, "eraser");
-    updateButtonIcon(insertPictureButton, "background");
-    // REMOVED E.1: touchGesturesButton moved to Toolbar
-    
-    // Update button styles with new theme (darkMode already declared at top of function)
-    QString newButtonStyle = createButtonStyle(darkMode);
-    
-    // Update all buttons that use the buttonStyle
-    if (loadPdfButton) loadPdfButton->setStyleSheet(newButtonStyle);
-    if (clearPdfButton) clearPdfButton->setStyleSheet(newButtonStyle);
-    if (pdfTextSelectButton) pdfTextSelectButton->setStyleSheet(newButtonStyle);
+    // REMOVED: All button styling removed from MainWindow - buttons moved to components
 
-    if (benchmarkButton) benchmarkButton->setStyleSheet(newButtonStyle);
-    // REMOVED E.1: toggleTabBarButton, saveButton, fullscreenButton moved to new components
-    // if (toggleTabBarButton) toggleTabBarButton->setStyleSheet(newButtonStyle);
-    // toggleOutlineButton and toggleBookmarksButton use custom floating tab styles, not buttonStyle
-    if (toggleBookmarkButton) toggleBookmarkButton->setStyleSheet(newButtonStyle);
-    if (selectFolderButton) selectFolderButton->setStyleSheet(newButtonStyle);
-    // if (saveButton) saveButton->setStyleSheet(newButtonStyle);
-    // if (fullscreenButton) fullscreenButton->setStyleSheet(newButtonStyle);
-    if (redButton) redButton->setStyleSheet(newButtonStyle);
-    if (blueButton) blueButton->setStyleSheet(newButtonStyle);
-    if (yellowButton) yellowButton->setStyleSheet(newButtonStyle);
-    if (greenButton) greenButton->setStyleSheet(newButtonStyle);
-    if (blackButton) blackButton->setStyleSheet(newButtonStyle);
-    if (whiteButton) whiteButton->setStyleSheet(newButtonStyle);
-    if (thicknessButton) thicknessButton->setStyleSheet(newButtonStyle);
-    // REMOVED E.1: Tool buttons moved to Toolbar
-    // if (penToolButton) penToolButton->setStyleSheet(newButtonStyle);
-    // if (markerToolButton) markerToolButton->setStyleSheet(newButtonStyle);
-    // if (eraserToolButton) eraserToolButton->setStyleSheet(newButtonStyle);
-    // if (straightLineToggleButton) straightLineToggleButton->setStyleSheet(newButtonStyle);
-    // if (ropeToolButton) ropeToolButton->setStyleSheet(newButtonStyle);
-    if (insertPictureButton) insertPictureButton->setStyleSheet(newButtonStyle);
-    if (deletePageButton) deletePageButton->setStyleSheet(newButtonStyle);
-    if (overflowMenuButton) overflowMenuButton->setStyleSheet(newButtonStyle);
-    // REMOVED MW5.2+: zoom buttons moved to NavigationBar/Toolbar
-    // MW2.2: Removed dialToggleButton, fastForwardButton style updates
-    if (jumpToPageButton) jumpToPageButton->setStyleSheet(newButtonStyle);
-    if (addPresetButton) addPresetButton->setStyleSheet(newButtonStyle);
-    if (openControlPanelButton) openControlPanelButton->setStyleSheet(newButtonStyle);
-    // Phase C.1.5: Removed openRecentNotebooksButton style update
-    // REMOVED MW5.2+: zoom buttons moved to NavigationBar/Toolbar
-    // REMOVED MW1.3: prevPageButton, nextPageButton style updates
-    
-    // Update color buttons with palette-based icons
-    // Removed colorPreview widget - no longer needed
-
-    if (redButton) {
-        QString redIconPath = useBrighterPalette ? ":/resources/icons/pen_light_red.png" : ":/resources/icons/pen_dark_red.png";
-        redButton->setIcon(QIcon(redIconPath));
-    }
-    if (blueButton) {
-        QString blueIconPath = useBrighterPalette ? ":/resources/icons/pen_light_blue.png" : ":/resources/icons/pen_dark_blue.png";
-        blueButton->setIcon(QIcon(blueIconPath));
-    }
-    if (yellowButton) {
-        QString yellowIconPath = useBrighterPalette ? ":/resources/icons/pen_light_yellow.png" : ":/resources/icons/pen_dark_yellow.png";
-        yellowButton->setIcon(QIcon(yellowIconPath));
-    }
-    if (greenButton) {
-        QString greenIconPath = useBrighterPalette ? ":/resources/icons/pen_light_green.png" : ":/resources/icons/pen_dark_green.png";
-        greenButton->setIcon(QIcon(greenIconPath));
-    }
-    if (blackButton) {
-        QString blackIconPath = darkMode ? ":/resources/icons/pen_light_black.png" : ":/resources/icons/pen_dark_black.png";
-        blackButton->setIcon(QIcon(blackIconPath));
-    }
-    if (whiteButton) {
-        QString whiteIconPath = darkMode ? ":/resources/icons/pen_light_white.png" : ":/resources/icons/pen_dark_white.png";
-        whiteButton->setIcon(QIcon(whiteIconPath));
-    }
-    
-    // Phase C.1.5: Tab styling now uses m_tabBar with StyleLoader (QSS files)
-    
-    // Update dial display
-    updateDialDisplay();
-}
 
 void MainWindow::saveThemeSettings() {
     QSettings settings("SpeedyNote", "App");
@@ -4227,14 +3505,16 @@ bool MainWindow::isLowResPreviewEnabled() const {
 
 // ui optimizations
 
-bool MainWindow::areBenchmarkControlsVisible() const {
-    return benchmarkButton->isVisible() && benchmarkLabel->isVisible();
-}
+// REMOVED: areBenchmarkControlsVisible function removed - benchmarkButton deleted
+// bool MainWindow::areBenchmarkControlsVisible() const {
+//     return benchmarkButton->isVisible() && benchmarkLabel->isVisible();
+// }
 
-void MainWindow::setBenchmarkControlsVisible(bool visible) {
-    benchmarkButton->setVisible(visible);
-    benchmarkLabel->setVisible(visible);
-}
+// REMOVED: setBenchmarkControlsVisible function removed - benchmark controls deleted
+// void MainWindow::setBenchmarkControlsVisible(bool visible) {
+//     benchmarkButton->setVisible(visible);
+//     benchmarkLabel->setVisible(visible);
+// }
 
 // REMOVED MW5.2+: areZoomButtonsVisible function removed - zoom buttons moved to NavigationBar/Toolbar
 
@@ -4566,30 +3846,26 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
         case ControllerAction::ToggleFullscreen:
             toggleFullscreen();
             break;
-        case ControllerAction::ToggleDial:
-            toggleDial();
-            break;
+        // REMOVED MW7.2: ToggleDial case removed - dial functionality deleted
         case ControllerAction::Zoom50:
             if (DocumentViewport* vp = currentViewport()) {
                 vp->setZoomLevel(0.5);
-                updateDialDisplay();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
             }
             break;
         case ControllerAction::ZoomOut:
             if (DocumentViewport* vp = currentViewport()) {
                 vp->setZoomLevel(1.0);
-                updateDialDisplay();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
             }
             break;
         case ControllerAction::Zoom200:
             if (DocumentViewport* vp = currentViewport()) {
                 vp->setZoomLevel(2.0);
-                updateDialDisplay();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
             }
             break;
-        case ControllerAction::AddPreset:
-            addPresetButton->click();
-            break;
+        // REMOVED MW5.5: AddPreset action removed - color presets no longer used
         case ControllerAction::DeletePage:
             deletePageButton->click();  // assuming you have this
             break;
@@ -4597,25 +3873,50 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
             // MW2.2: Removed fastForwardButton click - dial system deleted
             break;
         case ControllerAction::OpenControlPanel:
-            openControlPanelButton->click();
+            // REMOVED: openControlPanelButton removed - show message instead
+QMessageBox::information(this, tr("Control Panel"), tr("Control Panel is being redesigned. Coming soon!"));
             break;
         case ControllerAction::RedColor:
-            redButton->click();
+            // REMOVED: redButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("red"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::BlueColor:
-            blueButton->click();
+            // REMOVED: blueButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("blue"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::YellowColor:
-            yellowButton->click();
+            // REMOVED: yellowButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("yellow"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::GreenColor:
-            greenButton->click();
+            // REMOVED: greenButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("green"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::BlackColor:
-            blackButton->click();
+            // REMOVED: blackButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(QColor("#000000"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::WhiteColor:
-            whiteButton->click();
+            // REMOVED: whiteButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(QColor("#FFFFFF"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::CustomColor:
             customColorButton->click();
@@ -4652,17 +3953,10 @@ void MainWindow::handleControllerButton(const QString &buttonName) {  // This is
             setEraserTool();
             break;
         case ControllerAction::TogglePdfTextSelection:
-            pdfTextSelectButton->click();
+            // REMOVED: pdfTextSelectButton removed - PDF text selection stubbed
             break;
-        case ControllerAction::ToggleOutline:
-            toggleOutlineSidebar();
-            break;
-        case ControllerAction::ToggleBookmarks:
-            toggleBookmarksSidebar();
-            break;
-        case ControllerAction::AddBookmark:
-            toggleBookmarkButton->click();
-            break;
+        // REMOVED MW7.5: ToggleOutline case removed - outline sidebar deleted
+        // REMOVED MW7.4: ToggleBookmarks and AddBookmark cases removed - bookmark implementation deleted
         case ControllerAction::ToggleTouchGestures:
             cycleTouchGestureMode();
             break;
@@ -4748,71 +4042,73 @@ void MainWindow::loadUserSettings() {
 // REMOVED MW5.2+: cycleZoomLevels function removed - zoom controls moved to NavigationBar/Toolbar
 
 
-void MainWindow::updateColorButtonStates() {
-    // Phase 3.1.4: Use currentViewport()
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
-    
-    // Get current pen color
-    QColor currentColor = vp->penColor();
-    
-    // Determine if we're in dark mode to match the correct colors
-    bool darkMode = isDarkMode();
-    
-    // Reset all color buttons to original style
-    redButton->setProperty("selected", false);
-    blueButton->setProperty("selected", false);
-    yellowButton->setProperty("selected", false);
-    greenButton->setProperty("selected", false);
-    blackButton->setProperty("selected", false);
-    whiteButton->setProperty("selected", false);
-    
-    // Update all color button icons to unselected state
-    QString redIconName = darkMode ? "pen_light_red" : "pen_dark_red";
-    QString blueIconName = darkMode ? "pen_light_blue" : "pen_dark_blue";
-    QString yellowIconName = darkMode ? "pen_light_yellow" : "pen_dark_yellow";
-    QString greenIconName = darkMode ? "pen_light_green" : "pen_dark_green";
-    QString blackIconName = darkMode ? "pen_light_black" : "pen_dark_black";
-    QString whiteIconName = darkMode ? "pen_light_white" : "pen_dark_white";
-    
-    // Set the selected property for the matching color button based on current palette
-    QColor redColor = getPaletteColor("red");
-    QColor blueColor = getPaletteColor("blue");
-    QColor yellowColor = getPaletteColor("yellow");
-    QColor greenColor = getPaletteColor("green");
-    
-    if (currentColor == redColor) {
-        redButton->setProperty("selected", true);
-        // For color buttons, we don't reverse the icon - the colored pen icon should stay
-    } else if (currentColor == blueColor) {
-        blueButton->setProperty("selected", true);
-    } else if (currentColor == yellowColor) {
-        yellowButton->setProperty("selected", true);
-    } else if (currentColor == greenColor) {
-        greenButton->setProperty("selected", true);
-    } else if (currentColor == QColor("#000000")) {
-        blackButton->setProperty("selected", true);
-    } else if (currentColor == QColor("#FFFFFF")) {
-        whiteButton->setProperty("selected", true);
-    }
-    
-    // Force style update
-    redButton->style()->unpolish(redButton);
-    redButton->style()->polish(redButton);
-    blueButton->style()->unpolish(blueButton);
-    blueButton->style()->polish(blueButton);
-    yellowButton->style()->unpolish(yellowButton);
-    yellowButton->style()->polish(yellowButton);
-    greenButton->style()->unpolish(greenButton);
-    greenButton->style()->polish(greenButton);
-    blackButton->style()->unpolish(blackButton);
-    blackButton->style()->polish(blackButton);
-    whiteButton->style()->unpolish(whiteButton);
-    whiteButton->style()->polish(whiteButton);
-}
+// REMOVED: updateColorButtonStates function removed - color buttons deleted
+// void MainWindow::updateColorButtonStates() {
+//     // Phase 3.1.4: Use currentViewport()
+//     DocumentViewport* vp = currentViewport();
+//     if (!vp) return;
+//
+//     // Get current pen color
+//     QColor currentColor = vp->penColor();
+//
+//     // Determine if we're in dark mode to match the correct colors
+//     bool darkMode = isDarkMode();
+//
+//     // Reset all color buttons to original style
+//     redButton->setProperty("selected", false);
+//     blueButton->setProperty("selected", false);
+//     yellowButton->setProperty("selected", false);
+//     greenButton->setProperty("selected", false);
+//     blackButton->setProperty("selected", false);
+//     whiteButton->setProperty("selected", false);
+//
+//     // Update all color button icons to unselected state
+//     QString redIconName = darkMode ? "pen_light_red" : "pen_dark_red";
+//     QString blueIconName = darkMode ? "pen_light_blue" : "pen_dark_blue";
+//     QString yellowIconName = darkMode ? "pen_light_yellow" : "pen_dark_yellow";
+//     QString greenIconName = darkMode ? "pen_light_green" : "pen_dark_green";
+//     QString blackIconName = darkMode ? "pen_light_black" : "pen_dark_black";
+//     QString whiteIconName = darkMode ? "pen_light_white" : "pen_dark_white";
+//
+//     // Set the selected property for the matching color button based on current palette
+//     QColor redColor = getPaletteColor("red");
+//     QColor blueColor = getPaletteColor("blue");
+//     QColor yellowColor = getPaletteColor("yellow");
+//     QColor greenColor = getPaletteColor("green");
+//
+//     if (currentColor == redColor) {
+//         redButton->setProperty("selected", true);
+//         // For color buttons, we don't reverse the icon - the colored pen icon should stay
+//     } else if (currentColor == blueColor) {
+//         blueButton->setProperty("selected", true);
+//     } else if (currentColor == yellowColor) {
+//         yellowButton->setProperty("selected", true);
+//     } else if (currentColor == greenColor) {
+//         greenButton->setProperty("selected", true);
+//     } else if (currentColor == QColor("#000000")) {
+//         blackButton->setProperty("selected", true);
+//     } else if (currentColor == QColor("#FFFFFF")) {
+//         whiteButton->setProperty("selected", true);
+//     }
+//
+//     // Force style update
+//     redButton->style()->unpolish(redButton);
+//     redButton->style()->polish(redButton);
+//     blueButton->style()->unpolish(blueButton);
+//     blueButton->style()->polish(blueButton);
+//     yellowButton->style()->unpolish(yellowButton);
+//     yellowButton->style()->polish(yellowButton);
+//     greenButton->style()->unpolish(greenButton);
+//     greenButton->style()->polish(greenButton);
+//     blackButton->style()->unpolish(blackButton);
+//     blackButton->style()->polish(blackButton);
+//     whiteButton->style()->unpolish(whiteButton);
+//     whiteButton->style()->polish(whiteButton);
+// }
 
 void MainWindow::selectColorButton(QPushButton* selectedButton) {
-    updateColorButtonStates();
+    // REMOVED: Color button updates removed - buttons deleted
+    // updateColorButtonStates();
 }
 
 QColor MainWindow::getContrastingTextColor(const QColor &backgroundColor) {
@@ -4851,31 +4147,32 @@ void MainWindow::updateRopeToolButtonState() {
     // Function kept as stub for compatibility
 }
 
-void MainWindow::updatePictureButtonState() {
-    // Phase O2.9: Track ObjectSelect tool state
-    bool isActive = false;
+// REMOVED: updatePictureButtonState function removed - insertPictureButton deleted
+// void MainWindow::updatePictureButtonState() {
+//     // Phase O2.9: Track ObjectSelect tool state
+//     bool isActive = false;
+//
+//     if (DocumentViewport* vp = currentViewport()) {
+//         isActive = (vp->currentTool() == ToolType::ObjectSelect);
+//     }
+//
+//     // Set visual indicator that the button is active/inactive
+//     if (insertPictureButton) {
+//         insertPictureButton->setProperty("selected", isActive);
+//         updateButtonIcon(insertPictureButton, "background");
+//
+//         // Force style update
+//         insertPictureButton->style()->unpolish(insertPictureButton);
+//         insertPictureButton->style()->polish(insertPictureButton);
+//     }
+// }
 
-    if (DocumentViewport* vp = currentViewport()) {
-        isActive = (vp->currentTool() == ToolType::ObjectSelect);
-    }
-
-    // Set visual indicator that the button is active/inactive
-    if (insertPictureButton) {
-        insertPictureButton->setProperty("selected", isActive);
-        updateButtonIcon(insertPictureButton, "background");
-
-        // Force style update
-        insertPictureButton->style()->unpolish(insertPictureButton);
-        insertPictureButton->style()->polish(insertPictureButton);
-    }
-}
-
-// MW2.2: Dial system stubs - kept for moc compatibility
-void MainWindow::updateDialButtonState() { }
-void MainWindow::updateFastForwardButtonState() { }
-void MainWindow::toggleDial() { }
-void MainWindow::positionDialContainer() { }
-void MainWindow::initializeDialSound() { }
+// REMOVED MW7.2: Dial system functions removed - dial functionality deleted
+// void MainWindow::updateDialButtonState() { }
+// void MainWindow::updateFastForwardButtonState() { }
+// void MainWindow::toggleDial() { }
+// void MainWindow::positionDialContainer() { }
+// void MainWindow::initializeDialSound() { }
 
 void MainWindow::wheelEvent(QWheelEvent *event) {
     // MW2.2: Forward to base class - dial wheel handling removed
@@ -4964,30 +4261,26 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
         case ControllerAction::ToggleFullscreen:
             toggleFullscreen();
             break;
-        case ControllerAction::ToggleDial:
-            toggleDial();
-            break;
+        // REMOVED MW7.2: ToggleDial case removed - dial functionality deleted
         case ControllerAction::Zoom50:
             if (DocumentViewport* vp = currentViewport()) {
                 vp->setZoomLevel(0.5);
-                updateDialDisplay();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
             }
             break;
         case ControllerAction::ZoomOut:
             if (DocumentViewport* vp = currentViewport()) {
                 vp->setZoomLevel(1.0);
-                updateDialDisplay();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
             }
             break;
         case ControllerAction::Zoom200:
             if (DocumentViewport* vp = currentViewport()) {
                 vp->setZoomLevel(2.0);
-                updateDialDisplay();
+                // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
             }
             break;
-        case ControllerAction::AddPreset:
-            addPresetButton->click();
-            break;
+        // REMOVED MW5.5: AddPreset action removed - color presets no longer used
         case ControllerAction::DeletePage:
             deletePageButton->click();
             break;
@@ -4995,25 +4288,50 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
             // MW2.2: Removed fastForwardButton click - dial system deleted
             break;
         case ControllerAction::OpenControlPanel:
-            openControlPanelButton->click();
+            // REMOVED: openControlPanelButton removed - show message instead
+QMessageBox::information(this, tr("Control Panel"), tr("Control Panel is being redesigned. Coming soon!"));
             break;
         case ControllerAction::RedColor:
-            redButton->click();
+            // REMOVED: redButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("red"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::BlueColor:
-            blueButton->click();
+            // REMOVED: blueButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("blue"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::YellowColor:
-            yellowButton->click();
+            // REMOVED: yellowButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("yellow"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::GreenColor:
-            greenButton->click();
+            // REMOVED: greenButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(getPaletteColor("green"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::BlackColor:
-            blackButton->click();
+            // REMOVED: blackButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(QColor("#000000"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::WhiteColor:
-            whiteButton->click();
+            // REMOVED: whiteButton removed - set color directly
+if (DocumentViewport* vp = currentViewport()) {
+    vp->setPenColor(QColor("#FFFFFF"));
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+}
             break;
         case ControllerAction::CustomColor:
             customColorButton->click();
@@ -5050,17 +4368,10 @@ void MainWindow::handleKeyboardShortcut(const QString &keySequence) {
             setEraserTool();
             break;
         case ControllerAction::TogglePdfTextSelection:
-            pdfTextSelectButton->click();
+            // REMOVED: pdfTextSelectButton removed - PDF text selection stubbed
             break;
-        case ControllerAction::ToggleOutline:
-            toggleOutlineSidebar();
-            break;
-        case ControllerAction::ToggleBookmarks:
-            toggleBookmarksSidebar();
-            break;
-        case ControllerAction::AddBookmark:
-            toggleBookmarkButton->click();
-            break;
+        // REMOVED MW7.5: ToggleOutline case removed - outline sidebar deleted
+        // REMOVED MW7.4: ToggleBookmarks and AddBookmark cases removed - bookmark implementation deleted
         case ControllerAction::ToggleTouchGestures:
             cycleTouchGestureMode();
             break;
@@ -5258,109 +4569,13 @@ void MainWindow::saveDefaultBackgroundSettings(Page::BackgroundType style, QColo
 }
 
 // PDF Outline functionality
-void MainWindow::toggleOutlineSidebar() {
-    outlineSidebarVisible = !outlineSidebarVisible;
-    
-    // Hide bookmarks sidebar if it's visible when opening outline
-    if (outlineSidebarVisible && bookmarksSidebar && bookmarksSidebar->isVisible()) {
-        bookmarksSidebar->setVisible(false);
-        bookmarksSidebarVisible = false;
-        // REMOVED S1: Bookmarks button moved to LeftSidebarContainer
-    }
-    
-    outlineSidebar->setVisible(outlineSidebarVisible);
-    
-    // Update sidebar container visibility (hide if both sidebars are hidden)
-    if (m_leftSidebar) {
-        bool anySidebarVisible = outlineSidebarVisible || bookmarksSidebarVisible;
-        m_leftSidebar->setVisible(anySidebarVisible);
-    }
-    
-    // REMOVED S1: Outline button moved to LeftSidebarContainer
-    
-    // REMOVED MW5.3: PDF outline loading removed - now handled by Document/DocumentViewport
-    // Load PDF outline when showing sidebar for the first time - functionality removed
-    
-    // Force layout update and reposition floating tabs after sidebar visibility change
-    if (centralWidget() && centralWidget()->layout()) {
-        centralWidget()->layout()->invalidate();
-        centralWidget()->layout()->activate();
-    }
-    QTimer::singleShot(0, this, [this]() {
-        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
-        // MW2.2: Removed dial container positioning
-    });
-}
+// REMOVED MW7.5: toggleOutlineSidebar function removed - outline sidebar deleted
 
-void MainWindow::onOutlineItemClicked(QTreeWidgetItem *item, int column) {
-    Q_UNUSED(column);
-    
-    if (!item) return;
-    
-    // Get the page number stored in the item data
-    QVariant pageData = item->data(0, Qt::UserRole);
-    if (pageData.isValid()) {
-        int pageNumber = pageData.toInt();
-        if (pageNumber >= 0) {
-            // Switch to the selected page (pageNumber is already 1-based from PDF outline)
-            switchPage(pageNumber);
-            pageInput->setValue(pageNumber);
-        }
-    }
-}
+// REMOVED MW7.5: onOutlineItemClicked function removed - outline sidebar deleted
 
 // REMOVED MW5.3: loadPdfOutline and addOutlineItem functions removed - PDF outline now handled by Document/DocumentViewport
 
-void MainWindow::updateOutlineSelection(int pageNumber) {
-    // ✅ EFFICIENCY: Only update if outline sidebar is visible
-    if (!outlineSidebarVisible || !outlineTree) return;
-    
-    // ✅ MEMORY SAFETY: Use QTreeWidgetItemIterator for safe tree traversal
-    QTreeWidgetItem* bestMatch = nullptr;
-    int bestMatchPage = -1;
-    
-    // Iterate through all items in the tree to find the best match
-    QTreeWidgetItemIterator it(outlineTree);
-    while (*it) {
-        QTreeWidgetItem* item = *it;
-        QVariant pageData = item->data(0, Qt::UserRole);
-        
-        if (pageData.isValid()) {
-            int itemPage = pageData.toInt();
-            
-            // Find the item with the highest page number that's <= current page
-            if (itemPage <= pageNumber && itemPage > bestMatchPage) {
-                bestMatch = item;
-                bestMatchPage = itemPage;
-            }
-        }
-        
-        ++it;
-    }
-    
-    // ✅ Update selection if we found a match
-    if (bestMatch) {
-        // Block signals to prevent triggering navigation when programmatically selecting
-        outlineTree->blockSignals(true);
-        
-        // Clear previous selection and select the new item
-        outlineTree->clearSelection();
-        bestMatch->setSelected(true);
-        
-        // Ensure the item is visible by scrolling to it
-        outlineTree->scrollToItem(bestMatch, QAbstractItemView::EnsureVisible);
-        
-        // ✅ Expand parent items to make the selected item visible
-        QTreeWidgetItem* parent = bestMatch->parent();
-        while (parent) {
-            parent->setExpanded(true);
-            parent = parent->parent();
-        }
-        
-        // Re-enable signals
-        outlineTree->blockSignals(false);
-    }
-}
+// REMOVED MW7.5: updateOutlineSelection function removed - outline sidebar deleted
 
 // REMOVED MW5.3: getPdfDocument function removed - PDF document access now handled by Document/DocumentViewport
 
@@ -5387,15 +4602,16 @@ void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QCol
 
 // REMOVED MW1.4: applyDefaultBackgroundToCanvas(InkCanvas*) - use Page background settings
 
-void MainWindow::updatePdfTextSelectButtonState() {
-    // Phase 3.1.5: Stubbed - PDF text selection not yet implemented in DocumentViewport
-    if (pdfTextSelectButton) {
-        pdfTextSelectButton->setProperty("selected", false);
-        updateButtonIcon(pdfTextSelectButton, "ibeam");
-        pdfTextSelectButton->style()->unpolish(pdfTextSelectButton);
-        pdfTextSelectButton->style()->polish(pdfTextSelectButton);
-    }
-}
+// REMOVED: updatePdfTextSelectButtonState function removed - pdfTextSelectButton deleted
+// void MainWindow::updatePdfTextSelectButtonState() {
+//     // Phase 3.1.5: Stubbed - PDF text selection not yet implemented in DocumentViewport
+//     if (pdfTextSelectButton) {
+//         pdfTextSelectButton->setProperty("selected", false);
+//         updateButtonIcon(pdfTextSelectButton, "ibeam");
+//         pdfTextSelectButton->style()->unpolish(pdfTextSelectButton);
+//         pdfTextSelectButton->style()->polish(pdfTextSelectButton);
+//     }
+// }
 
 QString MainWindow::elideTabText(const QString &text, int maxWidth) {
     // Create a font metrics object using the default font
@@ -5405,64 +4621,9 @@ QString MainWindow::elideTabText(const QString &text, int maxWidth) {
     return fontMetrics.elidedText(text, Qt::ElideRight, maxWidth);
 }
 
-// Bookmark functionality implementation
-void MainWindow::toggleBookmarksSidebar() {
-    if (!bookmarksSidebar) return;
-    
-    bool isVisible = bookmarksSidebar->isVisible();
-    
-    // Hide outline sidebar if it's visible
-    if (!isVisible && outlineSidebar && outlineSidebar->isVisible()) {
-        outlineSidebar->setVisible(false);
-        outlineSidebarVisible = false;
-        // REMOVED S1: Outline button moved to LeftSidebarContainer
-    }
-    
-    bookmarksSidebar->setVisible(!isVisible);
-    bookmarksSidebarVisible = !isVisible;
-    
-    // Update sidebar container visibility (hide if both sidebars are hidden)
-    if (m_leftSidebar) {
-        bool anySidebarVisible = outlineSidebarVisible || bookmarksSidebarVisible;
-        m_leftSidebar->setVisible(anySidebarVisible);
-    }
-    
-    // REMOVED S1: Bookmarks button moved to LeftSidebarContainer
-    
-    if (bookmarksSidebarVisible) {
-        loadBookmarks(); // Refresh bookmarks when opening
-    }
-    
-    // Force layout update and reposition floating tabs after sidebar visibility change
-    if (centralWidget() && centralWidget()->layout()) {
-        centralWidget()->layout()->invalidate();
-        centralWidget()->layout()->activate();
-    }
-    QTimer::singleShot(0, this, [this]() {
-        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
-        // MW2.2: Removed dial container positioning
-    });
-}
+// REMOVED MW7.4: toggleBookmarksSidebar function removed - bookmark implementation deleted
 
-void MainWindow::toggleLayerPanel() {
-    if (!m_layerPanel) return;
-    
-    layerPanelVisible = !layerPanelVisible;
-    m_layerPanel->setVisible(layerPanelVisible);
-    
-    // REMOVED S1: Layer panel button moved to LeftSidebarContainer
-    
-    // Force layout update and reposition floating tabs
-    if (centralWidget() && centralWidget()->layout()) {
-        centralWidget()->layout()->invalidate();
-        centralWidget()->layout()->activate();
-            }
-    // Use a slightly longer delay to ensure layout is complete before positioning
-    QTimer::singleShot(50, this, [this]() {
-        // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
-        // MW2.2: Removed positionDialToolbarTab()
-    });
-}
+// REMOVED MW5.4: toggleLayerPanel function removed - layer panel now handled by LeftSidebarContainer
 
 void MainWindow::toggleDebugOverlay() {
     if (!m_debugOverlay) return;
@@ -5497,38 +4658,11 @@ void MainWindow::toggleAutoLayout() {
     }
 }
 
-void MainWindow::onBookmarkItemClicked(QTreeWidgetItem *item, int column) {
-    Q_UNUSED(column);
-    if (!item) return;
-    
-    // Get the page number from the item data
-    bool ok;
-    int pageNumber = item->data(0, Qt::UserRole).toInt(&ok);
-    if (ok && pageNumber > 0) {
-        // Phase 3.1.9: Use currentViewport() for page navigation
-        DocumentViewport* vp = currentViewport();
-        int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
-        switchPageWithDirection(pageNumber, (pageNumber > currentPage) ? 1 : -1);
-        pageInput->setValue(pageNumber);
-            }
-}
+// REMOVED MW7.4: onBookmarkItemClicked function removed - bookmark implementation deleted
 
-void MainWindow::loadBookmarks() {
-    // Phase 3.1.9: Stubbed - bookmarks will use Document in Phase 3.4
-    if (!bookmarksTree) return;
-    
-    bookmarksTree->clear();
-    bookmarks.clear();
-        
-    // TODO Phase 3.4: Load bookmarks from currentViewport()->document()
-    
-    updateBookmarkButtonState();
-}
+// REMOVED MW7.4: loadBookmarks function removed - bookmark implementation deleted
 
-// MW1.5: Kept as stub - called from multiple places
-void MainWindow::saveBookmarks() {
-    qDebug() << "saveBookmarks(): Stub (Phase 3.4)";
-}
+// REMOVED MW7.4: saveBookmarks function removed - bookmark implementation deleted
 
 // Markdown Notes Sidebar functionality
 void MainWindow::toggleMarkdownNotesSidebar() {
@@ -5572,28 +4706,29 @@ void MainWindow::toggleMarkdownNotesSidebar() {
 
 
 
-void MainWindow::updateBookmarkButtonState() {
-    // Phase 3.1.9: Use currentViewport() instead of currentCanvas()
-    if (!toggleBookmarkButton) return;
-    
-    DocumentViewport* vp = currentViewport();
-    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
-    bool isBookmarked = bookmarks.contains(currentPage);
-    
-    toggleBookmarkButton->setProperty("selected", isBookmarked);
-    updateButtonIcon(toggleBookmarkButton, "star");
-    
-    // Update tooltip
-    if (isBookmarked) {
-        toggleBookmarkButton->setToolTip(tr("Remove Bookmark"));
-    } else {
-        toggleBookmarkButton->setToolTip(tr("Add Bookmark"));
-    }
-    
-    // Force style update
-    toggleBookmarkButton->style()->unpolish(toggleBookmarkButton);
-    toggleBookmarkButton->style()->polish(toggleBookmarkButton);
-}
+// REMOVED: updateBookmarkButtonState function removed - toggleBookmarkButton deleted
+// void MainWindow::updateBookmarkButtonState() {
+//     // Phase 3.1.9: Use currentViewport() instead of currentCanvas()
+//     if (!toggleBookmarkButton) return;
+//
+//     DocumentViewport* vp = currentViewport();
+//     int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
+//     bool isBookmarked = bookmarks.contains(currentPage);
+//
+//     toggleBookmarkButton->setProperty("selected", isBookmarked);
+//     updateButtonIcon(toggleBookmarkButton, "star");
+//
+//     // Update tooltip
+//     if (isBookmarked) {
+//         toggleBookmarkButton->setToolTip(tr("Remove Bookmark"));
+//     } else {
+//         toggleBookmarkButton->setToolTip(tr("Add Bookmark"));
+//     }
+//
+//     // Force style update
+//     toggleBookmarkButton->style()->unpolish(toggleBookmarkButton);
+//     toggleBookmarkButton->style()->polish(toggleBookmarkButton);
+// }
 
 // IME support for multi-language input
 void MainWindow::inputMethodEvent(QInputMethodEvent *event) {
@@ -5626,7 +4761,7 @@ void MainWindow::setUseBrighterPalette(bool use) {
         useBrighterPalette = use;
         
         // Update all colors - call updateColorPalette which handles null checks
-        updateColorPalette();
+        // REMOVED: updateColorPalette removed - color buttons deleted
         
         // Save preference
         QSettings settings("SpeedyNote", "App");
@@ -5634,39 +4769,28 @@ void MainWindow::setUseBrighterPalette(bool use) {
     }
 }
 
-void MainWindow::updateColorPalette() {
-    // Clear existing presets
-    colorPresets.clear();
-    currentPresetIndex = 0;
-    
-    // Add default pen color (theme-aware)
-    colorPresets.enqueue(getDefaultPenColor());
-    
-    // Add palette colors
-    colorPresets.enqueue(getPaletteColor("red"));
-    colorPresets.enqueue(getPaletteColor("yellow"));
-    colorPresets.enqueue(getPaletteColor("blue"));
-    colorPresets.enqueue(getPaletteColor("green"));
-    colorPresets.enqueue(QColor("#000000")); // Black (always same)
-    colorPresets.enqueue(QColor("#FFFFFF")); // White (always same)
-    
-    // Only update UI elements if they exist
-    if (redButton && blueButton && yellowButton && greenButton) {
-        // Update color button icons based on current palette (not theme)
-        QString redIconPath = useBrighterPalette ? ":/resources/icons/pen_light_red.png" : ":/resources/icons/pen_dark_red.png";
-        QString blueIconPath = useBrighterPalette ? ":/resources/icons/pen_light_blue.png" : ":/resources/icons/pen_dark_blue.png";
-        QString yellowIconPath = useBrighterPalette ? ":/resources/icons/pen_light_yellow.png" : ":/resources/icons/pen_dark_yellow.png";
-        QString greenIconPath = useBrighterPalette ? ":/resources/icons/pen_light_green.png" : ":/resources/icons/pen_dark_green.png";
-        
-        redButton->setIcon(QIcon(redIconPath));
-        blueButton->setIcon(QIcon(blueIconPath));
-        yellowButton->setIcon(QIcon(yellowIconPath));
-        greenButton->setIcon(QIcon(greenIconPath));
-        
-        // Update color button states
-        updateColorButtonStates();
-    }
-}
+// REMOVED: updateColorPalette function removed - color buttons deleted
+// void MainWindow::updateColorPalette() {
+//     // REMOVED MW5.5: colorPresets functionality removed - only keeping icon updates
+//
+//     // Only update UI elements if they exist
+//     if (redButton && blueButton && yellowButton && greenButton) {
+//         // Update color button icons based on current palette (not theme)
+//         QString redIconPath = useBrighterPalette ? ":/resources/icons/pen_light_red.png" : ":/resources/icons/pen_dark_red.png";
+//         QString blueIconPath = useBrighterPalette ? ":/resources/icons/pen_light_blue.png" : ":/resources/icons/pen_dark_blue.png";
+//         QString yellowIconPath = useBrighterPalette ? ":/resources/icons/pen_light_yellow.png" : ":/resources/icons/pen_dark_yellow.png";
+//         QString greenIconPath = useBrighterPalette ? ":/resources/icons/pen_light_green.png" : ":/resources/icons/pen_dark_green.png";
+//
+//         redButton->setIcon(QIcon(redIconPath));
+//         blueButton->setIcon(QIcon(blueIconPath));
+//         yellowButton->setIcon(QIcon(yellowIconPath));
+//         greenButton->setIcon(QIcon(greenIconPath));
+//
+//         // Update color button states
+//         // REMOVED: Color button updates removed - buttons deleted
+//     // updateColorButtonStates();
+//     }
+// }
 
 QColor MainWindow::getPaletteColor(const QString &colorName) {
     if (useBrighterPalette) {
@@ -5809,8 +4933,8 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         }
     // ===========================================================
         
-        // ✅ Save current bookmarks before closing
-        saveBookmarks();
+        // REMOVED MW7.4: Save bookmarks removed - bookmark implementation deleted
+        // saveBookmarks();
     
     // Accept the close event to allow the program to close
     event->accept();
@@ -5818,25 +4942,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
 // REMOVED MW1.4: showLastAccessedPageDialog(InkCanvas*) - InkCanvas obsolete
 
-void MainWindow::openSpnPackage(const QString &spnPath)
-{
-    // Phase 3.1.8: Stubbed - .spn format is being replaced with .snx
-    Q_UNUSED(spnPath);
-    QMessageBox::information(this, tr("Open Notebook"), 
-        tr("Opening .spn packages is being redesigned. Coming soon with .snx format!"));
-    return;
+// REMOVED MW5.6: openSpnPackage function removed - .spn format deprecated
 
-
-}
-
-void MainWindow::createNewSpnPackage(const QString &spnPath)
-{
-    // Phase 3.1.8: Stubbed - .spn format is being replaced with .snx
-    Q_UNUSED(spnPath);
-    QMessageBox::information(this, tr("Create Notebook"), 
-        tr("Creating .spn packages is being redesigned. Coming soon with .snx format!"));
-        return;
-    }
+// REMOVED MW5.6: createNewSpnPackage function removed - .spn format deprecated
     
 // MW1.5: Kept as stubs - still called from openFileInNewTab
 void MainWindow::openPdfFile(const QString &pdfPath) {
@@ -5845,10 +4953,7 @@ void MainWindow::openPdfFile(const QString &pdfPath) {
         tr("PDF opening is being redesigned. Coming soon!"));
 }
 
-bool MainWindow::switchToExistingNotebook(const QString &spnPath) {
-    Q_UNUSED(spnPath);
-    return false; // Always return false - allow opening
-}
+// REMOVED MW5.6: switchToExistingNotebook function removed - .spn format deprecated
 
 // ========================================
 // Single Instance Implementation
@@ -6016,15 +5121,8 @@ void MainWindow::onNewConnection()
                 raise();
                 activateWindow();
                 
-                // Parse command
-                if (command.startsWith("--create-new|")) {
-                    // Handle create new package command
-                    QString filePath = command.mid(13); // Remove "--create-new|" prefix
-                    createNewSpnPackage(filePath);
-                } else {
-                    // Regular file opening
+                // REMOVED MW5.6: .spn format deprecated - only handle regular file opening
                     openFileInNewTab(command);
-                }
             });
         }
         
@@ -6088,21 +5186,13 @@ void MainWindow::cleanupSharedResources()
 
 void MainWindow::openFileInNewTab(const QString &filePath)
 {
-    // Check for duplicate .spn notebooks before creating a new tab
-    if (filePath.toLower().endsWith(".spn")) {
-        if (switchToExistingNotebook(filePath)) {
-            return; // Notebook already open, switched to existing tab
-        }
-    }
-    
     // Create a new tab first
     addNewTab();
     
     // Open the file in the new tab
+    // REMOVED MW5.6: .spn format deprecated - only PDF files supported now
     if (filePath.toLower().endsWith(".pdf")) {
         openPdfFile(filePath);
-    } else if (filePath.toLower().endsWith(".spn")) {
-        openSpnPackage(filePath);
     }
 }
 
@@ -6134,10 +5224,5 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *event) {
 
 
 
-void MainWindow::onAutoScrollRequested(int direction)
-{
-    // Phase 3.1.5: Stubbed - not needed with DocumentViewport's continuous scrolling
-    Q_UNUSED(direction);
-    // DocumentViewport handles infinite scrolling internally
-}
+// REMOVED MW5.7: onAutoScrollRequested function removed - auto-scroll feature deprecated
 

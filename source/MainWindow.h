@@ -7,7 +7,7 @@
 #include "core/Page.h"  // Phase 3.1.8: For Page::BackgroundType
 
 // Phase 3.1.7: Forward declaration for legacy method signatures (will be removed)
-class InkCanvas;
+// class InkCanvas;
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
@@ -86,7 +86,7 @@ namespace Poppler {
 enum class ControllerAction {
     None,
     ToggleFullscreen,
-    ToggleDial,
+    // REMOVED MW7.2: ToggleDial removed - dial functionality deleted
     Zoom50,
     ZoomOut,
     Zoom200,
@@ -109,9 +109,8 @@ enum class ControllerAction {
     SetMarkerTool,
     SetEraserTool,
     TogglePdfTextSelection,
-    ToggleOutline,
-    ToggleBookmarks,
-    AddBookmark,
+    // REMOVED MW7.5: ToggleOutline removed - outline sidebar deleted
+    // REMOVED MW7.4: ToggleBookmarks and AddBookmark removed - bookmark implementation deleted
     ToggleTouchGestures,
     PreviousPage,
     NextPage
@@ -129,7 +128,7 @@ enum class StylusButtonAction {
 [[maybe_unused]] static QString actionToString(ControllerAction action) {
     switch (action) {
         case ControllerAction::ToggleFullscreen: return "Toggle Fullscreen";
-        case ControllerAction::ToggleDial: return "Toggle Dial";
+        // REMOVED MW7.2: ToggleDial case removed - dial functionality deleted
         case ControllerAction::Zoom50: return "Zoom 50%";
         case ControllerAction::ZoomOut: return "Zoom Out";
         case ControllerAction::Zoom200: return "Zoom 200%";
@@ -152,9 +151,8 @@ enum class StylusButtonAction {
         case ControllerAction::SetMarkerTool: return "Set Marker Tool";
         case ControllerAction::SetEraserTool: return "Set Eraser Tool";
         case ControllerAction::TogglePdfTextSelection: return "Toggle PDF Text Selection";
-        case ControllerAction::ToggleOutline: return "Toggle PDF Outline";
-        case ControllerAction::ToggleBookmarks: return "Toggle Bookmarks";
-        case ControllerAction::AddBookmark: return "Add/Remove Bookmark";
+        // REMOVED MW7.5: ToggleOutline case removed - outline sidebar deleted
+        // REMOVED MW7.4: ToggleBookmarks and AddBookmark cases removed - bookmark implementation deleted
         case ControllerAction::ToggleTouchGestures: return "Toggle Touch Gestures";
         case ControllerAction::PreviousPage: return "Previous Page";
         case ControllerAction::NextPage: return "Next Page";
@@ -169,7 +167,7 @@ enum class StylusButtonAction {
     switch (internalAction) {
         case InternalControllerAction::None: return ControllerAction::None;
         case InternalControllerAction::ToggleFullscreen: return ControllerAction::ToggleFullscreen;
-        case InternalControllerAction::ToggleDial: return ControllerAction::ToggleDial;
+        // REMOVED MW7.2: InternalControllerAction ToggleDial removed - dial functionality deleted
         case InternalControllerAction::Zoom50: return ControllerAction::Zoom50;
         case InternalControllerAction::ZoomOut: return ControllerAction::ZoomOut;
         case InternalControllerAction::Zoom200: return ControllerAction::Zoom200;
@@ -192,9 +190,8 @@ enum class StylusButtonAction {
         case InternalControllerAction::SetMarkerTool: return ControllerAction::SetMarkerTool;
         case InternalControllerAction::SetEraserTool: return ControllerAction::SetEraserTool;
         case InternalControllerAction::TogglePdfTextSelection: return ControllerAction::TogglePdfTextSelection;
-        case InternalControllerAction::ToggleOutline: return ControllerAction::ToggleOutline;
-        case InternalControllerAction::ToggleBookmarks: return ControllerAction::ToggleBookmarks;
-        case InternalControllerAction::AddBookmark: return ControllerAction::AddBookmark;
+        // REMOVED MW7.5: InternalControllerAction ToggleOutline removed - outline sidebar deleted
+        // REMOVED MW7.4: InternalControllerAction ToggleBookmarks and AddBookmark removed - bookmark implementation deleted
         case InternalControllerAction::ToggleTouchGestures: return ControllerAction::ToggleTouchGestures;
         case InternalControllerAction::PreviousPage: return ControllerAction::PreviousPage;
         case InternalControllerAction::NextPage: return ControllerAction::NextPage;
@@ -219,9 +216,7 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     virtual ~MainWindow();
     
-    // REMOVED Phase 3.1: isUsingNewViewport() - always using new architecture
-    // REMOVED Phase 3.1: s_useNewViewport - no longer needed
-    int getCurrentPageForCanvas(InkCanvas *canvas);  // MW1.4: Stub - returns 0
+    // int getCurrentPageForCanvas(InkCanvas *canvas);  // MW1.4: Stub - returns 0
 
     bool lowResPreviewEnabled = true;
 
@@ -229,9 +224,8 @@ public:
     bool isLowResPreviewEnabled() const;
 
     bool areBenchmarkControlsVisible() const;
-    void setBenchmarkControlsVisible(bool visible);
+    // void setBenchmarkControlsVisible(bool visible);
 
-    // REMOVED MW5.2+: Zoom buttons moved to NavigationBar/Toolbar
     // bool zoomButtonsVisible = true;
     bool areZoomButtonsVisible() const;
     void setZoomButtonsVisible(bool visible);
@@ -304,10 +298,7 @@ public:
     // ✅ Mouse dial mapping management
 
 
-    void openSpnPackage(const QString &spnPath);
-    void createNewSpnPackage(const QString &spnPath); // ✅ Create new empty SPN package
     void openPdfFile(const QString &pdfPath); // MW1.5: Stub
-    bool switchToExistingNotebook(const QString &spnPath); // MW1.5: Stub
     
     // Single instance functionality
     static bool isInstanceRunning();
@@ -317,7 +308,6 @@ public:
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
     void openFileInNewTab(const QString &filePath); // ✅ Open .spn package directly
-    // REMOVED MW1.4: showLastAccessedPageDialog(InkCanvas*) - InkCanvas obsolete
 
     int getPdfDPI() const { return pdfRenderDPI; }
     void setPdfDPI(int dpi);
@@ -329,7 +319,6 @@ public:
     // Phase 3.1.8: Migrated from BackgroundStyle to Page::BackgroundType
     void saveDefaultBackgroundSettings(Page::BackgroundType style, QColor bgColor, QColor gridColor, int density);
     void loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density);
-    // REMOVED MW1.4: applyDefaultBackgroundToCanvas(InkCanvas*) - use Page background settings
     
     void saveThemeSettings();
     void loadThemeSettings();
@@ -339,7 +328,7 @@ public:
     void migrateOldButtonMappings();
     QString migrateOldActionString(const QString &oldString);
 
-    InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
+    // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     void saveCurrentPage(); // Made public for RecentNotebooksDialog
     void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
@@ -347,7 +336,6 @@ public:
     void switchPageWithDirection(int pageNumber, int direction); // MW1.5: Stub
     void updateTabLabel(); // Made public for RecentNotebooksDialog
     QSpinBox *pageInput; // Made public for RecentNotebooksDialog
-    // REMOVED MW1.3: prevPageButton, nextPageButton - feature was dropped
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
     void addKeyboardMapping(const QString &keySequence, const QString &action);
@@ -361,11 +349,10 @@ public:
     void updateDialButtonState();     // Update dial button state when switching tabs
     void updateFastForwardButtonState(); // Update fast forward button state when switching tabs
     void updateToolButtonStates();   // Update tool button states when switching tabs
-    void handleColorButtonClick();    // Handle tool switching when color buttons are clicked
-    void updateThicknessSliderForCurrentTool(); // Update thickness slider to reflect current tool's thickness
+    // void handleColorButtonClick();    // Handle tool switching when color buttons are clicked
+    // void updateThicknessSliderForCurrentTool(); // Update thickness slider to reflect current tool's thickness
     void updatePdfTextSelectButtonState(); // Update PDF text selection button state when switching tabs
-    void updateBookmarkButtonState(); // Update bookmark toggle button state
-    bool selectFolder(); // Select save folder - moved to public for ControlPanelDialog access, returns true on success
+    // REMOVED MW7.4: updateBookmarkButtonState removed - bookmark implementation deleted
 
     void addNewTab();
     
@@ -405,48 +392,44 @@ private slots:
     void changeTool(int index);
     void deleteCurrentPage();
 
-    void loadPdf();
+    // REMOVED MW7.3: loadPdf removed - old PDF loading function
     void exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId); // Export canvas-only notebook (no PDF)
-    void exportAnnotatedPdfFullRender(const QString &exportPath, const QSet<int> &annotatedPages, bool exportWholeDocument = true, int exportStartPage = 0, int exportEndPage = -1); // Full render fallback
-    bool createAnnotatedPagesPdf(const QString &outputPath, const QList<int> &pages, QProgressDialog &progress); // Create temp PDF
-    bool mergePdfWithPdftk(const QString &originalPdf, const QString &annotatedPagesPdf, const QString &outputPdf, const QList<int> &annotatedPageNumbers, QString *errorMsg = nullptr, bool exportWholeDocument = true, int exportStartPage = 0, int exportEndPage = -1); // Merge using pdftk
+    // REMOVED MW7.3: exportAnnotatedPdfFullRender removed - pdftk export function
+    // REMOVED MW7.3: createAnnotatedPagesPdf removed - temp PDF creation function
+    // REMOVED MW7.3: mergePdfWithPdftk removed - PDF merging function
     
     // PDF outline preservation helpers
-    // REMOVED MW5.3: extractPdfOutlineData removed - PDF outline now handled by Document/DocumentViewport
-    QString filterAndAdjustOutline(const QString &metadataContent, int startPage, int endPage, int pageOffset); // Filter and adjust outline for page range
-    bool applyOutlineToPdf(const QString &pdfPath, const QString &outlineData); // Apply outline to PDF using pdftk
+    // REMOVED MW7.3: filterAndAdjustOutline removed - outline manipulation function
+    // REMOVED MW7.3: applyOutlineToPdf removed - outline application function
     
     // Helper function to show page range dialog (returns false if cancelled)
-    bool showPageRangeDialog(int totalPages, bool &exportWholeDocument, int &startPage, int &endPage);
+    // REMOVED MW7.3: showPageRangeDialog removed - export dialog function
 
     void updateZoom();
-    // REMOVED MW5.2: onZoomSliderChanged function removed - zoomSlider deleted
     void updatePanRange();
     void updatePanX(int value);
     void updatePanY(int value);
 
-    // REMOVED MW1.2: selectBackground() - feature was dropped
 
     void forceUIRefresh();
 
     void switchTab(int index);
 
     void removeTabAt(int index);
-    // REMOVED MW5.2+: toggleZoomSlider function removed - zoom buttons moved to NavigationBar/Toolbar
-    void toggleThicknessSlider(); // Added function to toggle thickness slider
+    // void toggleThicknessSlider(); // Added function to toggle thickness slider
     void toggleFullscreen();
     void showJumpToPageDialog();
     void goToPreviousPage(); // Go to previous page
     void goToNextPage();     // Go to next page
     void onPageInputChanged(int newPage); // Handle spinbox page changes with direction tracking
 
-    void toggleDial();  // ✅ Show/Hide dial
-    void positionDialContainer(); // ✅ Position dial container intelligently
+    // REMOVED MW7.2: toggleDial removed - dial functionality deleted
+    // REMOVED MW7.2: positionDialContainer removed - dial functionality deleted
     // void processPageSwitch();
-    void initializeDialSound();
+    // REMOVED MW7.2: initializeDialSound removed - dial functionality deleted
 
     // void updateCustomColor();
-    void updateDialDisplay();
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
@@ -463,8 +446,7 @@ private slots:
 
 
 
-    void addColorPreset();
-    void updateColorPalette(); // Update colors based on current palette mode
+    // void updateColorPalette(); // Update colors based on current palette mode
     QColor getPaletteColor(const QString &colorName); // Get color based on current palette
     qreal getDevicePixelRatio(); 
 
@@ -472,12 +454,12 @@ private slots:
     QIcon loadThemedIcon(const QString& baseName);
     QIcon loadThemedIconReversed(const QString& baseName);
     void updateButtonIcon(QPushButton* button, const QString& iconName);
-    QString createButtonStyle(bool darkMode);
+    // REMOVED: createButtonStyle removed - button styling no longer needed in MainWindow
 
 
     
     // Color button state management
-    void updateColorButtonStates();
+    // void updateColorButtonStates();
     void selectColorButton(QPushButton* selectedButton);
     void updateStraightLineButtonState();
     void updateRopeToolButtonState(); // New slot for rope tool button
@@ -486,14 +468,12 @@ private slots:
     
 
 public slots:
-    void updatePictureButtonState(); // Public slot for picture button state
-    void onAutoScrollRequested(int direction);
+    // void updatePictureButtonState(); // Public slot for picture button state
 
 private:
     void setPenTool();               // Set pen tool
     void setMarkerTool();            // Set marker tool
     void setEraserTool();            // Set eraser tool
-    // REMOVED Phase 3.1.3: setVectorPenTool(), setVectorEraserTool(), vectorUndo()
     // Features migrated to DocumentViewport
 
     QColor getContrastingTextColor(const QColor &backgroundColor);
@@ -505,85 +485,67 @@ private:
     
     
     // PDF Outline functionality
-    void toggleOutlineSidebar();     // Toggle PDF outline sidebar
-    void onOutlineItemClicked(QTreeWidgetItem *item, int column); // Handle outline item clicks
-    // REMOVED MW5.3: loadPdfOutline removed - PDF outline now handled by Document/DocumentViewport
-    void addOutlineItem(const Poppler::OutlineItem& outlineItem, QTreeWidgetItem* parentItem); // Add outline item recursively
-    // REMOVED MW5.3: getPdfDocument removed - PDF document access now handled by Document/DocumentViewport
-    void updateOutlineSelection(int pageNumber); // Update outline selection based on current page
+    // REMOVED MW7.5: Outline sidebar functions removed - outline sidebar deleted
+    // REMOVED MW7.3: addOutlineItem removed - recursive outline builder function
+    // REMOVED MW7.5: updateOutlineSelection removed - outline sidebar deleted
     
-    // Bookmark sidebar functionality
-    void toggleBookmarksSidebar();   // Toggle bookmarks sidebar
-    void onBookmarkItemClicked(QTreeWidgetItem *item, int column); // Handle bookmark item clicks
-    void loadBookmarks();            // Load bookmarks from file
-    void saveBookmarks();            // MW1.5: Stub
+    // REMOVED MW7.4: Bookmark sidebar functionality removed - bookmark implementation deleted
     
     // Markdown notes sidebar functionality
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
 
 private:
     // =========================================================================
-    // REMOVED Phase 3.1: Architecture Mode flag - always using new architecture
     // bool m_useNewViewport = false;
     // =========================================================================
     
-    // InkCanvas *canvas;  // Phase 3.1.7: Removed - using DocumentViewport via TabManager
-    QPushButton *benchmarkButton;
+    // InkCanvas *canvas;  // using DocumentViewport via TabManager
+    // QPushButton *benchmarkButton;
     QLabel *benchmarkLabel;
     QTimer *benchmarkTimer;
     bool benchmarking;
 
 
 
-    QPushButton *redButton;
-    QPushButton *blueButton;
-    QPushButton *yellowButton;
-    QPushButton *greenButton;
-    QPushButton *blackButton;
-    QPushButton *whiteButton;
+    // QPushButton *redButton;
+    // QPushButton *blueButton;
+    // QPushButton *yellowButton;
+    // QPushButton *greenButton;
+    // QPushButton *blackButton;
+    // QPushButton *whiteButton;
     QLineEdit *customColorInput;
     QPushButton *customColorButton;
-    QPushButton *thicknessButton; // Added thickness button
-    QSlider *thicknessSlider; // Added thickness slider
-    QFrame *thicknessFrame; // Added thickness frame
+    // QPushButton *thicknessButton; // Added thickness button
+    // QSlider *thicknessSlider; // Added thickness slider
+    // QFrame *thicknessFrame; // Added thickness frame
     QComboBox *toolSelector;
-    // REMOVED E.1: Tool buttons moved to Toolbar
     // QPushButton *penToolButton;    // Individual pen tool button
     // QPushButton *markerToolButton; // Individual marker tool button
     // QPushButton *eraserToolButton; // Individual eraser tool button
-    // REMOVED Phase 3.1.3: vectorPenButton, vectorEraserButton, vectorUndoButton
     // Features migrated to DocumentViewport - pen/eraser now use vector layers directly
     QPushButton *deletePageButton;
-    QPushButton *selectFolderButton; // Button to select folder
-    // REMOVED E.1: Moved to NavigationBar
     // QPushButton *saveButton; // Button to save file
     // QPushButton *fullscreenButton;
-    QPushButton *openControlPanelButton;
+    // QPushButton *openControlPanelButton;
     // Phase C.1.5: openRecentNotebooksButton removed - functionality now in NavigationBar
 
-    QPushButton *loadPdfButton;
-    QPushButton *clearPdfButton;
-    QPushButton *exportPdfButton; // Button to export annotated PDF
-    QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
-    // REMOVED E.1: Moved to NavigationBar
+    // QPushButton *loadPdfButton;
+    // QPushButton *clearPdfButton;
+    // QPushButton *exportPdfButton; // Button to export annotated PDF
+    // QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
     // QPushButton *toggleTabBarButton;
     
     // Overflow menu for infrequently used actions
     QPushButton *overflowMenuButton;
     QMenu *overflowMenu;
 
-    // REMOVED Phase 3.1.1: QMap<InkCanvas*, int> pageMap;
     // Page tracking now done by DocumentViewport internally
     
 
-    // REMOVED MW1.2: backgroundButton - feature was dropped
-    // REMOVED E.1: straightLineToggleButton moved to Toolbar, ropeToolButton deprecated
     // QPushButton *straightLineToggleButton; // Button to toggle straight line mode
     // QPushButton *ropeToolButton; // Button to toggle rope tool mode
-    QPushButton *insertPictureButton; // Button to insert pictures
+    // QPushButton *insertPictureButton; // Button to insert pictures
 
-    // REMOVED MW5.2: zoomSlider deleted - zoom now controlled by NavigationBar/Toolbar
-    // REMOVED MW5.2+: Zoom buttons moved to NavigationBar/Toolbar
     // QPushButton *zoomButton;
     // QFrame *zoomFrame;
     // QPushButton *dezoomButton;
@@ -595,7 +557,6 @@ private:
     QScrollBar *panYSlider;
 
 
-    // REMOVED Phase 3.1.1: Old tab system replaced with QTabWidget + TabManager
     // QListWidget *tabList;          // Horizontal tab bar
     // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
     
@@ -616,33 +577,18 @@ private:
     QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)
     
     // PDF Outline Sidebar
-    QWidget *outlineSidebar;       // Container for PDF outline
-    QTreeWidget *outlineTree;      // Tree widget for PDF bookmarks/outline
-    // Phase S3: Removed - floating buttons replaced by LeftSidebarContainer
-    // QPushButton *toggleOutlineButton; // Floating tab button to toggle outline sidebar
-    bool outlineSidebarVisible = false;
+    // REMOVED MW7.5: Outline sidebar variables removed - outline sidebar deleted
     
-    // Bookmarks Sidebar
-    QWidget *bookmarksSidebar;     // Container for bookmarks
-    QTreeWidget *bookmarksTree;    // Tree widget for bookmarks
-    // Phase S3: Removed - floating buttons replaced by LeftSidebarContainer
-    // QPushButton *toggleBookmarksButton; // Floating tab button to toggle bookmarks sidebar
-    QPushButton *toggleBookmarkButton; // Button to add/remove current page bookmark
-    // REMOVED E.1: Moved to Toolbar
-    // QPushButton *touchGesturesButton; // Touch gestures toggle button
-    bool bookmarksSidebarVisible = false;
+    // REMOVED MW7.4: Bookmarks Sidebar removed - bookmark implementation deleted
     
     // Phase S3: Left Sidebar Container (replaces floating tabs)
     LeftSidebarContainer *m_leftSidebar = nullptr;  // Tabbed container for left panels
     LayerPanel *m_layerPanel = nullptr;             // Reference to LayerPanel in container
-    // Phase S3: Removed - replaced by LeftSidebarContainer
     // QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
     // QPushButton *toggleLayerPanelButton = nullptr; // Floating tab button to toggle layer panel
     bool layerPanelVisible = true;                   // Layer panel visible by default
     
-    // Phase S3: Removed - no longer needed with new container
     // void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
-    void toggleLayerPanel();         // Toggle layer panel visibility (kept for compatibility)
     
     // Debug Overlay (development tool - easily disabled for production)
     class DebugOverlay* m_debugOverlay = nullptr;  // Floating debug info panel
@@ -650,12 +596,11 @@ private:
     
     // Two-column layout toggle (Ctrl+2)
     void toggleAutoLayout();                        // Toggle auto 1/2 column layout mode
-    QMap<int, QString> bookmarks;  // Map of page number to bookmark title
-    QPushButton *jumpToPageButton; // Button to jump to a specific page
+    // REMOVED MW7.4: bookmarks QMap removed - bookmark implementation deleted
+    // QPushButton *jumpToPageButton; // Button to jump to a specific page
     
     // Markdown Notes Sidebar
     MarkdownNotesSidebar *markdownNotesSidebar;  // Sidebar for markdown notes
-    // REMOVED E.1: Moved to NavigationBar
     // QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
     bool markdownNotesSidebarVisible = false;
 
@@ -664,19 +609,16 @@ private:
 
     // Removed unused colorPreview widget
 
-    QLabel *dialDisplay = nullptr; // ✅ Display for dial mode
+    // REMOVED MW7.2: dialDisplay removed - dial functionality deleted
 
-    QFrame *dialColorPreview;
-    QLabel *dialIconView;
+    // REMOVED MW7.2: dialColorPreview removed - dial functionality deleted
+    // REMOVED MW7.2: dialIconView removed - dial functionality deleted
     QFont pixelFont; // ✅ Font for pixel effect
     // QLabel *modeIndicator; ✅ Indicator for mode selection
     // QLabel *dialNeedle;
 
 
 
-    QQueue<QColor> colorPresets; // ✅ FIFO queue for color presets
-    QPushButton *addPresetButton; // ✅ Button to add current color to queue
-    int currentPresetIndex = 0; // ✅ Track selected preset
 
     // Color palette mode (independent of UI theme)
     bool useBrighterPalette = false; // false = darker colors, true = brighter colors
@@ -684,7 +626,6 @@ private:
     qreal initialDpr = 1.0; // Will be set in constructor
 
     QWidget *sidebarContainer;  // Container for sidebar
-    // REMOVED MW5.1: controlBar deleted - replaced by NavigationBar and Toolbar
 
     
     // ✅ Mouse dial controls
@@ -694,7 +635,6 @@ private:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
-    // REMOVED MW5.1: controlBar visibility tracking removed - controlBar deleted
     void cycleZoomLevels();         // Function to cycle through 0.5x, 1x, 2x zoom levels
     bool sidebarWasVisibleBeforeFullscreen = true;  // Track sidebar state before fullscreen
 
@@ -725,7 +665,7 @@ private:
     void saveKeyboardMappings();
     void loadKeyboardMappings();
 
-    bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas);  // MW1.4: Stub - returns true
+    // bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas);  // MW1.4: Stub - returns true
 
     RecentNotebooksManager *recentNotebooksManager; // Added manager instance
 
@@ -797,7 +737,6 @@ private:
     // Update scrollbar positions based on container size
     void updateScrollbarPositions();
     
-    // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

@@ -1,8 +1,8 @@
 # MainWindow Cleanup Subplan
 
-**Document Version:** 1.3  
-**Date:** January 5, 2026  
-**Status:** Phase 1-3 Complete, Phase 5 Planned  
+**Document Version:** 1.4  
+**Date:** January 6, 2026  
+**Status:** Phase 1-3 Complete, MW5.1-5.7 Complete, Phase 7 Ready  
 **Prerequisites:** Q&A completed in `MAINWINDOW_CLEANUP_QA.md`  
 **Related:** `TOOLBAR_EXTRACTION_SUBPLAN.md` (Phase 3 details)
 
@@ -16,17 +16,19 @@ MainWindow.cpp (~9,700 lines) is the last major piece of legacy code in SpeedyNo
 1. ✅ Delete dead code (~2,800 lines saved!)
 2. ✅ Delete dial system entirely (simpler than extraction)
 3. ✅ Extract toolbar components (NavigationBar, Toolbar, TabBar)
-4. ⬜ Clean up remaining obsolete code (Phase 5)
-5. ⬜ Extract input handling to hub classes (Phase 6)
+4. ✅ MW5.1-5.7: Delete controlBar, zoomSlider, PDF functions, toggles, presets, .spn, autoScroll
+5. ⬜ Phase 7: Deep cleanup (dial remnants, bookmarks, outlines, mappings, stubs)
+6. ⬜ Phase 6: Extract input handling to hub classes (Future)
 
 ### Results So Far
 | Metric | Before | Current | Target |
 |--------|--------|---------|--------|
-| MainWindow.cpp lines | 9,722 | 6,633 | ~5,500 |
-| MainWindow.h lines | 887 | 836 | ~700 |
+| MainWindow.cpp lines | 9,722 | ~5,900 | ~4,500 |
+| MainWindow.h lines | 887 | ~846 | ~500 |
 | Dead code blocks | ~1,500 | 0 | 0 |
 | Dial system | Complex 7-mode | Deleted | N/A |
 | Toolbar | Monolithic | Extracted | ✅ |
+| Old controlBar | Present | Deleted | ✅ |
 
 ### New Components Created (Phase 3)
 | Component | File | Purpose |
@@ -1200,4 +1202,383 @@ source/
 - Each task should be followed by a build verification
 - Manual testing is recommended after major deletions
 - Some code may have unexpected dependencies - proceed carefully
-- Keep backup of MainWindow.cpp before starting (git commit) 
+- Keep backup of MainWindow.cpp before starting (git commit)
+
+---
+
+## Phase 7: Deep Cleanup (MW5.1-5.7 Done)
+
+**Status:** MW5.1-5.7 completed manually, Phase 7 tasks ready  
+**Goal:** Remove all obsolete code, clean up header, prepare for future input hub  
+**Estimated savings:** ~800-1,200 lines
+
+---
+
+### MW7.1: Clean Up "REMOVED" Comments in MainWindow.h
+
+**Priority:** HIGH  
+**Risk:** None (cosmetic only)
+
+Delete all verbose "REMOVED" comments in MainWindow.h. They clutter the file.
+
+**Pattern to delete:**
+```cpp
+// REMOVED MW5.1: ...
+// REMOVED: ... removed - ...
+// Phase 3.1.7: Removed - ...
+```
+
+**Keep:** Actual forward declarations and includes that are still used.
+
+**Search pattern:** `// REMOVED|// Phase.*Removed`
+
+---
+
+### MW7.2: Delete ALL Dial Functionality
+
+**Priority:** HIGH  
+**Risk:** Low
+
+Delete all dial-related code. This includes UI elements, functions, and any calls to dial functions.
+
+**MainWindow.h - Delete declarations:**
+```cpp
+QLabel *dialDisplay = nullptr;
+QFrame *dialColorPreview;
+QLabel *dialIconView;
+QFont pixelFont;
+```
+
+**MainWindow.h - Delete function declarations:**
+```cpp
+void toggleDial();
+void positionDialContainer();
+void initializeDialSound();
+void updateDialDisplay();
+```
+
+**MainWindow.cpp - Delete:**
+1. All `dialDisplay`, `dialColorPreview`, `dialIconView` creation code
+2. `toggleDial()` function definition
+3. `positionDialContainer()` function definition  
+4. `initializeDialSound()` function definition
+5. `updateDialDisplay()` function definition
+6. ALL calls to `updateDialDisplay()` (e.g., in zoom actions)
+7. Dial-related styling code
+8. Any dial signal connections
+
+**Search pattern:** `dial|Dial`
+
+---
+
+### MW7.3: Delete Old PDF Functions
+
+**Priority:** HIGH  
+**Risk:** Low
+
+Keep `openPdfDocument()` (new, used by Ctrl+Shift+O). Delete all old PDF workflow functions.
+
+**MainWindow.h - Delete declarations:**
+```cpp
+void loadPdf();
+void exportAnnotatedPdfFullRender(...);
+bool createAnnotatedPagesPdf(...);
+bool mergePdfWithPdftk(...);
+QString filterAndAdjustOutline(...);
+bool applyOutlineToPdf(...);
+void addOutlineItem(...);
+bool showPageRangeDialog(...);
+```
+
+**MainWindow.cpp - Delete function definitions:**
+1. `loadPdf()` - old PDF loading
+2. `exportAnnotatedPdfFullRender()` - pdftk export
+3. `createAnnotatedPagesPdf()` - temp PDF creation
+4. `mergePdfWithPdftk()` - PDF merging
+5. `filterAndAdjustOutline()` - outline manipulation
+6. `applyOutlineToPdf()` - outline application
+7. `addOutlineItem()` - recursive outline builder
+8. `showPageRangeDialog()` - export dialog
+
+**Keep:**
+- `openPdfDocument()` - new PDF opening (Ctrl+Shift+O)
+
+**Search pattern:** `loadPdf|exportAnnotatedPdf|createAnnotatedPagesPdf|mergePdfWithPdftk|filterAndAdjustOutline|applyOutlineToPdf|addOutlineItem|showPageRangeDialog`
+
+---
+
+### MW7.4: Delete Bookmark Implementation
+
+**Priority:** HIGH  
+**Risk:** Low (will be reimplemented later)
+
+Bookmarks need architectural rework (page index ≠ PDF page index). Delete current implementation.
+
+**MainWindow.h - Delete declarations:**
+```cpp
+void toggleBookmarksSidebar();
+void onBookmarkItemClicked(QTreeWidgetItem *item, int column);
+void loadBookmarks();
+void saveBookmarks();
+QWidget *bookmarksSidebar;
+QTreeWidget *bookmarksTree;
+bool bookmarksSidebarVisible = false;
+QMap<int, QString> bookmarks;
+void updateBookmarkButtonState();
+```
+
+**MainWindow.cpp - Delete:**
+1. `toggleBookmarksSidebar()` function
+2. `onBookmarkItemClicked()` function
+3. `loadBookmarks()` function
+4. `saveBookmarks()` function
+5. `updateBookmarkButtonState()` function
+6. Bookmark sidebar creation code
+7. Bookmark tree widget setup
+8. Bookmark signal connections
+
+**Search pattern:** `bookmark|Bookmark`
+
+---
+
+### MW7.5: Delete Old Outline Sidebar
+
+**Priority:** HIGH  
+**Risk:** Low
+
+The outline sidebar will be reimplemented in LeftSidebarContainer later.
+
+**MainWindow.h - Delete declarations:**
+```cpp
+void toggleOutlineSidebar();
+void onOutlineItemClicked(QTreeWidgetItem *item, int column);
+void updateOutlineSelection(int pageNumber);
+QWidget *outlineSidebar;
+QTreeWidget *outlineTree;
+bool outlineSidebarVisible = false;
+```
+
+**MainWindow.cpp - Delete:**
+1. `toggleOutlineSidebar()` function
+2. `onOutlineItemClicked()` function
+3. `updateOutlineSelection()` function
+4. Outline sidebar creation code
+5. Outline tree widget setup
+6. Outline signal connections
+
+**Search pattern:** `outlineSidebar|outlineTree|toggleOutlineSidebar|OutlineItem`
+
+---
+
+### MW7.6: Delete Old Keyboard/Controller Mapping System
+
+**Priority:** HIGH  
+**Risk:** MEDIUM (controller still needed, mappings are not)
+
+Keep `SDLControllerManager` (receives button presses). Delete the old mapping system.
+
+**MainWindow.h - Delete declarations:**
+```cpp
+void handleKeyboardShortcut(const QString &keySequence);
+void handleControllerButton(const QString &buttonName);
+void handleButtonHeld(const QString &buttonName);
+void handleButtonReleased(const QString &buttonName);
+QMap<QString, QString> buttonPressMapping;
+QMap<QString, ControllerAction> buttonPressActionMapping;
+QMap<QString, QString> keyboardMappings;
+QMap<QString, ControllerAction> keyboardActionMapping;
+void saveKeyboardMappings();
+void loadKeyboardMappings();
+void saveButtonMappings();
+void loadButtonMappings();
+void addKeyboardMapping(...);
+void removeKeyboardMapping(...);
+QMap<QString, QString> getKeyboardMappings() const;
+QString getPressMapping(const QString &buttonName);
+void setPressMapping(const QString &buttonName, const QString &action);
+void migrateOldButtonMappings();
+QString migrateOldActionString(const QString &oldString);
+```
+
+**MainWindow.cpp - Delete:**
+1. `handleKeyboardShortcut()` function
+2. `handleControllerButton()` function
+3. `handleButtonHeld()` function
+4. `handleButtonReleased()` function
+5. `saveKeyboardMappings()` function
+6. `loadKeyboardMappings()` function
+7. `saveButtonMappings()` function  
+8. `loadButtonMappings()` function
+9. `addKeyboardMapping()` function
+10. `removeKeyboardMapping()` function
+11. `getKeyboardMappings()` function
+12. `getPressMapping()` function
+13. `setPressMapping()` function
+14. `migrateOldButtonMappings()` function
+15. `migrateOldActionString()` function
+16. Mapping-related signal connections
+
+**Keep:**
+- `SDLControllerManager *controllerManager` - still needed
+- `QThread *controllerThread` - still needed
+- `keyPressEvent()` override - still needed (clean up old code inside it)
+- New `QShortcut`-based shortcuts (see Phase doc-1 block)
+
+**Search pattern:** `handleKeyboardShortcut|handleControllerButton|buttonPressMapping|keyboardMapping|saveButtonMappings|loadButtonMappings`
+
+---
+
+### MW7.7: Delete Stub Functions (MW1.5 Stubs)
+
+**Priority:** MEDIUM  
+**Risk:** Low
+
+Functions marked as "MW1.5: Stub" that do nothing can be deleted.
+
+**MainWindow.h - Find and evaluate each:**
+```cpp
+void openPdfFile(const QString &pdfPath); // MW1.5: Stub
+void switchPageWithDirection(int pageNumber, int direction); // MW1.5: Stub
+void enableStylusButtonMode(Qt::MouseButton button); // MW1.5: Stub
+void disableStylusButtonMode(Qt::MouseButton button); // MW1.5: Stub
+```
+
+**Evaluation:**
+- `openPdfFile()` - If just a stub, delete. If has real code, keep or replace.
+- `switchPageWithDirection()` - Likely obsolete with new scrollToPage(), delete.
+- Stylus button mode functions - Check if called anywhere, delete if unused.
+
+**Search pattern:** `MW1.5: Stub`
+
+---
+
+### MW7.8: Delete overflowMenuButton (Keep overflowMenu)
+
+**Priority:** MEDIUM  
+**Risk:** Low
+
+The old `overflowMenuButton` in MainWindow is redundant - NavigationBar has its own menu button that shows the same `overflowMenu`.
+
+**MainWindow.h - Delete:**
+```cpp
+QPushButton *overflowMenuButton;
+```
+
+**MainWindow.cpp - Delete:**
+1. `overflowMenuButton` creation (lines ~1092-1098)
+2. `overflowMenuButton` click connection (lines ~1146-1149)
+3. `overflowMenuButton` addition to controlLayout (line ~1191) - may already be gone
+4. `overflowMenuButton` styling in `updateTheme()`
+
+**Keep:**
+- `QMenu *overflowMenu` - the actual menu
+- Connection to NavigationBar's `menuRequested` signal (line ~1320)
+
+**Search pattern:** `overflowMenuButton`
+
+---
+
+### MW7.9: Clean Up InkCanvas References
+
+**Priority:** HIGH  
+**Risk:** MEDIUM (other files may reference InkCanvas)
+
+Remove InkCanvas references from MainWindow.h. Don't delete InkCanvas.cpp from CMakeLists yet (other files reference it).
+
+**MainWindow.h - Delete/clean:**
+1. Any remaining `#include "InkCanvas.h"` (should be commented)
+2. Any remaining `class InkCanvas;` forward declaration
+3. Comments mentioning InkCanvas methods
+
+**Note:** InkCanvas.cpp compilation errors exist because it calls deleted MainWindow methods:
+- `updatePictureButtonState()` 
+- `getCurrentPageForCanvas()`
+
+**Future task:** Either stub these in InkCanvas.cpp or remove InkCanvas.cpp from CMakeLists.
+
+---
+
+### MW7.10: Delete Remaining Obsolete UI Elements
+
+**Priority:** LOW  
+**Risk:** Low
+
+Clean up any remaining obsolete button/widget declarations that weren't caught earlier.
+
+**Check and delete if present:**
+```cpp
+QPushButton *deletePageButton;      // If unused
+QWidget *zoomContainer;             // If unused
+QLineEdit *zoomInput;               // If unused  
+QWidget *sidebarContainer;          // If unused
+QWidget *tabBarContainer;           // If unused (legacy)
+QLineEdit *customColorInput;        // If unused
+QPushButton *customColorButton;     // If unused
+```
+
+**Search pattern for each:** Check if they're created and used anywhere.
+
+---
+
+### Summary Checklist
+
+| Task | Description | Search Pattern |
+|------|-------------|----------------|
+| MW7.1 | Delete "REMOVED" comments | `// REMOVED` |
+| MW7.2 | Delete ALL dial code | `dial\|Dial` |
+| MW7.3 | Delete old PDF functions | `loadPdf\|exportAnnotated` |
+| MW7.4 | Delete bookmark implementation | `bookmark\|Bookmark` |
+| MW7.5 | Delete outline sidebar | `outlineSidebar\|outlineTree` |
+| MW7.6 | Delete old mapping system | `handleKeyboardShortcut\|buttonPressMapping` |
+| MW7.7 | Delete stub functions | `MW1.5: Stub` |
+| MW7.8 | Delete overflowMenuButton | `overflowMenuButton` |
+| MW7.9 | Clean InkCanvas refs | `InkCanvas` |
+| MW7.10 | Delete remaining obsolete UI | (manual review) |
+
+---
+
+## Appendix: Code to KEEP
+
+### Keep: New QShortcut-based Shortcuts (Phase doc-1)
+
+These use the new pattern and should NOT be deleted:
+
+```cpp
+// Phase doc-1: Application-wide keyboard shortcuts
+// Using QShortcut with ApplicationShortcut context
+QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
+QShortcut* loadShortcut = new QShortcut(QKeySequence::Open, this);
+QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
+QShortcut* insertPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this);
+QShortcut* deletePageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this);
+QShortcut* newEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this);
+QShortcut* loadBundleShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), this);
+QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
+QShortcut* debugOverlayShortcut = new QShortcut(QKeySequence(Qt::Key_F12), this);
+QShortcut* autoLayoutShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_2), this);
+```
+
+### Keep: SDLControllerManager
+
+The controller manager itself is needed - only the mapping system is deleted:
+
+```cpp
+SDLControllerManager *controllerManager = nullptr;
+QThread *controllerThread = nullptr;
+```
+
+### Keep: keyPressEvent() Override
+
+The override stays, but old code inside may need cleanup:
+
+```cpp
+void keyPressEvent(QKeyEvent *event) override;
+```
+
+### Keep: openPdfDocument()
+
+New PDF opening function (Ctrl+Shift+O):
+
+```cpp
+void openPdfDocument();
+```

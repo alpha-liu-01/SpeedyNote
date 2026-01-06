@@ -1970,7 +1970,8 @@ void InkCanvas::mousePressEvent(QMouseEvent *event) {
             setPictureSelectionMode(false);
             MainWindow *mainWindow = findMainWindow();
             if (mainWindow) {
-                mainWindow->updatePictureButtonState();
+                // REMOVED: updatePictureButtonState removed - insertPictureButton deleted
+                // mainWindow->updatePictureButtonState();
             }
             event->accept();
             return;
@@ -2024,11 +2025,11 @@ void InkCanvas::mousePressEvent(QMouseEvent *event) {
         // Exit picture selection mode after placing a picture
         setPictureSelectionMode(false);
         
-        // Update the main window button state
-        MainWindow *mainWindow = findMainWindow();
-        if (mainWindow) {
-            mainWindow->updatePictureButtonState();
-        }
+        // REMOVED: updatePictureButtonState removed - insertPictureButton deleted
+        // MainWindow *mainWindow = findMainWindow();
+        // if (mainWindow) {
+        //     mainWindow->updatePictureButtonState();
+        // }
         
         event->accept();
         return;
@@ -2073,7 +2074,8 @@ void InkCanvas::mousePressEvent(QMouseEvent *event) {
                     }
                     
                     if (mainWindow) {
-                        mainWindow->updatePictureButtonState();
+                        // REMOVED: updatePictureButtonState removed - insertPictureButton deleted
+                // mainWindow->updatePictureButtonState();
                     }
                     
                     // Show brief success message
@@ -3074,7 +3076,8 @@ void InkCanvas::saveCurrentPage() {
     MainWindow *mainWin = qobject_cast<MainWindow*>(parentWidget());  // ✅ Get main window
     if (!mainWin) return;
     
-    int currentPage = mainWin->getCurrentPageForCanvas(this);  // ✅ Get correct page
+    // REMOVED: getCurrentPageForCanvas removed - InkCanvas being deleted
+    int currentPage = 0;  // Default to page 0
     saveToFile(currentPage);
 }
 
