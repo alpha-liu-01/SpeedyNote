@@ -107,7 +107,7 @@ void setupLinuxSignalHandlers() {
 #endif
 
 MainWindow::MainWindow(QWidget *parent) 
-    : QMainWindow(parent), benchmarking(false), localServer(nullptr) {
+    : QMainWindow(parent), localServer(nullptr) {
 
     setWindowTitle(tr("SpeedyNote Beta 0.12.2"));
     
@@ -123,10 +123,6 @@ MainWindow::MainWindow(QWidget *parent)
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setFocusPolicy(Qt::StrongFocus);
     
-    // Initialize DPR early
-    initialDpr = getDevicePixelRatio();
-
-
     // QString iconPath = QCoreApplication::applicationDirPath() + "/icon.ico";
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
     
@@ -280,10 +276,6 @@ MainWindow::MainWindow(QWidget *parent)
         m_tabManager->closeTab(index);
     });
     // ===========================================================================
-    
-    QSettings settings("SpeedyNote", "App");
-    pdfRenderDPI = settings.value("pdfRenderDPI", 192).toInt();
-    // REMOVED: setPdfDPI call removed - PDF DPI functionality deleted
     
     setupUi();    // ✅ Move all UI setup here
 
@@ -800,10 +792,6 @@ void MainWindow::setupUi() {
 
     setCentralWidget(container);
 
-    benchmarkTimer = new QTimer(this);
-    // REMOVED: benchmarkButton connection removed - button deleted
-    connect(benchmarkTimer, &QTimer::timeout, this, &MainWindow::updateBenchmarkDisplay);
-
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/temp_session";
     QDir dir(tempDir);
 
@@ -902,15 +890,6 @@ void MainWindow::setupUi() {
 }
 
 MainWindow::~MainWindow() {
-    // ✅ MEMORY SAFETY: Wait for any pending async save to complete
-    // This prevents the async task from running after MainWindow is destroyed
-    // (even though it captures data by value, this ensures clean shutdown)
-    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
-        concurrentSaveFuture.waitForFinished();
-    }
-
-    // REMOVED MW7.6: saveButtonMappings call removed - old mapping system deleted
-    
     // ✅ FIX: Disconnect TabManager signals BEFORE Qt deletes children
     // This prevents "signal during destruction" crash where TabManager emits
     // currentViewportChanged during child deletion, triggering updateDialDisplay
@@ -959,35 +938,6 @@ MainWindow::~MainWindow() {
     cleanupSharedResources();
 }
 
-void MainWindow::toggleBenchmark() {
-    // Phase 3.1.4: Use currentViewport() for benchmark
-    benchmarking = !benchmarking;
-    if (DocumentViewport* vp = currentViewport()) {
-    if (benchmarking) {
-            vp->startBenchmark();
-            benchmarkTimer->start(1000);
-    } else {
-            vp->stopBenchmark();
-            benchmarkTimer->stop();
-            benchmarkLabel->setText(tr("PR:N/A"));
-        }
-    } else {
-        benchmarkTimer->stop();
-        benchmarkLabel->setText(tr("PR:N/A"));
-    }
-}
-
-void MainWindow::updateBenchmarkDisplay() {
-    // Phase 3.1.4: Use currentViewport() for benchmark display
-    if (DocumentViewport* vp = currentViewport()) {
-        int paintRate = vp->getPaintRate();
-        benchmarkLabel->setText(QString(tr("PR:%1 Hz")).arg(paintRate));
-    } else {
-        benchmarkLabel->setText(tr("PR:N/A"));
-    }
-}
-
-
 // MW1.5: Kept as stubs - still called from many places
 void MainWindow::switchPage(int pageIndex) {
     // Phase S4: Main page switching function - everything goes through here
@@ -997,29 +947,6 @@ void MainWindow::switchPage(int pageIndex) {
     
     vp->scrollToPage(pageIndex);
     // pageInput update is handled by currentPageChanged signal connection
-}
-
-
-void MainWindow::deleteCurrentPage() {
-    // Phase 3.1.8: Stubbed - page deletion will use DocumentViewport
-    DocumentViewport* vp = currentViewport();
-    if (!vp) return;
-    
-    int displayPageNumber = vp->currentPageIndex() + 1;
-    
-    // Show confirmation dialog
-    QMessageBox confirmBox(this);
-    confirmBox.setWindowTitle(tr("Clear Page"));
-    confirmBox.setIcon(QMessageBox::Warning);
-    confirmBox.setText(tr("Are you sure you want to clear page %1?").arg(displayPageNumber));
-    confirmBox.setInformativeText(tr("This will permanently delete all drawings on this page. This action cannot be undone."));
-    confirmBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-    confirmBox.setDefaultButton(QMessageBox::No);
-    
-    if (confirmBox.exec() == QMessageBox::Yes) {
-        // TODO Phase 3.3: Clear page via vp->document()->currentPage()->clearAll()
-        qDebug() << "deleteCurrentPage(): Clear page not implemented yet";
-    }
 }
 
 
@@ -1727,14 +1654,12 @@ void MainWindow::addNewTab() {
         return;
     }
     
-    // Phase doc-1: Apply user's default background settings from QSettings
-    // This ensures new pages use the user's preferred background style
+    // Apply default background settings (hardcoded defaults)
     {
-        Page::BackgroundType defaultStyle;
-        QColor defaultBgColor;
-        QColor defaultGridColor;
-        int defaultDensity;
-        loadDefaultBackgroundSettings(defaultStyle, defaultBgColor, defaultGridColor, defaultDensity);
+        Page::BackgroundType defaultStyle = Page::BackgroundType::Grid;
+        QColor defaultBgColor = Qt::white;
+        QColor defaultGridColor = QColor(200, 200, 200);
+        int defaultDensity = 30;
         
         // Update document defaults for future pages
         doc->defaultBackgroundType = defaultStyle;
@@ -1814,13 +1739,12 @@ void MainWindow::addNewEdgelessTab()
         return;
     }
     
-    // Apply user's default background settings from QSettings
+    // Apply default background settings (hardcoded defaults)
     {
-        Page::BackgroundType defaultStyle;
-        QColor defaultBgColor;
-        QColor defaultGridColor;
-        int defaultDensity;
-        loadDefaultBackgroundSettings(defaultStyle, defaultBgColor, defaultGridColor, defaultDensity);
+        Page::BackgroundType defaultStyle = Page::BackgroundType::Grid;
+        QColor defaultBgColor = Qt::white;
+        QColor defaultGridColor = QColor(200, 200, 200);
+        int defaultDensity = 30;
         
         // Update document defaults for tiles
         doc->defaultBackgroundType = defaultStyle;
@@ -2083,33 +2007,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         else if (event->type() == QEvent::TabletMove) {
             // TODO Phase 3.3: Implement tablet hover handling
         }
-        // Handle tablet press/release for stylus button mapping
-        else if (event->type() == QEvent::TabletPress) {
-            QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
-#ifdef Q_OS_LINUX
-            // REMOVED: onStylusProximityEnter call removed - stylus proximity functionality deleted
-#endif
-            // Handle stylus side button press (not just tip)
-            Qt::MouseButtons buttons = tabletEvent->buttons();
-            if ((buttons & Qt::MiddleButton) || (buttons & Qt::RightButton)) {
-                handleStylusButtonPress(buttons);
-            }
-        }
-        else if (event->type() == QEvent::TabletRelease) {
-            QTabletEvent* tabletEvent = static_cast<QTabletEvent*>(event);
-#ifdef Q_OS_LINUX
-            // REMOVED: onStylusProximityLeave call removed - stylus proximity functionality deleted
-#endif
-            // Handle stylus side button release
-            Qt::MouseButton releasedButton = tabletEvent->button();
-            Qt::MouseButtons remainingButtons = tabletEvent->buttons();
-            if (releasedButton == Qt::MiddleButton || releasedButton == Qt::RightButton ||
-                stylusButtonAActive || stylusButtonBActive) {
-                handleStylusButtonRelease(remainingButtons, releasedButton);
-            }
-        }
-        
         // ========================================================================
+        // Wheel event handling
         else if (event->type() == QEvent::Wheel) {
             // MW2.2: Removed mouseDialModeActive check
 
@@ -2345,7 +2244,6 @@ void MainWindow::saveThemeSettings() {
     if (customAccentColor.isValid()) {
         settings.setValue("customAccentColor", customAccentColor.name());
     }
-    settings.setValue("useBrighterPalette", useBrighterPalette);
 }
 
 void MainWindow::loadThemeSettings() {
@@ -2353,7 +2251,6 @@ void MainWindow::loadThemeSettings() {
     useCustomAccentColor = settings.value("useCustomAccentColor", false).toBool();
     QString colorName = settings.value("customAccentColor", "#0078D4").toString();
     customAccentColor = QColor(colorName);
-    useBrighterPalette = settings.value("useBrighterPalette", false).toBool();
     
     // Ensure valid values
     if (!customAccentColor.isValid()) {
@@ -2398,103 +2295,13 @@ void MainWindow::cycleTouchGestureMode() {
     }
 }
 
-// ==================== Stylus Button Mapping ====================
-
-void MainWindow::setStylusButtonAAction(StylusButtonAction action) {
-    stylusButtonAAction = action;
-    saveStylusButtonSettings();
-}
-
-void MainWindow::setStylusButtonBAction(StylusButtonAction action) {
-    stylusButtonBAction = action;
-    saveStylusButtonSettings();
-}
-
-void MainWindow::setStylusButtonAQt(Qt::MouseButton button) {
-    stylusButtonAQt = button;
-    saveStylusButtonSettings();
-}
-
-void MainWindow::setStylusButtonBQt(Qt::MouseButton button) {
-    stylusButtonBQt = button;
-    saveStylusButtonSettings();
-}
-
-void MainWindow::saveStylusButtonSettings() {
-    QSettings settings("SpeedyNote", "App");
-    settings.setValue("stylusButtonAAction", static_cast<int>(stylusButtonAAction));
-    settings.setValue("stylusButtonBAction", static_cast<int>(stylusButtonBAction));
-    settings.setValue("stylusButtonAQt", static_cast<int>(stylusButtonAQt));
-    settings.setValue("stylusButtonBQt", static_cast<int>(stylusButtonBQt));
-}
-
-void MainWindow::loadStylusButtonSettings() {
-    QSettings settings("SpeedyNote", "App");
-    stylusButtonAAction = static_cast<StylusButtonAction>(
-        settings.value("stylusButtonAAction", static_cast<int>(StylusButtonAction::None)).toInt());
-    stylusButtonBAction = static_cast<StylusButtonAction>(
-        settings.value("stylusButtonBAction", static_cast<int>(StylusButtonAction::None)).toInt());
-    stylusButtonAQt = static_cast<Qt::MouseButton>(
-        settings.value("stylusButtonAQt", static_cast<int>(Qt::MiddleButton)).toInt());
-    stylusButtonBQt = static_cast<Qt::MouseButton>(
-        settings.value("stylusButtonBQt", static_cast<int>(Qt::RightButton)).toInt());
-}
-
-// MW1.5: Kept as stubs - still called from stylus button handlers
-// REMOVED MW7.7: enableStylusButtonMode and disableStylusButtonMode stubs removed
-
-void MainWindow::handleStylusButtonPress(Qt::MouseButtons buttons) {
-    // Check if any configured stylus button is now pressed
-    if ((buttons & stylusButtonAQt) && stylusButtonAAction != StylusButtonAction::None) {
-        // REMOVED MW7.7: enableStylusButtonMode stub call removed
-    }
-    if ((buttons & stylusButtonBQt) && stylusButtonBAction != StylusButtonAction::None) {
-        // REMOVED MW7.7: enableStylusButtonMode stub call removed
-    }
-}
-
-void MainWindow::handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton) {
-    // Check if a configured stylus button was released
-    if (releasedButton == stylusButtonAQt || !(buttons & stylusButtonAQt)) {
-        if (stylusButtonAActive) {
-            // REMOVED MW7.7: disableStylusButtonMode stub call removed
-        }
-    }
-    if (releasedButton == stylusButtonBQt || !(buttons & stylusButtonBQt)) {
-        if (stylusButtonBActive) {
-            // REMOVED MW7.7: disableStylusButtonMode stub call removed
-        }
-    }
-}
-
-
-
 void MainWindow::loadUserSettings() {
     QSettings settings("SpeedyNote", "App");
-
 
     // Load touch gesture mode (default to Full for backwards compatibility)
     int savedMode = settings.value("touchGestureMode", static_cast<int>(TouchGestureMode::Full)).toInt();
     touchGestureMode = static_cast<TouchGestureMode>(savedMode);
     setTouchGestureMode(touchGestureMode);
-    
-
-    // Load stylus button settings
-    loadStylusButtonSettings();
-    
-    // Phase doc-1: Migrate from old BackgroundStyle enum to Page::BackgroundType
-    // Old enum: None=0, Grid=1, Lines=2
-    // New enum: None=0, PDF=1, Custom=2, Grid=3, Lines=4
-    // Using new key "defaultBgType" to avoid loading stale values from old enum
-    if (!settings.contains("defaultBgType")) {
-        // Clear old key if it exists (from pre-migration)
-        if (settings.contains("defaultBackgroundStyle")) {
-            settings.remove("defaultBackgroundStyle");
-        }
-        saveDefaultBackgroundSettings(Page::BackgroundType::Grid, Qt::white, QColor(200, 200, 200), 30);
-    }
-    
-    // REMOVED MW7.6: loadKeyboardMappings call removed - old mapping system deleted
     
     // Load theme settings
     loadThemeSettings();
@@ -2595,41 +2402,6 @@ void MainWindow::keyReleaseEvent(QKeyEvent *event) {
     // TODO Phase 3.3: Track Ctrl state in DocumentViewport if needed
     
     QMainWindow::keyReleaseEvent(event);
-}
-
-
-
-// REMOVED MW5.2: onZoomSliderChanged function removed - zoomSlider deleted
-
-void MainWindow::saveDefaultBackgroundSettings(Page::BackgroundType style, QColor bgColor, QColor gridColor, int density) {
-    // Phase doc-1: Using new key "defaultBgType" to avoid stale values from old BackgroundStyle enum
-    QSettings settings("SpeedyNote", "App");
-    settings.setValue("defaultBgType", static_cast<int>(style));
-    settings.setValue("defaultBackgroundColor", bgColor.name());
-    settings.setValue("defaultGridColor", gridColor.name());  // Phase doc-1: Added grid color
-    settings.setValue("defaultBackgroundDensity", density);
-}
-
-
-void MainWindow::loadDefaultBackgroundSettings(Page::BackgroundType &style, QColor &bgColor, QColor &gridColor, int &density) {
-    // Phase doc-1: Using new key "defaultBgType" to avoid stale values from old BackgroundStyle enum
-    QSettings settings("SpeedyNote", "App");
-    style = static_cast<Page::BackgroundType>(settings.value("defaultBgType", static_cast<int>(Page::BackgroundType::Grid)).toInt());
-    bgColor = QColor(settings.value("defaultBackgroundColor", "#FFFFFF").toString());
-    gridColor = QColor(settings.value("defaultGridColor", "#C8C8C8").toString());  // Phase doc-1: Added grid color (gray 200,200,200)
-    density = settings.value("defaultBackgroundDensity", 30).toInt();
-    
-    // Ensure valid values
-    if (!bgColor.isValid()) bgColor = Qt::white;
-    if (!gridColor.isValid()) gridColor = QColor(200, 200, 200);
-    if (density < 10) density = 10;
-    if (density > 200) density = 200;
-    
-    // Validate enum range (0-4 for Page::BackgroundType)
-    int styleInt = static_cast<int>(style);
-    if (styleInt < 0 || styleInt > 4) {
-        style = Page::BackgroundType::Grid;  // Default to Grid if invalid
-    }
 }
 
 
@@ -2789,12 +2561,6 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
 #endif
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-    // ✅ OPTIMIZATION: Wait for any pending async save to complete before closing
-    // This ensures data saved during page switching is fully written to disk
-    if (concurrentSaveFuture.isValid() && !concurrentSaveFuture.isFinished()) {
-        concurrentSaveFuture.waitForFinished();
-    }
-    
     // ========== CHECK FOR UNSAVED EDGELESS DOCUMENTS ==========
     // Iterate through all tabs and prompt for unsaved edgeless documents
     if (m_tabManager && m_documentManager) {
