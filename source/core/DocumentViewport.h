@@ -1394,6 +1394,7 @@ private:
     // Text box cache (loaded on-demand for current page)
     QVector<PdfTextBox> m_textBoxCache;
     int m_textBoxCachePageIndex = -1;
+    mutable int m_lastHitBoxIndex = -1;  ///< PERF: Spatial locality hint for findCharacterAtPoint
     
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha

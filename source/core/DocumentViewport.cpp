@@ -154,6 +154,10 @@ void DocumentViewport::setDocument(Document* doc)
     invalidatePdfCache();
     invalidatePageLayoutCache();
     
+    // Phase A: Clear text selection (refers to old document's text boxes)
+    m_textSelection.clear();
+    clearTextBoxCache();
+    
     // Reset view state
     m_zoomLevel = 1.0;
     m_panOffset = QPointF(0, 0);
@@ -7307,6 +7311,10 @@ void DocumentViewport::clearLassoSelection()
 
 // ===== Highlighter Tool Methods (Phase A) =====
 
+// PDF uses 72 DPI, Page uses 96 DPI - scale factor for coordinate conversion
+static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
+static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
+
 void DocumentViewport::loadTextBoxesForPage(int pageIndex)
 {
     // Already cached?
@@ -7350,6 +7358,7 @@ void DocumentViewport::clearTextBoxCache()
 {
     m_textBoxCache.clear();
     m_textBoxCachePageIndex = -1;
+    m_lastHitBoxIndex = -1;  // Reset locality hint
 }
 
 bool DocumentViewport::isHighlighterEnabled() const
@@ -7397,6 +7406,8 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
     
     // Check for double-click (word selection) and triple-click (line selection)
     // Using static variables for timing - thread-safe for single UI thread
+    // Note: QElapsedTimer::isValid() returns false until first restart(), which
+    // correctly handles the first click (clickCount becomes 1, timer starts)
     static QElapsedTimer lastClickTimer;
     static QPointF lastClickPos;
     static int clickCount = 0;
@@ -7426,9 +7437,8 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
     }
     
     // Single click: start text-flow selection at character position
-    // Convert page coords to PDF coords (72 DPI)
-    const qreal scale = 72.0 / 96.0;
-    QPointF pdfPos(hit.pagePoint.x() * scale, hit.pagePoint.y() * scale);
+    // Convert page coords to PDF coords
+    QPointF pdfPos(hit.pagePoint.x() * PAGE_TO_PDF_SCALE, hit.pagePoint.y() * PAGE_TO_PDF_SCALE);
     
     CharacterPosition charPos = findCharacterAtPoint(pdfPos);
     
@@ -7466,28 +7476,37 @@ void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
         return;
     }
     
-    // Convert page coords to PDF coords (72 DPI)
-    const qreal scale = 72.0 / 96.0;
-    QPointF pdfPos(hit.pagePoint.x() * scale, hit.pagePoint.y() * scale);
+    // Convert page coords to PDF coords
+    QPointF pdfPos(hit.pagePoint.x() * PAGE_TO_PDF_SCALE, hit.pagePoint.y() * PAGE_TO_PDF_SCALE);
     
     CharacterPosition charPos = findCharacterAtPoint(pdfPos);
     
     if (charPos.isValid()) {
-        // Update end position (start stays anchored)
-        m_textSelection.endBoxIndex = charPos.boxIndex;
-        m_textSelection.endCharIndex = charPos.charIndex;
+        // PERF: Only update if position actually changed
+        // This avoids expensive string/rect rebuilding on every mouse move
+        bool positionChanged = (charPos.boxIndex != m_textSelection.endBoxIndex ||
+                                charPos.charIndex != m_textSelection.endCharIndex);
         
         // If start wasn't valid (clicked outside text initially), set it now
         if (m_textSelection.startBoxIndex < 0) {
             m_textSelection.startBoxIndex = charPos.boxIndex;
             m_textSelection.startCharIndex = charPos.charIndex;
+            positionChanged = true;  // Force update on first valid hit
         }
         
-        // Recompute selected text and highlight rectangles
-        updateSelectedTextAndRects();
+        if (positionChanged) {
+            // Update end position (start stays anchored)
+            m_textSelection.endBoxIndex = charPos.boxIndex;
+            m_textSelection.endCharIndex = charPos.charIndex;
+            
+            // Recompute selected text and highlight rectangles
+            updateSelectedTextAndRects();
+            
+            // Only repaint when selection actually changed
+            update();
+        }
     }
-    
-    update();
+    // Note: No update() if position unchanged or charPos invalid
 }
 
 void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
@@ -7516,13 +7535,13 @@ DocumentViewport::CharacterPosition DocumentViewport::findCharacterAtPoint(const
         return result;
     }
     
-    // Iterate through text boxes to find which character contains the point
-    for (int boxIdx = 0; boxIdx < m_textBoxCache.size(); ++boxIdx) {
+    // Helper lambda to check a single box and return character position
+    auto checkBox = [&](int boxIdx) -> bool {
         const PdfTextBox& box = m_textBoxCache[boxIdx];
         
         // Quick bounding box check first
         if (!box.boundingBox.contains(pdfPos)) {
-            continue;
+            return false;
         }
         
         // Check character-level bounding boxes for precision
@@ -7531,7 +7550,8 @@ DocumentViewport::CharacterPosition DocumentViewport::findCharacterAtPoint(const
                 if (box.charBoundingBoxes[charIdx].contains(pdfPos)) {
                     result.boxIndex = boxIdx;
                     result.charIndex = charIdx;
-                    return result;
+                    m_lastHitBoxIndex = boxIdx;  // Update locality hint
+                    return true;
                 }
             }
             // Point is in box but not in any char rect - find nearest char
@@ -7548,11 +7568,43 @@ DocumentViewport::CharacterPosition DocumentViewport::findCharacterAtPoint(const
             }
             result.boxIndex = boxIdx;
             result.charIndex = bestCharIdx;
-            return result;
+            m_lastHitBoxIndex = boxIdx;  // Update locality hint
+            return true;
         } else {
             // No character boxes - return the whole word (char 0)
             result.boxIndex = boxIdx;
             result.charIndex = 0;
+            m_lastHitBoxIndex = boxIdx;  // Update locality hint
+            return true;
+        }
+    };
+    
+    // PERF: Spatial locality optimization
+    // Check last hit box and its neighbors first (cursor usually stays nearby)
+    if (m_lastHitBoxIndex >= 0 && m_lastHitBoxIndex < m_textBoxCache.size()) {
+        // Check last hit box
+        if (checkBox(m_lastHitBoxIndex)) {
+            return result;
+        }
+        // Check neighbors (next and previous boxes in reading order)
+        if (m_lastHitBoxIndex + 1 < m_textBoxCache.size() && checkBox(m_lastHitBoxIndex + 1)) {
+            return result;
+        }
+        if (m_lastHitBoxIndex > 0 && checkBox(m_lastHitBoxIndex - 1)) {
+            return result;
+        }
+    }
+    
+    // Fallback: Full linear scan (skip already-checked boxes)
+    for (int boxIdx = 0; boxIdx < m_textBoxCache.size(); ++boxIdx) {
+        // Skip boxes we already checked in the locality optimization
+        if (m_lastHitBoxIndex >= 0 && 
+            (boxIdx == m_lastHitBoxIndex || 
+             boxIdx == m_lastHitBoxIndex + 1 || 
+             boxIdx == m_lastHitBoxIndex - 1)) {
+            continue;
+        }
+        if (checkBox(boxIdx)) {
             return result;
         }
     }
@@ -7600,13 +7652,19 @@ void DocumentViewport::updateSelectedTextAndRects()
     for (int boxIdx = fromBox; boxIdx <= toBox && boxIdx < m_textBoxCache.size(); ++boxIdx) {
         const PdfTextBox& box = m_textBoxCache[boxIdx];
         
+        // Skip empty text boxes (safety check)
+        if (box.text.isEmpty()) {
+            continue;
+        }
+        
         // Determine character range for this box
         int startChar = (boxIdx == fromBox) ? fromChar : 0;
         int endChar = (boxIdx == toBox) ? toChar : (box.text.length() - 1);
         
-        // Clamp to valid range
-        startChar = qBound(0, startChar, box.text.length() - 1);
-        endChar = qBound(0, endChar, box.text.length() - 1);
+        // Clamp to valid range (now safe since we checked for empty text)
+        int maxCharIdx = box.text.length() - 1;
+        startChar = qBound(0, startChar, maxCharIdx);
+        endChar = qBound(0, endChar, maxCharIdx);
         
         if (startChar > endChar) {
             continue;  // Invalid range
@@ -7670,8 +7728,8 @@ void DocumentViewport::finalizeTextSelection()
     // Emit signal for UI feedback
     emit textSelected(m_textSelection.selectedText);
     
-    qDebug() << "Text selected:" << m_textSelection.selectedText.left(50) 
-             << (m_textSelection.selectedText.length() > 50 ? "..." : "");
+    // qDebug() << "Text selected:" << m_textSelection.selectedText.left(50) 
+             // << (m_textSelection.selectedText.length() > 50 ? "..." : "");
 }
 
 void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
@@ -7679,13 +7737,17 @@ void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
     loadTextBoxesForPage(pageIndex);
     
     // Convert to PDF coords
-    const qreal scale = 72.0 / 96.0;
-    QPointF pdfPos(pagePos.x() * scale, pagePos.y() * scale);
+    QPointF pdfPos(pagePos.x() * PAGE_TO_PDF_SCALE, pagePos.y() * PAGE_TO_PDF_SCALE);
     
     // Find text box containing point
     for (int boxIdx = 0; boxIdx < m_textBoxCache.size(); ++boxIdx) {
         const PdfTextBox& box = m_textBoxCache[boxIdx];
         if (box.boundingBox.contains(pdfPos)) {
+            // Skip empty text boxes
+            if (box.text.isEmpty()) {
+                continue;
+            }
+            
             m_textSelection.clear();
             m_textSelection.pageIndex = pageIndex;
             
@@ -7708,8 +7770,7 @@ void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
     loadTextBoxesForPage(pageIndex);
     
     // Convert to PDF coords
-    const qreal scale = 72.0 / 96.0;
-    QPointF pdfPos(pagePos.x() * scale, pagePos.y() * scale);
+    QPointF pdfPos(pagePos.x() * PAGE_TO_PDF_SCALE, pagePos.y() * PAGE_TO_PDF_SCALE);
     
     // Find text box containing point
     int clickedBoxIdx = -1;
@@ -7747,7 +7808,8 @@ void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
     m_textSelection.endBoxIndex = lastBoxOnLine;
     
     const PdfTextBox& lastBox = m_textBoxCache[lastBoxOnLine];
-    m_textSelection.endCharIndex = lastBox.text.length() - 1;
+    // Safety: handle empty text boxes
+    m_textSelection.endCharIndex = lastBox.text.isEmpty() ? 0 : (lastBox.text.length() - 1);
     
     updateSelectedTextAndRects();
     finalizeTextSelection();
@@ -7772,9 +7834,6 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
     
     painter.save();
     
-    // Scale factor: PDF coords (72 DPI) to page coords (96 DPI)
-    const qreal scale = 96.0 / 72.0;
-    
     // Selection color (Windows selection blue with transparency)
     QColor selectionColor(0, 120, 215, 100);
     painter.setBrush(selectionColor);
@@ -7783,10 +7842,10 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
     // Draw highlight rectangles (per-line segments, in PDF coords → convert to page coords)
     for (const QRectF& pdfRect : m_textSelection.highlightRects) {
         QRectF pageRect(
-            pdfRect.x() * scale,
-            pdfRect.y() * scale,
-            pdfRect.width() * scale,
-            pdfRect.height() * scale
+            pdfRect.x() * PDF_TO_PAGE_SCALE,
+            pdfRect.y() * PDF_TO_PAGE_SCALE,
+            pdfRect.width() * PDF_TO_PAGE_SCALE,
+            pdfRect.height() * PDF_TO_PAGE_SCALE
         );
         painter.drawRect(pageRect);
     }
