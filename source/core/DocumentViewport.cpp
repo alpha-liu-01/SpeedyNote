@@ -28,6 +28,7 @@
 #include <QSet>       // For efficient ID lookup in eraseAt
 #include <QClipboard>     // For clipboard access (O2.4)
 #include <QGuiApplication> // For clipboard access (O2.4)
+#include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QMimeData>      // For clipboard content type check (O2.4)
 
 // ===== Constructor & Destructor =====
@@ -364,7 +365,16 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
-    // Update cursor and repaint for eraser cursor visibility
+    // Phase A: Clear text selection when switching away from Highlighter
+    if (previousTool == ToolType::Highlighter && tool != ToolType::Highlighter) {
+        m_textSelection.clear();
+        clearTextBoxCache();
+    }
+    
+    // Update cursor based on tool and page type
+    updateHighlighterCursor();
+    
+    // Repaint for tool-specific visuals (eraser cursor, etc.)
     update();
     
     emit toolChanged(tool);
@@ -752,13 +762,16 @@ QRectF DocumentViewport::pageRect(int pageIndex) const
         return QRectF();
     }
     
-    const Page* page = m_document->page(pageIndex);
-    if (!page) {
+    // PERF FIX: Use pageSizeAt() instead of page()->size to avoid
+    // triggering lazy loading from disk. pageSizeAt() uses metadata
+    // which is loaded upfront from the manifest.
+    QSizeF pageSize = m_document->pageSizeAt(pageIndex);
+    if (pageSize.isEmpty()) {
         return QRectF();
     }
     
     QPointF pos = pagePosition(pageIndex);
-    return QRectF(pos, page->size);
+    return QRectF(pos, pageSize);
 }
 
 QSizeF DocumentViewport::totalContentSize() const
@@ -774,57 +787,11 @@ QSizeF DocumentViewport::totalContentSize() const
         return page ? page->size : QSizeF(0, 0);
     }
     
-    qreal totalWidth = 0;
-    qreal totalHeight = 0;
-    
-    switch (m_layoutMode) {
-        case LayoutMode::SingleColumn: {
-            for (int i = 0; i < m_document->pageCount(); ++i) {
-                const Page* page = m_document->page(i);
-                if (page) {
-                    totalWidth = qMax(totalWidth, page->size.width());
-                    totalHeight += page->size.height();
-                    if (i > 0) {
-                        totalHeight += m_pageGap;
-                    }
-                }
-            }
-            break;
-        }
-        
-        case LayoutMode::TwoColumn: {
-            int numRows = (m_document->pageCount() + 1) / 2;
-            
-            for (int row = 0; row < numRows; ++row) {
-                int leftIdx = row * 2;
-                int rightIdx = row * 2 + 1;
-                
-                qreal rowWidth = 0;
-                qreal rowHeight = 0;
-                
-                const Page* leftPage = m_document->page(leftIdx);
-                if (leftPage) {
-                    rowWidth += leftPage->size.width();
-                    rowHeight = qMax(rowHeight, leftPage->size.height());
-                }
-                
-                const Page* rightPage = m_document->page(rightIdx);
-                if (rightPage) {
-                    rowWidth += m_pageGap + rightPage->size.width();
-                    rowHeight = qMax(rowHeight, rightPage->size.height());
-                }
-                
-                totalWidth = qMax(totalWidth, rowWidth);
-                totalHeight += rowHeight;
-                if (row > 0) {
-                    totalHeight += m_pageGap;
-                }
-            }
-            break;
-        }
-    }
-    
-    return QSizeF(totalWidth, totalHeight);
+    // PERF FIX: Use cached content size computed during layout pass.
+    // ensurePageLayoutCache() computes both page Y positions AND total content size
+    // in a single O(n) pass, avoiding repeated O(n) iterations on every scroll.
+    ensurePageLayoutCache();
+    return m_cachedContentSize;
 }
 
 int DocumentViewport::pageAtPoint(QPointF documentPt) const
@@ -878,7 +845,54 @@ int DocumentViewport::pageAtPoint(QPointF documentPt) const
         return -1;
     }
     
-    // For two-column: linear search (still O(n) but pageRect is now O(1))
+    // PERF FIX: For two-column, use binary search on Y cache to find the row
+    // Then only check the two pages in that row instead of all 3600+ pages
+    if (!m_pageYCache.isEmpty()) {
+        qreal targetY = documentPt.y();
+        int numRows = (pageCount + 1) / 2;
+        
+        // Binary search to find the row containing this Y coordinate
+        int low = 0;
+        int high = numRows - 1;
+        int candidateRow = -1;
+        
+        while (low <= high) {
+            int mid = (low + high) / 2;
+            int pageIdx = mid * 2;  // First page of row
+            qreal rowY = m_pageYCache[pageIdx];
+            
+            if (targetY < rowY) {
+                high = mid - 1;
+            } else {
+                candidateRow = mid;  // This row or later
+                low = mid + 1;
+            }
+        }
+        
+        // Check candidate row and neighbors (for edge cases)
+        for (int row = qMax(0, candidateRow); row <= qMin(numRows - 1, candidateRow + 1); ++row) {
+            int leftIdx = row * 2;
+            
+            // Check left page
+            QRectF leftRect = pageRect(leftIdx);
+            if (leftRect.contains(documentPt)) {
+                return leftIdx;
+            }
+            
+            // Check right page
+            int rightIdx = leftIdx + 1;
+            if (rightIdx < pageCount) {
+                QRectF rightRect = pageRect(rightIdx);
+                if (rightRect.contains(documentPt)) {
+                    return rightIdx;
+                }
+            }
+        }
+        
+        return -1;
+    }
+    
+    // Fallback: linear search if cache not available
     for (int i = 0; i < pageCount; ++i) {
         QRectF rect = pageRect(i);
         if (rect.contains(documentPt)) {
@@ -1271,7 +1285,69 @@ QVector<int> DocumentViewport::visiblePages() const
         return result;
     }
     
-    // For two-column: linear search (pageRect is now O(1))
+    // PERF FIX: For two-column, use binary search on Y cache to find visible rows
+    // Then only check pages in those rows instead of all 3600+ pages
+    if (!m_pageYCache.isEmpty()) {
+        qreal viewTop = viewRect.top();
+        qreal viewBottom = viewRect.bottom();
+        
+        // Binary search for first row that might be visible
+        // In two-column mode, rows are at even indices (0, 2, 4, ...)
+        int numRows = (pageCount + 1) / 2;
+        int low = 0;
+        int high = numRows - 1;
+        int firstRow = numRows;  // Beyond last row
+        
+        while (low <= high) {
+            int mid = (low + high) / 2;
+            int pageIdx = mid * 2;  // First page of row
+            qreal rowY = m_pageYCache[pageIdx];
+            
+            // Get row height (max of both pages in row)
+            QSizeF leftSize = m_document->pageSizeAt(pageIdx);
+            QSizeF rightSize = (pageIdx + 1 < pageCount) ? m_document->pageSizeAt(pageIdx + 1) : QSizeF();
+            qreal rowHeight = qMax(leftSize.height(), rightSize.height());
+            qreal rowBottom = rowY + rowHeight;
+            
+            if (rowBottom < viewTop) {
+                // Row is entirely above viewport
+                low = mid + 1;
+            } else {
+                // Row might be visible
+                firstRow = mid;
+                high = mid - 1;
+            }
+        }
+        
+        // Now iterate from first visible row until rows are below viewport
+        for (int row = firstRow; row < numRows; ++row) {
+            int leftIdx = row * 2;
+            qreal rowY = m_pageYCache[leftIdx];
+            
+            if (rowY > viewBottom) {
+                // This and all subsequent rows are below viewport
+                break;
+            }
+            
+            // Check both pages in row
+            QRectF leftRect = pageRect(leftIdx);
+            if (leftRect.intersects(viewRect)) {
+                result.append(leftIdx);
+            }
+            
+            int rightIdx = leftIdx + 1;
+            if (rightIdx < pageCount) {
+                QRectF rightRect = pageRect(rightIdx);
+                if (rightRect.intersects(viewRect)) {
+                    result.append(rightIdx);
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    // Fallback: linear search if cache not available
     for (int i = 0; i < pageCount; ++i) {
         QRectF rect = pageRect(i);
         if (rect.intersects(viewRect)) {
@@ -1900,6 +1976,26 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
                     // Ctrl+[ → send backward
                     sendSelectedBackward();
                 }
+                event->accept();
+                return;
+            }
+        }
+    }
+    
+    // Phase A: Highlighter tool keyboard shortcuts
+    if (m_currentTool == ToolType::Highlighter) {
+        // Copy (Ctrl+C) - copy selected text to clipboard
+        if (event->matches(QKeySequence::Copy)) {
+            copySelectedTextToClipboard();
+            event->accept();
+            return;
+        }
+        
+        // Cancel selection (Escape)
+        if (event->key() == Qt::Key_Escape) {
+            if (m_textSelection.isValid() || m_textSelection.isSelecting) {
+                m_textSelection.clear();
+                update();
                 event->accept();
                 return;
             }
@@ -2702,6 +2798,7 @@ void DocumentViewport::ensurePageLayoutCache() const
     m_pageYCache.resize(pageCount);
     
     if (m_document->isEdgeless() || pageCount == 0) {
+        m_cachedContentSize = QSizeF(0, 0);
         m_pageLayoutDirty = false;
         return;
     }
@@ -2709,6 +2806,10 @@ void DocumentViewport::ensurePageLayoutCache() const
     // Build cache based on layout mode
     // Phase O1.7.5: Use pageSizeAt() instead of page()->size to avoid loading full page content
     // This is critical for paged lazy loading - layout can be calculated from metadata alone
+    // PERF: Also compute totalContentSize during this single O(n) pass
+    qreal totalWidth = 0;
+    qreal totalHeight = 0;
+    
     switch (m_layoutMode) {
         case LayoutMode::SingleColumn: {
             qreal y = 0;
@@ -2716,6 +2817,8 @@ void DocumentViewport::ensurePageLayoutCache() const
                 m_pageYCache[i] = y;
                 QSizeF pageSize = m_document->pageSizeAt(i);
                 if (!pageSize.isEmpty()) {
+                    totalWidth = qMax(totalWidth, pageSize.width());
+                    totalHeight = y + pageSize.height();  // Track total height
                     y += pageSize.height() + m_pageGap;
                 }
             }
@@ -2727,6 +2830,8 @@ void DocumentViewport::ensurePageLayoutCache() const
             // Y position is same for both pages in a row
             qreal y = 0;
             for (int i = 0; i < pageCount; ++i) {
+                QSizeF pageSize = m_document->pageSizeAt(i);
+                
                 if (i % 2 == 0) {
                     // First page of row - calculate and store Y
                     m_pageYCache[i] = y;
@@ -2737,20 +2842,33 @@ void DocumentViewport::ensurePageLayoutCache() const
                     // After second page, advance Y using metadata sizes
                     qreal rowHeight = 0;
                     QSizeF leftSize = m_document->pageSizeAt(i - 1);
-                    QSizeF rightSize = m_document->pageSizeAt(i);
+                    QSizeF rightSize = pageSize;
                     if (!leftSize.isEmpty()) rowHeight = qMax(rowHeight, leftSize.height());
                     if (!rightSize.isEmpty()) rowHeight = qMax(rowHeight, rightSize.height());
+                    
+                    // Track total width (both pages + gap)
+                    qreal rowWidth = 0;
+                    if (!leftSize.isEmpty()) rowWidth += leftSize.width();
+                    if (!rightSize.isEmpty()) rowWidth += m_pageGap + rightSize.width();
+                    totalWidth = qMax(totalWidth, rowWidth);
+                    
+                    totalHeight = y + rowHeight;  // Track total height
                     y += rowHeight + m_pageGap;
                 }
             }
             // Handle odd page count (last page is alone)
             if (pageCount % 2 == 1 && pageCount > 0) {
-                // Last row Y already set, just need to ensure it's correct
+                QSizeF lastSize = m_document->pageSizeAt(pageCount - 1);
+                if (!lastSize.isEmpty()) {
+                    totalWidth = qMax(totalWidth, lastSize.width());
+                    totalHeight = m_pageYCache[pageCount - 1] + lastSize.height();
+                }
             }
             break;
         }
     }
     
+    m_cachedContentSize = QSizeF(totalWidth, totalHeight);
     m_pageLayoutDirty = false;
 }
 
@@ -2790,13 +2908,15 @@ void DocumentViewport::preloadStrokeCaches()
     // Only evict if lazy loading is enabled (bundle format)
     bool lazyLoadingEnabled = m_document->isLazyLoadEnabled();
     
-    // Evict caches/pages outside the keep range
-    for (int i = 0; i < pageCount; ++i) {
-        if (i < keepStart || i > keepEnd) {
-            if (lazyLoadingEnabled) {
+    // PERF FIX: Only check pages that are actually loaded to avoid O(n) iterations
+    // For documents with 3600 pages, iterating through all of them on every scroll is slow
+    if (lazyLoadingEnabled) {
+        // Get list of currently loaded page indices and evict those outside keep range
+        QVector<int> loadedIndices = m_document->loadedPageIndices();
+        for (int i : loadedIndices) {
+            if (i < keepStart || i > keepEnd) {
                 // CR-O1: Clear selection for objects on pages about to be evicted
-                // This prevents dangling pointers in m_selectedObjects and m_hoveredObject
-                Page* page = m_document->page(i);
+                Page* page = m_document->page(i);  // Already loaded, no disk I/O
                 if (page && !page->objects.empty()) {
                     bool selectionChanged = false;
                     for (const auto& obj : page->objects) {
@@ -2814,8 +2934,13 @@ void DocumentViewport::preloadStrokeCaches()
                 
                 // Evict entire page (saves if dirty, removes from memory)
                 m_document->evictPage(i);
-            } else {
-                // Legacy mode: only evict stroke caches, keep page in memory
+            }
+        }
+    } else {
+        // Legacy mode: only evict stroke caches for pages outside keep range
+        // Still need to iterate all pages, but page() access is cheap (already in memory)
+        for (int i = 0; i < pageCount; ++i) {
+            if (i < keepStart || i > keepEnd) {
                 Page* page = m_document->page(i);
                 if (page && page->hasLayerCachesAllocated()) {
                     page->releaseLayerCaches();
@@ -3047,6 +3172,9 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     } else if (m_currentTool == ToolType::ObjectSelect) {
         // Phase O2: Object selection tool
         handlePointerPress_ObjectSelect(pe);
+    } else if (m_currentTool == ToolType::Highlighter) {
+        // Phase A: Text selection / highlighter tool
+        handlePointerPress_Highlighter(pe);
     }
 }
 
@@ -3118,6 +3246,12 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         return;
     }
     
+    // Phase A: Highlighter tool - update text selection
+    if (m_currentTool == ToolType::Highlighter && m_textSelection.isSelecting) {
+        handlePointerMove_Highlighter(pe);
+        return;
+    }
+    
     // For stroke drawing, require an active drawing page
     if (m_activeDrawingPage < 0) {
         return;
@@ -3174,6 +3308,12 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     // Phase O2: ObjectSelect tool - finalize drag
     if (m_currentTool == ToolType::ObjectSelect) {
         handlePointerRelease_ObjectSelect(pe);
+        return;
+    }
+    
+    // Phase A: Highlighter tool - finalize text selection
+    if (m_currentTool == ToolType::Highlighter) {
+        handlePointerRelease_Highlighter(pe);
         return;
     }
     
@@ -7165,6 +7305,509 @@ void DocumentViewport::clearLassoSelection()
     update();
 }
 
+// ===== Highlighter Tool Methods (Phase A) =====
+
+void DocumentViewport::loadTextBoxesForPage(int pageIndex)
+{
+    // Already cached?
+    if (pageIndex == m_textBoxCachePageIndex && !m_textBoxCache.isEmpty()) {
+        return;
+    }
+    
+    m_textBoxCache.clear();
+    m_textBoxCachePageIndex = -1;
+    
+    if (!m_document || pageIndex < 0 || pageIndex >= m_document->pageCount()) {
+        return;
+    }
+    
+    // Check if page has PDF background
+    Page* page = m_document->page(pageIndex);
+    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
+        return;
+    }
+    
+    // Get PDF provider
+    const PdfProvider* pdf = m_document->pdfProvider();
+    if (!pdf || !pdf->supportsTextExtraction()) {
+        return;
+    }
+    
+    // Get PDF page index (may differ from document page index)
+    int pdfPageIndex = page->pdfPageNumber;
+    if (pdfPageIndex < 0) {
+        pdfPageIndex = pageIndex;  // Fallback: assume 1:1 mapping
+    }
+    
+    // Load text boxes
+    m_textBoxCache = pdf->textBoxes(pdfPageIndex);
+    m_textBoxCachePageIndex = pageIndex;
+    
+    qDebug() << "Loaded" << m_textBoxCache.size() << "text boxes for page" << pageIndex;
+}
+
+void DocumentViewport::clearTextBoxCache()
+{
+    m_textBoxCache.clear();
+    m_textBoxCachePageIndex = -1;
+}
+
+bool DocumentViewport::isHighlighterEnabled() const
+{
+    if (!m_document) return false;
+    
+    // Check if current page has PDF
+    Page* page = m_document->page(m_currentPageIndex);
+    return page && page->backgroundType == Page::BackgroundType::PDF;
+}
+
+void DocumentViewport::updateHighlighterCursor()
+{
+    if (m_currentTool != ToolType::Highlighter) {
+        // Not in Highlighter mode - restore default cursor
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
+    
+    if (isHighlighterEnabled()) {
+        setCursor(Qt::IBeamCursor);  // Text selection cursor for PDF pages
+    } else {
+        setCursor(Qt::ForbiddenCursor);  // Not available on non-PDF pages
+    }
+}
+
+void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
+{
+    // Check if highlighter is enabled on this page
+    PageHit hit = viewportToPage(pe.viewportPos);
+    if (!hit.valid()) {
+        m_textSelection.clear();
+        return;
+    }
+    
+    Page* page = m_document->page(hit.pageIndex);
+    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
+        // Not a PDF page - highlighter disabled
+        m_textSelection.clear();
+        return;
+    }
+    
+    // Load text boxes for this page if not cached
+    loadTextBoxesForPage(hit.pageIndex);
+    
+    // Check for double-click (word selection) and triple-click (line selection)
+    // Using static variables for timing - thread-safe for single UI thread
+    static QElapsedTimer lastClickTimer;
+    static QPointF lastClickPos;
+    static int clickCount = 0;
+    
+    const qreal doubleClickDistance = 5.0;  // pixels
+    const int doubleClickTime = 400;  // ms
+    
+    if (lastClickTimer.isValid() && 
+        lastClickTimer.elapsed() < doubleClickTime &&
+        QLineF(lastClickPos, pe.viewportPos).length() < doubleClickDistance) {
+        clickCount++;
+    } else {
+        clickCount = 1;
+    }
+    lastClickTimer.restart();
+    lastClickPos = pe.viewportPos;
+    
+    if (clickCount == 2) {
+        // Double-click: select word
+        selectWordAtPoint(hit.pagePoint, hit.pageIndex);
+        return;
+    } else if (clickCount >= 3) {
+        // Triple-click: select line
+        selectLineAtPoint(hit.pagePoint, hit.pageIndex);
+        clickCount = 0;  // Reset
+        return;
+    }
+    
+    // Single click: start text-flow selection at character position
+    // Convert page coords to PDF coords (72 DPI)
+    const qreal scale = 72.0 / 96.0;
+    QPointF pdfPos(hit.pagePoint.x() * scale, hit.pagePoint.y() * scale);
+    
+    CharacterPosition charPos = findCharacterAtPoint(pdfPos);
+    
+    m_textSelection.clear();
+    m_textSelection.pageIndex = hit.pageIndex;
+    
+    if (charPos.isValid()) {
+        // Start selection at this character
+        m_textSelection.startBoxIndex = charPos.boxIndex;
+        m_textSelection.startCharIndex = charPos.charIndex;
+        m_textSelection.endBoxIndex = charPos.boxIndex;
+        m_textSelection.endCharIndex = charPos.charIndex;
+    } else {
+        // Clicked outside text - try to find nearest character
+        // For now, just mark selection as started but without valid position
+        m_textSelection.startBoxIndex = -1;
+        m_textSelection.startCharIndex = -1;
+        m_textSelection.endBoxIndex = -1;
+        m_textSelection.endCharIndex = -1;
+    }
+    
+    m_textSelection.isSelecting = true;
+    update();
+}
+
+void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
+{
+    if (!m_textSelection.isSelecting) {
+        return;
+    }
+    
+    PageHit hit = viewportToPage(pe.viewportPos);
+    if (!hit.valid() || hit.pageIndex != m_textSelection.pageIndex) {
+        // Moved off the page - for now, just ignore moves outside the page
+        return;
+    }
+    
+    // Convert page coords to PDF coords (72 DPI)
+    const qreal scale = 72.0 / 96.0;
+    QPointF pdfPos(hit.pagePoint.x() * scale, hit.pagePoint.y() * scale);
+    
+    CharacterPosition charPos = findCharacterAtPoint(pdfPos);
+    
+    if (charPos.isValid()) {
+        // Update end position (start stays anchored)
+        m_textSelection.endBoxIndex = charPos.boxIndex;
+        m_textSelection.endCharIndex = charPos.charIndex;
+        
+        // If start wasn't valid (clicked outside text initially), set it now
+        if (m_textSelection.startBoxIndex < 0) {
+            m_textSelection.startBoxIndex = charPos.boxIndex;
+            m_textSelection.startCharIndex = charPos.charIndex;
+        }
+        
+        // Recompute selected text and highlight rectangles
+        updateSelectedTextAndRects();
+    }
+    
+    update();
+}
+
+void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
+{
+    Q_UNUSED(pe);
+    
+    if (!m_textSelection.isSelecting) {
+        return;
+    }
+    
+    m_textSelection.isSelecting = false;
+    
+    // Finalize selection
+    if (m_textSelection.isValid()) {
+        finalizeTextSelection();
+    }
+    
+    update();
+}
+
+DocumentViewport::CharacterPosition DocumentViewport::findCharacterAtPoint(const QPointF& pdfPos) const
+{
+    CharacterPosition result;
+    
+    if (m_textBoxCache.isEmpty()) {
+        return result;
+    }
+    
+    // Iterate through text boxes to find which character contains the point
+    for (int boxIdx = 0; boxIdx < m_textBoxCache.size(); ++boxIdx) {
+        const PdfTextBox& box = m_textBoxCache[boxIdx];
+        
+        // Quick bounding box check first
+        if (!box.boundingBox.contains(pdfPos)) {
+            continue;
+        }
+        
+        // Check character-level bounding boxes for precision
+        if (!box.charBoundingBoxes.isEmpty()) {
+            for (int charIdx = 0; charIdx < box.charBoundingBoxes.size(); ++charIdx) {
+                if (box.charBoundingBoxes[charIdx].contains(pdfPos)) {
+                    result.boxIndex = boxIdx;
+                    result.charIndex = charIdx;
+                    return result;
+                }
+            }
+            // Point is in box but not in any char rect - find nearest char
+            // Use the char whose horizontal center is closest to the point
+            qreal minDist = std::numeric_limits<qreal>::max();
+            int bestCharIdx = 0;
+            for (int charIdx = 0; charIdx < box.charBoundingBoxes.size(); ++charIdx) {
+                qreal charCenterX = box.charBoundingBoxes[charIdx].center().x();
+                qreal dist = qAbs(pdfPos.x() - charCenterX);
+                if (dist < minDist) {
+                    minDist = dist;
+                    bestCharIdx = charIdx;
+                }
+            }
+            result.boxIndex = boxIdx;
+            result.charIndex = bestCharIdx;
+            return result;
+        } else {
+            // No character boxes - return the whole word (char 0)
+            result.boxIndex = boxIdx;
+            result.charIndex = 0;
+            return result;
+        }
+    }
+    
+    return result;  // Invalid - point not in any text box
+}
+
+void DocumentViewport::updateSelectedTextAndRects()
+{
+    m_textSelection.selectedText.clear();
+    m_textSelection.highlightRects.clear();
+    
+    if (m_textBoxCache.isEmpty() || 
+        m_textSelection.startBoxIndex < 0 || 
+        m_textSelection.endBoxIndex < 0) {
+        return;
+    }
+    
+    // Determine selection direction (forward or backward)
+    int fromBox, fromChar, toBox, toChar;
+    if (m_textSelection.startBoxIndex < m_textSelection.endBoxIndex ||
+        (m_textSelection.startBoxIndex == m_textSelection.endBoxIndex && 
+         m_textSelection.startCharIndex <= m_textSelection.endCharIndex)) {
+        // Forward selection
+        fromBox = m_textSelection.startBoxIndex;
+        fromChar = m_textSelection.startCharIndex;
+        toBox = m_textSelection.endBoxIndex;
+        toChar = m_textSelection.endCharIndex;
+    } else {
+        // Backward selection (user dragged left/up)
+        fromBox = m_textSelection.endBoxIndex;
+        fromChar = m_textSelection.endCharIndex;
+        toBox = m_textSelection.startBoxIndex;
+        toChar = m_textSelection.startCharIndex;
+    }
+    
+    // Build selected text and highlight rectangles
+    QString selectedText;
+    const qreal lineThreshold = 5.0;  // PDF points - boxes on same line
+    
+    // Group consecutive boxes by line for highlight rect generation
+    qreal currentLineY = -1;
+    QRectF currentLineRect;
+    
+    for (int boxIdx = fromBox; boxIdx <= toBox && boxIdx < m_textBoxCache.size(); ++boxIdx) {
+        const PdfTextBox& box = m_textBoxCache[boxIdx];
+        
+        // Determine character range for this box
+        int startChar = (boxIdx == fromBox) ? fromChar : 0;
+        int endChar = (boxIdx == toBox) ? toChar : (box.text.length() - 1);
+        
+        // Clamp to valid range
+        startChar = qBound(0, startChar, box.text.length() - 1);
+        endChar = qBound(0, endChar, box.text.length() - 1);
+        
+        if (startChar > endChar) {
+            continue;  // Invalid range
+        }
+        
+        // Extract text for this range
+        QString boxText = box.text.mid(startChar, endChar - startChar + 1);
+        if (!selectedText.isEmpty() && !boxText.isEmpty()) {
+            selectedText += " ";  // Space between words
+        }
+        selectedText += boxText;
+        
+        // Compute highlight rect for this box's selected characters
+        QRectF charRect;
+        if (!box.charBoundingBoxes.isEmpty()) {
+            for (int c = startChar; c <= endChar && c < box.charBoundingBoxes.size(); ++c) {
+                if (charRect.isNull()) {
+                    charRect = box.charBoundingBoxes[c];
+                } else {
+                    charRect = charRect.united(box.charBoundingBoxes[c]);
+                }
+            }
+        } else {
+            // No char boxes - use whole word box
+            charRect = box.boundingBox;
+        }
+        
+        if (charRect.isNull()) {
+            continue;
+        }
+        
+        // Check if this box is on the same line as current line rect
+        qreal boxCenterY = charRect.center().y();
+        if (currentLineY < 0 || qAbs(boxCenterY - currentLineY) > lineThreshold) {
+            // New line - save previous line rect and start new one
+            if (!currentLineRect.isNull()) {
+                m_textSelection.highlightRects.append(currentLineRect);
+            }
+            currentLineRect = charRect;
+            currentLineY = boxCenterY;
+        } else {
+            // Same line - extend the rect
+            currentLineRect = currentLineRect.united(charRect);
+        }
+    }
+    
+    // Don't forget the last line
+    if (!currentLineRect.isNull()) {
+        m_textSelection.highlightRects.append(currentLineRect);
+    }
+    
+    m_textSelection.selectedText = selectedText;
+}
+
+void DocumentViewport::finalizeTextSelection()
+{
+    if (!m_textSelection.isValid()) {
+        return;
+    }
+    
+    // Emit signal for UI feedback
+    emit textSelected(m_textSelection.selectedText);
+    
+    qDebug() << "Text selected:" << m_textSelection.selectedText.left(50) 
+             << (m_textSelection.selectedText.length() > 50 ? "..." : "");
+}
+
+void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
+{
+    loadTextBoxesForPage(pageIndex);
+    
+    // Convert to PDF coords
+    const qreal scale = 72.0 / 96.0;
+    QPointF pdfPos(pagePos.x() * scale, pagePos.y() * scale);
+    
+    // Find text box containing point
+    for (int boxIdx = 0; boxIdx < m_textBoxCache.size(); ++boxIdx) {
+        const PdfTextBox& box = m_textBoxCache[boxIdx];
+        if (box.boundingBox.contains(pdfPos)) {
+            m_textSelection.clear();
+            m_textSelection.pageIndex = pageIndex;
+            
+            // Select entire word (box)
+            m_textSelection.startBoxIndex = boxIdx;
+            m_textSelection.startCharIndex = 0;
+            m_textSelection.endBoxIndex = boxIdx;
+            m_textSelection.endCharIndex = box.text.length() - 1;
+            
+            updateSelectedTextAndRects();
+            finalizeTextSelection();
+            update();
+            return;
+        }
+    }
+}
+
+void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
+{
+    loadTextBoxesForPage(pageIndex);
+    
+    // Convert to PDF coords
+    const qreal scale = 72.0 / 96.0;
+    QPointF pdfPos(pagePos.x() * scale, pagePos.y() * scale);
+    
+    // Find text box containing point
+    int clickedBoxIdx = -1;
+    for (int i = 0; i < m_textBoxCache.size(); ++i) {
+        if (m_textBoxCache[i].boundingBox.contains(pdfPos)) {
+            clickedBoxIdx = i;
+            break;
+        }
+    }
+    
+    if (clickedBoxIdx < 0) {
+        return;  // No text box at point
+    }
+    
+    const qreal lineThreshold = 5.0;  // PDF points
+    qreal targetY = m_textBoxCache[clickedBoxIdx].boundingBox.center().y();
+    
+    // Find all boxes on the same line (similar Y coordinate)
+    int firstBoxOnLine = clickedBoxIdx;
+    int lastBoxOnLine = clickedBoxIdx;
+    
+    for (int i = 0; i < m_textBoxCache.size(); ++i) {
+        qreal boxY = m_textBoxCache[i].boundingBox.center().y();
+        if (qAbs(boxY - targetY) <= lineThreshold) {
+            if (i < firstBoxOnLine) firstBoxOnLine = i;
+            if (i > lastBoxOnLine) lastBoxOnLine = i;
+        }
+    }
+    
+    // Set selection to span entire line
+    m_textSelection.clear();
+    m_textSelection.pageIndex = pageIndex;
+    m_textSelection.startBoxIndex = firstBoxOnLine;
+    m_textSelection.startCharIndex = 0;
+    m_textSelection.endBoxIndex = lastBoxOnLine;
+    
+    const PdfTextBox& lastBox = m_textBoxCache[lastBoxOnLine];
+    m_textSelection.endCharIndex = lastBox.text.length() - 1;
+    
+    updateSelectedTextAndRects();
+    finalizeTextSelection();
+    update();
+}
+
+// ============================================================================
+// Text Selection Rendering
+// ============================================================================
+
+void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageIndex)
+{
+    // Only render if there's a valid selection or actively selecting
+    if (m_textSelection.highlightRects.isEmpty() && !m_textSelection.isSelecting) {
+        return;
+    }
+    
+    // Only render on the page being selected
+    if (m_textSelection.pageIndex != pageIndex) {
+        return;
+    }
+    
+    painter.save();
+    
+    // Scale factor: PDF coords (72 DPI) to page coords (96 DPI)
+    const qreal scale = 96.0 / 72.0;
+    
+    // Selection color (Windows selection blue with transparency)
+    QColor selectionColor(0, 120, 215, 100);
+    painter.setBrush(selectionColor);
+    painter.setPen(Qt::NoPen);
+    
+    // Draw highlight rectangles (per-line segments, in PDF coords → convert to page coords)
+    for (const QRectF& pdfRect : m_textSelection.highlightRects) {
+        QRectF pageRect(
+            pdfRect.x() * scale,
+            pdfRect.y() * scale,
+            pdfRect.width() * scale,
+            pdfRect.height() * scale
+        );
+        painter.drawRect(pageRect);
+    }
+    
+    painter.restore();
+}
+
+void DocumentViewport::copySelectedTextToClipboard()
+{
+    if (!m_textSelection.isValid() || m_textSelection.selectedText.isEmpty()) {
+        qDebug() << "copySelectedTextToClipboard: No text selected";
+        return;
+    }
+    
+    QClipboard* clipboard = QGuiApplication::clipboard();
+    clipboard->setText(m_textSelection.selectedText);
+    
+    qDebug() << "Copied to clipboard:" << m_textSelection.selectedText.left(50)
+             << (m_textSelection.selectedText.length() > 50 ? "..." : "");
+}
+
 void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
 {
     // ========== OPTIMIZATION: Point Decimation ==========
@@ -8866,7 +9509,12 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
         page->renderObjectsWithAffinity(painter, 1.0, layerIdx, nextLayerVisible, objectExcludePtr);
     }
     
-    // 5. Draw page border (optional, for visual separation)
+    // 5. Render text selection overlay (Phase A: Highlighter tool)
+    if (m_currentTool == ToolType::Highlighter) {
+        renderTextSelectionOverlay(painter, pageIndex);
+    }
+    
+    // 6. Draw page border (optional, for visual separation)
     // CUSTOMIZABLE: Page border color (theme setting)
     // The border does not need to be redrawn every time the page is rendered. 
     painter.setPen(QPen(QColor(180, 180, 180), 1.0 / m_zoomLevel));  // Light gray border
@@ -9372,21 +10020,46 @@ void DocumentViewport::updateCurrentPageIndex()
                 m_currentPageIndex = visible.first();
             }
         } else {
-            // No visible pages - estimate based on scroll position
-            // Find the page whose center is closest to viewport center
-            qreal minDist = std::numeric_limits<qreal>::max();
-            int closestPage = 0;
+            // No visible pages - estimate based on scroll position using binary search
+            // PERF FIX: Use cached Y positions for O(log n) lookup instead of O(n)
+            ensurePageLayoutCache();
+            int pageCount = m_document->pageCount();
             
-            for (int i = 0; i < m_document->pageCount(); ++i) {
-                QRectF rect = pageRect(i);
-                QPointF pageCenter = rect.center();
-                qreal dist = QLineF(viewCenter, pageCenter).length();
-                if (dist < minDist) {
-                    minDist = dist;
-                    closestPage = i;
+            if (m_layoutMode == LayoutMode::SingleColumn && !m_pageYCache.isEmpty()) {
+                // Binary search to find page closest to viewport center Y
+                qreal targetY = viewCenter.y();
+                int low = 0;
+                int high = pageCount - 1;
+                int closestPage = 0;
+                
+                while (low <= high) {
+                    int mid = (low + high) / 2;
+                    qreal pageY = m_pageYCache[mid];
+                    QSizeF pageSize = m_document->pageSizeAt(mid);
+                    qreal pageCenterY = pageY + pageSize.height() / 2.0;
+                    
+                    if (pageCenterY < targetY) {
+                        closestPage = mid;  // This page or later
+                        low = mid + 1;
+                    } else {
+                        high = mid - 1;
+                    }
                 }
+                
+                // Check neighboring pages to find the actual closest
+                qreal minDist = std::numeric_limits<qreal>::max();
+                for (int i = qMax(0, closestPage - 1); i <= qMin(pageCount - 1, closestPage + 1); ++i) {
+                    QRectF rect = pageRect(i);
+                    qreal dist = qAbs(rect.center().y() - viewCenter.y());
+                    if (dist < minDist) {
+                        minDist = dist;
+                        m_currentPageIndex = i;
+                    }
+                }
+            } else {
+                // Two-column fallback: just pick the first page (rare edge case)
+                m_currentPageIndex = 0;
             }
-            m_currentPageIndex = closestPage;
         }
     }
     
@@ -9395,6 +10068,11 @@ void DocumentViewport::updateCurrentPageIndex()
         // Undo/redo availability may change when page changes
         emit undoAvailableChanged(canUndo());
         emit redoAvailableChanged(canRedo());
+        
+        // Update cursor if Highlighter tool is active (may toggle enabled/disabled)
+        if (m_currentTool == ToolType::Highlighter) {
+            updateHighlighterCursor();
+        }
     }
 }
 

@@ -29,6 +29,7 @@ enum class TouchGestureMode {
 #include "Page.h"
 #include "ToolType.h"
 #include "../strokes/VectorStroke.h"
+#include "../pdf/PdfProvider.h"
 #include <QStack>
 #include <QMap>
 
@@ -1172,6 +1173,14 @@ signals:
      */
     void verticalScrollChanged(qreal fraction);
     
+    /**
+     * @brief Emitted when text selection is finalized.
+     * @param text The selected text content.
+     * 
+     * Phase A: Emitted by Highlighter tool when user completes text selection.
+     */
+    void textSelected(const QString& text);
+    
 protected:
     // ===== Qt Event Overrides =====
     
@@ -1318,6 +1327,76 @@ private:
     bool m_skipSelectionRendering = false;   ///< Temp flag during snapshot capture
     
     void captureSelectionBackground();       ///< Capture background for transform
+    
+    // ============================================================================
+    // Text Selection State (Highlighter Tool) - Phase A
+    // ============================================================================
+    
+    /**
+     * @brief Temporary state for text selection from PDF.
+     * 
+     * Active when ToolType::Highlighter is selected and user is selecting text.
+     * Cleared when tool changes or selection is finalized.
+     */
+    /**
+     * @brief Character position within text boxes (for hit testing).
+     */
+    struct CharacterPosition {
+        int boxIndex = -1;                      ///< Index into m_textBoxCache
+        int charIndex = -1;                     ///< Character index within that box
+        
+        bool isValid() const { return boxIndex >= 0 && charIndex >= 0; }
+    };
+    
+    /**
+     * @brief Text-flow selection model (like Notepad/Word).
+     * 
+     * Selection is defined by start and end character positions in reading order.
+     * The selection flows character-by-character, not as a rectangle.
+     */
+    struct TextSelection {
+        int pageIndex = -1;                     ///< Page being selected from (-1 = none)
+        
+        // Start position (anchor) - where selection began
+        int startBoxIndex = -1;                 ///< Index into m_textBoxCache
+        int startCharIndex = -1;                ///< Character index within that box (-1 = end of box)
+        
+        // End position (cursor) - current selection endpoint
+        int endBoxIndex = -1;                   ///< Index into m_textBoxCache
+        int endCharIndex = -1;                  ///< Character index within that box
+        
+        // Computed from start/end positions
+        QString selectedText;                   ///< All characters from start to end
+        QVector<QRectF> highlightRects;         ///< Per-line highlight rectangles (PDF coords)
+        
+        bool isSelecting = false;               ///< Currently dragging?
+        
+        bool isValid() const { 
+            return pageIndex >= 0 && startBoxIndex >= 0 && endBoxIndex >= 0; 
+        }
+        
+        /// Check if selection is empty (start == end)
+        bool isEmpty() const {
+            return startBoxIndex == endBoxIndex && startCharIndex == endCharIndex;
+        }
+        
+        void clear() {
+            pageIndex = -1;
+            startBoxIndex = startCharIndex = -1;
+            endBoxIndex = endCharIndex = -1;
+            selectedText.clear();
+            highlightRects.clear();
+            isSelecting = false;
+        }
+    };
+    TextSelection m_textSelection;
+    
+    // Text box cache (loaded on-demand for current page)
+    QVector<PdfTextBox> m_textBoxCache;
+    int m_textBoxCachePageIndex = -1;
+    
+    // Highlighter tool settings
+    QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
     
     // ===== Object Selection (Phase O2) =====
     
@@ -1562,6 +1641,7 @@ private:
     
     // ===== Page Layout Cache (Performance: O(1) page position lookup) =====
     mutable QVector<qreal> m_pageYCache;  ///< Cached Y position for each page (single column)
+    mutable QSizeF m_cachedContentSize;   ///< Cached total content size (computed during layout)
     mutable bool m_pageLayoutDirty = true; ///< True if cache needs rebuild
     
     // ===== Input State (Task 1.3.8) =====
@@ -2054,6 +2134,98 @@ private:
      * @brief Check if clipboard has content.
      */
     bool hasClipboardContent() const { return m_clipboard.hasContent; }
+    
+    // ===== Highlighter Tool Methods (Phase A) =====
+    
+    /**
+     * @brief Handle pointer press for highlighter tool.
+     * Starts text selection if on a PDF page.
+     */
+    void handlePointerPress_Highlighter(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer move for highlighter tool.
+     * Updates text selection rectangle and hit-tested text boxes.
+     */
+    void handlePointerMove_Highlighter(const PointerEvent& pe);
+    
+    /**
+     * @brief Handle pointer release for highlighter tool.
+     * Finalizes text selection.
+     */
+    void handlePointerRelease_Highlighter(const PointerEvent& pe);
+    
+    /**
+     * @brief Load text boxes from PDF for the specified page.
+     * @param pageIndex The page to load text boxes for.
+     * 
+     * Caches text boxes in m_textBoxCache for hit testing.
+     * No-op if page has no PDF background.
+     */
+    void loadTextBoxesForPage(int pageIndex);
+    
+    /**
+     * @brief Clear the text box cache.
+     */
+    void clearTextBoxCache();
+    
+    /**
+     * @brief Check if highlighter tool is enabled for current page.
+     * @return True if current page has PDF background.
+     */
+    bool isHighlighterEnabled() const;
+    
+    /**
+     * @brief Find the character at a given point (for text-flow selection).
+     * @param pdfPos Point in PDF coordinates (72 DPI).
+     * @return CharacterPosition with boxIndex and charIndex, or invalid if not found.
+     */
+    CharacterPosition findCharacterAtPoint(const QPointF& pdfPos) const;
+    
+    /**
+     * @brief Update selected text and highlight rects from start/end positions.
+     * Called after changing startBoxIndex/endBoxIndex etc.
+     */
+    void updateSelectedTextAndRects();
+    
+    /**
+     * @brief Finalize the current text selection.
+     * Emits textSelected signal with combined text.
+     */
+    void finalizeTextSelection();
+    
+    /**
+     * @brief Select the word at the given point (double-click).
+     * @param pagePos Position in page coordinates.
+     * @param pageIndex Page index.
+     */
+    void selectWordAtPoint(const QPointF& pagePos, int pageIndex);
+    
+    /**
+     * @brief Select the entire line at the given point (triple-click).
+     * @param pagePos Position in page coordinates.
+     * @param pageIndex Page index.
+     */
+    void selectLineAtPoint(const QPointF& pagePos, int pageIndex);
+    
+    /**
+     * @brief Copy selected text to system clipboard.
+     */
+    void copySelectedTextToClipboard();
+    
+    /**
+     * @brief Render the text selection overlay.
+     * @param painter The painter to render to (page-transformed).
+     * @param pageIndex The page being rendered.
+     */
+    void renderTextSelectionOverlay(QPainter& painter, int pageIndex);
+    
+    /**
+     * @brief Update cursor based on Highlighter tool availability.
+     * Sets IBeamCursor on PDF pages, ForbiddenCursor on non-PDF pages,
+     * and restores ArrowCursor when Highlighter is not active.
+     */
+    void updateHighlighterCursor();
     
     /**
      * @brief Add a point to the current stroke with point decimation.

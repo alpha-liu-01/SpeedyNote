@@ -294,6 +294,36 @@ bool Document::isPageLoaded(int index) const
     return m_loadedPages.find(uuid) != m_loadedPages.end();
 }
 
+QVector<int> Document::loadedPageIndices() const
+{
+    QVector<int> result;
+    
+    if (m_pageOrder.isEmpty()) {
+        // Legacy mode: all pages are loaded - return all indices
+        // This is fine since legacy mode doesn't have thousands of pages anyway
+        result.reserve(static_cast<int>(m_pages.size()));
+        for (int i = 0; i < static_cast<int>(m_pages.size()); ++i) {
+            result.append(i);
+        }
+        return result;
+    }
+    
+    // Lazy loading mode: iterate through loaded pages (typically small set)
+    // and find their indices in m_pageOrder
+    result.reserve(static_cast<int>(m_loadedPages.size()));
+    
+    // Build UUID -> index lookup if we don't have one cached
+    // For now, iterate through m_loadedPages and find each in m_pageOrder
+    // This is O(loaded * pageCount) but loaded is typically < 10
+    for (const auto& [uuid, page] : m_loadedPages) {
+        int idx = m_pageOrder.indexOf(uuid);
+        if (idx >= 0) {
+            result.append(idx);
+        }
+    }
+    return result;
+}
+
 QString Document::pageUuidAt(int index) const
 {
     // Currently using legacy m_pages - no UUIDs yet
@@ -2086,6 +2116,20 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
         } else {
             // No page_order - this shouldn't happen for paged bundles
             qWarning() << "Paged bundle missing page_order in manifest";
+        }
+    }
+    
+    // ========== LOAD PDF IF REFERENCED (Bug Fix) ==========
+    // Document::fromJson() only stores the pdf_path, it doesn't load the PDF.
+    // We need to load it here for the PDF backgrounds to render.
+    if (doc->hasPdfReference() && !doc->isPdfLoaded()) {
+        if (!doc->loadPdf(doc->pdfPath())) {
+            qWarning() << "loadBundle: Failed to load referenced PDF:" << doc->pdfPath();
+            // Don't fail - document can still be used, PDF can be relinked
+        } else {
+#ifdef QT_DEBUG
+            qDebug() << "loadBundle: Loaded PDF from" << doc->pdfPath();
+#endif
         }
     }
     

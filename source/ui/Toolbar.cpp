@@ -120,13 +120,16 @@ void Toolbar::connectSignals()
         emit toolSelected(ToolType::Lasso);
     });
     
+    // Text/Highlighter tool - now has ToolType
+    connect(m_textButton, &QPushButton::clicked, this, [this]() {
+        emit toolSelected(ToolType::Highlighter);
+    });
+    
     // Tools without ToolType enum - emit dedicated signals
     connect(m_shapeButton, &QPushButton::clicked, 
             this, &Toolbar::shapeClicked);
     connect(m_objectInsertButton, &QPushButton::clicked,
             this, &Toolbar::objectInsertClicked);
-    connect(m_textButton, &QPushButton::clicked,
-            this, &Toolbar::textClicked);
     
     // Action buttons
     connect(m_undoButton, &QPushButton::clicked,
@@ -162,8 +165,7 @@ void Toolbar::setCurrentTool(ToolType tool)
             m_objectInsertButton->setChecked(true);
             break;
         case ToolType::Highlighter:
-            // Highlighter not yet in toolbar - default to marker
-            m_markerButton->setChecked(true);
+            m_textButton->setChecked(true);
             break;
     }
     

@@ -743,10 +743,7 @@ void MainWindow::setupUi() {
         // Stub - will show object insert menu in future
         qDebug() << "Toolbar: Object insert clicked (stub)";
     });
-    connect(m_toolbar, &Toolbar::textClicked, this, [this]() {
-        // Stub - will activate text tool in future
-        qDebug() << "Toolbar: Text clicked (stub)";
-    });
+    // Note: m_textButton now emits toolSelected(ToolType::Highlighter) directly
     connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->undo();
@@ -1926,7 +1923,9 @@ void MainWindow::showJumpToPageDialog() {
         } else {
             switchPage(newPage); // Same page, no direction needed
         }
-        pageInput->setValue(newPage);
+        if (pageInput) {
+            pageInput->setValue(newPage);
+        }
     }
 }
 

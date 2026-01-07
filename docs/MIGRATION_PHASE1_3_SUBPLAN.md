@@ -702,6 +702,140 @@ Phase 1.3 is complete when:
 - Zoom transition < 200ms
 - Page switch < 100ms (cached)
 
+---
+
+## Critical Performance Optimizations (Large Document Support)
+
+### Problem: O(n) Scroll Lag with Many Pages
+
+When loading saved PDF documents with 3000+ pages, scrolling became extremely laggy. Each scroll event triggered multiple O(n) operations:
+
+1. **`totalContentSize()`** - Called on every scroll (via `clampPanOffset()` and `emitScrollFractions()`)
+2. **`pageRect()`** - Called in loops during page visibility calculations
+3. **`visiblePages()` / `pageAtPoint()`** - Linear search through all pages
+
+### Root Causes
+
+| Issue | Original Code | Problem |
+|-------|---------------|---------|
+| `totalContentSize()` | Iterated all pages, called `page()->size` | O(n) per scroll, triggered lazy loading |
+| `pageRect()` | Called `m_document->page(i)` | Triggered disk I/O for lazy-loaded pages |
+| `visiblePages()` (2-col) | Linear search through all pages | O(n) per scroll |
+| `pageAtPoint()` (2-col) | Linear search through all pages | O(n) per scroll |
+| `preloadStrokeCaches()` | Iterated ALL page indices to find eviction candidates | O(n) per scroll |
+
+### Solutions Implemented
+
+#### 1. Content Size Caching
+```cpp
+// Before: O(n) on every scroll
+QSizeF totalContentSize() const {
+    for (int i = 0; i < pageCount; ++i) {
+        const Page* page = m_document->page(i);  // Disk I/O!
+        totalHeight += page->size.height();
+    }
+}
+
+// After: O(1) - returns cached value
+QSizeF totalContentSize() const {
+    ensurePageLayoutCache();  // O(n) only when dirty
+    return m_cachedContentSize;
+}
+```
+
+**New members in `DocumentViewport.h`:**
+```cpp
+mutable QSizeF m_cachedContentSize;   // Computed during layout pass
+```
+
+#### 2. Use `pageSizeAt()` Instead of `page()->size`
+```cpp
+// Before: Triggers lazy loading from disk
+const Page* page = m_document->page(pageIndex);
+return QRectF(pos, page->size);
+
+// After: Uses metadata (no disk I/O)
+QSizeF pageSize = m_document->pageSizeAt(pageIndex);
+return QRectF(pos, pageSize);
+```
+
+**Key insight:** `Document::pageSizeAt()` reads from `m_pageMetadata` which is loaded from the manifest upfront, avoiding disk access.
+
+#### 3. Binary Search for Two-Column Layout
+```cpp
+// Before: O(n) linear search
+for (int i = 0; i < pageCount; ++i) {
+    if (pageRect(i).contains(point)) return i;
+}
+
+// After: O(log n) binary search on Y cache
+int numRows = (pageCount + 1) / 2;
+// Binary search to find row, then check only 2-4 pages
+```
+
+#### 4. Efficient Page Eviction
+```cpp
+// Before: Iterate ALL pages to find eviction candidates
+for (int i = 0; i < pageCount; ++i) {
+    if (i < keepStart || i > keepEnd) {
+        m_document->evictPage(i);  // Most pages not even loaded!
+    }
+}
+
+// After: Only iterate LOADED pages
+QVector<int> loadedIndices = m_document->loadedPageIndices();
+for (int i : loadedIndices) {
+    if (i < keepStart || i > keepEnd) {
+        m_document->evictPage(i);
+    }
+}
+```
+
+**New method in `Document`:**
+```cpp
+QVector<int> Document::loadedPageIndices() const;
+```
+
+### Complexity Summary
+
+| Operation | Before | After |
+|-----------|--------|-------|
+| `totalContentSize()` | O(n) per scroll | O(1) |
+| `pageRect()` | O(1) + disk I/O | O(1) memory only |
+| `visiblePages()` (1-col) | O(log n) | O(log n) |
+| `visiblePages()` (2-col) | O(n) | O(log n + visible) |
+| `pageAtPoint()` (1-col) | O(log n) | O(log n) |
+| `pageAtPoint()` (2-col) | O(n) | O(log n) |
+| `preloadStrokeCaches()` eviction | O(n) | O(loaded) ≈ O(1) |
+
+### Why Edgeless Mode Doesn't Have This Problem
+
+Edgeless mode uses a fundamentally different architecture:
+
+1. **Direct coordinate calculation**: Tile position = `(tx × TILE_SIZE, ty × TILE_SIZE)` — O(1)
+2. **Bounded loaded tiles**: `evictDistantTiles()` keeps only ~25 tiles loaded
+3. **`tilesInRect()`**: Directly computes visible tiles from viewport bounds — O(visible)
+4. **Sparse storage**: `m_tiles` map only contains loaded tiles, not all tiles
+
+**Key difference:**
+- **Paged mode**: Position of page N depends on heights of pages 0..N-1 (cumulative)
+- **Edgeless mode**: Position of tile (tx, ty) is independent of other tiles (grid-based)
+
+### Testing
+
+To verify performance with large documents:
+```bash
+# Create a test document with many pages
+./NoteApp --test-viewport  # Modify to create 1000+ pages
+
+# Or load a large PDF via Ctrl+Shift+O
+# Then scroll rapidly with mouse wheel
+```
+
+**Expected behavior:** Smooth scrolling regardless of page count.
+
+---
+
 ### What's NOT in Phase 1.3
 - Touch gesture handling (Phase 2 or 4)
 - Actual drawing/erasing (Phase 2)

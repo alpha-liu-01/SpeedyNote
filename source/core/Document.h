@@ -725,6 +725,15 @@ public:
     bool isPageLoaded(int index) const;
     
     /**
+     * @brief Get indices of all currently loaded pages.
+     * @return Vector of page indices that are currently in memory.
+     * 
+     * PERF: This allows iterating only over loaded pages instead of all pages,
+     * avoiding O(n) iterations through potentially thousands of pages.
+     */
+    QVector<int> loadedPageIndices() const;
+    
+    /**
      * @brief Get the UUID of a page by index.
      * @param index 0-based page index.
      * @return Page UUID, or empty string if index is out of range.

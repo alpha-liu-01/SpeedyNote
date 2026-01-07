@@ -152,7 +152,7 @@ public:
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
 
-    QSpinBox *pageInput; // Made public for RecentNotebooksDialog
+    QSpinBox *pageInput = nullptr; // Made public for RecentNotebooksDialog
 
     
     void updateTabLabel(); // Made public for RecentNotebooksDialog    

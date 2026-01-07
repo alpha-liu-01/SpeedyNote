@@ -915,9 +915,13 @@ void LauncherWindow::openNotebook(const QString &path)
             canvas->setSaveFolder(path);
             if (!targetMainWindow->showLastAccessedPageDialog(canvas)) {
                 targetMainWindow->switchPage(1);
-                targetMainWindow->pageInput->setValue(1);
+                if (targetMainWindow->pageInput) {
+                    targetMainWindow->pageInput->setValue(1);
+                }
             } else {
-                targetMainWindow->pageInput->setValue(targetMainWindow->getCurrentPageForCanvas(canvas) + 1);
+                if (targetMainWindow->pageInput) {
+                    targetMainWindow->pageInput->setValue(targetMainWindow->getCurrentPageForCanvas(canvas) + 1);
+                }
             }
             targetMainWindow->updateTabLabel();
             targetMainWindow->updateBookmarkButtonState();
