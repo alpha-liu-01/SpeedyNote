@@ -1181,6 +1181,14 @@ signals:
      */
     void textSelected(const QString& text);
     
+    /**
+     * @brief Emitted when auto-highlight mode changes.
+     * 
+     * Phase B: Can be connected to subtoolbar toggle button to sync state.
+     * @param enabled New auto-highlight state.
+     */
+    void autoHighlightEnabledChanged(bool enabled);
+    
 protected:
     // ===== Qt Event Overrides =====
     
@@ -1398,6 +1406,7 @@ private:
     
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
+    bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
     
     // ===== Object Selection (Phase O2) =====
     
@@ -2177,6 +2186,23 @@ private:
     bool isHighlighterEnabled() const;
     
     /**
+     * @brief Set auto-highlight mode (Phase B).
+     * 
+     * When enabled, releasing mouse after text selection automatically
+     * creates highlight strokes. When disabled, selection remains until
+     * user copies or cancels.
+     * 
+     * @param enabled True to enable auto-highlight on release.
+     */
+    void setAutoHighlightEnabled(bool enabled);
+    
+    /**
+     * @brief Check if auto-highlight mode is enabled.
+     * @return True if releasing selection auto-creates strokes.
+     */
+    bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
+    
+    /**
      * @brief Find the character at a given point (for text-flow selection).
      * @param pdfPos Point in PDF coordinates (72 DPI).
      * @return CharacterPosition with boxIndex and charIndex, or invalid if not found.
@@ -2220,6 +2246,31 @@ private:
      * @param pageIndex The page being rendered.
      */
     void renderTextSelectionOverlay(QPainter& painter, int pageIndex);
+    
+    /**
+     * @brief Create a marker-style stroke for a highlight rectangle (Phase B.6).
+     * 
+     * Creates a horizontal stroke through the center of the rectangle,
+     * with width equal to the rectangle height (text line height).
+     * Used to convert text selection highlight rects to VectorStrokes.
+     * 
+     * @param rect Rectangle in page coordinates (96 DPI).
+     * @param color Highlight color (typically m_highlighterColor).
+     * @return VectorStroke configured as a horizontal marker.
+     */
+    VectorStroke createHighlightStroke(const QRectF& rect, const QColor& color) const;
+    
+    /**
+     * @brief Create highlight strokes from current text selection (Phase B.3).
+     * 
+     * Converts each rectangle in m_textSelection.highlightRects to a VectorStroke
+     * and adds it to the current layer on the selection's page.
+     * Each stroke gets its own undo action (can be undone individually).
+     * Clears the text selection after creating strokes.
+     * 
+     * @return List of created stroke IDs.
+     */
+    QVector<QString> createHighlightStrokes();
     
     /**
      * @brief Update cursor based on Highlighter tool availability.

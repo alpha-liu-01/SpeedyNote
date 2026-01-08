@@ -1986,11 +1986,18 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         }
     }
     
-    // Phase A: Highlighter tool keyboard shortcuts
+    // Phase A & B: Highlighter tool keyboard shortcuts
     if (m_currentTool == ToolType::Highlighter) {
         // Copy (Ctrl+C) - copy selected text to clipboard
         if (event->matches(QKeySequence::Copy)) {
             copySelectedTextToClipboard();
+            event->accept();
+            return;
+        }
+        
+        // Phase B.2: Toggle auto-highlight mode (Ctrl+H)
+        if (event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_H) {
+            setAutoHighlightEnabled(!m_autoHighlightEnabled);
             event->accept();
             return;
         }
@@ -7370,6 +7377,18 @@ bool DocumentViewport::isHighlighterEnabled() const
     return page && page->backgroundType == Page::BackgroundType::PDF;
 }
 
+void DocumentViewport::setAutoHighlightEnabled(bool enabled)
+{
+    if (m_autoHighlightEnabled == enabled) {
+        return;  // No change
+    }
+    
+    m_autoHighlightEnabled = enabled;
+    emit autoHighlightEnabledChanged(enabled);
+    
+    qDebug() << "Auto-highlight mode:" << (enabled ? "ON" : "OFF");
+}
+
 void DocumentViewport::updateHighlighterCursor()
 {
     if (m_currentTool != ToolType::Highlighter) {
@@ -7522,6 +7541,12 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     // Finalize selection
     if (m_textSelection.isValid()) {
         finalizeTextSelection();
+        
+        // Phase B.4: Auto-create strokes if toggle is ON
+        if (m_autoHighlightEnabled) {
+            createHighlightStrokes();
+            // Note: createHighlightStrokes() already clears m_textSelection
+        }
     }
     
     update();
@@ -7851,6 +7876,110 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
     }
     
     painter.restore();
+}
+
+VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect, const QColor& color) const
+{
+    VectorStroke stroke;
+    
+    // Generate unique ID
+    stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    
+    // Set color (should include alpha for semi-transparency)
+    stroke.color = color;
+    
+    // Stroke width = rectangle height (text line height)
+    stroke.baseThickness = rect.height();
+    
+    // Create a horizontal line through the center of the rectangle
+    // This is how markers work: a thick line that covers the text area
+    StrokePoint startPoint;
+    startPoint.pos = QPointF(rect.left(), rect.center().y());
+    startPoint.pressure = 1.0;  // Uniform pressure for highlights
+    
+    StrokePoint endPoint;
+    endPoint.pos = QPointF(rect.right(), rect.center().y());
+    endPoint.pressure = 1.0;
+    
+    stroke.points.append(startPoint);
+    stroke.points.append(endPoint);
+    
+    // Calculate bounding box
+    stroke.updateBoundingBox();
+    
+    return stroke;
+}
+
+QVector<QString> DocumentViewport::createHighlightStrokes()
+{
+    QVector<QString> createdIds;
+    
+    // Validate selection
+    if (!m_textSelection.isValid() || m_textSelection.highlightRects.isEmpty()) {
+        return createdIds;
+    }
+    
+    if (!m_document) {
+        return createdIds;
+    }
+    
+    // Get the page where selection exists
+    int pageIndex = m_textSelection.pageIndex;
+    Page* page = m_document->page(pageIndex);
+    if (!page) {
+        return createdIds;
+    }
+    
+    // Get the active layer for this page
+    VectorLayer* layer = page->activeLayer();
+    if (!layer) {
+        return createdIds;
+    }
+    
+    // Convert each highlight rect to a stroke
+    // highlightRects are in PDF coordinates, need to convert to page coordinates
+    for (const QRectF& pdfRect : m_textSelection.highlightRects) {
+        // Skip degenerate rectangles (zero width or height)
+        if (pdfRect.width() < 0.1 || pdfRect.height() < 0.1) {
+            continue;
+        }
+        
+        // Convert from PDF coords (72 DPI) to page coords (96 DPI)
+        QRectF pageRect(
+            pdfRect.x() * PDF_TO_PAGE_SCALE,
+            pdfRect.y() * PDF_TO_PAGE_SCALE,
+            pdfRect.width() * PDF_TO_PAGE_SCALE,
+            pdfRect.height() * PDF_TO_PAGE_SCALE
+        );
+        
+        // Create the stroke
+        VectorStroke stroke = createHighlightStroke(pageRect, m_highlighterColor);
+        
+        // Add to layer
+        layer->addStroke(stroke);
+        
+        // Push individual undo action (each stroke can be undone separately)
+        pushUndoAction(pageIndex, PageUndoAction::AddStroke, stroke);
+        
+        createdIds.append(stroke.id);
+    }
+    
+    // Invalidate stroke cache for this page
+    layer->invalidateStrokeCache();
+    
+    // Clear the text selection
+    m_textSelection.clear();
+    
+    // Emit document modified (only if we created strokes)
+    if (!createdIds.isEmpty()) {
+        emit documentModified();
+    }
+    
+#ifdef QT_DEBUG
+    qDebug() << "Created" << createdIds.size() << "highlight strokes on page" << pageIndex;
+#endif
+    
+    return createdIds;
 }
 
 void DocumentViewport::copySelectedTextToClipboard()

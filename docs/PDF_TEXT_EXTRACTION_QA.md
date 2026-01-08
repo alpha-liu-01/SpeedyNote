@@ -682,6 +682,1100 @@ struct PdfTextBox {
 
 ---
 
+---
+
+## Phase B Questions: Highlight Strokes
+
+Phase A (Text Selection) is complete. Before implementing Phase B, I need clarification on stroke creation.
+
+---
+
+### Question L: When is the highlight stroke created?
+
+After user selects text, what triggers stroke creation?
+
+- [ ] **Auto on release** - Mouse/stylus release creates stroke immediately
+- [ ] **Explicit confirmation** - User presses Enter, clicks button, or uses context menu
+- [ ] **Subtoolbar toggle** - Auto if toggle ON, show menu if toggle OFF (as described in Q&A)
+- [ ] **Keyboard shortcut** - e.g., press H to highlight current selection
+
+**Note:** Subtoolbar doesn't exist yet. For Phase B, should we:
+1. Use auto-on-release as temporary behavior?
+2. Add a keyboard shortcut?
+3. Wait for subtoolbar implementation?
+
+**Your answer:**
+Add a keyboard shortcut. With this toggle on, we create the stroke. With it off, the behavior stays the same as the end of phase 1. 
+---
+
+### Question M: Stroke shape for highlights
+
+How should highlight strokes be shaped?
+
+**Option A: One rectangle per line**
+```
+┌─────────────────────────┐  ← Line 1 rect
+│ Selected text on line 1 │
+└─────────────────────────┘
+┌───────────────┐            ← Line 2 rect  
+│ Line 2 text   │
+└───────────────┘
+```
+
+**Option B: One merged stroke covering all**
+```
+┌─────────────────────────┐
+│ Selected text on line 1 │
+│ Line 2 text             │
+└─────────────────────────┘
+```
+
+**Option C: Follow text boxes exactly (jagged edges)**
+```
+┌─────────────────────────┐
+│ Selected text on line 1 │
+└────────────────┬────────┘
+                 └───────────┐
+                 │ Line 2    │
+                 └───────────┘
+```
+
+**Your preference:**
+Option A. But it should definitely be possible to start the stroke halfway in a row. For "per line", do you mean filling the whole row, or we can adjust the start or the end? Also... What if text is tilted from the beginning? How do we handle this case, or we may give up on supporting this case?
+---
+
+### Question N: Stroke type and properties
+
+Should highlight strokes:
+
+**Type:**
+- [x ] Use existing `VectorStroke` class with marker-like properties
+- [ ] Create new `HighlightStroke` subclass
+- [ ] Use `VectorStroke` but with a special flag/property
+
+**Properties:**
+- **Color:** Use `m_highlighterColor` (configurable per-tool)?
+- **Opacity:** Same as markers (50%)?
+- **Thickness:** Should the rectangle height match text line height, or be configurable?
+- **Pressure:** Ignore pressure (uniform appearance)?
+
+**Your preferences:**
+Regular vector stroke. Use `m_highlighterColor` and the same opacity. Thickness should match the text line height ( but slightly more than that ). Definitely ignore pressure. Pay attention to the fact that multiple layers exist. Only create the stroke on the current layer. 
+---
+
+### Question O: Stroke integration with VectorLayer
+
+Highlight strokes should:
+- [x ] Go into the page's existing `VectorLayer` (mixed with pen strokes)
+- [ ] Go into a separate highlight-only layer
+- [ ] Use affinity system (drawn to layer based on current affinity setting)
+
+**Note:** If using existing VectorLayer + affinity, highlights behave like any other stroke for undo/redo/serialization.
+
+**Your preference:**
+"Affinity" is designed for inserted objects, and NEVER strokes. Don't mix them up. Highlights behave like any other stroke is correct behavior. 
+---
+
+### Question P: Selection state after highlight creation
+
+After creating a highlight stroke:
+- [x ] **Clear selection** - User must re-select for next highlight
+- [ ] **Keep selection** - User can change color/re-highlight
+- [ ] **Auto-advance** - Selection cleared, tool ready for next selection
+
+**Your preference:**
+Just let the user undo (like a normal stroke) and highlight again. No special UX needed here. 
+---
+
+### Question Q: Highlight overlap behavior
+
+If user highlights text that's already highlighted (same or different color):
+- [x ] **Stack** - New highlight drawn on top (colors blend)
+- [ ] **Replace** - Delete old highlight, create new one
+- [ ] **Ignore** - Don't create duplicate highlights
+- [ ] **Allow both** - Treat as independent strokes
+
+**Your preference:**
+For minimum architectural changes, it's the vanilla behavior when the user draws one marker stroke on top of another one. No special logic needed here.
+---
+
+### Question R: Stroke data structure
+
+For Phase C (LinkObject), we might need to store the extracted text with the stroke. Should we:
+
+**Option A: Store nothing** - Stroke is just a visual rectangle
+```cpp
+// VectorStroke only has points/color/width
+```
+
+**Option B: Store text in stroke metadata**
+```cpp
+struct VectorStroke {
+    // existing fields...
+    QString extractedText;  // Only for highlights
+};
+```
+
+**Option C: Store reference to future LinkObject**
+```cpp
+struct VectorStroke {
+    // existing fields...
+    QString linkedObjectId;  // Empty for regular strokes
+};
+```
+
+**Option D: Defer to Phase C** - Keep stroke simple for now
+
+**Your preference:**
+
+The strokes themselves NEVER contain extra data. In Phase C, we will create that LinkObject ALONGSIDE with the highlighter stroke, and that LinkObject can hold the selected text and more information. So it's Option A and D?
+
+---
+
+## AI Feedback on Phase B Answers
+
+### On L: Keyboard Shortcut Clarification Needed
+
+You said "Add a keyboard shortcut. With this toggle on, we create the stroke."
+
+I'm not 100% sure what you mean. Two possible interpretations:
+
+**Interpretation 1: Toggle mode + auto-create**
+- Press `H` to toggle "auto-highlight mode"
+- When ON: releasing mouse after selection → auto-create stroke
+- When OFF: selection only, no stroke created
+
+**Interpretation 2: Explicit shortcut to create**
+- Select text (no stroke yet)
+- Press `H` to convert current selection to stroke
+- No toggle, just an action
+
+**Which did you mean?**
+
+Also, what keyboard shortcut? `H` is intuitive but might conflict with other shortcuts.
+
+---
+
+### On M: Mid-row Selection - We Already Support This!
+
+Yes, "per line" means we can adjust start and end positions. The `highlightRects` from Phase A already stores **per-line rectangles with correct start/end positions**:
+
+```
+Line 1: [x_start ──────────────────── x_end]  ← Full width
+Line 2: [x_start ─────── x_end]                ← Starts mid-line
+```
+
+The Phase A `updateSelectedTextAndRects()` computes these rectangles based on character-level positions. Each rectangle in `highlightRects` is:
+- X: from first selected char to last selected char on that line
+- Y: from line top to line bottom
+- Height: matches the text line height
+
+So **no additional work needed** for mid-row precision - we already have the rectangles!
+
+---
+
+### On M: Tilted/Rotated Text
+
+This is a good edge case to consider. Poppler's `QRectF` bounding boxes are **always axis-aligned** (horizontal/vertical edges), even for rotated text.
+
+For rotated text, the bounding box looks like:
+
+```
+Rotated text "Hello":    Poppler's bounding box:
+    H                    ┌───────┐
+     e                   │       │
+      l                  │       │  ← Axis-aligned rect
+       l                 │       │     covering rotated text
+        o                └───────┘
+```
+
+**Options for tilted text:**
+
+1. **Use axis-aligned boxes anyway** (simplest)
+   - Highlight rectangle won't align perfectly with text
+   - But still covers the text area
+   - 99% of PDFs have horizontal text, so this is fine for most cases
+
+2. **Skip rotated text** (detect via box aspect ratio / text direction)
+   - If text appears rotated, don't allow selection
+   - Cleaner UX but limits functionality
+
+3. **Future: Rotated stroke support** (complex)
+   - Store rotation angle in stroke
+   - Requires VectorStroke changes
+
+**My recommendation:** Option 1 for Phase B. Most PDFs have horizontal text. We can revisit if users report issues with rotated PDFs.
+
+**Do you agree?**
+I agree with Option 1. 
+---
+
+### On N: Thickness "Slightly More Than Line Height"
+
+You said thickness should match text line height "but slightly more than that."
+
+**Implementation question:** How much more?
+
+- **Option A:** Line height × 1.1 (10% padding)
+- **Option B:** Line height + fixed padding (e.g., +2 PDF points)
+- **Option C:** Use the bounding box height directly (already includes some padding from Poppler)
+
+The `highlightRects` from Phase A use the exact bounding box from Poppler's text extraction. These boxes typically include a small amount of padding around the text.
+
+**My recommendation:** Use the bounding box height directly (Option C). It already has natural padding and matches what the user sees during selection.
+
+**Do you agree?**
+I agree with Option C. 
+---
+
+### On N: Current Layer Clarification
+
+You mentioned "Only create the stroke on the current layer."
+
+**Quick check:** In DocumentViewport, we have:
+- `m_currentLayerIndex` - the active layer for new strokes
+- `addStrokeToCurrentLayer()` - adds stroke to active layer
+
+So highlights will use the same mechanism as pen/marker strokes. ✓
+
+---
+
+### On R: Option A + D Confirmed
+
+Yes, correct interpretation! Strokes are pure visual data. The semantic meaning (extracted text, links) lives in LinkObject which is created separately in Phase C.
+
+---
+
+## Phase B Agreed Points
+
+| Topic | Decision |
+|-------|----------|
+| **Stroke creation trigger** | Keyboard shortcut (details TBD) |
+| **Stroke shape** | One rectangle per line, respecting character-level start/end positions |
+| **Tilted text** | Use axis-aligned boxes (Poppler default), revisit if needed |
+| **Stroke type** | Regular `VectorStroke` (no subclass, no special flags) |
+| **Stroke color** | Use `m_highlighterColor` (per-tool setting) |
+| **Stroke opacity** | Same as markers (50% alpha) |
+| **Stroke thickness** | Match text line height (use bounding box height from Phase A) |
+| **Pressure sensitivity** | Ignored (uniform appearance) |
+| **Layer integration** | Goes into current `VectorLayer` via `m_currentLayerIndex` |
+| **Selection after create** | Clear selection |
+| **Overlap behavior** | Stack like normal markers (no special logic) |
+| **Stroke data** | Pure visual - no extracted text stored in stroke |
+| **Undo/redo** | Standard stroke undo behavior |
+
+---
+
+## Remaining Questions
+
+### Question S: Keyboard Shortcut Key
+
+What key should trigger highlight creation?
+
+- [ ] `H` - intuitive for "Highlight"
+- [ ] `Enter` - standard "confirm" action
+- [ ] `Space` - easy to press with stylus hand
+- [x ] Other: _How about ctrl+h? This hard-coded keyboard shortcut will be removed when we reconnect the keyboard shortcut customizations in the control panel. ctrl+h is good enough before subtoolbars are implemented. SpeedyNote is meant for tablets anyway, so this is not a problem.______________
+
+**Also:** Should this be a toggle (persistent mode) or one-shot (press each time)?
+
+**Your answer:**
+Toggle. The interface should be a toggle as well, and so will the button on the subtoolbar be. 
+
+---
+
+### Question T: Toggle State Indication (Before Subtoolbar)
+
+Since subtoolbar doesn't exist yet, how should the user know if auto-highlight is ON or OFF?
+
+- [ ] **Cursor change** - Different cursor when toggle is ON (e.g., highlighter icon)
+- [ ] **Status bar message** - "Auto-highlight: ON/OFF" 
+- [ ] **Toast notification** - Brief popup when toggling
+- [ ] **Selection overlay color** - Blue when OFF, yellow when ON
+- [x] **No indication** - Power users will remember (temporary solution)
+- [ ] Other: _______________
+
+**Your preference:**
+No indication for now. Subtoolbar toggle button will provide indication when implemented.
+
+---
+
+## Phase B Final Agreed Points
+
+| Topic | Decision |
+|-------|----------|
+| **Stroke creation trigger** | `Ctrl+H` toggle for auto-highlight mode |
+| **Toggle behavior** | ON: release mouse → auto-create stroke; OFF: selection only |
+| **Stroke shape** | One rectangle per line, respecting character-level start/end positions |
+| **Tilted text** | Use axis-aligned boxes (Poppler default), revisit if needed |
+| **Stroke type** | Regular `VectorStroke` (no subclass, no special flags) |
+| **Stroke color** | Use `m_highlighterColor` (per-tool setting) |
+| **Stroke opacity** | Same as markers (50% alpha) |
+| **Stroke thickness** | Use bounding box height directly (natural padding from Poppler) |
+| **Pressure sensitivity** | Ignored (uniform appearance) |
+| **Layer integration** | Goes into current `VectorLayer` via `m_currentLayerIndex` |
+| **Selection after create** | Clear selection |
+| **Overlap behavior** | Stack like normal markers (no special logic) |
+| **Stroke data** | Pure visual - no extracted text stored in stroke |
+| **Undo/redo** | Standard stroke undo behavior |
+| **Toggle indication** | None for now (subtoolbar toggle button will provide indication later) |
+
+---
+
+## Phase B Implementation Plan
+
+**Scope:** Create highlight strokes from text selection. No LinkObject yet.
+
+**Prerequisites:** Phase A complete (text selection working)
+
+---
+
+### Task B.1: Add Auto-Highlight Toggle State
+
+**Location:** `DocumentViewport.h`
+
+```cpp
+// In private members section
+bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke
+
+// Public method for external control (future subtoolbar)
+public:
+    void setAutoHighlightEnabled(bool enabled);
+    bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
+    
+signals:
+    void autoHighlightEnabledChanged(bool enabled);
+```
+
+**Estimated lines:** ~15
+
+---
+
+### Task B.2: Add Ctrl+H Keyboard Shortcut
+
+**Location:** `DocumentViewport.cpp` (keyPressEvent) or `MainWindow.cpp`
+
+```cpp
+// In keyPressEvent or via QShortcut
+if (event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_H) {
+    setAutoHighlightEnabled(!m_autoHighlightEnabled);
+    // Optional: qDebug() << "Auto-highlight:" << m_autoHighlightEnabled;
+}
+```
+
+**Note:** Check MainWindow for existing Ctrl+H bindings to avoid conflicts.
+
+**Estimated lines:** ~20
+
+---
+
+### Task B.3: Implement createHighlightStrokes()
+
+**Location:** `DocumentViewport.cpp`
+
+```cpp
+/**
+ * @brief Creates marker strokes from current text selection.
+ * 
+ * Converts each rectangle in m_textSelection.highlightRects to a VectorStroke
+ * and adds it to the current layer.
+ * 
+ * @return List of created stroke IDs for potential undo grouping.
+ */
+QVector<QString> DocumentViewport::createHighlightStrokes();
+```
+
+**Implementation outline:**
+1. Check `m_textSelection.isValid()` and `!m_textSelection.highlightRects.isEmpty()`
+2. Get target page and layer
+3. For each rect in `highlightRects`:
+   - Convert from PDF coords to page coords (× PDF_TO_PAGE_SCALE)
+   - Create `VectorStroke` as rectangle path (4 corner points, closed)
+   - Set stroke properties:
+     - Color: `m_highlighterColor`
+     - Width: rect height (already correct from bounding box)
+     - Tool type: `ToolType::Marker` (for correct blending)
+     - Pressure: uniform (1.0)
+   - Add to current layer via existing stroke addition methods
+   - Record stroke ID for undo
+4. Invalidate stroke cache for affected page
+5. Return list of stroke IDs
+
+**Key consideration:** Marker strokes typically use a polyline with width. For rectangles, we have two options:
+- **Option A:** Single horizontal stroke (start to end of rect, width = rect height)
+- **Option B:** Four-point rectangle path
+
+Option A is simpler and matches how markers work. The stroke goes through the center of the text line horizontally.
+
+**Estimated lines:** ~80
+
+---
+
+### Task B.4: Modify handlePointerRelease_Highlighter()
+
+**Location:** `DocumentViewport.cpp`
+
+```cpp
+void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
+{
+    Q_UNUSED(pe);
+    
+    if (!m_textSelection.isSelecting) {
+        return;
+    }
+    
+    m_textSelection.isSelecting = false;
+    
+    // Finalize selection
+    if (m_textSelection.isValid()) {
+        finalizeTextSelection();
+        
+        // NEW: Auto-create strokes if toggle is ON
+        if (m_autoHighlightEnabled) {
+            createHighlightStrokes();
+            m_textSelection.clear();  // Clear selection after stroke creation
+        }
+    }
+    
+    update();
+}
+```
+
+**Estimated lines:** ~10 (modification)
+
+---
+
+### Task B.5: Integrate with Undo System
+
+**Location:** `DocumentViewport.cpp`
+
+The existing stroke addition methods should already integrate with undo. Verify:
+- `addStroke()` or equivalent pushes to undo stack
+- Each highlight rect = one stroke = one undo step (or group them?)
+
+**Question resolved earlier:** Separate undo steps (not grouped). Each stroke can be undone individually.
+
+**Estimated lines:** ~5 (verification, may need minor adjustments)
+
+---
+
+### Task B.6: VectorStroke Rectangle Creation Helper
+
+**Location:** `DocumentViewport.cpp` (or utility function)
+
+```cpp
+/**
+ * @brief Creates a marker-style stroke for a highlight rectangle.
+ * 
+ * @param rect Rectangle in page coordinates
+ * @param color Highlight color
+ * @return VectorStroke configured as horizontal marker through rect center
+ */
+VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect, const QColor& color);
+```
+
+**Implementation:**
+```cpp
+VectorStroke stroke;
+stroke.setId(QUuid::createUuid().toString());
+stroke.setColor(color);
+stroke.setWidth(rect.height());  // Stroke width = text line height
+stroke.setToolType(ToolType::Marker);
+
+// Single horizontal line through center of rect
+QVector<QPointF> points;
+points.append(QPointF(rect.left(), rect.center().y()));   // Start
+points.append(QPointF(rect.right(), rect.center().y()));  // End
+
+// Uniform pressure
+QVector<qreal> pressures;
+pressures.append(1.0);
+pressures.append(1.0);
+
+stroke.setPoints(points);
+stroke.setPressures(pressures);
+
+return stroke;
+```
+
+**Estimated lines:** ~30
+
+---
+
+### Task B.7: Test and Verify
+
+Manual testing checklist:
+- [ ] Ctrl+H toggles auto-highlight mode
+- [ ] With toggle OFF: selection works as before (Phase A)
+- [ ] With toggle ON: releasing mouse creates strokes
+- [ ] Strokes appear on current layer
+- [ ] Strokes have correct color (m_highlighterColor)
+- [ ] Strokes have correct width (text line height)
+- [ ] Strokes render with marker blending (semi-transparent)
+- [ ] Multi-line selection creates multiple strokes
+- [ ] Character-level precision respected (partial lines)
+- [ ] Undo removes strokes one at a time
+- [ ] Selection clears after stroke creation
+- [ ] Strokes persist after save/load
+
+---
+
+### Task Summary
+
+| # | Task | Est. Lines | Dependencies |
+|---|------|------------|--------------|
+| B.1 | Add auto-highlight toggle state | 15 | None |
+| B.2 | Add Ctrl+H keyboard shortcut | 20 | B.1 |
+| B.3 | Implement createHighlightStrokes() | 80 | B.1, B.6 |
+| B.4 | Modify handlePointerRelease_Highlighter() | 10 | B.1, B.3 |
+| B.5 | Integrate with undo system | 5 | B.3 |
+| B.6 | VectorStroke rectangle creation helper | 30 | None |
+| B.7 | Test and verify | - | All |
+| **Total** | | **~160** | |
+
+---
+
+### Implementation Order
+
+1. **B.1** → Add toggle state (foundation)
+2. **B.6** → Create stroke helper (can test independently)
+3. **B.3** → Implement createHighlightStrokes()
+4. **B.4** → Wire up auto-create on release
+5. **B.2** → Add Ctrl+H shortcut
+6. **B.5** → Verify undo integration
+7. **B.7** → Full testing
+
+---
+
+### Code References Needed
+
+Before implementation, review these existing methods:
+- How strokes are added to layers: `VectorLayer::addStroke()` or similar
+- How undo is handled for strokes
+- Existing stroke creation patterns in pen/marker handlers
+- `m_currentLayerIndex` usage
+
+---
+
+**Ready to proceed with Phase B implementation?**
+
+---
+
+## Phase B Code Review
+
+Performed after completing B.1 through B.6.
+
+### Issues Found and Fixed
+
+| Issue | Severity | Fix |
+|-------|----------|-----|
+| Debug output in release builds | Minor | Wrapped in `#ifdef QT_DEBUG` |
+| Degenerate rectangle handling | Edge case | Skip rects with width/height < 0.1 |
+| Emit documentModified unconditionally | Minor | Only emit if strokes were created |
+
+### Verified Safe
+
+| Aspect | Status |
+|--------|--------|
+| **Memory safety** | ✅ All objects stack-allocated or Qt-managed |
+| **Document switching** | ✅ `setDocument()` clears text selection (from Phase A) |
+| **Tool switching** | ✅ Switching away from Highlighter clears selection |
+| **Undo integration** | ✅ Uses standard `pushUndoAction()` for each stroke |
+| **Thread safety** | ✅ All operations on main Qt thread |
+| **Eraser compatibility** | ✅ Highlight strokes are regular VectorStrokes |
+
+### Code Quality Notes
+
+1. **Return value of `createHighlightStrokes()`**: Returns list of stroke IDs but currently unused. Kept for potential future use (e.g., grouping for LinkObject in Phase C).
+
+2. **Toggle state persistence**: `m_autoHighlightEnabled` is NOT reset on document change - intentional, as it's a user preference rather than document state.
+
+3. **Coordinate conversion**: Uses `PDF_TO_PAGE_SCALE` constant consistently (same as Phase A).
+
+### Test Results
+
+Manual testing confirmed:
+- ✅ Toggle works via Ctrl+H
+- ✅ Strokes created on correct layer
+- ✅ Undo removes strokes individually
+- ✅ Eraser can delete highlight strokes
+- ✅ Selection cleared after stroke creation
+- ✅ Document marked dirty after highlight
+
+---
+
+## Phase C Questions: LinkObject Integration
+
+Phase B (Highlight Strokes) is complete. Before implementing Phase C, I need clarification on LinkObject design.
+
+### Understanding from Earlier Q&A
+
+From our earlier discussions, I understand:
+- LinkObject is a **visible InsertedObject** (like ImageObject)
+- It's **general-purpose** - can link to viewport location, website, markdown notes
+- It's **independent from strokes** - erasing a highlight stroke doesn't delete the LinkObject
+- It appears as a **semi-transparent double quote icon**
+- Has a **description/title field** for search
+- When created from highlight, stores the **extracted text**
+
+---
+
+### Question U: LinkObject Core Properties
+
+What properties should LinkObject store?
+
+**Proposed properties (based on InsertedObject base + specific):**
+
+```cpp
+class LinkObject : public InsertedObject {
+    // Inherited: id, position, size, zOrder, locked, visible, rotation, layerAffinity
+    
+    // Link target type
+    enum class TargetType {
+        None,           // No target (just annotation)
+        PageLocation,   // Link to specific page + position
+        Url,            // External URL
+        Markdown        // Link to markdown note (by ID)
+    };
+    TargetType targetType = TargetType::None;
+    
+    // Target data (depending on type)
+    int targetPageIndex = -1;           // For PageLocation
+    QPointF targetPosition;             // For PageLocation
+    QString targetUrl;                  // For Url
+    QString targetMarkdownId;           // For Markdown
+    
+    // Content
+    QString title;                      // Short label (displayed near icon?)
+    QString description;                // Longer text (for search, extracted text)
+    QColor color;                       // Tint color for the icon
+    
+    // Source info (for highlights)
+    int sourcePageIndex = -1;           // PDF page where text was extracted
+    QString sourceText;                 // Original extracted text (redundant with description?)
+};
+```
+
+**Questions:**
+1. Is `description` the same as extracted text, or separate?
+2. Should `sourceText` and `description` be merged into one field?
+3. Should there be a `sourceType` to indicate how the LinkObject was created (highlight, manual, markdown)?
+
+**Your preferences:**
+A1: For the LinkObjects created alongside with a highlight, the descriptions will be the same as extracted text. For LinkObjects created other ways, no. 
+A2: Yes. Just like what I said in A1. For further description on some highlighted text, the user should reach out to the markdown text annotation linked to this LinkObject. 
+A3: `markdown` definitely should not be a separate type, but an attribute. I think a LinkObject would support a lot of features at the same time, it can link to a website, and link to a markdown note, and link to another position. 
+
+I got an idea about the UX
+
+---
+Img Insert
+
+*LinkInsert* (toggled)
+
+---
+
+🖋
+
+
+
+➕
+
+---
+
++ // to be taken
+
++ // to be taken
+
++ // to be taken
+---
+This is the default behavior. By default, there are 3 buttons on the subtoolbar for the ObjectInsert tool. The pen is for adding one on the DocumentViewport, The mouse cursor is for selection, the plus button is for adding links. The user may add one of a few types, like a markdown note, a position shortcut, or a web link, or something else (that will be implemented later). For each LinkObject, there will be 3 general purpose slots, for the user to link stuff to. 
+
+The UX is like this. The user select the ObjectSelect tool on the main toolbar - (default to) or select LinkInsert mode - (since the default is select, the user will need to manually select add) the pen icon and click the place he wants on the canvas to create a new LinkObject. 
+
+Object Creation is complete, by default it already has the attributes that all InsertedObject have. The user will need to click "add" to add a link to it. (now there will be a menu of options on which type of link he wants, markdown , web link, another position, etc. We can deal with this later). After the link is created, it will take up one of the 3 "to be taken" slot of this link. The link can be of any type, it can be 2 markdowns and a position, or one of each kind. 
+
+For accessing the link later, (since the default option is LinkInsert - select), all the user needs to do is click on tool ObjectInsert, and immediately click on the LinkObject somewhere on a page, or an edgeless canvas. That's only 2 steps. After the LinkObject is selected, the subtoolbar shows all 3 (or as many as the user created) links and the user can access any. 
+
+What do you think about this idea? This whole thing can be accelerated even more if the action combinations are connected to other things, like gestures? 
+
+It should really reuse the logic how other things get inserted, like an image, which also has an "selected" state. I can't just let the user click on the LinkObject and immediately bring it somewhere else, because it goes against how other InsertedObjects work.
+
+
+---
+
+### Question V: LinkObject Visual Appearance
+
+You mentioned "semi-transparent double quote icon". More details needed:
+
+**Icon design:**
+- [x ] Fixed icon (e.g., `"` quote marks)
+- [ ] Icon varies by target type (quote for text, chain for URL, page for location)
+- [ ] Custom icon per LinkObject
+
+**Size:**
+- [x ] Fixed size (e.g., 24x24 pixels at 100% zoom)
+- [ ] Size based on content (title length)
+- [ ] Configurable per object
+
+**Position relative to highlight:**
+- [x ] At start of highlight (left edge)
+- [ ] At end of highlight (right edge)
+- [ ] Centered on first line
+- [x ] User-draggable anywhere
+
+**Visibility:**
+- [x ] Always visible (like ImageObject), *but only if the user makes the layer visible (affinity support)*
+- [ ] Only visible when hovering near the highlight
+- [ ] Only visible in a special "link view" mode
+
+**Your preferences:**
+Just like what I selected. 
+---
+
+### Question W: LinkObject Creation Flow
+
+When user creates a highlight (with auto-highlight ON), how is LinkObject created?
+
+**Option A: Always create LinkObject with highlight**
+```
+Select text → Release → Create stroke(s) + Create LinkObject
+```
+- Every highlight has an associated LinkObject
+- Simpler logic
+
+**Option B: Separate toggle for LinkObject**
+```
+Toggle 1: Auto-highlight (creates strokes)
+Toggle 2: Auto-link (creates LinkObject)
+```
+- User controls whether to create just visual highlight or also semantic link
+- More flexible but more complex UI
+
+**Option C: Post-creation option**
+```
+Select text → Release → Create stroke(s) only
+Then: User right-clicks highlight area → "Add Link" → Creates LinkObject
+```
+- LinkObject is optional, added later
+- Doesn't require knowing which stroke "belongs" to which link
+
+**Your preference:**
+Option A. Always auto create (as long as the highlight mode is on., or it still behaves like the end of Phase A). Otherwise the user will use the regular marker if he doesn't want the LinkObject. 
+---
+
+### Question X: LinkObject Interaction
+
+What happens when user interacts with a LinkObject?
+
+**On click:**
+- [ ] Navigate to target (if TargetType is PageLocation/Url/Markdown)
+- [ ] Open context menu (navigate, edit, delete)
+- [ ] Select the object (like ImageObject)
+
+**On double-click:**
+- [ ] Edit target/description
+- [ ] Navigate to target
+- [ ] Show properties dialog
+
+**Tool requirements:**
+- [ ] Clickable with any tool (like hyperlinks in PDF viewers)
+- [x ] Only clickable with ObjectSelect tool
+- [ ] Only clickable with a new "Link" tool
+
+**Your preferences:**
+I think I answered the question clearly in Question U. Link appears on the subtoolbar. When we don't have a toolbar, we can use ctrl+8 ctrl+9 ctrl+0 shortcuts for now. We can't default single or double click behavior, because a LinkObject can have various types of things linked to it, unless the user gives it an order, the first one can be triggered by double click, the second one can be triggered by something else, etc. This can be convenient, but we need to implement this later. 
+---
+
+### Question Y: LinkObject and Markdown Integration
+
+You mentioned markdown notes will reference LinkObjects. Clarify:
+
+**Connection direction:**
+- [ ] Markdown note stores LinkObject ID → looks up LinkObject for position
+- [x ] LinkObject stores markdown note ID → links to note
+- [ ] Bidirectional references
+
+**When markdown note is created:**
+1. User selects text → creates highlight + LinkObject
+2. Then what?
+   - [ ] Automatic: Opens markdown editor with extracted text
+   - [ ] Manual: User later creates note and links it to existing LinkObject
+   - [ ] Context menu: Right-click LinkObject → "Create Note"
+
+**Your preferences:**
+For connection direction, LinkObject should store the markdown note id. Since there is already a "loading ondemand" system for InsertedObjects, the moment markdown notes load FOLLOWS when the InsertedObjects load. This means that, when a LinkObject is deleted, the deletion will cascade and the markdown note(s) linked to the LinkObject will be deleted. 
+When a markdown note is deleted, the LinkObject is more or less unaffected, unless the user tries to access (or the application is trying to automatically load) the markdown note again, and the file is not there and the LinkObject will delete this reference. Does this make sense to you? If not, you may correct me. 
+
+
+For markdown creation, he can create a markdown note by adding a "link to a markdown note", which takes up one of the 3 slots.  
+
+
+---
+
+### Question Z: LinkObject Layer Affinity
+
+Where should LinkObject render in the layer stack?
+
+- [ ] **Above all strokes** (always visible, even under highlight strokes)
+- [ ] **Same affinity as highlight stroke** (if applicable)
+- [ ] **Default affinity like ImageObject** (activeLayer - 1)
+- [ ] **Special "overlay" layer** that's always on top
+
+**Your preference:**
+Same affinity as the CURRENT LAYER. DocumentViewport shouldn't really know what type of InsertedObject it is. You may reference the affinity of the inserted images. It's always right below the currently selected vector layer and right above the vector layer below. 
+---
+
+### Question AA: Phase C Scope
+
+Given the complexity of LinkObject, what should Phase C cover?
+
+**Option A: Full LinkObject implementation**
+- Create LinkObject class
+- Integrate with highlight creation
+- Implement all target types
+- Markdown integration
+
+**Option B: Minimal LinkObject (MVP)**
+- Create LinkObject class (basic properties only)
+- Integrate with highlight creation (stores extracted text)
+- No navigation (TargetType::None only)
+- Markdown integration deferred
+
+**Option C: LinkObject class only**
+- Create LinkObject class and rendering
+- No integration with highlighter yet
+- Test insertion/selection/manipulation via debug menu
+- Integration in separate phase
+
+**Your preference:**
+
+I'm going for Option A. This really is the LAST puzzle of the architectural migration (and improvement) of SpeedyNote. After this, it's all UI/UX, and smaller stuff. 
+
+---
+
+## AI Analysis & Follow-up Questions
+
+### Understanding the 3-Slot Architecture
+
+Your UX design is creative! Let me make sure I understand correctly:
+
+**LinkObject has 3 "link slots"**, each can hold a different type of link:
+
+```cpp
+struct LinkSlot {
+    enum class Type { Empty, Markdown, Url, Position };
+    Type type = Type::Empty;
+    
+    // Data (only one is used based on type)
+    QString markdownNoteId;     // For Markdown
+    QString url;                // For Url
+    int targetPageIndex;        // For Position
+    QPointF targetPosition;     // For Position
+};
+
+class LinkObject : public InsertedObject {
+    // ... inherited properties ...
+    
+    QString description;        // Extracted text (for highlights) or user-entered
+    QColor iconColor;          // Tint color for the icon
+    
+    LinkSlot slots[3];         // The 3 link slots
+};
+```
+
+**Questions about slots:**
+
+### Question AB: Slot Limit
+
+Is 3 a hard limit, or should it be configurable?
+
+- [ ] **Hard limit of 3** - Simple, predictable UI
+- [ ] **Configurable per-document** - More flexible
+- [ ] **Unlimited slots** - Maximum flexibility, but complex UI
+
+**My suggestion:** Start with hard limit of 3 for Phase C. This keeps the subtoolbar UI simple and predictable. Can be expanded later if needed.
+
+**Your preference:**
+
+---
+
+### Question AC: Two Creation Flows
+
+I see TWO ways to create a LinkObject:
+
+**Flow 1: From Highlight (Automatic)**
+```
+Highlighter tool active + auto-highlight ON
+→ Select PDF text → Release mouse
+→ Creates stroke(s) + LinkObject with description = extracted text
+→ LinkObject positioned at start of first highlight rect
+```
+
+**Flow 2: Manual via ObjectSelect Tool**
+```
+ObjectSelect tool active + LinkInsert mode
+→ Click pen icon on subtoolbar
+→ Click position on canvas
+→ Creates empty LinkObject (no description, no slots filled)
+```
+
+**Is this understanding correct?**
+
+**Follow-up:** For Flow 1, should the LinkObject:
+- [ ] Have all 3 slots empty (user adds links later)
+- [ ] Have slot 0 pre-filled with something (e.g., position of the highlight itself?)
+- [ ] User chooses during creation
+
+**Your answer:**
+
+---
+
+### Question AD: Cascade Delete Confirmation
+
+You said: "when a LinkObject is deleted, the deletion will cascade and the markdown note(s) linked to the LinkObject will be deleted."
+
+**This is significant behavior!** Want to confirm:
+
+1. **Deleting a LinkObject** → All markdown notes in its slots are **permanently deleted**?
+2. **Is there a confirmation dialog?** "This will delete X linked notes. Continue?"
+3. **What about undo?** Undo delete LinkObject → restores the markdown notes too?
+
+**Alternative approach (softer):**
+- Deleting LinkObject only removes the *reference* to markdown notes
+- Markdown notes become "orphaned" but still exist
+- User can find orphaned notes via markdown panel/search
+
+**Which behavior do you want?**
+- [ ] **Hard cascade** - Delete LinkObject = delete notes (with confirmation)
+- [ ] **Soft cascade** - Delete LinkObject = orphan notes (recoverable)
+
+**Your preference:**
+
+---
+
+### Question AE: Subtoolbar Dependency
+
+The UX you described depends heavily on the **subtoolbar**, which doesn't exist yet.
+
+**For Phase C, should we:**
+
+1. **Implement subtoolbar first** → Then LinkObject integration
+2. **Use temporary keyboard shortcuts** → Ctrl+8/9/0 for slots (you mentioned this)
+3. **Use context menu** → Right-click LinkObject → menu shows slots
+
+**My suggestion:** Start with option 2+3 (shortcuts + context menu). This lets us:
+- Build and test LinkObject without waiting for subtoolbar
+- Verify the slot architecture works
+- Add subtoolbar later as pure UI layer
+
+**Your preference:**
+
+---
+
+### Question AF: LinkObject Icon Rendering
+
+You said: Fixed icon (24x24 at 100% zoom), semi-transparent double quote.
+
+**Implementation questions:**
+
+1. **Icon source:** 
+   - [ ] Embedded PNG/SVG resource
+   - [ ] Qt-drawn shapes (QPainter)
+   - [ ] Font glyph (e.g., FontAwesome quote icon)
+
+2. **Visual states:**
+   - Normal: Semi-transparent icon
+   - Hovered: Slightly more opaque?
+   - Selected: Selection box around it (like ImageObject)?
+   - Has links: Any indicator (dots under icon for filled slots)?
+
+**Your preferences:**
+
+---
+
+### Question AG: Highlighter Tool vs ObjectSelect Tool
+
+Clarifying tool relationships:
+
+| Tool | Can Create LinkObject? | Can Select LinkObject? | Can Access Slots? |
+|------|------------------------|------------------------|-------------------|
+| **Highlighter** | Yes (from highlight) | No? | No? |
+| **ObjectSelect** | Yes (manual) | Yes | Yes (subtoolbar) |
+| **Pen/Marker/Eraser** | No | No | No |
+
+**Is this correct?**
+
+If Highlighter can't select LinkObjects, how does user access the slots of a highlight-created LinkObject?
+- Switch to ObjectSelect tool?
+- Auto-switch after creation?
+
+**Your answer:**
+
+---
+
+### Phase C Sub-phases Suggestion
+
+Given the scope (Full LinkObject + all link types + markdown integration), I suggest breaking Phase C into sub-phases:
+
+**C.1: LinkObject Class Foundation**
+- Create `LinkObject` class with 3-slot architecture
+- Implement `render()` (draw icon)
+- Implement `toJson()` / `loadFromJson()` serialization
+- Register in `InsertedObject::fromJson()` factory
+- Test via direct insertion (debug code)
+- ~150 lines
+
+**C.2: LinkObject Selection & Manipulation**
+- Hit testing (click on 24x24 icon)
+- Selection works like ImageObject
+- Move/delete via ObjectSelect tool
+- Undo/redo support
+- ~100 lines
+
+**C.3: Highlighter Integration**
+- Modify `createHighlightStrokes()` to also create LinkObject
+- Position at start of first highlight rect
+- Set description to extracted text
+- ~50 lines
+
+**C.4: Link Slot Functionality**
+- Implement slot types (Markdown, Url, Position)
+- Keyboard shortcuts (Ctrl+8/9/0) or context menu to access slots
+- Navigation for Position type
+- URL opening for Url type
+- ~150 lines
+
+**C.5: Markdown Integration**
+- Create/link markdown notes
+- Cascade delete behavior
+- Markdown panel integration (if exists)
+- ~200 lines
+
+**Total: ~650 lines across 5 sub-phases**
+
+**Do you agree with this breakdown?**
+
+---
+
+## Phase C Agreed Points (So Far)
+
+| Topic | Decision |
+|-------|----------|
+| **LinkObject properties** | 3 link slots + description + iconColor |
+| **Description field** | Same as extracted text for highlights, user-entered otherwise |
+| **Link types** | Multiple per LinkObject: Markdown, Url, Position in slots |
+| **Visual** | Fixed 24x24 icon (double quote), semi-transparent, user-draggable |
+| **Initial position** | Start of highlight (left edge) when created from highlight |
+| **Visibility** | Always visible, respects layer affinity |
+| **Creation from highlight** | Always auto-create when highlight mode ON |
+| **Interaction** | Only via ObjectSelect tool; slots shown on subtoolbar/shortcuts |
+| **Markdown connection** | LinkObject stores markdown ID; cascade delete (TBD exact behavior) |
+| **Layer affinity** | Same as current layer (activeLayer - 1) |
+| **Scope** | Full implementation (Option A) |
+
+---
+
 ## References
 
 - Old implementation: `source/InkCanvas.cpp` lines 5820-5935
