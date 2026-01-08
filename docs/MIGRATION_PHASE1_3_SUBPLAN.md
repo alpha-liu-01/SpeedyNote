@@ -836,6 +836,99 @@ To verify performance with large documents:
 
 ---
 
+## Critical Bug Fix: Missing `markPageDirty()` in Paged Mode
+
+### Problem: Strokes Not Saved After First Save
+
+**Symptom:** When saving a new document (first save), then drawing more strokes and saving again, the new strokes were not persisted. Page 0 (and any pages that existed before the first save) would lose all subsequent changes.
+
+**Steps to reproduce:**
+1. Create new document (unsaved)
+2. Draw strokes on page 0
+3. Save As → creates `.snb` bundle (strokes saved correctly)
+4. Draw more strokes on page 0
+5. Save again
+6. Close and reopen → **strokes from step 4 are missing!**
+
+### Root Cause
+
+The lazy save system uses `m_dirtyPages` to track which pages need to be written to disk:
+
+```cpp
+// In Document::saveBundle()
+for (const auto& [uuid, pagePtr] : m_loadedPages) {
+    bool needsSave = savingToNewLocation || m_dirtyPages.count(uuid) > 0;
+    if (needsSave) { /* save page */ }
+}
+m_dirtyPages.clear();  // Clear after save
+```
+
+**The bug:** Paged mode stroke operations never called `markPageDirty()`. After the first save cleared `m_dirtyPages`, subsequent modifications weren't tracked.
+
+**Edgeless mode worked correctly** because it called `markTileDirty()` in all the right places.
+
+### Solution: Add `markPageDirty()` to All Paged Mode Operations
+
+Added `m_document->markPageDirty()` calls to these locations in `DocumentViewport.cpp`:
+
+| Function | Operation | Line (approx) |
+|----------|-----------|---------------|
+| `finishStroke()` | Drawing strokes | ~3530 |
+| `createStraightLineStroke()` | Straight line tool | ~3980 |
+| `applySelectionTransform()` | Lasso transform | ~7055 |
+| `pasteStrokes()` | Paste strokes | ~7210 |
+| `deleteSelection()` | Delete selected strokes | ~7305 |
+| `createHighlightStrokes()` | Highlighter tool | ~7985 |
+| `eraseAtPaged()` | Eraser tool | ~8275 |
+| `undo()` | Undo in paged mode | ~9080 |
+| `redo()` | Redo in paged mode | ~9240 |
+
+### Example Fix
+
+```cpp
+// Before (BUG):
+void DocumentViewport::finishStroke()
+{
+    // ...
+    layer->addStroke(m_currentStroke);
+    pushUndoAction(m_activeDrawingPage, PageUndoAction::AddStroke, m_currentStroke);
+    // Missing: m_document->markPageDirty(...)
+    emit documentModified();
+}
+
+// After (FIXED):
+void DocumentViewport::finishStroke()
+{
+    // ...
+    layer->addStroke(m_currentStroke);
+    
+    // Mark page dirty for lazy save (BUG FIX: was missing)
+    m_document->markPageDirty(m_activeDrawingPage);
+    
+    pushUndoAction(m_activeDrawingPage, PageUndoAction::AddStroke, m_currentStroke);
+    emit documentModified();
+}
+```
+
+### Why This Wasn't Caught Earlier
+
+1. **First save always worked** - During first save, all pages are migrated from `m_pages` to `m_loadedPages` and marked dirty
+2. **Edgeless mode worked** - Different code path with correct `markTileDirty()` calls
+3. **`documentModified()` signal misleading** - The signal was emitted (triggering UI "unsaved" indicator) but didn't actually mark pages for save
+
+### Testing
+
+To verify the fix:
+1. Create new document
+2. Draw strokes
+3. Save As
+4. Draw more strokes
+5. Save
+6. Close and reopen
+7. **All strokes should be present**
+
+---
+
 ### What's NOT in Phase 1.3
 - Touch gesture handling (Phase 2 or 4)
 - Actual drawing/erasing (Phase 2)
