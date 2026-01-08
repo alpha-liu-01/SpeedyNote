@@ -3526,6 +3526,9 @@ void DocumentViewport::finishStroke()
         if (layer) {
             layer->addStroke(m_currentStroke);
             
+            // Mark page dirty for lazy save (BUG FIX: was missing, causing strokes to not save)
+            m_document->markPageDirty(m_activeDrawingPage);
+            
             // Push to undo stack
             pushUndoAction(m_activeDrawingPage, PageUndoAction::AddStroke, m_currentStroke);
         }
@@ -3967,6 +3970,9 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
         
         layer->addStroke(stroke);
         layer->invalidateStrokeCache();
+        
+        // Mark page dirty for lazy save (BUG FIX: was missing)
+        m_document->markPageDirty(m_straightLinePageIndex);
         
         // Push to undo stack (same pattern as finishStroke)
         pushUndoAction(m_straightLinePageIndex, PageUndoAction::AddStroke, stroke);
@@ -7048,6 +7054,9 @@ void DocumentViewport::applySelectionTransform()
         
         layer->invalidateStrokeCache();
         
+        // Mark page dirty for lazy save (BUG FIX: was missing)
+        m_document->markPageDirty(m_lassoSelection.sourcePageIndex);
+        
         // Push to paged undo stack
         pushUndoAction(m_lassoSelection.sourcePageIndex, undoAction);
     }
@@ -7195,6 +7204,9 @@ void DocumentViewport::pasteSelection()
         
         layer->invalidateStrokeCache();
         
+        // Mark page dirty for lazy save (BUG FIX: was missing)
+        m_document->markPageDirty(pageIndex);
+        
         // Push to paged undo stack (use addedStrokes for multiple strokes)
         pushUndoAction(pageIndex, undoAction);
     }
@@ -7284,6 +7296,11 @@ void DocumentViewport::deleteSelection()
         }
         
         layer->invalidateStrokeCache();
+        
+        // Mark page dirty for lazy save (BUG FIX: was missing)
+        if (!undoAction.strokes.isEmpty()) {
+            m_document->markPageDirty(m_lassoSelection.sourcePageIndex);
+        }
         
         // Push to paged undo stack
         if (!undoAction.strokes.isEmpty()) {
@@ -7967,6 +7984,11 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
     // Invalidate stroke cache for this page
     layer->invalidateStrokeCache();
     
+    // Mark page dirty for lazy save (BUG FIX: was missing)
+    if (!createdIds.isEmpty()) {
+        m_document->markPageDirty(pageIndex);
+    }
+    
     // Clear the text selection
     m_textSelection.clear();
     
@@ -8235,6 +8257,11 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     }
     
     // Stroke cache is automatically invalidated by removeStroke()
+    
+    // Mark page dirty for lazy save (BUG FIX: was missing)
+    if (!removedStrokes.isEmpty()) {
+        m_document->markPageDirty(pe.pageHit.pageIndex);
+    }
     
     // Push undo action
     if (removedStrokes.size() == 1) {
@@ -9057,6 +9084,9 @@ void DocumentViewport::undo()
         }
     }
     
+    // Mark page dirty for lazy save (BUG FIX: was missing)
+    m_document->markPageDirty(pageIdx);
+    
     // Push to redo stack
     m_redoStacks[pageIdx].push(action);
     
@@ -9207,6 +9237,9 @@ void DocumentViewport::redo()
                 break;
         }
     }
+    
+    // Mark page dirty for lazy save (BUG FIX: was missing)
+    m_document->markPageDirty(pageIdx);
     
     // Push back to undo stack
     m_undoStacks[pageIdx].push(action);

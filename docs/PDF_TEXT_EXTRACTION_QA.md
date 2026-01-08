@@ -1590,14 +1590,14 @@ class LinkObject : public InsertedObject {
 
 Is 3 a hard limit, or should it be configurable?
 
-- [ ] **Hard limit of 3** - Simple, predictable UI
+- [x ] **Hard limit of 3** - Simple, predictable UI
 - [ ] **Configurable per-document** - More flexible
 - [ ] **Unlimited slots** - Maximum flexibility, but complex UI
 
 **My suggestion:** Start with hard limit of 3 for Phase C. This keeps the subtoolbar UI simple and predictable. Can be expanded later if needed.
 
 **Your preference:**
-
+Having a hard limit is not an issue. If the user wants more, he can just add another LinkObject nearby.
 ---
 
 ### Question AC: Two Creation Flows
@@ -1623,12 +1623,12 @@ ObjectSelect tool active + LinkInsert mode
 **Is this understanding correct?**
 
 **Follow-up:** For Flow 1, should the LinkObject:
-- [ ] Have all 3 slots empty (user adds links later)
+- [x ] Have all 3 slots empty (user adds links later)
 - [ ] Have slot 0 pre-filled with something (e.g., position of the highlight itself?)
 - [ ] User chooses during creation
 
 **Your answer:**
-
+Option 1. Have all 3 slots empty.
 ---
 
 ### Question AD: Cascade Delete Confirmation
@@ -1648,10 +1648,12 @@ You said: "when a LinkObject is deleted, the deletion will cascade and the markd
 
 **Which behavior do you want?**
 - [ ] **Hard cascade** - Delete LinkObject = delete notes (with confirmation)
-- [ ] **Soft cascade** - Delete LinkObject = orphan notes (recoverable)
+- [x ] **Soft cascade** - Delete LinkObject = orphan notes (recoverable)
 
 **Your preference:**
+This notices me... We don't have a "recycle bin" feature, and orphaned images can still exist... I think we actually need a phase c0 for getting the current ObjectInsert implementation complete enough for LinkObject. 
 
+When the user choose to close the document, all orphaned files can then be deleted permanently from the garbage bin. Undo actions can bring the inserted objects out of the recycle bin. 
 ---
 
 ### Question AE: Subtoolbar Dependency
@@ -1670,7 +1672,7 @@ The UX you described depends heavily on the **subtoolbar**, which doesn't exist 
 - Add subtoolbar later as pure UI layer
 
 **Your preference:**
-
+Option 2 only. There really are only 7 buttons, from the top to bottom, (ImgInsertion/LinkInsertion, one or the other, that's 2), (create/select, shared for 2 modes, that's another 2),  we actually don't need the plus button there (because we can just let the user press the empty slot button), and the 3 slots, that's 7. They can take up ctrl+<, ctrl+>, then ctrl+6, ctrl+7, and the 3 slots take up ctrl + 8 through 0.
 ---
 
 ### Question AF: LinkObject Icon Rendering
@@ -1680,18 +1682,18 @@ You said: Fixed icon (24x24 at 100% zoom), semi-transparent double quote.
 **Implementation questions:**
 
 1. **Icon source:** 
-   - [ ] Embedded PNG/SVG resource
+   - [x ] Embedded PNG/SVG resource
    - [ ] Qt-drawn shapes (QPainter)
    - [ ] Font glyph (e.g., FontAwesome quote icon)
 
 2. **Visual states:**
-   - Normal: Semi-transparent icon
-   - Hovered: Slightly more opaque?
-   - Selected: Selection box around it (like ImageObject)?
-   - Has links: Any indicator (dots under icon for filled slots)?
+   - Normal: Semi-transparent icon. Yes.
+   - Hovered: Slightly more opaque? No appearance change.
+   - Selected: Selection box around it (like ImageObject)? Yes, share the same code.
+   - Has links: Any indicator (dots under icon for filled slots)? No need for that I guess. A LinkObject is "linky" itself. 
 
 **Your preferences:**
-
+I can provide an svg for this, but the question is, if my provided button is black, how can the " show up as another color (but not make the background also show the same color)?
 ---
 
 ### Question AG: Highlighter Tool vs ObjectSelect Tool
@@ -1700,18 +1702,18 @@ Clarifying tool relationships:
 
 | Tool | Can Create LinkObject? | Can Select LinkObject? | Can Access Slots? |
 |------|------------------------|------------------------|-------------------|
-| **Highlighter** | Yes (from highlight) | No? | No? |
+| **Highlighter** | Yes (from highlight) | No! | No! |
 | **ObjectSelect** | Yes (manual) | Yes | Yes (subtoolbar) |
 | **Pen/Marker/Eraser** | No | No | No |
 
-**Is this correct?**
+**Is this correct?** Correct! 
 
 If Highlighter can't select LinkObjects, how does user access the slots of a highlight-created LinkObject?
 - Switch to ObjectSelect tool?
 - Auto-switch after creation?
 
 **Your answer:**
-
+Manual switch. The user doesn't necessarily want to immediately link it to something. He may want to continue using the highlighter, or the pen, or the marker, or whatever he wants. 
 ---
 
 ### Phase C Sub-phases Suggestion
@@ -1755,6 +1757,515 @@ Given the scope (Full LinkObject + all link types + markdown integration), I sug
 **Total: ~650 lines across 5 sub-phases**
 
 **Do you agree with this breakdown?**
+We may need an extra phase 0, because the lack of the "recycle bin". Also the only way of inserting an image now is to paste from the clipboard. We need to implement an "add from already inserted picture or add from file explorer" (which shares the add button with the add LinkObject) feature with a location specified (by clicking on somewhere on a page or a tile). For now image insertion only uses a default location (which is the center of the viewport (?)). 
+
+Also I have a few more concerns. 
+
+Question AH: 
+
+I don't know the current InsertedObject in general support inserting pages halfway in a document (with or without a pdf)? I actually forgot to test this... 
+
+Question AI:
+
+If there are more than 1 reference of the same picture being inserted to a document, how can the application know if it's the last reference (and put it in recycle bin upon deleting this reference)? Are there really efficient ways of doing this, or we are modifying the architecture? 
+
+Question AJ:
+
+Should a LinkObject be copy/pastable? Does copying a LinkObject make sense? The supposed UX should really be making a new LinkObject that links to somewhere around the old one, and let the user click on the old one then (?) 
+
+---
+
+## AI Responses to New Questions
+
+### On Icon Tinting (AF Follow-up)
+
+You asked: "if my provided button is black, how can the " show up as another color (but not make the background also show the same color)?"
+
+**Solution: Use a white/single-color SVG and apply color programmatically**
+
+```cpp
+void LinkObject::render(QPainter& painter, qreal zoom) const
+{
+    // Load the SVG (could be cached)
+    QSvgRenderer renderer(QString(":/icons/link_quote.svg"));
+    
+    // Create a temporary image
+    QImage iconImage(24 * zoom, 24 * zoom, QImage::Format_ARGB32);
+    iconImage.fill(Qt::transparent);
+    
+    // Render SVG to image
+    QPainter iconPainter(&iconImage);
+    renderer.render(&iconPainter);
+    iconPainter.end();
+    
+    // Apply color tint using composition mode
+    QPainter tintPainter(&iconImage);
+    tintPainter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    tintPainter.fillRect(iconImage.rect(), iconColor);
+    tintPainter.end();
+    
+    // Draw the tinted icon
+    painter.drawImage(position * zoom, iconImage);
+}
+```
+
+**Key:** The SVG should be white (or any solid color). `CompositionMode_SourceIn` replaces the color while preserving alpha/transparency.
+
+**Alternative:** Provide the SVG with a placeholder color (e.g., `#FF00FF` magenta) and do string replacement before loading:
+```cpp
+QString svgData = loadSvgFile();
+svgData.replace("#FF00FF", iconColor.name());
+QSvgRenderer renderer(svgData.toUtf8());
+```
+
+---
+
+### On Question AH: InsertedObjects and Page Insertion
+
+**The question:** Do InsertedObjects work correctly when pages are inserted/deleted mid-document?
+
+**Current architecture:**
+- InsertedObjects are stored in `Page::objects`
+- Each Page owns its objects - no global pageIndex stored in objects
+- When pages are inserted/deleted, objects stay with their Page
+
+**Potential issues:**
+1. **Undo/redo**: `PageUndoAction` stores `pageIndex`. If pages are reordered, the index might be wrong.
+2. **LinkObject Position slots**: If slot links to "page 5, position X" and page 5 is deleted or moved, the link breaks.
+
+**My assessment:** This is an existing architectural issue, not specific to LinkObject. For Phase C, I suggest:
+- Document this as a known limitation
+- LinkObject position slots store pageIndex + coordinates
+- If target page is deleted, navigation shows "Target not found"
+- Future: Store page UUID instead of index for robustness
+
+**Do you want to address this in Phase C, or defer?**
+
+Oh we have to address this as early as possible. If we don't, the problems will stack up quickly. The undo function was implemented before we have a UUID for each page. 
+
+---
+
+### On Question AI: Image Reference Counting
+
+**The question:** How to know if an image file is the last reference when deleting an ImageObject?
+
+**Current architecture (from ImageObject):**
+- Images saved to `assets/images/{hash}.png`
+- Multiple ImageObjects can share same file (deduplication via hash)
+- No reference counting exists
+
+**Options:**
+
+**Option 1: Scan on delete**
+```cpp
+bool isLastReference(const QString& imageHash) {
+    int refCount = 0;
+    for (int i = 0; i < document->pageCount(); i++) {
+        for (auto& obj : document->page(i)->objects) {
+            if (auto img = dynamic_cast<ImageObject*>(obj.get())) {
+                if (img->imageHash == imageHash) refCount++;
+            }
+        }
+    }
+    return refCount == 1;
+}
+```
+- Simple but O(n) on every delete
+- Works for small documents
+
+**Option 2: Reference count in manifest**
+```json
+// In manifest.json
+"assetReferences": {
+    "a1b2c3d4.png": 3,  // 3 ImageObjects use this
+    "e5f6g7h8.png": 1
+}
+```
+- Updated on add/remove
+- O(1) lookup
+- Requires manifest changes
+
+**Option 3: Lazy cleanup on save/close (your suggestion)**
+- Don't delete files immediately
+- On document save/close, scan for orphaned files in `assets/`
+- Delete files not referenced by any object
+
+**My recommendation:** Option 3 (lazy cleanup) for Phase C.0:
+- Simplest to implement
+- No architectural changes needed
+- Matches your "recycle bin" concept
+- Clean orphans on document close
+
+**Your preference:**
+But wait, does Option 3 still have O(mn) upon closing a document, where m stand for the number of images deleted, and n stand for the number pages... If so, we have to do Option 2 instead. 
+---
+
+### On Question AJ: LinkObject Copy/Paste
+
+**Should copying a LinkObject be supported?**
+
+**Analysis:**
+| Object Type | Copy Makes Sense? | What Gets Copied? |
+|-------------|-------------------|-------------------|
+| ImageObject | ✅ Yes | Same image file reference (deduped) |
+| LinkObject | 🤔 Maybe | Description, but slots? |
+
+**If we copy a LinkObject:**
+
+**Option A: Deep copy (clone everything)**
+- New LinkObject with same description
+- Same slot data (same markdown IDs, URLs, positions)
+- Problem: Two LinkObjects point to same markdown note?
+
+**Option B: Shallow copy (clear slots)**
+- New LinkObject with same description
+- All 3 slots empty
+- User must re-link manually
+- Cleaner, avoids duplicate references
+
+**Option C: Don't support copy**
+- LinkObject copy does nothing / shows error
+- User must create new LinkObject manually
+
+**My recommendation:** Option B (shallow copy with cleared slots)
+- Preserves the description (useful for highlights)
+- Avoids confusing duplicate references
+- User can easily re-link if needed
+
+**Your preference:**
+I agree with your choice of Option B. It would be even better if we add the original LinkObject's position to one of the slots of the new LinkObject as the destination position. 
+---
+
+### Revised Phase C Breakdown
+
+Based on your feedback, here's a revised breakdown:
+
+**Phase C.0: Object Infrastructure Completion**
+- Implement lazy asset cleanup (scan for orphans on save/close)
+- Add "insert image from file" flow (file dialog + click-to-place)
+- Verify page insertion doesn't break objects
+- ~150 lines
+
+**Phase C.1: LinkObject Class Foundation**
+- Create `LinkObject` class with 3-slot architecture
+- Implement `render()` with icon tinting
+- Implement `toJson()` / `loadFromJson()` serialization
+- Register in factory
+- ~150 lines
+
+**Phase C.2: LinkObject Selection & Manipulation**
+- Hit testing (24x24 icon area)
+- Selection (shared code with ImageObject)
+- Move/delete with undo
+- Copy/paste (shallow copy, clear slots)
+- ~100 lines
+
+**Phase C.3: Highlighter Integration**
+- Modify `createHighlightStrokes()` to create LinkObject
+- Position at start of first highlight rect
+- Set description = extracted text
+- ~50 lines
+
+**Phase C.4: Keyboard Shortcuts for Subtoolbar**
+- Ctrl+< / Ctrl+> for ImgInsert/LinkInsert mode switch
+- Ctrl+6 / Ctrl+7 for create/select mode
+- Ctrl+8 / Ctrl+9 / Ctrl+0 for slot access
+- ~100 lines
+
+**Phase C.5: Link Slot Functionality**
+- Position slot: Navigate to page + coordinates
+- URL slot: Open in browser
+- Markdown slot: Open/create note (deferred details)
+- ~150 lines
+
+**Phase C.6: Markdown Integration** (may be separate phase)
+- Create markdown note from slot
+- Load existing note
+- Soft cascade on delete (orphan notes)
+- ~200 lines
+
+**Total: ~900 lines across 7 sub-phases**
+
+**Do you agree with this revised breakdown?**
+
+---
+
+## AI Follow-up on Latest Feedback
+
+### On AH: Page UUID Migration is Critical
+
+You're right - this needs to be addressed early. Here's the scope:
+
+**What needs Page UUIDs:**
+1. `PageUndoAction::pageIndex` → should store page UUID
+2. `LinkObject` position slots → store target page UUID
+3. Any future cross-page references
+
+**Migration plan for Phase C.0:**
+
+```cpp
+// In Page.h
+class Page {
+    QString uuid;  // Add this - generated on creation
+    // ...
+};
+
+// In PageUndoAction
+struct PageUndoAction {
+    QString pageUuid;  // Replace or add alongside pageIndex
+    // ...
+};
+```
+
+**Tasks:**
+1. Add `uuid` field to Page (generated in constructor)
+2. Add uuid to Page serialization (toJson/fromJson)
+3. Update all PageUndoAction creators to use UUID
+4. Update undo/redo to lookup page by UUID (with fallback to index for old documents)
+5. Add `Document::pageByUuid()` method
+
+**Estimated lines:** ~100 for the UUID infrastructure
+
+---
+
+### On AI: Complexity Analysis Correction
+
+Let me clarify the complexity:
+
+**Option 3 (Lazy Cleanup) - Actual Complexity:**
+```
+On document close:
+1. Scan all pages for ImageObject references    → O(total_objects)
+2. Collect referenced hashes into a HashSet     → O(total_images)
+3. List files in assets/images/                 → O(files_on_disk)
+4. Delete files not in HashSet                  → O(files_on_disk)
+Total: O(total_objects + files_on_disk)
+```
+This is **linear, not O(m*n)**. It's done **once** on close.
+
+**Option 2 (Reference Counting) - Complexity:**
+```
+On add ImageObject:    O(1) increment
+On remove ImageObject: O(1) decrement, maybe delete file if count=0
+On save:               O(1) just save manifest
+```
+More efficient per-operation, but requires maintaining count consistency.
+
+**The real question:** Which is simpler to implement correctly?
+
+| Aspect | Option 2 (Ref Count) | Option 3 (Lazy) |
+|--------|---------------------|-----------------|
+| Add complexity | Must update manifest | None |
+| Remove complexity | Must update manifest + maybe delete | None |
+| Undo/redo | Must restore ref count! | No special handling |
+| Consistency | Can drift if bug | Always correct |
+| Performance | O(1) per operation | O(n) once on close |
+
+**Key insight:** Undo/redo complicates Option 2. When undoing an image deletion, we'd need to restore the reference count. This adds complexity.
+
+**Revised recommendation:** 
+- Start with Option 3 (lazy cleanup) - simpler and always correct
+- If performance is an issue for large documents, optimize later
+- The O(n) scan on close is acceptable for most documents
+
+**Your decision:**
+I can accept your choice of Option 3.
+---
+
+### On AJ: Copy LinkObject with Back-Link
+
+Great idea! When copying a LinkObject:
+1. Create new LinkObject with same description
+2. Clear all 3 slots
+3. **Automatically fill slot 0 with position link to original LinkObject's location**
+
+```cpp
+LinkObject* LinkObject::clone() const {
+    auto copy = new LinkObject();
+    copy->description = this->description;
+    copy->iconColor = this->iconColor;
+    // Slots cleared by default
+    
+    // Auto-fill slot 0 with back-link
+    copy->slots[0].type = LinkSlot::Type::Position;
+    copy->slots[0].targetPageUuid = this->pageUuid;  // Page where original lives
+    copy->slots[0].targetPosition = this->position;
+    
+    return copy;
+}
+```
+
+This creates a natural "trail" - paste a LinkObject, and you automatically have a way back!
+
+---
+
+### Question AK Still Unanswered
+
+From my earlier question:
+
+**Should selection be universal or mode-specific?**
+
+| Mode | Click on Image | Click on Link |
+|------|----------------|---------------|
+| ImgInsert + Select | Select image | ??? |
+| LinkInsert + Select | ??? | Select link |
+
+**Options:**
+- [ ] **Mode-specific**: ImgInsert only selects images, LinkInsert only selects links
+- [ ] **Universal**: Any mode can select any object type
+
+**My suggestion:** Universal selection - simpler and more intuitive.
+
+**Your answer:**
+Oh sorry for omitting this question. Universal selection makes the most sense. When the user clicks on an InsertedObject, it immediately switches to the according mode, and show its paired actions. 
+---
+
+### Final Revised Phase C.0 Scope
+
+Based on all feedback, Phase C.0 (Infrastructure) should include:
+
+1. **Page UUID System** (~100 lines)
+   - Add UUID to Page
+   - Update undo to use UUID
+   - Add `Document::pageByUuid()`
+
+2. **Asset Cleanup on Close** (~50 lines)
+   - Scan for orphaned images
+   - Delete unreferenced files
+
+3. **Insert Image from File** (~80 lines)
+   - File dialog
+   - Click-to-place flow
+
+4. **Verify Page Operations** (~50 lines)
+   - Test insert/delete page with objects
+   - Ensure undo works
+
+**Total C.0: ~280 lines**
+
+This is larger than originally estimated, but the Page UUID work is essential.
+
+**Do you approve this expanded C.0 scope?**
+
+Yes I do. Be careful with other places that still makes use of the old index. You don't need to modify the edgeless behavior, because it uses a 2d index array that can't be inserted or deleted. 
+---
+
+### Question AK: Create/Select Mode for Objects
+
+You mentioned "create/select" modes shared between ImgInsert and LinkInsert.
+
+**Clarifying the modes:**
+
+| Mode | Tool | Behavior |
+|------|------|----------|
+| ImgInsert + Create | ObjectSelect | Click → Opens file dialog → Places image at click position |
+| ImgInsert + Select | ObjectSelect | Click → Selects existing ImageObject |
+| LinkInsert + Create | ObjectSelect | Click → Creates empty LinkObject at position |
+| LinkInsert + Select | ObjectSelect | Click → Selects existing LinkObject, shows slots |
+
+**Questions:**
+1. Does "ImgInsert + Select" only select images, or any object?
+2. Does "LinkInsert + Select" only select links, or any object?
+3. Or is selection universal (select any object regardless of mode)?
+
+**My suggestion:** Selection should be universal - clicking on any InsertedObject selects it, regardless of ImgInsert/LinkInsert mode. The mode only affects what "Create" does.
+
+**Your answer:**
+3. Selection is universal, and mode will be switched to follow the currently selected InsertedObject
+
+---
+
+## Phase C Complete Agreed Points
+
+All questions have been answered. Here's the complete summary:
+
+### LinkObject Architecture
+
+| Property | Decision |
+|----------|----------|
+| **Slot count** | Hard limit of 3 slots per LinkObject |
+| **Slot types** | Position, URL, Markdown (any combination) |
+| **Description field** | Stores extracted text (for highlights) or user-entered text |
+| **Icon** | Fixed 24x24 semi-transparent quote icon, embedded SVG with color tinting |
+| **Visual states** | Normal (semi-transparent), Selected (selection box like ImageObject) |
+| **Initial position** | Start of first highlight rect (when created from highlight) |
+| **User-draggable** | Yes, like any InsertedObject |
+
+### Creation Flows
+
+| Flow | Trigger | Result |
+|------|---------|--------|
+| **From highlight** | Highlighter tool + auto-highlight ON + release | Stroke(s) + LinkObject (description = extracted text, slots empty) |
+| **Manual** | ObjectSelect + LinkInsert + Create mode + click | Empty LinkObject at click position |
+
+### Interaction & Selection
+
+| Behavior | Decision |
+|----------|----------|
+| **Selection** | Universal - click any object to select, regardless of current mode |
+| **Mode switching** | Selecting an object switches mode to match (ImageObject → ImgInsert, LinkObject → LinkInsert) |
+| **Tool requirement** | Only selectable with ObjectSelect tool |
+| **Slot access** | Via keyboard shortcuts (Ctrl+8/9/0) or future subtoolbar |
+
+### Keyboard Shortcuts (Temporary until subtoolbar)
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+< | Switch to ImgInsert mode |
+| Ctrl+> | Switch to LinkInsert mode |
+| Ctrl+6 | Create mode |
+| Ctrl+7 | Select mode |
+| Ctrl+8 | Access slot 0 |
+| Ctrl+9 | Access slot 1 |
+| Ctrl+0 | Access slot 2 |
+
+### Copy/Paste Behavior
+
+| Object Type | Copy Behavior |
+|-------------|---------------|
+| **ImageObject** | Clone with same image reference |
+| **LinkObject** | Clone description + iconColor, clear slots, auto-fill slot 0 with back-link to original position |
+
+### Deletion & Cleanup
+
+| Aspect | Decision |
+|--------|----------|
+| **Image cleanup** | Lazy cleanup on document close (scan for orphaned files) |
+| **LinkObject → Markdown** | Soft cascade (orphan notes, don't delete) |
+| **Markdown → LinkObject** | Remove broken reference when accessed |
+
+### Infrastructure (C.0)
+
+| Component | Decision |
+|-----------|----------|
+| **Page UUID** | Required - add UUID to Page, update undo to use UUID |
+| **Edgeless mode** | No changes (2D tile coordinates can't be inserted/deleted) |
+| **Insert from file** | Add file dialog + click-to-place flow |
+
+---
+
+## Final Phase C Breakdown
+
+| Phase | Description | Est. Lines |
+|-------|-------------|------------|
+| **C.0** | Infrastructure (Page UUID, lazy cleanup, insert from file) | ~280 |
+| **C.1** | LinkObject class with 3-slot architecture, rendering | ~150 |
+| **C.2** | Selection & manipulation (shared code, copy with back-link) | ~100 |
+| **C.3** | Highlighter integration (auto-create LinkObject) | ~50 |
+| **C.4** | Keyboard shortcuts for mode/slot switching | ~100 |
+| **C.5** | Slot functionality (Position, URL navigation) | ~150 |
+| **C.6** | Markdown integration (create/link notes, soft cascade) | ~200 |
+| **Total** | | **~1030** |
+
+---
+
+## Ready for Implementation Plan?
+
+All major design questions appear to be resolved. 
+
+**Before creating the detailed implementation plan, any final questions or concerns?**
+
+If not, I'll create a separate `PDF_TEXT_LINKOBJECT_SUBPLAN.md` document with detailed task breakdowns for each sub-phase, similar to what we did for Phase A and B.
 
 ---
 
