@@ -1051,3 +1051,212 @@ if (m_lastHitBoxIndex >= 0) {
 2. **Deferred update batching** using a short timer (16ms)
 3. **Incremental string building** instead of full rebuild
 
+---
+
+## A.11: PDF Internal Link Clicking
+
+**Date:** Phase D.1 implementation
+
+**Goal:** Make PDF internal links (TOC, cross-references) and external URLs clickable in Highlighter tool.
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Cursor feedback | Hand cursor on hover | Standard UX pattern |
+| Click priority | Links over text selection | Expected PDF reader behavior |
+| External URLs | Open immediately in browser | Productivity app, not security sandbox |
+| Visual indicator | Cursor only | PDFs already have link underlines |
+
+### Implementation
+
+#### A.11.1: Add Link Cache (DocumentViewport.h)
+
+```cpp
+// Link cache (loaded on-demand for current page, similar to text box cache)
+QVector<PdfLink> m_linkCache;
+int m_linkCachePageIndex = -1;
+```
+
+#### A.11.2: Add Link Methods (DocumentViewport.h)
+
+```cpp
+// PDF Link support (Phase D.1)
+void loadLinksForPage(int pageIndex);
+void clearLinkCache();
+const PdfLink* findLinkAtPoint(const QPointF& pagePos, int pageIndex);
+void activatePdfLink(const PdfLink& link);
+void updateLinkCursor(const QPointF& viewportPos);
+```
+
+#### A.11.3: Implement Link Loading (DocumentViewport.cpp)
+
+```cpp
+void DocumentViewport::loadLinksForPage(int pageIndex)
+{
+    if (pageIndex == m_linkCachePageIndex && !m_linkCache.isEmpty()) {
+        return;  // Already cached
+    }
+    
+    m_linkCache.clear();
+    m_linkCachePageIndex = -1;
+    
+    if (!m_document || pageIndex < 0 || pageIndex >= m_document->pageCount()) {
+        return;
+    }
+    
+    Page* page = m_document->page(pageIndex);
+    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
+        return;
+    }
+    
+    const PdfProvider* pdf = m_document->pdfProvider();
+    if (!pdf || !pdf->supportsLinks()) {
+        return;
+    }
+    
+    int pdfPageIndex = page->pdfPageNumber;  // member variable, not function
+    if (pdfPageIndex < 0) pdfPageIndex = pageIndex;
+    
+    m_linkCache = pdf->links(pdfPageIndex);
+    m_linkCachePageIndex = pageIndex;
+}
+```
+
+#### A.11.4: Implement Link Hit Testing (DocumentViewport.cpp)
+
+```cpp
+const PdfLink* DocumentViewport::findLinkAtPoint(const QPointF& pagePos, int pageIndex)
+{
+    loadLinksForPage(pageIndex);
+    
+    if (m_linkCache.isEmpty()) return nullptr;
+    
+    Page* page = m_document->page(pageIndex);
+    if (!page) return nullptr;
+    
+    // Link areas are normalized (0-1), convert pagePos to normalized coords
+    QSizeF pageSize = page->size;
+    qreal normX = pagePos.x() / pageSize.width();
+    qreal normY = pagePos.y() / pageSize.height();
+    QPointF normPos(normX, normY);
+    
+    for (const PdfLink& link : m_linkCache) {
+        if (link.area.contains(normPos)) {
+            return &link;
+        }
+    }
+    return nullptr;
+}
+```
+
+#### A.11.5: Implement Link Activation (DocumentViewport.cpp)
+
+```cpp
+void DocumentViewport::activatePdfLink(const PdfLink& link)
+{
+    switch (link.type) {
+        case PdfLinkType::Goto:
+            if (link.targetPage >= 0 && link.targetPage < m_document->pageCount()) {
+                scrollToPage(link.targetPage);  // existing method
+            }
+            break;
+        case PdfLinkType::Uri:
+            if (!link.uri.isEmpty()) {
+                QDesktopServices::openUrl(QUrl(link.uri));
+            }
+            break;
+        default:
+            break;
+    }
+}
+```
+
+#### A.11.6: Modify handlePointerPress_Highlighter
+
+Insert link check BEFORE text selection starts:
+
+```cpp
+void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
+{
+    PageHit hit = viewportToPage(pe.viewportPos);
+    if (!hit.valid()) { ... }
+    
+    // NEW: Check for PDF link click (priority over text selection)
+    const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
+    if (link && link->type != PdfLinkType::None) {
+        activatePdfLink(*link);
+        return;  // Don't start text selection
+    }
+    
+    // ... existing text selection code ...
+}
+```
+
+#### A.11.7: Add Cursor Feedback on Hover
+
+In `handlePointerMove()`, update cursor when in Highlighter mode:
+
+```cpp
+void DocumentViewport::updateLinkCursor(const QPointF& viewportPos)
+{
+    if (m_currentTool != ToolType::Highlighter) return;
+    
+    PageHit hit = viewportToPage(viewportPos);
+    if (!hit.valid()) {
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
+    
+    Page* page = m_document->page(hit.pageIndex);
+    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
+        setCursor(Qt::ForbiddenCursor);
+        return;
+    }
+    
+    // Check if hovering over a link
+    const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
+    if (link && link->type != PdfLinkType::None) {
+        setCursor(Qt::PointingHandCursor);
+    } else {
+        setCursor(Qt::IBeamCursor);  // Text selection cursor
+    }
+}
+```
+
+### Task Checklist
+
+| Task | Description | Status |
+|------|-------------|--------|
+| A.11.1 | Add link cache members | ✅ DONE |
+| A.11.2 | Add link method declarations | ✅ DONE |
+| A.11.3 | Implement loadLinksForPage() | ✅ DONE |
+| A.11.4 | Implement findLinkAtPoint() | ✅ DONE |
+| A.11.5 | Implement activatePdfLink() | ✅ DONE |
+| A.11.6 | Modify handlePointerPress_Highlighter for link priority | ✅ DONE |
+| A.11.7 | Add cursor feedback in handlePointerMove | ✅ DONE |
+| A.11.8 | Clear link cache in setDocument() and tool switching | ✅ DONE |
+| A.11.9 | Fix cursor stuck issues (m_pointerActive management) | ✅ DONE |
+| A.11.10 | Code review and optimization | ✅ DONE |
+
+### A.11.9: Cursor Management Fixes
+
+**Issues fixed:**
+1. Cursor stuck after page jump/pan - `updateHighlighterCursor()` used stale `m_lastPointerPos`
+2. Cursor stuck after text selection - `m_pointerActive` not reset in Highlighter release handler
+3. Cursor stuck after link click - `m_pointerActive` not reset after navigation
+
+**Solution:**
+- Use `QCursor::pos()` via `mapFromGlobal()` for current mouse position in `updateHighlighterCursor()`
+- Reset `m_pointerActive = false` in all Highlighter handler exit paths
+- Call `updateHighlighterCursor()` after state changes
+
+### A.11.10: Code Review - Optimizations Applied
+
+| Issue | Fix |
+|-------|-----|
+| Redundant page lookup in `updateLinkCursor()` | Removed null check since `viewportToPage` validates page |
+| Verbose debug output | Removed "Loaded N links/text boxes" logs that run on every page |
+| Inconsistent cache validation | Made link cache check consistent with text box cache (check index >= 0) |
+| Minor: temporary `QPointF` in loop | Inline `QPointF(normX, normY)` construction in `findLinkAtPoint()` |
+

@@ -169,6 +169,7 @@ void DocumentViewport::setDocument(Document* doc)
     // Phase A: Clear text selection (refers to old document's text boxes)
     m_textSelection.clear();
     clearTextBoxCache();
+    clearLinkCache();  // Phase D.1
     
     // Reset view state
     m_zoomLevel = 1.0;
@@ -385,6 +386,7 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     if (previousTool == ToolType::Highlighter && tool != ToolType::Highlighter) {
         m_textSelection.clear();
         clearTextBoxCache();
+        clearLinkCache();  // Phase D.1
     }
     
     // Update cursor based on tool and page type
@@ -1778,6 +1780,10 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
             QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
                            eraserRadius * 2, eraserRadius * 2);
             update(dirtyRect.united(oldRect).toRect());
+        }
+        // Phase D.1: Update cursor for PDF link hover in Highlighter tool
+        else if (m_currentTool == ToolType::Highlighter) {
+            updateLinkCursor(m_lastPointerPos);
         }
     }
     event->accept();
@@ -7843,7 +7849,7 @@ void DocumentViewport::loadTextBoxesForPage(int pageIndex)
     m_textBoxCache = pdf->textBoxes(pdfPageIndex);
     m_textBoxCachePageIndex = pageIndex;
     
-    qDebug() << "Loaded" << m_textBoxCache.size() << "text boxes for page" << pageIndex;
+    // Debug output removed - too verbose during normal use
 }
 
 void DocumentViewport::clearTextBoxCache()
@@ -7851,6 +7857,122 @@ void DocumentViewport::clearTextBoxCache()
     m_textBoxCache.clear();
     m_textBoxCachePageIndex = -1;
     m_lastHitBoxIndex = -1;  // Reset locality hint
+}
+
+// ============================================================================
+// PDF Link Support (Phase D.1)
+// ============================================================================
+
+void DocumentViewport::loadLinksForPage(int pageIndex)
+{
+    // Already cached? (check both index and non-empty, consistent with loadTextBoxesForPage)
+    // Note: empty cache with valid index means the page has no links, which is valid
+    if (pageIndex == m_linkCachePageIndex && pageIndex >= 0) {
+        return;
+    }
+    
+    m_linkCache.clear();
+    m_linkCachePageIndex = -1;
+    
+    if (!m_document || pageIndex < 0 || pageIndex >= m_document->pageCount()) {
+        return;
+    }
+    
+    Page* page = m_document->page(pageIndex);
+    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
+        return;
+    }
+    
+    const PdfProvider* pdf = m_document->pdfProvider();
+    if (!pdf || !pdf->supportsLinks()) {
+        return;
+    }
+    
+    int pdfPageIndex = page->pdfPageNumber;
+    if (pdfPageIndex < 0) pdfPageIndex = pageIndex;
+    
+    m_linkCache = pdf->links(pdfPageIndex);
+    m_linkCachePageIndex = pageIndex;
+    
+    // Debug output removed - too verbose during normal scrolling
+}
+
+void DocumentViewport::clearLinkCache()
+{
+    m_linkCache.clear();
+    m_linkCachePageIndex = -1;
+}
+
+const PdfLink* DocumentViewport::findLinkAtPoint(const QPointF& pagePos, int pageIndex)
+{
+    loadLinksForPage(pageIndex);
+    
+    if (m_linkCache.isEmpty()) return nullptr;
+    
+    // Page was already validated in loadLinksForPage, use cached page size
+    // Link cache is only populated if page exists and is PDF, so this is safe
+    Page* page = m_document->page(pageIndex);
+    if (!page) return nullptr;  // Defensive check (shouldn't happen if cache is populated)
+    
+    // Link areas are normalized (0-1), convert pagePos to normalized coords
+    const QSizeF& pageSize = page->size;
+    const qreal normX = pagePos.x() / pageSize.width();
+    const qreal normY = pagePos.y() / pageSize.height();
+    
+    for (const PdfLink& link : m_linkCache) {
+        if (link.area.contains(QPointF(normX, normY))) {
+            return &link;
+        }
+    }
+    return nullptr;
+}
+
+void DocumentViewport::activatePdfLink(const PdfLink& link)
+{
+    switch (link.type) {
+        case PdfLinkType::Goto:
+            if (link.targetPage >= 0 && link.targetPage < m_document->pageCount()) {
+                qDebug() << "PDF link: navigating to page" << link.targetPage;
+                scrollToPage(link.targetPage);
+            }
+            break;
+        case PdfLinkType::Uri:
+            if (!link.uri.isEmpty()) {
+                qDebug() << "PDF link: opening URL" << link.uri;
+                QDesktopServices::openUrl(QUrl(link.uri));
+            }
+            break;
+        default:
+            qDebug() << "PDF link: unsupported type" << static_cast<int>(link.type);
+            break;
+    }
+}
+
+void DocumentViewport::updateLinkCursor(const QPointF& viewportPos)
+{
+    if (m_currentTool != ToolType::Highlighter) return;
+    
+    PageHit hit = viewportToPage(viewportPos);
+    if (!hit.valid()) {
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
+    
+    // Optimization: viewportToPage already validated the page exists,
+    // so we only need to check the background type
+    Page* page = m_document->page(hit.pageIndex);
+    if (page->backgroundType != Page::BackgroundType::PDF) {
+        setCursor(Qt::ForbiddenCursor);
+        return;
+    }
+    
+    // Check if hovering over a link (loadLinksForPage is called inside)
+    const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
+    if (link && link->type != PdfLinkType::None) {
+        setCursor(Qt::PointingHandCursor);
+    } else {
+        setCursor(Qt::IBeamCursor);  // Text selection cursor
+    }
 }
 
 bool DocumentViewport::isHighlighterEnabled() const
@@ -7882,11 +8004,10 @@ void DocumentViewport::updateHighlighterCursor()
         return;
     }
     
-    if (isHighlighterEnabled()) {
-        setCursor(Qt::IBeamCursor);  // Text selection cursor for PDF pages
-    } else {
-        setCursor(Qt::ForbiddenCursor);  // Not available on non-PDF pages
-    }
+    // Phase D.1: Use link-aware cursor update (hand on links, I-beam otherwise)
+    // Get CURRENT mouse position (not cached) since view may have changed
+    QPointF currentPos = mapFromGlobal(QCursor::pos());
+    updateLinkCursor(currentPos);
 }
 
 void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
@@ -7895,6 +8016,7 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
     PageHit hit = viewportToPage(pe.viewportPos);
     if (!hit.valid()) {
         m_textSelection.clear();
+        m_pointerActive = false;  // Reset so hover works
         return;
     }
     
@@ -7902,7 +8024,18 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
     if (!page || page->backgroundType != Page::BackgroundType::PDF) {
         // Not a PDF page - highlighter disabled
         m_textSelection.clear();
+        m_pointerActive = false;  // Reset so hover works
         return;
+    }
+    
+    // Phase D.1: Check for PDF link click (priority over text selection)
+    const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
+    if (link && link->type != PdfLinkType::None) {
+        activatePdfLink(*link);
+        // Reset pointer state since link click doesn't involve dragging
+        m_pointerActive = false;
+        updateHighlighterCursor();
+        return;  // Don't start text selection
     }
     
     // Load text boxes for this page if not cached
@@ -8018,6 +8151,9 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     Q_UNUSED(pe);
     
     if (!m_textSelection.isSelecting) {
+        // Phase D.1: Still need to clear pointer state and update cursor
+        m_pointerActive = false;
+        updateHighlighterCursor();
         return;
     }
     
@@ -8033,6 +8169,10 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
             // Note: createHighlightStrokes() already clears m_textSelection
         }
     }
+    
+    // Phase D.1: Clear pointer state so hover code works again
+    m_pointerActive = false;
+    updateHighlighterCursor();
     
     update();
 }

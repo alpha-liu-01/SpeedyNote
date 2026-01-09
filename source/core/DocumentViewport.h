@@ -1524,6 +1524,10 @@ private:
     int m_textBoxCachePageIndex = -1;
     mutable int m_lastHitBoxIndex = -1;  ///< PERF: Spatial locality hint for findCharacterAtPoint
     
+    // Link cache (loaded on-demand for current page) - Phase D.1
+    QVector<PdfLink> m_linkCache;
+    int m_linkCachePageIndex = -1;
+    
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
     bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
@@ -2314,6 +2318,39 @@ private:
      * @brief Clear the text box cache.
      */
     void clearTextBoxCache();
+    
+    // ===== PDF Link Support (Phase D.1) =====
+    
+    /**
+     * @brief Load PDF links for a page into cache.
+     * @param pageIndex The page to load links for.
+     */
+    void loadLinksForPage(int pageIndex);
+    
+    /**
+     * @brief Clear the link cache.
+     */
+    void clearLinkCache();
+    
+    /**
+     * @brief Find a PDF link at the given page position.
+     * @param pagePos Position in page coordinates (96 DPI).
+     * @param pageIndex The page to search.
+     * @return Pointer to the link if found, nullptr otherwise.
+     */
+    const PdfLink* findLinkAtPoint(const QPointF& pagePos, int pageIndex);
+    
+    /**
+     * @brief Activate a PDF link (navigate or open URL).
+     * @param link The link to activate.
+     */
+    void activatePdfLink(const PdfLink& link);
+    
+    /**
+     * @brief Update cursor based on hover state over PDF links.
+     * @param viewportPos Current pointer position in viewport coordinates.
+     */
+    void updateLinkCursor(const QPointF& viewportPos);
     
     /**
      * @brief Check if highlighter tool is enabled for current page.

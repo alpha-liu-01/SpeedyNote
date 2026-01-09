@@ -557,10 +557,11 @@ Here are the remaining phases to complete the SpeedyNote remake:
 PHASE D: Tablet UX & Tool Enhancement (Tablet-first priority)
 =============================================================================
 
-D.1: PDF Internal Link Clicking [SMALL - HIGH VALUE]
-     - Highlighter tool currently doesn't make PDF page links clickable
-     - Need to detect link annotations and navigate on click
-     - Small fix, big usability improvement for PDF navigation
+D.1: PDF Internal Link Clicking [SMALL - HIGH VALUE] ✅ DONE
+     - Highlighter tool now makes PDF page links clickable
+     - Hand cursor on link hover, I-beam cursor otherwise
+     - Internal links navigate to page, external URLs open in browser
+     - See PDF_TEXT_SELECTION_SUBPLAN.md A.11 for details
 
 D.2: Subtoolbar Framework [MEDIUM]
      - Create shared infrastructure for tool-specific subtoolbars
