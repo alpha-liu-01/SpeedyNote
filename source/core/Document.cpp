@@ -1857,7 +1857,15 @@ void Document::cleanupOrphanedAssets()
         // some orphans until the tile is loaded and document is closed again.
     } else {
         // Paged mode: scan all pages
-        // For lazy-loaded mode, page(i) loads pages on demand
+        // 
+        // PERF NOTE: For lazy-loaded mode, page(i) loads pages on demand.
+        // This means cleanup will load ALL pages into memory for large documents.
+        // This is intentional: we need to scan all pages to avoid deleting
+        // images that are still referenced by unloaded pages.
+        // 
+        // This only runs on document close, so the memory usage is temporary.
+        // Future optimization: track image references in manifest to avoid
+        // loading all pages.
         for (int i = 0; i < pageCount(); i++) {
             Page* p = page(i);
             collectFromPage(p);

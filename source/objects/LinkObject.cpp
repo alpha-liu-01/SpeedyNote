@@ -107,6 +107,14 @@ const QPixmap& LinkObject::iconPixmap()
 
 QPixmap LinkObject::tintedIcon(const QColor& color, qreal size) const
 {
+    // Check render cache - avoid recreating tinted icon every frame
+    // Allow small size variation (1px) to avoid thrashing during smooth zoom
+    if (!m_cachedTintedIcon.isNull() && 
+        m_cachedColor == color && 
+        qAbs(m_cachedSize - size) < 1.0) {
+        return m_cachedTintedIcon;
+    }
+    
     const QPixmap& baseIcon = iconPixmap();
     
     // Scale icon
@@ -136,7 +144,12 @@ QPixmap LinkObject::tintedIcon(const QColor& color, qreal size) const
         }
     }
     
-    return QPixmap::fromImage(img);
+    // Update cache
+    m_cachedTintedIcon = QPixmap::fromImage(img);
+    m_cachedColor = color;
+    m_cachedSize = size;
+    
+    return m_cachedTintedIcon;
 }
 
 bool LinkObject::containsPoint(const QPointF& pt) const

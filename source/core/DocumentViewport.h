@@ -918,9 +918,19 @@ public:
      * - Position: Navigate to the target page/position
      * - URL: Open in default browser
      * - Markdown: Open markdown note editor
-     * - Empty: Show add link menu (Phase C.5)
+     * - Empty: Show add link menu (Phase C.5.3)
      */
     void activateLinkSlot(int slotIndex);
+    
+    /**
+     * @brief Show menu to add a link to an empty slot.
+     * @param slotIndex The slot index (0-2) to populate.
+     * 
+     * Phase C.5.3 (TEMPORARY): Shows a simple QMenu with options to add
+     * Position, URL, or Markdown links. URL uses QInputDialog for input.
+     * This is a temporary UI until a proper subtoolbar is implemented.
+     */
+    void addLinkToSlot(int slotIndex);
     
     /**
      * @brief Create an empty LinkObject at the specified page position.
@@ -1047,6 +1057,17 @@ public slots:
      * @param pageIndex 0-based page index.
      */
     void scrollToPage(int pageIndex);
+    
+    /**
+     * @brief Navigate to a specific position on a page identified by UUID.
+     * @param pageUuid UUID of the target page.
+     * @param position Position in page-local coordinates to center on.
+     * 
+     * Phase C.5.1: Used by LinkObject Position slots to navigate to linked
+     * locations. Scrolls to the page and centers the view on the position.
+     * No-op if page UUID not found.
+     */
+    void navigateToPosition(const QString& pageUuid, const QPointF& position);
     
     /**
      * @brief Scroll by a delta amount.

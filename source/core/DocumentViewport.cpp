@@ -34,6 +34,8 @@
 #include <QFileDialog>    // For insertImageFromDialog (Phase C.0.5)
 #include <QDesktopServices>  // For opening URLs (Phase C.4.3)
 #include <QUrl>              // For URL handling (Phase C.4.3)
+#include <QMenu>             // For addLinkToSlot menu (Phase C.5.3 - temporary)
+#include <QInputDialog>      // For URL input dialog (Phase C.5.3 - temporary)
 
 // ===== Constants =====
 
@@ -559,6 +561,45 @@ void DocumentViewport::scrollToPage(int pageIndex)
     
     m_currentPageIndex = pageIndex;
     emit currentPageChanged(m_currentPageIndex);
+}
+
+void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF& position)
+{
+    // Phase C.5.1: Navigate to a specific page position (for LinkObject Position slots)
+    if (!m_document || pageUuid.isEmpty()) {
+        qDebug() << "navigateToPosition: Invalid target";
+        return;
+    }
+    
+    int targetPageIndex = m_document->pageIndexByUuid(pageUuid);
+    if (targetPageIndex < 0) {
+        qDebug() << "navigateToPosition: Page not found for UUID" << pageUuid;
+        // TODO: Show user message "Target page not found"
+        return;
+    }
+    
+    // First scroll to bring the page into view
+    scrollToPage(targetPageIndex);
+    
+    // Convert page-local position to document coordinates
+    QPointF targetDocPos = pageToDocument(targetPageIndex, position);
+    
+    // Calculate pan offset to center this position in viewport
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    QPointF targetViewportPos = documentToViewport(targetDocPos);
+    QPointF panDelta = viewportCenter - targetViewportPos;
+    
+    setPanOffset(m_panOffset + panDelta);
+    
+    // Re-center horizontally to ensure proper alignment
+    recenterHorizontally();
+    
+    update();
+    
+#ifdef QT_DEBUG
+    qDebug() << "navigateToPosition: Navigated to page" << targetPageIndex 
+             << "position" << position;
+#endif
 }
 
 void DocumentViewport::scrollBy(QPointF delta)
@@ -5246,15 +5287,13 @@ void DocumentViewport::copySelectedObjects()
         // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
         // with a back-link to the original position
         if (auto* link = dynamic_cast<LinkObject*>(obj)) {
-            // Find source page UUID
+            // Find source page UUID - O(1) since selected objects are on current page
             QString sourcePageUuid;
             if (m_document->isPaged()) {
-                for (int i = 0; i < m_document->pageCount(); ++i) {
-                    Page* page = m_document->page(i);
-                    if (page && page->objectById(obj->id)) {
-                        sourcePageUuid = page->uuid;
-                        break;
-                    }
+                // In paged mode, selected objects are always on the current page
+                Page* currentPage = m_document->page(m_currentPageIndex);
+                if (currentPage) {
+                    sourcePageUuid = currentPage->uuid;
                 }
             }
             // Note: Edgeless mode doesn't have page UUIDs, back-link will be empty
@@ -5282,8 +5321,37 @@ void DocumentViewport::pasteObjects()
     // Track newly pasted objects for selection
     QList<InsertedObject*> pastedObjects;
     
-    // Paste offset to avoid placing directly on top of original
+    // Calculate paste position based on mouse cursor
+    QPoint cursorViewport = mapFromGlobal(QCursor::pos());
+    bool useCursorPosition = false;
+    QPointF pastePagePos;
+    
+    if (rect().contains(cursorViewport)) {
+        // Cursor is within the viewport - use its position
+        if (m_document->isEdgeless()) {
+            // Edgeless: convert to document coordinates
+            pastePagePos = viewportToDocument(cursorViewport);
+            useCursorPosition = true;
+        } else {
+            // Paged: convert to page-local coordinates using PageHit
+            PageHit hit = viewportToPage(QPointF(cursorViewport));
+            if (hit.valid() && hit.pageIndex == m_currentPageIndex) {
+                // Cursor is on the current page - clamp to page bounds
+                Page* page = m_document->page(hit.pageIndex);
+                if (page) {
+                    pastePagePos.setX(qBound(0.0, hit.pagePoint.x(), page->size.width() - 24.0));
+                    pastePagePos.setY(qBound(0.0, hit.pagePoint.y(), page->size.height() - 24.0));
+                    useCursorPosition = true;
+                }
+            }
+        }
+    }
+    
+    // Fallback: paste at top-left with offset
     constexpr qreal PASTE_OFFSET = 20.0;
+    if (!useCursorPosition) {
+        pastePagePos = QPointF(PASTE_OFFSET, PASTE_OFFSET);
+    }
     
     for (const QJsonObject& jsonObj : m_objectClipboard) {
         // Deserialize object
@@ -5296,8 +5364,8 @@ void DocumentViewport::pasteObjects()
         // Assign new UUID (critical for uniqueness)
         obj->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         
-        // Offset position from original
-        obj->position += QPointF(PASTE_OFFSET, PASTE_OFFSET);
+        // Set position to paste location (cursor or fallback)
+        obj->position = pastePagePos;
         
         // Phase O2.C: Load any external assets (type-agnostic)
         if (!m_document->bundlePath().isEmpty()) {
@@ -5516,18 +5584,16 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
     const LinkSlot& slot = link->linkSlots[slotIndex];
     
     if (slot.isEmpty()) {
-        // Empty slot - show menu to add link (Phase C.5)
-        qDebug() << "activateLinkSlot: Slot" << slotIndex << "is empty - TODO: show add menu";
+        // Empty slot - show menu to add link (Phase C.5.3)
+        addLinkToSlot(slotIndex);
         return;
     }
     
     // Activate the slot based on type
     switch (slot.type) {
         case LinkSlot::Type::Position:
-            // Phase C.5: Navigate to page position
-            qDebug() << "activateLinkSlot: Position link - TODO: navigateToPosition("
-                     << slot.targetPageUuid << "," << slot.targetPosition << ")";
-            // TODO: navigateToPosition(slot.targetPageUuid, slot.targetPosition);
+            // Phase C.5.1: Navigate to page position
+            navigateToPosition(slot.targetPageUuid, slot.targetPosition);
             break;
             
         case LinkSlot::Type::Url:
@@ -5542,6 +5608,70 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
             
         default:
             break;
+    }
+}
+
+void DocumentViewport::addLinkToSlot(int slotIndex)
+{
+    // Phase C.5.3 (TEMPORARY): Simple menu UI for adding links to slots
+    // This will be replaced with a proper subtoolbar in the future
+    
+    if (m_selectedObjects.size() != 1) {
+        qDebug() << "addLinkToSlot: Need exactly one object selected";
+        return;
+    }
+    
+    LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
+    if (!link) {
+        qDebug() << "addLinkToSlot: Selected object is not a LinkObject";
+        return;
+    }
+    
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        qDebug() << "addLinkToSlot: Invalid slot index" << slotIndex;
+        return;
+    }
+    
+    // Simple context menu (TEMPORARY UI)
+    QMenu menu;
+    QAction* posAction = menu.addAction("Add Position Link");
+    QAction* urlAction = menu.addAction("Add URL Link");
+    QAction* mdAction = menu.addAction("Add Markdown Note");
+    
+    QAction* selected = menu.exec(QCursor::pos());
+    
+    if (selected == posAction) {
+        // TODO: Enter "pick position" mode (requires additional UI work)
+        qDebug() << "addLinkToSlot: Position link - TODO: implement pick position mode";
+    } else if (selected == urlAction) {
+        QString url = QInputDialog::getText(this, "Add URL", "Enter URL:");
+        if (!url.isEmpty()) {
+            link->linkSlots[slotIndex].type = LinkSlot::Type::Url;
+            link->linkSlots[slotIndex].url = url;
+            
+            // Mark page dirty - find which page contains this object
+            Document::TileCoord tileCoord;
+            Page* page = findPageContainingObject(link, &tileCoord);
+            if (page && m_document) {
+                if (m_document->isEdgeless()) {
+                    m_document->markTileDirty(tileCoord);
+                } else {
+                    // Use cached UUID→index lookup (O(1) from Phase C.0.2)
+                    int pageIndex = m_document->pageIndexByUuid(page->uuid);
+                    if (pageIndex >= 0) {
+                        m_document->markPageDirty(pageIndex);
+                    }
+                }
+            }
+            
+            emit documentModified();
+            update();
+            
+            qDebug() << "addLinkToSlot: Added URL link to slot" << slotIndex << ":" << url;
+        }
+    } else if (selected == mdAction) {
+        // Phase C.6: Create/link markdown note
+        qDebug() << "addLinkToSlot: Markdown note - TODO: implement in Phase C.6";
     }
 }
 

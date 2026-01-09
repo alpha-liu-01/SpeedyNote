@@ -803,12 +803,12 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
 
 ## C.3 Testing Checklist
 
-- [ ] Create highlight with auto-highlight ON → stroke + LinkObject created
-- [ ] LinkObject positioned at start of first highlight line
-- [ ] LinkObject description = extracted text
-- [ ] LinkObject icon color matches highlighter color
-- [ ] Undo → removes both stroke and LinkObject
-- [ ] Create highlight with auto-highlight OFF → no LinkObject
+- [x ] Create highlight with auto-highlight ON → stroke + LinkObject created
+- [x ] LinkObject positioned at start of first highlight line
+- [x ] LinkObject description = extracted text
+- [x ] LinkObject icon color matches highlighter color
+- [x ] Undo → removes both stroke and LinkObject
+- [x ] Create highlight with auto-highlight OFF → no LinkObject
 
 ---
 
@@ -1323,6 +1323,52 @@ case LinkSlot::Type::Markdown:
 - `source/core/DocumentViewport.h` / `DocumentViewport.cpp` (most changes)
 - `source/objects/InsertedObject.cpp` (factory)
 - `CMakeLists.txt`
+
+---
+
+# Post-Implementation Code Review
+
+**Date:** Phase C completion
+
+## Issues Identified and Fixed
+
+### 1. Performance: `tintedIcon` Created New Pixmap Every Frame ✅ FIXED
+
+**Problem:** `LinkObject::render()` called `tintedIcon()` which created a new tinted QPixmap by iterating every pixel on every render call. This was slow, especially with multiple LinkObjects or during zoom/scroll.
+
+**Fix:** Added render cache (`m_cachedTintedIcon`, `m_cachedColor`, `m_cachedSize`) with 1px tolerance to avoid thrashing during smooth zoom.
+
+**Files:** `LinkObject.h`, `LinkObject.cpp`
+
+### 2. Performance: `copySelectedObjects` O(n) Page Search ✅ FIXED
+
+**Problem:** When copying a LinkObject, code iterated ALL pages to find which page contains it.
+
+**Fix:** Simplified to use `m_currentPageIndex` directly, since selected objects are always on the current page in paged mode. O(1) instead of O(n).
+
+**Files:** `DocumentViewport.cpp`
+
+### 3. Performance: `cleanupOrphanedAssets` Loads All Pages ⚠️ DOCUMENTED
+
+**Problem:** For lazy-loaded documents, `cleanupOrphanedAssets()` loads ALL pages to scan for image references, defeating lazy loading.
+
+**Decision:** Left as-is with documentation. This only runs on document close, so temporary memory usage is acceptable. Future optimization: track image references in manifest.
+
+**Files:** `Document.cpp` (added comment)
+
+### 4. Missing Undo for Slot Modification ℹ️ DEFERRED
+
+**Problem:** `addLinkToSlot()` doesn't push undo action when adding URLs.
+
+**Decision:** This is temporary UI that will be replaced with proper subtoolbar. Undo support will be added with the new UI.
+
+## Items Verified as Safe
+
+- **Memory safety in `cloneWithBackLink`**: Creates new `unique_ptr`, properly transfers ownership
+- **Null pixmap handling in `iconPixmap()`**: Falls back gracefully if resource missing
+- **UUID cache invalidation**: Properly called on all page operations (add/insert/delete/move)
+- **Factory registration**: `LinkObject` properly registered in `InsertedObject::fromJson()`
+- **Serialization round-trip**: `toJson()`/`loadFromJson()` tested via unit tests
 
 ---
 

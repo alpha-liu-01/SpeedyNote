@@ -87,5 +87,10 @@ private:
     static const QPixmap& iconPixmap();
     void ensureIconLoaded() const;  // Kept for API compatibility, now empty
     QPixmap tintedIcon(const QColor& color, qreal size) const;
+    
+    // Render cache to avoid recreating tinted icon every frame
+    mutable QPixmap m_cachedTintedIcon;
+    mutable QColor m_cachedColor;
+    mutable qreal m_cachedSize = 0.0;
 };
 
