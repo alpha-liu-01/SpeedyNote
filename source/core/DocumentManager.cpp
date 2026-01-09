@@ -38,6 +38,12 @@ DocumentManager::~DocumentManager()
     for (Document* doc : m_documents) {
         // Clean up temp bundle if exists (handles discarded edgeless docs)
         cleanupTempBundle(doc);
+        
+        // Phase C.0.4: Clean up orphaned assets before deletion
+        // This is the same cleanup that closeDocument() does, but for
+        // documents still open when the application quits.
+        doc->cleanupOrphanedAssets();
+        
         delete doc;
     }
     m_documents.clear();
@@ -297,6 +303,10 @@ void DocumentManager::closeDocument(Document* doc)
     m_documentPaths.remove(doc);
     m_modifiedFlags.remove(doc);
     // Note: m_tempBundlePaths already cleaned by cleanupTempBundle()
+    
+    // Phase C.0.4: Clean up orphaned assets before deletion
+    // This deletes image files that are no longer referenced by any object.
+    doc->cleanupOrphanedAssets();
     
     // Delete the document
     delete doc;

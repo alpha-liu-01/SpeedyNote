@@ -319,6 +319,7 @@ set(LAYER_SOURCES
 set(OBJECT_SOURCES
         source/objects/InsertedObject.cpp  # Task 1.1.4
         source/objects/ImageObject.cpp     # Task 1.1.5
+        source/objects/LinkObject.cpp      # Phase C.1: LinkObject for annotations
 )
 
 # ✅ NEW ARCHITECTURE: Stroke data types (extracted from VectorCanvas)

@@ -508,6 +508,56 @@ bool Document::isPageDirty(int index) const
     return m_dirtyPages.count(uuid) > 0;
 }
 
+// =========================================================================
+// UUID→Index Cache (Phase C.0.2)
+// =========================================================================
+
+void Document::rebuildUuidCache() const
+{
+    m_uuidToIndexCache.clear();
+    
+    // For lazy-loaded paged mode, use m_pageOrder directly (no disk I/O)
+    if (!m_pageOrder.isEmpty()) {
+        for (int i = 0; i < m_pageOrder.size(); i++) {
+            const QString& uuid = m_pageOrder[i];
+            if (!uuid.isEmpty()) {
+                m_uuidToIndexCache[uuid] = i;
+            }
+        }
+    } else {
+        // Non-lazy mode: pages are loaded in m_pages vector
+        for (int i = 0; i < static_cast<int>(m_pages.size()); i++) {
+            if (m_pages[i] && !m_pages[i]->uuid.isEmpty()) {
+                m_uuidToIndexCache[m_pages[i]->uuid] = i;
+            }
+        }
+    }
+    
+    m_uuidCacheDirty = false;
+    
+#ifdef QT_DEBUG
+    qDebug() << "Rebuilt UUID cache with" << m_uuidToIndexCache.size() << "entries";
+#endif
+}
+
+int Document::pageIndexByUuid(const QString& uuid) const
+{
+    if (uuid.isEmpty()) {
+        return -1;
+    }
+    
+    if (m_uuidCacheDirty) {
+        rebuildUuidCache();  // O(n) but only once per page change
+    }
+    
+    return m_uuidToIndexCache.value(uuid, -1);  // O(1)
+}
+
+void Document::invalidateUuidCache()
+{
+    m_uuidCacheDirty = true;
+}
+
 Page* Document::addPage()
 {
     auto newPage = createDefaultPage();
@@ -515,8 +565,8 @@ Page* Document::addPage()
     
     // Phase O1.7: Support lazy loading mode
     if (!m_pageOrder.isEmpty()) {
-        // Generate UUID for the new page
-        QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        // Phase C.0.1: Use the page's own UUID (generated in Page constructor)
+        QString uuid = newPage->uuid;
         
         // Add to page order and metadata
         m_pageOrder.append(uuid);
@@ -527,9 +577,15 @@ Page* Document::addPage()
         
         // Mark as dirty
         m_dirtyPages.insert(uuid);
+        
+        // Phase C.0.2: Invalidate UUID cache
+        invalidateUuidCache();
     } else {
         // Legacy mode
-    m_pages.push_back(std::move(newPage));
+        m_pages.push_back(std::move(newPage));
+        
+        // Phase C.0.2: Invalidate UUID cache
+        invalidateUuidCache();
     }
     
     markModified();
@@ -548,8 +604,8 @@ Page* Document::insertPage(int index)
         auto newPage = createDefaultPage();
         Page* pagePtr = newPage.get();
         
-        // Generate UUID for the new page
-        QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        // Phase C.0.1: Use the page's own UUID (generated in Page constructor)
+        QString uuid = newPage->uuid;
         
         // Insert into page order
         m_pageOrder.insert(index, uuid);
@@ -560,6 +616,9 @@ Page* Document::insertPage(int index)
         
         // Mark as dirty
         m_dirtyPages.insert(uuid);
+        
+        // Phase C.0.2: Invalidate UUID cache (page order changed)
+        invalidateUuidCache();
         
         markModified();
         return pagePtr;
@@ -574,6 +633,10 @@ Page* Document::insertPage(int index)
     auto newPage = createDefaultPage();
     Page* pagePtr = newPage.get();
     m_pages.insert(m_pages.begin() + index, std::move(newPage));
+    
+    // Phase C.0.2: Invalidate UUID cache (page order changed)
+    invalidateUuidCache();
+    
     markModified();
     return pagePtr;
 }
@@ -631,6 +694,9 @@ bool Document::removePage(int index)
         // Track for deletion on next save
         m_deletedPages.insert(uuid);
         
+        // Phase C.0.2: Invalidate UUID cache (page order changed)
+        invalidateUuidCache();
+        
         markModified();
         return true;
     }
@@ -647,6 +713,10 @@ bool Document::removePage(int index)
     }
     
     m_pages.erase(m_pages.begin() + index);
+    
+    // Phase C.0.2: Invalidate UUID cache (page order changed)
+    invalidateUuidCache();
+    
     markModified();
     return true;
 }
@@ -672,6 +742,9 @@ bool Document::movePage(int from, int to)
         m_pageOrder.removeAt(from);
         m_pageOrder.insert(to, uuid);
         
+        // Phase C.0.2: Invalidate UUID cache (page order changed)
+        invalidateUuidCache();
+        
         markModified();
         return true;
     }
@@ -695,6 +768,9 @@ bool Document::movePage(int from, int to)
     
     // Insert at new position
     m_pages.insert(m_pages.begin() + to, std::move(pageToMove));
+    
+    // Phase C.0.2: Invalidate UUID cache (page order changed)
+    invalidateUuidCache();
     
     markModified();
     return true;
@@ -1736,6 +1812,81 @@ int Document::saveUnsavedImages(const QString& bundlePath)
     return savedCount;
 }
 
+// =========================================================================
+// Asset Cleanup (Phase C.0.4)
+// =========================================================================
+
+void Document::cleanupOrphanedAssets()
+{
+    if (m_bundlePath.isEmpty()) {
+        return;  // Unsaved document, nothing on disk
+    }
+    
+    QString assetsPath = m_bundlePath + "/assets/images";
+    QDir assetsDir(assetsPath);
+    if (!assetsDir.exists()) {
+        return;  // No assets folder
+    }
+    
+    // Step 1: Collect all referenced image filenames
+    QSet<QString> referencedFiles;
+    
+    // Helper to scan a page's objects for image references
+    auto collectFromPage = [&](Page* p) {
+        if (!p) return;
+        
+        for (const auto& obj : p->objects) {
+            if (auto* img = dynamic_cast<ImageObject*>(obj.get())) {
+                if (!img->imagePath.isEmpty()) {
+                    referencedFiles.insert(img->imagePath);
+                }
+            }
+        }
+    };
+    
+    // Step 2: Scan all pages/tiles based on mode
+    if (isEdgeless()) {
+        // Edgeless mode: scan all loaded tiles
+        for (const auto& coord : allLoadedTileCoords()) {
+            Page* tile = getTile(coord.first, coord.second);
+            collectFromPage(tile);
+        }
+        
+        // Note: Evicted tiles are NOT scanned. If an image is only referenced
+        // by an evicted tile, we don't delete it. This is safe but may leave
+        // some orphans until the tile is loaded and document is closed again.
+    } else {
+        // Paged mode: scan all pages
+        // For lazy-loaded mode, page(i) loads pages on demand
+        for (int i = 0; i < pageCount(); i++) {
+            Page* p = page(i);
+            collectFromPage(p);
+        }
+    }
+    
+    // Step 3: List files on disk and delete orphans
+    QStringList filesOnDisk = assetsDir.entryList(QDir::Files);
+    int deletedCount = 0;
+    
+    for (const QString& filename : filesOnDisk) {
+        if (!referencedFiles.contains(filename)) {
+            QString fullPath = assetsPath + "/" + filename;
+            if (QFile::remove(fullPath)) {
+                deletedCount++;
+#ifdef QT_DEBUG
+                qDebug() << "Cleaned up orphaned asset:" << filename;
+#endif
+            }
+        }
+    }
+    
+#ifdef QT_DEBUG
+    if (deletedCount > 0) {
+        qDebug() << "Cleaned up" << deletedCount << "orphaned assets";
+    }
+#endif
+}
+
 bool Document::saveBundle(const QString& path)
 {
     // Save old bundle path before overwriting - needed for copying evicted tiles/pages
@@ -1801,13 +1952,17 @@ bool Document::saveBundle(const QString& path)
         // Convert legacy pages to UUID-based format if needed
         if (m_pageOrder.isEmpty() && !m_pages.empty()) {
             for (auto& page : m_pages) {
-                QString uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+                // Phase C.0.1: Use the page's own UUID (generated in Page constructor)
+                QString uuid = page->uuid;
                 m_pageOrder.append(uuid);
                 m_pageMetadata[uuid] = page->size;
                 m_loadedPages[uuid] = std::move(page);
                 m_dirtyPages.insert(uuid);
             }
             m_pages.clear();
+            
+            // Phase C.0.2: Invalidate UUID cache after migration
+            invalidateUuidCache();
         }
         
         // Write page_order to manifest

@@ -125,11 +125,14 @@ void Toolbar::connectSignals()
         emit toolSelected(ToolType::Highlighter);
     });
     
-    // Tools without ToolType enum - emit dedicated signals
+    // Shape tool - emits dedicated signal (no ToolType yet)
     connect(m_shapeButton, &QPushButton::clicked, 
             this, &Toolbar::shapeClicked);
-    connect(m_objectInsertButton, &QPushButton::clicked,
-            this, &Toolbar::objectInsertClicked);
+    
+    // Object Insert - selects ObjectSelect tool
+    connect(m_objectInsertButton, &QPushButton::clicked, this, [this]() {
+        emit toolSelected(ToolType::ObjectSelect);
+    });
     
     // Action buttons
     connect(m_undoButton, &QPushButton::clicked,

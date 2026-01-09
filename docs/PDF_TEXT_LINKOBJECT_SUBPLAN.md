@@ -12,16 +12,16 @@ This document contains the detailed implementation plan for Phase C of the PDF t
 
 ## Phase Summary
 
-| Phase | Description | Est. Lines | Dependencies |
-|-------|-------------|------------|--------------|
-| **C.0** | Infrastructure (Page UUID with cache, cleanup, insert from file) | ~200 | None |
-| **C.1** | LinkObject class foundation | ~290 | C.0 |
-| **C.2** | Selection & manipulation | ~60 | C.1 |
-| **C.3** | Highlighter integration | ~50 | C.1, C.2 |
-| **C.4** | Keyboard shortcuts | ~155 | C.2 |
-| **C.5** | Slot functionality (Position, URL) | ~80 | C.1 |
-| **C.6** | Markdown integration | ~95 | C.5 |
-| **Total** | | **~930** | |
+| Phase | Description | Est. Lines | Dependencies | Status |
+|-------|-------------|------------|--------------|--------|
+| **C.0** | Infrastructure (Page UUID with cache, cleanup, insert from file) | ~200 | None | ✅ COMPLETE |
+| **C.1** | LinkObject class foundation | ~290 | C.0 | ✅ COMPLETE |
+| **C.2** | Selection & manipulation | ~60 | C.1 | ✅ COMPLETE |
+| **C.3** | Highlighter integration | ~50 | C.1, C.2 | Pending |
+| **C.4** | Keyboard shortcuts | ~155 | C.2 | ✅ COMPLETE |
+| **C.5** | Slot functionality (Position, URL) | ~80 | C.1 | Pending |
+| **C.6** | Markdown integration | ~95 | C.5 | Pending |
+| **Total** | | **~930** | | |
 
 ---
 
@@ -31,119 +31,36 @@ This document contains the detailed implementation plan for Phase C of the PDF t
 
 ---
 
-## Task C.0.1: Add UUID to Page
+## Task C.0.1: Add UUID to Page ✅ COMPLETE
 
 **Location:** `source/core/Page.h`, `source/core/Page.cpp`
 
 **Purpose:** Enable stable cross-references for LinkObject Position links. UUIDs are NOT used for undo/redo (current behavior of clearing undo on page change is preserved).
 
-**Changes:**
-
-```cpp
-// In Page.h
-class Page {
-public:
-    // Add near top of class
-    QString uuid;  ///< Unique identifier for LinkObject position links
-    
-    // Constructor should generate UUID
-    Page();
-    
-    // ...existing members...
-};
-```
-
-```cpp
-// In Page.cpp
-#include <QUuid>
-
-Page::Page() 
-    : uuid(QUuid::createUuid().toString(QUuid::WithoutBraces))
-    // ...other initializers...
-{
-}
-```
-
-**Serialization:**
-```cpp
-// In Page::toJson()
-obj["uuid"] = uuid;
-
-// In Page::fromJson()
-uuid = obj["uuid"].toString();
-if (uuid.isEmpty()) {
-    // Generate for legacy documents
-    uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
-}
-```
+**Implemented:**
+- Added `QString uuid` member to Page class
+- Both constructors generate UUID via `QUuid::createUuid().toString(QUuid::WithoutBraces)`
+- Serialization in `toJson()` and deserialization in `fromJson()` with legacy fallback
+- Updated `Document::addPage()`, `insertPage()`, and `saveBundle()` to use page's own UUID
 
 **Estimated lines:** ~30
 
 ---
 
-## Task C.0.2: Add Cached UUID→Index Lookup
+## Task C.0.2: Add Cached UUID→Index Lookup ✅ COMPLETE
 
 **Location:** `source/core/Document.h`, `source/core/Document.cpp`
 
 **Design Decision:** Use cached mapping for O(1) lookups. The cache is rebuilt O(n) only when pages change (insert/delete/move), not on every lookup.
 
-```cpp
-// In Document.h
-private:
-    mutable QHash<QString, int> m_uuidToIndexCache;
-    mutable bool m_uuidCacheDirty = true;
-    
-    void rebuildUuidCache() const;
-    
-public:
-    int pageIndexByUuid(const QString& uuid) const;
-    void invalidateUuidCache();  // Called on page insert/delete/move
+**Implemented:**
+- Added `m_uuidToIndexCache` (`QHash<QString, int>`) and `m_uuidCacheDirty` members
+- Added `rebuildUuidCache()` private method (uses `m_pageOrder` directly - no separate metadata needed)
+- Added `pageIndexByUuid()` public method with lazy cache rebuild
+- Added `invalidateUuidCache()` public method
+- Called `invalidateUuidCache()` in: `addPage()`, `insertPage()`, `removePage()`, `movePage()`, and legacy migration in `saveBundle()`
 
-// In Document.cpp
-void Document::rebuildUuidCache() const
-{
-    m_uuidToIndexCache.clear();
-    
-    // For lazy-loaded paged mode, use metadata (no disk I/O)
-    if (!m_pageOrder.isEmpty()) {
-        for (int i = 0; i < m_pageOrder.size(); i++) {
-            const QString& uuid = m_pageMetadata[m_pageOrder[i]].uuid;
-            if (!uuid.isEmpty()) {
-                m_uuidToIndexCache[uuid] = i;
-            }
-        }
-    } else {
-        // Non-lazy mode: pages are loaded
-        for (int i = 0; i < m_pages.size(); i++) {
-            if (m_pages[i] && !m_pages[i]->uuid.isEmpty()) {
-                m_uuidToIndexCache[m_pages[i]->uuid] = i;
-            }
-        }
-    }
-    
-    m_uuidCacheDirty = false;
-}
-
-int Document::pageIndexByUuid(const QString& uuid) const
-{
-    if (uuid.isEmpty()) return -1;
-    
-    if (m_uuidCacheDirty) {
-        rebuildUuidCache();  // O(n) but only once per page change
-    }
-    return m_uuidToIndexCache.value(uuid, -1);  // O(1)
-}
-
-void Document::invalidateUuidCache()
-{
-    m_uuidCacheDirty = true;
-}
-```
-
-**Call `invalidateUuidCache()` in:**
-- `insertPage()`
-- `removePage()`
-- `movePage()`
+**Simplification vs Plan:** The plan suggested storing UUID in `PageMetadata`, but this is unnecessary because `m_pageOrder` already contains UUIDs in order. The cache rebuild simply iterates `m_pageOrder`.
 
 **Complexity:**
 | Action | Cost |
@@ -156,30 +73,18 @@ void Document::invalidateUuidCache()
 
 ---
 
-## Task C.0.3: Store UUID in Page Metadata (Lazy Loading)
+## Task C.0.3: Store UUID in Page Metadata (Lazy Loading) — SKIPPED
 
-**Location:** `source/core/Document.h`, `source/core/Document.cpp`
+**Reason:** Not needed with current architecture.
 
-**For lazy-loaded paged mode, store UUID in metadata so we don't need to load pages to rebuild cache:**
+The plan suggested adding UUID to `PageMetadata` struct, but this is unnecessary because:
+- `m_pageOrder` already contains UUIDs in the correct order
+- `rebuildUuidCache()` iterates `m_pageOrder` directly (O(n), no disk I/O)
+- The UUID is already stored both in:
+  1. `m_pageOrder` (from manifest's `page_order` array)
+  2. Each page's JSON file (via `Page::toJson()`)
 
-```cpp
-// In Document.h (PageMetadata struct)
-struct PageMetadata {
-    QSizeF size;
-    QString uuid;  // Add this
-};
-
-// In Document::loadBundle() when reading manifest
-metadata.uuid = pageObj["uuid"].toString();
-if (metadata.uuid.isEmpty()) {
-    metadata.uuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
-}
-
-// In Document::saveBundle() when writing manifest
-pageObj["uuid"] = m_pageMetadata[uuid].uuid;
-```
-
-**Estimated lines:** ~15
+**No code changes needed.**
 
 ---
 
@@ -194,131 +99,39 @@ pageObj["uuid"] = m_pageMetadata[uuid].uuid;
 
 ---
 
-## Task C.0.4: Lazy Asset Cleanup on Document Close
+## Task C.0.4: Lazy Asset Cleanup on Document Close ✅ COMPLETE
 
-**Location:** `source/core/Document.cpp`
+**Location:** `source/core/Document.h`, `source/core/Document.cpp`, `source/core/DocumentManager.cpp`
 
-**Add method:**
-```cpp
-// In Document.h
-void cleanupOrphanedAssets();
+**Implemented:**
+- Added `cleanupOrphanedAssets()` declaration to Document.h with documentation
+- Implemented `cleanupOrphanedAssets()` in Document.cpp:
+  - Uses helper lambda to scan pages for ImageObject references
+  - Handles both paged mode (scans all pages via `page(i)`) and edgeless mode (scans loaded tiles)
+  - Lists files in assets/images and deletes unreferenced ones
+  - Debug logging for deleted files
+- Called in `DocumentManager::closeDocument()` before document deletion
 
-// In Document.cpp
-void Document::cleanupOrphanedAssets()
-{
-    if (m_bundlePath.isEmpty()) {
-        return;  // Unsaved document, nothing on disk
-    }
-    
-    QString assetsPath = m_bundlePath + "/assets/images";
-    QDir assetsDir(assetsPath);
-    if (!assetsDir.exists()) {
-        return;
-    }
-    
-    // Step 1: Collect all referenced image hashes
-    QSet<QString> referencedFiles;
-    for (int i = 0; i < pageCount(); i++) {
-        Page* p = page(i);
-        if (!p) continue;
-        
-        for (const auto& obj : p->objects) {
-            if (auto* img = dynamic_cast<ImageObject*>(obj.get())) {
-                if (!img->imagePath.isEmpty()) {
-                    referencedFiles.insert(img->imagePath);
-                }
-            }
-        }
-    }
-    
-    // Step 2: Also check tiles in edgeless mode
-    if (isEdgeless()) {
-        for (const auto& coord : allLoadedTileCoords()) {
-            Page* tile = getTile(coord.first, coord.second);
-            if (!tile) continue;
-            
-            for (const auto& obj : tile->objects) {
-                if (auto* img = dynamic_cast<ImageObject*>(obj.get())) {
-                    if (!img->imagePath.isEmpty()) {
-                        referencedFiles.insert(img->imagePath);
-                    }
-                }
-            }
-        }
-    }
-    
-    // Step 3: List files on disk and delete orphans
-    QStringList filesOnDisk = assetsDir.entryList(QDir::Files);
-    int deletedCount = 0;
-    
-    for (const QString& filename : filesOnDisk) {
-        if (!referencedFiles.contains(filename)) {
-            QString fullPath = assetsPath + "/" + filename;
-            if (QFile::remove(fullPath)) {
-                deletedCount++;
-#ifdef QT_DEBUG
-                qDebug() << "Cleaned up orphaned asset:" << filename;
-#endif
-            }
-        }
-    }
-    
-#ifdef QT_DEBUG
-    if (deletedCount > 0) {
-        qDebug() << "Cleaned up" << deletedCount << "orphaned assets";
-    }
-#endif
-}
-```
-
-**Call on document close:**
-```cpp
-// In MainWindow or DocumentManager, when closing document:
-if (document) {
-    document->cleanupOrphanedAssets();
-}
-```
+**Note:** For edgeless mode, only loaded tiles are scanned. Evicted tiles are not loaded for cleanup (performance tradeoff). Orphans from evicted tiles remain until tile is loaded again.
 
 **Estimated lines:** ~60
 
 ---
 
-## Task C.0.5: Insert Image from File Dialog
+## Task C.0.5: Insert Image from File Dialog ✅ COMPLETE
 
-**Location:** `source/core/DocumentViewport.cpp`
+**Location:** `source/core/DocumentViewport.h`, `source/core/DocumentViewport.cpp`
 
-**Current state:** `insertImageFromFile()` exists but may not have file dialog.
-
-**Verify/implement:**
-```cpp
-void DocumentViewport::insertImageFromDialog()
-{
-    QString filePath = QFileDialog::getOpenFileName(
-        this,
-        tr("Insert Image"),
-        QString(),
-        tr("Images (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*)")
-    );
-    
-    if (filePath.isEmpty()) {
-        return;
-    }
-    
-    // Get click position from user
-    // Option A: Use center of viewport
-    // Option B: Enter "click to place" mode
-    
-    // For now, use viewport center
-    QPointF viewportCenter(width() / 2.0, height() / 2.0);
-    QPointF docPos = viewportToDocument(viewportCenter);
-    
-    insertImageFromFile(filePath, docPos);
-}
-```
+**Implemented:**
+- Added `insertImageFromDialog()` declaration to header
+- Implemented method that opens `QFileDialog::getOpenFileName()` and calls `insertImageFromFile()`
+- Added `#include <QFileDialog>`
+- Supports PNG, JPG, JPEG, BMP, GIF, WebP formats
+- Image is positioned at viewport center (existing behavior in `insertImageFromFile()`)
 
 **Better UX: Click-to-place mode** (deferred to C.4 with keyboard shortcuts)
 
-**Estimated lines:** ~30
+**Estimated lines:** ~20
 
 ---
 
@@ -350,13 +163,15 @@ void DocumentViewport::insertImageFromDialog()
 
 ---
 
-# Phase C.1: LinkObject Class Foundation
+# Phase C.1: LinkObject Class Foundation ✅ COMPLETE
 
 **Goal:** Create the LinkObject class with 3-slot architecture.
 
+**Completed:** All 6 tasks implemented and tested.
+
 ---
 
-## Task C.1.1: Create LinkSlot Struct
+## Task C.1.1: Create LinkSlot Struct ✅ COMPLETE
 
 **Location:** `source/objects/LinkObject.h`
 
@@ -405,7 +220,7 @@ struct LinkSlot {
 
 ---
 
-## Task C.1.2: Create LinkObject Class
+## Task C.1.2: Create LinkObject Class ✅ COMPLETE
 
 **Location:** `source/objects/LinkObject.h`, `source/objects/LinkObject.cpp`
 
@@ -467,7 +282,7 @@ private:
 
 ---
 
-## Task C.1.3: Implement LinkObject Methods
+## Task C.1.3: Implement LinkObject Methods ✅ COMPLETE
 
 **Location:** `source/objects/LinkObject.cpp`
 
@@ -627,7 +442,7 @@ std::unique_ptr<LinkObject> LinkObject::cloneWithBackLink(const QString& sourceP
 
 ---
 
-## Task C.1.4: Implement LinkSlot Serialization
+## Task C.1.4: Implement LinkSlot Serialization ✅ COMPLETE
 
 **Location:** `source/objects/LinkObject.cpp`
 
@@ -686,7 +501,7 @@ LinkSlot LinkSlot::fromJson(const QJsonObject& obj)
 
 ---
 
-## Task C.1.5: Register LinkObject in Factory
+## Task C.1.5: Register LinkObject in Factory ✅ COMPLETE
 
 **Location:** `source/objects/InsertedObject.cpp`
 
@@ -722,7 +537,7 @@ std::unique_ptr<InsertedObject> InsertedObject::fromJson(const QJsonObject& obj)
 
 ---
 
-## Task C.1.6: Update CMakeLists.txt
+## Task C.1.6: Update CMakeLists.txt ✅ COMPLETE
 
 **Location:** `CMakeLists.txt`
 
@@ -738,14 +553,21 @@ source/objects/LinkObject.cpp
 
 ## C.1 Testing Checklist
 
-- [ ] LinkObject can be created programmatically
-- [ ] LinkObject renders icon at correct position
-- [ ] Icon tinting works (different colors)
-- [ ] containsPoint() correctly detects clicks on icon
-- [ ] toJson() / fromJson() round-trips correctly
-- [ ] Slots serialize/deserialize correctly
-- [ ] Factory creates LinkObject from JSON
-- [ ] cloneWithBackLink() works
+- [x] LinkObject can be created programmatically
+- [x] LinkObject renders icon at correct position
+- [x] Icon tinting works (different colors)
+- [x] containsPoint() correctly detects clicks on icon
+- [x] toJson() / fromJson() round-trips correctly
+- [x] Slots serialize/deserialize correctly
+- [x] Factory creates LinkObject from JSON
+- [x] cloneWithBackLink() works
+
+**Unit Tests:** `./NoteApp --test-linkobject` - ALL PASSED
+
+**Implementation Notes:**
+- Renamed `slots` → `linkSlots` to avoid Qt keyword conflict
+- Changed static `QPixmap` to function-local static to avoid startup crash
+- Icon loaded from `:/resources/icons/link_quote.svg`
 
 ---
 
@@ -864,17 +686,17 @@ signals:
 
 ---
 
-## C.2 Testing Checklist
+## C.2 Testing Checklist ✅ ALL PASSED
 
-- [ ] Click LinkObject with ObjectSelect → selects it
-- [ ] Selection handles appear around LinkObject
-- [ ] Drag LinkObject → moves it
-- [ ] Delete key → deletes LinkObject
-- [ ] Undo delete → restores LinkObject
-- [ ] Copy LinkObject → clipboard contains serialized data
-- [ ] Paste LinkObject → new object with back-link in slot 0
-- [ ] Selecting ImageObject switches to ImgInsert mode
-- [ ] Selecting LinkObject switches to LinkInsert mode
+- [x] Click LinkObject with ObjectSelect → selects it
+- [x] Selection handles appear around LinkObject
+- [x] Drag LinkObject → moves it
+- [x] Delete key → deletes LinkObject
+- [x] Undo delete → restores LinkObject
+- [x] Copy LinkObject → clipboard contains serialized data
+- [x] Paste LinkObject → new object with back-link in slot 0
+- [x] Selecting ImageObject switches to ImgInsert mode
+- [x] Selecting LinkObject switches to LinkInsert mode
 
 ---
 
@@ -1211,16 +1033,17 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
 
 ---
 
-## C.4 Testing Checklist
+## C.4 Testing Checklist ✅ ALL PASSED
 
-- [ ] Ctrl+< switches to Image mode
-- [ ] Ctrl+> switches to Link mode
-- [ ] Ctrl+6 switches to Create mode
-- [ ] Ctrl+7 switches to Select mode
-- [ ] In Create+Image mode, click → file dialog → image inserted
-- [ ] In Create+Link mode, click → empty LinkObject created
-- [ ] Ctrl+8/9/0 activates slots (logs for empty slots)
-- [ ] Mode signals emitted correctly
+- [x] Ctrl+< switches to Image mode
+- [x] Ctrl+> switches to Link mode
+- [x] Ctrl+6 switches to Create mode
+- [x] Ctrl+7 switches to Select mode
+- [x] In Create+Image mode, click → file dialog → image inserted
+- [x] In Create+Link mode, click → empty LinkObject created
+- [x] Ctrl+8/9/0 activates slots (logs for empty slots)
+- [x] Mode signals emitted correctly
+- [x] LinkObject serialization verified (correct JSON structure)
 
 ---
 

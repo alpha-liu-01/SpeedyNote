@@ -5,19 +5,22 @@
 // ============================================================================
 
 #include "Page.h"
+#include <QUuid>       // Phase C.0.1: UUID generation for LinkObject position links
 #include <algorithm>
 #include <climits>  // For INT_MIN (Phase O3.5.5: affinity filtering)
 
 // ===== Constructors =====
 
 Page::Page()
+    : uuid(QUuid::createUuid().toString(QUuid::WithoutBraces))  // Phase C.0.1
 {
     // Create one default layer
     vectorLayers.push_back(std::make_unique<VectorLayer>("Layer 1"));
 }
 
 Page::Page(const QSizeF& pageSize)
-    : size(pageSize)
+    : uuid(QUuid::createUuid().toString(QUuid::WithoutBraces))  // Phase C.0.1
+    , size(pageSize)
 {
     // Create one default layer
     vectorLayers.push_back(std::make_unique<VectorLayer>("Layer 1"));
@@ -691,6 +694,7 @@ QJsonObject Page::toJson() const
     QJsonObject obj;
     
     // Identity
+    obj["uuid"] = uuid;  // Phase C.0.1: For LinkObject position links
     obj["pageIndex"] = pageIndex;
     obj["width"] = size.width();
     obj["height"] = size.height();
@@ -738,6 +742,13 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
     page->vectorLayers.clear();
     
     // Identity
+    // Phase C.0.1: Load UUID, or keep the generated one for legacy documents
+    QString loadedUuid = obj["uuid"].toString();
+    if (!loadedUuid.isEmpty()) {
+        page->uuid = loadedUuid;
+    }
+    // else: page->uuid already has a freshly generated UUID from constructor
+    
     page->pageIndex = obj["pageIndex"].toInt(0);
     page->size = QSizeF(obj["width"].toDouble(800), obj["height"].toDouble(600));
     

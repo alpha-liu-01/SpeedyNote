@@ -5,7 +5,8 @@
 // ============================================================================
 
 #include "InsertedObject.h"
-#include "ImageObject.h"  // Will be created in Task 1.1.5
+#include "ImageObject.h"
+#include "LinkObject.h"
 
 QJsonObject InsertedObject::toJson() const
 {
@@ -70,6 +71,9 @@ std::unique_ptr<InsertedObject> InsertedObject::fromJson(const QJsonObject& obj)
     
     if (objectType == "image") {
         result = std::make_unique<ImageObject>();
+    }
+    else if (objectType == "link") {
+        result = std::make_unique<LinkObject>();
     }
     // Future object types:
     // else if (objectType == "textbox") {

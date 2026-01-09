@@ -40,6 +40,7 @@
 class Page {
 public:
     // ===== Identity =====
+    QString uuid;               ///< Unique identifier for LinkObject position links (Phase C.0.1)
     int pageIndex = 0;          ///< Index of this page in the document (0-based)
     QSizeF size;                ///< Page dimensions in logical pixels
     bool modified = false;      ///< True if page has unsaved changes

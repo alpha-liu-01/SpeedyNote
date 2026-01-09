@@ -21,6 +21,7 @@
 #include "core/DocumentTests.h" // Phase 1.2.8: Document unit tests
 #include "core/DocumentViewportTests.h" // Phase 1.3.11: Viewport tests
 #include "ui/ToolbarButtonTests.h" // Toolbar button unit tests
+#include "objects/LinkObjectTests.h" // Phase C.1: LinkObject unit tests
 #include "ui/ToolbarButtonTestWidget.h" // Toolbar button visual test
 
 #ifdef Q_OS_WIN
@@ -251,6 +252,7 @@ int main(int argc, char *argv[]) {
     bool runViewportTests = false;
     bool runButtonTests = false;
     bool runButtonVisualTest = false;
+    bool runLinkObjectTests = false;
     // REMOVED Phase 3.1: useNewViewport - always using new architecture
     
     // Parse command line arguments
@@ -281,6 +283,9 @@ int main(int argc, char *argv[]) {
         } else if (arg == "--test-buttons-visual") {
             // Run toolbar button visual test widget
             runButtonVisualTest = true;
+        } else if (arg == "--test-linkobject") {
+            // Phase C.1: Run LinkObject unit tests
+            runLinkObjectTests = true;
         } else if (!arg.startsWith("--") && inputFile.isEmpty()) {
             // Regular file argument (first non-flag argument)
             inputFile = arg;
@@ -348,6 +353,19 @@ int main(int argc, char *argv[]) {
         int result = app.exec();
         SDL_Quit();
         return result;
+    }
+    
+    // Phase C.1: Handle --test-linkobject command
+    if (runLinkObjectTests) {
+#ifdef _WIN32
+        // Re-enable console for test output on Windows
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+#endif
+        bool success = LinkObjectTests::runAllTests();
+        SDL_Quit();
+        return success ? 0 : 1;
     }
 
     // Handle silent creation (context menu) - create file and exit immediately

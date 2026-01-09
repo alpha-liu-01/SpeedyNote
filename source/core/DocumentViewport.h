@@ -286,6 +286,30 @@ public:
         Inside    ///< Inside bounding box (for move)
     };
     
+    /**
+     * @brief Object insertion mode for ObjectSelect tool.
+     * 
+     * Phase C.2.4: Determines what type of object is created when clicking
+     * in create mode. Auto-switches when selecting an existing object.
+     */
+    enum class ObjectInsertMode {
+        Image,  ///< Insert ImageObject (default)
+        Link    ///< Insert LinkObject
+    };
+    Q_ENUM(ObjectInsertMode)
+    
+    /**
+     * @brief Object action mode for ObjectSelect tool.
+     * 
+     * Phase C.4.1: Determines whether clicking creates new objects
+     * or selects existing ones.
+     */
+    enum class ObjectActionMode {
+        Select,  ///< Click selects existing objects (default)
+        Create   ///< Click creates new object at position
+    };
+    Q_ENUM(ObjectActionMode)
+    
     // ===== Constructor & Destructor =====
     
     /**
@@ -720,6 +744,22 @@ public:
      */
     bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
     
+    /**
+     * @brief Get the current object insert mode.
+     * @return Current insert mode (Image or Link).
+     * 
+     * Phase C.2.4: Used by UI to reflect current mode state.
+     */
+    ObjectInsertMode objectInsertMode() const { return m_objectInsertMode; }
+    
+    /**
+     * @brief Get the current object action mode.
+     * @return Current action mode (Select or Create).
+     * 
+     * Phase C.4.1: Used by UI to reflect current mode state.
+     */
+    ObjectActionMode objectActionMode() const { return m_objectActionMode; }
+    
     // ===== Object Resize (Phase O3.1) =====
     
     /**
@@ -837,6 +877,14 @@ public:
     void insertImageFromFile(const QString& filePath);
     
     /**
+     * @brief Open file dialog and insert selected image.
+     * 
+     * Phase C.0.5: Opens a file dialog to select an image file,
+     * then calls insertImageFromFile() to insert it at viewport center.
+     */
+    void insertImageFromDialog();
+    
+    /**
      * @brief Delete all currently selected objects.
      * 
      * Phase O2.5: Removes each selected object from its page/tile,
@@ -860,6 +908,39 @@ public:
      * and selects the pasted objects.
      */
     void pasteObjects();
+    
+    /**
+     * @brief Activate a link slot on the selected LinkObject.
+     * @param slotIndex The slot index (0-2) to activate.
+     * 
+     * Phase C.4.3: If exactly one LinkObject is selected, activates the
+     * specified slot based on its type:
+     * - Position: Navigate to the target page/position
+     * - URL: Open in default browser
+     * - Markdown: Open markdown note editor
+     * - Empty: Show add link menu (Phase C.5)
+     */
+    void activateLinkSlot(int slotIndex);
+    
+    /**
+     * @brief Create an empty LinkObject at the specified page position.
+     * @param pageIndex Index of the page to add the LinkObject to.
+     * @param pagePos Position in page-local coordinates.
+     * 
+     * Phase C.4.5: Creates a new LinkObject with empty slots at the
+     * specified position, adds to page, pushes undo, and selects it.
+     */
+    void createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos);
+    
+    /**
+     * @brief Create a LinkObject for a text highlight.
+     * @param pageIndex Index of the page containing the highlight.
+     * 
+     * Phase C.3.2: Creates a LinkObject positioned at the start of the
+     * first highlight rect, with description set to the selected text
+     * and icon color matching the highlighter color.
+     */
+    void createLinkObjectForHighlight(int pageIndex);
     
     /**
      * @brief Get the list of pages currently visible in the viewport.
@@ -1162,6 +1243,24 @@ signals:
     void objectSelectionChanged();
     
     /**
+     * @brief Emitted when the object insert mode changes.
+     * @param mode New object insert mode (Image or Link).
+     * 
+     * Phase C.2.4: Notifies UI when user switches between inserting
+     * ImageObjects or LinkObjects. Auto-emitted when selecting objects.
+     */
+    void objectInsertModeChanged(ObjectInsertMode mode);
+    
+    /**
+     * @brief Emitted when the object action mode changes.
+     * @param mode New action mode (Select or Create).
+     * 
+     * Phase C.4.1: Notifies UI when user switches between selecting
+     * existing objects or creating new ones.
+     */
+    void objectActionModeChanged(ObjectActionMode mode);
+    
+    /**
      * @brief Emitted when horizontal scroll position changes.
      * @param fraction Scroll position as fraction (0.0 to 1.0).
      */
@@ -1426,6 +1525,22 @@ private:
      * Updated on mouse move when ObjectSelect tool is active.
      */
     InsertedObject* m_hoveredObject = nullptr;
+    
+    /**
+     * @brief Current object insertion mode.
+     * 
+     * Phase C.2.4: Determines whether clicking in create mode inserts
+     * an ImageObject or LinkObject. Auto-updated when selecting objects.
+     */
+    ObjectInsertMode m_objectInsertMode = ObjectInsertMode::Image;
+    
+    /**
+     * @brief Current object action mode.
+     * 
+     * Phase C.4.1: Determines whether clicking selects existing objects
+     * or creates new ones. Default is Select.
+     */
+    ObjectActionMode m_objectActionMode = ObjectActionMode::Select;
     
     /**
      * @brief Whether we're currently dragging selected objects.

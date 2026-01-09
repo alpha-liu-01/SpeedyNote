@@ -30,6 +30,7 @@
 #include <QFile>
 #include <QPixmap>
 #include <QSet>
+#include <QHash>
 #include <vector>
 #include <map>
 #include <set>
@@ -348,6 +349,17 @@ public:
      * ImageObjects with empty imagePath but valid cachedPixmap are saved.
      */
     int saveUnsavedImages(const QString& bundlePath);
+    
+    /**
+     * @brief Clean up orphaned asset files from the assets folder.
+     * 
+     * Phase C.0.4: Scans the assets/images directory and deletes files
+     * that are no longer referenced by any ImageObject in the document.
+     * 
+     * Should be called when closing a document to free disk space.
+     * Safe to call on unsaved documents (no-op if bundlePath is empty).
+     */
+    void cleanupOrphanedAssets();
     
     /**
      * @brief Check if lazy loading from disk is enabled.
@@ -749,6 +761,28 @@ public:
      */
     QSizeF pageSizeAt(int index) const;
     
+    // ===== UUID→Index Lookup (Phase C.0.2) =====
+    
+    /**
+     * @brief Get page index by UUID.
+     * @param uuid Page UUID to look up.
+     * @return 0-based page index, or -1 if not found.
+     * 
+     * Uses cached mapping for O(1) lookups. Cache is rebuilt O(n) only
+     * when page order changes (insert/delete/move), not on every lookup.
+     * 
+     * Phase C.0.2: For LinkObject position links - enables stable cross-references.
+     */
+    int pageIndexByUuid(const QString& uuid) const;
+    
+    /**
+     * @brief Invalidate the UUID→Index cache.
+     * 
+     * Call this when page order changes (insert/delete/move).
+     * The cache will be rebuilt lazily on next pageIndexByUuid() call.
+     */
+    void invalidateUuidCache();
+    
     /**
      * @brief Load a page from disk into memory.
      * @param index 0-based page index.
@@ -1105,6 +1139,20 @@ private:
     
     /// True if layer manifest has unsaved changes (need to save document.json).
     bool m_edgelessManifestDirty = false;
+    
+    // ===== UUID→Index Cache (Phase C.0.2) =====
+    /// Cached mapping from page UUID to index for O(1) lookups.
+    /// Mutable for lazy rebuilding in const methods.
+    mutable QHash<QString, int> m_uuidToIndexCache;
+    
+    /// True if cache needs rebuilding (page order changed).
+    mutable bool m_uuidCacheDirty = true;
+    
+    /**
+     * @brief Rebuild the UUID→Index cache from current page order.
+     * Called lazily when cache is dirty and a lookup is requested.
+     */
+    void rebuildUuidCache() const;
     
     /**
      * @brief CR-L13: Load all evicted tiles from disk into memory.

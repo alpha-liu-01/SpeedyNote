@@ -1924,7 +1924,7 @@ void MainWindow::showJumpToPageDialog() {
             switchPage(newPage); // Same page, no direction needed
         }
         if (pageInput) {
-            pageInput->setValue(newPage);
+        pageInput->setValue(newPage);
         }
     }
 }

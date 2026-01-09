@@ -124,6 +124,7 @@
     <file>resources/icons/objectinsert_reversed.png</file>
     <file>resources/icons/text.png</file>
     <file>resources/icons/text_reversed.png</file>
+    <file>resources/icons/link_quote.png</file>
     <file>resources/reversed_icons/color_reversed.png</file>
     <file>resources/reversed_icons/bookpage_reversed.png</file>
     <file>resources/reversed_icons/zoom_reversed.png</file>

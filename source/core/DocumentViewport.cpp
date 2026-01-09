@@ -8,6 +8,7 @@
 #include "TouchGestureHandler.h"
 #include "../layers/VectorLayer.h"
 #include "../pdf/PopplerPdfProvider.h"
+#include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -30,6 +31,15 @@
 #include <QGuiApplication> // For clipboard access (O2.4)
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QMimeData>      // For clipboard content type check (O2.4)
+#include <QFileDialog>    // For insertImageFromDialog (Phase C.0.5)
+#include <QDesktopServices>  // For opening URLs (Phase C.4.3)
+#include <QUrl>              // For URL handling (Phase C.4.3)
+
+// ===== Constants =====
+
+// PDF uses 72 DPI, Page uses 96 DPI - scale factor for coordinate conversion
+static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
+static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
 
 // ===== Constructor & Destructor =====
 
@@ -1092,6 +1102,12 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     InsertedObject* obj = m_selectedObjects.first();
     if (!obj) return;
     
+    // Phase C.2.2: LinkObject doesn't resize - only move is allowed
+    // LinkObject has fixed icon size (24x24), resize would distort it
+    if (obj->type() == "link") {
+        return;
+    }
+    
     // Convert positions to document coordinates
     QPointF currentDoc = viewportToDocument(currentViewport);
     
@@ -1980,6 +1996,58 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
                     // Ctrl+[ → send backward
                     sendSelectedBackward();
                 }
+                event->accept();
+                return;
+            }
+        }
+        
+        // Phase C.4.2: Mode switching shortcuts
+        if (event->modifiers() == Qt::ControlModifier) {
+            // Ctrl+< or Ctrl+, → Image mode
+            if (event->key() == Qt::Key_Less || event->key() == Qt::Key_Comma) {
+                m_objectInsertMode = ObjectInsertMode::Image;
+                emit objectInsertModeChanged(m_objectInsertMode);
+                qDebug() << "Switched to Image insert mode";
+                event->accept();
+                return;
+            }
+            // Ctrl+> or Ctrl+. → Link mode
+            if (event->key() == Qt::Key_Greater || event->key() == Qt::Key_Period) {
+                m_objectInsertMode = ObjectInsertMode::Link;
+                emit objectInsertModeChanged(m_objectInsertMode);
+                qDebug() << "Switched to Link insert mode";
+                event->accept();
+                return;
+            }
+            // Ctrl+6 → Create mode
+            if (event->key() == Qt::Key_6) {
+                m_objectActionMode = ObjectActionMode::Create;
+                emit objectActionModeChanged(m_objectActionMode);
+                qDebug() << "Switched to Create mode";
+                event->accept();
+                return;
+            }
+            // Ctrl+7 → Select mode
+            if (event->key() == Qt::Key_7) {
+                m_objectActionMode = ObjectActionMode::Select;
+                emit objectActionModeChanged(m_objectActionMode);
+                qDebug() << "Switched to Select mode";
+                event->accept();
+                return;
+            }
+            // Ctrl+8/9/0 → Access link slots (Phase C.4.3)
+            if (event->key() == Qt::Key_8) {
+                activateLinkSlot(0);
+                event->accept();
+                return;
+            }
+            if (event->key() == Qt::Key_9) {
+                activateLinkSlot(1);
+                event->accept();
+                return;
+            }
+            if (event->key() == Qt::Key_0) {
+                activateLinkSlot(2);
                 event->accept();
                 return;
             }
@@ -4221,53 +4289,87 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 {
     if (!m_document) return;
     
+    // Phase C.4.4: Create mode - insert object at click position instead of selecting
+    if (m_objectActionMode == ObjectActionMode::Create) {
+        PageHit hit = viewportToPage(pe.viewportPos);
+        if (hit.pageIndex < 0) {
+            // Click not on any page - ignore in paged mode
+            if (!m_document->isEdgeless()) {
+                qDebug() << "handlePointerPress_ObjectSelect: Create mode click not on page";
+                return;
+            }
+            // Edgeless: use document coordinates directly
+            QPointF docPos = viewportToDocument(pe.viewportPos);
+            auto coord = m_document->tileCoordForPoint(docPos);
+            hit.pageIndex = 0;  // Placeholder - edgeless uses tiles
+            hit.pagePoint = docPos - QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                              coord.second * Document::EDGELESS_TILE_SIZE);
+        }
+        
+        if (m_objectInsertMode == ObjectInsertMode::Image) {
+            // Open file dialog and insert image
+            // Note: insertImageFromDialog() positions at viewport center for now
+            // TODO: Create insertImageAtPosition() for click-to-place
+            insertImageFromDialog();
+        } else {
+            // Create empty LinkObject at position
+            createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint);
+        }
+        return;
+    }
+    
     // Phase O3.1.3: Check for resize handle click FIRST (single selection only)
     if (m_selectedObjects.size() == 1) {
         HandleHit handle = objectHandleAtPoint(pe.viewportPos);
         if (handle != HandleHit::None && handle != HandleHit::Inside) {
             InsertedObject* obj = m_selectedObjects.first();
             
-            // Start resize operation
-            m_isResizingObject = true;
-            m_objectResizeHandle = handle;
-            m_resizeStartViewport = pe.viewportPos;
-            m_resizeOriginalSize = obj->size;
-            m_resizeOriginalPosition = obj->position;  // Tile-local, for undo
-            m_resizeOriginalRotation = obj->rotation;  // Phase O3.1.8.2
-            m_pointerActive = true;
-            
-            // BF: Calculate document-global center for scale calculations
-            // In edgeless mode, obj->position is tile-local, but pointer events
-            // give document-global coordinates. Must use consistent coordinate system!
-            QPointF docPos;
-            if (m_document->isEdgeless()) {
-                // Find tile containing this object and add tile origin
-                for (const auto& coord : m_document->allLoadedTileCoords()) {
-                    Page* tile = m_document->getTile(coord.first, coord.second);
-                    if (tile && tile->objectById(obj->id)) {
-                        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                                           coord.second * Document::EDGELESS_TILE_SIZE);
-                        docPos = tileOrigin + obj->position;
-                        break;
+            // Phase C.2.2: LinkObject doesn't resize - skip resize handle interaction
+            // Allow the click to fall through to drag logic instead
+            if (obj->type() != "link") {
+                // Start resize operation (non-LinkObject only)
+                m_isResizingObject = true;
+                m_objectResizeHandle = handle;
+                m_resizeStartViewport = pe.viewportPos;
+                m_resizeOriginalSize = obj->size;
+                m_resizeOriginalPosition = obj->position;  // Tile-local, for undo
+                m_resizeOriginalRotation = obj->rotation;  // Phase O3.1.8.2
+                m_pointerActive = true;
+                
+                // BF: Calculate document-global center for scale calculations
+                // In edgeless mode, obj->position is tile-local, but pointer events
+                // give document-global coordinates. Must use consistent coordinate system!
+                QPointF docPos;
+                if (m_document->isEdgeless()) {
+                    // Find tile containing this object and add tile origin
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (tile && tile->objectById(obj->id)) {
+                            QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                               coord.second * Document::EDGELESS_TILE_SIZE);
+                            docPos = tileOrigin + obj->position;
+                            break;
+                        }
+                    }
+                } else {
+                    // Paged: find page containing object
+                    for (int i = 0; i < m_document->pageCount(); ++i) {
+                        Page* page = m_document->page(i);
+                        if (page && page->objectById(obj->id)) {
+                            docPos = pagePosition(i) + obj->position;
+                            break;
+                        }
                     }
                 }
-            } else {
-                // Paged: find page containing object
-                for (int i = 0; i < m_document->pageCount(); ++i) {
-                    Page* page = m_document->page(i);
-                    if (page && page->objectById(obj->id)) {
-                        docPos = pagePosition(i) + obj->position;
-                        break;
-                    }
-                }
+                m_resizeObjectDocCenter = docPos + QPointF(obj->size.width() / 2.0, 
+                                                            obj->size.height() / 2.0);
+                
+                // Phase O4.1: Capture background for fast resize rendering
+                captureObjectDragBackground();
+                
+                return;  // Don't start object drag
             }
-            m_resizeObjectDocCenter = docPos + QPointF(obj->size.width() / 2.0, 
-                                                        obj->size.height() / 2.0);
-            
-            // Phase O4.1: Capture background for fast resize rendering
-            captureObjectDragBackground();
-            
-            return;  // Don't start object drag
+            // LinkObject: fall through to handle as drag instead
         }
     }
     
@@ -4643,6 +4745,24 @@ void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
     
     if (changed) {
         emit objectSelectionChanged();
+        
+        // Phase C.2.4: Auto-switch insert mode based on selected object type
+        if (m_selectedObjects.size() == 1) {
+            InsertedObject* selected = m_selectedObjects.first();
+            ObjectInsertMode newMode = m_objectInsertMode;
+            
+            if (selected->type() == "image") {
+                newMode = ObjectInsertMode::Image;
+            } else if (selected->type() == "link") {
+                newMode = ObjectInsertMode::Link;
+            }
+            
+            if (newMode != m_objectInsertMode) {
+                m_objectInsertMode = newMode;
+                emit objectInsertModeChanged(m_objectInsertMode);
+            }
+        }
+        
         update();
     }
 }
@@ -4999,6 +5119,24 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
              << "size" << rawPtr->size << "at" << rawPtr->position;
 }
 
+void DocumentViewport::insertImageFromDialog()
+{
+    // Phase C.0.5: Open file dialog to select an image
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        tr("Insert Image"),
+        QString(),
+        tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)")
+    );
+    
+    if (filePath.isEmpty()) {
+        return;  // User cancelled
+    }
+    
+    // Insert at viewport center (handled by insertImageFromFile)
+    insertImageFromFile(filePath);
+}
+
 void DocumentViewport::deleteSelectedObjects()
 {
     // Phase O2.5.2: Delete all selected objects
@@ -5103,7 +5241,27 @@ void DocumentViewport::copySelectedObjects()
     
     // Serialize each selected object to JSON
     for (InsertedObject* obj : m_selectedObjects) {
-        if (obj) {
+        if (!obj) continue;
+        
+        // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
+        // with a back-link to the original position
+        if (auto* link = dynamic_cast<LinkObject*>(obj)) {
+            // Find source page UUID
+            QString sourcePageUuid;
+            if (m_document->isPaged()) {
+                for (int i = 0; i < m_document->pageCount(); ++i) {
+                    Page* page = m_document->page(i);
+                    if (page && page->objectById(obj->id)) {
+                        sourcePageUuid = page->uuid;
+                        break;
+                    }
+                }
+            }
+            // Note: Edgeless mode doesn't have page UUIDs, back-link will be empty
+            
+            auto clone = link->cloneWithBackLink(sourcePageUuid);
+            m_objectClipboard.append(clone->toJson());
+        } else {
             m_objectClipboard.append(obj->toJson());
         }
     }
@@ -5203,6 +5361,188 @@ void DocumentViewport::pasteObjects()
     update();
     
     qDebug() << "pasteObjects: Pasted" << pastedObjects.size() << "objects from internal clipboard";
+}
+
+// ===== LinkObject Creation (Phase C.3.2 & C.4.5) =====
+
+void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
+{
+    // Phase C.3.2: Create LinkObject for text highlight
+    if (!m_document || m_textSelection.highlightRects.isEmpty()) {
+        return;
+    }
+    
+    Page* page = m_document->page(pageIndex);
+    if (!page) {
+        return;
+    }
+    
+    // Create LinkObject
+    auto linkObj = std::make_unique<LinkObject>();
+    
+    // Position to the LEFT of the first highlight rect (in the margin)
+    // This avoids overlapping with the highlight strokes
+    QRectF firstRect = m_textSelection.highlightRects[0];
+    qreal firstRectX = firstRect.x() * PDF_TO_PAGE_SCALE;
+    qreal firstRectY = firstRect.y() * PDF_TO_PAGE_SCALE;
+    
+    // Place icon to the left with padding, but clamp to avoid negative coords
+    constexpr qreal MARGIN_PADDING = 4.0;
+    qreal iconX = firstRectX - LinkObject::ICON_SIZE - MARGIN_PADDING;
+    if (iconX < MARGIN_PADDING) {
+        iconX = MARGIN_PADDING;  // Keep small margin from page edge
+    }
+    
+    linkObj->position = QPointF(iconX, firstRectY);
+    
+    // Set description to extracted text
+    linkObj->description = m_textSelection.selectedText;
+    
+    // Use a DARKER version of highlighter color for visibility on white pages
+    // Light colors like yellow become hard to see, so we darken by ~50%
+    QColor darkened = m_highlighterColor;
+    darkened.setRed(darkened.red() * 0.5);
+    darkened.setGreen(darkened.green() * 0.5);
+    darkened.setBlue(darkened.blue() * 0.5);
+    darkened.setAlpha(255);  // Full opacity for visibility
+    linkObj->iconColor = darkened;
+    
+    // Set default affinity (activeLayer - 1, so it appears below strokes)
+    int activeLayer = page->activeLayerIndex;
+    linkObj->setLayerAffinity(activeLayer - 1);
+    
+    // Store raw pointer BEFORE std::move
+    LinkObject* rawPtr = linkObj.get();
+    
+    // Add to page
+    page->addObject(std::move(linkObj));
+    
+    // Mark page dirty for save
+    m_document->markPageDirty(pageIndex);
+    
+    // Push undo action (empty tile coord for paged mode)
+    pushObjectInsertUndo(rawPtr, pageIndex, {});
+    
+#ifdef QT_DEBUG
+    qDebug() << "Created LinkObject for highlight on page" << pageIndex
+             << "description:" << rawPtr->description.left(30);
+#endif
+}
+
+void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos)
+{
+    // Phase C.4.5: Create empty LinkObject at specified position
+    if (!m_document) return;
+    
+    auto linkObj = std::make_unique<LinkObject>();
+    linkObj->position = pagePos;
+    linkObj->description = QString();  // Empty for manual creation
+    
+    // Store raw pointer BEFORE std::move
+    LinkObject* rawPtr = linkObj.get();
+    
+    // Track tile coord for undo (edgeless mode)
+    Document::TileCoord insertedTileCoord = {0, 0};
+    
+    if (m_document->isEdgeless()) {
+        // Edgeless mode: pagePos is already tile-local from handlePointerPress_ObjectSelect
+        // We need to find which tile based on document coordinates
+        QPointF docPos = viewportToDocument(mapFromGlobal(QCursor::pos()));
+        auto coord = m_document->tileCoordForPoint(docPos);
+        
+        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+        if (!targetTile) {
+            qWarning() << "createLinkObjectAtPosition: Failed to get/create tile";
+            return;
+        }
+        
+        // Default affinity based on active layer
+        int activeLayer = m_edgelessActiveLayerIndex;
+        linkObj->setLayerAffinity(activeLayer - 1);
+        
+        targetTile->addObject(std::move(linkObj));
+        m_document->markTileDirty(coord);
+        insertedTileCoord = coord;
+    } else {
+        // Paged mode
+        Page* page = m_document->page(pageIndex);
+        if (!page) {
+            qWarning() << "createLinkObjectAtPosition: No page at index" << pageIndex;
+            return;
+        }
+        
+        // Default affinity based on active layer
+        int activeLayer = page->activeLayerIndex;
+        linkObj->setLayerAffinity(activeLayer - 1);
+        
+        page->addObject(std::move(linkObj));
+        m_document->markPageDirty(pageIndex);
+    }
+    
+    // Push undo action
+    pushObjectInsertUndo(rawPtr, pageIndex, insertedTileCoord);
+    
+    // Select the new object
+    deselectAllObjects();
+    selectObject(rawPtr, false);
+    
+    emit documentModified();
+    update();
+    
+    qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
+}
+
+// ===== Link Slot Activation (Phase C.4.3) =====
+
+void DocumentViewport::activateLinkSlot(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        qDebug() << "activateLinkSlot: Invalid slot index" << slotIndex;
+        return;
+    }
+    
+    // Must have exactly one LinkObject selected
+    if (m_selectedObjects.size() != 1) {
+        qDebug() << "activateLinkSlot: Need exactly one object selected";
+        return;
+    }
+    
+    LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
+    if (!link) {
+        qDebug() << "activateLinkSlot: Selected object is not a LinkObject";
+        return;
+    }
+    
+    const LinkSlot& slot = link->linkSlots[slotIndex];
+    
+    if (slot.isEmpty()) {
+        // Empty slot - show menu to add link (Phase C.5)
+        qDebug() << "activateLinkSlot: Slot" << slotIndex << "is empty - TODO: show add menu";
+        return;
+    }
+    
+    // Activate the slot based on type
+    switch (slot.type) {
+        case LinkSlot::Type::Position:
+            // Phase C.5: Navigate to page position
+            qDebug() << "activateLinkSlot: Position link - TODO: navigateToPosition("
+                     << slot.targetPageUuid << "," << slot.targetPosition << ")";
+            // TODO: navigateToPosition(slot.targetPageUuid, slot.targetPosition);
+            break;
+            
+        case LinkSlot::Type::Url:
+            qDebug() << "activateLinkSlot: Opening URL" << slot.url;
+            QDesktopServices::openUrl(QUrl(slot.url));
+            break;
+            
+        case LinkSlot::Type::Markdown:
+            // Phase C.6: Open markdown note
+            qDebug() << "activateLinkSlot: Markdown link - TODO: open note" << slot.markdownNoteId;
+            break;
+            
+        default:
+            break;
+    }
 }
 
 // ===== Object Z-Order (Phase O2.8) =====
@@ -7335,9 +7675,7 @@ void DocumentViewport::clearLassoSelection()
 
 // ===== Highlighter Tool Methods (Phase A) =====
 
-// PDF uses 72 DPI, Page uses 96 DPI - scale factor for coordinate conversion
-static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
-static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
+// Note: PDF_TO_PAGE_SCALE and PAGE_TO_PDF_SCALE defined in Constants section at top of file
 
 void DocumentViewport::loadTextBoxesForPage(int pageIndex)
 {
@@ -7987,6 +8325,11 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
     // Mark page dirty for lazy save (BUG FIX: was missing)
     if (!createdIds.isEmpty()) {
         m_document->markPageDirty(pageIndex);
+    }
+    
+    // Phase C.3.1: Create LinkObject alongside highlight strokes
+    if (!createdIds.isEmpty() && !m_textSelection.highlightRects.isEmpty()) {
+        createLinkObjectForHighlight(pageIndex);
     }
     
     // Clear the text selection

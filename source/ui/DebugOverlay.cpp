@@ -271,6 +271,14 @@ QString DebugOverlay::toolName() const
         case ToolType::Eraser:      return "Eraser";
         case ToolType::Highlighter: return "Highlighter";
         case ToolType::Lasso:       return "Lasso";
+        case ToolType::ObjectSelect: {
+            // Phase C.4: Show sub-modes for ObjectSelect tool
+            QString insertMode = (m_viewport->objectInsertMode() == DocumentViewport::ObjectInsertMode::Image) 
+                                 ? "Img" : "Link";
+            QString actionMode = (m_viewport->objectActionMode() == DocumentViewport::ObjectActionMode::Create) 
+                                 ? "Create" : "Select";
+            return QString("Object[%1/%2]").arg(insertMode, actionMode);
+        }
         default:                    return "Unknown";
     }
 }
