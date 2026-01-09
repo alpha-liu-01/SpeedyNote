@@ -548,3 +548,154 @@ docs/
 └── VIEWPORT_RECONSTRUCTION_SUBPLAN.md  Viewport architecture
 
 =============================================================================
+
+
+Now we finally arrive at a junction. SpeedyNote is architecturally complete now, but incomplete feature wise. 
+Here are the remaining phases to complete the SpeedyNote remake:
+
+=============================================================================
+PHASE D: Tablet UX & Tool Enhancement (Tablet-first priority)
+=============================================================================
+
+D.1: PDF Internal Link Clicking [SMALL - HIGH VALUE]
+     - Highlighter tool currently doesn't make PDF page links clickable
+     - Need to detect link annotations and navigate on click
+     - Small fix, big usability improvement for PDF navigation
+
+D.2: Subtoolbar Framework [MEDIUM]
+     - Create shared infrastructure for tool-specific subtoolbars
+     - Should be touch-friendly (large buttons, clear icons)
+     - Appears below main toolbar when tool is selected
+
+D.3: ObjectSelect Subtoolbar [MEDIUM]
+     - Replace temporary keyboard shortcuts (Ctrl+,/./6/7/8/9/0)
+     - Mode switches: Image/Link insert mode, Create/Select action mode
+     - Slot buttons (1/2/3) with visual state (empty/filled/type icon)
+     - "Pick position" mode for Position links
+
+D.4: Action Bar [MEDIUM]
+     - Context-sensitive floating buttons for tablet users
+     - Shows: Copy/Paste/Delete/Undo/Redo when relevant
+     - Appears on selection, disappears after action
+     - Should integrate visually with subtoolbar
+
+D.5: Other Tool Subtoolbars [FUTURE]
+     - Pen: thickness, color shortcuts
+     - Eraser: mode (stroke/pixel), size
+     - Highlighter: color, auto-highlight toggle
+     - Lasso: transform options
+
+=============================================================================
+PHASE E: Left Sidebar Features
+=============================================================================
+
+E.1: Sidebar Container Refresh [SMALL]
+     - Make tab switching touch-friendly (larger tap targets)
+     - Container already exists, LayerPanel already in a tab
+
+E.2: PDF Outline Panel [MEDIUM]
+     - Display Poppler's TOC/outline data
+     - Click entry → navigate to page
+     - Scroll document → highlight current section
+     - Expand/collapse nested sections
+
+E.3: Page Panel [MEDIUM-LARGE]
+     - Page thumbnails for quick navigation
+     - Click → navigate to page
+     - Drag to reorder pages
+     - Visual indicator for current page
+     - Add/delete page buttons
+
+E.4: LayerPanel Refresh [SMALL-MEDIUM]
+     - Make touch-friendly (larger buttons, better spacing)
+     - Logic should already work with new architecture
+
+=============================================================================
+PHASE F: Markdown Integration (Phase C.6 completion)
+=============================================================================
+
+F.1: Assess Existing Markdown Code [RESEARCH]
+     - Review QMarkdownTextEdit integration
+     - Understand old page-by-page loading architecture
+     - Identify what needs to change for LinkObject connection
+
+F.2: LinkObject → Markdown Connection [MEDIUM]
+     - Create note from LinkSlot (Ctrl+0 on empty slot)
+     - Open existing note from LinkSlot
+     - Store note files in document bundle
+
+F.3: Note Lifecycle Management [SMALL]
+     - Handle orphaned notes (LinkObject deleted)
+     - Handle broken references (note file deleted)
+
+-----------------------------------------------------------------------------------------------------------------------------
+
+LATER (Post-core features):
+
+G.1: Polish UX
+     - Tab switching behavior (unsaved changes warning)
+     - Missing PDF handling (file moved/deleted)
+     - Error states and recovery
+
+G.2: Packaging Format Finalization
+     - Currently using .snb bundle (folder structure)
+     - Decide: keep folder vs zip compression
+     - Temp file location (tmp vs same folder)
+     - Old .spn format is incompatible - clean break
+
+G.3: Control Panel Remake
+     - Most old options don't make sense with new architecture
+     - Focus on: theme, default tool settings, performance tuning
+
+G.4: File Explorer Integration
+     - Double-click .snb → open SpeedyNote
+     - File associations for Windows/Linux
+
+G.5: Shortcut Hub
+     - Centralized keyboard/mouse/controller shortcut customization
+     - Reconnect SDLController for WACOM remote-like UX
+
+G.6: LauncherWindow Reconnect/Remake
+     - Recent documents list
+     - Quick open for frequently edited notes
+
+G.7: Legacy Code Cleanup
+     - Remove PictureWindow and other obsolete code
+     - Clean up unused includes and dead code paths
+
+-------------------------------------------------------------------------------------------------------------------------------
+
+FUTURE (Post Windows/Linux release):
+
+H.1: Android Port
+     - Need alternative PDF provider (Poppler dependencies too heavy)
+     - SDL2 also problematic on Android
+     - Investigate: MuPDF, PDFium, or Android's native PDF renderer
+     - Sandbox/persistence challenges to investigate
+
+H.2: iOS/iPadOS Port
+     - Qt for iOS exists
+     - Without SDL2/Poppler, may be more feasible
+     - Would need iOS-native PDF rendering
+
+...
+
+=============================================================================
+DESIGN DECISIONS (Post-Phase C Discussion)
+=============================================================================
+
+Platform Priority: Tablet-first (tablet PCs), but must work on desktop too.
+
+Markdown Sidebar: UI exists (QMarkdownTextEdit). Old architecture tied notes to 
+                  highlights and loaded page-by-page. Needs refactoring for 
+                  LinkObject-based connection.
+
+LayerPanel: Functional but ugly, not tablet-friendly. Sidebar container exists.
+
+PDF Outline: Poppler provides TOC data. Need display + click-to-navigate + 
+             scroll-to-highlight-current-section.
+
+Bookmark Panel: REMOVED. LinkObjects + markdown notes replace traditional bookmarks.
+
+PDF Links: Text selection tool currently doesn't make PDF internal links clickable.
+           This is a gap that needs to be addressed (added as D.1).
