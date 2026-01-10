@@ -6,6 +6,13 @@
 #include "ui/sidebars/LayerPanel.h" // Phase S1: Moved to sidebars folder
 #include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
 #include "ui/StyleLoader.h"         // QSS stylesheet loader
+// Phase D: Subtoolbar includes
+#include "ui/subtoolbars/SubToolbarContainer.h"
+#include "ui/subtoolbars/PenSubToolbar.h"
+#include "ui/subtoolbars/MarkerSubToolbar.h"
+#include "ui/subtoolbars/HighlighterSubToolbar.h"
+#include "ui/subtoolbars/ObjectSelectSubToolbar.h"
+#include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -596,7 +603,8 @@ void MainWindow::setupUi() {
 
 
     // Create a container for the viewport stack and scrollbars with relative positioning
-    QWidget *canvasContainer = new QWidget;
+    m_canvasContainer = new QWidget;
+    QWidget *canvasContainer = m_canvasContainer;  // Local alias for existing code
     QVBoxLayout *canvasLayout = new QVBoxLayout(canvasContainer);
     canvasLayout->setContentsMargins(0, 0, 0, 0);
     
@@ -760,6 +768,9 @@ void MainWindow::setupUi() {
         // TODO: Connect to TouchGestureHandler when ready
     });
     // ------------------ End of Toolbar signal connections ------------------
+    
+    // Phase D: Setup subtoolbars
+    setupSubToolbars();
 
     // Add components in vertical order
     // Phase C.1.5: tabBarContainer hidden - buttons now in NavigationBar
@@ -1036,6 +1047,24 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_straightLineModeConn);
         m_straightLineModeConn = {};
     }
+    // Phase D: Disconnect auto-highlight sync connection
+    if (m_autoHighlightConn) {
+        disconnect(m_autoHighlightConn);
+        m_autoHighlightConn = {};
+    }
+    // Phase D: Disconnect object mode sync connections
+    if (m_insertModeConn) {
+        disconnect(m_insertModeConn);
+        m_insertModeConn = {};
+    }
+    if (m_actionModeConn) {
+        disconnect(m_actionModeConn);
+        m_actionModeConn = {};
+    }
+    if (m_selectionChangedConn) {
+        disconnect(m_selectionChangedConn);
+        m_selectionChangedConn = {};
+    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -1111,6 +1140,91 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // m_straightLineModeConn = connect(viewport, &DocumentViewport::straightLineModeChanged, this, [this](bool enabled) {
     //     // Button state sync removed
     // });
+    
+    // Phase D: Connect auto-highlight state sync (viewport → subtoolbar)
+    // When Ctrl+H changes the state, update the subtoolbar toggle to match
+    m_autoHighlightConn = connect(viewport, &DocumentViewport::autoHighlightEnabledChanged, 
+                                  this, [this](bool enabled) {
+        if (m_highlighterSubToolbar) {
+            m_highlighterSubToolbar->setAutoHighlightState(enabled);
+        }
+    });
+    
+    // Also sync the current auto-highlight state to the subtoolbar
+    if (m_highlighterSubToolbar) {
+        m_highlighterSubToolbar->setAutoHighlightState(viewport->isAutoHighlightEnabled());
+    }
+    
+    // Phase D: Connect object mode state sync (viewport → subtoolbar)
+    // When Ctrl+< / Ctrl+> / Ctrl+6 / Ctrl+7 changes the mode, update the subtoolbar
+    m_insertModeConn = connect(viewport, &DocumentViewport::objectInsertModeChanged,
+                               this, [this](DocumentViewport::ObjectInsertMode mode) {
+        if (m_objectSelectSubToolbar) {
+            m_objectSelectSubToolbar->setInsertModeState(mode);
+        }
+    });
+    
+    m_actionModeConn = connect(viewport, &DocumentViewport::objectActionModeChanged,
+                               this, [this](DocumentViewport::ObjectActionMode mode) {
+        if (m_objectSelectSubToolbar) {
+            m_objectSelectSubToolbar->setActionModeState(mode);
+        }
+    });
+    
+    // Also sync the current object modes to the subtoolbar
+    if (m_objectSelectSubToolbar) {
+        m_objectSelectSubToolbar->setInsertModeState(viewport->objectInsertMode());
+        m_objectSelectSubToolbar->setActionModeState(viewport->objectActionMode());
+    }
+    
+    // Phase D: Connect object selection changed to update LinkSlot buttons
+    m_selectionChangedConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
+                                     this, [this, viewport]() {
+        updateLinkSlotButtons(viewport);
+    });
+    
+    // Also sync the current selection state to the subtoolbar
+    updateLinkSlotButtons(viewport);
+}
+
+void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
+{
+    // Phase D: Update ObjectSelectSubToolbar slot buttons based on selected LinkObject
+    if (!m_objectSelectSubToolbar || !viewport) {
+        return;
+    }
+    
+    const auto& selectedObjects = viewport->selectedObjects();
+    
+    // Check if exactly one LinkObject is selected
+    if (selectedObjects.size() == 1) {
+        LinkObject* link = dynamic_cast<LinkObject*>(selectedObjects.first());
+        if (link) {
+            // Convert LinkSlot::Type to LinkSlotState for each slot
+            LinkSlotState states[3];
+            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+                switch (link->linkSlots[i].type) {
+                    case LinkSlot::Type::Empty:
+                        states[i] = LinkSlotState::Empty;
+                        break;
+                    case LinkSlot::Type::Position:
+                        states[i] = LinkSlotState::Position;
+                        break;
+                    case LinkSlot::Type::Url:
+                        states[i] = LinkSlotState::Url;
+                        break;
+                    case LinkSlot::Type::Markdown:
+                        states[i] = LinkSlotState::Markdown;
+                        break;
+                }
+            }
+            m_objectSelectSubToolbar->updateSlotStates(states);
+            return;
+        }
+    }
+    
+    // No LinkObject selected (or multiple objects selected) - clear slots
+    m_objectSelectSubToolbar->clearSlotStates();
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -2242,7 +2356,12 @@ void MainWindow::updateTheme() {
     // Update left sidebar container theme
     if (m_leftSidebar) {
         m_leftSidebar->updateTheme(darkMode);
-    }    
+    }
+    
+    // Phase D: Update SubToolbarContainer theme for icon switching
+    if (m_subtoolbarContainer) {
+        m_subtoolbarContainer->setDarkMode(darkMode);
+    }
 }
     
 void MainWindow::saveThemeSettings() {
@@ -2412,6 +2531,146 @@ void MainWindow::updateScrollbarPositions() {
     // Ensure sliders are raised above content
     panXSlider->raise();
     panYSlider->raise();
+    
+    // Phase D: Also update subtoolbar position
+    updateSubToolbarPosition();
+}
+
+// =========================================================================
+// Phase D: Subtoolbar Setup and Positioning
+// =========================================================================
+
+void MainWindow::setupSubToolbars()
+{
+    if (!m_canvasContainer) {
+        qWarning() << "setupSubToolbars: canvasContainer not yet created";
+        return;
+    }
+    
+    // Create subtoolbar container as child of canvas container (floats over viewport)
+    m_subtoolbarContainer = new SubToolbarContainer(m_canvasContainer);
+    
+    // Create individual subtoolbars
+    m_penSubToolbar = new PenSubToolbar();
+    m_markerSubToolbar = new MarkerSubToolbar();
+    m_highlighterSubToolbar = new HighlighterSubToolbar();
+    m_objectSelectSubToolbar = new ObjectSelectSubToolbar();
+    
+    // Register subtoolbars with container
+    m_subtoolbarContainer->setSubToolbar(ToolType::Pen, m_penSubToolbar);
+    m_subtoolbarContainer->setSubToolbar(ToolType::Marker, m_markerSubToolbar);
+    m_subtoolbarContainer->setSubToolbar(ToolType::Highlighter, m_highlighterSubToolbar);
+    m_subtoolbarContainer->setSubToolbar(ToolType::ObjectSelect, m_objectSelectSubToolbar);
+    // Eraser, Lasso - no subtoolbar (nullptr by default)
+    
+    // Connect tool changes from Toolbar to SubToolbarContainer
+    connect(m_toolbar, &Toolbar::toolSelected, 
+            m_subtoolbarContainer, &SubToolbarContainer::onToolChanged);
+    
+    // Connect PenSubToolbar signals to viewport
+    connect(m_penSubToolbar, &PenSubToolbar::penColorChanged, this, [this](const QColor& color) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setPenColor(color);
+        }
+    });
+    connect(m_penSubToolbar, &PenSubToolbar::penThicknessChanged, this, [this](qreal thickness) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setPenThickness(thickness);
+        }
+    });
+    
+    // Connect MarkerSubToolbar signals to viewport
+    connect(m_markerSubToolbar, &MarkerSubToolbar::markerColorChanged, this, [this](const QColor& color) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setMarkerColor(color);
+        }
+    });
+    connect(m_markerSubToolbar, &MarkerSubToolbar::markerThicknessChanged, this, [this](qreal thickness) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setMarkerThickness(thickness);
+        }
+    });
+    
+    // Connect HighlighterSubToolbar signals to viewport
+    connect(m_highlighterSubToolbar, &HighlighterSubToolbar::highlighterColorChanged, this, [this](const QColor& color) {
+        if (DocumentViewport* vp = currentViewport()) {
+            // Highlighter uses marker color for now (shared presets)
+            vp->setMarkerColor(color);
+        }
+    });
+    connect(m_highlighterSubToolbar, &HighlighterSubToolbar::autoHighlightChanged, this, [this](bool enabled) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setAutoHighlightEnabled(enabled);
+        }
+    });
+    
+    // Connect ObjectSelectSubToolbar signals to viewport
+    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::insertModeChanged, this, 
+            [this](DocumentViewport::ObjectInsertMode mode) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setObjectInsertMode(mode);
+        }
+    });
+    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::actionModeChanged, this, 
+            [this](DocumentViewport::ObjectActionMode mode) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setObjectActionMode(mode);
+        }
+    });
+    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::slotActivated, this, [this](int index) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->activateLinkSlot(index);
+        }
+    });
+    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::slotCleared, this, [this](int index) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->clearLinkSlot(index);
+        }
+    });
+    
+    // Connect tab changes to subtoolbar container
+    // Use currentViewportChanged and track indices manually
+    connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* /*vp*/) {
+        static int previousIndex = -1;
+        int newIndex = m_tabManager->currentIndex();
+        if (newIndex != previousIndex) {
+            m_subtoolbarContainer->onTabChanged(newIndex, previousIndex);
+            previousIndex = newIndex;
+        }
+    });
+    
+    // Initial position update
+    QTimer::singleShot(0, this, &MainWindow::updateSubToolbarPosition);
+    
+    // Show for default tool (Pen)
+    m_subtoolbarContainer->showForTool(ToolType::Pen);
+    
+    qDebug() << "Phase D: Subtoolbars initialized";
+}
+
+void MainWindow::updateSubToolbarPosition()
+{
+    if (!m_subtoolbarContainer || !m_canvasContainer) {
+        return;
+    }
+    
+    // Get canvas container geometry (the viewport area)
+    QRect viewportRect = m_canvasContainer->rect();
+    
+    // Account for left sidebar if visible
+    int leftOffset = 0;
+    if (m_leftSidebar && m_leftSidebar->isVisible()) {
+        leftOffset = m_leftSidebar->width();
+    }
+    
+    // Adjust viewport rect to exclude left sidebar area
+    viewportRect.setLeft(viewportRect.left() + leftOffset);
+    
+    // Update subtoolbar container position
+    m_subtoolbarContainer->updatePosition(viewportRect);
+    
+    // Ensure it's raised above viewport content
+    m_subtoolbarContainer->raise();
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete

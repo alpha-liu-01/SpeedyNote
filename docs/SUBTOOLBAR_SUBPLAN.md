@@ -47,7 +47,7 @@ Implement subtoolbars that provide tool-specific options. Subtoolbars float on t
 
 ## Phase 1: Custom Widgets
 
-### Task 1.1: ColorPresetButton
+### Task 1.1: ColorPresetButton ✅ COMPLETE
 
 **File:** `source/ui/widgets/ColorPresetButton.h/cpp`
 
@@ -702,4 +702,475 @@ source/ui/subtoolbars/
 ```
 
 **Total: 22 new files**
+
+---
+
+## Implementation Status
+
+### Phase 1: Custom Button Widgets
+
+#### Task 1.1: ColorPresetButton ✅
+**Status:** COMPLETED
+- Created `source/ui/widgets/ColorPresetButton.h` (~90 lines)
+- Created `source/ui/widgets/ColorPresetButton.cpp` (~200 lines)
+- Includes `ColorEditDialog` for custom color selection
+- Click unselected → select, click selected → open color picker
+- Visual states: unselected (thin neutral border), selected (high contrast border), pressed (darken effect)
+- 36×36 pixels, fully round
+
+#### Task 1.2: ThicknessPresetButton ✅
+**Status:** COMPLETED
+- Created `source/ui/widgets/ThicknessPresetButton.h` (~95 lines)
+- Created `source/ui/widgets/ThicknessPresetButton.cpp` (~250 lines)
+- Includes `ThicknessEditDialog` with synchronized slider + spinbox
+- Diagonal line preview with logarithmic scaling for visual representation
+- Line color property for preview (matches current tool color)
+- Same click behavior as ColorPresetButton
+- 36×36 pixels, fully round
+
+#### Task 1.3: SubToolbarToggle ✅
+**Status:** COMPLETED
+- Created `source/ui/widgets/ToggleButton.h` (~85 lines) - contains `SubToolbarToggle` class
+- Created `source/ui/widgets/ToggleButton.cpp` (~160 lines)
+- **Note:** Class renamed to `SubToolbarToggle` to avoid conflict with existing `ToggleButton` in `ToolbarButtons.h`
+- Simple on/off toggle with icon
+- Visual states: unchecked (neutral gray bg), checked (accent blue bg), pressed (darken)
+- Hover effect on unchecked state (lighten)
+- Click toggles between checked/unchecked
+- Emits `toggled(bool)` signal on state change
+- Dark/light mode aware background colors
+- 36×36 pixels, fully round
+
+#### Task 1.4: ModeToggleButton ✅
+**Status:** COMPLETED
+- Created `source/ui/widgets/ModeToggleButton.h` (~95 lines)
+- Created `source/ui/widgets/ModeToggleButton.cpp` (~160 lines)
+- Two-state toggle showing different icons based on current mode (0 or 1)
+- `setModeIcons()` to configure icons for each mode
+- `setModeToolTips()` to configure tooltips for each mode (auto-updates on mode change)
+- Click toggles between mode 0 ↔ mode 1
+- Emits `modeChanged(int)` signal on state change
+- Visual states: normal (neutral bg), hovered (lighten), pressed (darken)
+- Dark/light mode aware background colors
+- 36×36 pixels, fully round
+- **Usage:** Insert mode (Image↔Link), Action mode (Select↔Create)
+
+#### Task 1.5: LinkSlotButton ✅
+**Status:** COMPLETED
+- Created `source/ui/widgets/LinkSlotButton.h` (~155 lines)
+- Created `source/ui/widgets/LinkSlotButton.cpp` (~270 lines)
+- Shows LinkObject slot state with appropriate icon/symbol
+- 4 states: `Empty` (+), `Position` (P), `Url` (U), `Markdown` (M)
+- `setStateIcons()` for custom icons per state (fallback text symbols if not set)
+- `selected` property with visual indicator (thick white/black border)
+- Long-press detection (500ms) via `timerEvent()` for filled slots
+- Emits `clicked()` on short press, `deleteRequested()` on long-press of non-empty slot
+- Empty slots have subtle "inviting" appearance (lighter border/bg)
+- Auto-updating tooltips based on state
+- Dark/light mode aware colors
+- 36×36 pixels, fully round
+
+### Phase 1 Complete! ✅
+All 5 custom button widgets implemented:
+1. ColorPresetButton - color circles with edit dialog
+2. ThicknessPresetButton - diagonal line preview with edit dialog
+3. SubToolbarToggle - on/off toggle with icon
+4. ModeToggleButton - two-state toggle with different icons
+5. LinkSlotButton - slot state display with long-press delete
+
+---
+
+### Phase 2: Framework
+
+#### Task 2.1: SubToolbar Base Class ✅
+**Status:** COMPLETED
+- Created `source/ui/subtoolbars/SubToolbar.h` (~90 lines)
+- Created `source/ui/subtoolbars/SubToolbar.cpp` (~90 lines)
+- Abstract base class with pure virtual methods:
+  - `refreshFromSettings()` - load presets from QSettings
+  - `restoreTabState(int)` - restore per-tab state
+  - `saveTabState(int)` - save per-tab state
+- Helper methods: `addSeparator()`, `addWidget()`, `addStretch()`
+- Auto-applied styling in constructor:
+  - Fixed width: 44px (36 button + 8 padding)
+  - Rounded corners (8px radius)
+  - Drop shadow effect for depth
+  - Theme-aware background/border colors
+- Dark/light mode detection via `isDarkMode()`
+
+#### Task 2.2: SubToolbarContainer ✅
+**Status:** COMPLETED
+- Created `source/ui/subtoolbars/SubToolbarContainer.h` (~100 lines)
+- Created `source/ui/subtoolbars/SubToolbarContainer.cpp` (~130 lines)
+- Manages subtoolbar registration and swapping via `setSubToolbar(ToolType, SubToolbar*)`
+- Shows/hides appropriate subtoolbar via `showForTool(ToolType)` and `onToolChanged(ToolType)` slot
+- Positioning logic in `updatePosition(QRect viewportRect)`:
+  - 24px from viewport left edge
+  - Vertically centered based on subtoolbar height
+  - Clamps to stay within viewport bounds
+- Tab state management via `onTabChanged(int newIndex, int oldIndex)`:
+  - Calls `saveTabState()` on all subtoolbars for old tab
+  - Calls `restoreTabState()` on all subtoolbars for new tab
+- Auto-hides when no subtoolbar registered for current tool
+- Calls `refreshFromSettings()` when subtoolbar becomes visible
+
+### Phase 2 Complete! ✅
+Framework classes implemented:
+1. SubToolbar - Abstract base class with shared styling and tab state interface
+2. SubToolbarContainer - Manager for swapping and positioning subtoolbars
+
+---
+
+### Phase 3: Tool Subtoolbars
+
+#### Task 3.1: PenSubToolbar ✅
+**Status:** COMPLETED
+- Created `source/ui/subtoolbars/PenSubToolbar.h` (~90 lines)
+- Created `source/ui/subtoolbars/PenSubToolbar.cpp` (~270 lines)
+- Layout: 3 ColorPresetButtons + separator + 3 ThicknessPresetButtons
+- Default colors: Red (#FF0000), Blue (#0000FF), Black (#000000)
+- Default thicknesses: 2.0, 5.0, 10.0
+- Click behavior: unselected → select & emit signal, selected → open edit dialog
+- Signals: `penColorChanged(QColor)`, `penThicknessChanged(qreal)`
+- QSettings persistence with keys: `pen/color1-3`, `pen/thickness1-3`, `pen/selectedColor`, `pen/selectedThickness`
+- Per-tab state via `TabState` struct stored in `QHash<int, TabState>`
+- Thickness preview lines update to match selected pen color
+- Full SubToolbar interface implementation: `refreshFromSettings()`, `saveTabState()`, `restoreTabState()`
+
+#### Task 3.2: MarkerSubToolbar ✅
+**Status:** COMPLETED
+- Created `source/ui/subtoolbars/MarkerSubToolbar.h` (~95 lines)
+- Created `source/ui/subtoolbars/MarkerSubToolbar.cpp` (~280 lines)
+- Layout: 3 ColorPresetButtons + separator + 3 ThicknessPresetButtons
+- **SHARED colors with Highlighter**: uses `marker/color1-3` keys (same as Highlighter will use)
+- Default colors: Light red (#FFAAAA), Yellow (#FFFF00), Light blue (#AAAAFF)
+- **Marker-specific thicknesses**: `marker/thickness1-3` (8.0, 16.0, 32.0 defaults)
+- Separate `saveColorsToSettings()` and `saveThicknessesToSettings()` for clarity
+- Signals: `markerColorChanged(QColor)`, `markerThicknessChanged(qreal)`
+- Full SubToolbar interface implementation
+- When color is edited, change is immediately shared with Highlighter via QSettings
+
+#### Task 3.3: HighlighterSubToolbar ✅
+**Status:** COMPLETED
+- Created `source/ui/subtoolbars/HighlighterSubToolbar.h` (~90 lines)
+- Created `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (~210 lines)
+- Layout: 3 ColorPresetButtons + separator + 1 SubToolbarToggle (auto-highlight)
+- **SHARED colors with Marker**: reads/writes `marker/color1-3` keys
+- **Highlighter-specific settings**: `highlighter/selectedColor`, `highlighter/autoHighlight`
+- No thickness controls (highlighter uses fixed thickness)
+- Signals: `highlighterColorChanged(QColor)`, `autoHighlightChanged(bool)`
+- Auto-highlight toggle persists to QSettings
+- Full SubToolbar interface implementation
+- When color is edited, change is immediately shared with Marker via QSettings
+
+#### Task 3.4: ObjectSelectSubToolbar ✅
+**Status:** COMPLETED
+- Created `source/ui/subtoolbars/ObjectSelectSubToolbar.h` (~110 lines)
+- Created `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp` (~220 lines)
+- Layout: 2 ModeToggleButtons + separator + 3 LinkSlotButtons
+- Insert mode toggle: Image (mode 0) ↔ Link (mode 1) with icons
+- Action mode toggle: Select (mode 0) ↔ Create (mode 1) with icons
+- 3 LinkSlotButtons showing slot states (Empty/Position/Url/Markdown)
+- `updateSlotStates(LinkSlotState[3])` to reflect selected LinkObject
+- `clearSlotStates()` when no LinkObject is selected
+- Long-press delete with confirmation dialog (`confirmSlotDelete()`)
+- Signals: `insertModeChanged()`, `actionModeChanged()`, `slotActivated(int)`, `slotCleared(int)`
+- QSettings persistence: `objectSelect/insertMode`, `objectSelect/actionMode`
+- Full SubToolbar interface implementation
+
+### Phase 3 Complete! ✅
+All 4 tool subtoolbars implemented:
+1. PenSubToolbar - 3 colors + 3 thicknesses (6 buttons)
+2. MarkerSubToolbar - 3 colors (shared) + 3 thicknesses (6 buttons)
+3. HighlighterSubToolbar - 3 colors (shared) + auto-highlight toggle (4 buttons)
+4. ObjectSelectSubToolbar - 2 mode toggles + 3 slot buttons (5 buttons)
+
+---
+
+### Phase 4: Integration
+
+#### Task 4.1: MainWindow Integration ✅
+**Status:** COMPLETED
+- Updated `source/MainWindow.h`:
+  - Added forward declarations for subtoolbar classes
+  - Added member variables: `m_subtoolbarContainer`, `m_penSubToolbar`, etc.
+  - Added `m_canvasContainer` pointer for positioning
+  - Added `setupSubToolbars()` and `updateSubToolbarPosition()` methods
+- Updated `source/MainWindow.cpp`:
+  - Added includes for all subtoolbar headers
+  - Stored canvas container pointer for subtoolbar positioning
+  - Implemented `setupSubToolbars()` (~100 lines):
+    - Creates SubToolbarContainer as child of canvas container
+    - Creates all 4 subtoolbar instances
+    - Registers subtoolbars with container
+    - Connects Toolbar::toolSelected to SubToolbarContainer::onToolChanged
+    - Connects subtoolbar signals to DocumentViewport methods
+    - Connects TabManager tab changes for per-tab state
+  - Implemented `updateSubToolbarPosition()` (~20 lines):
+    - Accounts for left sidebar visibility
+    - Calls SubToolbarContainer::updatePosition()
+  - Called from `updateScrollbarPositions()` for resize handling
+- Signal connections:
+  - PenSubToolbar → setPenColor, setPenThickness
+  - MarkerSubToolbar → setMarkerColor, setMarkerThickness
+  - HighlighterSubToolbar → setMarkerColor (shared), setAutoHighlightEnabled
+  - ObjectSelectSubToolbar → setObjectInsertMode, setObjectActionMode, activateLinkSlot
+- **TODOs for full functionality:**
+  - ~~`clearLinkSlot(int)` - needs implementation in DocumentViewport~~ ✅ DONE
+  - ~~`setAutoHighlightEnabled(bool)` - currently private, needs to be made public~~ ✅ DONE
+  - ~~`setObjectInsertMode(ObjectInsertMode)` - needs to be added to DocumentViewport~~ ✅ DONE
+  - ~~`setObjectActionMode(ObjectActionMode)` - needs to be added to DocumentViewport~~ ✅ DONE
+
+---
+
+### Bug Fixes (Post-Implementation)
+
+#### Fix 4.1.1: ColorPresetButton/ThicknessPresetButton editRequested Signal Timing ✅
+**Status:** FIXED
+
+**Problem:** Clicking an **unselected** preset button was incorrectly opening the edit dialog, instead of just selecting the preset.
+
+**Root Cause:** In `mouseReleaseEvent()`, the code checked `m_selected` AFTER emitting `clicked()`:
+```cpp
+emit clicked();
+if (m_selected) {        // Bug: m_selected changed by clicked() handler!
+    emit editRequested();
+}
+```
+The `clicked()` signal handler in the subtoolbar would call `setSelected(true)`, which changed `m_selected` to `true`. When control returned to `mouseReleaseEvent`, the check saw the NEW state and incorrectly emitted `editRequested()`.
+
+**Fix:** Capture the selection state BEFORE emitting `clicked()`:
+```cpp
+bool wasSelected = m_selected;  // Capture state BEFORE signal
+emit clicked();
+if (wasSelected) {              // Use captured state
+    emit editRequested();
+}
+```
+
+**Files Fixed:**
+- `source/ui/widgets/ColorPresetButton.cpp`
+- `source/ui/widgets/ThicknessPresetButton.cpp`
+
+**Correct Behavior:**
+- Click **unselected** button → Select preset, apply value, do NOT open dialog
+- Click **selected** button → Open edit dialog
+
+---
+
+#### Fix 4.1.2: Marker/Highlighter Color Opacity Missing ✅
+**Status:** FIXED
+
+**Problem:** Marker strokes were appearing at approximately 25% opacity instead of the expected 50%. Additionally, color preset buttons displayed fully opaque colors instead of semi-transparent ones.
+
+**Root Cause:** The `DEFAULT_COLORS` arrays in `MarkerSubToolbar` and `HighlighterSubToolbar` were defined without alpha channels (fully opaque). When these colors were emitted via `markerColorChanged`/`highlighterColorChanged` signals, they overwrote the default `m_markerColor` (which had alpha = 128) with fully opaque colors.
+
+**Fix:** Added `MARKER_OPACITY = 128` constant to both subtoolbars. When emitting color change signals, the alpha channel is now set to `MARKER_OPACITY` before emitting:
+```cpp
+QColor colorWithOpacity = m_colorButtons[index]->color();
+colorWithOpacity.setAlpha(MARKER_OPACITY);
+emit markerColorChanged(colorWithOpacity);
+```
+
+**Design Decision:** Color buttons display "base" colors without alpha (easier to see in UI). The 50% marker opacity is applied when sending to DocumentViewport.
+
+**Files Fixed:**
+- `source/ui/subtoolbars/MarkerSubToolbar.h` (added `MARKER_OPACITY` constant)
+- `source/ui/subtoolbars/MarkerSubToolbar.cpp` (apply opacity in emit calls)
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` (added `MARKER_OPACITY` constant)
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (apply opacity in emit calls)
+
+**Correct Behavior:**
+- Marker strokes render at 50% opacity
+- Highlighter strokes render at 50% opacity
+- Color buttons show base color without transparency (better UX)
+- Both Marker and Highlighter share the same opacity constant
+
+---
+
+#### Fix 4.1.3: Auto-Highlight Toggle Not Connected ✅
+**Status:** FIXED
+
+**Problem:** The auto-highlight toggle button in HighlighterSubToolbar was not properly connected to DocumentViewport. The toggle had a placeholder that only logged a message instead of calling `setAutoHighlightEnabled()`.
+
+**Root Cause:** When the subtoolbar was originally implemented, `setAutoHighlightEnabled()` was in the private section of DocumentViewport. A placeholder was added with a TODO comment. After moving the method to public, the placeholder was never updated.
+
+**Fix (3 parts):**
+
+1. **MainWindow.cpp** - Updated the `autoHighlightChanged` signal connection to actually call `vp->setAutoHighlightEnabled(enabled)` instead of the placeholder.
+
+2. **HighlighterSubToolbar** - Added `setAutoHighlightState(bool enabled)` public method to update the toggle button state from outside without emitting signals (uses `blockSignals()`).
+
+3. **MainWindow.cpp** - Added bidirectional sync in `connectViewportScrollSignals()`:
+   - Connect `autoHighlightEnabledChanged` signal from viewport to update subtoolbar toggle when Ctrl+H is used
+   - Sync current state when viewport changes (tab switch)
+   - Added `m_autoHighlightConn` member variable for proper cleanup
+
+**Files Fixed:**
+- `source/MainWindow.h` (added `m_autoHighlightConn` member)
+- `source/MainWindow.cpp` (fixed connection, added viewport→subtoolbar sync)
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` (added `setAutoHighlightState()`)
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (implemented `setAutoHighlightState()`)
+
+**Correct Behavior:**
+- Click toggle button → changes auto-highlight state in DocumentViewport
+- Press Ctrl+H (keyboard shortcut) → toggle button updates to reflect new state
+- Switch tabs → toggle button syncs to that viewport's auto-highlight state
+
+---
+
+#### Fix 4.1.4: ObjectSelectSubToolbar Mode Toggles Not Connected ✅
+**Status:** FIXED
+
+**Problem:** The insert mode toggle (Image ↔ Link) and action mode toggle (Select ↔ Create) buttons in ObjectSelectSubToolbar had placeholder connections that only logged messages instead of actually changing the modes in DocumentViewport.
+
+**Root Cause:** When the subtoolbar was originally implemented, the mode setter methods (`setObjectInsertMode`, `setObjectActionMode`) were not yet implemented in DocumentViewport. Placeholders were added with TODO comments. After adding these methods, the placeholders were never updated.
+
+**Fix (3 parts):**
+
+1. **MainWindow.cpp** - Updated `insertModeChanged` and `actionModeChanged` signal connections to actually call `vp->setObjectInsertMode(mode)` and `vp->setObjectActionMode(mode)`.
+
+2. **ObjectSelectSubToolbar** - Added `setInsertModeState()` and `setActionModeState()` public methods to update toggle button states from outside without emitting signals (uses `blockSignals()`).
+
+3. **MainWindow.cpp** - Added bidirectional sync in `connectViewportScrollSignals()`:
+   - Connect `objectInsertModeChanged` signal from viewport to update subtoolbar when Ctrl+< / Ctrl+> is used
+   - Connect `objectActionModeChanged` signal from viewport to update subtoolbar when Ctrl+6 / Ctrl+7 is used
+   - Sync current states when viewport changes (tab switch)
+   - Added `m_insertModeConn` and `m_actionModeConn` member variables for proper cleanup
+
+**Files Fixed:**
+- `source/MainWindow.h` (added `m_insertModeConn`, `m_actionModeConn` members)
+- `source/MainWindow.cpp` (fixed connections, added viewport→subtoolbar sync)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.h` (added state setter methods)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp` (implemented state setter methods)
+
+**Correct Behavior:**
+- Click insert mode toggle → changes ObjectInsertMode in DocumentViewport
+- Click action mode toggle → changes ObjectActionMode in DocumentViewport
+- Press Ctrl+< / Ctrl+> (keyboard) → insert mode toggle updates to reflect new state
+- Press Ctrl+6 / Ctrl+7 (keyboard) → action mode toggle updates to reflect new state
+- Switch tabs → mode toggles sync to that viewport's current modes
+
+---
+
+#### Fix 4.1.5: LinkSlot Buttons Not Updating on Selection ✅
+**Status:** FIXED
+
+**Problem:** When selecting a LinkObject, the slot buttons in ObjectSelectSubToolbar did not update to show the actual slot states (Empty, Position, URL, Markdown). They always showed empty (+) icons regardless of what the LinkObject slots contained.
+
+**Root Cause:** There was no connection between the viewport's `objectSelectionChanged` signal and the subtoolbar's slot button update logic.
+
+**Fix:**
+
+1. **MainWindow.h** - Added `m_selectionChangedConn` member variable for proper cleanup.
+
+2. **MainWindow.cpp** - Added `#include "objects/LinkObject.h"` to access LinkSlot::Type.
+
+3. **MainWindow.cpp** - Added `updateLinkSlotButtons(DocumentViewport* viewport)` helper function that:
+   - Gets selected objects from viewport
+   - If exactly one LinkObject is selected, converts `LinkSlot::Type` to `LinkSlotState` for each slot
+   - Calls `m_objectSelectSubToolbar->updateSlotStates(states)` or `clearSlotStates()`
+
+4. **MainWindow.cpp** - In `connectViewportScrollSignals()`:
+   - Added connection from `objectSelectionChanged` to `updateLinkSlotButtons()`
+   - Added initial sync call when viewport changes (tab switch)
+
+**Files Fixed:**
+- `source/MainWindow.h` (added `m_selectionChangedConn` member, `updateLinkSlotButtons()` declaration)
+- `source/MainWindow.cpp` (added include, helper function, connection)
+
+**Correct Behavior:**
+- Select a LinkObject → slot buttons show actual slot states (Position/URL/Markdown/Empty)
+- Select an ImageObject → slot buttons show Empty
+- Select multiple objects → slot buttons show Empty
+- Deselect all → slot buttons show Empty
+- Switch tabs → slot buttons sync to that viewport's selection
+
+---
+
+#### Fix 4.1.6: ThicknessPresetButton Line Too Long and Marker Opacity Missing ✅
+**Status:** FIXED
+
+**Problems:**
+1. The diagonal line in thickness preset buttons extended almost corner-to-corner, not fitting well in the round icon
+2. Marker thickness preview didn't show the 50% opacity, making the preview look different from actual marker strokes
+
+**Fixes:**
+
+1. **ThicknessPresetButton.cpp** - Increased line inset from `borderWidth + 4.0` to `borderWidth + 8.0` to make the line shorter and fit nicely within the circular boundary.
+
+2. **MarkerSubToolbar.cpp** - In `updateThicknessPreviewColors()`, added `previewColor.setAlpha(MARKER_OPACITY)` so the thickness preview line shows the actual marker opacity (50%).
+
+**Files Fixed:**
+- `source/ui/widgets/ThicknessPresetButton.cpp`
+- `source/ui/subtoolbars/MarkerSubToolbar.cpp`
+
+**Correct Behavior:**
+- Thickness preview lines are shorter and fit nicely inside the round button
+- Marker thickness previews show semi-transparent lines matching actual marker appearance
+
+---
+
+#### Fix 4.1.7: Subtoolbar Icons Not Switching with Dark/Light Mode ✅
+**Status:** FIXED
+
+**Problem:** Icons in subtoolbar buttons (`SubToolbarToggle`, `ModeToggleButton`, `LinkSlotButton`) did not switch between regular and `_reversed` versions when the application theme changed between light and dark modes. The icons were loaded once with hardcoded full paths and never updated.
+
+**Root Cause:** The widgets were using `setIcon(QIcon(":/resources/icons/foo.png"))` with full paths, which doesn't support automatic switching. The main `ToolbarButtons` class had this functionality via `setThemedIcon(baseName)` and `setDarkMode(bool)`, but the subtoolbar widgets didn't.
+
+**Fix (multi-part):**
+
+1. **SubToolbarToggle** (`ToggleButton.h/cpp`) - Added:
+   - `m_iconBaseName` and `m_darkMode` member variables
+   - `setIconName(const QString& baseName)` - set icon by base name (enables dark mode switching)
+   - `setDarkMode(bool darkMode)` - switch icon based on mode
+   - `updateIcon()` - builds path: `baseName.png` or `baseName_reversed.png`
+
+2. **ModeToggleButton** - Added:
+   - `m_iconBaseNames[2]` and `m_darkMode` member variables
+   - `setModeIconNames(mode0BaseName, mode1BaseName)` - set icons by base name
+   - `setDarkMode(bool darkMode)` - switch icons based on mode
+   - `updateIcons()` - builds paths for both modes
+
+3. **LinkSlotButton** - Added:
+   - `m_iconBaseNames[4]` and `m_darkMode` member variables
+   - `setStateIconNames(empty, position, url, markdown)` - set icons by base name
+   - `setDarkMode(bool darkMode)` - switch icons based on mode
+   - `updateIcons()` - builds paths for all states
+
+4. **SubToolbar** (base class) - Added virtual `setDarkMode(bool)` for subclasses to override.
+
+5. **HighlighterSubToolbar** - Override `setDarkMode()` to propagate to `m_autoHighlightToggle`. Updated `createWidgets()` to use `setIconName("marker")` instead of full path.
+
+6. **ObjectSelectSubToolbar** - Override `setDarkMode()` to propagate to mode toggles and slot buttons. Updated `createWidgets()` to use `setModeIconNames()` and `setStateIconNames()` instead of full paths.
+
+7. **SubToolbarContainer** - Added `setDarkMode(bool)` to propagate to all registered subtoolbars.
+
+8. **MainWindow::updateTheme()** - Added `m_subtoolbarContainer->setDarkMode(darkMode)` call.
+
+**Files Modified:**
+- `source/ui/widgets/ToggleButton.h` (added dark mode support)
+- `source/ui/widgets/ToggleButton.cpp` (implemented dark mode support)
+- `source/ui/widgets/ModeToggleButton.h` (added dark mode support)
+- `source/ui/widgets/ModeToggleButton.cpp` (implemented dark mode support)
+- `source/ui/widgets/LinkSlotButton.h` (added dark mode support)
+- `source/ui/widgets/LinkSlotButton.cpp` (implemented dark mode support)
+- `source/ui/subtoolbars/SubToolbar.h` (added virtual setDarkMode)
+- `source/ui/subtoolbars/SubToolbar.cpp` (added base setDarkMode implementation)
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` (added setDarkMode override)
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (implemented setDarkMode, use setIconName)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.h` (added setDarkMode override)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp` (implemented setDarkMode, use icon name methods)
+- `source/ui/subtoolbars/SubToolbarContainer.h` (added setDarkMode)
+- `source/ui/subtoolbars/SubToolbarContainer.cpp` (implemented setDarkMode)
+- `source/MainWindow.cpp` (call setDarkMode in updateTheme)
+
+**Pattern for icon paths:**
+- Light mode: `:/resources/icons/{baseName}.png`
+- Dark mode: `:/resources/icons/{baseName}_reversed.png`
+
+**Correct Behavior:**
+- When app theme changes (light ↔ dark), all subtoolbar icons update to appropriate variant
+- Icons are set via base names (e.g., "marker") instead of full paths
+- Initial state is determined by `isDarkMode()` check at widget creation time
 

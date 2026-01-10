@@ -491,6 +491,23 @@ public:
      */
     bool straightLineMode() const { return m_straightLineMode; }
     
+    // ===== Auto-Highlight Mode (Phase D) =====
+    
+    /**
+     * @brief Enable or disable auto-highlight mode.
+     * @param enabled True to auto-create highlight strokes on selection release.
+     * 
+     * When enabled, releasing mouse after text selection automatically
+     * creates highlight strokes. When disabled, selection remains until
+     * user copies or cancels. Called from HighlighterSubToolbar.
+     */
+    void setAutoHighlightEnabled(bool enabled);
+    
+    /**
+     * @brief Check if auto-highlight mode is enabled.
+     */
+    bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
+    
     // ===== Undo/Redo (Task 2.5) =====
     
     /**
@@ -753,12 +770,28 @@ public:
     ObjectInsertMode objectInsertMode() const { return m_objectInsertMode; }
     
     /**
+     * @brief Set the object insert mode.
+     * @param mode The new insert mode (Image or Link).
+     * 
+     * Phase D: Called from ObjectSelectSubToolbar to change insert mode.
+     */
+    void setObjectInsertMode(ObjectInsertMode mode);
+    
+    /**
      * @brief Get the current object action mode.
      * @return Current action mode (Select or Create).
      * 
      * Phase C.4.1: Used by UI to reflect current mode state.
      */
     ObjectActionMode objectActionMode() const { return m_objectActionMode; }
+    
+    /**
+     * @brief Set the object action mode.
+     * @param mode The new action mode (Select or Create).
+     * 
+     * Phase D: Called from ObjectSelectSubToolbar to change action mode.
+     */
+    void setObjectActionMode(ObjectActionMode mode);
     
     // ===== Object Resize (Phase O3.1) =====
     
@@ -931,6 +964,16 @@ public:
      * This is a temporary UI until a proper subtoolbar is implemented.
      */
     void addLinkToSlot(int slotIndex);
+    
+    /**
+     * @brief Clear the content of a LinkObject slot.
+     * @param slotIndex The slot index (0-2) to clear.
+     * 
+     * Phase D: Called from ObjectSelectSubToolbar after long-press delete
+     * confirmation. Clears the slot content (Position/URL/Markdown) without
+     * deleting the entire LinkObject.
+     */
+    void clearLinkSlot(int slotIndex);
     
     /**
      * @brief Create an empty LinkObject at the specified page position.
@@ -2357,23 +2400,6 @@ private:
      * @return True if current page has PDF background.
      */
     bool isHighlighterEnabled() const;
-    
-    /**
-     * @brief Set auto-highlight mode (Phase B).
-     * 
-     * When enabled, releasing mouse after text selection automatically
-     * creates highlight strokes. When disabled, selection remains until
-     * user copies or cancels.
-     * 
-     * @param enabled True to enable auto-highlight on release.
-     */
-    void setAutoHighlightEnabled(bool enabled);
-    
-    /**
-     * @brief Check if auto-highlight mode is enabled.
-     * @return True if releasing selection auto-creates strokes.
-     */
-    bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
     
     /**
      * @brief Find the character at a given point (for text-flow selection).

@@ -125,14 +125,14 @@
     <file>resources/icons/text.png</file>
     <file>resources/icons/text_reversed.png</file>
     <file>resources/icons/link_quote.png</file>
-    <file>resources/reversed_icons/color_reversed.png</file>
-    <file>resources/reversed_icons/bookpage_reversed.png</file>
-    <file>resources/reversed_icons/zoom_reversed.png</file>
-    <file>resources/reversed_icons/thickness_reversed.png</file>
-    <file>resources/reversed_icons/eraser_reversed.png</file>
-    <file>resources/reversed_icons/marker_reversed.png</file>
-    <file>resources/reversed_icons/pen_reversed.png</file>
-    <file>resources/reversed_icons/preset_reversed.png</file>
+    <file>resources/icons/link.png</file>
+    <file>resources/icons/link_reversed.png</file>
+    <file>resources/icons/url.png</file>
+    <file>resources/icons/url_reversed.png</file>
+    <file>resources/icons/select.png</file>
+    <file>resources/icons/select_reversed.png</file>
+    <file>resources/icons/linkicon.png</file>
+    <file>resources/icons/linkicon_reversed.png</file>
     <file>resources/sounds/dial_click.wav</file>
     <file>resources/fonts/PixelFont.ttf</file>
     <file>resources/fonts/Jersey20-Regular.ttf</file>

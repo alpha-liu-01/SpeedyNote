@@ -482,6 +482,30 @@ void DocumentViewport::setStraightLineMode(bool enabled)
     emit straightLineModeChanged(enabled);
 }
 
+// ===== Object Mode Setters (Phase D) =====
+
+void DocumentViewport::setObjectInsertMode(ObjectInsertMode mode)
+{
+    if (m_objectInsertMode == mode) {
+        return;
+    }
+    
+    m_objectInsertMode = mode;
+    emit objectInsertModeChanged(mode);
+    qDebug() << "Object insert mode changed to:" << (mode == ObjectInsertMode::Image ? "Image" : "Link");
+}
+
+void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
+{
+    if (m_objectActionMode == mode) {
+        return;
+    }
+    
+    m_objectActionMode = mode;
+    emit objectActionModeChanged(mode);
+    qDebug() << "Object action mode changed to:" << (mode == ObjectActionMode::Select ? "Select" : "Create");
+}
+
 // ===== View State Setters =====
 
 void DocumentViewport::setZoomLevel(qreal zoom)
@@ -5679,6 +5703,51 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
         // Phase C.6: Create/link markdown note
         qDebug() << "addLinkToSlot: Markdown note - TODO: implement in Phase C.6";
     }
+}
+
+void DocumentViewport::clearLinkSlot(int slotIndex)
+{
+    // Phase D: Clear a LinkObject slot content (called from ObjectSelectSubToolbar)
+    
+    if (m_selectedObjects.size() != 1) {
+        qDebug() << "clearLinkSlot: Need exactly one object selected";
+        return;
+    }
+    
+    LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
+    if (!link) {
+        qDebug() << "clearLinkSlot: Selected object is not a LinkObject";
+        return;
+    }
+    
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        qDebug() << "clearLinkSlot: Invalid slot index" << slotIndex;
+        return;
+    }
+    
+    // Check if slot is already empty
+    if (link->linkSlots[slotIndex].isEmpty()) {
+        qDebug() << "clearLinkSlot: Slot" << slotIndex << "is already empty";
+        return;
+    }
+    
+    // Clear the slot using LinkSlot::clear() which resets to default state
+    LinkSlot::Type oldType = link->linkSlots[slotIndex].type;
+    link->linkSlots[slotIndex].clear();
+    
+    qDebug() << "clearLinkSlot: Cleared slot" << slotIndex 
+             << "(was type" << static_cast<int>(oldType) << ")";
+    
+    // Mark page dirty
+    Page* page = findPageContainingObject(link);
+    if (page) {
+        int pageIndex = m_document->pageIndexByUuid(page->uuid);
+        if (pageIndex >= 0) {
+            m_document->markPageDirty(pageIndex);
+        }
+    }
+    
+    update();
 }
 
 // ===== Object Z-Order (Phase O2.8) =====

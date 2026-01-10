@@ -60,6 +60,12 @@
 #include "ui/Toolbar.h"
 #include "ui/sidebars/LeftSidebarContainer.h"  // Phase S3: Left sidebar container
 
+// Phase D: Subtoolbar includes
+class SubToolbarContainer;
+class PenSubToolbar;
+class MarkerSubToolbar;
+class HighlighterSubToolbar;
+class ObjectSelectSubToolbar;
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
 // Will be reimplemented in Phase 3.3 if needed
@@ -233,6 +239,7 @@ private slots:
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
+    void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     
     // Phase doc-1: Document operations
     void saveDocument();          // doc-1.1: Save document to JSON file (Ctrl+S)
@@ -271,6 +278,14 @@ private:
     
     // Toolbar extraction: Toolbar (Phase B)
     Toolbar *m_toolbar = nullptr;
+    
+    // Phase D: Subtoolbar system
+    SubToolbarContainer *m_subtoolbarContainer = nullptr;
+    PenSubToolbar *m_penSubToolbar = nullptr;
+    MarkerSubToolbar *m_markerSubToolbar = nullptr;
+    HighlighterSubToolbar *m_highlighterSubToolbar = nullptr;
+    ObjectSelectSubToolbar *m_objectSelectSubToolbar = nullptr;
+    QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
     
     // Phase C.1.5: addTabButton removed - functionality now in NavigationBar
     QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)
@@ -351,6 +366,14 @@ private:
     QMetaObject::Connection m_toolChangedConn;
     QMetaObject::Connection m_straightLineModeConn;
     
+    // Phase D: Auto-highlight sync connection (subtoolbar ↔ viewport)
+    QMetaObject::Connection m_autoHighlightConn;
+    
+    // Phase D: Object mode sync connections (subtoolbar ↔ viewport)
+    QMetaObject::Connection m_insertModeConn;
+    QMetaObject::Connection m_actionModeConn;
+    QMetaObject::Connection m_selectionChangedConn;
+    
     // Phase 5.1: LayerPanel page change connection
     QMetaObject::Connection m_layerPanelPageConn;
     
@@ -367,6 +390,10 @@ private:
     
     // Update scrollbar positions based on container size
     void updateScrollbarPositions();
+    
+    // Phase D: Subtoolbar setup and positioning
+    void setupSubToolbars();           // Create and connect subtoolbars
+    void updateSubToolbarPosition();   // Update position on viewport resize
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

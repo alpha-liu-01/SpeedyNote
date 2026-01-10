@@ -341,6 +341,20 @@ set(UI_SOURCES
         source/ui/Toolbar.cpp                 # Toolbar (Phase B)
         source/ui/StyleLoader.cpp             # QSS stylesheet loader with placeholders
         source/ui/TabBar.cpp                  # Custom tab bar (Phase C.2)
+        # Subtoolbar widgets (Phase D)
+        source/ui/widgets/ColorPresetButton.cpp  # Task 1.1: Color preset button
+        source/ui/widgets/ThicknessPresetButton.cpp  # Task 1.2: Thickness preset button
+        source/ui/widgets/ToggleButton.cpp  # Task 1.3: SubToolbarToggle
+        source/ui/widgets/ModeToggleButton.cpp  # Task 1.4: Mode toggle button
+        source/ui/widgets/LinkSlotButton.cpp  # Task 1.5: Link slot button
+        # Subtoolbar framework (Phase D)
+        source/ui/subtoolbars/SubToolbar.cpp  # Task 2.1: SubToolbar base class
+        source/ui/subtoolbars/SubToolbarContainer.cpp  # Task 2.2: SubToolbar container
+        # Tool subtoolbars (Phase D)
+        source/ui/subtoolbars/PenSubToolbar.cpp  # Task 3.1: Pen subtoolbar
+        source/ui/subtoolbars/MarkerSubToolbar.cpp  # Task 3.2: Marker subtoolbar
+        source/ui/subtoolbars/HighlighterSubToolbar.cpp  # Task 3.3: Highlighter subtoolbar
+        source/ui/subtoolbars/ObjectSelectSubToolbar.cpp  # Task 3.4: ObjectSelect subtoolbar
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
