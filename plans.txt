@@ -563,12 +563,12 @@ D.1: PDF Internal Link Clicking [SMALL - HIGH VALUE] ✅ DONE
      - Internal links navigate to page, external URLs open in browser
      - See PDF_TEXT_SELECTION_SUBPLAN.md A.11 for details
 
-D.2: Subtoolbar Framework [MEDIUM]
+D.2: Subtoolbar Framework [MEDIUM] ✅ DONE
      - Create shared infrastructure for tool-specific subtoolbars
      - Should be touch-friendly (large buttons, clear icons)
      - Appears below main toolbar when tool is selected
 
-D.3: ObjectSelect Subtoolbar [MEDIUM]
+D.3: ObjectSelect Subtoolbar [MEDIUM] ✅ DONE
      - Replace temporary keyboard shortcuts (Ctrl+,/./6/7/8/9/0)
      - Mode switches: Image/Link insert mode, Create/Select action mode
      - Slot buttons (1/2/3) with visual state (empty/filled/type icon)
@@ -580,7 +580,7 @@ D.4: Action Bar [MEDIUM]
      - Appears on selection, disappears after action
      - Should integrate visually with subtoolbar
 
-D.5: Other Tool Subtoolbars [FUTURE]
+D.5: Other Tool Subtoolbars [FUTURE] ✅ DONE
      - Pen: thickness, color shortcuts
      - Eraser: mode (stroke/pixel), size
      - Highlighter: color, auto-highlight toggle
