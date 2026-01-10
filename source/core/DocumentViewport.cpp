@@ -3060,7 +3060,7 @@ void DocumentViewport::preloadStrokeCaches()
     
     // PERF FIX: Only check pages that are actually loaded to avoid O(n) iterations
     // For documents with 3600 pages, iterating through all of them on every scroll is slow
-    if (lazyLoadingEnabled) {
+            if (lazyLoadingEnabled) {
         // Get list of currently loaded page indices and evict those outside keep range
         QVector<int> loadedIndices = m_document->loadedPageIndices();
         for (int i : loadedIndices) {
@@ -3086,7 +3086,7 @@ void DocumentViewport::preloadStrokeCaches()
                 m_document->evictPage(i);
             }
         }
-    } else {
+            } else {
         // Legacy mode: only evict stroke caches for pages outside keep range
         // Still need to iterate all pages, but page() access is cheap (already in memory)
         for (int i = 0; i < pageCount; ++i) {
@@ -4399,46 +4399,46 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             // Allow the click to fall through to drag logic instead
             if (obj->type() != "link") {
                 // Start resize operation (non-LinkObject only)
-                m_isResizingObject = true;
-                m_objectResizeHandle = handle;
-                m_resizeStartViewport = pe.viewportPos;
-                m_resizeOriginalSize = obj->size;
-                m_resizeOriginalPosition = obj->position;  // Tile-local, for undo
-                m_resizeOriginalRotation = obj->rotation;  // Phase O3.1.8.2
-                m_pointerActive = true;
-                
-                // BF: Calculate document-global center for scale calculations
-                // In edgeless mode, obj->position is tile-local, but pointer events
-                // give document-global coordinates. Must use consistent coordinate system!
-                QPointF docPos;
-                if (m_document->isEdgeless()) {
-                    // Find tile containing this object and add tile origin
-                    for (const auto& coord : m_document->allLoadedTileCoords()) {
-                        Page* tile = m_document->getTile(coord.first, coord.second);
-                        if (tile && tile->objectById(obj->id)) {
-                            QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                                               coord.second * Document::EDGELESS_TILE_SIZE);
-                            docPos = tileOrigin + obj->position;
-                            break;
-                        }
-                    }
-                } else {
-                    // Paged: find page containing object
-                    for (int i = 0; i < m_document->pageCount(); ++i) {
-                        Page* page = m_document->page(i);
-                        if (page && page->objectById(obj->id)) {
-                            docPos = pagePosition(i) + obj->position;
-                            break;
-                        }
+            m_isResizingObject = true;
+            m_objectResizeHandle = handle;
+            m_resizeStartViewport = pe.viewportPos;
+            m_resizeOriginalSize = obj->size;
+            m_resizeOriginalPosition = obj->position;  // Tile-local, for undo
+            m_resizeOriginalRotation = obj->rotation;  // Phase O3.1.8.2
+            m_pointerActive = true;
+            
+            // BF: Calculate document-global center for scale calculations
+            // In edgeless mode, obj->position is tile-local, but pointer events
+            // give document-global coordinates. Must use consistent coordinate system!
+            QPointF docPos;
+            if (m_document->isEdgeless()) {
+                // Find tile containing this object and add tile origin
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (tile && tile->objectById(obj->id)) {
+                        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                           coord.second * Document::EDGELESS_TILE_SIZE);
+                        docPos = tileOrigin + obj->position;
+                        break;
                     }
                 }
-                m_resizeObjectDocCenter = docPos + QPointF(obj->size.width() / 2.0, 
-                                                            obj->size.height() / 2.0);
-                
-                // Phase O4.1: Capture background for fast resize rendering
-                captureObjectDragBackground();
-                
-                return;  // Don't start object drag
+            } else {
+                // Paged: find page containing object
+                for (int i = 0; i < m_document->pageCount(); ++i) {
+                    Page* page = m_document->page(i);
+                    if (page && page->objectById(obj->id)) {
+                        docPos = pagePosition(i) + obj->position;
+                        break;
+                    }
+                }
+            }
+            m_resizeObjectDocCenter = docPos + QPointF(obj->size.width() / 2.0, 
+                                                        obj->size.height() / 2.0);
+            
+            // Phase O4.1: Capture background for fast resize rendering
+            captureObjectDragBackground();
+            
+            return;  // Don't start object drag
             }
             // LinkObject: fall through to handle as drag instead
         }
@@ -10933,8 +10933,8 @@ void DocumentViewport::updateCurrentPageIndex()
                 qreal targetY = viewCenter.y();
                 int low = 0;
                 int high = pageCount - 1;
-                int closestPage = 0;
-                
+            int closestPage = 0;
+            
                 while (low <= high) {
                     int mid = (low + high) / 2;
                     qreal pageY = m_pageYCache[mid];
@@ -10952,13 +10952,13 @@ void DocumentViewport::updateCurrentPageIndex()
                 // Check neighboring pages to find the actual closest
                 qreal minDist = std::numeric_limits<qreal>::max();
                 for (int i = qMax(0, closestPage - 1); i <= qMin(pageCount - 1, closestPage + 1); ++i) {
-                    QRectF rect = pageRect(i);
+                QRectF rect = pageRect(i);
                     qreal dist = qAbs(rect.center().y() - viewCenter.y());
-                    if (dist < minDist) {
-                        minDist = dist;
+                if (dist < minDist) {
+                    minDist = dist;
                         m_currentPageIndex = i;
-                    }
                 }
+            }
             } else {
                 // Two-column fallback: just pick the first page (rare edge case)
                 m_currentPageIndex = 0;

@@ -36,6 +36,27 @@ public:
     void refreshFromSettings() override;
     void restoreTabState(int tabIndex) override;
     void saveTabState(int tabIndex) override;
+    void clearTabState(int tabIndex) override;
+    
+    /**
+     * @brief Emit the currently selected preset values.
+     * 
+     * Call this when connecting to a new viewport to sync its
+     * color/thickness with the subtoolbar's current selection.
+     */
+    void emitCurrentValues();
+    
+    /**
+     * @brief Get the currently selected marker color (with MARKER_OPACITY applied).
+     * @return The color from the selected preset button with 50% opacity.
+     */
+    QColor currentColor() const;
+    
+    /**
+     * @brief Get the currently selected marker thickness.
+     * @return The thickness from the selected preset button.
+     */
+    qreal currentThickness() const;
 
 signals:
     /**

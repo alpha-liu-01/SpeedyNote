@@ -96,8 +96,24 @@ bool SubToolbar::isDarkMode() const
 
 void SubToolbar::setDarkMode(bool darkMode)
 {
-    // Base implementation does nothing.
-    // Subclasses should override to propagate dark mode to their buttons.
     Q_UNUSED(darkMode);
+    
+    // Update the subtoolbar's own styling (background, border, shadow)
+    setupStyle();
+    
+    // Update separator styling
+    // Find all QFrame children that are separators and update their style
+    const auto frames = findChildren<QFrame*>();
+    for (QFrame* frame : frames) {
+        if (frame->frameShape() == QFrame::HLine) {
+            if (isDarkMode()) {
+                frame->setStyleSheet("background-color: #555555; border: none;");
+            } else {
+                frame->setStyleSheet("background-color: #CCCCCC; border: none;");
+            }
+        }
+    }
+    
+    // Subclasses should override this to also propagate dark mode to their buttons
 }
 

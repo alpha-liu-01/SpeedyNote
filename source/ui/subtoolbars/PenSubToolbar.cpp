@@ -133,6 +133,33 @@ void PenSubToolbar::refreshFromSettings()
     loadFromSettings();
 }
 
+void PenSubToolbar::emitCurrentValues()
+{
+    // Emit the currently selected preset values to sync with viewport
+    if (m_selectedColorIndex >= 0 && m_selectedColorIndex < NUM_PRESETS) {
+        emit penColorChanged(m_colorButtons[m_selectedColorIndex]->color());
+    }
+    if (m_selectedThicknessIndex >= 0 && m_selectedThicknessIndex < NUM_PRESETS) {
+        emit penThicknessChanged(m_thicknessButtons[m_selectedThicknessIndex]->thickness());
+    }
+}
+
+QColor PenSubToolbar::currentColor() const
+{
+    if (m_selectedColorIndex >= 0 && m_selectedColorIndex < NUM_PRESETS && m_colorButtons[m_selectedColorIndex]) {
+        return m_colorButtons[m_selectedColorIndex]->color();
+    }
+    return DEFAULT_COLORS[0];  // Fallback to first default
+}
+
+qreal PenSubToolbar::currentThickness() const
+{
+    if (m_selectedThicknessIndex >= 0 && m_selectedThicknessIndex < NUM_PRESETS && m_thicknessButtons[m_selectedThicknessIndex]) {
+        return m_thicknessButtons[m_selectedThicknessIndex]->thickness();
+    }
+    return DEFAULT_THICKNESSES[0];  // Fallback to first default
+}
+
 void PenSubToolbar::restoreTabState(int tabIndex)
 {
     if (!m_tabStates.contains(tabIndex) || !m_tabStates[tabIndex].initialized) {
@@ -177,15 +204,17 @@ void PenSubToolbar::saveTabState(int tabIndex)
     state.initialized = true;
 }
 
+void PenSubToolbar::clearTabState(int tabIndex)
+{
+    m_tabStates.remove(tabIndex);
+}
+
 void PenSubToolbar::onColorPresetClicked(int index)
 {
     if (index < 0 || index >= NUM_PRESETS) return;
     
-    if (m_selectedColorIndex == index) {
-        // Already selected - editRequested will handle opening dialog
-        return;
-    }
-    
+    // Always apply the color when clicked - the preset might show as "selected"
+    // but the actual current color could be different (changed via other means)
     selectColorPreset(index);
     
     // Emit color change
@@ -218,11 +247,7 @@ void PenSubToolbar::onThicknessPresetClicked(int index)
 {
     if (index < 0 || index >= NUM_PRESETS) return;
     
-    if (m_selectedThicknessIndex == index) {
-        // Already selected - editRequested will handle opening dialog
-        return;
-    }
-    
+    // Always apply the thickness when clicked
     selectThicknessPreset(index);
     
     // Emit thickness change
@@ -251,7 +276,8 @@ void PenSubToolbar::onThicknessEditRequested(int index)
 
 void PenSubToolbar::selectColorPreset(int index)
 {
-    if (index < 0 || index >= NUM_PRESETS) return;
+    // Allow index = -1 for "no selection"
+    if (index < -1 || index >= NUM_PRESETS) return;
     
     // Update selection state
     for (int i = 0; i < NUM_PRESETS; ++i) {
@@ -260,13 +286,14 @@ void PenSubToolbar::selectColorPreset(int index)
     
     m_selectedColorIndex = index;
     
-    // Update thickness preview colors to match new color
+    // Update thickness preview colors to match selected color (if any)
     updateThicknessPreviewColors();
 }
 
 void PenSubToolbar::selectThicknessPreset(int index)
 {
-    if (index < 0 || index >= NUM_PRESETS) return;
+    // Allow index = -1 for "no selection"
+    if (index < -1 || index >= NUM_PRESETS) return;
     
     // Update selection state
     for (int i = 0; i < NUM_PRESETS; ++i) {
@@ -279,7 +306,9 @@ void PenSubToolbar::selectThicknessPreset(int index)
 void PenSubToolbar::updateThicknessPreviewColors()
 {
     // Set thickness preview line color to match selected pen color
-    QColor previewColor = m_colorButtons[m_selectedColorIndex]->color();
+    // If no color is selected (index = -1), use the first preset's color as fallback
+    int colorIndex = (m_selectedColorIndex >= 0) ? m_selectedColorIndex : 0;
+    QColor previewColor = m_colorButtons[colorIndex]->color();
     for (int i = 0; i < NUM_PRESETS; ++i) {
         m_thicknessButtons[i]->setLineColor(previewColor);
     }

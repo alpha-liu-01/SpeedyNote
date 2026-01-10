@@ -240,6 +240,8 @@ private slots:
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
+    void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
+    void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
     
     // Phase doc-1: Document operations
     void saveDocument();          // doc-1.1: Save document to JSON file (Ctrl+S)
@@ -286,6 +288,7 @@ private:
     HighlighterSubToolbar *m_highlighterSubToolbar = nullptr;
     ObjectSelectSubToolbar *m_objectSelectSubToolbar = nullptr;
     QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
+    int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
     
     // Phase C.1.5: addTabButton removed - functionality now in NavigationBar
     QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)

@@ -51,6 +51,15 @@ public:
     virtual void saveTabState(int tabIndex) = 0;
     
     /**
+     * @brief Clear per-tab state when a tab is closed.
+     * @param tabIndex The tab index to clear state for.
+     * 
+     * Default implementation does nothing. Subclasses with m_tabStates
+     * should override to remove the entry for the closed tab.
+     */
+    virtual void clearTabState(int tabIndex) { Q_UNUSED(tabIndex); }
+    
+    /**
      * @brief Set dark mode and update all button icons accordingly.
      * @param darkMode True for dark mode, false for light mode.
      * 

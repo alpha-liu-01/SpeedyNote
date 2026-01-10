@@ -582,7 +582,7 @@ Page* Document::addPage()
         invalidateUuidCache();
     } else {
         // Legacy mode
-        m_pages.push_back(std::move(newPage));
+    m_pages.push_back(std::move(newPage));
         
         // Phase C.0.2: Invalidate UUID cache
         invalidateUuidCache();

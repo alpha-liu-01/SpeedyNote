@@ -187,7 +187,11 @@ MainWindow::MainWindow(QWidget *parent)
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
     // TabManager::closeTab() emits this signal before deleting the viewport
     connect(m_tabManager, &TabManager::tabCloseRequested, this, [this](int index, DocumentViewport* vp) {
-        Q_UNUSED(index);
+        // Clean up subtoolbar per-tab state to prevent memory leak
+        if (m_subtoolbarContainer) {
+            m_subtoolbarContainer->clearTabState(index);
+        }
+        
         if (vp && m_documentManager) {
             Document* doc = vp->document();
             if (doc) {
@@ -739,13 +743,12 @@ void MainWindow::setupUi() {
         // REMOVED: updateToolButtonStates call removed - tool button state functionality deleted
         qDebug() << "Toolbar: Tool selected:" << static_cast<int>(tool);
     });
-    connect(m_toolbar, &Toolbar::shapeClicked, this, [this]() {
-        // Shape tool → straight line mode for now
+    connect(m_toolbar, &Toolbar::straightLineToggled, this, [this](bool enabled) {
+        // Straight line mode toggle
         if (DocumentViewport* vp = currentViewport()) {
-            vp->setStraightLineMode(true);
-            // REMOVED E.1: straightLineToggleButton moved to Toolbar
+            vp->setStraightLineMode(enabled);
         }
-        qDebug() << "Toolbar: Shape clicked → straight line mode";
+        qDebug() << "Toolbar: Straight line mode" << (enabled ? "enabled" : "disabled");
     });
     connect(m_toolbar, &Toolbar::objectInsertClicked, this, [this]() {
         // Stub - will show object insert menu in future
@@ -1136,10 +1139,20 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     });
     
-    // REMOVED E.1: straightLineToggleButton moved to Toolbar - no need to sync button state
-    // m_straightLineModeConn = connect(viewport, &DocumentViewport::straightLineModeChanged, this, [this](bool enabled) {
-    //     // Button state sync removed
-    // });
+    // Phase D: Connect straight line mode sync (viewport → toolbar)
+    // When straight line mode changes (e.g., auto-disabled when switching to Eraser/Lasso),
+    // update the toolbar toggle button to match
+    m_straightLineModeConn = connect(viewport, &DocumentViewport::straightLineModeChanged, 
+                                     this, [this](bool enabled) {
+        if (m_toolbar) {
+            m_toolbar->setStraightLineMode(enabled);
+        }
+    });
+    
+    // Also sync the current straight line mode to the toolbar
+    if (m_toolbar) {
+        m_toolbar->setStraightLineMode(viewport->straightLineMode());
+    }
     
     // Phase D: Connect auto-highlight state sync (viewport → subtoolbar)
     // When Ctrl+H changes the state, update the subtoolbar toggle to match
@@ -1225,6 +1238,66 @@ void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
     
     // No LinkObject selected (or multiple objects selected) - clear slots
     m_objectSelectSubToolbar->clearSlotStates();
+}
+
+void MainWindow::applySubToolbarValuesToViewport(ToolType tool)
+{
+    // Phase D: Apply subtoolbar's current preset values to the viewport (via signals)
+    // This is used when the current tool changes and we want to emit signals
+    // For new viewports, use applyAllSubToolbarValuesToViewport() instead
+    
+    switch (tool) {
+        case ToolType::Pen:
+            if (m_penSubToolbar) {
+                m_penSubToolbar->emitCurrentValues();
+            }
+            break;
+        case ToolType::Marker:
+            if (m_markerSubToolbar) {
+                m_markerSubToolbar->emitCurrentValues();
+            }
+            break;
+        case ToolType::Highlighter:
+            if (m_highlighterSubToolbar) {
+                m_highlighterSubToolbar->emitCurrentValues();
+            }
+            break;
+        default:
+            // Other tools don't have color/thickness presets
+            break;
+    }
+}
+
+void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
+{
+    // Phase D: Apply ALL subtoolbar preset values DIRECTLY to a specific viewport
+    // This is called when a new tab is created or when switching tabs
+    // It bypasses signals and applies values directly to avoid timing issues
+    
+    if (!viewport) {
+        return;
+    }
+    
+    // Apply pen settings
+    if (m_penSubToolbar) {
+        viewport->setPenColor(m_penSubToolbar->currentColor());
+        viewport->setPenThickness(m_penSubToolbar->currentThickness());
+    }
+    
+    // Apply marker settings (marker and highlighter share colors)
+    if (m_markerSubToolbar) {
+        viewport->setMarkerColor(m_markerSubToolbar->currentColor());
+        viewport->setMarkerThickness(m_markerSubToolbar->currentThickness());
+    }
+    
+    // Note: Highlighter uses marker color, so no separate setter needed
+    // (HighlighterSubToolbar shares color presets with MarkerSubToolbar)
+    
+    qDebug() << "Applied all subtoolbar values to viewport:"
+             << "penColor=" << (m_penSubToolbar ? m_penSubToolbar->currentColor().name() : "N/A")
+             << "penThickness=" << (m_penSubToolbar ? m_penSubToolbar->currentThickness() : 0)
+             << "markerColor=" << (m_markerSubToolbar ? m_markerSubToolbar->currentColor().name() : "N/A")
+             << "markerThickness=" << (m_markerSubToolbar ? m_markerSubToolbar->currentThickness() : 0);
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -2356,7 +2429,7 @@ void MainWindow::updateTheme() {
     // Update left sidebar container theme
     if (m_leftSidebar) {
         m_leftSidebar->updateTheme(darkMode);
-    }
+    }    
     
     // Phase D: Update SubToolbarContainer theme for icon switching
     if (m_subtoolbarContainer) {
@@ -2628,14 +2701,35 @@ void MainWindow::setupSubToolbars()
         }
     });
     
-    // Connect tab changes to subtoolbar container
-    // Use currentViewportChanged and track indices manually
-    connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* /*vp*/) {
-        static int previousIndex = -1;
+    // Connect tab changes to subtoolbar container and toolbar
+    // Handles per-tab state for both toolbar tool selection and subtoolbar presets
+    connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
         int newIndex = m_tabManager->currentIndex();
-        if (newIndex != previousIndex) {
-            m_subtoolbarContainer->onTabChanged(newIndex, previousIndex);
-            previousIndex = newIndex;
+        
+        if (newIndex != m_previousTabIndex) {
+            // Update subtoolbar per-tab state (save old, restore new)
+            m_subtoolbarContainer->onTabChanged(newIndex, m_previousTabIndex);
+            
+            // Sync toolbar and subtoolbar to the new viewport's current tool
+            if (vp) {
+                ToolType currentTool = vp->currentTool();
+                
+                // Update toolbar button selection (without emitting signals)
+                m_toolbar->setCurrentTool(currentTool);
+                
+                // Update subtoolbar to show the correct one for this tool
+                m_subtoolbarContainer->showForTool(currentTool);
+                
+                // Apply ALL subtoolbar preset values DIRECTLY to the new viewport
+                // This ensures the viewport's colors/thicknesses match what's selected in UI
+                // Uses direct setter calls to avoid timing issues with signals
+                applyAllSubToolbarValuesToViewport(vp);
+            }
+            
+            m_previousTabIndex = newIndex;
+            
+            qDebug() << "Tab changed: index" << newIndex 
+                     << "tool" << (vp ? static_cast<int>(vp->currentTool()) : -1);
         }
     });
     
@@ -2644,6 +2738,14 @@ void MainWindow::setupSubToolbars()
     
     // Show for default tool (Pen)
     m_subtoolbarContainer->showForTool(ToolType::Pen);
+    
+    // Apply initial preset values to first viewport on startup
+    // Use QTimer to ensure the first tab is fully created
+    QTimer::singleShot(0, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            applyAllSubToolbarValuesToViewport(vp);
+        }
+    });
     
     qDebug() << "Phase D: Subtoolbars initialized";
 }

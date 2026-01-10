@@ -38,6 +38,7 @@ public:
     void refreshFromSettings() override;
     void restoreTabState(int tabIndex) override;
     void saveTabState(int tabIndex) override;
+    void clearTabState(int tabIndex) override;
     void setDarkMode(bool darkMode) override;
     
     /**

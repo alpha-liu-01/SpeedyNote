@@ -52,11 +52,17 @@ public:
      * Enable/disable redo button.
      */
     void setRedoEnabled(bool enabled);
+    
+    /**
+     * Set straight line mode (for external sync, e.g., from keyboard shortcut).
+     * @param enabled True to enable straight line mode
+     */
+    void setStraightLineMode(bool enabled);
 
 signals:
     // Tool selection
     void toolSelected(ToolType tool);
-    void shapeClicked();         // Shape tool - currently → straight line
+    void straightLineToggled(bool enabled);  // Straight line mode toggle
     void objectInsertClicked();  // Object insert tool
     void textClicked();          // Text tool
     
@@ -76,10 +82,12 @@ private:
     ToolButton *m_penButton;
     ToolButton *m_markerButton;
     ToolButton *m_eraserButton;
-    ToolButton *m_shapeButton;
     ToolButton *m_lassoButton;
     ToolButton *m_objectInsertButton;
     ToolButton *m_textButton;
+    
+    // Non-exclusive toggle (not part of tool group)
+    ToggleButton *m_straightLineButton;
     
     // Action buttons
     ActionButton *m_undoButton;

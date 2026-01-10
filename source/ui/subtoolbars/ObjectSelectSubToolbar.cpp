@@ -53,7 +53,7 @@ void ObjectSelectSubToolbar::createWidgets()
         m_slotButtons[i]->setState(LinkSlotState::Empty);
         // Use icon base names for dark mode switching support
         // Note: LinkSlotButton falls back to text symbols if icons are not set
-        m_slotButtons[i]->setStateIconNames("addpage", "location", "url", "markdown");
+        m_slotButtons[i]->setStateIconNames("addtab", "link", "url", "markdown");
         m_slotButtons[i]->setDarkMode(dark);
         m_slotButtons[i]->setToolTip(tr("Slot %1").arg(i + 1));
         addWidget(m_slotButtons[i]);
@@ -139,6 +139,11 @@ void ObjectSelectSubToolbar::saveTabState(int tabIndex)
     state.insertMode = m_insertMode;
     state.actionMode = m_actionMode;
     state.initialized = true;
+}
+
+void ObjectSelectSubToolbar::clearTabState(int tabIndex)
+{
+    m_tabStates.remove(tabIndex);
 }
 
 void ObjectSelectSubToolbar::updateSlotStates(const LinkSlotState states[3])

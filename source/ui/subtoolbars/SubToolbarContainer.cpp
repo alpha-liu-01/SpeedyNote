@@ -48,8 +48,9 @@ void SubToolbarContainer::showForTool(ToolType tool)
     m_currentSubToolbar = m_subtoolbars.value(tool, nullptr);
     
     if (m_currentSubToolbar) {
-        // Refresh from settings when becoming visible
-        m_currentSubToolbar->refreshFromSettings();
+        // NOTE: Do NOT call refreshFromSettings() here!
+        // Per-tab state is restored by onTabChanged() before showForTool() is called.
+        // Calling refreshFromSettings() would overwrite the per-tab state with QSettings.
         
         // Position subtoolbar at (0,0) within container
         m_currentSubToolbar->move(0, 0);
@@ -106,6 +107,17 @@ void SubToolbarContainer::onTabChanged(int newTabIndex, int oldTabIndex)
     // Update current subtoolbar display
     if (m_currentSubToolbar) {
         m_currentSubToolbar->update();
+    }
+}
+
+void SubToolbarContainer::clearTabState(int tabIndex)
+{
+    // Clear per-tab state on all registered subtoolbars
+    // This prevents memory leak from accumulating state for closed tabs
+    for (SubToolbar* subtoolbar : m_subtoolbars) {
+        if (subtoolbar) {
+            subtoolbar->clearTabState(tabIndex);
+        }
     }
 }
 

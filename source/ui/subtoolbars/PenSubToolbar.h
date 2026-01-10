@@ -32,6 +32,27 @@ public:
     void refreshFromSettings() override;
     void restoreTabState(int tabIndex) override;
     void saveTabState(int tabIndex) override;
+    void clearTabState(int tabIndex) override;
+    
+    /**
+     * @brief Emit the currently selected preset values.
+     * 
+     * Call this when connecting to a new viewport to sync its
+     * color/thickness with the subtoolbar's current selection.
+     */
+    void emitCurrentValues();
+    
+    /**
+     * @brief Get the currently selected pen color.
+     * @return The color from the selected preset button.
+     */
+    QColor currentColor() const;
+    
+    /**
+     * @brief Get the currently selected pen thickness.
+     * @return The thickness from the selected preset button.
+     */
+    qreal currentThickness() const;
 
 signals:
     /**

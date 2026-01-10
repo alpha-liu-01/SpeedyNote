@@ -67,6 +67,14 @@ public:
     void onTabChanged(int newTabIndex, int oldTabIndex);
     
     /**
+     * @brief Clear per-tab state when a tab is closed.
+     * @param tabIndex The index of the closed tab.
+     * 
+     * Call this when a tab is closed to free memory used by per-tab state.
+     */
+    void clearTabState(int tabIndex);
+    
+    /**
      * @brief Get the currently visible subtoolbar.
      * @return The current subtoolbar, or nullptr if none is visible.
      */

@@ -49,12 +49,12 @@ void Toolbar::setupUi()
     m_toolGroup->addButton(m_eraserButton);
     mainLayout->addWidget(m_eraserButton);
     
-    // Shape (→ straight line for now)
-    m_shapeButton = new ToolButton(this);
-    m_shapeButton->setThemedIcon("shape");
-    m_shapeButton->setToolTip(tr("Shape Tool"));
-    m_toolGroup->addButton(m_shapeButton);
-    mainLayout->addWidget(m_shapeButton);
+    // Straight Line Toggle (NOT in exclusive tool group - can be combined with any tool)
+    m_straightLineButton = new ToggleButton(this);
+    m_straightLineButton->setThemedIcon("straightLine");
+    m_straightLineButton->setToolTip(tr("Straight Line Mode (/)"));
+    // Note: NOT added to m_toolGroup - this is a modifier, not a tool
+    mainLayout->addWidget(m_straightLineButton);
     
     // Lasso
     m_lassoButton = new ToolButton(this);
@@ -125,9 +125,9 @@ void Toolbar::connectSignals()
         emit toolSelected(ToolType::Highlighter);
     });
     
-    // Shape tool - emits dedicated signal (no ToolType yet)
-    connect(m_shapeButton, &QPushButton::clicked, 
-            this, &Toolbar::shapeClicked);
+    // Straight Line toggle - emits straightLineToggled(bool)
+    connect(m_straightLineButton, &ToggleButton::toggled, 
+            this, &Toolbar::straightLineToggled);
     
     // Object Insert - selects ObjectSelect tool
     connect(m_objectInsertButton, &QPushButton::clicked, this, [this]() {
@@ -201,7 +201,7 @@ void Toolbar::updateTheme(bool darkMode)
     m_penButton->setDarkMode(darkMode);
     m_markerButton->setDarkMode(darkMode);
     m_eraserButton->setDarkMode(darkMode);
-    m_shapeButton->setDarkMode(darkMode);
+    m_straightLineButton->setDarkMode(darkMode);
     m_lassoButton->setDarkMode(darkMode);
     m_objectInsertButton->setDarkMode(darkMode);
     m_textButton->setDarkMode(darkMode);
@@ -218,5 +218,13 @@ void Toolbar::setUndoEnabled(bool enabled)
 void Toolbar::setRedoEnabled(bool enabled)
 {
     m_redoButton->setEnabled(enabled);
+}
+
+void Toolbar::setStraightLineMode(bool enabled)
+{
+    // Block signals to avoid feedback loop when called from external sync
+    m_straightLineButton->blockSignals(true);
+    m_straightLineButton->setChecked(enabled);
+    m_straightLineButton->blockSignals(false);
 }
 

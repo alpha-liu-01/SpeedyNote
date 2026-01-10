@@ -163,15 +163,17 @@ void HighlighterSubToolbar::saveTabState(int tabIndex)
     state.initialized = true;
 }
 
+void HighlighterSubToolbar::clearTabState(int tabIndex)
+{
+    m_tabStates.remove(tabIndex);
+}
+
 void HighlighterSubToolbar::onColorPresetClicked(int index)
 {
     if (index < 0 || index >= NUM_PRESETS) return;
     
-    if (m_selectedColorIndex == index) {
-        // Already selected - editRequested will handle opening dialog
-        return;
-    }
-    
+    // Always apply the color when clicked - the preset might show as "selected"
+    // but the actual current color could be different (changed via other means)
     selectColorPreset(index);
     
     // Emit color change with marker opacity applied
@@ -210,7 +212,8 @@ void HighlighterSubToolbar::onAutoHighlightToggled(bool checked)
 
 void HighlighterSubToolbar::selectColorPreset(int index)
 {
-    if (index < 0 || index >= NUM_PRESETS) return;
+    // Allow index = -1 for "no selection"
+    if (index < -1 || index >= NUM_PRESETS) return;
     
     // Update selection state
     for (int i = 0; i < NUM_PRESETS; ++i) {
@@ -229,6 +232,29 @@ void HighlighterSubToolbar::setAutoHighlightState(bool enabled)
     m_autoHighlightToggle->blockSignals(true);
     m_autoHighlightToggle->setChecked(enabled);
     m_autoHighlightToggle->blockSignals(false);
+}
+
+void HighlighterSubToolbar::emitCurrentValues()
+{
+    // Emit the currently selected preset values to sync with viewport
+    if (m_selectedColorIndex >= 0 && m_selectedColorIndex < NUM_PRESETS) {
+        QColor colorWithOpacity = m_colorButtons[m_selectedColorIndex]->color();
+        colorWithOpacity.setAlpha(MARKER_OPACITY);
+        emit highlighterColorChanged(colorWithOpacity);
+    }
+    // Note: auto-highlight state is synced via setAutoHighlightState() separately
+}
+
+QColor HighlighterSubToolbar::currentColor() const
+{
+    QColor color;
+    if (m_selectedColorIndex >= 0 && m_selectedColorIndex < NUM_PRESETS && m_colorButtons[m_selectedColorIndex]) {
+        color = m_colorButtons[m_selectedColorIndex]->color();
+    } else {
+        color = DEFAULT_COLORS[0];  // Fallback to first default
+    }
+    color.setAlpha(MARKER_OPACITY);
+    return color;
 }
 
 void HighlighterSubToolbar::setDarkMode(bool darkMode)

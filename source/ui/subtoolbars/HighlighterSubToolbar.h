@@ -38,6 +38,7 @@ public:
     void refreshFromSettings() override;
     void restoreTabState(int tabIndex) override;
     void saveTabState(int tabIndex) override;
+    void clearTabState(int tabIndex) override;
     void setDarkMode(bool darkMode) override;
     
     /**
@@ -48,6 +49,20 @@ public:
      * This updates the UI without emitting the autoHighlightChanged signal to avoid loops.
      */
     void setAutoHighlightState(bool enabled);
+    
+    /**
+     * @brief Emit the currently selected preset values.
+     * 
+     * Call this when connecting to a new viewport to sync its
+     * color with the subtoolbar's current selection.
+     */
+    void emitCurrentValues();
+    
+    /**
+     * @brief Get the currently selected highlighter color (with MARKER_OPACITY applied).
+     * @return The color from the selected preset button with 50% opacity.
+     */
+    QColor currentColor() const;
 
 signals:
     /**

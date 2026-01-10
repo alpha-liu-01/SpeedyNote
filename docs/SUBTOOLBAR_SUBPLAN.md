@@ -921,6 +921,94 @@ All 4 tool subtoolbars implemented:
   - ~~`setObjectInsertMode(ObjectInsertMode)` - needs to be added to DocumentViewport~~ ✅ DONE
   - ~~`setObjectActionMode(ObjectActionMode)` - needs to be added to DocumentViewport~~ ✅ DONE
 
+#### Task 4.2: Viewport Resize Handling ✅
+**Status:** COMPLETED (as part of Task 4.1)
+- Resize handling was implemented as part of Task 4.1
+- `updateSubToolbarPosition()` is called from `updateScrollbarPositions()` (line 2536)
+- `updateScrollbarPositions()` is triggered by:
+  - `eventFilter()` on container resize events (line 2095)
+  - `showScrollbars()` when scrollbars become visible (line 2467)
+  - Initial setup via `QTimer::singleShot(0, ...)` (line 651)
+- Subtoolbar position correctly updates when viewport/container resizes
+
+#### Task 4.3: Tab Change Handling ✅
+**Status:** COMPLETED (enhanced implementation)
+
+**Initial implementation (Task 4.1):**
+- Used static local variable `previousIndex` (problematic)
+- Only updated subtoolbar container, not toolbar
+
+**Enhanced implementation:**
+- Added `m_previousTabIndex` member variable to MainWindow.h for proper state tracking
+- Connected `TabManager::currentViewportChanged` to comprehensive handler that:
+  1. Saves old tab's subtoolbar state via `SubToolbarContainer::onTabChanged()`
+  2. Restores new tab's subtoolbar state
+  3. **Syncs Toolbar to viewport's current tool** via `Toolbar::setCurrentTool()` (NEW)
+  4. **Updates SubToolbarContainer to show correct subtoolbar** via `showForTool()` (NEW)
+
+**Files Modified:**
+- `source/MainWindow.h` - Added `int m_previousTabIndex = -1;` member
+- `source/MainWindow.cpp` - Rewrote tab change handler in `setupSubToolbars()`:
+  ```cpp
+  connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
+      int newIndex = m_tabManager->currentIndex();
+      if (newIndex != m_previousTabIndex) {
+          m_subtoolbarContainer->onTabChanged(newIndex, m_previousTabIndex);
+          if (vp) {
+              ToolType currentTool = vp->currentTool();
+              m_toolbar->setCurrentTool(currentTool);           // Sync toolbar
+              m_subtoolbarContainer->showForTool(currentTool);  // Show correct subtoolbar
+          }
+          m_previousTabIndex = newIndex;
+      }
+  });
+  ```
+
+**Behavior:**
+- Switching tabs now restores:
+  - **Toolbar:** Which tool button is selected (per viewport's `m_currentTool`)
+  - **SubToolbar:** Which subtoolbar is visible (matches tool)
+  - **SubToolbar presets:** Per-tab color/thickness selections and values
+
+#### Task 4.4: Toolbar Straight Line Toggle ✅
+**Status:** COMPLETED
+
+**Changes:**
+Converted the Shape button to a Straight Line toggle button:
+
+1. **Toolbar.h:**
+   - Changed `ToolButton *m_shapeButton;` → `ToggleButton *m_straightLineButton;`
+   - Changed signal `void shapeClicked();` → `void straightLineToggled(bool enabled);`
+   - Added `void setStraightLineMode(bool enabled);` for external sync
+
+2. **Toolbar.cpp:**
+   - Changed button type from `ToolButton` to `ToggleButton`
+   - **NOT added to `m_toolGroup`** - this is a modifier, not a tool (can be combined with Pen/Marker)
+   - Changed icon from "shape" to "straightLine"
+   - Updated tooltip to "Straight Line Mode (/)"
+   - Connected to emit `straightLineToggled(bool)` instead of `shapeClicked()`
+   - Implemented `setStraightLineMode(bool)` for bidirectional sync
+
+3. **MainWindow.cpp:**
+   - Updated connection from `shapeClicked` to `straightLineToggled(bool enabled)`
+   - Restored `m_straightLineModeConn` to sync viewport→toolbar when mode changes
+   - Added initial sync in `connectViewportScrollSignals()` for tab switching
+
+**Bidirectional Sync:**
+- **Toolbar → Viewport:** Click toggle → `DocumentViewport::setStraightLineMode(enabled)`
+- **Viewport → Toolbar:** Mode changes (e.g., auto-disabled on Eraser/Lasso) → `Toolbar::setStraightLineMode(enabled)`
+
+**Files Modified:**
+- `source/ui/Toolbar.h`
+- `source/ui/Toolbar.cpp`
+- `source/MainWindow.cpp`
+
+**Behavior:**
+- Clicking the button toggles straight line mode on/off
+- Button is independent of tool selection (can be used with Pen or Marker)
+- Switching to Eraser/Lasso auto-disables straight line mode and updates button
+- Switching tabs syncs the button to that viewport's straight line mode state
+
 ---
 
 ### Bug Fixes (Post-Implementation)
@@ -1173,4 +1261,186 @@ emit markerColorChanged(colorWithOpacity);
 - When app theme changes (light ↔ dark), all subtoolbar icons update to appropriate variant
 - Icons are set via base names (e.g., "marker") instead of full paths
 - Initial state is determined by `isDarkMode()` check at widget creation time
+
+---
+
+#### Fix 4.1.8: Clicking "Selected" Preset Doesn't Apply Color ✅
+**Status:** FIXED
+
+**Problem:** When clicking a color/thickness preset button that appeared "selected" in the UI, the click was ignored and the edit dialog opened instead of applying the preset value. This was problematic because:
+1. The subtoolbar tracks which preset INDEX is selected, not the actual current color/thickness
+2. If the actual color/thickness changed via other means (different initial state, future external color picker, etc.), the UI might show a preset as "selected" even though it doesn't match the current value
+3. Clicking that "selected" preset would open the edit dialog instead of applying the preset's value
+
+**Root Cause:** In `onColorPresetClicked()` / `onThicknessPresetClicked()`:
+```cpp
+if (m_selectedColorIndex == index) {
+    // Already selected - editRequested will handle opening dialog
+    return;  // BUG: This skips applying the color!
+}
+```
+This early return prevented the color from being applied, even if the actual current color was different from the preset.
+
+**Fix:** Removed the early return. Now clicking any preset always applies its value:
+```cpp
+void onColorPresetClicked(int index) {
+    // Always apply the color when clicked - the preset might show as "selected"
+    // but the actual current color could be different
+    selectColorPreset(index);
+    emit colorChanged(m_colorButtons[index]->color());
+}
+```
+
+**Additional Changes:**
+- Modified `selectColorPreset()` and `selectThicknessPreset()` in all subtoolbars to allow index = -1 for "no selection" (future-proofing for when external color pickers are added)
+- Fixed `updateThicknessPreviewColors()` in PenSubToolbar and MarkerSubToolbar to handle -1 index gracefully
+
+**Files Fixed:**
+- `source/ui/subtoolbars/PenSubToolbar.cpp` (fixed color and thickness preset click handlers)
+- `source/ui/subtoolbars/MarkerSubToolbar.cpp` (fixed color and thickness preset click handlers)
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (fixed color preset click handler)
+
+**Correct Behavior:**
+- Clicking any preset always applies its value to the viewport
+- Clicking an already-selected preset applies the value (useful if current color differs from preset)
+- The edit dialog only opens when `editRequested` signal is emitted (second click on selected preset)
+
+---
+
+#### Fix 4.1.9: Viewport Color Not Synced with Subtoolbar Preset on Startup ✅
+**Status:** FIXED (Revised)
+
+**Problem:** On app startup or new tab creation, the viewport had its hardcoded default colors (e.g., black pen), but the subtoolbar showed its first preset as selected (which might be a different color from QSettings). This meant the UI showed one color as "selected" but drawing used a different color until the user clicked a preset.
+
+**Root Cause:** 
+1. The subtoolbars loaded their preset values and selections from QSettings, but never applied those values to the viewport
+2. The initial fix using `emitCurrentValues()` and signals didn't work because:
+   - It only applied ONE tool's values (the current tool), but a new viewport needs ALL tool values
+   - Signal-based approach had timing issues - signals go through lambdas that call `currentViewport()` which may not be ready
+   - The first tab is often created before signal connections are set up
+
+**Fix (Revised):** Added getter methods to subtoolbars and a direct application method:
+
+1. **Added getter methods to subtoolbars:**
+   - `PenSubToolbar::currentColor()` / `currentThickness()` - returns selected preset values
+   - `MarkerSubToolbar::currentColor()` / `currentThickness()` - returns selected preset values (color has MARKER_OPACITY applied)
+   - `HighlighterSubToolbar::currentColor()` - returns selected preset value (with MARKER_OPACITY)
+
+2. **Added `applyAllSubToolbarValuesToViewport(DocumentViewport* vp)` in MainWindow:**
+   - Takes a viewport pointer directly (no reliance on `currentViewport()`)
+   - Applies ALL tool preset values (pen + marker) to the viewport
+   - Uses direct setter calls (`vp->setPenColor()`, etc.) instead of signals
+
+**When Applied:**
+1. **On startup:** Via `QTimer::singleShot(0, ...)` with direct viewport pointer
+2. **On tab change:** In the `currentViewportChanged` handler, passing the new viewport pointer directly
+
+**Files Modified:**
+- `source/ui/subtoolbars/PenSubToolbar.h` (added `currentColor()`, `currentThickness()`)
+- `source/ui/subtoolbars/PenSubToolbar.cpp` (implemented getters)
+- `source/ui/subtoolbars/MarkerSubToolbar.h` (added `currentColor()`, `currentThickness()`)
+- `source/ui/subtoolbars/MarkerSubToolbar.cpp` (implemented getters)
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` (added `currentColor()`)
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (implemented getter)
+- `source/MainWindow.h` (added `applyAllSubToolbarValuesToViewport()`)
+- `source/MainWindow.cpp` (implemented, updated tab change and startup code)
+
+**Correct Behavior:**
+- On startup, the viewport's color/thickness immediately matches the subtoolbar's selected presets
+- On tab change, the new viewport receives ALL subtoolbar preset values directly
+- Works regardless of which tool is currently selected
+- What you see selected in the UI matches what you draw with
+
+---
+
+## Post-Implementation Code Review
+
+### CR-ST-1: Per-tab State Immediately Overwritten ✅
+**Status:** FIXED
+
+**Problem:** When switching tabs, `onTabChanged()` restored per-tab state for all subtoolbars, but then `showForTool()` immediately called `refreshFromSettings()` which overwrote the restored state with QSettings values. This made the per-tab state feature completely non-functional.
+
+**Root Cause:** The call order was:
+1. `onTabChanged()` - restore per-tab state ✓
+2. `showForTool()` → `refreshFromSettings()` - overwrite with QSettings ✗
+
+**Fix:** Removed the `refreshFromSettings()` call from `showForTool()`. Per-tab state is already restored by `onTabChanged()` which is called before `showForTool()`.
+
+**Files Modified:**
+- `source/ui/subtoolbars/SubToolbarContainer.cpp`
+
+---
+
+### CR-ST-2: SubToolbar::setDarkMode() Didn't Update Own Styling ✅
+**Status:** FIXED
+
+**Problem:** The base `SubToolbar::setDarkMode()` implementation was empty. When the theme changed, the subtoolbar's own background color, border, and separator styling wouldn't update.
+
+**Fix:** Modified `SubToolbar::setDarkMode()` to:
+1. Call `setupStyle()` to re-apply theme-aware background and border
+2. Find all QFrame separator children and update their stylesheet
+
+**Files Modified:**
+- `source/ui/subtoolbars/SubToolbar.cpp`
+
+---
+
+### CR-ST-3: Per-tab State Never Cleaned Up (Memory Leak) ✅
+**Status:** FIXED
+
+**Problem:** The `m_tabStates` hash maps in all subtoolbars grew indefinitely. When tabs were closed, their per-tab state was never removed, causing a gradual memory leak with many tabs opened and closed over time.
+
+**Fix:** Added `clearTabState(int tabIndex)` method to:
+1. `SubToolbar` (base class, default empty implementation)
+2. `PenSubToolbar` - removes entry from `m_tabStates`
+3. `MarkerSubToolbar` - removes entry from `m_tabStates`
+4. `HighlighterSubToolbar` - removes entry from `m_tabStates`
+5. `ObjectSelectSubToolbar` - removes entry from `m_tabStates`
+6. `SubToolbarContainer` - propagates to all registered subtoolbars
+
+Connected to `tabCloseRequested` signal in MainWindow to clean up state when tabs are closed.
+
+**Files Modified:**
+- `source/ui/subtoolbars/SubToolbar.h` (added virtual method)
+- `source/ui/subtoolbars/SubToolbarContainer.h` (added method)
+- `source/ui/subtoolbars/SubToolbarContainer.cpp` (implemented method)
+- `source/ui/subtoolbars/PenSubToolbar.h` (override)
+- `source/ui/subtoolbars/PenSubToolbar.cpp` (implemented)
+- `source/ui/subtoolbars/MarkerSubToolbar.h` (override)
+- `source/ui/subtoolbars/MarkerSubToolbar.cpp` (implemented)
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` (override)
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` (implemented)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.h` (override)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp` (implemented)
+- `source/MainWindow.cpp` (connect to tabCloseRequested)
+
+---
+
+### CR-ST-4: Redundant isDarkMode() Function (Code Duplication)
+**Status:** NOT FIXED (Minor, documented)
+
+**Problem:** The `isDarkMode()` function is duplicated in 6+ files:
+- `ColorPresetButton.cpp`
+- `ThicknessPresetButton.cpp`
+- `SubToolbarToggle.cpp` (ToggleButton.cpp)
+- `ModeToggleButton.cpp`
+- `LinkSlotButton.cpp`
+- `SubToolbar.cpp`
+
+**Decision:** This is a minor code smell, not a bug. The function is simple (5 lines) and extracting it would require either:
+- A utility class/namespace (adds complexity)
+- A common base class (these widgets don't share a common ancestor)
+
+The duplication is acceptable for now. Future refactoring could create a `ThemeUtils::isDarkMode()` function if more theme-related utilities are needed.
+
+---
+
+### Code Review Summary
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| CR-ST-1: Per-tab state overwritten | **High** | ✅ FIXED |
+| CR-ST-2: setDarkMode() missing styling | **Medium** | ✅ FIXED |
+| CR-ST-3: Per-tab state memory leak | **Medium** | ✅ FIXED |
+| CR-ST-4: isDarkMode() duplication | **Low** | Documented |
 
