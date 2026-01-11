@@ -733,6 +733,24 @@ public:
     void deselectAllObjects();
     
     /**
+     * @brief Handle cancel/escape action for ObjectSelect tool.
+     * 
+     * Behavior:
+     * - If objects are selected: deselect all objects
+     * - If no objects selected but clipboard has content: clear object clipboard
+     * 
+     * Used by Escape key handler and ObjectSelectSubToolbar cancel button.
+     */
+    void cancelObjectSelectAction();
+    
+    /**
+     * @brief Clear the internal object clipboard.
+     * 
+     * Emits objectClipboardChanged(false).
+     */
+    void clearObjectClipboard();
+    
+    /**
      * @brief Deselect an object by its ID.
      * @param objectId The ID of the object to deselect.
      * 
@@ -760,6 +778,38 @@ public:
      * @return True if at least one object is selected.
      */
     bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
+    
+    /**
+     * @brief Check if a lasso selection exists.
+     * @return True if there is an active lasso selection.
+     * 
+     * Action Bar: Used to sync state on tab switch.
+     */
+    bool hasLassoSelection() const { return m_lassoSelection.isValid(); }
+    
+    /**
+     * @brief Check if text is currently selected (PDF text).
+     * @return True if text is selected.
+     * 
+     * Action Bar: Used to sync state on tab switch.
+     */
+    bool hasTextSelection() const { return m_textSelection.isValid(); }
+    
+    /**
+     * @brief Check if the internal stroke clipboard has content.
+     * @return True if strokes can be pasted.
+     * 
+     * Action Bar: Used to sync state on tab switch.
+     */
+    bool hasStrokesInClipboard() const { return m_clipboard.hasContent; }
+    
+    /**
+     * @brief Check if the internal object clipboard has content.
+     * @return True if objects can be pasted.
+     * 
+     * Action Bar: Used to sync state on tab switch.
+     */
+    bool hasObjectsInClipboard() const { return !m_objectClipboard.isEmpty(); }
     
     /**
      * @brief Get the current object insert mode.
@@ -1037,6 +1087,16 @@ public:
     QPointF viewportCenterInDocument() const;
     
     /**
+     * @brief Get the next available zOrder for objects with a given affinity on a page.
+     * @param page The page to check (can be a tile in edgeless mode).
+     * @param affinity The layer affinity to check.
+     * @return max(existing zOrders) + 1, or 0 if no objects with that affinity exist.
+     * 
+     * Used when inserting/pasting objects to ensure they appear on top of existing objects.
+     */
+    int getNextZOrderForAffinity(Page* page, int affinity) const;
+    
+    /**
      * @brief Convert viewport pixel coordinates to page-local coordinates.
      * @param viewportPt Point in viewport/widget coordinates.
      * @return PageHit containing page index and page-local coordinates.
@@ -1248,6 +1308,38 @@ public slots:
      */
     TouchGestureMode touchGestureMode() const;
     
+    // ===== Public Clipboard Operations (Action Bar support) =====
+    
+    /**
+     * @brief Copy current lasso selection to internal clipboard.
+     * Action Bar: Called by LassoActionBar::copyRequested.
+     */
+    void copyLassoSelection();
+    
+    /**
+     * @brief Cut current lasso selection (copy + delete).
+     * Action Bar: Called by LassoActionBar::cutRequested.
+     */
+    void cutLassoSelection();
+    
+    /**
+     * @brief Paste internal clipboard content.
+     * Action Bar: Called by LassoActionBar::pasteRequested.
+     */
+    void pasteLassoSelection();
+    
+    /**
+     * @brief Delete current lasso selection.
+     * Action Bar: Called by LassoActionBar::deleteRequested.
+     */
+    void deleteLassoSelection();
+    
+    /**
+     * @brief Copy selected PDF text to system clipboard.
+     * Action Bar: Called by TextSelectionActionBar::copyRequested.
+     */
+    void copyTextSelection();
+    
 signals:
     // ===== View State Signals =====
     
@@ -1323,6 +1415,38 @@ signals:
      * existing objects or creating new ones.
      */
     void objectActionModeChanged(ObjectActionMode mode);
+    
+    /**
+     * @brief Emitted when lasso selection state changes.
+     * @param hasSelection True if lasso selection exists.
+     * 
+     * Action Bar: Used to show/hide LassoActionBar.
+     */
+    void lassoSelectionChanged(bool hasSelection);
+    
+    /**
+     * @brief Emitted when PDF text selection state changes.
+     * @param hasSelection True if text is selected.
+     * 
+     * Action Bar: Used to show/hide TextSelectionActionBar.
+     */
+    void textSelectionChanged(bool hasSelection);
+    
+    /**
+     * @brief Emitted when internal stroke clipboard state changes.
+     * @param hasStrokes True if clipboard contains strokes.
+     * 
+     * Action Bar: Used to show/hide Paste button in LassoActionBar.
+     */
+    void strokeClipboardChanged(bool hasStrokes);
+    
+    /**
+     * @brief Emitted when internal object clipboard state changes.
+     * @param hasObjects True if clipboard contains objects.
+     * 
+     * Action Bar: Used to show/hide Paste button in ObjectSelectActionBar.
+     */
+    void objectClipboardChanged(bool hasObjects);
     
     /**
      * @brief Emitted when horizontal scroll position changes.

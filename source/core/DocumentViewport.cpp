@@ -167,7 +167,11 @@ void DocumentViewport::setDocument(Document* doc)
     invalidatePageLayoutCache();
     
     // Phase A: Clear text selection (refers to old document's text boxes)
+    bool hadTextSelection = m_textSelection.isValid();
     m_textSelection.clear();
+    if (hadTextSelection) {
+        emit textSelectionChanged(false);
+    }
     clearTextBoxCache();
     clearLinkCache();  // Phase D.1
     
@@ -384,7 +388,11 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     
     // Phase A: Clear text selection when switching away from Highlighter
     if (previousTool == ToolType::Highlighter && tool != ToolType::Highlighter) {
+        bool hadTextSelection = m_textSelection.isValid();
         m_textSelection.clear();
+        if (hadTextSelection) {
+            emit textSelectionChanged(false);
+        }
         clearTextBoxCache();
         clearLinkCache();  // Phase D.1
     }
@@ -2000,6 +2008,17 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             }
         }
         
+        // Escape key - deselect objects or clear clipboard
+        if (event->key() == Qt::Key_Escape) {
+            // If objects are selected, deselect them
+            // If no objects but clipboard has content, clear clipboard
+            if (hasSelectedObjects() || !m_objectClipboard.isEmpty()) {
+                cancelObjectSelectAction();
+                event->accept();
+                return;
+            }
+        }
+        
         // Phase O3.5.2: Layer affinity shortcuts (Alt+[ / Alt+] / Alt+\)
         // These change which layer the object renders relative to
         if (hasSelectedObjects()) {
@@ -2144,7 +2163,11 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         // Cancel selection (Escape)
         if (event->key() == Qt::Key_Escape) {
             if (m_textSelection.isValid() || m_textSelection.isSelecting) {
+                bool hadValidSelection = m_textSelection.isValid();
                 m_textSelection.clear();
+                if (hadValidSelection) {
+                    emit textSelectionChanged(false);
+                }
                 update();
                 event->accept();
                 return;
@@ -2309,6 +2332,24 @@ QPointF DocumentViewport::viewportCenterInDocument() const
     // Used for placing newly inserted objects at the center of the view
     QPointF viewportCenter(width() / 2.0, height() / 2.0);
     return viewportToDocument(viewportCenter);
+}
+
+int DocumentViewport::getNextZOrderForAffinity(Page* page, int affinity) const
+{
+    // Find the maximum zOrder among objects with the same affinity
+    // New objects should get maxZOrder + 1 to appear on top
+    if (!page) {
+        return 0;
+    }
+    
+    int maxZOrder = -1;  // Start below 0 so first object gets zOrder = 0
+    for (const auto& obj : page->objects) {
+        if (obj && obj->getLayerAffinity() == affinity) {
+            maxZOrder = qMax(maxZOrder, obj->zOrder);
+        }
+    }
+    
+    return maxZOrder + 1;
 }
 
 PageHit DocumentViewport::viewportToPage(QPointF viewportPt) const
@@ -4857,6 +4898,29 @@ void DocumentViewport::deselectAllObjects()
     update();
 }
 
+void DocumentViewport::cancelObjectSelectAction()
+{
+    // Step 1: If objects are selected, deselect them
+    if (!m_selectedObjects.isEmpty()) {
+        deselectAllObjects();
+        return;
+    }
+    
+    // Step 2: If no objects selected but clipboard has content, clear clipboard
+    if (!m_objectClipboard.isEmpty()) {
+        clearObjectClipboard();
+    }
+}
+
+void DocumentViewport::clearObjectClipboard()
+{
+    if (m_objectClipboard.isEmpty()) return;
+    
+    m_objectClipboard.clear();
+    emit objectClipboardChanged(false);
+    qDebug() << "clearObjectClipboard: Object clipboard cleared";
+}
+
 void DocumentViewport::deselectObjectById(const QString& objectId)
 {
     for (int i = m_selectedObjects.size() - 1; i >= 0; --i) {
@@ -5028,6 +5092,10 @@ void DocumentViewport::insertImageFromClipboard()
             return;
         }
         
+        // Set zOrder so new object appears on top of existing objects with same affinity
+        imgObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
+        qDebug() << "insertImageFromClipboard: assigned zOrder =" << imgObj->zOrder;
+        
         // Convert to tile-local coordinates
         imgObj->position = imgObj->position - QPointF(
             coord.first * Document::EDGELESS_TILE_SIZE,
@@ -5044,6 +5112,10 @@ void DocumentViewport::insertImageFromClipboard()
             qWarning() << "insertImageFromClipboard: No page at index" << m_currentPageIndex;
             return;
         }
+        
+        // Set zOrder so new object appears on top of existing objects with same affinity
+        imgObj->zOrder = getNextZOrderForAffinity(targetPage, defaultAffinity);
+        qDebug() << "insertImageFromClipboard: assigned zOrder =" << imgObj->zOrder;
         
         // Adjust position to be page-local (subtract page origin)
         QPointF pageOrigin = pagePosition(m_currentPageIndex);
@@ -5139,6 +5211,10 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
             return;
         }
         
+        // Set zOrder so new object appears on top of existing objects with same affinity
+        imgObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
+        qDebug() << "insertImageFromFile: assigned zOrder =" << imgObj->zOrder;
+        
         // Convert to tile-local coordinates
         imgObj->position = imgObj->position - QPointF(
             coord.first * Document::EDGELESS_TILE_SIZE,
@@ -5155,6 +5231,10 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
             qWarning() << "insertImageFromFile: No page at index" << m_currentPageIndex;
             return;
         }
+        
+        // Set zOrder so new object appears on top of existing objects with same affinity
+        imgObj->zOrder = getNextZOrderForAffinity(targetPage, defaultAffinity);
+        qDebug() << "insertImageFromFile: assigned zOrder =" << imgObj->zOrder;
         
         // Adjust position to be page-local
         QPointF pageOrigin = pagePosition(m_currentPageIndex);
@@ -5336,6 +5416,9 @@ void DocumentViewport::copySelectedObjects()
     }
     
     qDebug() << "copySelectedObjects: Copied" << m_objectClipboard.size() << "objects to internal clipboard";
+    
+    // Notify that object clipboard has content (for action bar paste button)
+    emit objectClipboardChanged(!m_objectClipboard.isEmpty());
 }
 
 void DocumentViewport::pasteObjects()
@@ -5418,6 +5501,11 @@ void DocumentViewport::pasteObjects()
                 continue;
             }
             
+            // Set zOrder so pasted object appears on top of existing objects with same affinity
+            int affinity = obj->getLayerAffinity();
+            obj->zOrder = getNextZOrderForAffinity(targetTile, affinity);
+            qDebug() << "pasteObjects: assigned zOrder =" << obj->zOrder << "for affinity =" << affinity;
+            
             // Convert to tile-local coordinates
             obj->position = obj->position - QPointF(
                 coord.first * Document::EDGELESS_TILE_SIZE,
@@ -5433,6 +5521,11 @@ void DocumentViewport::pasteObjects()
                 qWarning() << "pasteObjects: No page at index" << m_currentPageIndex;
                 continue;
             }
+            
+            // Set zOrder so pasted object appears on top of existing objects with same affinity
+            int affinity = obj->getLayerAffinity();
+            obj->zOrder = getNextZOrderForAffinity(targetPage, affinity);
+            qDebug() << "pasteObjects: assigned zOrder =" << obj->zOrder << "for affinity =" << affinity;
             
             targetPage->addObject(std::move(obj));
             m_document->markPageDirty(m_currentPageIndex);
@@ -5507,7 +5600,11 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
     
     // Set default affinity (activeLayer - 1, so it appears below strokes)
     int activeLayer = page->activeLayerIndex;
-    linkObj->setLayerAffinity(activeLayer - 1);
+    int defaultAffinity = activeLayer - 1;
+    linkObj->setLayerAffinity(defaultAffinity);
+    
+    // Set zOrder so new object appears on top of existing objects with same affinity
+    linkObj->zOrder = getNextZOrderForAffinity(page, defaultAffinity);
     
     // Store raw pointer BEFORE std::move
     LinkObject* rawPtr = linkObj.get();
@@ -5556,7 +5653,11 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
         
         // Default affinity based on active layer
         int activeLayer = m_edgelessActiveLayerIndex;
-        linkObj->setLayerAffinity(activeLayer - 1);
+        int defaultAffinity = activeLayer - 1;
+        linkObj->setLayerAffinity(defaultAffinity);
+        
+        // Set zOrder so new object appears on top of existing objects with same affinity
+        linkObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
         
         targetTile->addObject(std::move(linkObj));
         m_document->markTileDirty(coord);
@@ -5571,7 +5672,11 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
         
         // Default affinity based on active layer
         int activeLayer = page->activeLayerIndex;
-        linkObj->setLayerAffinity(activeLayer - 1);
+        int defaultAffinity = activeLayer - 1;
+        linkObj->setLayerAffinity(defaultAffinity);
+        
+        // Set zOrder so new object appears on top of existing objects with same affinity
+        linkObj->zOrder = getNextZOrderForAffinity(page, defaultAffinity);
         
         page->addObject(std::move(linkObj));
         m_document->markPageDirty(pageIndex);
@@ -6397,6 +6502,9 @@ void DocumentViewport::finalizeLassoSelection()
         
         // P5: Clear background snapshot (new selection = new excluded strokes)
         m_selectionBackgroundSnapshot = QPixmap();
+        
+        // Action Bar: Notify that lasso selection now exists
+        emit lassoSelectionChanged(true);
     }
     
     // Clear the lasso path now that selection is complete
@@ -7639,6 +7747,9 @@ void DocumentViewport::copySelection()
     }
     
     m_clipboard.hasContent = true;
+    
+    // Action Bar: Notify that stroke clipboard now has content
+    emit strokeClipboardChanged(true);
 }
 
 void DocumentViewport::cutSelection()
@@ -7858,8 +7969,39 @@ void DocumentViewport::deleteSelection()
     emit documentModified();
 }
 
+// =========================================================================
+// Public Clipboard Operations (Action Bar support)
+// =========================================================================
+
+void DocumentViewport::copyLassoSelection()
+{
+    copySelection();
+}
+
+void DocumentViewport::cutLassoSelection()
+{
+    cutSelection();
+}
+
+void DocumentViewport::pasteLassoSelection()
+{
+    pasteSelection();
+}
+
+void DocumentViewport::deleteLassoSelection()
+{
+    deleteSelection();
+}
+
+void DocumentViewport::copyTextSelection()
+{
+    copySelectedTextToClipboard();
+}
+
 void DocumentViewport::clearLassoSelection()
 {
+    bool hadSelection = m_lassoSelection.isValid();
+    
     m_lassoSelection.clear();
     m_lassoPath.clear();
     m_isDrawingLasso = false;
@@ -7874,6 +8016,11 @@ void DocumentViewport::clearLassoSelection()
     
     // P5: Clear background snapshot
     m_selectionBackgroundSnapshot = QPixmap();
+    
+    // Action Bar: Notify that lasso selection was cleared
+    if (hadSelection) {
+        emit lassoSelectionChanged(false);
+    }
     
     update();
 }
@@ -8084,7 +8231,11 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
     // Check if highlighter is enabled on this page
     PageHit hit = viewportToPage(pe.viewportPos);
     if (!hit.valid()) {
+        bool hadSelection = m_textSelection.isValid();
         m_textSelection.clear();
+        if (hadSelection) {
+            emit textSelectionChanged(false);
+        }
         m_pointerActive = false;  // Reset so hover works
         return;
     }
@@ -8092,7 +8243,11 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
     Page* page = m_document->page(hit.pageIndex);
     if (!page || page->backgroundType != Page::BackgroundType::PDF) {
         // Not a PDF page - highlighter disabled
+        bool hadSelection = m_textSelection.isValid();
         m_textSelection.clear();
+        if (hadSelection) {
+            emit textSelectionChanged(false);
+        }
         m_pointerActive = false;  // Reset so hover works
         return;
     }
@@ -8446,6 +8601,9 @@ void DocumentViewport::finalizeTextSelection()
     
     // Emit signal for UI feedback
     emit textSelected(m_textSelection.selectedText);
+    
+    // Action Bar: Notify that text selection now exists
+    emit textSelectionChanged(true);
     
     // qDebug() << "Text selected:" << m_textSelection.selectedText.left(50) 
              // << (m_textSelection.selectedText.length() > 50 ? "..." : "");

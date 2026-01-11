@@ -347,6 +347,7 @@ set(UI_SOURCES
         source/ui/widgets/ToggleButton.cpp  # Task 1.3: SubToolbarToggle
         source/ui/widgets/ModeToggleButton.cpp  # Task 1.4: Mode toggle button
         source/ui/widgets/LinkSlotButton.cpp  # Task 1.5: Link slot button
+        source/ui/widgets/ActionBarButton.cpp  # Task 1.2: ActionBarButton widget
         # Subtoolbar framework (Phase D)
         source/ui/subtoolbars/SubToolbar.cpp  # Task 2.1: SubToolbar base class
         source/ui/subtoolbars/SubToolbarContainer.cpp  # Task 2.2: SubToolbar container
@@ -355,6 +356,13 @@ set(UI_SOURCES
         source/ui/subtoolbars/MarkerSubToolbar.cpp  # Task 3.2: Marker subtoolbar
         source/ui/subtoolbars/HighlighterSubToolbar.cpp  # Task 3.3: Highlighter subtoolbar
         source/ui/subtoolbars/ObjectSelectSubToolbar.cpp  # Task 3.4: ObjectSelect subtoolbar
+        # Action bar framework (Phase D.4)
+        source/ui/actionbars/ActionBar.cpp  # Task 1.1: ActionBar base class
+        source/ui/actionbars/ActionBarContainer.cpp  # Task 1.3: ActionBarContainer
+        source/ui/actionbars/LassoActionBar.cpp  # Task 2.1: LassoActionBar
+        source/ui/actionbars/ObjectSelectActionBar.cpp  # Task 2.2: ObjectSelectActionBar
+        source/ui/actionbars/TextSelectionActionBar.cpp  # Task 2.3: TextSelectionActionBar
+        source/ui/actionbars/ClipboardActionBar.cpp  # Task 2.4: ClipboardActionBar
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)

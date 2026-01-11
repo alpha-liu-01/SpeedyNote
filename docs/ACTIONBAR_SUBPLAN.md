@@ -631,21 +631,21 @@ source/ui/widgets/
 ## Implementation Status
 
 ### Phase 1: Framework
-- [ ] Task 1.1: ActionBar base class
-- [ ] Task 1.2: ActionBarButton widget
-- [ ] Task 1.3: ActionBarContainer
+- [x] Task 1.1: ActionBar base class ✅
+- [x] Task 1.2: ActionBarButton widget ✅
+- [x] Task 1.3: ActionBarContainer ✅
 
 ### Phase 2: Action Bars
-- [ ] Task 2.1: LassoActionBar
-- [ ] Task 2.2: ObjectSelectActionBar
-- [ ] Task 2.3: TextSelectionActionBar
-- [ ] Task 2.4: ClipboardActionBar
+- [x] Task 2.1: LassoActionBar ✅
+- [x] Task 2.2: ObjectSelectActionBar ✅
+- [x] Task 2.3: TextSelectionActionBar ✅
+- [x] Task 2.4: ClipboardActionBar ✅
 
 ### Phase 3: Integration
-- [ ] Task 3.1: DocumentViewport signals
-- [ ] Task 3.2: MainWindow integration
-- [ ] Task 3.3: Viewport connection handler
-- [ ] Task 3.4: Position update
+- [x] Task 3.1: DocumentViewport signals ✅
+- [x] Task 3.2: MainWindow integration ✅
+- [x] Task 3.3: Viewport connection handler ✅
+- [x] Task 3.4: Position update ✅ (completed in Task 3.2)
 
 ### Phase 4: Polish
 - [ ] Task 4.1: Animation implementation
@@ -653,4 +653,178 @@ source/ui/widgets/
 - [ ] Task 4.3: Tooltips
 - [ ] Task 4.4: Tab change handling
 
+---
+
+## Bug Fixes (Post-Implementation)
+
+### Fix 1: Action Bars Not Working on First Tab
+
+**Problem:** Action bars did not work on the first tab created after application launch. Creating a second tab would make action bars functional.
+
+**Root Cause:** In `TabManager::createTab()`, when `m_tabBar->addTab()` is called for the first tab, Qt automatically selects it and emits `currentChanged(0)`. At that moment, `m_viewports` is still empty because `m_viewports.append(viewport)` hadn't been executed yet. This caused `onCurrentChanged(0)` to pass a null viewport to signal handlers.
+
+**Solution:** Block signals on `m_tabBar` during the entire tab creation process, then manually sync the viewport stack and emit `currentViewportChanged(viewport)` after all data structures are properly initialized.
+
+**File:** `source/ui/TabManager.cpp`
+
+```cpp
+// BUG FIX: Block signals during tab creation
+m_tabBar->blockSignals(true);
+
+int index = m_tabBar->addTab(title);
+m_viewportStack->addWidget(viewport);
+m_viewports.append(viewport);
+// ...
+m_tabBar->setCurrentIndex(index);
+
+m_tabBar->blockSignals(false);
+
+// Manually sync viewport stack (blocked signal normally does this)
+m_viewportStack->setCurrentIndex(index);
+
+// Manually emit with valid viewport
+emit currentViewportChanged(viewport);
+```
+
+---
+
+### Fix 2: Pasted Objects Have Incorrect zOrder
+
+**Problem:** Pasted objects (from clipboard) and newly inserted objects (via Ctrl+V from external clipboard) had zOrder=0 by default. If existing objects on the page had higher zOrders (e.g., from previous "bring to front" operations), the new objects would render below them despite being inserted later.
+
+**Root Cause:** When objects are first created (`insertImageFromClipboard()`, `insertImageFromFile()`, `createLinkObjectAtPosition()`, `createLinkObjectForHighlight()`, `pasteObjects()`), they used the default `zOrder = 0` from `InsertedObject`. The `zOrder` was only changed when users explicitly used "bring to front/back" operations.
+
+**Solution:** Added `getNextZOrderForAffinity(Page* page, int affinity)` helper function that calculates `max(existing zOrders) + 1` for objects with the same affinity. This ensures newly inserted/pasted objects always appear on top.
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` - Added `getNextZOrderForAffinity()` declaration
+- `source/core/DocumentViewport.cpp` - Implemented helper, updated:
+  - `insertImageFromClipboard()`
+  - `insertImageFromFile()`
+  - `pasteObjects()`
+  - `createLinkObjectForHighlight()`
+  - `createLinkObjectAtPosition()`
+
+```cpp
+int DocumentViewport::getNextZOrderForAffinity(Page* page, int affinity) const
+{
+    if (!page) return 0;
+    
+    int maxZOrder = -1;  // Start below 0 so first object gets zOrder = 0
+    for (const auto& obj : page->objects) {
+        if (obj && obj->getLayerAffinity() == affinity) {
+            maxZOrder = qMax(maxZOrder, obj->zOrder);
+        }
+    }
+    return maxZOrder + 1;
+}
+```
+
+**Note:** Undo/redo operations correctly restore objects with their original serialized zOrder values, so they were not modified.
+
+---
+
+### Fix 3: ObjectSelectActionBar Paste Button Dismissal
+
+**Problem:** The paste button on ObjectSelectActionBar persisted indefinitely after copying an object. Users had no way to dismiss it without a keyboard (pressing Escape), which is problematic for tablet users.
+
+**Solution:** Added a Cancel button to ObjectSelectSubToolbar and Escape key handling for ObjectSelect tool in DocumentViewport.
+
+**Behavior:**
+1. First press: If objects are selected, deselect them
+2. Second press: If no objects selected but clipboard has content, clear the clipboard
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` - Added `cancelObjectSelectAction()` and `clearObjectClipboard()` methods
+- `source/core/DocumentViewport.cpp` - Implemented methods and added Escape key handling in ObjectSelect tool
+- `source/ui/actionbars/ObjectSelectActionBar.h` - Added `cancelRequested()` signal and `m_cancelButton` member
+- `source/ui/actionbars/ObjectSelectActionBar.cpp` - Added cancel button with cross icon (visible in paste-only mode)
+- `source/MainWindow.cpp` - Connected `ObjectSelectActionBar::cancelRequested` to `DocumentViewport::cancelObjectSelectAction()`
+
+```cpp
+// DocumentViewport::cancelObjectSelectAction()
+void DocumentViewport::cancelObjectSelectAction()
+{
+    // Step 1: If objects are selected, deselect them
+    if (!m_selectedObjects.isEmpty()) {
+        deselectAllObjects();
+        return;
+    }
+    
+    // Step 2: If no objects selected but clipboard has content, clear clipboard
+    if (!m_objectClipboard.isEmpty()) {
+        clearObjectClipboard();
+    }
+}
+```
+
+The Cancel button appears on the **ActionBar** (floating panel on the right side) alongside the Paste button when in paste-only mode. This is the correct placement since Cancel is an action, not a tool setting - the subtoolbar (on the left) is reserved for tool settings/modes.
+
+---
+
+## Post-Implementation Code Review
+
+### CR-AB-1: Separator Initial Color Hardcoded ✅
+**Status:** FIXED
+
+**Problem:** In `ObjectSelectActionBar::setupButtons()`, the separator was created with a hardcoded light mode color (`#CCCCCC`) instead of checking the current theme.
+
+**Fix:** Added `isDarkMode()` check when setting initial separator color.
+
+**File Modified:** `source/ui/actionbars/ObjectSelectActionBar.cpp`
+
+---
+
+### CR-AB-2: Context State Not Synced on Tab Switch ✅
+**Status:** FIXED
+
+**Problem:** When switching tabs, only `onToolChanged()` and `onObjectSelectionChanged()` were called. Other context states (`m_hasLassoSelection`, `m_hasTextSelection`, `m_hasStrokesInClipboard`, `m_hasObjectsInClipboard`) were NOT synced, causing the action bar to potentially show/hide incorrectly after a tab switch.
+
+**Example bug scenario:**
+1. Tab 1: Make a lasso selection (LassoActionBar shows)
+2. Switch to Tab 2 (LassoActionBar should hide because Tab 2 has no selection)
+3. Bug: LassoActionBar might still show because `m_hasLassoSelection` retained its old value
+
+**Fix:** 
+1. Added getter methods to `DocumentViewport.h`:
+   - `hasLassoSelection()` - checks `m_lassoSelection.isValid()`
+   - `hasTextSelection()` - checks `m_textSelection.isValid()`
+   - `hasStrokesInClipboard()` - checks `m_clipboard.hasContent`
+   - `hasObjectsInClipboard()` - checks `!m_objectClipboard.isEmpty()`
+
+2. Updated `MainWindow::connectViewportScrollSignals()` to sync ALL context states:
+```cpp
+// Sync all selection/clipboard states
+m_actionBarContainer->onLassoSelectionChanged(viewport->hasLassoSelection());
+m_actionBarContainer->onObjectSelectionChanged(viewport->hasSelectedObjects());
+m_actionBarContainer->onTextSelectionChanged(viewport->hasTextSelection());
+m_actionBarContainer->onStrokeClipboardChanged(viewport->hasStrokesInClipboard());
+m_actionBarContainer->onObjectClipboardChanged(viewport->hasObjectsInClipboard());
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` (added getter methods)
+- `source/MainWindow.cpp` (sync all states on tab switch)
+
+---
+
+### CR-AB-3: isDarkMode() Duplication (Low Severity)
+**Status:** NOT FIXED (Minor, documented)
+
+**Problem:** The `isDarkMode()` function is duplicated in multiple files:
+- `ActionBar.cpp`
+- `ActionBarButton.cpp`
+- All subtoolbar widgets
+
+**Decision:** Same as CR-ST-4 from subtoolbar review - this is a minor code smell, not a bug. The function is simple (5 lines) and extracting it would require either a utility class or common base class. Acceptable for now.
+
+---
+
+### Code Review Summary
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| CR-AB-1: Separator hardcoded color | **Low** | ✅ FIXED |
+| CR-AB-2: Tab switch state sync | **Medium** | ✅ FIXED |
+| CR-AB-3: isDarkMode() duplication | **Low** | Documented |
 

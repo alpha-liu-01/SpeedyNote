@@ -133,6 +133,14 @@
     <file>resources/icons/select_reversed.png</file>
     <file>resources/icons/linkicon.png</file>
     <file>resources/icons/linkicon_reversed.png</file>
+    <file>resources/icons/cut.png</file>
+    <file>resources/icons/cut_reversed.png</file>
+    <file>resources/icons/paste.png</file>
+    <file>resources/icons/paste_reversed.png</file>
+    <file>resources/icons/layer_uparrow.png</file>
+    <file>resources/icons/layer_uparrow_reversed.png</file>
+    <file>resources/icons/layer_downarrow.png</file>
+    <file>resources/icons/layer_downarrow_reversed.png</file>
     <file>resources/sounds/dial_click.wav</file>
     <file>resources/fonts/PixelFont.ttf</file>
     <file>resources/fonts/Jersey20-Regular.ttf</file>

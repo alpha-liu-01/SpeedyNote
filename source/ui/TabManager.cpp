@@ -57,6 +57,12 @@ int TabManager::createTab(Document* doc, const QString& title)
     DocumentViewport* viewport = new DocumentViewport(m_viewportStack);
     viewport->setDocument(doc);
     
+    // BUG FIX: Block signals during tab creation to prevent currentChanged
+    // from being emitted before m_viewports is updated. When addTab() is called
+    // for the first tab, Qt automatically selects it and emits currentChanged,
+    // but at that point m_viewports would still be empty.
+    m_tabBar->blockSignals(true);
+    
     // Add to tab bar
     int index = m_tabBar->addTab(title);
     
@@ -68,8 +74,17 @@ int TabManager::createTab(Document* doc, const QString& title)
     m_baseTitles.append(title);
     m_modifiedFlags.append(false);
     
-    // Make the new tab active
+    // Make the new tab active (still blocked, so no signal yet)
     m_tabBar->setCurrentIndex(index);
+    
+    // Re-enable signals
+    m_tabBar->blockSignals(false);
+    
+    // Manually sync viewport stack (since we blocked the signal that normally does this)
+    m_viewportStack->setCurrentIndex(index);
+    
+    // Manually emit currentViewportChanged now that everything is set up
+    emit currentViewportChanged(viewport);
     
     return index;
 }

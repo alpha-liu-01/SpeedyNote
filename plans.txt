@@ -574,7 +574,7 @@ D.3: ObjectSelect Subtoolbar [MEDIUM] ✅ DONE
      - Slot buttons (1/2/3) with visual state (empty/filled/type icon)
      - "Pick position" mode for Position links
 
-D.4: Action Bar [MEDIUM]
+D.4: Action Bar [MEDIUM] ✅ DONE
      - Context-sensitive floating buttons for tablet users
      - Shows: Copy/Paste/Delete/Undo/Redo when relevant
      - Appears on selection, disappears after action

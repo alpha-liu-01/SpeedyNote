@@ -67,6 +67,13 @@ class MarkerSubToolbar;
 class HighlighterSubToolbar;
 class ObjectSelectSubToolbar;
 
+// Action Bar includes
+class ActionBarContainer;
+class LassoActionBar;
+class ObjectSelectActionBar;
+class TextSelectionActionBar;
+class ClipboardActionBar;
+
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
 // Will be reimplemented in Phase 3.3 if needed
 // Guard to prevent redefinition if InkCanvas.h is also included
@@ -290,6 +297,13 @@ private:
     QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
     int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
     
+    // Action Bar system
+    ActionBarContainer *m_actionBarContainer = nullptr;
+    LassoActionBar *m_lassoActionBar = nullptr;
+    ObjectSelectActionBar *m_objectSelectActionBar = nullptr;
+    TextSelectionActionBar *m_textSelectionActionBar = nullptr;
+    ClipboardActionBar *m_clipboardActionBar = nullptr;
+    
     // Phase C.1.5: addTabButton removed - functionality now in NavigationBar
     QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)
     
@@ -377,6 +391,13 @@ private:
     QMetaObject::Connection m_actionModeConn;
     QMetaObject::Connection m_selectionChangedConn;
     
+    // Action Bar: Selection state connections (viewport → action bar container)
+    QMetaObject::Connection m_lassoSelectionConn;
+    QMetaObject::Connection m_objectSelectionForActionBarConn;
+    QMetaObject::Connection m_textSelectionConn;
+    QMetaObject::Connection m_strokeClipboardConn;
+    QMetaObject::Connection m_objectClipboardConn;
+    
     // Phase 5.1: LayerPanel page change connection
     QMetaObject::Connection m_layerPanelPageConn;
     
@@ -397,6 +418,10 @@ private:
     // Phase D: Subtoolbar setup and positioning
     void setupSubToolbars();           // Create and connect subtoolbars
     void updateSubToolbarPosition();   // Update position on viewport resize
+    
+    // Action Bar setup and positioning
+    void setupActionBars();            // Create and connect action bars
+    void updateActionBarPosition();    // Update position on viewport resize
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

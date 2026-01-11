@@ -12,7 +12,13 @@
 #include "ui/subtoolbars/MarkerSubToolbar.h"
 #include "ui/subtoolbars/HighlighterSubToolbar.h"
 #include "ui/subtoolbars/ObjectSelectSubToolbar.h"
+#include "ui/actionbars/ActionBarContainer.h"
+#include "ui/actionbars/LassoActionBar.h"
+#include "ui/actionbars/ObjectSelectActionBar.h"
+#include "ui/actionbars/TextSelectionActionBar.h"
+#include "ui/actionbars/ClipboardActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
+#include <QClipboard>  // For clipboard signal connection
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -417,6 +423,12 @@ void MainWindow::setupUi() {
     scrollbarHideTimer->setInterval(3000);  // 3 seconds
     connect(scrollbarHideTimer, &QTimer::timeout, this, &MainWindow::hideScrollbars);
     
+    // FIX: Start autohide timer if scrollbars are initially visible
+    // Without this, scrollbars stay visible forever until user interacts with them
+    if (scrollbarsVisible) {
+        scrollbarHideTimer->start();
+    }
+    
     // Trackpad mode timer: maintains trackpad state across rapid events
     trackpadModeTimer = new QTimer(this);
     trackpadModeTimer->setSingleShot(true);
@@ -774,6 +786,9 @@ void MainWindow::setupUi() {
     
     // Phase D: Setup subtoolbars
     setupSubToolbars();
+    
+    // Setup action bars
+    setupActionBars();
 
     // Add components in vertical order
     // Phase C.1.5: tabBarContainer hidden - buttons now in NavigationBar
@@ -1068,6 +1083,27 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_selectionChangedConn);
         m_selectionChangedConn = {};
     }
+    // Action Bar: Disconnect selection state connections
+    if (m_lassoSelectionConn) {
+        disconnect(m_lassoSelectionConn);
+        m_lassoSelectionConn = {};
+    }
+    if (m_objectSelectionForActionBarConn) {
+        disconnect(m_objectSelectionForActionBarConn);
+        m_objectSelectionForActionBarConn = {};
+    }
+    if (m_textSelectionConn) {
+        disconnect(m_textSelectionConn);
+        m_textSelectionConn = {};
+    }
+    if (m_strokeClipboardConn) {
+        disconnect(m_strokeClipboardConn);
+        m_strokeClipboardConn = {};
+    }
+    if (m_objectClipboardConn) {
+        disconnect(m_objectClipboardConn);
+        m_objectClipboardConn = {};
+    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -1198,6 +1234,50 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     
     // Also sync the current selection state to the subtoolbar
     updateLinkSlotButtons(viewport);
+    
+    // =========================================================================
+    // Action Bar: Connect selection state signals to ActionBarContainer
+    // =========================================================================
+    
+    // Lasso selection changed (shows/hides LassoActionBar)
+    m_lassoSelectionConn = connect(viewport, &DocumentViewport::lassoSelectionChanged,
+                                   m_actionBarContainer, &ActionBarContainer::onLassoSelectionChanged);
+    
+    // Object selection changed (shows/hides ObjectSelectActionBar)
+    // Note: objectSelectionChanged has no bool parameter, so we wrap it
+    m_objectSelectionForActionBarConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
+                                                this, [this, viewport]() {
+        if (m_actionBarContainer) {
+            bool hasSelection = !viewport->selectedObjects().isEmpty();
+            m_actionBarContainer->onObjectSelectionChanged(hasSelection);
+        }
+    });
+    
+    // Text selection changed (shows/hides TextSelectionActionBar)
+    m_textSelectionConn = connect(viewport, &DocumentViewport::textSelectionChanged,
+                                  m_actionBarContainer, &ActionBarContainer::onTextSelectionChanged);
+    
+    // Stroke clipboard changed (shows/hides Paste button in LassoActionBar)
+    m_strokeClipboardConn = connect(viewport, &DocumentViewport::strokeClipboardChanged,
+                                    m_actionBarContainer, &ActionBarContainer::onStrokeClipboardChanged);
+    
+    // Object clipboard changed (shows/hides Paste button in ObjectSelectActionBar)
+    m_objectClipboardConn = connect(viewport, &DocumentViewport::objectClipboardChanged,
+                                    m_actionBarContainer, &ActionBarContainer::onObjectClipboardChanged);
+    
+    // Sync initial action bar state from viewport
+    // CR-AB-2 FIX: Sync ALL context states to prevent stale state from previous tab
+    if (m_actionBarContainer) {
+        // Trigger tool change to evaluate initial visibility
+        m_actionBarContainer->onToolChanged(viewport->currentTool());
+        
+        // Sync all selection/clipboard states
+        m_actionBarContainer->onLassoSelectionChanged(viewport->hasLassoSelection());
+        m_actionBarContainer->onObjectSelectionChanged(viewport->hasSelectedObjects());
+        m_actionBarContainer->onTextSelectionChanged(viewport->hasTextSelection());
+        m_actionBarContainer->onStrokeClipboardChanged(viewport->hasStrokesInClipboard());
+        m_actionBarContainer->onObjectClipboardChanged(viewport->hasObjectsInClipboard());
+    }
 }
 
 void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
@@ -2435,6 +2515,11 @@ void MainWindow::updateTheme() {
     if (m_subtoolbarContainer) {
         m_subtoolbarContainer->setDarkMode(darkMode);
     }
+    
+    // Update ActionBarContainer theme
+    if (m_actionBarContainer) {
+        m_actionBarContainer->setDarkMode(darkMode);
+    }
 }
     
 void MainWindow::saveThemeSettings() {
@@ -2556,7 +2641,10 @@ void MainWindow::hideScrollbars() {
 }
 
 void MainWindow::updateScrollbarPositions() {
-    // MW5.8: Position sliders relative to Toolbar and LeftSidebarContainer
+    // MW5.8: Position sliders relative to their parent container (canvasContainer)
+    // Note: Sliders are children of canvasContainer, NOT the main window, so their
+    // coordinates are relative to canvasContainer. The left sidebar is a sibling of
+    // canvasContainer in the layout, so we should NOT add sidebar offset here.
     QWidget *container = m_viewportStack ? m_viewportStack->parentWidget() : nullptr;
     if (!container || !panXSlider || !panYSlider || !m_viewportStack) return;
     
@@ -2574,31 +2662,25 @@ void MainWindow::updateScrollbarPositions() {
     int containerWidth = container->width();
     int containerHeight = container->height();
     
-    // Calculate left offset based on LeftSidebarContainer
-    int leftOffset = 0;
-    if (m_leftSidebar && m_leftSidebar->isVisible()) {
-        leftOffset = m_leftSidebar->width();
-    }
-    
-    // Leave a bit of space for the corner
+    // Leave a bit of space for the corner where panX and panY would intersect
     int cornerOffset = 15;
     
-    // Position horizontal scrollbar at top (below Toolbar, which is handled by layout)
-    // Pan X: Full width of viewport area, starting after left sidebar
+    // Position horizontal scrollbar at top
+    // Pan X: Full width of container minus corner space for panY slider
     panXSlider->setGeometry(
-        leftOffset + cornerOffset + margin,  // After left sidebar + corner space
-        margin,  // At top of container (Toolbar is above in main layout)
-        containerWidth - leftOffset - cornerOffset - margin*2,  // Width minus sidebar and margins
+        cornerOffset + margin,  // After corner space for panY
+        margin,  // At top of container
+        containerWidth - cornerOffset - margin * 2,  // Width minus corner and margins
         scrollbarHeight
     );
     
-    // Position vertical scrollbar at left (to the right of LeftSidebarContainer)
-    // Pan Y: On the LEFT side to avoid arm/wrist interference
+    // Position vertical scrollbar at left
+    // Pan Y: On the LEFT side to avoid arm/wrist interference (for right-handed users)
     panYSlider->setGeometry(
-        leftOffset + margin,  // Right after left sidebar
-        cornerOffset + margin,  // Below corner offset
+        margin,  // At left edge of container
+        cornerOffset + margin,  // Below corner offset (for panX)
         scrollbarWidth,
-        containerHeight - cornerOffset - margin*2  // Full height minus corners
+        containerHeight - cornerOffset - margin * 2  // Full height minus corners
     );
     
     // Ensure sliders are raised above content
@@ -2607,6 +2689,9 @@ void MainWindow::updateScrollbarPositions() {
     
     // Phase D: Also update subtoolbar position
     updateSubToolbarPosition();
+    
+    // Update action bar position
+    updateActionBarPosition();
 }
 
 // =========================================================================
@@ -2757,22 +2842,149 @@ void MainWindow::updateSubToolbarPosition()
     }
     
     // Get canvas container geometry (the viewport area)
+    // Note: SubToolbarContainer is a child of m_canvasContainer, so coordinates
+    // are relative to canvasContainer. The left sidebar is a sibling of
+    // canvasContainer in the layout, so we should NOT add sidebar offset here.
     QRect viewportRect = m_canvasContainer->rect();
-    
-    // Account for left sidebar if visible
-    int leftOffset = 0;
-    if (m_leftSidebar && m_leftSidebar->isVisible()) {
-        leftOffset = m_leftSidebar->width();
-    }
-    
-    // Adjust viewport rect to exclude left sidebar area
-    viewportRect.setLeft(viewportRect.left() + leftOffset);
     
     // Update subtoolbar container position
     m_subtoolbarContainer->updatePosition(viewportRect);
     
     // Ensure it's raised above viewport content
     m_subtoolbarContainer->raise();
+}
+
+void MainWindow::setupActionBars()
+{
+    if (!m_canvasContainer) {
+        qWarning() << "setupActionBars: canvasContainer not yet created";
+        return;
+    }
+    
+    // Create action bar container as child of canvas container (floats over viewport)
+    m_actionBarContainer = new ActionBarContainer(m_canvasContainer);
+    
+    // Create individual action bars
+    m_lassoActionBar = new LassoActionBar();
+    m_objectSelectActionBar = new ObjectSelectActionBar();
+    m_textSelectionActionBar = new TextSelectionActionBar();
+    m_clipboardActionBar = new ClipboardActionBar();
+    
+    // Register action bars with container
+    m_actionBarContainer->setActionBar("lasso", m_lassoActionBar);
+    m_actionBarContainer->setActionBar("objectSelect", m_objectSelectActionBar);
+    m_actionBarContainer->setActionBar("textSelection", m_textSelectionActionBar);
+    m_actionBarContainer->setActionBar("clipboard", m_clipboardActionBar);
+    
+    // Connect tool changes from Toolbar to ActionBarContainer
+    connect(m_toolbar, &Toolbar::toolSelected, 
+            m_actionBarContainer, &ActionBarContainer::onToolChanged);
+    
+    // Connect clipboard changes from system clipboard
+    connect(QApplication::clipboard(), &QClipboard::dataChanged,
+            m_actionBarContainer, &ActionBarContainer::onClipboardChanged);
+    
+    // Connect LassoActionBar signals to viewport
+    connect(m_lassoActionBar, &LassoActionBar::copyRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->copyLassoSelection();
+        }
+    });
+    connect(m_lassoActionBar, &LassoActionBar::cutRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->cutLassoSelection();
+        }
+    });
+    connect(m_lassoActionBar, &LassoActionBar::pasteRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->pasteLassoSelection();
+        }
+    });
+    connect(m_lassoActionBar, &LassoActionBar::deleteRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->deleteLassoSelection();
+        }
+    });
+    
+    // Connect ObjectSelectActionBar signals to viewport
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::copyRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->copySelectedObjects();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::pasteRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->pasteForObjectSelect();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::deleteRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->deleteSelectedObjects();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::bringForwardRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->bringSelectedForward();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::sendBackwardRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->sendSelectedBackward();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::increaseAffinityRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->increaseSelectedAffinity();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::decreaseAffinityRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->decreaseSelectedAffinity();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::cancelRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->cancelObjectSelectAction();
+        }
+    });
+    
+    // Connect TextSelectionActionBar signals to viewport
+    connect(m_textSelectionActionBar, &TextSelectionActionBar::copyRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->copyTextSelection();
+        }
+    });
+    
+    // Connect ClipboardActionBar signals to viewport
+    connect(m_clipboardActionBar, &ClipboardActionBar::pasteRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->pasteForObjectSelect();
+        }
+    });
+    
+    // Initial position update
+    QTimer::singleShot(0, this, &MainWindow::updateActionBarPosition);
+    
+    qDebug() << "Action bars initialized";
+}
+
+void MainWindow::updateActionBarPosition()
+{
+    if (!m_actionBarContainer || !m_canvasContainer) {
+        return;
+    }
+    
+    // Get canvas container geometry (the viewport area)
+    // Note: ActionBarContainer is a child of m_canvasContainer, so coordinates
+    // are relative to canvasContainer. The sidebars are siblings of
+    // canvasContainer in the layout, so we should NOT add sidebar offset here.
+    QRect viewportRect = m_canvasContainer->rect();
+    
+    // Update action bar container position
+    m_actionBarContainer->updatePosition(viewportRect);
+    
+    // Ensure it's raised above viewport content
+    m_actionBarContainer->raise();
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
