@@ -1162,6 +1162,19 @@ public slots:
     void scrollToPage(int pageIndex);
     
     /**
+     * @brief Scroll to a specific position on a page using normalized coordinates.
+     * @param pageIndex 0-based page index.
+     * @param normalizedPosition Position in normalized coordinates (0-1 range).
+     *        X: 0 = left edge, 1 = right edge
+     *        Y: 0 = bottom edge, 1 = top edge (PDF coordinate convention)
+     *        Values < 0 mean "not specified" and are ignored.
+     * 
+     * Phase E.2: Used by OutlinePanel for PDF outline navigation.
+     * PDF outlines often specify exact positions using normalized coordinates.
+     */
+    void scrollToPositionOnPage(int pageIndex, QPointF normalizedPosition);
+    
+    /**
      * @brief Navigate to a specific position on a page identified by UUID.
      * @param pageUuid UUID of the target page.
      * @param position Position in page-local coordinates to center on.

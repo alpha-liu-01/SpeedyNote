@@ -597,6 +597,58 @@ void DocumentViewport::scrollToPage(int pageIndex)
     emit currentPageChanged(m_currentPageIndex);
 }
 
+void DocumentViewport::scrollToPositionOnPage(int pageIndex, QPointF normalizedPosition)
+{
+    // Phase E.2: Scroll to a specific position within a page using normalized coordinates
+    // Used by OutlinePanel for PDF outline navigation
+    //
+    // Normalized coordinates: 0-1 range where:
+    //   X: 0 = left edge, 1 = right edge
+    //   Y: 0 = top edge, 1 = bottom edge (ALREADY converted from PDF coords by PopplerPdfProvider)
+    //   Values < 0 mean "not specified"
+    
+    if (!m_document || m_document->pageCount() == 0) return;
+    
+    pageIndex = qBound(0, pageIndex, m_document->pageCount() - 1);
+    
+    // Get page size and position in document coordinates
+    QSizeF pageSz = m_document->pageSizeAt(pageIndex);
+    QPointF pagePos = pagePosition(pageIndex);
+    
+    // Calculate target Y position within the page
+    // Only adjust Y if specified; X is handled by centering
+    qreal targetY = pagePos.y();
+    
+    if (normalizedPosition.y() >= 0) {
+        // Normalized Y is already in our coordinate system (0 = top, 1 = bottom)
+        // Position near top of viewport, not centered, so user sees content below
+        targetY += normalizedPosition.y() * pageSz.height();
+        // Add small offset so the target line isn't at the very top edge
+        targetY -= 20;  // 20px margin from top
+    }
+    
+    // Set pan to show target Y position near top of viewport
+    // For Y: we want targetY to be near the top of the viewport, not centered
+    QPointF newPan(
+        m_panOffset.x(),  // Keep current X (will recenter horizontally below)
+        targetY
+    );
+    
+    setPanOffset(newPan);
+    
+    // Re-center horizontally to keep pages properly centered
+    // This ensures the document stays centered regardless of X position in outline
+    recenterHorizontally();
+    
+    // Update current page index
+    m_currentPageIndex = pageIndex;
+    emit currentPageChanged(m_currentPageIndex);
+    
+    qDebug() << "scrollToPositionOnPage: page" << pageIndex 
+             << "normalized" << normalizedPosition
+             << "-> targetY" << targetY;
+}
+
 void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF& position)
 {
     // Phase C.5.1: Navigate to a specific page position (for LinkObject Position slots)

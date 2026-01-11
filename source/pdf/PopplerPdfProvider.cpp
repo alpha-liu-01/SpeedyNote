@@ -95,12 +95,41 @@ PdfOutlineItem PopplerPdfProvider::convertOutlineItem(const Poppler::OutlineItem
     item.title = popplerItem.name();
     item.isOpen = popplerItem.isOpen();
     
-    // Get target page from destination
+    // Get target page and position from destination
     // Note: destination() returns QSharedPointer<const LinkDestination>
     auto dest = popplerItem.destination();
     if (dest && dest->pageNumber() > 0) {
         // Poppler uses 1-based page numbers, we use 0-based
         item.targetPage = dest->pageNumber() - 1;
+        
+        qreal posX = -1;
+        qreal posY = -1;
+        
+        // Extract position if Poppler provides it
+        // NOTE: Poppler's LinkDestination::left() and top() return ALREADY
+        // NORMALIZED coordinates (0-1 range), NOT PDF points!
+        // - top() = 0.0 means top of page
+        // - top() = 0.5 means middle of page
+        // - top() = 1.0 means bottom of page
+        
+        if (dest->isChangeLeft()) {
+            posX = dest->left();
+            posX = qBound(0.0, posX, 1.0);  // Clamp to valid range
+        }
+        if (dest->isChangeTop()) {
+            posY = dest->top();
+            posY = qBound(0.0, posY, 1.0);  // Clamp to valid range
+        }
+        
+        // Only set position if at least one coordinate is specified
+        if (posX >= 0 || posY >= 0) {
+            item.targetPosition = QPointF(posX, posY);
+        }
+        
+        // Extract zoom if available
+        if (dest->isChangeZoom() && dest->zoom() > 0) {
+            item.targetZoom = dest->zoom();
+        }
     }
     
     // Convert children recursively

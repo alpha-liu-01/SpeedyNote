@@ -333,6 +333,8 @@ set(UI_SOURCES
         source/ui/TabManager.cpp             # Task 3.0.2
         source/ui/sidebars/LayerPanel.cpp    # Phase S1: Moved to sidebars folder
         source/ui/sidebars/LeftSidebarContainer.cpp  # Phase S2: Sidebar container
+        source/ui/sidebars/OutlinePanel.cpp  # Phase E.2: PDF outline panel
+        source/ui/sidebars/OutlineItemDelegate.cpp  # Phase E.2: Outline item delegate
         source/ui/DebugOverlay.cpp           # Debug overlay widget
         source/ui/ToolbarButtons.cpp         # Toolbar button types
         source/ui/ToolbarButtonTests.cpp     # Toolbar button unit tests

@@ -4,6 +4,8 @@
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
 #include "ui/sidebars/LayerPanel.h" // Phase S1: Moved to sidebars folder
+#include "ui/sidebars/OutlinePanel.h" // Phase E.2: PDF outline panel
+#include "ui/sidebars/LeftSidebarContainer.h" // Phase S3: Left sidebar container
 #include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
 #include "ui/StyleLoader.h"         // QSS stylesheet loader
 // Phase D: Subtoolbar includes
@@ -167,6 +169,11 @@ MainWindow::MainWindow(QWidget *parent)
         
         // Phase 5.1 Task 4: Update LayerPanel when tab changes
         updateLayerPanelForViewport(vp);
+        
+        // Phase E.2: Update OutlinePanel for current document
+        if (vp) {
+            updateOutlinePanelForDocument(vp->document());
+        }
         
         // Update DebugOverlay with current viewport
         if (m_debugOverlay) {
@@ -789,6 +796,9 @@ void MainWindow::setupUi() {
     
     // Setup action bars
     setupActionBars();
+    
+    // Phase E.2: Setup outline panel connections
+    setupOutlinePanelConnections();
 
     // Add components in vertical order
     // Phase C.1.5: tabBarContainer hidden - buttons now in NavigationBar
@@ -1104,6 +1114,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_objectClipboardConn);
         m_objectClipboardConn = {};
     }
+    // Phase E.2: Disconnect outline page tracking connection
+    if (m_outlinePageConn) {
+        disconnect(m_outlinePageConn);
+        m_outlinePageConn = {};
+    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -1277,6 +1292,22 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_actionBarContainer->onTextSelectionChanged(viewport->hasTextSelection());
         m_actionBarContainer->onStrokeClipboardChanged(viewport->hasStrokesInClipboard());
         m_actionBarContainer->onObjectClipboardChanged(viewport->hasObjectsInClipboard());
+    }
+    
+    // =========================================================================
+    // Phase E.2: Connect page change to OutlinePanel for section highlighting
+    // =========================================================================
+    
+    if (m_leftSidebar) {
+        OutlinePanel* outlinePanel = m_leftSidebar->outlinePanel();
+        if (outlinePanel) {
+            // Connect viewport's currentPageChanged to outline highlighting
+            m_outlinePageConn = connect(viewport, &DocumentViewport::currentPageChanged,
+                                        outlinePanel, &OutlinePanel::highlightPage);
+            
+            // Sync current page state immediately
+            outlinePanel->highlightPage(viewport->currentPageIndex());
+        }
     }
 }
 
@@ -1486,6 +1517,44 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
             }
         });
     }
+}
+
+// ============================================================================
+// Phase E.2: OutlinePanel Update for Document
+// ============================================================================
+
+void MainWindow::updateOutlinePanelForDocument(Document* doc)
+{
+    if (!m_leftSidebar) {
+        return;
+    }
+    
+    OutlinePanel* outlinePanel = m_leftSidebar->outlinePanel();
+    if (!outlinePanel) {
+        return;
+    }
+    
+    // Case 1: No document or not a PDF document
+    if (!doc || !doc->isPdfLoaded()) {
+        m_leftSidebar->showOutlineTab(false);
+        outlinePanel->clearOutline();
+        return;
+    }
+    
+    // Case 2: PDF document but no outline
+    const PdfProvider* pdf = doc->pdfProvider();
+    if (!pdf || !pdf->hasOutline()) {
+        m_leftSidebar->showOutlineTab(false);
+        outlinePanel->clearOutline();
+        return;
+    }
+    
+    // Case 3: PDF with outline - show tab and load data
+    QVector<PdfOutlineItem> outline = pdf->outline();
+    outlinePanel->setOutline(outline);
+    m_leftSidebar->showOutlineTab(true);
+    
+    qDebug() << "Phase E.2: Loaded outline with" << outline.size() << "top-level items";
 }
 
 // ============================================================================
@@ -2985,6 +3054,41 @@ void MainWindow::updateActionBarPosition()
     
     // Ensure it's raised above viewport content
     m_actionBarContainer->raise();
+}
+
+// =========================================================================
+// Phase E.2: PDF Outline Panel Connections
+// =========================================================================
+
+void MainWindow::setupOutlinePanelConnections()
+{
+    if (!m_leftSidebar) {
+        qWarning() << "setupOutlinePanelConnections: m_leftSidebar not yet created";
+        return;
+    }
+    
+    OutlinePanel* outlinePanel = m_leftSidebar->outlinePanel();
+    if (!outlinePanel) {
+        qWarning() << "setupOutlinePanelConnections: OutlinePanel not available";
+        return;
+    }
+    
+    // Navigation: OutlinePanel → DocumentViewport
+    connect(outlinePanel, &OutlinePanel::navigationRequested,
+            this, [this](int pageIndex, QPointF position) {
+        if (DocumentViewport* vp = currentViewport()) {
+            // Position values of -1 mean "not specified"
+            if (position.x() >= 0 || position.y() >= 0) {
+                // Scroll to exact position within the page (PDF provides normalized coords)
+                vp->scrollToPositionOnPage(pageIndex, position);
+            } else {
+                // No position specified - just scroll to the page top
+                vp->scrollToPage(pageIndex);
+            }
+        }
+    });
+    
+    qDebug() << "Phase E.2: Outline panel connections initialized";
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete

@@ -65,10 +65,31 @@ struct PdfLink {
 
 /**
  * @brief Simple data struct for an outline (TOC) item.
+ * 
+ * Used by OutlinePanel to display PDF table of contents and enable
+ * navigation to specific locations within the document.
  */
 struct PdfOutlineItem {
     QString title;                          ///< Display title
     int targetPage = -1;                    ///< Target page (0-based), -1 if none
+    
+    /**
+     * @brief Target position within the page (normalized 0.0-1.0).
+     * 
+     * PDF coordinates: (0,0) is bottom-left, (1,1) is top-right.
+     * Value of -1 means "not specified" for that axis.
+     * If both x and y are -1, scroll to top of page.
+     */
+    QPointF targetPosition = QPointF(-1, -1);
+    
+    /**
+     * @brief Suggested zoom level for this destination.
+     * 
+     * Value of -1 means "keep current zoom".
+     * Typical values: 1.0 = 100%, 2.0 = 200%, etc.
+     */
+    qreal targetZoom = -1;
+    
     bool isOpen = false;                    ///< Whether item is expanded by default
     QVector<PdfOutlineItem> children;       ///< Child items
 };

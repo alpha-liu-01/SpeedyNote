@@ -246,6 +246,7 @@ private slots:
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
+    void updateOutlinePanelForDocument(Document* doc);  // Phase E.2: Update OutlinePanel for document
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
@@ -401,6 +402,9 @@ private:
     // Phase 5.1: LayerPanel page change connection
     QMetaObject::Connection m_layerPanelPageConn;
     
+    // Phase E.2: OutlinePanel page change connection (for section highlighting)
+    QMetaObject::Connection m_outlinePageConn;
+    
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;
     QTimer *trackpadModeTimer = nullptr;
@@ -422,6 +426,9 @@ private:
     // Action Bar setup and positioning
     void setupActionBars();            // Create and connect action bars
     void updateActionBarPosition();    // Update position on viewport resize
+    
+    // Phase E.2: PDF Outline Panel connections
+    void setupOutlinePanelConnections();  // Connect outline panel signals
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     
