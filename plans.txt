@@ -603,7 +603,7 @@ E.2: PDF Outline Panel [MEDIUM]
 E.3: Page Panel [MEDIUM-LARGE]
      - Page thumbnails for quick navigation
      - Click → navigate to page
-     - Drag to reorder pages
+     - Drag to reorder pages (??) I don't think we implemented that feature... 
      - Visual indicator for current page
      - Add/delete page buttons
 
