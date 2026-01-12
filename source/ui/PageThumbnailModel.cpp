@@ -229,6 +229,7 @@ void PageThumbnailModel::setDocument(Document* doc)
     m_document = doc;
     m_currentPageIndex = 0;
     m_thumbnailCache.clear();
+    m_cacheAccessOrder.clear();  // LRU: clear access order
     m_pendingThumbnails.clear();
     
     endResetModel();
@@ -289,6 +290,7 @@ QPixmap PageThumbnailModel::thumbnailForPage(int pageIndex) const
 {
     // Return cached thumbnail if available
     if (m_thumbnailCache.contains(pageIndex)) {
+        touchCache(pageIndex);  // LRU: mark as recently used
         return m_thumbnailCache.value(pageIndex);
     }
     
@@ -306,6 +308,7 @@ void PageThumbnailModel::invalidateThumbnail(int pageIndex)
     
     if (hadCache || wasPending) {
         m_thumbnailCache.remove(pageIndex);
+        m_cacheAccessOrder.removeAll(pageIndex);  // LRU: remove from access order
         m_pendingThumbnails.remove(pageIndex);
         
         // Notify view that the thumbnail data changed
@@ -322,6 +325,7 @@ void PageThumbnailModel::invalidateAllThumbnails()
     m_renderer->cancelAll();
     
     m_thumbnailCache.clear();
+    m_cacheAccessOrder.clear();  // LRU: clear access order
     m_pendingThumbnails.clear();
     
     // Notify view that all data changed
@@ -347,6 +351,7 @@ void PageThumbnailModel::onPageCountChanged()
     
     // Clear cache since page indices may have changed
     m_thumbnailCache.clear();
+    m_cacheAccessOrder.clear();  // LRU: clear access order
     m_pendingThumbnails.clear();
     
     // Clamp current page index
@@ -372,8 +377,10 @@ void PageThumbnailModel::onThumbnailRendered(int pageIndex, QPixmap thumbnail)
         return;
     }
     
-    // Cache the thumbnail
+    // Cache the thumbnail with LRU tracking
     m_thumbnailCache[pageIndex] = thumbnail;
+    touchCache(pageIndex);      // LRU: add to access order
+    evictOldestIfNeeded();      // LRU: evict if over limit
     
     // Notify view that the thumbnail is ready
     const QModelIndex modelIndex = createIndex(pageIndex, 0);
@@ -465,5 +472,25 @@ bool PageThumbnailModel::canDragPage(int pageIndex) const
     
     // In a non-PDF document, all pages can be dragged
     return true;
+}
+
+// ============================================================================
+// LRU Cache Management
+// ============================================================================
+
+void PageThumbnailModel::touchCache(int pageIndex) const
+{
+    // Move page to end of access order (most recently used)
+    m_cacheAccessOrder.removeAll(pageIndex);
+    m_cacheAccessOrder.append(pageIndex);
+}
+
+void PageThumbnailModel::evictOldestIfNeeded() const
+{
+    // Evict oldest entries until we're under the limit
+    while (m_thumbnailCache.size() > MAX_CACHED_THUMBNAILS && !m_cacheAccessOrder.isEmpty()) {
+        int oldestPage = m_cacheAccessOrder.takeFirst();
+        m_thumbnailCache.remove(oldestPage);
+    }
 }
 

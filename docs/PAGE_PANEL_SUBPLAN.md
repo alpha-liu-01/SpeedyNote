@@ -1335,5 +1335,46 @@ void PagePanel::showEvent(QShowEvent* event)
 
 ---
 
+### BF-5: Thumbnail Cache Memory Limit (Implemented)
+
+**Problem:** The thumbnail cache had no size limit. For large documents (e.g., 3651 pages), memory usage could grow to ~1.7GB as all viewed thumbnails remained cached indefinitely.
+
+**Solution:** Implemented LRU (Least Recently Used) cache eviction with a 50-page limit.
+
+**Memory Budget:**
+- High DPI (2x): ~465KB/thumbnail × 50 = **~23 MB max**
+- Low DPI (1x): ~116KB/thumbnail × 50 = **~6 MB max**
+
+**Implementation:**
+```cpp
+// PageThumbnailModel.h
+mutable QList<int> m_cacheAccessOrder;  // LRU: front = oldest, back = newest
+static constexpr int MAX_CACHED_THUMBNAILS = 50;
+
+// PageThumbnailModel.cpp
+void PageThumbnailModel::touchCache(int pageIndex) const {
+    m_cacheAccessOrder.removeAll(pageIndex);
+    m_cacheAccessOrder.append(pageIndex);
+}
+
+void PageThumbnailModel::evictOldestIfNeeded() const {
+    while (m_thumbnailCache.size() > MAX_CACHED_THUMBNAILS) {
+        int oldest = m_cacheAccessOrder.takeFirst();
+        m_thumbnailCache.remove(oldest);
+    }
+}
+```
+
+**Behavior:**
+- When a thumbnail is accessed or rendered, it's moved to the "most recently used" end
+- When cache exceeds 50 entries, the least recently used thumbnails are evicted
+- Cache is completely cleared on document switch, tab close, or page count change
+
+**Files Modified:**
+- `source/ui/PageThumbnailModel.h`
+- `source/ui/PageThumbnailModel.cpp`
+
+---
+
 *Subplan created for SpeedyNote Page Panel implementation*
 

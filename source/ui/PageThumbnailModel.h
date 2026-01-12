@@ -195,9 +195,13 @@ private:
     // Current page for highlighting
     int m_currentPageIndex = 0;
     
-    // Thumbnail cache
+    // Thumbnail cache with LRU eviction
     mutable QHash<int, QPixmap> m_thumbnailCache;
+    mutable QList<int> m_cacheAccessOrder;  // LRU: front = oldest, back = newest
     mutable QSet<int> m_pendingThumbnails;
+    
+    void touchCache(int pageIndex) const;   // Mark page as recently used
+    void evictOldestIfNeeded() const;       // Evict LRU entries if over limit
     
     // Thumbnail settings
     int m_thumbnailWidth = 150;
@@ -205,6 +209,9 @@ private:
     
     // Async thumbnail renderer (owned)
     ThumbnailRenderer* m_renderer = nullptr;
+    
+    // Cache size limit (~20MB at 2x DPI, ~5MB at 1x DPI)
+    static constexpr int MAX_CACHED_THUMBNAILS = 50;
     
     // MIME type for drag-and-drop
     static constexpr const char* MIME_TYPE = "application/x-speedynote-page-index";
