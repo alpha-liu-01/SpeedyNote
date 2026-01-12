@@ -67,6 +67,15 @@ public:
      */
     virtual void setDarkMode(bool darkMode);
 
+signals:
+    /**
+     * @brief Emitted when the subtoolbar's content size changes.
+     * 
+     * The SubToolbarContainer connects to this signal to update its
+     * size and position when widgets are shown/hidden.
+     */
+    void contentSizeChanged();
+
 protected:
     /**
      * @brief Add a horizontal separator line between button groups.

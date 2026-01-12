@@ -27,6 +27,12 @@ void SubToolbarContainer::setSubToolbar(ToolType tool, SubToolbar* subtoolbar)
         subtoolbar->setParent(this);
         subtoolbar->hide();  // Hidden until this tool is selected
         m_subtoolbars.insert(tool, subtoolbar);
+        
+        // Connect to content size changes to update container size
+        connect(subtoolbar, &SubToolbar::contentSizeChanged, this, [this]() {
+            updateSize();
+            updatePosition(m_viewportRect);
+        });
     }
     
     // If this is the current tool, update display

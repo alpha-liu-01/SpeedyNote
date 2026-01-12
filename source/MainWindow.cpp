@@ -1488,6 +1488,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     
     // Phase M.3: Refresh markdown notes sidebar when page changes
     if (markdownNotesSidebar) {
+        // Set edgeless mode (hides page range controls for edgeless documents)
+        Document* doc = viewport->document();
+        markdownNotesSidebar->setEdgelessMode(doc && doc->isEdgeless());
+        
         m_markdownNotesPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
                 this, [this](int /*pageIndex*/) {
             if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {

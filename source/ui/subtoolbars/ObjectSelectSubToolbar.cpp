@@ -80,14 +80,20 @@ void ObjectSelectSubToolbar::createWidgets()
     );
     addWidget(m_actionModeToggle);
     
-    // Add separator before LinkObject controls
-    addSeparator();
+    // Add separator before LinkObject controls (create manually to track it)
+    m_linkObjectSeparator = new QFrame(this);
+    m_linkObjectSeparator->setFrameShape(QFrame::HLine);
+    m_linkObjectSeparator->setFrameShadow(QFrame::Sunken);
+    m_linkObjectSeparator->setFixedHeight(2);
+    m_linkObjectSeparator->setVisible(false);  // Hidden by default
+    addWidget(m_linkObjectSeparator);
     
     // Create color button for LinkObject color editing
     m_colorButton = new ColorPresetButton(this);
     m_colorButton->setColor(QColor(180, 180, 180));  // Gray when disabled
     m_colorButton->setEnabled(false);  // Disabled until LinkObject is selected
     m_colorButton->setToolTip(tr("Select a LinkObject to edit color"));
+    m_colorButton->setVisible(false);  // Hidden by default
     addWidget(m_colorButton);
     
     // Create description edit button (SubToolbarToggle handles styling)
@@ -97,6 +103,7 @@ void ObjectSelectSubToolbar::createWidgets()
     m_descriptionButton->setToolTip(tr("Edit LinkObject description"));
     m_descriptionButton->setChecked(false);
     m_descriptionButton->setEnabled(false);  // Disabled until LinkObject is selected
+    m_descriptionButton->setVisible(false);  // Hidden by default
     addWidget(m_descriptionButton);
     
     // Create slot buttons
@@ -108,6 +115,7 @@ void ObjectSelectSubToolbar::createWidgets()
         m_slotButtons[i]->setStateIconNames("addtab", "link", "url", "markdown");
         m_slotButtons[i]->setDarkMode(dark);
         m_slotButtons[i]->setToolTip(tr("Slot %1").arg(i + 1));
+        m_slotButtons[i]->setVisible(false);  // Hidden by default
         addWidget(m_slotButtons[i]);
     }
     
@@ -384,8 +392,41 @@ void ObjectSelectSubToolbar::setDarkMode(bool darkMode)
     // Color button doesn't need dark mode update (uses its own color)
 }
 
+void ObjectSelectSubToolbar::setLinkObjectControlsVisible(bool visible)
+{
+    // Show/hide all LinkObject-specific controls
+    if (m_linkObjectSeparator) {
+        m_linkObjectSeparator->setVisible(visible);
+    }
+    if (m_colorButton) {
+        m_colorButton->setVisible(visible);
+    }
+    if (m_descriptionButton) {
+        m_descriptionButton->setVisible(visible);
+    }
+    for (int i = 0; i < NUM_SLOTS; ++i) {
+        if (m_slotButtons[i]) {
+            m_slotButtons[i]->setVisible(visible);
+        }
+    }
+    
+    // Force layout update after visibility change
+    if (layout()) {
+        layout()->invalidate();
+        layout()->activate();
+    }
+    updateGeometry();
+    adjustSize();
+    
+    // Notify container that size has changed
+    emit contentSizeChanged();
+}
+
 void ObjectSelectSubToolbar::setLinkObjectColor(const QColor& color, bool visible)
 {
+    // Show/hide all LinkObject controls based on visibility
+    setLinkObjectControlsVisible(visible);
+    
     if (m_colorButton) {
         if (visible) {
             m_colorButton->setColor(color);

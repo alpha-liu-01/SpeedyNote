@@ -91,31 +91,34 @@ void MarkdownNotesSidebar::setupSearchUI() {
     searchBarLayout->addWidget(searchButton);
     searchBarLayout->addWidget(exitSearchButton);
     
-    // Page range row
-    pageRangeLayout = new QHBoxLayout();
+    // Page range row (wrapped in container so it can be hidden for edgeless docs)
+    pageRangeContainer = new QWidget(searchContainer);
+    pageRangeContainer->setObjectName("PageRangeContainer");
+    pageRangeLayout = new QHBoxLayout(pageRangeContainer);
+    pageRangeLayout->setContentsMargins(0, 0, 0, 0);
     pageRangeLayout->setSpacing(6);
     
-    pageRangeLabel = new QLabel(tr("Pages:"), searchContainer);
+    pageRangeLabel = new QLabel(tr("Pages:"), pageRangeContainer);
     pageRangeLabel->setObjectName("PageRangeLabel");
     
-    fromPageSpinBox = new QSpinBox(searchContainer);
+    fromPageSpinBox = new QSpinBox(pageRangeContainer);
     fromPageSpinBox->setObjectName("PageSpinBox");
     fromPageSpinBox->setMinimum(1);
     fromPageSpinBox->setMaximum(9999);
     fromPageSpinBox->setValue(1);
     fromPageSpinBox->setMinimumHeight(32);
     
-    toLabel = new QLabel(tr("to"), searchContainer);
+    toLabel = new QLabel(tr("to"), pageRangeContainer);
     toLabel->setObjectName("ToLabel");
     
-    toPageSpinBox = new QSpinBox(searchContainer);
+    toPageSpinBox = new QSpinBox(pageRangeContainer);
     toPageSpinBox->setObjectName("PageSpinBox");
     toPageSpinBox->setMinimum(1);
     toPageSpinBox->setMaximum(9999);
     toPageSpinBox->setValue(10);
     toPageSpinBox->setMinimumHeight(32);
     
-    searchAllPagesCheckBox = new QCheckBox(tr("All"), searchContainer);
+    searchAllPagesCheckBox = new QCheckBox(tr("All"), pageRangeContainer);
     searchAllPagesCheckBox->setObjectName("SearchAllCheckbox");
     searchAllPagesCheckBox->setToolTip(tr("Search all pages in the notebook"));
     searchAllPagesCheckBox->setMinimumHeight(32);
@@ -134,7 +137,7 @@ void MarkdownNotesSidebar::setupSearchUI() {
     searchStatusLabel->setVisible(false);
     
     searchLayout->addLayout(searchBarLayout);
-    searchLayout->addLayout(pageRangeLayout);
+    searchLayout->addWidget(pageRangeContainer);
     searchLayout->addWidget(searchStatusLabel);
 }
 
@@ -164,6 +167,20 @@ void MarkdownNotesSidebar::setDarkMode(bool darkMode) {
     if (isDarkMode != darkMode) {
         isDarkMode = darkMode;
         applyStyle();
+    }
+}
+
+void MarkdownNotesSidebar::setEdgelessMode(bool edgeless) {
+    if (isEdgeless != edgeless) {
+        isEdgeless = edgeless;
+        
+        // Hide page range controls for edgeless documents (they have no pages)
+        pageRangeContainer->setVisible(!edgeless);
+        
+        // In edgeless mode, force "search all" behavior
+        if (edgeless) {
+            searchAllPagesCheckBox->setChecked(true);
+        }
     }
 }
 

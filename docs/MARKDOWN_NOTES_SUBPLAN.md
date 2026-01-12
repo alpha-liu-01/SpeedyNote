@@ -1230,5 +1230,239 @@ For search in edgeless mode, page range parameters are ignored (all loaded tiles
 
 ---
 
+# Appendix A: Markdown Notes Memory & Disk Lifecycle
+
+This section documents when markdown notes are loaded from disk, saved to disk, and evicted from RAM.
+
+---
+
+## Overview
+
+**Key Design Principle:** Markdown notes are **NOT cached in RAM**. They are loaded on-demand from disk and only exist in memory as `MarkdownNoteEntry` widgets while displayed in the sidebar.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        MARKDOWN NOTES LIFECYCLE                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────┐     LOAD        ┌───────────────┐       DISPLAY     ┌────────┐│
+│  │  DISK   │ ──────────────► │     RAM       │ ────────────────► │   UI   ││
+│  │ (.md)   │                 │ (NoteDisplay  │                   │(Entry) ││
+│  │         │ ◄────────────── │     Data)     │ ◄──────────────── │        ││
+│  └─────────┘     SAVE        └───────────────┘     USER EDITS    └────────┘│
+│       │                            │                                   │    │
+│       │                            │ PAGE CHANGE                       │    │
+│       │                            ▼ OR SIDEBAR HIDE                   │    │
+│       │                      ┌───────────┐                             │    │
+│       │                      │ EVICTED   │ ◄───────────────────────────┘    │
+│       │                      │(deleteLater)                                 │
+│       │                      └───────────┘                                  │
+│       │                                                                     │
+│       │ DELETE ◄─────────────────────────────────────────────────────────── │
+│       │ (on slot clear or LinkObject delete)                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Loading from Disk
+
+Notes are loaded from `.md` files in `assets/notes/` via `MarkdownNote::loadFromFile()`.
+
+| Trigger | Function | Description |
+|---------|----------|-------------|
+| **Page Change** | `MainWindow::loadNotesForCurrentPage()` | When user navigates to a new page (only if sidebar visible) |
+| **Sidebar Opens** | `MainWindow::toggleMarkdownNotesSidebar()` | When markdown notes sidebar becomes visible |
+| **Note Created** | `DocumentViewport::requestOpenMarkdownNote` | After creating a new note, sidebar reloads |
+| **Note Opened** | `DocumentViewport::activateLinkSlot()` | When user clicks a markdown LinkSlot button |
+| **Search** | `MainWindow::searchMarkdownNotes()` | Loads notes in page range for search matching |
+| **Exit Search Mode** | `MarkdownNotesSidebar::exitSearchMode()` | Emits `reloadNotesRequested()` to reload current page notes |
+| **Tab Switch** | `MainWindow::currentViewportChanged` handler | Loads notes when switching to another document tab |
+
+### Load Flow
+
+```
+User Action (page change / sidebar open / etc.)
+        │
+        ▼
+MainWindow::loadNotesForCurrentPage()
+        │
+        ├── Iterate Page/Tile → InsertedObjects → LinkObjects
+        │           │
+        │           ▼
+        │   For each LinkSlot with type == Markdown:
+        │           │
+        │           ▼
+        │   MarkdownNote::loadFromFile(filePath)  ← DISK I/O
+        │           │
+        │           ▼
+        │   Build NoteDisplayData (noteId, title, content,
+        │                          linkObjectId, color, description)
+        │
+        ▼
+MarkdownNotesSidebar::loadNotesForPage(QList<NoteDisplayData>)
+        │
+        ├── clearNotes()  ← Previous entries deleted (see Eviction)
+        │
+        └── For each NoteDisplayData:
+                │
+                ▼
+            new MarkdownNoteEntry(data)  ← Widget created in RAM
+```
+
+---
+
+## Saving to Disk
+
+Notes are saved to disk via `MarkdownNote::saveToFile()`.
+
+| Trigger | Location | Description |
+|---------|----------|-------------|
+| **Note Created** | `DocumentViewport::createMarkdownNoteForSlot()` | Initial save when note is created |
+| **Content Edit** | `MarkdownNoteEntry::onContentChanged()` | On every keystroke (via `contentChanged` signal chain) |
+| **Title Edit** | `MarkdownNoteEntry::onTitleEdited()` | When title loses focus or Enter pressed |
+
+### Save Flow
+
+```
+User types in editor
+        │
+        ▼
+MarkdownNoteEntry::onContentChanged()
+        │
+        ▼
+emit contentChanged(noteId)
+        │
+        ▼
+MarkdownNotesSidebar::onNoteContentChanged(noteId)
+        │
+        ▼
+emit noteContentSaved(noteId, title, content)
+        │
+        ▼
+MainWindow connection handler:
+        │
+        ├── Build MarkdownNote(id, title, content)
+        │
+        └── note.saveToFile(notesDir + "/" + noteId + ".md")  ← DISK I/O
+```
+
+**Note:** Saves happen immediately on every content change. There is no debouncing in the new system (unlike the legacy InkCanvas which used `saveNotebookMetadataDeferred()`).
+
+---
+
+## Eviction from RAM
+
+Note data is evicted from RAM when `MarkdownNoteEntry` widgets are destroyed.
+
+| Trigger | Function | Description |
+|---------|----------|-------------|
+| **Page Change** | `MarkdownNotesSidebar::clearNotes()` | Old entries deleted, new ones created |
+| **Search Mode** | `MarkdownNotesSidebar::clearNotes()` | Existing entries cleared for search results |
+| **Sidebar Close** | Widget hidden | Entries remain but not rendered |
+| **Tab Close** | Widget destroyed | All child entries destroyed |
+
+### Eviction Flow
+
+```
+Page change / Search / Reload
+        │
+        ▼
+MarkdownNotesSidebar::loadNotesForPage()
+        │
+        ▼
+clearNotes()
+        │
+        ├── For each MarkdownNoteEntry* in noteEntries:
+        │       │
+        │       └── entry->deleteLater()  ← Scheduled for deletion
+        │
+        └── noteEntries.clear()
+        
+        (Qt event loop later)
+        │
+        ▼
+    ~MarkdownNoteEntry()  ← RAM freed
+```
+
+---
+
+## Deletion from Disk
+
+Note files are permanently deleted from disk in these scenarios:
+
+| Trigger | Function | Description |
+|---------|----------|-------------|
+| **Clear LinkSlot** | `DocumentViewport::clearLinkSlot()` | User clears the markdown slot |
+| **Delete LinkObject** | `DocumentViewport::deleteSelectedObjects()` | Cascade delete all linked notes |
+| **Delete from Sidebar** | `MainWindow` handler for `noteDeletedWithLink` | User clicks delete on note entry |
+
+### Delete Flow
+
+```
+User action (clear slot / delete object / delete note)
+        │
+        ▼
+Document::deleteNoteFile(noteId)
+        │
+        ├── Build filePath = notesPath() + "/" + noteId + ".md"
+        │
+        ├── QFile::exists(filePath) ?
+        │       │
+        │       └── QFile::remove(filePath)  ← DISK DELETE
+        │
+        └── Return success (even if file didn't exist)
+```
+
+---
+
+## Memory Usage Summary
+
+| Component | Memory Footprint | Lifetime |
+|-----------|-----------------|----------|
+| `MarkdownNote` (struct) | ~100-500 bytes | Transient (stack) |
+| `NoteDisplayData` (struct) | ~200-600 bytes | Transient (stack/list) |
+| `MarkdownNoteEntry` (widget) | ~5-20 KB per entry | Until page change or sidebar reload |
+| Note file content | Not cached | On-disk only |
+
+**Typical RAM usage:** For a page with 5 notes, approximately 25-100 KB of widget memory.
+
+---
+
+## Diagram: Complete Lifecycle
+
+```
+                              ┌──────────────────────────┐
+                              │      USER ACTIONS        │
+                              └──────────────────────────┘
+                                         │
+         ┌───────────────────────────────┼───────────────────────────────┐
+         │                               │                               │
+         ▼                               ▼                               ▼
+┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
+│  Navigate Page  │          │   Edit Note     │          │  Delete Note    │
+│  Open Sidebar   │          │   Edit Title    │          │  Delete Object  │
+│  Open Note      │          │                 │          │  Clear Slot     │
+└────────┬────────┘          └────────┬────────┘          └────────┬────────┘
+         │                            │                            │
+         ▼                            ▼                            ▼
+┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
+│     LOAD        │          │     SAVE        │          │    DELETE       │
+│  from Disk      │          │   to Disk       │          │  from Disk      │
+│                 │          │                 │          │                 │
+│ loadFromFile()  │          │ saveToFile()    │          │ deleteNoteFile()│
+└────────┬────────┘          └────────┬────────┘          └────────┬────────┘
+         │                            │                            │
+         ▼                            ▼                            ▼
+┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
+│   CREATE        │          │   MODIFY        │          │   EVICT         │
+│  NoteEntry      │          │   File on Disk  │          │  NoteEntry      │
+│  Widgets        │          │                 │          │  (deleteLater)  │
+└─────────────────┘          └─────────────────┘          └─────────────────┘
+```
+
+---
+
 *Subplan created for SpeedyNote Markdown Notes Integration*
 

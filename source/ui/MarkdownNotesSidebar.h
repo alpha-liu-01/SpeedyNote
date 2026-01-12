@@ -40,6 +40,12 @@ public:
     // Search functionality
     void setCurrentPageInfo(int currentPage, int totalPages);
     bool isInSearchMode() const { return searchMode; }
+    
+    /**
+     * @brief Set edgeless mode (hides page range controls).
+     * @param edgeless true for edgeless document, false for paged document.
+     */
+    void setEdgelessMode(bool edgeless);
     void exitSearchMode();
     void onNewNoteCreated(); // Auto-exit search mode when a new note is created
     
@@ -107,6 +113,7 @@ private:
     QLineEdit *searchInput;
     QPushButton *searchButton;
     QPushButton *exitSearchButton;
+    QWidget *pageRangeContainer;  // Container for page range controls (hidden in edgeless mode)
     QHBoxLayout *pageRangeLayout;
     QLabel *pageRangeLabel;
     QSpinBox *fromPageSpinBox;
@@ -123,6 +130,7 @@ private:
     
     QList<MarkdownNoteEntry*> noteEntries;
     bool isDarkMode = false;
+    bool isEdgeless = false;  // True when viewing edgeless document
     
     // Search state
     bool searchMode = false;

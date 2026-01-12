@@ -6,6 +6,7 @@
 #include "../widgets/LinkSlotButton.h"    // For LinkSlotState
 #include <QHash>
 #include <QColor>
+#include <QFrame>
 
 class ModeToggleButton;
 class LinkSlotButton;
@@ -148,6 +149,14 @@ private:
     void loadFromSettings();
     void saveToSettings();
     bool confirmSlotDelete(int index);
+    
+    /**
+     * @brief Show/hide LinkObject-specific controls.
+     * @param visible true to show controls, false to hide them.
+     * 
+     * Controls: color button, description button, 3 slot buttons, and the separator.
+     */
+    void setLinkObjectControlsVisible(bool visible);
 
     // Widgets
     ModeToggleButton* m_insertModeToggle = nullptr;
@@ -161,6 +170,7 @@ private:
     QString m_originalDescription;               // For cancel functionality
     bool m_popupClosedByButton = false;          // Prevents double signal emission
     LinkSlotButton* m_slotButtons[3] = {nullptr, nullptr, nullptr};
+    QFrame* m_linkObjectSeparator = nullptr;  // Separator before LinkObject controls
     
     // Current state
     DocumentViewport::ObjectInsertMode m_insertMode = DocumentViewport::ObjectInsertMode::Image;

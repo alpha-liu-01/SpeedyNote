@@ -5196,7 +5196,13 @@ void DocumentViewport::insertImageFromClipboard()
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // 9. Emit modification signal
+    // 9. Auto-switch to Select mode after inserting
+    if (m_objectActionMode == ObjectActionMode::Create) {
+        m_objectActionMode = ObjectActionMode::Select;
+        emit objectActionModeChanged(m_objectActionMode);
+    }
+    
+    // 10. Emit modification signal
     emit documentModified();
     
     update();
@@ -5314,7 +5320,13 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // 8. Emit modification signal
+    // 9. Auto-switch to Select mode after inserting
+    if (m_objectActionMode == ObjectActionMode::Create) {
+        m_objectActionMode = ObjectActionMode::Select;
+        emit objectActionModeChanged(m_objectActionMode);
+    }
+    
+    // 10. Emit modification signal
     emit documentModified();
     
     update();
@@ -5773,6 +5785,12 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     // Select the new object
     deselectAllObjects();
     selectObject(rawPtr, false);
+    
+    // Auto-switch to Select mode after inserting
+    if (m_objectActionMode == ObjectActionMode::Create) {
+        m_objectActionMode = ObjectActionMode::Select;
+        emit objectActionModeChanged(m_objectActionMode);
+    }
     
     emit documentModified();
     update();
