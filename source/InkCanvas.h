@@ -22,7 +22,7 @@
 #include <QJsonArray>
 #include <QUuid>
 #include "PictureWindowManager.h"
-#include "MarkdownNoteEntry.h"
+#include "text/MarkdownNoteEntry.h"
 // ToolType.h already included above
 #include "ButtonMappingTypes.h"
 #include "SpnPackageManager.h"

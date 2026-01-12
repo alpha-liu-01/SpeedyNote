@@ -1026,6 +1026,16 @@ public:
     void clearLinkSlot(int slotIndex);
     
     /**
+     * @brief Create a new markdown note for the specified slot.
+     * @param slotIndex Slot index (0-2).
+     * 
+     * Phase M.2: Requires a LinkObject to be selected with an empty slot
+     * at slotIndex. Creates note file in assets/notes/ and updates slot
+     * reference. Emits requestOpenMarkdownNote on success.
+     */
+    void createMarkdownNoteForSlot(int slotIndex);
+    
+    /**
      * @brief Create an empty LinkObject at the specified page position.
      * @param pageIndex Index of the page to add the LinkObject to.
      * @param pagePos Position in page-local coordinates.
@@ -1488,6 +1498,16 @@ signals:
      * @param enabled New auto-highlight state.
      */
     void autoHighlightEnabledChanged(bool enabled);
+    
+    /**
+     * @brief Emitted when a markdown note should be opened in sidebar.
+     * @param noteId The note UUID.
+     * @param linkObjectId The parent LinkObject ID (for navigation).
+     * 
+     * Phase M.2: Emitted after creating or opening a markdown note.
+     * MainWindow connects this to open the markdown notes sidebar.
+     */
+    void requestOpenMarkdownNote(const QString& noteId, const QString& linkObjectId);
     
 protected:
     // ===== Qt Event Overrides =====

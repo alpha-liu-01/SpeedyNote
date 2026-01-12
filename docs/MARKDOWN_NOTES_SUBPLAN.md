@@ -465,7 +465,7 @@ void DocumentViewport::deleteSelectedObjects()
 
 ## Task M.3.1: Update MarkdownNoteEntry for LinkObject
 
-**File:** `source/MarkdownNoteEntry.h` (modifications)
+**File:** `source/text/MarkdownNoteEntry.h` (modifications)
 
 ```cpp
 // New data structure for display
@@ -504,7 +504,7 @@ private:
 
 ## Task M.3.2: Update MarkdownNoteEntry Implementation
 
-**File:** `source/MarkdownNoteEntry.cpp` (modifications)
+**File:** `source/text/MarkdownNoteEntry.cpp` (modifications)
 
 Key changes:
 - Constructor takes `NoteDisplayData` instead of `MarkdownNoteData`
@@ -519,7 +519,7 @@ Key changes:
 
 ## Task M.3.3: Update MarkdownNotesSidebar for File-Based Loading
 
-**File:** `source/MarkdownNotesSidebar.h` (modifications)
+**File:** `source/ui/MarkdownNotesSidebar.h` (modifications)
 
 ```cpp
 class MarkdownNotesSidebar : public QWidget {
@@ -539,7 +539,7 @@ signals:
 };
 ```
 
-**File:** `source/MarkdownNotesSidebar.cpp` (modifications)
+**File:** `source/ui/MarkdownNotesSidebar.cpp` (modifications)
 
 Key changes:
 - `loadNotesForPage()` takes `NoteDisplayData` list
@@ -713,7 +713,7 @@ void MainWindow::navigateToLinkObject(const QString& linkObjectId)
 
 ## Task M.4.1: Update Search Implementation
 
-**File:** `source/MarkdownNotesSidebar.cpp` (modify `performSearch`)
+**File:** `source/ui/MarkdownNotesSidebar.cpp` (modify `performSearch`)
 
 ```cpp
 void MarkdownNotesSidebar::performSearch()
@@ -826,6 +826,81 @@ QList<NoteDisplayData> MainWindow::searchMarkdownNotes(
 
 ---
 
+## M.4.2: Search Performance Optimizations
+
+### Problem Analysis
+
+The initial search implementation has **O(P × O)** complexity with disk I/O per note:
+
+```
+for (pageIdx = fromPage to toPage)           // O(P) pages/tiles
+    for (each object in page->objects)       // O(O) objects per page
+        for (each slot in 3 slots)           // O(1) constant
+            loadFromFile(noteId)             // DISK I/O per note!
+            string.contains(query)           // O(length) per field
+```
+
+**Risk Assessment:**
+
+| Document Type | Risk | Concern |
+|--------------|------|---------|
+| Paged PDF (100 pages) | 🟡 Medium | Bounded but scales with size |
+| Edgeless infinite canvas | 🔴 High | Tiles can be arbitrarily large |
+| Many LinkObjects per page | 🔴 High | O(P × O) can explode |
+
+### Optimization A: Two-Tier Search ✅ IMPLEMENTED
+
+Search description first (in memory), score it before loading file.
+
+```cpp
+// Tier 1: Check description first (already in memory - no file I/O)
+bool descriptionMatch = link->description.contains(query, Qt::CaseInsensitive);
+if (descriptionMatch) {
+    score += 100;  // Description match highest priority
+}
+
+// Tier 2: Load file for title/content matching
+MarkdownNote note = MarkdownNote::loadFromFile(filePath);
+```
+
+**Benefit:** Description matching requires no disk I/O. Note: File still loaded for display data.
+
+### Optimization B: Result Limiting ✅ IMPLEMENTED
+
+Stop after finding MAX_SEARCH_RESULTS (100) to prevent runaway searches.
+
+```cpp
+static const int MAX_SEARCH_RESULTS = 100;
+
+if (results.size() >= MAX_SEARCH_RESULTS) {
+    reachedLimit = true;
+    break;
+}
+```
+
+**Benefit:** Caps worst-case to ~100 file reads regardless of document size.
+
+### Optimization C: Early Termination Flag ⏸️ DEFERRED
+
+Would require UI changes (cancel button) and atomic flag. Deferred for future enhancement.
+
+### Optimization D: Periodic Event Processing ✅ IMPLEMENTED
+
+Process Qt events every 10 pages to keep UI responsive during long searches.
+
+```cpp
+if (++pagesSearched % 10 == 0) {
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+}
+```
+
+**Benefit:** UI remains responsive. ExcludeUserInputEvents prevents re-entrant searches.
+
+**Note:** Full background threading via QtConcurrent deferred - would require thread-safe 
+Document access or copying all data upfront, adding significant complexity.
+
+---
+
 # Phase M.5: MainWindow Integration
 
 **Goal:** Connect all pieces in MainWindow.
@@ -860,7 +935,7 @@ connect(vp, &DocumentViewport::requestOpenMarkdownNote,
 
 ## Task M.5.2: Add scrollToNote and setNoteEditMode to Sidebar
 
-**File:** `source/MarkdownNotesSidebar.h/cpp`
+**File:** `source/ui/MarkdownNotesSidebar.h/cpp`
 
 ```cpp
 void MarkdownNotesSidebar::scrollToNote(const QString& noteId)
@@ -902,22 +977,24 @@ void MarkdownNotesSidebar::setNoteEditMode(const QString& noteId, bool editMode)
 
 ## Total Estimated Lines by Phase
 
-| Phase | Description | Lines |
-|-------|-------------|-------|
-| M.1 | Data Model & File I/O | ~150 |
-| M.2 | Core Operations | ~135 |
-| M.3 | Sidebar Integration | ~245 |
-| M.4 | Search Integration | ~80 |
-| M.5 | MainWindow Integration | ~40 |
-| **Total** | | **~650** |
+| Phase | Description | Lines | Status |
+|-------|-------------|-------|--------|
+| M.1 | Data Model & File I/O | ~150 | ✅ Done |
+| M.2 | Core Operations | ~135 | ✅ Done |
+| M.3 | Sidebar Integration | ~245 | ✅ Done |
+| M.4 | Search Integration | ~80 | ✅ Done |
+| M.5 | MainWindow Integration | ~40 | ✅ Done |
+| M.6 | Post-Integration UX Improvements | ~120 | ✅ Done |
+| **Total** | | **~770** |
 
 ## Implementation Order
 
-1. **M.1** - Must be first (MarkdownNote class)
-2. **M.2** - Depends on M.1 (file operations)
-3. **M.3** - Depends on M.1, M.2 (sidebar display)
-4. **M.4** - Depends on M.3 (search uses sidebar)
-5. **M.5** - Final integration
+1. **M.1** - Must be first (MarkdownNote class) ✅
+2. **M.2** - Depends on M.1 (file operations) ✅
+3. **M.3** - Depends on M.1, M.2 (sidebar display) ✅
+4. **M.4** - Depends on M.3 (search uses sidebar) ✅
+5. **M.5** - Final integration ✅
+6. **M.6** - UX polish (color/description editing, nav sync) ✅
 
 ## Files to Create
 
@@ -928,22 +1005,228 @@ void MarkdownNotesSidebar::setNoteEditMode(const QString& noteId, bool editMode)
 
 - `source/core/Document.h` / `Document.cpp`
 - `source/core/DocumentViewport.h` / `DocumentViewport.cpp`
-- `source/MarkdownNoteEntry.h` / `MarkdownNoteEntry.cpp`
-- `source/MarkdownNotesSidebar.h` / `MarkdownNotesSidebar.cpp`
+- `source/text/MarkdownNoteEntry.h` / `MarkdownNoteEntry.cpp`
+- `source/ui/MarkdownNotesSidebar.h` / `MarkdownNotesSidebar.cpp`
 - `source/MainWindow.h` / `MainWindow.cpp`
 - `CMakeLists.txt`
 
 ## Success Criteria
 
-- [ ] Can create markdown note from empty LinkSlot
-- [ ] Note content saved to `assets/notes/{id}.md`
-- [ ] Sidebar shows notes for current page
-- [ ] Note color matches LinkObject.iconColor
-- [ ] Edit note → file saved
-- [ ] Delete note → file deleted, slot cleared
-- [ ] Delete LinkObject → cascade deletes note files
-- [ ] Search finds notes by description, title, content
-- [ ] Jump to LinkObject works from sidebar
+- [x] Can create markdown note from empty LinkSlot
+- [x] Note content saved to `assets/notes/{id}.md`
+- [x] Sidebar shows notes for current page
+- [x] Note color matches LinkObject.iconColor
+- [x] Edit note → file saved
+- [x] Delete note → file deleted, slot cleared
+- [x] Delete LinkObject → cascade deletes note files
+- [x] Search finds notes by description, title, content
+- [x] Jump to LinkObject works from sidebar
+- [x] Can edit LinkObject color from subtoolbar
+- [x] Can edit LinkObject description from subtoolbar popup
+- [x] NavigationBar button syncs when sidebar opened programmatically
+
+---
+
+# Phase M.6: Post-Integration UX Improvements
+
+**Goal:** Improve the UX of LinkObject editing and sidebar interaction after core integration.
+
+---
+
+## Task M.6.1: LinkObject Color Editing ✅ COMPLETED
+
+**Problem:** LinkObjects created directly (not via highlighter) have the default gray color, making markdown notes hard to distinguish visually.
+
+**Solution:** Added `ColorPresetButton` to `ObjectSelectSubToolbar`.
+
+**File:** `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp`
+
+**Implementation:**
+- Added `ColorPresetButton* m_colorButton` above the first LinkSlot button
+- Button is disabled (gray) when no LinkObject is selected
+- When LinkObject selected: button enabled with current `iconColor`, set to "selected" state
+- Click opens `QColorDialog` to change color
+- Color change emits `linkObjectColorChanged(QColor)` signal
+- MainWindow connects signal to update `LinkObject::iconColor` and refresh sidebar
+
+**Behavior:**
+- Button always present in layout (avoids layout shift)
+- Enabled/disabled based on LinkObject selection
+- "Selected" state by default → first click opens color dialog immediately
+
+---
+
+## Task M.6.2: LinkObject Description Editing ✅ COMPLETED
+
+**Problem:** Directly created LinkObjects have no description, making them unsearchable via the markdown notes search feature.
+
+**Solution:** Added description edit button with popup editor to `ObjectSelectSubToolbar`.
+
+**File:** `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp`
+
+**Implementation:**
+- Added `SubToolbarToggle* m_descriptionButton` (uses "ibeam" icon)
+- Button is disabled when no LinkObject is selected
+- Toggle opens a popup (`QWidget` with `Qt::Popup` flag) containing:
+  - `QLineEdit` for description text (180px width)
+  - Green confirm button (✓) - saves and closes
+  - Red cancel button (✕) - restores original and closes
+- Popup positioned below the button
+- `eventFilter` detects popup close (click outside) → auto-confirms
+
+**Confirm behavior:**
+- Clicking confirm button
+- Pressing Enter in text field
+- Clicking outside popup (auto-confirm via Hide event)
+
+**Cancel behavior:**
+- Clicking cancel button → restores `m_originalDescription`
+
+**Signals:**
+- `linkObjectDescriptionChanged(QString)` emitted on confirm
+- MainWindow connects to update `LinkObject::description` and refresh sidebar
+
+---
+
+## Task M.6.3: NavigationBar Sync for Programmatic Sidebar Toggle ✅ COMPLETED
+
+**Problem:** Opening a markdown note via LinkSlot button shows the sidebar but doesn't update the NavigationBar's right sidebar toggle button to "checked" state.
+
+**Solution:** Sync NavigationBar button state in `toggleMarkdownNotesSidebar()`.
+
+**File:** `source/MainWindow.cpp`
+
+**Implementation:**
+```cpp
+void MainWindow::toggleMarkdownNotesSidebar() {
+    // ... existing toggle logic ...
+    
+    markdownNotesSidebar->setVisible(!isVisible);
+    markdownNotesSidebarVisible = !isVisible;
+    
+    // Sync NavigationBar button state when sidebar is toggled programmatically
+    if (m_navigationBar) {
+        m_navigationBar->setRightSidebarChecked(markdownNotesSidebarVisible);
+    }
+    
+    // ... rest of function ...
+}
+```
+
+**Behavior:**
+- User clicks NavigationBar button → button state already correct from click
+- Programmatic toggle (LinkSlot click) → button state now synced
+
+---
+
+## M.6 Summary
+
+| Task | Description | Status |
+|------|-------------|--------|
+| M.6.1 | ColorPresetButton for LinkObject color | ✅ Done |
+| M.6.2 | Description edit popup for LinkObject | ✅ Done |
+| M.6.3 | NavigationBar button sync | ✅ Done |
+
+---
+
+# Code Review: Issues Found and Fixed
+
+**Review Date:** Post-Phase M.6
+
+---
+
+## Issue CR.1: Double Signal Emission on Description Popup ✅ FIXED
+
+**Location:** `ObjectSelectSubToolbar.cpp`
+
+**Problem:** When confirm/cancel buttons were clicked, the signal `linkObjectDescriptionChanged` was emitted twice:
+1. Once by `onDescriptionConfirm()` or incorrectly by `onDescriptionCancel()`
+2. Again by `eventFilter()` handling the `QEvent::Hide` event
+
+For cancel, this was especially problematic - it would emit the description after restoring the original, causing an unnecessary file save.
+
+**Fix:** Added `m_popupClosedByButton` flag:
+- Set to `true` before calling `hide()` in confirm/cancel handlers
+- `eventFilter` checks this flag and only emits if `false` (popup closed by clicking outside)
+- Flag is reset to `false` after handling
+
+---
+
+## Issue CR.2: Debug Statements in Production Code ⏸️ DEFERRED
+
+**Location:** `DocumentViewport.cpp`
+
+**Observation:** Multiple `qDebug()` statements remain in `createMarkdownNoteForSlot`, `clearLinkSlot`, `deleteSelectedObjects`, and `activateLinkSlot`.
+
+**Assessment:** These are informational and not causing bugs. Removing them would be inconsistent with other parts of DocumentViewport which also have debug logging. Could be addressed in a future cleanup pass.
+
+---
+
+## Issue CR.3: Legacy Code Removed ✅ FIXED
+
+**Location:** `MarkdownNotesSidebar.cpp/h`
+
+**Removed:**
+- `addNote(MarkdownNoteData&)` - legacy add method
+- `updateNote(MarkdownNoteData&)` - legacy update method
+- `loadNotesForPages(QList<MarkdownNoteData>&)` - legacy bulk load
+- `getAllNotes()` - legacy getter
+- `setNoteProvider(std::function)` - legacy callback provider
+- `displaySearchResults(QList<MarkdownNoteData>&)` - legacy search results
+- `onHighlightLinkClicked()` slot - InkCanvas-only
+- `noteContentChanged(MarkdownNoteData)` signal - legacy
+- `noteDeleted(QString)` signal - replaced by `noteDeletedWithLink`
+- `highlightLinkClicked(QString)` signal - InkCanvas-only
+- `noteProvider` member - unused
+- `normalModeNotes` member - replaced by `reloadNotesRequested` signal
+
+**New Signal:** `reloadNotesRequested()` - Emitted when exiting search mode so MainWindow reloads current page notes.
+
+---
+
+## Issue CR.4: Memory Safety ✅ VERIFIED
+
+**Locations reviewed:**
+- `ObjectSelectSubToolbar::~ObjectSelectSubToolbar()` - Correctly deletes `m_descriptionPopup` (children are auto-deleted)
+- `MarkdownNotesSidebar::clearNotes()` - Uses `deleteLater()` for proper deferred deletion
+- Connection tracking (`m_markdownNotesPageConn`, `m_markdownNoteOpenConn`) - Properly disconnected on viewport change
+
+**No issues found.**
+
+---
+
+## Issue CR.5: Disk Safety ✅ VERIFIED
+
+**Concern:** Orphaned note files if app crashes between file deletion and document save.
+
+**Assessment:** 
+- Note files are deleted immediately in `deleteNoteFile()` 
+- `activateLinkSlot()` gracefully handles broken references (clears slot if file not found)
+- No disk space leak possible - stale references are self-healing
+
+---
+
+## Issue CR.5: Edgeless Mode Not Supported ✅ FIXED
+
+**Location:** `MainWindow.cpp`
+
+**Problem:** `loadNotesForCurrentPage()` and `searchMarkdownNotes()` only worked in paged mode, using `doc->page(pageIndex)`. In edgeless mode, there are tiles instead of pages, so markdown notes were never loaded or searched.
+
+**Fix:** Updated both functions to check `doc->isEdgeless()`:
+- **Paged mode:** Uses `doc->page(pageIndex)` as before
+- **Edgeless mode:** Iterates `doc->allLoadedTileCoords()` and uses `doc->getTile()`
+
+For search in edgeless mode, page range parameters are ignored (all loaded tiles are searched).
+
+---
+
+## Issue CR.6: Minor Inefficiency ⏸️ DEFERRED
+
+**Location:** `Document::notesPath()`
+
+**Observation:** `QDir().mkpath(notes)` is called on every invocation, even if directory already exists.
+
+**Assessment:** `mkpath()` is idempotent and fast when directory exists. Could cache the result, but overhead is negligible.
 
 ---
 
