@@ -713,5 +713,396 @@ Before I create the implementation plan, please confirm:
 
 
 
+## Section 11: Additional Questions (Added by AI)
+
+### Q11.1: PagePanelActionBar - Spinnable Page Number Widget
+
+You mentioned an iPhone alarm clock-style wheel for page navigation. Let me clarify:
+
+**Visual concept:**
+```
+     ┌───────────┐
+     │    12     │  ← dimmed, smaller
+     │    13     │  ← dimmed, smaller
+     │  [ 14 ]   │  ← current, highlighted, larger
+     │    15     │  ← dimmed, smaller
+     │    16     │  ← dimmed, smaller
+     └───────────┘
+```
+Also the container is round (not rectangular) like every other button on the action bar. This may be another custom widget like the color buttons on the subtoolbars. 
+
+**Questions:**
+1. How many pages visible in the wheel at once? (3? 5?) Answer: 3. 
+2. Should swiping/scrolling be velocity-based (flick to scroll fast)? Yes, with inertia scrolling. 
+3. Should it snap to whole page numbers or allow smooth scrolling? Allow smooth scrolling and snap to whole page number when it slows down. If you find this consumes too much performance you may change the plan. 
+4. On selection, does it navigate immediately or require confirmation? Navigate immediately. 
+
+**My Recommendation:** 
+- Show 3-5 pages in wheel
+- Velocity-based scrolling with snap-to-page
+- Navigate immediately on selection (no confirm button)
+- Consider using QML for smoother animation, or custom paint with physics  (For QML, will this immediately make SpeedyNote really heavy? I doubt if it will work well with the rest of the application... )
+
+**Answer:**
+
+---
+
+### Q11.2: PagePanelActionBar Visibility
+
+You said the action bar appears when Page Panel is toggled. Questions:
+
+1. Does it REPLACE the existing action bar (Object/Lasso selection bar)?
+2. Or does it appear in addition to / alongside other action bars?
+3. If user has a lasso selection AND Page Panel open, which action bar shows?
+
+**My Recommendation:** 
+- Context priority: Selection action bar > Page Panel action bar
+- If user has active selection, show selection action bar
+- Otherwise, show Page Panel action bar when panel is visible
+
+**Answer:**
+I think the better way is to modify the `ActionBarContainer.cpp` to make it support 2 action bars (if necessary). When no other action bar is present, the pagepanelactionbar takes the place just like any other 1 column action bar. 
+When there is another action bar being active (imagine this use case, the user copies an InsertedObject, and keeps it selected, and he opens the page panel to navigate to another page, and then paste the InsertedObject), the PagePanelActionBar needs to be positioned to the left of the other action bar and form another column. Apart from the PagePanelActionBar, there should always be one action bar on display. 
+---
+
+### Q11.3: Page Panel Tab Behavior in Sidebar
+
+Currently the left sidebar has tabs (Layers, Outline for PDF). Questions:
+
+1. Is Page Panel a new tab alongside these? Yes. 
+2. What's the tab order? (Outline → Pages → Layers?) Yes, just like what you described. 
+3. Should Page Panel tab be hidden for edgeless (like Outline is hidden for non-PDF)? Yes. 
+
+**My Recommendation:**
+- New tab in sidebar: Outline | Pages | Layers
+- Hide for edgeless documents
+- Default to Pages tab for new documents (unless PDF with outline)
+
+**Answer:**
+
+---
+
+### Q11.4: Thumbnail Content - What Exactly Gets Rendered?
+
+For each page thumbnail, confirm what's included:
+
+- [x] Page background (color/grid/lines/image)
+- [?] PDF content (if PDF page)
+- [?] All vector layers (or just visible layers?)
+- [?] Inserted objects (images, links)
+- [ ] Selection highlights (probably not)
+- [ ] Current stroke being drawn (probably not)
+
+**My Recommendation:**
+- Include: background, PDF, ALL layers (regardless of visibility toggle), objects
+- Exclude: selection state, in-progress strokes
+
+**Answer:**
+I agree with this. 
+---
+
+### Q11.5: Existing Page Navigation - What Already Exists?
+
+I should understand what's already implemented. From your mention:
+
+| Feature | Location | Description |
+|---------|----------|-------------|
+| `switchPage(int)` | MainWindow | Navigate to specific page |
+| Forward/Backward | Mouse side buttons | Navigate ±1 page |
+| Page spinbox | Toolbar area? | Direct page number input |
+| Ctrl+Shift+A | Shortcut | Add page at end |
+| Ctrl+Shift+I | Shortcut | Insert page after current |
+| Ctrl+Shift+D | Shortcut | Delete current page |
+
+**Questions:**
+1. Is this list complete? The page spinbox is already REMOVED. 
+2. Are there Page Up/Page Down keyboard shortcuts currently? I don't think so. But the mouse side button shortcuts are already connected. 
+3. Does the existing page spinbox work the way you want, or does it need replacement? The existing page spinbox is stubbed and mostly deleted. It should no longer exist and be replaced with the new widget (the iPhone alarm-like one). 
+It should be connected to 
+
+```cpp
+
+void MainWindow::switchPage(int pageIndex) {
+    // Phase S4: Main page switching function - everything goes through here
+    // pageIndex is 0-based internally
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    
+    vp->scrollToPage(pageIndex);
+    // pageInput update is handled by currentPageChanged signal connection
+}
+```
+and 
+```cpp
+void MainWindow::goToPreviousPage() {
+    // Phase S4: Thin wrapper - go to previous page (0-based)
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    switchPage(vp->currentPageIndex() - 1);
+}
+
+void MainWindow::goToNextPage() {
+    // Phase S4: Thin wrapper - go to next page (0-based)
+    DocumentViewport* vp = currentViewport();
+    if (!vp) return;
+    switchPage(vp->currentPageIndex() + 1);
+}
+```
+these. 
+
+**Answer:**
+
+---
+
+### Q11.6: Document::movePage() Testing
+
+You mentioned `movePage()` was never tested. Before implementing drag-and-drop, we should verify:
+
+1. Does `movePage(from, to)` work correctly?
+2. Does it properly update page indices for bookmarks?
+3. Does it handle edge cases (move to same position, move first/last page)?
+4. Is there undo support for page moves?
+
+**My Recommendation:** Add unit tests for movePage() before building drag-and-drop UI.
+
+**Answer:**
+I agree with your recommendation. 
+---
+
+### Q11.7: Touch Scrolling in Page Panel
+
+You mentioned the panel needs touch support. Specific questions:
+
+1. Does Qt's QListView/QScrollArea support touch scrolling out of the box on Linux?
+2. Do we need custom touch handling like DocumentViewport?
+3. Should there be kinetic/momentum scrolling?
+
+**My Recommendation:** Test Qt's built-in touch scrolling first. If inadequate, may need custom QScroller setup.
+
+**Answer:**
+Sure. The touch support featured in the PDF Outline Panel is good enough. It should be good enough here. 
+---
+
 *Please answer the questions above, and feel free to add any additional requirements or constraints I may have missed!*
 
+## Additional responses from your suggestions:
+
+### Q2.1 
+
+I agree with your choice. Low DPI thumbnails are guaranteed to be pixel-to-pixel (since we calculate the DPI based on the page size and widget size), so the quality is already as good as it gets for the limited widget size. 
+
+### Q4.6
+
+Up/Down buttons will not be present in the final version. It will be testing only. So you may not plan on designing any UI elements for this, but connecting it to keyboard shortcuts for testing. 
+
+### Q10.1
+
+I agree with Option C (QListView + QAbstractListModel + custom delegate).
+
+---
+
+## Section 12: Final Clarifications (Added by AI)
+
+### Q12.1: ActionBarContainer 2-Column Layout Details
+
+You mentioned the PagePanelActionBar should form a second column when another action bar is active. Let me confirm the exact layout:
+
+**Scenario 1: Only Page Panel open (no selection)**
+```
+                    ┌─────────────┐
+                    │ [Page Up]   │
+                    │ [Wheel 14]  │  ← PagePanelActionBar (single column, right side)
+                    │ [Page Down] │
+                    ├─────────────┤
+                    │ [Add]       │
+                    │ [Insert]    │
+                    │ [Delete]    │
+                    └─────────────┘
+```
+
+**Scenario 2: Page Panel open + Object selected**
+```
+        ┌─────────────┐  ┌─────────────┐
+        │ [Page Up]   │  │ [Copy]      │
+        │ [Wheel 14]  │  │ [Paste]     │  ← Two columns side by side
+        │ [Page Down] │  │ [Delete]    │
+        ├─────────────┤  │ [...]       │
+        │ [Add]       │  └─────────────┘
+        │ [Insert]    │
+        │ [Delete]    │
+        └─────────────┘
+           Left            Right
+      (PagePanel)    (Selection/Object)
+```
+
+**Questions:**
+1. Is this layout correct? PagePanelActionBar always on LEFT when 2 columns?
+2. What's the gap between the two columns? Same as internal button spacing?
+3. When Page Panel tab is closed, does PagePanelActionBar disappear (leaving only selection bar)?
+
+**Answer:**
+
+---
+
+### Q12.2: PagePanelActionBar - When Exactly Is It Visible?
+
+I want to confirm the visibility rules:
+
+| Condition | PagePanelActionBar Visible? |
+|-----------|----------------------------|
+| Page Panel tab is selected/open | Yes |
+| Page Panel tab is NOT selected (e.g., Layers tab) | ? |
+| Edgeless document (no Page Panel tab) | No |
+| Switching tabs (Document tabs, not sidebar) | ? |
+
+**My assumption:** PagePanelActionBar is visible **only when the Page Panel tab in the sidebar is the active tab**, regardless of what's happening in the viewport.
+
+**Answer:**
+
+---
+
+### Q12.3: PageWheelPicker - Size and Touch Target
+
+For the iPhone-style wheel picker in a round container:
+
+**Visual mockup:**
+```
+      ┌─────────────┐
+      │      13     │  ← small, dimmed (20% opacity?)
+      │    [ 14 ]   │  ← full size, bright, centered
+      │      15     │  ← small, dimmed
+      └─────────────┘
+         ~48x48px?
+```
+
+**Questions:**
+1. What diameter for the round container? 
+2. Should the wheel picker be the SAME width as other action bar buttons, or can it be taller/different? 
+3. Numbers only, or also show "Page" prefix? (e.g., "14" vs "Page 14") No prefix. 
+
+**My Recommendation:**
+- Same width as other buttons (36px) but allow taller height (~72px) to fit 3 numbers... 
+- Numbers only (space is tight)
+- Font size: center = 14px bold, above/below = 10px light
+
+**Answer:**
+Your recommendation (36x72px with border radius of 18px) is interesting. So it will be a hotdog-shaped widget, instead of being 100% round. It still fits in though, which is nice. 
+I agree with your other choices as well. 
+---
+
+### Q12.4: Delete Page Confirmation Toast
+
+From Q4.4, you agreed with Option D (undo toast like Gmail). Questions:
+
+1. Where should the toast appear? (Bottom center? Bottom right? Near action bar?)
+2. How long before auto-dismiss? (5 seconds as suggested?)
+3. Should the toast be the same component used elsewhere, or new?
+
+**My Recommendation:**
+- Bottom center of viewport (not blocking sidebar or action bars)
+- 5 second auto-dismiss with Undo button
+- Create reusable `UndoToast` widget if one doesn't exist, or reuse existing notification system
+
+**Answer:**
+I have a good idea. Make the delete button in the pagepanelactionbar a custom widget, so that it will turn itself into the toast after clicking on it. 
+---
+
+### Q12.5: Drag-and-Drop - Visual Feedback During Drag
+
+You approved drag-and-drop reorder. Specific visual questions:
+
+1. **Drag initiation indicator:** Should there be a "drag handle" icon on each thumbnail, or just long-press anywhere?
+2. **Drop indicator:** Horizontal line between thumbnails, or gap that opens up?
+3. **Scroll speed:** When dragging near edges, how fast should auto-scroll be?
+
+**My Recommendation:**
+- No drag handle (keep UI clean) - long-press anywhere on thumbnail initiates drag
+- Gap opens up between thumbnails (more intuitive than line)
+- Auto-scroll: start slow (2 thumbnails/sec), accelerate the closer to edge
+
+**Answer:**
+I agree with your recommendations.
+
+---
+
+### Q12.6: Delete Button → Toast Transformation (Clarification)
+
+You suggested the delete button transforms into a toast after clicking. Let me clarify:
+
+**Visual concept:**
+```
+BEFORE CLICK:              AFTER CLICK (toast state):
+┌─────────────┐            ┌─────────────────────────────┐
+│ [Delete 🗑]  │    →→→    │ Page deleted [Undo]         │
+└─────────────┘            └─────────────────────────────┘
+                           (expands width? same position?)
+```
+
+**Questions:**
+1. Does the button expand in-place (within action bar), or does it float/pop out? No expansion needed. 
+2. What happens to other action bar buttons during toast state? (Hidden? Pushed aside?) Nothing happens. 
+3. After 5 seconds or Undo click, does it shrink back to normal delete button? Yes. 
+4. If user clicks another action while toast is showing, what happens? I agree with your recommendation. 
+
+**My Recommendation:**
+- Button expands in-place within the action bar column
+- Other buttons remain visible (toast just takes more width temporarily)
+- Shrinks back after timeout or action
+- Any other action dismisses the toast (confirms delete)
+
+**Answer:**
+The buttons never show any text. It just changes the icon from the bin to an undo icon.
+---
+
+### Q12.7: PDF Document - Drag-and-Drop Restrictions
+
+We established PDF pages can't be deleted or reordered. For drag-and-drop:
+
+**Scenario:** User opens a PDF, inserts a blank page between page 5 and 6. Can they drag that inserted page?
+
+**Options:**
+- A) No drag-and-drop at all in PDF documents
+- B) Only inserted (non-PDF) pages can be dragged
+- C) Inserted pages can be dragged, but only between PDF pages (can't reorder PDF pages)
+
+**My Recommendation:** Option B - only inserted pages show drag behavior. PDF pages show no drag affordance.
+
+**Answer:**
+I agree with Option B. 
+---
+
+### Q12.8: Action Bar Icons - Do They Exist?
+
+For PagePanelActionBar, we need icons:
+
+| Button | Icon Needed | Exists? |
+|--------|-------------|---------|
+| Page Up | Arrow up or chevron up | ? |
+| Page Down | Arrow down or chevron down | ? |
+| Add Page | Plus icon | ? |
+| Insert Page | Plus with line? Insert icon? | ? |
+| Delete Page | Trash/bin icon | ? |
+
+**Questions:**
+1. Do these icons already exist in `resources/icons/`?
+2. If not, should I plan to create placeholders or use text labels initially?
+3. Should icons be the same style as toolbar icons?
+
+**Answer:**
+1 and 2. You can assume that they exist for now. Pay attention to the light/dark color switch. You may take a look at how other action bars handle this. I'll replace the file names with the actual ones later. 
+3. No. They should be the same as OTHER action bar icons. There are multiple action bars that share the same general architecture. 
+---
+
+## REMINDER: Unanswered Questions
+
+**Q12.1** and **Q12.2** about ActionBarContainer layout are still unanswered:
+
+### Q12.1 (Still needs answer):
+1. Is the 2-column layout correct? PagePanelActionBar always on LEFT?  Yes, both are correct. 
+2. What's the gap between the two columns?  24px logical. 
+3. When Page Panel tab is closed, does PagePanelActionBar disappear? Yes. 
+
+### Q12.2 (Still needs answer):
+When exactly is PagePanelActionBar visible?
+- Only when Page Panel sidebar tab is selected? Yes
+- Or whenever a paged document is open (regardless of sidebar tab)?  No. 

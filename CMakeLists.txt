@@ -350,6 +350,12 @@ set(UI_SOURCES
         source/ui/widgets/ModeToggleButton.cpp  # Task 1.4: Mode toggle button
         source/ui/widgets/LinkSlotButton.cpp  # Task 1.5: Link slot button
         source/ui/widgets/ActionBarButton.cpp  # Task 1.2: ActionBarButton widget
+        source/ui/widgets/PageWheelPicker.cpp  # Page Panel: Task 1.1: PageWheelPicker widget
+        source/ui/widgets/UndoDeleteButton.cpp  # Page Panel: Task 1.2: UndoDeleteButton widget
+        source/ui/PageThumbnailModel.cpp  # Page Panel: Task 2.1: PageThumbnailModel
+        source/ui/PageThumbnailDelegate.cpp  # Page Panel: Task 2.2: PageThumbnailDelegate
+        source/ui/PagePanel.cpp  # Page Panel: Task 2.3: PagePanel widget
+        source/ui/ThumbnailRenderer.cpp  # Page Panel: Task 3.1: Async thumbnail renderer
         # Subtoolbar framework (Phase D)
         source/ui/subtoolbars/SubToolbar.cpp  # Task 2.1: SubToolbar base class
         source/ui/subtoolbars/SubToolbarContainer.cpp  # Task 2.2: SubToolbar container
@@ -365,6 +371,7 @@ set(UI_SOURCES
         source/ui/actionbars/ObjectSelectActionBar.cpp  # Task 2.2: ObjectSelectActionBar
         source/ui/actionbars/TextSelectionActionBar.cpp  # Task 2.3: TextSelectionActionBar
         source/ui/actionbars/ClipboardActionBar.cpp  # Task 2.4: ClipboardActionBar
+        source/ui/actionbars/PagePanelActionBar.cpp  # Page Panel: Task 4.1: PagePanelActionBar
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)

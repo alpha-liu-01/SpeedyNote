@@ -2,6 +2,7 @@
 #include "ActionBar.h"
 #include "LassoActionBar.h"
 #include "ObjectSelectActionBar.h"
+#include "PagePanelActionBar.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -46,7 +47,7 @@ void ActionBarContainer::setActionBar(const QString& type, ActionBar* actionBar)
 void ActionBarContainer::showActionBar(const QString& type)
 {
     // If already showing this type, just update button states (context may have changed)
-    if (m_currentType == type && m_currentActionBar && isVisible()) {
+    if (m_currentType == type && m_currentActionBar && m_currentActionBar->isVisible()) {
         m_currentActionBar->updateButtonStates();
         updateSize();
         updatePosition(m_viewportRect);
@@ -66,16 +67,23 @@ void ActionBarContainer::showActionBar(const QString& type)
     if (m_currentActionBar) {
         // Update button states for current context
         m_currentActionBar->updateButtonStates();
-        
-        // Position action bar at (0,0) within container
-        m_currentActionBar->move(0, 0);
         m_currentActionBar->show();
         
         updateSize();
         updatePosition(m_viewportRect);
         
-        // Animate or show immediately
+        // Show container (might already be visible if PagePanel is shown)
+        if (!isVisible()) {
+            if (m_animationEnabled) {
         animateShow();
+            } else {
+                show();
+                raise();
+            }
+        } else {
+            // Already visible (PagePanel is showing), just raise
+            raise();
+        }
     } else {
         hideActionBar();
     }
@@ -83,19 +91,26 @@ void ActionBarContainer::showActionBar(const QString& type)
 
 void ActionBarContainer::hideActionBar()
 {
-    if (!isVisible() && !m_isAnimating) {
+    if (!m_currentActionBar) {
         return;
     }
     
-    if (m_animationEnabled) {
+    // Hide the current context action bar
+    m_currentActionBar->hide();
+    m_currentActionBar = nullptr;
+    m_currentType.clear();
+    
+    // Update layout
+    updateSize();
+    updatePosition(m_viewportRect);
+    
+    // Hide container only if PagePanel is also not visible
+    if (!m_pagePanelVisible) {
+        if (m_animationEnabled && isVisible()) {
         animateHide();
     } else {
-        if (m_currentActionBar) {
-            m_currentActionBar->hide();
+            hide();
         }
-        m_currentActionBar = nullptr;
-        m_currentType.clear();
-        hide();
     }
 }
 
@@ -103,24 +118,59 @@ void ActionBarContainer::updatePosition(const QRect& viewportRect)
 {
     m_viewportRect = viewportRect;
     
-    if (!m_currentActionBar || (!isVisible() && !m_isAnimating)) {
+    // Count visible bars
+    bool pagePanelShown = m_pagePanelBar && m_pagePanelVisible;
+    bool contextBarShown = m_currentActionBar && m_currentActionBar->isVisible();
+    
+    if (!pagePanelShown && !contextBarShown) {
         return;
     }
     
-    // Calculate X position: RIGHT_OFFSET from viewport right edge
-    int actionBarWidth = m_currentActionBar->sizeHint().width();
-    int x = viewportRect.right() - RIGHT_OFFSET - actionBarWidth;
+    // Don't update position while animating
+    if (m_isAnimating) {
+        return;
+    }
     
-    // Calculate Y position: vertically centered in viewport
-    int actionBarHeight = m_currentActionBar->sizeHint().height();
-    int y = viewportRect.top() + (viewportRect.height() - actionBarHeight) / 2;
+    // Calculate heights for vertical centering
+    int pagePanelHeight = pagePanelShown ? m_pagePanelBar->sizeHint().height() : 0;
+    int contextBarHeight = contextBarShown ? m_currentActionBar->sizeHint().height() : 0;
+    int maxBarHeight = qMax(pagePanelHeight, contextBarHeight);
     
-    // Ensure we don't go above the viewport top
-    y = qMax(y, viewportRect.top() + RIGHT_OFFSET);
+    // Calculate widths
+    int pagePanelWidth = pagePanelShown ? m_pagePanelBar->sizeHint().width() : 0;
+    int contextBarWidth = contextBarShown ? m_currentActionBar->sizeHint().width() : 0;
     
-    // Move the container (unless animating - animation controls position)
-    if (!m_isAnimating) {
-        move(x, y);
+    // Calculate total width
+    int totalWidth;
+    if (pagePanelShown && contextBarShown) {
+        // 2-column layout: pagePanelWidth + gap + contextBarWidth
+        totalWidth = pagePanelWidth + COLUMN_GAP + contextBarWidth;
+    } else {
+        totalWidth = qMax(pagePanelWidth, contextBarWidth);
+    }
+    
+    // Calculate container position (X: right-aligned, Y: vertically centered)
+    int containerX = viewportRect.right() - RIGHT_OFFSET - totalWidth;
+    int containerY = viewportRect.top() + (viewportRect.height() - maxBarHeight) / 2;
+    containerY = qMax(containerY, viewportRect.top() + RIGHT_OFFSET);
+    
+    // Move container
+    move(containerX, containerY);
+    
+    // Position child action bars within container
+    if (pagePanelShown && contextBarShown) {
+        // 2-column layout: PagePanel on LEFT, context bar on RIGHT
+        int pagePanelY = (maxBarHeight - pagePanelHeight) / 2;
+        int contextBarY = (maxBarHeight - contextBarHeight) / 2;
+        
+        m_pagePanelBar->move(0, pagePanelY);
+        m_currentActionBar->move(pagePanelWidth + COLUMN_GAP, contextBarY);
+    } else if (pagePanelShown) {
+        // Only PagePanel visible
+        m_pagePanelBar->move(0, 0);
+    } else if (contextBarShown) {
+        // Only context bar visible
+        m_currentActionBar->move(0, 0);
     }
 }
 
@@ -131,6 +181,11 @@ void ActionBarContainer::setDarkMode(bool darkMode)
         if (actionBar) {
             actionBar->setDarkMode(darkMode);
         }
+    }
+    
+    // Propagate to PagePanel action bar
+    if (m_pagePanelBar) {
+        m_pagePanelBar->setDarkMode(darkMode);
     }
 }
 
@@ -147,6 +202,60 @@ ActionBar* ActionBarContainer::currentActionBar() const
 ToolType ActionBarContainer::currentTool() const
 {
     return m_currentTool;
+}
+
+// ============================================================================
+// Page Panel Action Bar (2-Column Support)
+// ============================================================================
+
+void ActionBarContainer::setPagePanelActionBar(PagePanelActionBar* actionBar)
+{
+    // Clean up old action bar
+    if (m_pagePanelBar) {
+        m_pagePanelBar->setParent(nullptr);
+        m_pagePanelBar->deleteLater();
+    }
+    
+    m_pagePanelBar = actionBar;
+    
+    if (m_pagePanelBar) {
+        m_pagePanelBar->setParent(this);
+        m_pagePanelBar->setVisible(m_pagePanelVisible);
+    }
+    
+    // Update layout
+    updateSize();
+    updatePosition(m_viewportRect);
+}
+
+PagePanelActionBar* ActionBarContainer::pagePanelActionBar() const
+{
+    return m_pagePanelBar;
+}
+
+void ActionBarContainer::setPagePanelVisible(bool visible)
+{
+    if (m_pagePanelVisible == visible) {
+        return;
+    }
+    
+    m_pagePanelVisible = visible;
+    
+    if (m_pagePanelBar) {
+        m_pagePanelBar->setVisible(visible);
+    }
+    
+    // Update layout for potential 2-column arrangement
+    updateSize();
+    updatePosition(m_viewportRect);
+    
+    // Show container if at least one bar is visible
+    if (m_pagePanelVisible || (m_currentActionBar && m_currentActionBar->isVisible())) {
+        show();
+        raise();
+    } else if (!m_pagePanelVisible && !m_currentActionBar) {
+        hide();
+    }
 }
 
 void ActionBarContainer::onToolChanged(ToolType tool)
@@ -281,13 +390,37 @@ void ActionBarContainer::updateVisibility()
 
 void ActionBarContainer::updateSize()
 {
-    if (m_currentActionBar) {
-        // Size container to fit the action bar
-        QSize actionBarSize = m_currentActionBar->sizeHint();
-        setFixedSize(actionBarSize);
-    } else {
+    // Count visible bars
+    bool pagePanelShown = m_pagePanelBar && m_pagePanelVisible;
+    bool contextBarShown = m_currentActionBar && m_currentActionBar->isVisible();
+    
+    if (!pagePanelShown && !contextBarShown) {
         setFixedSize(0, 0);
+        return;
     }
+    
+    // Calculate dimensions
+    int pagePanelWidth = pagePanelShown ? m_pagePanelBar->sizeHint().width() : 0;
+    int pagePanelHeight = pagePanelShown ? m_pagePanelBar->sizeHint().height() : 0;
+    int contextBarWidth = contextBarShown ? m_currentActionBar->sizeHint().width() : 0;
+    int contextBarHeight = contextBarShown ? m_currentActionBar->sizeHint().height() : 0;
+    
+    int totalWidth;
+    int totalHeight;
+    
+    if (pagePanelShown && contextBarShown) {
+        // 2-column layout
+        totalWidth = pagePanelWidth + COLUMN_GAP + contextBarWidth;
+        totalHeight = qMax(pagePanelHeight, contextBarHeight);
+    } else if (pagePanelShown) {
+        totalWidth = pagePanelWidth;
+        totalHeight = pagePanelHeight;
+    } else {
+        totalWidth = contextBarWidth;
+        totalHeight = contextBarHeight;
+    }
+    
+    setFixedSize(totalWidth, totalHeight);
 }
 
 void ActionBarContainer::animateShow()

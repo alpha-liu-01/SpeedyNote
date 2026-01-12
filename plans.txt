@@ -590,17 +590,17 @@ D.5: Other Tool Subtoolbars [FUTURE] ✅ DONE
 PHASE E: Left Sidebar Features
 =============================================================================
 
-E.1: Sidebar Container Refresh [SMALL]
+E.1: Sidebar Container Refresh [SMALL] ✅ NO NEED
      - Make tab switching touch-friendly (larger tap targets)
      - Container already exists, LayerPanel already in a tab
 
-E.2: PDF Outline Panel [MEDIUM]
+E.2: PDF Outline Panel [MEDIUM] ✅ DONE
      - Display Poppler's TOC/outline data
      - Click entry → navigate to page
      - Scroll document → highlight current section
      - Expand/collapse nested sections
 
-E.3: Page Panel [MEDIUM-LARGE]
+E.3: Page Panel [MEDIUM-LARGE] `WE ARE HERE!`
      - Page thumbnails for quick navigation
      - Click → navigate to page
      - Drag to reorder pages (??) I don't think we implemented that feature... 

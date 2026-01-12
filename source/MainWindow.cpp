@@ -6,6 +6,7 @@
 #include "ui/sidebars/LayerPanel.h" // Phase S1: Moved to sidebars folder
 #include "ui/sidebars/OutlinePanel.h" // Phase E.2: PDF outline panel
 #include "ui/sidebars/LeftSidebarContainer.h" // Phase S3: Left sidebar container
+#include "ui/PagePanel.h" // Page Panel: Task 5.1
 #include "ui/DebugOverlay.h"        // Debug overlay (toggle with D key)
 #include "ui/StyleLoader.h"         // QSS stylesheet loader
 // Phase D: Subtoolbar includes
@@ -19,6 +20,7 @@
 #include "ui/actionbars/ObjectSelectActionBar.h"
 #include "ui/actionbars/TextSelectionActionBar.h"
 #include "ui/actionbars/ClipboardActionBar.h"
+#include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include <QClipboard>  // For clipboard signal connection
 #include "ButtonMappingTypes.h"
@@ -174,6 +176,9 @@ MainWindow::MainWindow(QWidget *parent)
         if (vp) {
             updateOutlinePanelForDocument(vp->document());
         }
+        
+        // Page Panel: Task 5.1: Update PagePanel when tab changes
+        updatePagePanelForViewport(vp);
         
         // Update DebugOverlay with current viewport
         if (m_debugOverlay) {
@@ -462,6 +467,7 @@ void MainWindow::setupUi() {
     m_leftSidebar->setFixedWidth(250);  // Match sidebar width
     m_leftSidebar->setVisible(false);   // Hidden by default, toggled via NavigationBar
     m_layerPanel = m_leftSidebar->layerPanel();  // Get reference for signal connections
+    m_pagePanel = m_leftSidebar->pagePanel();    // Page Panel: Task 5.1
     
     // =========================================================================
     // Phase 5.6.8: Simplified LayerPanel Signal Handlers
@@ -799,6 +805,9 @@ void MainWindow::setupUi() {
     
     // Phase E.2: Setup outline panel connections
     setupOutlinePanelConnections();
+    
+    // Page Panel: Task 5.2: Setup page panel connections
+    setupPagePanelConnections();
 
     // Add components in vertical order
     // Phase C.1.5: tabBarContainer hidden - buttons now in NavigationBar
@@ -861,6 +870,9 @@ void MainWindow::setupUi() {
         // Phase 5.1: Initialize LayerPanel for the first tab
         // currentViewportChanged may have been emitted before m_layerPanel was ready
         updateLayerPanelForViewport(currentViewport());
+        
+        // Page Panel: Task 5.1: Initialize PagePanel for the first tab
+        updatePagePanelForViewport(currentViewport());
         
         // Initialize DebugOverlay with the first viewport
         if (m_debugOverlay) {
@@ -1119,6 +1131,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_outlinePageConn);
         m_outlinePageConn = {};
     }
+    // Page Panel: Task 5.2: Disconnect page panel page tracking connection
+    if (m_pagePanelPageConn) {
+        disconnect(m_pagePanelPageConn);
+        m_pagePanelPageConn = {};
+    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -1307,6 +1324,36 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             
             // Sync current page state immediately
             outlinePanel->highlightPage(viewport->currentPageIndex());
+        }
+    }
+    
+    // =========================================================================
+    // Page Panel: Task 5.2: Connect viewport ↔ PagePanel
+    // =========================================================================
+    
+    if (m_pagePanel) {
+        // Connect viewport's currentPageChanged to PagePanel
+        m_pagePanelPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
+                                      m_pagePanel, &PagePanel::onCurrentPageChanged);
+        
+        // Sync current page state immediately
+        m_pagePanel->onCurrentPageChanged(viewport->currentPageIndex());
+    }
+    
+    // Page Panel: Task 5.3: Sync PagePanelActionBar with viewport
+    if (m_pagePanelActionBar) {
+        // Connect viewport's currentPageChanged to PagePanelActionBar
+        connect(viewport, &DocumentViewport::currentPageChanged,
+                this, [this](int pageIndex) {
+            if (m_pagePanelActionBar) {
+                m_pagePanelActionBar->setCurrentPage(pageIndex);
+            }
+        });
+        
+        // Sync current state immediately
+        if (Document* doc = viewport->document()) {
+            m_pagePanelActionBar->setPageCount(doc->pageCount());
+            m_pagePanelActionBar->setCurrentPage(viewport->currentPageIndex());
         }
     }
 }
@@ -1555,6 +1602,50 @@ void MainWindow::updateOutlinePanelForDocument(Document* doc)
     m_leftSidebar->showOutlineTab(true);
     
     qDebug() << "Phase E.2: Loaded outline with" << outline.size() << "top-level items";
+}
+
+// ============================================================================
+// Page Panel: Task 5.1: Update PagePanel for Viewport
+// ============================================================================
+
+void MainWindow::updatePagePanelForViewport(DocumentViewport* viewport)
+{
+    if (!m_leftSidebar) {
+        return;
+    }
+    
+    PagePanel* pagePanel = m_leftSidebar->pagePanel();
+    if (!pagePanel) {
+        return;
+    }
+    
+    // Case 1: No viewport or no document
+    if (!viewport || !viewport->document()) {
+        m_leftSidebar->showPagesTab(false);
+        pagePanel->setDocument(nullptr);
+        updatePagePanelActionBarVisibility();  // Task 5.4: Hide action bar
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    
+    // Case 2: Edgeless document - hide Pages tab
+    if (doc->isEdgeless()) {
+        m_leftSidebar->showPagesTab(false);
+        pagePanel->setDocument(nullptr);
+        updatePagePanelActionBarVisibility();  // Task 5.4: Hide action bar
+        return;
+    }
+    
+    // Case 3: Paged document - show Pages tab
+    pagePanel->setDocument(doc);
+    pagePanel->setCurrentPageIndex(viewport->currentPageIndex());
+    m_leftSidebar->showPagesTab(true);
+    
+    // Task 5.4: Update action bar visibility when viewport changes
+    updatePagePanelActionBarVisibility();
+    
+    qDebug() << "Page Panel: Updated for document with" << doc->pageCount() << "pages";
 }
 
 // ============================================================================
@@ -3034,6 +3125,9 @@ void MainWindow::setupActionBars()
     // Initial position update
     QTimer::singleShot(0, this, &MainWindow::updateActionBarPosition);
     
+    // Page Panel: Task 5.3: Setup PagePanelActionBar
+    setupPagePanelActionBar();
+    
     qDebug() << "Action bars initialized";
 }
 
@@ -3054,6 +3148,201 @@ void MainWindow::updateActionBarPosition()
     
     // Ensure it's raised above viewport content
     m_actionBarContainer->raise();
+}
+
+// =========================================================================
+// Page Panel: Task 5.3: PagePanelActionBar Setup and Connections
+// =========================================================================
+
+void MainWindow::setupPagePanelActionBar()
+{
+    if (!m_actionBarContainer) {
+        qWarning() << "setupPagePanelActionBar: ActionBarContainer not yet created";
+        return;
+    }
+    
+    // Create the PagePanelActionBar
+    m_pagePanelActionBar = new PagePanelActionBar(m_actionBarContainer);
+    m_actionBarContainer->setPagePanelActionBar(m_pagePanelActionBar);
+    
+    // -------------------------------------------------------------------------
+    // Navigation signals
+    // -------------------------------------------------------------------------
+    
+    // Page Up: Go to previous page
+    connect(m_pagePanelActionBar, &PagePanelActionBar::pageUpClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            int currentPage = vp->currentPageIndex();
+            if (currentPage > 0) {
+                vp->scrollToPage(currentPage - 1);
+            }
+        }
+    });
+    
+    // Page Down: Go to next page
+    connect(m_pagePanelActionBar, &PagePanelActionBar::pageDownClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            int currentPage = vp->currentPageIndex();
+            if (Document* doc = vp->document()) {
+                if (currentPage < doc->pageCount() - 1) {
+                    vp->scrollToPage(currentPage + 1);
+                }
+            }
+        }
+    });
+    
+    // Wheel picker page selection: Navigate directly to page
+    connect(m_pagePanelActionBar, &PagePanelActionBar::pageSelected, this, [this](int page) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->scrollToPage(page);
+        }
+    });
+    
+    // -------------------------------------------------------------------------
+    // Page management signals
+    // -------------------------------------------------------------------------
+    
+    // Add Page: Add a new page at the end
+    connect(m_pagePanelActionBar, &PagePanelActionBar::addPageClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (Document* doc = vp->document()) {
+                doc->addPage();
+                vp->notifyDocumentStructureChanged();
+                // Navigate to the new page
+                vp->scrollToPage(doc->pageCount() - 1);
+                // Update PagePanel and action bar
+                if (m_pagePanel) {
+                    m_pagePanel->onPageCountChanged();
+                }
+                m_pagePanelActionBar->setPageCount(doc->pageCount());
+            }
+        }
+    });
+    
+    // Insert Page: Insert a new page after the current page
+    connect(m_pagePanelActionBar, &PagePanelActionBar::insertPageClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (Document* doc = vp->document()) {
+                int currentPage = vp->currentPageIndex();
+                doc->insertPage(currentPage + 1);
+                vp->notifyDocumentStructureChanged();
+                // Navigate to the new page
+                vp->scrollToPage(currentPage + 1);
+                // Update PagePanel and action bar
+                if (m_pagePanel) {
+                    m_pagePanel->onPageCountChanged();
+                }
+                m_pagePanelActionBar->setPageCount(doc->pageCount());
+            }
+        }
+    });
+    
+    // Delete Page (first click): Store index and perform soft delete
+    connect(m_pagePanelActionBar, &PagePanelActionBar::deletePageClicked, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (Document* doc = vp->document()) {
+                // Can't delete the last page
+                if (doc->pageCount() <= 1) {
+                    m_pagePanelActionBar->resetDeleteButton();
+                    return;
+                }
+                
+                m_pendingDeletePageIndex = vp->currentPageIndex();
+                
+                // Actually delete the page
+                if (doc->removePage(m_pendingDeletePageIndex)) {
+                    vp->notifyDocumentStructureChanged();
+                    
+                    // Navigate to appropriate page
+                    int newPage = qMin(m_pendingDeletePageIndex, doc->pageCount() - 1);
+                    vp->scrollToPage(newPage);
+                    
+                    // Update UI
+                    if (m_pagePanel) {
+                        m_pagePanel->onPageCountChanged();
+                    }
+                    m_pagePanelActionBar->setPageCount(doc->pageCount());
+                    m_pagePanelActionBar->setCurrentPage(newPage);
+                } else {
+                    // Delete failed, reset button
+                    m_pendingDeletePageIndex = -1;
+                    m_pagePanelActionBar->resetDeleteButton();
+                }
+            }
+        }
+    });
+    
+    // Delete confirmed (timeout elapsed): Clear pending state
+    connect(m_pagePanelActionBar, &PagePanelActionBar::deleteConfirmed, this, [this]() {
+        // Delete was already performed in deletePageClicked
+        // Just clear the pending state - page data is now permanently gone
+        m_pendingDeletePageIndex = -1;
+        qDebug() << "Page Panel: Delete confirmed, page permanently removed";
+    });
+    
+    // Undo delete clicked: Restore the deleted page
+    connect(m_pagePanelActionBar, &PagePanelActionBar::undoDeleteClicked, this, [this]() {
+        // TODO: Implement actual undo once we have page data restoration
+        // For now, just log and reset state
+        qDebug() << "Page Panel: Undo delete requested for page" << m_pendingDeletePageIndex;
+        // Note: True undo requires storing the deleted Page* temporarily
+        // This is a placeholder - the page is already gone at this point
+        m_pendingDeletePageIndex = -1;
+    });
+    
+    // -------------------------------------------------------------------------
+    // Visibility: Show only when Pages tab is selected
+    // -------------------------------------------------------------------------
+    
+    // Connect to left sidebar tab changes
+    if (m_leftSidebar) {
+        connect(m_leftSidebar, &QTabWidget::currentChanged, this, [this](int) {
+            // Task 5.4: Use helper function for consistent visibility logic
+            updatePagePanelActionBarVisibility();
+        });
+    }
+    
+    qDebug() << "Page Panel: PagePanelActionBar connections initialized";
+}
+
+// =========================================================================
+// Page Panel: Task 5.4: Action Bar Visibility Logic
+// =========================================================================
+
+void MainWindow::updatePagePanelActionBarVisibility()
+{
+    if (!m_pagePanelActionBar || !m_actionBarContainer) {
+        return;
+    }
+    
+    bool shouldShow = false;
+    
+    // Condition 1: Pages tab must be visible and selected
+    if (m_leftSidebar && m_leftSidebar->hasPagesTab()) {
+        int pagesTabIndex = m_leftSidebar->indexOf(m_leftSidebar->pagePanel());
+        if (m_leftSidebar->currentIndex() == pagesTabIndex) {
+            // Condition 2: Must be a paged document (not edgeless)
+            if (DocumentViewport* vp = currentViewport()) {
+                if (Document* doc = vp->document()) {
+                    if (!doc->isEdgeless()) {
+                        shouldShow = true;
+                    }
+                }
+            }
+        }
+    }
+    
+    m_actionBarContainer->setPagePanelVisible(shouldShow);
+    
+    // Update action bar state when becoming visible
+    if (shouldShow) {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (Document* doc = vp->document()) {
+                m_pagePanelActionBar->setPageCount(doc->pageCount());
+                m_pagePanelActionBar->setCurrentPage(vp->currentPageIndex());
+            }
+        }
+    }
 }
 
 // =========================================================================
@@ -3089,6 +3378,54 @@ void MainWindow::setupOutlinePanelConnections()
     });
     
     qDebug() << "Phase E.2: Outline panel connections initialized";
+}
+
+// =========================================================================
+// Page Panel: Task 5.2: Page Panel Connections
+// =========================================================================
+
+void MainWindow::setupPagePanelConnections()
+{
+    if (!m_leftSidebar) {
+        qWarning() << "setupPagePanelConnections: m_leftSidebar not yet created";
+        return;
+    }
+    
+    PagePanel* pagePanel = m_leftSidebar->pagePanel();
+    if (!pagePanel) {
+        qWarning() << "setupPagePanelConnections: PagePanel not available";
+        return;
+    }
+    
+    // Navigation: PagePanel → DocumentViewport
+    // When user clicks a page thumbnail, navigate to that page
+    connect(pagePanel, &PagePanel::pageClicked, this, [this](int pageIndex) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->scrollToPage(pageIndex);
+        }
+    });
+    
+    // Drag-and-Drop: PagePanel → Document
+    // When user drops a page to reorder, call Document::movePage()
+    connect(pagePanel, &PagePanel::pageDropped, this, [this](int fromIndex, int toIndex) {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (Document* doc = vp->document()) {
+                if (doc->movePage(fromIndex, toIndex)) {
+                    // Refresh the viewport after page reorder
+                    vp->update();
+                    
+                    // Update page panel to reflect new order
+                    if (m_pagePanel) {
+                        m_pagePanel->invalidateAllThumbnails();
+                    }
+                    
+                    qDebug() << "Page Panel: Moved page" << fromIndex << "to" << toIndex;
+                }
+            }
+        }
+    });
+    
+    qDebug() << "Page Panel: Connections initialized";
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete

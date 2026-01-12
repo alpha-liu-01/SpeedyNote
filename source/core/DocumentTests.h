@@ -1077,6 +1077,280 @@ inline bool testActualPdfLoad()
 }
 
 /**
+ * @brief Test movePage() operations in detail.
+ * 
+ * Tests:
+ * - Move from middle positions
+ * - Move to same position (no-op)
+ * - Move first to last
+ * - Move last to first
+ * - Invalid indices (negative, out of bounds)
+ * - Page identity preserved (UUIDs follow pages)
+ * - Strokes follow their pages
+ * - Modified flag set
+ * 
+ * Note: This is a more thorough test than the basic movePage() test
+ * in testPageManagement(). Created for Page Panel drag-and-drop support.
+ */
+inline bool testMovePage()
+{
+    qDebug() << "=== Test: Document::movePage() Detailed ===";
+    bool success = true;
+    
+    // Create document with 5 pages
+    auto doc = Document::createNew("MovePage Test");
+    for (int i = 0; i < 4; ++i) {
+        doc->addPage();
+    }
+    // Now have 5 pages (indices 0-4)
+    
+    if (doc->pageCount() != 5) {
+        qDebug() << "FAIL: Setup - should have 5 pages";
+        return false;
+    }
+    
+    // Store UUIDs to track page identity
+    QStringList originalUuids;
+    for (int i = 0; i < 5; ++i) {
+        originalUuids.append(doc->page(i)->uuid);
+    }
+    
+    // Add a stroke to page 1 to verify strokes follow pages
+    VectorStroke testStroke;
+    testStroke.id = "move-test-stroke";
+    testStroke.color = Qt::green;
+    testStroke.baseThickness = 2.0;
+    testStroke.points.append({QPointF(10, 10), 0.5});
+    testStroke.points.append({QPointF(50, 50), 0.8});
+    testStroke.updateBoundingBox();
+    doc->page(1)->activeLayer()->addStroke(testStroke);
+    
+    doc->clearModified();
+    
+    // =========================================================================
+    // Test 1: Move to same position (no-op)
+    // =========================================================================
+    bool result = doc->movePage(2, 2);
+    
+    if (!result) {
+        qDebug() << "FAIL: movePage(2, 2) should return true (no-op)";
+        success = false;
+    }
+    
+    // Order should be unchanged: [0, 1, 2, 3, 4]
+    for (int i = 0; i < 5; ++i) {
+        if (doc->page(i)->uuid != originalUuids[i]) {
+            qDebug() << "FAIL: Same position move changed order";
+            success = false;
+            break;
+        }
+    }
+    
+    qDebug() << "  - Move to same position (no-op): OK";
+    
+    // =========================================================================
+    // Test 2: Move page 0 to position 2
+    // =========================================================================
+    // Before: [0, 1, 2, 3, 4]
+    // After:  [1, 2, 0, 3, 4]
+    
+    result = doc->movePage(0, 2);
+    
+    if (!result) {
+        qDebug() << "FAIL: movePage(0, 2) should succeed";
+        success = false;
+    }
+    
+    // Verify new order
+    if (doc->page(0)->uuid != originalUuids[1] ||
+        doc->page(1)->uuid != originalUuids[2] ||
+        doc->page(2)->uuid != originalUuids[0] ||
+        doc->page(3)->uuid != originalUuids[3] ||
+        doc->page(4)->uuid != originalUuids[4]) {
+        qDebug() << "FAIL: movePage(0, 2) - order incorrect";
+        qDebug() << "  Expected: [1, 2, 0, 3, 4]";
+        qDebug() << "  Got UUIDs:";
+        for (int i = 0; i < 5; ++i) {
+            int originalIdx = originalUuids.indexOf(doc->page(i)->uuid);
+            qDebug() << "    Page" << i << "= original" << originalIdx;
+        }
+        success = false;
+    }
+    
+    // The stroke should still be on what was originally page 1 (now at index 0)
+    if (doc->page(0)->activeLayer()->strokeCount() != 1 ||
+        doc->page(0)->activeLayer()->strokes()[0].id != "move-test-stroke") {
+        qDebug() << "FAIL: Stroke did not follow page during move";
+        success = false;
+    }
+    
+    qDebug() << "  - Move page 0 to position 2: OK";
+    
+    // =========================================================================
+    // Test 3: Move last page to first position
+    // =========================================================================
+    // Current: [1, 2, 0, 3, 4]
+    // After:   [4, 1, 2, 0, 3]
+    
+    result = doc->movePage(4, 0);
+    
+    if (!result) {
+        qDebug() << "FAIL: movePage(4, 0) should succeed";
+        success = false;
+    }
+    
+    if (doc->page(0)->uuid != originalUuids[4]) {
+        qDebug() << "FAIL: movePage(4, 0) - page 4 should be at index 0";
+        success = false;
+    }
+    
+    qDebug() << "  - Move last to first: OK";
+    
+    // =========================================================================
+    // Test 4: Move first page to last position
+    // =========================================================================
+    // Current: [4, 1, 2, 0, 3]
+    // After:   [1, 2, 0, 3, 4]
+    
+    result = doc->movePage(0, 4);
+    
+    if (!result) {
+        qDebug() << "FAIL: movePage(0, 4) should succeed";
+        success = false;
+    }
+    
+    if (doc->page(4)->uuid != originalUuids[4]) {
+        qDebug() << "FAIL: movePage(0, 4) - original page 4 should be at index 4";
+        success = false;
+    }
+    
+    qDebug() << "  - Move first to last: OK";
+    
+    // =========================================================================
+    // Test 5: Invalid indices - negative
+    // =========================================================================
+    result = doc->movePage(-1, 2);
+    if (result) {
+        qDebug() << "FAIL: movePage(-1, 2) should return false";
+        success = false;
+    }
+    
+    result = doc->movePage(2, -1);
+    if (result) {
+        qDebug() << "FAIL: movePage(2, -1) should return false";
+        success = false;
+    }
+    
+    qDebug() << "  - Negative indices rejected: OK";
+    
+    // =========================================================================
+    // Test 6: Invalid indices - out of bounds
+    // =========================================================================
+    result = doc->movePage(10, 2);
+    if (result) {
+        qDebug() << "FAIL: movePage(10, 2) should return false";
+        success = false;
+    }
+    
+    result = doc->movePage(2, 10);
+    if (result) {
+        qDebug() << "FAIL: movePage(2, 10) should return false";
+        success = false;
+    }
+    
+    result = doc->movePage(5, 2);  // Exactly at boundary (5 pages, valid indices are 0-4)
+    if (result) {
+        qDebug() << "FAIL: movePage(5, 2) should return false (index 5 is out of bounds)";
+        success = false;
+    }
+    
+    qDebug() << "  - Out of bounds indices rejected: OK";
+    
+    // =========================================================================
+    // Test 7: Modified flag is set
+    // =========================================================================
+    doc->clearModified();
+    doc->movePage(0, 1);
+    
+    if (!doc->modified) {
+        qDebug() << "FAIL: movePage should mark document as modified";
+        success = false;
+    }
+    
+    qDebug() << "  - Modified flag set: OK";
+    
+    // =========================================================================
+    // Test 8: UUID cache is invalidated (pageIndexByUuid should still work)
+    // =========================================================================
+    // After all moves, verify pageIndexByUuid returns correct values
+    for (int i = 0; i < 5; ++i) {
+        QString pageUuid = doc->page(i)->uuid;
+        int foundIndex = doc->pageIndexByUuid(pageUuid);
+        if (foundIndex != i) {
+            qDebug() << "FAIL: pageIndexByUuid() returned" << foundIndex 
+                     << "but page is at index" << i;
+            success = false;
+            break;
+        }
+    }
+    
+    qDebug() << "  - UUID cache correctly invalidated: OK";
+    
+    // =========================================================================
+    // Test 9: Multiple consecutive moves
+    // =========================================================================
+    // Reset to known state
+    auto doc2 = Document::createNew("MovePage Test 2");
+    for (int i = 0; i < 4; ++i) {
+        doc2->addPage();
+    }
+    
+    QStringList uuids2;
+    for (int i = 0; i < 5; ++i) {
+        uuids2.append(doc2->page(i)->uuid);
+    }
+    
+    // Perform multiple moves: simulate drag-and-drop reordering
+    // [0,1,2,3,4] -> move 4 to 0 -> [4,0,1,2,3]
+    // [4,0,1,2,3] -> move 2 to 4 -> [4,0,2,3,1]
+    // [4,0,2,3,1] -> move 0 to 2 -> [0,2,4,3,1]
+    
+    doc2->movePage(4, 0);  // [4,0,1,2,3]
+    doc2->movePage(2, 4);  // [4,0,2,3,1]
+    doc2->movePage(0, 2);  // [0,2,4,3,1]
+    
+    // Verify final state
+    // Expected order of original indices: [0, 2, 4, 3, 1]
+    int expectedOrder[] = {0, 2, 4, 3, 1};
+    bool orderCorrect = true;
+    for (int i = 0; i < 5; ++i) {
+        if (doc2->page(i)->uuid != uuids2[expectedOrder[i]]) {
+            orderCorrect = false;
+            break;
+        }
+    }
+    
+    if (!orderCorrect) {
+        qDebug() << "FAIL: Multiple consecutive moves - order incorrect";
+        qDebug() << "  Expected original indices: [0, 2, 4, 3, 1]";
+        qDebug() << "  Got:";
+        for (int i = 0; i < 5; ++i) {
+            int originalIdx = uuids2.indexOf(doc2->page(i)->uuid);
+            qDebug() << "    Position" << i << "= original" << originalIdx;
+        }
+        success = false;
+    }
+    
+    qDebug() << "  - Multiple consecutive moves: OK";
+    
+    if (success) {
+        qDebug() << "PASS: movePage() detailed tests successful!";
+    }
+    
+    return success;
+}
+
+/**
  * @brief Run all Document tests.
  * @return True if all tests pass.
  */
@@ -1092,6 +1366,9 @@ inline bool runAllTests()
     qDebug() << "";
     
     allPass &= testPageManagement();
+    qDebug() << "";
+    
+    allPass &= testMovePage();  // NEW: Detailed movePage tests
     qDebug() << "";
     
     allPass &= testBookmarks();

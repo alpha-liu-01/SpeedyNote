@@ -7,6 +7,7 @@
 #include "../../core/ToolType.h"
 
 class ActionBar;
+class PagePanelActionBar;
 
 /**
  * @brief Manages action bar swapping, positioning, and visibility.
@@ -96,6 +97,33 @@ public:
      * @brief Get the current tool type.
      */
     ToolType currentTool() const;
+    
+    // =========================================================================
+    // Page Panel Action Bar (2-Column Support)
+    // =========================================================================
+    
+    /**
+     * @brief Set the Page Panel action bar.
+     * @param actionBar The PagePanelActionBar instance.
+     * 
+     * The container takes ownership of the action bar.
+     * When both PagePanelActionBar and a context action bar are visible,
+     * they are arranged in 2 columns with PagePanel on the left.
+     */
+    void setPagePanelActionBar(PagePanelActionBar* actionBar);
+    
+    /**
+     * @brief Get the Page Panel action bar.
+     */
+    PagePanelActionBar* pagePanelActionBar() const;
+    
+    /**
+     * @brief Show or hide the Page Panel action bar.
+     * @param visible True to show, false to hide.
+     * 
+     * Call this when the Page Panel sidebar tab is shown/hidden.
+     */
+    void setPagePanelVisible(bool visible);
 
 public slots:
     /**
@@ -182,6 +210,10 @@ private:
     ToolType m_currentTool = ToolType::Pen;
     QRect m_viewportRect;
     
+    // Page Panel action bar (2-column support)
+    PagePanelActionBar* m_pagePanelBar = nullptr;
+    bool m_pagePanelVisible = false;
+    
     // Context state (cached)
     bool m_hasLassoSelection = false;
     bool m_hasObjectSelection = false;
@@ -197,6 +229,8 @@ private:
     
     /// Offset from right edge of viewport
     static constexpr int RIGHT_OFFSET = 24;
+    /// Gap between columns in 2-column layout
+    static constexpr int COLUMN_GAP = 24;
     /// Animation duration in milliseconds
     static constexpr int ANIMATION_DURATION = 150;
 };

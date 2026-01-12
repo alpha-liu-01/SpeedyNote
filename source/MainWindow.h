@@ -73,6 +73,7 @@ class LassoActionBar;
 class ObjectSelectActionBar;
 class TextSelectionActionBar;
 class ClipboardActionBar;
+class PagePanelActionBar;
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
 // Will be reimplemented in Phase 3.3 if needed
@@ -92,6 +93,7 @@ class QTreeWidgetItem;
 class QProgressDialog;
 class DocumentViewport;
 class LayerPanel;
+class PagePanel;
 class DebugOverlay;
 namespace Poppler { 
     class Document; 
@@ -247,6 +249,7 @@ private slots:
     void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
     void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
     void updateOutlinePanelForDocument(Document* doc);  // Phase E.2: Update OutlinePanel for document
+    void updatePagePanelForViewport(DocumentViewport* viewport);  // Page Panel: Task 5.1: Update PagePanel
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
@@ -304,6 +307,10 @@ private:
     ObjectSelectActionBar *m_objectSelectActionBar = nullptr;
     TextSelectionActionBar *m_textSelectionActionBar = nullptr;
     ClipboardActionBar *m_clipboardActionBar = nullptr;
+    PagePanelActionBar *m_pagePanelActionBar = nullptr;
+    
+    // Page Panel: Task 5.3: Pending delete state for undo support
+    int m_pendingDeletePageIndex = -1;
     
     // Phase C.1.5: addTabButton removed - functionality now in NavigationBar
     QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)
@@ -316,6 +323,7 @@ private:
     // Phase S3: Left Sidebar Container (replaces floating tabs)
     LeftSidebarContainer *m_leftSidebar = nullptr;  // Tabbed container for left panels
     LayerPanel *m_layerPanel = nullptr;             // Reference to LayerPanel in container
+    PagePanel *m_pagePanel = nullptr;               // Reference to PagePanel in container
     // QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
     // QPushButton *toggleLayerPanelButton = nullptr; // Floating tab button to toggle layer panel
     bool layerPanelVisible = true;                   // Layer panel visible by default
@@ -405,6 +413,9 @@ private:
     // Phase E.2: OutlinePanel page change connection (for section highlighting)
     QMetaObject::Connection m_outlinePageConn;
     
+    // Page Panel: Task 5.2: PagePanel page change connection
+    QMetaObject::Connection m_pagePanelPageConn;
+    
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;
     QTimer *trackpadModeTimer = nullptr;
@@ -426,9 +437,14 @@ private:
     // Action Bar setup and positioning
     void setupActionBars();            // Create and connect action bars
     void updateActionBarPosition();    // Update position on viewport resize
+    void setupPagePanelActionBar();    // Page Panel: Task 5.3: Create and connect PagePanelActionBar
+    void updatePagePanelActionBarVisibility();  // Page Panel: Task 5.4: Update visibility based on tab and document
     
     // Phase E.2: PDF Outline Panel connections
     void setupOutlinePanelConnections();  // Connect outline panel signals
+    
+    // Page Panel: Task 5.2: Page Panel connections
+    void setupPagePanelConnections();  // Connect page panel signals
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

@@ -5,6 +5,7 @@
 
 class LayerPanel;
 class OutlinePanel;
+class PagePanel;
 
 /**
  * @brief Tabbed container for left sidebar panels.
@@ -36,6 +37,12 @@ public:
      */
     OutlinePanel* outlinePanel() const { return m_outlinePanel; }
     
+    /**
+     * @brief Get the PagePanel instance.
+     * @return Pointer to PagePanel (owned by this container).
+     */
+    PagePanel* pagePanel() const { return m_pagePanel; }
+    
     // =========================================================================
     // Dynamic Tab Management
     // =========================================================================
@@ -45,7 +52,7 @@ public:
      * @param show True to show, false to hide.
      * 
      * The Outline tab is only shown when viewing a PDF with an outline.
-     * When shown, it's inserted at position 0 (before Layers).
+     * When shown, it's inserted at position 0 (before other tabs).
      */
     void showOutlineTab(bool show);
     
@@ -56,6 +63,21 @@ public:
     bool hasOutlineTab() const { return m_outlineTabIndex >= 0; }
     
     /**
+     * @brief Show or hide the Pages tab.
+     * @param show True to show, false to hide.
+     * 
+     * The Pages tab is shown for paged documents and hidden for edgeless documents.
+     * When shown, it appears after Outline (if visible) and before Layers.
+     */
+    void showPagesTab(bool show);
+    
+    /**
+     * @brief Check if the Pages tab is currently visible.
+     * @return True if Pages tab is shown.
+     */
+    bool hasPagesTab() const { return m_pagesTabIndex >= 0; }
+    
+    /**
      * @brief Update theme colors.
      * @param darkMode True for dark theme
      */
@@ -63,12 +85,15 @@ public:
 
 private:
     void setupUi();
+    void updateTabIndices();  // Recalculate indices after tab add/remove
     
     LayerPanel *m_layerPanel = nullptr;
     OutlinePanel *m_outlinePanel = nullptr;
-    int m_outlineTabIndex = -1;  // -1 = tab not added
+    PagePanel *m_pagePanel = nullptr;
     
-    // Future: BookmarksPanel, PagePanel
+    int m_outlineTabIndex = -1;  // -1 = tab not added
+    int m_pagesTabIndex = -1;    // -1 = tab not added
+    int m_layersTabIndex = 0;    // Layers is always the last tab
 };
 
 #endif // LEFTSIDEBARCONTAINER_H
