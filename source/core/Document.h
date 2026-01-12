@@ -329,16 +329,6 @@ public:
     QString bundlePath() const { return m_bundlePath; }
     
     /**
-     * @brief Get the path to the assets directory.
-     * @return Full path to assets/, or empty if bundle path not set.
-     * 
-     * Phase M.1: Base path for all document assets (images, notes, etc.).
-     */
-    QString assetsPath() const { 
-        return m_bundlePath.isEmpty() ? QString() : m_bundlePath + "/assets"; 
-    }
-    
-    /**
      * @brief Get the path to the assets/images directory.
      * @return Full path to assets/images, or empty if bundle path not set.
      * 
@@ -349,24 +339,6 @@ public:
     QString assetsImagePath() const { 
         return m_bundlePath.isEmpty() ? QString() : m_bundlePath + "/assets/images"; 
     }
-    
-    /**
-     * @brief Get the path to the assets/notes directory.
-     * Creates the directory if it doesn't exist.
-     * @return Full path to assets/notes/, or empty if bundle path not set.
-     * 
-     * Phase M.1: Used for storing markdown note files.
-     */
-    QString notesPath() const;
-    
-    /**
-     * @brief Delete a markdown note file from the notes directory.
-     * @param noteId The note UUID (filename without .md extension).
-     * @return true if deleted or file didn't exist, false on error.
-     * 
-     * Phase M.1: Used for cascade delete when clearing LinkSlots or deleting LinkObjects.
-     */
-    bool deleteNoteFile(const QString& noteId);
     
     /**
      * @brief Save all unsaved ImageObjects to the assets folder.

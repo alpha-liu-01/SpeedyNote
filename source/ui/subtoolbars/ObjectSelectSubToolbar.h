@@ -5,15 +5,9 @@
 #include "../../core/DocumentViewport.h"  // For ObjectInsertMode, ObjectActionMode
 #include "../widgets/LinkSlotButton.h"    // For LinkSlotState
 #include <QHash>
-#include <QColor>
 
 class ModeToggleButton;
 class LinkSlotButton;
-class ColorPresetButton;
-class SubToolbarToggle;
-class QLineEdit;
-class QWidget;
-class QPushButton;
 
 /**
  * @brief Subtoolbar for the ObjectSelect tool.
@@ -39,10 +33,6 @@ class ObjectSelectSubToolbar : public SubToolbar {
 
 public:
     explicit ObjectSelectSubToolbar(QWidget* parent = nullptr);
-    ~ObjectSelectSubToolbar() override;
-    
-    // Event filter for popup handling
-    bool eventFilter(QObject* watched, QEvent* event) override;
     
     // SubToolbar interface
     void refreshFromSettings() override;
@@ -61,20 +51,6 @@ public:
      * @brief Clear all slot states (no LinkObject selected).
      */
     void clearSlotStates();
-    
-    /**
-     * @brief Set the LinkObject color button state.
-     * @param color The current LinkObject color.
-     * @param visible Whether the color button should be visible (LinkObject selected).
-     */
-    void setLinkObjectColor(const QColor& color, bool visible);
-    
-    /**
-     * @brief Set the LinkObject description for editing.
-     * @param description The current description.
-     * @param enabled Whether editing is enabled (LinkObject selected).
-     */
-    void setLinkObjectDescription(const QString& description, bool enabled);
     
     /**
      * @brief Set the insert mode toggle state from outside.
@@ -118,29 +94,12 @@ signals:
      * @param index The slot index (0, 1, or 2).
      */
     void slotCleared(int index);
-    
-    /**
-     * @brief Emitted when the LinkObject color is changed via the color button.
-     * @param color The new color.
-     */
-    void linkObjectColorChanged(const QColor& color);
-    
-    /**
-     * @brief Emitted when the LinkObject description is changed.
-     * @param description The new description.
-     */
-    void linkObjectDescriptionChanged(const QString& description);
 
 private slots:
     void onInsertModeToggled(int mode);
     void onActionModeToggled(int mode);
     void onSlotClicked(int index);
     void onSlotDeleteRequested(int index);
-    void onColorButtonClicked();
-    void onColorButtonEditRequested();
-    void onDescriptionButtonToggled(bool checked);
-    void onDescriptionConfirm();
-    void onDescriptionCancel();
 
 private:
     void createWidgets();
@@ -152,14 +111,6 @@ private:
     // Widgets
     ModeToggleButton* m_insertModeToggle = nullptr;
     ModeToggleButton* m_actionModeToggle = nullptr;
-    ColorPresetButton* m_colorButton = nullptr;  // LinkObject color editor
-    SubToolbarToggle* m_descriptionButton = nullptr;  // Toggle description editor
-    QWidget* m_descriptionPopup = nullptr;       // Popup container
-    QLineEdit* m_descriptionEdit = nullptr;      // Description text editor
-    QPushButton* m_confirmButton = nullptr;      // Confirm description
-    QPushButton* m_cancelButton = nullptr;       // Cancel editing
-    QString m_originalDescription;               // For cancel functionality
-    bool m_popupClosedByButton = false;          // Prevents double signal emission
     LinkSlotButton* m_slotButtons[3] = {nullptr, nullptr, nullptr};
     
     // Current state

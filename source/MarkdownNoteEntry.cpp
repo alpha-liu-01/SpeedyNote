@@ -15,39 +15,6 @@ MarkdownNoteEntry::MarkdownNoteEntry(const MarkdownNoteData &data, QWidget *pare
     updatePreview();
 }
 
-// Phase M.3: New constructor for LinkObject-based notes
-MarkdownNoteEntry::MarkdownNoteEntry(const NoteDisplayData &data, QWidget *parent)
-    : QFrame(parent), m_linkObjectId(data.linkObjectId)
-{
-    // Convert NoteDisplayData to internal MarkdownNoteData format
-    noteData.id = data.noteId;
-    noteData.title = data.title;
-    noteData.content = data.content;
-    noteData.color = data.color;
-    noteData.highlightId = QString();  // Not used in new system
-    noteData.pageNumber = -1;          // Derived from LinkObject at runtime
-    
-    isDarkMode = palette().color(QPalette::Window).lightness() < 128;
-    setupUI();
-    
-    // Phase M.3: Configure link button for LinkObject navigation
-    if (!m_linkObjectId.isEmpty()) {
-        highlightLinkButton->setVisible(true);
-        highlightLinkButton->setToolTip(tr("Jump to linked annotation"));
-        // Disconnect old signal and connect new one
-        disconnect(highlightLinkButton, &QPushButton::clicked, this, &MarkdownNoteEntry::onHighlightLinkClicked);
-        connect(highlightLinkButton, &QPushButton::clicked, this, &MarkdownNoteEntry::onLinkObjectClicked);
-    }
-    
-    // Set tooltip with LinkObject description if available
-    if (!data.description.isEmpty()) {
-        setToolTip(data.description);
-    }
-    
-    applyStyle();
-    updatePreview();
-}
-
 MarkdownNoteEntry::~MarkdownNoteEntry() = default;
 
 void MarkdownNoteEntry::setupUI() {
@@ -267,11 +234,6 @@ void MarkdownNoteEntry::onTitleEdited() {
 
 void MarkdownNoteEntry::onDeleteClicked() {
     emit deleteRequested(noteData.id);
-    
-    // Phase M.3: Also emit with linkObjectId for new system
-    if (!m_linkObjectId.isEmpty()) {
-        emit deleteWithLinkRequested(noteData.id, m_linkObjectId);
-    }
 }
 
 void MarkdownNoteEntry::onPreviewClicked() {
@@ -281,13 +243,6 @@ void MarkdownNoteEntry::onPreviewClicked() {
 void MarkdownNoteEntry::onHighlightLinkClicked() {
     if (!noteData.highlightId.isEmpty()) {
         emit highlightLinkClicked(noteData.highlightId);
-    }
-}
-
-// Phase M.3: Jump to parent LinkObject
-void MarkdownNoteEntry::onLinkObjectClicked() {
-    if (!m_linkObjectId.isEmpty()) {
-        emit linkObjectClicked(m_linkObjectId);
     }
 }
 

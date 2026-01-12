@@ -1895,34 +1895,6 @@ void Document::cleanupOrphanedAssets()
 #endif
 }
 
-// ===== Markdown Notes (Phase M.1) =====
-
-QString Document::notesPath() const
-{
-    QString assets = assetsPath();
-    if (assets.isEmpty()) {
-        return QString();
-    }
-    
-    QString notes = assets + "/notes";
-    QDir().mkpath(notes);
-    return notes;
-}
-
-bool Document::deleteNoteFile(const QString& noteId)
-{
-    QString notes = notesPath();
-    if (notes.isEmpty()) {
-        return false;
-    }
-    
-    QString filePath = notes + "/" + noteId + ".md";
-    if (QFile::exists(filePath)) {
-        return QFile::remove(filePath);
-    }
-    return true;  // File didn't exist, consider it successfully "deleted"
-}
-
 bool Document::saveBundle(const QString& path)
 {
     // Save old bundle path before overwriting - needed for copying evicted tiles/pages

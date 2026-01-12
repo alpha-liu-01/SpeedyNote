@@ -22,9 +22,7 @@
 #include "ui/actionbars/ClipboardActionBar.h"
 #include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
-#include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
 #include <QClipboard>  // For clipboard signal connection
-#include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -592,79 +590,16 @@ void MainWindow::setupUi() {
     markdownNotesSidebar->setFixedWidth(300);
     markdownNotesSidebar->setVisible(false); // Hidden by default
     
-    // Phase M.3: Connect new signals for LinkObject-based markdown notes
+    // MW1.5: Markdown notes signals disabled - will be reimplemented
+    // connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteContentChanged, this, &MainWindow::onMarkdownNoteContentChanged);
+    // connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeleted, this, &MainWindow::onMarkdownNoteDeleted);
+    // connect(markdownNotesSidebar, &MarkdownNotesSidebar::highlightLinkClicked, this, &MainWindow::onHighlightLinkClicked);
     
-    // Handle note content changes - save to file
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteContentSaved,
-            this, [this](const QString& noteId, const QString& title, const QString& content) {
-        DocumentViewport* vp = currentViewport();
-        if (!vp || !vp->document()) return;
-        
-        QString notesDir = vp->document()->notesPath();
-        if (notesDir.isEmpty()) return;
-        
-        QString filePath = notesDir + "/" + noteId + ".md";
-        MarkdownNote note;
-        note.id = noteId;
-        note.title = title;
-        note.content = content;
-        note.saveToFile(filePath);
-    });
-    
-    // Handle note deletion from sidebar - delete file and clear LinkSlot
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeletedWithLink,
-            this, [this](const QString& noteId, const QString& linkObjectId) {
-        DocumentViewport* vp = currentViewport();
-        if (!vp || !vp->document()) return;
-        
-        Document* doc = vp->document();
-        
-        // Delete the note file
-        doc->deleteNoteFile(noteId);
-        
-        // Find the LinkObject and clear the slot
-        Page* page = doc->page(vp->currentPageIndex());
-        if (page) {
-            for (const auto& objPtr : page->objects) {
-                LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-                if (link && link->id == linkObjectId) {
-                    for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                        if (link->linkSlots[i].type == LinkSlot::Type::Markdown &&
-                            link->linkSlots[i].markdownNoteId == noteId) {
-                            link->linkSlots[i].clear();
-                            doc->markPageDirty(vp->currentPageIndex());
-                            vp->update();
-                            break;
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        
-        // Refresh sidebar
-        markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-    });
-    
-    // Handle jump to LinkObject
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::linkObjectClicked,
-            this, [this](const QString& linkObjectId) {
-        navigateToLinkObject(linkObjectId);
-    });
-    
-    // Phase M.4: Handle search requests
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::searchRequested,
-            this, [this](const QString& query, int fromPage, int toPage) {
-        QList<NoteDisplayData> results = searchMarkdownNotes(query, fromPage, toPage);
-        markdownNotesSidebar->displaySearchResults(results);
-    });
-    
-    // Connect reload request from sidebar (when exiting search mode)
-    connect(markdownNotesSidebar, &MarkdownNotesSidebar::reloadNotesRequested,
-            this, [this]() {
-        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-        }
+    // Set up note provider for search functionality
+    // Phase 3.1.8: Stubbed - markdown notes will use DocumentViewport in Phase 3.3
+    markdownNotesSidebar->setNoteProvider([this]() -> QList<MarkdownNoteData> {
+        // TODO Phase 3.3: Get notes from currentViewport()->document()
+        return QList<MarkdownNoteData>();
     });
     
     // Phase C.1.5: Removed old m_tabWidget configuration - now using m_tabBar + m_viewportStack
@@ -1247,14 +1182,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_pagePanelActionBarConn);
         m_pagePanelActionBarConn = {};
     }
-    if (m_markdownNotesPageConn) {
-        disconnect(m_markdownNotesPageConn);
-        m_markdownNotesPageConn = {};
-    }
-    if (m_markdownNoteOpenConn) {
-        disconnect(m_markdownNoteOpenConn);
-        m_markdownNoteOpenConn = {};
-    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -1485,39 +1412,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             m_pagePanelActionBar->setCurrentPage(viewport->currentPageIndex());
         }
     }
-    
-    // Phase M.3: Refresh markdown notes sidebar when page changes
-    if (markdownNotesSidebar) {
-        m_markdownNotesPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
-                this, [this](int /*pageIndex*/) {
-            if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-            }
-        });
-        
-        // Load notes for current page if sidebar is visible
-        if (markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-        }
-        
-        // Phase M.5: Handle requestOpenMarkdownNote signal (create/open note)
-        m_markdownNoteOpenConn = connect(viewport, &DocumentViewport::requestOpenMarkdownNote,
-                this, [this](const QString& noteId, const QString& /*linkObjectId*/) {
-            if (!markdownNotesSidebar) return;
-            
-            // Show the markdown notes sidebar if hidden
-            if (!markdownNotesSidebar->isVisible()) {
-                toggleMarkdownNotesSidebar();
-            }
-            
-            // Reload notes to include the new/opened note
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-            
-            // Scroll to the note and set it to edit mode
-            markdownNotesSidebar->scrollToNote(noteId);
-            markdownNotesSidebar->setNoteEditMode(noteId, true);
-        });
-    }
 }
 
 void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
@@ -1552,20 +1446,12 @@ void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
                 }
             }
             m_objectSelectSubToolbar->updateSlotStates(states);
-            
-            // Show LinkObject color button
-            m_objectSelectSubToolbar->setLinkObjectColor(link->iconColor, true);
-            
-            // Show LinkObject description editor
-            m_objectSelectSubToolbar->setLinkObjectDescription(link->description, true);
             return;
         }
     }
     
-    // No LinkObject selected (or multiple objects selected) - clear slots and hide controls
+    // No LinkObject selected (or multiple objects selected) - clear slots
     m_objectSelectSubToolbar->clearSlotStates();
-    m_objectSelectSubToolbar->setLinkObjectColor(Qt::transparent, false);
-    m_objectSelectSubToolbar->setLinkObjectDescription(QString(), false);
 }
 
 void MainWindow::applySubToolbarValuesToViewport(ToolType tool)
@@ -3116,74 +3002,6 @@ void MainWindow::setupSubToolbars()
         }
     });
     
-    // Connect LinkObject color change from subtoolbar
-    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::linkObjectColorChanged,
-            this, [this](const QColor& color) {
-        DocumentViewport* vp = currentViewport();
-        if (!vp) return;
-        
-        const auto& selectedObjects = vp->selectedObjects();
-        if (selectedObjects.size() != 1) return;
-        
-        LinkObject* link = dynamic_cast<LinkObject*>(selectedObjects.first());
-        if (!link) return;
-        
-        // Update LinkObject color
-        link->iconColor = color;
-        
-        // Mark document as modified
-        if (Document* doc = vp->document()) {
-            Page* page = doc->page(vp->currentPageIndex());
-            if (page) {
-                int pageIndex = doc->pageIndexByUuid(page->uuid);
-                if (pageIndex >= 0) {
-                    doc->markPageDirty(pageIndex);
-                }
-            }
-        }
-        
-        vp->update();
-        
-        // Refresh markdown notes sidebar to update colors
-        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-        }
-    });
-    
-    // Connect LinkObject description change from subtoolbar
-    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::linkObjectDescriptionChanged,
-            this, [this](const QString& description) {
-        DocumentViewport* vp = currentViewport();
-        if (!vp) return;
-        
-        const auto& selectedObjects = vp->selectedObjects();
-        if (selectedObjects.size() != 1) return;
-        
-        LinkObject* link = dynamic_cast<LinkObject*>(selectedObjects.first());
-        if (!link) return;
-        
-        // Update LinkObject description
-        link->description = description;
-        
-        // Mark document as modified
-        if (Document* doc = vp->document()) {
-            Page* page = doc->page(vp->currentPageIndex());
-            if (page) {
-                int pageIndex = doc->pageIndexByUuid(page->uuid);
-                if (pageIndex >= 0) {
-                    doc->markPageDirty(pageIndex);
-                }
-            }
-        }
-        
-        vp->update();
-        
-        // Refresh markdown notes sidebar to update descriptions
-        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-        }
-    });
-    
     // Connect tab changes to subtoolbar container and toolbar
     // Handles per-tab state for both toolbar tool selection and subtoolbar presets
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
@@ -3781,14 +3599,10 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     markdownNotesSidebar->setVisible(!isVisible);
     markdownNotesSidebarVisible = !isVisible;
     
-    // Sync NavigationBar button state when sidebar is toggled programmatically
-    if (m_navigationBar) {
-        m_navigationBar->setRightSidebarChecked(markdownNotesSidebarVisible);
-    }
+    // REMOVED E.1: toggleMarkdownNotesButton moved to NavigationBar - no need to update button state
     
-    // Phase M.3: Load notes when sidebar becomes visible
     if (markdownNotesSidebarVisible) {
-        markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+        // MW1.5: loadMarkdownNotesForCurrentPage() removed - will be reimplemented
     }
     
     // Force immediate layout update so canvas repositions correctly
@@ -3812,257 +3626,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     });
 }
 
-// Phase M.3: Load markdown notes for current page from LinkObjects
-QList<NoteDisplayData> MainWindow::loadNotesForCurrentPage()
-{
-    QList<NoteDisplayData> results;
-    
-    DocumentViewport* vp = currentViewport();
-    if (!vp || !vp->document()) return results;
-    
-    Document* doc = vp->document();
-    QString notesDir = doc->notesPath();
-    if (notesDir.isEmpty()) return results;
-    
-    // Helper lambda to extract notes from a page/tile
-    auto extractNotesFromPage = [&](Page* page) {
-        if (!page) return;
-        
-        for (const auto& objPtr : page->objects) {
-            LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-            if (!link) continue;
-            
-            // Check each slot for markdown type
-            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                const LinkSlot& slot = link->linkSlots[i];
-                if (slot.type != LinkSlot::Type::Markdown) continue;
-                
-                // Load the note file
-                QString filePath = notesDir + "/" + slot.markdownNoteId + ".md";
-                MarkdownNote note = MarkdownNote::loadFromFile(filePath);
-                
-                if (!note.isValid()) continue;  // File not found
-                
-                // Build display data
-                NoteDisplayData displayData;
-                displayData.noteId = note.id;
-                displayData.title = note.title;
-                displayData.content = note.content;
-                displayData.linkObjectId = link->id;
-                displayData.color = link->iconColor;
-                displayData.description = link->description;
-                
-                results.append(displayData);
-            }
-        }
-    };
-    
-    if (doc->isEdgeless()) {
-        // Edgeless mode: iterate through all loaded tiles
-        for (const auto& coord : doc->allLoadedTileCoords()) {
-            Page* tile = doc->getTile(coord.first, coord.second);
-            extractNotesFromPage(tile);
-        }
-    } else {
-        // Paged mode: use current page
-        int pageIndex = vp->currentPageIndex();
-        Page* page = doc->page(pageIndex);
-        extractNotesFromPage(page);
-    }
-    
-    return results;
-}
 
-// Phase M.3: Navigate to and select a LinkObject
-void MainWindow::navigateToLinkObject(const QString& linkObjectId)
-{
-    DocumentViewport* vp = currentViewport();
-    if (!vp || !vp->document()) return;
-    
-    Document* doc = vp->document();
-    
-    // Search for LinkObject - check current page first (most likely), then all pages
-    int currentPage = vp->currentPageIndex();
-    InsertedObject* foundObject = nullptr;
-    int foundPageIndex = -1;
-    
-    // Helper lambda to search a page
-    auto searchPage = [&](int pageIdx) -> bool {
-        Page* page = doc->page(pageIdx);
-        if (!page) return false;
-        
-        for (const auto& objPtr : page->objects) {
-            if (objPtr->id == linkObjectId) {
-                foundObject = objPtr.get();
-                foundPageIndex = pageIdx;
-                return true;
-            }
-        }
-        return false;
-    };
-    
-    // Search current page first
-    if (!searchPage(currentPage)) {
-        // Not on current page - search all pages
-        for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
-            if (pageIdx == currentPage) continue;  // Already checked
-            if (searchPage(pageIdx)) break;
-        }
-    }
-    
-    if (!foundObject) {
-        qWarning() << "navigateToLinkObject: LinkObject not found:" << linkObjectId;
-        return;
-    }
-    
-    // Navigate to page if needed
-    if (foundPageIndex != currentPage) {
-        vp->scrollToPage(foundPageIndex);
-    }
-    
-    // Calculate object center and convert to normalized coordinates for scrolling
-    QSizeF pageSize = doc->pageSizeAt(foundPageIndex);
-    if (pageSize.width() > 0 && pageSize.height() > 0) {
-        QPointF objectCenter = foundObject->position + 
-            QPointF(foundObject->size.width() / 2.0, foundObject->size.height() / 2.0);
-        QPointF normalizedPos(
-            objectCenter.x() / pageSize.width(),
-            objectCenter.y() / pageSize.height()
-        );
-        vp->scrollToPositionOnPage(foundPageIndex, normalizedPos);
-    }
-    
-    // Select the object (this will show slot buttons in subtoolbar)
-    vp->selectObject(foundObject);
-}
-
-// Phase M.4: Search markdown notes across pages
-// Optimizations applied:
-//   A. Two-tier search: check description first (in memory), load file only if needed
-//   B. Result limiting: stop after MAX_SEARCH_RESULTS
-//   C. (Future) Cancel flag for long searches
-//   D. (Connected below) Background thread via QtConcurrent
-
-static const int MAX_SEARCH_RESULTS = 100;  // Optimization B: Cap results
-
-QList<NoteDisplayData> MainWindow::searchMarkdownNotes(const QString& query, int fromPage, int toPage)
-{
-    struct ScoredNote {
-        NoteDisplayData data;
-        int score;
-    };
-    
-    QList<ScoredNote> results;
-    
-    DocumentViewport* vp = currentViewport();
-    if (!vp || !vp->document()) return {};
-    
-    Document* doc = vp->document();
-    QString notesDir = doc->notesPath();
-    if (notesDir.isEmpty()) return {};
-    
-    bool reachedLimit = false;
-    int tilesSearched = 0;
-    
-    // Helper lambda to search a page/tile for notes matching query
-    auto searchPage = [&](Page* page) {
-        if (!page || reachedLimit) return;
-        
-        for (const auto& objPtr : page->objects) {
-            if (reachedLimit) break;
-            
-            LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-            if (!link) continue;
-            
-            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                const LinkSlot& slot = link->linkSlots[i];
-                if (slot.type != LinkSlot::Type::Markdown) continue;
-                
-                // Optimization A: Two-tier search
-                // Tier 1: Check description first (already in memory - no file I/O)
-                int score = 0;
-                bool descriptionMatch = link->description.contains(query, Qt::CaseInsensitive);
-                if (descriptionMatch) {
-                    score += 100;  // Description match highest priority
-                }
-                
-                // Tier 2: Load file for title/content matching
-                QString filePath = notesDir + "/" + slot.markdownNoteId + ".md";
-                MarkdownNote note = MarkdownNote::loadFromFile(filePath);
-                if (!note.isValid()) continue;
-                
-                // Check title and content
-                if (note.title.contains(query, Qt::CaseInsensitive)) {
-                    score += 75;   // Title match
-                }
-                if (note.content.contains(query, Qt::CaseInsensitive)) {
-                    score += 50;   // Content match
-                }
-                
-                if (score > 0) {
-                    NoteDisplayData displayData;
-                    displayData.noteId = note.id;
-                    displayData.title = note.title;
-                    displayData.content = note.content;
-                    displayData.linkObjectId = link->id;
-                    displayData.color = link->iconColor;
-                    displayData.description = link->description;
-                    
-                    results.append({displayData, score});
-                    
-                    // Optimization B: Stop after reaching limit
-                    if (results.size() >= MAX_SEARCH_RESULTS) {
-                        reachedLimit = true;
-                        break;
-                    }
-                }
-            }
-        }
-    };
-    
-    if (doc->isEdgeless()) {
-        // Edgeless mode: search all loaded tiles (page range is ignored)
-        for (const auto& coord : doc->allLoadedTileCoords()) {
-            if (reachedLimit) break;
-            
-            // Optimization D: Process events periodically
-            if (++tilesSearched % 10 == 0) {
-                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-            }
-            
-            Page* tile = doc->getTile(coord.first, coord.second);
-            searchPage(tile);
-        }
-    } else {
-        // Paged mode: search within page range
-        fromPage = qMax(0, fromPage);
-        toPage = qMin(toPage, doc->pageCount() - 1);
-        
-        for (int pageIdx = fromPage; pageIdx <= toPage && !reachedLimit; ++pageIdx) {
-            // Optimization D: Process events periodically
-            if (++tilesSearched % 10 == 0) {
-                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-            }
-            
-            Page* page = doc->page(pageIdx);
-            searchPage(page);
-        }
-    }
-    
-    // Sort by score descending
-    std::sort(results.begin(), results.end(),
-              [](const ScoredNote& a, const ScoredNote& b) {
-                  return a.score > b.score;
-              });
-    
-    // Extract sorted data
-    QList<NoteDisplayData> output;
-    output.reserve(results.size());
-    for (const ScoredNote& item : results) {
-        output.append(item.data);
-    }
-    return output;
-}
 
 // IME support for multi-language input
 void MainWindow::inputMethodEvent(QInputMethodEvent *event) {

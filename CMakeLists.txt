@@ -308,7 +308,6 @@ set(CORE_SOURCES
         source/core/DocumentViewport.cpp # Task 1.3.1
         source/core/DocumentManager.cpp  # Task 3.0.1
         source/core/TouchGestureHandler.cpp # Task TG.1.R
-        source/core/MarkdownNote.cpp   # Phase M.1: Markdown notes for LinkObjects
 )
 
 # ✅ NEW ARCHITECTURE: Vector layer system
@@ -392,8 +391,8 @@ add_executable(${PROJECT_NAME}
         source/RecentNotebooksManager.cpp
         source/KeyCaptureDialog.cpp
         source/ControllerMappingDialog.cpp
-        source/text/MarkdownNoteEntry.cpp    # Phase M.3: Moved to text/
-        source/ui/MarkdownNotesSidebar.cpp    # Phase M.3: Moved to ui/
+        source/MarkdownNoteEntry.cpp
+        source/MarkdownNotesSidebar.cpp
 	  source/PictureWindow.cpp
     	  source/PictureWindowManager.cpp
         source/PdfOpenDialog.cpp

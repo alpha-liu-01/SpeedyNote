@@ -2,6 +2,8 @@
 #include <QPalette>
 #include <QApplication>
 #include <QDebug>
+#include <QSet>
+#include <algorithm>
 
 MarkdownNotesSidebar::MarkdownNotesSidebar(QWidget *parent)
     : QWidget(parent)
@@ -213,6 +215,31 @@ void MarkdownNotesSidebar::applyStyle() {
     )"));
 }
 
+void MarkdownNotesSidebar::addNote(const MarkdownNoteData &data) {
+    // Check if note already exists
+    for (MarkdownNoteEntry *entry : noteEntries) {
+        if (entry->getNoteId() == data.id) {
+            entry->setNoteData(data);
+            return;
+        }
+    }
+    
+    // Create new entry
+    MarkdownNoteEntry *entry = new MarkdownNoteEntry(data, scrollContent);
+    connect(entry, &MarkdownNoteEntry::contentChanged, this, &MarkdownNotesSidebar::onNoteContentChanged);
+    connect(entry, &MarkdownNoteEntry::deleteRequested, this, &MarkdownNotesSidebar::onNoteDeleted);
+    connect(entry, &MarkdownNoteEntry::highlightLinkClicked, this, &MarkdownNotesSidebar::onHighlightLinkClicked);
+    
+    noteEntries.append(entry);
+    
+    // Insert before the stretch
+    scrollLayout->insertWidget(scrollLayout->count() - 1, entry);
+    
+    // Update visibility
+    emptyLabel->hide();
+    scrollArea->show();
+}
+
 void MarkdownNotesSidebar::removeNote(const QString &noteId) {
     for (int i = 0; i < noteEntries.size(); ++i) {
         if (noteEntries[i]->getNoteId() == noteId) {
@@ -230,6 +257,15 @@ void MarkdownNotesSidebar::removeNote(const QString &noteId) {
     }
 }
 
+void MarkdownNotesSidebar::updateNote(const MarkdownNoteData &data) {
+    for (MarkdownNoteEntry *entry : noteEntries) {
+        if (entry->getNoteId() == data.id) {
+            entry->setNoteData(data);
+            return;
+        }
+    }
+}
+
 void MarkdownNotesSidebar::clearNotes() {
     for (MarkdownNoteEntry *entry : noteEntries) {
         scrollLayout->removeWidget(entry);
@@ -241,26 +277,58 @@ void MarkdownNotesSidebar::clearNotes() {
     emptyLabel->show();
 }
 
-// Load notes from LinkObject-based NoteDisplayData
-void MarkdownNotesSidebar::loadNotesForPage(const QList<NoteDisplayData>& notes)
-{
-    // Clear existing notes
-    clearNotes();
+void MarkdownNotesSidebar::loadNotesForPages(const QList<MarkdownNoteData> &notes) {
+    // If in search mode, store the notes for later but don't display them
+    if (searchMode) {
+        normalModeNotes = notes;
+        return;
+    }
     
-    // Add each note with the new NoteDisplayData constructor
-    for (const NoteDisplayData& data : notes) {
-        // Create entry using the new constructor
-        MarkdownNoteEntry* entry = new MarkdownNoteEntry(data, scrollContent);
-        
-        // Connect signals
-        connect(entry, &MarkdownNoteEntry::contentChanged, this, &MarkdownNotesSidebar::onNoteContentChanged);
-        connect(entry, &MarkdownNoteEntry::linkObjectClicked, this, &MarkdownNotesSidebar::onLinkObjectClicked);
-        connect(entry, &MarkdownNoteEntry::deleteWithLinkRequested, this, &MarkdownNotesSidebar::onNoteDeletedWithLink);
-        
-        noteEntries.append(entry);
-        
-        // Insert before the stretch
-        scrollLayout->insertWidget(scrollLayout->count() - 1, entry);
+    // Store for potential search mode exit
+    normalModeNotes = notes;
+    
+    // ✅ OPTIMIZATION: Reuse existing widgets instead of destroy+recreate
+    // This avoids expensive widget construction during rapid page switches
+    
+    // Build a set of note IDs we need to display
+    QSet<QString> newNoteIds;
+    for (const MarkdownNoteData &note : notes) {
+        newNoteIds.insert(note.id);
+    }
+    
+    // Track which existing widgets to keep
+    QSet<QString> existingNoteIds;
+    for (MarkdownNoteEntry *entry : noteEntries) {
+        existingNoteIds.insert(entry->getNoteId());
+    }
+    
+    // Remove widgets that are no longer needed
+    QList<MarkdownNoteEntry*> entriesToRemove;
+    for (MarkdownNoteEntry *entry : noteEntries) {
+        if (!newNoteIds.contains(entry->getNoteId())) {
+            entriesToRemove.append(entry);
+        }
+    }
+    for (MarkdownNoteEntry *entry : entriesToRemove) {
+        noteEntries.removeOne(entry);
+        scrollLayout->removeWidget(entry);
+        entry->deleteLater();
+    }
+    
+    // Update existing widgets and add new ones
+    for (const MarkdownNoteData &note : notes) {
+        if (existingNoteIds.contains(note.id)) {
+            // Update existing widget (very fast - just updates data)
+            for (MarkdownNoteEntry *entry : noteEntries) {
+                if (entry->getNoteId() == note.id) {
+                    entry->setNoteData(note);
+                    break;
+                }
+            }
+        } else {
+            // Create new widget only for truly new notes
+            addNote(note);
+        }
     }
     
     // Update visibility
@@ -274,6 +342,14 @@ void MarkdownNotesSidebar::loadNotesForPage(const QList<NoteDisplayData>& notes)
     }
 }
 
+QList<MarkdownNoteData> MarkdownNotesSidebar::getAllNotes() const {
+    QList<MarkdownNoteData> notes;
+    for (const MarkdownNoteEntry *entry : noteEntries) {
+        notes.append(entry->getNoteData());
+    }
+    return notes;
+}
+
 MarkdownNoteEntry* MarkdownNotesSidebar::findNoteEntry(const QString &noteId) {
     for (MarkdownNoteEntry *entry : noteEntries) {
         if (entry->getNoteId() == noteId) {
@@ -281,6 +357,10 @@ MarkdownNoteEntry* MarkdownNotesSidebar::findNoteEntry(const QString &noteId) {
         }
     }
     return nullptr;
+}
+
+void MarkdownNotesSidebar::setNoteProvider(std::function<QList<MarkdownNoteData>()> provider) {
+    noteProvider = provider;
 }
 
 void MarkdownNotesSidebar::setCurrentPageInfo(int page, int total) {
@@ -317,8 +397,21 @@ void MarkdownNotesSidebar::exitSearchMode() {
     searchStatusLabel->setVisible(false);
     searchInput->clear();
     
-    // Request MainWindow to reload notes for current page
-    emit reloadNotesRequested();
+    // Restore normal mode notes
+    clearNotes();
+    for (const MarkdownNoteData &note : normalModeNotes) {
+        addNote(note);
+    }
+    
+    // Update visibility
+    if (noteEntries.isEmpty()) {
+        scrollArea->hide();
+        emptyLabel->setText(tr("No notes on this page"));
+        emptyLabel->show();
+    } else {
+        emptyLabel->hide();
+        scrollArea->show();
+    }
 }
 
 void MarkdownNotesSidebar::onNewNoteCreated() {
@@ -332,19 +425,19 @@ void MarkdownNotesSidebar::onNewNoteCreated() {
 void MarkdownNotesSidebar::onNoteContentChanged(const QString &noteId) {
     MarkdownNoteEntry *entry = findNoteEntry(noteId);
     if (entry) {
-        emit noteContentSaved(noteId, entry->getTitle(), entry->getContent());
+        emit noteContentChanged(noteId, entry->getNoteData());
     }
 }
 
-// Handle jump to LinkObject
-void MarkdownNotesSidebar::onLinkObjectClicked(const QString& linkObjectId) {
-    emit linkObjectClicked(linkObjectId);
+void MarkdownNotesSidebar::onNoteDeleted(const QString &noteId) {
+    removeNote(noteId);
+    emit noteDeleted(noteId);
 }
 
-// Phase M.3: Handle note deletion with LinkObject reference
-void MarkdownNotesSidebar::onNoteDeletedWithLink(const QString& noteId, const QString& linkObjectId) {
-    removeNote(noteId);
-    emit noteDeletedWithLink(noteId, linkObjectId);
+void MarkdownNotesSidebar::onHighlightLinkClicked(const QString &highlightId) {
+    // In search mode, we may need to navigate to a different page
+    // The MainWindow will handle the navigation
+    emit highlightLinkClicked(highlightId);
 }
 
 void MarkdownNotesSidebar::onSearchButtonClicked() {
@@ -369,10 +462,18 @@ void MarkdownNotesSidebar::performSearch() {
         return;
     }
     
+    if (!noteProvider) {
+        qWarning() << "No note provider set for search";
+        return;
+    }
+    
     // Enter search mode
     searchMode = true;
     lastSearchQuery = query;
     exitSearchButton->setVisible(true);
+    
+    // Get all notes from provider
+    QList<MarkdownNoteData> allNotes = noteProvider();
     
     // Determine page range
     int fromPage = 0; // 0-based internally
@@ -383,36 +484,96 @@ void MarkdownNotesSidebar::performSearch() {
         toPage = toPageSpinBox->value() - 1;
     }
     
-    // Phase M.4: Emit signal for MainWindow to handle search
-    emit searchRequested(query, fromPage, toPage);
-}
-
-// Display search results using NoteDisplayData
-void MarkdownNotesSidebar::displaySearchResults(const QList<NoteDisplayData>& results) {
-    // Clear current notes
-    clearNotes();
+    // Search and score results
+    struct ScoredNote {
+        MarkdownNoteData note;
+        int score; // Higher = better match
+    };
+    
+    QList<ScoredNote> scoredResults;
+    
+    for (const MarkdownNoteData &note : allNotes) {
+        // Check page range
+        if (note.pageNumber < fromPage || note.pageNumber > toPage) {
+            continue;
+        }
+        
+        // Check if query matches title or content
+        bool titleMatch = note.title.contains(query, Qt::CaseInsensitive);
+        bool contentMatch = note.content.contains(query, Qt::CaseInsensitive);
+        
+        if (titleMatch || contentMatch) {
+            ScoredNote scored;
+            scored.note = note;
+            
+            // Calculate relevance score
+            // Title match is worth more than content match
+            // Exact match is worth more than partial match
+            scored.score = 0;
+            
+            if (titleMatch) {
+                scored.score += 100;
+                // Bonus for exact title match
+                if (note.title.compare(query, Qt::CaseInsensitive) == 0) {
+                    scored.score += 50;
+                }
+                // Bonus for title starting with query
+                if (note.title.startsWith(query, Qt::CaseInsensitive)) {
+                    scored.score += 25;
+                }
+            }
+            
+            if (contentMatch) {
+                scored.score += 50;
+                // Count occurrences in content (more = more relevant)
+                int count = 0;
+                int pos = 0;
+                QString lowerContent = note.content.toLower();
+                QString lowerQuery = query.toLower();
+                while ((pos = lowerContent.indexOf(lowerQuery, pos)) != -1) {
+                    count++;
+                    pos += lowerQuery.length();
+                }
+                scored.score += qMin(count * 5, 25); // Cap at 25 bonus points
+            }
+            
+            scoredResults.append(scored);
+        }
+    }
+    
+    // Sort by score (descending), then by page number (ascending)
+    std::sort(scoredResults.begin(), scoredResults.end(), [](const ScoredNote &a, const ScoredNote &b) {
+        if (a.score != b.score) {
+            return a.score > b.score; // Higher score first
+        }
+        return a.note.pageNumber < b.note.pageNumber; // Lower page first for same score
+    });
+    
+    // Extract sorted notes
+    QList<MarkdownNoteData> results;
+    for (const ScoredNote &scored : scoredResults) {
+        results.append(scored.note);
+    }
     
     // Update status label
     if (results.isEmpty()) {
-        searchStatusLabel->setText(tr("No results found for \"%1\"").arg(lastSearchQuery));
+        searchStatusLabel->setText(tr("No results found for \"%1\"").arg(query));
     } else {
         searchStatusLabel->setText(tr("%n result(s) found", "", results.size()));
     }
     searchStatusLabel->setVisible(true);
     
-    // Add search results using new format
-    for (const NoteDisplayData& data : results) {
-        MarkdownNoteEntry* entry = new MarkdownNoteEntry(data, scrollContent);
-        scrollLayout->insertWidget(scrollLayout->count() - 1, entry);
-        noteEntries.append(entry);
-        
-        // Connect signals for LinkObject-based entries
-        connect(entry, &MarkdownNoteEntry::linkObjectClicked,
-                this, &MarkdownNotesSidebar::onLinkObjectClicked);
-        connect(entry, &MarkdownNoteEntry::deleteWithLinkRequested,
-                this, &MarkdownNotesSidebar::onNoteDeletedWithLink);
-        connect(entry, &MarkdownNoteEntry::contentChanged,
-                this, &MarkdownNotesSidebar::onNoteContentChanged);
+    // Display results
+    displaySearchResults(results);
+}
+
+void MarkdownNotesSidebar::displaySearchResults(const QList<MarkdownNoteData> &results) {
+    // Clear current notes
+    clearNotes();
+    
+    // Add search results
+    for (const MarkdownNoteData &note : results) {
+        addNote(note);
     }
     
     // Update visibility
@@ -423,27 +584,5 @@ void MarkdownNotesSidebar::displaySearchResults(const QList<NoteDisplayData>& re
     } else {
         emptyLabel->hide();
         scrollArea->show();
-    }
-}
-
-// Phase M.5: Scroll to a specific note entry
-void MarkdownNotesSidebar::scrollToNote(const QString& noteId)
-{
-    for (MarkdownNoteEntry* entry : noteEntries) {
-        if (entry->getNoteId() == noteId) {
-            scrollArea->ensureWidgetVisible(entry);
-            return;
-        }
-    }
-}
-
-// Phase M.5: Set note to edit or preview mode
-void MarkdownNotesSidebar::setNoteEditMode(const QString& noteId, bool editMode)
-{
-    for (MarkdownNoteEntry* entry : noteEntries) {
-        if (entry->getNoteId() == noteId) {
-            entry->setPreviewMode(!editMode);
-            return;
-        }
     }
 }

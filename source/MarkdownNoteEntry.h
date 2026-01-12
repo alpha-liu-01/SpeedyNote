@@ -14,29 +14,6 @@
 
 class QMarkdownTextEdit;
 
-// ============================================================================
-// Phase M.3: New data structure for LinkObject-based display
-// ============================================================================
-
-/**
- * @brief Display data for a markdown note linked to a LinkObject.
- * 
- * This struct is used to pass note data from MainWindow to the sidebar.
- * Color and description are derived from the LinkObject at display time.
- */
-struct NoteDisplayData {
-    QString noteId;         ///< Note UUID (matches filename without .md)
-    QString title;          ///< Note title (from YAML front matter)
-    QString content;        ///< Markdown content
-    QString linkObjectId;   ///< Parent LinkObject ID (for jump navigation)
-    QColor color;           ///< From LinkObject.iconColor
-    QString description;    ///< From LinkObject.description (for tooltip)
-};
-
-// ============================================================================
-// Legacy data structure (for backward compatibility with InkCanvas)
-// ============================================================================
-
 // Structure to store markdown note data
 struct MarkdownNoteData {
     QString id;                  // Unique ID for this note
@@ -75,18 +52,12 @@ class MarkdownNoteEntry : public QFrame {
     Q_OBJECT
 
 public:
-    // Legacy constructor (for InkCanvas compatibility)
     explicit MarkdownNoteEntry(const MarkdownNoteData &data, QWidget *parent = nullptr);
-    
-    // Phase M.3: New constructor for LinkObject-based notes
-    explicit MarkdownNoteEntry(const NoteDisplayData &data, QWidget *parent = nullptr);
-    
     ~MarkdownNoteEntry();
     
     // Data access
     QString getNoteId() const { return noteData.id; }
-    QString getHighlightId() const { return noteData.highlightId; }  // Legacy
-    QString getLinkObjectId() const { return m_linkObjectId; }       // Phase M.3
+    QString getHighlightId() const { return noteData.highlightId; }
     MarkdownNoteData getNoteData() const { return noteData; }
     void setNoteData(const MarkdownNoteData &data);
     
@@ -107,11 +78,7 @@ signals:
     void deleteRequested(const QString &noteId);
     void contentChanged(const QString &noteId);
     void titleChanged(const QString &noteId, const QString &newTitle);
-    void highlightLinkClicked(const QString &highlightId);  // Legacy (for InkCanvas)
-    
-    // Phase M.3: New signals for LinkObject-based notes
-    void linkObjectClicked(const QString &linkObjectId);
-    void deleteWithLinkRequested(const QString &noteId, const QString &linkObjectId);
+    void highlightLinkClicked(const QString &highlightId);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -120,8 +87,7 @@ private slots:
     void onTitleEdited();
     void onDeleteClicked();
     void onPreviewClicked();
-    void onHighlightLinkClicked();  // Legacy (for InkCanvas)
-    void onLinkObjectClicked();     // Phase M.3
+    void onHighlightLinkClicked();
     void onContentChanged();
 
 private:
@@ -130,7 +96,6 @@ private:
     void updatePreview();
     
     MarkdownNoteData noteData;
-    QString m_linkObjectId;     ///< Phase M.3: Parent LinkObject ID (empty for legacy notes)
     
     // UI components
     QVBoxLayout *mainLayout;
