@@ -3,8 +3,9 @@
 
 #include <QMainWindow>
 // #include "InkCanvas.h"  // Phase 3.1.7: Disconnected - using DocumentViewport
-#include "MarkdownNotesSidebar.h"
+#include "ui/MarkdownNotesSidebar.h"
 #include "core/Page.h"  // Phase 3.1.8: For Page::BackgroundType
+#include "core/MarkdownNote.h"  // Phase M.3: For loading markdown notes
 
 // Phase 3.1.7: Forward declaration for legacy method signatures (will be removed)
 // class InkCanvas;
@@ -270,6 +271,36 @@ private:
 
     // Markdown notes sidebar functionality
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
+    
+    /**
+     * @brief Phase M.3: Load markdown notes for the current page from LinkObjects.
+     * @return List of NoteDisplayData for all markdown notes on current page.
+     * 
+     * Iterates through LinkObjects on the current page, loads markdown note
+     * files for each Markdown-type slot, and returns display data.
+     */
+    QList<NoteDisplayData> loadNotesForCurrentPage();
+    
+    /**
+     * @brief Phase M.3: Navigate to and select a LinkObject on the current page.
+     * @param linkObjectId The UUID of the LinkObject to navigate to.
+     * 
+     * Scrolls the viewport to center the LinkObject and selects it.
+     * Implementation in Task M.3.6.
+     */
+    void navigateToLinkObject(const QString& linkObjectId);
+    
+    /**
+     * @brief Phase M.4: Search markdown notes across pages.
+     * @param query Search query string.
+     * @param fromPage Start page index (0-based).
+     * @param toPage End page index (0-based).
+     * @return List of matching notes with display data.
+     * 
+     * Searches LinkObject.description (100 pts), note title (75 pts), 
+     * and note content (50 pts). Results sorted by score descending.
+     */
+    QList<NoteDisplayData> searchMarkdownNotes(const QString& query, int fromPage, int toPage);
 
     QMenu *overflowMenu;
     QScrollBar *panXSlider;
@@ -418,6 +449,8 @@ private:
     QMetaObject::Connection m_pagePanelPageConn;
     QMetaObject::Connection m_pagePanelContentConn;  // For documentModified → thumbnail invalidation
     QMetaObject::Connection m_pagePanelActionBarConn;  // For currentPageChanged → action bar sync
+    QMetaObject::Connection m_markdownNotesPageConn;  // Phase M.3: For page change → notes reload
+    QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;

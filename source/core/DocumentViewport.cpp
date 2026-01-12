@@ -6,6 +6,7 @@
 
 #include "DocumentViewport.h"
 #include "TouchGestureHandler.h"
+#include "MarkdownNote.h"           // Phase M.2: For markdown note creation
 #include "../layers/VectorLayer.h"
 #include "../pdf/PopplerPdfProvider.h"
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
@@ -5347,6 +5348,38 @@ void DocumentViewport::deleteSelectedObjects()
         return;
     }
     
+    // Phase M.2: Cascade delete markdown notes linked to LinkObjects
+    int noteCount = 0;
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (LinkObject* link = dynamic_cast<LinkObject*>(obj)) {
+            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+                if (link->linkSlots[i].type == LinkSlot::Type::Markdown) {
+                    noteCount++;
+                }
+            }
+        }
+    }
+    
+    // TODO: Show confirmation dialog if notes will be deleted
+    // "This will delete N linked note(s). Continue?"
+    if (noteCount > 0) {
+        qDebug() << "deleteSelectedObjects: Cascade deleting" << noteCount << "markdown note(s)";
+    }
+    
+    // Delete markdown note files before removing LinkObjects
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (LinkObject* link = dynamic_cast<LinkObject*>(obj)) {
+            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+                if (link->linkSlots[i].type == LinkSlot::Type::Markdown) {
+                    QString noteId = link->linkSlots[i].markdownNoteId;
+                    if (!noteId.isEmpty()) {
+                        m_document->deleteNoteFile(noteId);
+                    }
+                }
+            }
+        }
+    }
+    
     int deletedCount = 0;
     
     if (m_document->isEdgeless()) {
@@ -5789,9 +5822,34 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
             break;
             
         case LinkSlot::Type::Markdown:
-            // Phase C.6: Open markdown note
-            qDebug() << "activateLinkSlot: Markdown link - TODO: open note" << slot.markdownNoteId;
+        {
+            // Phase M.2: Open markdown note in sidebar
+            QString noteId = slot.markdownNoteId;
+            QString notePath = m_document->notesPath() + "/" + noteId + ".md";
+            
+            if (!QFile::exists(notePath)) {
+                qWarning() << "activateLinkSlot: Markdown note file not found, clearing broken reference:" << notePath;
+                link->linkSlots[slotIndex].clear();
+                
+                // Mark page dirty
+                Page* page = findPageContainingObject(link);
+                if (page) {
+                    int pageIndex = m_document->pageIndexByUuid(page->uuid);
+                    if (pageIndex >= 0) {
+                        m_document->markPageDirty(pageIndex);
+                    }
+                }
+                
+                emit documentModified();
+                update();
+                // TODO: Notify user that note was missing
+                return;
+            }
+            
+            qDebug() << "activateLinkSlot: Opening markdown note" << noteId;
+            emit requestOpenMarkdownNote(noteId, link->id);
             break;
+        }
             
         default:
             break;
@@ -5857,8 +5915,8 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
             qDebug() << "addLinkToSlot: Added URL link to slot" << slotIndex << ":" << url;
         }
     } else if (selected == mdAction) {
-        // Phase C.6: Create/link markdown note
-        qDebug() << "addLinkToSlot: Markdown note - TODO: implement in Phase C.6";
+        // Phase M.2: Create markdown note for this slot
+        createMarkdownNoteForSlot(slotIndex);
     }
 }
 
@@ -5888,9 +5946,20 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
         return;
     }
     
+    LinkSlot& slot = link->linkSlots[slotIndex];
+    LinkSlot::Type oldType = slot.type;
+    
+    // Phase M.2: If markdown slot, delete the note file
+    if (slot.type == LinkSlot::Type::Markdown) {
+        QString noteId = slot.markdownNoteId;
+        if (!noteId.isEmpty()) {
+            m_document->deleteNoteFile(noteId);
+            qDebug() << "clearLinkSlot: Deleted markdown note file" << noteId;
+        }
+    }
+    
     // Clear the slot using LinkSlot::clear() which resets to default state
-    LinkSlot::Type oldType = link->linkSlots[slotIndex].type;
-    link->linkSlots[slotIndex].clear();
+    slot.clear();
     
     qDebug() << "clearLinkSlot: Cleared slot" << slotIndex 
              << "(was type" << static_cast<int>(oldType) << ")";
@@ -5903,6 +5972,82 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
             m_document->markPageDirty(pageIndex);
         }
     }
+    
+    update();
+}
+
+void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
+{
+    // Phase M.2: Create a new markdown note for an empty LinkSlot
+    
+    // Validate selection - need exactly one LinkObject selected
+    if (m_selectedObjects.size() != 1) {
+        qDebug() << "createMarkdownNoteForSlot: Need exactly one object selected";
+        return;
+    }
+    
+    LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
+    if (!link) {
+        qDebug() << "createMarkdownNoteForSlot: Selected object is not a LinkObject";
+        return;
+    }
+    
+    // Validate slot index
+    if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        qDebug() << "createMarkdownNoteForSlot: Invalid slot index" << slotIndex;
+        return;
+    }
+    
+    // Check slot is empty
+    if (!link->linkSlots[slotIndex].isEmpty()) {
+        qDebug() << "createMarkdownNoteForSlot: Slot" << slotIndex << "is not empty";
+        return;
+    }
+    
+    // Check document is saved (needed for file path)
+    QString notesDir = m_document->notesPath();
+    if (notesDir.isEmpty()) {
+        qWarning() << "createMarkdownNoteForSlot: Cannot create note - document not saved";
+        // TODO: Show user message via a signal
+        return;
+    }
+    
+    // Generate note ID
+    QString noteId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    
+    // Create note with default title from LinkObject description
+    MarkdownNote note;
+    note.id = noteId;
+    note.title = link->description.isEmpty() 
+        ? tr("Untitled Note") 
+        : link->description.left(50);
+    note.content = "";
+    
+    // Save note file
+    QString filePath = notesDir + "/" + noteId + ".md";
+    if (!note.saveToFile(filePath)) {
+        qWarning() << "createMarkdownNoteForSlot: Failed to create note file:" << filePath;
+        return;
+    }
+    
+    // Update slot
+    link->linkSlots[slotIndex].type = LinkSlot::Type::Markdown;
+    link->linkSlots[slotIndex].markdownNoteId = noteId;
+    
+    qDebug() << "createMarkdownNoteForSlot: Created note" << noteId 
+             << "for slot" << slotIndex << "title:" << note.title;
+    
+    // Mark page dirty
+    Page* page = findPageContainingObject(link);
+    if (page) {
+        int pageIndex = m_document->pageIndexByUuid(page->uuid);
+        if (pageIndex >= 0) {
+            m_document->markPageDirty(pageIndex);
+        }
+    }
+    
+    emit documentModified();
+    emit requestOpenMarkdownNote(noteId, link->id);
     
     update();
 }

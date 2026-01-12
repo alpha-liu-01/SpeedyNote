@@ -3,7 +3,7 @@
 
 #include <QMainWindow>
 #include "InkCanvas.h"
-#include "MarkdownNotesSidebar.h"
+#include "ui/MarkdownNotesSidebar.h"
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
