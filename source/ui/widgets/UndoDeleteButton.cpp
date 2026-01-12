@@ -211,12 +211,7 @@ void UndoDeleteButton::updateIcons()
     const QString suffix = m_darkMode ? "_reversed" : "";
     
     // Delete icon (trash/bin)
-    m_deleteIcon = QIcon(QString(":/resources/icons/deletePage%1.png").arg(suffix));
-    
-    // Fallback if deletePage icon doesn't exist, try "delete" or "trash"
-    if (m_deleteIcon.isNull()) {
-        m_deleteIcon = QIcon(QString(":/resources/icons/delete%1.png").arg(suffix));
-    }
+    m_deleteIcon = QIcon(QString(":/resources/icons/trash%1.png").arg(suffix));
     
     // Undo icon
     m_undoIcon = QIcon(QString(":/resources/icons/undo%1.png").arg(suffix));

@@ -221,8 +221,6 @@ void PageThumbnailModel::setDocument(Document* doc)
         return;
     }
     
-    qDebug() << "PageThumbnailModel::setDocument() - will reset model (scroll may jump!)";
-    
     beginResetModel();
     
     // Cancel any pending thumbnail requests for old document
@@ -340,8 +338,6 @@ void PageThumbnailModel::invalidateAllThumbnails()
 
 void PageThumbnailModel::onPageCountChanged()
 {
-    qDebug() << "PageThumbnailModel::onPageCountChanged() - will reset model (scroll may jump!)";
-    
     // Reset the model when page count changes
     // This is simpler than tracking individual inserts/removes
     beginResetModel();

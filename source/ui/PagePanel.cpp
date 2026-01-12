@@ -132,16 +132,6 @@ void PagePanel::setupConnections()
     connect(m_invalidationTimer, &QTimer::timeout, 
             this, &PagePanel::performPendingInvalidation);
     
-    // DEBUG: Track scroll value changes
-    connect(m_listView->verticalScrollBar(), &QScrollBar::valueChanged, 
-            this, [](int value) {
-        static int lastValue = -1;
-        // Only log significant changes to avoid spam
-        if (qAbs(value - lastValue) > 100) {
-            qDebug() << "PagePanel scroll changed:" << lastValue << "->" << value;
-            lastValue = value;
-        }
-    });
 }
 
 // ============================================================================
@@ -153,8 +143,6 @@ void PagePanel::setDocument(Document* doc)
     if (m_document == doc) {
         return;
     }
-    
-    qDebug() << "PagePanel::setDocument() - changing document, scroll will reset";
     
     m_document = doc;
     m_currentPageIndex = 0;
@@ -185,10 +173,6 @@ void PagePanel::setCurrentPageIndex(int index)
 
 void PagePanel::onCurrentPageChanged(int pageIndex)
 {
-    qDebug() << "PagePanel::onCurrentPageChanged:" << pageIndex 
-             << "visible:" << isVisible()
-             << "current scroll:" << scrollPosition();
-    
     int previousPage = m_currentPageIndex;
     setCurrentPageIndex(pageIndex);
     
@@ -203,10 +187,7 @@ void PagePanel::onCurrentPageChanged(int pageIndex)
             
             // Only scroll if item is completely outside visible area
             if (!viewRect.intersects(itemRect)) {
-                qDebug() << "PagePanel: Auto-scrolling to page" << pageIndex << "(was off-screen)";
                 scrollToCurrentPage();
-            } else {
-                qDebug() << "PagePanel: Page" << pageIndex << "already visible, not scrolling";
             }
         }
     }
@@ -217,8 +198,6 @@ void PagePanel::scrollToCurrentPage()
     if (!m_document || m_currentPageIndex < 0) {
         return;
     }
-    
-    qDebug() << "PagePanel::scrollToCurrentPage() called, page:" << m_currentPageIndex;
     
     QModelIndex index = m_model->index(m_currentPageIndex, 0);
     if (index.isValid()) {
@@ -242,22 +221,15 @@ void PagePanel::setScrollPosition(int pos)
 
 void PagePanel::saveTabState(int tabIndex)
 {
-    int pos = scrollPosition();
-    qDebug() << "PagePanel::saveTabState(" << tabIndex << ") - saving scroll position:" << pos;
-    m_tabScrollPositions[tabIndex] = pos;
+    m_tabScrollPositions[tabIndex] = scrollPosition();
 }
 
 void PagePanel::restoreTabState(int tabIndex)
 {
-    qDebug() << "PagePanel::restoreTabState(" << tabIndex << ") - current scroll:" << scrollPosition();
-    
     if (m_tabScrollPositions.contains(tabIndex)) {
-        int savedPos = m_tabScrollPositions.value(tabIndex);
-        qDebug() << "  -> restoring saved position:" << savedPos;
-        setScrollPosition(savedPos);
+        setScrollPosition(m_tabScrollPositions.value(tabIndex));
     } else {
         // New tab - scroll to current page
-        qDebug() << "  -> no saved position, scrolling to current page";
         scrollToCurrentPage();
     }
 }
@@ -307,6 +279,15 @@ void PagePanel::applyTheme()
 
 void PagePanel::invalidateThumbnail(int pageIndex)
 {
+    // Optimization: If panel is not visible, just mark for refresh when it becomes visible.
+    // This avoids clearing cached thumbnails unnecessarily while the user is editing
+    // on another sidebar tab, and prevents any rendering work until the panel is shown.
+    if (!isVisible()) {
+        m_pendingInvalidations.insert(pageIndex);
+        // Don't start the timer - we'll handle it in showEvent
+        return;
+    }
+    
     m_pendingInvalidations.insert(pageIndex);
     
     // Start debounce timer if not already running
@@ -407,12 +388,18 @@ void PagePanel::showEvent(QShowEvent* event)
 {
     QWidget::showEvent(event);
     
-    qDebug() << "PagePanel::showEvent() - needsFullRefresh:" << m_needsFullRefresh;
-    
-    // If we need a full refresh, do it now
+    // Process any pending invalidations that accumulated while hidden
+    // This is more efficient than clearing cache while hidden (thumbnails stay cached)
     if (m_needsFullRefresh) {
         m_model->invalidateAllThumbnails();
         m_needsFullRefresh = false;
+        m_pendingInvalidations.clear();  // Full refresh supersedes individual invalidations
+    } else if (!m_pendingInvalidations.isEmpty()) {
+        // Invalidate only the pages that were modified while hidden
+        for (int pageIndex : m_pendingInvalidations) {
+            m_model->invalidateThumbnail(pageIndex);
+        }
+        m_pendingInvalidations.clear();
     }
     
     // Only scroll to current page on initial show, not every show

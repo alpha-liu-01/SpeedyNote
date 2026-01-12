@@ -54,7 +54,8 @@ void LeftSidebarContainer::showPagesTab(bool show)
         m_pagePanel->show();  // Ensure visible when added to tab
         m_pagesTabIndex = insertTab(insertPos, m_pagePanel, tr("Pages"));
         updateTabIndices();
-        setCurrentIndex(m_pagesTabIndex);  // Switch to Pages tab
+        // Don't auto-select Pages tab - user should manually select it
+        // This prevents the PagePanelActionBar from showing on startup
     } else if (!show && m_pagesTabIndex != -1) {
         // Remove Pages tab
         removeTab(m_pagesTabIndex);

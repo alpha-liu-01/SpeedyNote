@@ -942,101 +942,49 @@ void PagePanel::setupAutoScroll() {
 
 ## Phase 7: Polish & Integration
 
-### Task 7.1: Dark Mode Support (~50 lines)
+### Task 7.1: Dark Mode Support ✅ DONE
 
-**Files:** Modify `source/MainWindow.cpp`
+**Status:** Already implemented through existing theme propagation chain.
 
-**Description:** Propagate dark mode to all Page Panel components.
+**Implementation:**
+- `LeftSidebarContainer::updateTheme(darkMode)` calls `m_pagePanel->setDarkMode(darkMode)`
+- `ActionBarContainer::setDarkMode(darkMode)` calls `m_pagePanelBar->setDarkMode(darkMode)`
+- Both are called from `MainWindow::updateTheme()` → existing infrastructure
 
-```cpp
-void MainWindow::updateTheme() {
-    bool darkMode = isDarkMode();
-    
-    // ... existing theme updates ...
-    
-    // Page Panel components
-    if (m_pagePanel) {
-        m_pagePanel->setDarkMode(darkMode);
-    }
-    if (m_pagePanelActionBar) {
-        m_pagePanelActionBar->setDarkMode(darkMode);
-    }
-}
-```
-
-**Estimated:** ~50 lines
+**No additional code needed.**
 
 ---
 
-### Task 7.2: Per-Tab State (~60 lines)
+### Task 7.2: Per-Tab State ✅ DONE
 
-**Files:** Modify `source/ui/PagePanel.cpp`
+**Status:** Fully implemented.
 
-**Description:** Save/restore scroll position per tab.
+**Implementation:**
+- `PagePanel::saveTabState()`, `restoreTabState()`, `clearTabState()` methods in PagePanel
+- `saveTabState()` called in `currentViewportChanged` BEFORE `updatePagePanelForViewport()`
+- `restoreTabState()` called in `currentViewportChanged` AFTER `updatePagePanelForViewport()`
+- `clearTabState()` called in `tabCloseRequested` handler
 
-```cpp
-void PagePanel::saveTabState(int tabIndex) {
-    m_tabScrollPositions[tabIndex] = m_listView->verticalScrollBar()->value();
-}
-
-void PagePanel::restoreTabState(int tabIndex) {
-    if (m_tabScrollPositions.contains(tabIndex)) {
-        m_listView->verticalScrollBar()->setValue(m_tabScrollPositions[tabIndex]);
-    } else {
-        // New tab - scroll to current page
-        scrollToCurrentPage();
-    }
-}
-
-void PagePanel::clearTabState(int tabIndex) {
-    m_tabScrollPositions.remove(tabIndex);
-}
-```
-
-**Estimated:** ~60 lines
+**Behavior:**
+- When switching from Tab A to Tab B: PagePanel scroll position for Tab A is saved
+- When switching back to Tab A: PagePanel scroll position is restored
+- When closing a tab: Its saved scroll position is cleaned up
 
 ---
 
-### Task 7.3: Cache Invalidation (~80 lines)
+### Task 7.3: Cache Invalidation ✅ DONE
 
-**Files:** Modify `source/ui/PagePanel.cpp`, `source/ui/PageThumbnailModel.cpp`
+**Status:** Fully implemented with performance optimization.
 
-**Description:** Debounced thumbnail invalidation.
+**Implementation:**
+- `m_invalidationTimer` with 500ms debounce
+- `performPendingInvalidation()` processes batched invalidations
+- `m_needsFullRefresh` flag for bulk refresh
+- **BF-3 optimization:** Deferred invalidation when panel is hidden (see Bug Fixes section)
+- `showEvent()` processes pending invalidations when panel becomes visible
+- Connected to `DocumentViewport::documentModified` signal
 
-```cpp
-void PagePanel::onContentChanged() {
-    // Called when strokes change, objects added, etc.
-    if (!m_invalidationTimer->isActive()) {
-        m_invalidationTimer->start(500);  // 500ms debounce
-    }
-}
-
-void PagePanel::performInvalidation() {
-    if (isVisible()) {
-        // Invalidate visible + buffer pages
-        int firstVisible = /* calculate */;
-        int lastVisible = /* calculate */;
-        
-        for (int i = firstVisible - 2; i <= lastVisible + 2; ++i) {
-            m_model->invalidateThumbnail(i);
-        }
-    } else {
-        // Mark all as needing refresh when panel becomes visible
-        m_needsFullRefresh = true;
-    }
-}
-
-void PagePanel::showEvent(QShowEvent* event) {
-    QWidget::showEvent(event);
-    
-    if (m_needsFullRefresh) {
-        m_model->invalidateAllThumbnails();
-        m_needsFullRefresh = false;
-    }
-}
-```
-
-**Estimated:** ~80 lines
+**No additional code needed.**
 
 ---
 
@@ -1074,70 +1022,72 @@ source/
 
 ## Task Summary
 
-| Phase | Task | Description | Est. Lines |
-|-------|------|-------------|------------|
-| **0** | 0.1 | Test movePage() | ~50 |
-| **1** | 1.1 | PageWheelPicker widget | ~300 |
-| | 1.2 | UndoDeleteButton widget | ~150 |
-| **2** | 2.1 | PageThumbnailModel | ~200 |
-| | 2.2 | PageThumbnailDelegate | ~250 |
-| | 2.3 | PagePanel widget | ~350 |
-| **3** | 3.1 | ThumbnailRenderer | ~200 |
-| | 3.2 | Integrate renderer | ~100 |
-| **4** | 4.1 | PagePanelActionBar | ~250 |
-| | 4.2 | ActionBarContainer 2-col | ~100 |
-| **5** | 5.1 | Add sidebar tab | ~80 |
-| | 5.2 | Connect PagePanel signals | ~100 |
-| | 5.3 | Connect ActionBar signals | ~120 |
-| | 5.4 | Visibility logic | ~50 |
-| **6** | 6.1 | Drag initiation | ~100 |
-| | 6.2 | Drop indicator | ~80 |
-| | 6.3 | Auto-scroll | ~50 |
-| **7** | 7.1 | Dark mode | ~50 |
-| | 7.2 | Per-tab state | ~60 |
-| | 7.3 | Cache invalidation | ~80 |
-| **Total** | | | **~2720 lines** |
+| Phase | Task | Description | Status | Est. Lines |
+|-------|------|-------------|--------|------------|
+| **0** | 0.1 | Test movePage() | ✅ | ~50 |
+| **1** | 1.1 | PageWheelPicker widget | ✅ | ~300 |
+| | 1.2 | UndoDeleteButton widget | ✅ | ~150 |
+| **2** | 2.1 | PageThumbnailModel | ✅ | ~200 |
+| | 2.2 | PageThumbnailDelegate | ✅ | ~250 |
+| | 2.3 | PagePanel widget | ✅ | ~350 |
+| **3** | 3.1 | ThumbnailRenderer | ✅ | ~200 |
+| | 3.2 | Integrate renderer | ✅ | ~100 |
+| **4** | 4.1 | PagePanelActionBar | ✅ | ~250 |
+| | 4.2 | ActionBarContainer 2-col | ✅ | ~100 |
+| **5** | 5.1 | Add sidebar tab | ✅ | ~80 |
+| | 5.2 | Connect PagePanel signals | ✅ | ~100 |
+| | 5.3 | Connect ActionBar signals | ✅ | ~120 |
+| | 5.4 | Visibility logic | ✅ | ~50 |
+| **6** | 6.1 | Drag initiation | ⏸️ | ~100 |
+| | 6.2 | Drop indicator | ⏸️ | ~80 |
+| | 6.3 | Auto-scroll | ⏸️ | ~50 |
+| **7** | 7.1 | Dark mode | ✅ | ~50 |
+| | 7.2 | Per-tab state | ✅ | ~60 |
+| | 7.3 | Cache invalidation | ✅ | ~80 |
+| **Total** | | | **17/20** | **~2720 lines** |
+
+**Legend:** ✅ Done | ⏸️ Skipped/Deferred
 
 ---
 
 ## Implementation Order
 
 ```
-Phase 0: Prerequisites
-    └── Task 0.1: Test movePage()
+Phase 0: Prerequisites ✅
+    └── Task 0.1: Test movePage() ✅
          ↓
-Phase 1: Core Widgets (can be parallel)
-    ├── Task 1.1: PageWheelPicker
-    └── Task 1.2: UndoDeleteButton
+Phase 1: Core Widgets ✅
+    ├── Task 1.1: PageWheelPicker ✅
+    └── Task 1.2: UndoDeleteButton ✅
          ↓
-Phase 2: Page Panel Core
-    ├── Task 2.1: PageThumbnailModel
-    ├── Task 2.2: PageThumbnailDelegate
-    └── Task 2.3: PagePanel
+Phase 2: Page Panel Core ✅
+    ├── Task 2.1: PageThumbnailModel ✅
+    ├── Task 2.2: PageThumbnailDelegate ✅
+    └── Task 2.3: PagePanel ✅
          ↓
-Phase 3: Thumbnail Rendering
-    ├── Task 3.1: ThumbnailRenderer
-    └── Task 3.2: Integrate with model
+Phase 3: Thumbnail Rendering ✅
+    ├── Task 3.1: ThumbnailRenderer ✅
+    └── Task 3.2: Integrate with model ✅
          ↓
-Phase 4: Action Bar
-    ├── Task 4.1: PagePanelActionBar
-    └── Task 4.2: ActionBarContainer 2-column
+Phase 4: Action Bar ✅
+    ├── Task 4.1: PagePanelActionBar ✅
+    └── Task 4.2: ActionBarContainer 2-column ✅
          ↓
-Phase 5: Sidebar Integration
-    ├── Task 5.1: Add tab
-    ├── Task 5.2: Connect PagePanel
-    ├── Task 5.3: Connect ActionBar
-    └── Task 5.4: Visibility logic
+Phase 5: Sidebar Integration ✅
+    ├── Task 5.1: Add tab ✅
+    ├── Task 5.2: Connect PagePanel ✅
+    ├── Task 5.3: Connect ActionBar ✅
+    └── Task 5.4: Visibility logic ✅
          ↓
-Phase 6: Drag-and-Drop
+Phase 6: Drag-and-Drop ⏸️ (DEFERRED)
     ├── Task 6.1: Drag initiation
     ├── Task 6.2: Drop indicator
     └── Task 6.3: Auto-scroll
          ↓
-Phase 7: Polish
-    ├── Task 7.1: Dark mode
-    ├── Task 7.2: Per-tab state
-    └── Task 7.3: Cache invalidation
+Phase 7: Polish ✅
+    ├── Task 7.1: Dark mode ✅
+    ├── Task 7.2: Per-tab state ✅
+    └── Task 7.3: Cache invalidation ✅
 ```
 
 ---
@@ -1154,12 +1104,14 @@ Phase complete when:
 6. ✅ Page Up/Down buttons work
 7. ✅ Add/Insert/Delete page buttons work
 8. ✅ Delete button transforms to undo state for 5 seconds
-9. ✅ Drag-and-drop reorder works (long-press to initiate)
-10. ✅ PDF pages cannot be dragged (only inserted pages)
+9. ⏸️ Drag-and-drop reorder works (long-press to initiate) — DEFERRED
+10. ⏸️ PDF pages cannot be dragged (only inserted pages) — DEFERRED (model supports it, UI doesn't)
 11. ✅ 2-column action bar layout works when both bars visible
 12. ✅ Dark/light mode switching works
 13. ✅ Per-tab scroll position preserved
 14. ✅ Thumbnail cache invalidates on content change
+
+**Current Status: 12/14 complete, 2 deferred (drag-and-drop)**
 
 ---
 
@@ -1246,6 +1198,140 @@ For a 3651-page PDF document, scrolling performance remains smooth after this fi
 **Files Modified:**
 - `source/ui/PagePanel.cpp`
 - `source/ui/PageThumbnailModel.cpp` (debug output only)
+
+---
+
+### BF-2: Thumbnails Not Updating After Edits (Fixed)
+
+**Symptom:** After drawing strokes or making other edits to a page, the thumbnail in the Page Panel would not update. Thumbnails only refreshed after saving and reopening the document.
+
+**Root Cause:**
+
+The `Document` class is **not a QObject** (it's `class Document {`), so it cannot emit Qt signals. The planned `pageContentChanged` signal never existed, and no connection was ever made to invalidate thumbnails when content changed.
+
+**Fix Applied:**
+
+Connected `DocumentViewport::documentModified` signal to thumbnail invalidation:
+
+```cpp
+// In MainWindow::connectViewportScrollSignals()
+m_pagePanelContentConn = connect(viewport, &DocumentViewport::documentModified, 
+                                 this, [this, viewport]() {
+    if (m_pagePanel && viewport) {
+        m_pagePanel->invalidateThumbnail(viewport->currentPageIndex());
+    }
+});
+```
+
+**Flow After Fix:**
+1. User draws stroke → `finishStroke()` → `emit documentModified()`
+2. Connection triggers → `invalidateThumbnail(currentPageIndex)`
+3. After 500ms debounce → thumbnail removed from cache
+4. Next paint → renderer generates new thumbnail
+
+**Files Modified:**
+- `source/MainWindow.h` (added `m_pagePanelContentConn`)
+- `source/MainWindow.cpp` (added connection and disconnection)
+
+---
+
+### BF-3: Thumbnail Invalidation Performance Optimization (Implemented)
+
+**Optimization Goal:** Avoid unnecessary thumbnail cache clearing and rendering work when the Page Panel is not visible (user is on another sidebar tab like Layers or Outline).
+
+**Problem Scenario:**
+Without optimization, when Page Panel is hidden:
+1. User edits page → `documentModified()` emitted
+2. `invalidateThumbnail()` clears cached thumbnail after 500ms debounce
+3. Thumbnail is gone from cache, even though panel isn't visible
+4. When panel becomes visible, user sees placeholder while re-rendering
+
+**Optimization Applied:**
+
+```cpp
+void PagePanel::invalidateThumbnail(int pageIndex)
+{
+    // If panel is not visible, just mark for refresh when it becomes visible.
+    // This avoids clearing cached thumbnails unnecessarily.
+    if (!isVisible()) {
+        m_pendingInvalidations.insert(pageIndex);
+        return;  // Don't start debounce timer, don't clear cache
+    }
+    
+    // Normal debounced invalidation when visible
+    m_pendingInvalidations.insert(pageIndex);
+    if (!m_invalidationTimer->isActive()) {
+        m_invalidationTimer->start();
+    }
+}
+
+void PagePanel::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    
+    // Process pending invalidations that accumulated while hidden
+    if (!m_pendingInvalidations.isEmpty()) {
+        for (int pageIndex : m_pendingInvalidations) {
+            m_model->invalidateThumbnail(pageIndex);
+        }
+        m_pendingInvalidations.clear();
+    }
+}
+```
+
+**Performance Characteristics:**
+
+| Aspect | Without Optimization | With Optimization |
+|--------|---------------------|-------------------|
+| Cache while hidden | Cleared after 500ms | Preserved |
+| Render while hidden | Triggered by dataChanged | None |
+| On panel show | Re-render from scratch | Invalidate only dirty pages |
+| CPU usage (hidden) | Some | Zero |
+
+**Behavior Summary:**
+- **When visible:** Debounced invalidation (500ms), async re-render
+- **When hidden:** Dirty pages tracked in `m_pendingInvalidations`, cache preserved
+- **On becoming visible:** Dirty pages invalidated, async re-render starts
+
+**Files Modified:**
+- `source/ui/PagePanel.cpp`
+
+---
+
+### BF-4: Connection Leak and Code Quality Fixes (Fixed)
+
+**Issues Identified During Code Review:**
+
+1. **Untracked Signal Connection (Memory Leak)**
+   - **Problem:** In `MainWindow::connectViewportScrollSignals()`, the connection from `viewport->currentPageChanged` to `PagePanelActionBar::setCurrentPage` was not stored in a member variable.
+   - **Impact:** Each tab switch accumulated another connection. After N tab switches, `setCurrentPage()` would be called N times for each page change.
+   - **Fix:** Added `m_pagePanelActionBarConn` member to track and properly disconnect when switching viewports.
+
+2. **Debug Logging in Production Code**
+   - **Problem:** Multiple `qDebug()` statements left in `PagePanel.cpp` and `PageThumbnailModel.cpp` from debugging.
+   - **Impact:** Unnecessary console output, minor performance overhead.
+   - **Fix:** Removed all debug prints:
+     - `PagePanel::setDocument()`
+     - `PagePanel::onCurrentPageChanged()`
+     - `PagePanel::scrollToCurrentPage()`
+     - `PagePanel::saveTabState()` / `restoreTabState()`
+     - Scroll value change logging lambda
+     - `PageThumbnailModel::setDocument()`
+     - `PageThumbnailModel::onPageCountChanged()`
+
+3. **Async Rendering Safety**
+   - **Problem:** `ThumbnailRenderer::renderThumbnailSync()` used a raw `Document*` in a background thread. If the document was deleted during rendering, this could cause undefined behavior.
+   - **Mitigation:** 
+     - Added comment documenting the safety guarantee: `PageThumbnailModel::setDocument()` calls `cancelAll()` and waits for completion before clearing the document reference.
+     - Added early validation split to check page count separately from initial null check.
+   - **Note:** Full thread safety would require using shared_ptr or a document reference counting mechanism, but the current design where `cancelAll()` waits for tasks is sufficient.
+
+**Files Modified:**
+- `source/MainWindow.h` (added `m_pagePanelActionBarConn`)
+- `source/MainWindow.cpp` (track and disconnect connection)
+- `source/ui/PagePanel.cpp` (removed debug prints)
+- `source/ui/PageThumbnailModel.cpp` (removed debug prints)
+- `source/ui/ThumbnailRenderer.cpp` (improved validation comments)
 
 ---
 

@@ -17,7 +17,7 @@ void PagePanelActionBar::setupUI()
     
     // Page Up button
     m_pageUpButton = new ActionBarButton(this);
-    m_pageUpButton->setIconName("pageUp");
+    m_pageUpButton->setIconName("up_arrow");
     m_pageUpButton->setToolTip(tr("Previous Page (Page Up)"));
     addButton(m_pageUpButton);
     
@@ -28,7 +28,7 @@ void PagePanelActionBar::setupUI()
     
     // Page Down button
     m_pageDownButton = new ActionBarButton(this);
-    m_pageDownButton->setIconName("pageDown");
+    m_pageDownButton->setIconName("down_arrow");
     m_pageDownButton->setToolTip(tr("Next Page (Page Down)"));
     addButton(m_pageDownButton);
     
@@ -39,13 +39,13 @@ void PagePanelActionBar::setupUI()
     
     // Add Page button
     m_addPageButton = new ActionBarButton(this);
-    m_addPageButton->setIconName("addPage");
+    m_addPageButton->setIconName("addtab");
     m_addPageButton->setToolTip(tr("Add Page at End"));
     addButton(m_addPageButton);
     
     // Insert Page button
     m_insertPageButton = new ActionBarButton(this);
-    m_insertPageButton->setIconName("insertPage");
+    m_insertPageButton->setIconName("import");
     m_insertPageButton->setToolTip(tr("Insert Page After Current"));
     addButton(m_insertPageButton);
     

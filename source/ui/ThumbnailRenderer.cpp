@@ -167,8 +167,17 @@ QPixmap ThumbnailRenderer::renderThumbnailSync(const RenderTask& task)
     int width = task.width;
     qreal dpr = task.dpr;
     
-    // Validate document still has this page
-    if (!doc || pageIndex < 0 || pageIndex >= doc->pageCount()) {
+    // Safety: Validate document pointer and page index
+    // Note: This can't fully protect against use-after-free if doc is deleted
+    // concurrently, but PageThumbnailModel::setDocument() calls cancelAll() and
+    // waits for all tasks to complete before clearing the document reference.
+    if (!doc || pageIndex < 0) {
+        return QPixmap();
+    }
+    
+    // Check page count (can fail if doc was modified concurrently)
+    int pageCount = doc->pageCount();
+    if (pageIndex >= pageCount) {
         return QPixmap();
     }
     

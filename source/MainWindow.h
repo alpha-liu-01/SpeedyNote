@@ -300,6 +300,7 @@ private:
     ObjectSelectSubToolbar *m_objectSelectSubToolbar = nullptr;
     QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
     int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
+    QHash<int, int> m_sidebarTabStates;  // Per-document-tab sidebar tab index
     
     // Action Bar system
     ActionBarContainer *m_actionBarContainer = nullptr;
@@ -415,6 +416,8 @@ private:
     
     // Page Panel: Task 5.2: PagePanel page change connection
     QMetaObject::Connection m_pagePanelPageConn;
+    QMetaObject::Connection m_pagePanelContentConn;  // For documentModified → thumbnail invalidation
+    QMetaObject::Connection m_pagePanelActionBarConn;  // For currentPageChanged → action bar sync
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;

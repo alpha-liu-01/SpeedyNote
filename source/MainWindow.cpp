@@ -165,6 +165,22 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Connect TabManager signals
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
+        // Save/restore left sidebar tab selection per document tab
+        // IMPORTANT: Must be FIRST, before updatePagePanelForViewport() which modifies sidebar tabs
+        int newIndex = m_tabManager->currentIndex();
+        if (m_leftSidebar && newIndex != m_previousTabIndex) {
+            // Save current sidebar tab for previous document tab
+            if (m_previousTabIndex >= 0) {
+                m_sidebarTabStates[m_previousTabIndex] = m_leftSidebar->currentIndex();
+            }
+        }
+        
+        // Task 7.2: Save PagePanel scroll position for previous document tab
+        // MUST be before updatePagePanelForViewport() which resets scroll via setDocument()
+        if (m_pagePanel && m_previousTabIndex >= 0 && newIndex != m_previousTabIndex) {
+            m_pagePanel->saveTabState(m_previousTabIndex);
+        }
+        
         // Phase 3.3: Connect scroll signals from current viewport
         connectViewportScrollSignals(vp);
         // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
@@ -200,6 +216,20 @@ MainWindow::MainWindow(QWidget *parent)
             }
             m_navigationBar->setFilename(filename);
         }
+        
+        // Restore left sidebar tab selection for new document tab
+        // IMPORTANT: Must be AFTER updatePagePanelForViewport() which modifies sidebar tabs
+        if (m_leftSidebar && newIndex != m_previousTabIndex) {
+            if (m_sidebarTabStates.contains(newIndex)) {
+                m_leftSidebar->setCurrentIndex(m_sidebarTabStates[newIndex]);
+            }
+        }
+        
+        // Task 7.2: Restore PagePanel scroll position for new document tab
+        // MUST be after updatePagePanelForViewport() which sets the new document
+        if (m_pagePanel && newIndex != m_previousTabIndex) {
+            m_pagePanel->restoreTabState(newIndex);
+        }
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
@@ -209,6 +239,14 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_subtoolbarContainer) {
             m_subtoolbarContainer->clearTabState(index);
         }
+        
+        // Task 7.2: Clean up PagePanel scroll state for closed tab
+        if (m_pagePanel) {
+            m_pagePanel->clearTabState(index);
+        }
+        
+        // Clean up sidebar tab state for closed tab
+        m_sidebarTabStates.remove(index);
         
         if (vp && m_documentManager) {
             Document* doc = vp->document();
@@ -1131,10 +1169,18 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_outlinePageConn);
         m_outlinePageConn = {};
     }
-    // Page Panel: Task 5.2: Disconnect page panel page tracking connection
+    // Page Panel: Task 5.2: Disconnect page panel connections
     if (m_pagePanelPageConn) {
         disconnect(m_pagePanelPageConn);
         m_pagePanelPageConn = {};
+    }
+    if (m_pagePanelContentConn) {
+        disconnect(m_pagePanelContentConn);
+        m_pagePanelContentConn = {};
+    }
+    if (m_pagePanelActionBarConn) {
+        disconnect(m_pagePanelActionBarConn);
+        m_pagePanelActionBarConn = {};
     }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
@@ -1336,14 +1382,24 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_pagePanelPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
                                       m_pagePanel, &PagePanel::onCurrentPageChanged);
         
+        // Connect documentModified to invalidate current page's thumbnail
+        // This ensures thumbnails update when user draws/erases/pastes
+        m_pagePanelContentConn = connect(viewport, &DocumentViewport::documentModified, 
+                                         this, [this, viewport]() {
+            if (m_pagePanel && viewport) {
+                // Invalidate the current page's thumbnail (most likely the one being edited)
+                m_pagePanel->invalidateThumbnail(viewport->currentPageIndex());
+            }
+        });
+        
         // Sync current page state immediately
         m_pagePanel->onCurrentPageChanged(viewport->currentPageIndex());
     }
     
     // Page Panel: Task 5.3: Sync PagePanelActionBar with viewport
     if (m_pagePanelActionBar) {
-        // Connect viewport's currentPageChanged to PagePanelActionBar
-        connect(viewport, &DocumentViewport::currentPageChanged,
+        // Connect viewport's currentPageChanged to PagePanelActionBar (tracked connection)
+        m_pagePanelActionBarConn = connect(viewport, &DocumentViewport::currentPageChanged,
                 this, [this](int pageIndex) {
             if (m_pagePanelActionBar) {
                 m_pagePanelActionBar->setCurrentPage(pageIndex);
@@ -2954,6 +3010,9 @@ void MainWindow::setupSubToolbars()
         if (newIndex != m_previousTabIndex) {
             // Update subtoolbar per-tab state (save old, restore new)
             m_subtoolbarContainer->onTabChanged(newIndex, m_previousTabIndex);
+            
+            // Note: Sidebar tab state save/restore is handled in the first currentViewportChanged
+            // handler (above) because it must happen BEFORE/AFTER updatePagePanelForViewport()
             
             // Sync toolbar and subtoolbar to the new viewport's current tool
             if (vp) {
