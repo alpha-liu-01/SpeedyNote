@@ -1,0 +1,241 @@
+/*
+ * SpeedyNote Markdown Notes Sidebar Styles - Dark Mode
+ * 
+ * Design Philosophy:
+ * - "Hotdog-shaped" rounded corners (pill shapes for inputs/buttons)
+ * - Subtle shadows for depth
+ * - Touch-friendly 36px+ touch targets
+ * - Consistent with widget styling patterns
+ */
+
+/* ==========================================================================
+   Sidebar Container
+   ========================================================================== */
+
+MarkdownNotesSidebar {
+    background-color: #1a1a1a;
+}
+
+/* ==========================================================================
+   Search Input - Pill shaped
+   ========================================================================== */
+
+QLineEdit#SearchInput {
+    background-color: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 18px;
+    padding: 10px 16px;
+    font-size: 14px;
+    color: #e6e6e6;
+    selection-background-color: #0078d4;
+}
+
+QLineEdit#SearchInput:focus {
+    border: 2px solid #0078d4;
+    padding: 9px 15px;  /* Compensate for thicker border */
+}
+
+QLineEdit#SearchInput::placeholder {
+    color: #808080;
+}
+
+/* ==========================================================================
+   Search Buttons - Round with shadow
+   ========================================================================== */
+
+QPushButton#SearchButton {
+    background-color: #2d2d2d;
+    border: 1px solid #404040;
+    border-radius: 18px;
+    min-width: 36px;
+    min-height: 36px;
+    max-width: 36px;
+    max-height: 36px;
+}
+
+QPushButton#SearchButton:hover {
+    background-color: #3d3d3d;
+    border-color: #505050;
+}
+
+QPushButton#SearchButton:pressed {
+    background-color: #4d4d4d;
+}
+
+/* Exit Search Button - Red accent */
+QPushButton#ExitSearchButton {
+    background-color: #3d1f1f;
+    border: 1px solid #a04040;
+    border-radius: 18px;
+    min-width: 36px;
+    min-height: 36px;
+    max-width: 36px;
+    max-height: 36px;
+    color: #ff6b6b;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+QPushButton#ExitSearchButton:hover {
+    background-color: #4d2828;
+    border-color: #c05050;
+}
+
+QPushButton#ExitSearchButton:pressed {
+    background-color: #ff4d4f;
+    color: white;
+}
+
+
+
+/* ==========================================================================
+   Labels
+   ========================================================================== */
+
+QLabel#PageRangeLabel,
+QLabel#ToLabel {
+    color: #808080;
+    font-size: 13px;
+}
+
+QLabel#SearchStatusLabel {
+    color: #808080;
+    font-size: 12px;
+    font-style: italic;
+    padding: 4px 0px;
+}
+
+QLabel#EmptyLabel {
+    color: #606060;
+    font-size: 14px;
+    font-style: italic;
+    padding: 30px;
+}
+
+/* ==========================================================================
+   Scroll Area
+   ========================================================================== */
+
+QScrollArea#NotesScrollArea {
+    border: none;
+    background-color: transparent;
+}
+
+QScrollArea#NotesScrollArea > QWidget > QWidget {
+    background-color: transparent;
+}
+
+/* Scrollbar styling */
+QScrollBar:vertical {
+    background-color: transparent;
+    width: 8px;
+    margin: 4px 2px 4px 2px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #404040;
+    border-radius: 4px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #505050;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* ==========================================================================
+   Note Entry Cards
+   ========================================================================== */
+
+MarkdownNoteEntry {
+    background-color: #252525;
+    border: 1px solid #353535;
+    border-radius: 12px;
+    margin: 4px 0px;
+}
+
+MarkdownNoteEntry:hover {
+    border-color: #454545;
+    background-color: #2a2a2a;
+}
+
+/* Color indicator bar (left edge) */
+QFrame#ColorIndicator {
+    border-radius: 2px;
+}
+
+/* Title input */
+QLineEdit#NoteTitleEdit {
+    background: transparent;
+    border: none;
+    font-weight: bold;
+    font-size: 14px;
+    color: #e6e6e6;
+    padding: 2px 4px;
+}
+
+QLineEdit#NoteTitleEdit:focus {
+    background-color: #353535;
+    border-radius: 4px;
+}
+
+/* Preview label */
+QLabel#NotePreviewLabel {
+    color: #909090;
+    font-size: 13px;
+    padding: 4px 8px;
+    background: transparent;
+}
+
+/* Action buttons (jump, delete) */
+QPushButton#NoteActionButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 10px;
+    min-width: 24px;
+    min-height: 24px;
+    max-width: 24px;
+    max-height: 24px;
+    font-size: 14px;
+}
+
+QPushButton#NoteActionButton:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+QPushButton#NoteActionButton:pressed {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Delete button special styling */
+QPushButton#NoteDeleteButton {
+    background-color: #3d1f1f;
+    border: none;
+    border-radius: 10px;
+    min-width: 24px;
+    min-height: 24px;
+    max-width: 24px;
+    max-height: 24px;
+    color: #ff6b6b;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+QPushButton#NoteDeleteButton:hover {
+    background-color: #4d2828;
+}
+
+QPushButton#NoteDeleteButton:pressed {
+    background-color: #ff4d4f;
+    color: white;
+}
+

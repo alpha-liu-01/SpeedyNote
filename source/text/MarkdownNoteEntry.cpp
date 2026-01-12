@@ -52,68 +52,45 @@ MarkdownNoteEntry::~MarkdownNoteEntry() = default;
 
 void MarkdownNoteEntry::setupUI() {
     mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(6, 6, 6, 6);
-    mainLayout->setSpacing(4);
+    mainLayout->setContentsMargins(10, 8, 10, 8);
+    mainLayout->setSpacing(6);
     
     // Header with title, color indicator, and buttons
     headerLayout = new QHBoxLayout();
-    headerLayout->setSpacing(4);
+    headerLayout->setSpacing(6);
     
-    // Color indicator (vertical bar)
+    // Color indicator (vertical bar with rounded ends)
     colorIndicator = new QFrame(this);
+    colorIndicator->setObjectName("ColorIndicator");
     colorIndicator->setFixedWidth(4);
-    colorIndicator->setMinimumHeight(20);
-    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 0px;")
+    colorIndicator->setMinimumHeight(24);
+    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
                                   .arg(noteData.color.name()));
     
     // Title edit
     titleEdit = new QLineEdit(noteData.title.isEmpty() ? tr("Untitled Note") : noteData.title, this);
+    titleEdit->setObjectName("NoteTitleEdit");
     titleEdit->setFrame(false);
-    titleEdit->setStyleSheet("font-weight: bold; background: transparent; padding-left: 2px;");
-    titleEdit->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); // Left-align title text
-    // Ensure cursor starts at beginning to show the start of text
+    titleEdit->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     titleEdit->setCursorPosition(0);
     titleEdit->deselect();
     connect(titleEdit, &QLineEdit::editingFinished, this, &MarkdownNoteEntry::onTitleEdited);
     
-    // Highlight link button (if linked to a highlight)
+    // Jump to link button
     highlightLinkButton = new QPushButton("🔗", this);
-    highlightLinkButton->setFixedSize(20, 20);
-    highlightLinkButton->setToolTip(tr("Jump to linked highlight"));
+    highlightLinkButton->setObjectName("NoteActionButton");
+    highlightLinkButton->setFixedSize(24, 24);
+    highlightLinkButton->setToolTip(tr("Jump to linked annotation"));
     highlightLinkButton->setVisible(!noteData.highlightId.isEmpty());
-    highlightLinkButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: transparent;
-            border: none;
-            font-size: 14px;
-        }
-        QPushButton:hover {
-            background-color: rgba(100, 100, 100, 0.2);
-            border-radius: 3px;
-        }
-    )");
+    highlightLinkButton->setCursor(Qt::PointingHandCursor);
     connect(highlightLinkButton, &QPushButton::clicked, this, &MarkdownNoteEntry::onHighlightLinkClicked);
     
     // Delete button
     deleteButton = new QPushButton("×", this);
-    deleteButton->setFixedSize(20, 20);
+    deleteButton->setObjectName("NoteDeleteButton");
+    deleteButton->setFixedSize(24, 24);
     deleteButton->setToolTip(tr("Delete note"));
-    deleteButton->setStyleSheet(R"(
-        QPushButton {
-            background-color: #ff4444;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-weight: bold;
-            font-size: 12px;
-        }
-        QPushButton:hover {
-            background-color: #ff6666;
-        }
-        QPushButton:pressed {
-            background-color: #cc2222;
-        }
-    )");
+    deleteButton->setCursor(Qt::PointingHandCursor);
     connect(deleteButton, &QPushButton::clicked, this, &MarkdownNoteEntry::onDeleteClicked);
     
     headerLayout->addWidget(colorIndicator);
@@ -123,10 +100,10 @@ void MarkdownNoteEntry::setupUI() {
     
     // Preview label (shows in preview mode)
     previewLabel = new QLabel(this);
+    previewLabel->setObjectName("NotePreviewLabel");
     previewLabel->setWordWrap(true);
     previewLabel->setTextFormat(Qt::PlainText);
     previewLabel->setMaximumHeight(60);
-    previewLabel->setStyleSheet("padding: 4px; background: transparent;");
     previewLabel->setCursor(Qt::PointingHandCursor);
     previewLabel->installEventFilter(this);
     
@@ -147,18 +124,94 @@ void MarkdownNoteEntry::setupUI() {
 }
 
 void MarkdownNoteEntry::applyStyle() {
-    QString bgColor = isDarkMode ? "#2b2b2b" : "#f5f5f5";
-    QString borderColor = isDarkMode ? "#555555" : "#dddddd";
+    // Styles are now primarily from QSS loaded by parent sidebar
+    // Only set dynamic properties here
+    QString bgColor = isDarkMode ? "#252525" : "#ffffff";
+    QString borderColor = isDarkMode ? "#353535" : "#e4e7ec";
+    QString textColor = isDarkMode ? "#e6e6e6" : "#1d2939";
+    QString previewColor = isDarkMode ? "#909090" : "#667085";
+    QString deleteHoverBg = isDarkMode ? "#4d2828" : "#ffccc7";
     
+    // Card styling with rounded corners
     setStyleSheet(QString(R"(
         MarkdownNoteEntry {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 0px;
+            border-radius: 12px;
         }
-    )").arg(bgColor, borderColor));
+        MarkdownNoteEntry:hover {
+            background-color: %3;
+            border-color: %4;
+        }
+    )").arg(bgColor, borderColor, 
+            isDarkMode ? "#2a2a2a" : "#fafbfc",
+            isDarkMode ? "#454545" : "#d0d5dd"));
     
-    setFrameStyle(QFrame::StyledPanel | QFrame::Raised);
+    // Title edit
+    titleEdit->setStyleSheet(QString(R"(
+        QLineEdit {
+            background: transparent;
+            border: none;
+            font-weight: bold;
+            font-size: 14px;
+            color: %1;
+            padding: 2px 4px;
+        }
+        QLineEdit:focus {
+            background-color: %2;
+            border-radius: 4px;
+        }
+    )").arg(textColor, isDarkMode ? "#353535" : "#f2f4f7"));
+    
+    // Preview label
+    previewLabel->setStyleSheet(QString(R"(
+        QLabel {
+            color: %1;
+            font-size: 13px;
+            padding: 4px 8px;
+            background: transparent;
+        }
+    )").arg(previewColor));
+    
+    // Jump button
+    highlightLinkButton->setStyleSheet(QString(R"(
+        QPushButton {
+            background-color: transparent;
+            border: none;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+        QPushButton:hover {
+            background-color: %1;
+        }
+        QPushButton:pressed {
+            background-color: %2;
+        }
+    )").arg(isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)",
+            isDarkMode ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)"));
+    
+    // Delete button
+    deleteButton->setStyleSheet(QString(R"(
+        QPushButton {
+            background-color: %1;
+            border: none;
+            border-radius: 12px;
+            color: %2;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        QPushButton:hover {
+            background-color: %3;
+        }
+        QPushButton:pressed {
+            background-color: #ff4d4f;
+            color: white;
+        }
+    )").arg(isDarkMode ? "#3d1f1f" : "#fff1f0",
+            isDarkMode ? "#ff6b6b" : "#cf1322",
+            deleteHoverBg));
+    
+    setFrameStyle(QFrame::NoFrame);
 }
 
 void MarkdownNoteEntry::updatePreview() {
@@ -202,7 +255,7 @@ void MarkdownNoteEntry::setNoteData(const MarkdownNoteData &data) {
     }
     
     if (colorChanged) {
-        colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 0px;")
+        colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
                                       .arg(data.color.name()));
     }
     
@@ -232,7 +285,7 @@ void MarkdownNoteEntry::setContent(const QString &content) {
 
 void MarkdownNoteEntry::setColor(const QColor &color) {
     noteData.color = color;
-    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 0px;")
+    colorIndicator->setStyleSheet(QString("background-color: %1; border-radius: 2px;")
                                   .arg(color.name()));
 }
 

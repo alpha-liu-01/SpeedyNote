@@ -151,6 +151,8 @@
     <file>resources/styles/buttons_dark.qss</file>
     <file>resources/styles/tabs.qss</file>
     <file>resources/styles/tabs_dark.qss</file>
+    <file>resources/styles/markdown_sidebar.qss</file>
+    <file>resources/styles/markdown_sidebar_dark.qss</file>
     
 </qresource>
 </RCC>

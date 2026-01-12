@@ -63,6 +63,12 @@ public:
      * @param editMode true for edit mode, false for preview mode.
      */
     void setNoteEditMode(const QString& noteId, bool editMode);
+    
+    /**
+     * @brief Update the sidebar theme.
+     * @param darkMode true for dark theme, false for light theme.
+     */
+    void setDarkMode(bool darkMode);
 
 signals:
     // Signals for LinkObject-based notes
