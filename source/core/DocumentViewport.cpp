@@ -10,6 +10,7 @@
 #include "../layers/VectorLayer.h"
 #include "../pdf/PopplerPdfProvider.h"
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
+#include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -196,6 +197,40 @@ void DocumentViewport::setDocument(Document* doc)
     emit panChanged(m_panOffset);
     emit currentPageChanged(m_currentPageIndex);
     emitScrollFractions();
+}
+
+// ===== Missing PDF Banner (Phase R.3) =====
+
+void DocumentViewport::showMissingPdfBanner(const QString& pdfName)
+{
+    if (!m_missingPdfBanner) {
+        m_missingPdfBanner = new MissingPdfBanner(this);
+        
+        // Connect signals
+        connect(m_missingPdfBanner, &MissingPdfBanner::locatePdfClicked,
+                this, [this]() { emit requestPdfRelink(); });
+        connect(m_missingPdfBanner, &MissingPdfBanner::dismissed,
+                this, [this]() { /* Banner handles its own hide animation */ });
+    }
+    
+    m_missingPdfBanner->setPdfName(pdfName);
+    
+    // Position at top of viewport
+    m_missingPdfBanner->setFixedWidth(width());
+    m_missingPdfBanner->move(0, 0);
+    
+    // Only animate if not already visible (avoid restart on redundant calls)
+    if (!m_missingPdfBanner->isVisible()) {
+        m_missingPdfBanner->showAnimated();
+    }
+}
+
+void DocumentViewport::hideMissingPdfBanner()
+{
+    // Only hide if banner exists and is visible (avoid redundant animation)
+    if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
+        m_missingPdfBanner->hideAnimated();
+    }
 }
 
 // ===== Layout =====
@@ -1805,6 +1840,11 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     emit panChanged(m_panOffset);
     emitScrollFractions();
     update();
+    
+    // Update missing PDF banner width if visible
+    if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
+        m_missingPdfBanner->setFixedWidth(width());
+    }
 }
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)

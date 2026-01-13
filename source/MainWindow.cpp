@@ -23,6 +23,7 @@
 #include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
+#include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include <QVBoxLayout>
@@ -285,17 +286,27 @@ MainWindow::MainWindow(QWidget *parent)
             return;
         }
         
-        // Check if this is an unsaved edgeless document with content
-        bool isUnsavedEdgeless = doc->isEdgeless() && 
-                                  m_documentManager->isUsingTempBundle(doc) &&
-                                  (doc->tileCount() > 0 || doc->tileIndexCount() > 0);
+        // Check if this document has unsaved changes
+        bool needsSavePrompt = false;
+        bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
         
-        if (isUnsavedEdgeless) {
+        if (doc->isEdgeless()) {
+            // Edgeless: check if it has tiles and is in temp bundle
+            bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
+            needsSavePrompt = isUsingTemp && hasContent;
+        } else {
+            // Paged: check if modified OR (in temp bundle with pages)
+            bool hasContent = doc->pageCount() > 0;
+            needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
+        }
+        
+        if (needsSavePrompt) {
             // Prompt user to save
+            QString docType = doc->isEdgeless() ? tr("canvas") : tr("document");
             QMessageBox::StandardButton reply = QMessageBox::question(
                 this,
-                tr("Save Canvas?"),
-                tr("This canvas has unsaved changes. Do you want to save before closing?"),
+                tr("Save Changes?"),
+                tr("This %1 has unsaved changes. Do you want to save before closing?").arg(docType),
                 QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
                 QMessageBox::Save
             );
@@ -306,36 +317,51 @@ MainWindow::MainWindow(QWidget *parent)
             }
             
             if (reply == QMessageBox::Save) {
-                // Show save dialog
-                QString defaultName = doc->name.isEmpty() ? "Untitled Canvas" : doc->name;
-                QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                // Check if document already has a permanent save path
+                QString existingPath = m_documentManager->documentPath(doc);
+                bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
                 
-                QString savePath = QFileDialog::getSaveFileName(
-                    this,
-                    tr("Save Edgeless Canvas"),
-                    defaultPath,
-                    tr("SpeedyNote Bundle (*.snb)")
-                );
-                
-                if (savePath.isEmpty()) {
-                    // User cancelled save dialog - don't close
-                    return;
-                }
-                
-                // Ensure .snb extension
-                if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
-                    savePath += ".snb";
-                }
-                
-                // Save to the chosen location
-                if (!m_documentManager->saveDocumentAs(doc, savePath)) {
-                    QMessageBox::critical(this, tr("Save Error"),
-                        tr("Failed to save canvas to:\n%1").arg(savePath));
-                    return;  // Don't close if save failed
+                if (canSaveInPlace) {
+                    // Save in-place to existing location
+                    if (!m_documentManager->saveDocument(doc)) {
+                        QMessageBox::critical(this, tr("Save Error"),
+                            tr("Failed to save document to:\n%1").arg(existingPath));
+                        return;  // Don't close if save failed
+                    }
+                } else {
+                    // Show save dialog for new documents
+                    QString defaultName = doc->name.isEmpty() 
+                        ? (doc->isEdgeless() ? "Untitled Canvas" : "Untitled Document") 
+                        : doc->name;
+                    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                    
+                    QString savePath = QFileDialog::getSaveFileName(
+                        this,
+                        doc->isEdgeless() ? tr("Save Canvas") : tr("Save Document"),
+                        defaultPath,
+                        tr("SpeedyNote Bundle (*.snb)")
+                    );
+                    
+                    if (savePath.isEmpty()) {
+                        // User cancelled save dialog - don't close
+                        return;
+                    }
+                    
+                    // Ensure .snb extension
+                    if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
+                        savePath += ".snb";
+                    }
+                    
+                    // Save to the chosen location
+                    if (!m_documentManager->saveDocumentAs(doc, savePath)) {
+                        QMessageBox::critical(this, tr("Save Error"),
+                            tr("Failed to save to:\n%1").arg(savePath));
+                        return;  // Don't close if save failed
+                    }
                 }
                 
                 // Update tab title
-                m_tabManager->setTabTitle(index, QFileInfo(savePath).baseName());
+                m_tabManager->setTabTitle(index, doc->displayName());
                 m_tabManager->markTabModified(index, false);
             }
             // If Discard, fall through to close
@@ -692,6 +718,34 @@ void MainWindow::setupUi() {
     // connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
     // QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
     // connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportAnnotatedPdf);
+    
+    // Phase R.4: Relink PDF action (enabled only when document has PDF reference)
+    m_relinkPdfAction = overflowMenu->addAction(tr("Relink PDF..."));
+    m_relinkPdfAction->setEnabled(false);  // Initially disabled
+    connect(m_relinkPdfAction, &QAction::triggered, this, [this]() {
+        DocumentViewport* vp = currentViewport();
+        Document* doc = vp ? vp->document() : nullptr;
+        if (!doc || !doc->hasPdfReference()) return;
+        
+        // Open PdfRelinkDialog with hash verification
+        PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(), this);
+        if (dialog.exec() == QDialog::Accepted) {
+            PdfRelinkDialog::Result result = dialog.getResult();
+            
+            if (result == PdfRelinkDialog::RelinkPdf) {
+                QString newPath = dialog.getNewPdfPath();
+                if (!newPath.isEmpty() && doc->relinkPdf(newPath)) {
+                    // Hide the banner if visible
+                    vp->hideMissingPdfBanner();
+                    // Refresh viewport
+                    vp->update();
+                }
+            } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
+                // Hide the banner if visible
+                vp->hideMissingPdfBanner();
+            }
+        }
+    });
     
     overflowMenu->addSeparator();
     
@@ -1255,6 +1309,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_markdownNoteOpenConn);
         m_markdownNoteOpenConn = {};
     }
+    // Phase R.4: Disconnect PDF relink connection
+    if (m_pdfRelinkConn) {
+        disconnect(m_pdfRelinkConn);
+        m_pdfRelinkConn = {};
+    }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -1521,6 +1580,52 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             markdownNotesSidebar->scrollToNote(noteId);
             markdownNotesSidebar->setNoteEditMode(noteId, true);
         });
+    }
+    
+    // =========================================================================
+    // Phase R.4: PDF Relink - Connect signal and check for missing PDF
+    // =========================================================================
+    
+    m_pdfRelinkConn = connect(viewport, &DocumentViewport::requestPdfRelink,
+            this, [this, viewport]() {
+        Document* doc = viewport ? viewport->document() : nullptr;
+        if (!doc || !doc->hasPdfReference()) return;
+        
+        // Open PdfRelinkDialog with hash verification
+        PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(), this);
+        if (dialog.exec() == QDialog::Accepted) {
+            PdfRelinkDialog::Result result = dialog.getResult();
+            
+            if (result == PdfRelinkDialog::RelinkPdf) {
+                QString newPath = dialog.getNewPdfPath();
+                if (!newPath.isEmpty() && doc->relinkPdf(newPath)) {
+                    // Hide the banner
+                    viewport->hideMissingPdfBanner();
+                    
+                    // Refresh viewport to show PDF backgrounds
+                    viewport->update();
+                }
+            } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
+                // User chose to continue without PDF - hide the banner
+                viewport->hideMissingPdfBanner();
+            }
+            // Cancel: do nothing, banner remains visible
+        }
+    });
+    
+    // Check if PDF is missing and show banner
+    Document* doc = viewport->document();
+    if (doc && doc->hasPdfReference() && !doc->isPdfLoaded()) {
+        QFileInfo pdfInfo(doc->pdfPath());
+        viewport->showMissingPdfBanner(pdfInfo.fileName());
+    } else if (doc) {
+        // PDF exists or no PDF reference - ensure banner is hidden
+        viewport->hideMissingPdfBanner();
+    }
+    
+    // Update Relink PDF menu action enabled state
+    if (m_relinkPdfAction) {
+        m_relinkPdfAction->setEnabled(doc && doc->hasPdfReference());
     }
 }
 
@@ -4133,27 +4238,39 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
 #endif
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-    // ========== CHECK FOR UNSAVED EDGELESS DOCUMENTS ==========
-    // Iterate through all tabs and prompt for unsaved edgeless documents
+    // ========== CHECK FOR UNSAVED DOCUMENTS ==========
+    // Iterate through all tabs and prompt for unsaved documents
     if (m_tabManager && m_documentManager) {
         for (int i = 0; i < m_tabManager->tabCount(); ++i) {
             Document* doc = m_tabManager->documentAt(i);
-            if (!doc || !doc->isEdgeless()) continue;
+            if (!doc) continue;
             
-            // Check if this is an unsaved edgeless document with content
-            bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
-            bool isUnsaved = m_documentManager->isUsingTempBundle(doc);
+            // Check if this document has unsaved changes
+            bool needsSavePrompt = false;
+            bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
             
-            if (hasContent && isUnsaved) {
-                // Switch to this tab so user knows which canvas we're asking about
+            if (doc->isEdgeless()) {
+                // Edgeless: check if it has tiles and is in temp bundle
+                bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
+                needsSavePrompt = isUsingTemp && hasContent;
+            } else {
+                // Paged: check if modified OR (in temp bundle with pages)
+                bool hasContent = doc->pageCount() > 0;
+                needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
+            }
+            
+            if (needsSavePrompt) {
+                // Switch to this tab so user knows which document we're asking about
                 if (m_tabBar) {
                     m_tabBar->setCurrentIndex(i);
                 }
                 
+                QString docType = doc->isEdgeless() ? tr("canvas") : tr("document");
                 QMessageBox::StandardButton reply = QMessageBox::question(
                     this,
-                    tr("Save Canvas?"),
-                    tr("The canvas \"%1\" has unsaved changes. Do you want to save before quitting?")
+                    tr("Save Changes?"),
+                    tr("The %1 \"%2\" has unsaved changes. Do you want to save before quitting?")
+                        .arg(docType)
                         .arg(doc->displayName()),
                     QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
                     QMessageBox::Save
@@ -4166,39 +4283,54 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 }
                 
                 if (reply == QMessageBox::Save) {
-                    // Show save dialog
-                    QString defaultName = doc->name.isEmpty() ? "Untitled Canvas" : doc->name;
-                    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                    // Check if document already has a permanent save path
+                    QString existingPath = m_documentManager->documentPath(doc);
+                    bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
                     
-                    QString savePath = QFileDialog::getSaveFileName(
-                        this,
-                        tr("Save Edgeless Canvas"),
-                        defaultPath,
-                        tr("SpeedyNote Bundle (*.snb)")
-                    );
-                    
-                    if (savePath.isEmpty()) {
-                        // User cancelled save dialog - abort quit
-                        event->ignore();
-                        return;
-                    }
-                    
-                    // Ensure .snb extension
-                    if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
-                        savePath += ".snb";
-                    }
-                    
-                    // Save to the chosen location
-                    if (!m_documentManager->saveDocumentAs(doc, savePath)) {
-                        QMessageBox::critical(this, tr("Save Error"),
-                            tr("Failed to save canvas to:\n%1\n\nQuit anyway?").arg(savePath));
-                        // Don't abort - let them quit without saving if save failed
+                    if (canSaveInPlace) {
+                        // Save in-place to existing location
+                        if (!m_documentManager->saveDocument(doc)) {
+                            QMessageBox::critical(this, tr("Save Error"),
+                                tr("Failed to save document to:\n%1\n\nQuit anyway?").arg(existingPath));
+                            // Don't abort - let them quit without saving if save failed
+                        }
+                    } else {
+                        // Show save dialog for new documents
+                        QString defaultName = doc->name.isEmpty() 
+                            ? (doc->isEdgeless() ? "Untitled Canvas" : "Untitled Document")
+                            : doc->name;
+                        QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                        
+                        QString savePath = QFileDialog::getSaveFileName(
+                            this,
+                            doc->isEdgeless() ? tr("Save Canvas") : tr("Save Document"),
+                            defaultPath,
+                            tr("SpeedyNote Bundle (*.snb)")
+                        );
+                        
+                        if (savePath.isEmpty()) {
+                            // User cancelled save dialog - abort quit
+                            event->ignore();
+                            return;
+                        }
+                        
+                        // Ensure .snb extension
+                        if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
+                            savePath += ".snb";
+                        }
+                        
+                        // Save to the chosen location
+                        if (!m_documentManager->saveDocumentAs(doc, savePath)) {
+                            QMessageBox::critical(this, tr("Save Error"),
+                                tr("Failed to save to:\n%1\n\nQuit anyway?").arg(savePath));
+                            // Don't abort - let them quit without saving if save failed
+                        }
                     }
                 }
                 // If Discard, continue to next document
-                }
             }
         }
+    }
     // ===========================================================
         
         // REMOVED MW7.4: Save bookmarks removed - bookmark implementation deleted

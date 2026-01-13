@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "Document.h"
+#include <QCryptographicHash>
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 
@@ -90,6 +91,54 @@ bool Document::pdfFileExists() const
     return QFileInfo::exists(m_pdfPath);
 }
 
+QString Document::computePdfHash(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return QString();
+    }
+    
+    // Read first 1MB for hashing (fast even for large PDFs)
+    constexpr qint64 HASH_CHUNK_SIZE = 1024 * 1024; // 1 MB
+    QByteArray data = file.read(HASH_CHUNK_SIZE);
+    file.close();
+    
+    if (data.isEmpty()) {
+        return QString();
+    }
+    
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    hash.addData(data);
+    QByteArray result = hash.result();
+    
+    return QStringLiteral("sha256:") + result.toHex();
+}
+
+qint64 Document::getPdfFileSize(const QString& path)
+{
+    QFileInfo info(path);
+    if (!info.exists()) {
+        return -1;
+    }
+    return info.size();
+}
+
+bool Document::verifyPdfHash(const QString& path) const
+{
+    // Legacy document without hash - can't verify, assume OK
+    if (m_pdfHash.isEmpty()) {
+        return true;
+    }
+    
+    // Compute hash of the candidate file
+    QString candidateHash = computePdfHash(path);
+    if (candidateHash.isEmpty()) {
+        return false; // Can't read file
+    }
+    
+    return (candidateHash == m_pdfHash);
+}
+
 bool Document::loadPdf(const QString& path)
 {
     // Unload any existing PDF first
@@ -120,12 +169,21 @@ bool Document::loadPdf(const QString& path)
         return false;
     }
     
+    // Compute and store hash if not already set (first load or legacy document)
+    if (m_pdfHash.isEmpty()) {
+        m_pdfHash = computePdfHash(path);
+        m_pdfSize = getPdfFileSize(path);
+    }
+    
     return true;
 }
 
 bool Document::relinkPdf(const QString& newPath)
 {
     if (loadPdf(newPath)) {
+        // Always update hash for relinked PDF (it may be a different file)
+        m_pdfHash = computePdfHash(newPath);
+        m_pdfSize = getPdfFileSize(newPath);
         markModified();
         return true;
     }
@@ -413,7 +471,7 @@ bool Document::loadPageFromDisk(int index) const
     m_loadedPages[uuid] = std::move(page);
     
 
-    qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
+    // qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
 
     
     return true;
@@ -1256,6 +1314,12 @@ QJsonObject Document::toJson() const
     
     // PDF reference (path only, provider is runtime)
     obj["pdf_path"] = m_pdfPath;
+    if (!m_pdfHash.isEmpty()) {
+        obj["pdf_hash"] = m_pdfHash;
+    }
+    if (m_pdfSize > 0) {
+        obj["pdf_size"] = m_pdfSize;
+    }
     
     // State
     obj["last_accessed_page"] = lastAccessedPage;
@@ -1302,6 +1366,8 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
     
     // PDF reference (don't load yet, just store path)
     doc->m_pdfPath = obj["pdf_path"].toString();
+    doc->m_pdfHash = obj["pdf_hash"].toString();
+    doc->m_pdfSize = obj["pdf_size"].toVariant().toLongLong();
     
     // State
     doc->lastAccessedPage = obj["last_accessed_page"].toInt(0);

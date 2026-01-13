@@ -299,6 +299,7 @@ private:
     QList<NoteDisplayData> searchMarkdownNotes(const QString& query, int fromPage, int toPage);
 
     QMenu *overflowMenu;
+    QAction* m_relinkPdfAction = nullptr;  // Phase R.4: Relink PDF menu action
     QScrollBar *panXSlider;
     QScrollBar *panYSlider;
 
@@ -448,6 +449,7 @@ private:
     QMetaObject::Connection m_pagePanelActionBarConn;  // For currentPageChanged → action bar sync
     QMetaObject::Connection m_markdownNotesPageConn;  // Phase M.3: For page change → notes reload
     QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
+    QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;

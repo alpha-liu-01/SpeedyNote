@@ -159,6 +159,7 @@ class QMouseEvent;
 class QTabletEvent;
 class QWheelEvent;
 class TouchGestureHandler;
+class MissingPdfBanner;
 
 /**
  * @brief Layout mode for page arrangement.
@@ -339,6 +340,19 @@ public:
      * @return Pointer to the document, or nullptr if none set.
      */
     Document* document() const { return m_document; }
+    
+    // ===== Missing PDF Banner (Phase R.3) =====
+    
+    /**
+     * @brief Show the missing PDF banner at the top of the viewport.
+     * @param pdfName Filename of the missing PDF to display.
+     */
+    void showMissingPdfBanner(const QString& pdfName);
+    
+    /**
+     * @brief Hide the missing PDF banner.
+     */
+    void hideMissingPdfBanner();
     
     // ===== View State Getters =====
     
@@ -1509,6 +1523,13 @@ signals:
      */
     void requestOpenMarkdownNote(const QString& noteId, const QString& linkObjectId);
     
+    /**
+     * @brief Emitted when user clicks "Locate PDF" on the missing PDF banner.
+     * 
+     * Phase R.3: MainWindow connects this to show PdfRelinkDialog.
+     */
+    void requestPdfRelink();
+    
 protected:
     // ===== Qt Event Overrides =====
     
@@ -1527,6 +1548,9 @@ protected:
 private:
     // ===== Document Reference =====
     Document* m_document = nullptr;
+    
+    // ===== Missing PDF Banner (Phase R.3) =====
+    MissingPdfBanner* m_missingPdfBanner = nullptr;
     
     // ===== View State =====
     qreal m_zoomLevel = 1.0;

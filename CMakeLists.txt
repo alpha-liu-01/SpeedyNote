@@ -373,11 +373,15 @@ set(UI_SOURCES
         source/ui/actionbars/TextSelectionActionBar.cpp  # Task 2.3: TextSelectionActionBar
         source/ui/actionbars/ClipboardActionBar.cpp  # Task 2.4: ClipboardActionBar
         source/ui/actionbars/PagePanelActionBar.cpp  # Page Panel: Task 4.1: PagePanelActionBar
+        # Banners (Phase R.3)
+        source/ui/banners/MissingPdfBanner.cpp  # Phase R.3.1: Missing PDF notification banner
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
 set(PDF_SOURCES
         source/pdf/PopplerPdfProvider.cpp  # Task 1.2.2
+        source/pdf/PdfRelinkDialog.cpp     # PDF relink dialog
+        source/pdf/PdfMismatchDialog.cpp   # PDF hash mismatch dialog (Phase R.2)
 )
 
 # ✅ Build target

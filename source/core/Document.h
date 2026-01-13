@@ -673,6 +673,44 @@ public:
     void clearPdfReference();
     
     /**
+     * @brief Compute SHA-256 hash of first 1MB of a PDF file.
+     * @param path Path to the PDF file.
+     * @return Hash string in format "sha256:{hex}", or empty string on error.
+     * 
+     * Used for verifying that a relinked PDF is the same file.
+     * Only hashes first 1MB for performance with large files.
+     */
+    static QString computePdfHash(const QString& path);
+    
+    /**
+     * @brief Get the size of a PDF file.
+     * @param path Path to the PDF file.
+     * @return File size in bytes, or -1 on error.
+     */
+    static qint64 getPdfFileSize(const QString& path);
+    
+    /**
+     * @brief Get the stored PDF hash.
+     * @return Hash string, or empty if not set (legacy document).
+     */
+    QString pdfHash() const { return m_pdfHash; }
+    
+    /**
+     * @brief Get the stored PDF file size.
+     * @return File size in bytes, or 0 if not set.
+     */
+    qint64 pdfSize() const { return m_pdfSize; }
+    
+    /**
+     * @brief Verify that a PDF file matches the stored hash.
+     * @param path Path to the PDF file to verify.
+     * @return True if hash matches or no hash stored (legacy), false if mismatch.
+     * 
+     * Used when relinking to check if user selected the correct PDF.
+     */
+    bool verifyPdfHash(const QString& path) const;
+    
+    /**
      * @brief Render a PDF page to an image.
      * @param pageIndex 0-based page index.
      * @param dpi Rendering DPI (default 96 for screen).
@@ -1113,6 +1151,8 @@ public:
 private:
     // ===== PDF Reference (Task 1.2.4) =====
     QString m_pdfPath;                              ///< Path to external PDF file
+    QString m_pdfHash;                              ///< SHA-256 hash of first 1MB (format: "sha256:...")
+    qint64 m_pdfSize = 0;                           ///< File size in bytes (for quick verification)
     std::unique_ptr<PdfProvider> m_pdfProvider;    ///< Loaded PDF (may be null)
     
     // ===== Pages (Task 1.2.5) =====

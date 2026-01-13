@@ -1,11 +1,20 @@
 #include "PdfRelinkDialog.h"
+#include "PdfMismatchDialog.h"
+#include "../core/Document.h"
 #include <QApplication>
 #include <QStyle>
 #include <QScreen>
 #include <QGuiApplication>
+#include <QDir>
 
-PdfRelinkDialog::PdfRelinkDialog(const QString &missingPdfPath, QWidget *parent)
-    : QDialog(parent), originalPdfPath(missingPdfPath)
+PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
+                                   const QString& storedHash,
+                                   qint64 storedSize,
+                                   QWidget* parent)
+    : QDialog(parent)
+    , originalPdfPath(missingPdfPath)
+    , m_storedHash(storedHash)
+    , m_storedSize(storedSize)
 {
     setWindowTitle(tr("PDF File Missing"));
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
@@ -165,25 +174,87 @@ void PdfRelinkDialog::onRelinkPdf()
         startDir = QDir::homePath();
     }
     
-    QString selectedPdf = QFileDialog::getOpenFileName(
-        this,
-        tr("Locate PDF File"),
-        startDir,
-        tr("PDF Files (*.pdf);;All Files (*)")
-    );
-    
-    if (!selectedPdf.isEmpty()) {
+    // Loop to allow "Choose Different" from mismatch dialog
+    while (true) {
+        QString selectedPdf = QFileDialog::getOpenFileName(
+            this,
+            tr("Locate PDF File"),
+            startDir,
+            tr("PDF Files (*.pdf);;All Files (*)")
+        );
+        
+        if (selectedPdf.isEmpty()) {
+            // User cancelled file dialog
+            return;
+        }
+        
         // Verify it's a valid PDF file
         QFileInfo pdfInfo(selectedPdf);
-        if (pdfInfo.exists() && pdfInfo.isFile()) {
+        if (!pdfInfo.exists() || !pdfInfo.isFile()) {
+            QMessageBox::warning(this, tr("Invalid File"), 
+                tr("The selected file is not a valid PDF file."));
+            continue;
+        }
+        
+        // Verify hash if we have one stored
+        if (verifyAndConfirmPdf(selectedPdf)) {
             newPdfPath = selectedPdf;
             result = RelinkPdf;
             accept();
-        } else {
-            QMessageBox::warning(this, tr("Invalid File"), 
-                tr("The selected file is not a valid PDF file."));
+            return;
         }
+        
+        // verifyAndConfirmPdf returned false - either user chose "Choose Different"
+        // (loop continues) or "Cancel" (we should exit)
+        // Check if we should exit entirely
+        if (result == Cancel) {
+            reject();
+            return;
+        }
+        
+        // User chose "Choose Different" - update start directory and loop
+        startDir = pdfInfo.absolutePath();
     }
+}
+
+bool PdfRelinkDialog::verifyAndConfirmPdf(const QString& selectedPath)
+{
+    // No stored hash = legacy document, accept any PDF
+    if (m_storedHash.isEmpty()) {
+        return true;
+    }
+    
+    // Compute hash of selected file
+    QString selectedHash = Document::computePdfHash(selectedPath);
+    
+    // Hash matches - accept
+    if (selectedHash == m_storedHash) {
+        return true;
+    }
+    
+    // Hash mismatch - show warning dialog
+    QFileInfo originalInfo(originalPdfPath);
+    QString originalName = originalInfo.fileName();
+    
+    PdfMismatchDialog mismatchDialog(originalName, m_storedSize, selectedPath, this);
+    mismatchDialog.exec();
+    
+    switch (mismatchDialog.getResult()) {
+        case PdfMismatchDialog::Result::UseThisPdf:
+            // User accepts the different PDF
+            return true;
+            
+        case PdfMismatchDialog::Result::ChooseDifferent:
+            // User wants to pick a different file - return false to continue loop
+            return false;
+            
+        case PdfMismatchDialog::Result::Cancel:
+            // User wants to abort entirely
+            result = Cancel;
+            return false;
+    }
+    
+    return false;
 }
 
 void PdfRelinkDialog::onContinueWithoutPdf()
