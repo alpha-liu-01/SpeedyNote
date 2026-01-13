@@ -14,9 +14,8 @@
 #include <QFont>
 #include <QFontDatabase>
 #include "MainWindow.h"
-#include "LauncherWindow.h"
-#include "SpnPackageManager.h"
-#include "InkCanvas.h" // For BackgroundStyle enum
+// #include "SpnPackageManager.h"  // TODO G.2: Re-enable after package format finalization
+
 #include "core/PageTests.h" // Phase 1.1.7: Page unit tests
 #include "core/DocumentTests.h" // Phase 1.2.8: Document unit tests
 #include "core/DocumentViewportTests.h" // Phase 1.3.11: Viewport tests
@@ -192,10 +191,8 @@ int main(int argc, char *argv[]) {
     // Apply nice Windows fonts (Segoe UI + Dengxian for Chinese)
     applyWindowsFonts(app);
 
-    // ✅ DISK CLEANUP: Clean up orphaned temp directories from previous sessions on startup
-    // Since .spn files are extracted to temp folders with hash-based names, orphaned folders
-    // from crashes/force-close can accumulate. This cleanup runs on startup to free disk space.
-    SpnPackageManager::cleanupOrphanedTempDirs();
+    // TODO G.2: Re-enable after package format finalization
+    // SpnPackageManager::cleanupOrphanedTempDirs();
     
     QTranslator translator;
     
@@ -368,47 +365,12 @@ int main(int argc, char *argv[]) {
         return success ? 0 : 1;
     }
 
+    // TODO G.2: Re-enable after package format finalization
     // Handle silent creation (context menu) - create file and exit immediately
-    if (createSilent && !inputFile.isEmpty()) {
-        if (inputFile.toLower().endsWith(".spn")) {
-            // Check if file already exists
-            if (QFile::exists(inputFile)) {
-                return 1; // Exit with error code
-            }
-            
-            // Get the base name for the notebook (without .spn extension)
-            QFileInfo fileInfo(inputFile);
-            QString notebookName = fileInfo.baseName();
-            
-            // ✅ Load user's default background settings
-            QSettings settings("SpeedyNote", "App");
-            BackgroundStyle defaultStyle = static_cast<BackgroundStyle>(
-                settings.value("defaultBackgroundStyle", static_cast<int>(BackgroundStyle::Grid)).toInt());
-            QColor defaultColor = QColor(settings.value("defaultBackgroundColor", "#FFFFFF").toString());
-            int defaultDensity = settings.value("defaultBackgroundDensity", 30).toInt();
-            
-            // Ensure valid values
-            if (!defaultColor.isValid()) defaultColor = Qt::white;
-            if (defaultDensity < 10) defaultDensity = 10;
-            if (defaultDensity > 200) defaultDensity = 200;
-            
-            // Create the new .spn package with user's preferred background settings
-            if (SpnPackageManager::createSpnPackageWithBackground(inputFile, notebookName, 
-                                                                  defaultStyle, defaultColor, defaultDensity)) {
-                // ✅ Notify Windows Explorer to refresh (fix file manager issue)
-#ifdef Q_OS_WIN
-                SHChangeNotify(SHCNE_CREATE, SHCNF_PATH, inputFile.toStdWString().c_str(), nullptr);
-#endif
-                SDL_Quit(); // Clean up SDL
-                return 0; // Exit successfully
-            } else {
-                SDL_Quit(); // Clean up SDL
-                return 1; // Exit with error code
-            }
-        }
-        SDL_Quit(); // Clean up SDL
-        return 1; // Invalid file extension
-    }
+    // if (createSilent && !inputFile.isEmpty()) {
+    //     ... SpnPackageManager-based creation disabled ...
+    // }
+    Q_UNUSED(createSilent);
 
     // Check if another instance is already running
     if (MainWindow::isInstanceRunning()) {

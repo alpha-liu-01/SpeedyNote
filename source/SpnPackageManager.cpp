@@ -1,5 +1,4 @@
 #include "SpnPackageManager.h"
-#include "InkCanvas.h" // For BackgroundStyle enum
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>

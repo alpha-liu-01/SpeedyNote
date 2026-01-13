@@ -6,9 +6,18 @@
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QColor>
 
-// Forward declaration to avoid circular includes
-enum class BackgroundStyle;
+/**
+ * @brief Background style for notebook pages.
+ * 
+ * Used when creating new notebooks to specify the default background pattern.
+ */
+enum class BackgroundStyle {
+    None,   ///< Solid color only
+    Grid,   ///< Grid pattern
+    Lines   ///< Horizontal lines (ruled paper)
+};
 
 class SpnPackageManager
 {

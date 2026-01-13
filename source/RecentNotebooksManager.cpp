@@ -1,5 +1,4 @@
 #include "RecentNotebooksManager.h"
-#include "InkCanvas.h"
 #include "SpnPackageManager.h"
 #include <QDir>
 #include <QStandardPaths>
@@ -35,47 +34,27 @@ RecentNotebooksManager* RecentNotebooksManager::getInstance(QObject *parent)
     return instance;
 }
 
-void RecentNotebooksManager::addRecentNotebook(const QString& folderPath, InkCanvas* canvasForPreview) {
+void RecentNotebooksManager::addRecentNotebook(const QString& folderPath, const QString& displayPathOverride) {
     if (folderPath.isEmpty()) return;
 
-    // ✅ Use display path to avoid duplicates between .spn files and temp folders
-    QString displayPath = folderPath;
-    if (canvasForPreview) {
-        displayPath = canvasForPreview->getDisplayPath();
-    }
+    // Use display path to avoid duplicates between .spn files and temp folders
+    QString displayPath = displayPathOverride.isEmpty() ? folderPath : displayPathOverride;
     
-    // ✅ Normalize path separators to prevent duplicates
+    // Normalize path separators to prevent duplicates
     displayPath = QDir::toNativeSeparators(QFileInfo(displayPath).absoluteFilePath());
     
-
-    // ✅ More aggressive deduplication - remove any entries that might be related
-    QString pdfPath;
-    if (canvasForPreview) {
-        pdfPath = canvasForPreview->getPdfPath();
-    }
-    
-    // Remove entries that match either the display path or are related to the same PDF or notebook ID
+    // Remove entries that match the display path or are related to the same notebook ID
     QStringList toRemove;
-    QString currentNotebookId;
-    if (canvasForPreview) {
-        currentNotebookId = canvasForPreview->getNotebookId();
-    }
+    QString currentNotebookId = getNotebookIdFromPath(displayPath);
     
     for (const QString& existingPath : recentNotebookPaths) {
         bool shouldRemove = false;
         
-        // ✅ Normalize existing path for comparison
+        // Normalize existing path for comparison
         QString normalizedExistingPath = QDir::toNativeSeparators(QFileInfo(existingPath).absoluteFilePath());
         
         if (normalizedExistingPath == displayPath) {
             shouldRemove = true;
-        } else if (!pdfPath.isEmpty()) {
-            // Check if this existing entry is related to the same PDF
-            QString existingPdfPath = getPdfPathFromNotebook(existingPath);
-            if (!existingPdfPath.isEmpty() && 
-                QFileInfo(existingPdfPath).absoluteFilePath() == QFileInfo(pdfPath).absoluteFilePath()) {
-                shouldRemove = true;
-            }
         }
         
         // Also check notebook ID if available
@@ -102,13 +81,12 @@ void RecentNotebooksManager::addRecentNotebook(const QString& folderPath, InkCan
         recentNotebookPaths.removeLast();
     }
 
-
-    // ✅ Invalidate caches for the added notebook (file might have changed)
+    // Invalidate caches for the added notebook (file might have changed)
     pdfPathCache.remove(displayPath);
     displayNameCache.remove(displayPath);
     
-    // ✅ Generate thumbnail once - no delayed generation to avoid memory leaks
-    generateAndSaveCoverPreview(displayPath, canvasForPreview);
+    // Generate thumbnail once - no delayed generation to avoid memory leaks
+    generateAndSaveCoverPreview(displayPath);
     saveRecentNotebooks();
 }
 
@@ -170,8 +148,8 @@ QString RecentNotebooksManager::getCoverImageDir() const {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/RecentCovers/";
 }
 
-void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPath, InkCanvas* optionalCanvas) {
-    // ✅ Early validation - don't proceed with invalid paths
+void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPath) {
+    // Early validation - don't proceed with invalid paths
     if (folderPath.isEmpty()) {
         return;
     }
@@ -199,64 +177,8 @@ void RecentNotebooksManager::generateAndSaveCoverPreview(const QString& folderPa
     QPainter painter(&coverImage);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
-    // ✅ Try canvas grab first, but with better validation
-    bool canvasGrabSuccessful = false;
-    if (optionalCanvas && optionalCanvas->width() > 0 && optionalCanvas->height() > 0) {
-        int logicalCanvasWidth = optionalCanvas->width();
-        int logicalCanvasHeight = optionalCanvas->height();
-
-        double targetAspectRatio = 4.0 / 3.0;
-        double canvasAspectRatio = (double)logicalCanvasWidth / logicalCanvasHeight;
-
-        int grabWidth, grabHeight;
-        int xOffset = 0, yOffset = 0;
-
-        if (canvasAspectRatio > targetAspectRatio) { // Canvas is wider than target 4:3
-            grabHeight = logicalCanvasHeight;
-            grabWidth = qRound(logicalCanvasHeight * targetAspectRatio);
-            xOffset = (logicalCanvasWidth - grabWidth) / 2;
-        } else { // Canvas is taller than or equal to target 4:3 (vertical documents)
-            // For vertical documents, zoom in more by taking a smaller portion
-            // This makes the thumbnail show more detail instead of the entire page
-            grabWidth = logicalCanvasWidth;
-            grabHeight = qRound(logicalCanvasWidth / targetAspectRatio * 0.7); // Zoom in by taking 70% of calculated height
-            yOffset = qRound((logicalCanvasHeight - grabHeight) * 0.2); // Start from 20% down instead of center
-        }
-
-        if (grabWidth > 0 && grabHeight > 0) {
-            QRect grabRect(xOffset, yOffset, grabWidth, grabHeight);
-            QPixmap capturedView = optionalCanvas->grab(grabRect);
-            
-            // ✅ Check if the captured view is not just blank/white (improved sampling)
-            QImage testImage = capturedView.toImage();
-            bool isBlank = true;
-            if (!testImage.isNull() && testImage.width() > 0 && testImage.height() > 0) {
-                // Sample more pixels spread across the image
-                int sampleCount = 0;
-                int stepX = qMax(1, testImage.width() / 20);
-                int stepY = qMax(1, testImage.height() / 20);
-                for (int y = 0; y < testImage.height() && isBlank; y += stepY) {
-                    for (int x = 0; x < testImage.width() && isBlank; x += stepX) {
-                        QRgb pixel = testImage.pixel(x, y);
-                        // Check for non-white and non-transparent pixels
-                        if (qAlpha(pixel) > 0 && pixel != qRgb(255, 255, 255)) {
-                            isBlank = false;
-                        }
-                        sampleCount++;
-                        if (sampleCount > 400) break; // Limit samples for performance
-                    }
-                }
-            }
-            
-            if (!isBlank) {
-                painter.drawPixmap(coverImage.rect(), capturedView, capturedView.rect());
-                canvasGrabSuccessful = true;
-            }
-        }
-    }
-    
-    // ✅ If canvas grab failed or was blank, try saved files
-    if (!canvasGrabSuccessful) {
+    // Generate cover from saved files
+    {
         QString notebookIdStr;
         QString actualFolderPath = folderPath;
         bool needsCleanup = false;

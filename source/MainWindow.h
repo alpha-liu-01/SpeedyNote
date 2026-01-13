@@ -6,6 +6,7 @@
 #include "ui/MarkdownNotesSidebar.h"
 #include "core/Page.h"  // Phase 3.1.8: For Page::BackgroundType
 #include "core/MarkdownNote.h"  // Phase M.3: For loading markdown notes
+// #include "RecentNotebooksManager.h"  // TODO G.6: Re-enable after LauncherWindow remake
 
 // Phase 3.1.7: Forward declaration for legacy method signatures (will be removed)
 // class InkCanvas;
@@ -26,12 +27,9 @@
 #include <QStackedWidget>
 #include <QTreeWidget>
 #include <QDial>
-#include "SimpleAudio.h"
 #include <QFont>
 #include <QQueue>
 #include "SDLControllerManager.h"
-#include "ButtonMappingTypes.h"
-#include "RecentNotebooksManager.h"
 #include <QResizeEvent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -40,8 +38,6 @@
 #include <QMenu>
 #include <QCloseEvent>
 // #include "ControlPanelDialog.h"  // Phase 3.1.8: Disabled - depends on InkCanvas
-#include "PictureWindowManager.h"
-#include "SpnPackageManager.h"
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSharedMemory>
@@ -394,7 +390,8 @@ private:
     
  
 
-    RecentNotebooksManager *recentNotebooksManager; // Added manager instance
+    // TODO G.6: Re-enable after LauncherWindow remake
+    // RecentNotebooksManager *recentNotebooksManager;
 
 
     

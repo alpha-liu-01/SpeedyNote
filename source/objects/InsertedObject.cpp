@@ -42,10 +42,6 @@ void InsertedObject::loadFromJson(const QJsonObject& obj)
     rotation = obj["rotation"].toDouble(0.0);
     layerAffinity = obj["layerAffinity"].toInt(-1);  // Default: below all strokes
     
-    qDebug() << "InsertedObject::loadFromJson: loaded position =" << position
-             << "size =" << size << "zOrder =" << zOrder
-             << "layerAffinity =" << layerAffinity;
-    
     // Generate ID if missing (for backwards compatibility)
     if (id.isEmpty()) {
         id = QUuid::createUuid().toString(QUuid::WithoutBraces);

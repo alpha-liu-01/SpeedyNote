@@ -6,8 +6,6 @@
 #include <QObject>
 #include <QHash>
 
-class InkCanvas; // Forward declaration
-
 class RecentNotebooksManager : public QObject {
     Q_OBJECT
 
@@ -20,12 +18,12 @@ public:
     // Singleton pattern for shared instance
     static RecentNotebooksManager* getInstance(QObject *parent = nullptr);
 
-    void addRecentNotebook(const QString& folderPath, InkCanvas* canvasForPreview = nullptr);
+    void addRecentNotebook(const QString& folderPath, const QString& displayPath = QString());
     void removeRecentNotebook(const QString& folderPath);
     QStringList getRecentNotebooks() const;
     QString getCoverImagePathForNotebook(const QString& folderPath) const;
     QString getNotebookDisplayName(const QString& folderPath) const;
-    void generateAndSaveCoverPreview(const QString& folderPath, InkCanvas* optionalCanvas = nullptr);
+    void generateAndSaveCoverPreview(const QString& folderPath);
     
     // Starred notebooks functionality
     void addStarred(const QString& folderPath);

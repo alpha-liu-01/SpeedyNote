@@ -384,28 +384,11 @@ set(PDF_SOURCES
 add_executable(${PROJECT_NAME}
         source/Main.cpp
         source/MainWindow.cpp
-        source/InkCanvas.cpp
-        source/SimpleAudio.cpp
+
         # source/ControlPanelDialog.cpp  # Phase 3.1.8: Disabled - depends on InkCanvas
         source/SDLControllerManager.cpp
-        source/ButtonMappingTypes.cpp
-        source/RecentNotebooksManager.cpp
-        source/KeyCaptureDialog.cpp
-        source/ControllerMappingDialog.cpp
         source/text/MarkdownNoteEntry.cpp    # Phase M.3: Moved to text/
         source/ui/MarkdownNotesSidebar.cpp    # Phase M.3: Moved to ui/
-	  source/PictureWindow.cpp
-    	  source/PictureWindowManager.cpp
-        source/PdfOpenDialog.cpp
-	  source/PdfRelinkDialog.cpp
-    	  source/SpnPackageManager.cpp
-    	  # source/LauncherWindow.cpp  # Phase 3.1: Disconnected - uses MainWindow::s_useNewViewport
-        source/PictureSourceDialog.cpp
-        source/ExistingPictureDialog.cpp
-        source/DocumentConverter.cpp
-
-        source/VectorCanvas.cpp  # REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
-        source/VectorCanvas.h    # REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
         
         # New architecture sources (uncomment as implemented)
         ${CORE_SOURCES}

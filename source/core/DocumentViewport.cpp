@@ -884,10 +884,11 @@ QPointF DocumentViewport::pagePosition(int pageIndex) const
             
             if (col == 1) {
                 // Right column - offset by left page width + gap
+                // PERF FIX: Use pageSizeAt() to avoid triggering lazy loading
                 int leftIdx = (pageIndex / 2) * 2;
-                const Page* leftPage = m_document->page(leftIdx);
-                if (leftPage) {
-                    x = leftPage->size.width() + m_pageGap;
+                QSizeF leftSize = m_document->pageSizeAt(leftIdx);
+                if (!leftSize.isEmpty()) {
+                    x = leftSize.width() + m_pageGap;
                 }
             }
             
@@ -1129,8 +1130,9 @@ QRectF DocumentViewport::objectBoundsInViewport(InsertedObject* obj) const
     } else {
         // Paged: object position is page-local
         // Find which page contains this object
-        for (int i = 0; i < m_document->pageCount(); ++i) {
-            Page* page = m_document->page(i);
+        // PERF FIX: Only search loaded pages to avoid triggering lazy loading
+        for (int i : m_document->loadedPageIndices()) {
+            Page* page = m_document->page(i);  // Already loaded, no disk I/O
             if (page && page->objectById(obj->id)) {
                 docPos = pagePosition(i) + obj->position;
                 break;
@@ -1403,8 +1405,9 @@ QVector<int> DocumentViewport::visiblePages() const
         while (low <= high) {
             int mid = (low + high) / 2;
             qreal pageY = m_pageYCache[mid];
-            const Page* page = m_document->page(mid);
-            qreal pageBottom = page ? (pageY + page->size.height()) : pageY;
+            // PERF FIX: Use pageSizeAt() to avoid triggering lazy loading in binary search
+            QSizeF pageSize = m_document->pageSizeAt(mid);
+            qreal pageBottom = pageY + pageSize.height();
             
             if (pageBottom < viewTop) {
                 // Page is entirely above viewport
@@ -4518,8 +4521,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
                 }
             } else {
                 // Paged: find page containing object
-                for (int i = 0; i < m_document->pageCount(); ++i) {
-                    Page* page = m_document->page(i);
+                // PERF FIX: Only search loaded pages to avoid triggering lazy loading
+                for (int i : m_document->loadedPageIndices()) {
+                    Page* page = m_document->page(i);  // Already loaded, no disk I/O
                     if (page && page->objectById(obj->id)) {
                         docPos = pagePosition(i) + obj->position;
                         break;
@@ -5439,10 +5443,11 @@ void DocumentViewport::deleteSelectedObjects()
                     m_document->markPageDirty(m_currentPageIndex);
                     deletedCount++;
                 } else {
-                    // Object might be on a different page - search all loaded pages
+                    // Object might be on a different page - search loaded pages only
+                    // PERF FIX: Only search loaded pages to avoid triggering lazy loading
                     bool found = false;
-                    for (int i = 0; i < m_document->pageCount(); i++) {
-                        Page* page = m_document->page(i);
+                    for (int i : m_document->loadedPageIndices()) {
+                        Page* page = m_document->page(i);  // Already loaded, no disk I/O
                         if (page && page->objectById(obj->id)) {
                             page->removeObject(obj->id);
                             m_document->markPageDirty(i);
@@ -5452,7 +5457,7 @@ void DocumentViewport::deleteSelectedObjects()
                         }
                     }
                     if (!found) {
-                        qWarning() << "deleteSelectedObjects: Object" << obj->id << "not found on any page";
+                        qWarning() << "deleteSelectedObjects: Object" << obj->id << "not found on any loaded page";
                     }
                 }
             }
@@ -6946,8 +6951,10 @@ void DocumentViewport::renderSelectedObjectsOnly(QPainter& painter)
                     }
                 }
             } else {
-                for (int i = 0; i < m_document->pageCount(); ++i) {
-                    Page* page = m_document->page(i);
+                // PERF FIX: Only search loaded pages to avoid triggering lazy loading
+                // Selected objects must be on already-loaded pages
+                for (int i : m_document->loadedPageIndices()) {
+                    Page* page = m_document->page(i);  // Already loaded, no disk I/O
                     if (!page) continue;
                     
                     for (const auto& pageObj : page->objects) {
@@ -7015,8 +7022,10 @@ void DocumentViewport::cacheSelectedObjectsForDrag()
             }
         }
     } else {
-        for (int i = 0; i < m_document->pageCount(); ++i) {
-            Page* page = m_document->page(i);
+        // PERF FIX: Only search loaded pages to avoid triggering lazy loading
+        // Selected objects must be on already-loaded pages
+        for (int i : m_document->loadedPageIndices()) {
+            Page* page = m_document->page(i);  // Already loaded, no disk I/O
             if (!page) continue;
             
             for (const auto& pageObj : page->objects) {

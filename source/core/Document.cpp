@@ -412,9 +412,9 @@ bool Document::loadPageFromDisk(int index) const
     
     m_loadedPages[uuid] = std::move(page);
     
-#ifdef QT_DEBUG
+
     qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
-#endif
+
     
     return true;
 }

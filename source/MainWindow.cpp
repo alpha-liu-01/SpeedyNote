@@ -25,7 +25,6 @@
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
-#include "ButtonMappingTypes.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScreen>
@@ -368,7 +367,8 @@ MainWindow::MainWindow(QWidget *parent)
     // REMOVED: Benchmark controls removed - buttons deleted
     // setBenchmarkControlsVisible(false);
     
-    recentNotebooksManager = RecentNotebooksManager::getInstance(this); // Use singleton instance
+    // TODO G.6: Re-enable after LauncherWindow remake
+    // recentNotebooksManager = RecentNotebooksManager::getInstance(this);
 
     // MW2.2: Removed dial initialization
     
