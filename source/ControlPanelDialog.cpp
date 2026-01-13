@@ -2,7 +2,7 @@
 #include "MainWindow.h"
 #include "ButtonMappingTypes.h"
 #include "SDLControllerManager.h"
-#include "SpnPackageManager.h"
+// #include "SpnPackageManager.h"  // Phase P.1: Removed - .spn format deprecated
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -954,7 +954,8 @@ void ControlPanelDialog::createCacheTab() {
     layout->addSpacing(20);
 
     // Show cache size
-    qint64 cacheSize = SpnPackageManager::getTempDirsTotalSize();
+    // Phase P.1: SpnPackageManager removed - cache management will be reimplemented in NotebookLibrary
+    qint64 cacheSize = 0;  // TODO: Implement with NotebookLibrary::getTempDirsTotalSize()
     QString cacheSizeText = QString::number(cacheSize / 1024.0 / 1024.0, 'f', 2) + " MB";
     QLabel *cacheSizeLabel = new QLabel(tr("Current cache size: %1").arg(cacheSizeText), cacheTab);
     cacheSizeLabel->setAlignment(Qt::AlignCenter);
@@ -991,17 +992,17 @@ void ControlPanelDialog::createCacheTab() {
         );
 
         if (reply == QMessageBox::Yes) {
-            // Clean up orphaned temp directories
-            SpnPackageManager::cleanupOrphanedTempDirs();
-
-            // Update cache size display
-            qint64 newCacheSize = SpnPackageManager::getTempDirsTotalSize();
+            // Phase P.1: SpnPackageManager removed - cache cleanup will be reimplemented
+            // TODO: Implement with NotebookLibrary::cleanupOrphanedTempDirs()
+            
+            // Update cache size display (currently disabled)
+            qint64 newCacheSize = 0;  // TODO: Implement with NotebookLibrary
             QString newCacheSizeText = QString::number(newCacheSize / 1024.0 / 1024.0, 'f', 2) + " MB";
             cacheSizeLabel->setText(tr("Current cache size: %1").arg(newCacheSizeText));
 
             // Show feedback message
             QMessageBox::information(this, tr("Cache Cleared"), 
-                tr("Temporary cache files have been cleared successfully."));
+                tr("Cache cleanup is temporarily disabled during architecture migration."));
         }
     });
 
@@ -1136,7 +1137,7 @@ void ControlPanelDialog::createCompatibilityTab() {
     layout->addWidget(folderSectionLabel);
     
     QLabel *folderDescriptionLabel = new QLabel(tr("This feature allows you to manually select a save folder for your notes. "
-                                                  "This is only for converting old folder-based notebooks to the new .spn format."), compatibilityTab);
+                                                  "SpeedyNote uses .snb folder bundles for notebook storage."), compatibilityTab);
     folderDescriptionLabel->setWordWrap(true);
     folderDescriptionLabel->setStyleSheet("font-size: 11px; margin-bottom: 10px;");
     layout->addWidget(folderDescriptionLabel);

@@ -307,6 +307,7 @@ set(CORE_SOURCES
         source/core/Document.cpp       # Task 1.2.3
         source/core/DocumentViewport.cpp # Task 1.3.1
         source/core/DocumentManager.cpp  # Task 3.0.1
+        source/core/NotebookLibrary.cpp  # Task P.2.2
         source/core/TouchGestureHandler.cpp # Task TG.1.R
         source/core/MarkdownNote.cpp   # Phase M.1: Markdown notes for LinkObjects
 )
@@ -375,6 +376,8 @@ set(UI_SOURCES
         source/ui/actionbars/PagePanelActionBar.cpp  # Page Panel: Task 4.1: PagePanelActionBar
         # Banners (Phase R.3)
         source/ui/banners/MissingPdfBanner.cpp  # Phase R.3.1: Missing PDF notification banner
+        # Launcher (Phase P.3)
+        source/ui/launcher/Launcher.cpp  # Phase P.3.1: New launcher skeleton
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)

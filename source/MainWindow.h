@@ -164,7 +164,7 @@ public:
     
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
-    void openFileInNewTab(const QString &filePath); // ✅ Open .spn package directly
+    void openFileInNewTab(const QString &filePath); // Open file (PDF) in new tab via single-instance
 
 
     

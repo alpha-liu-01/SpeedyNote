@@ -276,7 +276,7 @@ private:
     // Settings key for recent documents
     static const QString SETTINGS_RECENT_KEY;
     
-    // Temp bundle prefix (matches SpnPackageManager convention)
+    // Temp bundle prefix for unsaved edgeless documents
     static const QString TEMP_EDGELESS_PREFIX;
 
     // Load/save recent documents from/to QSettings

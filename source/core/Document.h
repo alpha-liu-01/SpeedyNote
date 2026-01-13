@@ -94,7 +94,7 @@ struct LayerDefinition {
 /**
  * @brief The central data structure representing an open notebook.
  * 
- * Document is the in-memory representation of a .spn notebook file.
+ * Document is the in-memory representation of a .snb notebook bundle.
  * It owns all pages, references external PDFs, and manages metadata.
  * 
  * Supports two modes:

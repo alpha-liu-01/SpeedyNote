@@ -84,19 +84,27 @@ Remove all legacy code before building new features.
 - `loadThemedIcon()` → Not needed; widgets use `setIconName()` which handles theming
 
 **Estimated:** ~50 LOC changes
-**Status:** 🔄 In Progress (utilities extracted, files ready for deletion)
+**Status:** 🔄 In Progress (utilities extracted, awaiting file deletion)
 
 ---
 
 ### Task P.1.6: Remove remaining .spn references
 **Search:** `grep -r "\.spn" source/` and `grep -r "spn" source/`
-**Files likely affected:**
-- `source/MainWindow.cpp` (openSpnPackage, etc.)
-- `source/DocumentConverter.cpp` (if any)
-- Any file dialogs with .spn filters
+
+**Changes made:**
+- `source/MainWindow.h`: Updated comment (line 167) from `.spn` to PDF description
+- `source/core/Document.h`: Updated docstring from `.spn` to `.snb`
+- `source/core/DocumentManager.h/cpp`: Updated comments removing SpnPackageManager references
+- `source/Main.cpp`: All `.spn` references are inside commented-out code blocks (safe)
+- `source/MainWindow.cpp`: All `.spn` references are removal comments (safe)
+- `source/ControlPanelDialog.cpp`: **Disconnected - will be remade** (not modified further)
+
+**Remaining (in disconnected/commented code):**
+- `Main.cpp`: Commented block (lines 417-449) with old LauncherWindow code
+- `ControlPanelDialog.cpp`: Disconnected, queued for remake
 
 **Estimated:** ~100 LOC changes
-**Status:** Pending
+**Status:** ✅ Complete (active code cleaned, disconnected code left for remake)
 
 ---
 
@@ -117,179 +125,180 @@ Create the new library management system.
 
 ### Task P.2.1: Create NotebookInfo struct
 **File:** `source/core/NotebookLibrary.h`
-**Contents:**
-```cpp
-struct NotebookInfo {
-    QString bundlePath;
-    QString name;
-    QString documentId;      // From document.json
-    QDateTime lastModified;
-    QDateTime lastAccessed;
-    bool isStarred = false;
-    QString starredFolder;   // Empty = unfiled
-    bool isPdfBased = false;
-    bool isEdgeless = false;
-    QString pdfFileName;     // For search, if PDF-based
-};
-```
+
+**Implementation:**
+- Created `NotebookInfo` struct with all planned fields
+- Added `isValid()` helper method to check if bundlePath is set
+- Added `displayName()` helper method that falls back to folder name if `name` is empty
+- Includes proper documentation comments
 
 **Estimated:** ~40 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.2: Create NotebookLibrary class skeleton
-**File:** `source/core/NotebookLibrary.h`, `source/core/NotebookLibrary.cpp`
-**Interface:**
-```cpp
-class NotebookLibrary : public QObject {
-    Q_OBJECT
-public:
-    static NotebookLibrary* instance();
-    
-    // Recent management
-    QList<NotebookInfo> recentNotebooks() const;
-    void addToRecent(const QString& bundlePath);
-    void removeFromRecent(const QString& bundlePath);
-    void updateLastAccessed(const QString& bundlePath);
-    
-    // Starred management
-    QList<NotebookInfo> starredNotebooks() const;
-    void setStarred(const QString& bundlePath, bool starred);
-    void setStarredFolder(const QString& bundlePath, const QString& folder);
-    QStringList starredFolders() const;
-    void createStarredFolder(const QString& name);
-    void deleteStarredFolder(const QString& name);
-    void reorderStarredFolder(const QString& name, int newIndex);
-    
-    // Search
-    QList<NotebookInfo> search(const QString& query) const;
-    
-    // Thumbnails
-    QString thumbnailPathFor(const QString& bundlePath) const;
-    void saveThumbnail(const QString& bundlePath, const QPixmap& thumbnail);
-    void invalidateThumbnail(const QString& bundlePath);
-    
-    // Persistence
-    void save();
-    void load();
-    
-signals:
-    void libraryChanged();
-    void thumbnailUpdated(const QString& bundlePath);
-    
-private:
-    NotebookLibrary(QObject* parent = nullptr);
-    QString m_libraryFilePath;
-    QList<NotebookInfo> m_notebooks;
-    QStringList m_starredFolderOrder;
-};
-```
+**Files:** `source/core/NotebookLibrary.h`, `source/core/NotebookLibrary.cpp`
+
+**Implementation:**
+- Added `NotebookLibrary` class as singleton (`instance()` pattern)
+- Grouped methods: Recent, Starred, Search, Thumbnails, Persistence
+- Added private `findNotebook()` helper for lookups
+- Constructor sets up paths using `QStandardPaths::AppDataLocation`
+- All method stubs created with `TODO` comments for later phases
+- Added to `CMakeLists.txt` under `CORE_SOURCES`
+
+**Private members:**
+- `m_libraryFilePath`: Path to `notebook_library.json`
+- `m_thumbnailCachePath`: Path to `thumbnail_cache/` directory
+- `m_notebooks`: List of all tracked notebooks
+- `m_starredFolderOrder`: Ordered list of folder names
 
 **Estimated:** ~100 LOC header, ~50 LOC skeleton
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.3: Implement JSON persistence
 **File:** `source/core/NotebookLibrary.cpp`
-**Features:**
-- Save to `QStandardPaths::AppDataLocation + "/library.json"`
-- Load on construction
-- Auto-save on changes (debounced)
-- Validate paths exist on load (remove stale entries)
 
-**JSON Structure:**
-```json
-{
-  "version": 1,
-  "notebooks": [
-    {
-      "path": "/path/to/notebook.snb",
-      "name": "My Notebook",
-      "documentId": "abc123",
-      "lastModified": "2026-01-13T10:00:00Z",
-      "lastAccessed": "2026-01-13T12:00:00Z",
-      "isStarred": true,
-      "starredFolder": "Work",
-      "isPdfBased": false,
-      "isEdgeless": true,
-      "pdfFileName": ""
-    }
-  ],
-  "starredFolders": ["Work", "Personal", "Archive"]
-}
-```
+**Implementation:**
+- `save()`: Serializes `m_notebooks` and `m_starredFolderOrder` to JSON
+- `load()`: Parses JSON and validates each notebook path exists
+  - Checks for `.snb_marker` or `document.json` to confirm valid bundle
+  - Removes stale entries automatically
+- `scheduleSave()`: Starts/restarts debounce timer (1 second)
+- `markDirty()`: Emits `libraryChanged()` and schedules save
+- Constructor calls `load()` and sets up timer connection
+- Version field for future compatibility
+
+**Added to header:**
+- `QTimer m_saveTimer` for debounced auto-save
+- `scheduleSave()` and `markDirty()` private methods
+- `SAVE_DEBOUNCE_MS = 1000` and `LIBRARY_VERSION = 1` constants
 
 **Estimated:** ~150 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.4: Implement recent notebooks logic
 **File:** `source/core/NotebookLibrary.cpp`
-**Features:**
-- `addToRecent()`: Add/update entry, set lastAccessed to now
-- `removeFromRecent()`: Remove entry (keeps starred status)
-- `recentNotebooks()`: Return sorted by lastAccessed (newest first)
-- No limit on recent count (infinite history)
-- Extract metadata from bundle on add (name, isPdfBased, isEdgeless)
+
+**Implementation:**
+- `recentNotebooks()`: Returns copy sorted by `lastAccessed` descending using `std::sort`
+- `addToRecent()`:
+  - If exists: updates `lastAccessed` and refreshes `lastModified` from filesystem
+  - If new: reads `document.json` to extract `name`, `notebook_id`, `mode`, `pdf_path`
+  - Sets `isEdgeless` based on mode == "edgeless"
+  - Sets `isPdfBased` and `pdfFileName` if pdf_path is present
+  - Gets `lastModified` from filesystem (more accurate than JSON)
+- `removeFromRecent()`: Removes entry by path
+- `updateLastAccessed()`: Updates timestamp only
+
+**Added:** `#include <algorithm>` for std::sort
 
 **Estimated:** ~80 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.5: Implement starred notebooks logic
 **File:** `source/core/NotebookLibrary.cpp`
-**Features:**
-- `setStarred()`: Toggle star status
-- `setStarredFolder()`: Assign to folder (or empty for unfiled)
-- `starredNotebooks()`: Return starred entries, grouped by folder
-- Folder CRUD operations
-- Reordering within folders (drag-drop support)
+
+**Implementation:**
+- `starredNotebooks()`: Returns starred notebooks grouped by folder
+  - Folders appear in `m_starredFolderOrder` order
+  - Unfiled notebooks (empty `starredFolder`) appear last
+- `setStarred(bundlePath, starred)`:
+  - Toggles star status
+  - Clears folder assignment when unstarring
+- `setStarredFolder(bundlePath, folder)`:
+  - Auto-stars notebook if assigning to a folder
+  - Validates folder exists before assignment
+  - Empty folder = unfiled
+- `createStarredFolder(name)`:
+  - Appends new folder to order list
+  - Validates name is non-empty and unique
+- `deleteStarredFolder(name)`:
+  - Moves all notebooks in folder to unfiled
+  - Removes folder from order list
+- `reorderStarredFolder(name, newIndex)`:
+  - Moves folder to new position (clamped to valid range)
+  - Supports drag-drop reordering
 
 **Estimated:** ~100 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.6: Implement search
 **File:** `source/core/NotebookLibrary.cpp`
-**Features:**
-- Case-insensitive search
-- Match notebook name OR pdfFileName
-- Return matching entries sorted by relevance (exact match first, then contains)
+
+**Implementation:**
+- Case-insensitive search using `QString::toLower()`
+- Matches against `displayName()` and `pdfFileName` (if PDF-based)
+- Scoring system:
+  - Score 2: Exact match (name or PDF filename equals query)
+  - Score 1: Contains match (name or PDF filename contains query)
+- Results sorted by:
+  1. Score descending (exact matches first)
+  2. `lastAccessed` descending (more recent first for same score)
+- Early return for empty query
 
 **Estimated:** ~50 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.7: Implement thumbnail caching
 **File:** `source/core/NotebookLibrary.cpp`
-**Features:**
+
+**Implementation:**
 - Cache location: `QStandardPaths::CacheLocation + "/thumbnails/"`
-- Filename: `{documentId}.png`
-- `saveThumbnail()`: Save pixmap to cache
-- `thumbnailPathFor()`: Return cache path (or empty if not cached)
-- `invalidateThumbnail()`: Delete cached file
-- LRU cleanup: Delete oldest when cache exceeds 200 MiB
+- Filename: `{documentId}.png` (using notebook's unique ID)
+- `thumbnailPathFor(bundlePath)`:
+  - Looks up notebook by path to get documentId
+  - Returns path only if file exists, otherwise empty string
+- `saveThumbnail(bundlePath, thumbnail)`:
+  - Saves pixmap as PNG using documentId
+  - Emits `thumbnailUpdated` signal for UI refresh
+  - Triggers `cleanupThumbnailCache()` after save
+- `invalidateThumbnail(bundlePath)`:
+  - Deletes cached file if it exists
+  - Emits `thumbnailUpdated` signal
+- `cleanupThumbnailCache()`:
+  - LRU eviction when total cache size exceeds 200 MiB
+  - Sorts files by `lastModified` (oldest first)
+  - Deletes oldest until under limit
+
+**Added to header:**
+- `MAX_CACHE_SIZE_BYTES = 200 * 1024 * 1024` constant
+- `cleanupThumbnailCache()` private method
 
 **Estimated:** ~80 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
 ### Task P.2.8: Integrate with DocumentManager
 **File:** `source/core/DocumentManager.cpp`
-**Changes:**
-- On document open: `NotebookLibrary::instance()->addToRecent(path)`
-- On document save: `NotebookLibrary::instance()->updateLastAccessed(path)`
-- On document close: Copy page-0 thumbnail to library cache
+
+**Implementation:**
+- Added `#include "NotebookLibrary.h"`
+- On .snb bundle load (`loadDocument`): `NotebookLibrary::instance()->addToRecent(path)`
+- On document save (`doSave`): `NotebookLibrary::instance()->addToRecent(bundlePath)`
+  - Uses `addToRecent` instead of `updateLastAccessed` to also refresh metadata
+- On document close: Added comment noting MainWindow should handle thumbnail saving
+  - MainWindow connects to `documentClosed(doc)` signal
+  - Calls `NotebookLibrary::instance()->saveThumbnail(path, thumbnail)`
+  - (Thumbnail saving implemented in Phase P.4 MainWindow integration)
+
+**Note:** Thumbnail saving requires PagePanel access, which only MainWindow has.
+The `documentClosed` signal is already emitted at the right time for this.
 
 **Estimated:** ~30 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 
@@ -299,37 +308,23 @@ Build the new launcher from scratch.
 
 ### Task P.3.1: Create Launcher class skeleton
 **Files:** `source/ui/launcher/Launcher.h`, `source/ui/launcher/Launcher.cpp`
-**Structure:**
-```cpp
-class Launcher : public QMainWindow {
-    Q_OBJECT
-public:
-    explicit Launcher(QWidget* parent = nullptr);
-    
-    void showWithAnimation();
-    void hideWithAnimation();
-    
-signals:
-    void notebookSelected(const QString& bundlePath);
-    void createNewEdgeless();
-    void createNewPaged();
-    void openPdfRequested();
-    void openNotebookRequested();
-    
-private:
-    void setupUi();
-    void setupTimeline();
-    void setupStarred();
-    void setupSearch();
-    void setupFAB();
-    
-    QStackedWidget* m_contentStack;
-    // ... widgets
-};
-```
+
+**Implementation:**
+- Created `source/ui/launcher/` directory
+- Header includes all signals, UI component pointers, and View enum
+- Signals: `notebookSelected`, `createNewEdgeless`, `createNewPaged`, `openPdfRequested`, `openNotebookRequested`
+- View switching: `Timeline`, `Starred`, `Search` views via `QStackedWidget`
+- Animation support:
+  - `showWithAnimation()` / `hideWithAnimation()` with fade effect
+  - `Q_PROPERTY(fadeOpacity)` for `QPropertyAnimation`
+- Keyboard handling:
+  - `Escape` hides launcher
+  - `Ctrl+H` toggles launcher (as per Q&A)
+- Setup methods stubbed with TODO comments for later tasks
+- Added to `CMakeLists.txt` under `UI_SOURCES`
 
 **Estimated:** ~100 LOC
-**Status:** Pending
+**Status:** ✅ Complete
 
 ---
 

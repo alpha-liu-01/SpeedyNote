@@ -6,6 +6,7 @@
 
 #include "DocumentManager.h"
 #include "Document.h"
+#include "NotebookLibrary.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -19,7 +20,7 @@
 // Settings key for recent documents persistence
 const QString DocumentManager::SETTINGS_RECENT_KEY = QStringLiteral("RecentDocuments");
 
-// Temp bundle prefix (matches SpnPackageManager convention: "speedynote_")
+// Temp bundle prefix for unsaved edgeless documents
 const QString DocumentManager::TEMP_EDGELESS_PREFIX = QStringLiteral("speedynote_edgeless_");
 
 // ============================================================================
@@ -176,6 +177,10 @@ Document* DocumentManager::loadDocument(const QString& path)
             m_modifiedFlags[doc] = false;
             
             addToRecent(path);
+            
+            // Phase P.2.8: Add to NotebookLibrary for launcher
+            NotebookLibrary::instance()->addToRecent(path);
+            
             emit documentLoaded(doc);
             return doc;
         }
@@ -288,6 +293,8 @@ void DocumentManager::closeDocument(Document* doc)
 #endif
     
     // Emit signal before deletion so receivers can clean up
+    // Phase P.2.8: MainWindow should connect to this signal to save thumbnail
+    // via NotebookLibrary::instance()->saveThumbnail(path, thumbnail)
     emit documentClosed(doc);
     
     // ========== TEMP BUNDLE CLEANUP ==========
@@ -495,6 +502,10 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
     // Update state
     clearModified(doc);
     addToRecent(bundlePath);
+    
+    // Phase P.2.8: Update NotebookLibrary for launcher
+    NotebookLibrary::instance()->addToRecent(bundlePath);
+    
     emit documentSaved(doc);
     return true;
 }
@@ -509,7 +520,7 @@ QString DocumentManager::createTempBundlePath(Document* doc)
         return QString();
     }
     
-    // Create temp directory path similar to SpnPackageManager convention:
+    // Create temp directory path for unsaved edgeless documents:
     // QStandardPaths::TempLocation + "speedynote_edgeless_" + uuid
     QString tempBase = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     QString uuid = doc->id.left(8);  // Use first 8 chars of doc ID for uniqueness
