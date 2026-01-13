@@ -103,6 +103,20 @@ struct LayerDefinition {
  */
 class Document {
 public:
+    // ===== Bundle Format Version =====
+    
+    /**
+     * @brief Current bundle format version.
+     * 
+     * Increment this when making breaking changes to the bundle structure.
+     * Used for forward compatibility checks - if a bundle was created with
+     * a newer version of SpeedyNote, we warn the user.
+     * 
+     * Version history:
+     * - 1: Initial .snb bundle format (2026-01)
+     */
+    static constexpr int BUNDLE_FORMAT_VERSION = 1;
+    
     // ===== Document Mode =====
     
     /**

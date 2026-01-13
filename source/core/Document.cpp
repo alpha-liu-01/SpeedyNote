@@ -1299,7 +1299,10 @@ QJsonObject Document::toJson() const
 {
     QJsonObject obj;
     
-    // Format version (for compatibility checks)
+    // Bundle format version (integer, for forward compatibility checks)
+    obj["bundle_format_version"] = BUNDLE_FORMAT_VERSION;
+    
+    // Legacy format version string (for backward compatibility with .snx files)
     obj["format_version"] = formatVersion;
     
     // Identity
@@ -1995,6 +1998,16 @@ bool Document::saveBundle(const QString& path)
     QString oldBundlePath = m_bundlePath;
     m_bundlePath = path;
     
+    // Phase P.1.1: Write .snb_marker file to identify this as a SpeedyNote bundle
+    QString markerPath = path + "/.snb_marker";
+    if (!QFile::exists(markerPath)) {
+        QFile markerFile(markerPath);
+        if (markerFile.open(QIODevice::WriteOnly)) {
+            // Empty file - existence is enough to identify the bundle
+            markerFile.close();
+        }
+    }
+    
     // Phase O1.6: Create assets directory for object files (images, etc.)
     if (!QDir().mkpath(path + "/assets/images")) {
         qWarning() << "Cannot create assets/images directory" << path;
@@ -2283,6 +2296,14 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
     }
     
     QJsonObject obj = jsonDoc.object();
+    
+    // Phase P.1.1: Check bundle format version for forward compatibility
+    int bundleVersion = obj["bundle_format_version"].toInt(1);
+    if (bundleVersion > BUNDLE_FORMAT_VERSION) {
+        qWarning() << "Bundle was created with a newer version of SpeedyNote (format version"
+                   << bundleVersion << ", current version" << BUNDLE_FORMAT_VERSION << ")."
+                   << "Some features may not work correctly. Please update SpeedyNote.";
+    }
     
     // Load document metadata
     auto doc = Document::fromJson(obj);
