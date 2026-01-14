@@ -8,6 +8,7 @@
 #include <QLocale>
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QColor>
@@ -15,6 +16,17 @@
 #include <QFontDatabase>
 #include "MainWindow.h"
 // #include "SpnPackageManager.h"  // TODO G.2: Re-enable after package format finalization
+
+// Controller support SDL includes
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
+#include <SDL2/SDL.h>
+#define SPEEDYNOTE_SDL_QUIT() SDL_Quit()
+#else
+#define SPEEDYNOTE_SDL_QUIT() ((void)0)
+#endif
+
+// Phase P.4: Launcher integration
+#include "ui/launcher/Launcher.h"
 
 #include "core/PageTests.h" // Phase 1.1.7: Page unit tests
 #include "core/DocumentTests.h" // Phase 1.2.8: Document unit tests
@@ -160,6 +172,8 @@ int main(int argc, char *argv[]) {
     
     
 #endif
+
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
     SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
@@ -176,6 +190,7 @@ int main(int argc, char *argv[]) {
         }
     }
     */  // For sdl2 debugging
+#endif // SPEEDYNOTE_CONTROLLER_SUPPORT
     
 
 
@@ -299,7 +314,7 @@ int main(int argc, char *argv[]) {
         freopen("CONOUT$", "w", stderr);
 #endif
         bool success = PageTests::runAllTests();
-        SDL_Quit();
+        SPEEDYNOTE_SDL_QUIT();
         return success ? 0 : 1;
     }
     
@@ -312,7 +327,7 @@ int main(int argc, char *argv[]) {
         freopen("CONOUT$", "w", stderr);
 #endif
         bool success = DocumentTests::runAllTests();
-        SDL_Quit();
+        SPEEDYNOTE_SDL_QUIT();
         return success ? 0 : 1;
     }
     
@@ -325,7 +340,7 @@ int main(int argc, char *argv[]) {
         freopen("CONOUT$", "w", stderr);
 #endif
         int result = DocumentViewportTests::runVisualTest();
-        SDL_Quit();
+        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
     
@@ -338,7 +353,7 @@ int main(int argc, char *argv[]) {
 #endif
         int result = runButtonTests ? runButtonTests : 0;
         result = runButtonTests ? QTest::qExec(new ToolbarButtonTests()) : 0;
-        SDL_Quit();
+        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
     
@@ -348,7 +363,7 @@ int main(int argc, char *argv[]) {
         testWidget->setAttribute(Qt::WA_DeleteOnClose);
         testWidget->show();
         int result = app.exec();
-        SDL_Quit();
+        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
     
@@ -361,7 +376,7 @@ int main(int argc, char *argv[]) {
         freopen("CONOUT$", "w", stderr);
 #endif
         bool success = LinkObjectTests::runAllTests();
-        SDL_Quit();
+        SPEEDYNOTE_SDL_QUIT();
         return success ? 0 : 1;
     }
 
@@ -385,72 +400,130 @@ int main(int argc, char *argv[]) {
             
             // Send command to existing instance
             if (MainWindow::sendToExistingInstance(command)) {
-                SDL_Quit(); // Clean up SDL before exiting
+                SPEEDYNOTE_SDL_QUIT(); // Clean up SDL before exiting
                 return 0; // Exit successfully, command sent to existing instance
             }
         }
         // If no command to send or sending failed, just exit
-        SDL_Quit(); // Clean up SDL before exiting
+        SPEEDYNOTE_SDL_QUIT(); // Clean up SDL before exiting
         return 0;
     }
 
-    // Phase 3.1: Skip LauncherWindow, go directly to MainWindow
-    // REMOVED: MainWindow::s_useNewViewport - always using new architecture
-    
-    // Determine which window to show based on command line arguments
+    // Phase P.4: Launcher integration
     int exitCode = 0;
     
-    // Phase 3.1: Always go to MainWindow (LauncherWindow will be reconnected later)
-    MainWindow *w = new MainWindow();
-    w->setAttribute(Qt::WA_DeleteOnClose); // Qt will delete when closed
-    w->show();
-    
-    // Phase 3.1: File handling is stubbed for now
-    // TODO Phase 3.5: Reconnect file operations
     if (!inputFile.isEmpty()) {
-        qDebug() << "File argument received but file operations are stubbed:" << inputFile;
-        // OLD: w->openSpnPackage(inputFile) or w->openPdfFile(inputFile)
-    }
-    
-    exitCode = app.exec();
-    
-    /* Phase 3.1: LauncherWindow code commented out - will be reconnected later
-    if (!inputFile.isEmpty()) {
-        // If a file is specified, go directly to MainWindow
+        // ========== FILE ARGUMENT PROVIDED ==========
+        // Go directly to MainWindow and open the file
         MainWindow *w = new MainWindow();
         w->setAttribute(Qt::WA_DeleteOnClose);
+        w->show();
         
-        if (createNewPackage) {
-            if (inputFile.toLower().endsWith(".spn")) {
-                w->show();
-                w->createNewSpnPackage(inputFile);
-            } else {
-                w->show();
-            }
-        } else {
-            if (inputFile.toLower().endsWith(".pdf")) {
-                w->show();
-                w->openPdfDocument(inputFile);
-            } else if (inputFile.toLower().endsWith(".spn")) {
-                w->show();
-                w->openSpnPackage(inputFile);
-            } else {
-                w->show();
-            }
-        }
+        // Use openFileInNewTab which routes through DocumentManager
+        // Handles: PDFs, .snb bundles, .snx/.json files
+        w->openFileInNewTab(inputFile);
+        
         exitCode = app.exec();
     } else {
-        // No file specified - show the launcher window
-        LauncherWindow *launcher = new LauncherWindow();
-        MainWindow::sharedLauncher = launcher;
+        // ========== NO FILE - SHOW LAUNCHER ==========
+        Launcher *launcher = new Launcher();
+        launcher->setAttribute(Qt::WA_DeleteOnClose);
+        
+        // Connect launcher signals to create MainWindow and perform actions
+        QObject::connect(launcher, &Launcher::notebookSelected, [launcher](const QString& bundlePath) {
+            // Find existing MainWindow or create new one
+            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+            bool isExisting = (mainWindow != nullptr);
+            if (!mainWindow) {
+                mainWindow = new MainWindow();
+                mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+            }
+            
+            // Preserve launcher's window state and bring to front
+            mainWindow->preserveWindowState(launcher, isExisting);
+            mainWindow->bringToFront();
+            
+            // Check if document is already open - switch to it instead of opening duplicate
+            if (!mainWindow->switchToDocument(bundlePath)) {
+                // Not already open - load the notebook bundle
+                mainWindow->openFileInNewTab(bundlePath);
+            }
+            
+            // Hide launcher with fade animation (Phase P.4.5)
+            launcher->hideWithAnimation();
+        });
+        
+        QObject::connect(launcher, &Launcher::createNewEdgeless, [launcher]() {
+            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+            bool isExisting = (mainWindow != nullptr);
+            if (!mainWindow) {
+                mainWindow = new MainWindow();
+                mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+            }
+            
+            mainWindow->preserveWindowState(launcher, isExisting);
+            mainWindow->bringToFront();
+            mainWindow->addNewEdgelessTab();
+            
+            // Hide launcher with fade animation (Phase P.4.5)
+            launcher->hideWithAnimation();
+        });
+        
+        QObject::connect(launcher, &Launcher::createNewPaged, [launcher]() {
+            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+            bool isExisting = (mainWindow != nullptr);
+            if (!mainWindow) {
+                mainWindow = new MainWindow();
+                mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+            }
+            
+            mainWindow->preserveWindowState(launcher, isExisting);
+            mainWindow->bringToFront();
+            mainWindow->addNewTab();
+            
+            // Hide launcher with fade animation (Phase P.4.5)
+            launcher->hideWithAnimation();
+        });
+        
+        QObject::connect(launcher, &Launcher::openPdfRequested, [launcher]() {
+            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+            bool isExisting = (mainWindow != nullptr);
+            if (!mainWindow) {
+                mainWindow = new MainWindow();
+                mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+            }
+            
+            mainWindow->preserveWindowState(launcher, isExisting);
+            mainWindow->bringToFront();
+            mainWindow->showOpenPdfDialog();  // Opens file dialog
+            
+            // Hide launcher with fade animation (Phase P.4.5)
+            launcher->hideWithAnimation();
+        });
+        
+        QObject::connect(launcher, &Launcher::openNotebookRequested, [launcher]() {
+            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+            bool isExisting = (mainWindow != nullptr);
+            if (!mainWindow) {
+                mainWindow = new MainWindow();
+                mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+            }
+            
+            mainWindow->preserveWindowState(launcher, isExisting);
+            mainWindow->bringToFront();
+            mainWindow->loadFolderDocument();  // Opens folder dialog
+            
+            // Hide launcher with fade animation (Phase P.4.5)
+            launcher->hideWithAnimation();
+        });
+        
         launcher->show();
         exitCode = app.exec();
     }
-    */
     
     // Clean up SDL before exiting to properly release HID device handles
     // This is especially important on macOS where HID handles can remain locked
-    SDL_Quit();
+    SPEEDYNOTE_SDL_QUIT();
     
     return exitCode;
 }

@@ -7,9 +7,14 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QPropertyAnimation>
+#include <QFrame>
 
-class NotebookListModel;
-class NotebookItemDelegate;
+class LauncherNavButton;
+class TimelineModel;
+class TimelineDelegate;
+class StarredView;
+class SearchView;
+class FloatingActionButton;
 
 /**
  * @brief The main launcher window for SpeedyNote.
@@ -84,15 +89,27 @@ signals:
 protected:
     void paintEvent(QPaintEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     void setupUi();
+    void setupNavigation();
     void setupTimeline();
     void setupStarred();
     void setupSearch();
     void setupFAB();
     void setupConnections();
     void applyStyle();
+    void updateNavigationState();
+    void setNavigationCompact(bool compact);
+    void onTimelineItemClicked(const QModelIndex& index);
+    void showNotebookContextMenu(const QString& bundlePath, const QPoint& globalPos);
+    void showFolderContextMenu(const QString& folderName, const QPoint& globalPos);
+    void deleteNotebook(const QString& bundlePath);
+    void toggleNotebookStar(const QString& bundlePath);
+    void renameNotebook(const QString& bundlePath);
+    void duplicateNotebook(const QString& bundlePath);
+    void showInFileManager(const QString& bundlePath);
     
     // === View Management ===
     enum class View {
@@ -106,41 +123,31 @@ private:
     QWidget* m_centralWidget = nullptr;
     QStackedWidget* m_contentStack = nullptr;
     
-    // Navigation tabs
-    QPushButton* m_timelineTab = nullptr;
-    QPushButton* m_starredTab = nullptr;
+    // Navigation sidebar
+    QWidget* m_navSidebar = nullptr;
+    LauncherNavButton* m_returnBtn = nullptr;
+    LauncherNavButton* m_timelineBtn = nullptr;
+    LauncherNavButton* m_starredBtn = nullptr;
+    LauncherNavButton* m_searchBtn = nullptr;
     
     // Timeline view
     QWidget* m_timelineView = nullptr;
     QListView* m_timelineList = nullptr;
+    TimelineModel* m_timelineModel = nullptr;
+    TimelineDelegate* m_timelineDelegate = nullptr;
     
     // Starred view
-    QWidget* m_starredView = nullptr;
-    QListView* m_starredList = nullptr;
+    StarredView* m_starredView = nullptr;
     
-    // Search
-    QLineEdit* m_searchInput = nullptr;
-    QWidget* m_searchResultsView = nullptr;
-    QListView* m_searchResultsList = nullptr;
+    // Search view
+    SearchView* m_searchView = nullptr;
     
     // FAB (Floating Action Button)
-    QPushButton* m_fabButton = nullptr;
-    QWidget* m_fabMenu = nullptr;
-    QPushButton* m_fabEdgelessBtn = nullptr;
-    QPushButton* m_fabPagedBtn = nullptr;
-    QPushButton* m_fabPdfBtn = nullptr;
-    QPushButton* m_fabOpenBtn = nullptr;
-    bool m_fabExpanded = false;
+    FloatingActionButton* m_fab = nullptr;
     
     // Animation
     QPropertyAnimation* m_fadeAnimation = nullptr;
     qreal m_fadeOpacity = 1.0;
-    
-    // Models (will be implemented in later tasks)
-    // NotebookListModel* m_timelineModel = nullptr;
-    // NotebookListModel* m_starredModel = nullptr;
-    // NotebookListModel* m_searchModel = nullptr;
-    // NotebookItemDelegate* m_itemDelegate = nullptr;
     
     View m_currentView = View::Timeline;
 };

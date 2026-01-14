@@ -52,6 +52,12 @@ public:
      * Set fullscreen toggle state (for external sync).
      */
     void setFullscreenChecked(bool checked);
+    
+    /**
+     * Get the add button widget for positioning menus.
+     * Phase P.4.3: Used to position the "New" dropdown menu.
+     */
+    QWidget* addButton() const { return m_addButton; }
 
 signals:
     // Left side

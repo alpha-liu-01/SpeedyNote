@@ -3,6 +3,9 @@
 // #include "VectorCanvas.h"  // REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
+#include "core/Page.h"              // Phase P.4.6: For thumbnail rendering
+#include "layers/VectorLayer.h"     // Phase P.4.6: For thumbnail rendering
+#include <QPainter>                 // Phase P.4.6: For thumbnail rendering
 #include "ui/sidebars/LayerPanel.h" // Phase S1: Moved to sidebars folder
 #include "ui/sidebars/OutlinePanel.h" // Phase E.2: PDF outline panel
 #include "ui/sidebars/LeftSidebarContainer.h" // Phase S3: Left sidebar container
@@ -23,6 +26,7 @@
 #include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
+#include "core/NotebookLibrary.h" // Phase P.4.6: For saving thumbnails
 #include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
@@ -58,6 +62,7 @@
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QInputMethod>
+#include <QPropertyAnimation>  // Phase P.4.5: Smooth window transitions
 #include <QInputMethodEvent>
 #include <QSet>
 #include <QWheelEvent>
@@ -75,7 +80,9 @@
 #include <QPointer>
 // #include "HandwritingLineEdit.h"
 // #include "ControlPanelDialog.h"  // Phase 3.1.8: Disabled - depends on InkCanvas
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "SDLControllerManager.h"
+#endif
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 
 #include "DocumentConverter.h" // Added for PowerPoint conversion
@@ -253,10 +260,38 @@ MainWindow::MainWindow(QWidget *parent)
         if (vp && m_documentManager) {
             Document* doc = vp->document();
             if (doc) {
+                // Phase P.4.6: Save page-0 thumbnail to NotebookLibrary before closing
+                // Only for paged documents that have been saved (have a bundle path)
+                QString bundlePath = m_documentManager->documentPath(doc);
+                if (!bundlePath.isEmpty() && !doc->isEdgeless() && doc->pageCount() > 0) {
+                    // Try to get cached thumbnail from PagePanel first
+                    QPixmap thumbnail;
+                    if (m_pagePanel && m_pagePanel->document() == doc) {
+                        thumbnail = m_pagePanel->thumbnailForPage(0);
+                    }
+                    
+                    // If no cached thumbnail, render one synchronously
+                    if (thumbnail.isNull()) {
+                        thumbnail = renderPage0Thumbnail(doc);
+                    }
+                    
+                    // Save to NotebookLibrary
+                    if (!thumbnail.isNull()) {
+                        NotebookLibrary::instance()->saveThumbnail(bundlePath, thumbnail);
+                    }
+                }
+                
                 // CR-L8: Clear LayerPanel's document pointer BEFORE deleting Document
                 // to prevent dangling pointer if any code accesses LayerPanel during cleanup
                 if (m_layerPanel && m_layerPanel->edgelessDocument() == doc) {
                     m_layerPanel->setCurrentPage(nullptr);
+                }
+                
+                // Phase P.4.6 FIX: Clear PagePanel's document pointer BEFORE deleting Document
+                // This cancels any async thumbnail renders to prevent use-after-free.
+                // ThumbnailRenderer::cancelAll() blocks until all active renders complete.
+                if (m_pagePanel && m_pagePanel->document() == doc) {
+                    m_pagePanel->setDocument(nullptr);
                 }
                 
                 m_documentManager->closeDocument(doc);
@@ -374,6 +409,7 @@ MainWindow::MainWindow(QWidget *parent)
     
     setupUi();    // ✅ Move all UI setup here
 
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     controllerManager = new SDLControllerManager();
     controllerThread = new QThread(this);
 
@@ -384,6 +420,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(controllerThread, &QThread::finished, controllerManager, &SDLControllerManager::deleteLater);
 
     controllerThread->start();
+#endif
 
     // toggleFullscreen(); // ✅ Toggle fullscreen to adjust layout
 
@@ -856,21 +893,19 @@ void MainWindow::setupUi() {
     mainLayout->addWidget(m_navigationBar);
     
     // Connect NavigationBar signals
-    connect(m_navigationBar, &NavigationBar::launcherClicked, this, [this]() {
-        // Stub - will show launcher in future
-        qDebug() << "NavigationBar: Launcher clicked (stub)";
-    });
+    connect(m_navigationBar, &NavigationBar::launcherClicked, this, &MainWindow::toggleLauncher);
     connect(m_navigationBar, &NavigationBar::leftSidebarToggled, this, [this](bool checked) {
         // Phase S3: Toggle left sidebar container
         if (m_leftSidebar) {
             m_leftSidebar->setVisible(checked);
+            // Phase P.4: Update action bar visibility when sidebar visibility changes
+            updatePagePanelActionBarVisibility();
         }
     });
     connect(m_navigationBar, &NavigationBar::saveClicked, this, &MainWindow::saveDocument);
     connect(m_navigationBar, &NavigationBar::addClicked, this, [this]() {
-        // Stub - will show add menu in future
-        qDebug() << "NavigationBar: Add clicked (stub)";
-        addNewTab();  // For now, just add a new tab
+        // Phase P.4.3: Show dropdown menu for new document options
+        showAddMenu();
     });
     connect(m_navigationBar, &NavigationBar::filenameClicked, this, [this]() {
         // Toggle tab bar visibility
@@ -1048,10 +1083,11 @@ void MainWindow::setupUi() {
     saveShortcut->setContext(Qt::ApplicationShortcut);
     connect(saveShortcut, &QShortcut::activated, this, &MainWindow::saveDocument);
     
-    // Load Document: Ctrl+O - load document from JSON file
-    QShortcut* loadShortcut = new QShortcut(QKeySequence::Open, this);
-    loadShortcut->setContext(Qt::ApplicationShortcut);
-    connect(loadShortcut, &QShortcut::activated, this, &MainWindow::loadDocument);
+    // Phase P.4.7: Removed Ctrl+O shortcut - obsolete with Launcher integration
+    // File opening is now handled by:
+    // - Launcher (recent notebooks, starred, search)
+    // - "+" menu → Open PDF... (Ctrl+Shift+O)
+    // - "+" menu → Open Notebook... (Ctrl+Shift+L)
     
     // Add Page: Ctrl+Shift+A - appends new page at end of document
     QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
@@ -1072,6 +1108,26 @@ void MainWindow::setupUi() {
     QShortcut* newEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this);
     newEdgelessShortcut->setContext(Qt::ApplicationShortcut);
     connect(newEdgelessShortcut, &QShortcut::activated, this, &MainWindow::addNewEdgelessTab);
+    
+    // New Paged Notebook: Ctrl+N - creates paged document (Phase P.4.3)
+    QShortcut* newPagedShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_N), this);
+    newPagedShortcut->setContext(Qt::ApplicationShortcut);
+    connect(newPagedShortcut, &QShortcut::activated, this, &MainWindow::addNewTab);
+    
+    // Toggle Launcher: Ctrl+H - show/hide launcher (Phase P.4.4)
+    QShortcut* launcherShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_H), this);
+    launcherShortcut->setContext(Qt::ApplicationShortcut);
+    connect(launcherShortcut, &QShortcut::activated, this, &MainWindow::toggleLauncher);
+    
+    // Go to Launcher: Escape - go to launcher when no modal dialogs open (Phase P.4.4)
+    QShortcut* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    escapeShortcut->setContext(Qt::WindowShortcut);
+    connect(escapeShortcut, &QShortcut::activated, this, [this]() {
+        // Only toggle launcher if no modal dialog is open
+        if (!QApplication::activeModalWidget()) {
+            toggleLauncher();
+        }
+    });
     
     // TEMPORARY: Load Bundle (.snb folder): Ctrl+Shift+L
     // Phase O1.7.6: Now handles BOTH paged and edgeless bundles
@@ -1125,12 +1181,14 @@ MainWindow::~MainWindow() {
     // Qt will automatically delete all canvases when canvasStack is destroyed
     // Manual deletion here would cause double-delete and segfault!
     
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // ✅ CRITICAL: Stop controller thread before destruction
     // Qt will abort if a QThread is destroyed while still running
     if (controllerThread && controllerThread->isRunning()) {
         controllerThread->quit();
         controllerThread->wait();  // Wait for thread to finish
     }
+#endif
     
     // Phase 3.1: LauncherWindow disconnected
     // if (sharedLauncher) {
@@ -1979,6 +2037,17 @@ void MainWindow::saveDocument()
             m_tabManager->markTabModified(currentIndex, false);
         }
         
+        // Phase P.4.6: Save thumbnail to NotebookLibrary
+        if (!isEdgeless && doc->pageCount() > 0) {
+            QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
+            if (thumbnail.isNull()) {
+                thumbnail = renderPage0Thumbnail(doc);
+            }
+            if (!thumbnail.isNull()) {
+                NotebookLibrary::instance()->saveThumbnail(existingPath, thumbnail);
+            }
+        }
+        
         if (isEdgeless) {
             qDebug() << "saveDocument: Saved edgeless canvas with" 
                      << doc->tileIndexCount() << "tiles to" << existingPath;
@@ -2032,6 +2101,20 @@ void MainWindow::saveDocument()
         m_tabManager->setTabTitle(currentIndex, doc->name);
         m_tabManager->markTabModified(currentIndex, false);
     }
+    
+    // Phase P.4.6: Save thumbnail to NotebookLibrary
+    if (!isEdgeless && doc->pageCount() > 0) {
+        QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
+        if (thumbnail.isNull()) {
+            thumbnail = renderPage0Thumbnail(doc);
+        }
+        if (!thumbnail.isNull()) {
+            NotebookLibrary::instance()->saveThumbnail(filePath, thumbnail);
+        }
+    }
+    
+    // Phase P.4.6: Register newly saved document with NotebookLibrary
+    NotebookLibrary::instance()->addToRecent(filePath);
     
     if (isEdgeless) {
         qDebug() << "saveDocument: Saved edgeless canvas with"
@@ -3667,11 +3750,12 @@ void MainWindow::updatePagePanelActionBarVisibility()
     
     bool shouldShow = false;
     
-    // Condition 1: Pages tab must be visible and selected
-    if (m_leftSidebar && m_leftSidebar->hasPagesTab()) {
+    // Condition 1: Left sidebar must be visible
+    // Condition 2: Pages tab must exist and be selected
+    // Condition 3: Must be a paged document (not edgeless)
+    if (m_leftSidebar && m_leftSidebar->isVisible() && m_leftSidebar->hasPagesTab()) {
         int pagesTabIndex = m_leftSidebar->indexOf(m_leftSidebar->pagePanel());
         if (m_leftSidebar->currentIndex() == pagesTabIndex) {
-            // Condition 2: Must be a paged document (not edgeless)
             if (DocumentViewport* vp = currentViewport()) {
                 if (Document* doc = vp->document()) {
                     if (!doc->isEdgeless()) {
@@ -3826,6 +3910,219 @@ void MainWindow::returnToLauncher() {
     // TODO Phase 3.5: Re-implement launcher return functionality
     QMessageBox::information(this, tr("Return to Launcher"), 
         tr("Launcher is being redesigned. This feature will return soon!"));
+}
+
+QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
+{
+    // Phase P.4.6: Render page-0 thumbnail for saving to NotebookLibrary
+    if (!doc || doc->isEdgeless() || doc->pageCount() == 0) {
+        return QPixmap();
+    }
+    
+    // Target thumbnail size for launcher display
+    static constexpr int THUMBNAIL_WIDTH = 180;
+    static constexpr qreal MAX_DPR = 2.0;  // Cap at 2x for reasonable file size
+    
+    // Get page size from metadata
+    QSizeF pageSize = doc->pageSizeAt(0);
+    if (pageSize.isEmpty()) {
+        pageSize = QSizeF(612, 792);  // Default US Letter
+    }
+    
+    // Calculate dimensions
+    qreal aspectRatio = pageSize.height() / pageSize.width();
+    int thumbnailHeight = static_cast<int>(THUMBNAIL_WIDTH * aspectRatio);
+    qreal dpr = qMin(devicePixelRatioF(), MAX_DPR);
+    
+    int physicalWidth = static_cast<int>(THUMBNAIL_WIDTH * dpr);
+    int physicalHeight = static_cast<int>(thumbnailHeight * dpr);
+    
+    // Create pixmap
+    QPixmap thumbnail(physicalWidth, physicalHeight);
+    thumbnail.setDevicePixelRatio(dpr);
+    thumbnail.fill(Qt::white);
+    
+    QPainter painter(&thumbnail);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    
+    // Calculate scale factor
+    qreal scale = static_cast<qreal>(THUMBNAIL_WIDTH) / pageSize.width();
+    painter.scale(scale, scale);
+    
+    // Get the page (may trigger lazy load)
+    Page* page = doc->page(0);
+    if (!page) {
+        painter.end();
+        return thumbnail;  // Return white placeholder
+    }
+    
+    // Render PDF background if available
+    QPixmap pdfBackground;
+    if (doc->isPdfLoaded() && page->pdfPageNumber >= 0) {
+        qreal pdfDpi = (THUMBNAIL_WIDTH * dpr) / (pageSize.width() / 72.0);
+        pdfDpi = qMin(pdfDpi, 150.0);  // Cap at 150 DPI
+        
+        QImage pdfImage = doc->renderPdfPageToImage(page->pdfPageNumber, pdfDpi);
+        if (!pdfImage.isNull()) {
+            pdfBackground = QPixmap::fromImage(pdfImage);
+        }
+    }
+    
+    // Render background
+    page->renderBackground(painter, pdfBackground.isNull() ? nullptr : &pdfBackground, 1.0);
+    
+    // Render vector layers
+    for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
+        VectorLayer* layer = page->layer(layerIdx);
+        if (layer && layer->visible) {
+            layer->render(painter);
+        }
+    }
+    
+    // Render inserted objects
+    page->renderObjects(painter, 1.0);
+    
+    painter.end();
+    return thumbnail;
+}
+
+void MainWindow::toggleLauncher() {
+    // Phase P.4.4: Toggle launcher visibility
+    // Phase P.4.5: Smooth transition with fade animation
+    
+    // Find existing Launcher among top-level widgets
+    QWidget* launcher = nullptr;
+    for (QWidget* widget : QApplication::topLevelWidgets()) {
+        if (widget->inherits("Launcher")) {
+            launcher = widget;
+            break;
+        }
+    }
+    
+    if (!launcher) {
+        // No launcher exists - can't toggle
+        qDebug() << "MainWindow::toggleLauncher: No launcher window found";
+        return;
+    }
+    
+    // Animation duration in milliseconds
+    const int fadeDuration = 150;
+    
+    if (launcher->isVisible()) {
+        // ========== LAUNCHER → MAINWINDOW ==========
+        // Copy window geometry from launcher to this window BEFORE showing
+        if (launcher->isMaximized()) {
+            // Set geometry first, then show maximized
+            setGeometry(launcher->geometry());
+        } else if (launcher->isFullScreen()) {
+            setGeometry(launcher->geometry());
+        } else {
+            setGeometry(launcher->geometry());
+        }
+        
+        // Start MainWindow at opacity 0, show it, then fade in
+        setWindowOpacity(0.0);
+        if (launcher->isMaximized()) {
+            showMaximized();
+        } else if (launcher->isFullScreen()) {
+            showFullScreen();
+        } else {
+            showNormal();
+        }
+        raise();
+        activateWindow();
+        
+        // Hide launcher immediately (no flicker since MainWindow is now on top)
+        launcher->hide();
+        launcher->setWindowOpacity(1.0);  // Reset for next time
+        
+        // Fade MainWindow in
+        QPropertyAnimation* fadeIn = new QPropertyAnimation(this, "windowOpacity");
+        fadeIn->setDuration(fadeDuration);
+        fadeIn->setStartValue(0.0);
+        fadeIn->setEndValue(1.0);
+        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
+        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
+        fadeIn->start();
+        
+    } else {
+        // ========== MAINWINDOW → LAUNCHER ==========
+        // Copy window geometry from this window to launcher BEFORE showing
+        if (isMaximized()) {
+            launcher->setGeometry(geometry());
+        } else if (isFullScreen()) {
+            launcher->setGeometry(geometry());
+        } else {
+            launcher->setGeometry(geometry());
+        }
+        
+        // Start launcher at opacity 0, show it, then fade in
+        launcher->setWindowOpacity(0.0);
+        if (isMaximized()) {
+            launcher->showMaximized();
+        } else if (isFullScreen()) {
+            launcher->showFullScreen();
+        } else {
+            launcher->showNormal();
+        }
+        launcher->raise();
+        launcher->activateWindow();
+        
+        // Hide MainWindow immediately (no flicker since launcher is now on top)
+        hide();
+        setWindowOpacity(1.0);  // Reset for next time
+        
+        // Fade launcher in
+        QPropertyAnimation* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
+        fadeIn->setDuration(fadeDuration);
+        fadeIn->setStartValue(0.0);
+        fadeIn->setEndValue(1.0);
+        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
+        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
+        fadeIn->start();
+    }
+}
+
+void MainWindow::showAddMenu() {
+    // Phase P.4.3: Show dropdown menu for new document options
+    if (!m_navigationBar) {
+        return;
+    }
+    
+    QMenu menu(this);
+    
+    // New Edgeless Canvas
+    QAction* newEdgelessAction = menu.addAction(tr("New Edgeless Canvas"));
+    newEdgelessAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
+    connect(newEdgelessAction, &QAction::triggered, this, &MainWindow::addNewEdgelessTab);
+    
+    // New Paged Notebook
+    QAction* newPagedAction = menu.addAction(tr("New Paged Notebook"));
+    newPagedAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    connect(newPagedAction, &QAction::triggered, this, &MainWindow::addNewTab);
+    
+    // Separator
+    menu.addSeparator();
+    
+    // Open PDF...
+    QAction* openPdfAction = menu.addAction(tr("Open PDF..."));
+    openPdfAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    connect(openPdfAction, &QAction::triggered, this, &MainWindow::showOpenPdfDialog);
+    
+    // Open Notebook...
+    QAction* openNotebookAction = menu.addAction(tr("Open Notebook..."));
+    openNotebookAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    connect(openNotebookAction, &QAction::triggered, this, &MainWindow::loadFolderDocument);
+    
+    // Position menu below the add button
+    QWidget* addButton = m_navigationBar->addButton();
+    if (addButton) {
+        QPoint buttonPos = addButton->mapToGlobal(QPoint(0, addButton->height()));
+        menu.exec(buttonPos);
+    } else {
+        menu.exec(QCursor::pos());
+    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
@@ -4241,6 +4538,7 @@ QVariant MainWindow::inputMethodQuery(Qt::InputMethodQuery query) const {
 
 
 
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 // MW2.2: reconnectControllerSignals simplified - dial system removed
 void MainWindow::reconnectControllerSignals() {
     if (!controllerManager) {
@@ -4250,6 +4548,7 @@ void MainWindow::reconnectControllerSignals() {
     // Disconnect all existing connections to avoid duplicates
     disconnect(controllerManager, nullptr, this, nullptr);
 }
+#endif // SPEEDYNOTE_CONTROLLER_SUPPORT
 
 #ifdef Q_OS_WIN
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result) {
@@ -4623,13 +4922,130 @@ void MainWindow::cleanupSharedResources()
 
 void MainWindow::openFileInNewTab(const QString &filePath)
 {
-    // Create a new tab first
-    addNewTab();
+    if (filePath.isEmpty()) {
+        return;
+    }
     
-    // Open the file in the new tab
-    // REMOVED MW5.6: .spn format deprecated - only PDF files supported now
-    if (filePath.toLower().endsWith(".pdf")) {
-        openPdfDocument(filePath);
+    // Phase P.4: Route all file opening through DocumentManager
+    // DocumentManager::loadDocument() handles: PDFs, .snb bundles, .snx/.json files
+    
+    if (!m_documentManager || !m_tabManager) {
+        qWarning() << "openFileInNewTab: DocumentManager or TabManager not initialized";
+        return;
+    }
+    
+    QFileInfo fileInfo(filePath);
+    if (!fileInfo.exists()) {
+        QMessageBox::warning(this, tr("File Not Found"),
+            tr("The file does not exist:\n%1").arg(filePath));
+        return;
+    }
+    
+    Document* doc = m_documentManager->loadDocument(filePath);
+    if (!doc) {
+        QMessageBox::critical(this, tr("Open Error"),
+            tr("Failed to open file:\n%1").arg(filePath));
+        return;
+    }
+    
+    // Get document name from file/folder if not set
+    if (doc->name.isEmpty()) {
+        doc->name = fileInfo.baseName();
+        // Remove .snb suffix if present
+        if (doc->name.endsWith(".snb", Qt::CaseInsensitive)) {
+            doc->name.chop(4);
+        }
+    }
+    
+    // Create new tab with the loaded document (TabManager creates viewport internally)
+    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
+    
+    if (tabIndex >= 0) {
+        // Switch to the new tab
+        if (m_tabBar) {
+            m_tabBar->setCurrentIndex(tabIndex);
+        }
+        
+        qDebug() << "MainWindow::openFileInNewTab: Opened" << filePath;
+    } else {
+        QMessageBox::critical(this, tr("Open Error"),
+            tr("Failed to create tab for:\n%1").arg(filePath));
+    }
+}
+
+void MainWindow::showOpenPdfDialog()
+{
+    // Phase P.4: Public wrapper for opening PDF via file dialog
+    // Calls the internal openPdfDocument() which shows a file dialog
+    openPdfDocument();
+}
+
+// ========== Phase P.4.2: Launcher Interface Methods ==========
+
+bool MainWindow::hasOpenDocuments() const
+{
+    if (!m_tabManager) {
+        return false;
+    }
+    return m_tabManager->tabCount() > 0;
+}
+
+bool MainWindow::switchToDocument(const QString& bundlePath)
+{
+    if (bundlePath.isEmpty() || !m_tabManager || !m_documentManager) {
+        return false;
+    }
+    
+    // Normalize path for comparison
+    QString normalizedPath = QFileInfo(bundlePath).absoluteFilePath();
+    
+    // Search through all open tabs for a matching document path
+    int tabCount = m_tabManager->tabCount();
+    for (int i = 0; i < tabCount; ++i) {
+        Document* doc = m_tabManager->documentAt(i);
+        if (!doc) continue;
+        
+        QString docPath = m_documentManager->documentPath(doc);
+        if (docPath.isEmpty()) continue;
+        
+        // Normalize and compare
+        QString normalizedDocPath = QFileInfo(docPath).absoluteFilePath();
+        if (normalizedDocPath == normalizedPath) {
+            // Found it - switch to this tab
+            if (m_tabBar) {
+                m_tabBar->setCurrentIndex(i);
+            }
+            qDebug() << "MainWindow::switchToDocument: Switched to existing tab for" << bundlePath;
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+void MainWindow::bringToFront()
+{
+    // Phase P.4.5: Fade in if window was hidden
+    bool wasHidden = !isVisible();
+    
+    if (wasHidden) {
+        // Start with opacity 0 and animate to 1
+        setWindowOpacity(0.0);
+    }
+    
+    show();
+    raise();
+    activateWindow();
+    
+    if (wasHidden) {
+        // Fade in animation
+        QPropertyAnimation* fadeIn = new QPropertyAnimation(this, "windowOpacity");
+        fadeIn->setDuration(150);
+        fadeIn->setStartValue(0.0);
+        fadeIn->setEndValue(1.0);
+        fadeIn->setEasingCurve(QEasingCurve::OutCubic);
+        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
+        fadeIn->start();
     }
 }
 
