@@ -22,10 +22,18 @@ QSize PageThumbnailDelegate::sizeHint(const QStyleOptionViewItem& option,
                                        const QModelIndex& index) const
 {
     Q_UNUSED(option);
-    Q_UNUSED(index);
     
-    // Calculate thumbnail height from width and aspect ratio
-    const int thumbHeight = static_cast<int>(m_thumbnailWidth * m_pageAspectRatio);
+    // Get the actual page's aspect ratio from model, or use default
+    qreal aspectRatio = m_pageAspectRatio;
+    if (index.isValid()) {
+        QVariant ratioVar = index.data(PageThumbnailModel::PageAspectRatioRole);
+        if (ratioVar.isValid()) {
+            aspectRatio = ratioVar.toReal();
+        }
+    }
+    
+    // Calculate thumbnail height from width and actual page aspect ratio
+    const int thumbHeight = static_cast<int>(m_thumbnailWidth * aspectRatio);
     
     // Total item height: padding + thumbnail + spacing + page number + padding
     const int totalHeight = VERTICAL_PADDING + thumbHeight + ITEM_SPACING + 
@@ -54,12 +62,19 @@ void PageThumbnailDelegate::paint(QPainter* painter, const QStyleOptionViewItem&
     const bool isCurrentPage = index.data(PageThumbnailModel::IsCurrentPageRole).toBool();
     const bool isPdfPage = index.data(PageThumbnailModel::IsPdfPageRole).toBool();
     
+    // Get the actual page's aspect ratio from model
+    qreal aspectRatio = m_pageAspectRatio;
+    QVariant ratioVar = index.data(PageThumbnailModel::PageAspectRatioRole);
+    if (ratioVar.isValid()) {
+        aspectRatio = ratioVar.toReal();
+    }
+    
     // Determine state
     const bool isSelected = option.state & QStyle::State_Selected;
     const bool isHovered = option.state & QStyle::State_MouseOver;
     
-    // Calculate thumbnail dimensions
-    const int thumbHeight = static_cast<int>(m_thumbnailWidth * m_pageAspectRatio);
+    // Calculate thumbnail dimensions using actual page aspect ratio
+    const int thumbHeight = static_cast<int>(m_thumbnailWidth * aspectRatio);
     
     // Calculate thumbnail rect (centered horizontally in the item)
     const int thumbX = option.rect.left() + (option.rect.width() - m_thumbnailWidth) / 2;

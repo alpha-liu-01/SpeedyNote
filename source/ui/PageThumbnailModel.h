@@ -33,7 +33,8 @@ public:
         ThumbnailRole,                       ///< QPixmap thumbnail
         IsCurrentPageRole,                   ///< bool: is this the current page?
         IsPdfPageRole,                       ///< bool: is this a PDF background page?
-        CanDragRole                          ///< bool: can this page be dragged?
+        CanDragRole,                         ///< bool: can this page be dragged?
+        PageAspectRatioRole                  ///< qreal: page height/width ratio
     };
 
     explicit PageThumbnailModel(QObject* parent = nullptr);

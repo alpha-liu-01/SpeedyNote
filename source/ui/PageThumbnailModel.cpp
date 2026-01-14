@@ -72,6 +72,15 @@ QVariant PageThumbnailModel::data(const QModelIndex& index, int role) const
         case CanDragRole:
             return canDragPage(pageIndex);
             
+        case PageAspectRatioRole: {
+            // Return the actual page's aspect ratio (height/width)
+            QSizeF pageSize = m_document->pageSizeAt(pageIndex);
+            if (pageSize.isEmpty()) {
+                pageSize = QSizeF(612, 792);  // Default US Letter
+            }
+            return pageSize.height() / pageSize.width();
+        }
+            
         default:
             return QVariant();
     }
@@ -106,6 +115,7 @@ QHash<int, QByteArray> PageThumbnailModel::roleNames() const
     roles[IsCurrentPageRole] = "isCurrentPage";
     roles[IsPdfPageRole] = "isPdfPage";
     roles[CanDragRole] = "canDrag";
+    roles[PageAspectRatioRole] = "pageAspectRatio";
     return roles;
 }
 

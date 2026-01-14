@@ -64,6 +64,8 @@ private:
     // === Background tab ===
     QWidget *backgroundTab;
     QComboBox *styleCombo;
+    QComboBox *pageSizeCombo;
+    QLabel *pageSizeDimLabel;
     QPushButton *bgColorButton;
     QPushButton *gridColorButton;
     QSpinBox *gridSpacingSpin;
@@ -71,6 +73,7 @@ private:
     QColor selectedBgColor;
     QColor selectedGridColor;
     void createBackgroundTab();
+    void onPageSizePresetChanged(int index);
 
     // === Theme tab ===
     QWidget *themeTab;

@@ -13,6 +13,7 @@
 
 Page::Page()
     : uuid(QUuid::createUuid().toString(QUuid::WithoutBraces))  // Phase C.0.1
+    , size(816, 1056)  // Default: US Letter at 96 DPI (consistent with Document::defaultPageSize)
 {
     // Create one default layer
     vectorLayers.push_back(std::make_unique<VectorLayer>("Layer 1"));
@@ -750,7 +751,8 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
     // else: page->uuid already has a freshly generated UUID from constructor
     
     page->pageIndex = obj["pageIndex"].toInt(0);
-    page->size = QSizeF(obj["width"].toDouble(800), obj["height"].toDouble(600));
+    // Default to US Letter at 96 DPI (consistent with Document::defaultPageSize)
+    page->size = QSizeF(obj["width"].toDouble(816), obj["height"].toDouble(1056));
     
     // Background
     page->backgroundType = static_cast<BackgroundType>(obj["backgroundType"].toInt(0));

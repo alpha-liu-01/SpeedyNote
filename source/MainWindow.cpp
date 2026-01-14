@@ -136,7 +136,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.0.0 Alpha 1"));
+    setWindowTitle(tr("SpeedyNote 1.0.0 Alpha 2"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -2456,10 +2456,17 @@ void MainWindow::addNewTab() {
         return;
     }
     
-    // Apply default background settings from user preferences
-    // Default: Grid with 32px spacing (32 divides evenly into 1024px tiles)
+    // Apply default page size and background settings from user preferences
     {
         QSettings settings("SpeedyNote", "App");
+        
+        // Load page size (default: US Letter at 96 DPI)
+        qreal pageWidth = settings.value("page/width", 816).toReal();
+        qreal pageHeight = settings.value("page/height", 1056).toReal();
+        QSizeF defaultPageSize(pageWidth, pageHeight);
+        
+        // Load background settings
+        // Default: Grid with 32px spacing (32 divides evenly into 1024px tiles)
         Page::BackgroundType defaultStyle = static_cast<Page::BackgroundType>(
             settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt());
         QColor defaultBgColor = QColor(settings.value("background/color", "#ffffff").toString());
@@ -2468,6 +2475,7 @@ void MainWindow::addNewTab() {
         int defaultLineSpacing = settings.value("background/lineSpacing", 32).toInt();
         
         // Update document defaults for future pages
+        doc->defaultPageSize = defaultPageSize;
         doc->defaultBackgroundType = defaultStyle;
         doc->defaultBackgroundColor = defaultBgColor;
         doc->defaultGridColor = defaultGridColor;
@@ -2478,6 +2486,7 @@ void MainWindow::addNewTab() {
         if (doc->pageCount() > 0) {
             Page* firstPage = doc->page(0);
             if (firstPage) {
+                firstPage->size = defaultPageSize;
                 firstPage->backgroundType = defaultStyle;
                 firstPage->backgroundColor = defaultBgColor;
                 firstPage->gridColor = defaultGridColor;
@@ -3672,7 +3681,9 @@ void MainWindow::setupPagePanelActionBar()
         }
     });
     
-    // Delete Page (first click): Store index and perform soft delete
+    // Delete Page (first click): Store index, wait for confirmation
+    // BUG-PG-002 FIX: Defer deletion until 5-second timer expires
+    // This allows the user to undo by clicking the button again
     connect(m_pagePanelActionBar, &PagePanelActionBar::deletePageClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             if (Document* doc = vp->document()) {
@@ -3682,56 +3693,94 @@ void MainWindow::setupPagePanelActionBar()
                     return;
                 }
                 
-                m_pendingDeletePageIndex = vp->currentPageIndex();
+                int pageIndex = vp->currentPageIndex();
                 
                 // BUG-PG-001 FIX: Can't delete PDF background pages
-                Page* page = doc->page(m_pendingDeletePageIndex);
+                Page* page = doc->page(pageIndex);
                 if (page && page->backgroundType == Page::BackgroundType::PDF) {
-                    qDebug() << "Page Panel: Cannot delete PDF page" << m_pendingDeletePageIndex;
-                    m_pendingDeletePageIndex = -1;
+                    qDebug() << "Page Panel: Cannot delete PDF page" << pageIndex;
                     m_pagePanelActionBar->resetDeleteButton();
                     return;
                 }
                 
-                // Actually delete the page
-                if (doc->removePage(m_pendingDeletePageIndex)) {
-                    vp->notifyDocumentStructureChanged();
-                    
-                    // Navigate to appropriate page
-                    int newPage = qMin(m_pendingDeletePageIndex, doc->pageCount() - 1);
-                    vp->scrollToPage(newPage);
-                    
-                    // Update UI
-                    if (m_pagePanel) {
-                        m_pagePanel->onPageCountChanged();
-                    }
-                    m_pagePanelActionBar->setPageCount(doc->pageCount());
-                    m_pagePanelActionBar->setCurrentPage(newPage);
-                } else {
-                    // Delete failed, reset button
-                    m_pendingDeletePageIndex = -1;
-                    m_pagePanelActionBar->resetDeleteButton();
-                }
+                // Store page index for deferred deletion
+                // Actual deletion happens in deleteConfirmed handler
+                m_pendingDeletePageIndex = pageIndex;
+                qDebug() << "Page Panel: Page" << pageIndex << "marked for deletion (5 sec to undo)";
             }
         }
     });
     
-    // Delete confirmed (timeout elapsed): Clear pending state
+    // Delete confirmed (timeout elapsed): Actually perform the deletion
     connect(m_pagePanelActionBar, &PagePanelActionBar::deleteConfirmed, this, [this]() {
-        // Delete was already performed in deletePageClicked
-        // Just clear the pending state - page data is now permanently gone
+        if (m_pendingDeletePageIndex < 0) {
+            return;  // No pending delete
+        }
+        
+        DocumentViewport* vp = currentViewport();
+        if (!vp) {
+            m_pendingDeletePageIndex = -1;
+            return;
+        }
+        
+        Document* doc = vp->document();
+        if (!doc) {
+            m_pendingDeletePageIndex = -1;
+            return;
+        }
+        
+        // Verify the page still exists and is still valid to delete
+        if (m_pendingDeletePageIndex >= doc->pageCount()) {
+            qDebug() << "Page Panel: Pending delete index" << m_pendingDeletePageIndex << "no longer valid";
+            m_pendingDeletePageIndex = -1;
+            return;
+        }
+        
+        // Double-check PDF protection (page may have changed)
+        Page* page = doc->page(m_pendingDeletePageIndex);
+        if (page && page->backgroundType == Page::BackgroundType::PDF) {
+            qDebug() << "Page Panel: Cannot delete PDF page" << m_pendingDeletePageIndex;
+            m_pendingDeletePageIndex = -1;
+            return;
+        }
+        
+        // Can't delete the last page
+        if (doc->pageCount() <= 1) {
+            qDebug() << "Page Panel: Cannot delete last page";
+            m_pendingDeletePageIndex = -1;
+            return;
+        }
+        
+        // Actually delete the page
+        int deleteIndex = m_pendingDeletePageIndex;
+        if (doc->removePage(deleteIndex)) {
+            qDebug() << "Page Panel: Page" << deleteIndex << "permanently deleted";
+            
+            vp->notifyDocumentStructureChanged();
+            
+            // Navigate to appropriate page
+            int newPage = qMin(deleteIndex, doc->pageCount() - 1);
+            vp->scrollToPage(newPage);
+            
+            // Update UI
+            if (m_pagePanel) {
+                m_pagePanel->onPageCountChanged();
+            }
+            m_pagePanelActionBar->setPageCount(doc->pageCount());
+            m_pagePanelActionBar->setCurrentPage(newPage);
+        } else {
+            qDebug() << "Page Panel: Delete failed for page" << deleteIndex;
+        }
+        
         m_pendingDeletePageIndex = -1;
-        qDebug() << "Page Panel: Delete confirmed, page permanently removed";
     });
     
-    // Undo delete clicked: Restore the deleted page
+    // Undo delete clicked: Cancel the pending deletion
     connect(m_pagePanelActionBar, &PagePanelActionBar::undoDeleteClicked, this, [this]() {
-        // TODO: Implement actual undo once we have page data restoration
-        // For now, just log and reset state
-        qDebug() << "Page Panel: Undo delete requested for page" << m_pendingDeletePageIndex;
-        // Note: True undo requires storing the deleted Page* temporarily
-        // This is a placeholder - the page is already gone at this point
-        m_pendingDeletePageIndex = -1;
+        if (m_pendingDeletePageIndex >= 0) {
+            qDebug() << "Page Panel: Delete cancelled for page" << m_pendingDeletePageIndex;
+            m_pendingDeletePageIndex = -1;
+        }
     });
     
     // -------------------------------------------------------------------------

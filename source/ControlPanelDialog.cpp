@@ -79,6 +79,25 @@ void ControlPanelDialog::loadSettings()
 {
     QSettings settings("SpeedyNote", "App");
     
+    // Load page size setting
+    // Default: US Letter (816 × 1056 px at 96 DPI)
+    qreal defaultWidth = settings.value("page/width", 816).toReal();
+    qreal defaultHeight = settings.value("page/height", 1056).toReal();
+    QSizeF savedSize(defaultWidth, defaultHeight);
+    
+    // Find the matching preset (or default to US Letter if no match)
+    int pageSizeIndex = 5;  // Default: US Letter (index 5)
+    for (int i = 0; i < pageSizeCombo->count(); ++i) {
+        QSizeF presetSize = pageSizeCombo->itemData(i).toSizeF();
+        if (qFuzzyCompare(presetSize.width(), savedSize.width()) &&
+            qFuzzyCompare(presetSize.height(), savedSize.height())) {
+            pageSizeIndex = i;
+            break;
+        }
+    }
+    pageSizeCombo->setCurrentIndex(pageSizeIndex);
+    onPageSizePresetChanged(pageSizeIndex);
+    
     // Load background settings
     // Default: Grid (enum value 3)
     int bgType = settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt();
@@ -124,6 +143,12 @@ void ControlPanelDialog::applyChanges()
     if (!mainWindowRef) return;
     
     QSettings settings("SpeedyNote", "App");
+    
+    // Apply page size settings to QSettings (for new documents only)
+    QSizeF selectedPageSize = pageSizeCombo->currentData().toSizeF();
+    settings.setValue("page/width", selectedPageSize.width());
+    settings.setValue("page/height", selectedPageSize.height());
+    // Note: Page size is NOT applied to current document - only affects new documents
     
     // Apply background settings to QSettings (for new documents)
     // Use the data value (enum value), not the combo index
@@ -697,15 +722,64 @@ void ControlPanelDialog::createBackgroundTab() {
     layout->addSpacing(10);
     
     // Title
-    QLabel *titleLabel = new QLabel(tr("Default Background Settings"), backgroundTab);
+    QLabel *titleLabel = new QLabel(tr("Default Page & Background Settings"), backgroundTab);
     titleLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
     layout->addWidget(titleLabel);
     
-    QLabel *descLabel = new QLabel(tr("These settings apply to new pages and documents. "
-                                      "Changes will also be applied to the current document."), backgroundTab);
+    QLabel *descLabel = new QLabel(tr("These settings apply to newly created documents only. "
+                                      "Background changes will also be applied to the current document."), backgroundTab);
     descLabel->setWordWrap(true);
     descLabel->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 15px;");
     layout->addWidget(descLabel);
+    
+    // ========== PAGE SIZE SECTION ==========
+    QLabel *pageSectionLabel = new QLabel(tr("Default Page Size"), backgroundTab);
+    pageSectionLabel->setStyleSheet("font-weight: bold; margin-top: 5px;");
+    layout->addWidget(pageSectionLabel);
+    
+    // Page Size Preset
+    QHBoxLayout *pageSizeLayout = new QHBoxLayout();
+    QLabel *pageSizeLabel = new QLabel(tr("Paper Size:"), backgroundTab);
+    pageSizeLabel->setMinimumWidth(120);
+    pageSizeLayout->addWidget(pageSizeLabel);
+    
+    pageSizeCombo = new QComboBox(backgroundTab);
+    // ISO/JIS sizes (commonly used internationally)
+    // Format: "Name", QVariant with QSizeF(width, height) at 96 DPI
+    // mm to px at 96 DPI: mm * 96 / 25.4
+    pageSizeCombo->addItem(tr("A3 (297 × 420 mm)"), QSizeF(1123, 1587));
+    pageSizeCombo->addItem(tr("B4 (250 × 353 mm)"), QSizeF(945, 1334));
+    pageSizeCombo->addItem(tr("A4 (210 × 297 mm)"), QSizeF(794, 1123));
+    pageSizeCombo->addItem(tr("B5 (176 × 250 mm)"), QSizeF(665, 945));
+    pageSizeCombo->addItem(tr("A5 (148 × 210 mm)"), QSizeF(559, 794));
+    // US Imperial sizes (commonly used in US)
+    pageSizeCombo->addItem(tr("US Letter (8.5 × 11 in)"), QSizeF(816, 1056));
+    pageSizeCombo->addItem(tr("US Legal (8.5 × 14 in)"), QSizeF(816, 1344));
+    pageSizeCombo->addItem(tr("US Tabloid (11 × 17 in)"), QSizeF(1056, 1632));
+    
+    connect(pageSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ControlPanelDialog::onPageSizePresetChanged);
+    pageSizeLayout->addWidget(pageSizeCombo, 1);
+    layout->addLayout(pageSizeLayout);
+    
+    // Page Size Dimensions (read-only display)
+    QHBoxLayout *pageDimLayout = new QHBoxLayout();
+    QLabel *pageDimLabel = new QLabel(tr("Dimensions:"), backgroundTab);
+    pageDimLabel->setMinimumWidth(120);
+    pageDimLayout->addWidget(pageDimLabel);
+    
+    pageSizeDimLabel = new QLabel(backgroundTab);
+    pageSizeDimLabel->setStyleSheet("color: #666; font-style: italic;");
+    pageDimLayout->addWidget(pageSizeDimLabel);
+    pageDimLayout->addStretch();
+    layout->addLayout(pageDimLayout);
+    
+    layout->addSpacing(15);
+    
+    // ========== BACKGROUND SECTION ==========
+    QLabel *bgSectionLabel = new QLabel(tr("Default Background"), backgroundTab);
+    bgSectionLabel->setStyleSheet("font-weight: bold;");
+    layout->addWidget(bgSectionLabel);
     
     // Background Style
     QHBoxLayout *styleLayout = new QHBoxLayout();
@@ -796,7 +870,19 @@ void ControlPanelDialog::createBackgroundTab() {
     selectedBgColor = QColor("#ffffff");
     selectedGridColor = QColor("#c8c8c8");
     
-    tabWidget->addTab(backgroundTab, tr("Background"));
+    // Initialize page size display
+    onPageSizePresetChanged(pageSizeCombo->currentIndex());
+    
+    tabWidget->addTab(backgroundTab, tr("Page"));
+}
+
+void ControlPanelDialog::onPageSizePresetChanged(int index) {
+    if (index < 0 || !pageSizeCombo || !pageSizeDimLabel) return;
+    
+    QSizeF size = pageSizeCombo->itemData(index).toSizeF();
+    pageSizeDimLabel->setText(tr("%1 × %2 px (at 96 DPI)")
+        .arg(static_cast<int>(size.width()))
+        .arg(static_cast<int>(size.height())));
 }
 
 void ControlPanelDialog::chooseBackgroundColor() {

@@ -174,6 +174,157 @@ if (page && page->backgroundType == Page::BackgroundType::PDF) {
 
 ---
 
+#### BUG-PG-002: Page delete undo button doesn't work
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When clicking the delete button on the PagePanelActionBar, the page was immediately deleted. The 5-second undo window was useless because clicking "Undo" did nothing - the page was already gone.
+
+**Steps to Reproduce:**
+1. Open a document with multiple pages (not PDF)
+2. Open Pages tab in left sidebar
+3. Click delete button on PagePanelActionBar
+4. Button transforms to "Undo" state
+5. Click "Undo" within 5 seconds
+6. Page is NOT restored (it was already deleted)
+
+**Expected:** Clicking "Undo" within 5 seconds should cancel the deletion
+**Actual:** Page was already deleted on first click, undo did nothing
+
+**Root Cause:** 
+The `deletePageClicked` handler immediately called `doc->removePage()` instead of waiting for the 5-second confirmation timer to expire. The design intention was:
+1. First click → Mark for deletion (soft delete)
+2. 5 sec timeout → Actually delete (hard delete)
+3. Undo click → Cancel the pending delete
+
+But the implementation was:
+1. First click → **Immediately delete** ❌
+2. 5 sec timeout → Just clear state
+3. Undo click → Nothing to undo
+
+**Fix:**
+Restructured the three handlers:
+
+1. **`deletePageClicked`**: Only stores `m_pendingDeletePageIndex`, doesn't delete
+2. **`deleteConfirmed`**: Actually performs `doc->removePage()` and updates UI
+3. **`undoDeleteClicked`**: Clears `m_pendingDeletePageIndex` to cancel
+
+Added validation in `deleteConfirmed` to handle edge cases:
+- Page index still valid?
+- Page is still not a PDF page?
+- Document still has >1 page?
+
+**Files Modified:**
+- `source/MainWindow.cpp` (deletePageClicked, deleteConfirmed, undoDeleteClicked handlers)
+
+**Verified:** [ ] First click marks page for deletion but doesn't delete
+**Verified:** [ ] Clicking Undo cancels the pending delete
+**Verified:** [ ] Waiting 5 seconds actually deletes the page
+**Verified:** [ ] PDF/last-page protections still work
+
+---
+
+#### BUG-PG-004: Default page size inconsistent and not configurable
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+1. Default page size was inconsistent across the codebase:
+   - `Document.h`: 816×1056 (US Letter at 96 DPI) ✓
+   - `Page::Page()`: Uninitialized (0×0 or garbage) ✗
+   - `Page::fromJson()`: 800×600 fallback ✗
+2. Users could not configure default page size for new documents
+3. Users who prefer ISO paper sizes (A4, A3, etc.) had no way to change the default
+
+**Root Cause:** 
+The `Page` class constructor didn't initialize the `size` member, and `Page::fromJson()` used an arbitrary 800×600 fallback instead of being consistent with `Document::defaultPageSize`.
+
+**Fix:**
+
+**Part 1: Fixed inconsistencies**
+1. `Page::Page()` now initializes `size` to 816×1056 (US Letter at 96 DPI)
+2. `Page::fromJson()` now uses 816×1056 as fallback (matches Document default)
+
+**Part 2: Added configurable page size presets**
+Added a "Paper Size" dropdown to the Settings → Page tab with common presets:
+
+| Preset | Size (mm) | Size (px @ 96 DPI) |
+|--------|-----------|-------------------|
+| A3 | 297 × 420 | 1123 × 1587 |
+| B4 | 250 × 353 | 945 × 1334 |
+| A4 | 210 × 297 | 794 × 1123 |
+| B5 | 176 × 250 | 665 × 945 |
+| A5 | 148 × 210 | 559 × 794 |
+| US Letter | 8.5 × 11 in | 816 × 1056 |
+| US Legal | 8.5 × 14 in | 816 × 1344 |
+| US Tabloid | 11 × 17 in | 1056 × 1632 |
+
+Settings are stored in QSettings:
+- `page/width` - Page width in pixels
+- `page/height` - Page height in pixels
+
+**Important:** Page size setting only affects **newly created documents**. It does not change existing documents or currently open documents.
+
+**Files Modified:**
+- `source/core/Page.cpp` (constructor, fromJson fallback)
+- `source/ControlPanelDialog.h` (added pageSizeCombo, pageSizeDimLabel)
+- `source/ControlPanelDialog.cpp` (page size UI in Background tab)
+- `source/MainWindow.cpp` (addNewTab applies page size from settings)
+
+**Verified:** [ ] Page::Page() initializes size to 816×1056
+**Verified:** [ ] Page::fromJson() uses 816×1056 as fallback
+**Verified:** [ ] Settings dialog shows page size presets
+**Verified:** [ ] New documents use selected page size
+**Verified:** [ ] Existing documents are not affected
+
+---
+
+#### BUG-PG-003: Page thumbnails display with wrong aspect ratio
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+All page thumbnails in the PagePanel displayed with a fixed US Letter aspect ratio (1.294), causing pages with different sizes (A4, custom, etc.) to appear stretched or squashed.
+
+**Steps to Reproduce:**
+1. Open a PDF document with A4 pages (aspect ratio ~1.414)
+2. Open the Pages tab in the left sidebar
+3. Thumbnails appear squashed (too short for their width)
+
+**Expected:** Thumbnails should display at the same aspect ratio as the actual page
+**Actual:** All thumbnails used fixed US Letter ratio regardless of actual page size
+
+**Root Cause:** 
+The `PageThumbnailDelegate` used a hardcoded `m_pageAspectRatio = 1.294` for all items in both `sizeHint()` and `paint()`. While the `ThumbnailRenderer` correctly rendered each thumbnail with the actual page's aspect ratio, the delegate then forced all items into the same fixed-height rectangle, causing distortion.
+
+| Component | Aspect Ratio Used |
+|-----------|-------------------|
+| ThumbnailRenderer | ✅ Actual page ratio |
+| PageThumbnailDelegate | ❌ Fixed 1.294 (US Letter) |
+
+**Fix:**
+1. **Added `PageAspectRatioRole`** to `PageThumbnailModel`:
+   - Returns `pageSize.height() / pageSize.width()` from document metadata
+   - Available immediately (doesn't wait for thumbnail to render)
+
+2. **Updated `PageThumbnailDelegate::sizeHint()`**:
+   - Queries `PageAspectRatioRole` from model for each item
+   - Uses actual ratio if available, falls back to default
+
+3. **Updated `PageThumbnailDelegate::paint()`**:
+   - Queries `PageAspectRatioRole` to calculate correct `thumbRect` height
+   - Thumbnail pixmap now fits perfectly without stretching
+
+**Files Modified:**
+- `source/ui/PageThumbnailModel.h` (added PageAspectRatioRole enum)
+- `source/ui/PageThumbnailModel.cpp` (data() returns aspect ratio, roleNames() updated)
+- `source/ui/PageThumbnailDelegate.cpp` (sizeHint() and paint() use per-page ratio)
+
+**Verified:** [ ] A4 pages display correctly (taller than Letter)
+**Verified:** [ ] US Letter pages display correctly
+**Verified:** [ ] Mixed page sizes in same document each display correctly
+**Verified:** [ ] Placeholder (before thumbnail loads) has correct height
+
+---
+
 ### PDF (PDF)
 
 ---
@@ -421,7 +572,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Highlighter | 0 | 0 | 0 | 0 |
 | Objects | 0 | 0 | 0 | 0 |
 | Layers | 0 | 0 | 0 | 0 |
-| Pages | 0 | 0 | 1 | 1 |
+| Pages | 0 | 0 | 4 | 4 |
 | PDF | 0 | 0 | 0 | 0 |
 | File I/O | 0 | 0 | 0 | 0 |
 | Tabs | 0 | 0 | 0 | 0 |
@@ -433,7 +584,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **6** | **6** |
+| **TOTAL** | **0** | **0** | **9** | **9** |
 
 ---
 
