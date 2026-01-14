@@ -970,8 +970,16 @@ void MainWindow::setupUi() {
     });
     connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
         // Touch gesture mode: 0=off, 1=y-axis, 2=full
+        // Convert int to TouchGestureMode enum and apply
+        TouchGestureMode gestureMode;
+        switch (mode) {
+            case 0: gestureMode = TouchGestureMode::Disabled; break;
+            case 1: gestureMode = TouchGestureMode::YAxisOnly; break;
+            case 2: gestureMode = TouchGestureMode::Full; break;
+            default: gestureMode = TouchGestureMode::Full; break;
+        }
+        setTouchGestureMode(gestureMode);
         qDebug() << "Toolbar: Touch gesture mode changed to" << mode;
-        // TODO: Connect to TouchGestureHandler when ready
     });
     // ------------------ End of Toolbar signal connections ------------------
     
@@ -2996,7 +3004,12 @@ void MainWindow::setTouchGestureMode(TouchGestureMode mode) {
     // TG.6: Apply touch gesture mode to current DocumentViewport
     if (DocumentViewport* vp = currentViewport()) {
         vp->setTouchGestureMode(mode);
-        }
+    }
+    
+    // Sync toolbar button state (prevents button from being out of sync after settings load)
+    if (m_toolbar) {
+        m_toolbar->setTouchGestureMode(static_cast<int>(mode));
+    }
     
     // TODO: Apply to all viewports when TabManager supports iteration
     // For now, each new viewport gets the mode applied in openDocumentInNewTab()

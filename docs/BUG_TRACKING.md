@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026
+**Last Updated:** Jan 14, 2026 (BUG-TCH-001 fixed)
 
 ---
 
@@ -64,6 +64,16 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 ## Active Bugs
 
 ### Viewport (VP)
+
+*No active bugs*
+
+---
+
+### Touch/Tablet (TCH)
+
+*No active bugs*
+
+---
 
 <!-- Template:
 #### BUG-VP-XXX: [Title]
@@ -176,6 +186,40 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 ### Recently Fixed
 
+#### BUG-TCH-001: Touch gesture mode button fails to switch modes
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+The touch gesture mode button on the toolbar appeared to cycle through states (debug message confirmed mode changes), but actual touch behavior was always stuck at Full gestures mode.
+
+**Steps to Reproduce:**
+1. Open SpeedyNote
+2. Click the touch gesture button (hand icon) to cycle modes
+3. Observe debug output: "Toolbar: Touch gesture mode changed to 0/1/2"
+4. Try touch gestures - they always work as Full mode regardless of button state
+
+**Expected:** Touch gestures should be disabled (mode 0), Y-axis only (mode 1), or full (mode 2)
+**Actual:** Touch gestures always behaved as Full mode
+
+**Root Cause:** 
+In `MainWindow.cpp` line 971-975, the `touchGestureModeChanged` signal handler only logged the mode but **never called `setTouchGestureMode()`** to actually apply it. There was a TODO comment indicating this was never completed:
+```cpp
+connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
+    qDebug() << "Toolbar: Touch gesture mode changed to" << mode;
+    // TODO: Connect to TouchGestureHandler when ready  ← NEVER DONE!
+});
+```
+
+**Fix:**
+1. Updated the signal handler to convert the int mode to `TouchGestureMode` enum and call `setTouchGestureMode()`
+2. Updated `setTouchGestureMode()` to sync the toolbar button state (for settings load on startup)
+
+**Files Modified:**
+- `source/MainWindow.cpp` (lines 971-982, 3001-3018)
+
+**Verified:** [x] Signal handler now calls setTouchGestureMode()
+**Verified:** [x] Toolbar button syncs when mode loaded from settings
+
 ---
 
 ## Statistics
@@ -196,11 +240,11 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 | Subtoolbar | 0 | 0 | 0 | 0 |
 | Action Bar | 0 | 0 | 0 | 0 |
 | Sidebar | 0 | 0 | 0 | 0 |
-| Touch | 0 | 0 | 0 | 0 |
+| Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 0 | 0 |
-| **TOTAL** | **0** | **0** | **0** | **0** |
+| **TOTAL** | **0** | **0** | **1** | **1** |
 
 ---
 
