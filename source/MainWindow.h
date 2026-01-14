@@ -29,7 +29,9 @@
 #include <QDial>
 #include <QFont>
 #include <QQueue>
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "SDLControllerManager.h"
+#endif
 #include <QResizeEvent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -135,8 +137,10 @@ public:
 
     QColor getDefaultPenColor();
 
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDLControllerManager *controllerManager = nullptr;
     QThread *controllerThread = nullptr;
+#endif
 
 
     
@@ -145,11 +149,34 @@ public:
     static bool sendToExistingInstance(const QString &filePath);
     void setupSingleInstanceServer();
     
+    /**
+     * @brief Find an existing MainWindow among all top-level widgets.
+     * @return Pointer to existing MainWindow, or nullptr if none exists.
+     * 
+     * Phase P.1: Extracted from LauncherWindow for reuse.
+     */
+    static MainWindow* findExistingMainWindow();
+    
+    /**
+     * @brief Preserve window state when transitioning from another window.
+     * @param sourceWindow The window whose state to preserve (size, position, maximized/fullscreen).
+     * @param isExistingWindow If true, just show without changing size/position.
+     * 
+     * Phase P.1: Extracted from LauncherWindow for reuse.
+     */
+    void preserveWindowState(QWidget* sourceWindow, bool isExistingWindow = false);
+    
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
-    void openFileInNewTab(const QString &filePath); // Open file (PDF) in new tab via single-instance
-
-
+    void openFileInNewTab(const QString &filePath); // Open file (PDF, .snb) in new tab via single-instance
+    
+    /**
+     * @brief Show PDF open dialog and open selected PDF in a new tab.
+     * 
+     * Phase P.4: Made public for Launcher integration.
+     * Routes through DocumentManager::loadDocument().
+     */
+    void showOpenPdfDialog();
     
     void saveThemeSettings();
     void loadThemeSettings();
@@ -165,15 +192,15 @@ public:
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
 
     QSpinBox *pageInput = nullptr; // Made public for RecentNotebooksDialog
-
     
-    void updateTabLabel(); // Made public for RecentNotebooksDialog    
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
     // REMOVED MW7.6: addKeyboardMapping, removeKeyboardMapping, and getKeyboardMappings removed - old mapping system deleted
     
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // Controller access
     SDLControllerManager* getControllerManager() const { return controllerManager; }
     void reconnectControllerSignals(); // Reconnect controller signals after reconnection
+#endif
 
     void addNewTab();
     
@@ -193,7 +220,34 @@ public:
      * possibly by packaging .snb as a single file (zip/tar) in the future.
      */
     void loadFolderDocument();
-
+    
+    // ========== Phase P.4.2: Launcher Interface Methods ==========
+    
+    /**
+     * @brief Check if any documents are currently open.
+     * @return True if at least one tab/document is open.
+     * 
+     * Used by Launcher to determine if MainWindow should be reused.
+     */
+    bool hasOpenDocuments() const;
+    
+    /**
+     * @brief Switch to an already-open document tab.
+     * @param bundlePath Path to the .snb bundle to switch to.
+     * @return True if document was found and switched to, false otherwise.
+     * 
+     * If the document is already open in a tab, switches to that tab
+     * instead of opening a duplicate.
+     */
+    bool switchToDocument(const QString& bundlePath);
+    
+    /**
+     * @brief Bring this window to the front.
+     * 
+     * Convenience method that calls show(), raise(), and activateWindow().
+     * Used by Launcher when transitioning to MainWindow.
+     */
+    void bringToFront();
 
     // Phase 3.1: sharedLauncher disconnected - will be re-linked later
     // static LauncherWindow *sharedLauncher;
@@ -264,6 +318,37 @@ private slots:
 private:
 
     void returnToLauncher(); // Return to launcher window
+    
+    /**
+     * @brief Phase P.4.6: Render a thumbnail for page 0 of a document.
+     * @param doc The document to render from.
+     * @return The rendered thumbnail, or null pixmap on failure.
+     * 
+     * Used to save thumbnails to NotebookLibrary when closing documents.
+     * Renders synchronously at a reasonable size for launcher display.
+     */
+    QPixmap renderPage0Thumbnail(Document* doc);
+    
+    /**
+     * @brief Phase P.4.4: Toggle the launcher visibility.
+     * 
+     * If launcher is visible, hides it and brings MainWindow to front.
+     * If launcher is hidden, shows it.
+     * Connected to Ctrl+H shortcut and launcher button in NavigationBar.
+     */
+    void toggleLauncher();
+    
+    /**
+     * @brief Phase P.4.3: Show the "+" button dropdown menu.
+     * 
+     * Displays a menu with options:
+     * - New Edgeless Canvas (Ctrl+Shift+N)
+     * - New Paged Notebook (Ctrl+N)
+     * - ───────────────
+     * - Open PDF... (Ctrl+Shift+O)
+     * - Open Notebook... (Ctrl+Shift+L)
+     */
+    void showAddMenu();
 
     // Markdown notes sidebar functionality
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
@@ -447,6 +532,7 @@ private:
     QMetaObject::Connection m_pagePanelPageConn;
     QMetaObject::Connection m_pagePanelContentConn;  // For documentModified → thumbnail invalidation
     QMetaObject::Connection m_pagePanelActionBarConn;  // For currentPageChanged → action bar sync
+    QMetaObject::Connection m_documentModifiedConn;    // BUG FIX: documentModified → mark doc/tab modified
     QMetaObject::Connection m_markdownNotesPageConn;  // Phase M.3: For page change → notes reload
     QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal

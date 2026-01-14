@@ -1,7 +1,7 @@
 #include "PagePanel.h"
-#include "PageThumbnailModel.h"
-#include "PageThumbnailDelegate.h"
-#include "../core/Document.h"
+#include "../PageThumbnailModel.h"
+#include "../PageThumbnailDelegate.h"
+#include "../../core/Document.h"
 
 #include <QListView>
 #include <QVBoxLayout>
@@ -271,6 +271,18 @@ void PagePanel::applyTheme()
             background-color: transparent;
         }
     )").arg(bgColor));
+}
+
+// ============================================================================
+// Thumbnail Access
+// ============================================================================
+
+QPixmap PagePanel::thumbnailForPage(int pageIndex) const
+{
+    if (!m_model) {
+        return QPixmap();
+    }
+    return m_model->thumbnailForPage(pageIndex);
 }
 
 // ============================================================================

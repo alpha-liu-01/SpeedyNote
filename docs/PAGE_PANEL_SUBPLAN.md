@@ -402,7 +402,7 @@ private:
 
 ### Task 2.3: PagePanel Widget (~350 lines)
 
-**Files:** `source/ui/PagePanel.h`, `source/ui/PagePanel.cpp`
+**Files:** `source/ui/sidebars/PagePanel.h`, `source/ui/sidebars/PagePanel.cpp`
 
 **Description:** Main page panel widget containing the thumbnail list.
 

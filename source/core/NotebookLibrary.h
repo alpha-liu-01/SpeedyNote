@@ -58,6 +58,9 @@ struct NotebookInfo {
     }
 };
 
+// Register NotebookInfo with Qt's meta type system for QVariant support
+Q_DECLARE_METATYPE(NotebookInfo)
+
 /**
  * @brief Central manager for notebook metadata, recent/starred lists, and thumbnails.
  * 

@@ -428,8 +428,7 @@ void NotebookLibrary::cleanupThumbnailCache()
         qint64 fileSize = fileInfo.size();
         if (QFile::remove(fileInfo.absoluteFilePath())) {
             totalSize -= fileSize;
-            qDebug() << "NotebookLibrary: Evicted thumbnail" << fileInfo.fileName() 
-                     << "(" << fileSize / 1024 << "KB)";
+            // CR-P.2: Removed qDebug for production code
         }
     }
 }

@@ -1,7 +1,7 @@
 #include "LeftSidebarContainer.h"
 #include "LayerPanel.h"
 #include "OutlinePanel.h"
-#include "../PagePanel.h"
+#include "PagePanel.h"
 
 LeftSidebarContainer::LeftSidebarContainer(QWidget *parent)
     : QTabWidget(parent)

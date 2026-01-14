@@ -5,6 +5,12 @@ project(SpeedyNote VERSION 0.12.2)
 project(NoteApp)
 set(CMAKE_CXX_STANDARD 17)
 
+# ============================================================================
+# Optional Features
+# ============================================================================
+option(ENABLE_CONTROLLER_SUPPORT "Enable SDL2 game controller support" OFF)
+message(STATUS "Controller support: ${ENABLE_CONTROLLER_SUPPORT}")
+
 # ✅ Detect Windows architecture and set appropriate toolchain paths
 if (WIN32)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
@@ -44,11 +50,15 @@ if (WIN32)
     # Include directories
     include_directories(
             ${CMAKE_CURRENT_BINARY_DIR}
-            "${SDL2_ROOT}/include"
     )
-
-    # Prevent SDL2 from redefining main()
-    add_compile_definitions(SDL_MAIN_HANDLED)
+    
+    # Controller support (optional)
+    if(ENABLE_CONTROLLER_SUPPORT)
+        include_directories("${SDL2_ROOT}/include")
+        # Prevent SDL2 from redefining main()
+        add_compile_definitions(SDL_MAIN_HANDLED)
+        add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
+    endif()
 
     # ✅ CPU architecture-specific optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
@@ -106,8 +116,12 @@ if (WIN32)
     # Find dependencies for Windows
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     # Poppler is already found via pkg-config above
-    find_package(SDL2 REQUIRED CONFIG)
-    unset(SDL2main CACHE)
+    
+    # SDL2 (optional - for controller support)
+    if(ENABLE_CONTROLLER_SUPPORT)
+        find_package(SDL2 REQUIRED CONFIG)
+        unset(SDL2main CACHE)
+    endif()
 elseif (APPLE)
     # macOS-specific configuration
     # Use Homebrew paths for macOS
@@ -129,15 +143,18 @@ elseif (APPLE)
     # Set paths for Homebrew-installed Qt6
     set(CMAKE_PREFIX_PATH
         "${HOMEBREW_PREFIX}/opt/qt@6"
-        "${HOMEBREW_PREFIX}/opt/sdl2"
     )
     
     # Find Qt6 from Homebrew
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     
-    # Find SDL2 from Homebrew via pkg-config
+    # Find SDL2 from Homebrew via pkg-config (optional - for controller support)
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+    if(ENABLE_CONTROLLER_SUPPORT)
+        list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/sdl2")
+        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+        add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
+    endif()
     
     # Poppler-Qt6 on macOS doesn't provide a .pc file, so we configure it manually
     set(POPPLER_PREFIX "/opt/poppler-qt6")
@@ -206,9 +223,11 @@ elseif (UNIX)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
 
-    # For SDL2, we use sdl2-compat which provides SDL2 compatibility
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+    # SDL2 (optional - for controller support)
+    if(ENABLE_CONTROLLER_SUPPORT)
+        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+        add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
+    endif()
 
     # Include current binary directory for generated files
     include_directories(${CMAKE_CURRENT_BINARY_DIR})
@@ -356,7 +375,7 @@ set(UI_SOURCES
         source/ui/widgets/UndoDeleteButton.cpp  # Page Panel: Task 1.2: UndoDeleteButton widget
         source/ui/PageThumbnailModel.cpp  # Page Panel: Task 2.1: PageThumbnailModel
         source/ui/PageThumbnailDelegate.cpp  # Page Panel: Task 2.2: PageThumbnailDelegate
-        source/ui/PagePanel.cpp  # Page Panel: Task 2.3: PagePanel widget
+        source/ui/sidebars/PagePanel.cpp  # Page Panel: Task 2.3: PagePanel widget
         source/ui/ThumbnailRenderer.cpp  # Page Panel: Task 3.1: Async thumbnail renderer
         # Subtoolbar framework (Phase D)
         source/ui/subtoolbars/SubToolbar.cpp  # Task 2.1: SubToolbar base class
@@ -378,6 +397,13 @@ set(UI_SOURCES
         source/ui/banners/MissingPdfBanner.cpp  # Phase R.3.1: Missing PDF notification banner
         # Launcher (Phase P.3)
         source/ui/launcher/Launcher.cpp  # Phase P.3.1: New launcher skeleton
+        source/ui/launcher/LauncherNavButton.cpp  # Phase P.3.2: Navigation button widget
+        source/ui/launcher/TimelineModel.cpp      # Phase P.3.3: Timeline data model
+        source/ui/launcher/TimelineDelegate.cpp   # Phase P.3.3: Timeline item delegate
+        source/ui/launcher/NotebookCard.cpp       # Phase P.3.4: Notebook card widget
+        source/ui/launcher/StarredView.cpp        # Phase P.3.5: Starred view with folders
+        source/ui/launcher/SearchView.cpp         # Phase P.3.6: Search view
+        source/ui/launcher/FloatingActionButton.cpp # Phase P.3.7: FAB
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
@@ -387,13 +413,24 @@ set(PDF_SOURCES
         source/pdf/PdfMismatchDialog.cpp   # PDF hash mismatch dialog (Phase R.2)
 )
 
+# ============================================================================
+# Controller Support Sources (optional)
+# ============================================================================
+set(CONTROLLER_SOURCES "")
+if(ENABLE_CONTROLLER_SUPPORT)
+    set(CONTROLLER_SOURCES
+        source/SDLControllerManager.cpp
+        source/ControllerMappingDialog.cpp
+        # source/ControlPanelDialog.cpp  # Phase 3.1.8: Disabled - depends on InkCanvas
+    )
+endif()
+
 # ✅ Build target
 add_executable(${PROJECT_NAME}
         source/Main.cpp
         source/MainWindow.cpp
 
-        # source/ControlPanelDialog.cpp  # Phase 3.1.8: Disabled - depends on InkCanvas
-        source/SDLControllerManager.cpp
+        ${CONTROLLER_SOURCES}
         source/text/MarkdownNoteEntry.cpp    # Phase M.3: Moved to text/
         source/ui/MarkdownNotesSidebar.cpp    # Phase M.3: Moved to ui/
         
@@ -451,29 +488,38 @@ endif ()
 
 # ✅ Link libraries - platform specific
 if (WIN32)
-    target_link_libraries(NoteApp
+    set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
-            SDL2::SDL2
             PkgConfig::POPPLER
             dsound  # For DirectSound API
             dxguid  # For DirectSound GUIDs
     )
+    if(ENABLE_CONTROLLER_SUPPORT)
+        list(APPEND PLATFORM_LIBS SDL2::SDL2)
+    endif()
+    target_link_libraries(NoteApp ${PLATFORM_LIBS})
 elseif (APPLE)
-    target_link_libraries(NoteApp
+    set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
-            PkgConfig::SDL2
             ${POPPLER_LIBRARIES}
             ${COREAUDIO_FRAMEWORK}
             ${AUDIOTOOLBOX_FRAMEWORK}
             ${AUDIOUNIT_FRAMEWORK}
     )
+    if(ENABLE_CONTROLLER_SUPPORT)
+        list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
+    endif()
+    target_link_libraries(NoteApp ${PLATFORM_LIBS})
 elseif (UNIX)
-    target_link_libraries(NoteApp
+    set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
-            PkgConfig::SDL2
             PkgConfig::POPPLER
             asound  # For ALSA audio
     )
+    if(ENABLE_CONTROLLER_SUPPORT)
+        list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
+    endif()
+    target_link_libraries(NoteApp ${PLATFORM_LIBS})
 endif ()
 
 # ✅ Set output name for macOS and Linux
