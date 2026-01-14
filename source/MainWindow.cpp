@@ -3684,6 +3684,15 @@ void MainWindow::setupPagePanelActionBar()
                 
                 m_pendingDeletePageIndex = vp->currentPageIndex();
                 
+                // BUG-PG-001 FIX: Can't delete PDF background pages
+                Page* page = doc->page(m_pendingDeletePageIndex);
+                if (page && page->backgroundType == Page::BackgroundType::PDF) {
+                    qDebug() << "Page Panel: Cannot delete PDF page" << m_pendingDeletePageIndex;
+                    m_pendingDeletePageIndex = -1;
+                    m_pagePanelActionBar->resetDeleteButton();
+                    return;
+                }
+                
                 // Actually delete the page
                 if (doc->removePage(m_pendingDeletePageIndex)) {
                     vp->notifyDocumentStructureChanged();

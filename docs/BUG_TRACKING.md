@@ -130,6 +130,48 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 ### Pages (PG)
 
+#### BUG-PG-001: PDF background pages can be deleted via Page Panel
+**Priority:** 🔴 P0 | **Status:** ✅ FIXED
+
+**Symptom:** 
+Pages with PDF backgrounds could be deleted through the Page Panel action bar's delete button, even though PDF pages should be protected from deletion (use external tools to modify PDFs).
+
+**Steps to Reproduce:**
+1. Open a PDF document in SpeedyNote
+2. Open the left sidebar, select Pages tab
+3. Navigate to any PDF page
+4. Click the delete button on the PagePanelActionBar
+5. Wait for 5-second timeout (or don't click undo)
+6. PDF page is deleted
+
+**Expected:** PDF background pages should be protected from deletion
+**Actual:** PDF pages were deleted, corrupting the annotation workflow
+
+**Root Cause:** 
+The `deletePageClicked` handler in `MainWindow::setupPagePanelActionBar()` (line 3676) was missing the PDF page protection check. It only checked for "last page" but not for `Page::BackgroundType::PDF`.
+
+The standalone `deletePageInDocument()` method (line 2297) had the check, but the PagePanelActionBar handler bypassed it by directly calling `doc->removePage()`.
+
+**Fix:**
+Added PDF page check to the `deletePageClicked` handler:
+```cpp
+// BUG-PG-001 FIX: Can't delete PDF background pages
+Page* page = doc->page(m_pendingDeletePageIndex);
+if (page && page->backgroundType == Page::BackgroundType::PDF) {
+    qDebug() << "Page Panel: Cannot delete PDF page" << m_pendingDeletePageIndex;
+    m_pendingDeletePageIndex = -1;
+    m_pagePanelActionBar->resetDeleteButton();
+    return;
+}
+```
+
+**Files Modified:**
+- `source/MainWindow.cpp` (deletePageClicked handler, ~line 3685)
+
+**Verified:** [ ] PDF pages cannot be deleted via Page Panel
+**Verified:** [ ] Inserted blank pages CAN still be deleted
+**Verified:** [ ] Last page protection still works
+
 ---
 
 ### PDF (PDF)
@@ -379,7 +421,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Highlighter | 0 | 0 | 0 | 0 |
 | Objects | 0 | 0 | 0 | 0 |
 | Layers | 0 | 0 | 0 | 0 |
-| Pages | 0 | 0 | 0 | 0 |
+| Pages | 0 | 0 | 1 | 1 |
 | PDF | 0 | 0 | 0 | 0 |
 | File I/O | 0 | 0 | 0 | 0 |
 | Tabs | 0 | 0 | 0 | 0 |
@@ -391,7 +433,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **5** | **5** |
+| **TOTAL** | **0** | **0** | **6** | **6** |
 
 ---
 

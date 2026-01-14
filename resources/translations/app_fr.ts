@@ -237,6 +237,7 @@
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="28"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="799"/>
         <source>Background</source>
         <translation type="unfinished">Contexte</translation>
     </message>
@@ -247,44 +248,49 @@
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="38"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="49"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="52"/>
         <source>Apply</source>
         <translation type="unfinished">Postuler</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="39"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="50"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="53"/>
         <source>OK</source>
         <translation type="unfinished">D&apos;ACCORD</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="40"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="51"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="54"/>
         <source>Cancel</source>
         <translation type="unfinished">Annuler</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="67"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="712"/>
         <source>Background Style:</source>
         <translation type="unfinished">Style d&apos;arrière-plan&#xa0;:</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="69"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="718"/>
         <source>None</source>
         <translation type="unfinished">Aucun</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="70"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="719"/>
         <source>Grid</source>
         <translation type="unfinished">Grille</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="71"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="720"/>
         <source>Lines</source>
         <translation type="unfinished">Lignes</translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="73"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="728"/>
         <source>Background Color:</source>
         <translation type="unfinished">Couleur d&apos;arrière-plan&#xa0;:</translation>
     </message>
@@ -295,6 +301,7 @@
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="95"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="803"/>
         <source>Select Background Color</source>
         <translation type="unfinished">Sélectionnez la couleur d&apos;arrière-plan</translation>
     </message>
@@ -444,31 +451,31 @@
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="393"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="657"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="823"/>
         <source>Use Custom Accent Color</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="396"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="660"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="826"/>
         <source>Accent Color:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="407"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="671"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="837"/>
         <source>When enabled, use a custom accent color instead of the system accent color for the toolbar, dial, and tab selection.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="418"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="693"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="859"/>
         <source>Theme</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../old/ControlPanelDialog.cpp" line="422"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="697"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="863"/>
         <source>Select Accent Color</source>
         <translation type="unfinished"></translation>
     </message>
@@ -508,125 +515,160 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="32"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="33"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="784"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="700"/>
+        <source>Default Background Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="704"/>
+        <source>These settings apply to new pages and documents. Changes will also be applied to the current document.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="742"/>
+        <source>Grid/Line Color:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="758"/>
+        <source>Grid Spacing:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="773"/>
+        <source>Line Spacing:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="787"/>
+        <source>Note: 32px spacing is recommended as it divides evenly into the 1024px tile size used by the edgeless canvas.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="811"/>
+        <source>Select Grid/Line Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="950"/>
         <source>Configure physical controller button mappings for your Joy-Con or other controller:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="788"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="954"/>
         <source>Note: This maps your physical controller buttons to the logical Joy-Con functions used by the application. After setting up the physical mapping, you can configure what actions each logical button performs in the &apos;Button Mapping&apos; tab.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="795"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="961"/>
         <source>Configure Controller Mapping</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="801"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="967"/>
         <source>Reconnect Controller</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="808"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="974"/>
         <source>Current controller status:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="854"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1020"/>
         <source>Controller manager is not available.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="859"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1025"/>
         <source>🔄 Reconnecting...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="876"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1042"/>
         <source>Reconnection Successful</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="877"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1043"/>
         <source>Controller has been successfully reconnected!</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="879"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1045"/>
         <source>Reconnection Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="880"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1046"/>
         <source>Failed to reconnect controller. Please ensure your controller is powered on and in pairing mode, then try again.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="889"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1055"/>
         <source>✗ Controller manager not available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="895"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1061"/>
         <source>✓ Controller connected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="898"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1064"/>
         <source>✗ No controller detected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="935"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1101"/>
         <source>SpeedyNote</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="943"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1109"/>
         <source>Version 1.0.0</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="995"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1161"/>
         <source>Cache Management</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1004"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1170"/>
         <source>SpeedyNote uses temporary folders to work with notebook files.
 These folders are normally cleaned up when you close a notebook,
 but crashes or force-close can leave orphaned files behind.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1020"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1061"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1186"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1227"/>
         <source>Current cache size: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1029"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1195"/>
         <source>Location: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1038"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1204"/>
         <source>Clear Cache Now</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1046"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1212"/>
         <source>Clear Cache?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1047"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1213"/>
         <source>This will delete all temporary cache files.
 
 ⚠️ WARNING: Make sure all notebooks are closed before clearing cache, otherwise you may lose unsaved changes!
@@ -635,98 +677,98 @@ Continue?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1064"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1230"/>
         <source>Cache Cleared</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1065"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1231"/>
         <source>Cache cleanup is temporarily disabled during architecture migration.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1079"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1245"/>
         <source>⚠️ Only clear cache when all notebooks are closed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1089"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1255"/>
         <source>Cache</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1101"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1267"/>
         <source>Language Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1108"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1274"/>
         <source>Use System Language (Auto-detect)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1111"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1277"/>
         <source>When enabled, SpeedyNote will automatically detect and use your system&apos;s language setting.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1117"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1283"/>
         <source>Manual Language Override:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1122"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1145"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1288"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1311"/>
         <source>English</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1123"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1289"/>
         <source>Español (Spanish)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1124"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1290"/>
         <source>Français (French)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1125"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1291"/>
         <source>中文 (Chinese Simplified)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1128"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1294"/>
         <source>Select a specific language to override the system setting. Changes take effect after restarting the application.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1134"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1300"/>
         <source>Current Language Status:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1142"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1308"/>
         <source>Spanish</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1143"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1309"/>
         <source>French</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1144"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1310"/>
         <source>Chinese Simplified</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1147"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1313"/>
         <source>System Language: %1 (%2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1177"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1343"/>
         <source>Language</source>
         <translation type="unfinished"></translation>
     </message>
@@ -735,65 +777,65 @@ Continue?</source>
         <translation type="obsolete">Sélectionnez Enregistrer le dossier</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="951"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1117"/>
         <source>A fast and intuitive note-taking application with PDF annotation support</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="960"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1126"/>
         <source>Developed by GitHub @alpha-liu-01 and various contributors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="968"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1134"/>
         <source>© 2025 SpeedyNote. All rights reserved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="977"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1143"/>
         <source>Built with Qt %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="984"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1150"/>
         <source>About</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="819"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="985"/>
         <source>Controller Mapping</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="824"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="847"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="990"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1013"/>
         <source>Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="824"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="847"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="990"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1013"/>
         <source>MainWindow reference not available.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="830"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="853"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="996"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1019"/>
         <source>Controller Not Available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="831"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="997"/>
         <source>Controller manager is not available. Please ensure a controller is connected and restart the application.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="836"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1002"/>
         <source>No Controller Detected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="837"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1003"/>
         <source>No controller is currently connected. Please connect your controller and restart the application.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2045,7 +2087,7 @@ Would you like to save it as a SpeedyNote Package (.spn) file before closing?</s
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3829"/>
+        <location filename="../../source/MainWindow.cpp" line="3915"/>
         <location filename="../../source/MainWindow_OLD.cpp" line="927"/>
         <source>Return to Launcher</source>
         <translation type="unfinished"></translation>
@@ -2225,19 +2267,19 @@ Error: %1</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="339"/>
-        <location filename="../../source/MainWindow.cpp" line="4526"/>
+        <location filename="../../source/MainWindow.cpp" line="4616"/>
         <source>canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="339"/>
-        <location filename="../../source/MainWindow.cpp" line="4526"/>
+        <location filename="../../source/MainWindow.cpp" line="4616"/>
         <source>document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="342"/>
-        <location filename="../../source/MainWindow.cpp" line="4529"/>
+        <location filename="../../source/MainWindow.cpp" line="4619"/>
         <source>Save Changes?</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2249,40 +2291,40 @@ Error: %1</source>
     <message>
         <location filename="../../source/MainWindow.cpp" line="361"/>
         <location filename="../../source/MainWindow.cpp" line="391"/>
-        <location filename="../../source/MainWindow.cpp" line="2044"/>
-        <location filename="../../source/MainWindow.cpp" line="2108"/>
-        <location filename="../../source/MainWindow.cpp" line="4551"/>
-        <location filename="../../source/MainWindow.cpp" line="4582"/>
+        <location filename="../../source/MainWindow.cpp" line="2056"/>
+        <location filename="../../source/MainWindow.cpp" line="2120"/>
+        <location filename="../../source/MainWindow.cpp" line="4641"/>
+        <location filename="../../source/MainWindow.cpp" line="4672"/>
         <source>Save Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="362"/>
-        <location filename="../../source/MainWindow.cpp" line="2045"/>
-        <location filename="../../source/MainWindow.cpp" line="2109"/>
+        <location filename="../../source/MainWindow.cpp" line="2057"/>
+        <location filename="../../source/MainWindow.cpp" line="2121"/>
         <source>Failed to save document to:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="374"/>
-        <location filename="../../source/MainWindow.cpp" line="2083"/>
-        <location filename="../../source/MainWindow.cpp" line="4564"/>
+        <location filename="../../source/MainWindow.cpp" line="2095"/>
+        <location filename="../../source/MainWindow.cpp" line="4654"/>
         <source>Save Canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="374"/>
-        <location filename="../../source/MainWindow.cpp" line="2023"/>
-        <location filename="../../source/MainWindow.cpp" line="2030"/>
-        <location filename="../../source/MainWindow.cpp" line="2083"/>
-        <location filename="../../source/MainWindow.cpp" line="4564"/>
+        <location filename="../../source/MainWindow.cpp" line="2035"/>
+        <location filename="../../source/MainWindow.cpp" line="2042"/>
+        <location filename="../../source/MainWindow.cpp" line="2095"/>
+        <location filename="../../source/MainWindow.cpp" line="4654"/>
         <source>Save Document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="376"/>
-        <location filename="../../source/MainWindow.cpp" line="4566"/>
+        <location filename="../../source/MainWindow.cpp" line="4656"/>
         <source>SpeedyNote Bundle (*.snb)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2328,82 +2370,82 @@ Error: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2024"/>
-        <location filename="../../source/MainWindow.cpp" line="2031"/>
+        <location filename="../../source/MainWindow.cpp" line="2036"/>
+        <location filename="../../source/MainWindow.cpp" line="2043"/>
         <source>No document is open.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2082"/>
+        <location filename="../../source/MainWindow.cpp" line="2094"/>
         <source>SpeedyNote Bundle (*.snb);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2154"/>
+        <location filename="../../source/MainWindow.cpp" line="2166"/>
         <source>SpeedyNote Files (*.snb *.json *.snx);;SpeedyNote Bundle (*.snb);;Legacy JSON (*.json *.snx);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2157"/>
+        <location filename="../../source/MainWindow.cpp" line="2169"/>
         <source>Open Document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2170"/>
-        <location filename="../../source/MainWindow.cpp" line="2580"/>
+        <location filename="../../source/MainWindow.cpp" line="2182"/>
+        <location filename="../../source/MainWindow.cpp" line="2600"/>
         <source>Load Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2171"/>
+        <location filename="../../source/MainWindow.cpp" line="2183"/>
         <source>Failed to load document from:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2310"/>
-        <location filename="../../source/MainWindow.cpp" line="2324"/>
+        <location filename="../../source/MainWindow.cpp" line="2322"/>
+        <location filename="../../source/MainWindow.cpp" line="2336"/>
         <source>Cannot Delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2311"/>
+        <location filename="../../source/MainWindow.cpp" line="2323"/>
         <source>Cannot delete the last remaining page.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2325"/>
+        <location filename="../../source/MainWindow.cpp" line="2337"/>
         <source>Cannot delete PDF pages. Use an external tool to modify the PDF.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2362"/>
+        <location filename="../../source/MainWindow.cpp" line="2374"/>
         <source>PDF Files (*.pdf);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2365"/>
+        <location filename="../../source/MainWindow.cpp" line="2377"/>
         <source>Open PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2383"/>
+        <location filename="../../source/MainWindow.cpp" line="2395"/>
         <source>PDF Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2384"/>
+        <location filename="../../source/MainWindow.cpp" line="2396"/>
         <source>Failed to open PDF file:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2566"/>
+        <location filename="../../source/MainWindow.cpp" line="2586"/>
         <source>Open SpeedyNote Bundle (.snb folder)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2581"/>
+        <location filename="../../source/MainWindow.cpp" line="2601"/>
         <source>Selected folder is not a valid SpeedyNote bundle.
 Missing document.json manifest.
 
@@ -2411,37 +2453,37 @@ Missing document.json manifest.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3830"/>
+        <location filename="../../source/MainWindow.cpp" line="3916"/>
         <source>Launcher is being redesigned. This feature will return soon!</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4014"/>
+        <location filename="../../source/MainWindow.cpp" line="4100"/>
         <source>New Edgeless Canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4019"/>
+        <location filename="../../source/MainWindow.cpp" line="4105"/>
         <source>New Paged Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4027"/>
+        <location filename="../../source/MainWindow.cpp" line="4113"/>
         <source>Open PDF...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4032"/>
+        <location filename="../../source/MainWindow.cpp" line="4118"/>
         <source>Open Notebook...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4530"/>
+        <location filename="../../source/MainWindow.cpp" line="4620"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4552"/>
+        <location filename="../../source/MainWindow.cpp" line="4642"/>
         <source>Failed to save document to:
 %1
 
@@ -2449,7 +2491,7 @@ Quit anyway?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4583"/>
+        <location filename="../../source/MainWindow.cpp" line="4673"/>
         <source>Failed to save to:
 %1
 
@@ -2457,25 +2499,25 @@ Quit anyway?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4855"/>
+        <location filename="../../source/MainWindow.cpp" line="4945"/>
         <source>The file does not exist:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4863"/>
-        <location filename="../../source/MainWindow.cpp" line="4881"/>
+        <location filename="../../source/MainWindow.cpp" line="4953"/>
+        <location filename="../../source/MainWindow.cpp" line="4971"/>
         <source>Open Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4864"/>
+        <location filename="../../source/MainWindow.cpp" line="4954"/>
         <source>Failed to open file:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4882"/>
+        <location filename="../../source/MainWindow.cpp" line="4972"/>
         <source>Failed to create tab for:
 %1</source>
         <translation type="unfinished"></translation>
@@ -2810,7 +2852,7 @@ Lasso</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4854"/>
+        <location filename="../../source/MainWindow.cpp" line="4944"/>
         <location filename="../../source/MainWindow_OLD.cpp" line="7054"/>
         <source>File Not Found</source>
         <translation type="unfinished"></translation>
