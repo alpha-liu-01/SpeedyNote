@@ -944,18 +944,18 @@ void MainWindow::setupUi() {
             vp->setCurrentTool(tool);
         }
         // REMOVED: updateToolButtonStates call removed - tool button state functionality deleted
-        qDebug() << "Toolbar: Tool selected:" << static_cast<int>(tool);
+        // qDebug() << "Toolbar: Tool selected:" << static_cast<int>(tool);
     });
     connect(m_toolbar, &Toolbar::straightLineToggled, this, [this](bool enabled) {
         // Straight line mode toggle
         if (DocumentViewport* vp = currentViewport()) {
             vp->setStraightLineMode(enabled);
         }
-        qDebug() << "Toolbar: Straight line mode" << (enabled ? "enabled" : "disabled");
+        // qDebug() << "Toolbar: Straight line mode" << (enabled ? "enabled" : "disabled");
     });
     connect(m_toolbar, &Toolbar::objectInsertClicked, this, [this]() {
         // Stub - will show object insert menu in future
-        qDebug() << "Toolbar: Object insert clicked (stub)";
+        // qDebug() << "Toolbar: Object insert clicked (stub)";
     });
     // Note: m_textButton now emits toolSelected(ToolType::Highlighter) directly
     connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
@@ -979,7 +979,7 @@ void MainWindow::setupUi() {
             default: gestureMode = TouchGestureMode::Full; break;
         }
         setTouchGestureMode(gestureMode);
-        qDebug() << "Toolbar: Touch gesture mode changed to" << mode;
+        // qDebug() << "Toolbar: Touch gesture mode changed to" << mode;
     });
     // ------------------ End of Toolbar signal connections ------------------
     
@@ -1030,7 +1030,11 @@ void MainWindow::setupUi() {
     }
     QDir().mkpath(tempDir);  // Recreate clean directory
 
-    addNewTab();
+    // NOTE: Do NOT call addNewTab() here!
+    // When launched from Launcher, the FAB actions (createNewPaged, createNewEdgeless, etc.)
+    // explicitly call the appropriate method to create a tab.
+    // When launched with a file argument, openFileInNewTab() creates the tab.
+    // Auto-creating a tab here would result in an unwanted extra tab.
 
     // Setup single instance server
     setupSingleInstanceServer();
@@ -2452,19 +2456,23 @@ void MainWindow::addNewTab() {
         return;
     }
     
-    // Apply default background settings (hardcoded defaults)
+    // Apply default background settings from user preferences
+    // Default: Grid with 32px spacing (32 divides evenly into 1024px tiles)
     {
-        Page::BackgroundType defaultStyle = Page::BackgroundType::Grid;
-        QColor defaultBgColor = Qt::white;
-        QColor defaultGridColor = QColor(200, 200, 200);
-        int defaultDensity = 30;
+        QSettings settings("SpeedyNote", "App");
+        Page::BackgroundType defaultStyle = static_cast<Page::BackgroundType>(
+            settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt());
+        QColor defaultBgColor = QColor(settings.value("background/color", "#ffffff").toString());
+        QColor defaultGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+        int defaultGridSpacing = settings.value("background/gridSpacing", 32).toInt();
+        int defaultLineSpacing = settings.value("background/lineSpacing", 32).toInt();
         
         // Update document defaults for future pages
         doc->defaultBackgroundType = defaultStyle;
         doc->defaultBackgroundColor = defaultBgColor;
         doc->defaultGridColor = defaultGridColor;
-        doc->defaultGridSpacing = defaultDensity;
-        doc->defaultLineSpacing = defaultDensity;
+        doc->defaultGridSpacing = defaultGridSpacing;
+        doc->defaultLineSpacing = defaultLineSpacing;
         
         // Also apply to the first page (already created by Document::createNew)
         if (doc->pageCount() > 0) {
@@ -2473,8 +2481,8 @@ void MainWindow::addNewTab() {
                 firstPage->backgroundType = defaultStyle;
                 firstPage->backgroundColor = defaultBgColor;
                 firstPage->gridColor = defaultGridColor;
-                firstPage->gridSpacing = defaultDensity;
-                firstPage->lineSpacing = defaultDensity;
+                firstPage->gridSpacing = defaultGridSpacing;
+                firstPage->lineSpacing = defaultLineSpacing;
             }
         }
     }
@@ -2516,19 +2524,23 @@ void MainWindow::addNewEdgelessTab()
         return;
     }
     
-    // Apply default background settings (hardcoded defaults)
+    // Apply default background settings from user preferences
+    // Default: Grid with 32px spacing (32 divides evenly into 1024px tiles)
     {
-        Page::BackgroundType defaultStyle = Page::BackgroundType::Grid;
-        QColor defaultBgColor = Qt::white;
-        QColor defaultGridColor = QColor(200, 200, 200);
-        int defaultDensity = 30;
+        QSettings settings("SpeedyNote", "App");
+        Page::BackgroundType defaultStyle = static_cast<Page::BackgroundType>(
+            settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt());
+        QColor defaultBgColor = QColor(settings.value("background/color", "#ffffff").toString());
+        QColor defaultGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+        int defaultGridSpacing = settings.value("background/gridSpacing", 32).toInt();
+        int defaultLineSpacing = settings.value("background/lineSpacing", 32).toInt();
         
         // Update document defaults for tiles
         doc->defaultBackgroundType = defaultStyle;
         doc->defaultBackgroundColor = defaultBgColor;
         doc->defaultGridColor = defaultGridColor;
-        doc->defaultGridSpacing = defaultDensity;
-        doc->defaultLineSpacing = defaultDensity;
+        doc->defaultGridSpacing = defaultGridSpacing;
+        doc->defaultLineSpacing = defaultLineSpacing;
     }
     
     // Create a new tab with DocumentViewport
@@ -2925,6 +2937,59 @@ void MainWindow::setUseCustomAccentColor(bool use) {
         saveThemeSettings();
     }
 }
+
+void MainWindow::applyBackgroundSettings(Page::BackgroundType type, const QColor& bgColor,
+                                         const QColor& gridColor, int gridSpacing, int lineSpacing) {
+    // Apply to current document
+    DocumentViewport* viewport = currentViewport();
+    if (!viewport) {
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        return;
+    }
+    
+    // Update document defaults for future pages
+    doc->defaultBackgroundType = type;
+    doc->defaultBackgroundColor = bgColor;
+    doc->defaultGridColor = gridColor;
+    doc->defaultGridSpacing = gridSpacing;
+    doc->defaultLineSpacing = lineSpacing;
+    
+    // Apply to all existing pages in the document
+    for (int i = 0; i < doc->pageCount(); ++i) {
+        Page* page = doc->page(i);
+        if (page) {
+            page->backgroundType = type;
+            page->backgroundColor = bgColor;
+            page->gridColor = gridColor;
+            page->gridSpacing = gridSpacing;
+            page->lineSpacing = lineSpacing;
+        }
+    }
+    
+    // For edgeless documents, also update tiles
+    if (doc->mode == Document::Mode::Edgeless) {
+        QVector<Document::TileCoord> tileCoords = doc->allTileCoords();
+        for (const auto& coord : tileCoords) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (tile) {
+                tile->backgroundType = type;
+                tile->backgroundColor = bgColor;
+                tile->gridColor = gridColor;
+                tile->gridSpacing = gridSpacing;
+                tile->lineSpacing = lineSpacing;
+            }
+        }
+    }
+    
+    // Mark document as modified and trigger redraw
+    doc->markModified();
+    viewport->update();
+}
+
 void MainWindow::updateTheme() {
     // Update control bar background color to match tab list brightness
     QColor accentColor = getAccentColor();

@@ -296,6 +296,43 @@ if (scroller) {
 
 ---
 
+#### BUG-UI-003: Launcher FAB creates extra tab (default tab already exists)
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When clicking any FAB button in the Launcher (New Edgeless, New Paged, Open PDF, Open Notebook), MainWindow opens with TWO tabs: an unwanted empty paged document tab plus the requested tab.
+
+**Root Cause:** 
+`MainWindow` constructor (line 1033) automatically called `addNewTab()` at the end of initialization. When the Launcher then called methods like `addNewEdgelessTab()`, it added a second tab.
+
+**Fix:**
+Removed the automatic `addNewTab()` call from the MainWindow constructor. The Launcher and command-line handling explicitly create the appropriate tabs:
+- Launcher FAB → calls `addNewTab()`, `addNewEdgelessTab()`, `showOpenPdfDialog()`, or `loadFolderDocument()`
+- File argument → calls `openFileInNewTab()`
+
+```cpp
+// BEFORE (bug):
+QDir().mkpath(tempDir);
+addNewTab();  // This created an unwanted default tab
+setupSingleInstanceServer();
+
+// AFTER (fixed):
+QDir().mkpath(tempDir);
+// NOTE: Do NOT call addNewTab() here!
+// Launcher and command-line explicitly create tabs.
+setupSingleInstanceServer();
+```
+
+**Files Modified:**
+- `source/MainWindow.cpp` (constructor, removed addNewTab() call)
+
+**Verified:** [ ] FAB "New Edgeless" creates single edgeless tab
+**Verified:** [ ] FAB "New Paged" creates single paged tab
+**Verified:** [ ] Opening notebook from Timeline creates single tab
+**Verified:** [ ] Command-line file argument creates single tab
+
+---
+
 #### BUG-TCH-001: Touch gesture mode button fails to switch modes
 **Priority:** 🟠 P1 | **Status:** ✅ FIXED
 
@@ -353,8 +390,8 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
-| UI/UX | 0 | 0 | 2 | 2 |
-| **TOTAL** | **0** | **0** | **4** | **4** |
+| UI/UX | 0 | 0 | 3 | 3 |
+| **TOTAL** | **0** | **0** | **5** | **5** |
 
 ---
 

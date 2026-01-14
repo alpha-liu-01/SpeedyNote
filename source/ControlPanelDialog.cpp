@@ -1,5 +1,6 @@
 #include "ControlPanelDialog.h"
 #include "MainWindow.h"
+#include "core/Page.h"
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "ButtonMappingTypes.h"
@@ -35,6 +36,8 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
     tabWidget = new QTabWidget(this);
 
     // === Working Tabs ===
+    createBackgroundTab();  // Background settings (first tab for importance)
+    
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // Note: createButtonMappingTab() removed - dial system was deleted (MW7.2)
     createControllerMappingTab();
@@ -74,6 +77,25 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
 
 void ControlPanelDialog::loadSettings()
 {
+    QSettings settings("SpeedyNote", "App");
+    
+    // Load background settings
+    // Default: Grid (enum value 3)
+    int bgType = settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt();
+    int comboIndex = styleCombo->findData(bgType);
+    if (comboIndex >= 0) {
+        styleCombo->setCurrentIndex(comboIndex);
+    }
+    
+    selectedBgColor = QColor(settings.value("background/color", "#ffffff").toString());
+    bgColorButton->setStyleSheet(QString("background-color: %1").arg(selectedBgColor.name()));
+    
+    selectedGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+    gridColorButton->setStyleSheet(QString("background-color: %1").arg(selectedGridColor.name()));
+    
+    gridSpacingSpin->setValue(settings.value("background/gridSpacing", 32).toInt());
+    lineSpacingSpin->setValue(settings.value("background/lineSpacing", 32).toInt());
+    
     // Load theme settings
     if (mainWindowRef) {
         useCustomAccentCheckbox->setChecked(mainWindowRef->isUsingCustomAccentColor());
@@ -83,7 +105,6 @@ void ControlPanelDialog::loadSettings()
     }
     
     // Load language settings
-    QSettings settings("SpeedyNote", "App");
     bool useSystemLang = settings.value("useSystemLanguage", true).toBool();
     QString overrideLang = settings.value("languageOverride", "en").toString();
     
@@ -102,6 +123,26 @@ void ControlPanelDialog::applyChanges()
 {
     if (!mainWindowRef) return;
     
+    QSettings settings("SpeedyNote", "App");
+    
+    // Apply background settings to QSettings (for new documents)
+    // Use the data value (enum value), not the combo index
+    int bgTypeValue = styleCombo->currentData().toInt();
+    settings.setValue("background/type", bgTypeValue);
+    settings.setValue("background/color", selectedBgColor.name());
+    settings.setValue("background/gridColor", selectedGridColor.name());
+    settings.setValue("background/gridSpacing", gridSpacingSpin->value());
+    settings.setValue("background/lineSpacing", lineSpacingSpin->value());
+    
+    // Apply background settings to current document (if any)
+    mainWindowRef->applyBackgroundSettings(
+        static_cast<Page::BackgroundType>(bgTypeValue),
+        selectedBgColor,
+        selectedGridColor,
+        gridSpacingSpin->value(),
+        lineSpacingSpin->value()
+    );
+    
     // Apply theme settings
     mainWindowRef->setUseCustomAccentColor(useCustomAccentCheckbox->isChecked());
     if (selectedAccentColor.isValid()) {
@@ -109,7 +150,6 @@ void ControlPanelDialog::applyChanges()
     }
     
     // Apply language settings
-    QSettings settings("SpeedyNote", "App");
     settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
     if (!useSystemLanguageCheckbox->isChecked()) {
         QString selectedLang = languageCombo->currentData().toString();
@@ -648,6 +688,132 @@ void ControlPanelDialog::createMouseDialTab() {
     tabWidget->addTab(mouseDialTab, tr("Mouse Dial Control"));
 }
 */
+
+void ControlPanelDialog::createBackgroundTab() {
+    backgroundTab = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(backgroundTab);
+    
+    // Add some spacing at the top
+    layout->addSpacing(10);
+    
+    // Title
+    QLabel *titleLabel = new QLabel(tr("Default Background Settings"), backgroundTab);
+    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
+    layout->addWidget(titleLabel);
+    
+    QLabel *descLabel = new QLabel(tr("These settings apply to new pages and documents. "
+                                      "Changes will also be applied to the current document."), backgroundTab);
+    descLabel->setWordWrap(true);
+    descLabel->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 15px;");
+    layout->addWidget(descLabel);
+    
+    // Background Style
+    QHBoxLayout *styleLayout = new QHBoxLayout();
+    QLabel *styleLabel = new QLabel(tr("Background Style:"), backgroundTab);
+    styleLabel->setMinimumWidth(120);
+    styleLayout->addWidget(styleLabel);
+    
+    styleCombo = new QComboBox(backgroundTab);
+    // Values must match Page::BackgroundType enum: None=0, PDF=1, Custom=2, Grid=3, Lines=4
+    styleCombo->addItem(tr("None"), static_cast<int>(Page::BackgroundType::None));     // 0
+    styleCombo->addItem(tr("Grid"), static_cast<int>(Page::BackgroundType::Grid));     // 3
+    styleCombo->addItem(tr("Lines"), static_cast<int>(Page::BackgroundType::Lines));   // 4
+    styleLayout->addWidget(styleCombo, 1);
+    layout->addLayout(styleLayout);
+    
+    layout->addSpacing(10);
+    
+    // Background Color
+    QHBoxLayout *bgColorLayout = new QHBoxLayout();
+    QLabel *bgColorLabel = new QLabel(tr("Background Color:"), backgroundTab);
+    bgColorLabel->setMinimumWidth(120);
+    bgColorLayout->addWidget(bgColorLabel);
+    
+    bgColorButton = new QPushButton(backgroundTab);
+    bgColorButton->setFixedSize(100, 30);
+    bgColorButton->setStyleSheet("background-color: #ffffff");
+    connect(bgColorButton, &QPushButton::clicked, this, &ControlPanelDialog::chooseBackgroundColor);
+    bgColorLayout->addWidget(bgColorButton);
+    bgColorLayout->addStretch();
+    layout->addLayout(bgColorLayout);
+    
+    // Grid/Line Color
+    QHBoxLayout *gridColorLayout = new QHBoxLayout();
+    QLabel *gridColorLabel = new QLabel(tr("Grid/Line Color:"), backgroundTab);
+    gridColorLabel->setMinimumWidth(120);
+    gridColorLayout->addWidget(gridColorLabel);
+    
+    gridColorButton = new QPushButton(backgroundTab);
+    gridColorButton->setFixedSize(100, 30);
+    gridColorButton->setStyleSheet("background-color: #c8c8c8");
+    connect(gridColorButton, &QPushButton::clicked, this, &ControlPanelDialog::chooseGridColor);
+    gridColorLayout->addWidget(gridColorButton);
+    gridColorLayout->addStretch();
+    layout->addLayout(gridColorLayout);
+    
+    layout->addSpacing(10);
+    
+    // Grid Spacing
+    QHBoxLayout *gridSpacingLayout = new QHBoxLayout();
+    QLabel *gridSpacingLabel = new QLabel(tr("Grid Spacing:"), backgroundTab);
+    gridSpacingLabel->setMinimumWidth(120);
+    gridSpacingLayout->addWidget(gridSpacingLabel);
+    
+    gridSpacingSpin = new QSpinBox(backgroundTab);
+    gridSpacingSpin->setRange(8, 128);
+    gridSpacingSpin->setSingleStep(8);
+    gridSpacingSpin->setSuffix(" px");
+    gridSpacingSpin->setValue(32);
+    gridSpacingLayout->addWidget(gridSpacingSpin);
+    gridSpacingLayout->addStretch();
+    layout->addLayout(gridSpacingLayout);
+    
+    // Line Spacing
+    QHBoxLayout *lineSpacingLayout = new QHBoxLayout();
+    QLabel *lineSpacingLabel = new QLabel(tr("Line Spacing:"), backgroundTab);
+    lineSpacingLabel->setMinimumWidth(120);
+    lineSpacingLayout->addWidget(lineSpacingLabel);
+    
+    lineSpacingSpin = new QSpinBox(backgroundTab);
+    lineSpacingSpin->setRange(8, 128);
+    lineSpacingSpin->setSingleStep(8);
+    lineSpacingSpin->setSuffix(" px");
+    lineSpacingSpin->setValue(32);
+    lineSpacingLayout->addWidget(lineSpacingSpin);
+    lineSpacingLayout->addStretch();
+    layout->addLayout(lineSpacingLayout);
+    
+    // Note about 32px default
+    QLabel *noteLabel = new QLabel(tr("Note: 32px spacing is recommended as it divides evenly into "
+                                      "the 1024px tile size used by the edgeless canvas."), backgroundTab);
+    noteLabel->setWordWrap(true);
+    noteLabel->setStyleSheet("color: gray; font-size: 10px; margin-top: 15px;");
+    layout->addWidget(noteLabel);
+    
+    layout->addStretch();
+    
+    // Initialize colors
+    selectedBgColor = QColor("#ffffff");
+    selectedGridColor = QColor("#c8c8c8");
+    
+    tabWidget->addTab(backgroundTab, tr("Background"));
+}
+
+void ControlPanelDialog::chooseBackgroundColor() {
+    QColor chosen = QColorDialog::getColor(selectedBgColor, this, tr("Select Background Color"));
+    if (chosen.isValid()) {
+        selectedBgColor = chosen;
+        bgColorButton->setStyleSheet(QString("background-color: %1").arg(selectedBgColor.name()));
+    }
+}
+
+void ControlPanelDialog::chooseGridColor() {
+    QColor chosen = QColorDialog::getColor(selectedGridColor, this, tr("Select Grid/Line Color"));
+    if (chosen.isValid()) {
+        selectedGridColor = chosen;
+        gridColorButton->setStyleSheet(QString("background-color: %1").arg(selectedGridColor.name()));
+    }
+}
 
 void ControlPanelDialog::createThemeTab() {
     themeTab = new QWidget(this);

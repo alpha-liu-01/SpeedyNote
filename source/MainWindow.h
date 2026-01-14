@@ -134,6 +134,16 @@ public:
     bool isUsingCustomAccentColor() const { return useCustomAccentColor; }
     void setUseCustomAccentColor(bool use);
 
+    /**
+     * @brief Apply background settings to the current document and viewport.
+     * @param type Background type (None, Grid, Lines)
+     * @param bgColor Background color
+     * @param gridColor Grid/line color
+     * @param gridSpacing Grid spacing in pixels
+     * @param lineSpacing Line spacing in pixels
+     */
+    void applyBackgroundSettings(Page::BackgroundType type, const QColor& bgColor,
+                                 const QColor& gridColor, int gridSpacing, int lineSpacing);
 
     QColor getDefaultPenColor();
 

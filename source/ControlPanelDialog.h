@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QColor>
+#include <QSpinBox>
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "KeyCaptureDialog.h"
@@ -42,6 +43,8 @@ public:
 private slots:
     void applyChanges();
     void chooseAccentColor();
+    void chooseBackgroundColor();
+    void chooseGridColor();
     void loadSettings();
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
@@ -57,6 +60,17 @@ private:
     QPushButton *applyButton;
     QPushButton *okButton;
     QPushButton *cancelButton;
+
+    // === Background tab ===
+    QWidget *backgroundTab;
+    QComboBox *styleCombo;
+    QPushButton *bgColorButton;
+    QPushButton *gridColorButton;
+    QSpinBox *gridSpacingSpin;
+    QSpinBox *lineSpacingSpin;
+    QColor selectedBgColor;
+    QColor selectedGridColor;
+    void createBackgroundTab();
 
     // === Theme tab ===
     QWidget *themeTab;
