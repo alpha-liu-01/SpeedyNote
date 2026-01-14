@@ -136,10 +136,9 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote Beta 0.12.2"));
+    setWindowTitle(tr("SpeedyNote 1.0.0 Alpha 1"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
-    qDebug() << "MainWindow: Using DocumentViewport architecture (Phase 3.1+)";
 
 #ifdef Q_OS_LINUX
     // Setup signal handlers for proper cleanup on Linux

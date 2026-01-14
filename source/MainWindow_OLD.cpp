@@ -99,7 +99,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(bool useNewViewport, QWidget *parent) 
     : QMainWindow(parent), m_useNewViewport(useNewViewport), benchmarking(false), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote Beta 0.12.2"));
+    setWindowTitle(tr("SpeedyNote Beta 1.0.0"));
     
     // Log architecture mode for debugging
     if (m_useNewViewport) {
