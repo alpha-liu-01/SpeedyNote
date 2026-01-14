@@ -600,7 +600,7 @@ E.2: PDF Outline Panel [MEDIUM] ✅ DONE
      - Scroll document → highlight current section
      - Expand/collapse nested sections
 
-E.3: Page Panel [MEDIUM-LARGE] `WE ARE HERE!`
+E.3: Page Panel [MEDIUM-LARGE] ✅ DONE 
      - Page thumbnails for quick navigation
      - Click → navigate to page
      - Drag to reorder pages (??) I don't think we implemented that feature... 
@@ -615,17 +615,17 @@ E.4: LayerPanel Refresh [SMALL-MEDIUM]
 PHASE F: Markdown Integration (Phase C.6 completion)
 =============================================================================
 
-F.1: Assess Existing Markdown Code [RESEARCH]
+F.1: Assess Existing Markdown Code [RESEARCH] ✅ DONE
      - Review QMarkdownTextEdit integration
      - Understand old page-by-page loading architecture
      - Identify what needs to change for LinkObject connection
 
-F.2: LinkObject → Markdown Connection [MEDIUM]
+F.2: LinkObject → Markdown Connection [MEDIUM] ✅ DONE
      - Create note from LinkSlot (Ctrl+0 on empty slot)
      - Open existing note from LinkSlot
      - Store note files in document bundle
 
-F.3: Note Lifecycle Management [SMALL]
+F.3: Note Lifecycle Management [SMALL] ✅ DONE
      - Handle orphaned notes (LinkObject deleted)
      - Handle broken references (note file deleted)
 
@@ -633,18 +633,18 @@ F.3: Note Lifecycle Management [SMALL]
 
 LATER (Post-core features):
 
-G.1: Polish UX
+G.1: Polish UX ✅ DONE
      - Tab switching behavior (unsaved changes warning)
      - Missing PDF handling (file moved/deleted)
      - Error states and recovery
 
-G.2: Packaging Format Finalization
+G.2: Packaging Format Finalization ✅ DONE
      - Currently using .snb bundle (folder structure)
      - Decide: keep folder vs zip compression
      - Temp file location (tmp vs same folder)
      - Old .spn format is incompatible - clean break
 
-G.3: Control Panel Remake
+G.3: Control Panel Remake ✅ DONE
      - Most old options don't make sense with new architecture
      - Focus on: theme, default tool settings, performance tuning
 
