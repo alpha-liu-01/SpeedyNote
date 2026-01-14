@@ -1,7 +1,4 @@
 #include "SDLControllerManager.h"
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-
 #include <QtMath>
 #include <QDebug>
 #include <QSettings>
@@ -317,5 +314,3 @@ void SDLControllerManager::reconnect() {
     // Restart polling
     pollTimer->start(16); // 60 FPS polling
 }
-
-#endif // SPEEDYNOTE_CONTROLLER_SUPPORT

@@ -336,364 +336,136 @@ Build the new launcher from scratch.
 ---
 
 ### Task P.3.2: Create navigation sidebar
-**Files:** 
-- `source/ui/launcher/LauncherNavButton.h/cpp` (new widget)
-- `source/ui/launcher/Launcher.cpp` (updated)
+**File:** `source/ui/launcher/Launcher.cpp`
+**Features:**
+- Vertical list of views: Timeline, Starred, Search
+- "Return" button at top (if MainWindow exists)
+- Touch-friendly sizing (60px height items)
+- Highlight current view
 
-**LauncherNavButton widget:**
-- Pill-shaped button: 44px height × 132px width (expanded)
-- Compact mode: 44x44 circle, icon only (for portrait)
-- Icon on left (20px), text on right
-- Checkable for view selection (accent color when checked)
-- Follows `ActionBarButton` styling patterns
-- `setIconName()`: Uses `{name}.png` / `{name}_reversed.png` convention
-- `setCompact(bool)`: Switches between pill and circle
-- Colors: Google blue accent (#1a73e8 light, #8ab4f8 dark)
-
-**Navigation buttons:**
-- Return: `back` icon, non-checkable, hides launcher
-- Timeline: `timeline` icon, checkable
-- Starred: `star` icon, checkable
-- Search: `zoom` icon (existing), checkable
-
-**`setNavigationCompact(bool)`:** 
-- Switches all nav buttons between expanded/compact mode
-- Updates sidebar width accordingly
-
-**QSS files:**
-- `resources/styles/launcher.qss` (light mode)
-- `resources/styles/launcher_dark.qss` (dark mode)
-
-**Estimated:** ~250 LOC (widget + integration)
-**Status:** ✅ Complete
+**Estimated:** ~80 LOC
+**Status:** Pending
 
 ---
 
 ### Task P.3.3: Create Timeline view
-**Files:**
-- `source/ui/launcher/TimelineModel.h/cpp` (~180 LOC)
-- `source/ui/launcher/TimelineDelegate.h/cpp` (~280 LOC)
-- `source/ui/launcher/Launcher.cpp` (updated `setupTimeline()`)
+**File:** `source/ui/launcher/TimelineView.h`, `source/ui/launcher/TimelineView.cpp`
+**Features:**
+- Scrollable list grouped by time period
+- Section headers: "Today", "Yesterday", "This Week", etc.
+- Collapsible year groups for old entries
+- NotebookCard widgets in grid layout
+- Touch scrolling with QScroller
 
-**Implementation:**
-
-**TimelineModel (QAbstractListModel):**
-- Fetches data from `NotebookLibrary::recentNotebooks()`
-- Groups notebooks by time period using `sectionForDate()`:
-  - Today, Yesterday, This Week, This Month, Last Month
-  - Individual months for current year (e.g., "January")
-  - Year for previous years (e.g., "2025", "2024")
-- Builds flat display list with section headers interleaved
-- Custom roles: `NotebookInfoRole`, `IsSectionHeaderRole`, `SectionNameRole`,
-  `BundlePathRole`, `ThumbnailPathRole`, `LastModifiedRole`, etc.
-- Auto-reloads on `NotebookLibrary::libraryChanged` signal
-
-**TimelineDelegate (QStyledItemDelegate):**
-- Two rendering modes: section headers and notebook cards
-- **Section headers:** Bold text with underline (32px height)
-- **Notebook cards:** (80px height)
-  - Thumbnail on left (60px width, rounded corners)
-  - Name (bold), date, and type indicator
-  - Star indicator (★) if starred
-  - Hover/selected background states
-  - Subtle shadow in light mode
-- Thumbnail display per Q&A (C+D hybrid):
-  - Taller than card: top-align crop
-  - Shorter than card: letterbox
-  - Standard aspect: no modification
-- Type indicators with colors:
-  - PDF Annotation (red)
-  - Edgeless Canvas (green)
-  - Paged Notebook (blue)
-- Date formatting: relative for recent, absolute for older
-
-**Touch scrolling:**
-- `QScroller::grabGesture()` on list viewport
-- Configured overshoot and drag sensitivity
-
-**Click handling:**
-- Section headers are ignored
-- Notebook cards emit `notebookSelected(bundlePath)`
-
-**Estimated:** ~250 LOC (actual: ~460 LOC)
-**Status:** ✅ Complete
+**Estimated:** ~250 LOC
+**Status:** Pending
 
 ---
 
 ### Task P.3.4: Create NotebookCard widget
-**Files:** `source/ui/launcher/NotebookCard.h/cpp`
+**File:** `source/ui/launcher/NotebookCard.h`, `source/ui/launcher/NotebookCard.cpp`
+**Features:**
+- Fixed width, fixed height
+- Thumbnail display (C+D hybrid: top-crop for tall, letterbox for short)
+- Name label (elided if too long)
+- Type indicator icon (PDF/Edgeless/Paged)
+- Star indicator
+- Tap → open notebook
+- Long-press → context menu
 
-**Implementation:**
-- **Fixed size:** 120×160 pixels for consistent grid layout
-- **Thumbnail area:** 104×100 pixels with 8px corner radius
-  - C+D hybrid display: top-crop for tall images, letterbox for short
-  - Placeholder icon (📄) when thumbnail not available
-- **Name label:** Bold, elided if too long
-- **Type indicator:** Colored text (PDF=red, Edgeless=green, Paged=blue)
-- **Star indicator:** Yellow ★ in top-right of thumbnail if starred
-
-**Interaction:**
-- Tap → `clicked()` signal
-- Long-press (500ms) → `longPressed()` signal for context menu
-- Movement cancels long-press (10px threshold)
-- Hover effect (lighter background)
-- Press effect (darker background)
-- Selected state with accent border
-
-**Visual:**
-- Rounded corners (12px)
-- Subtle shadow in light mode
-- Dark mode support with appropriate colors
-
-**Pattern:** Follows `ActionBarButton` widget patterns for mouse events and dark mode detection.
-
-**Estimated:** ~150 LOC (actual: ~290 LOC)
-**Status:** ✅ Complete
+**Estimated:** ~150 LOC
+**Status:** Pending
 
 ---
 
 ### Task P.3.5: Create Starred view
-**Files:** `source/ui/launcher/StarredView.h/cpp`
-
-**Implementation:**
-
-**StarredView (main widget):**
-- Scrollable container with touch-friendly QScroller
-- Builds folder sections from `NotebookLibrary::starredNotebooks()` and `starredFolders()`
-- Groups notebooks by `starredFolder` property
-- "Unfiled" section for starred notebooks without a folder
-- Empty state message when no starred notebooks
-- Persists collapsed/expanded state per folder
-
-**FolderHeader (collapsible section header):**
-- 44px height, bold folder name with chevron (▶/▼)
-- Click to toggle collapse/expand
-- Long-press (500ms) triggers `longPressed()` for context menu
-- Hover and press visual feedback
-- Dark mode support
-
-**Notebook Grid:**
-- Uses `QGridLayout` with `NotebookCard` widgets
-- 3+ columns based on estimated width
-- Cards emit `clicked()` and `longPressed()` signals
-- Responsive spacing (12px between cards)
-
-**Signals:**
-- `notebookClicked(bundlePath)` → forwarded to `Launcher::notebookSelected`
-- `notebookLongPressed(bundlePath)` → for context menu (TODO)
-- `folderLongPressed(folderName)` → for folder rename/delete (TODO)
-
-**Future enhancements (deferred):**
+**File:** `source/ui/launcher/StarredView.h`, `source/ui/launcher/StarredView.cpp`
+**Features:**
+- iOS homescreen-style layout
+- Folders as expandable groups
 - Drag-drop reordering within folders
-- Drag to move between folders
-- FlowLayout for true responsive grid
+- Drag to folder to move
+- Long-press folder to rename/delete
+- "Unfiled" section for starred without folder
 
-**Estimated:** ~300 LOC (actual: ~380 LOC)
-**Status:** ✅ Complete
+**Estimated:** ~300 LOC
+**Status:** Pending
 
 ---
 
 ### Task P.3.6: Create Search view
-**Files:** `source/ui/launcher/SearchView.h/cpp`
+**File:** `source/ui/launcher/SearchView.h`, `source/ui/launcher/SearchView.cpp`
+**Features:**
+- Search input at top
+- Results grid below
+- Real-time search as user types (debounced)
+- "No results" message
+- Keyboard-friendly (Enter to search, Escape to clear)
 
-**Implementation:**
-
-**Search Bar (styled like MarkdownNotesSidebar):**
-- `QLineEdit` with placeholder "Search notebooks..."
-- Clear button enabled (built-in)
-- Search button (44×44, zoom icon)
-- Clear button (44×44, ×) - shown when input has text
-- 44px height for touch-friendly targets
-
-**Real-time Search:**
-- 300ms debounce timer for typing
-- Enter key triggers immediate search
-- Escape key clears search
-- Uses `NotebookLibrary::search(query)`
-- Scope: notebook names + PDF filenames (per Q&A)
-
-**Results Display:**
-- Grid of `NotebookCard` widgets (4 columns)
-- 12px spacing between cards
-- Touch-friendly scrolling with QScroller
-- Status label shows result count
-
-**Empty States:**
-- Initial: "Type to search notebooks by name or PDF filename"
-- No results: "No notebooks match your search."
-
-**Signals:**
-- `notebookClicked(bundlePath)` → `Launcher::notebookSelected`
-- `notebookLongPressed(bundlePath)` → context menu (TODO)
-
-**Auto-focus:** When switching to Search view, input is focused
-
-**Estimated:** ~150 LOC (actual: ~270 LOC)
-**Status:** ✅ Complete
+**Estimated:** ~150 LOC
+**Status:** Pending
 
 ---
 
 ### Task P.3.7: Create FAB (Floating Action Button)
-**Files:** `source/ui/launcher/FloatingActionButton.h/cpp`
+**File:** `source/ui/launcher/FloatingActionButton.h`, `source/ui/launcher/FloatingActionButton.cpp`
+**Features:**
+- Round button in bottom-right corner
+- "+" icon, rotates to "×" when expanded
+- Unfolds upward with 4 action buttons:
+  1. New Edgeless
+  2. New Paged
+  3. From PDF
+  4. Open .snb
+- Icons with tooltips
+- Animation on expand/collapse
+- Click outside to collapse
 
-**Implementation:**
-
-**Main Button (56×56):**
-- Round button with Google Blue (#1a73e8) background
-- White "+" icon that rotates to "×" when expanded
-- Hover and pressed states
-- Positioned in bottom-right corner (24px margin)
-- Tooltip: "Create new notebook"
-
-**Action Buttons (48×48 each):**
-| Order | Icon | Tooltip | Signal |
-|-------|------|---------|--------|
-| 1 (bottom) | `edgeless` | "New Edgeless Canvas" | `createEdgeless()` |
-| 2 | `paged` | "New Paged Notebook" | `createPaged()` |
-| 3 | `pdf` | "Open PDF for Annotation" | `openPdf()` |
-| 4 (top) | `folder` | "Open Notebook (.snb)" | `openNotebook()` |
-
-**Animation:**
-- `QParallelAnimationGroup` with two properties:
-  - `expandProgress` (0→1): Animates action button positions upward
-  - `rotation` (0→45°): Rotates + to × on main button
-- Duration: 200ms with OutCubic easing
-- Action buttons fade in/out with expand progress
-
-**Behavior:**
-- Click main button → toggle expand/collapse
-- Click action button → emit signal + collapse
-- Click outside (event filter on parent) → collapse
-- Resize parent → reposition FAB
-
-**Connected to Launcher signals:**
-- `createEdgeless()` → `Launcher::createNewEdgeless`
-- `createPaged()` → `Launcher::createNewPaged`
-- `openPdf()` → `Launcher::openPdfRequested`
-- `openNotebook()` → `Launcher::openNotebookRequested`
-
-**Estimated:** ~200 LOC (actual: ~310 LOC)
-**Status:** ✅ Complete
+**Estimated:** ~200 LOC
+**Status:** Pending
 
 ---
 
-### Task P.3.8: Implement gestures and context menus
-**Files:** `source/ui/launcher/Launcher.cpp` (updated)
-
-**Gestures (already implemented in NotebookCard):**
-- ✅ Tap: Open notebook
-- ✅ Long-press: Triggers context menu signal
-
-**Context Menus (new):**
-
-**Notebook Context Menu:**
-| Action | Description |
-|--------|-------------|
-| ☆ Star / ★ Unstar | Toggle starred status |
-| Move to Folder | Submenu with: Unfiled, existing folders, + New Folder |
-| 🗑 Delete | Confirm dialog, removes from library and deletes from disk |
-
-**Folder Context Menu:**
-| Action | Description |
-|--------|-------------|
-| ✏ Rename | Input dialog, moves notebooks to new folder name |
-| 🗑 Delete Folder | Confirm dialog, notebooks become unfiled |
-
-**Context Menu Triggers:**
-- Timeline: Right-click via `customContextMenuRequested`
-- Starred view: `notebookLongPressed` / `folderLongPressed` signals
-- Search view: `notebookLongPressed` signal
-
-**Helper Methods Added:**
-- `showNotebookContextMenu(bundlePath, globalPos)`
-- `showFolderContextMenu(folderName, globalPos)`
-- `deleteNotebook(bundlePath)` - with confirmation
-- `toggleNotebookStar(bundlePath)`
-
-**Swipe Gestures (deferred to polish phase):**
-- Swipe left: Delete button
+### Task P.3.8: Implement gestures
+**File:** Multiple launcher files
+**Features:**
+- Tap: Open notebook (already in NotebookCard)
+- Long-press: Context menu (already in NotebookCard)
+- Swipe left: Show delete button (with confirmation dialog)
 - Swipe right: Toggle star
 
-**Estimated:** ~100 LOC (actual: ~160 LOC)
-**Status:** ✅ Complete
+**Note:** Implement tap/long-press first. Swipes can be polish.
+
+**Estimated:** ~100 LOC
+**Status:** Pending
 
 ---
 
-### Task P.3.9: Implement full context menu
-**File:** `source/ui/launcher/Launcher.cpp` (extended from P.3.8)
+### Task P.3.9: Implement context menu
+**File:** `source/ui/launcher/NotebookCard.cpp`
+**Menu items:**
+- Star / Unstar
+- Move to folder... (submenu with folder list)
+- Rename
+- Duplicate
+- Delete (with confirmation)
+- Show in file manager
 
-**Complete Menu Items:**
-| Action | Icon | Implementation |
-|--------|------|----------------|
-| Star / Unstar | ☆/★ | `toggleNotebookStar()` |
-| Move to Folder | → | Submenu: Unfiled, folders, + New Folder |
-| Rename | ✏ | `renameNotebook()` - input dialog, rename .snb folder |
-| Duplicate | 📋 | `duplicateNotebook()` - recursive copy with "(Copy)" suffix |
-| Show in File Manager | 📂 | `showInFileManager()` - platform-specific |
-| Delete | 🗑 | `deleteNotebook()` - confirm, remove + delete |
-
-**New Helper Methods (~110 LOC):**
-
-**`renameNotebook(bundlePath)`:**
-- Extract current name from path
-- Show input dialog with current name
-- Sanitize new name (replace `/` and `\` with `_`)
-- Check if target exists
-- Rename directory with `QDir::rename()`
-- Update NotebookLibrary (remove old, add new)
-
-**`duplicateNotebook(bundlePath)`:**
-- Generate unique name with "(Copy)" or "(Copy N)" suffix
-- Create destination directory
-- Recursively copy all files/subdirectories with `QDirIterator`
-- Add new notebook to library
-
-**`showInFileManager(bundlePath)`:**
-- Windows: `explorer /select,<path>`
-- macOS: `open -R <path>`
-- Linux: `QDesktopServices::openUrl()` on parent folder
-
-**Estimated:** ~80 LOC (actual: ~110 LOC for new methods)
-**Status:** ✅ Complete
+**Estimated:** ~80 LOC
+**Status:** Pending
 
 ---
 
 ### Task P.3.10: Apply styling
 **Files:** `resources/styles/launcher.qss`, `resources/styles/launcher_dark.qss`
+**Features:**
+- Consistent with existing SpeedyNote style
+- Touch-friendly sizing
+- Dark mode support
+- FAB styling with shadows
 
-**Updated to match actual widget object names and added missing styles:**
-
-**Styled Elements:**
-| Widget | Object Name | Style Features |
-|--------|-------------|----------------|
-| Main window | `Launcher` | Background color |
-| Nav sidebar | `#LauncherNavSidebar` | Background, border |
-| Nav separator | `#LauncherNavSeparator` | Line color |
-| Content views | `#TimelineView`, `#StarredViewWidget`, `#SearchViewWidget` | Background |
-| Timeline list | `#TimelineList` | Transparent background |
-| Search input | `#SearchInput` | Pill-shaped (22px radius), border, focus state |
-| Search buttons | `#SearchButton`, `#ClearButton` | Round buttons, hover/pressed states |
-| Status label | `#StatusLabel` | Muted text color |
-| Empty label | `#EmptyLabel` | Centered, muted, with padding |
-| Scroll areas | `#SearchScrollArea`, `#StarredScrollArea` | Transparent, no border |
-| Scroll bars | `QScrollBar:vertical` | Slim (8px), rounded handle, touch-friendly |
-| Context menus | `QMenu` | Rounded corners, padding, item states |
-| Message boxes | `QMessageBox` | Background, label colors |
-| Input dialogs | `QInputDialog` | Styled input fields |
-| Tooltips | `QToolTip` | Dark background, rounded |
-
-**Notes:**
-- `LauncherNavButton` uses custom QPainter rendering, not QSS
-- `TimelineDelegate` uses custom QPainter rendering, not QSS
-- `NotebookCard` uses custom QPainter rendering, not QSS
-- `FloatingActionButton` uses inline stylesheets for its buttons
-
-**Touch-friendly targets:**
-- 44px minimum height for interactive elements
-- 40px minimum scrollbar handle height
-
-**Estimated:** ~150 LOC (actual: ~430 LOC total across both files)
-**Status:** ✅ Complete
+**Estimated:** ~150 LOC
+**Status:** Pending
 
 ---
 
@@ -709,21 +481,7 @@ Connect the new launcher to the application.
 - Handle Launcher ↔ MainWindow transitions
 
 **Estimated:** ~50 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- Added `#include "ui/launcher/Launcher.h"`
-- Fixed SDL_QUIT macro (was self-referencing)
-- If file argument provided → go directly to MainWindow, use `openFileInNewTab(path)`
-- If no file → show Launcher and connect all signals:
-  - `notebookSelected` → `MainWindow::openFileInNewTab(bundlePath)` (routes through DocumentManager)
-  - `createNewEdgeless` → `MainWindow::addNewEdgelessTab()`
-  - `createNewPaged` → `MainWindow::addNewTab()`
-  - `openPdfRequested` → `MainWindow::showOpenPdfDialog()` (new public method)
-  - `openNotebookRequested` → `MainWindow::loadFolderDocument()`
-- Uses `MainWindow::findExistingMainWindow()` and `preserveWindowState()` for smooth transitions
-- All file operations route through `DocumentManager::loadDocument()` for proper ownership and state management
-- Updated `openFileInNewTab()` to handle all file types (PDFs, .snb bundles, .snx/.json)
+**Status:** Pending
 
 ---
 
@@ -731,40 +489,28 @@ Connect the new launcher to the application.
 **File:** `source/MainWindow.h`, `source/MainWindow.cpp`
 **New methods:**
 ```cpp
-// Document operations (already existed, renamed/documented)
-void openFileInNewTab(const QString& filePath);  // Opens PDF, .snb, .snx
-void showOpenPdfDialog();                         // Shows file dialog for PDF
-void loadFolderDocument();                        // Shows folder dialog for .snb
+// Document operations
+void openDocument(const QString& bundlePath);
+void openPdf(const QString& pdfPath);  // Simplified flow
+void createNewEdgeless();
+void createNewPaged();
 
-// Tab creation (already existed)
-void addNewTab();           // Same as createNewPaged()
-void addNewEdgelessTab();   // Same as createNewEdgeless()
-
-// Tab operations (NEW)
+// Tab operations  
 bool hasOpenDocuments() const;
 bool switchToDocument(const QString& bundlePath);
 
-// Window operations (NEW)
+// Window operations
 void bringToFront();
-
-// Already existed
-static MainWindow* findExistingMainWindow();
-void preserveWindowState(QWidget* source, bool isExisting);
+static MainWindow* findExisting();
 ```
 
 **Estimated:** ~100 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- `hasOpenDocuments()`: Returns `m_tabManager->tabCount() > 0`
-- `switchToDocument(path)`: Iterates tabs, compares normalized paths, switches if found
-- `bringToFront()`: Calls `show()`, `raise()`, `activateWindow()`
-- Updated Main.cpp to use `bringToFront()` and `switchToDocument()` to prevent duplicates
+**Status:** Pending
 
 ---
 
 ### Task P.4.3: Update "+" button dropdown
-**File:** `source/MainWindow.cpp`, `source/MainWindow.h`, `source/ui/NavigationBar.h`
+**File:** `source/MainWindow.cpp` or `source/ui/TabBar.cpp`
 **Changes:**
 - Replace current "+" behavior with dropdown menu:
   - New Edgeless Canvas (Ctrl+Shift+N)
@@ -774,43 +520,24 @@ void preserveWindowState(QWidget* source, bool isExisting);
   - Open Notebook... (Ctrl+Shift+L)
 
 **Estimated:** ~50 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- Added `showAddMenu()` method to MainWindow
-- Added `addButton()` getter to NavigationBar for menu positioning
-- Changed `addClicked` signal handler to call `showAddMenu()` instead of `addNewTab()`
-- Menu appears directly below the "+" button
-- Added Ctrl+N global shortcut for New Paged Notebook
-- Menu shows keyboard shortcuts for all actions
+**Status:** Pending
 
 ---
 
 ### Task P.4.4: Add Ctrl+H shortcut
-**File:** `source/MainWindow.cpp`, `source/MainWindow.h`
+**File:** `source/MainWindow.cpp`
 **Changes:**
 - Add `QShortcut` for Ctrl+H → toggle launcher
 - Add `QShortcut` for Escape → go to launcher (when no dialogs open)
 - Implement `toggleLauncher()` method
-- Connect `launcherClicked` signal from NavigationBar
 
 **Estimated:** ~30 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- `toggleLauncher()` finds Launcher via `QApplication::topLevelWidgets()` using `inherits("Launcher")`
-- **Window state transfer**: Copies geometry (position/size) and state (maximized/fullscreen) between windows
-- If launcher visible: transfers geometry to MainWindow, hides launcher, shows MainWindow
-- If launcher hidden: transfers geometry to launcher, hides MainWindow, shows launcher
-- This creates seamless "same window" experience when toggling
-- Ctrl+H has `Qt::ApplicationShortcut` context
-- Escape has `Qt::WindowShortcut` context and checks `QApplication::activeModalWidget()` before toggling
-- NavigationBar launcher button now connected to `toggleLauncher()`
+**Status:** Pending
 
 ---
 
 ### Task P.4.5: Implement smooth transition
-**File:** `source/ui/launcher/Launcher.cpp`, `source/MainWindow.cpp`, `source/Main.cpp`
+**File:** `source/ui/launcher/Launcher.cpp`, `source/MainWindow.cpp`
 **Changes:**
 - Fix window flash (proper show/hide ordering)
 - Add fade animation (optional polish):
@@ -819,40 +546,19 @@ void preserveWindowState(QWidget* source, bool isExisting);
   - Use QPropertyAnimation on windowOpacity
 
 **Estimated:** ~50 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- `MainWindow::toggleLauncher()` now uses 150ms fade animations with `QEasingCurve::OutCubic`
-- Destination window is shown first (at opacity 0), source is hidden immediately, then destination fades in
-- Window opacity is reset to 1.0 after transitions for clean state
-- `MainWindow::bringToFront()` detects if window was hidden and fades in accordingly
-- `Main.cpp` lambdas now call `launcher->hideWithAnimation()` for consistent fade behavior
-- Launcher already had `showWithAnimation()` and `hideWithAnimation()` from Phase P.3
+**Status:** Pending
 
 ---
 
 ### Task P.4.6: Save thumbnail on document close
-**File:** `source/MainWindow.cpp`, `source/ui/PagePanel.h/cpp`
+**File:** `source/MainWindow.cpp` or `source/core/DocumentManager.cpp`
 **Changes:**
 - On tab close or document save:
-  - Get page-0 thumbnail from PagePanel cache (if available)
-  - Fall back to `renderPage0Thumbnail()` for synchronous rendering
+  - Get page-0 thumbnail from ThumbnailRenderer (if available)
   - Call `NotebookLibrary::instance()->saveThumbnail(path, pixmap)`
-- Added `PagePanel::thumbnailForPage(int)` method
-- Added `MainWindow::renderPage0Thumbnail(Document*)` helper
 
 **Estimated:** ~30 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- Thumbnail saving occurs in two places:
-  1. Tab close: in `tabCloseRequested` handler, before document deletion
-  2. Document save: in `saveDocument()` after successful save
-- Fixed memory safety issue: PagePanel's document reference is cleared BEFORE document deletion
-  - This ensures `ThumbnailRenderer::cancelAll()` blocks until all async renders complete
-  - Prevents use-after-free on the Document pointer
-- `renderPage0Thumbnail()` uses same rendering logic as `ThumbnailRenderer::renderThumbnailSync()`
-- Save As also calls `NotebookLibrary::addToRecent()` to register new documents
+**Status:** Pending
 
 ---
 
@@ -863,15 +569,7 @@ void preserveWindowState(QWidget* source, bool isExisting);
 - Update help/documentation if any
 
 **Estimated:** ~10 LOC
-**Status:** Complete
-
-**Implementation Notes:**
-- Removed `QShortcut* loadShortcut` for `QKeySequence::Open` (Ctrl+O)
-- Added comment explaining file opening is now handled by:
-  - Launcher (recent notebooks, starred, search)
-  - "+" menu → Open PDF... (Ctrl+Shift+O)
-  - "+" menu → Open Notebook... (Ctrl+Shift+L)
-- `loadDocument()` function retained for potential legacy use
+**Status:** Pending
 
 ---
 

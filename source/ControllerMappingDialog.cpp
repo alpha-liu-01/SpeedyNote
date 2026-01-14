@@ -1,7 +1,4 @@
 #include "ControllerMappingDialog.h"
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-
 #include "SDLControllerManager.h"
 #include <QApplication>
 
@@ -274,6 +271,4 @@ bool ControllerMappingDialog::isDarkMode() const {
     // Same logic as MainWindow::isDarkMode()
     QColor bg = palette().color(QPalette::Window);
     return bg.lightness() < 128;  // Lightness scale: 0 (black) - 255 (white)
-}
-
-#endif // SPEEDYNOTE_CONTROLLER_SUPPORT
+} 

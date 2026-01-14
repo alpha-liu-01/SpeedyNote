@@ -274,18 +274,6 @@ void PagePanel::applyTheme()
 }
 
 // ============================================================================
-// Thumbnail Access
-// ============================================================================
-
-QPixmap PagePanel::thumbnailForPage(int pageIndex) const
-{
-    if (!m_model) {
-        return QPixmap();
-    }
-    return m_model->thumbnailForPage(pageIndex);
-}
-
-// ============================================================================
 // Thumbnail Invalidation
 // ============================================================================
 

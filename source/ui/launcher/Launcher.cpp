@@ -1,32 +1,10 @@
 #include "Launcher.h"
-#include "LauncherNavButton.h"
-#include "TimelineModel.h"
-#include "TimelineDelegate.h"
-#include "StarredView.h"
-#include "SearchView.h"
-#include "FloatingActionButton.h"
-#include "../../MainWindow.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QKeyEvent>
-#include <QResizeEvent>
 #include <QGraphicsOpacityEffect>
-#include <QFile>
-#include <QApplication>
-#include <QScroller>
-#include <QScrollBar>
-#include <QMenu>
-#include <QMessageBox>
-#include <QInputDialog>
-#include <QDir>
-#include <QDirIterator>
-#include <QFileInfo>
-#include <QCursor>
-#include <QProcess>
-#include <QDesktopServices>
-#include <QUrl>
 
 Launcher::Launcher(QWidget* parent)
     : QMainWindow(parent)
@@ -48,43 +26,27 @@ void Launcher::setupUi()
     m_centralWidget = new QWidget(this);
     setCentralWidget(m_centralWidget);
     
-    // Main horizontal layout: Navigation sidebar | Content area
-    auto* mainLayout = new QHBoxLayout(m_centralWidget);
+    auto* mainLayout = new QVBoxLayout(m_centralWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
     
-    // Navigation sidebar
-    setupNavigation();
-    mainLayout->addWidget(m_navSidebar);
-    
-    // Content area with content stack
-    auto* contentArea = new QWidget(this);
-    auto* contentLayout = new QVBoxLayout(contentArea);
-    contentLayout->setContentsMargins(0, 0, 0, 0);
-    contentLayout->setSpacing(0);
-    
-    // Content stack
-    m_contentStack = new QStackedWidget(this);
-    contentLayout->addWidget(m_contentStack);
-    
-    // Add views to stack
-    m_timelineView = new QWidget(this);
-    m_timelineView->setObjectName("TimelineView");
-    m_starredView = new StarredView(this);
-    m_starredView->setObjectName("StarredViewWidget");
-    m_searchView = new SearchView(this);
-    m_searchView->setObjectName("SearchViewWidget");
-    
-    m_contentStack->addWidget(m_timelineView);
-    m_contentStack->addWidget(m_starredView);
-    m_contentStack->addWidget(m_searchView);
-    
-    mainLayout->addWidget(contentArea, 1); // Content area stretches
-    
-    // Setup view content (after views are created)
+    // TODO P.3.2: Navigation tabs (Timeline | Starred)
     setupTimeline();
     setupStarred();
     setupSearch();
+    
+    // Content stack
+    m_contentStack = new QStackedWidget(this);
+    mainLayout->addWidget(m_contentStack);
+    
+    // Add views to stack (placeholders for now)
+    m_timelineView = new QWidget(this);
+    m_starredView = new QWidget(this);
+    m_searchResultsView = new QWidget(this);
+    
+    m_contentStack->addWidget(m_timelineView);
+    m_contentStack->addWidget(m_starredView);
+    m_contentStack->addWidget(m_searchResultsView);
     
     // FAB
     setupFAB();
@@ -92,224 +54,29 @@ void Launcher::setupUi()
     // Fade animation
     m_fadeAnimation = new QPropertyAnimation(this, "fadeOpacity", this);
     m_fadeAnimation->setDuration(200);
-    
-    // Set initial view
-    switchToView(View::Timeline);
-}
-
-void Launcher::setupNavigation()
-{
-    m_navSidebar = new QWidget(this);
-    m_navSidebar->setObjectName("LauncherNavSidebar");
-    m_navSidebar->setFixedWidth(LauncherNavButton::EXPANDED_WIDTH + 16); // Button width + margins
-    
-    auto* navLayout = new QVBoxLayout(m_navSidebar);
-    navLayout->setContentsMargins(8, 8, 8, 8);
-    navLayout->setSpacing(8);
-    
-    // Return button (only visible if MainWindow exists)
-    m_returnBtn = new LauncherNavButton(m_navSidebar);
-    m_returnBtn->setIconName("back");  // TODO: Replace with actual icon name
-    m_returnBtn->setText(tr("Return"));
-    m_returnBtn->setCheckable(false);
-    navLayout->addWidget(m_returnBtn);
-    
-    // Check if MainWindow exists and show/hide return button
-    bool hasMainWindow = (MainWindow::findExistingMainWindow() != nullptr);
-    m_returnBtn->setVisible(hasMainWindow);
-    
-    // Separator
-    auto* separator = new QFrame(m_navSidebar);
-    separator->setFrameShape(QFrame::HLine);
-    separator->setObjectName("LauncherNavSeparator");
-    separator->setFixedHeight(1);
-    navLayout->addWidget(separator);
-    
-    // Timeline button
-    m_timelineBtn = new LauncherNavButton(m_navSidebar);
-    m_timelineBtn->setIconName("timeline");  // TODO: Replace with actual icon name
-    m_timelineBtn->setText(tr("Timeline"));
-    m_timelineBtn->setCheckable(true);
-    navLayout->addWidget(m_timelineBtn);
-    
-    // Starred button
-    m_starredBtn = new LauncherNavButton(m_navSidebar);
-    m_starredBtn->setIconName("star");  // TODO: Replace with actual icon name
-    m_starredBtn->setText(tr("Starred"));
-    m_starredBtn->setCheckable(true);
-    navLayout->addWidget(m_starredBtn);
-    
-    // Search button
-    m_searchBtn = new LauncherNavButton(m_navSidebar);
-    m_searchBtn->setIconName("zoom");  // Uses existing zoom icon
-    m_searchBtn->setText(tr("Search"));
-    m_searchBtn->setCheckable(true);
-    navLayout->addWidget(m_searchBtn);
-    
-    // Spacer to push buttons to top
-    navLayout->addStretch();
-    
-    // Connect navigation buttons
-    connect(m_returnBtn, &LauncherNavButton::clicked, this, [this]() {
-        hideWithAnimation();
-    });
-    
-    connect(m_timelineBtn, &LauncherNavButton::clicked, this, [this]() {
-        switchToView(View::Timeline);
-    });
-    
-    connect(m_starredBtn, &LauncherNavButton::clicked, this, [this]() {
-        switchToView(View::Starred);
-    });
-    
-    connect(m_searchBtn, &LauncherNavButton::clicked, this, [this]() {
-        switchToView(View::Search);
-    });
 }
 
 void Launcher::setupTimeline()
 {
-    // Create layout for timeline view
-    auto* layout = new QVBoxLayout(m_timelineView);
-    layout->setContentsMargins(16, 16, 16, 16);
-    layout->setSpacing(0);
-    
-    // Create model and delegate
-    m_timelineModel = new TimelineModel(this);
-    m_timelineDelegate = new TimelineDelegate(this);
-    
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_timelineDelegate->setDarkMode(isDark);
-    
-    // Create list view
-    m_timelineList = new QListView(m_timelineView);
-    m_timelineList->setObjectName("TimelineList");
-    m_timelineList->setModel(m_timelineModel);
-    m_timelineList->setItemDelegate(m_timelineDelegate);
-    
-    // Configure list view for touch
-    m_timelineList->setViewMode(QListView::ListMode);
-    m_timelineList->setFlow(QListView::TopToBottom);
-    m_timelineList->setWrapping(false);
-    m_timelineList->setResizeMode(QListView::Adjust);
-    m_timelineList->setLayoutMode(QListView::SinglePass);
-    
-    // Selection
-    m_timelineList->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_timelineList->setSelectionBehavior(QAbstractItemView::SelectRows);
-    
-    // Scrolling
-    m_timelineList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    m_timelineList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    
-    // Appearance
-    m_timelineList->setFrameShape(QFrame::NoFrame);
-    m_timelineList->setSpacing(0);
-    m_timelineList->setUniformItemSizes(false);  // Headers and cards have different heights
-    
-    // Enable mouse tracking for hover effects
-    m_timelineList->setMouseTracking(true);
-    m_timelineList->viewport()->setMouseTracking(true);
-    m_timelineList->setAttribute(Qt::WA_Hover, true);
-    m_timelineList->viewport()->setAttribute(Qt::WA_Hover, true);
-    
-    // Touch scrolling with QScroller
-    QScroller::grabGesture(m_timelineList->viewport(), QScroller::TouchGesture);
-    QScroller* scroller = QScroller::scroller(m_timelineList->viewport());
-    QScrollerProperties props = scroller->scrollerProperties();
-    props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-    props.setScrollMetric(QScrollerProperties::OvershootScrollDistanceFactor, 0.2);
-    props.setScrollMetric(QScrollerProperties::DragStartDistance, 0.002);  // Start drag sooner
-    scroller->setScrollerProperties(props);
-    
-    // Connect click
-    connect(m_timelineList, &QListView::clicked,
-            this, &Launcher::onTimelineItemClicked);
-    
-    // Context menu for right-click / long-press
-    m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_timelineList, &QListView::customContextMenuRequested,
-            this, [this](const QPoint& pos) {
-        QModelIndex index = m_timelineList->indexAt(pos);
-        if (!index.isValid()) return;
-        
-        // Ignore section headers
-        bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
-        if (isHeader) return;
-        
-        QString bundlePath = index.data(TimelineModel::BundlePathRole).toString();
-        if (!bundlePath.isEmpty()) {
-            showNotebookContextMenu(bundlePath, m_timelineList->viewport()->mapToGlobal(pos));
-        }
-    });
-    
-    layout->addWidget(m_timelineList);
+    // TODO P.3.3: Implement timeline list view with NotebookListModel
 }
 
 void Launcher::setupStarred()
 {
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_starredView->setDarkMode(isDark);
-    
-    // Connect signals
-    connect(m_starredView, &StarredView::notebookClicked, this, [this](const QString& bundlePath) {
-        emit notebookSelected(bundlePath);
-    });
-    
-    connect(m_starredView, &StarredView::notebookLongPressed, this, [this](const QString& bundlePath) {
-        showNotebookContextMenu(bundlePath, QCursor::pos());
-    });
-    
-    connect(m_starredView, &StarredView::folderLongPressed, this, [this](const QString& folderName) {
-        showFolderContextMenu(folderName, QCursor::pos());
-    });
+    // TODO P.3.4: Implement starred view with folders
 }
 
 void Launcher::setupSearch()
 {
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_searchView->setDarkMode(isDark);
-    
-    // Connect signals
-    connect(m_searchView, &SearchView::notebookClicked, this, [this](const QString& bundlePath) {
-        emit notebookSelected(bundlePath);
-    });
-    
-    connect(m_searchView, &SearchView::notebookLongPressed, this, [this](const QString& bundlePath) {
-        showNotebookContextMenu(bundlePath, QCursor::pos());
-    });
+    // TODO P.3.5: Implement search bar and results
 }
 
 void Launcher::setupFAB()
 {
-    // Create FAB on central widget so it overlays content
-    m_fab = new FloatingActionButton(m_centralWidget);
-    
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_fab->setDarkMode(isDark);
-    
-    // Position in bottom-right
-    m_fab->positionInParent();
-    m_fab->raise();  // Ensure it's above other widgets
-    m_fab->show();
-    
-    // Connect signals
-    connect(m_fab, &FloatingActionButton::createEdgeless, this, &Launcher::createNewEdgeless);
-    connect(m_fab, &FloatingActionButton::createPaged, this, &Launcher::createNewPaged);
-    connect(m_fab, &FloatingActionButton::openPdf, this, &Launcher::openPdfRequested);
-    connect(m_fab, &FloatingActionButton::openNotebook, this, &Launcher::openNotebookRequested);
+    // TODO P.3.6: Implement floating action button with expand animation
+    m_fabButton = new QPushButton("+", this);
+    m_fabButton->setFixedSize(56, 56);
+    m_fabButton->hide(); // Will be positioned in later task
 }
 
 void Launcher::setupConnections()
@@ -319,22 +86,7 @@ void Launcher::setupConnections()
 
 void Launcher::applyStyle()
 {
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    
-    // Load appropriate stylesheet
-    QString stylePath = isDark 
-        ? ":/resources/styles/launcher_dark.qss"
-        : ":/resources/styles/launcher.qss";
-    
-    QFile styleFile(stylePath);
-    if (styleFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString styleSheet = QString::fromUtf8(styleFile.readAll());
-        setStyleSheet(styleSheet);
-        styleFile.close();
-    }
+    // TODO P.3.8: Apply styling (will use QSS file)
 }
 
 void Launcher::switchToView(View view)
@@ -349,34 +101,8 @@ void Launcher::switchToView(View view)
             m_contentStack->setCurrentWidget(m_starredView);
             break;
         case View::Search:
-            m_contentStack->setCurrentWidget(m_searchView);
-            m_searchView->focusSearchInput();
+            m_contentStack->setCurrentWidget(m_searchResultsView);
             break;
-    }
-    
-    updateNavigationState();
-}
-
-void Launcher::updateNavigationState()
-{
-    // Update button checked states
-    m_timelineBtn->setChecked(m_currentView == View::Timeline);
-    m_starredBtn->setChecked(m_currentView == View::Starred);
-    m_searchBtn->setChecked(m_currentView == View::Search);
-}
-
-void Launcher::setNavigationCompact(bool compact)
-{
-    m_returnBtn->setCompact(compact);
-    m_timelineBtn->setCompact(compact);
-    m_starredBtn->setCompact(compact);
-    m_searchBtn->setCompact(compact);
-    
-    // Update sidebar width
-    if (compact) {
-        m_navSidebar->setFixedWidth(LauncherNavButton::BUTTON_HEIGHT + 16);
-    } else {
-        m_navSidebar->setFixedWidth(LauncherNavButton::EXPANDED_WIDTH + 16);
     }
 }
 
@@ -417,31 +143,6 @@ void Launcher::paintEvent(QPaintEvent* event)
     // Custom painting can be added here for background effects
 }
 
-void Launcher::resizeEvent(QResizeEvent* event)
-{
-    QMainWindow::resizeEvent(event);
-    
-    // Reposition FAB in bottom-right corner
-    if (m_fab) {
-        m_fab->positionInParent();
-    }
-}
-
-void Launcher::onTimelineItemClicked(const QModelIndex& index)
-{
-    // Ignore clicks on section headers
-    bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
-    if (isHeader) {
-        return;
-    }
-    
-    // Get the bundle path
-    QString bundlePath = index.data(TimelineModel::BundlePathRole).toString();
-    if (!bundlePath.isEmpty()) {
-        emit notebookSelected(bundlePath);
-    }
-}
-
 void Launcher::keyPressEvent(QKeyEvent* event)
 {
     // Escape key hides launcher
@@ -457,338 +158,5 @@ void Launcher::keyPressEvent(QKeyEvent* event)
     }
     
     QMainWindow::keyPressEvent(event);
-}
-
-// ============================================================================
-// Context Menus (Phase P.3.8)
-// ============================================================================
-
-void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& globalPos)
-{
-    NotebookLibrary* lib = NotebookLibrary::instance();
-    const NotebookInfo* info = nullptr;
-    
-    // Find notebook info
-    for (const NotebookInfo& nb : lib->recentNotebooks()) {
-        if (nb.bundlePath == bundlePath) {
-            info = &nb;
-            break;
-        }
-    }
-    
-    QMenu menu(this);
-    
-    // Star/Unstar action
-    bool isStarred = info && info->isStarred;
-    QAction* starAction = menu.addAction(isStarred ? tr("★ Unstar") : tr("☆ Star"));
-    connect(starAction, &QAction::triggered, this, [this, bundlePath]() {
-        toggleNotebookStar(bundlePath);
-    });
-    
-    menu.addSeparator();
-    
-    // Move to folder submenu (only show if starred)
-    if (isStarred) {
-        QMenu* folderMenu = menu.addMenu(tr("Move to Folder"));
-        
-        // Unfiled option
-        QAction* unfiledAction = folderMenu->addAction(tr("Unfiled"));
-        connect(unfiledAction, &QAction::triggered, this, [bundlePath]() {
-            NotebookLibrary::instance()->setStarredFolder(bundlePath, QString());
-        });
-        
-        folderMenu->addSeparator();
-        
-        // Existing folders
-        QStringList folders = lib->starredFolders();
-        for (const QString& folder : folders) {
-            QAction* folderAction = folderMenu->addAction(folder);
-            connect(folderAction, &QAction::triggered, this, [bundlePath, folder]() {
-                NotebookLibrary::instance()->setStarredFolder(bundlePath, folder);
-            });
-        }
-        
-        folderMenu->addSeparator();
-        
-        // Create new folder
-        QAction* newFolderAction = folderMenu->addAction(tr("+ New Folder..."));
-        connect(newFolderAction, &QAction::triggered, this, [this, bundlePath]() {
-            bool ok;
-            QString name = QInputDialog::getText(this, tr("New Folder"),
-                                                  tr("Folder name:"), 
-                                                  QLineEdit::Normal, QString(), &ok);
-            if (ok && !name.isEmpty()) {
-                NotebookLibrary::instance()->createStarredFolder(name);
-                NotebookLibrary::instance()->setStarredFolder(bundlePath, name);
-            }
-        });
-        
-        menu.addSeparator();
-    }
-    
-    // Rename action
-    QAction* renameAction = menu.addAction(tr("✏ Rename"));
-    connect(renameAction, &QAction::triggered, this, [this, bundlePath]() {
-        renameNotebook(bundlePath);
-    });
-    
-    // Duplicate action
-    QAction* duplicateAction = menu.addAction(tr("📋 Duplicate"));
-    connect(duplicateAction, &QAction::triggered, this, [this, bundlePath]() {
-        duplicateNotebook(bundlePath);
-    });
-    
-    menu.addSeparator();
-    
-    // Show in file manager action
-    QAction* showAction = menu.addAction(tr("📂 Show in File Manager"));
-    connect(showAction, &QAction::triggered, this, [this, bundlePath]() {
-        showInFileManager(bundlePath);
-    });
-    
-    menu.addSeparator();
-    
-    // Delete action
-    QAction* deleteAction = menu.addAction(tr("🗑 Delete"));
-    connect(deleteAction, &QAction::triggered, this, [this, bundlePath]() {
-        deleteNotebook(bundlePath);
-    });
-    
-    menu.exec(globalPos);
-}
-
-void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& globalPos)
-{
-    QMenu menu(this);
-    
-    // Rename action
-    QAction* renameAction = menu.addAction(tr("✏ Rename"));
-    connect(renameAction, &QAction::triggered, this, [this, folderName]() {
-        bool ok;
-        QString newName = QInputDialog::getText(this, tr("Rename Folder"),
-                                                 tr("New name:"),
-                                                 QLineEdit::Normal, folderName, &ok);
-        if (ok && !newName.isEmpty() && newName != folderName) {
-            NotebookLibrary* lib = NotebookLibrary::instance();
-            
-            // Move all notebooks from old folder to new folder
-            lib->createStarredFolder(newName);
-            for (const NotebookInfo& info : lib->starredNotebooks()) {
-                if (info.starredFolder == folderName) {
-                    lib->setStarredFolder(info.bundlePath, newName);
-                }
-            }
-            lib->deleteStarredFolder(folderName);
-        }
-    });
-    
-    menu.addSeparator();
-    
-    // Delete action
-    QAction* deleteAction = menu.addAction(tr("🗑 Delete Folder"));
-    connect(deleteAction, &QAction::triggered, this, [this, folderName]() {
-        QMessageBox::StandardButton reply = QMessageBox::question(
-            this,
-            tr("Delete Folder"),
-            tr("Delete folder \"%1\"?\n\nNotebooks in this folder will become unfiled.").arg(folderName),
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::No
-        );
-        
-        if (reply == QMessageBox::Yes) {
-            NotebookLibrary::instance()->deleteStarredFolder(folderName);
-        }
-    });
-    
-    menu.exec(globalPos);
-}
-
-void Launcher::deleteNotebook(const QString& bundlePath)
-{
-    // Extract display name for confirmation
-    QString displayName = bundlePath;
-    int lastSlash = bundlePath.lastIndexOf('/');
-    if (lastSlash >= 0) {
-        displayName = bundlePath.mid(lastSlash + 1);
-        if (displayName.endsWith(".snb", Qt::CaseInsensitive)) {
-            displayName.chop(4);
-        }
-    }
-    
-    QMessageBox::StandardButton reply = QMessageBox::warning(
-        this,
-        tr("Delete Notebook"),
-        tr("Permanently delete \"%1\"?\n\nThis action cannot be undone.").arg(displayName),
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No
-    );
-    
-    if (reply == QMessageBox::Yes) {
-        // Remove from library
-        NotebookLibrary::instance()->removeFromRecent(bundlePath);
-        
-        // Delete from disk
-        QDir bundleDir(bundlePath);
-        if (bundleDir.exists()) {
-            bundleDir.removeRecursively();
-        }
-    }
-}
-
-void Launcher::toggleNotebookStar(const QString& bundlePath)
-{
-    NotebookLibrary* lib = NotebookLibrary::instance();
-    
-    // Find current starred state
-    bool isCurrentlyStarred = false;
-    for (const NotebookInfo& info : lib->recentNotebooks()) {
-        if (info.bundlePath == bundlePath) {
-            isCurrentlyStarred = info.isStarred;
-            break;
-        }
-    }
-    
-    lib->setStarred(bundlePath, !isCurrentlyStarred);
-}
-
-void Launcher::renameNotebook(const QString& bundlePath)
-{
-    // Extract current display name
-    QString currentName;
-    int lastSlash = bundlePath.lastIndexOf('/');
-    if (lastSlash >= 0) {
-        currentName = bundlePath.mid(lastSlash + 1);
-        if (currentName.endsWith(".snb", Qt::CaseInsensitive)) {
-            currentName.chop(4);
-        }
-    }
-    
-    bool ok;
-    QString newName = QInputDialog::getText(this, tr("Rename Notebook"),
-                                             tr("New name:"),
-                                             QLineEdit::Normal, currentName, &ok);
-    
-    if (!ok || newName.isEmpty() || newName == currentName) {
-        return;
-    }
-    
-    // Sanitize name (remove invalid characters)
-    newName.replace('/', '_');
-    newName.replace('\\', '_');
-    
-    // Build new path
-    QDir parentDir(bundlePath);
-    parentDir.cdUp();
-    QString newPath = parentDir.absolutePath() + "/" + newName + ".snb";
-    
-    // Check if target exists
-    if (QDir(newPath).exists()) {
-        QMessageBox::warning(this, tr("Rename Failed"),
-                            tr("A notebook named \"%1\" already exists.").arg(newName));
-        return;
-    }
-    
-    // Rename the directory
-    QDir bundleDir(bundlePath);
-    if (bundleDir.rename(bundlePath, newPath)) {
-        // Update library
-        NotebookLibrary* lib = NotebookLibrary::instance();
-        lib->removeFromRecent(bundlePath);
-        lib->addToRecent(newPath);
-    } else {
-        QMessageBox::warning(this, tr("Rename Failed"),
-                            tr("Could not rename the notebook."));
-    }
-}
-
-void Launcher::duplicateNotebook(const QString& bundlePath)
-{
-    // Extract current name
-    QString currentName;
-    int lastSlash = bundlePath.lastIndexOf('/');
-    if (lastSlash >= 0) {
-        currentName = bundlePath.mid(lastSlash + 1);
-        if (currentName.endsWith(".snb", Qt::CaseInsensitive)) {
-            currentName.chop(4);
-        }
-    }
-    
-    // Generate unique name
-    QDir parentDir(bundlePath);
-    parentDir.cdUp();
-    
-    QString newName = currentName + " (Copy)";
-    QString newPath = parentDir.absolutePath() + "/" + newName + ".snb";
-    int copyNum = 2;
-    
-    while (QDir(newPath).exists()) {
-        newName = QString("%1 (Copy %2)").arg(currentName).arg(copyNum++);
-        newPath = parentDir.absolutePath() + "/" + newName + ".snb";
-    }
-    
-    // Copy the directory recursively
-    QDir sourceDir(bundlePath);
-    if (!sourceDir.exists()) {
-        QMessageBox::warning(this, tr("Duplicate Failed"),
-                            tr("Source notebook not found."));
-        return;
-    }
-    
-    // Create destination directory
-    QDir destDir(newPath);
-    if (!destDir.mkpath(".")) {
-        QMessageBox::warning(this, tr("Duplicate Failed"),
-                            tr("Could not create destination directory."));
-        return;
-    }
-    
-    // Copy all files and subdirectories
-    bool success = true;
-    QDirIterator it(bundlePath, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, 
-                    QDirIterator::Subdirectories);
-    
-    while (it.hasNext()) {
-        QString sourcePath = it.next();
-        QString relativePath = sourcePath.mid(bundlePath.length());
-        QString destPath = newPath + relativePath;
-        
-        QFileInfo fi(sourcePath);
-        if (fi.isDir()) {
-            QDir().mkpath(destPath);
-        } else {
-            // Ensure parent directory exists
-            QDir().mkpath(QFileInfo(destPath).absolutePath());
-            if (!QFile::copy(sourcePath, destPath)) {
-                success = false;
-            }
-        }
-    }
-    
-    if (success) {
-        // Add to library
-        NotebookLibrary::instance()->addToRecent(newPath);
-    } else {
-        QMessageBox::warning(this, tr("Duplicate"),
-                            tr("Some files could not be copied."));
-    }
-}
-
-void Launcher::showInFileManager(const QString& bundlePath)
-{
-    // Open the containing folder and select the notebook
-    QFileInfo fi(bundlePath);
-    QString folderPath = fi.absolutePath();
-    
-#ifdef Q_OS_WIN
-    // Windows: use explorer with /select
-    QProcess::startDetached("explorer", QStringList() << "/select," << QDir::toNativeSeparators(bundlePath));
-#elif defined(Q_OS_MAC)
-    // macOS: use open with -R to reveal in Finder
-    QProcess::startDetached("open", QStringList() << "-R" << bundlePath);
-#else
-    // Linux: use xdg-open on the parent directory
-    // Note: Can't select file, just opens folder
-    QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
-#endif
 }
 

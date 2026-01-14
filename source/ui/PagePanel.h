@@ -4,7 +4,6 @@
 #include <QWidget>
 #include <QHash>
 #include <QSet>
-#include <QPixmap>
 
 class QListView;
 class QTimer;
@@ -113,17 +112,6 @@ public:
      * @param dark True for dark mode.
      */
     void setDarkMode(bool dark);
-
-    // =========================================================================
-    // Thumbnail Access
-    // =========================================================================
-
-    /**
-     * @brief Get the cached thumbnail for a page.
-     * @param pageIndex 0-based page index.
-     * @return Cached thumbnail, or null pixmap if not cached.
-     */
-    QPixmap thumbnailForPage(int pageIndex) const;
 
     // =========================================================================
     // Thumbnail Invalidation

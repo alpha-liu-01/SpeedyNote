@@ -1,8 +1,6 @@
 #ifndef CONTROLLERMAPPINGDIALOG_H
 #define CONTROLLERMAPPINGDIALOG_H
 
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-
 #include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -52,6 +50,4 @@ private:
     bool isDarkMode() const;
 };
 
-#endif // SPEEDYNOTE_CONTROLLER_SUPPORT
-
-#endif // CONTROLLERMAPPINGDIALOG_H
+#endif // CONTROLLERMAPPINGDIALOG_H 
