@@ -149,23 +149,6 @@ public:
     static bool sendToExistingInstance(const QString &filePath);
     void setupSingleInstanceServer();
     
-    /**
-     * @brief Find an existing MainWindow among all top-level widgets.
-     * @return Pointer to existing MainWindow, or nullptr if none exists.
-     * 
-     * Phase P.1: Extracted from LauncherWindow for reuse.
-     */
-    static MainWindow* findExistingMainWindow();
-    
-    /**
-     * @brief Preserve window state when transitioning from another window.
-     * @param sourceWindow The window whose state to preserve (size, position, maximized/fullscreen).
-     * @param isExistingWindow If true, just show without changing size/position.
-     * 
-     * Phase P.1: Extracted from LauncherWindow for reuse.
-     */
-    void preserveWindowState(QWidget* sourceWindow, bool isExistingWindow = false);
-    
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
     void openFileInNewTab(const QString &filePath); // Open file (PDF, .snb) in new tab via single-instance

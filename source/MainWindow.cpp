@@ -84,7 +84,7 @@
 #include "SDLControllerManager.h"
 #endif
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
-
+#include "PdfOpenDialog.h" // Added for PDF file association
 #include "DocumentConverter.h" // Added for PowerPoint conversion
 #include <poppler-qt6.h> // For PDF outline parsing
 #include <memory> // For std::shared_ptr
@@ -3863,47 +3863,6 @@ void MainWindow::setupPagePanelConnections()
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
-
-// Phase P.1: Extracted from LauncherWindow
-MainWindow* MainWindow::findExistingMainWindow()
-{
-    // Find existing MainWindow among all top-level widgets
-    for (QWidget *widget : QApplication::topLevelWidgets()) {
-        MainWindow *mainWindow = qobject_cast<MainWindow*>(widget);
-        if (mainWindow) {
-            return mainWindow;
-        }
-    }
-    return nullptr;
-}
-
-// Phase P.1: Extracted from LauncherWindow
-void MainWindow::preserveWindowState(QWidget* sourceWindow, bool isExistingWindow)
-{
-    if (!sourceWindow) return;
-    
-    if (isExistingWindow) {
-        // For existing windows, just show without changing size/position
-        if (isMaximized()) {
-            showMaximized();
-        } else if (isFullScreen()) {
-            showFullScreen();
-        } else {
-            show();
-        }
-    } else {
-        // For new windows, apply source window's state
-        if (sourceWindow->isMaximized()) {
-            showMaximized();
-        } else if (sourceWindow->isFullScreen()) {
-            showFullScreen();
-        } else {
-            resize(sourceWindow->size());
-            move(sourceWindow->pos());
-            show();
-        }
-    }
-}
 
 void MainWindow::returnToLauncher() {
     // Phase 3.1: LauncherWindow disconnected - will be re-linked later

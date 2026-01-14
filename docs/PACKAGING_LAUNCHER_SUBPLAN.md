@@ -19,19 +19,13 @@ Remove all legacy code before building new features.
 ### Task P.1.1: Add .snb_marker and format version
 **Files:** `source/core/Document.cpp`, `source/core/Document.h`
 **Changes:**
-- Add `BUNDLE_FORMAT_VERSION = 1` static constant to `Document` class
+- Add `FORMAT_VERSION = 1` constant
 - Write `.snb_marker` file on bundle save (empty file, just for identification)
-- Add `"bundle_format_version": 1` to document.json manifest
+- Add `"format_version": 1` to document.json
 - Add version check on load (warn if newer version)
 
-**Implementation:**
-- `Document.h`: Added `static constexpr int BUNDLE_FORMAT_VERSION = 1;` with version history documentation
-- `Document::saveBundle()`: Added code to write `.snb_marker` file at bundle root
-- `Document::toJson()`: Added `bundle_format_version` field to manifest
-- `Document::loadBundle()`: Added check to warn if bundle version is newer than current
-
 **Estimated:** ~30 LOC
-**Status:** ✅ Complete
+**Status:** Pending
 
 ---
 
@@ -41,8 +35,15 @@ Remove all legacy code before building new features.
 - `CMakeLists.txt` (remove from build)
 - Any files that `#include "SpnPackageManager.h"`
 
+**Steps:**
+1. `grep -r "SpnPackageManager" source/` to find all references
+2. Remove/comment out usages
+3. Delete files
+4. Update CMakeLists.txt
+5. Verify build
+
 **Estimated:** ~50 LOC changes
-**Status:** ✅ Complete (User manually deleted files, build verified)
+**Status:** Pending
 
 ---
 
@@ -53,8 +54,15 @@ Remove all legacy code before building new features.
 - `source/MainWindow.cpp` (remove usage)
 - `source/LauncherWindow.cpp` (will be deleted anyway)
 
+**Steps:**
+1. `grep -r "RecentNotebooksManager" source/` to find all references
+2. Remove/comment out usages (temporary - NotebookLibrary will replace)
+3. Delete files
+4. Update CMakeLists.txt
+5. Verify build
+
 **Estimated:** ~30 LOC changes
-**Status:** ✅ Complete (User manually deleted files, build verified)
+**Status:** Pending
 
 ---
 
@@ -67,7 +75,7 @@ Remove all legacy code before building new features.
 **Note:** The PDF opening feature will be remade in Phase P.4 with a simpler flow.
 
 **Estimated:** ~20 LOC changes
-**Status:** ✅ Complete (User manually deleted files, build verified)
+**Status:** Pending
 
 ---
 
@@ -77,14 +85,13 @@ Remove all legacy code before building new features.
 - `CMakeLists.txt`
 - `source/Main.cpp` (update to show MainWindow directly for now)
 
-**Extracted utilities:**
-- `findExistingMainWindow()` → Moved to `MainWindow` as static method
-- `preserveWindowState()` → Moved to `MainWindow` as public method
-- `isDarkMode()` → Already exists in `MainWindow::isDarkMode()`
-- `loadThemedIcon()` → Not needed; widgets use `setIconName()` which handles theming
+**Note:** Extract reusable utilities first:
+- `findExistingMainWindow()` → move to MainWindow as static
+- `preserveWindowState()` → move to utility file or MainWindow
+- `isDarkMode()` / `loadThemedIcon()` → already exists elsewhere or move to utility
 
 **Estimated:** ~50 LOC changes
-**Status:** 🔄 In Progress (utilities extracted, awaiting file deletion)
+**Status:** 🔄 In Progress (utilities extracted, files ready for deletion)
 
 ---
 
@@ -898,7 +905,7 @@ Low priority, can be done later.
 
 | Phase | Task | Description | Est. LOC | Status |
 |-------|------|-------------|----------|--------|
-| P.1 | P.1.1 | Add .snb_marker + version | 30 | ✅ Complete |
+| P.1 | P.1.1 | Add .snb_marker + version | 30 | Pending |
 | P.1 | P.1.2 | Delete SpnPackageManager | 50 | Pending |
 | P.1 | P.1.3 | Delete RecentNotebooksManager | 30 | Pending |
 | P.1 | P.1.4 | Delete PdfOpenDialog | 20 | Pending |
