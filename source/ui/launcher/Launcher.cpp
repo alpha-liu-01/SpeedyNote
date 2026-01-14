@@ -7,6 +7,7 @@
 #include "FloatingActionButton.h"
 #include "../../MainWindow.h"
 #include "../../core/NotebookLibrary.h"
+#include "../../core/Document.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -727,6 +728,17 @@ void Launcher::renameNotebook(const QString& bundlePath)
         QMessageBox::warning(this, tr("Rename Failed"),
                             tr("A notebook named \"%1\" already exists.").arg(newName));
         return;
+    }
+    
+    // BUG-TAB-001 FIX: If this notebook is open in MainWindow, close it first
+    // This prevents stale path issues - the folder must not be renamed while open
+    QString docId = Document::peekBundleId(bundlePath);
+    if (!docId.isEmpty()) {
+        MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+        if (mainWindow) {
+            mainWindow->closeDocumentById(docId);
+            // Document was saved and closed if it was open - proceed with rename
+        }
     }
     
     // Rename the directory

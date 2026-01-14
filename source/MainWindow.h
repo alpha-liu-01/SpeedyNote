@@ -181,6 +181,16 @@ public:
     void openFileInNewTab(const QString &filePath); // Open file (PDF, .snb) in new tab via single-instance
     
     /**
+     * @brief Close a document by its ID (save first if modified).
+     * @param documentId The document's UUID.
+     * @return True if the document was closed (or wasn't open), false if user cancelled.
+     * 
+     * Used when a document needs to be closed before an external operation
+     * (e.g., renaming the folder in Launcher). Prompts to save if modified.
+     */
+    bool closeDocumentById(const QString& documentId);
+    
+    /**
      * @brief Show PDF open dialog and open selected PDF in a new tab.
      * 
      * Phase P.4: Made public for Launcher integration.
@@ -327,7 +337,7 @@ private slots:
  
 private:
 
-    void returnToLauncher(); // Return to launcher window
+    // Note: returnToLauncher() removed - obsolete, replaced by toggleLauncher()
     
     /**
      * @brief Phase P.4.6: Render a thumbnail for page 0 of a document.

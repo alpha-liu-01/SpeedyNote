@@ -2028,9 +2028,12 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
 void DocumentViewport::keyPressEvent(QKeyEvent* event)
 {
     // Track backtick key for deferred vertical pan
-    // Ignore auto-repeat events - only track actual key press
-    if (event->key() == Qt::Key_QuoteLeft && !event->isAutoRepeat()) {
-        m_backtickHeld = true;
+    if (event->key() == Qt::Key_QuoteLeft) {
+        // Only set flag on initial press, ignore auto-repeat events
+        if (!event->isAutoRepeat()) {
+            m_backtickHeld = true;
+        }
+        // Always consume backtick events (initial and auto-repeat) to prevent spam
         event->accept();
         return;
     }
@@ -2074,11 +2077,7 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     }
     
     // Phase O2.4: ObjectSelect tool keyboard shortcuts
-    qDebug() << "keyPressEvent: currentTool =" << static_cast<int>(m_currentTool) 
-             << "(ObjectSelect=" << static_cast<int>(ToolType::ObjectSelect) << ")";
-    
     if (m_currentTool == ToolType::ObjectSelect) {
-        qDebug() << "keyPressEvent: In ObjectSelect block, key =" << event->key();
         
         // Copy (Ctrl+C) - copy selected objects to internal clipboard (O2.6)
         if (event->matches(QKeySequence::Copy)) {
@@ -2091,7 +2090,6 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         
         // Paste (Ctrl+V) - tool-aware paste for objects
         if (event->matches(QKeySequence::Paste)) {
-            qDebug() << "keyPressEvent: Paste detected, calling pasteForObjectSelect()";
             pasteForObjectSelect();
             event->accept();
             return;
@@ -2126,21 +2124,18 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             if (alt && !ctrl) {
                 // Alt+] - Increase affinity (move object up in layer stack)
                 if (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight) {
-                    qDebug() << "keyPressEvent: Alt+] detected - increaseSelectedAffinity";
                     increaseSelectedAffinity();
                     event->accept();
                     return;
                 }
                 // Alt+[ - Decrease affinity (move object down in layer stack)
                 if (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft) {
-                    qDebug() << "keyPressEvent: Alt+[ detected - decreaseSelectedAffinity";
                     decreaseSelectedAffinity();
                     event->accept();
                     return;
                 }
                 // Alt+\ - Send to background (affinity = -1)
                 if (event->key() == Qt::Key_Backslash || event->key() == Qt::Key_Bar) {
-                    qDebug() << "keyPressEvent: Alt+\\ detected - sendSelectedToBackground";
                     sendSelectedToBackground();
                     event->accept();
                     return;
@@ -2156,13 +2151,8 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             bool ctrl = event->modifiers() & Qt::ControlModifier;
             bool shift = event->modifiers() & Qt::ShiftModifier;
             
-            qDebug() << "keyPressEvent: hasSelectedObjects, key =" << event->key() 
-                     << "ctrl =" << ctrl << "shift =" << shift
-                     << "BracketRight(93) BraceRight(125) BracketLeft(91) BraceLeft(123)";
-            
             // Ctrl+] = bring forward, Ctrl+Shift+] (which produces }) = bring to front
             if (ctrl && (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight)) {
-                qDebug() << "keyPressEvent: Bracket/BraceRight with ctrl detected!";
                 if (shift || event->key() == Qt::Key_BraceRight) {
                     // Ctrl+Shift+] (or Ctrl+}) → bring to front
                     bringSelectedToFront();
@@ -2176,7 +2166,6 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             
             // Ctrl+[ = send backward, Ctrl+Shift+[ (which produces {) = send to back
             if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft)) {
-                qDebug() << "keyPressEvent: Bracket/BraceLeft with ctrl detected!";
                 if (shift || event->key() == Qt::Key_BraceLeft) {
                     // Ctrl+Shift+[ (or Ctrl+{) → send to back
                     sendSelectedToBack();
@@ -3422,6 +3411,19 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     } else {
         // Pointer is not on any page (in gap or outside content)
         m_activeDrawingPage = -1;
+    }
+    
+    // Two-column UX: Update current page when touching a page with an editing tool
+    // This ensures undo/redo operates on the page the user is actually editing,
+    // not just the page at viewport center (which may be incorrect in 2-column mode)
+    if (!m_document->isEdgeless() && pe.pageHit.valid()) {
+        int touchedPage = pe.pageHit.pageIndex;
+        if (touchedPage != m_currentPageIndex) {
+            m_currentPageIndex = touchedPage;
+            emit currentPageChanged(m_currentPageIndex);
+            emit undoAvailableChanged(canUndo());
+            emit redoAvailableChanged(canRedo());
+        }
     }
     
     // Handle tool-specific actions

@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026 (BUG-AB-001 fixed)
+**Last Updated:** Jan 14, 2026 (Fixed renamed document opening duplicate tab)
 
 ---
 
@@ -335,6 +335,80 @@ The `PageThumbnailDelegate` used a hardcoded `m_pageAspectRatio = 1.294` for all
 
 ### Tabs (TAB)
 
+#### BUG-TAB-001: Renamed document opens in new tab / breaks existing tab
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When a document is renamed in the Launcher while still open in MainWindow:
+1. The existing tab becomes broken (can't load pages - old path no longer exists)
+2. Reopening the renamed document creates a second tab instead of switching to existing
+
+**Steps to Reproduce:**
+1. Open a notebook from Launcher Timeline → opens in MainWindow tab
+2. Return to Launcher (Escape or Ctrl+H)
+3. Rename the document in the Timeline (long press → rename)
+4. Switch back to MainWindow
+5. **Existing tab is broken:** "Cannot load page: file not found..." errors
+
+**Root Cause:** 
+When the folder is renamed on disk, the Document object's internal `m_bundlePath` still points to the old location. Lazy loading then fails because it looks for pages at the old path.
+
+**Fix:**
+Two-part solution:
+
+**Part 1: Close tab before renaming**
+The folder cannot be safely renamed while the document is open. The Launcher now closes the tab (with save prompt if needed) before renaming:
+
+```cpp
+// In Launcher::renameNotebook(), BEFORE renaming:
+QString docId = Document::peekBundleId(bundlePath);
+if (!docId.isEmpty()) {
+    MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+    if (mainWindow && mainWindow->closeDocumentById(docId)) {
+        // Document was saved and closed, proceed with rename
+    }
+}
+```
+
+**Part 2: Duplicate detection on open**
+Before loading a document, check if it's already open (by UUID):
+
+```cpp
+// In openFileInNewTab(), before loading:
+QString docId = Document::peekBundleId(filePath);
+if (!docId.isEmpty()) {
+    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+        Document* existingDoc = m_tabManager->documentAt(i);
+        if (existingDoc && existingDoc->id == docId) {
+            m_tabBar->setCurrentIndex(i);  // Switch to existing tab
+            m_documentManager->setDocumentPath(existingDoc, filePath);
+            return;
+        }
+    }
+}
+```
+
+**New Methods:**
+- `Document::peekBundleId(path)` - Lightweight manifest read to get document UUID (reads `notebook_id` key)
+- `DocumentManager::setDocumentPath(doc, path)` - Update tracked path for existing doc
+- `MainWindow::closeDocumentById(docId)` - Save and close document by UUID
+
+**Bug during implementation:** Initially `peekBundleId()` read from `"id"` key, but the manifest uses `"notebook_id"`. Fixed to read `"notebook_id"` first, falling back to `"id"` for legacy compatibility.
+
+**Files Modified:**
+- `source/core/Document.h` (added `peekBundleId()` declaration)
+- `source/core/Document.cpp` (added `peekBundleId()` implementation - reads `notebook_id`)
+- `source/core/DocumentManager.h` (added `setDocumentPath()` declaration)
+- `source/core/DocumentManager.cpp` (added `setDocumentPath()` implementation)
+- `source/MainWindow.h` (added `closeDocumentById()` declaration)
+- `source/MainWindow.cpp` (added `closeDocumentById()`, duplicate detection)
+- `source/ui/launcher/Launcher.cpp` (added Document.h include, call `closeDocumentById()` before rename)
+
+**Verified:** [x] Renaming closes and saves the open document first
+**Verified:** [x] Reopening renamed document opens fresh (no stale paths)
+**Verified:** [ ] User can cancel rename if they don't want to save
+**Verified:** [x] Duplicate detection prevents opening same doc twice
+
 ---
 
 ### Toolbar (TB)
@@ -370,6 +444,151 @@ The `PageThumbnailDelegate` used a hardcoded `m_pageAspectRatio = 1.294` for all
 ---
 
 ### Miscellaneous (MISC)
+
+#### BUG-MISC-001: Dead code returnToLauncher() shows placeholder message
+**Priority:** 🟢 P3 | **Status:** ✅ FIXED
+
+**Symptom:** 
+The `returnToLauncher()` method existed in `MainWindow` but only showed a placeholder message: "Launcher is being redesigned. This feature will return soon!"
+
+**Root Cause:** 
+During the launcher redesign (Phase P.4), the old `returnToLauncher()` was temporarily disabled with a placeholder. The proper replacement `toggleLauncher()` was implemented later but the old method was never removed.
+
+| Method | Status | Connected To |
+|--------|--------|--------------|
+| `toggleLauncher()` | ✅ Active | NavigationBar button, Ctrl+H, Escape key |
+| `returnToLauncher()` | ❌ Dead code | Nothing (only in OLD files) |
+
+**Fix:**
+Removed the obsolete `returnToLauncher()` declaration and implementation:
+- `MainWindow.h` - Removed declaration
+- `MainWindow.cpp` - Removed implementation, added comment pointing to `toggleLauncher()`
+
+**Files Modified:**
+- `source/MainWindow.h` (removed declaration)
+- `source/MainWindow.cpp` (removed implementation)
+
+**Verified:** [ ] Launcher button still works (uses toggleLauncher)
+**Verified:** [ ] Ctrl+H still toggles launcher
+**Verified:** [ ] Escape key still toggles launcher
+
+---
+
+#### CLEANUP-MISC-002: Removed legacy .snx/.json loading code
+**Priority:** 🟢 P3 | **Status:** ✅ FIXED
+
+**Background:** 
+SpeedyNote originally planned two file formats: `.snx` (a proposed packaged format) and raw `.json` files. However, the unified `.snb` folder-based bundle format was implemented instead, making the `.snx` and standalone `.json` loaders dead code.
+
+**What Was Removed:**
+- `DocumentManager.cpp` lines 189-236: Complete `.snx`/`.json` file loading code path that read raw JSON files and called `Document::fromFullJson()`
+- File dialog filter in `MainWindow.cpp` no longer offers "Legacy JSON (*.json *.snx)" option
+
+**What Was Updated:**
+- `DocumentManager.h` comments: Updated to mention `.snb bundles` instead of `.snx format`
+- `MainWindow.cpp` comments: Updated to reflect that all documents use `.snb` bundles
+- `Main.cpp` comments: Updated file format references
+- File open dialog now shows: `"SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)"`
+
+**What Was Kept:**
+- `Document::toFullJson()` / `Document::fromFullJson()` - Still used internally for `.snb` bundle's `document.json` manifest
+- `Document.cpp` legacy format version comment - Still relevant for bundle versioning
+
+**Files Modified:**
+- `source/core/DocumentManager.cpp` (removed ~50 lines of legacy loader)
+- `source/core/DocumentManager.h` (updated comments)
+- `source/MainWindow.cpp` (updated file dialog filter and comments)
+- `source/Main.cpp` (updated comments)
+
+---
+
+#### BUG-MISC-003: Backtick key auto-repeat causes debug spam
+**Priority:** 🟢 P3 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When holding the backtick (`) key for deferred vertical panning, the console would be flooded with debug messages like:
+```
+keyPressEvent: currentTool = 0 (ObjectSelect= 5 )
+```
+These messages repeated rapidly until the key was released.
+
+**Root Cause:** 
+Two issues combined to cause this:
+
+1. **Auto-repeat events not consumed**: The backtick handler only caught the initial press (`!event->isAutoRepeat()`), but auto-repeat events fell through to the rest of `keyPressEvent()`.
+
+2. **Unconditional debug statements**: Debug prints at lines 2077-2078 ran for every key event that wasn't the initial backtick press, causing spam.
+
+**Fix:**
+1. Changed backtick handling to consume ALL backtick events (initial + auto-repeat), only setting `m_backtickHeld = true` on initial press
+2. Removed unnecessary debug statements from `keyPressEvent()`
+
+```cpp
+// Before: Only caught initial press, auto-repeat fell through
+if (event->key() == Qt::Key_QuoteLeft && !event->isAutoRepeat()) {
+    m_backtickHeld = true;
+    event->accept();
+    return;
+}
+
+// After: Catches all backtick events
+if (event->key() == Qt::Key_QuoteLeft) {
+    if (!event->isAutoRepeat()) {
+        m_backtickHeld = true;
+    }
+    event->accept();
+    return;  // Always return to prevent fallthrough
+}
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp` (fixed backtick handling, removed debug prints)
+
+---
+
+#### BUG-VP-001: Undo operates on wrong page in two-column mode
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+In two-column layout mode, when the user alternates between editing the left and right pages, undo/redo would operate on the wrong page. This happened because the "current page" was determined by viewport center, not by which page the user was actually editing.
+
+**Steps to Reproduce:**
+1. Open a multi-page document
+2. Press Ctrl+2 to enable auto two-column layout (on wide viewport)
+3. Draw on the left page
+4. Draw on the right page
+5. Draw on the left page again
+6. Press Ctrl+Z to undo
+7. **Expected:** Undo on left page (last edited)
+8. **Actual:** Undo on right page (at viewport center)
+
+**Root Cause:** 
+`m_currentPageIndex` was only updated by `updateCurrentPageIndex()`, which uses the viewport center to determine the current page. In two-column mode, both pages are equally visible, and the center often falls in the gap between them, causing incorrect page detection.
+
+**Fix:**
+Added logic in `handlePointerPress()` to update `m_currentPageIndex` when the user touches a page with any editing tool. This ensures the current page matches user intent:
+
+```cpp
+// In handlePointerPress(), after determining m_activeDrawingPage:
+if (!m_document->isEdgeless() && pe.pageHit.valid()) {
+    int touchedPage = pe.pageHit.pageIndex;
+    if (touchedPage != m_currentPageIndex) {
+        m_currentPageIndex = touchedPage;
+        emit currentPageChanged(m_currentPageIndex);
+        emit undoAvailableChanged(canUndo());
+        emit redoAvailableChanged(canRedo());
+    }
+}
+```
+
+**Design Rationale:**
+- Touch/click intent is clearer than viewport center for determining "current" page
+- Works for all tools (Pen, Eraser, Lasso, ObjectSelect, Highlighter)
+- Minimal overhead: single comparison + potential signal emit
+- Edgeless mode excluded (only has one logical "page")
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp` (added touch-sets-current-page logic)
 
 ---
 
@@ -566,7 +785,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 
 | Category | New | In Progress | Fixed | Total |
 |----------|-----|-------------|-------|-------|
-| Viewport | 0 | 0 | 0 | 0 |
+| Viewport | 0 | 0 | 1 | 1 |
 | Drawing | 0 | 0 | 0 | 0 |
 | Lasso | 0 | 0 | 0 | 0 |
 | Highlighter | 0 | 0 | 0 | 0 |
@@ -575,7 +794,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Pages | 0 | 0 | 4 | 4 |
 | PDF | 0 | 0 | 0 | 0 |
 | File I/O | 0 | 0 | 0 | 0 |
-| Tabs | 0 | 0 | 0 | 0 |
+| Tabs | 0 | 0 | 1 | 1 |
 | Toolbar | 0 | 0 | 0 | 0 |
 | Subtoolbar | 0 | 0 | 0 | 0 |
 | Action Bar | 0 | 0 | 1 | 1 |
@@ -584,7 +803,8 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **9** | **9** |
+| Miscellaneous | 0 | 0 | 3 | 3 |
+| **TOTAL** | **0** | **0** | **14** | **14** |
 
 ---
 

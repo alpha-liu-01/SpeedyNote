@@ -7,8 +7,8 @@
 //
 // DocumentManager is responsible for:
 // - Creating new Documents
-// - Loading Documents from files (.snx format)
-// - Saving Documents to files
+// - Loading Documents from files (.snb bundles and .pdf)
+// - Saving Documents to files (.snb bundles)
 // - Tracking which Documents have unsaved changes
 // - Managing recent documents list
 //
@@ -90,7 +90,7 @@ public:
 
     /**
      * @brief Load a document from a file.
-     * @param path Path to the file (.snx or .pdf).
+     * @param path Path to the file (.snb bundle or .pdf).
      * @return Pointer to the loaded document, or nullptr on failure.
      * 
      * The document is owned by DocumentManager.
@@ -170,6 +170,16 @@ public:
      * @return File path, or empty string if document is new (never saved).
      */
     QString documentPath(Document* doc) const;
+
+    /**
+     * @brief Update the file path of a document.
+     * @param doc Document to update.
+     * @param path New file path.
+     * 
+     * Use this when a document has been renamed externally (e.g., in the Launcher)
+     * but is still open in a tab. This keeps the path tracking in sync.
+     */
+    void setDocumentPath(Document* doc, const QString& path);
 
     /**
      * @brief Mark a document as modified.

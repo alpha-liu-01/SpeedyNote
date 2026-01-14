@@ -186,55 +186,6 @@ Document* DocumentManager::loadDocument(const QString& path)
         }
     }
     
-    // Handle .snx and .json files - load from JSON
-    if (suffix == "snx" || suffix == "json") {
-        QFile file(path);
-        if (!file.open(QIODevice::ReadOnly)) {
-            qWarning() << "DocumentManager::loadDocument: Cannot open file:" << path;
-            return nullptr;
-        }
-        
-        QByteArray data = file.readAll();
-        file.close();
-        
-        QJsonParseError parseError;
-        QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &parseError);
-        
-        if (parseError.error != QJsonParseError::NoError) {
-            qWarning() << "DocumentManager::loadDocument: JSON parse error:" << parseError.errorString();
-            return nullptr;
-        }
-        
-        if (!jsonDoc.isObject()) {
-            qWarning() << "DocumentManager::loadDocument: Invalid JSON format (not an object)";
-            return nullptr;
-        }
-        
-        auto docPtr = Document::fromFullJson(jsonDoc.object());
-        if (!docPtr) {
-            qWarning() << "DocumentManager::loadDocument: Failed to parse document from JSON";
-            return nullptr;
-        }
-        
-        Document* doc = docPtr.release();
-        m_documents.append(doc);
-        m_documentPaths[doc] = path;
-        m_modifiedFlags[doc] = false;
-        
-        // Try to load PDF if referenced
-        if (doc->hasPdfReference() && !doc->isPdfLoaded()) {
-            if (!doc->loadPdf(doc->pdfPath())) {
-                qWarning() << "DocumentManager::loadDocument: Failed to load referenced PDF:" 
-                           << doc->pdfPath();
-                // Don't fail - document can still be used, PDF can be relinked
-            }
-        }
-        
-        addToRecent(path);
-        emit documentLoaded(doc);
-        return doc;
-    }
-    
     qWarning() << "DocumentManager::loadDocument: Unsupported file format:" << suffix;
     return nullptr;
 }
@@ -359,6 +310,23 @@ QString DocumentManager::documentPath(Document* doc) const
         return QString();
     }
     return m_documentPaths.value(doc);
+}
+
+void DocumentManager::setDocumentPath(Document* doc, const QString& path)
+{
+    if (!doc || !m_documents.contains(doc)) {
+        return;
+    }
+    
+    QString oldPath = m_documentPaths.value(doc);
+    if (oldPath != path) {
+        m_documentPaths[doc] = path;
+        
+        // Also update the document's internal bundle path if it's a .snb bundle
+        if (path.endsWith(".snb", Qt::CaseInsensitive) || QFileInfo(path).isDir()) {
+            doc->setBundlePath(path);
+        }
+    }
 }
 
 void DocumentManager::markModified(Document* doc)

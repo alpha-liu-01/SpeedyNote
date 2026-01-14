@@ -472,6 +472,17 @@ public:
     static std::unique_ptr<Document> loadBundle(const QString& path);
     
     /**
+     * @brief Peek at a bundle's document ID without fully loading it.
+     * @param path Path to the .snb directory.
+     * @return Document ID (UUID), or empty string on error.
+     * 
+     * This is a lightweight operation that only reads the manifest file
+     * to extract the document ID. Used for duplicate detection before
+     * loading a full document.
+     */
+    static QString peekBundleId(const QString& path);
+    
+    /**
      * @brief Check if there are any unsaved tile changes.
      */
     bool hasUnsavedTileChanges() const { return !m_dirtyTiles.empty(); }

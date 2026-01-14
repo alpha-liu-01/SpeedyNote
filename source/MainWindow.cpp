@@ -2020,8 +2020,7 @@ void MainWindow::saveDocument()
 {
     // Phase doc-1.1: Save current document to file
     // Uses DocumentManager for proper document handling
-    // - Edgeless documents: saved as .snb bundles
-    // - Paged documents: saved as .json files
+    // All documents (paged and edgeless) are saved as .snb bundles
     // - If document has existing path: save in-place (no dialog)
     // - If new document: show Save As dialog
     
@@ -2162,8 +2161,8 @@ void MainWindow::loadDocument()
             }
     
     // Open file dialog for file selection
-    // Phase O1.7.6: Include .snb bundles in the filter (unified format)
-    QString filter = tr("SpeedyNote Files (*.snb *.json *.snx);;SpeedyNote Bundle (*.snb);;Legacy JSON (*.json *.snx);;All Files (*)");
+    // Phase O1.7.6: Unified .snb bundle format
+    QString filter = tr("SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)");
     QString filePath = QFileDialog::getOpenFileName(
         this,
         tr("Open Document"),
@@ -3967,12 +3966,9 @@ void MainWindow::preserveWindowState(QWidget* sourceWindow, bool isExistingWindo
     }
 }
 
-void MainWindow::returnToLauncher() {
-    // Phase 3.1: LauncherWindow disconnected - will be re-linked later
-    // TODO Phase 3.5: Re-implement launcher return functionality
-    QMessageBox::information(this, tr("Return to Launcher"), 
-        tr("Launcher is being redesigned. This feature will return soon!"));
-}
+// BUG-MISC-001 FIX: returnToLauncher() removed - obsolete placeholder
+// The active implementation is toggleLauncher() which handles smooth fade transitions
+// between MainWindow and Launcher. See line ~4052.
 
 QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
 {
@@ -4975,6 +4971,66 @@ void MainWindow::cleanupSharedResources()
 #endif
 }
 
+bool MainWindow::closeDocumentById(const QString& documentId)
+{
+    // Find the document by ID among open tabs
+    if (!m_tabManager) {
+        return true;  // No tabs, nothing to close
+    }
+    
+    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+        Document* doc = m_tabManager->documentAt(i);
+        if (doc && doc->id == documentId) {
+            // Found the document - save if modified, then close
+            if (m_documentManager && m_documentManager->hasUnsavedChanges(doc)) {
+                QString existingPath = m_documentManager->documentPath(doc);
+                if (!existingPath.isEmpty()) {
+                    // Has existing path - save in place
+                    if (!m_documentManager->saveDocument(doc)) {
+                        QMessageBox::critical(this, tr("Save Error"),
+                            tr("Failed to save document before closing."));
+                        return false;
+                    }
+                } else {
+                    // No path - need Save As dialog
+                    QString defaultName = doc->name.isEmpty() 
+                        ? (doc->isEdgeless() ? "Untitled Canvas" : "Untitled Document")
+                        : doc->name;
+                    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+                    
+                    QString savePath = QFileDialog::getSaveFileName(
+                        this,
+                        doc->isEdgeless() ? tr("Save Canvas") : tr("Save Document"),
+                        defaultPath,
+                        tr("SpeedyNote Bundle (*.snb)")
+                    );
+                    
+                    if (savePath.isEmpty()) {
+                        // User cancelled - don't close
+                        return false;
+                    }
+                    
+                    if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
+                        savePath += ".snb";
+                    }
+                    
+                    if (!m_documentManager->saveDocumentAs(doc, savePath)) {
+                        QMessageBox::critical(this, tr("Save Error"),
+                            tr("Failed to save document."));
+                        return false;
+                    }
+                }
+            }
+            
+            // Close the tab
+            removeTabAt(i);
+            return true;
+        }
+    }
+    
+    return true;  // Document not found = nothing to close = success
+}
+
 void MainWindow::openFileInNewTab(const QString &filePath)
 {
     // ==========================================================================
@@ -4984,7 +5040,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
     // All entry points (Launcher, "+" menu, shortcuts, command line) should
     // call this function to ensure consistent behavior.
     //
-    // Handles: PDFs, .snb bundles, .snx/.json files
+    // Handles: PDFs, .snb bundles
     // Performs: Load → Create Tab → Switch → Position (mode-specific)
     // ==========================================================================
     
@@ -5002,6 +5058,29 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         QMessageBox::warning(this, tr("File Not Found"),
             tr("The file does not exist:\n%1").arg(filePath));
         return;
+    }
+    
+    // Step 0: Check for duplicate documents (by ID, not path)
+    // This handles the case where a document was renamed in the Launcher
+    // but is still open in a tab. Without this check, we'd open a second tab.
+    QString suffix = fileInfo.suffix().toLower();
+    if (suffix == "snb" || fileInfo.isDir()) {
+        QString docId = Document::peekBundleId(filePath);
+        if (!docId.isEmpty()) {
+            for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+                Document* existingDoc = m_tabManager->documentAt(i);
+                if (existingDoc && existingDoc->id == docId) {
+                    // Document is already open - switch to that tab
+                    if (m_tabBar) {
+                        m_tabBar->setCurrentIndex(i);
+                    }
+                    // Update the document path in case it was renamed
+                    // This keeps DocumentManager's path tracking in sync
+                    m_documentManager->setDocumentPath(existingDoc, filePath);
+                    return;
+                }
+            }
+        }
     }
     
     // Step 1: Load document via DocumentManager

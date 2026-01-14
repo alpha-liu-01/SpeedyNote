@@ -420,7 +420,7 @@ int main(int argc, char *argv[]) {
         w->show();
         
         // Use openFileInNewTab which routes through DocumentManager
-        // Handles: PDFs, .snb bundles, .snx/.json files
+        // Handles: PDFs, .snb bundles
         w->openFileInNewTab(inputFile);
         
         exitCode = app.exec();

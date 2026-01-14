@@ -2414,6 +2414,35 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
     return doc;
 }
 
+QString Document::peekBundleId(const QString& path)
+{
+    // Lightweight manifest peek - only reads enough to get the document ID
+    QString manifestPath = path + "/document.json";
+    
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly)) {
+        // Not a valid bundle or file doesn't exist
+        return QString();
+    }
+    
+    QByteArray data = manifestFile.readAll();
+    manifestFile.close();
+    
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        return QString();
+    }
+    
+    QJsonObject obj = jsonDoc.object();
+    // Try "notebook_id" first (current format), fall back to "id" (legacy)
+    QString docId = obj["notebook_id"].toString();
+    if (docId.isEmpty()) {
+        docId = obj["id"].toString();
+    }
+    return docId;
+}
+
 // =============================================================================
 // Edgeless Layer Manifest API (Phase 5.6)
 // =============================================================================
