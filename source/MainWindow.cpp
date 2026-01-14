@@ -830,11 +830,11 @@ void MainWindow::setupUi() {
     // Toggle with 'D' key (defined in shortcuts below). Hidden by default in production.
     m_debugOverlay = new DebugOverlay(canvasContainer);
     m_debugOverlay->move(10, 10);  // Position at top-left
-// #ifdef SPEEDYNOTE_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     m_debugOverlay->show();  // Show by default in debug builds
-// #else
-    // m_debugOverlay->hide();  // Hidden in release builds
-// #endif
+#else
+    m_debugOverlay->hide();  // Hidden in release builds
+#endif
 
     // Enable context menu for the workaround
     canvasContainer->setContextMenuPolicy(Qt::CustomContextMenu);

@@ -9,7 +9,8 @@ NavigationBar::NavigationBar(QWidget *parent)
 {
     setupUi();
     connectSignals();
-    updateTheme(false, m_accentColor);  // Default to light mode
+    // Note: Don't call updateTheme() here - MainWindow::loadThemeSettings() 
+    // will call it after loading user preferences to avoid double initialization
 }
 
 void NavigationBar::setupUi()
@@ -136,9 +137,6 @@ void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor)
 {
     m_darkMode = darkMode;
     m_accentColor = accentColor;
-    
-    // Debug: Print what color we're receiving
-    qDebug() << "NavigationBar::updateTheme - accentColor:" << accentColor.name();
     
     // Clear any existing stylesheet that might interfere with palette
     setStyleSheet(QString());
