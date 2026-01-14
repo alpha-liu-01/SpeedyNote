@@ -806,7 +806,9 @@ std::unique_ptr<Page> Page::fromJson(const QJsonObject& obj)
 int Page::loadImages(const QString& basePath)
 {
     if (basePath.isEmpty()) {
-        qDebug() << "Page::loadImages: basePath is empty, skipping";
+        #ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "Page::loadImages: basePath is empty, skipping";
+        #endif
         return 0;
     }
     
@@ -819,7 +821,7 @@ int Page::loadImages(const QString& basePath)
         if (!obj->isAssetLoaded()) {  // Only load if not already loaded
             if (obj->loadAssets(basePath)) {
                 loaded++;
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Page::loadImages: Loaded asset for" << obj->type() 
                          << "object" << obj->id;
 #endif

@@ -20,7 +20,7 @@ Document::Document()
     created = QDateTime::currentDateTime();
     lastModified = created;
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document CREATED:" << this << "id=" << id.left(8);
 #endif
 }

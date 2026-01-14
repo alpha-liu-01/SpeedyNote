@@ -106,7 +106,9 @@ Document* DocumentManager::createEdgelessDocument(const QString& name)
         // 2. Set m_lazyLoadEnabled = true (enables evictDistantTiles())
         // Without this, eviction won't work and memory will grow unbounded.
         if (doc->saveBundle(tempPath)) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "DocumentManager: Initialized temp bundle at" << tempPath;
+#endif
         } else {
             qWarning() << "DocumentManager: Failed to initialize temp bundle, tile eviction disabled";
         }
@@ -115,7 +117,9 @@ Document* DocumentManager::createEdgelessDocument(const QString& name)
     }
     // ====================================================================
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "DocumentManager: Created edgeless document" << doc->name;
+#endif
     
     emit documentCreated(doc);
     return doc;
@@ -238,7 +242,7 @@ void DocumentManager::closeDocument(Document* doc)
         return;
     }
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "DocumentManager::closeDocument: Closing document" << doc 
              << "remaining=" << (m_documents.size() - 1);
 #endif
@@ -463,7 +467,9 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
     QString tempPath = m_tempBundlePaths.value(doc);
     if (!tempPath.isEmpty() && tempPath != bundlePath) {
         cleanupTempBundle(doc);
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "DocumentManager: Moved from temp bundle to" << bundlePath;
+#endif
     }
     // ==========================================
     
@@ -544,7 +550,9 @@ void DocumentManager::cleanupTempBundle(Document* doc)
     QDir tempDir(tempPath);
     if (tempDir.exists()) {
         if (tempDir.removeRecursively()) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "DocumentManager: Cleaned up temp bundle:" << tempPath;
+#endif
         } else {
             qWarning() << "DocumentManager: Failed to clean up temp bundle:" << tempPath;
         }

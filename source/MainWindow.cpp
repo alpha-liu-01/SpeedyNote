@@ -895,7 +895,9 @@ void MainWindow::setupUi() {
     });
     connect(m_navigationBar, &NavigationBar::filenameClicked, this, [this]() {
         // Toggle tab bar visibility
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "NavigationBar: Filename clicked - toggle tabs";
+#endif
         if (m_tabBar) {
             m_tabBar->setVisible(!m_tabBar->isVisible());
         }
@@ -906,7 +908,9 @@ void MainWindow::setupUi() {
     });
     connect(m_navigationBar, &NavigationBar::shareClicked, this, []() {
         // Stub - placeholder, does nothing
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "NavigationBar: Share clicked (stub - not implemented)";
+#endif
     });
     connect(m_navigationBar, &NavigationBar::rightSidebarToggled, this, [this](bool checked) {
         // Toggle markdown notes sidebar
@@ -1965,7 +1969,9 @@ void MainWindow::updateOutlinePanelForDocument(Document* doc)
     outlinePanel->setOutline(outline);
     m_leftSidebar->showOutlineTab(true);
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Phase E.2: Loaded outline with" << outline.size() << "top-level items";
+#endif
 }
 
 // ============================================================================
@@ -2009,7 +2015,9 @@ void MainWindow::updatePagePanelForViewport(DocumentViewport* viewport)
     // Task 5.4: Update action bar visibility when viewport changes
     updatePagePanelActionBarVisibility();
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Page Panel: Updated for document with" << doc->pageCount() << "pages";
+#endif
 }
 
 // ============================================================================
@@ -2075,10 +2083,14 @@ void MainWindow::saveDocument()
         }
         
         if (isEdgeless) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "saveDocument: Saved edgeless canvas with" 
                      << doc->tileIndexCount() << "tiles to" << existingPath;
+#endif
         } else {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << existingPath;
+#endif
         }
                 return;
             }
@@ -2143,10 +2155,14 @@ void MainWindow::saveDocument()
     NotebookLibrary::instance()->addToRecent(filePath);
     
     if (isEdgeless) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "saveDocument: Saved edgeless canvas with"
                  << doc->tileIndexCount() << "tiles to" << filePath;
+#endif
                 } else {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath;
+#endif
     }
 }
 
@@ -2196,7 +2212,9 @@ void MainWindow::loadDocument()
         // Center the viewport content
         centerViewportContent(tabIndex);
         
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "loadDocument: Loaded" << doc->pageCount() << "pages from" << filePath;
+#endif
     }
 }
 
@@ -2206,27 +2224,35 @@ void MainWindow::addPageToDocument()
     // Required for multi-page save/load testing
     
     if (!m_tabManager) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: No tab manager";
+#endif
         return;
     }
     
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: No current viewport";
+#endif
         return;
     }
     
     Document* doc = viewport->document();
     if (!doc) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: No document in viewport";
+#endif
         return;
     }
     
     // Add page at end
     Page* newPage = doc->addPage();
     if (newPage) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: Added page" << doc->pageCount() 
                  << "to document" << doc->name;
+#endif
     
         // CRITICAL: Notify viewport that document structure changed
         // This invalidates layout cache and triggers repaint
@@ -2249,19 +2275,25 @@ void MainWindow::insertPageInDocument()
     // Works for both PDF and non-PDF documents (inserted page has no PDF background)
     
     if (!m_tabManager) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertPageInDocument: No tab manager";
+#endif
         return;
         }
     
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertPageInDocument: No current viewport";
+#endif
         return;
     }
     
     Document* doc = viewport->document();
     if (!doc) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertPageInDocument: No document in viewport";
+#endif
         return;
     }
 
@@ -2276,8 +2308,10 @@ void MainWindow::insertPageInDocument()
     // Insert page after current
     Page* newPage = doc->insertPage(insertIndex);
     if (newPage) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertPageInDocument: Inserted page at" << insertIndex
                  << "in document" << doc->name << "(now" << doc->pageCount() << "pages)";
+#endif
         
         // Notify viewport that document structure changed
         viewport->notifyDocumentStructureChanged();
@@ -2300,19 +2334,25 @@ void MainWindow::deletePageInDocument()
     // - PDF pages: blocked (use external tool to modify PDF)
     
     if (!m_tabManager) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deletePageInDocument: No tab manager";
+#endif
         return;
     }
 
     DocumentViewport* viewport = m_tabManager->currentViewport();
     if (!viewport) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deletePageInDocument: No current viewport";
+#endif
         return;
     }
     
     Document* doc = viewport->document();
     if (!doc) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deletePageInDocument: No document in viewport";
+#endif
         return;
                 }
     
@@ -2326,7 +2366,9 @@ void MainWindow::deletePageInDocument()
     int currentPageIndex = viewport->currentPageIndex();
     Page* page = doc->page(currentPageIndex);
     if (!page) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deletePageInDocument: Invalid page index" << currentPageIndex;
+#endif
         return;
     }
     
@@ -2343,8 +2385,10 @@ void MainWindow::deletePageInDocument()
     // Delete the page
     doc->removePage(currentPageIndex);
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "deletePageInDocument: Deleted page at" << currentPageIndex
              << "in document" << doc->name << "(now" << doc->pageCount() << "pages)";
+#endif
     
     // Notify viewport that document structure changed
     viewport->notifyDocumentStructureChanged();
@@ -2403,8 +2447,10 @@ void MainWindow::openPdfDocument(const QString &filePath)
         // Center the viewport content
         centerViewportContent(tabIndex);
         
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "openPdfDocument: Loaded PDF with" << doc->pageCount() 
                  << "pages from" << filePath;
+#endif
     } else {
         qWarning() << "openPdfDocument: Failed to create tab for document";
     }
@@ -2555,7 +2601,9 @@ void MainWindow::addNewEdgelessTab()
     QString tabTitle = doc->displayName();
     int tabIndex = m_tabManager->createTab(doc, tabTitle);
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Created new edgeless tab at index" << tabIndex << "with document:" << tabTitle;
+#endif
     
     // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
     if (m_tabBar) {
@@ -3411,8 +3459,10 @@ void MainWindow::setupSubToolbars()
             
             m_previousTabIndex = newIndex;
             
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Tab changed: index" << newIndex 
                      << "tool" << (vp ? static_cast<int>(vp->currentTool()) : -1);
+#endif
         }
     });
     
@@ -3430,7 +3480,9 @@ void MainWindow::setupSubToolbars()
         }
     });
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Phase D: Subtoolbars initialized";
+#endif
 }
 
 void MainWindow::updateSubToolbarPosition()
@@ -3571,7 +3623,9 @@ void MainWindow::setupActionBars()
     // Page Panel: Task 5.3: Setup PagePanelActionBar
     setupPagePanelActionBar();
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Action bars initialized";
+#endif
 }
 
 void MainWindow::updateActionBarPosition()
@@ -3697,7 +3751,9 @@ void MainWindow::setupPagePanelActionBar()
                 // BUG-PG-001 FIX: Can't delete PDF background pages
                 Page* page = doc->page(pageIndex);
                 if (page && page->backgroundType == Page::BackgroundType::PDF) {
+#ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "Page Panel: Cannot delete PDF page" << pageIndex;
+#endif
                     m_pagePanelActionBar->resetDeleteButton();
                     return;
                 }
@@ -3705,7 +3761,9 @@ void MainWindow::setupPagePanelActionBar()
                 // Store page index for deferred deletion
                 // Actual deletion happens in deleteConfirmed handler
                 m_pendingDeletePageIndex = pageIndex;
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Page Panel: Page" << pageIndex << "marked for deletion (5 sec to undo)";
+#endif
             }
         }
     });
@@ -3730,7 +3788,9 @@ void MainWindow::setupPagePanelActionBar()
         
         // Verify the page still exists and is still valid to delete
         if (m_pendingDeletePageIndex >= doc->pageCount()) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Pending delete index" << m_pendingDeletePageIndex << "no longer valid";
+#endif
             m_pendingDeletePageIndex = -1;
             return;
         }
@@ -3738,14 +3798,18 @@ void MainWindow::setupPagePanelActionBar()
         // Double-check PDF protection (page may have changed)
         Page* page = doc->page(m_pendingDeletePageIndex);
         if (page && page->backgroundType == Page::BackgroundType::PDF) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Cannot delete PDF page" << m_pendingDeletePageIndex;
+#endif
             m_pendingDeletePageIndex = -1;
             return;
         }
         
         // Can't delete the last page
         if (doc->pageCount() <= 1) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Cannot delete last page";
+#endif
             m_pendingDeletePageIndex = -1;
             return;
         }
@@ -3753,7 +3817,9 @@ void MainWindow::setupPagePanelActionBar()
         // Actually delete the page
         int deleteIndex = m_pendingDeletePageIndex;
         if (doc->removePage(deleteIndex)) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Page" << deleteIndex << "permanently deleted";
+#endif
             
             vp->notifyDocumentStructureChanged();
             
@@ -3768,7 +3834,9 @@ void MainWindow::setupPagePanelActionBar()
             m_pagePanelActionBar->setPageCount(doc->pageCount());
             m_pagePanelActionBar->setCurrentPage(newPage);
         } else {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Delete failed for page" << deleteIndex;
+#endif
         }
         
         m_pendingDeletePageIndex = -1;
@@ -3777,7 +3845,9 @@ void MainWindow::setupPagePanelActionBar()
     // Undo delete clicked: Cancel the pending deletion
     connect(m_pagePanelActionBar, &PagePanelActionBar::undoDeleteClicked, this, [this]() {
         if (m_pendingDeletePageIndex >= 0) {
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Delete cancelled for page" << m_pendingDeletePageIndex;
+#endif
             m_pendingDeletePageIndex = -1;
         }
     });
@@ -3794,7 +3864,9 @@ void MainWindow::setupPagePanelActionBar()
         });
     }
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Page Panel: PagePanelActionBar connections initialized";
+#endif
 }
 
 // =========================================================================
@@ -3914,13 +3986,17 @@ void MainWindow::setupPagePanelConnections()
                         m_pagePanel->invalidateAllThumbnails();
                     }
                     
+#ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "Page Panel: Moved page" << fromIndex << "to" << toIndex;
+#endif
                 }
             }
         }
     });
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Page Panel: Connections initialized";
+#endif
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
@@ -4060,7 +4136,9 @@ void MainWindow::toggleLauncher() {
     
     if (!launcher) {
         // No launcher exists - can't toggle
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "MainWindow::toggleLauncher: No launcher window found";
+#endif
         return;
     }
     
@@ -4256,7 +4334,9 @@ void MainWindow::toggleAutoLayout() {
     Document* doc = viewport->document();
     if (!doc || doc->isEdgeless()) {
         // Auto layout only applies to paged documents
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Auto layout not available for edgeless canvas";
+#endif
         return;
     }
     
@@ -4264,11 +4344,13 @@ void MainWindow::toggleAutoLayout() {
     viewport->setAutoLayoutEnabled(newState);
     
     // Show status feedback via debug console
+#ifdef SPEEDYNOTE_DEBUG
     if (newState) {
         qDebug() << "Auto layout enabled (1/2 columns)";
     } else {
         qDebug() << "Single column layout";
     }
+#endif
 }
 
 // REMOVED MW7.4: onBookmarkItemClicked function removed - bookmark implementation deleted
@@ -5186,7 +5268,9 @@ bool MainWindow::switchToDocument(const QString& bundlePath)
             if (m_tabBar) {
                 m_tabBar->setCurrentIndex(i);
             }
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "MainWindow::switchToDocument: Switched to existing tab for" << bundlePath;
+#endif
             return true;
         }
     }

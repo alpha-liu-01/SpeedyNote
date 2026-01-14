@@ -233,7 +233,7 @@ bool ImageObject::saveToAssets(const QString& bundlePath)
     if (QFile::exists(fullFilePath)) {
         // Image already saved, just update path
         imagePath = filename;
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "ImageObject: reusing existing asset" << filename;
 #endif
         return true;
@@ -254,7 +254,7 @@ bool ImageObject::saveToAssets(const QString& bundlePath)
     // Update imagePath to just the filename
     imagePath = filename;
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "ImageObject: saved to assets" << filename;
 #endif
     

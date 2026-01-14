@@ -44,6 +44,13 @@ detect_architecture() {
 
 # Function to build the project
 build_project() {
+    local debug_flag="OFF"
+    for arg in "$@"; do
+        if [[ "$arg" == "--debug" || "$arg" == "-debug" ]]; then
+            debug_flag="ON"
+        fi
+    done
+
     echo -e "${YELLOW}Building SpeedyNote...${NC}"
     
     # Detect and display architecture
@@ -61,6 +68,12 @@ build_project() {
             echo -e "${YELLOW}Using generic optimizations${NC}"
             ;;
     esac
+
+    if [[ "$debug_flag" == "ON" ]]; then
+        echo -e "${YELLOW}Debug output: ENABLED${NC}"
+    else
+        echo -e "${CYAN}Debug output: DISABLED${NC}"
+    fi
     
     # Clean and create build directory
     rm -rf build
@@ -77,7 +90,7 @@ build_project() {
     
     # Configure and build with optimizations
     echo -e "${YELLOW}Configuring build with maximum performance optimizations...${NC}"
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr ..
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_DEBUG_OUTPUT=$debug_flag ..
     
     echo -e "${YELLOW}Compiling with $(nproc) parallel jobs...${NC}"
     make -j$(nproc)
@@ -99,7 +112,7 @@ main() {
     check_project_directory
     
     # Step 2: Build project
-    build_project
+    build_project "$@"
     
     echo
     echo -e "${GREEN}SpeedyNote compilation completed successfully!${NC}"

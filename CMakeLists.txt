@@ -11,6 +11,14 @@ set(CMAKE_CXX_STANDARD 17)
 option(ENABLE_CONTROLLER_SUPPORT "Enable SDL2 game controller support" OFF)
 message(STATUS "Controller support: ${ENABLE_CONTROLLER_SUPPORT}")
 
+option(ENABLE_DEBUG_OUTPUT "Enable verbose debug output (qDebug prints)" OFF)
+if(ENABLE_DEBUG_OUTPUT)
+    add_compile_definitions(SPEEDYNOTE_DEBUG)
+    message(STATUS "Debug output: ENABLED")
+else()
+    message(STATUS "Debug output: DISABLED")
+endif()
+
 # ✅ Detect Windows architecture and set appropriate toolchain paths
 if (WIN32)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")

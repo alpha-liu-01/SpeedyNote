@@ -558,7 +558,9 @@ void NotebookLibrary::load()
     }
     
     if (staleCount > 0) {
-        qDebug() << "NotebookLibrary: Removed" << staleCount << "stale entries";
+        #ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "NotebookLibrary: Removed" << staleCount << "stale entries";
+        #endif
         // Save to remove stale entries from disk
         scheduleSave();
     }

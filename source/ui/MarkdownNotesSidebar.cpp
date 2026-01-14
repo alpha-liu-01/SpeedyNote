@@ -153,7 +153,9 @@ void MarkdownNotesSidebar::applyStyle() {
         setStyleSheet(styleSheet);
         qssFile.close();
     } else {
-        qDebug() << "MarkdownNotesSidebar: Failed to load QSS from" << qssPath;
+        #ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "MarkdownNotesSidebar: Failed to load QSS from" << qssPath;
+        #endif
     }
     
     // Update search button icon for theme

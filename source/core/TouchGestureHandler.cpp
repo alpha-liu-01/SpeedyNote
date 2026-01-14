@@ -299,7 +299,9 @@ void TouchGestureHandler::endTouchPinch()
 
 void TouchGestureHandler::on3FingerTap()
 {
-    qDebug() << "[Touch] 3-finger tap detected - ready for future feature connection";
+    #ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[Touch] 3-finger tap detected - ready for future feature connection";
+    #endif
 }
 
 // ===== Inertia Animation =====

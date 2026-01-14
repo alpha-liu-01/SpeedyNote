@@ -263,9 +263,11 @@ void DocumentViewport::setLayoutMode(LayoutMode mode)
         qreal yDelta = newPageY - oldPageY;
         m_panOffset.setY(m_panOffset.y() + yDelta);
         
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Layout switch:" << (oldMode == LayoutMode::SingleColumn ? "1-col" : "2-col")
                  << "->" << (mode == LayoutMode::SingleColumn ? "1-col" : "2-col")
                  << "page" << currentPage << "yDelta" << yDelta;
+#endif
     }
     
     // Update PDF cache capacity for new layout (Task 1.3.6)
@@ -536,7 +538,9 @@ void DocumentViewport::setObjectInsertMode(ObjectInsertMode mode)
     
     m_objectInsertMode = mode;
     emit objectInsertModeChanged(mode);
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Object insert mode changed to:" << (mode == ObjectInsertMode::Image ? "Image" : "Link");
+#endif
 }
 
 void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
@@ -547,7 +551,9 @@ void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
     
     m_objectActionMode = mode;
     emit objectActionModeChanged(mode);
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Object action mode changed to:" << (mode == ObjectActionMode::Select ? "Select" : "Create");
+#endif
 }
 
 // ===== View State Setters =====
@@ -691,13 +697,17 @@ void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF
 {
     // Phase C.5.1: Navigate to a specific page position (for LinkObject Position slots)
     if (!m_document || pageUuid.isEmpty()) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "navigateToPosition: Invalid target";
+#endif
         return;
     }
     
     int targetPageIndex = m_document->pageIndexByUuid(pageUuid);
     if (targetPageIndex < 0) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "navigateToPosition: Page not found for UUID" << pageUuid;
+#endif
         // TODO: Show user message "Target page not found"
         return;
     }
@@ -720,7 +730,7 @@ void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF
     
     update();
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "navigateToPosition: Navigated to page" << targetPageIndex 
              << "position" << position;
 #endif
@@ -2184,7 +2194,9 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             if (event->key() == Qt::Key_Less || event->key() == Qt::Key_Comma) {
                 m_objectInsertMode = ObjectInsertMode::Image;
                 emit objectInsertModeChanged(m_objectInsertMode);
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Switched to Image insert mode";
+#endif
                 event->accept();
                 return;
             }
@@ -2192,7 +2204,9 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             if (event->key() == Qt::Key_Greater || event->key() == Qt::Key_Period) {
                 m_objectInsertMode = ObjectInsertMode::Link;
                 emit objectInsertModeChanged(m_objectInsertMode);
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Switched to Link insert mode";
+#endif
                 event->accept();
                 return;
             }
@@ -2200,7 +2214,9 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             if (event->key() == Qt::Key_6) {
                 m_objectActionMode = ObjectActionMode::Create;
                 emit objectActionModeChanged(m_objectActionMode);
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Switched to Create mode";
+#endif
                 event->accept();
                 return;
             }
@@ -2208,7 +2224,9 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             if (event->key() == Qt::Key_7) {
                 m_objectActionMode = ObjectActionMode::Select;
                 emit objectActionModeChanged(m_objectActionMode);
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Switched to Select mode";
+#endif
                 event->accept();
                 return;
             }
@@ -2775,6 +2793,7 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
     // This should only happen on first paint of a new page
     locker.unlock();  // Release mutex during expensive render
     
+#ifdef SPEEDYNOTE_DEBUG
     // Build cache contents string for debug
     QString cacheContents;
     {
@@ -2786,6 +2805,7 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
     }
     qDebug() << "PDF CACHE MISS: rendering page" << pageIndex 
              << "| cache has [" << cacheContents << "] capacity=" << m_pdfCacheCapacity;
+#endif
     
     // Render the page (expensive operation - done outside mutex)
     QImage pdfImage = m_document->renderPdfPageToImage(pageIndex, dpi);
@@ -2993,9 +3013,11 @@ void DocumentViewport::invalidatePdfCache()
     
     // Thread-safe cache clear
     QMutexLocker locker(&m_pdfCacheMutex);
+#ifdef SPEEDYNOTE_DEBUG
     if (!m_pdfCache.isEmpty()) {
         qDebug() << "PDF CACHE INVALIDATED: cleared" << m_pdfCache.size() << "entries";
     }
+#endif
     m_pdfCache.clear();
     m_cachedDpi = 0;
 }
@@ -3059,8 +3081,10 @@ void DocumentViewport::evictFurthestCacheEntries()
             }
         }
         
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "PDF cache evict: page" << m_pdfCache[evictIdx].pageIndex 
                  << "distance" << maxDistance << "new size" << (m_pdfCache.size() - 1);
+#endif
         m_pdfCache.removeAt(evictIdx);
     }
 }
@@ -3301,7 +3325,7 @@ void DocumentViewport::evictDistantTiles()
         emit objectSelectionChanged();
     }
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     if (evictedCount > 0) {
         qDebug() << "Evicted" << evictedCount << "tiles, remaining:" << m_document->tileCount();
     }
@@ -3883,7 +3907,7 @@ void DocumentViewport::finishStrokeEdgeless()
         segments.append(currentSegment);
     }
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Edgeless: Stroke split into" << segments.size() << "segments";
 #endif
     
@@ -3927,7 +3951,7 @@ void DocumentViewport::finishStrokeEdgeless()
         
         addedStrokes.append({seg.coord, localStroke});
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "  -> Tile" << seg.coord.first << "," << seg.coord.second
                  << "points:" << localStroke.points.size();
 #endif
@@ -4014,7 +4038,7 @@ QVector<QPair<Document::TileCoord, VectorStroke>> DocumentViewport::addStrokeToE
         segments.append(currentSegment);
     }
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     if (segments.size() > 1) {
         qDebug() << "addStrokeToEdgelessTiles: stroke split into" << segments.size() << "segments";
     }
@@ -4508,7 +4532,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         if (hit.pageIndex < 0) {
             // Click not on any page - ignore in paged mode
             if (!m_document->isEdgeless()) {
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "handlePointerPress_ObjectSelect: Create mode click not on page";
+#endif
                 return;
             }
             // Edgeless: use document coordinates directly
@@ -5020,7 +5046,9 @@ void DocumentViewport::clearObjectClipboard()
     
     m_objectClipboard.clear();
     emit objectClipboardChanged(false);
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "clearObjectClipboard: Object clipboard cleared";
+#endif
 }
 
 void DocumentViewport::deselectObjectById(const QString& objectId)
@@ -5065,22 +5093,26 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
 
 void DocumentViewport::pasteForObjectSelect()
 {
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pasteForObjectSelect: Called";
+#endif
     
     // Phase O2.4.2: Tool-aware paste for ObjectSelect tool
     QClipboard* clipboard = QGuiApplication::clipboard();
     if (!clipboard || !clipboard->mimeData()) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "pasteForObjectSelect: No clipboard or mimeData";
+#endif
         return;
     }
     
     const QMimeData* mimeData = clipboard->mimeData();
-    qDebug() << "pasteForObjectSelect: hasImage =" << mimeData->hasImage()
-             << "hasUrls =" << mimeData->hasUrls();
-    
+   
     // Priority 1: System clipboard has raw image data (e.g., copied from browser/image editor)
     if (mimeData->hasImage()) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "pasteForObjectSelect: Clipboard has raw image, calling insertImageFromClipboard()";
+#endif
         insertImageFromClipboard();
         return;
     }
@@ -5090,12 +5122,16 @@ void DocumentViewport::pasteForObjectSelect()
     // hasImage() returns false, but hasUrls() returns true with the file path.
     if (mimeData->hasUrls()) {
         QList<QUrl> urls = mimeData->urls();
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "pasteForObjectSelect: Clipboard has URLs:" << urls;
+#endif
         
         for (const QUrl& url : urls) {
             if (url.isLocalFile()) {
                 QString filePath = url.toLocalFile();
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "pasteForObjectSelect: Checking file:" << filePath;
+#endif
                 
                 // Check if it's an image file
                 QString lower = filePath.toLower();
@@ -5103,23 +5139,31 @@ void DocumentViewport::pasteForObjectSelect()
                     lower.endsWith(".jpeg") || lower.endsWith(".bmp") ||
                     lower.endsWith(".gif") || lower.endsWith(".webp")) {
                     
+#ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "pasteForObjectSelect: Loading image from file:" << filePath;
+#endif
                     insertImageFromFile(filePath);
                     return;  // Only insert first image
                 }
             }
         }
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "pasteForObjectSelect: No valid image files in URLs";
+#endif
     }
     
     // Priority 3: Internal object clipboard (O2.6.3)
     if (!m_objectClipboard.isEmpty()) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "pasteForObjectSelect: Internal clipboard has" << m_objectClipboard.size() << "objects";
+#endif
         pasteObjects();
         return;
     }
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pasteForObjectSelect: Nothing to paste";
+#endif
     
     // If neither clipboard has content, do nothing
     // (No fallback to lasso paste - that's a separate tool)
@@ -5127,28 +5171,39 @@ void DocumentViewport::pasteForObjectSelect()
 
 void DocumentViewport::insertImageFromClipboard()
 {
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromClipboard: Called";
+#endif
     
     // Phase O2.4.3: Insert image from clipboard as ImageObject
     if (!m_document) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromClipboard: No document!";
+#endif
         return;
     }
     
     // 1. Get image from clipboard
     QClipboard* clipboard = QGuiApplication::clipboard();
     if (!clipboard) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromClipboard: No clipboard!";
+#endif
         return;
     }
     
     QImage image = clipboard->image();
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromClipboard: image.isNull() =" << image.isNull() 
              << "size =" << image.size();
+
     if (image.isNull()) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromClipboard: No valid image in clipboard";
+        #endif
         return;
     }
+#endif
     
     // 2. Create ImageObject with setPixmap()
     auto imgObj = std::make_unique<ImageObject>();
@@ -5175,8 +5230,10 @@ void DocumentViewport::insertImageFromClipboard()
         : m_document->page(m_currentPageIndex)->activeLayerIndex;
     int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
     imgObj->setLayerAffinity(defaultAffinity);
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromClipboard: activeLayer =" << activeLayer 
              << "defaultAffinity =" << defaultAffinity;
+#endif
     
     // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
     InsertedObject* rawPtr = imgObj.get();
@@ -5196,7 +5253,10 @@ void DocumentViewport::insertImageFromClipboard()
         
         // Set zOrder so new object appears on top of existing objects with same affinity
         imgObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
+        
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromClipboard: assigned zOrder =" << imgObj->zOrder;
+        #endif
         
         // Convert to tile-local coordinates
         imgObj->position = imgObj->position - QPointF(
@@ -5217,7 +5277,9 @@ void DocumentViewport::insertImageFromClipboard()
         
         // Set zOrder so new object appears on top of existing objects with same affinity
         imgObj->zOrder = getNextZOrderForAffinity(targetPage, defaultAffinity);
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromClipboard: assigned zOrder =" << imgObj->zOrder;
+        #endif
         
         // Adjust position to be page-local (subtract page origin)
         QPointF pageOrigin = pagePosition(m_currentPageIndex);
@@ -5256,16 +5318,22 @@ void DocumentViewport::insertImageFromClipboard()
     
     update();
     
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromClipboard: Inserted image" << rawPtr->id 
              << "size" << rawPtr->size << "at" << rawPtr->position;
+#endif
 }
 
 void DocumentViewport::insertImageFromFile(const QString& filePath)
 {
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromFile: Called with path:" << filePath;
+#endif
     
     if (!m_document) {
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromFile: No document!";
+#endif
         return;
     }
     
@@ -5275,7 +5343,9 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         qWarning() << "insertImageFromFile: Failed to load image from" << filePath;
         return;
     }
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromFile: Loaded image, size =" << image.size();
+#endif
     
     // 2. Create ImageObject with setPixmap()
     auto imgObj = std::make_unique<ImageObject>();
@@ -5301,8 +5371,10 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         : m_document->page(m_currentPageIndex)->activeLayerIndex;
     int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
     imgObj->setLayerAffinity(defaultAffinity);
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromFile: activeLayer =" << activeLayer 
              << "defaultAffinity =" << defaultAffinity;
+#endif
     
     // Store raw pointer BEFORE std::move
     InsertedObject* rawPtr = imgObj.get();
@@ -5321,7 +5393,9 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         
         // Set zOrder so new object appears on top of existing objects with same affinity
         imgObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromFile: assigned zOrder =" << imgObj->zOrder;
+        #endif
         
         // Convert to tile-local coordinates
         imgObj->position = imgObj->position - QPointF(
@@ -5342,7 +5416,9 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         
         // Set zOrder so new object appears on top of existing objects with same affinity
         imgObj->zOrder = getNextZOrderForAffinity(targetPage, defaultAffinity);
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromFile: assigned zOrder =" << imgObj->zOrder;
+        #endif
         
         // Adjust position to be page-local
         QPointF pageOrigin = pagePosition(m_currentPageIndex);
@@ -5380,8 +5456,10 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     
     update();
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromFile: Inserted image" << rawPtr->id 
              << "size" << rawPtr->size << "at" << rawPtr->position;
+    #endif
 }
 
 void DocumentViewport::insertImageFromDialog()
@@ -5424,7 +5502,9 @@ void DocumentViewport::deleteSelectedObjects()
     // TODO: Show confirmation dialog if notes will be deleted
     // "This will delete N linked note(s). Continue?"
     if (noteCount > 0) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deleteSelectedObjects: Cascade deleting" << noteCount << "markdown note(s)";
+        #endif
     }
     
     // Delete markdown note files before removing LinkObjects
@@ -5467,7 +5547,9 @@ void DocumentViewport::deleteSelectedObjects()
             }
             
             if (!found) {
+                #ifdef SPEEDYNOTE_DEBUG
                 qWarning() << "deleteSelectedObjects: Object" << obj->id << "not found in any tile";
+                #endif
             }
         }
     } else {
@@ -5524,7 +5606,9 @@ void DocumentViewport::deleteSelectedObjects()
     
     update();
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "objects";
+    #endif
 }
 
 void DocumentViewport::copySelectedObjects()
@@ -5562,7 +5646,9 @@ void DocumentViewport::copySelectedObjects()
         }
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "copySelectedObjects: Copied" << m_objectClipboard.size() << "objects to internal clipboard";
+    #endif
     
     // Notify that object clipboard has content (for action bar paste button)
     emit objectClipboardChanged(!m_objectClipboard.isEmpty());
@@ -5651,7 +5737,9 @@ void DocumentViewport::pasteObjects()
             // Set zOrder so pasted object appears on top of existing objects with same affinity
             int affinity = obj->getLayerAffinity();
             obj->zOrder = getNextZOrderForAffinity(targetTile, affinity);
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "pasteObjects: assigned zOrder =" << obj->zOrder << "for affinity =" << affinity;
+            #endif
             
             // Convert to tile-local coordinates
             obj->position = obj->position - QPointF(
@@ -5672,7 +5760,9 @@ void DocumentViewport::pasteObjects()
             // Set zOrder so pasted object appears on top of existing objects with same affinity
             int affinity = obj->getLayerAffinity();
             obj->zOrder = getNextZOrderForAffinity(targetPage, affinity);
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "pasteObjects: assigned zOrder =" << obj->zOrder << "for affinity =" << affinity;
+            #endif
             
             targetPage->addObject(std::move(obj));
             m_document->markPageDirty(m_currentPageIndex);
@@ -5698,7 +5788,9 @@ void DocumentViewport::pasteObjects()
     
     update();
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pasteObjects: Pasted" << pastedObjects.size() << "objects from internal clipboard";
+    #endif
 }
 
 // ===== LinkObject Creation (Phase C.3.2 & C.4.5) =====
@@ -5853,19 +5945,25 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
 void DocumentViewport::activateLinkSlot(int slotIndex)
 {
     if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "activateLinkSlot: Invalid slot index" << slotIndex;
+        #endif
         return;
     }
     
     // Must have exactly one LinkObject selected
     if (m_selectedObjects.size() != 1) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "activateLinkSlot: Need exactly one object selected";
+        #endif
         return;
     }
     
     LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
     if (!link) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "activateLinkSlot: Selected object is not a LinkObject";
+        #endif
         return;
     }
     
@@ -5914,7 +6012,9 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
                 return;
             }
             
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "activateLinkSlot: Opening markdown note" << noteId;
+            #endif
             emit requestOpenMarkdownNote(noteId, link->id);
             break;
         }
@@ -5930,18 +6030,24 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     // This will be replaced with a proper subtoolbar in the future
     
     if (m_selectedObjects.size() != 1) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addLinkToSlot: Need exactly one object selected";
+        #endif
         return;
     }
     
     LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
     if (!link) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addLinkToSlot: Selected object is not a LinkObject";
+        #endif
         return;
     }
     
     if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addLinkToSlot: Invalid slot index" << slotIndex;
+        #endif
         return;
     }
     
@@ -5955,7 +6061,9 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     
     if (selected == posAction) {
         // TODO: Enter "pick position" mode (requires additional UI work)
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addLinkToSlot: Position link - TODO: implement pick position mode";
+        #endif
     } else if (selected == urlAction) {
         QString url = QInputDialog::getText(this, "Add URL", "Enter URL:");
         if (!url.isEmpty()) {
@@ -5980,7 +6088,9 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
             emit documentModified();
             update();
             
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "addLinkToSlot: Added URL link to slot" << slotIndex << ":" << url;
+            #endif
         }
     } else if (selected == mdAction) {
         // Phase M.2: Create markdown note for this slot
@@ -5993,24 +6103,32 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
     // Phase D: Clear a LinkObject slot content (called from ObjectSelectSubToolbar)
     
     if (m_selectedObjects.size() != 1) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "clearLinkSlot: Need exactly one object selected";
+        #endif
         return;
     }
     
     LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
     if (!link) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "clearLinkSlot: Selected object is not a LinkObject";
+        #endif
         return;
     }
     
     if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "clearLinkSlot: Invalid slot index" << slotIndex;
+        #endif
         return;
     }
     
     // Check if slot is already empty
     if (link->linkSlots[slotIndex].isEmpty()) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "clearLinkSlot: Slot" << slotIndex << "is already empty";
+        #endif
         return;
     }
     
@@ -6022,16 +6140,19 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
         QString noteId = slot.markdownNoteId;
         if (!noteId.isEmpty()) {
             m_document->deleteNoteFile(noteId);
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "clearLinkSlot: Deleted markdown note file" << noteId;
+            #endif
         }
     }
     
     // Clear the slot using LinkSlot::clear() which resets to default state
     slot.clear();
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "clearLinkSlot: Cleared slot" << slotIndex 
              << "(was type" << static_cast<int>(oldType) << ")";
-    
+    #endif
     // Mark page dirty
     Page* page = findPageContainingObject(link);
     if (page) {
@@ -6050,25 +6171,33 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     
     // Validate selection - need exactly one LinkObject selected
     if (m_selectedObjects.size() != 1) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "createMarkdownNoteForSlot: Need exactly one object selected";
+        #endif
         return;
     }
     
     LinkObject* link = dynamic_cast<LinkObject*>(m_selectedObjects[0]);
     if (!link) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "createMarkdownNoteForSlot: Selected object is not a LinkObject";
+        #endif
         return;
     }
     
     // Validate slot index
     if (slotIndex < 0 || slotIndex >= LinkObject::SLOT_COUNT) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "createMarkdownNoteForSlot: Invalid slot index" << slotIndex;
+        #endif
         return;
     }
     
     // Check slot is empty
     if (!link->linkSlots[slotIndex].isEmpty()) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "createMarkdownNoteForSlot: Slot" << slotIndex << "is not empty";
+        #endif
         return;
     }
     
@@ -6102,9 +6231,10 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     link->linkSlots[slotIndex].type = LinkSlot::Type::Markdown;
     link->linkSlots[slotIndex].markdownNoteId = noteId;
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "createMarkdownNoteForSlot: Created note" << noteId 
              << "for slot" << slotIndex << "title:" << note.title;
-    
+    #endif
     // Mark page dirty
     Page* page = findPageContainingObject(link);
     if (page) {
@@ -6124,19 +6254,24 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
 
 void DocumentViewport::bringSelectedToFront()
 {
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "bringSelectedToFront: called, selectedObjects count =" << m_selectedObjects.size();
+    #endif
     if (!m_document || m_selectedObjects.isEmpty()) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "bringSelectedToFront: early return - document:" << (m_document != nullptr) 
                  << "selectedObjects empty:" << m_selectedObjects.isEmpty();
+        #endif
         return;
     }
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "bringSelectedToFront: processing obj" << obj->id 
                  << "current zOrder =" << obj->zOrder;
-        
+        #endif
         // Find the page/tile containing this object
         Page* page = nullptr;
         Document::TileCoord tileCoord = {0, 0};
@@ -6156,7 +6291,9 @@ void DocumentViewport::bringSelectedToFront()
         }
         
         if (!page) {
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "bringSelectedToFront: page not found for obj" << obj->id;
+            #endif
             continue;
         }
         
@@ -6164,23 +6301,30 @@ void DocumentViewport::bringSelectedToFront()
         int affinity = obj->getLayerAffinity();
         int maxZOrder = obj->zOrder;
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "bringSelectedToFront: obj affinity =" << affinity 
                  << "page has" << page->objects.size() << "objects";
-        
+        #endif
         for (const auto& otherObj : page->objects) {
             if (otherObj.get() != obj && otherObj->getLayerAffinity() == affinity) {
+                #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "  other obj" << otherObj->id << "zOrder =" << otherObj->zOrder;
+                #endif
                 maxZOrder = qMax(maxZOrder, otherObj->zOrder);
             }
         }
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "bringSelectedToFront: maxZOrder found =" << maxZOrder;
+        #endif
         
         // Set zOrder to max + 1
         if (obj->zOrder != maxZOrder + 1) {
             int oldZOrder = obj->zOrder;
             obj->zOrder = maxZOrder + 1;
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "bringSelectedToFront: changed zOrder from" << oldZOrder << "to" << obj->zOrder;
+            #endif
             page->rebuildAffinityMap();  // Rebuild since zOrder changed
             
             if (m_document->isEdgeless()) {
@@ -6189,7 +6333,9 @@ void DocumentViewport::bringSelectedToFront()
                 m_document->markPageDirty(m_currentPageIndex);
             }
         } else {
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "bringSelectedToFront: zOrder unchanged (already at max+1)";
+            #endif
         }
     }
     
@@ -6379,7 +6525,9 @@ void DocumentViewport::increaseSelectedAffinity()
     if (!m_document || m_selectedObjects.isEmpty()) return;
     
     int maxAffinity = getMaxAffinity();
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "increaseSelectedAffinity: maxAffinity =" << maxAffinity;
+    #endif
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
@@ -6396,10 +6544,12 @@ void DocumentViewport::increaseSelectedAffinity()
         
         int oldAffinity = currentAffinity;
         page->updateObjectAffinity(obj->id, currentAffinity + 1);
-        
+
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
                  << "->" << obj->getLayerAffinity();
-        
+        #endif
+
         // Phase O3.5.3: Push undo entry for affinity change
         pushObjectAffinityUndo(obj, oldAffinity);
         
@@ -6419,14 +6569,18 @@ void DocumentViewport::decreaseSelectedAffinity()
     if (!m_document || m_selectedObjects.isEmpty()) return;
     
     const int minAffinity = -1;  // Background
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "decreaseSelectedAffinity: minAffinity =" << minAffinity;
+    #endif
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
         
         int currentAffinity = obj->getLayerAffinity();
         if (currentAffinity <= minAffinity) {
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "  obj" << obj->id << "already at min affinity" << currentAffinity;
+            #endif
             continue;
         }
         
@@ -6437,9 +6591,10 @@ void DocumentViewport::decreaseSelectedAffinity()
         int oldAffinity = currentAffinity;
         page->updateObjectAffinity(obj->id, currentAffinity - 1);
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
                  << "->" << obj->getLayerAffinity();
-        
+        #endif
         // Phase O3.5.3: Push undo entry for affinity change
         pushObjectAffinityUndo(obj, oldAffinity);
         
@@ -6459,14 +6614,18 @@ void DocumentViewport::sendSelectedToBackground()
     if (!m_document || m_selectedObjects.isEmpty()) return;
     
     const int backgroundAffinity = -1;
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "sendSelectedToBackground: setting affinity to" << backgroundAffinity;
+    #endif
     
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
         
         int currentAffinity = obj->getLayerAffinity();
         if (currentAffinity == backgroundAffinity) {
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "  obj" << obj->id << "already at background";
+            #endif
             continue;
         }
         
@@ -6477,9 +6636,10 @@ void DocumentViewport::sendSelectedToBackground()
         int oldAffinity = currentAffinity;
         page->updateObjectAffinity(obj->id, backgroundAffinity);
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
                  << "->" << backgroundAffinity;
-        
+        #endif
         // Phase O3.5.3: Push undo entry for affinity change
         pushObjectAffinityUndo(obj, oldAffinity);
         
@@ -8417,18 +8577,24 @@ void DocumentViewport::activatePdfLink(const PdfLink& link)
     switch (link.type) {
         case PdfLinkType::Goto:
             if (link.targetPage >= 0 && link.targetPage < m_document->pageCount()) {
+                #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "PDF link: navigating to page" << link.targetPage;
+                #endif
                 scrollToPage(link.targetPage);
             }
             break;
         case PdfLinkType::Uri:
             if (!link.uri.isEmpty()) {
+                #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "PDF link: opening URL" << link.uri;
+                #endif
                 QDesktopServices::openUrl(QUrl(link.uri));
             }
             break;
         default:
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "PDF link: unsupported type" << static_cast<int>(link.type);
+            #endif
             break;
     }
 }
@@ -9106,7 +9272,7 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
         emit documentModified();
     }
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Created" << createdIds.size() << "highlight strokes on page" << pageIndex;
 #endif
     
@@ -9116,15 +9282,19 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
 void DocumentViewport::copySelectedTextToClipboard()
 {
     if (!m_textSelection.isValid() || m_textSelection.selectedText.isEmpty()) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "copySelectedTextToClipboard: No text selected";
+        #endif
         return;
     }
     
     QClipboard* clipboard = QGuiApplication::clipboard();
     clipboard->setText(m_textSelection.selectedText);
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Copied to clipboard:" << m_textSelection.selectedText.left(50)
              << (m_textSelection.selectedText.length() > 50 ? "..." : "");
+    #endif
 }
 
 void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
@@ -9733,9 +9903,11 @@ void DocumentViewport::undoEdgeless()
                             obj->position = action.objectOldPosition;
                             obj->size = action.objectOldSize;
                             obj->rotation = action.objectOldRotation;  // O3.1.8.3
+                            #ifdef SPEEDYNOTE_DEBUG
                             qDebug() << "Undo ObjectResize (edgeless): obj" << action.objectId
                                      << "pos" << obj->position << "size" << obj->size 
                                      << "rot" << obj->rotation;
+                            #endif
                         }
                         m_document->markTileDirty(action.objectTileCoord);
                     }
@@ -9941,9 +10113,11 @@ void DocumentViewport::redoEdgeless()
                             obj->position = action.objectNewPosition;
                             obj->size = action.objectNewSize;
                             obj->rotation = action.objectNewRotation;  // O3.1.8.3
+                            #ifdef SPEEDYNOTE_DEBUG
                             qDebug() << "Redo ObjectResize (edgeless): obj" << action.objectId
                                      << "pos" << obj->position << "size" << obj->size
                                      << "rot" << obj->rotation;
+                            #endif
                         }
                         m_document->markTileDirty(action.objectTileCoord);
                     }
@@ -10181,9 +10355,11 @@ void DocumentViewport::undo()
                         obj->position = action.objectOldPosition;
                         obj->size = action.objectOldSize;
                         obj->rotation = action.objectOldRotation;  // O3.1.8.3
+                        #ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Undo ObjectResize (paged): obj" << action.objectId
                                  << "pos" << obj->position << "size" << obj->size
                                  << "rot" << obj->rotation;
+                        #endif
                     }
                 }
                 break;
@@ -10335,9 +10511,11 @@ void DocumentViewport::redo()
                         obj->position = action.objectNewPosition;
                         obj->size = action.objectNewSize;
                         obj->rotation = action.objectNewRotation;  // O3.1.8.3
+                        #ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Redo ObjectResize (paged): obj" << action.objectId
                                  << "pos" << obj->position << "size" << obj->size
                                  << "rot" << obj->rotation;
+                        #endif
                     }
                 }
                 break;
@@ -10388,11 +10566,12 @@ void DocumentViewport::pushObjectInsertUndo(InsertedObject* obj, int pageIndex,
 {
     if (!obj) return;
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pushObjectInsertUndo: obj->position =" << obj->position
              << "obj->size =" << obj->size
              << "obj->zOrder =" << obj->zOrder
              << "obj->layerAffinity =" << obj->layerAffinity;
-    
+    #endif
     if (m_document && m_document->isEdgeless()) {
         // Edgeless mode: use global stack
         EdgelessUndoAction action;
@@ -10471,9 +10650,10 @@ void DocumentViewport::pushObjectMoveUndo(InsertedObject* obj, const QPointF& ol
 {
     if (!obj) return;
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pushObjectMoveUndo: obj" << obj->id << "oldPos =" << oldPos 
              << "newPos =" << obj->position;
-    
+    #endif
     if (m_document && m_document->isEdgeless()) {
         // Edgeless mode: use global stack
         EdgelessUndoAction action;
@@ -10523,11 +10703,12 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
 {
     if (!obj) return;
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pushObjectResizeUndo: obj" << obj->id 
              << "oldPos =" << oldPos << "newPos =" << obj->position
              << "oldSize =" << oldSize << "newSize =" << obj->size
              << "oldRot =" << oldRotation << "newRot =" << obj->rotation;
-    
+    #endif
     if (m_document && m_document->isEdgeless()) {
         // ===== Edgeless mode: use global stack =====
         EdgelessUndoAction action;
@@ -10587,10 +10768,11 @@ void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffini
 {
     if (!obj) return;
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pushObjectAffinityUndo: obj" << obj->id 
              << "oldAffinity =" << oldAffinity 
              << "newAffinity =" << obj->getLayerAffinity();
-    
+    #endif
     if (m_document && m_document->isEdgeless()) {
         // ===== Edgeless mode: use global stack =====
         EdgelessUndoAction action;
