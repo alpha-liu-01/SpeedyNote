@@ -79,7 +79,7 @@
 #include <QThread>
 #include <QPointer>
 // #include "HandwritingLineEdit.h"
-// #include "ControlPanelDialog.h"  // Phase 3.1.8: Disabled - depends on InkCanvas
+#include "ControlPanelDialog.h"  // Phase CP.1: Re-enabled with cleaned up tabs
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "SDLControllerManager.h"
 #endif
@@ -738,24 +738,10 @@ void MainWindow::setupUi() {
     tabBarContainer->setObjectName("tabBarContainer");
     tabBarContainer->setVisible(false);  // Hidden - using m_tabBar now
 
-    // REMOVED E.1: toggleTabBarButton moved to NavigationBar
-    // Phase S3: Floating toggle buttons removed - sidebars now in LeftSidebarContainer tabs
-    // connect(toggleOutlineButton, &QPushButton::clicked, this, &MainWindow::toggleOutlineSidebar);
-    // connect(toggleBookmarksButton, &QPushButton::clicked, this, &MainWindow::toggleBookmarksSidebar);
-    // connect(toggleLayerPanelButton, &QPushButton::clicked, this, &MainWindow::toggleLayerPanel);
-    // REMOVED E.1: toggleMarkdownNotesButton and touchGesturesButton moved to new components
-
-
 
     overflowMenu = new QMenu(this);
     overflowMenu->setObjectName("overflowMenu");
-    
-    // MW1.5: PDF menu actions disabled - will be reimplemented
-    // QAction *managePdfAction = overflowMenu->addAction(loadThemedIcon("pdf"), tr("Import/Clear Document"));
-    // connect(managePdfAction, &QAction::triggered, this, &MainWindow::handleSmartPdfButton);
-    // QAction *exportPdfAction = overflowMenu->addAction(loadThemedIcon("export"), tr("Export Annotated PDF"));
-    // connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportAnnotatedPdf);
-    
+
     // Phase R.4: Relink PDF action (enabled only when document has PDF reference)
     m_relinkPdfAction = overflowMenu->addAction(tr("Relink PDF..."));
     m_relinkPdfAction->setEnabled(false);  // Initially disabled
@@ -817,8 +803,9 @@ void MainWindow::setupUi() {
     
     QAction *openControlPanelAction = overflowMenu->addAction(tr("Settings"));
     connect(openControlPanelAction, &QAction::triggered, this, [this]() {
-        // REMOVED: openControlPanelButton removed - use direct action
-        QMessageBox::information(this, tr("Control Panel"), tr("Control Panel is being redesigned. Coming soon!"));
+        // Phase CP.1: Open the cleaned-up Control Panel dialog
+        ControlPanelDialog dialog(this, this);
+        dialog.exec();
     });
     
     // MW7.8: overflowMenuButton deleted - menu now shown via NavigationBar menuRequested signal
@@ -1011,14 +998,7 @@ void MainWindow::setupUi() {
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
     
-    // Phase 5: Left side container holds sidebars on top, layer panel at bottom
-    // Phase S3: Old sidebar container removed - outline/bookmarks will be moved to LeftSidebarContainer
-    // m_leftSideContainer = new QWidget(this);
-    // QHBoxLayout *leftSidebarsLayout = new QHBoxLayout(m_leftSideContainer);
-    // leftSidebarsLayout->setContentsMargins(0, 0, 0, 0);
-    // leftSidebarsLayout->setSpacing(0);
-    // leftSidebarsLayout->addWidget(outlineSidebar);
-    // leftSidebarsLayout->addWidget(bookmarksSidebar);
+
     
     // Phase S3: Left sidebar container (replaces separate sidebars and floating tabs)
     contentLayout->addWidget(m_leftSidebar, 0);
@@ -1823,12 +1803,12 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
     
     // Note: Highlighter uses marker color, so no separate setter needed
     // (HighlighterSubToolbar shares color presets with MarkerSubToolbar)
-    
+    /*
     qDebug() << "Applied all subtoolbar values to viewport:"
              << "penColor=" << (m_penSubToolbar ? m_penSubToolbar->currentColor().name() : "N/A")
              << "penThickness=" << (m_penSubToolbar ? m_penSubToolbar->currentThickness() : 0)
              << "markerColor=" << (m_markerSubToolbar ? m_markerSubToolbar->currentColor().name() : "N/A")
-             << "markerThickness=" << (m_markerSubToolbar ? m_markerSubToolbar->currentThickness() : 0);
+             << "markerThickness=" << (m_markerSubToolbar ? m_markerSubToolbar->currentThickness() : 0); */
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -2444,26 +2424,8 @@ void MainWindow::switchTab(int index) {
         
         DocumentViewport *viewport = currentViewport();
         if (viewport) {
-            // TODO Phase 3.3: Update page spinbox from viewport
-            // int currentPage = viewport->currentPageIndex();
-            // pageInput->blockSignals(true);
-            // pageInput->setValue(currentPage + 1);
-            // pageInput->blockSignals(false);
-            
-            // REMOVED MW5.2: zoomSlider removed - zoom now controlled by NavigationBar/Toolbar
+
         }
-        
-        // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
-        // TODO Phase 3.3: Reconnect these update functions to work with DocumentViewport
-        // updateColorButtonStates();
-        // updateStraightLineButtonState();
-        // updateRopeToolButtonState();
-        // updatePictureButtonState();
-        // updatePdfTextSelectButtonState();
-        // updateBookmarkButtonState();
-        // MW2.2: Removed dial button state updates
-        // updateToolButtonStates();
-        // updateThicknessSliderForCurrentTool();
     }
 }
 
@@ -2514,7 +2476,7 @@ void MainWindow::addNewTab() {
     QString tabTitle = doc->displayName();
     int tabIndex = m_tabManager->createTab(doc, tabTitle);
     
-    qDebug() << "Created new tab at index" << tabIndex << "with document:" << tabTitle;
+    // qDebug() << "Created new tab at index" << tabIndex << "with document:" << tabTitle;
     
     // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
     if (m_tabBar) {
@@ -2529,28 +2491,7 @@ void MainWindow::addNewTab() {
     
     // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     
-    return;
-    
-    /* ========== OLD INKCANVAS CODE - KEPT FOR REFERENCE ==========
-    // This code will be removed in Phase 3.1.7 when InkCanvas is fully disconnected
-    
-    if (!tabList || !canvasStack) return;  // Ensure tabList and canvasStack exist
-
-    int newTabIndex = tabList->count();  // New tab index
-    QWidget *tabWidget = new QWidget();  // Custom tab container
-    tabWidget->setObjectName("tabWidget"); // Name the widget for easy retrieval later
-    QHBoxLayout *tabLayout = new QHBoxLayout(tabWidget);
-    tabLayout->setContentsMargins(5, 2, 5, 2);
-
-    // ✅ Create the label (Tab Name) - adaptive width based on content
-    QLabel *tabLabel = new QLabel(QString("Tab %1").arg(newTabIndex + 1), tabWidget);    
-    tabLabel->setObjectName("tabLabel"); // ✅ Name the label for easy retrieval later
-    tabLabel->setWordWrap(false); // ✅ No wrapping for horizontal tabs
-    // Use expanding size policy so label grows with content
-    tabLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    tabLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter); // Left-align to show filename start
-    tabLabel->setTextFormat(Qt::PlainText); // Ensure plain text for proper eliding
-    ========== END OLD INKCANVAS CODE ========== */
+    return;    
 }
 
 void MainWindow::addNewEdgelessTab()
@@ -3790,7 +3731,6 @@ void MainWindow::setupOutlinePanelConnections()
         }
     });
     
-    qDebug() << "Phase E.2: Outline panel connections initialized";
 }
 
 // =========================================================================
@@ -4659,17 +4599,6 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     event->accept();
 }
 
-// REMOVED MW1.4: showLastAccessedPageDialog(InkCanvas*) - InkCanvas obsolete
-
-// REMOVED MW5.6: openSpnPackage function removed - .spn format deprecated
-
-// REMOVED MW5.6: createNewSpnPackage function removed - .spn format deprecated
-    
-// MW1.5: Kept as stubs - still called from openFileInNewTab
-// REMOVED MW7.7: openPdfFile stub removed - replaced with openPdfDocument(filePath)
-
-// REMOVED MW5.6: switchToExistingNotebook function removed - .spn format deprecated
-
 // ========================================
 // Single Instance Implementation
 // ========================================
@@ -4977,7 +4906,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         // Paged: Center content horizontally within the viewport
         centerViewportContent(tabIndex);
     }
-    
+    /*
     // Step 6: Log success
     if (isEdgeless) {
         qDebug() << "openFileInNewTab: Opened edgeless canvas with" 
@@ -4986,6 +4915,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         qDebug() << "openFileInNewTab: Opened paged document with" 
                  << doc->pageCount() << "pages from" << filePath;
     }
+    */
 }
 
 void MainWindow::showOpenPdfDialog()

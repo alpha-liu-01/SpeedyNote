@@ -680,9 +680,11 @@ void DocumentViewport::scrollToPositionOnPage(int pageIndex, QPointF normalizedP
     m_currentPageIndex = pageIndex;
     emit currentPageChanged(m_currentPageIndex);
     
+    /*
     qDebug() << "scrollToPositionOnPage: page" << pageIndex 
              << "normalized" << normalizedPosition
              << "-> targetY" << targetY;
+                 */
 }
 
 void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF& position)
@@ -2985,11 +2987,12 @@ void DocumentViewport::doAsyncPdfPreload()
         
         watcher->setFuture(future);
     }
-    
+    /*
     if (!pagesToPreload.isEmpty()) {
         qDebug() << "PDF async preload: started" << pagesToPreload.size() 
                  << "background renders for pages" << pagesToPreload;
     }
+    */
 }
 
 void DocumentViewport::invalidatePdfCache()

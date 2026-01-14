@@ -39,7 +39,7 @@
 #include <QTabletEvent>
 #include <QMenu>
 #include <QCloseEvent>
-// #include "ControlPanelDialog.h"  // Phase 3.1.8: Disabled - depends on InkCanvas
+// Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QSharedMemory>

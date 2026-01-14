@@ -1,8 +1,12 @@
 #include "ControlPanelDialog.h"
 #include "MainWindow.h"
+
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "ButtonMappingTypes.h"
 #include "SDLControllerManager.h"
-// #include "SpnPackageManager.h"  // Phase P.1: Removed - .spn format deprecated
+#endif
+
+
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -22,38 +26,32 @@
 #include <QTimer>
 #include <QTabletEvent>
 
-ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, InkCanvas *targetCanvas, QWidget *parent)
-    : QDialog(parent), canvas(targetCanvas), selectedColor(canvas->getBackgroundColor()), mainWindowRef(mainWindow) {
+ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
+    : QDialog(parent), mainWindowRef(mainWindow) {
 
-    setWindowTitle(tr("Canvas Control Panel"));
-    resize(400, 200);
+    setWindowTitle(tr("Settings"));
+    resize(450, 400);
 
     tabWidget = new QTabWidget(this);
 
-    // === Tabs ===
-    createBackgroundTab();
-    tabWidget->addTab(backgroundTab, tr("Background"));
-    if (mainWindowRef) {
-        createPerformanceTab();
-        tabWidget->addTab(performanceTab, tr("Performance"));
-        createToolbarTab();
-    }
-    createButtonMappingTab();
+    // === Working Tabs ===
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
+    // Note: createButtonMappingTab() removed - dial system was deleted (MW7.2)
     createControllerMappingTab();
-    createKeyboardMappingTab();
-    createMouseDialTab();
+#endif
+
     createThemeTab();
     createLanguageTab();
-    createCompatibilityTab();
     createCacheTab();
     createAboutTab();
+    
     // === Buttons ===
     applyButton = new QPushButton(tr("Apply"));
     okButton = new QPushButton(tr("OK"));
     cancelButton = new QPushButton(tr("Cancel"));
 
     connect(applyButton, &QPushButton::clicked, this, &ControlPanelDialog::applyChanges);
-    connect(okButton, &QPushButton::clicked, this, [=]() {
+    connect(okButton, &QPushButton::clicked, this, [this]() {
         applyChanges();
         accept();
     });
@@ -69,11 +67,57 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, InkCanvas *target
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(tabWidget);
     mainLayout->addLayout(buttonLayout);
-
-    loadFromCanvas();
+    
+    // Load current settings into UI
+    loadSettings();
 }
 
+void ControlPanelDialog::loadSettings()
+{
+    // Load theme settings
+    if (mainWindowRef) {
+        useCustomAccentCheckbox->setChecked(mainWindowRef->isUsingCustomAccentColor());
+        selectedAccentColor = mainWindowRef->getCustomAccentColor();
+        accentColorButton->setStyleSheet(QString("background-color: %1").arg(selectedAccentColor.name()));
+        accentColorButton->setEnabled(useCustomAccentCheckbox->isChecked());
+    }
+    
+    // Load language settings
+    QSettings settings("SpeedyNote", "App");
+    bool useSystemLang = settings.value("useSystemLanguage", true).toBool();
+    QString overrideLang = settings.value("languageOverride", "en").toString();
+    
+    useSystemLanguageCheckbox->setChecked(useSystemLang);
+    languageCombo->setEnabled(!useSystemLang);
+    
+    for (int i = 0; i < languageCombo->count(); ++i) {
+        if (languageCombo->itemData(i).toString() == overrideLang) {
+            languageCombo->setCurrentIndex(i);
+            break;
+        }
+    }
+}
 
+void ControlPanelDialog::applyChanges()
+{
+    if (!mainWindowRef) return;
+    
+    // Apply theme settings
+    mainWindowRef->setUseCustomAccentColor(useCustomAccentCheckbox->isChecked());
+    if (selectedAccentColor.isValid()) {
+        mainWindowRef->setCustomAccentColor(selectedAccentColor);
+    }
+    
+    // Apply language settings
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
+    if (!useSystemLanguageCheckbox->isChecked()) {
+        QString selectedLang = languageCombo->currentData().toString();
+        settings.setValue("languageOverride", selectedLang);
+    }
+}
+
+/*
 void ControlPanelDialog::createBackgroundTab() {
     backgroundTab = new QWidget(this);
 
@@ -119,7 +163,9 @@ void ControlPanelDialog::chooseColor() {
         colorButton->setStyleSheet(QString("background-color: %1").arg(selectedColor.name()));
     }
 }
+*/
 
+/*
 void ControlPanelDialog::applyChanges() {
     if (!canvas) return;
 
@@ -180,7 +226,9 @@ void ControlPanelDialog::applyChanges() {
         }
     }
 }
+*/
 
+/*
 void ControlPanelDialog::loadFromCanvas() {
     styleCombo->setCurrentIndex(static_cast<int>(canvas->getBackgroundStyle()));
     densitySpin->setValue(canvas->getBackgroundDensity());
@@ -225,8 +273,8 @@ void ControlPanelDialog::loadFromCanvas() {
         }
     }
 }
-
-
+*/
+/*
 void ControlPanelDialog::createPerformanceTab() {
     performanceTab = new QWidget();
     QVBoxLayout *layout = new QVBoxLayout(performanceTab);
@@ -287,7 +335,8 @@ void ControlPanelDialog::createPerformanceTab() {
 
     // return performanceTab;
 }
-
+*/
+/*
 void ControlPanelDialog::createToolbarTab(){
     toolbarTab = new QWidget(this);
     QVBoxLayout *toolbarLayout = new QVBoxLayout(toolbarTab);
@@ -431,8 +480,8 @@ void ControlPanelDialog::createToolbarTab(){
     // Connect the checkbox
     connect(benchmarkVisibilityCheckbox, &QCheckBox::toggled, mainWindowRef, &MainWindow::setBenchmarkControlsVisible);
 }
-
-
+*/
+/*
 void ControlPanelDialog::createButtonMappingTab() {
     QWidget *buttonTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(buttonTab);
@@ -468,6 +517,9 @@ void ControlPanelDialog::createButtonMappingTab() {
     buttonTab->setLayout(layout);
     tabWidget->addTab(buttonTab, tr("Button Mapping"));
 }
+*/
+
+/*
 
 void ControlPanelDialog::createKeyboardMappingTab() {
     keyboardTab = new QWidget(this);
@@ -516,7 +568,8 @@ void ControlPanelDialog::createKeyboardMappingTab() {
     
     tabWidget->addTab(keyboardTab, tr("Keyboard Shortcuts"));
 }
-
+*/
+/*
 void ControlPanelDialog::createMouseDialTab() {
     mouseDialTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(mouseDialTab);
@@ -594,6 +647,7 @@ void ControlPanelDialog::createMouseDialTab() {
     
     tabWidget->addTab(mouseDialTab, tr("Mouse Dial Control"));
 }
+*/
 
 void ControlPanelDialog::createThemeTab() {
     themeTab = new QWidget(this);
@@ -623,6 +677,8 @@ void ControlPanelDialog::createThemeTab() {
     connect(useCustomAccentCheckbox, &QCheckBox::toggled, accentColorButton, &QPushButton::setEnabled);
     connect(useCustomAccentCheckbox, &QCheckBox::toggled, accentColorLabel, &QLabel::setEnabled);
     
+
+    /*
     // Color palette preference
     useBrighterPaletteCheckbox = new QCheckBox(tr("Use Brighter Color Palette"), themeTab);
     layout->addWidget(useBrighterPaletteCheckbox);
@@ -631,7 +687,7 @@ void ControlPanelDialog::createThemeTab() {
     paletteNote->setWordWrap(true);
     paletteNote->setStyleSheet("color: gray; font-size: 10px;");
     layout->addWidget(paletteNote);
-    
+    */
     layout->addStretch();
     
     tabWidget->addTab(themeTab, tr("Theme"));
@@ -645,6 +701,7 @@ void ControlPanelDialog::chooseAccentColor() {
     }
 }
 
+/*
 void ControlPanelDialog::addKeyboardMapping() {
     // Step 1: Capture key sequence
     KeyCaptureDialog captureDialog(this);
@@ -717,7 +774,8 @@ void ControlPanelDialog::removeKeyboardMapping() {
         keyboardTable->removeRow(currentRow);
     }
 }
-
+*/
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 void ControlPanelDialog::createControllerMappingTab() {
     controllerMappingTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(controllerMappingTab);
@@ -841,6 +899,8 @@ void ControlPanelDialog::updateControllerStatus() {
         controllerStatusLabel->setStyleSheet("color: red; font-weight: bold;");
     }
 }
+#endif
+
 
 void ControlPanelDialog::createAboutTab() {
     aboutTab = new QWidget(this);
@@ -1117,6 +1177,7 @@ void ControlPanelDialog::createLanguageTab() {
     tabWidget->addTab(languageTab, tr("Language"));
 }
 
+/*
 void ControlPanelDialog::createCompatibilityTab() {
     compatibilityTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(compatibilityTab);
@@ -1288,3 +1349,5 @@ void ControlPanelDialog::detectStylusButton(bool isButtonA) {
                 .arg(isButtonA ? tr("Button A") : tr("Button B")));
     }
 }
+
+*/

@@ -421,7 +421,6 @@ if(ENABLE_CONTROLLER_SUPPORT)
     set(CONTROLLER_SOURCES
         source/SDLControllerManager.cpp
         source/ControllerMappingDialog.cpp
-        # source/ControlPanelDialog.cpp  # Phase 3.1.8: Disabled - depends on InkCanvas
     )
 endif()
 
@@ -429,6 +428,7 @@ endif()
 add_executable(${PROJECT_NAME}
         source/Main.cpp
         source/MainWindow.cpp
+        source/ControlPanelDialog.cpp  # Phase CP.1: Re-enabled with cleaned up tabs
 
         ${CONTROLLER_SOURCES}
         source/text/MarkdownNoteEntry.cpp    # Phase M.3: Moved to text/
