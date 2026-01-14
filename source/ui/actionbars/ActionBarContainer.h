@@ -171,6 +171,15 @@ public slots:
      */
     void onObjectClipboardChanged(bool hasObjects);
 
+signals:
+    /**
+     * @brief Emitted when the container needs a fresh viewport rect.
+     * 
+     * Connect this to MainWindow::updateActionBarPosition() to ensure
+     * the container gets correct positioning when becoming visible.
+     */
+    void positionUpdateRequested();
+
 private:
     /**
      * @brief Determine which action bar to show based on current state.

@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026 (BUG-TCH-001 fixed)
+**Last Updated:** Jan 14, 2026 (BUG-AB-001 fixed)
 
 ---
 
@@ -186,6 +186,83 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 ### Recently Fixed
 
+#### BUG-AB-001: Action bars mispositioned when PagePanelActionBar visible
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+The page panel action bar was "stopping" other action bars from moving to the correct location (right edge of DocumentViewport). Action bars had a tendency to stick somewhere in the viewport, or outside it entirely. Additionally, context action bars (Lasso, ObjectSelect) wouldn't appear correctly when PagePanelActionBar was NOT open.
+
+**Steps to Reproduce:**
+1. Open a paged document (not edgeless)
+2. Open the left sidebar and select the Pages tab
+3. PagePanelActionBar appears
+4. Create a lasso selection or select an object
+5. The context action bar (LassoActionBar/ObjectSelectActionBar) appears in wrong position
+6. OR: Without PagePanel open, context action bars don't appear or appear offscreen
+
+**Expected:** Both bars should be arranged in 2-column layout, right-aligned 24px from viewport edge; single action bars should also position correctly
+**Actual:** Action bars stuck in middle of viewport or outside it
+
+**Root Cause:** 
+Four issues in `ActionBarContainer.cpp`:
+
+1. **`animateShow()` ignored 2-column layout:** The animation code only used `m_currentActionBar` dimensions, completely ignoring `PagePanelActionBar` when calculating positions. This was legacy code from before 2-column support was added.
+
+2. **Stale viewport rect:** When `setPagePanelVisible()` was called, it used cached `m_viewportRect` which could be empty or outdated. `MainWindow::updatePagePanelActionBarVisibility()` didn't call `updateActionBarPosition()` after changing visibility.
+
+3. **`isVisible()` returns false when container is hidden (THE REAL BUG):** In `updateSize()` and `updatePosition()`, the code checked `m_currentActionBar->isVisible()` to determine if a context bar should be shown. However, `QWidget::isVisible()` returns false if ANY ancestor is hidden. When showing a context action bar:
+   - `showActionBar()` calls `m_currentActionBar->show()` on the child
+   - Then calls `updateSize()` BEFORE showing the container
+   - `isVisible()` returns false because container is still hidden
+   - Container size is set to 0x0!
+   - This is why it worked with PagePanel open (container already visible) but not when closed.
+
+4. **No fresh rect for context bars:** When context action bars were shown, `showActionBar()` used `m_viewportRect` which might be empty.
+
+**Fix:**
+1. Rewrote `animateShow()` to calculate total width/height considering both PagePanelActionBar and context action bar (2-column or single-column layout)
+2. Added `updateActionBarPosition()` call in `MainWindow::updatePagePanelActionBarVisibility()` after visibility change
+3. Animation now triggers `updatePosition()` on completion to properly position child action bars
+4. Added `positionUpdateRequested` signal to `ActionBarContainer` - emitted when container is about to become visible
+5. Connected signal to `MainWindow::updateActionBarPosition()` to ensure fresh viewport rect before showing
+6. Added fallback to query parent widget rect when `m_viewportRect` is empty
+7. **Critical fix:** Changed `updateSize()`, `updatePosition()`, and `setPagePanelVisible()` to use `m_currentActionBar != nullptr` instead of `m_currentActionBar->isVisible()`. This checks intent-to-show rather than actual visibility, which depends on ancestor state.
+
+**Files Modified:**
+- `source/ui/actionbars/ActionBarContainer.h` (added positionUpdateRequested signal)
+- `source/ui/actionbars/ActionBarContainer.cpp` (animateShow, showActionBar, updatePosition - parent fallback)
+- `source/MainWindow.cpp` (updatePagePanelActionBarVisibility, connect positionUpdateRequested)
+
+**Verified:** [x] Single action bar positions correctly
+**Verified:** [x] 2-column layout positions both bars correctly
+**Verified:** [x] Animation works for both layouts
+**Verified:** [x] Context bars appear correctly without PagePanel open
+**Verified:** [x] Action bars reposition on window maximize
+
+---
+
+#### BUG-UI-001: Subtoolbars/action bars don't reposition on window maximize
+**Priority:** 🟢 P3 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When maximizing the window, subtoolbars and action bars (especially PagePanelActionBar) didn't reposition correctly. They only updated on gradual resizing.
+
+**Root Cause:** 
+1. The event filter comparison used `m_viewportStack->parentWidget()` instead of comparing directly with `m_canvasContainer` (the object the filter was installed on)
+2. The `MainWindow::resizeEvent()` was empty and didn't trigger position updates
+
+**Fix:**
+1. Changed event filter to compare `obj == m_canvasContainer` directly
+2. Added `updateSubToolbarPosition()` and `updateActionBarPosition()` calls in `resizeEvent()`
+
+**Files Modified:**
+- `source/MainWindow.cpp` (eventFilter, resizeEvent)
+
+**Verified:** [x] Subtoolbars reposition on maximize
+**Verified:** [x] Action bars reposition on maximize
+
+---
+
 #### BUG-TCH-001: Touch gesture mode button fails to switch modes
 **Priority:** 🟠 P1 | **Status:** ✅ FIXED
 
@@ -238,13 +315,13 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Tabs | 0 | 0 | 0 | 0 |
 | Toolbar | 0 | 0 | 0 | 0 |
 | Subtoolbar | 0 | 0 | 0 | 0 |
-| Action Bar | 0 | 0 | 0 | 0 |
+| Action Bar | 0 | 0 | 1 | 1 |
 | Sidebar | 0 | 0 | 0 | 0 |
 | Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
-| UI/UX | 0 | 0 | 0 | 0 |
-| **TOTAL** | **0** | **0** | **1** | **1** |
+| UI/UX | 0 | 0 | 1 | 1 |
+| **TOTAL** | **0** | **0** | **3** | **3** |
 
 ---
 

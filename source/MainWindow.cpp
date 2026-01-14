@@ -2691,9 +2691,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     }
 
     // Handle resize events for canvas container
-    // Phase C.1.5: Use m_viewportStack instead of m_tabWidget
-    QWidget *container = m_viewportStack ? m_viewportStack->parentWidget() : nullptr;
-    if (obj == container && event->type() == QEvent::Resize) {
+    // BUG-AB-001/UI-001 FIX: Use m_canvasContainer directly instead of m_viewportStack->parentWidget()
+    // The event filter was installed on m_canvasContainer, so compare with that directly
+    if (obj == m_canvasContainer && event->type() == QEvent::Resize) {
         updateScrollbarPositions();
         return false; // Let the event propagate
     }
@@ -3409,6 +3409,11 @@ void MainWindow::setupActionBars()
     connect(QApplication::clipboard(), &QClipboard::dataChanged,
             m_actionBarContainer, &ActionBarContainer::onClipboardChanged);
     
+    // BUG-AB-001 FIX: Connect position update request signal
+    // This ensures the container gets a fresh viewport rect before becoming visible
+    connect(m_actionBarContainer, &ActionBarContainer::positionUpdateRequested,
+            this, &MainWindow::updateActionBarPosition);
+    
     // Connect LassoActionBar signals to viewport
     connect(m_lassoActionBar, &LassoActionBar::copyRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
@@ -3699,6 +3704,9 @@ void MainWindow::updatePagePanelActionBarVisibility()
     }
     
     m_actionBarContainer->setPagePanelVisible(shouldShow);
+    
+    // Update action bar position after visibility change to ensure correct placement
+    updateActionBarPosition();
     
     // Update action bar state when becoming visible
     if (shouldShow) {
@@ -4059,6 +4067,10 @@ void MainWindow::showAddMenu() {
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
     
+    // BUG-AB-001/UI-001 FIX: Update toolbar positions on window resize
+    // This catches maximize/restore events that might not trigger canvas container resize
+    updateSubToolbarPosition();
+    updateActionBarPosition();
 }
 
 

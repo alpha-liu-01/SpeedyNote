@@ -70,18 +70,29 @@ void ActionBarContainer::showActionBar(const QString& type)
         m_currentActionBar->show();
         
         updateSize();
-        updatePosition(m_viewportRect);
         
         // Show container (might already be visible if PagePanel is shown)
         if (!isVisible()) {
+            // BUG-AB-001 FIX: Ensure we have a valid viewport rect before showing
+            // If m_viewportRect is empty, get it from parent widget directly
+            if (m_viewportRect.isEmpty() && parentWidget()) {
+                m_viewportRect = parentWidget()->rect();
+            }
+            
+            // Also request fresh rect via signal (for future updates)
+            emit positionUpdateRequested();
+            
+            updatePosition(m_viewportRect);
+            
             if (m_animationEnabled) {
-        animateShow();
+                animateShow();
             } else {
                 show();
                 raise();
             }
         } else {
-            // Already visible (PagePanel is showing), just raise
+            // Already visible (PagePanel is showing), just update position and raise
+            updatePosition(m_viewportRect);
             raise();
         }
     } else {
@@ -116,11 +127,20 @@ void ActionBarContainer::hideActionBar()
 
 void ActionBarContainer::updatePosition(const QRect& viewportRect)
 {
-    m_viewportRect = viewportRect;
+    // BUG-AB-001 FIX: Only update m_viewportRect if the passed rect is valid
+    // This prevents overwriting a good rect with an empty one
+    if (!viewportRect.isEmpty()) {
+        m_viewportRect = viewportRect;
+    } else if (m_viewportRect.isEmpty() && parentWidget()) {
+        // Fallback: get rect from parent widget
+        m_viewportRect = parentWidget()->rect();
+    }
     
     // Count visible bars
+    // BUG-AB-001 FIX: Don't use isVisible() because it returns false if container is hidden.
+    // Instead, check if we INTEND to show the bar.
     bool pagePanelShown = m_pagePanelBar && m_pagePanelVisible;
-    bool contextBarShown = m_currentActionBar && m_currentActionBar->isVisible();
+    bool contextBarShown = m_currentActionBar != nullptr;
     
     if (!pagePanelShown && !contextBarShown) {
         return;
@@ -128,6 +148,11 @@ void ActionBarContainer::updatePosition(const QRect& viewportRect)
     
     // Don't update position while animating
     if (m_isAnimating) {
+        return;
+    }
+    
+    // If still no valid rect, can't position
+    if (m_viewportRect.isEmpty()) {
         return;
     }
     
@@ -249,8 +274,9 @@ void ActionBarContainer::setPagePanelVisible(bool visible)
     updateSize();
     updatePosition(m_viewportRect);
     
-    // Show container if at least one bar is visible
-    if (m_pagePanelVisible || (m_currentActionBar && m_currentActionBar->isVisible())) {
+    // Show container if at least one bar should be visible
+    // BUG-AB-001 FIX: Use m_currentActionBar != nullptr instead of isVisible()
+    if (m_pagePanelVisible || m_currentActionBar) {
         show();
         raise();
     } else if (!m_pagePanelVisible && !m_currentActionBar) {
@@ -391,8 +417,10 @@ void ActionBarContainer::updateVisibility()
 void ActionBarContainer::updateSize()
 {
     // Count visible bars
+    // BUG-AB-001 FIX: Don't use isVisible() because it returns false if container is hidden.
+    // Instead, check if we INTEND to show the bar (m_currentActionBar is set means we want to show it).
     bool pagePanelShown = m_pagePanelBar && m_pagePanelVisible;
-    bool contextBarShown = m_currentActionBar && m_currentActionBar->isVisible();
+    bool contextBarShown = m_currentActionBar != nullptr;
     
     if (!pagePanelShown && !contextBarShown) {
         setFixedSize(0, 0);
@@ -425,7 +453,23 @@ void ActionBarContainer::updateSize()
 
 void ActionBarContainer::animateShow()
 {
-    if (!m_animationEnabled || !m_currentActionBar) {
+    // Check if we have anything to show
+    bool hasContextBar = m_currentActionBar != nullptr;
+    bool hasPagePanel = m_pagePanelBar && m_pagePanelVisible;
+    
+    if (!m_animationEnabled || (!hasContextBar && !hasPagePanel)) {
+        show();
+        raise();
+        return;
+    }
+    
+    // BUG-AB-001 FIX: If viewport rect is empty, try to get it from parent widget
+    if (m_viewportRect.isEmpty() && parentWidget()) {
+        m_viewportRect = parentWidget()->rect();
+    }
+    
+    // If still empty (no parent), skip animation and just show
+    if (m_viewportRect.isEmpty()) {
         show();
         raise();
         return;
@@ -438,13 +482,30 @@ void ActionBarContainer::animateShow()
         m_animation = nullptr;
     }
     
-    // Calculate positions
-    int actionBarWidth = m_currentActionBar->sizeHint().width();
-    int actionBarHeight = m_currentActionBar->sizeHint().height();
+    // Calculate total dimensions (same logic as updatePosition/updateSize)
+    int pagePanelWidth = hasPagePanel ? m_pagePanelBar->sizeHint().width() : 0;
+    int pagePanelHeight = hasPagePanel ? m_pagePanelBar->sizeHint().height() : 0;
+    int contextBarWidth = hasContextBar ? m_currentActionBar->sizeHint().width() : 0;
+    int contextBarHeight = hasContextBar ? m_currentActionBar->sizeHint().height() : 0;
+    
+    int totalWidth;
+    int maxBarHeight;
+    
+    if (hasPagePanel && hasContextBar) {
+        // 2-column layout
+        totalWidth = pagePanelWidth + COLUMN_GAP + contextBarWidth;
+        maxBarHeight = qMax(pagePanelHeight, contextBarHeight);
+    } else if (hasPagePanel) {
+        totalWidth = pagePanelWidth;
+        maxBarHeight = pagePanelHeight;
+    } else {
+        totalWidth = contextBarWidth;
+        maxBarHeight = contextBarHeight;
+    }
     
     // Final position (24px from right edge, vertically centered)
-    int finalX = m_viewportRect.right() - RIGHT_OFFSET - actionBarWidth;
-    int finalY = m_viewportRect.top() + (m_viewportRect.height() - actionBarHeight) / 2;
+    int finalX = m_viewportRect.right() - RIGHT_OFFSET - totalWidth;
+    int finalY = m_viewportRect.top() + (m_viewportRect.height() - maxBarHeight) / 2;
     finalY = qMax(finalY, m_viewportRect.top() + RIGHT_OFFSET);
     
     // Start position: 50px to the right of final position
@@ -467,6 +528,8 @@ void ActionBarContainer::animateShow()
     
     connect(m_animation, &QPropertyAnimation::finished, this, [this]() {
         m_isAnimating = false;
+        // After animation finishes, update child positions
+        updatePosition(m_viewportRect);
         m_animation->deleteLater();
         m_animation = nullptr;
     });
