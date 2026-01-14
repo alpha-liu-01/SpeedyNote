@@ -2610,22 +2610,17 @@ void MainWindow::addNewEdgelessTab()
 
 void MainWindow::loadFolderDocument()
 {
-    // TEMPORARY: Load .snb bundle document from directory
-    // Uses directory selection because .snb is a folder, not a single file.
-    // 
-    // Phase O1.7.6: This now handles BOTH paged and edgeless bundles.
-    // The mode is detected from the manifest and handled appropriately.
+    // ==========================================================================
+    // UI ENTRY POINT: Shows directory dialog, then delegates to openFileInNewTab
+    // ==========================================================================
+    // This function ONLY handles the UI dialog. All actual document loading
+    // and setup is done by openFileInNewTab() - the single source of truth.
     //
-    // TODO: Replace with unified file handling after implementing:
-    // 1. Single-file packaging (.snb as zip/tar), OR
-    // 2. Unified file picker that handles both files and folders
+    // Uses directory selection because .snb is a folder, not a single file.
+    // TODO: Replace with unified file picker when .snb becomes a single file.
+    // ==========================================================================
     
-    if (!m_documentManager || !m_tabManager) {
-        qWarning() << "loadBundleDocument: DocumentManager or TabManager not initialized";
-        return;
-    }
-    
-    // Use directory dialog to select .snb bundle folder
+    // Show directory dialog to select .snb bundle folder
     QString bundlePath = QFileDialog::getExistingDirectory(
         this,
         tr("Open SpeedyNote Bundle (.snb folder)"),
@@ -2639,6 +2634,7 @@ void MainWindow::loadFolderDocument()
     }
     
     // Validate that it's a .snb bundle (has document.json)
+    // This validation is specific to directory-based bundles
     QString manifestPath = bundlePath + "/document.json";
     if (!QFile::exists(manifestPath)) {
         QMessageBox::critical(this, tr("Load Error"),
@@ -2647,61 +2643,8 @@ void MainWindow::loadFolderDocument()
         return;
     }
     
-    // Load the bundle via DocumentManager (handles both paged and edgeless)
-    Document* doc = m_documentManager->loadDocument(bundlePath);
-    if (!doc) {
-        QMessageBox::critical(this, tr("Load Error"),
-            tr("Failed to load document from:\n%1").arg(bundlePath));
-        return;
-    }
-    
-    // Get document name from folder if not set
-    if (doc->name.isEmpty()) {
-        QFileInfo folderInfo(bundlePath);
-        doc->name = folderInfo.baseName();
-        // Remove .snb suffix if present
-        if (doc->name.endsWith(".snb", Qt::CaseInsensitive)) {
-            doc->name.chop(4);
-        }
-    }
-    
-    // Create new tab with the loaded document
-    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
-    
-    if (tabIndex >= 0) {
-        // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
-        if (m_tabBar) {
-            m_tabBar->setCurrentIndex(tabIndex);
-        }
-        
-        // Mode-specific setup
-        bool isEdgeless = doc->isEdgeless();
-        
-        // Mode-specific initial positioning
-        if (isEdgeless) {
-            // Edgeless: Center on origin (use timer to ensure viewport is ready)
-            QTimer::singleShot(0, this, [this, tabIndex]() {
-                if (m_tabManager) {
-                    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
-                    if (viewport) {
-                        viewport->setPanOffset(QPointF(-100, -100));
-                    }
-                }
-            });
-        } else {
-            // Paged: Center content horizontally (same as loadDocument)
-            centerViewportContent(tabIndex);
-        }
-        
-        if (isEdgeless) {
-            qDebug() << "loadBundleDocument: Loaded edgeless canvas with" 
-                     << doc->tileIndexCount() << "tiles indexed (lazy load) from" << bundlePath;
-        } else {
-            qDebug() << "loadBundleDocument: Loaded paged document with" 
-                     << doc->pageCount() << "pages (lazy load) from" << bundlePath;
-        }
-    }    
-    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+    // Delegate to the single implementation
+    openFileInNewTab(bundlePath);
 }
 
 
@@ -4958,12 +4901,20 @@ void MainWindow::cleanupSharedResources()
 
 void MainWindow::openFileInNewTab(const QString &filePath)
 {
+    // ==========================================================================
+    // SINGLE SOURCE OF TRUTH for opening documents
+    // ==========================================================================
+    // This is THE implementation for opening any document type into a new tab.
+    // All entry points (Launcher, "+" menu, shortcuts, command line) should
+    // call this function to ensure consistent behavior.
+    //
+    // Handles: PDFs, .snb bundles, .snx/.json files
+    // Performs: Load → Create Tab → Switch → Position (mode-specific)
+    // ==========================================================================
+    
     if (filePath.isEmpty()) {
         return;
     }
-    
-    // Phase P.4: Route all file opening through DocumentManager
-    // DocumentManager::loadDocument() handles: PDFs, .snb bundles, .snx/.json files
     
     if (!m_documentManager || !m_tabManager) {
         qWarning() << "openFileInNewTab: DocumentManager or TabManager not initialized";
@@ -4977,6 +4928,8 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         return;
     }
     
+    // Step 1: Load document via DocumentManager
+    // DocumentManager handles all file types and manages document lifecycle
     Document* doc = m_documentManager->loadDocument(filePath);
     if (!doc) {
         QMessageBox::critical(this, tr("Open Error"),
@@ -4984,7 +4937,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         return;
     }
     
-    // Get document name from file/folder if not set
+    // Step 2: Set document name from file/folder if not already set
     if (doc->name.isEmpty()) {
         doc->name = fileInfo.baseName();
         // Remove .snb suffix if present
@@ -4993,19 +4946,45 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         }
     }
     
-    // Create new tab with the loaded document (TabManager creates viewport internally)
+    // Step 3: Create new tab (TabManager creates DocumentViewport internally)
     int tabIndex = m_tabManager->createTab(doc, doc->displayName());
     
-    if (tabIndex >= 0) {
-        // Switch to the new tab
-        if (m_tabBar) {
-            m_tabBar->setCurrentIndex(tabIndex);
-        }
-        
-        qDebug() << "MainWindow::openFileInNewTab: Opened" << filePath;
-    } else {
+    if (tabIndex < 0) {
         QMessageBox::critical(this, tr("Open Error"),
             tr("Failed to create tab for:\n%1").arg(filePath));
+        return;
+    }
+    
+    // Step 4: Switch to the new tab
+    if (m_tabBar) {
+        m_tabBar->setCurrentIndex(tabIndex);
+    }
+    
+    // Step 5: Mode-specific initial positioning
+    // Use QTimer::singleShot(0) to ensure viewport geometry is ready
+    bool isEdgeless = doc->isEdgeless();
+    if (isEdgeless) {
+        // Edgeless: Center on origin (offset by a small margin)
+        QTimer::singleShot(0, this, [this, tabIndex]() {
+            if (m_tabManager) {
+                DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+                if (viewport) {
+                    viewport->setPanOffset(QPointF(-100, -100));
+                }
+            }
+        });
+    } else {
+        // Paged: Center content horizontally within the viewport
+        centerViewportContent(tabIndex);
+    }
+    
+    // Step 6: Log success
+    if (isEdgeless) {
+        qDebug() << "openFileInNewTab: Opened edgeless canvas with" 
+                 << doc->tileIndexCount() << "tiles indexed from" << filePath;
+    } else {
+        qDebug() << "openFileInNewTab: Opened paged document with" 
+                 << doc->pageCount() << "pages from" << filePath;
     }
 }
 

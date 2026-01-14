@@ -905,6 +905,171 @@ void preserveWindowState(QWidget* source, bool isExisting);
 
 ---
 
+### Bug Fix: Document Not Centered When Opened from Launcher (CR-P.6)
+
+**Date:** 2026-01-14
+
+**Symptom:**
+Opening a notebook from the Launcher did not center the document, while opening the same document from the "+" button → Open Notebook... did center it correctly.
+
+**Root Cause Analysis:**
+
+Two separate code paths existed for opening documents:
+
+| Entry Point | Function Called | Positioning Logic |
+|-------------|-----------------|-------------------|
+| "+" Button → Open Notebook... | `loadFolderDocument()` | ✅ Had positioning |
+| Launcher → notebookSelected | `openFileInNewTab()` | ❌ Missing positioning |
+
+This was a **DRY (Don't Repeat Yourself) violation**. The two functions did the same thing, but `openFileInNewTab()` was an incomplete copy of `loadFolderDocument()`.
+
+**Code Flow Before Fix:**
+
+```
+loadFolderDocument():           openFileInNewTab():
+├─ Show dialog                  ├─ (no dialog)
+├─ Validate bundle              ├─ Check file exists
+├─ Load via DocumentManager     ├─ Load via DocumentManager
+├─ Set doc.name                 ├─ Set doc.name
+├─ Create tab                   ├─ Create tab
+├─ Switch to tab                ├─ Switch to tab
+├─ Position (edgeless/paged) ✅ ├─ (missing!) ❌
+└─ Debug logging                └─ Debug logging
+```
+
+**Architectural Fix:**
+
+Established `openFileInNewTab()` as the **single source of truth** for document opening:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Entry Points (UI only)                     │
+├─────────────────────────────────────────────────────────────┤
+│ loadFolderDocument()     │ Shows QFileDialog, validates,    │
+│                          │ then calls openFileInNewTab()     │
+├──────────────────────────┼──────────────────────────────────┤
+│ Launcher::notebookSelected│ Has path already,               │
+│                          │ calls openFileInNewTab() directly │
+├──────────────────────────┼──────────────────────────────────┤
+│ Ctrl+Shift+L shortcut    │ Calls loadFolderDocument()       │
+├──────────────────────────┼──────────────────────────────────┤
+│ Command line argument    │ Calls openFileInNewTab() directly │
+├──────────────────────────┼──────────────────────────────────┤
+│ Single-instance IPC      │ Calls openFileInNewTab() directly │
+└──────────────────────────┴──────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│              openFileInNewTab(path)                          │
+│              (THE single implementation)                     │
+├─────────────────────────────────────────────────────────────┤
+│ Step 1: Validate file/folder exists                          │
+│ Step 2: Load document via DocumentManager                    │
+│ Step 3: Set document name from path if empty                 │
+│ Step 4: Create tab via TabManager                            │
+│ Step 5: Switch to new tab                                    │
+│ Step 6: Mode-specific positioning:                           │
+│         - Edgeless: setPanOffset(QPointF(-100, -100))        │
+│         - Paged: centerViewportContent(tabIndex)             │
+│ Step 7: Log success with mode-specific details               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Changes Made:**
+
+1. **`MainWindow::openFileInNewTab()` (lines ~4959-5042):**
+   - Added mode-specific positioning logic (previously missing)
+   - Edgeless: `viewport->setPanOffset(QPointF(-100, -100))` via `QTimer::singleShot(0)`
+   - Paged: `centerViewportContent(tabIndex)`
+   - Added mode-specific debug logging
+   - Added comprehensive documentation comments
+
+2. **`MainWindow::loadFolderDocument()` (lines ~2611-2647):**
+   - Simplified to ONLY handle the directory dialog UI
+   - Removed duplicate document loading, tab creation, and positioning logic
+   - Now validates the bundle (checks for document.json)
+   - Delegates to `openFileInNewTab(bundlePath)` for all actual work
+
+**Lines Changed:**
+- `openFileInNewTab()`: Expanded from 52 to 84 lines (+32)
+- `loadFolderDocument()`: Reduced from 95 to 37 lines (-58)
+- Net change: -26 lines (removed duplication)
+
+**Why `QTimer::singleShot(0)` for Edgeless Positioning:**
+The viewport needs its geometry to be fully initialized before `setPanOffset()` can work correctly. Posting to the event loop with `QTimer::singleShot(0)` ensures Qt has processed all pending layout events before attempting to position the view.
+
+---
+
+### Bug Fix: Rename Not Updating Timeline Display (CR-P.7)
+
+**Date:** 2026-01-14
+
+**Symptom:**
+When renaming a notebook via right-click context menu on the Launcher Timeline, the rename succeeded on disk but the Timeline continued showing the old name.
+
+**Root Cause:**
+
+The rename flow was:
+1. Rename folder on disk: `OldName.snb` → `NewName.snb` ✅
+2. `lib->removeFromRecent(oldPath)` ✅
+3. `lib->addToRecent(newPath)` ✅
+4. `addToRecent()` reads `document.json` from the new path
+5. **But `document.json` still contained the old name** in its `name` field ❌
+6. `NotebookInfo::displayName()` prioritizes the `name` field over the folder name
+7. Result: Old name displayed despite folder being renamed
+
+**The Data Flow:**
+
+```
+document.json:                NotebookInfo:             displayName():
+┌─────────────────┐           ┌─────────────┐           ┌─────────────────┐
+│ "name": "Old"   │  ──────>  │ name="Old"  │  ──────>  │ returns "Old"   │
+└─────────────────┘           │ path="New"  │           │ (ignores path)  │
+                              └─────────────┘           └─────────────────┘
+```
+
+**Fix Applied:**
+
+In `Launcher::renameNotebook()`, after renaming the folder, also update `document.json` with the new name:
+
+```cpp
+// After successful folder rename...
+
+// Update document.json with the new name
+QString manifestPath = newPath + "/document.json";
+QFile manifestFile(manifestPath);
+if (manifestFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    QByteArray data = manifestFile.readAll();
+    manifestFile.close();
+    
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    QJsonObject obj = doc.object();
+    obj["name"] = newName;  // Update the name field
+    doc.setObject(obj);
+    
+    if (manifestFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        manifestFile.write(doc.toJson(QJsonDocument::Indented));
+        manifestFile.close();
+    }
+}
+
+// Then update library...
+lib->removeFromRecent(bundlePath);
+lib->addToRecent(newPath);  // Now reads the correct name from document.json
+```
+
+**Files Changed:**
+- `source/ui/launcher/Launcher.cpp`:
+  - Added JSON includes (`QJsonDocument`, `QJsonObject`, `QJsonParseError`)
+  - Extended `renameNotebook()` to update `document.json` before updating library
+
+**Why This Approach:**
+- Keeps `document.json` and folder name in sync
+- Persists the rename so it works correctly even after app restart
+- `addToRecent()` continues to work unchanged (single source of truth for reading metadata)
+
+---
+
 ## Phase P.5: File Manager Integration (Optional)
 
 Low priority, can be done later.

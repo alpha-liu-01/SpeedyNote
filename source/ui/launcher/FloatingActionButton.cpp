@@ -54,8 +54,8 @@ void FloatingActionButton::setupUi()
     connect(m_mainButton, &QPushButton::clicked, this, &FloatingActionButton::toggle);
     
     // Create action buttons (bottom to top order when expanded)
-    m_edgelessBtn = createActionButton("edgeless", tr("New Edgeless Canvas"));
-    m_pagedBtn = createActionButton("paged", tr("New Paged Notebook"));
+    m_edgelessBtn = createActionButton("fullscreen", tr("New Edgeless Canvas"));
+    m_pagedBtn = createActionButton("bookmark", tr("New Paged Notebook"));
     m_pdfBtn = createActionButton("pdf", tr("Open PDF for Annotation"));
     m_openBtn = createActionButton("folder", tr("Open Notebook (.snb)"));
     
@@ -255,8 +255,8 @@ void FloatingActionButton::setDarkMode(bool dark)
             
             QString iconName;
             switch (i) {
-                case 0: iconName = "edgeless"; break;
-                case 1: iconName = "paged"; break;
+                case 0: iconName = "fullscreen"; break;
+                case 1: iconName = "bookmark"; break;
                 case 2: iconName = "pdf"; break;
                 case 3: iconName = "folder"; break;
             }

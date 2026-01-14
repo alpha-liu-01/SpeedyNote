@@ -13,6 +13,7 @@
 #include <QPainter>
 #include <QKeyEvent>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QGraphicsOpacityEffect>
 #include <QFile>
 #include <QApplication>
@@ -28,6 +29,9 @@
 #include <QProcess>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 
 Launcher::Launcher(QWidget* parent)
     : QMainWindow(parent)
@@ -110,7 +114,7 @@ void Launcher::setupNavigation()
     
     // Return button (only visible if MainWindow exists)
     m_returnBtn = new LauncherNavButton(m_navSidebar);
-    m_returnBtn->setIconName("back");  // TODO: Replace with actual icon name
+    m_returnBtn->setIconName("recent");  // TODO: Replace with actual icon name
     m_returnBtn->setText(tr("Return"));
     m_returnBtn->setCheckable(false);
     navLayout->addWidget(m_returnBtn);
@@ -128,7 +132,7 @@ void Launcher::setupNavigation()
     
     // Timeline button
     m_timelineBtn = new LauncherNavButton(m_navSidebar);
-    m_timelineBtn->setIconName("timeline");  // TODO: Replace with actual icon name
+    m_timelineBtn->setIconName("layer_uparrow");  // TODO: Replace with actual icon name
     m_timelineBtn->setText(tr("Timeline"));
     m_timelineBtn->setCheckable(true);
     navLayout->addWidget(m_timelineBtn);
@@ -152,6 +156,22 @@ void Launcher::setupNavigation()
     
     // Connect navigation buttons
     connect(m_returnBtn, &LauncherNavButton::clicked, this, [this]() {
+        // Find and show the existing MainWindow before hiding the Launcher
+        MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+        if (mainWindow) {
+            // Transfer window geometry for seamless transition
+            mainWindow->move(pos());
+            mainWindow->resize(size());
+            if (isMaximized()) {
+                mainWindow->showMaximized();
+            } else if (isFullScreen()) {
+                mainWindow->showFullScreen();
+            } else {
+                mainWindow->showNormal();
+            }
+            mainWindow->raise();
+            mainWindow->activateWindow();
+        }
         hideWithAnimation();
     });
     
@@ -387,6 +407,9 @@ void Launcher::setNavigationCompact(bool compact)
 
 void Launcher::showWithAnimation()
 {
+    // Note: Return button visibility is updated in showEvent() which is
+    // called when show() is invoked below
+    
     m_fadeOpacity = 0.0;
     show();
     
@@ -429,6 +452,19 @@ void Launcher::resizeEvent(QResizeEvent* event)
     // Reposition FAB in bottom-right corner
     if (m_fab) {
         m_fab->positionInParent();
+    }
+}
+
+void Launcher::showEvent(QShowEvent* event)
+{
+    QMainWindow::showEvent(event);
+    
+    // Update Return button visibility based on whether MainWindow exists
+    // This must be checked each time the Launcher is shown because MainWindow
+    // may have been created/destroyed since the Launcher was last visible
+    bool hasMainWindow = (MainWindow::findExistingMainWindow() != nullptr);
+    if (m_returnBtn) {
+        m_returnBtn->setVisible(hasMainWindow);
     }
 }
 
@@ -696,6 +732,30 @@ void Launcher::renameNotebook(const QString& bundlePath)
     // Rename the directory
     QDir bundleDir(bundlePath);
     if (bundleDir.rename(bundlePath, newPath)) {
+        // Update document.json with the new name
+        // This is necessary because NotebookLibrary reads the name from document.json,
+        // and displayName() prioritizes the JSON name over the folder name.
+        QString manifestPath = newPath + "/document.json";
+        QFile manifestFile(manifestPath);
+        if (manifestFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QByteArray data = manifestFile.readAll();
+            manifestFile.close();
+            
+            QJsonParseError parseError;
+            QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+            if (parseError.error == QJsonParseError::NoError) {
+                QJsonObject obj = doc.object();
+                obj["name"] = newName;  // Update the name field
+                doc.setObject(obj);
+                
+                // Write back
+                if (manifestFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    manifestFile.write(doc.toJson(QJsonDocument::Indented));
+                    manifestFile.close();
+                }
+            }
+        }
+        
         // Update library
         NotebookLibrary* lib = NotebookLibrary::instance();
         lib->removeFromRecent(bundlePath);
