@@ -355,6 +355,16 @@ void PagePanel::onItemClicked(const QModelIndex& index)
         return;
     }
     
+    // BUG-UI-002 FIX: Ignore clicks when QScroller is actively scrolling
+    // This prevents touch scroll gestures from being detected as clicks
+    QScroller* scroller = QScroller::scroller(m_listView->viewport());
+    if (scroller) {
+        QScroller::State state = scroller->state();
+        if (state == QScroller::Dragging || state == QScroller::Scrolling) {
+            return;  // Ignore click during scroll
+        }
+    }
+    
     int pageIndex = index.data(PageThumbnailModel::PageIndexRole).toInt();
     emit pageClicked(pageIndex);
 }

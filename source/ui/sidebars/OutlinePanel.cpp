@@ -211,6 +211,16 @@ void OutlinePanel::onItemClicked(QTreeWidgetItem* item, int column)
     if (!item) {
         return;
     }
+    
+    // BUG-UI-002 FIX: Ignore clicks when QScroller is actively scrolling
+    // This prevents touch scroll gestures from being detected as clicks
+    QScroller* scroller = QScroller::scroller(m_tree->viewport());
+    if (scroller) {
+        QScroller::State state = scroller->state();
+        if (state == QScroller::Dragging || state == QScroller::Scrolling) {
+            return;  // Ignore click during scroll
+        }
+    }
 
     int pageIndex = item->data(0, PageRole).toInt();
     if (pageIndex < 0) {

@@ -263,6 +263,39 @@ When maximizing the window, subtoolbars and action bars (especially PagePanelAct
 
 ---
 
+#### BUG-UI-002: Touch scroll in sidebar panels triggers unintended page navigation
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When scrolling the PagePanel or OutlinePanel with touch, the scroll gesture was also being detected as a tap/click on an item, causing unintended page navigation while trying to scroll.
+
+**Root Cause:** 
+Qt's `QScroller::TouchGesture` enables kinetic scrolling for touch, but the `clicked` signal is still emitted when the touch ends on an item, even if the user was scrolling. The click handler didn't distinguish between a genuine tap and a scroll-release.
+
+**Fix:**
+In both `PagePanel::onItemClicked()` and `OutlinePanel::onItemClicked()`, check the QScroller's state before processing the click:
+- If scroller state is `Dragging` or `Scrolling` → ignore the click
+- If scroller state is `Inactive` or `Pressed` → process the click normally
+
+```cpp
+QScroller* scroller = QScroller::scroller(viewport);
+if (scroller) {
+    QScroller::State state = scroller->state();
+    if (state == QScroller::Dragging || state == QScroller::Scrolling) {
+        return;  // Ignore click during scroll
+    }
+}
+```
+
+**Files Modified:**
+- `source/ui/sidebars/PagePanel.cpp` (onItemClicked)
+- `source/ui/sidebars/OutlinePanel.cpp` (onItemClicked)
+
+**Verified:** [ ] Touch scroll doesn't trigger page navigation
+**Verified:** [ ] Deliberate tap still works for page selection
+
+---
+
 #### BUG-TCH-001: Touch gesture mode button fails to switch modes
 **Priority:** 🟠 P1 | **Status:** ✅ FIXED
 
@@ -320,8 +353,8 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
-| UI/UX | 0 | 0 | 1 | 1 |
-| **TOTAL** | **0** | **0** | **3** | **3** |
+| UI/UX | 0 | 0 | 2 | 2 |
+| **TOTAL** | **0** | **0** | **4** | **4** |
 
 ---
 
