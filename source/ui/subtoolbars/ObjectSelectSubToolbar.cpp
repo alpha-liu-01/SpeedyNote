@@ -234,33 +234,25 @@ void ObjectSelectSubToolbar::refreshFromSettings()
 
 void ObjectSelectSubToolbar::restoreTabState(int tabIndex)
 {
-    if (!m_tabStates.contains(tabIndex) || !m_tabStates[tabIndex].initialized) {
-        // No saved state for this tab - use current (global) values
-        return;
-    }
-    
-    const TabState& state = m_tabStates[tabIndex];
-    
-    // Restore modes
-    m_insertMode = state.insertMode;
-    m_actionMode = state.actionMode;
-    
-    m_insertModeToggle->setCurrentMode(static_cast<int>(m_insertMode));
-    m_actionModeToggle->setCurrentMode(static_cast<int>(m_actionMode));
+    // BUG-STB-002 FIX: Do NOT restore insert/action modes here.
+    // The viewport is the source of truth for object modes (each viewport
+    // stores its own mode). The subtoolbar is synced FROM the viewport
+    // via setInsertModeState()/setActionModeState() in connectViewportScrollSignals().
+    // Restoring modes here would conflict with the viewport's actual state.
+    Q_UNUSED(tabIndex);
 }
 
 void ObjectSelectSubToolbar::saveTabState(int tabIndex)
 {
-    TabState& state = m_tabStates[tabIndex];
-    
-    state.insertMode = m_insertMode;
-    state.actionMode = m_actionMode;
-    state.initialized = true;
+    // BUG-STB-002 FIX: Do NOT save insert/action modes here.
+    // The viewport stores modes per-document, not the subtoolbar.
+    Q_UNUSED(tabIndex);
 }
 
 void ObjectSelectSubToolbar::clearTabState(int tabIndex)
 {
-    m_tabStates.remove(tabIndex);
+    // BUG-STB-002 FIX: No per-tab state to clear (modes come from viewport)
+    Q_UNUSED(tabIndex);
 }
 
 void ObjectSelectSubToolbar::updateSlotStates(const LinkSlotState states[3])

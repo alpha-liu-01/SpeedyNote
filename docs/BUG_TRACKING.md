@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026 (Fixed subtoolbar color presets not persisting after restart)
+**Last Updated:** Jan 14, 2026 (Fixed ObjectSelect mode mismatch when switching tabs)
 
 ---
 
@@ -463,6 +463,58 @@ This ensures that `QSettings()` (default constructor) now uses the same settings
 
 ---
 
+#### BUG-STB-002: ObjectSelect mode toggle mismatch when switching tabs
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When switching between tabs with ObjectSelect tool active, the insert mode and action mode toggle buttons would show incorrect state. The visual icon wouldn't match the actual mode being used, causing confusion.
+
+**Steps to Reproduce:**
+1. Open Tab 1, select ObjectSelect tool, set Insert Mode to "Link"
+2. Open Tab 2, select ObjectSelect tool (defaults to "Image")
+3. Switch back to Tab 1
+4. Toggle button shows "Image" but viewport is in "Link" mode (mismatch)
+
+**Expected:** Toggle buttons should reflect the current viewport's actual mode
+**Actual:** Toggle buttons showed stale state from per-tab subtoolbar storage
+
+**Root Cause:** 
+Conflicting sources of truth for object modes:
+
+| Step | Action | Result |
+|------|--------|--------|
+| 1 | Tab switch triggers `connectViewportScrollSignals()` | Syncs mode FROM viewport TO subtoolbar ✅ |
+| 2 | Then `restoreTabState()` is called | OVERWRITES subtoolbar with saved tab state ❌ |
+| 3 | Then `applyAllSubToolbarValuesToViewport()` | Pushes wrong state TO viewport ❌ |
+
+The viewport stores its own `m_objectInsertMode` and `m_objectActionMode` (per-document state). But `ObjectSelectSubToolbar::restoreTabState()` was saving/restoring modes as per-tab subtoolbar state, creating a conflict.
+
+**Fix:**
+Removed mode save/restore from `ObjectSelectSubToolbar`. The viewport is now the sole source of truth for object modes:
+
+```cpp
+void ObjectSelectSubToolbar::restoreTabState(int tabIndex)
+{
+    // BUG-STB-002 FIX: Do NOT restore modes here.
+    // Viewport is source of truth, synced via setInsertModeState()/setActionModeState()
+    Q_UNUSED(tabIndex);
+}
+```
+
+The subtoolbar now only receives mode updates from:
+- `setInsertModeState()` / `setActionModeState()` - called when tab switches
+- Keyboard shortcuts (Ctrl+< / Ctrl+>) via viewport signals
+
+**Files Modified:**
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.cpp` (removed mode save/restore)
+- `source/ui/subtoolbars/ObjectSelectSubToolbar.h` (removed TabState struct)
+
+**Verified:** [ ] Switching tabs correctly updates mode toggles
+**Verified:** [ ] Mode changes via toggle button work correctly
+**Verified:** [ ] Mode changes via keyboard shortcuts sync to toggle
+
+---
+
 ### Action Bar (AB)
 
 ---
@@ -877,7 +929,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | File I/O | 0 | 0 | 0 | 0 |
 | Tabs | 0 | 0 | 1 | 1 |
 | Toolbar | 0 | 0 | 0 | 0 |
-| Subtoolbar | 0 | 0 | 1 | 1 |
+| Subtoolbar | 0 | 0 | 2 | 2 |
 | Action Bar | 0 | 0 | 1 | 1 |
 | Sidebar | 0 | 0 | 0 | 0 |
 | Touch | 0 | 0 | 1 | 1 |
@@ -885,7 +937,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **16** | **16** |
+| **TOTAL** | **0** | **0** | **17** | **17** |
 
 ---
 

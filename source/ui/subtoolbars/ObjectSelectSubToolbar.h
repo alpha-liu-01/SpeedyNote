@@ -176,13 +176,9 @@ private:
     DocumentViewport::ObjectInsertMode m_insertMode = DocumentViewport::ObjectInsertMode::Image;
     DocumentViewport::ObjectActionMode m_actionMode = DocumentViewport::ObjectActionMode::Select;
     
-    // Per-tab state storage
-    struct TabState {
-        DocumentViewport::ObjectInsertMode insertMode;
-        DocumentViewport::ObjectActionMode actionMode;
-        bool initialized = false;
-    };
-    QHash<int, TabState> m_tabStates;
+    // BUG-STB-002 FIX: Removed per-tab state storage for modes.
+    // The viewport is the source of truth for insert/action modes.
+    // Subtoolbar syncs FROM viewport via setInsertModeState()/setActionModeState().
     
     // QSettings keys
     static const QString SETTINGS_GROUP;
