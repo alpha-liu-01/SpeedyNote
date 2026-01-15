@@ -1255,6 +1255,37 @@ The `bundle_format_version` integer is now the single source of truth for format
 
 ---
 
+### FEATURE-DOC-001: Restore last accessed page on document load ✅ FIXED
+
+**Date Identified:** 2026-01-15
+**Severity:** Low (Enhancement)
+**Category:** Miscellaneous
+
+**Symptom:** The `lastAccessedPage` field in the document manifest was always 0 for paged documents. The field was being serialized but never updated when saving, and never used to restore scroll position when loading.
+
+**Expected Behavior:**
+1. When saving a paged document, the current page index should be stored in `lastAccessedPage`
+2. When loading a paged document, the viewport should scroll to the `lastAccessedPage`
+
+**Root Cause:** The implementation was incomplete:
+1. **On save**: `doc->lastAccessedPage` was never updated from `viewport->currentPageIndex()`
+2. **On load**: `DocumentViewport::setDocument()` set `m_currentPageIndex` but a comment said "Will scroll to this page in a later task" - which was never implemented
+
+**Fix:**
+1. **MainWindow::saveDocument()**: Added `doc->lastAccessedPage = viewport->currentPageIndex()` before saving (for paged documents only)
+2. **Tab close handler**: Added same update before save operations
+3. **MainWindow::closeEvent()**: Added a new block at the start that updates `lastAccessedPage` for ALL paged documents before checking for unsaved changes. If the page changed, marks document as modified to trigger save prompt. This ensures position is saved even if user only navigated without editing.
+4. **DocumentViewport::setDocument()**: Added deferred `scrollToPage()` call using `QTimer::singleShot(0, ...)` to scroll to the restored page after the widget has correct dimensions
+
+**Files Modified:**
+- `source/MainWindow.cpp` - Update `lastAccessedPage` before save operations
+- `source/core/DocumentViewport.cpp` - Scroll to restored page on load
+- `source/core/Document.cpp` - Added debug logging for `toJson()`
+
+**Verified:** [ ] Open document, navigate to page N, save, close, reopen → jumps to page N
+
+---
+
 ## Statistics
 
 | Category | New | In Progress | Fixed | Total |
@@ -1277,8 +1308,8 @@ The `bundle_format_version` integer is now the single source of truth for format
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 1 | 1 |
 | UI/UX | 0 | 0 | 4 | 4 |
-| Miscellaneous | 0 | 0 | 4 | 4 |
-| **TOTAL** | **0** | **0** | **23** | **23** |
+| Miscellaneous | 0 | 0 | 5 | 5 |
+| **TOTAL** | **0** | **0** | **24** | **24** |
 
 ---
 

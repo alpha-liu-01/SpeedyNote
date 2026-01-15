@@ -186,7 +186,19 @@ void DocumentViewport::setDocument(Document* doc)
     if (m_document && m_document->lastAccessedPage > 0) {
         m_currentPageIndex = qMin(m_document->lastAccessedPage, 
                                    m_document->pageCount() - 1);
-        // Will scroll to this page in a later task
+        
+        // Defer scrollToPage to next event loop iteration
+        // This ensures the widget has correct dimensions before calculating scroll position
+        if (m_currentPageIndex > 0) {
+            QTimer::singleShot(0, this, [this, pageToRestore = m_currentPageIndex]() {
+                if (m_document && pageToRestore < m_document->pageCount()) {
+                    scrollToPage(pageToRestore);
+#ifdef SPEEDYNOTE_DEBUG
+                    qDebug() << "Restored last accessed page:" << pageToRestore;
+#endif
+                }
+            });
+        }
     }
     
     // Trigger repaint

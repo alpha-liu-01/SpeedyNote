@@ -1366,6 +1366,9 @@ QJsonObject Document::toJson() const
     
     // State
     obj["last_accessed_page"] = lastAccessedPage;
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "Document::toJson: lastAccessedPage =" << lastAccessedPage;
+#endif
     
     // Default background settings
     obj["default_background"] = defaultBackgroundToJson();

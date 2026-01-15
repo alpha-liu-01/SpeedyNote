@@ -351,6 +351,11 @@ MainWindow::MainWindow(QWidget *parent)
             }
             
             if (reply == QMessageBox::Save) {
+                // Update lastAccessedPage before saving (for restoring position on reload)
+                if (!doc->isEdgeless() && vp) {
+                    doc->lastAccessedPage = vp->currentPageIndex();
+                }
+                
                 // Check if document already has a permanent save path
                 QString existingPath = m_documentManager->documentPath(doc);
                 bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
@@ -2034,7 +2039,9 @@ void MainWindow::saveDocument()
     // - If new document: show Save As dialog
     
     if (!m_documentManager || !m_tabManager) {
-        qWarning() << "saveDocument: DocumentManager or TabManager not initialized";
+        #ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "saveDocument: DocumentManager or TabManager not initialized";
+        #endif
         return;
     }
 
@@ -2058,6 +2065,14 @@ void MainWindow::saveDocument()
     QString existingPath = m_documentManager->documentPath(doc);
     bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
             
+    // Update lastAccessedPage before saving (for restoring position on reload)
+    if (!doc->isEdgeless()) {
+        doc->lastAccessedPage = viewport->currentPageIndex();
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "saveDocument: Setting lastAccessedPage to" << doc->lastAccessedPage;
+#endif
+    }
+    
     if (!existingPath.isEmpty() && !isUsingTemp) {
         // ✅ Document was previously saved to permanent location - save in-place
         if (!m_documentManager->saveDocument(doc)) {
@@ -4713,6 +4728,29 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
 #endif
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+    // ========== UPDATE LAST ACCESSED PAGE FOR ALL DOCUMENTS ==========
+    // Before checking for unsaved changes, update lastAccessedPage for all paged documents
+    // This ensures the position is saved even if the document was saved earlier in the session
+    if (m_tabManager && m_documentManager) {
+        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+            Document* doc = m_tabManager->documentAt(i);
+            if (!doc || doc->isEdgeless()) continue;
+            
+            DocumentViewport* vp = m_tabManager->viewportAt(i);
+            if (vp) {
+                int currentPage = vp->currentPageIndex();
+                if (doc->lastAccessedPage != currentPage) {
+                    doc->lastAccessedPage = currentPage;
+                    // Mark as needing save for this metadata update
+                    doc->markModified();
+#ifdef SPEEDYNOTE_DEBUG
+                    qDebug() << "closeEvent: Updated lastAccessedPage to" << currentPage << "for" << doc->displayName();
+#endif
+                }
+            }
+        }
+    }
+    
     // ========== CHECK FOR UNSAVED DOCUMENTS ==========
     // Iterate through all tabs and prompt for unsaved documents
     if (m_tabManager && m_documentManager) {
@@ -4758,6 +4796,8 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                 }
                 
                 if (reply == QMessageBox::Save) {
+                    // Note: lastAccessedPage was already updated in the loop at the start of closeEvent()
+                    
                     // Check if document already has a permanent save path
                     QString existingPath = m_documentManager->documentPath(doc);
                     bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
