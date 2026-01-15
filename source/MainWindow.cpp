@@ -2471,25 +2471,6 @@ void MainWindow::forceUIRefresh() {
 // REMOVED MW7.3: loadPdf function removed - old PDF loading function
 
 
-            
-
-void MainWindow::switchTab(int index) {
-    // Phase C.1.5: Updated to use m_tabManager instead of m_tabWidget
-    // Many InkCanvas-specific features are stubbed for now
-    
-    if (!m_tabManager || !pageInput) {
-        return;
-    }
-
-    if (index >= 0 && index < m_tabManager->tabCount()) {
-        // QTabBar handles the tab switch internally via TabManager
-        
-        DocumentViewport *viewport = currentViewport();
-        if (viewport) {
-
-        }
-    }
-}
 
 
     
@@ -3884,7 +3865,6 @@ void MainWindow::updatePagePanelActionBarVisibility()
     if (!m_pagePanelActionBar || !m_actionBarContainer) {
         return;
     }
-    
     bool shouldShow = false;
     
     // Condition 1: Left sidebar must be visible

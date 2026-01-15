@@ -160,18 +160,17 @@ static void applySystemPalette(QApplication &app) {
 }
 
 int main(int argc, char *argv[]) {
-#ifdef _WIN32
-    // FreeConsole();  // Hide console safely on Windows
+    #ifdef _WIN32
 
+    #ifdef SPEEDYNOTE_DEBUG
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    #else
+        FreeConsole();  // Hide console safely on Windows
+    #endif
     
-    // DEBUG: Show console for trackpad gesture debugging
-
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
-    
-    
-#endif
+    #endif
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");

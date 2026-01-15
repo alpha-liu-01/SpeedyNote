@@ -304,7 +304,6 @@ private slots:
 
     void forceUIRefresh();
 
-    void switchTab(int index);
 
     void removeTabAt(int index);
     // void toggleThicknessSlider(); // Added function to toggle thickness slider

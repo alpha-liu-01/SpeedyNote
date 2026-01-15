@@ -576,6 +576,57 @@ Added `m_navigationBar->setFilename()` calls after all `setTabTitle()` updates:
 
 ---
 
+#### BUG-UI-005: Page Panel action bar not shown when switching back from edgeless tab
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When switching from a paged document tab to an edgeless document tab and back, the Page Panel action bar fails to reappear even though the Page Panel is visible and the document is paged.
+
+**Steps to Reproduce:**
+1. Open a paged document (Page Panel action bar shows correctly)
+2. Switch to an edgeless document tab (action bar hides, sidebar switches to Layers tab)
+3. Switch back to the paged document tab
+4. Page Panel shows, but action bar does NOT appear
+
+**Expected:** Action bar should reappear when switching back to paged document
+**Actual:** Action bar stays hidden
+
+**Root Cause:** 
+Race condition in `TabManager::onCurrentChanged()`. The `currentViewportChanged` signal was emitted BEFORE the `m_viewportStack` index was updated. When `updatePagePanelActionBarVisibility()` called `currentViewport()`, it returned the **old** viewport (edgeless document) instead of the new one (paged document).
+
+Signal connection order in constructor:
+```cpp
+// Connection 1: emits currentViewportChanged (runs first)
+connect(m_tabBar, &QTabBar::currentChanged, this, &TabManager::onCurrentChanged);
+// Connection 2: sets stack index (runs second - TOO LATE!)
+connect(m_tabBar, &QTabBar::currentChanged, m_viewportStack, &QStackedWidget::setCurrentIndex);
+```
+
+**Fix:**
+In `TabManager::onCurrentChanged()`, explicitly sync the viewport stack BEFORE emitting the signal:
+
+```cpp
+void TabManager::onCurrentChanged(int index)
+{
+    // CRITICAL: Sync viewport stack BEFORE emitting signal
+    if (m_viewportStack && index >= 0 && index < m_viewportStack->count()) {
+        m_viewportStack->setCurrentIndex(index);
+    }
+    
+    DocumentViewport* viewport = ...;
+    emit currentViewportChanged(viewport);
+}
+```
+
+Also removed the redundant second connection since `onCurrentChanged` now handles it.
+
+**Files Modified:**
+- `source/ui/TabManager.cpp`
+
+**Verified:** [x] Switching between paged and edgeless tabs correctly shows/hides action bar
+
+---
+
 ### Miscellaneous (MISC)
 
 #### BUG-MISC-001: Dead code returnToLauncher() shows placeholder message

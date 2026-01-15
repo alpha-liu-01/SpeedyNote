@@ -19,16 +19,12 @@ TabManager::TabManager(QTabBar* tabBar, QStackedWidget* viewportStack, QObject* 
 {
     if (m_tabBar) {
         // Connect tab bar signals
+        // Note: onCurrentChanged() now syncs m_viewportStack internally before emitting
+        // currentViewportChanged, so no separate connection needed for setCurrentIndex
         connect(m_tabBar, &QTabBar::currentChanged,
                 this, &TabManager::onCurrentChanged);
         connect(m_tabBar, &QTabBar::tabCloseRequested,
                 this, &TabManager::onTabCloseRequested);
-    }
-    
-    // Sync tab bar selection with viewport stack
-    if (m_tabBar && m_viewportStack) {
-        connect(m_tabBar, &QTabBar::currentChanged,
-                m_viewportStack, &QStackedWidget::setCurrentIndex);
     }
 }
 
@@ -232,6 +228,13 @@ QString TabManager::tabTitle(int index) const
 
 void TabManager::onCurrentChanged(int index)
 {
+    // CRITICAL: Sync viewport stack BEFORE emitting signal
+    // This ensures currentViewport() returns the correct viewport
+    // when handlers call it during signal processing
+    if (m_viewportStack && index >= 0 && index < m_viewportStack->count()) {
+        m_viewportStack->setCurrentIndex(index);
+    }
+    
     DocumentViewport* viewport = (index >= 0 && index < m_viewports.size()) 
                                   ? m_viewports.at(index) 
                                   : nullptr;
