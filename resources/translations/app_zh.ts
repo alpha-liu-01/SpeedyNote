@@ -1377,8 +1377,8 @@ Would you like to save it as a SpeedyNote Package (.spn) file before closing?</s
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="139"/>
-        <source>SpeedyNote 1.0.0 Alpha 2</source>
-        <translation type="unfinished">极疾记 1.0.0 先行版2</translation>
+        <source>SpeedyNote 1.0.0 Alpha 3</source>
+        <translation type="unfinished">极疾记 1.0.0 先行版 3</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="221"/>

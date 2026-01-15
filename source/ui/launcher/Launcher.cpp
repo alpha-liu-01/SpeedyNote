@@ -39,6 +39,7 @@ Launcher::Launcher(QWidget* parent)
 {
     setWindowTitle(tr("SpeedyNote"));
     setMinimumSize(800, 600);
+    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
     
     setupUi();
     setupConnections();

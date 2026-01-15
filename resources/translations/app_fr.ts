@@ -1531,7 +1531,7 @@ Error: %1</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="139"/>
-        <source>SpeedyNote 1.0.0 Alpha 2</source>
+        <source>SpeedyNote 1.0.0 Alpha 3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

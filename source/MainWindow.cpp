@@ -136,7 +136,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.0.0 Alpha 2"));
+    setWindowTitle(tr("SpeedyNote 1.0.0 Alpha 3"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
