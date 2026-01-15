@@ -1224,6 +1224,37 @@ This follows the same pattern used for `ObjectSelectSubToolbar` modes (BUG-STB-0
 
 ---
 
+### CLEANUP-MISC-003: Redundant format_version in document manifest ✅ FIXED
+
+**Date Identified:** 2026-01-15
+**Severity:** Low (Confusing/Legacy cruft)
+**Category:** Miscellaneous
+
+**Symptom:** The `document.json` manifest contained two version fields:
+- `bundle_format_version: 1` (integer)
+- `format_version: "2.0"` (string)
+
+This was confusing as they seemed redundant and had inconsistent values.
+
+**Root Cause:** `format_version` was a legacy field intended for the never-implemented `.snx` single-file format. When the `.snb` bundle format was implemented, a new `bundle_format_version` integer was added for forward compatibility checks. The old `format_version` string was left in for "backward compatibility" but served no purpose.
+
+**Fix:** Removed the `format_version` field entirely:
+1. Removed `formatVersion` member variable from `Document.h`
+2. Removed writing `format_version` to manifest in `toJson()`
+3. Old files with `format_version` are still loadable (the field is simply ignored)
+4. Updated `DocumentTests.h` to remove the obsolete test
+
+The `bundle_format_version` integer is now the single source of truth for format versioning.
+
+**Files Modified:**
+- `source/core/Document.h` - Removed `formatVersion` member
+- `source/core/Document.cpp` - Removed write/read of `format_version`
+- `source/core/DocumentTests.h` - Removed obsolete test
+
+**Verified:** [x] New documents only have `bundle_format_version` in manifest
+
+---
+
 ## Statistics
 
 | Category | New | In Progress | Fixed | Total |
@@ -1246,8 +1277,8 @@ This follows the same pattern used for `ObjectSelectSubToolbar` modes (BUG-STB-0
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 1 | 1 |
 | UI/UX | 0 | 0 | 4 | 4 |
-| Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **22** | **22** |
+| Miscellaneous | 0 | 0 | 4 | 4 |
+| **TOTAL** | **0** | **0** | **23** | **23** |
 
 ---
 

@@ -133,7 +133,7 @@ public:
     QString author;                     ///< Optional author field
     QDateTime created;                  ///< Creation timestamp
     QDateTime lastModified;             ///< Last modification timestamp
-    QString formatVersion = "2.0";      ///< File format version
+    // NOTE: formatVersion removed - use BUNDLE_FORMAT_VERSION constant instead
     
     // ===== Document Mode =====
     Mode mode = Mode::Paged;            ///< Layout mode

@@ -116,10 +116,7 @@ inline bool testDocumentCreation()
     {
         auto doc = Document::createNew("Defaults Test");
         
-        if (doc->formatVersion != "2.0") {
-            qDebug() << "FAIL: formatVersion should be 2.0, got:" << doc->formatVersion;
-            success = false;
-        }
+        // NOTE: formatVersion removed - use BUNDLE_FORMAT_VERSION constant instead
         
         if (doc->modified != false) {
             qDebug() << "FAIL: new document should not be modified";

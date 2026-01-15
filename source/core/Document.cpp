@@ -1345,9 +1345,6 @@ QJsonObject Document::toJson() const
     // Bundle format version (integer, for forward compatibility checks)
     obj["bundle_format_version"] = BUNDLE_FORMAT_VERSION;
     
-    // Legacy format version string (for backward compatibility with .snx files)
-    obj["format_version"] = formatVersion;
-    
     // Identity
     obj["notebook_id"] = id;
     obj["name"] = name;
@@ -1390,8 +1387,8 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
         doc->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     }
     
-    // Format version
-    doc->formatVersion = obj["format_version"].toString("1.0");
+    // NOTE: format_version is no longer read - use bundle_format_version instead
+    // Old files may have format_version but it's ignored for backward compatibility
     
     // Identity
     doc->name = obj["name"].toString();
