@@ -2,6 +2,7 @@
 #include "LauncherNavButton.h"
 #include "TimelineModel.h"
 #include "TimelineDelegate.h"
+#include "TimelineListView.h"
 #include "StarredView.h"
 #include "SearchView.h"
 #include "FloatingActionButton.h"
@@ -41,11 +42,10 @@ Launcher::Launcher(QWidget* parent)
     // Minimum size: 640x480 allows compact sidebar (60px) + content area (580px)
     // This supports screens as small as 1024x640 @ 125% DPI (= 820x512 logical)
     // with room for window chrome and taskbar
-    setMinimumSize(640, 480);
+    setMinimumSize(560, 480);
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
     
     setupUi();
-    setupConnections();
     applyStyle();
 }
 
@@ -208,14 +208,10 @@ void Launcher::setupTimeline()
     connect(NotebookLibrary::instance(), &NotebookLibrary::thumbnailUpdated,
             m_timelineDelegate, &TimelineDelegate::invalidateThumbnail);
     
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_timelineDelegate->setDarkMode(isDark);
+    m_timelineDelegate->setDarkMode(isDarkMode());
     
-    // Create list view
-    m_timelineList = new QListView(m_timelineView);
+    // Create list view (using custom TimelineListView for long-press support)
+    m_timelineList = new TimelineListView(m_timelineView);
     m_timelineList->setObjectName("TimelineList");
     m_timelineList->setModel(m_timelineModel);
     m_timelineList->setItemDelegate(m_timelineDelegate);
@@ -259,7 +255,7 @@ void Launcher::setupTimeline()
     connect(m_timelineList, &QListView::clicked,
             this, &Launcher::onTimelineItemClicked);
     
-    // Context menu for right-click / long-press
+    // Context menu for right-click
     m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_timelineList, &QListView::customContextMenuRequested,
             this, [this](const QPoint& pos) {
@@ -276,16 +272,27 @@ void Launcher::setupTimeline()
         }
     });
     
+    // Context menu for long-press (touch devices)
+    connect(m_timelineList, &TimelineListView::longPressed,
+            this, [this](const QModelIndex& index, const QPoint& globalPos) {
+        if (!index.isValid()) return;
+        
+        // Ignore section headers
+        bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
+        if (isHeader) return;
+        
+        QString bundlePath = index.data(TimelineModel::BundlePathRole).toString();
+        if (!bundlePath.isEmpty()) {
+            showNotebookContextMenu(bundlePath, globalPos);
+        }
+    });
+    
     layout->addWidget(m_timelineList);
 }
 
 void Launcher::setupStarred()
 {
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_starredView->setDarkMode(isDark);
+    m_starredView->setDarkMode(isDarkMode());
     
     // Connect signals
     connect(m_starredView, &StarredView::notebookClicked, this, [this](const QString& bundlePath) {
@@ -303,11 +310,7 @@ void Launcher::setupStarred()
 
 void Launcher::setupSearch()
 {
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_searchView->setDarkMode(isDark);
+    m_searchView->setDarkMode(isDarkMode());
     
     // Connect signals
     connect(m_searchView, &SearchView::notebookClicked, this, [this](const QString& bundlePath) {
@@ -324,11 +327,7 @@ void Launcher::setupFAB()
     // Create FAB on central widget so it overlays content
     m_fab = new FloatingActionButton(m_centralWidget);
     
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
-    m_fab->setDarkMode(isDark);
+    m_fab->setDarkMode(isDarkMode());
     
     // Position in bottom-right
     m_fab->positionInParent();
@@ -342,17 +341,17 @@ void Launcher::setupFAB()
     connect(m_fab, &FloatingActionButton::openNotebook, this, &Launcher::openNotebookRequested);
 }
 
-void Launcher::setupConnections()
+bool Launcher::isDarkMode() const
 {
-    // TODO P.3.7: Connect signals/slots
+    const QPalette& pal = QApplication::palette();
+    const QColor windowColor = pal.color(QPalette::Window);
+    // Luminance formula: 0.299*R + 0.587*G + 0.114*B
+    return (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
 }
 
 void Launcher::applyStyle()
 {
-    // Detect dark mode
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    bool isDark = (0.299 * windowColor.redF() + 0.587 * windowColor.greenF() + 0.114 * windowColor.blueF()) < 0.5;
+    bool isDark = isDarkMode();
     
     // Load appropriate stylesheet
     QString stylePath = isDark 
@@ -521,20 +520,18 @@ void Launcher::keyPressEvent(QKeyEvent* event)
 void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& globalPos)
 {
     NotebookLibrary* lib = NotebookLibrary::instance();
-    const NotebookInfo* info = nullptr;
     
-    // Find notebook info
+    // Find notebook info - copy the data we need since recentNotebooks() returns by value
+    // (taking address of elements in the returned copy would be a use-after-free bug)
+    bool isStarred = false;
     for (const NotebookInfo& nb : lib->recentNotebooks()) {
         if (nb.bundlePath == bundlePath) {
-            info = &nb;
+            isStarred = nb.isStarred;
             break;
         }
     }
     
     QMenu menu(this);
-    
-    // Star/Unstar action
-    bool isStarred = info && info->isStarred;
     QAction* starAction = menu.addAction(isStarred ? tr("★ Unstar") : tr("☆ Star"));
     connect(starAction, &QAction::triggered, this, [this, bundlePath]() {
         toggleNotebookStar(bundlePath);

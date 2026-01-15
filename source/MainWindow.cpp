@@ -136,7 +136,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.0.0 Alpha 3"));
+    setWindowTitle(tr("SpeedyNote 1.0.0 Preview 4"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -293,6 +293,12 @@ MainWindow::MainWindow(QWidget *parent)
                     m_pagePanel->setDocument(nullptr);
                 }
                 
+                // MEMORY FIX: Clear viewport's document pointer BEFORE deleting Document
+                // This triggers cleanup of PDF cache, undo stacks, and other document-related
+                // data structures while the document is still valid. Also prevents any
+                // dangling pointer access during viewport destruction.
+                vp->setDocument(nullptr);
+                
                 m_documentManager->closeDocument(doc);
             }
         }
@@ -320,9 +326,37 @@ MainWindow::MainWindow(QWidget *parent)
             return;
         }
         
+        // FEATURE-DOC-001: Update lastAccessedPage for paged documents
+        // This ensures the page position is saved even if no other edits were made
+        bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
+        bool pagePositionChanged = false;
+        
+        if (!doc->isEdgeless()) {
+            int currentPage = vp->currentPageIndex();
+            if (doc->lastAccessedPage != currentPage) {
+                doc->lastAccessedPage = currentPage;
+                pagePositionChanged = true;
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "tabCloseAttempted: lastAccessedPage changed to" << currentPage;
+#endif
+            }
+        }
+        
+        // FEATURE-DOC-001: Auto-save if only page position changed (no content changes)
+        // This is a silent save - no prompt needed for just navigation
+        if (pagePositionChanged && !isUsingTemp && !doc->modified) {
+            QString existingPath = m_documentManager->documentPath(doc);
+            if (!existingPath.isEmpty()) {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "tabCloseAttempted: Auto-saving to persist lastAccessedPage";
+#endif
+                m_documentManager->saveDocument(doc);
+                // Don't show error dialog - this is a best-effort save for position only
+            }
+        }
+        
         // Check if this document has unsaved changes
         bool needsSavePrompt = false;
-        bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
         
         if (doc->isEdgeless()) {
             // Edgeless: check if it has tiles and is in temp bundle
@@ -351,10 +385,7 @@ MainWindow::MainWindow(QWidget *parent)
             }
             
             if (reply == QMessageBox::Save) {
-                // Update lastAccessedPage before saving (for restoring position on reload)
-                if (!doc->isEdgeless() && vp) {
-                    doc->lastAccessedPage = vp->currentPageIndex();
-                }
+                // Note: lastAccessedPage was already updated above (before needsSavePrompt check)
                 
                 // Check if document already has a permanent save path
                 QString existingPath = m_documentManager->documentPath(doc);
@@ -2072,7 +2103,7 @@ void MainWindow::saveDocument()
         qDebug() << "saveDocument: Setting lastAccessedPage to" << doc->lastAccessedPage;
 #endif
     }
-    
+            
     if (!existingPath.isEmpty() && !isUsingTemp) {
         // ✅ Document was previously saved to permanent location - save in-place
         if (!m_documentManager->saveDocument(doc)) {
@@ -3133,7 +3164,7 @@ void MainWindow::setTouchGestureMode(TouchGestureMode mode) {
     // TG.6: Apply touch gesture mode to current DocumentViewport
     if (DocumentViewport* vp = currentViewport()) {
         vp->setTouchGestureMode(mode);
-    }
+        }
     
     // Sync toolbar button state (prevents button from being out of sync after settings load)
     if (m_toolbar) {
@@ -3820,27 +3851,27 @@ void MainWindow::setupPagePanelActionBar()
             m_pendingDeletePageIndex = -1;
             return;
         }
-        
-        // Actually delete the page
+                
+                // Actually delete the page
         int deleteIndex = m_pendingDeletePageIndex;
         if (doc->removePage(deleteIndex)) {
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Page" << deleteIndex << "permanently deleted";
 #endif
             
-            vp->notifyDocumentStructureChanged();
-            
-            // Navigate to appropriate page
+                    vp->notifyDocumentStructureChanged();
+                    
+                    // Navigate to appropriate page
             int newPage = qMin(deleteIndex, doc->pageCount() - 1);
-            vp->scrollToPage(newPage);
-            
-            // Update UI
-            if (m_pagePanel) {
-                m_pagePanel->onPageCountChanged();
-            }
-            m_pagePanelActionBar->setPageCount(doc->pageCount());
-            m_pagePanelActionBar->setCurrentPage(newPage);
-        } else {
+                    vp->scrollToPage(newPage);
+                    
+                    // Update UI
+                    if (m_pagePanel) {
+                        m_pagePanel->onPageCountChanged();
+                    }
+                    m_pagePanelActionBar->setPageCount(doc->pageCount());
+                    m_pagePanelActionBar->setCurrentPage(newPage);
+                } else {
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Delete failed for page" << deleteIndex;
 #endif
@@ -3855,7 +3886,7 @@ void MainWindow::setupPagePanelActionBar()
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Delete cancelled for page" << m_pendingDeletePageIndex;
 #endif
-            m_pendingDeletePageIndex = -1;
+        m_pendingDeletePageIndex = -1;
         }
     });
     

@@ -120,6 +120,49 @@ DocumentViewport::~DocumentViewport()
         delete watcher;
     }
     m_activePdfWatchers.clear();
+    
+    // ========== MEMORY FIX: Explicit cache cleanup ==========
+    // While these should be cleaned up automatically by member destructors,
+    // explicitly clearing them before destruction ensures:
+    // 1. Qt's implicit sharing is broken before any other cleanup
+    // 2. Large allocations are freed in a deterministic order
+    // 3. Any circular references are broken
+    
+    // Clear PDF cache (can be several MB for multi-page documents)
+    {
+        QMutexLocker locker(&m_pdfCacheMutex);
+        m_pdfCache.clear();
+        m_pdfCache.squeeze();  // Release excess capacity
+    }
+    
+    // Clear selection/drag snapshot caches (can be full viewport-sized pixmaps)
+    m_selectionBackgroundSnapshot = QPixmap();
+    m_objectDragBackgroundSnapshot = QPixmap();
+    m_dragObjectRenderedCache = QPixmap();
+    
+    // Clear stroke rendering caches
+    m_selectionStrokeCache = QPixmap();
+    m_lassoPathCache = QPixmap();
+    m_currentStrokeCache = QPixmap();
+    
+    // Clear text/link caches
+    m_textBoxCache.clear();
+    m_textBoxCache.squeeze();
+    m_linkCache.clear();
+    m_linkCache.squeeze();
+    
+    // Clear undo/redo stacks (can hold stroke data)
+    m_undoStacks.clear();
+    m_redoStacks.clear();
+    m_edgelessUndoStack.clear();
+    m_edgelessRedoStack.clear();
+    
+    // Clear page layout cache
+    m_pageYCache.clear();
+    m_pageYCache.squeeze();
+    
+    // Clear document pointer to prevent any dangling access
+    m_document = nullptr;
 }
 
 // ===== Document Management =====

@@ -410,6 +410,7 @@ set(UI_SOURCES
         source/ui/launcher/LauncherNavButton.cpp  # Phase P.3.2: Navigation button widget
         source/ui/launcher/TimelineModel.cpp      # Phase P.3.3: Timeline data model
         source/ui/launcher/TimelineDelegate.cpp   # Phase P.3.3: Timeline item delegate
+        source/ui/launcher/TimelineListView.cpp   # Phase P.3.3: Timeline list with long-press
         source/ui/launcher/NotebookCard.cpp       # Phase P.3.4: Notebook card widget
         source/ui/launcher/StarredView.cpp        # Phase P.3.5: Starred view with folders
         source/ui/launcher/SearchView.cpp         # Phase P.3.6: Search view

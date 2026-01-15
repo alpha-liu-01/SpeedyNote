@@ -3,7 +3,6 @@
 
 #include <QMainWindow>
 #include <QStackedWidget>
-#include <QListView>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QPropertyAnimation>
@@ -12,6 +11,7 @@
 class LauncherNavButton;
 class TimelineModel;
 class TimelineDelegate;
+class TimelineListView;
 class StarredView;
 class SearchView;
 class FloatingActionButton;
@@ -99,9 +99,9 @@ private:
     void setupStarred();
     void setupSearch();
     void setupFAB();
-    void setupConnections();
     void applyStyle();
     void updateNavigationState();
+    bool isDarkMode() const;
     void setNavigationCompact(bool compact);
     void onTimelineItemClicked(const QModelIndex& index);
     void showNotebookContextMenu(const QString& bundlePath, const QPoint& globalPos);
@@ -133,7 +133,7 @@ private:
     
     // Timeline view
     QWidget* m_timelineView = nullptr;
-    QListView* m_timelineList = nullptr;
+    TimelineListView* m_timelineList = nullptr;
     TimelineModel* m_timelineModel = nullptr;
     TimelineDelegate* m_timelineDelegate = nullptr;
     

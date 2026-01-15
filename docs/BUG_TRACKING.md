@@ -1273,16 +1273,21 @@ The `bundle_format_version` integer is now the single source of truth for format
 
 **Fix:**
 1. **MainWindow::saveDocument()**: Added `doc->lastAccessedPage = viewport->currentPageIndex()` before saving (for paged documents only)
-2. **Tab close handler**: Added same update before save operations
+2. **Tab close handler (`tabCloseAttempted`)**: 
+   - Updated `lastAccessedPage` BEFORE the save prompt check
+   - If only page position changed (no content edits) and document is already saved, auto-save silently without prompting the user
+   - If user confirms save in prompt, the updated `lastAccessedPage` is included
 3. **MainWindow::closeEvent()**: Added a new block at the start that updates `lastAccessedPage` for ALL paged documents before checking for unsaved changes. If the page changed, marks document as modified to trigger save prompt. This ensures position is saved even if user only navigated without editing.
 4. **DocumentViewport::setDocument()**: Added deferred `scrollToPage()` call using `QTimer::singleShot(0, ...)` to scroll to the restored page after the widget has correct dimensions
 
 **Files Modified:**
-- `source/MainWindow.cpp` - Update `lastAccessedPage` before save operations
+- `source/MainWindow.cpp` - Update `lastAccessedPage` before save operations (saveDocument, tab close, app close)
 - `source/core/DocumentViewport.cpp` - Scroll to restored page on load
 - `source/core/Document.cpp` - Added debug logging for `toJson()`
 
-**Verified:** [ ] Open document, navigate to page N, save, close, reopen → jumps to page N
+**Verified:** [x] Open document, navigate to page N, save, close, reopen → jumps to page N
+**Verified:** [x] Open document, navigate to page N, close tab (no edits), reopen → jumps to page N
+**Verified:** [ ] Close app with multiple tabs, reopen each → jumps to correct page
 
 ---
 
@@ -1314,6 +1319,47 @@ if (mode == Mode::Paged) {
 
 ---
 
+## BUG-MEM-001: Document Open/Close Memory Leak (~1.5MB per cycle)
+
+**Date Identified:** 2026-01-15
+**Date Fixed:** 2026-01-15
+**Severity:** Moderate (Memory Leak)
+**Category:** Performance
+
+**Symptom:** Opening and closing a document without any edits leaked approximately 1.5MB of memory per cycle. This was particularly problematic for users who frequently open documents for quick reference.
+
+**Root Cause:** The `DocumentViewport` destructor did not explicitly clear its large data structures before destruction. While C++ destructors automatically destroy member variables, Qt's implicit sharing and deferred cleanup could leave references alive:
+1. PDF cache entries (QPixmaps containing rendered PDF pages)
+2. Selection/drag snapshot caches
+3. Stroke rendering caches
+4. Text/link caches
+5. Undo/redo stacks
+
+Additionally, the document was deleted while the viewport still held a reference to it, preventing proper cleanup of document-related caches.
+
+**Fix:** 
+
+1. **Enhanced destructor cleanup** (`DocumentViewport::~DocumentViewport()`):
+   - Explicitly clear PDF cache with mutex protection
+   - Clear all snapshot/cache QPixmaps by assigning empty pixmaps
+   - Clear text/link caches and squeeze vectors
+   - Clear undo/redo stacks
+   - Set document pointer to nullptr
+
+2. **Improved close sequence** (`MainWindow` tab close handler):
+   - Call `vp->setDocument(nullptr)` BEFORE `closeDocument(doc)`
+   - This triggers cache cleanup while document is still valid
+   - Clears all document-related data before document deletion
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp` - Enhanced destructor with explicit cache cleanup
+- `source/MainWindow.cpp` - Clear viewport's document before deletion
+
+**Verified:** [ ] Memory usage stable after repeated open/close cycles
+**Verified:** [ ] No dangling pointer access during cleanup
+
+---
+
 ## Statistics
 
 | Category | New | In Progress | Fixed | Total |
@@ -1334,10 +1380,10 @@ if (mode == Mode::Paged) {
 | Sidebar | 0 | 0 | 0 | 0 |
 | Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
-| Performance | 0 | 0 | 1 | 1 |
+| Performance | 0 | 0 | 2 | 2 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 6 | 6 |
-| **TOTAL** | **0** | **0** | **25** | **25** |
+| **TOTAL** | **0** | **0** | **26** | **26** |
 
 ---
 
