@@ -39,6 +39,21 @@ public:
     void clearTabState(int tabIndex) override;
     
     /**
+     * @brief Sync shared state from QSettings (overrides SubToolbar::syncSharedState).
+     * 
+     * Reloads shared colors from QSettings to sync with Highlighter edits.
+     */
+    void syncSharedState() override;
+    
+    /**
+     * @brief Reload shared colors from QSettings.
+     * 
+     * Called when switching from Highlighter to Marker to sync shared color presets.
+     * This only reloads colors (not selection or thickness), preserving per-tab state.
+     */
+    void syncSharedColorsFromSettings();
+    
+    /**
      * @brief Emit the currently selected preset values.
      * 
      * Call this when connecting to a new viewport to sync its

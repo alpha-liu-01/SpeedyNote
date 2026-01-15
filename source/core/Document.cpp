@@ -789,6 +789,9 @@ bool Document::removePage(int index)
         // Remove metadata
         m_pageMetadata.erase(uuid);
         
+        // Remove PDF page index tracking
+        m_pagePdfIndex.erase(uuid);
+        
         // Track for deletion on next save
         m_deletedPages.insert(uuid);
         
@@ -2125,11 +2128,13 @@ bool Document::saveBundle(const QString& path)
                 
                 m_loadedPages[uuid] = std::move(page);
                 
-                // Only mark as dirty if page has user content
+                // Only mark as dirty if page has user content or bookmarks
                 // Pristine PDF pages don't need individual files
                 Page* loadedPage = m_loadedPages[uuid].get();
-                if (loadedPage->hasContent() || 
-                    loadedPage->backgroundType != Page::BackgroundType::PDF) {
+                bool isPristinePdfPage = (loadedPage->backgroundType == Page::BackgroundType::PDF)
+                                         && !loadedPage->hasContent()
+                                         && !loadedPage->isBookmarked;
+                if (!isPristinePdfPage) {
                     m_dirtyPages.insert(uuid);
                 }
             }
@@ -2301,14 +2306,25 @@ bool Document::saveBundle(const QString& path)
         // Save pages in memory
         for (const auto& [uuid, pagePtr] : m_loadedPages) {
             // Skip pristine PDF pages - they can be synthesized from manifest
-            // A page is "pristine" if it has PDF background and no user content
+            // A page is "pristine" if it has PDF background, no user content, and no bookmark
             bool isPristinePdfPage = (pagePtr->backgroundType == Page::BackgroundType::PDF) 
-                                     && !pagePtr->hasContent();
+                                     && !pagePtr->hasContent()
+                                     && !pagePtr->isBookmarked;
             if (isPristinePdfPage) {
                 // Ensure PDF page index is tracked for synthesis
                 if (m_pagePdfIndex.find(uuid) == m_pagePdfIndex.end()) {
                     m_pagePdfIndex[uuid] = pagePtr->pdfPageNumber;
                 }
+                
+                // Delete any stale file from when page had content
+                QString pagePath = path + "/pages/" + uuid + ".json";
+                if (QFile::exists(pagePath)) {
+                    QFile::remove(pagePath);
+#ifdef SPEEDYNOTE_DEBUG
+                    qDebug() << "Deleted stale file for pristine PDF page" << uuid;
+#endif
+                }
+                
                 continue;  // Don't save file - synthesize on load
             }
             

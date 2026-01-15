@@ -42,6 +42,21 @@ public:
     void setDarkMode(bool darkMode) override;
     
     /**
+     * @brief Sync shared state from QSettings (overrides SubToolbar::syncSharedState).
+     * 
+     * Reloads shared colors from QSettings to sync with Marker edits.
+     */
+    void syncSharedState() override;
+    
+    /**
+     * @brief Reload shared colors from QSettings.
+     * 
+     * Called when switching from Marker to Highlighter to sync shared color presets.
+     * This only reloads colors (not selection), preserving per-tab state.
+     */
+    void syncSharedColorsFromSettings();
+    
+    /**
      * @brief Set the auto-highlight toggle state from outside.
      * @param enabled The new state.
      * 
@@ -99,10 +114,11 @@ private:
     bool m_autoHighlightEnabled = false;
     
     // Per-tab state storage
+    // NOTE: autoHighlightEnabled is NOT stored here - DocumentViewport is the source of truth.
+    // The subtoolbar syncs its toggle state from the viewport via setAutoHighlightState().
     struct TabState {
         QColor colors[3];
         int selectedColorIndex;
-        bool autoHighlightEnabled;
         bool initialized = false;
     };
     QHash<int, TabState> m_tabStates;

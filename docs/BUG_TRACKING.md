@@ -1142,6 +1142,88 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 
 ---
 
+### BUG-STB-003: Highlighter color buttons don't affect highlighter color ✅ FIXED
+
+**Date Identified:** 2026-01-15
+**Severity:** High (Feature broken)
+**Category:** Subtoolbar
+
+**Symptom:** Clicking color preset buttons on the HighlighterSubToolbar had no effect on the highlighter color. The highlighter tool always used the default yellow color.
+
+**Root Cause:** The `HighlighterSubToolbar::highlighterColorChanged` signal was connected to `vp->setMarkerColor()` in MainWindow, but the Highlighter tool uses its own separate `m_highlighterColor` member variable in DocumentViewport. There was no `setHighlighterColor()` method.
+
+**Fix:**
+1. Added `setHighlighterColor(const QColor& color)` method to `DocumentViewport`
+2. Updated MainWindow to connect `highlighterColorChanged` to `setHighlighterColor()` instead of `setMarkerColor()`
+3. Updated `applyAllSubToolbarValuesToViewport()` to also apply highlighter color
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` - Added `setHighlighterColor()` and `highlighterColor()` methods
+- `source/core/DocumentViewport.cpp` - Implemented `setHighlighterColor()`
+- `source/MainWindow.cpp` - Fixed signal connection and `applyAllSubToolbarValuesToViewport()`
+
+**Verified:** [x] Clicking highlighter color buttons now changes the highlighter stroke color
+
+---
+
+### BUG-STB-004: Marker/Highlighter color presets not syncing when switching tools ✅ FIXED
+
+**Date Identified:** 2026-01-15
+**Severity:** Medium (Inconsistent UI)
+**Category:** Subtoolbar
+
+**Symptom:** When changing a color preset on the HighlighterSubToolbar and then switching to the Marker tool, the MarkerSubToolbar's color buttons still showed the old colors. The presets are designed to be shared, but the in-memory button colors weren't syncing.
+
+**Root Cause:** Both subtoolbars share the same QSettings keys for colors (`marker/color1-3`), but when one subtoolbar modifies a color and saves to QSettings, the other subtoolbar's in-memory ColorPresetButton values are not updated.
+
+**Fix:**
+1. Added `syncSharedState()` virtual method to `SubToolbar` base class (default empty implementation)
+2. Added `syncSharedColorsFromSettings()` method to both `MarkerSubToolbar` and `HighlighterSubToolbar` to reload shared colors from QSettings
+3. Override `syncSharedState()` in both subtoolbars to call `syncSharedColorsFromSettings()`
+4. Modified `SubToolbarContainer::showForTool()` to call `syncSharedState()` on the incoming subtoolbar
+
+**Files Modified:**
+- `source/ui/subtoolbars/SubToolbar.h` - Added virtual `syncSharedState()` method
+- `source/ui/subtoolbars/MarkerSubToolbar.h` - Added method declarations
+- `source/ui/subtoolbars/MarkerSubToolbar.cpp` - Implemented methods
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` - Added method declarations
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` - Implemented methods
+- `source/ui/subtoolbars/SubToolbarContainer.cpp` - Call `syncSharedState()` in `showForTool()`
+
+**Verified:** [x] Switching between Marker and Highlighter now shows synchronized color presets
+
+---
+
+### BUG-STB-005: Auto-highlight toggle state inconsistent when switching tabs ✅ FIXED
+
+**Date Identified:** 2026-01-15
+**Severity:** Medium (Confusing UX)
+**Category:** Subtoolbar
+
+**Symptom:** The auto-highlight toggle button on the HighlighterSubToolbar would randomly flip states when switching between tabs. If tab 1 had it ON and tab 2 had it OFF, switching back and forth would cause the states to swap or change unpredictably.
+
+**Root Cause:** **Duplicate state storage** - the auto-highlight state was stored in two places:
+1. `DocumentViewport::m_autoHighlightEnabled` - the TRUE per-viewport state (source of truth)
+2. `HighlighterSubToolbar::TabState::autoHighlightEnabled` - a STALE duplicate
+
+When switching tabs, two conflicting operations occurred:
+1. `connectViewportScrollSignals()` synced the subtoolbar to the viewport's CORRECT state
+2. `onTabChanged()` → `restoreTabState()` OVERWROTE with the subtoolbar's STALE duplicate state
+
+Since the handlers ran in sequence, the subtoolbar's stale state won, causing incorrect toggle states.
+
+**Fix:** Removed `autoHighlightEnabled` from `HighlighterSubToolbar::TabState`. The viewport is now the single source of truth, and the subtoolbar only syncs from the viewport via `setAutoHighlightState()`.
+
+This follows the same pattern used for `ObjectSelectSubToolbar` modes (BUG-STB-002).
+
+**Files Modified:**
+- `source/ui/subtoolbars/HighlighterSubToolbar.h` - Removed `autoHighlightEnabled` from `TabState` struct
+- `source/ui/subtoolbars/HighlighterSubToolbar.cpp` - Removed save/restore of auto-highlight state
+
+**Verified:** [x] Auto-highlight toggle state is now consistent per-tab after switching
+
+---
+
 ## Statistics
 
 | Category | New | In Progress | Fixed | Total |
@@ -1157,7 +1239,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | File I/O | 0 | 0 | 0 | 0 |
 | Tabs | 0 | 0 | 1 | 1 |
 | Toolbar | 0 | 0 | 0 | 0 |
-| Subtoolbar | 0 | 0 | 2 | 2 |
+| Subtoolbar | 0 | 0 | 5 | 5 |
 | Action Bar | 0 | 0 | 1 | 1 |
 | Sidebar | 0 | 0 | 0 | 0 |
 | Touch | 0 | 0 | 1 | 1 |
@@ -1165,7 +1247,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Performance | 0 | 0 | 1 | 1 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **19** | **19** |
+| **TOTAL** | **0** | **0** | **22** | **22** |
 
 ---
 

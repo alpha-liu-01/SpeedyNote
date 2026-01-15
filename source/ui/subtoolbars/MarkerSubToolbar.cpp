@@ -148,6 +148,31 @@ void MarkerSubToolbar::refreshFromSettings()
     loadFromSettings();
 }
 
+void MarkerSubToolbar::syncSharedState()
+{
+    // Sync shared colors when switching to this subtoolbar
+    syncSharedColorsFromSettings();
+}
+
+void MarkerSubToolbar::syncSharedColorsFromSettings()
+{
+    // Reload ONLY shared colors from QSettings
+    // This preserves per-tab selection state while syncing with Highlighter edits
+    QSettings settings;
+    settings.beginGroup(SETTINGS_GROUP_SHARED_COLORS);
+    
+    for (int i = 0; i < NUM_PRESETS; ++i) {
+        QString key = KEY_COLOR_PREFIX + QString::number(i + 1);
+        QColor color = settings.value(key, DEFAULT_COLORS[i]).value<QColor>();
+        m_colorButtons[i]->setColor(color);
+    }
+    
+    settings.endGroup();
+    
+    // Update thickness preview colors in case selected color changed
+    updateThicknessPreviewColors();
+}
+
 void MarkerSubToolbar::emitCurrentValues()
 {
     // Emit the currently selected preset values to sync with viewport

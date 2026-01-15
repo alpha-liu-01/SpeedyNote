@@ -124,6 +124,28 @@ void HighlighterSubToolbar::refreshFromSettings()
     loadFromSettings();
 }
 
+void HighlighterSubToolbar::syncSharedState()
+{
+    // Sync shared colors when switching to this subtoolbar
+    syncSharedColorsFromSettings();
+}
+
+void HighlighterSubToolbar::syncSharedColorsFromSettings()
+{
+    // Reload ONLY shared colors from QSettings
+    // This preserves per-tab selection state while syncing with Marker edits
+    QSettings settings;
+    settings.beginGroup(SETTINGS_GROUP_SHARED_COLORS);
+    
+    for (int i = 0; i < NUM_PRESETS; ++i) {
+        QString key = KEY_COLOR_PREFIX + QString::number(i + 1);
+        QColor color = settings.value(key, DEFAULT_COLORS[i]).value<QColor>();
+        m_colorButtons[i]->setColor(color);
+    }
+    
+    settings.endGroup();
+}
+
 void HighlighterSubToolbar::restoreTabState(int tabIndex)
 {
     if (!m_tabStates.contains(tabIndex) || !m_tabStates[tabIndex].initialized) {
@@ -141,9 +163,9 @@ void HighlighterSubToolbar::restoreTabState(int tabIndex)
     // Restore selection
     selectColorPreset(state.selectedColorIndex);
     
-    // Restore auto-highlight state
-    m_autoHighlightEnabled = state.autoHighlightEnabled;
-    m_autoHighlightToggle->setChecked(m_autoHighlightEnabled);
+    // NOTE: Auto-highlight state is NOT restored here.
+    // DocumentViewport is the source of truth for auto-highlight state (per-viewport).
+    // The toggle is synced from viewport via setAutoHighlightState() in MainWindow.
 }
 
 void HighlighterSubToolbar::saveTabState(int tabIndex)
@@ -158,8 +180,9 @@ void HighlighterSubToolbar::saveTabState(int tabIndex)
     // Save selection
     state.selectedColorIndex = m_selectedColorIndex;
     
-    // Save auto-highlight state
-    state.autoHighlightEnabled = m_autoHighlightEnabled;
+    // NOTE: Auto-highlight state is NOT saved here.
+    // DocumentViewport stores auto-highlight state per-viewport (per-tab).
+    // We don't duplicate that state in the subtoolbar.
     state.initialized = true;
 }
 

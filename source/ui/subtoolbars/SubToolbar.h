@@ -60,6 +60,15 @@ public:
     virtual void clearTabState(int tabIndex) { Q_UNUSED(tabIndex); }
     
     /**
+     * @brief Sync shared state from QSettings.
+     * 
+     * Called when switching to this subtoolbar to sync values shared with
+     * other subtoolbars (e.g., Marker and Highlighter share colors).
+     * Default implementation does nothing.
+     */
+    virtual void syncSharedState() {}
+    
+    /**
      * @brief Set dark mode and update all button icons accordingly.
      * @param darkMode True for dark mode, false for light mode.
      * 

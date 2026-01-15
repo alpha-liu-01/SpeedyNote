@@ -522,6 +522,17 @@ public:
      */
     bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
     
+    /**
+     * @brief Set the highlighter color (used for text highlight strokes).
+     * @param color The new highlighter color (alpha controls opacity).
+     */
+    void setHighlighterColor(const QColor& color);
+    
+    /**
+     * @brief Get the current highlighter color.
+     */
+    QColor highlighterColor() const { return m_highlighterColor; }
+    
     // ===== Undo/Redo (Task 2.5) =====
     
     /**

@@ -1813,20 +1813,18 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
         viewport->setPenThickness(m_penSubToolbar->currentThickness());
     }
     
-    // Apply marker settings (marker and highlighter share colors)
+    // Apply marker settings
     if (m_markerSubToolbar) {
         viewport->setMarkerColor(m_markerSubToolbar->currentColor());
         viewport->setMarkerThickness(m_markerSubToolbar->currentThickness());
     }
     
-    // Note: Highlighter uses marker color, so no separate setter needed
-    // (HighlighterSubToolbar shares color presets with MarkerSubToolbar)
-    /*
-    qDebug() << "Applied all subtoolbar values to viewport:"
-             << "penColor=" << (m_penSubToolbar ? m_penSubToolbar->currentColor().name() : "N/A")
-             << "penThickness=" << (m_penSubToolbar ? m_penSubToolbar->currentThickness() : 0)
-             << "markerColor=" << (m_markerSubToolbar ? m_markerSubToolbar->currentColor().name() : "N/A")
-             << "markerThickness=" << (m_markerSubToolbar ? m_markerSubToolbar->currentThickness() : 0); */
+    // Apply highlighter color (uses separate m_highlighterColor in viewport)
+    // Note: Highlighter and Marker share the same color PRESETS (QSettings),
+    // but the Highlighter tool uses a separate color variable in DocumentViewport
+    if (m_highlighterSubToolbar) {
+        viewport->setHighlighterColor(m_highlighterSubToolbar->currentColor());
+    }
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -3322,8 +3320,7 @@ void MainWindow::setupSubToolbars()
     // Connect HighlighterSubToolbar signals to viewport
     connect(m_highlighterSubToolbar, &HighlighterSubToolbar::highlighterColorChanged, this, [this](const QColor& color) {
         if (DocumentViewport* vp = currentViewport()) {
-            // Highlighter uses marker color for now (shared presets)
-            vp->setMarkerColor(color);
+            vp->setHighlighterColor(color);
         }
     });
     connect(m_highlighterSubToolbar, &HighlighterSubToolbar::autoHighlightChanged, this, [this](bool enabled) {

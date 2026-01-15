@@ -8664,6 +8664,11 @@ void DocumentViewport::setAutoHighlightEnabled(bool enabled)
     qDebug() << "Auto-highlight mode:" << (enabled ? "ON" : "OFF");
 }
 
+void DocumentViewport::setHighlighterColor(const QColor& color)
+{
+    m_highlighterColor = color;
+}
+
 void DocumentViewport::updateHighlighterCursor()
 {
     if (m_currentTool != ToolType::Highlighter) {
