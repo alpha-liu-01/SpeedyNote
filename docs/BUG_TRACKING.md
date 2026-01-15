@@ -1286,6 +1286,34 @@ The `bundle_format_version` integer is now the single source of truth for format
 
 ---
 
+### CLEANUP-DOC-001: Remove unused page_width/page_height from edgeless manifests ✅ FIXED
+
+**Date Identified:** 2026-01-15
+**Severity:** Low (Cleanup/Clarity)
+**Category:** Miscellaneous
+
+**Symptom:** Edgeless document manifests contained `page_width` and `page_height` fields in `default_background` that were never used. Edgeless uses 1024x1024 tiles, not pages.
+
+**Root Cause:** `Document::defaultBackgroundToJson()` wrote all default background fields regardless of document mode.
+
+**Fix:** Modified `defaultBackgroundToJson()` to only include `page_width` and `page_height` for paged documents:
+```cpp
+if (mode == Mode::Paged) {
+    bg["page_width"] = defaultPageSize.width();
+    bg["page_height"] = defaultPageSize.height();
+}
+```
+
+**Backward Compatibility:** `loadDefaultBackgroundFromJson()` already checks `obj.contains("page_width")` before reading, so old edgeless documents with these fields still load correctly.
+
+**Files Modified:**
+- `source/core/Document.cpp` - Conditional write of page size fields
+
+**Verified:** [x] New edgeless documents don't have page_width/page_height in manifest
+**Verified:** [x] Old edgeless documents with these fields still load correctly
+
+---
+
 ## Statistics
 
 | Category | New | In Progress | Fixed | Total |
@@ -1308,8 +1336,8 @@ The `bundle_format_version` integer is now the single source of truth for format
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 1 | 1 |
 | UI/UX | 0 | 0 | 4 | 4 |
-| Miscellaneous | 0 | 0 | 5 | 5 |
-| **TOTAL** | **0** | **0** | **24** | **24** |
+| Miscellaneous | 0 | 0 | 6 | 6 |
+| **TOTAL** | **0** | **0** | **25** | **25** |
 
 ---
 

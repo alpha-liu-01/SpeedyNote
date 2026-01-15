@@ -1529,8 +1529,13 @@ QJsonObject Document::defaultBackgroundToJson() const
     bg["grid_color"] = defaultGridColor.name(QColor::HexRgb);  // Use 6-char hex (#RRGGBB) for clarity
     bg["grid_spacing"] = defaultGridSpacing;
     bg["line_spacing"] = defaultLineSpacing;
-    bg["page_width"] = defaultPageSize.width();
-    bg["page_height"] = defaultPageSize.height();
+    
+    // Only include page size for paged documents
+    // Edgeless documents use tiles (1024x1024), not pages, so these fields are unused
+    if (mode == Mode::Paged) {
+        bg["page_width"] = defaultPageSize.width();
+        bg["page_height"] = defaultPageSize.height();
+    }
     return bg;
 }
 

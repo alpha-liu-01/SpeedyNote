@@ -2070,7 +2070,7 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     if (event->key() == Qt::Key_QuoteLeft) {
         // Only set flag on initial press, ignore auto-repeat events
         if (!event->isAutoRepeat()) {
-            m_backtickHeld = true;
+        m_backtickHeld = true;
         }
         // Always consume backtick events (initial and auto-repeat) to prevent spam
         event->accept();
@@ -5136,7 +5136,7 @@ void DocumentViewport::pasteForObjectSelect()
     }
     
     const QMimeData* mimeData = clipboard->mimeData();
-   
+    
     // Priority 1: System clipboard has raw image data (e.g., copied from browser/image editor)
     if (mimeData->hasImage()) {
 #ifdef SPEEDYNOTE_DEBUG
@@ -6573,12 +6573,12 @@ void DocumentViewport::increaseSelectedAffinity()
         
         int oldAffinity = currentAffinity;
         page->updateObjectAffinity(obj->id, currentAffinity + 1);
-
+        
         #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "  obj" << obj->id << "affinity:" << oldAffinity 
                  << "->" << obj->getLayerAffinity();
         #endif
-
+        
         // Phase O3.5.3: Push undo entry for affinity change
         pushObjectAffinityUndo(obj, oldAffinity);
         
