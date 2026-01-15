@@ -27,7 +27,7 @@ Document::Document()
 
 Document::~Document()
 {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document DESTROYED:" << this << "id=" << id.left(8) 
              << "pages=" << m_pages.size() << "tiles=" << m_tiles.size();
 #endif
@@ -457,7 +457,9 @@ bool Document::loadPageFromDisk(int index) const
     // We must call loadImages() to load image files into memory for rendering.
     int imagesLoaded = page->loadImages(m_bundlePath);
     if (imagesLoaded > 0) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "loadPageFromDisk: Loaded" << imagesLoaded << "images for page" << index;
+        #endif
     }
     
     // Phase O1.5: Update max object extent from loaded objects
@@ -513,7 +515,7 @@ bool Document::savePage(int index)
     // Update metadata
     m_pageMetadata[uuid] = it->second->size;
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Saved page" << index << "(" << uuid.left(8) << ") to disk";
 #endif
     
@@ -543,7 +545,7 @@ void Document::evictPage(int index)
     // Remove from memory
     m_loadedPages.erase(it);
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Evicted page" << index << "(" << uuid.left(8) << ") from memory";
 #endif
 }
@@ -593,7 +595,7 @@ void Document::rebuildUuidCache() const
     
     m_uuidCacheDirty = false;
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Rebuilt UUID cache with" << m_uuidToIndexCache.size() << "entries";
 #endif
 }
@@ -945,7 +947,7 @@ void Document::loadAllEvictedTiles()
     }
     
     if (!tilesToLoad.empty()) {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "CR-L13: Loading" << tilesToLoad.size() << "evicted tiles for layer operation";
 #endif
     }
@@ -1039,7 +1041,7 @@ Page* Document::getOrCreateTile(int tx, int ty)
     m_dirtyTiles.insert(coord);
     markModified();
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document: Created tile at (" << tx << "," << ty << ") total tiles:" << m_tiles.size();
 #endif
     
@@ -1106,7 +1108,7 @@ void Document::removeTileIfEmpty(int tx, int ty)
         
         markModified();
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Document: Removed empty tile at (" << tx << "," << ty << ") remaining tiles:" << m_tiles.size();
 #endif
     }
@@ -1126,7 +1128,7 @@ void Document::updateMaxObjectExtent(const InsertedObject* obj)
     // Update maximum if this object is larger
     if (extent > m_maxObjectExtent) {
         m_maxObjectExtent = extent;
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Document: Updated max object extent to" << m_maxObjectExtent;
 #endif
     }
@@ -1162,7 +1164,7 @@ void Document::recalculateMaxObjectExtent()
     
     m_maxObjectExtent = newMax;
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document: Recalculated max object extent =" << m_maxObjectExtent;
 #endif
 }
@@ -1649,7 +1651,7 @@ bool Document::saveTile(TileCoord coord)
     m_dirtyTiles.erase(coord);
     m_tileIndex.insert(coord);
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Saved tile" << coord.first << "," << coord.second << "to" << tilePath;
 #endif
     
@@ -1762,7 +1764,7 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         
         m_tiles[coord] = std::move(tile);
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Loaded tile" << coord.first << "," << coord.second 
                  << "from disk (manifest reconstruction)";
 #endif
@@ -1789,7 +1791,7 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         
         m_tiles[coord] = std::move(tile);
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Loaded tile" << coord.first << "," << coord.second << "from disk (legacy)";
 #endif
     }
@@ -1815,7 +1817,7 @@ void Document::evictTile(TileCoord coord)
     // Remove from memory
     m_tiles.erase(it);
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Evicted tile" << coord.first << "," << coord.second << "from memory";
 #endif
 }
@@ -1875,7 +1877,9 @@ int Document::saveUnsavedImages(const QString& bundlePath)
     }
     
     if (savedCount > 0) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "saveUnsavedImages: Saved" << savedCount << "images to assets";
+        #endif
     }
     
     return savedCount;
@@ -1950,14 +1954,14 @@ void Document::cleanupOrphanedAssets()
             QString fullPath = assetsPath + "/" + filename;
             if (QFile::remove(fullPath)) {
                 deletedCount++;
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "Cleaned up orphaned asset:" << filename;
 #endif
             }
         }
     }
     
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
     if (deletedCount > 0) {
         qDebug() << "Cleaned up" << deletedCount << "orphaned assets";
     }
@@ -2125,7 +2129,7 @@ bool Document::saveBundle(const QString& path)
                 // Skip if already exists (e.g., newly added images saved above)
                 if (!QFile::exists(newFilePath)) {
                     if (QFile::copy(oldFilePath, newFilePath)) {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Copied asset" << fileName;
 #endif
                     } else {
@@ -2157,7 +2161,7 @@ bool Document::saveBundle(const QString& path)
                 // Copy tile file from old location to new location
                 if (QFile::exists(oldTilePath)) {
                     if (QFile::copy(oldTilePath, newTilePath)) {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Copied evicted tile" << coord.first << "," << coord.second;
 #endif
                     } else {
@@ -2186,7 +2190,7 @@ bool Document::saveBundle(const QString& path)
             QString tilePath = path + "/tiles/" + tileFileName;
             if (QFile::exists(tilePath)) {
                 if (QFile::remove(tilePath)) {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "Deleted empty tile file:" << tileFileName;
 #endif
                 } else {
@@ -2198,7 +2202,7 @@ bool Document::saveBundle(const QString& path)
         m_dirtyTiles.clear();
         m_tileIndex = allTileCoords;
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Saved edgeless bundle to" << path << "with" << allTileCoords.size() << "tiles";
 #endif
     } else {
@@ -2218,7 +2222,7 @@ bool Document::saveBundle(const QString& path)
                 
                 if (QFile::exists(oldPagePath)) {
                     if (QFile::copy(oldPagePath, newPagePath)) {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                         qDebug() << "Copied evicted page" << uuid;
 #endif
                     } else {
@@ -2240,7 +2244,7 @@ bool Document::saveBundle(const QString& path)
                     QJsonDocument doc(pagePtr->toJson());
                     file.write(doc.toJson(QJsonDocument::Compact));
                     file.close();
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "Saved page" << uuid;
 #endif
                 } else {
@@ -2254,7 +2258,7 @@ bool Document::saveBundle(const QString& path)
             QString pagePath = path + "/pages/" + uuid + ".json";
             if (QFile::exists(pagePath)) {
                 if (QFile::remove(pagePath)) {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "Deleted page file:" << uuid;
 #endif
                 } else {
@@ -2265,7 +2269,7 @@ bool Document::saveBundle(const QString& path)
         m_deletedPages.clear();
         m_dirtyPages.clear();
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Saved paged bundle to" << path << "with" << m_pageOrder.size() << "pages";
 #endif
     }
@@ -2355,7 +2359,7 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
             doc->m_edgelessLayers.push_back(defaultLayer);
         }
         
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Loaded edgeless bundle from" << path << "with" << doc->m_tileIndex.size() 
                  << "tiles indexed," << doc->m_edgelessLayers.size() << "layers";
 #endif
@@ -2387,7 +2391,7 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
                 }
             }
             
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Loaded paged bundle from" << path << "with" 
                      << doc->m_pageOrder.size() << "pages indexed";
 #endif
@@ -2405,7 +2409,7 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
             qWarning() << "loadBundle: Failed to load referenced PDF:" << doc->pdfPath();
             // Don't fail - document can still be used, PDF can be relinked
         } else {
-#ifdef QT_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "loadBundle: Loaded PDF from" << doc->pdfPath();
 #endif
         }

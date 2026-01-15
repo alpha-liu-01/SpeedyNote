@@ -381,6 +381,8 @@ set(UI_SOURCES
         source/ui/widgets/ActionBarButton.cpp  # Task 1.2: ActionBarButton widget
         source/ui/widgets/PageWheelPicker.cpp  # Page Panel: Task 1.1: PageWheelPicker widget
         source/ui/widgets/UndoDeleteButton.cpp  # Page Panel: Task 1.2: UndoDeleteButton widget
+        source/ui/widgets/LayerItemWidget.cpp  # Layer Panel: Phase L.1: Touch-friendly layer item
+        source/ui/widgets/LayerPanelPillButton.cpp  # Layer Panel: Phase L.3: Pill-shaped text button
         source/ui/PageThumbnailModel.cpp  # Page Panel: Task 2.1: PageThumbnailModel
         source/ui/PageThumbnailDelegate.cpp  # Page Panel: Task 2.2: PageThumbnailDelegate
         source/ui/sidebars/PagePanel.cpp  # Page Panel: Task 2.3: PagePanel widget

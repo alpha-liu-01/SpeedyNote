@@ -1,20 +1,25 @@
 // ============================================================================
 // LayerPanel Implementation
 // ============================================================================
-// Part of the SpeedyNote document architecture (Phase 3.0.3, 5.6.7)
+// Part of the SpeedyNote document architecture (Phase 3.0.3, 5.6.7, L.2)
 // ============================================================================
 
 #include "LayerPanel.h"
+#include "../widgets/LayerItemWidget.h"
+#include "../widgets/ActionBarButton.h"
+#include "../widgets/LayerPanelPillButton.h"
 #include "../../core/Page.h"
 #include "../../core/Document.h"
 #include "../../layers/VectorLayer.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QScrollArea>
 #include <QLabel>
 #include <QIcon>
 #include <QPalette>
 #include <QApplication>
+#include <QScroller>
 #include <algorithm>  // Phase 5.4: for std::sort in merge
 
 // ============================================================================
@@ -24,21 +29,11 @@
 LayerPanel::LayerPanel(QWidget* parent)
     : QWidget(parent)
 {
-    // Phase 5.2: Load visibility icon with theme support
-    loadVisibilityIcon();
+    // Detect initial dark mode
+    m_darkMode = QApplication::palette().color(QPalette::Window).lightness() < 128;
     
     setupUI();
     updateButtonStates();
-}
-
-void LayerPanel::loadVisibilityIcon()
-{
-    // Detect dark mode from application palette
-    bool isDark = QApplication::palette().color(QPalette::Window).lightness() < 128;
-    QString iconPath = isDark
-        ? ":/resources/icons/notvisible_reversed.png"
-        : ":/resources/icons/notvisible.png";
-    m_notVisibleIcon = QIcon(iconPath);
 }
 
 // ============================================================================
@@ -57,83 +52,93 @@ void LayerPanel::setupUI()
     m_titleLabel->setStyleSheet("font-weight: bold;");
     mainLayout->addWidget(m_titleLabel);
 
-    // Layer list
-    m_layerList = new QListWidget(this);
-    m_layerList->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_layerList->setDragDropMode(QAbstractItemView::NoDragDrop);  // Use buttons for reorder
-    m_layerList->setMinimumHeight(100);
-    mainLayout->addWidget(m_layerList, 1);  // Stretch factor 1
+    // Phase L.2: Layer scroll area with custom widgets
+    m_layerScrollArea = new QScrollArea(this);
+    m_layerScrollArea->setWidgetResizable(true);
+    m_layerScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_layerScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_layerScrollArea->setMinimumHeight(100);
+    m_layerScrollArea->setFrameShape(QFrame::NoFrame);
+    
+    // Phase L.4: Apply themed background to scroll area
+    updateScrollAreaStyle();
+    
+    // Enable touch scrolling
+    QScroller::grabGesture(m_layerScrollArea->viewport(), QScroller::TouchGesture);
+    
+    // Container widget inside scroll area
+    m_layerContainer = new QWidget();
+    m_layerLayout = new QVBoxLayout(m_layerContainer);
+    m_layerLayout->setContentsMargins(4, 4, 4, 4);
+    m_layerLayout->setSpacing(2);
+    m_layerLayout->addStretch();  // Push items to top
+    
+    m_layerScrollArea->setWidget(m_layerContainer);
+    mainLayout->addWidget(m_layerScrollArea, 1);  // Stretch factor 1
 
-    // Connect list signals
-    connect(m_layerList, &QListWidget::currentRowChanged,
-            this, &LayerPanel::onLayerSelectionChanged);
-    connect(m_layerList, &QListWidget::itemClicked,
-            this, &LayerPanel::onItemClicked);
-    connect(m_layerList, &QListWidget::itemChanged,
-            this, &LayerPanel::onItemChanged);
-
-    // Phase 5.3: Selection buttons bar
-    QHBoxLayout* selectionLayout = new QHBoxLayout();
-    selectionLayout->setSpacing(2);
+    // Phase L.3: Top row - Pill buttons (96×36px) for All/None and Merge
+    QHBoxLayout* topButtonLayout = new QHBoxLayout();
+    topButtonLayout->setSpacing(4);
     
-    m_selectAllButton = new QPushButton(tr("All"), this);
-    m_selectAllButton->setToolTip(tr("Select all layers"));
-    m_selectAllButton->setFixedHeight(22);
-    connect(m_selectAllButton, &QPushButton::clicked, this, &LayerPanel::onSelectAllClicked);
-    selectionLayout->addWidget(m_selectAllButton);
+    m_selectAllButton = new LayerPanelPillButton(tr("All/None"), this);
+    m_selectAllButton->setToolTip(tr("Toggle select all/none"));
+    m_selectAllButton->setDarkMode(m_darkMode);
+    connect(m_selectAllButton, &LayerPanelPillButton::clicked, this, &LayerPanel::onSelectAllClicked);
+    topButtonLayout->addWidget(m_selectAllButton);
     
-    m_deselectAllButton = new QPushButton(tr("None"), this);
-    m_deselectAllButton->setToolTip(tr("Deselect all layers"));
-    m_deselectAllButton->setFixedHeight(22);
-    connect(m_deselectAllButton, &QPushButton::clicked, this, &LayerPanel::onDeselectAllClicked);
-    selectionLayout->addWidget(m_deselectAllButton);
-    
-    m_mergeButton = new QPushButton(tr("Merge"), this);
+    m_mergeButton = new LayerPanelPillButton(tr("Merge"), this);
     m_mergeButton->setToolTip(tr("Merge selected layers (2+ required)"));
-    m_mergeButton->setFixedHeight(22);
-    connect(m_mergeButton, &QPushButton::clicked, this, &LayerPanel::onMergeClicked);
-    selectionLayout->addWidget(m_mergeButton);
+    m_mergeButton->setDarkMode(m_darkMode);
+    connect(m_mergeButton, &LayerPanelPillButton::clicked, this, &LayerPanel::onMergeClicked);
+    topButtonLayout->addWidget(m_mergeButton);
     
-    selectionLayout->addStretch();
-    mainLayout->addLayout(selectionLayout);
+    topButtonLayout->addStretch();
+    mainLayout->addLayout(topButtonLayout);
+    
+    // Add spacing between top and bottom button rows
+    mainLayout->addSpacing(8);
 
-    // Button bar (add/remove/move)
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    buttonLayout->setSpacing(2);
+    // Phase L.3: Bottom row - Icon buttons (36×36px) using ActionBarButton
+    QHBoxLayout* bottomButtonLayout = new QHBoxLayout();
+    bottomButtonLayout->setSpacing(4);
 
-    m_addButton = new QPushButton("+", this);
+    m_addButton = new ActionBarButton(this);
+    m_addButton->setIconName("addtab");
+    m_addButton->setDarkMode(m_darkMode);
     m_addButton->setToolTip(tr("Add new layer"));
-    m_addButton->setFixedSize(28, 28);
-    connect(m_addButton, &QPushButton::clicked, this, &LayerPanel::onAddLayerClicked);
-    buttonLayout->addWidget(m_addButton);
+    connect(m_addButton, &ActionBarButton::clicked, this, &LayerPanel::onAddLayerClicked);
+    bottomButtonLayout->addWidget(m_addButton);
 
-    m_removeButton = new QPushButton("-", this);
+    m_removeButton = new ActionBarButton(this);
+    m_removeButton->setIconName("trash");
+    m_removeButton->setDarkMode(m_darkMode);
     m_removeButton->setToolTip(tr("Remove selected layer"));
-    m_removeButton->setFixedSize(28, 28);
-    connect(m_removeButton, &QPushButton::clicked, this, &LayerPanel::onRemoveLayerClicked);
-    buttonLayout->addWidget(m_removeButton);
+    connect(m_removeButton, &ActionBarButton::clicked, this, &LayerPanel::onRemoveLayerClicked);
+    bottomButtonLayout->addWidget(m_removeButton);
 
-    m_moveUpButton = new QPushButton("↑", this);
+    m_moveUpButton = new ActionBarButton(this);
+    m_moveUpButton->setIconName("layer_uparrow");
+    m_moveUpButton->setDarkMode(m_darkMode);
     m_moveUpButton->setToolTip(tr("Move layer up"));
-    m_moveUpButton->setFixedSize(28, 28);
-    connect(m_moveUpButton, &QPushButton::clicked, this, &LayerPanel::onMoveUpClicked);
-    buttonLayout->addWidget(m_moveUpButton);
+    connect(m_moveUpButton, &ActionBarButton::clicked, this, &LayerPanel::onMoveUpClicked);
+    bottomButtonLayout->addWidget(m_moveUpButton);
 
-    m_moveDownButton = new QPushButton("↓", this);
+    m_moveDownButton = new ActionBarButton(this);
+    m_moveDownButton->setIconName("layer_downarrow");
+    m_moveDownButton->setDarkMode(m_darkMode);
     m_moveDownButton->setToolTip(tr("Move layer down"));
-    m_moveDownButton->setFixedSize(28, 28);
-    connect(m_moveDownButton, &QPushButton::clicked, this, &LayerPanel::onMoveDownClicked);
-    buttonLayout->addWidget(m_moveDownButton);
+    connect(m_moveDownButton, &ActionBarButton::clicked, this, &LayerPanel::onMoveDownClicked);
+    bottomButtonLayout->addWidget(m_moveDownButton);
 
-    // Phase 5.5: Duplicate button
-    m_duplicateButton = new QPushButton("⧉", this);  // Unicode clone/copy symbol
+    m_duplicateButton = new ActionBarButton(this);
+    m_duplicateButton->setIconName("copy");
+    m_duplicateButton->setDarkMode(m_darkMode);
     m_duplicateButton->setToolTip(tr("Duplicate selected layer"));
-    m_duplicateButton->setFixedSize(28, 28);
-    connect(m_duplicateButton, &QPushButton::clicked, this, &LayerPanel::onDuplicateClicked);
-    buttonLayout->addWidget(m_duplicateButton);
+    connect(m_duplicateButton, &ActionBarButton::clicked, this, &LayerPanel::onDuplicateClicked);
+    bottomButtonLayout->addWidget(m_duplicateButton);
 
-    buttonLayout->addStretch();
-    mainLayout->addLayout(buttonLayout);
+    bottomButtonLayout->addStretch();
+    mainLayout->addLayout(bottomButtonLayout);
 }
 
 // ============================================================================
@@ -170,7 +175,8 @@ void LayerPanel::refreshLayerList()
 {
     m_updatingList = true;
 
-    m_layerList->clear();
+    // Clear existing layer items
+    clearLayerItems();
 
     // Phase 5.6.7: Check both page and edgeless doc
     if (!m_page && !m_edgelessDoc) {
@@ -179,20 +185,17 @@ void LayerPanel::refreshLayerList()
         return;
     }
 
-    // Add layers to list (top layer first, so reverse order)
-    int layerCount = getLayerCount();
-    for (int i = layerCount - 1; i >= 0; --i) {
-        QListWidgetItem* item = createLayerItem(i);
-        if (item) {
-            m_layerList->addItem(item);
-        }
-    }
+    // Create layer item widgets
+    createLayerItems();
 
-    // Select the active layer
+    // Update active layer visual state
     int activeIndex = getActiveLayerIndex();
+    int layerCount = getLayerCount();
     if (activeIndex >= 0 && activeIndex < layerCount) {
-        int row = layerIndexToRow(activeIndex);
-        m_layerList->setCurrentRow(row);
+        int widgetIdx = layerIndexToWidgetIndex(activeIndex);
+        if (widgetIdx >= 0 && widgetIdx < m_layerItems.size()) {
+            m_layerItems[widgetIdx]->setActive(true);
+        }
     }
 
     m_updatingList = false;
@@ -208,119 +211,133 @@ void LayerPanel::updateButtonStates()
     // Phase 5.6.7: Check both page and edgeless doc
     bool hasSource = (m_page != nullptr || m_edgelessDoc != nullptr);
     int layerCount = hasSource ? getLayerCount() : 0;
-    int currentRow = m_layerList->currentRow();
-    int selectedLayerIndex = (currentRow >= 0) ? rowToLayerIndex(currentRow) : -1;
+    int activeLayerIndex = currentActiveIndex();
 
     // Add: always enabled if we have a source
     m_addButton->setEnabled(hasSource);
 
     // Remove: enabled if more than one layer and something selected
-    m_removeButton->setEnabled(hasSource && layerCount > 1 && selectedLayerIndex >= 0);
+    m_removeButton->setEnabled(hasSource && layerCount > 1 && activeLayerIndex >= 0);
 
     // Move Up: enabled if not at top (layer index < layerCount - 1)
-    m_moveUpButton->setEnabled(hasSource && selectedLayerIndex >= 0 && 
-                               selectedLayerIndex < layerCount - 1);
+    m_moveUpButton->setEnabled(hasSource && activeLayerIndex >= 0 && 
+                               activeLayerIndex < layerCount - 1);
 
     // Move Down: enabled if not at bottom (layer index > 0)
-    m_moveDownButton->setEnabled(hasSource && selectedLayerIndex > 0);
+    m_moveDownButton->setEnabled(hasSource && activeLayerIndex > 0);
     
-    // Phase 5.3: Selection buttons
+    // Phase 5.3/L.2: Selection button (combined All/None toggle)
     m_selectAllButton->setEnabled(hasSource && layerCount > 0);
-    m_deselectAllButton->setEnabled(hasSource && layerCount > 0);
+    // m_deselectAllButton is nullptr (combined into selectAllButton)
     
     // Merge: enabled if 2+ layers are checked
     int checkedCount = selectedLayerCount();
     m_mergeButton->setEnabled(hasSource && checkedCount >= 2);
     
     // Phase 5.5: Duplicate: enabled if a layer is selected
-    m_duplicateButton->setEnabled(hasSource && selectedLayerIndex >= 0);
+    m_duplicateButton->setEnabled(hasSource && activeLayerIndex >= 0);
 }
 
 // ============================================================================
-// Item Creation
+// Phase L.2: Layer Item Widget Management
 // ============================================================================
 
-QListWidgetItem* LayerPanel::createLayerItem(int layerIndex)
+void LayerPanel::createLayerItems()
 {
-    // Phase 5.6.7: Use abstracted accessors
     int layerCount = getLayerCount();
-    if (layerIndex < 0 || layerIndex >= layerCount) {
-        return nullptr;
-    }
-
-    QString name = getLayerName(layerIndex);
-    bool visible = getLayerVisible(layerIndex);
-    bool locked = getLayerLocked(layerIndex);
-
-    // Phase 5.2: Create item with just the layer name
-    // Use icon for hidden layers, no icon for visible layers
-    QListWidgetItem* item = new QListWidgetItem(name);
     
-    if (!visible) {
-        item->setIcon(m_notVisibleIcon);
+    // Add layers to list (top layer first, so reverse order)
+    for (int i = layerCount - 1; i >= 0; --i) {
+        LayerItemWidget* item = new LayerItemWidget(i, m_layerContainer);
+        item->setLayerName(getLayerName(i));
+        item->setLayerVisible(getLayerVisible(i));
+        item->setDarkMode(m_darkMode);
+        item->setSelected(false);
+        
+        // Connect signals
+        connect(item, &LayerItemWidget::clicked,
+                this, &LayerPanel::onLayerItemClicked);
+        connect(item, &LayerItemWidget::visibilityToggled,
+                this, &LayerPanel::onLayerVisibilityToggled);
+        connect(item, &LayerItemWidget::selectionToggled,
+                this, &LayerPanel::onLayerSelectionToggled);
+        connect(item, &LayerItemWidget::nameChanged,
+                this, &LayerPanel::onLayerNameChanged);
+        
+        // Insert before the stretch (which is at the end)
+        m_layerLayout->insertWidget(m_layerLayout->count() - 1, item);
+        m_layerItems.append(item);
+    }
+}
+
+void LayerPanel::clearLayerItems()
+{
+    for (LayerItemWidget* item : m_layerItems) {
+        m_layerLayout->removeWidget(item);
+        item->deleteLater();
+    }
+    m_layerItems.clear();
+}
+
+int LayerPanel::currentActiveIndex() const
+{
+    // Find the active layer item
+    for (const LayerItemWidget* item : m_layerItems) {
+        if (item->isActive()) {
+            return item->layerIndex();
+        }
     }
     
-    // Store layer index as data
-    item->setData(Qt::UserRole, layerIndex);
-    
-    // Phase 5.3: Add checkbox for selection
-    item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
-    item->setCheckState(Qt::Unchecked);
-
-    // Visual indication for locked layers
-    if (locked) {
-        item->setForeground(Qt::gray);
-    }
-
-    return item;
+    // Fallback to the stored active layer index
+    return getActiveLayerIndex();
 }
 
 // ============================================================================
 // Index Conversion
 // ============================================================================
 
-int LayerPanel::rowToLayerIndex(int row) const
+int LayerPanel::widgetIndexToLayerIndex(int widgetIndex) const
 {
-    // Phase 5.6.7: Use abstracted layer count
+    // Widgets are in reverse order: widget 0 = top layer = highest index
     int layerCount = getLayerCount();
-    if (layerCount == 0 || row < 0) {
+    if (layerCount == 0 || widgetIndex < 0 || widgetIndex >= layerCount) {
         return -1;
     }
-    // List is reversed: row 0 = top layer = highest index
-    return layerCount - 1 - row;
+    return layerCount - 1 - widgetIndex;
 }
 
-int LayerPanel::layerIndexToRow(int layerIndex) const
+int LayerPanel::layerIndexToWidgetIndex(int layerIndex) const
 {
-    // Phase 5.6.7: Use abstracted layer count
+    // Widgets are in reverse order: highest layer index = widget 0
     int layerCount = getLayerCount();
-    if (layerCount == 0 || layerIndex < 0) {
+    if (layerCount == 0 || layerIndex < 0 || layerIndex >= layerCount) {
         return -1;
     }
-    // List is reversed: highest layer index = row 0
     return layerCount - 1 - layerIndex;
 }
 
 // ============================================================================
-// Slots - Selection
+// Phase L.2: Slots - LayerItemWidget Signal Handlers
 // ============================================================================
 
-void LayerPanel::onLayerSelectionChanged(int currentRow)
+void LayerPanel::onLayerItemClicked(int layerIndex)
 {
-    // Phase 5.6.7: Check both sources
-    if (m_updatingList || (!m_page && !m_edgelessDoc) || currentRow < 0) {
-        updateButtonStates();
+    // Phase L.2: Handle layer item click (select as active)
+    if (m_updatingList || (!m_page && !m_edgelessDoc)) {
         return;
     }
 
-    int layerIndex = rowToLayerIndex(currentRow);
     int layerCount = getLayerCount();
     if (layerIndex < 0 || layerIndex >= layerCount) {
-        updateButtonStates();
         return;
     }
 
-    // Update active layer
+    // Update active layer visual state
+    for (LayerItemWidget* item : m_layerItems) {
+        item->setActive(item->layerIndex() == layerIndex);
+    }
+
+    // Update model active layer
     if (getActiveLayerIndex() != layerIndex) {
         setActiveLayerIndex(layerIndex);
         emit activeLayerChanged(layerIndex);
@@ -329,85 +346,60 @@ void LayerPanel::onLayerSelectionChanged(int currentRow)
     updateButtonStates();
 }
 
-void LayerPanel::onItemClicked(QListWidgetItem* item)
+void LayerPanel::onLayerVisibilityToggled(int layerIndex, bool visible)
 {
-    // Phase 5.6.7: Check both sources
-    if (m_updatingList || (!m_page && !m_edgelessDoc) || !item) {
+    // Phase L.2: Handle visibility toggle from layer item
+    if (m_updatingList || (!m_page && !m_edgelessDoc)) {
         return;
     }
 
-    int layerIndex = item->data(Qt::UserRole).toInt();
     int layerCount = getLayerCount();
     if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
     }
 
-    // Check if user clicked in the visibility area
-    // Phase 5.3: Checkbox is in the first ~20 pixels, visibility icon after that
-    // We detect clicks in the 20-50 pixel range for visibility toggle
-    
-    // Get click position
-    QPoint clickPos = m_layerList->mapFromGlobal(QCursor::pos());
-    QRect itemRect = m_layerList->visualItemRect(item);
-    
-    // If click is after checkbox but in icon area (20-50 pixels), toggle visibility
-    int relativeX = clickPos.x() - itemRect.left();
-    if (relativeX >= 20 && relativeX < 50) {
-        bool newVisible = !getLayerVisible(layerIndex);
-        setLayerVisible(layerIndex, newVisible);
-        
-        // Phase 5.2: Update item icon based on visibility
-        m_updatingList = true;
-        if (newVisible) {
-            item->setIcon(QIcon());  // No icon for visible layers
-        } else {
-            item->setIcon(m_notVisibleIcon);  // Show "not visible" icon
-        }
-        m_updatingList = false;
-        
-        emit layerVisibilityChanged(layerIndex, newVisible);
-    }
+    setLayerVisible(layerIndex, visible);
+    emit layerVisibilityChanged(layerIndex, visible);
 }
 
-void LayerPanel::onItemChanged(QListWidgetItem* item)
+void LayerPanel::onLayerSelectionToggled(int layerIndex, bool selected)
 {
-    // Phase 5.2/5.6.7: Handle layer rename via inline editing
-    // Phase 5.3: Also handle checkbox state changes
-    // Skip if we're programmatically updating the list
-    if (m_updatingList || (!m_page && !m_edgelessDoc) || !item) {
+    // Phase L.2: Handle selection toggle from layer item
+    if (m_updatingList || (!m_page && !m_edgelessDoc)) {
         return;
     }
+
+    Q_UNUSED(layerIndex)
+    Q_UNUSED(selected)
     
-    int layerIndex = item->data(Qt::UserRole).toInt();
+    // Update button states (merge button depends on selection count)
+    updateButtonStates();
+    emit selectionChanged(selectedLayerIndices());
+}
+
+void LayerPanel::onLayerNameChanged(int layerIndex, const QString& newName)
+{
+    // Phase L.2: Handle layer name changed from layer item
+    if (m_updatingList || (!m_page && !m_edgelessDoc)) {
+        return;
+    }
+
     int layerCount = getLayerCount();
     if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
     }
-    
-    // Phase 5.3: Update button states when checkbox changes
-    // (Merge button depends on selection count)
-    updateButtonStates();
-    emit selectionChanged(selectedLayerIndices());
-    
-    // Get the edited text (no prefix to strip - we use icons now)
-    QString newText = item->text().trimmed();
-    
-    // Don't allow empty names
-    if (newText.isEmpty()) {
-        newText = QString("Layer %1").arg(layerIndex + 1);
+
+    QString finalName = newName.trimmed();
+    if (finalName.isEmpty()) {
+        finalName = QString("Layer %1").arg(layerIndex + 1);
     }
-    
+
     // Only update if name actually changed
     QString currentName = getLayerName(layerIndex);
-    if (currentName != newText) {
-        setLayerName(layerIndex, newText);
-        emit layerRenamed(layerIndex, newText);
+    if (currentName != finalName) {
+        setLayerName(layerIndex, finalName);
+        emit layerRenamed(layerIndex, finalName);
     }
-    
-    // Ensure the display text is correct
-    m_updatingList = true;
-    item->setText(getLayerName(layerIndex));
-    m_updatingList = false;
 }
 
 // ============================================================================
@@ -443,17 +435,12 @@ void LayerPanel::onAddLayerClicked()
 
 void LayerPanel::onRemoveLayerClicked()
 {
-    // Phase 5.6.7: Check both sources
+    // Phase 5.6.7/L.2: Check both sources
     if (!m_page && !m_edgelessDoc) {
         return;
     }
 
-    int currentRow = m_layerList->currentRow();
-    if (currentRow < 0) {
-        return;
-    }
-
-    int layerIndex = rowToLayerIndex(currentRow);
+    int layerIndex = currentActiveIndex();
     int layerCount = getLayerCount();
     if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
@@ -478,17 +465,12 @@ void LayerPanel::onRemoveLayerClicked()
 
 void LayerPanel::onMoveUpClicked()
 {
-    // Phase 5.6.7: Check both sources
+    // Phase 5.6.7/L.2: Check both sources
     if (!m_page && !m_edgelessDoc) {
         return;
     }
 
-    int currentRow = m_layerList->currentRow();
-    if (currentRow < 0) {
-        return;
-    }
-
-    int layerIndex = rowToLayerIndex(currentRow);
+    int layerIndex = currentActiveIndex();
     int layerCount = getLayerCount();
     if (layerIndex < 0 || layerIndex >= layerCount - 1) {
         return;  // Can't move up if already at top
@@ -500,26 +482,20 @@ void LayerPanel::onMoveUpClicked()
         return;
     }
 
-    // Refresh and reselect
+    // Refresh list (refreshLayerList already sets active layer from model)
     refreshLayerList();
-    m_layerList->setCurrentRow(layerIndexToRow(newIndex));
 
     emit layerMoved(layerIndex, newIndex);
 }
 
 void LayerPanel::onMoveDownClicked()
 {
-    // Phase 5.6.7: Check both sources
+    // Phase 5.6.7/L.2: Check both sources
     if (!m_page && !m_edgelessDoc) {
         return;
     }
 
-    int currentRow = m_layerList->currentRow();
-    if (currentRow < 0) {
-        return;
-    }
-
-    int layerIndex = rowToLayerIndex(currentRow);
+    int layerIndex = currentActiveIndex();
     if (layerIndex <= 0) {
         return;  // Can't move down if already at bottom
     }
@@ -530,9 +506,8 @@ void LayerPanel::onMoveDownClicked()
         return;
     }
 
-    // Refresh and reselect
+    // Refresh list (refreshLayerList already sets active layer from model)
     refreshLayerList();
-    m_layerList->setCurrentRow(layerIndexToRow(newIndex));
 
     emit layerMoved(layerIndex, newIndex);
 }
@@ -673,20 +648,16 @@ bool LayerPanel::moveLayer(int from, int to)
 }
 
 // ============================================================================
-// Phase 5.3: Selection API
+// Phase 5.3/L.2: Selection API
 // ============================================================================
 
 QVector<int> LayerPanel::selectedLayerIndices() const
 {
     QVector<int> indices;
     
-    for (int row = 0; row < m_layerList->count(); ++row) {
-        QListWidgetItem* item = m_layerList->item(row);
-        if (item && item->checkState() == Qt::Checked) {
-            int layerIndex = rowToLayerIndex(row);
-            if (layerIndex >= 0) {
-                indices.append(layerIndex);
-            }
+    for (const LayerItemWidget* item : m_layerItems) {
+        if (item && item->isSelected()) {
+            indices.append(item->layerIndex());
         }
     }
     
@@ -698,9 +669,8 @@ QVector<int> LayerPanel::selectedLayerIndices() const
 int LayerPanel::selectedLayerCount() const
 {
     int count = 0;
-    for (int row = 0; row < m_layerList->count(); ++row) {
-        QListWidgetItem* item = m_layerList->item(row);
-        if (item && item->checkState() == Qt::Checked) {
+    for (const LayerItemWidget* item : m_layerItems) {
+        if (item && item->isSelected()) {
             ++count;
         }
     }
@@ -710,10 +680,9 @@ int LayerPanel::selectedLayerCount() const
 void LayerPanel::selectAllLayers()
 {
     m_updatingList = true;
-    for (int row = 0; row < m_layerList->count(); ++row) {
-        QListWidgetItem* item = m_layerList->item(row);
+    for (LayerItemWidget* item : m_layerItems) {
         if (item) {
-            item->setCheckState(Qt::Checked);
+            item->setSelected(true);
         }
     }
     m_updatingList = false;
@@ -725,10 +694,9 @@ void LayerPanel::selectAllLayers()
 void LayerPanel::deselectAllLayers()
 {
     m_updatingList = true;
-    for (int row = 0; row < m_layerList->count(); ++row) {
-        QListWidgetItem* item = m_layerList->item(row);
+    for (LayerItemWidget* item : m_layerItems) {
         if (item) {
-            item->setCheckState(Qt::Unchecked);
+            item->setSelected(false);
         }
     }
     m_updatingList = false;
@@ -738,16 +706,22 @@ void LayerPanel::deselectAllLayers()
 }
 
 // ============================================================================
-// Phase 5.3: Selection Slots
+// Phase 5.3/L.2: Selection Slots
 // ============================================================================
 
 void LayerPanel::onSelectAllClicked()
 {
-    selectAllLayers();
+    // Phase L.2: Toggle All/None - if any selected, deselect all; else select all
+    if (selectedLayerCount() > 0) {
+        deselectAllLayers();
+    } else {
+        selectAllLayers();
+    }
 }
 
 void LayerPanel::onDeselectAllClicked()
 {
+    // No longer used - combined into onSelectAllClicked as toggle
     deselectAllLayers();
 }
 
@@ -796,17 +770,12 @@ void LayerPanel::onMergeClicked()
 
 void LayerPanel::onDuplicateClicked()
 {
-    // Phase 5.5: Duplicate selected layer
+    // Phase 5.5/L.2: Duplicate selected layer
     if (!m_page && !m_edgelessDoc) {
         return;
     }
     
-    int currentRow = m_layerList->currentRow();
-    if (currentRow < 0) {
-        return;
-    }
-    
-    int layerIndex = rowToLayerIndex(currentRow);
+    int layerIndex = currentActiveIndex();
     int layerCount = getLayerCount();
     if (layerIndex < 0 || layerIndex >= layerCount) {
         return;
@@ -823,13 +792,112 @@ void LayerPanel::onDuplicateClicked()
     }
     
     if (newIndex >= 0) {
-        // Refresh the layer list
+        // Set as active before refresh so refreshLayerList picks it up
+        setActiveLayerIndex(newIndex);
+        
+        // Refresh the layer list (will set active layer from model)
         refreshLayerList();
         
-        // Select the new layer and sync viewport
+        // Emit signals for MainWindow to update viewport
         emit activeLayerChanged(newIndex);
-        
-        // Emit signal for MainWindow to update viewport
         emit layerDuplicated(layerIndex, newIndex);
+    }
+}
+
+// ============================================================================
+// Phase L.4: Theme Integration
+// ============================================================================
+
+void LayerPanel::updateScrollAreaStyle()
+{
+    // Style the scroll area with a subtle inset background
+    QString scrollStyle;
+    QString containerStyle;
+    
+    if (m_darkMode) {
+        // Dark mode: darker inset background
+        scrollStyle = QStringLiteral(
+            "QScrollArea { "
+            "  background-color: #2a2a2a; "
+            "  border: 1px solid #3a3a3a; "
+            "  border-radius: 6px; "
+            "}"
+            "QScrollBar:vertical { "
+            "  background: #2a2a2a; "
+            "  width: 8px; "
+            "  margin: 2px; "
+            "}"
+            "QScrollBar::handle:vertical { "
+            "  background: #555555; "
+            "  border-radius: 3px; "
+            "  min-height: 20px; "
+            "}"
+            "QScrollBar::handle:vertical:hover { "
+            "  background: #666666; "
+            "}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { "
+            "  height: 0px; "
+            "}"
+        );
+        containerStyle = QStringLiteral("background-color: transparent;");
+    } else {
+        // Light mode: subtle gray inset
+        scrollStyle = QStringLiteral(
+            "QScrollArea { "
+            "  background-color: #f0f0f0; "
+            "  border: 1px solid #d0d0d0; "
+            "  border-radius: 6px; "
+            "}"
+            "QScrollBar:vertical { "
+            "  background: #f0f0f0; "
+            "  width: 8px; "
+            "  margin: 2px; "
+            "}"
+            "QScrollBar::handle:vertical { "
+            "  background: #b0b0b0; "
+            "  border-radius: 3px; "
+            "  min-height: 20px; "
+            "}"
+            "QScrollBar::handle:vertical:hover { "
+            "  background: #999999; "
+            "}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { "
+            "  height: 0px; "
+            "}"
+        );
+        containerStyle = QStringLiteral("background-color: transparent;");
+    }
+    
+    m_layerScrollArea->setStyleSheet(scrollStyle);
+    if (m_layerContainer) {
+        m_layerContainer->setStyleSheet(containerStyle);
+    }
+}
+
+void LayerPanel::setDarkMode(bool dark)
+{
+    if (m_darkMode == dark) {
+        return;
+    }
+    
+    m_darkMode = dark;
+    
+    // Update scroll area styling
+    updateScrollAreaStyle();
+    
+    // Update pill buttons
+    m_selectAllButton->setDarkMode(dark);
+    m_mergeButton->setDarkMode(dark);
+    
+    // Update icon buttons (ActionBarButton handles icon switching internally)
+    m_addButton->setDarkMode(dark);
+    m_removeButton->setDarkMode(dark);
+    m_moveUpButton->setDarkMode(dark);
+    m_moveDownButton->setDarkMode(dark);
+    m_duplicateButton->setDarkMode(dark);
+    
+    // Update layer item widgets
+    for (LayerItemWidget* item : m_layerItems) {
+        item->setDarkMode(dark);
     }
 }

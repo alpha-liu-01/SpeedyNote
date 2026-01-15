@@ -108,6 +108,8 @@
     <file>resources/icons/hand_reversed.png</file>
     <file>resources/icons/clipboard.png</file>
     <file>resources/icons/clipboard_reversed.png</file>
+    <file>resources/icons/visible.png</file>
+    <file>resources/icons/visible_reversed.png</file>
     <file>resources/icons/notvisible.png</file>
     <file>resources/icons/notvisible_reversed.png</file>
     <file>resources/icons/leftsidebar.png</file>

@@ -23,15 +23,18 @@
 // ============================================================================
 
 #include <QWidget>
-#include <QListWidget>
-#include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QVector>
 
 class Page;
 class Document;
 class VectorLayer;
+class LayerItemWidget;
+class ActionBarButton;
+class LayerPanelPillButton;
 
 /**
  * @brief Widget for managing layers on a Page.
@@ -223,23 +226,34 @@ private slots:
      */
     void onMoveDownClicked();
 
+    // Phase L.2: LayerItemWidget signal handlers
+    
     /**
-     * @brief Handle layer selection change.
-     * @param currentRow The newly selected row.
+     * @brief Handle layer item clicked (select as active).
+     * @param index The layer index.
      */
-    void onLayerSelectionChanged(int currentRow);
+    void onLayerItemClicked(int index);
 
     /**
-     * @brief Handle visibility checkbox click.
-     * @param item The item that was clicked.
+     * @brief Handle visibility toggle from layer item.
+     * @param index The layer index.
+     * @param visible The new visibility state.
      */
-    void onItemClicked(QListWidgetItem* item);
+    void onLayerVisibilityToggled(int index, bool visible);
 
     /**
-     * @brief Handle item text changed (rename).
-     * @param item The item that was changed.
+     * @brief Handle selection toggle from layer item.
+     * @param index The layer index.
+     * @param selected The new selection state.
      */
-    void onItemChanged(QListWidgetItem* item);
+    void onLayerSelectionToggled(int index, bool selected);
+
+    /**
+     * @brief Handle layer name changed from layer item.
+     * @param index The layer index.
+     * @param newName The new name.
+     */
+    void onLayerNameChanged(int index, const QString& newName);
 
     /**
      * @brief Phase 5.3: Handle Select All button click.
@@ -268,35 +282,34 @@ private:
     // Connected document (edgeless mode, not owned) - Phase 5.6.7
     Document* m_edgelessDoc = nullptr;
 
+    // Phase L.2: Layer list using custom widgets
+    QScrollArea* m_layerScrollArea = nullptr;
+    QWidget* m_layerContainer = nullptr;
+    QVBoxLayout* m_layerLayout = nullptr;
+    QVector<LayerItemWidget*> m_layerItems;
+    
     // UI elements
-    QListWidget* m_layerList = nullptr;
-    QPushButton* m_addButton = nullptr;
-    QPushButton* m_removeButton = nullptr;
-    QPushButton* m_moveUpButton = nullptr;
-    QPushButton* m_moveDownButton = nullptr;
     QLabel* m_titleLabel = nullptr;
     
-    // Phase 5.3: Selection buttons
-    QPushButton* m_selectAllButton = nullptr;
-    QPushButton* m_deselectAllButton = nullptr;
-    QPushButton* m_mergeButton = nullptr;
+    // Phase L.3: Icon buttons (36×36px) using ActionBarButton
+    ActionBarButton* m_addButton = nullptr;
+    ActionBarButton* m_removeButton = nullptr;
+    ActionBarButton* m_moveUpButton = nullptr;
+    ActionBarButton* m_moveDownButton = nullptr;
+    ActionBarButton* m_duplicateButton = nullptr;
     
-    // Phase 5.5: Duplicate button
-    QPushButton* m_duplicateButton = nullptr;
-    
-    // Phase 5.2: Visibility icon (loaded based on theme)
-    QIcon m_notVisibleIcon;
+    // Phase L.3: Pill buttons (72×36px) using LayerPanelPillButton
+    LayerPanelPillButton* m_selectAllButton = nullptr;
+    LayerPanelPillButton* m_mergeButton = nullptr;
 
     // Flag to prevent recursive updates
     bool m_updatingList = false;
+    
+    // Dark mode state for theming
+    bool m_darkMode = false;
 
     // Setup methods
     void setupUI();
-    
-    /**
-     * @brief Load the visibility icon based on current theme.
-     */
-    void loadVisibilityIcon();
 
     /**
      * @brief Update button enabled states based on current selection.
@@ -304,29 +317,50 @@ private:
     void updateButtonStates();
 
     /**
-     * @brief Create a list item for a layer.
-     * @param layerIndex The layer index in the page/manifest.
-     * @return The created item (caller owns).
+     * @brief Create or update layer item widgets.
      */
-    QListWidgetItem* createLayerItem(int layerIndex);
+    void createLayerItems();
+    
+    /**
+     * @brief Clear all layer item widgets.
+     */
+    void clearLayerItems();
+    
+    /**
+     * @brief Phase L.4: Update scroll area styling based on theme.
+     */
+    void updateScrollAreaStyle();
+    
+    /**
+     * @brief Get the currently active layer item index (selected in UI).
+     * @return The active layer index, or -1 if none.
+     */
+    int currentActiveIndex() const;
 
     /**
-     * @brief Convert list row to layer index.
+     * @brief Convert widget index to layer index.
      * 
      * The list shows layers in reverse order (top layer at top of list),
-     * so we need to convert between row and layer index.
+     * so we need to convert between widget position and layer index.
      * 
-     * @param row The list row (0 = top of list).
+     * @param widgetIndex The position in m_layerItems (0 = top of list).
      * @return The layer index in the page/manifest.
      */
-    int rowToLayerIndex(int row) const;
+    int widgetIndexToLayerIndex(int widgetIndex) const;
 
     /**
-     * @brief Convert layer index to list row.
+     * @brief Convert layer index to widget index.
      * @param layerIndex The layer index in the page/manifest.
-     * @return The list row.
+     * @return The position in m_layerItems.
      */
-    int layerIndexToRow(int layerIndex) const;
+    int layerIndexToWidgetIndex(int layerIndex) const;
+    
+public:
+    /**
+     * @brief Set dark mode for theming.
+     * @param dark True for dark mode, false for light mode.
+     */
+    void setDarkMode(bool dark);
 
     // =========================================================================
     // Abstracted layer access (Phase 5.6.7)
