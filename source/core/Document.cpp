@@ -432,6 +432,44 @@ bool Document::loadPageFromDisk(int index) const
     
     QFile file(pagePath);
     if (!file.open(QIODevice::ReadOnly)) {
+        // File doesn't exist - check if we can synthesize a pristine PDF page
+        auto pdfIt = m_pagePdfIndex.find(uuid);
+        if (pdfIt != m_pagePdfIndex.end()) {
+            // Synthesize pristine PDF page from manifest metadata
+            auto page = std::make_unique<Page>();
+            page->uuid = uuid;
+            page->pageIndex = index;
+            page->backgroundType = Page::BackgroundType::PDF;
+            page->pdfPageNumber = pdfIt->second;
+            
+            // Get size from metadata
+            auto sizeIt = m_pageMetadata.find(uuid);
+            if (sizeIt != m_pageMetadata.end()) {
+                page->size = sizeIt->second;
+            } else {
+                // Fallback to PDF page size if available
+                if (isPdfLoaded() && pdfIt->second >= 0 && pdfIt->second < pdfPageCount()) {
+                    QSizeF pdfSize = pdfPageSize(pdfIt->second);
+                    qreal scale = 96.0 / 72.0;  // PDF points to 96 dpi
+                    page->size = QSizeF(pdfSize.width() * scale, pdfSize.height() * scale);
+                }
+            }
+            
+            // Apply document defaults for colors/spacing
+            page->backgroundColor = defaultBackgroundColor;
+            page->gridColor = defaultGridColor;
+            page->gridSpacing = defaultGridSpacing;
+            page->lineSpacing = defaultLineSpacing;
+            
+            m_loadedPages[uuid] = std::move(page);
+            
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "Synthesized pristine PDF page" << index << "(" << uuid.left(8) << ")";
+#endif
+            return true;
+        }
+        
+        // Not a PDF page and file doesn't exist - actual error
         qWarning() << "Cannot load page: file not found" << pagePath;
         return false;
     }
@@ -472,9 +510,9 @@ bool Document::loadPageFromDisk(int index) const
     
     m_loadedPages[uuid] = std::move(page);
     
-
-    // qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
-
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
+#endif
     
     return true;
 }
@@ -2037,7 +2075,9 @@ bool Document::saveBundle(const QString& path)
     if (mode == Mode::Edgeless) {
         // Create tiles directory
         if (!QDir().mkpath(path + "/tiles")) {
-            qWarning() << "Cannot create tiles directory" << path;
+            #ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "Cannot create tiles directory" << path;
+            #endif
             return false;
         }
         
@@ -2064,7 +2104,9 @@ bool Document::saveBundle(const QString& path)
     } else {
         // ========== PAGED MODE SAVE (Phase O1.7.4) ==========
         if (!QDir().mkpath(path + "/pages")) {
-            qWarning() << "Cannot create pages directory" << path;
+            #ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "Cannot create pages directory" << path;
+            #endif
             return false;
         }
         
@@ -2075,8 +2117,21 @@ bool Document::saveBundle(const QString& path)
                 QString uuid = page->uuid;
                 m_pageOrder.append(uuid);
                 m_pageMetadata[uuid] = page->size;
+                
+                // Track PDF page index for pristine page synthesis
+                if (page->backgroundType == Page::BackgroundType::PDF) {
+                    m_pagePdfIndex[uuid] = page->pdfPageNumber;
+                }
+                
                 m_loadedPages[uuid] = std::move(page);
-                m_dirtyPages.insert(uuid);
+                
+                // Only mark as dirty if page has user content
+                // Pristine PDF pages don't need individual files
+                Page* loadedPage = m_loadedPages[uuid].get();
+                if (loadedPage->hasContent() || 
+                    loadedPage->backgroundType != Page::BackgroundType::PDF) {
+                    m_dirtyPages.insert(uuid);
+                }
             }
             m_pages.clear();
             
@@ -2091,13 +2146,20 @@ bool Document::saveBundle(const QString& path)
         }
         manifest["page_order"] = pageOrderArray;
         
-        // Write page_metadata to manifest
+        // Write page_metadata to manifest (includes pdf_page for pristine PDF page synthesis)
         QJsonObject pageMetadataObj;
         for (const auto& [uuid, size] : m_pageMetadata) {
-            QJsonObject sizeObj;
-            sizeObj["width"] = size.width();
-            sizeObj["height"] = size.height();
-            pageMetadataObj[uuid] = sizeObj;
+            QJsonObject metaObj;
+            metaObj["width"] = size.width();
+            metaObj["height"] = size.height();
+            
+            // Include PDF page index if this is a PDF page
+            auto pdfIt = m_pagePdfIndex.find(uuid);
+            if (pdfIt != m_pagePdfIndex.end()) {
+                metaObj["pdf_page"] = pdfIt->second;
+            }
+            
+            pageMetadataObj[uuid] = metaObj;
         }
         manifest["page_metadata"] = pageMetadataObj;
     }
@@ -2194,7 +2256,9 @@ bool Document::saveBundle(const QString& path)
                     qDebug() << "Deleted empty tile file:" << tileFileName;
 #endif
                 } else {
-                    qWarning() << "Failed to delete empty tile file:" << tilePath;
+                    #ifdef SPEEDYNOTE_DEBUG
+                        qDebug() << "Failed to delete empty tile file:" << tilePath;
+                    #endif
                 }
             }
         }
@@ -2226,7 +2290,9 @@ bool Document::saveBundle(const QString& path)
                         qDebug() << "Copied evicted page" << uuid;
 #endif
                     } else {
-                        qWarning() << "Failed to copy page" << oldPagePath << "to" << newPagePath;
+                        #ifdef SPEEDYNOTE_DEBUG
+                            qDebug() << "Failed to copy page" << oldPagePath << "to" << newPagePath;
+                        #endif
                     }
                 }
             }
@@ -2234,7 +2300,19 @@ bool Document::saveBundle(const QString& path)
         
         // Save pages in memory
         for (const auto& [uuid, pagePtr] : m_loadedPages) {
-            // When saving to new location: save ALL in-memory pages
+            // Skip pristine PDF pages - they can be synthesized from manifest
+            // A page is "pristine" if it has PDF background and no user content
+            bool isPristinePdfPage = (pagePtr->backgroundType == Page::BackgroundType::PDF) 
+                                     && !pagePtr->hasContent();
+            if (isPristinePdfPage) {
+                // Ensure PDF page index is tracked for synthesis
+                if (m_pagePdfIndex.find(uuid) == m_pagePdfIndex.end()) {
+                    m_pagePdfIndex[uuid] = pagePtr->pdfPageNumber;
+                }
+                continue;  // Don't save file - synthesize on load
+            }
+            
+            // When saving to new location: save ALL in-memory pages (with content)
             // When saving to same location: only save dirty pages
             bool needsSave = savingToNewLocation || m_dirtyPages.count(uuid) > 0;
             if (needsSave) {
@@ -2248,7 +2326,9 @@ bool Document::saveBundle(const QString& path)
                     qDebug() << "Saved page" << uuid;
 #endif
                 } else {
-                    qWarning() << "Failed to save page" << pagePath;
+                    #ifdef SPEEDYNOTE_DEBUG
+                        qDebug() << "Failed to save page" << pagePath;
+                    #endif
                 }
             }
         }
@@ -2372,15 +2452,20 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
                 doc->m_pageOrder.append(val.toString());
             }
             
-            // Parse page_metadata (sizes for layout calculations)
+            // Parse page_metadata (sizes and PDF page indices for layout/synthesis)
             if (obj.contains("page_metadata")) {
                 QJsonObject pageMetadataObj = obj["page_metadata"].toObject();
                 for (auto it = pageMetadataObj.begin(); it != pageMetadataObj.end(); ++it) {
                     QString uuid = it.key();
-                    QJsonObject sizeObj = it.value().toObject();
-                    QSizeF size(sizeObj["width"].toDouble(595.0), 
-                               sizeObj["height"].toDouble(842.0));
+                    QJsonObject metaObj = it.value().toObject();
+                    QSizeF size(metaObj["width"].toDouble(595.0), 
+                               metaObj["height"].toDouble(842.0));
                     doc->m_pageMetadata[uuid] = size;
+                    
+                    // Parse PDF page index for pristine page synthesis
+                    if (metaObj.contains("pdf_page")) {
+                        doc->m_pagePdfIndex[uuid] = metaObj["pdf_page"].toInt();
+                    }
                 }
             } else {
                 // Fallback: assign default size to pages missing metadata

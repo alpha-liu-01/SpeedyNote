@@ -1192,6 +1192,12 @@ private:
     /// Key: page UUID, Value: page size (width, height).
     std::map<QString, QSizeF> m_pageMetadata;
     
+    /// PDF page index for each page (for pristine PDF page synthesis).
+    /// Key: page UUID, Value: PDF page index (0-based).
+    /// Only contains entries for pages with PDF backgrounds.
+    /// Pages not in this map are non-PDF pages (blank, grid, lines, etc.).
+    std::map<QString, int> m_pagePdfIndex;
+    
     /// Currently loaded pages. Key: page UUID, Value: Page object.
     /// Mutable for lazy loading in const methods like page().
     mutable std::map<QString, std::unique_ptr<Page>> m_loadedPages;

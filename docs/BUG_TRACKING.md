@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 15, 2026 (Fixed page horizontal shift when navigating with sidebar open)
+**Last Updated:** Jan 15, 2026 (Optimized first-time save of PDF documents)
 
 ---
 
@@ -603,6 +603,54 @@ The subtoolbar now only receives mode updates from:
 
 ### Performance (PERF)
 
+#### BUG-PERF-001: First-time save of PDF documents extremely slow
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+Saving a PDF document for the first time (loading a PDF and saving as .snb) was extremely slow on weaker devices. A 3000+ page PDF could take minutes to save initially, but subsequent saves were nearly instant.
+
+**Root Cause:**
+During first-time save, the legacy-to-UUID migration marked ALL pages as dirty:
+
+```cpp
+// Before fix
+for (auto& page : m_pages) {
+    m_dirtyPages.insert(uuid);  // ALL 3000+ pages marked dirty!
+}
+```
+
+This caused 3000+ individual page JSON files to be written, even though most pages had no user content (just PDF background reference).
+
+**Fix:**
+Implemented "pristine PDF page" optimization:
+
+1. **Track PDF page indices in manifest** (`m_pagePdfIndex` map):
+   - `page_metadata` now includes `pdf_page` for PDF pages
+   - Enables on-demand page synthesis without individual files
+
+2. **Skip saving pristine PDF pages** in `saveBundle()`:
+   - Pages with `backgroundType == PDF` and `hasContent() == false` are not written to disk
+   - Their PDF page index is stored in manifest metadata instead
+
+3. **Synthesize on load** in `loadPageFromDisk()`:
+   - If page file doesn't exist but `pdf_page` metadata exists, create page in memory
+   - Uses size from manifest + PDF page index + document defaults
+
+**Performance Impact:**
+- **Before:** First save writes N page files (O(N) file operations)
+- **After:** First save writes only pages with content + 1 manifest (O(k+1) where k = edited pages)
+- For 3000-page PDF with 5 edited pages: **3000 files → 6 files** (99.8% reduction!)
+
+**Files Changed:**
+- `source/core/Document.h`: Added `m_pagePdfIndex` map
+- `source/core/Document.cpp`: Modified `saveBundle()`, `loadBundle()`, `loadPageFromDisk()`
+
+**Backward Compatibility:**
+- Old bundles with individual page files still work normally
+- Files are loaded as usual; shrinking only happens on re-save
+
+**Verified:** [ ] First save of large PDF is fast; subsequent loads/edits work correctly
+
 ---
 
 ### UI/UX (UI)
@@ -1114,10 +1162,10 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Sidebar | 0 | 0 | 0 | 0 |
 | Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
-| Performance | 0 | 0 | 0 | 0 |
+| Performance | 0 | 0 | 1 | 1 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **18** | **18** |
+| **TOTAL** | **0** | **0** | **19** | **19** |
 
 ---
 
