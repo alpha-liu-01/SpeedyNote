@@ -3002,10 +3002,15 @@ void MainWindow::applyBackgroundSettings(Page::BackgroundType type, const QColor
     doc->defaultLineSpacing = lineSpacing;
     
     // Apply to all existing pages in the document
+    // IMPORTANT: Skip pages with PDF backgrounds - they should never be overwritten
     for (int i = 0; i < doc->pageCount(); ++i) {
         Page* page = doc->page(i);
         if (page) {
-            page->backgroundType = type;
+            // Preserve PDF backgrounds - only apply settings to non-PDF pages
+            if (page->backgroundType != Page::BackgroundType::PDF) {
+                page->backgroundType = type;
+            }
+            // Always update colors and spacing (these affect the rendering even for PDF pages)
             page->backgroundColor = bgColor;
             page->gridColor = gridColor;
             page->gridSpacing = gridSpacing;
@@ -3019,7 +3024,10 @@ void MainWindow::applyBackgroundSettings(Page::BackgroundType type, const QColor
         for (const auto& coord : tileCoords) {
             Page* tile = doc->getTile(coord.first, coord.second);
             if (tile) {
-                tile->backgroundType = type;
+                // Preserve PDF backgrounds - only apply settings to non-PDF tiles
+                if (tile->backgroundType != Page::BackgroundType::PDF) {
+                    tile->backgroundType = type;
+                }
                 tile->backgroundColor = bgColor;
                 tile->gridColor = gridColor;
                 tile->gridSpacing = gridSpacing;

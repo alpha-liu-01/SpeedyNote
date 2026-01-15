@@ -627,6 +627,65 @@ Also removed the redundant second connection since `onCurrentChanged` now handle
 
 ---
 
+#### BUG-UI-006: Control Panel settings override PDF backgrounds
+**Priority:** 🔴 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When opening the Control Panel and clicking Apply or OK (even without changing any background settings), PDF backgrounds are overwritten with the grid/lines/none setting from the Control Panel.
+
+**Steps to Reproduce:**
+1. Open a PDF document in SpeedyNote
+2. Open Control Panel (Settings)
+3. Change any setting (e.g., theme, language) or just click "Apply"
+4. PDF background disappears, replaced by grid/lines/none
+
+**Expected:** PDF backgrounds should be preserved when applying Control Panel settings
+**Actual:** All pages unconditionally have their `backgroundType` overwritten
+
+**Root Cause:** 
+In `MainWindow::applyBackgroundSettings()`, the function unconditionally set `page->backgroundType = type` for ALL pages, including pages with `Page::BackgroundType::PDF`:
+
+```cpp
+for (int i = 0; i < doc->pageCount(); ++i) {
+    Page* page = doc->page(i);
+    if (page) {
+        page->backgroundType = type;  // ← Overwrites PDF backgrounds!
+        // ...
+    }
+}
+```
+
+When `ControlPanelDialog::applyChanges()` calls `mainWindowRef->applyBackgroundSettings()`, it passes the current combo box value (Grid/Lines/None), which replaces the PDF background type.
+
+**Fix:**
+Added a guard in `MainWindow::applyBackgroundSettings()` to skip pages with PDF backgrounds:
+
+```cpp
+for (int i = 0; i < doc->pageCount(); ++i) {
+    Page* page = doc->page(i);
+    if (page) {
+        // Preserve PDF backgrounds - only apply settings to non-PDF pages
+        if (page->backgroundType != Page::BackgroundType::PDF) {
+            page->backgroundType = type;
+        }
+        // Colors and spacing are still applied (for overlays, etc.)
+        page->backgroundColor = bgColor;
+        // ...
+    }
+}
+```
+
+Same logic applied to edgeless tiles for consistency.
+
+**Files Modified:**
+- `source/MainWindow.cpp` - Added PDF background check in `applyBackgroundSettings()`
+
+**Verified:** [ ] PDF document backgrounds preserved after Control Panel changes
+**Verified:** [ ] Non-PDF pages still get background settings applied
+**Verified:** [ ] Newly added pages in PDF document follow document defaults
+
+---
+
 ### Miscellaneous (MISC)
 
 #### BUG-MISC-001: Dead code returnToLauncher() shows placeholder message
