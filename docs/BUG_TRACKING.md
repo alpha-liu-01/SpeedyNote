@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026 (Fixed NavigationBar filename not updating after Save As)
+**Last Updated:** Jan 14, 2026 (Fixed subtoolbar color presets not persisting after restart)
 
 ---
 
@@ -416,6 +416,50 @@ if (!docId.isEmpty()) {
 ---
 
 ### Subtoolbar (STB)
+
+#### BUG-STB-001: Subtoolbar color presets not persisting after restart
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+Custom color presets in the Pen, Marker, and Highlighter subtoolbars would reset to defaults after closing and reopening the application. However, new tabs created within the same session would correctly show the custom presets.
+
+**Steps to Reproduce:**
+1. Open SpeedyNote, select Pen tool
+2. Long-press a color preset, change it to a custom color (e.g., orange)
+3. Close SpeedyNote
+4. Reopen SpeedyNote, open a document from Launcher
+5. Color preset shows default (red/blue/black) instead of custom (orange)
+
+**Expected:** Custom color presets should persist across app restarts
+**Actual:** Color presets reset to defaults after restart
+
+**Root Cause:** 
+Inconsistent `QSettings` constructor usage across the codebase:
+
+| Location | Constructor Used | Settings File |
+|----------|-----------------|---------------|
+| MainWindow, ControlPanelDialog | `QSettings("SpeedyNote", "App")` | ✅ SpeedyNote/App |
+| PenSubToolbar, MarkerSubToolbar, etc. | `QSettings()` (default) | ❌ Empty/unknown |
+
+The default `QSettings()` constructor relies on `QCoreApplication::organizationName()` and `applicationName()` - but these were **never set** in `Main.cpp`! So the subtoolbars were writing to and reading from a **different settings location** than the rest of the application.
+
+**Fix:**
+Added organization and application name setup in `Main.cpp` right after creating `QApplication`:
+
+```cpp
+app.setOrganizationName("SpeedyNote");
+app.setApplicationName("App");
+```
+
+This ensures that `QSettings()` (default constructor) now uses the same settings location as `QSettings("SpeedyNote", "App")`.
+
+**Files Modified:**
+- `source/Main.cpp` (added setOrganizationName/setApplicationName)
+
+**Verified:** [ ] Custom pen color presets persist after restart
+**Verified:** [ ] Custom marker color presets persist after restart  
+**Verified:** [ ] Custom thickness presets persist after restart
+**Verified:** [ ] Other settings (theme, language, etc.) still work
 
 ---
 
@@ -833,7 +877,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | File I/O | 0 | 0 | 0 | 0 |
 | Tabs | 0 | 0 | 1 | 1 |
 | Toolbar | 0 | 0 | 0 | 0 |
-| Subtoolbar | 0 | 0 | 0 | 0 |
+| Subtoolbar | 0 | 0 | 1 | 1 |
 | Action Bar | 0 | 0 | 1 | 1 |
 | Sidebar | 0 | 0 | 0 | 0 |
 | Touch | 0 | 0 | 1 | 1 |
@@ -841,7 +885,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **15** | **15** |
+| **TOTAL** | **0** | **0** | **16** | **16** |
 
 ---
 

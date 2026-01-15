@@ -197,6 +197,11 @@ int main(int argc, char *argv[]) {
     // Enable Windows IME support for multi-language input
     QApplication app(argc, argv);
     
+    // Set organization and application name for QSettings
+    // This allows QSettings() default constructor to work consistently
+    app.setOrganizationName("SpeedyNote");
+    app.setApplicationName("App");
+    
     // High DPI scaling is automatically enabled in Qt 6+
     // No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps
 
