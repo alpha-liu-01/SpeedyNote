@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026 (Fixed renamed document opening duplicate tab)
+**Last Updated:** Jan 14, 2026 (Fixed NavigationBar filename not updating after Save As)
 
 ---
 
@@ -441,6 +441,43 @@ if (!docId.isEmpty()) {
 
 ### UI/UX (UI)
 
+#### BUG-UI-004: NavigationBar filename not updated after Save As
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+After saving a document with "Save As" and choosing a new filename, the NavigationBar still displayed the old name (e.g., "Untitled") while the tab title correctly showed the new name.
+
+**Steps to Reproduce:**
+1. Create a new paged document (shows "Untitled" in NavigationBar)
+2. Draw something
+3. Press Ctrl+S to save
+4. Choose a new filename like "MyNotes.snb"
+5. NavigationBar still shows "Untitled"
+
+**Expected:** NavigationBar should show "MyNotes" after saving
+**Actual:** NavigationBar showed "Untitled"
+
+**Root Cause:** 
+The `saveDocument()` method updated the tab title via `m_tabManager->setTabTitle()` but didn't update the NavigationBar via `m_navigationBar->setFilename()`. The NavigationBar was only updated on tab switch.
+
+| Location | Tab Title | NavigationBar |
+|----------|-----------|---------------|
+| Tab switch | N/A | ✅ Updated |
+| Save As | ✅ Updated | ❌ NOT updated |
+| Tab close with save | ✅ Updated | ❌ NOT updated |
+
+**Fix:**
+Added `m_navigationBar->setFilename()` calls after all `setTabTitle()` updates:
+
+1. In `saveDocument()` after Save As dialog (line ~2145)
+2. In `tabCloseRequested` handler after save (line ~400)
+
+**Files Modified:**
+- `source/MainWindow.cpp` (two locations)
+
+**Verified:** [ ] Save As updates NavigationBar filename
+**Verified:** [ ] Tab close with save updates NavigationBar filename
+
 ---
 
 ### Miscellaneous (MISC)
@@ -802,9 +839,9 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Touch | 0 | 0 | 1 | 1 |
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 0 | 0 |
-| UI/UX | 0 | 0 | 3 | 3 |
+| UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **14** | **14** |
+| **TOTAL** | **0** | **0** | **15** | **15** |
 
 ---
 

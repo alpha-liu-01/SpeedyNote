@@ -394,9 +394,12 @@ MainWindow::MainWindow(QWidget *parent)
                     }
                 }
                 
-                // Update tab title
+                // Update tab title and NavigationBar
                 m_tabManager->setTabTitle(index, doc->displayName());
                 m_tabManager->markTabModified(index, false);
+                if (m_navigationBar) {
+                    m_navigationBar->setFilename(doc->displayName());
+                }
             }
             // If Discard, fall through to close
         }
@@ -2133,11 +2136,14 @@ void MainWindow::saveDocument()
                 return;
         }
         
-    // Update tab title (remove * prefix)
+    // Update tab title (remove * prefix) and NavigationBar
     int currentIndex = m_tabManager->currentIndex();
     if (currentIndex >= 0) {
         m_tabManager->setTabTitle(currentIndex, doc->name);
         m_tabManager->markTabModified(currentIndex, false);
+    }
+    if (m_navigationBar) {
+        m_navigationBar->setFilename(doc->name);
     }
     
     // Phase P.4.6: Save thumbnail to NotebookLibrary
