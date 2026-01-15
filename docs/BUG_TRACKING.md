@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 14, 2026 (Fixed ObjectSelect mode mismatch when switching tabs)
+**Last Updated:** Jan 15, 2026 (Fixed page horizontal shift when navigating with sidebar open)
 
 ---
 
@@ -65,7 +65,77 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 ### Viewport (VP)
 
-*No active bugs*
+#### BUG-VP-002: Page navigation causes horizontal shift when sidebar is open
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When navigating to a different page via the PagePanel or OutlinePanel (with sidebar open), the page would shift horizontally. After closing the sidebar, the page would be significantly off-center, with a large blank area on the left and part of the page outside the window.
+
+**Steps to Reproduce:**
+1. Open a paged document at default zoom
+2. Note initial Pan X (e.g., -5, properly centered)
+3. Open left sidebar (Pages tab)
+4. Note Pan X changes (e.g., 120, adjusted for narrower viewport)
+5. Click a different page in the PagePanel
+6. Pan X resets to 0 (the bug!)
+7. Close sidebar
+8. Pan X is now ~125 instead of -5, page is shifted right
+
+**Expected:** Page should remain centered after navigation and sidebar toggle
+**Actual:** Page shifted significantly to the right after closing sidebar
+
+**Root Cause:** 
+Two issues combined:
+
+**Issue 1: `scrollToPage()` reset Pan X to 0**
+```cpp
+QPointF pos = pagePosition(pageIndex);  // Returns X=0, Y=pagePosition
+pos.setY(pos.y() - 10);
+setPanOffset(pos);  // Sets BOTH X=0 and Y — wipes out X centering!
+```
+
+**Issue 2: `recenterHorizontally()` condition failed with narrow viewport**
+When sidebar is open, the viewport is narrower. If content width > narrow viewport width at default zoom, the condition `contentSize.width() < viewportWidth` fails, and `recenterHorizontally()` does nothing. Pan X stays at 0.
+
+Then when sidebar closes:
+- `resizeEvent()` tries to "preserve center point" from Pan X = 0
+- Result: Pan X becomes positive (page shifted right)
+
+**Fix:**
+Two-part fix:
+
+**Part 1: Only modify Y in `scrollToPage()`**
+```cpp
+// Before: setPanOffset(pos) — sets both X and Y
+// After: Only modify Y, preserve X centering
+m_panOffset.setY(pos.y() - 10);
+recenterHorizontally();
+clampPanOffset();
+emit panChanged(m_panOffset);
+```
+
+**Part 2: Recenter on resize when content is narrower than viewport**
+Added to `resizeEvent()`:
+```cpp
+// Re-center horizontally if content is narrower than viewport
+QSizeF contentSize = totalContentSize();
+qreal viewportWidth = width() / m_zoomLevel;
+if (contentSize.width() < viewportWidth) {
+    recenterHorizontally();
+}
+```
+
+This ensures:
+- Page switch preserves X pan (only Y changes)
+- Sidebar close → `resizeEvent` recenters for wider viewport
+- Zoomed in (content > viewport) → preserves user's horizontal pan
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp` (`scrollToPage()`, `resizeEvent()`)
+
+**Verified:** [x] Page switch with sidebar open preserves X centering
+**Verified:** [x] Sidebar close recenters page correctly
+**Verified:** [x] Zoomed-in documents preserve horizontal pan on resize
 
 ---
 
@@ -1028,7 +1098,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 
 | Category | New | In Progress | Fixed | Total |
 |----------|-----|-------------|-------|-------|
-| Viewport | 0 | 0 | 1 | 1 |
+| Viewport | 0 | 0 | 2 | 2 |
 | Drawing | 0 | 0 | 0 | 0 |
 | Lasso | 0 | 0 | 0 | 0 |
 | Highlighter | 0 | 0 | 0 | 0 |
@@ -1047,7 +1117,7 @@ connect(m_toolbar, &Toolbar::touchGestureModeChanged, this, [this](int mode) {
 | Performance | 0 | 0 | 0 | 0 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Miscellaneous | 0 | 0 | 3 | 3 |
-| **TOTAL** | **0** | **0** | **17** | **17** |
+| **TOTAL** | **0** | **0** | **18** | **18** |
 
 ---
 

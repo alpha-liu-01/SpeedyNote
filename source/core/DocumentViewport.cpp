@@ -626,17 +626,23 @@ void DocumentViewport::scrollToPage(int pageIndex)
     // Get page position and scroll to show it at top of viewport
     QPointF pos = pagePosition(pageIndex);
     
-    // Optionally add some margin from top
-    pos.setY(pos.y() - 10);
+    // Only change Y position (with margin), preserve X centering
+    // This prevents the horizontal pan from resetting when navigating pages,
+    // which would cause the page to shift when sidebars are toggled
+    m_panOffset.setY(pos.y() - 10);
     
-    setPanOffset(pos);
-    
-    // Phase S4: Re-center horizontally after positioning
-    // This ensures the document stays centered when content is narrower than viewport
+    // Re-center horizontally if content is narrower than viewport
+    // If content is wider (user zoomed in), preserve their horizontal pan position
     recenterHorizontally();
+    
+    // Clamp to valid bounds and emit signal
+    clampPanOffset();
+    emit panChanged(m_panOffset);
     
     m_currentPageIndex = pageIndex;
     emit currentPageChanged(m_currentPageIndex);
+    
+    update();
 }
 
 void DocumentViewport::scrollToPositionOnPage(int pageIndex, QPointF normalizedPosition)
@@ -1841,6 +1847,17 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     
     // Clamp to valid bounds (content may now be smaller/larger relative to viewport)
     clampPanOffset();
+    
+    // Re-center horizontally if content is narrower than viewport
+    // This fixes the issue where sidebar toggle causes page shift:
+    // - Sidebar opens → viewport shrinks → page switch centers for narrow viewport
+    // - Sidebar closes → viewport expands → we need to recenter for wider viewport
+    // Only recenter when content is narrower than viewport (not when user has zoomed in)
+    QSizeF contentSize = totalContentSize();
+    qreal viewportWidth = width() / m_zoomLevel;
+    if (contentSize.width() < viewportWidth) {
+        recenterHorizontally();
+    }
     
     // Update current page index (visible area changed)
     updateCurrentPageIndex();

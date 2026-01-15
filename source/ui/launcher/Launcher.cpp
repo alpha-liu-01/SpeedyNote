@@ -38,7 +38,10 @@ Launcher::Launcher(QWidget* parent)
     : QMainWindow(parent)
 {
     setWindowTitle(tr("SpeedyNote"));
-    setMinimumSize(800, 600);
+    // Minimum size: 640x480 allows compact sidebar (60px) + content area (580px)
+    // This supports screens as small as 1024x640 @ 125% DPI (= 820x512 logical)
+    // with room for window chrome and taskbar
+    setMinimumSize(640, 480);
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
     
     setupUi();
@@ -455,6 +458,15 @@ void Launcher::resizeEvent(QResizeEvent* event)
     if (m_fab) {
         m_fab->positionInParent();
     }
+    
+    // Trigger compact mode for navigation buttons when:
+    // 1. Window width < 768px (narrow window), OR
+    // 2. Portrait orientation (height > width)
+    const int windowWidth = event->size().width();
+    const int windowHeight = event->size().height();
+    const bool shouldBeCompact = (windowWidth < 768) || (windowHeight > windowWidth);
+    
+    setNavigationCompact(shouldBeCompact);
 }
 
 void Launcher::showEvent(QShowEvent* event)
