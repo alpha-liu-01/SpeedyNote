@@ -418,11 +418,25 @@ set(UI_SOURCES
 )
 
 # ✅ NEW ARCHITECTURE: PDF abstraction layer (Phase 1.2)
-set(PDF_SOURCES
-        source/pdf/PopplerPdfProvider.cpp  # Task 1.2.2
+# Platform-specific PDF backend:
+# - Android: MuPDF (smaller, no external dependencies)
+# - Desktop: Poppler (feature-rich, widely available)
+# Factory is in PdfProviderFactory.cpp (selects backend via #ifdef)
+if(ANDROID)
+    set(PDF_SOURCES
+        source/pdf/PdfProviderFactory.cpp  # Factory with platform selection
+        source/pdf/MuPdfProvider.cpp       # Android: MuPDF backend
         source/pdf/PdfRelinkDialog.cpp     # PDF relink dialog
         source/pdf/PdfMismatchDialog.cpp   # PDF hash mismatch dialog (Phase R.2)
-)
+    )
+else()
+    set(PDF_SOURCES
+        source/pdf/PdfProviderFactory.cpp  # Factory with platform selection
+        source/pdf/PopplerPdfProvider.cpp  # Desktop: Poppler backend
+        source/pdf/PdfRelinkDialog.cpp     # PDF relink dialog
+        source/pdf/PdfMismatchDialog.cpp   # PDF hash mismatch dialog (Phase R.2)
+    )
+endif()
 
 # ============================================================================
 # Controller Support Sources (optional)
@@ -520,6 +534,28 @@ elseif (APPLE)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
     endif()
+    target_link_libraries(NoteApp ${PLATFORM_LIBS})
+elseif (ANDROID)
+    # Android: Use MuPDF instead of Poppler
+    # MuPDF paths are set via MUPDF_INCLUDE_DIR and MUPDF_LIBRARIES
+    if(NOT MUPDF_INCLUDE_DIR)
+        set(MUPDF_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/android/mupdf-build/include")
+    endif()
+    if(NOT MUPDF_LIBRARIES)
+        set(MUPDF_LIBRARIES
+            "${CMAKE_SOURCE_DIR}/android/mupdf-build/lib/libmupdf.a"
+            "${CMAKE_SOURCE_DIR}/android/mupdf-build/lib/libmupdf-third.a"
+        )
+    endif()
+    
+    target_include_directories(NoteApp PRIVATE ${MUPDF_INCLUDE_DIR})
+    
+    set(PLATFORM_LIBS
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            ${MUPDF_LIBRARIES}
+            log  # Android logging
+            z    # zlib (usually available on Android)
+    )
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 elseif (UNIX)
     set(PLATFORM_LIBS

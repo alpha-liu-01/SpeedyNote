@@ -275,20 +275,6 @@ std::unique_ptr<Poppler::Page> PopplerPdfProvider::getPage(int pageIndex) const
     return std::unique_ptr<Poppler::Page>(m_document->page(pageIndex));
 }
 
-// ===== Factory Methods (defined in PdfProvider interface) =====
-
-std::unique_ptr<PdfProvider> PdfProvider::create(const QString& pdfPath)
-{
-    auto provider = std::make_unique<PopplerPdfProvider>(pdfPath);
-    if (provider->isValid()) {
-        return provider;
-    }
-    return nullptr;
-}
-
-bool PdfProvider::isAvailable()
-{
-    // Poppler is always available when this code compiles
-    // (it's a compile-time dependency)
-    return true;
-}
+// ===== Factory Methods =====
+// Factory methods are now in PdfProviderFactory.cpp for cleaner separation.
+// This allows each provider implementation to be self-contained.

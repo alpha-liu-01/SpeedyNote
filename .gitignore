@@ -59,3 +59,6 @@ old/
 qt6/
 qt5/
 misc/
+android/test-app/
+android/mupdf-build/
+SpeedyNote-Android-android-conan/
