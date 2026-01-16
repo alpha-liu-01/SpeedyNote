@@ -111,6 +111,9 @@ private:
     void renameNotebook(const QString& bundlePath);
     void duplicateNotebook(const QString& bundlePath);
     void showInFileManager(const QString& bundlePath);
+#ifdef Q_OS_ANDROID
+    QString findImportedPdfPath(const QString& bundlePath);
+#endif
     
     // === View Management ===
     enum class View {

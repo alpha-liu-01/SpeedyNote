@@ -75,8 +75,11 @@ public:
 
 signals:
     /**
-     * @brief Emitted when the current page changes (during scroll AND on snap).
+     * @brief Emitted when the current page changes (only on snap finish, not during scroll).
      * @param page The new current page index (0-based).
+     * 
+     * Note: BUG-A006 fix - signal is debounced to prevent flooding PDF render system
+     * on Android during rapid scroll animations.
      */
     void currentPageChanged(int page);
     
@@ -161,7 +164,8 @@ private:
     void setScrollOffset(qreal offset);
 
     // Page state
-    int m_currentPage = 0;      // 0-based
+    int m_currentPage = 0;      // 0-based, display page during scroll
+    int m_lastEmittedPage = 0;  // Last page for which signal was emitted (BUG-A006 fix)
     int m_pageCount = 1;
     
     // Scroll state

@@ -3001,11 +3001,18 @@ void DocumentViewport::doAsyncPdfPreload()
         // The background thread returns QImage, and we convert to QPixmap here
         // in the finished handler which runs on the main thread.
         connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, pdfPageNum, dpi]() {
-            m_activePdfWatchers.removeOne(watcher);
+            // BUG-A006 FIX: Check if watcher was cancelled (e.g., by invalidatePdfCache)
+            // This happens when document/page changes while render is in progress
+            bool wasActive = m_activePdfWatchers.removeOne(watcher);
+            watcher->deleteLater();
+            
+            if (!wasActive || watcher->isCanceled()) {
+                // Watcher was removed by invalidatePdfCache - discard stale result
+                return;
+            }
             
             // Get the rendered image from the background task
             QImage pdfImage = watcher->result();
-            watcher->deleteLater();
             
             // Check if rendering failed
             if (pdfImage.isNull()) {
@@ -3083,6 +3090,16 @@ void DocumentViewport::invalidatePdfCache()
     if (m_pdfPreloadTimer) {
         m_pdfPreloadTimer->stop();
     }
+    
+    // BUG-A006 FIX: Cancel active background PDF render threads
+    // Without this, background threads can continue accessing stale PDF files
+    // after document change, causing SIGBUS crashes on Android (memory alignment errors)
+    for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
+        watcher->cancel();
+        // Don't waitForFinished() here - it would block the UI thread
+        // The watcher will clean itself up when finished via deleteLater()
+    }
+    m_activePdfWatchers.clear();
     
     // Thread-safe cache clear
     QMutexLocker locker(&m_pdfCacheMutex);

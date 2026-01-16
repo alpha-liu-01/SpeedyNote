@@ -360,7 +360,7 @@ if(ANDROID)
     
     set_target_properties(NoteApp PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android/app-resources"
-        QT_ANDROID_TARGET_SDK_VERSION 34
+        QT_ANDROID_TARGET_SDK_VERSION 35
         QT_ANDROID_MIN_SDK_VERSION 26
     )
     

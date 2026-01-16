@@ -53,6 +53,7 @@ void PageWheelPicker::setCurrentPage(int page)
     
     if (m_currentPage != page) {
         m_currentPage = page;
+        m_lastEmittedPage = page;  // BUG-A006: Keep in sync
         m_scrollOffset = static_cast<qreal>(page);
         update();
         emit currentPageChanged(m_currentPage);
@@ -286,7 +287,19 @@ void PageWheelPicker::onSnapFinished()
     // Final update to ensure we're exactly on a page
     m_scrollOffset = std::round(m_scrollOffset);
     clampOffset();
-    updateFromOffset();
+    
+    // BUG-A006 FIX: Only emit page change when scrolling is fully complete
+    // This prevents flooding the PDF render system with rapid page change signals
+    // during scroll/inertia animations
+    const int newPage = qBound(0, static_cast<int>(std::round(m_scrollOffset)), m_pageCount - 1);
+    m_currentPage = newPage;
+    
+    // Only emit if the final page differs from the last emitted page
+    if (newPage != m_lastEmittedPage) {
+        m_lastEmittedPage = newPage;
+        emit currentPageChanged(m_currentPage);
+    }
+    
     update();
 }
 
@@ -360,22 +373,23 @@ void PageWheelPicker::snapToPage()
         m_snapAnimation->setEndValue(targetOffset);
         m_snapAnimation->start();
     } else {
-        // Already close enough, just set directly
+        // Already close enough - call onSnapFinished directly to emit signal
         m_scrollOffset = targetOffset;
-        updateFromOffset();
-        update();
+        onSnapFinished();
     }
 }
 
 void PageWheelPicker::updateFromOffset()
 {
-    // Calculate the page index closest to center
-    const int newPage = qBound(0, static_cast<int>(std::round(m_scrollOffset)), m_pageCount - 1);
+    // BUG-A006 FIX: During drag/inertia, only update internal state for display
+    // The actual currentPageChanged signal is emitted only when scrolling stops
+    // (in onSnapFinished) to prevent flooding the PDF render system
     
-    if (newPage != m_currentPage) {
-        m_currentPage = newPage;
-        emit currentPageChanged(m_currentPage);
-    }
+    // Calculate the page index closest to center for internal tracking only
+    m_currentPage = qBound(0, static_cast<int>(std::round(m_scrollOffset)), m_pageCount - 1);
+    
+    // Note: Do NOT emit currentPageChanged here - it will be emitted in onSnapFinished()
+    // This prevents rapid-fire signals during scroll animation that can crash Android
 }
 
 void PageWheelPicker::clampOffset()

@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.speedynote.app"
     android:versionCode="1"
-    android:versionName="0.12.0"
+    android:versionName="1.0.0"
     android:installLocation="auto">
 
     <!-- Permissions -->
@@ -34,14 +34,15 @@
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
         android:label="SpeedyNote"
+        android:icon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:fullBackupOnly="false"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
-        <!-- Main activity -->
+        <!-- Main activity - custom class to handle PDF picker results -->
         <activity
-            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:name="org.speedynote.app.SpeedyNoteActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
             android:label="SpeedyNote"
             android:launchMode="singleTop"

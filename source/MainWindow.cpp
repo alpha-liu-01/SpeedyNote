@@ -53,6 +53,7 @@
 // REMOVED MW7.2: QDial include removed - dial functionality deleted
 #include <QFontDatabase>
 #include <QStandardPaths>
+#include <QRegularExpression>  // BUG-A002: For filename sanitization on Android
 #include <QSettings>
 #include <QMessageBox>
 #include <QDebug>
@@ -77,6 +78,114 @@
 #include <QFile>
 #include <QJsonDocument>  // Phase doc-1: JSON serialization
 #include <QThread>
+
+// Android JNI support for PDF file picking (BUG-A003)
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QJniEnvironment>
+#include <QCoreApplication>
+#include <QEventLoop>
+
+// ============================================================================
+// Android PDF File Picker (BUG-A003)
+// ============================================================================
+// Uses a custom Java helper to pick PDFs with proper SAF permission handling.
+// The Java code copies the file to local storage while permission is valid,
+// then calls back to C++ with the local file path.
+// ============================================================================
+
+namespace {
+    // Static variables for async file picker result
+    static QString s_pickedPdfPath;
+    static bool s_pdfPickerCancelled = false;
+    static QEventLoop* s_pdfPickerLoop = nullptr;
+}
+
+// JNI callback: Called from Java when a PDF file is successfully picked and copied
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_PdfFileHelper_onPdfFilePicked(JNIEnv *env, jclass /*clazz*/, jstring localPath)
+{
+    const char* pathChars = env->GetStringUTFChars(localPath, nullptr);
+    s_pickedPdfPath = QString::fromUtf8(pathChars);
+    env->ReleaseStringUTFChars(localPath, pathChars);
+    
+    s_pdfPickerCancelled = false;
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "JNI callback: PDF picked -" << s_pickedPdfPath;
+#endif
+    
+    if (s_pdfPickerLoop) {
+        s_pdfPickerLoop->quit();
+    }
+}
+
+// JNI callback: Called from Java when PDF picking is cancelled or fails
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_PdfFileHelper_onPdfPickCancelled(JNIEnv * /*env*/, jclass /*clazz*/)
+{
+    s_pickedPdfPath.clear();
+    s_pdfPickerCancelled = true;
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "JNI callback: PDF pick cancelled";
+#endif
+    
+    if (s_pdfPickerLoop) {
+        s_pdfPickerLoop->quit();
+    }
+}
+
+// Opens the Android file picker for PDFs and waits for the result.
+// Returns the local file path, or empty string if cancelled.
+static QString pickPdfFileAndroid()
+{
+    // Reset state
+    s_pickedPdfPath.clear();
+    s_pdfPickerCancelled = false;
+    
+    // Get the destination directory for imported PDFs
+    QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
+    QDir().mkpath(destDir);
+    
+    // Get the Activity
+    QJniObject activity = QNativeInterface::QAndroidApplication::context();
+    if (!activity.isValid()) {
+        qWarning() << "pickPdfFileAndroid: Failed to get Android context";
+        return QString();
+    }
+    
+    // Call Java helper to open the file picker
+    QJniObject destDirJni = QJniObject::fromString(destDir);
+    QJniObject::callStaticMethod<void>(
+        "org/speedynote/app/PdfFileHelper",
+        "pickPdfFile",
+        "(Landroid/app/Activity;Ljava/lang/String;)V",
+        activity.object(),
+        destDirJni.object<jstring>());
+    
+    QJniEnvironment env;
+    if (env.checkAndClearExceptions()) {
+        qWarning() << "pickPdfFileAndroid: Exception calling pickPdfFile";
+        return QString();
+    }
+    
+    // Wait for the callback using a local event loop
+    QEventLoop loop;
+    s_pdfPickerLoop = &loop;
+    
+    // Timeout after 2 minutes (user should have picked a file by then)
+    QTimer::singleShot(120000, &loop, &QEventLoop::quit);
+    
+    loop.exec();
+    s_pdfPickerLoop = nullptr;
+    
+    if (s_pdfPickerCancelled || s_pickedPdfPath.isEmpty()) {
+        return QString();
+    }
+    
+    return s_pickedPdfPath;
+}
+
+#endif // Q_OS_ANDROID
 #include <QPointer>
 // #include "HandwritingLineEdit.h"
 #include "ControlPanelDialog.h"  // Phase CP.1: Re-enabled with cleaned up tabs
@@ -2151,12 +2260,48 @@ void MainWindow::saveDocument()
     QString defaultName = doc->name.isEmpty() ? 
         (isEdgeless ? "Untitled Canvas" : "Untitled") : doc->name;
     
+    QString filePath;
+    
+#ifdef Q_OS_ANDROID
+    // BUG-A002 Fix: On Android, save to app-private storage.
+    // Android's Storage Access Framework (SAF) returns content:// URIs which don't support
+    // directory creation. Since .snb bundles are directories, we must use app-private storage
+    // where we have full filesystem access.
+    QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+    QDir().mkpath(notebooksDir);
+    
+    // Show a simple input dialog for the document name
+    bool ok;
+    QString docName = QInputDialog::getText(this, 
+        isEdgeless ? tr("Save Canvas") : tr("Save Document"),
+        tr("Document name:"),
+        QLineEdit::Normal,
+        defaultName,
+        &ok);
+    
+    if (!ok || docName.isEmpty()) {
+        return; // User cancelled
+    }
+    
+    // Sanitize the filename (remove invalid characters)
+    docName = docName.replace(QRegularExpression("[<>:\"/\\\\|?*]"), "_");
+    filePath = notebooksDir + "/" + docName + ".snb";
+    
+    // Check if file exists and ask for overwrite confirmation
+    if (QDir(filePath).exists()) {
+        if (QMessageBox::question(this, tr("Overwrite?"),
+                tr("A document named '%1' already exists.\nDo you want to replace it?").arg(docName),
+                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+            return;
+        }
+    }
+#else
     QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
     
     QString filter = tr("SpeedyNote Bundle (*.snb);;All Files (*)");
     QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
     
-    QString filePath = QFileDialog::getSaveFileName(
+    filePath = QFileDialog::getSaveFileName(
         this,
         dialogTitle,
         defaultPath,
@@ -2165,8 +2310,9 @@ void MainWindow::saveDocument()
     
     if (filePath.isEmpty()) {
         // User cancelled
-                return;
-            }
+        return;
+    }
+#endif
             
     // Ensure .snb extension (Phase O1.7.6: unified bundle format)
     if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
@@ -2230,10 +2376,46 @@ void MainWindow::loadDocument()
                 return;
             }
     
+    QString filePath;
+    
+#ifdef Q_OS_ANDROID
+    // BUG-A002 Fix: On Android, show list of saved documents from app-private storage.
+    // QFileDialog returns content:// URIs which don't work for .snb bundles (directories).
+    QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+    QDir dir(notebooksDir);
+    
+    // Get list of .snb bundles (they are directories)
+    QStringList notebooks = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    
+    // Filter to only include .snb directories
+    QStringList snbNotebooks;
+    for (const QString& name : notebooks) {
+        if (name.endsWith(".snb", Qt::CaseInsensitive)) {
+            snbNotebooks << name;
+        }
+    }
+    
+    if (snbNotebooks.isEmpty()) {
+        QMessageBox::information(this, tr("No Documents"),
+            tr("No saved documents found.\n\nDocuments are saved to:\n%1").arg(notebooksDir));
+        return;
+    }
+    
+    // Show selection dialog
+    bool ok;
+    QString selected = QInputDialog::getItem(this, tr("Open Document"),
+        tr("Select a document:"), snbNotebooks, 0, false, &ok);
+    
+    if (!ok || selected.isEmpty()) {
+        return; // User cancelled
+    }
+    
+    filePath = notebooksDir + "/" + selected;
+#else
     // Open file dialog for file selection
     // Phase O1.7.6: Unified .snb bundle format
     QString filter = tr("SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)");
-    QString filePath = QFileDialog::getOpenFileName(
+    filePath = QFileDialog::getOpenFileName(
         this,
         tr("Open Document"),
         QDir::homePath(),
@@ -2244,6 +2426,7 @@ void MainWindow::loadDocument()
         // User cancelled
         return;
     }
+#endif
     
     // Use DocumentManager to load the document (handles ownership, PDF reloading, etc.)
     Document* doc = m_documentManager->loadDocument(filePath);
@@ -2468,6 +2651,16 @@ void MainWindow::openPdfDocument(const QString &filePath)
 
     // If no file path provided, open file dialog for PDF selection
     if (pdfPath.isEmpty()) {
+#ifdef Q_OS_ANDROID
+        // BUG-A003: Use custom Android file picker that handles SAF permissions properly.
+        // The Java helper copies the PDF to local storage while permission is valid.
+        pdfPath = pickPdfFileAndroid();
+        
+        if (pdfPath.isEmpty()) {
+            // User cancelled or error
+            return;
+        }
+#else
         QString filter = tr("PDF Files (*.pdf);;All Files (*)");
         pdfPath = QFileDialog::getOpenFileName(
             this,
@@ -2480,6 +2673,7 @@ void MainWindow::openPdfDocument(const QString &filePath)
             // User cancelled
             return;
         }
+#endif
     }
     
     // Use DocumentManager to load the PDF
@@ -2670,6 +2864,12 @@ void MainWindow::loadFolderDocument()
     // Uses directory selection because .snb is a folder, not a single file.
     // TODO: Replace with unified file picker when .snb becomes a single file.
     // ==========================================================================
+    
+#ifdef Q_OS_ANDROID
+    // On Android, just use the regular loadDocument() which shows a list dialog
+    loadDocument();
+    return;
+#endif
     
     // Show directory dialog to select .snb bundle folder
     QString bundlePath = QFileDialog::getExistingDirectory(

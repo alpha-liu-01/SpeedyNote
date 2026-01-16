@@ -238,9 +238,12 @@ SpeedyNote/
 │   ├── build-speedynote.sh     # Build full APK
 │   ├── app-resources/          # Android app resources
 │   │   ├── AndroidManifest.xml # App manifest
-│   │   └── res/
-│   │       └── xml/
-│   │           └── file_paths.xml  # FileProvider paths
+│   │   ├── res/
+│   │   │   └── xml/
+│   │   │       └── file_paths.xml  # FileProvider paths
+│   │   └── src/org/speedynote/app/  # Java source files
+│   │       ├── SpeedyNoteActivity.java  # Custom Activity
+│   │       └── PdfFileHelper.java       # PDF picker with SAF handling
 │   ├── mupdf-build/            # Built MuPDF (generated)
 │   │   ├── include/
 │   │   └── lib/
@@ -298,6 +301,62 @@ void setupLinuxSignalHandlers() { ... }
 #include "ui/ToolbarButtonTests.h"
 #endif
 ```
+
+### PDF File Picker (BUG-A003)
+
+Android's Storage Access Framework (SAF) requires special handling. Qt's `QFileDialog` returns `content://` URIs, but the temporary permission expires before our code can use it.
+
+**Solution:** Custom Java classes handle the file picker and copy the file while permission is valid:
+
+```java
+// SpeedyNoteActivity.java - Extends QtActivity
+@Override
+protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    if (PdfFileHelper.handleActivityResult(requestCode, resultCode, data)) {
+        return; // Our helper handled it
+    }
+    super.onActivityResult(requestCode, resultCode, data);
+}
+```
+
+### High-Rate Stylus Input (BUG-A004)
+
+Android batches touch events at 60Hz by default. To get the full hardware rate (e.g., 240Hz):
+
+```java
+// SpeedyNoteActivity.java - Enable unbuffered dispatch
+@Override
+public boolean dispatchTouchEvent(MotionEvent event) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        View contentView = findViewById(android.R.id.content);
+        if (contentView != null) {
+            contentView.requestUnbufferedDispatch(event);
+        }
+    }
+    return super.dispatchTouchEvent(event);
+}
+
+// PdfFileHelper.java - Copies file while permission is valid
+public static boolean handleActivityResult(...) {
+    Uri uri = data.getData();
+    String localPath = copyUriToLocal(uri, destDir);  // ← Permission valid here
+    onPdfFilePicked(localPath);  // JNI callback to C++
+    return true;
+}
+```
+
+The C++ side waits for the callback:
+
+```cpp
+#ifdef Q_OS_ANDROID
+// In openPdfDocument()
+pdfPath = pickPdfFileAndroid();  // Calls Java, waits for result
+#else
+pdfPath = QFileDialog::getOpenFileName(...);
+#endif
+```
+
+**Imported PDFs are stored at:** `/data/data/org.speedynote.app/files/pdfs/`
 
 ---
 

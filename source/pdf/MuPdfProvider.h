@@ -16,6 +16,7 @@
 // ============================================================================
 
 #include "PdfProvider.h"
+#include <QMutex>
 
 // Forward declarations for MuPDF types (avoid exposing mupdf headers)
 struct fz_context;
@@ -88,9 +89,15 @@ private:
      */
     QVector<PdfOutlineItem> convertOutline(struct fz_outline* outline) const;
     
-    fz_context* m_ctx = nullptr;        ///< MuPDF context (owns all allocations)
-    fz_document* m_doc = nullptr;       ///< The loaded PDF document
-    QString m_path;                     ///< Path to the PDF file
-    int m_pageCount = 0;                ///< Cached page count
+    // MuPDF context and document are mutable because fz_* functions 
+    // modify internal state even for "read" operations like rendering.
+    // This is required for proper const-correctness with MuPDF's API.
+    mutable fz_context* m_ctx = nullptr;  ///< MuPDF context (owns all allocations)
+    mutable fz_document* m_doc = nullptr; ///< The loaded PDF document
+    QString m_path;                       ///< Path to the PDF file
+    int m_pageCount = 0;                  ///< Cached page count
+    
+    // Mutex for thread-safety on Android (main thread sync + background async renders)
+    mutable QMutex m_mutex;
 };
 

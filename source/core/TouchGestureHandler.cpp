@@ -73,6 +73,36 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             
             event->accept();
             return true;
+        } else if (points.size() == 2) {
+            // TG.4: Two fingers touch simultaneously - start pinch directly
+            // This is common on Android where both fingers can arrive in same event
+            if (m_mode == TouchGestureMode::YAxisOnly) {
+                // Y-axis only mode: ignore pinch, just accept the event
+                event->accept();
+                return true;
+            }
+            
+            const auto& p1 = points[0];
+            const auto& p2 = points[1];
+            
+            QPointF pos1 = p1.position();
+            QPointF pos2 = p2.position();
+            QPointF centroid = (pos1 + pos2) / 2.0;
+            qreal distance = QLineF(pos1, pos2).length();
+            
+            if (distance < 1.0) {
+                distance = 1.0;
+            }
+            
+            m_pinchActive = true;
+            m_pinchStartZoom = m_viewport->zoomLevel();
+            m_pinchStartDistance = distance;
+            m_pinchCentroid = centroid;
+            
+            m_viewport->beginZoomGesture(centroid);
+            
+            event->accept();
+            return true;
         } else if (points.size() == 3) {
             // TG.5: 3-finger touch - record start time for tap detection
             m_threeFingerTapStart = QDateTime::currentMSecsSinceEpoch();

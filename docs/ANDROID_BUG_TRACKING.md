@@ -13,6 +13,19 @@
 | PDF Backend | MuPDF |
 | Test Device | Samsung Galaxy Tab S6 Lite 2024 (Android 16 / API 36) |
 
+## Bug Summary
+
+| Bug | Description | Status |
+|-----|-------------|--------|
+| **BUG-A001** | Settings Panel Crash | ✅ Fixed (Qt 6.9.3) |
+| **BUG-A002** | Document Never Saves | ✅ Fixed (app-private storage) |
+| **BUG-A003** | PDF Loading Fails | ✅ Fixed (Java SAF handler + storage management) |
+| **BUG-A004** | Extreme Stroke Lag | ✅ Fixed (Qt 6.9.3 + 240Hz unbuffered) |
+| **BUG-A005** | Pinch-to-Zoom Unreliable | ✅ Fixed (2-finger TouchBegin handler) |
+| **BUG-A006** | PDF Page Switch Crash | ✅ Fixed (multi-layer fix) |
+
+**All critical bugs resolved!** 🎉
+
 ---
 
 ## Critical Bugs (App Crashes / Data Loss)
@@ -71,92 +84,330 @@ Files modified:
 ---
 
 ### BUG-A002: Document Never Saves
-**Status:** 🔴 Open  
+**Status:** ✅ Fixed  
 **Priority:** Critical  
 **Category:** File I/O
 
 **Description:**  
 Documents are never saved to .snb folder bundles on Android.
 
-**Steps to Reproduce:**  
-1. Create new document or open existing
-2. Draw strokes / make changes
-3. Attempt to save
-4. Close and reopen → Changes lost
+**Root Cause Analysis:**  
+The error message showed:
+```
+content://com.android.externalstorage.documents/document/primary%3ADocuments%2FUntitled.snb
+```
 
-**Expected:** Document should save to internal storage  
-**Actual:** Save appears to fail silently or doesn't persist
+- `QFileDialog::getSaveFileName()` on Android returns `content://` URIs
+- `.snb` bundles are **directories** requiring `QDir().mkpath()` operations
+- Android's SAF (Storage Access Framework) only supports single-file access via `content://`
+- **Result:** `QDir().mkpath(content://...)` fails → save fails
 
-**Possible Causes:**
-- Android Scoped Storage restrictions (API 30+)
-- Missing storage permissions in AndroidManifest
-- Incorrect file paths for Android
-- Bundle path not set correctly
+**Fix Applied:**  
+On Android, save/load documents to **app-private storage** instead of SAF:
+- Save path: `QStandardPaths::AppDataLocation/notebooks/*.snb`
+- Uses `QInputDialog` for document naming instead of `QFileDialog`
+- Open shows list of saved documents from app-private storage
 
-**Notes:**  
-_User to provide: Where is it trying to save? Any error dialogs?_
+**Files Modified:**
+- `source/MainWindow.cpp`
+  - `saveDocument()` - uses app-private storage on Android
+  - `loadDocument()` - shows list dialog on Android
+  - `loadFolderDocument()` - redirects to `loadDocument()` on Android
 
 ---
 
 ### BUG-A003: PDF Loading Fails
-**Status:** 🔴 Open  
+**Status:** ✅ Fixed  
 **Priority:** Critical  
-**Category:** PDF / MuPDF
+**Category:** PDF / MuPDF / Permissions
 
 **Description:**  
-PDF files cannot be loaded. App shows "relink" dialog, but relinking also fails.
+PDF files cannot be loaded. Error: "Failed to read PDF file. Android may have denied access to this file."
 
-**Steps to Reproduce:**  
-1. Open a PDF file
-2. → Shows "PDF not found, relink?" dialog
-3. Try to relink → Fails again
+**Root Cause Analysis:**  
+1. Qt's `QFileDialog` returns `content://` URIs from Android's file picker
+2. The SAF (Storage Access Framework) permission is **only valid inside the Activity result callback**
+3. By the time our C++ code tries to use it, the permission context is lost
+4. MuPDF (C library) cannot read `content://` URIs anyway
 
-**Expected:** PDF should load and render  
-**Actual:** PDF loading fails, relink fails
+**Why Previous Attempts Failed:**
+- JNI call to `ContentResolver.openInputStream()` failed because permission expired
+- Qt processes the Intent result internally and discards the permission context
+- Our code runs after Qt's callback, so permission is gone
 
-**Possible Causes:**
-- MuPDF integration issue
-- File path encoding (Android content:// URIs vs file:// paths)
-- MuPDF cannot open file due to permissions
-- MuPdfProvider not correctly implemented
+**Solution Implemented:**  
+Use a **custom Java Activity** that handles the file picker result and copies the file **while permission is still valid**:
 
-**Notes:**  
-_User to provide: Is this opening from file manager or from within app?_
+```
+Qt's QFileDialog (broken):
+  Intent result → Qt processes → Returns URI string → Our code → ❌ Permission gone
+
+Our solution (works):
+  Intent result → Our Java callback → Copy file NOW → Return local path → ✅
+```
+
+**Files Added:**
+- `android/app-resources/src/org/speedynote/app/PdfFileHelper.java`
+  - Opens file picker with proper Intent flags
+  - Copies file to local storage in `onActivityResult` callback
+  - Calls back to C++ with local file path
+
+- `android/app-resources/src/org/speedynote/app/SpeedyNoteActivity.java`
+  - Custom Activity extending QtActivity
+  - Forwards `onActivityResult` to `PdfFileHelper`
+
+**Files Modified:**
+- `android/app-resources/AndroidManifest.xml`
+  - Changed activity class to `SpeedyNoteActivity`
+
+- `source/MainWindow.cpp`
+  - Added JNI callbacks: `onPdfFilePicked()`, `onPdfPickCancelled()`
+  - Added `pickPdfFileAndroid()` - calls Java and waits for result
+  - Updated `openPdfDocument()` - uses custom picker on Android
+
+- `CMakeLists.txt`
+  - Updated target SDK to 35
+
+**Imported PDFs are stored at:**
+```
+/data/data/org.speedynote.app/files/pdfs/
+```
+
+**Storage Management:** ✅ Implemented & Tested
+
+1. **PDF Deduplication:**
+   - Before copying a PDF, checks if file with same name and size exists
+   - If duplicate found, reuses existing file (no copy needed)
+   - If name exists but size differs, generates unique name (e.g., `file_1.pdf`)
+
+2. **Cleanup on Document Delete:**
+   - When deleting a document from the Launcher
+   - Checks if document has an imported PDF in the sandbox
+   - Deletes the imported PDF along with the document bundle
+   - Only deletes PDFs in `/files/pdfs/` - never touches user's original files
+
+**Files for storage management:**
+- `android/app-resources/src/org/speedynote/app/PdfFileHelper.java`
+  - `getFileSize()` - gets file size for deduplication
+  - `copyUriToLocal()` - implements deduplication logic
+  
+- `source/ui/launcher/Launcher.cpp` (wrapped with `#ifdef Q_OS_ANDROID`)
+  - `findImportedPdfPath()` - finds PDF in sandbox from document.json
+  - `deleteNotebook()` - deletes imported PDF with document
 
 ---
 
 ## Major Bugs (Functionality Broken)
 
 ### BUG-A004: Extreme Stroke Lag
-**Status:** 🟢 Mostly Fixed (by Qt 6.9.3 upgrade)  
+**Status:** ✅ Fixed  
 **Priority:** High  
 **Category:** Performance / Input
 
 **Description:**  
 Drawing strokes has huge lag. Sometimes strokes only appear after lifting the stylus.
 
-**Resolution:**  
-Upgrading from Qt 6.7.2 to Qt 6.9.3 resolved the major lag issues. Strokes now appear immediately during drawing.
-
-**Remaining Issue:**  
-Stylus poll rate is still capped at 60Hz instead of the hardware-supported 240Hz.
-This requires implementing `requestUnbufferedDispatch()` via JNI - deferred to future work.
+**Root Causes:**
+1. Qt 6.7.x had internal input handling issues → Fixed by Qt 6.9.3
+2. Android batches touch events at 60Hz by default → Fixed by `requestUnbufferedDispatch()`
 
 **Symptoms (BEFORE fix):**
 - Visible delay between stylus movement and stroke rendering
 - Strokes may not appear until stylus is lifted
 - Drawing feels unresponsive
+- Stylus input capped at 60Hz despite 240Hz hardware
 
-**Fix Applied:**  
-Upgraded Qt from 6.7.2 → 6.9.3. No code changes required.
+**Fixes Applied:**
 
-**Future Enhancement (60Hz → 240Hz):**  
-To unlock full stylus poll rate, need to implement:
+**Fix 1: Qt Upgrade (major lag)**
+- Upgraded Qt from 6.7.2 → 6.9.3
+- Resolved the extreme lag where strokes wouldn't appear until stylus lifted
+
+**Fix 2: Unbuffered Dispatch (60Hz → 240Hz)**
+- Added `dispatchTouchEvent()` override in `SpeedyNoteActivity.java`
+- Calls `requestUnbufferedDispatch()` on API 31+ (Android 12+)
+- Tells Android to deliver events at hardware rate instead of batching
+
 ```java
-// In Activity or View - requires JNI integration
-view.requestUnbufferedDispatch(motionEvent);
+// SpeedyNoteActivity.java
+@Override
+public boolean dispatchTouchEvent(MotionEvent event) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        View contentView = findViewById(android.R.id.content);
+        if (contentView != null) {
+            contentView.requestUnbufferedDispatch(event);
+        }
+    }
+    return super.dispatchTouchEvent(event);
+}
 ```
-This requires API 31+ and custom Java/JNI code
+
+**Files Modified:**
+- `android/app-resources/src/org/speedynote/app/SpeedyNoteActivity.java`
+  - Added `dispatchTouchEvent()` override with unbuffered dispatch
+
+**Result:**
+- Strokes appear immediately during drawing
+- Full hardware stylus poll rate (up to 240Hz on supported devices)
+- Smooth, responsive drawing experience
+
+---
+
+### BUG-A005: Pinch-to-Zoom Unreliable
+**Status:** ✅ Fixed  
+**Priority:** Medium  
+**Category:** Touch Input / Gestures
+**Platform:** Android only
+
+**Description:**  
+Pinch-to-zoom gestures only trigger about 1 in 5 times. Once triggered, the zoom works correctly until released.
+
+**Root Cause:**  
+The `TouchGestureHandler::handleTouchEvent()` only handled 1-finger and 3-finger cases in the `TouchBegin` event. On Android, when two fingers touch nearly simultaneously, the system may send a `TouchBegin` event with 2 points directly (instead of a 1-finger TouchBegin followed by a 2-finger TouchUpdate).
+
+This left the pinch gesture uninitialized, causing subsequent `TouchUpdate` events to fail to start the zoom properly.
+
+**Symptoms (BEFORE fix):**
+- Pinch-to-zoom gesture often doesn't trigger
+- Need to retry pinch gesture multiple times
+- Once triggered, zoom works correctly until fingers are lifted
+
+**Fix Applied:**
+Added handling for 2-finger `TouchBegin` events in `TouchGestureHandler.cpp`:
+
+```cpp
+// TouchBegin handler - added 2-finger case
+} else if (points.size() == 2) {
+    // Two fingers touch simultaneously - start pinch directly
+    // Common on Android where both fingers can arrive in same event
+    if (m_mode == TouchGestureMode::YAxisOnly) {
+        event->accept();
+        return true;
+    }
+    
+    const auto& p1 = points[0];
+    const auto& p2 = points[1];
+    
+    QPointF pos1 = p1.position();
+    QPointF pos2 = p2.position();
+    QPointF centroid = (pos1 + pos2) / 2.0;
+    qreal distance = QLineF(pos1, pos2).length();
+    
+    if (distance < 1.0) distance = 1.0;
+    
+    m_pinchActive = true;
+    m_pinchStartZoom = m_viewport->zoomLevel();
+    m_pinchStartDistance = distance;
+    m_pinchCentroid = centroid;
+    
+    m_viewport->beginZoomGesture(centroid);
+    
+    event->accept();
+    return true;
+}
+```
+
+**Files Modified:**
+- `source/core/TouchGestureHandler.cpp`
+  - Added 2-finger `TouchBegin` handler to initialize pinch gesture directly
+
+**Desktop Impact:** None - the fix is in shared code but desktop platforms typically don't send 2-finger TouchBegin events (they use a 1-finger then update pattern). The fix is additive and doesn't change existing behavior.
+
+**Result:**
+- Pinch-to-zoom now triggers reliably on first attempt
+- Gesture system properly handles simultaneous 2-finger touch
+
+---
+
+### BUG-A006: PDF Page Switch Crash
+**Status:** ✅ Fixed  
+**Priority:** High  
+**Category:** Stability / Threading
+**Platform:** Primarily Android (ARM64)
+
+**Description:**  
+App crashes when switching pages in PDF documents, particularly during rapid page navigation using PageWheelPicker.
+
+**Root Causes (Multiple):**
+
+1. **Orphaned background renders**: `invalidatePdfCache()` didn't cancel active `QtConcurrent` render threads, leaving them running with stale PDF paths
+
+2. **Signal flooding**: `PageWheelPicker` emitted `currentPageChanged` during every frame of scroll animation (60+ times/second), overwhelming the PDF system
+
+3. **MuPDF thread-safety**: MuPDF's `fz_context` was not protected by mutex, allowing potential concurrent access corruption
+
+4. **ARM64 alignment**: Direct `memcpy` on potentially unaligned MuPDF buffers caused SIGBUS on ARM64
+
+**Symptoms (BEFORE fix):**
+- Crashes when using PageWheelPicker to scroll pages
+- SIGBUS/WINDOW DIED errors in logcat
+- More frequent with rapid page switching
+- Only on Android, not desktop
+
+**Multi-Layer Fix Applied:**
+
+**Layer 1: Cancel stale background renders**
+```cpp
+void DocumentViewport::invalidatePdfCache() {
+    for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
+        watcher->cancel();
+    }
+    m_activePdfWatchers.clear();
+    // ...
+}
+```
+
+**Layer 2: Debounce PageWheelPicker signals**
+```cpp
+void PageWheelPicker::updateFromOffset() {
+    m_currentPage = qBound(...);  // Update display only
+    // Do NOT emit signal - wait for snap to finish
+}
+
+void PageWheelPicker::onSnapFinished() {
+    if (newPage != m_lastEmittedPage) {
+        m_lastEmittedPage = newPage;
+        emit currentPageChanged(m_currentPage);  // Only emit when stopped
+    }
+}
+```
+
+**Layer 3: MuPDF thread-safety**
+```cpp
+// MuPdfProvider.h
+mutable fz_context* m_ctx;  // Mutable for const methods
+mutable QMutex m_mutex;     // Thread protection
+
+// MuPdfProvider.cpp
+QImage MuPdfProvider::renderPageToImage(...) const {
+    QMutexLocker locker(&m_mutex);  // Serialize all MuPDF calls
+    // ...
+}
+```
+
+**Layer 4: ARM64 safety checks**
+```cpp
+// Validate before memory operations
+if (!samples || stride < width * 4) {
+    fz_throw(m_ctx, FZ_ERROR_GENERIC, "Invalid pixmap data");
+}
+// Use memmove for alignment safety
+memmove(dst, src, width * 4);
+```
+
+**Files Modified:**
+- `source/core/DocumentViewport.cpp` - Cancel active watchers, check cancellation in callback
+- `source/ui/widgets/PageWheelPicker.cpp/.h` - Debounce signal, add `m_lastEmittedPage`
+- `source/pdf/MuPdfProvider.cpp/.h` - Mutex, mutable, safety checks, memmove
+
+**Desktop Impact:** Also improves desktop stability with better thread safety.
+
+**Result:**
+- ✅ No more crashes during PDF page navigation
+- ✅ PageWheelPicker scrolling is crash-free
+- ✅ Background renders properly cancelled on page change
+- ✅ MuPDF operations are thread-safe
+- ✅ ARM64 memory alignment issues prevented
 
 ---
 

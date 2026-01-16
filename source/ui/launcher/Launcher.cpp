@@ -34,6 +34,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QStandardPaths>
 
 Launcher::Launcher(QWidget* parent)
     : QMainWindow(parent)
@@ -676,6 +677,12 @@ void Launcher::deleteNotebook(const QString& bundlePath)
     );
     
     if (reply == QMessageBox::Yes) {
+#ifdef Q_OS_ANDROID
+        // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
+        // If so, delete the PDF too to prevent storage leaks
+        QString pdfToDelete = findImportedPdfPath(bundlePath);
+#endif
+        
         // Remove from library
         NotebookLibrary::instance()->removeFromRecent(bundlePath);
         
@@ -684,6 +691,16 @@ void Launcher::deleteNotebook(const QString& bundlePath)
         if (bundleDir.exists()) {
             bundleDir.removeRecursively();
         }
+        
+#ifdef Q_OS_ANDROID
+        // Delete imported PDF if found
+        if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
+            QFile::remove(pdfToDelete);
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "Launcher::deleteNotebook: Also deleted imported PDF:" << pdfToDelete;
+#endif
+        }
+#endif
     }
 }
 
@@ -878,4 +895,47 @@ void Launcher::showInFileManager(const QString& bundlePath)
     QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
 #endif
 }
+
+#ifdef Q_OS_ANDROID
+QString Launcher::findImportedPdfPath(const QString& bundlePath)
+{
+    // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox.
+    // Returns the path to the PDF if it's in our sandbox, empty string otherwise.
+    
+    // Read document.json to get the PDF path
+    QString manifestPath = bundlePath + "/document.json";
+    QFile manifestFile(manifestPath);
+    if (!manifestFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return QString();
+    }
+    
+    QByteArray data = manifestFile.readAll();
+    manifestFile.close();
+    
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        return QString();
+    }
+    
+    QJsonObject obj = doc.object();
+    QString pdfPath = obj["pdf_path"].toString();
+    
+    if (pdfPath.isEmpty()) {
+        return QString(); // Not a PDF-backed document
+    }
+    
+    // Check if the PDF is in our imported PDFs sandbox directory
+    // On Android: /data/data/org.speedynote.app/files/pdfs/
+    QString sandboxPdfDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
+    
+    if (pdfPath.startsWith(sandboxPdfDir)) {
+        // This PDF was imported to our sandbox - safe to delete
+        return pdfPath;
+    }
+    
+    // PDF is external (user's original file) - don't delete it
+    return QString();
+}
+#endif
 

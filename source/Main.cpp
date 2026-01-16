@@ -26,6 +26,26 @@
 #define SPEEDYNOTE_SDL_QUIT() ((void)0)
 #endif
 
+// Android helpers
+#ifdef Q_OS_ANDROID
+#include <QDebug>
+
+static void logAndroidPaths()
+{
+    // Log storage paths for debugging
+    qDebug() << "=== Android Storage Paths ===";
+    qDebug() << "  AppDataLocation:" << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    qDebug() << "  DocumentsLocation:" << QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    qDebug() << "  DownloadLocation:" << QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    qDebug() << "  CacheLocation:" << QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    qDebug() << "=============================";
+    
+    // Note: On Android 13+ (API 33+), READ_EXTERNAL_STORAGE is deprecated.
+    // PDF file access requires Storage Access Framework (SAF).
+    // QFileDialog uses SAF, but content:// URI handling in Qt may have issues.
+}
+#endif
+
 // Test includes (desktop only)
 #ifndef Q_OS_ANDROID
 #include "core/PageTests.h"
@@ -258,6 +278,10 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_WIN
     applyWindowsPalette(app);
     applyWindowsFonts(app);
+#endif
+
+#ifdef Q_OS_ANDROID
+    logAndroidPaths();
 #endif
 
     QTranslator translator;

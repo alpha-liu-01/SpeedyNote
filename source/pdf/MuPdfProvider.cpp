@@ -9,6 +9,7 @@
 
 #include <QDebug>
 #include <QFile>
+#include <QMutexLocker>
 
 // ============================================================================
 // Construction / Destruction
@@ -43,6 +44,9 @@ MuPdfProvider::MuPdfProvider(const QString& pdfPath)
     fz_catch(m_ctx) {
         qWarning() << "MuPdfProvider: Failed to open" << pdfPath 
                    << "-" << fz_caught_message(m_ctx);
+        // FIX: Drop context to prevent memory leak when document fails to open
+        fz_drop_context(m_ctx);
+        m_ctx = nullptr;
         return;
     }
     
@@ -206,6 +210,8 @@ QVector<PdfOutlineItem> MuPdfProvider::convertOutline(fz_outline* ol) const
 
 QSizeF MuPdfProvider::pageSize(int pageIndex) const
 {
+    QMutexLocker locker(&m_mutex);
+    
     if (!isValid() || pageIndex < 0 || pageIndex >= m_pageCount) {
         return QSizeF();
     }
@@ -229,7 +235,18 @@ QSizeF MuPdfProvider::pageSize(int pageIndex) const
 
 QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
 {
+    // Thread safety: MuPDF context is not thread-safe, so we need to serialize access
+    // This is especially important on Android where main thread sync renders can
+    // overlap with background async renders (BUG-A006)
+    QMutexLocker locker(&m_mutex);
+    
     if (!isValid() || pageIndex < 0 || pageIndex >= m_pageCount) {
+        return QImage();
+    }
+    
+    // Additional safety check for context
+    if (!m_ctx || !m_doc) {
+        qWarning() << "MuPdfProvider: Context or document is null";
         return QImage();
     }
     
@@ -243,6 +260,9 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
     fz_try(m_ctx) {
         // Load page
         page = fz_load_page(m_ctx, m_doc, pageIndex);
+        if (!page) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to load page %d", pageIndex);
+        }
         
         // Create transformation matrix
         fz_matrix ctm = fz_scale(scale, scale);
@@ -251,12 +271,26 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
         fz_rect bounds = fz_bound_page(m_ctx, page);
         fz_irect bbox = fz_round_rect(fz_transform_rect(bounds, ctm));
         
+        // Sanity check for bounds
+        int imgWidth = bbox.x1 - bbox.x0;
+        int imgHeight = bbox.y1 - bbox.y0;
+        if (imgWidth <= 0 || imgHeight <= 0 || imgWidth > 10000 || imgHeight > 10000) {
+            qWarning() << "MuPdfProvider: Invalid page bounds" << imgWidth << "x" << imgHeight;
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Invalid page bounds");
+        }
+        
         // Create pixmap (BGRA for Qt compatibility)
         pix = fz_new_pixmap_with_bbox(m_ctx, fz_device_bgr(m_ctx), bbox, nullptr, 1);
+        if (!pix) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to create pixmap");
+        }
         fz_clear_pixmap_with_value(m_ctx, pix, 255); // White background
         
         // Render page to pixmap
         fz_device* dev = fz_new_draw_device(m_ctx, ctm, pix);
+        if (!dev) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to create draw device");
+        }
         fz_run_page(m_ctx, page, dev, fz_identity, nullptr);
         fz_close_device(m_ctx, dev);
         fz_drop_device(m_ctx, dev);
@@ -267,10 +301,27 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
         int stride = fz_pixmap_stride(m_ctx, pix);
         unsigned char* samples = fz_pixmap_samples(m_ctx, pix);
         
-        // Copy data to QImage (MuPDF pixmap will be freed)
+        // Verify data is valid before copy
+        if (!samples || stride < width * 4) {
+            qWarning() << "MuPdfProvider: Invalid pixmap data - samples:" << (samples ? "valid" : "null")
+                       << "stride:" << stride << "expected:" << (width * 4);
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Invalid pixmap data");
+        }
+        
+        // Create QImage and copy data
+        // Use Format_ARGB32 which matches BGRA byte order on little-endian (ARM)
         result = QImage(width, height, QImage::Format_ARGB32);
+        if (result.isNull()) {
+            qWarning() << "MuPdfProvider: Failed to allocate QImage" << width << "x" << height;
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Failed to allocate QImage");
+        }
+        
+        // Copy row by row, using QImage's bytesPerLine for destination stride
         for (int y = 0; y < height; ++y) {
-            memcpy(result.scanLine(y), samples + y * stride, width * 4);
+            unsigned char* dst = result.scanLine(y);
+            const unsigned char* src = samples + y * stride;
+            // Use memmove instead of memcpy for safety with potential overlap/alignment
+            memmove(dst, src, width * 4);
         }
     }
     fz_always(m_ctx) {
@@ -278,7 +329,8 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
         if (page) fz_drop_page(m_ctx, page);
     }
     fz_catch(m_ctx) {
-        qWarning() << "MuPdfProvider: Render failed for page" << pageIndex;
+        qWarning() << "MuPdfProvider: Render failed for page" << pageIndex 
+                   << "-" << fz_caught_message(m_ctx);
         return QImage();
     }
     
@@ -291,6 +343,8 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
 
 QVector<PdfTextBox> MuPdfProvider::textBoxes(int pageIndex) const
 {
+    QMutexLocker locker(&m_mutex);
+    
     if (!isValid() || pageIndex < 0 || pageIndex >= m_pageCount) {
         return {};
     }
@@ -369,6 +423,8 @@ QVector<PdfTextBox> MuPdfProvider::textBoxes(int pageIndex) const
 
 QVector<PdfLink> MuPdfProvider::links(int pageIndex) const
 {
+    QMutexLocker locker(&m_mutex);
+    
     if (!isValid() || pageIndex < 0 || pageIndex >= m_pageCount) {
         return {};
     }
