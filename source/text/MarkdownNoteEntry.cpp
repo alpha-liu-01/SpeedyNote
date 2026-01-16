@@ -1,5 +1,5 @@
 #include "MarkdownNoteEntry.h"
-#include "../markdown/qmarkdowntextedit.h"
+#include "../../markdown/qmarkdowntextedit.h"
 #include <QTextDocument>
 #include <QApplication>
 #include <QPalette>

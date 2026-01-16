@@ -8,7 +8,7 @@
 #include "TouchGestureHandler.h"
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
 #include "../layers/VectorLayer.h"
-#include "../pdf/PopplerPdfProvider.h"
+#include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 
@@ -3056,14 +3056,15 @@ void DocumentViewport::doAsyncPdfPreload()
         // and can be safely passed between threads.
         QFuture<QImage> future = QtConcurrent::run([pdfPageNum, dpi, pdfPath]() -> QImage {
             // Create thread-local PDF provider (each thread loads its own copy)
-            PopplerPdfProvider threadPdf(pdfPath);
-            if (!threadPdf.isValid()) {
+            // Uses factory method to get platform-appropriate backend (Poppler/MuPDF)
+            auto threadPdf = PdfProvider::create(pdfPath);
+            if (!threadPdf || !threadPdf->isValid()) {
                 return QImage();  // Return null image on failure
             }
             
             // Render page using thread-local provider
             // This is the expensive operation (50-200ms) that we're offloading
-            return threadPdf.renderPageToImage(pdfPageNum, dpi);
+            return threadPdf->renderPageToImage(pdfPageNum, dpi);
         });
         
         watcher->setFuture(future);

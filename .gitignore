@@ -61,4 +61,5 @@ qt5/
 misc/
 android/test-app/
 android/mupdf-build/
+android/build-app/
 SpeedyNote-Android-android-conan/

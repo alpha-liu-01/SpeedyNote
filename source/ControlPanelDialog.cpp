@@ -7,8 +7,6 @@
 #include "SDLControllerManager.h"
 #endif
 
-
-
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -26,6 +24,12 @@
 #include <QSettings>
 #include <QTimer>
 #include <QTabletEvent>
+
+// Android keyboard fix (BUG-A001)
+#ifdef Q_OS_ANDROID
+#include <QGuiApplication>
+#include <QInputMethod>
+#endif
 
 ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
     : QDialog(parent), mainWindowRef(mainWindow) {
@@ -73,6 +77,48 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
     
     // Load current settings into UI
     loadSettings();
+}
+
+void ControlPanelDialog::done(int result)
+{
+#ifdef Q_OS_ANDROID
+    // BUG-A001 Fix: Defer dialog close to let Android keyboard operations complete.
+    // Qt 6.7.x has a bug where closing a dialog with text inputs causes a crash
+    // in QtInputDelegate.resetSoftwareKeyboard() - the async lambda accesses 
+    // QtEditText.m_optionsChanged after the widget is destroyed.
+    // 
+    // Solution: Hide keyboard, clear focus, then defer the actual close by 150ms
+    // to give the Android UI thread time to complete keyboard operations.
+    
+    // Prevent re-entry if already deferring
+    static bool isDeferring = false;
+    if (isDeferring) {
+        QDialog::done(result);
+        return;
+    }
+    
+    // Clear focus from current widget
+    if (QWidget* focused = QApplication::focusWidget()) {
+        focused->clearFocus();
+    }
+    
+    // Hide keyboard
+    if (QGuiApplication::inputMethod()) {
+        QGuiApplication::inputMethod()->hide();
+        QGuiApplication::inputMethod()->commit();
+    }
+    
+    // Defer the actual close
+    isDeferring = true;
+    int savedResult = result;
+    QTimer::singleShot(150, this, [this, savedResult]() {
+        isDeferring = false;
+        QDialog::done(savedResult);
+    });
+    return;  // Don't call base done() immediately
+#else
+    QDialog::done(result);
+#endif
 }
 
 void ControlPanelDialog::loadSettings()

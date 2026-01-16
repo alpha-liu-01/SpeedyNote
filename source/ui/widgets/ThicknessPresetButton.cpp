@@ -12,6 +12,13 @@
 #include <QPushButton>
 #include <QDialogButtonBox>
 
+// Android keyboard fix (BUG-A001)
+#ifdef Q_OS_ANDROID
+#include <QGuiApplication>
+#include <QInputMethod>
+#include <QTimer>
+#endif
+
 // ============================================================================
 // ThicknessEditDialog
 // ============================================================================
@@ -89,6 +96,36 @@ void ThicknessEditDialog::onSpinBoxChanged(double value)
     m_slider->blockSignals(true);
     m_slider->setValue(static_cast<int>(value * 10));
     m_slider->blockSignals(false);
+}
+
+void ThicknessEditDialog::done(int result)
+{
+#ifdef Q_OS_ANDROID
+    // BUG-A001 Fix: Defer dialog close. See ControlPanelDialog.cpp for full explanation.
+    static bool isDeferring = false;
+    if (isDeferring) {
+        QDialog::done(result);
+        return;
+    }
+    
+    if (QWidget* focused = QApplication::focusWidget()) {
+        focused->clearFocus();
+    }
+    if (QGuiApplication::inputMethod()) {
+        QGuiApplication::inputMethod()->hide();
+        QGuiApplication::inputMethod()->commit();
+    }
+    
+    isDeferring = true;
+    int savedResult = result;
+    QTimer::singleShot(150, this, [this, savedResult]() {
+        isDeferring = false;
+        QDialog::done(savedResult);
+    });
+    return;
+#else
+    QDialog::done(result);
+#endif
 }
 
 // ============================================================================

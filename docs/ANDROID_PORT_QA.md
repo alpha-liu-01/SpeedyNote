@@ -969,10 +969,14 @@ adb install build/android-build/TestAndroidApp.apk
 8. [x] Configure MuPDF vs Poppler selection (automatic via ANDROID check) ✅
 9. [x] Platform-specific PDF_SOURCES in CMakeLists.txt ✅
 
-### Phase D: Full App Build
-10. [ ] Build APK with ALL features (full feature parity)
-11. [ ] Test on Samsung Tab S6 Lite
-12. [ ] Verify: rendering, stylus, touch gestures, save/load
+### Phase D: Full App Build (IN PROGRESS)
+10. [x] Create `android/build-speedynote.sh` build script ✅
+11. [x] Create `android/app-resources/AndroidManifest.xml` ✅
+12. [x] Update CMakeLists.txt with Android platform section ✅
+13. [x] Add `qt_add_executable()` for Android builds ✅
+14. [ ] Build APK with ALL features
+15. [ ] Test on Samsung Tab S6 Lite
+16. [ ] Verify: rendering, stylus, touch gestures, save/load
 
 ### Phase E: Stylus Optimization
 13. [ ] Implement `requestUnbufferedDispatch()` for high-rate stylus (API 31+)

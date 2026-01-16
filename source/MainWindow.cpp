@@ -86,7 +86,9 @@
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 
 #include "DocumentConverter.h" // Added for PowerPoint conversion
-#include <poppler-qt6.h> // For PDF outline parsing
+#ifndef Q_OS_ANDROID
+#include <poppler-qt6.h> // For PDF outline parsing (desktop only)
+#endif
 #include <memory> // For std::shared_ptr
 
 // Linux-specific includes for signal handling
@@ -98,7 +100,9 @@
 #endif
 
 // Static member definition for single instance
+#ifndef Q_OS_ANDROID
 QSharedMemory *MainWindow::sharedMemory = nullptr;
+#endif
 // Phase 3.1: LauncherWindow disconnected - will be re-linked later
 // LauncherWindow *MainWindow::sharedLauncher = nullptr;
 
@@ -106,8 +110,8 @@ QSharedMemory *MainWindow::sharedMemory = nullptr;
 // Always using new architecture now
 // bool MainWindow::s_useNewViewport = false;
 
-#ifdef Q_OS_LINUX
-// Linux-specific signal handler for cleanup
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+// Linux-specific signal handler for cleanup (not used on Android)
 void linuxSignalHandler(int signal) {
     Q_UNUSED(signal);
     
@@ -140,8 +144,8 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
-#ifdef Q_OS_LINUX
-    // Setup signal handlers for proper cleanup on Linux
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+    // Setup signal handlers for proper cleanup on Linux (not Android)
     setupLinuxSignalHandlers();
 #endif
 
@@ -4892,6 +4896,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
 bool MainWindow::isInstanceRunning()
 {
+#ifdef Q_OS_ANDROID
+    // Android handles app lifecycle differently - always return false
+    return false;
+#else
     if (!sharedMemory) {
         sharedMemory = new QSharedMemory("SpeedyNote_SingleInstance");
     }
@@ -4988,6 +4996,7 @@ bool MainWindow::isInstanceRunning()
     
     // Another instance is running (or cleanup failed)
     return true;
+#endif // !Q_OS_ANDROID
 }
 
 bool MainWindow::sendToExistingInstance(const QString &filePath)
@@ -5088,6 +5097,7 @@ void MainWindow::onNewConnection()
 // Static cleanup method for signal handlers and emergency cleanup
 void MainWindow::cleanupSharedResources()
 {
+#ifndef Q_OS_ANDROID
     // Minimal cleanup to avoid Qt conflicts
     if (sharedMemory) {
         if (sharedMemory->isAttached()) {
@@ -5099,6 +5109,7 @@ void MainWindow::cleanupSharedResources()
     
     // Remove local server
     QLocalServer::removeServer("SpeedyNote_SingleInstance");
+#endif
     
 #ifdef Q_OS_LINUX
     // On Linux, try to clean up stale shared memory segments

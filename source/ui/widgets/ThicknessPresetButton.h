@@ -27,6 +27,9 @@ public:
      */
     qreal thickness() const;
 
+protected:
+    void done(int result) override;  // Android keyboard fix (BUG-A001)
+
 private slots:
     void onSliderChanged(int value);
     void onSpinBoxChanged(double value);

@@ -40,6 +40,13 @@ public:
      */
     explicit ControlPanelDialog(MainWindow *mainWindow, QWidget *parent = nullptr);
 
+protected:
+    /**
+     * @brief Override done() to fix Android keyboard crash (BUG-A001).
+     * Hides the virtual keyboard before dialog destruction.
+     */
+    void done(int result) override;
+
 private slots:
     void applyChanges();
     void chooseAccentColor();

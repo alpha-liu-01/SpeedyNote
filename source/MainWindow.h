@@ -42,7 +42,9 @@
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
 #include <QLocalSocket>
+#ifndef Q_OS_ANDROID
 #include <QSharedMemory>
+#endif
 // Phase C.1.5: QTabWidget removed - using QTabBar + QStackedWidget
 // Phase C.2: Using custom TabBar class
 #include "ui/TabBar.h"
@@ -272,7 +274,9 @@ public:
     // Phase 3.1: sharedLauncher disconnected - will be re-linked later
     // static LauncherWindow *sharedLauncher;
 
+#ifndef Q_OS_ANDROID
     static QSharedMemory *sharedMemory;
+#endif
     
     // Static cleanup method for signal handlers
     static void cleanupSharedResources();
