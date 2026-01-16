@@ -5,10 +5,11 @@
 | Property | Value |
 |----------|-------|
 | Build Type | Release |
-| Qt Version | 6.7.2 |
-| Target API | 34 |
+| Qt Version | 6.9.3 ✅ (6.10.x has OpenGL deadlock, 6.7.x has keyboard crash) |
+| Target API | 35 |
 | Min API | 26 |
 | ABI | arm64-v8a |
+| NDK Version | r27 (27.2.12479018) |
 | PDF Backend | MuPDF |
 | Test Device | Samsung Galaxy Tab S6 Lite 2024 (Android 16 / API 36) |
 
@@ -17,10 +18,10 @@
 ## Critical Bugs (App Crashes / Data Loss)
 
 ### BUG-A001: Settings Panel Crash (Qt Framework Bug)
-**Status:** 🟢 Fixed  
+**Status:** 🟢 Fixed (by Qt 6.9.3 upgrade)  
 **Priority:** Critical  
 **Category:** UI / Settings  
-**Root Cause:** Qt 6.7.2 Android bug in keyboard handling
+**Root Cause:** Qt 6.7.x Android bug in keyboard handling - resolved by upgrading to Qt 6.9.3
 
 **Description:**  
 Applying settings in the control panel causes immediate crash.
@@ -127,51 +128,35 @@ _User to provide: Is this opening from file manager or from within app?_
 ## Major Bugs (Functionality Broken)
 
 ### BUG-A004: Extreme Stroke Lag
-**Status:** 🟠 Open  
+**Status:** 🟢 Mostly Fixed (by Qt 6.9.3 upgrade)  
 **Priority:** High  
 **Category:** Performance / Input
 
 **Description:**  
 Drawing strokes has huge lag. Sometimes strokes only appear after lifting the stylus.
 
-**Symptoms:**
+**Resolution:**  
+Upgrading from Qt 6.7.2 to Qt 6.9.3 resolved the major lag issues. Strokes now appear immediately during drawing.
+
+**Remaining Issue:**  
+Stylus poll rate is still capped at 60Hz instead of the hardware-supported 240Hz.
+This requires implementing `requestUnbufferedDispatch()` via JNI - deferred to future work.
+
+**Symptoms (BEFORE fix):**
 - Visible delay between stylus movement and stroke rendering
 - Strokes may not appear until stylus is lifted
 - Drawing feels unresponsive
 
-**Possible Causes:**
-1. **Event compression** - Qt compresses high-frequency touch events by default
-2. **Software rendering fallback** - Not using GPU acceleration
-3. **Main thread blocking** - Rendering blocking input processing
-4. **Missing unbuffered dispatch** - Not requesting high-rate stylus input
+**Fix Applied:**  
+Upgraded Qt from 6.7.2 → 6.9.3. No code changes required.
 
-**Fixes to Try:**
-
-1. **Disable event compression** (in Main.cpp):
-```cpp
-#ifdef Q_OS_ANDROID
-QCoreApplication::setAttribute(Qt::AA_CompressHighFrequencyEvents, false);
-QCoreApplication::setAttribute(Qt::AA_SynthesizeMouseForUnhandledTabletEvents, false);
-#endif
-```
-
-2. **Force GPU rendering** (environment variable or in code):
-```cpp
-qputenv("QSG_RHI_BACKEND", "opengl");
-qputenv("QSG_RENDER_LOOP", "threaded");
-```
-
-3. **Request unbuffered dispatch** (requires Java/JNI):
+**Future Enhancement (60Hz → 240Hz):**  
+To unlock full stylus poll rate, need to implement:
 ```java
-// In Activity or View
+// In Activity or View - requires JNI integration
 view.requestUnbufferedDispatch(motionEvent);
 ```
-
-4. **Use threaded render loop** - Already using Qt Widgets, so this may help
-
-**Notes:**  
-- High-rate stylus input (240Hz) requires API 31+ and `requestUnbufferedDispatch()`
-- Current community port was limited to 60Hz - this may be the same issue
+This requires API 31+ and custom Java/JNI code
 
 ---
 

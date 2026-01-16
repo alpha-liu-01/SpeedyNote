@@ -680,10 +680,10 @@ The Docker image needs:
 pip install aqtinstall
 
 # Install Qt 6.7 for Android arm64
-aqt install-qt linux android 6.7.2 android_arm64_v8a
+aqt install-qt linux android 6.9.3 android_arm64_v8a
 
 # Install Qt 6.7 host tools (needed for moc, uic, etc.)
-aqt install-qt linux desktop 6.7.2 gcc_64
+aqt install-qt linux desktop 6.9.3 gcc_64
 ```
 
 #### A.1.3: Dockerfile Skeleton
@@ -718,7 +718,7 @@ RUN yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --licenses && 
     "ndk;26.1.10909125"
 
 # Install Qt 6.7 for Android and host
-ENV QT_VERSION=6.7.2
+ENV QT_VERSION=6.9.3
 RUN aqt install-qt linux android ${QT_VERSION} android_arm64_v8a -O /opt/qt && \
     aqt install-qt linux desktop ${QT_VERSION} gcc_64 -O /opt/qt
 
@@ -935,7 +935,7 @@ adb install build/android-build/TestAndroidApp.apk
 5. [x] `android/build-mupdf.sh` - MuPDF cross-compilation script ✅
 6. [x] MuPDF 1.24.10 built for arm64-v8a (libmupdf.a 50MB + libmupdf-third.a 9MB) ✅
 7. [x] `android/test-app/` - Minimal test app + build script ✅
-8. [x] Test app running on Tab S6 Lite - Qt 6.7.2 on Android 16 ✅
+8. [x] Test app running on Tab S6 Lite - Qt 6.9.3 on Android 16 ✅
 9. [x] **Phase A COMPLETE** (2026-01-16) ✅
 
 ---

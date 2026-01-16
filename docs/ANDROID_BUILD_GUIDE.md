@@ -14,7 +14,7 @@ This guide provides step-by-step instructions for building SpeedyNote for Androi
 
 - **Target:** Android arm64-v8a (64-bit ARM)
 - **PDF Backend:** MuPDF (cross-compiled)
-- **UI Framework:** Qt 6.7.2 for Android
+- **UI Framework:** Qt 6.9.3 for Android
 - **Minimum API:** 26 (Android 8.0)
 - **Target API:** 34 (Android 14)
 
@@ -66,7 +66,7 @@ The Docker image contains all build dependencies:
 - Ubuntu 22.04 base
 - Android SDK (API 34)
 - Android NDK 26.1
-- Qt 6.7.2 (Android arm64-v8a + Linux host tools)
+- Qt 6.9.3 (Android arm64-v8a + Linux host tools)
 - CMake, Ninja, OpenJDK 17
 
 #### 1.1 Build the Docker image
@@ -219,8 +219,8 @@ Key environment variables:
 Builds the full SpeedyNote APK.
 
 Key environment variables:
-- `QT_ANDROID` - Qt Android installation (default: `/opt/qt/6.7.2/android_arm64_v8a`)
-- `QT_HOST` - Qt host tools (default: `/opt/qt/6.7.2/gcc_64`)
+- `QT_ANDROID` - Qt Android installation (default: `/opt/qt/6.9.3/android_arm64_v8a`)
+- `QT_HOST` - Qt host tools (default: `/opt/qt/6.9.3/gcc_64`)
 - `MUPDF_INCLUDE_DIR` - MuPDF headers
 - `MUPDF_LIBRARIES` - MuPDF static libraries
 
@@ -321,7 +321,7 @@ Or run Docker commands with `sudo`.
 
 **Fix:** Ensure `QT_HOST` environment variable is correct:
 ```bash
-export QT_HOST=/opt/qt/6.7.2/gcc_64
+export QT_HOST=/opt/qt/6.9.3/gcc_64
 ```
 
 ### APK installation fails with INSTALL_PARSE_FAILED_NO_CERTIFICATES

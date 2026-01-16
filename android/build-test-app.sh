@@ -17,9 +17,9 @@ TEST_APP_DIR="${SCRIPT_DIR}/test-app"
 BUILD_DIR="${TEST_APP_DIR}/build"
 
 # Qt and Android paths from Docker environment
-QT_ANDROID="${QT_ANDROID:-/opt/qt/6.7.2/android_arm64_v8a}"
+QT_ANDROID="${QT_ANDROID:-/opt/qt/6.9.3/android_arm64_v8a}"
 # Note: aqtinstall uses "linux_gcc_64" as arch name but installs to "gcc_64"
-QT_HOST="${QT_HOST:-/opt/qt/6.7.2/gcc_64}"
+QT_HOST="${QT_HOST:-/opt/qt/6.9.3/gcc_64}"
 ANDROID_SDK="${ANDROID_SDK_ROOT:-/opt/android-sdk}"
 ANDROID_NDK="${ANDROID_NDK_ROOT:-/opt/android-sdk/ndk/26.1.10909125}"
 
