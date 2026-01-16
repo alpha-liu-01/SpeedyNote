@@ -23,6 +23,7 @@
 | **BUG-A004** | Extreme Stroke Lag | ✅ Fixed (Qt 6.9.3 + 240Hz unbuffered) |
 | **BUG-A005** | Pinch-to-Zoom Unreliable | ✅ Fixed (2-finger TouchBegin handler) |
 | **BUG-A006** | PDF Page Switch Crash | ✅ Fixed (multi-layer fix) |
+| **BUG-A007** | Dark Mode Not Syncing | ✅ Fixed (JNI + Fusion style) |
 
 **All critical bugs resolved!** 🎉
 
@@ -408,6 +409,109 @@ memmove(dst, src, width * 4);
 - ✅ Background renders properly cancelled on page change
 - ✅ MuPDF operations are thread-safe
 - ✅ ARM64 memory alignment issues prevented
+
+---
+
+### BUG-A007: Dark Mode Not Syncing with Android System
+**Status:** ✅ Fixed  
+**Priority:** Medium  
+**Category:** Theming / UI
+**Platform:** Android only
+
+**Description:**  
+SpeedyNote's UI elements don't follow Android's system light/dark mode setting. When switching to light mode in Android settings, most UI elements remain dark, but some (like control panel tabs, text boxes) become light while their text stays light-colored, causing very low contrast and unreadable text.
+
+**Root Causes:**
+
+1. **No Android theme initialization**: `Main.cpp` had explicit palette setup for Windows but nothing for Android. Qt uses its default "android" style which doesn't consistently follow system theme.
+
+2. **`isDarkMode()` detection fails on Android**: The function falls back to checking `QPalette::Window` color lightness, but Qt doesn't automatically sync its palette with Android's system theme, so this returns a fixed value regardless of system setting.
+
+3. **Mixed native vs Qt widget styling**: Native Android dialogs follow system theme, but Qt widgets use Qt's internal palette, causing visual inconsistency.
+
+**Symptoms (BEFORE fix):**
+- Tab bars have light background but light text (invisible)
+- Text boxes have wrong background/text color combinations
+- Control panel tabs unreadable in light mode
+- Inconsistent appearance between native and Qt widgets
+
+**Fix Applied:**
+
+**Layer 1: JNI Dark Mode Detection**
+Added `isDarkMode()` static method to `SpeedyNoteActivity.java`:
+
+```java
+public static boolean isDarkMode() {
+    Configuration config = sInstance.getResources().getConfiguration();
+    int nightMode = config.uiMode & Configuration.UI_MODE_NIGHT_MASK;
+    return (nightMode == Configuration.UI_MODE_NIGHT_YES);
+}
+```
+
+**Layer 2: Android Palette Initialization**
+Added `applyAndroidPalette()` in `Main.cpp`:
+- Uses Fusion style (cross-platform, respects palette colors)
+- Queries system dark mode via JNI
+- Applies matching dark or light palette
+
+```cpp
+static void applyAndroidPalette(QApplication& app) {
+    app.setStyle("Fusion");  // Respects palette colors
+    
+    if (isAndroidDarkMode()) {
+        // Apply dark palette (same as Windows)
+        QPalette darkPalette;
+        // ... set all color roles ...
+        app.setPalette(darkPalette);
+    } else {
+        // Apply light palette
+        QPalette lightPalette;
+        // ... set all color roles ...
+        app.setPalette(lightPalette);
+    }
+}
+```
+
+**Layer 3: Update isDarkMode() for Android**
+Modified `MainWindow::isDarkMode()` to call JNI on Android:
+
+```cpp
+bool MainWindow::isDarkMode() {
+#ifdef Q_OS_WIN
+    // Windows registry detection
+#elif defined(Q_OS_ANDROID)
+    // JNI call to SpeedyNoteActivity.isDarkMode()
+    QJniObject result = QJniObject::callStaticMethod<jboolean>(
+        "org/speedynote/app/SpeedyNoteActivity",
+        "isDarkMode", "()Z");
+    return result.isValid() && result.object<jboolean>();
+#else
+    // Linux palette detection
+#endif
+}
+```
+
+**Files Modified:**
+- `android/app-resources/src/org/speedynote/app/SpeedyNoteActivity.java`
+  - Added `sInstance` singleton for JNI access
+  - Added `isDarkMode()` static method querying `Configuration.UI_MODE_NIGHT_MASK`
+  
+- `source/Main.cpp`
+  - Added `isAndroidDarkMode()` JNI helper
+  - Added `applyAndroidPalette()` with full dark/light palette definitions
+  - Called `applyAndroidPalette()` at startup
+  
+- `source/MainWindow.cpp`
+  - Added Android branch to `isDarkMode()` using JNI call
+
+**Desktop Impact:** None - Windows and Linux behavior unchanged. All changes are wrapped in `#ifdef Q_OS_ANDROID`.
+
+**Result:**
+- ✅ All Qt widgets follow Android system theme
+- ✅ Text is readable in both light and dark modes
+- ✅ Control panel tabs have proper contrast
+- ✅ Consistent appearance across all UI elements
+- ✅ Theme is applied at app startup
 
 ---
 

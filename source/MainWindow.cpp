@@ -3188,6 +3188,15 @@ bool MainWindow::isDarkMode() {
     // If the key doesn't exist (older Windows), default to light mode
     int appsUseLightTheme = settings.value("AppsUseLightTheme", 1).toInt();
     return (appsUseLightTheme == 0);
+#elif defined(Q_OS_ANDROID)
+    // On Android, query the system via JNI
+    // Calls SpeedyNoteActivity.isDarkMode() which checks Configuration.UI_MODE_NIGHT_MASK
+    // callStaticMethod<jboolean> returns the primitive directly, not a QJniObject
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/speedynote/app/SpeedyNoteActivity",
+        "isDarkMode",
+        "()Z"
+    );
 #else
     // On Linux and other platforms, use palette-based detection
     QColor bg = palette().color(QPalette::Window);

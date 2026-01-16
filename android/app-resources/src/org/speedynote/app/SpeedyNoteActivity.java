@@ -1,6 +1,7 @@
 package org.speedynote.app;
 
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -14,13 +15,51 @@ import org.qtproject.qt.android.bindings.QtActivity;
  * Extends QtActivity to:
  * 1. Handle Activity results from the PDF file picker (BUG-A003)
  * 2. Enable high-rate stylus input via requestUnbufferedDispatch() (BUG-A004)
+ * 3. Provide system dark mode detection for theme synchronization (BUG-A007)
  * 
  * This is necessary because:
  * - PDF picker: We need to process the file picker result while SAF permission is valid
  * - Stylus input: Android batches touch events at 60Hz by default; we want 240Hz
+ * - Dark mode: Qt doesn't automatically detect Android's system theme setting
  */
 public class SpeedyNoteActivity extends QtActivity {
     private static final String TAG = "SpeedyNoteActivity";
+    
+    // Singleton reference for JNI calls
+    private static SpeedyNoteActivity sInstance;
+    
+    @Override
+    public void onCreate(android.os.Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        sInstance = this;
+    }
+    
+    @Override
+    protected void onDestroy() {
+        if (sInstance == this) {
+            sInstance = null;
+        }
+        super.onDestroy();
+    }
+    
+    /**
+     * Check if the system is in dark mode.
+     * Called from C++ via JNI to sync Qt's palette with Android's system theme.
+     * 
+     * @return true if dark mode is enabled, false otherwise
+     */
+    public static boolean isDarkMode() {
+        if (sInstance == null) {
+            Log.w(TAG, "isDarkMode: Activity not available, defaulting to light mode");
+            return false;
+        }
+        
+        Configuration config = sInstance.getResources().getConfiguration();
+        int nightMode = config.uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        boolean isDark = (nightMode == Configuration.UI_MODE_NIGHT_YES);
+        Log.d(TAG, "isDarkMode: " + isDark + " (uiMode=" + config.uiMode + ")");
+        return isDark;
+    }
     
     /**
      * Intercept all touch events to request unbuffered dispatch.
