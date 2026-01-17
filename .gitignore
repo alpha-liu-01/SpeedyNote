@@ -46,6 +46,7 @@ dmg_temp/
 # Editor
 .vs/
 .idea/
+.cursor/
 .vscode/
 .DS_Store
 
