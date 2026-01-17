@@ -162,7 +162,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.0.0 Preview 4"));
+    setWindowTitle(tr("SpeedyNote 1.0.0 Preview 5"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -815,28 +815,7 @@ void MainWindow::setupUi() {
     m_relinkPdfAction = overflowMenu->addAction(tr("Relink PDF..."));
     m_relinkPdfAction->setEnabled(false);  // Initially disabled
     connect(m_relinkPdfAction, &QAction::triggered, this, [this]() {
-        DocumentViewport* vp = currentViewport();
-        Document* doc = vp ? vp->document() : nullptr;
-        if (!doc || !doc->hasPdfReference()) return;
-        
-        // Open PdfRelinkDialog with hash verification
-        PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(), this);
-        if (dialog.exec() == QDialog::Accepted) {
-            PdfRelinkDialog::Result result = dialog.getResult();
-            
-            if (result == PdfRelinkDialog::RelinkPdf) {
-                QString newPath = dialog.getNewPdfPath();
-                if (!newPath.isEmpty() && doc->relinkPdf(newPath)) {
-                    // Hide the banner if visible
-                    vp->hideMissingPdfBanner();
-                    // Refresh viewport
-                    vp->update();
-                }
-            } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
-                // Hide the banner if visible
-                vp->hideMissingPdfBanner();
-            }
-        }
+        showPdfRelinkDialog(currentViewport());
     });
     
     overflowMenu->addSeparator();
@@ -1843,29 +1822,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     
     m_pdfRelinkConn = connect(viewport, &DocumentViewport::requestPdfRelink,
             this, [this, viewport]() {
-        Document* doc = viewport ? viewport->document() : nullptr;
-        if (!doc || !doc->hasPdfReference()) return;
-        
-        // Open PdfRelinkDialog with hash verification
-        PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(), this);
-        if (dialog.exec() == QDialog::Accepted) {
-            PdfRelinkDialog::Result result = dialog.getResult();
-            
-            if (result == PdfRelinkDialog::RelinkPdf) {
-                QString newPath = dialog.getNewPdfPath();
-                if (!newPath.isEmpty() && doc->relinkPdf(newPath)) {
-                    // Hide the banner
-                    viewport->hideMissingPdfBanner();
-                    
-                    // Refresh viewport to show PDF backgrounds
-                    viewport->update();
-                }
-            } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
-                // User chose to continue without PDF - hide the banner
-                viewport->hideMissingPdfBanner();
-            }
-            // Cancel: do nothing, banner remains visible
-        }
+        showPdfRelinkDialog(viewport);
     });
     
     // Check if PDF is missing and show banner
@@ -2099,6 +2056,47 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
 }
 
 // ============================================================================
+// Phase R.4: Unified PDF Relink Handler
+// ============================================================================
+
+void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
+{
+    if (!viewport) return;
+    
+    Document* doc = viewport->document();
+    if (!doc || !doc->hasPdfReference()) return;
+    
+    // Open PdfRelinkDialog with hash verification
+    PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(), this);
+    if (dialog.exec() == QDialog::Accepted) {
+        PdfRelinkDialog::Result result = dialog.getResult();
+        
+        if (result == PdfRelinkDialog::RelinkPdf) {
+            QString newPath = dialog.getNewPdfPath();
+            if (!newPath.isEmpty() && doc->relinkPdf(newPath)) {
+                // Hide the banner
+                viewport->hideMissingPdfBanner();
+                
+                // Refresh viewport to show PDF backgrounds
+                viewport->update();
+                
+                // Refresh OutlinePanel - PDF may have outline now
+                updateOutlinePanelForDocument(doc);
+                
+                // Refresh PagePanel thumbnails to show PDF background
+                if (m_pagePanel) {
+                    m_pagePanel->invalidateAllThumbnails();
+                }
+            }
+        } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
+            // User chose to continue without PDF - hide the banner
+            viewport->hideMissingPdfBanner();
+        }
+        // Cancel: do nothing, banner remains visible
+    }
+}
+
+// ============================================================================
 // Phase E.2: OutlinePanel Update for Document
 // ============================================================================
 
@@ -2182,6 +2180,26 @@ void MainWindow::updatePagePanelForViewport(DocumentViewport* viewport)
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Page Panel: Updated for document with" << doc->pageCount() << "pages";
 #endif
+}
+
+// ============================================================================
+// Helper: Notify PagePanel and ActionBar after page structure change
+// ============================================================================
+
+void MainWindow::notifyPageStructureChanged(Document* doc, int currentPage)
+{
+    // Update PagePanel thumbnail model
+    if (m_pagePanel) {
+        m_pagePanel->onPageCountChanged();
+    }
+    
+    // Update action bar page count and optionally current page
+    if (m_pagePanelActionBar && doc) {
+        m_pagePanelActionBar->setPageCount(doc->pageCount());
+        if (currentPage >= 0) {
+            m_pagePanelActionBar->setCurrentPage(currentPage);
+        }
+    }
 }
 
 // ============================================================================
@@ -2510,8 +2528,8 @@ void MainWindow::addPageToDocument()
             m_tabManager->markTabModified(currentIndex, true);
         }
         
-        // Optionally scroll to the new page (user can do this manually for now)
-        // viewport->scrollToPage(doc->pageCount() - 1);
+        // Update PagePanel and action bar
+        notifyPageStructureChanged(doc);
     }
 }
 
@@ -2568,8 +2586,8 @@ void MainWindow::insertPageInDocument()
             m_tabManager->markTabModified(tabIndex, true);
         }
         
-        // Note: Don't auto-scroll - let user scroll manually if needed
-        // (matches addPageToDocument behavior)
+        // Update PagePanel and action bar
+        notifyPageStructureChanged(doc);
     }
 }
 
@@ -2629,7 +2647,12 @@ void MainWindow::deletePageInDocument()
     viewport->clearUndoStacksFrom(currentPageIndex);
     
     // Delete the page
-    doc->removePage(currentPageIndex);
+    if (!doc->removePage(currentPageIndex)) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "deletePageInDocument: Failed to delete page" << currentPageIndex;
+#endif
+        return;
+    }
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "deletePageInDocument: Deleted page at" << currentPageIndex
@@ -2638,12 +2661,19 @@ void MainWindow::deletePageInDocument()
     
     // Notify viewport that document structure changed
     viewport->notifyDocumentStructureChanged();
+    
+    // Navigate to appropriate page (stay at same index or go to last page)
+    int newPage = qMin(currentPageIndex, doc->pageCount() - 1);
+    viewport->scrollToPage(newPage);
         
     // Mark tab as modified
     int tabIndex = m_tabManager->currentIndex();
     if (tabIndex >= 0) {
         m_tabManager->markTabModified(tabIndex, true);
-        }
+    }
+    
+    // Update PagePanel and action bar
+    notifyPageStructureChanged(doc, newPage);
 }
 
 void MainWindow::openPdfDocument(const QString &filePath)
@@ -3970,17 +4000,11 @@ void MainWindow::setupPagePanelActionBar()
     
     // Add Page: Add a new page at the end
     connect(m_pagePanelActionBar, &PagePanelActionBar::addPageClicked, this, [this]() {
+        addPageToDocument();
+        // Scroll to the newly added page (at end)
         if (DocumentViewport* vp = currentViewport()) {
             if (Document* doc = vp->document()) {
-                doc->addPage();
-                vp->notifyDocumentStructureChanged();
-                // Navigate to the new page
                 vp->scrollToPage(doc->pageCount() - 1);
-                // Update PagePanel and action bar
-                if (m_pagePanel) {
-                    m_pagePanel->onPageCountChanged();
-                }
-                m_pagePanelActionBar->setPageCount(doc->pageCount());
             }
         }
     });
@@ -3988,18 +4012,10 @@ void MainWindow::setupPagePanelActionBar()
     // Insert Page: Insert a new page after the current page
     connect(m_pagePanelActionBar, &PagePanelActionBar::insertPageClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            if (Document* doc = vp->document()) {
-                int currentPage = vp->currentPageIndex();
-                doc->insertPage(currentPage + 1);
-                vp->notifyDocumentStructureChanged();
-                // Navigate to the new page
-                vp->scrollToPage(currentPage + 1);
-                // Update PagePanel and action bar
-                if (m_pagePanel) {
-                    m_pagePanel->onPageCountChanged();
-                }
-                m_pagePanelActionBar->setPageCount(doc->pageCount());
-            }
+            int targetPage = vp->currentPageIndex() + 1;
+            insertPageInDocument();
+            // Scroll to the newly inserted page
+            vp->scrollToPage(targetPage);
         }
     });
     
@@ -4089,20 +4105,15 @@ void MainWindow::setupPagePanelActionBar()
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Page" << deleteIndex << "permanently deleted";
 #endif
+            vp->notifyDocumentStructureChanged();
             
-                    vp->notifyDocumentStructureChanged();
-                    
-                    // Navigate to appropriate page
+            // Navigate to appropriate page
             int newPage = qMin(deleteIndex, doc->pageCount() - 1);
-                    vp->scrollToPage(newPage);
-                    
-                    // Update UI
-                    if (m_pagePanel) {
-                        m_pagePanel->onPageCountChanged();
-                    }
-                    m_pagePanelActionBar->setPageCount(doc->pageCount());
-                    m_pagePanelActionBar->setCurrentPage(newPage);
-                } else {
+            vp->scrollToPage(newPage);
+            
+            // Update UI
+            notifyPageStructureChanged(doc, newPage);
+        } else {
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Delete failed for page" << deleteIndex;
 #endif
