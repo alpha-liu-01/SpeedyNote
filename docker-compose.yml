@@ -1,8 +1,0 @@
-version: '3.8'
-
-services:
-  speedynote-builder:
-    build: .
-    volumes:
-      # 挂载当前目录以实现代码同步
-      - .:/app

@@ -82,7 +82,10 @@ build_project() {
     # Compile translations if lrelease is available
     if command_exists lrelease; then
         echo -e "${YELLOW}Compiling translation files...${NC}"
-        # lrelease ./resources/translations/app_zh.ts ./resources/translations/app_fr.ts ./resources/translations/app_es.ts
+        /usr/lib/qt6/bin/lrelease ./resources/translations/app_zh.ts ./resources/translations/app_fr.ts ./resources/translations/app_es.ts
+        cp resources/translations/*.qm build/ 2>/dev/null || true
+    else
+        echo -e "${YELLOW}Warning: lrelease not found, copying existing .qm files...${NC}"
         cp resources/translations/*.qm build/ 2>/dev/null || true
     fi
     
