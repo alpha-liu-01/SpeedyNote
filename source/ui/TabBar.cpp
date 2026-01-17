@@ -8,7 +8,7 @@ TabBar::TabBar(QWidget *parent)
 {
     // Configure tab bar behavior
     setExpanding(false);           // Tabs fit content, don't expand to fill
-    setMovable(true);              // Allow drag-to-reorder
+    setMovable(false);             // Disabled: reordering tabs doesn't reorder viewports/documents
     setTabsClosable(true);         // Show close button on each tab
     setUsesScrollButtons(true);    // Show arrows when tabs overflow
     setElideMode(Qt::ElideRight);  // Truncate long titles with "..."
