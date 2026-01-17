@@ -1263,7 +1263,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(10);
     
     // Copyright
-    QLabel *copyrightLabel = new QLabel(tr("© 2025 SpeedyNote. All rights reserved."), aboutTab);
+    QLabel *copyrightLabel = new QLabel(tr("© 2026 SpeedyNote. All rights reserved."), aboutTab);
     copyrightLabel->setAlignment(Qt::AlignCenter);
     copyrightLabel->setStyleSheet("font-size: 10px; color: #95a5a6;");
     layout->addWidget(copyrightLabel);
