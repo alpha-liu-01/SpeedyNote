@@ -289,8 +289,6 @@ set(UI_SOURCES
     source/ui/actionbars/PagePanelActionBar.cpp
     # Banners
     source/ui/banners/MissingPdfBanner.cpp
-    # Dialogs
-    source/ui/dialogs/SaveDocumentDialog.cpp
     # Launcher
     source/ui/launcher/Launcher.cpp
     source/ui/launcher/LauncherNavButton.cpp
@@ -338,11 +336,12 @@ set(SHARING_SOURCES
     thirdparty/miniz/miniz.c
 )
 
-# Android-specific utilities
+# Android-specific utilities and UI
 set(ANDROID_PLATFORM_SOURCES "")
 if(ANDROID)
     set(ANDROID_PLATFORM_SOURCES
         source/android/PdfPickerAndroid.cpp
+        source/ui/dialogs/SaveDocumentDialog.cpp  # BUG-A002: Touch-friendly save dialog
     )
 endif()
 
