@@ -58,6 +58,10 @@ void SubToolbarContainer::showForTool(ToolType tool)
         // Per-tab state is restored by onTabChanged() before showForTool() is called.
         // Calling refreshFromSettings() would overwrite the per-tab state with QSettings.
         
+        // BUT we DO need to sync shared state (e.g., Marker/Highlighter shared colors)
+        // This only reloads shared values, preserving per-tab selections
+        m_currentSubToolbar->syncSharedState();
+        
         // Position subtoolbar at (0,0) within container
         m_currentSubToolbar->move(0, 0);
         m_currentSubToolbar->show();

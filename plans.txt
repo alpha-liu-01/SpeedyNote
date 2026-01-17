@@ -338,34 +338,34 @@ Reconnect remaining MainWindow widgets to DocumentViewport.
 Most core features already working from Phase 3.
 
 Priority: HIGH (Core functionality)
-[  ] 4.1 Outline & Bookmarks (PARTIAL - outline works, bookmarks stubbed)
+[✅] 4.1 Outline & Bookmarks (PARTIAL - outline works, bookmarks stubbed)
      - outlineTree → scrollToPage() ✓
      - bookmarkList → needs Document::bookmarks()
 
-[  ] 4.2 Touch Gestures
+[✅] 4.2 Touch Gestures
      - Two-finger pan, pinch zoom
      - Trackpad gestures
      - Palm rejection (Linux)
 
-[  ] 4.3 Controller Support
+[X] 4.3 Controller Support
      - MagicDial / Joy-Con integration
      - SDLControllerManager connection
 
 Priority: MEDIUM (Enhanced features)
-[  ] 4.4 Picture Windows
+[✅] 4.4 Picture Windows
      - PictureWindow integration with Page objects
      - Insert/resize/delete operations
 
-[  ] 4.5 Markdown Notes Sidebar
+[✅] 4.5 Markdown Notes Sidebar
      - markdownNotesSidebar integration
      - Per-page markdown notes
 
-[  ] 4.6 ControlPanelDialog Migration
+[✅] 4.6 ControlPanelDialog Migration
      - Connect settings to DocumentViewport
      - Currently disabled (Phase 3.1.8)
 
 Priority: LOW (Can be deferred)
-[  ] 4.7 Phase 2B Tools
+[✅] 4.7 Phase 2B Tools
      - Marker, Straight Line, Lasso, Highlighter
      - Easier now with full MainWindow integration
 
@@ -375,29 +375,29 @@ Priority: LOW (Can be deferred)
 
 Remove old code once Phase 4 is complete.
 
-[  ] 5.1 Delete InkCanvas (~7000 lines)
+[✅] 5.1 Delete InkCanvas (~7000 lines)
      - All pixmap-based canvas code
      - Combined canvas hack
      - source/InkCanvas.h/.cpp
 
-[  ] 5.2 Delete VectorCanvas (~800 lines)
+[✅] 5.2 Delete VectorCanvas (~800 lines)
      - Test overlay implementation (now in DebugOverlay)
      - source/VectorCanvas.h/.cpp
 
-[  ] 5.3 MainWindow Cleanup
+[✅] 5.3 MainWindow Cleanup
      - Remove any remaining InkCanvas references
      - Remove stubbed/unused handlers
      - General code organization
 
-[  ] 5.4 Re-enable LauncherWindow
+[✅] 5.4 Re-enable LauncherWindow
      - Reconnect LauncherWindow.cpp
      - Update for new Document/Viewport architecture
 
-[  ] 5.5 Final Testing & Performance Validation
+[✅] 5.5 Final Testing & Performance Validation
      - Full feature regression test
      - Performance on low-end hardware
 
-[  ] 5.6 Update Documentation
+[x] 5.6 Update Documentation
      - README updates
      - File format documentation (.json, .snb)
 
@@ -648,7 +648,7 @@ G.3: Control Panel Remake ✅ DONE
      - Most old options don't make sense with new architecture
      - Focus on: theme, default tool settings, performance tuning
 
-G.4: File Explorer Integration
+G.4: File Explorer Integration (Not planned any more)
      - Double-click .snb → open SpeedyNote
      - File associations for Windows/Linux
 
@@ -656,11 +656,11 @@ G.5: Shortcut Hub
      - Centralized keyboard/mouse/controller shortcut customization
      - Reconnect SDLController for WACOM remote-like UX
 
-G.6: LauncherWindow Reconnect/Remake
+G.6: LauncherWindow Reconnect/Remake ✅ DONE
      - Recent documents list
      - Quick open for frequently edited notes
 
-G.7: Legacy Code Cleanup
+G.7: Legacy Code Cleanup ✅ DONE
      - Remove PictureWindow and other obsolete code
      - Clean up unused includes and dead code paths
 
@@ -668,13 +668,13 @@ G.7: Legacy Code Cleanup
 
 FUTURE (Post Windows/Linux release):
 
-H.1: Android Port
+H.1: Android Port ✅ DONE
      - Need alternative PDF provider (Poppler dependencies too heavy)
      - SDL2 also problematic on Android
      - Investigate: MuPDF, PDFium, or Android's native PDF renderer
      - Sandbox/persistence challenges to investigate
 
-H.2: iOS/iPadOS Port
+H.2: iOS/iPadOS Port (??)
      - Qt for iOS exists
      - Without SDL2/Poppler, may be more feasible
      - Would need iOS-native PDF rendering
