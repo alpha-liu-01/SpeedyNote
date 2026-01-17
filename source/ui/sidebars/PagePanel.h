@@ -6,7 +6,7 @@
 #include <QSet>
 #include <QPixmap>
 
-class QListView;
+class PagePanelListView;
 class QTimer;
 class Document;
 class PageThumbnailModel;
@@ -179,17 +179,17 @@ private slots:
     void onItemClicked(const QModelIndex& index);
     void onModelPageDropped(int fromIndex, int toIndex);
     void performPendingInvalidation();
+    void onDragRequested(const QModelIndex& index);
 
 private:
     void setupUI();
     void setupConnections();
     void configureListView();
-    void setupTouchScrolling();
     void updateThumbnailWidth();
     void applyTheme();
 
     // Widgets
-    QListView* m_listView = nullptr;
+    PagePanelListView* m_listView = nullptr;
     PageThumbnailModel* m_model = nullptr;
     PageThumbnailDelegate* m_delegate = nullptr;
 

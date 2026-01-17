@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 16, 2026 (Fixed timeline time display not refreshing)
+**Last Updated:** Jan 17, 2026 (Fixed Page Panel touch drag conflicts with scroll gestures)
 
 ---
 
@@ -142,7 +142,104 @@ This ensures:
 
 ### Touch/Tablet (TCH)
 
-*No active bugs*
+#### BUG-TCH-002: Page Panel touch drag conflicts with scroll gestures
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+Multiple issues with touch-based page reordering in the Page Panel:
+1. Touch input immediately triggered drag instead of requiring long-press (400ms delay)
+2. Thumbnail appeared 2x-4x larger when dragged by touch (scaled by device pixel ratio)
+3. During drag, touch movement also triggered scroll gestures, causing the panel to scroll in the opposite direction
+
+**Steps to Reproduce:**
+1. Open a multi-page document
+2. Open the Pages tab in the left sidebar
+3. Try to drag a page thumbnail with finger (touch input)
+4. Page immediately starts dragging (no long-press required)
+5. Thumbnail appears much larger than normal during drag
+6. Panel scrolls in opposite direction of drag movement
+
+**Expected:** 
+- Touch should require 400ms long-press before initiating drag
+- Thumbnail should maintain normal size during drag
+- Panel should not scroll during drag operation
+
+**Actual:** Immediate drag with oversized thumbnail and conflicting scroll
+
+**Root Cause:** 
+Three separate issues:
+
+**Issue 1: QScroller intercepting touch events**
+When QScroller was grabbed with `TouchGesture`, it intercepted touch events before they reached `viewportEvent()`. The long-press timer was never started because `TouchBegin` events weren't received.
+
+**Issue 2: DPR scaling in drag pixmap**
+Qt's default `QListView::startDrag()` created a drag pixmap at physical size but didn't properly account for device pixel ratio, causing 2x/4x scaling on high-DPI displays.
+
+**Issue 3: No scroll suppression during drag**
+Even after ungrabbing QScroller, mouse events still flowed through `QListView::mouseMoveEvent()` which triggered internal scroll behavior. Additionally, `setAutoScroll(true)` (default) caused QListView's built-in auto-scroll during drag.
+
+**Fix:**
+Created custom `PagePanelListView` class with proper touch/stylus separation:
+
+**Part 1: Detect touch via mouse event source**
+```cpp
+// In mousePressEvent():
+m_isTouchInput = (event->source() == Qt::MouseEventSynthesizedBySystem);
+if (m_isTouchInput && canDrag) {
+    m_longPressTimer.start();  // 400ms timer
+}
+```
+
+**Part 2: Block immediate drag for touch**
+```cpp
+// In startDrag():
+if (m_isTouchInput && !m_longPressTriggered) {
+    return;  // Block until long-press fires
+}
+```
+
+**Part 3: Create drag pixmap at logical size**
+```cpp
+// Override startDrag() to create pixmap without DPR scaling:
+QPixmap pixmap(itemRect.size());  // Logical size, NOT * dpr
+pixmap.fill(Qt::transparent);
+// ... render item into pixmap ...
+drag->setPixmap(pixmap);
+```
+
+**Part 4: Suppress scroll during drag**
+```cpp
+// In onLongPressTimeout():
+setAutoScroll(false);  // Disable QListView's auto-scroll
+
+// In mouseMoveEvent():
+if (m_longPressTriggered && m_isTouchInput) {
+    event->accept();
+    return;  // Don't let QListView process mouse moves
+}
+
+// In mouseReleaseEvent():
+setAutoScroll(true);  // Re-enable after drag
+```
+
+**Part 5: Custom edge auto-scroll**
+Implemented custom auto-scroll in `dragMoveEvent()` that only triggers when dragging near top/bottom edges (50px margin).
+
+**Files Created:**
+- `source/ui/sidebars/PagePanelListView.h`
+- `source/ui/sidebars/PagePanelListView.cpp`
+
+**Files Modified:**
+- `source/ui/sidebars/PagePanel.h` (use PagePanelListView instead of QListView)
+- `source/ui/sidebars/PagePanel.cpp` (integrate PagePanelListView, connect dragRequested signal)
+- `CMakeLists.txt` (add new source file)
+
+**Verified:** [x] Touch requires 400ms long-press before drag starts
+**Verified:** [x] Stylus/mouse can drag immediately (no delay)
+**Verified:** [x] Thumbnail maintains correct size during drag
+**Verified:** [x] Panel does not scroll during drag operation
+**Verified:** [x] Auto-scroll works when dragging near edges
+**Verified:** [x] Touch scrolling still works normally (when not dragging)
 
 ---
 
@@ -1468,13 +1565,13 @@ Additionally, the document was deleted while the viewport still held a reference
 | Subtoolbar | 0 | 0 | 5 | 5 |
 | Action Bar | 0 | 0 | 1 | 1 |
 | Sidebar | 0 | 0 | 0 | 0 |
-| Touch | 0 | 0 | 1 | 1 |
+| Touch | 0 | 0 | 2 | 2 |
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 2 | 2 |
 | UI/UX | 0 | 0 | 4 | 4 |
 | Launcher | 0 | 0 | 2 | 2 |
 | Miscellaneous | 0 | 0 | 6 | 6 |
-| **TOTAL** | **0** | **0** | **28** | **28** |
+| **TOTAL** | **0** | **0** | **29** | **29** |
 
 ---
 

@@ -261,6 +261,7 @@ set(UI_SOURCES
     source/ui/sidebars/OutlinePanel.cpp
     source/ui/sidebars/OutlineItemDelegate.cpp
     source/ui/sidebars/PagePanel.cpp
+    source/ui/sidebars/PagePanelListView.cpp
     # Widgets
     source/ui/widgets/ColorPresetButton.cpp
     source/ui/widgets/ThicknessPresetButton.cpp

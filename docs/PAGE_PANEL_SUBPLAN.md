@@ -816,127 +816,360 @@ void MainWindow::updatePagePanelActionBarVisibility() {
 
 ---
 
-## Phase 6: Drag-and-Drop
+## Phase 6: Drag-and-Drop (Touch-Friendly)
 
-### Task 6.1: Drag Initiation (~100 lines)
+### Problem Analysis
 
-**Files:** Modify `source/ui/PagePanel.cpp`
+**Issue:** When using finger touch to drag pages, the entire delegate item becomes "bigger" due to a conflict between QScroller and Qt's drag-and-drop system.
 
-**Description:** Long-press to initiate drag.
+**Root Cause:**
+1. `QScroller::TouchGesture` intercepts ALL touch events for kinetic scrolling
+2. `QListView`'s drag-and-drop also wants touch input when `ItemIsDragEnabled` is set
+3. When both systems try to handle the same touch, undefined visual behavior occurs
+4. Stylus works fine because it uses mouse events, bypassing QScroller
 
-```cpp
-// In PagePanel, handle long-press:
+**Solution (Option B):** Implement proper long-press detection with QScroller management:
+- Touch starts → Start long-press timer, temporarily ungrab QScroller
+- Long-press completes → Initiate drag manually, keep QScroller disabled
+- Moved before long-press → Cancel drag, re-enable QScroller for scrolling
+- Touch ends → Reset state, re-enable QScroller
 
-void PagePanel::setupDragDrop() {
-    m_listView->setDragEnabled(true);
-    m_listView->setAcceptDrops(true);
-    m_listView->setDropIndicatorShown(true);
-    m_listView->setDragDropMode(QAbstractItemView::InternalMove);
-    
-    // Long-press timer for touch
-    m_longPressTimer = new QTimer(this);
-    m_longPressTimer->setSingleShot(true);
-    m_longPressTimer->setInterval(400);  // 400ms for touch
-    
-    connect(m_longPressTimer, &QTimer::timeout, this, [this]() {
-        if (m_pressedIndex.isValid()) {
-            startDrag(m_pressedIndex);
-        }
-    });
-}
-
-bool PagePanel::eventFilter(QObject* obj, QEvent* event) {
-    if (obj == m_listView->viewport()) {
-        if (event->type() == QEvent::MouseButtonPress) {
-            auto* me = static_cast<QMouseEvent*>(event);
-            m_pressedIndex = m_listView->indexAt(me->pos());
-            m_pressPos = me->pos();
-            
-            // Check if page can be dragged
-            if (m_pressedIndex.isValid() && 
-                m_pressedIndex.data(PageThumbnailModel::CanDragRole).toBool()) {
-                m_longPressTimer->start();
-            }
-        } else if (event->type() == QEvent::MouseButtonRelease) {
-            m_longPressTimer->stop();
-        } else if (event->type() == QEvent::MouseMove) {
-            auto* me = static_cast<QMouseEvent*>(event);
-            if ((me->pos() - m_pressPos).manhattanLength() > 10) {
-                m_longPressTimer->stop();  // Cancel if moved too much
-            }
-        }
-    }
-    return QWidget::eventFilter(obj, event);
-}
-```
-
-**Estimated:** ~100 lines
+This is similar to `TimelineListView` but extended to support initiating drag.
 
 ---
 
-### Task 6.2: Drop Indicator & Visual Feedback (~80 lines)
+### Task 6.1: PagePanelListView Class (~180 lines)
 
-**Files:** Modify `source/ui/PageThumbnailDelegate.cpp`
+**Files:** `source/ui/sidebars/PagePanelListView.h`, `source/ui/sidebars/PagePanelListView.cpp`
 
-**Description:** Custom drop indicator (gap opening up).
+**Description:** Custom QListView subclass that properly separates touch scrolling from touch dragging using long-press detection.
 
 ```cpp
-void PageThumbnailDelegate::paint(QPainter* painter, 
-                                   const QStyleOptionViewItem& option,
-                                   const QModelIndex& index) const {
-    // ... existing thumbnail painting ...
+// PagePanelListView.h
+#ifndef PAGEPANELLISTVIEW_H
+#define PAGEPANELLISTVIEW_H
+
+#include <QListView>
+#include <QTimer>
+#include <QPoint>
+
+class QScroller;
+
+/**
+ * @brief A QListView subclass that enables touch drag-and-drop via long-press.
+ * 
+ * Resolves the conflict between QScroller (touch scrolling) and Qt's drag-and-drop:
+ * - Short touch/move → QScroller handles scrolling
+ * - Long-press (400ms) → Initiates drag, QScroller disabled during drag
+ * - Stylus/mouse → Immediate drag (no long-press needed)
+ */
+class PagePanelListView : public QListView {
+    Q_OBJECT
+
+public:
+    explicit PagePanelListView(QWidget* parent = nullptr);
     
-    // Draw drop indicator (gap)
-    if (option.state & QStyle::State_DropIndicator) {
-        // Draw horizontal line or expanded gap
-        painter->setPen(QPen(accentColor, 2));
-        painter->drawLine(option.rect.topLeft(), option.rect.topRight());
-    }
-}
+signals:
+    /**
+     * @brief Emitted when a drag should start for the given index.
+     * @param index The model index to drag.
+     * 
+     * Connect this to manually start a QDrag operation.
+     */
+    void dragRequested(const QModelIndex& index);
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    
+    // Override to detect stylus vs finger
+    bool viewportEvent(QEvent* event) override;
+
+private slots:
+    void onLongPressTimeout();
+
+private:
+    void ungrabScroller();
+    void regrabScroller();
+    void startDragFromLongPress();
+    
+    QTimer m_longPressTimer;
+    QPoint m_pressPos;              // Position where press started
+    QModelIndex m_pressedIndex;     // Index that was pressed
+    bool m_longPressTriggered = false;
+    bool m_isTouchInput = false;    // True if current input is touch (not stylus/mouse)
+    bool m_scrollerGrabbed = true;  // Track QScroller grab state
+    
+    static constexpr int LONG_PRESS_MS = 400;           // Time to trigger long-press
+    static constexpr int LONG_PRESS_MOVE_THRESHOLD = 15; // Max movement in pixels
+};
+
+#endif // PAGEPANELLISTVIEW_H
 ```
 
-**Estimated:** ~80 lines
-
----
-
-### Task 6.3: Auto-scroll During Drag (~50 lines)
-
-**Files:** Modify `source/ui/PagePanel.cpp`
-
-**Description:** Auto-scroll when dragging near edges.
-
 ```cpp
-void PagePanel::setupAutoScroll() {
-    m_autoScrollTimer = new QTimer(this);
-    m_autoScrollTimer->setInterval(50);  // 20 FPS
+// PagePanelListView.cpp
+#include "PagePanelListView.h"
+#include "../PageThumbnailModel.h"
+
+#include <QMouseEvent>
+#include <QScroller>
+#include <QDrag>
+#include <QMimeData>
+
+PagePanelListView::PagePanelListView(QWidget* parent)
+    : QListView(parent)
+{
+    // Configure long-press timer
+    m_longPressTimer.setSingleShot(true);
+    m_longPressTimer.setInterval(LONG_PRESS_MS);
+    connect(&m_longPressTimer, &QTimer::timeout,
+            this, &PagePanelListView::onLongPressTimeout);
+}
+
+bool PagePanelListView::viewportEvent(QEvent* event)
+{
+    // Detect if input is touch (finger) vs stylus/mouse
+    if (event->type() == QEvent::TouchBegin) {
+        m_isTouchInput = true;
+    } else if (event->type() == QEvent::MouseButtonPress) {
+        // Mouse events from stylus have tablet device source
+        auto* me = static_cast<QMouseEvent*>(event);
+        m_isTouchInput = (me->source() == Qt::MouseEventSynthesizedBySystem);
+    }
     
-    connect(m_autoScrollTimer, &QTimer::timeout, this, [this]() {
-        if (!m_isDragging) {
-            m_autoScrollTimer->stop();
+    return QListView::viewportEvent(event);
+}
+
+void PagePanelListView::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_pressPos = event->pos();
+        m_pressedIndex = indexAt(event->pos());
+        m_longPressTriggered = false;
+        
+        // Check if item can be dragged
+        bool canDrag = m_pressedIndex.isValid() && 
+                       m_pressedIndex.data(PageThumbnailModel::CanDragRole).toBool();
+        
+        if (canDrag) {
+            if (m_isTouchInput) {
+                // Touch: require long-press to initiate drag
+                // Temporarily ungrab scroller to prevent conflict
+                ungrabScroller();
+                m_longPressTimer.start();
+            }
+            // Stylus/mouse: let QListView handle immediate drag
+        }
+    }
+    
+    // Call base class (handles selection, etc.)
+    QListView::mousePressEvent(event);
+}
+
+void PagePanelListView::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_longPressTimer.stop();
+        
+        // Re-enable scroller if we disabled it
+        if (!m_scrollerGrabbed) {
+            regrabScroller();
+        }
+        
+        // If long-press was triggered, don't process as a click
+        if (m_longPressTriggered) {
+            m_longPressTriggered = false;
+            event->accept();
             return;
         }
-        
-        QPoint pos = m_listView->viewport()->mapFromGlobal(QCursor::pos());
-        int viewHeight = m_listView->viewport()->height();
-        int scrollSpeed = 0;
-        
-        if (pos.y() < 50) {
-            // Near top - scroll up
-            scrollSpeed = -qMin(10, (50 - pos.y()) / 5);
-        } else if (pos.y() > viewHeight - 50) {
-            // Near bottom - scroll down
-            scrollSpeed = qMin(10, (pos.y() - (viewHeight - 50)) / 5);
+    }
+    
+    m_isTouchInput = false;  // Reset for next interaction
+    QListView::mouseReleaseEvent(event);
+}
+
+void PagePanelListView::mouseMoveEvent(QMouseEvent* event)
+{
+    // Cancel long-press if moved too far from initial press position
+    if (m_longPressTimer.isActive()) {
+        QPoint delta = event->pos() - m_pressPos;
+        if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
+            m_longPressTimer.stop();
+            // User is scrolling - re-enable QScroller
+            if (!m_scrollerGrabbed) {
+                regrabScroller();
+            }
         }
-        
-        if (scrollSpeed != 0) {
-            m_listView->verticalScrollBar()->setValue(
-                m_listView->verticalScrollBar()->value() + scrollSpeed);
-        }
-    });
+    }
+    
+    QListView::mouseMoveEvent(event);
+}
+
+void PagePanelListView::onLongPressTimeout()
+{
+    m_longPressTriggered = true;
+    
+    if (m_pressedIndex.isValid()) {
+        // Visual feedback: could add haptic or selection highlight here
+        startDragFromLongPress();
+    }
+}
+
+void PagePanelListView::startDragFromLongPress()
+{
+    // Emit signal for external handling, or start drag directly
+    emit dragRequested(m_pressedIndex);
+    
+    // Alternative: Start drag directly here
+    // QListView::startDrag(Qt::MoveAction);
+}
+
+void PagePanelListView::ungrabScroller()
+{
+    QScroller::ungrabGesture(viewport());
+    m_scrollerGrabbed = false;
+}
+
+void PagePanelListView::regrabScroller()
+{
+    QScroller::grabGesture(viewport(), QScroller::TouchGesture);
+    m_scrollerGrabbed = true;
 }
 ```
 
+**Key Features:**
+- Detects touch vs stylus/mouse input via `viewportEvent()`
+- Touch requires long-press (400ms) to initiate drag
+- Stylus/mouse gets immediate drag (standard Qt behavior)
+- Temporarily ungrabs QScroller during long-press detection to prevent conflict
+- Re-grabs QScroller if user moves (scrolling) or releases (tap)
+
+**Estimated:** ~180 lines
+
+---
+
+### Task 6.2: Integrate PagePanelListView (~50 lines)
+
+**Files:** Modify `source/ui/sidebars/PagePanel.cpp`, `source/ui/sidebars/PagePanel.h`
+
+**Description:** Replace `QListView` with `PagePanelListView` in PagePanel.
+
+```cpp
+// In PagePanel.h:
+#include "PagePanelListView.h"
+// Change: QListView* m_listView; → PagePanelListView* m_listView;
+
+// In PagePanel::setupUI():
+m_listView = new PagePanelListView(this);  // Was: new QListView(this)
+
+// In PagePanel::setupConnections():
+// Handle dragRequested signal to start drag with proper visual feedback
+connect(m_listView, &PagePanelListView::dragRequested, 
+        this, &PagePanel::onDragRequested);
+
+// Add new slot:
+void PagePanel::onDragRequested(const QModelIndex& index)
+{
+    if (!index.isValid()) return;
+    
+    // Start the drag operation
+    m_listView->startDrag(Qt::MoveAction);
+}
+```
+
+**Changes:**
+1. Include `PagePanelListView.h` in PagePanel.h
+2. Change member type from `QListView*` to `PagePanelListView*`
+3. Update instantiation in `setupUI()`
+4. Connect `dragRequested` signal
+5. Add `onDragRequested()` slot
+
 **Estimated:** ~50 lines
+
+---
+
+### Task 6.3: Move QScroller Setup (~20 lines)
+
+**Files:** Modify `source/ui/sidebars/PagePanel.cpp`, `source/ui/sidebars/PagePanelListView.cpp`
+
+**Description:** Move QScroller configuration to PagePanelListView for proper lifecycle management.
+
+```cpp
+// Remove from PagePanel::setupTouchScrolling() - move to PagePanelListView constructor:
+
+PagePanelListView::PagePanelListView(QWidget* parent)
+    : QListView(parent)
+{
+    // ... timer setup ...
+    
+    // Setup touch scrolling (moved from PagePanel)
+    QScroller::grabGesture(viewport(), QScroller::TouchGesture);
+    
+    QScroller* scroller = QScroller::scroller(viewport());
+    if (scroller) {
+        QScrollerProperties props = scroller->scrollerProperties();
+        props.setScrollMetric(QScrollerProperties::DecelerationFactor, 0.3);
+        props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
+        props.setScrollMetric(QScrollerProperties::SnapTime, 0.3);
+        scroller->setScrollerProperties(props);
+    }
+}
+```
+
+This ensures QScroller is managed by the same class that handles ungrab/regrab.
+
+**Estimated:** ~20 lines
+
+---
+
+### Task 6.4: Auto-scroll During Drag (~60 lines) [OPTIONAL]
+
+**Files:** Modify `source/ui/sidebars/PagePanelListView.cpp`
+
+**Description:** Auto-scroll when dragging near edges. This is a polish feature.
+
+```cpp
+// Add to PagePanelListView:
+
+void PagePanelListView::dragMoveEvent(QDragMoveEvent* event)
+{
+    QListView::dragMoveEvent(event);
+    
+    // Check if near edges for auto-scroll
+    int y = event->position().toPoint().y();
+    int viewHeight = viewport()->height();
+    
+    if (y < AUTO_SCROLL_MARGIN) {
+        // Near top - scroll up
+        int speed = qMin(AUTO_SCROLL_MAX_SPEED, (AUTO_SCROLL_MARGIN - y) / 5);
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - speed);
+    } else if (y > viewHeight - AUTO_SCROLL_MARGIN) {
+        // Near bottom - scroll down
+        int speed = qMin(AUTO_SCROLL_MAX_SPEED, (y - (viewHeight - AUTO_SCROLL_MARGIN)) / 5);
+        verticalScrollBar()->setValue(verticalScrollBar()->value() + speed);
+    }
+}
+
+// Constants:
+static constexpr int AUTO_SCROLL_MARGIN = 50;     // Pixels from edge
+static constexpr int AUTO_SCROLL_MAX_SPEED = 10;  // Max pixels per event
+```
+
+**Estimated:** ~60 lines
+
+---
+
+### Task Summary (Phase 6)
+
+| Task | Description | Status | Est. Lines |
+|------|-------------|--------|------------|
+| 6.1 | PagePanelListView class | 🔵 TODO | ~180 |
+| 6.2 | Integrate into PagePanel | 🔵 TODO | ~50 |
+| 6.3 | Move QScroller setup | 🔵 TODO | ~20 |
+| 6.4 | Auto-scroll during drag | 🔵 OPTIONAL | ~60 |
+| **Total** | | | **~310 lines** |
 
 ---
 
@@ -1038,15 +1271,16 @@ source/
 | | 5.2 | Connect PagePanel signals | ✅ | ~100 |
 | | 5.3 | Connect ActionBar signals | ✅ | ~120 |
 | | 5.4 | Visibility logic | ✅ | ~50 |
-| **6** | 6.1 | Drag initiation | ⏸️ | ~100 |
-| | 6.2 | Drop indicator | ⏸️ | ~80 |
-| | 6.3 | Auto-scroll | ⏸️ | ~50 |
+| **6** | 6.1 | PagePanelListView class | 🔵 | ~180 |
+| | 6.2 | Integrate into PagePanel | 🔵 | ~50 |
+| | 6.3 | Move QScroller setup | 🔵 | ~20 |
+| | 6.4 | Auto-scroll during drag | ⏸️ | ~60 |
 | **7** | 7.1 | Dark mode | ✅ | ~50 |
 | | 7.2 | Per-tab state | ✅ | ~60 |
 | | 7.3 | Cache invalidation | ✅ | ~80 |
-| **Total** | | | **17/20** | **~2720 lines** |
+| **Total** | | | **17/21** | **~2970 lines** |
 
-**Legend:** ✅ Done | ⏸️ Skipped/Deferred
+**Legend:** ✅ Done | 🔵 TODO | ⏸️ Deferred
 
 ---
 
@@ -1079,10 +1313,11 @@ Phase 5: Sidebar Integration ✅
     ├── Task 5.3: Connect ActionBar ✅
     └── Task 5.4: Visibility logic ✅
          ↓
-Phase 6: Drag-and-Drop ⏸️ (DEFERRED)
-    ├── Task 6.1: Drag initiation
-    ├── Task 6.2: Drop indicator
-    └── Task 6.3: Auto-scroll
+Phase 6: Drag-and-Drop (Touch-Friendly) 🔵
+    ├── Task 6.1: PagePanelListView class
+    ├── Task 6.2: Integrate into PagePanel
+    ├── Task 6.3: Move QScroller setup
+    └── Task 6.4: Auto-scroll during drag (optional)
          ↓
 Phase 7: Polish ✅
     ├── Task 7.1: Dark mode ✅
@@ -1104,14 +1339,14 @@ Phase complete when:
 6. ✅ Page Up/Down buttons work
 7. ✅ Add/Insert/Delete page buttons work
 8. ✅ Delete button transforms to undo state for 5 seconds
-9. ⏸️ Drag-and-drop reorder works (long-press to initiate) — DEFERRED
-10. ⏸️ PDF pages cannot be dragged (only inserted pages) — DEFERRED (model supports it, UI doesn't)
+9. 🔵 Drag-and-drop reorder works (long-press for touch, immediate for stylus/mouse)
+10. 🔵 PDF pages cannot be dragged (only inserted pages)
 11. ✅ 2-column action bar layout works when both bars visible
 12. ✅ Dark/light mode switching works
 13. ✅ Per-tab scroll position preserved
 14. ✅ Thumbnail cache invalidates on content change
 
-**Current Status: 12/14 complete, 2 deferred (drag-and-drop)**
+**Current Status: 12/14 complete, 2 in progress (touch-friendly drag-and-drop)**
 
 ---
 

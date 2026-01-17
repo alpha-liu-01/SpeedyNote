@@ -1,9 +1,8 @@
 #include "PagePanel.h"
+#include "PagePanelListView.h"
 #include "../PageThumbnailModel.h"
 #include "../PageThumbnailDelegate.h"
 #include "../../core/Document.h"
-
-#include <QListView>
 #include <QVBoxLayout>
 #include <QScrollBar>
 #include <QScroller>
@@ -42,8 +41,8 @@ void PagePanel::setupUI()
     // Create delegate
     m_delegate = new PageThumbnailDelegate(this);
     
-    // Create list view
-    m_listView = new QListView(this);
+    // Create list view (custom class with long-press drag support)
+    m_listView = new PagePanelListView(this);
     configureListView();
     
     // Set model and delegate
@@ -99,30 +98,17 @@ void PagePanel::configureListView()
     m_listView->setAttribute(Qt::WA_Hover, true);
     m_listView->viewport()->setAttribute(Qt::WA_Hover, true);
     
-    // Setup touch scrolling
-    setupTouchScrolling();
-}
-
-void PagePanel::setupTouchScrolling()
-{
-    // Enable kinetic scrolling for touch only (not mouse)
-    QScroller::grabGesture(m_listView->viewport(), QScroller::TouchGesture);
-    
-    // Configure scroller
-    QScroller* scroller = QScroller::scroller(m_listView->viewport());
-    if (scroller) {
-        QScrollerProperties props = scroller->scrollerProperties();
-        props.setScrollMetric(QScrollerProperties::DecelerationFactor, 0.3);
-        props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-        props.setScrollMetric(QScrollerProperties::SnapTime, 0.3);
-        scroller->setScrollerProperties(props);
-    }
+    // Note: Touch scrolling (QScroller) is handled by PagePanelListView
 }
 
 void PagePanel::setupConnections()
 {
     // Item click
     connect(m_listView, &QListView::clicked, this, &PagePanel::onItemClicked);
+    
+    // Long-press drag request (touch input)
+    connect(m_listView, &PagePanelListView::dragRequested,
+            this, &PagePanel::onDragRequested);
     
     // Page dropped from model
     connect(m_model, &PageThumbnailModel::pageDropped, 
@@ -131,7 +117,6 @@ void PagePanel::setupConnections()
     // Invalidation timer
     connect(m_invalidationTimer, &QTimer::timeout, 
             this, &PagePanel::performPendingInvalidation);
-    
 }
 
 // ============================================================================
@@ -373,6 +358,16 @@ void PagePanel::onModelPageDropped(int fromIndex, int toIndex)
 {
     // Forward the signal
     emit pageDropped(fromIndex, toIndex);
+}
+
+void PagePanel::onDragRequested(const QModelIndex& index)
+{
+    if (!index.isValid()) {
+        return;
+    }
+    
+    // Start drag operation (triggered by long-press on touch)
+    m_listView->beginDrag(Qt::MoveAction);
 }
 
 // ============================================================================

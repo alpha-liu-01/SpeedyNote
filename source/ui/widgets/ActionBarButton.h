@@ -45,6 +45,18 @@ public:
     void setIconName(const QString& baseName);
     
     /**
+     * @brief Set text to display instead of an icon.
+     * @param text The text to display (e.g., "1", "A"). 
+     *             Clears the icon if set. Use an empty string to clear.
+     */
+    void setText(const QString& text);
+    
+    /**
+     * @brief Get the current text.
+     */
+    QString text() const;
+    
+    /**
      * @brief Set dark mode and update icon accordingly.
      * @param darkMode True for dark mode, false for light mode.
      */
@@ -102,6 +114,7 @@ private:
 
     QIcon m_icon;
     QString m_iconBaseName;
+    QString m_text;         ///< Text to display instead of icon
     bool m_darkMode = false;
     bool m_enabled = true;
     bool m_pressed = false;

@@ -1760,6 +1760,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         if (Document* doc = viewport->document()) {
             m_pagePanelActionBar->setPageCount(doc->pageCount());
             m_pagePanelActionBar->setCurrentPage(viewport->currentPageIndex());
+            m_pagePanelActionBar->setAutoLayoutEnabled(viewport->autoLayoutEnabled());
         }
     }
     
@@ -3978,6 +3979,15 @@ void MainWindow::setupPagePanelActionBar()
         }
     });
     
+    // Layout toggle: Switch between 1-column and auto 1/2 column mode
+    connect(m_pagePanelActionBar, &PagePanelActionBar::layoutToggleClicked, this, [this]() {
+        toggleAutoLayout();
+        // Update the button state to reflect the new mode
+        if (DocumentViewport* vp = currentViewport()) {
+            m_pagePanelActionBar->setAutoLayoutEnabled(vp->autoLayoutEnabled());
+        }
+    });
+    
     // -------------------------------------------------------------------------
     // Page management signals
     // -------------------------------------------------------------------------
@@ -4171,6 +4181,7 @@ void MainWindow::updatePagePanelActionBarVisibility()
             if (Document* doc = vp->document()) {
                 m_pagePanelActionBar->setPageCount(doc->pageCount());
                 m_pagePanelActionBar->setCurrentPage(vp->currentPageIndex());
+                m_pagePanelActionBar->setAutoLayoutEnabled(vp->autoLayoutEnabled());
             }
         }
     }

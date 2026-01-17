@@ -18,6 +18,7 @@ class UndoDeleteButton;
  * - [Page Up]        - Navigate to previous page
  * - [Wheel Picker]   - iPhone-style page number scroll picker
  * - [Page Down]      - Navigate to next page
+ * - [Layout Toggle]  - Toggle 1-column / auto 1-2 column mode (displays "1" or "A")
  * - ──────────────── - Separator
  * - [Add Page]       - Add a new page at the end
  * - [Insert Page]    - Insert a new page after current
@@ -47,6 +48,14 @@ public:
      * Updates the wheel picker and button enabled states.
      */
     void setPageCount(int count);
+    
+    /**
+     * @brief Set the auto layout mode state.
+     * @param enabled True for auto (1/2 column), false for 1-column only.
+     * 
+     * Updates the layout toggle button display ("A" for auto, "1" for single).
+     */
+    void setAutoLayoutEnabled(bool enabled);
     
     /**
      * @brief Update button enabled states based on current page/count.
@@ -122,12 +131,16 @@ signals:
      * The caller should restore the deleted page.
      */
     void undoDeleteClicked();
+    
+    /**
+     * @brief Emitted when the layout toggle button is clicked.
+     * 
+     * The caller should toggle between 1-column and auto 1/2 column mode.
+     */
+    void layoutToggleClicked();
 
 private slots:
     void onWheelPageChanged(int page);
-    void onDeleteRequested();
-    void onDeleteConfirmedInternal();
-    void onUndoRequested();
 
 private:
     void setupUI();
@@ -137,6 +150,7 @@ private:
     ActionBarButton* m_pageUpButton = nullptr;
     PageWheelPicker* m_wheelPicker = nullptr;
     ActionBarButton* m_pageDownButton = nullptr;
+    ActionBarButton* m_layoutToggleButton = nullptr;  // 1-column / Auto toggle
     
     // Page management buttons
     ActionBarButton* m_addPageButton = nullptr;
@@ -146,6 +160,7 @@ private:
     // State
     int m_currentPage = 0;
     int m_pageCount = 1;
+    bool m_autoLayoutEnabled = false;
 };
 
 #endif // PAGEPANELACTIONBAR_H

@@ -28,7 +28,24 @@ QIcon ActionBarButton::icon() const
 void ActionBarButton::setIconName(const QString& baseName)
 {
     m_iconBaseName = baseName;
+    m_text.clear();  // Clear text when setting icon
     updateIcon();
+}
+
+void ActionBarButton::setText(const QString& text)
+{
+    m_text = text;
+    // Clear icon when setting text
+    if (!text.isEmpty()) {
+        m_icon = QIcon();
+        m_iconBaseName.clear();
+    }
+    update();
+}
+
+QString ActionBarButton::text() const
+{
+    return m_text;
 }
 
 void ActionBarButton::setDarkMode(bool darkMode)
@@ -95,8 +112,23 @@ void ActionBarButton::paintEvent(QPaintEvent* event)
     painter.setBrush(bgColor);
     painter.drawEllipse(rect());
     
-    // Draw icon centered
-    if (!m_icon.isNull()) {
+    // Draw icon or text centered
+    if (!m_text.isEmpty()) {
+        // Draw text instead of icon
+        QColor textColor;
+        if (!m_enabled) {
+            textColor = isDarkMode() ? QColor(100, 100, 100) : QColor(150, 150, 150);
+        } else {
+            textColor = isDarkMode() ? QColor(255, 255, 255) : QColor(40, 40, 40);
+        }
+        
+        painter.setPen(textColor);
+        QFont font = painter.font();
+        font.setPixelSize(18);
+        font.setBold(true);
+        painter.setFont(font);
+        painter.drawText(rect(), Qt::AlignCenter, m_text);
+    } else if (!m_icon.isNull()) {
         const int iconX = (BUTTON_SIZE - ICON_SIZE) / 2;
         const int iconY = (BUTTON_SIZE - ICON_SIZE) / 2;
         const QRect iconRect(iconX, iconY, ICON_SIZE, ICON_SIZE);

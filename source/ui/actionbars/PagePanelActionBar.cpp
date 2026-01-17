@@ -32,6 +32,12 @@ void PagePanelActionBar::setupUI()
     m_pageDownButton->setToolTip(tr("Next Page (Page Down)"));
     addButton(m_pageDownButton);
     
+    // Layout toggle button (1-column / Auto) - right below page down
+    m_layoutToggleButton = new ActionBarButton(this);
+    m_layoutToggleButton->setText("1");  // Default: 1-column mode
+    m_layoutToggleButton->setToolTip(tr("Toggle Column Layout (Ctrl+2)\n1 = Single Column\nA = Auto 1/2 Columns"));
+    addButton(m_layoutToggleButton);
+    
     // Separator between navigation and management
     addSeparator();
     
@@ -64,6 +70,9 @@ void PagePanelActionBar::setupConnections()
     connect(m_pageDownButton, &ActionBarButton::clicked,
             this, &PagePanelActionBar::pageDownClicked);
     
+    connect(m_layoutToggleButton, &ActionBarButton::clicked,
+            this, &PagePanelActionBar::layoutToggleClicked);
+    
     connect(m_wheelPicker, &PageWheelPicker::currentPageChanged,
             this, &PagePanelActionBar::onWheelPageChanged);
     
@@ -75,14 +84,15 @@ void PagePanelActionBar::setupConnections()
             this, &PagePanelActionBar::insertPageClicked);
     
     // Delete button signals (3-way: request, confirm, undo)
+    // Use direct signal-to-signal connections to avoid trivial wrapper slots
     connect(m_deleteButton, &UndoDeleteButton::deleteRequested,
-            this, &PagePanelActionBar::onDeleteRequested);
+            this, &PagePanelActionBar::deletePageClicked);
     
     connect(m_deleteButton, &UndoDeleteButton::deleteConfirmed,
-            this, &PagePanelActionBar::onDeleteConfirmedInternal);
+            this, &PagePanelActionBar::deleteConfirmed);
     
     connect(m_deleteButton, &UndoDeleteButton::undoRequested,
-            this, &PagePanelActionBar::onUndoRequested);
+            this, &PagePanelActionBar::undoDeleteClicked);
 }
 
 void PagePanelActionBar::setCurrentPage(int page)
@@ -119,30 +129,27 @@ void PagePanelActionBar::setPageCount(int count)
     }
 }
 
+void PagePanelActionBar::setAutoLayoutEnabled(bool enabled)
+{
+    if (m_autoLayoutEnabled != enabled) {
+        m_autoLayoutEnabled = enabled;
+        // Update button text: "A" for auto, "1" for single column
+        m_layoutToggleButton->setText(enabled ? "A" : "1");
+    }
+}
+
 void PagePanelActionBar::updateButtonStates()
 {
     // Page Up: disabled on first page
-    if (m_pageUpButton) {
-        m_pageUpButton->setEnabled(m_currentPage > 0);
-    }
+    m_pageUpButton->setEnabled(m_currentPage > 0);
     
     // Page Down: disabled on last page
-    if (m_pageDownButton) {
-        m_pageDownButton->setEnabled(m_currentPage < m_pageCount - 1);
-    }
-    
-    // Add/Insert: always enabled (documents can always have more pages)
-    if (m_addPageButton) {
-        m_addPageButton->setEnabled(true);
-    }
-    if (m_insertPageButton) {
-        m_insertPageButton->setEnabled(true);
-    }
+    m_pageDownButton->setEnabled(m_currentPage < m_pageCount - 1);
     
     // Delete: disabled when only 1 page remains
-    if (m_deleteButton) {
-        m_deleteButton->setEnabled(m_pageCount > 1);
-    }
+    m_deleteButton->setEnabled(m_pageCount > 1);
+    
+    // Note: Add/Insert and Layout toggle are always enabled, no state updates needed
 }
 
 void PagePanelActionBar::setDarkMode(bool darkMode)
@@ -168,6 +175,9 @@ void PagePanelActionBar::setDarkMode(bool darkMode)
     }
     if (m_deleteButton) {
         m_deleteButton->setDarkMode(darkMode);
+    }
+    if (m_layoutToggleButton) {
+        m_layoutToggleButton->setDarkMode(darkMode);
     }
 }
 
@@ -196,23 +206,5 @@ void PagePanelActionBar::onWheelPageChanged(int page)
         updateButtonStates();
         emit pageSelected(page);
     }
-}
-
-void PagePanelActionBar::onDeleteRequested()
-{
-    // Forward the delete request
-    emit deletePageClicked();
-}
-
-void PagePanelActionBar::onDeleteConfirmedInternal()
-{
-    // Forward the delete confirmation
-    emit deleteConfirmed();
-}
-
-void PagePanelActionBar::onUndoRequested()
-{
-    // Forward the undo request
-    emit undoDeleteClicked();
 }
 
