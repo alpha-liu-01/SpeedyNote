@@ -219,6 +219,11 @@ MainWindow::MainWindow(QWidget *parent)
         connectViewportScrollSignals(vp);
         // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
         
+        // Sync viewport dark mode with current theme
+        if (vp) {
+            vp->setDarkMode(isDarkMode());
+        }
+        
         // Phase 5.1 Task 4: Update LayerPanel when tab changes
         updateLayerPanelForViewport(vp);
         
@@ -3320,6 +3325,15 @@ void MainWindow::updateTheme() {
     // Phase C.2: TabBar handles its own theming
     if (m_tabBar) {
         m_tabBar->updateTheme(darkMode, accentColor);
+    }
+    
+    // Update all DocumentViewports
+    if (m_tabManager) {
+        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+            if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
+                vp->setDarkMode(darkMode);
+            }
+        }
     }
     
     // REMOVED MW5.1: controlBar styling removed - replaced by NavigationBar and Toolbar

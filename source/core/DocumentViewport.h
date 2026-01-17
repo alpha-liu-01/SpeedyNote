@@ -354,6 +354,23 @@ public:
      */
     void hideMissingPdfBanner();
     
+    // ===== Theme / Dark Mode =====
+    
+    /**
+     * @brief Set dark mode state.
+     * @param dark True for dark mode, false for light mode.
+     * 
+     * This caches the background color to avoid recalculating on every paint.
+     * Should be called when the application theme changes.
+     */
+    void setDarkMode(bool dark);
+    
+    /**
+     * @brief Check if dark mode is enabled.
+     * @return True if dark mode is active.
+     */
+    bool isDarkMode() const { return m_isDarkMode; }
+    
     // ===== View State Getters =====
     
     /**
@@ -1562,6 +1579,10 @@ private:
     
     // ===== Missing PDF Banner (Phase R.3) =====
     MissingPdfBanner* m_missingPdfBanner = nullptr;
+    
+    // ===== Theme / Dark Mode =====
+    bool m_isDarkMode = true;  ///< Cached dark mode state (default: dark)
+    QColor m_backgroundColor = QColor(64, 64, 64);  ///< Cached background color
     
     // ===== View State =====
     qreal m_zoomLevel = 1.0;

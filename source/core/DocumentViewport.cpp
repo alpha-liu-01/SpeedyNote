@@ -68,7 +68,7 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // CUSTOMIZABLE: Viewport background color (theme setting, visible in gaps between pages)
     setAutoFillBackground(true);
     QPalette pal = palette();
-    pal.setColor(QPalette::Window, QColor(64, 64, 64));  // Dark gray - TODO: Load from theme settings
+    pal.setColor(QPalette::Window, m_backgroundColor);  // Uses cached background color
     setPalette(pal);
     
     // Benchmark display timer - triggers repaint to update paint rate counter
@@ -286,6 +286,29 @@ void DocumentViewport::hideMissingPdfBanner()
     if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
         m_missingPdfBanner->hideAnimated();
     }
+}
+
+// ===== Theme / Dark Mode =====
+
+void DocumentViewport::setDarkMode(bool dark)
+{
+    if (m_isDarkMode == dark) {
+        return;
+    }
+    
+    m_isDarkMode = dark;
+    
+    // Cache background color to avoid recalculating on every paint
+    // Dark mode: dark gray, Light mode: light gray
+    m_backgroundColor = dark ? QColor(64, 64, 64) : QColor(224, 224, 224);
+    
+    // Update palette for auto-fill background
+    QPalette pal = palette();
+    pal.setColor(QPalette::Window, m_backgroundColor);
+    setPalette(pal);
+    
+    // Trigger repaint
+    update();
 }
 
 // ===== Layout =====
@@ -1636,7 +1659,7 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         && m_gesture.startZoom > 0) {  // Guard against division by zero
         
         // Fill background (for areas outside transformed frame)
-        painter.fillRect(rect(), QColor(64, 64, 64));
+        painter.fillRect(rect(), m_backgroundColor);
         
         // Calculate frame size in LOGICAL pixels (not physical)
         // grab() returns a pixmap at device pixel ratio, so we must divide by DPR
@@ -1725,9 +1748,9 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     
     // Fill background - only the dirty region for partial updates
     if (isPartialUpdate) {
-        painter.fillRect(dirtyRect, QColor(64, 64, 64));
+        painter.fillRect(dirtyRect, m_backgroundColor);
     } else {
-        painter.fillRect(rect(), QColor(64, 64, 64));
+        painter.fillRect(rect(), m_backgroundColor);
     }
     
     if (!m_document) {
