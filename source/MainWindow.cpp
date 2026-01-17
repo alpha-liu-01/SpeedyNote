@@ -1,6 +1,5 @@
 #include "MainWindow.h"
-// #include "InkCanvas.h"  // Phase 3.1.7: Disconnected - using DocumentViewport
-// #include "VectorCanvas.h"  // REMOVED Phase 3.1.3 - Features migrated to DocumentViewport
+
 #include "core/DocumentViewport.h"  // Phase 3.1: New viewport architecture
 #include "core/Document.h"          // Phase 3.1: Document class
 #include "core/Page.h"              // Phase P.4.6: For thumbnail rendering
@@ -37,8 +36,8 @@
 #include <QScreen>
 #include <QApplication>
 #ifdef Q_OS_WIN
-#include <windows.h>
-#endif 
+#include <windows.h>  // For MSG struct in nativeEvent (theme change detection)
+#endif
 #include <QGuiApplication>
 #include <QLineEdit>
 #include <QTextEdit>
@@ -50,20 +49,12 @@
 #include <QDir>
 #include <QImage>
 #include <QSpinBox>
-#include <QTextStream>
 #include <QInputDialog>
-// REMOVED MW7.2: QDial include removed - dial functionality deleted
-#include <QFontDatabase>
 #include <QStandardPaths>
 #include <QRegularExpression>  // BUG-A002: For filename sanitization on Android
 #include <QSettings>
 #include <QMessageBox>
 #include <QDebug>
-#include <QToolTip> // For manual tooltip display
-#include <QWindow> // For tablet event safety checks
-#include <QtConcurrent/QtConcurrentRun> // For concurrent saving
-#include <QFuture>
-#include <QFutureWatcher>
 #include <QInputMethod>
 #include <QPropertyAnimation>  // Phase P.4.5: Smooth window transitions
 #include <QInputMethodEvent>
@@ -73,9 +64,8 @@
 #include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
 #include <QInputDevice>  // MW5.8: For keyboard detection
 #include <QColorDialog>  // Phase 3.1.8: For custom color picker
-#include <QPdfWriter>
-#include <QProgressDialog>
 #include <QProcess>
+#include <QLocalSocket>  // For single-instance server communication
 #include <QFileInfo>
 #include <QFile>
 #include <QJsonDocument>  // Phase doc-1: JSON serialization
@@ -99,7 +89,6 @@
 #include "android/PdfPickerAndroid.h"
 
 #endif // Q_OS_ANDROID
-#include <QPointer>
 // #include "HandwritingLineEdit.h"
 #include "ControlPanelDialog.h"  // Phase CP.1: Re-enabled with cleaned up tabs
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
@@ -108,17 +97,12 @@
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 
 #include "DocumentConverter.h" // Added for PowerPoint conversion
-#ifndef Q_OS_ANDROID
-#include <poppler-qt6.h> // For PDF outline parsing (desktop only)
-#endif
-#include <memory> // For std::shared_ptr
 
 // Linux-specific includes for signal handling
 #ifdef Q_OS_LINUX
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <QProcess>
 #endif
 
 // Static member definition for single instance

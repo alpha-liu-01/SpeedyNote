@@ -8,40 +8,19 @@
 #include "core/MarkdownNote.h"  // Phase M.3: For loading markdown notes
 // #include "RecentNotebooksManager.h"  // TODO G.6: Re-enable after LauncherWindow remake
 
-// Phase 3.1.7: Forward declaration for legacy method signatures (will be removed)
-// class InkCanvas;
-#include <QPushButton>
-#include <QLabel>
 #include <QTimer>
 #include <QPointer>
-#include <QFuture>
-#include <QLineEdit>
-#include <QSlider>
 #include <QScrollBar>
-#include <QComboBox>
 #include <QSpinBox>
-#include <QRadioButton>
-#include <QDialog>
-#include <QFileDialog>
-#include <QListWidget>
-#include <QStackedWidget>
-#include <QTreeWidget>
-#include <QDial>
-#include <QFont>
-#include <QQueue>
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "SDLControllerManager.h"
 #endif
 #include <QResizeEvent>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QKeyEvent>
-#include <QTabletEvent>
 #include <QMenu>
 #include <QCloseEvent>
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
-#include <QLocalSocket>
 #ifndef Q_OS_ANDROID
 #include <QSharedMemory>
 #endif
