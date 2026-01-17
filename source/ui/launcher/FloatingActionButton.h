@@ -87,6 +87,11 @@ signals:
      * @brief Open existing .snb notebook.
      */
     void openNotebook();
+    
+    /**
+     * @brief Import a .snbx package.
+     */
+    void importPackage();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -108,6 +113,7 @@ private:
     QPushButton* m_pagedBtn = nullptr;
     QPushButton* m_pdfBtn = nullptr;
     QPushButton* m_openBtn = nullptr;
+    QPushButton* m_importBtn = nullptr;
     QList<QPushButton*> m_actionButtons;
     
     // Animation

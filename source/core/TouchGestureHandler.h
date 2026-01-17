@@ -96,13 +96,11 @@ private:
     // ===== Single-finger Pan Tracking =====
     bool m_panActive = false;                ///< Whether a touch pan is in progress
     QPointF m_lastPos;                       ///< Last touch position (viewport coords)
-    QPointF m_startPos;                      ///< Touch start position (for tap detection)
     
     // ===== Pinch-to-zoom Tracking =====
     bool m_pinchActive = false;              ///< Whether a pinch gesture is in progress
-    qreal m_pinchStartZoom = 1.0;            ///< Zoom level when pinch started
-    qreal m_pinchStartDistance = 0;          ///< Distance between fingers at start
-    QPointF m_pinchCentroid;                 ///< Centroid of pinch gesture
+    qreal m_pinchStartDistance = 0;          ///< Distance between fingers at start (for incremental scaling)
+    QPointF m_pinchCentroid;                 ///< Centroid of pinch gesture (fixed at start)
     
     // ===== Velocity Tracking for Inertia =====
     QVector<QPointF> m_velocitySamples;      ///< Recent velocity samples (pixels/ms) for averaging
@@ -120,7 +118,8 @@ private:
     int m_activeTouchPoints = 0;             ///< Number of active touch points
     
     // ===== 3-Finger Tap Detection =====
-    qint64 m_threeFingerTapStart = 0;        ///< Timestamp when 3 fingers touched
+    QElapsedTimer m_threeFingerTimer;        ///< Timer for 3-finger tap detection
+    bool m_threeFingerTimerActive = false;   ///< Whether 3-finger timer is running
     static constexpr qint64 TAP_MAX_DURATION_MS = 300;  ///< Max duration for tap detection
     
     // ===== Helper Methods =====

@@ -7,6 +7,7 @@
 #include "DocumentManager.h"
 #include "Document.h"
 #include "NotebookLibrary.h"
+#include "../sharing/NotebookImporter.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -156,6 +157,53 @@ Document* DocumentManager::loadDocument(const QString& path)
         addToRecent(path);
         emit documentLoaded(doc);
         return doc;
+    }
+    
+    // Handle .snbx packages - extract and load the contained notebook
+    if (suffix == "snbx") {
+        // Determine extraction destination
+#ifdef Q_OS_ANDROID
+        // On Android, extract to app-private notebooks directory
+        QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+#else
+        // On desktop, extract next to the .snbx file
+        QString destDir = fileInfo.absolutePath();
+#endif
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "DocumentManager: Importing .snbx package" << path << "to" << destDir;
+#endif
+        
+        auto importResult = NotebookImporter::importPackage(path, destDir);
+        if (!importResult.success) {
+            qWarning() << "DocumentManager::loadDocument: Failed to import .snbx:" << importResult.errorMessage;
+            return nullptr;
+        }
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "DocumentManager: Extracted to" << importResult.extractedSnbPath;
+        if (!importResult.embeddedPdfPath.isEmpty()) {
+            qDebug() << "DocumentManager: Embedded PDF at" << importResult.embeddedPdfPath;
+        }
+#endif
+        
+#ifdef Q_OS_ANDROID
+        // Clean up the source .snbx file from /imports/ directory
+        // This prevents disk space leaks from accumulated imports
+        // Note: Only do this on Android where we control the import copy location
+        QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QString importsDir = appDataDir + "/imports";
+        if (path.startsWith(importsDir)) {
+            QFile::remove(path);
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "DocumentManager: Cleaned up imported .snbx file:" << path;
+#endif
+        }
+#endif
+        
+        // Recursively load the extracted .snb bundle
+        // The dual-path system in Document::loadBundle() will resolve the PDF
+        return loadDocument(importResult.extractedSnbPath);
     }
     
     // Handle .snb bundle directories - edgeless documents with O(1) tile loading

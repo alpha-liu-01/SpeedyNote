@@ -171,7 +171,8 @@ Our solution (works):
 
 **Imported PDFs are stored at:**
 ```
-/data/data/org.speedynote.app/files/pdfs/
+/data/data/org.speedynote.app/files/pdfs/           # Direct PDF imports via SAF
+/data/data/org.speedynote.app/files/notebooks/embedded/  # PDFs from .snbx packages
 ```
 
 **Storage Management:** ✅ Implemented & Tested
@@ -185,7 +186,10 @@ Our solution (works):
    - When deleting a document from the Launcher
    - Checks if document has an imported PDF in the sandbox
    - Deletes the imported PDF along with the document bundle
-   - Only deletes PDFs in `/files/pdfs/` - never touches user's original files
+   - Handles both PDF storage locations:
+     - `/files/pdfs/` - PDFs imported directly via SAF file picker
+     - `/files/notebooks/embedded/` - PDFs extracted from .snbx packages (Phase 2)
+   - Never touches user's original files outside sandbox
 
 **Files for storage management:**
 - `android/app-resources/src/org/speedynote/app/PdfFileHelper.java`
@@ -193,7 +197,7 @@ Our solution (works):
   - `copyUriToLocal()` - implements deduplication logic
   
 - `source/ui/launcher/Launcher.cpp` (wrapped with `#ifdef Q_OS_ANDROID`)
-  - `findImportedPdfPath()` - finds PDF in sandbox from document.json
+  - `findImportedPdfPath()` - finds PDF in sandbox from document.json (checks both `/pdfs/` and `/embedded/`)
   - `deleteNotebook()` - deletes imported PDF with document
 
 ---
@@ -255,7 +259,7 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 ---
 
 ### BUG-A005: Pinch-to-Zoom Unreliable
-**Status:** ✅ Fixed  
+**Status:** ✅ Fixed (v2)  
 **Priority:** Medium  
 **Category:** Touch Input / Gestures
 **Platform:** Android only
@@ -263,60 +267,71 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 **Description:**  
 Pinch-to-zoom gestures only trigger about 1 in 5 times. Once triggered, the zoom works correctly until released.
 
-**Root Cause:**  
-The `TouchGestureHandler::handleTouchEvent()` only handled 1-finger and 3-finger cases in the `TouchBegin` event. On Android, when two fingers touch nearly simultaneously, the system may send a `TouchBegin` event with 2 points directly (instead of a 1-finger TouchBegin followed by a 2-finger TouchUpdate).
+**Root Cause (Original - Partially Fixed):**  
+The `TouchGestureHandler::handleTouchEvent()` only handled 1-finger and 3-finger cases in the `TouchBegin` event. On Android, when two fingers touch nearly simultaneously, the system may send a `TouchBegin` event with 2 points directly.
 
-This left the pinch gesture uninitialized, causing subsequent `TouchUpdate` events to fail to start the zoom properly.
+**Root Cause (v2 - Fully Fixed):**  
+The original fix improved reliability from ~30% to ~70%, but three additional issues remained:
 
-**Symptoms (BEFORE fix):**
-- Pinch-to-zoom gesture often doesn't trigger
-- Need to retry pinch gesture multiple times
-- Once triggered, zoom works correctly until fingers are lifted
+1. **Released points counted as active**: `points.size()` includes ALL touch points, including those with state `Released`. When a finger lifts, the point is still in the event but with `Released` state. The code was counting released points as active, causing:
+   - Pinch update trying to use a released point's position
+   - State transitions not triggering correctly (2→1 finger transition missed)
 
-**Fix Applied:**
-Added handling for 2-finger `TouchBegin` events in `TouchGestureHandler.cpp`:
+2. **No 2→1 finger transition handling**: When one finger lifts during a pinch, the code had no path to transition back to pan with the remaining finger. The gesture would get stuck.
+
+3. **Inconsistent state flags**: When 2-finger `TouchBegin` happened, `m_panActive` wasn't explicitly cleared, potentially leaving conflicting state.
+
+**Symptoms (BEFORE v2 fix):**
+- Pinch-to-zoom gesture works ~70% of the time (improved from 30%)
+- Lifting one finger during pinch causes stuck gesture
+- Gesture state sometimes inconsistent
+
+**Fix Applied (v2):**
+Complete rewrite of touch point counting and state transitions:
 
 ```cpp
-// TouchBegin handler - added 2-finger case
-} else if (points.size() == 2) {
-    // Two fingers touch simultaneously - start pinch directly
-    // Common on Android where both fingers can arrive in same event
-    if (m_mode == TouchGestureMode::YAxisOnly) {
-        event->accept();
-        return true;
+// ===== Count ACTIVE touch points (exclude Released) =====
+// This is critical! Qt includes Released points in points() for TouchUpdate.
+// Without filtering, we'd count a just-lifted finger as still active.
+QVector<const QEventPoint*> activePoints;
+activePoints.reserve(points.size());
+for (const auto& pt : points) {
+    if (pt.state() != QEventPoint::Released) {
+        activePoints.append(&pt);
     }
-    
-    const auto& p1 = points[0];
-    const auto& p2 = points[1];
-    
-    QPointF pos1 = p1.position();
-    QPointF pos2 = p2.position();
-    QPointF centroid = (pos1 + pos2) / 2.0;
-    qreal distance = QLineF(pos1, pos2).length();
-    
-    if (distance < 1.0) distance = 1.0;
-    
-    m_pinchActive = true;
-    m_pinchStartZoom = m_viewport->zoomLevel();
-    m_pinchStartDistance = distance;
-    m_pinchCentroid = centroid;
-    
-    m_viewport->beginZoomGesture(centroid);
-    
-    event->accept();
-    return true;
 }
+m_activeTouchPoints = activePoints.size();
 ```
+
+Key improvements:
+- Filter out `Released` points when counting active touches
+- Proper 2→1 transition: pinch ends, pan starts with remaining finger
+- Proper 1→2 transition: pan ends, pinch starts
+- Clean state management: explicit `m_panActive = false` / `m_pinchActive = false`
+- Use `activePoints` array instead of raw `points` for gesture calculations
+
+**Why This Works:**
+1. **Accurate finger count**: By filtering out `Released` points, we know exactly how many fingers are currently touching the screen.
+2. **State machine transitions**: The code now properly handles all transitions:
+   - 0→1 finger: Start pan
+   - 1→2 fingers: End pan, start pinch
+   - 2→1 finger: End pinch, start pan with remaining finger
+   - 1/2→0 fingers: End active gesture
+3. **Clean state**: Explicit clearing of conflicting state flags prevents stuck gestures.
 
 **Files Modified:**
 - `source/core/TouchGestureHandler.cpp`
-  - Added 2-finger `TouchBegin` handler to initialize pinch gesture directly
+  - Added `activePoints` array filtering out `Released` points
+  - Added 2→1 finger transition (pinch to pan)
+  - Restructured 1→2 finger transition for clarity
+  - Explicit state flag management in all branches
 
-**Desktop Impact:** None - the fix is in shared code but desktop platforms typically don't send 2-finger TouchBegin events (they use a 1-finger then update pattern). The fix is additive and doesn't change existing behavior.
+**Desktop Impact:** None - desktop platforms typically use mouse/touchpad for gestures and don't exhibit the same touch point lifecycle. The fix improves robustness without changing behavior.
 
 **Result:**
-- Pinch-to-zoom now triggers reliably on first attempt
-- Gesture system properly handles simultaneous 2-finger touch
+- Pinch-to-zoom now triggers reliably on every attempt
+- Smooth transitions between pan and pinch when fingers are added/removed
+- No more stuck gesture states
 
 ---
 

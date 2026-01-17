@@ -184,6 +184,15 @@ bool Document::relinkPdf(const QString& newPath)
         // Always update hash for relinked PDF (it may be a different file)
         m_pdfHash = computePdfHash(newPath);
         m_pdfSize = getPdfFileSize(newPath);
+        
+        // Clear the relink flag since we successfully relinked
+        m_needsPdfRelink = false;
+        
+        // Update relative path if we know the bundle location
+        if (!m_bundlePath.isEmpty()) {
+            m_pdfRelativePath = QDir(m_bundlePath).relativeFilePath(newPath);
+        }
+        
         markModified();
         return true;
     }
@@ -200,6 +209,8 @@ void Document::clearPdfReference()
 {
     m_pdfProvider.reset();
     m_pdfPath.clear();
+    m_pdfRelativePath.clear();  // Phase SHARE: Clear relative path too
+    m_needsPdfRelink = false;   // No PDF = no need to relink
     markModified();
 }
 
@@ -1410,8 +1421,9 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
     // Mode
     doc->mode = stringToMode(obj["mode"].toString("paged"));
     
-    // PDF reference (don't load yet, just store path)
+    // PDF reference (don't load yet, just store paths)
     doc->m_pdfPath = obj["pdf_path"].toString();
+    doc->m_pdfRelativePath = obj["pdf_relative_path"].toString();  // Phase SHARE
     doc->m_pdfHash = obj["pdf_hash"].toString();
     doc->m_pdfSize = obj["pdf_size"].toVariant().toLongLong();
     
@@ -2174,6 +2186,16 @@ bool Document::saveBundle(const QString& path)
         manifest["page_metadata"] = pageMetadataObj;
     }
     
+    // Phase SHARE: Calculate and write pdf_relative_path for portability
+    if (!m_pdfPath.isEmpty()) {
+        QDir bundleDir(path);
+        QString relativePath = bundleDir.relativeFilePath(m_pdfPath);
+        manifest["pdf_relative_path"] = relativePath;
+        
+        // Also update the member variable for consistency
+        m_pdfRelativePath = relativePath;
+    }
+    
     // Write manifest
     QString manifestPath = path + "/document.json";
     QFile manifestFile(manifestPath);
@@ -2507,17 +2529,54 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
         }
     }
     
-    // ========== LOAD PDF IF REFERENCED (Bug Fix) ==========
-    // Document::fromJson() only stores the pdf_path, it doesn't load the PDF.
-    // We need to load it here for the PDF backgrounds to render.
-    if (doc->hasPdfReference() && !doc->isPdfLoaded()) {
-        if (!doc->loadPdf(doc->pdfPath())) {
-            qWarning() << "loadBundle: Failed to load referenced PDF:" << doc->pdfPath();
-            // Don't fail - document can still be used, PDF can be relinked
-        } else {
+    // ========== LOAD PDF IF REFERENCED (Phase SHARE: Dual Path Resolution) ==========
+    // Document::fromJson() stores both pdf_path (absolute) and pdf_relative_path.
+    // We try both paths and use whichever works, updating the other for consistency.
+    if (!doc->m_pdfPath.isEmpty() || !doc->m_pdfRelativePath.isEmpty()) {
+        QString bundleDir = QFileInfo(manifestPath).absolutePath();
+        bool absoluteExists = !doc->m_pdfPath.isEmpty() && QFile::exists(doc->m_pdfPath);
+        bool relativeExists = false;
+        QString resolvedRelativePath;
+        
+        // Resolve relative path to absolute (canonicalize to remove .. components)
+        if (!doc->m_pdfRelativePath.isEmpty()) {
+            QString rawPath = QDir(bundleDir).absoluteFilePath(doc->m_pdfRelativePath);
+            QFileInfo fileInfo(rawPath);
+            if (fileInfo.exists()) {
+                resolvedRelativePath = fileInfo.canonicalFilePath();  // Clean absolute path
+                relativeExists = true;
+            }
+        }
+        
+        if (absoluteExists) {
+            // Absolute path works - load PDF and update relative path for portability
+            if (doc->loadPdf(doc->m_pdfPath)) {
+                // Update relative path to keep in sync
+                doc->m_pdfRelativePath = QDir(bundleDir).relativeFilePath(doc->m_pdfPath);
 #ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "loadBundle: Loaded PDF from" << doc->pdfPath();
+                qDebug() << "loadBundle: Loaded PDF from absolute path:" << doc->m_pdfPath;
 #endif
+        } else {
+                qWarning() << "loadBundle: Failed to load PDF from absolute path:" << doc->m_pdfPath;
+                doc->m_needsPdfRelink = true;
+            }
+        } else if (relativeExists) {
+            // Relative path works - load PDF
+            // Note: loadPdf() already sets m_pdfPath = resolvedRelativePath internally
+            if (doc->loadPdf(resolvedRelativePath)) {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "loadBundle: Loaded PDF from relative path:" << doc->m_pdfRelativePath 
+                         << "-> resolved to:" << resolvedRelativePath;
+#endif
+            } else {
+                qWarning() << "loadBundle: Failed to load PDF from relative path:" << resolvedRelativePath;
+                doc->m_needsPdfRelink = true;
+            }
+        } else {
+            // Neither path works - flag for relink
+            qWarning() << "loadBundle: PDF not found at absolute path:" << doc->m_pdfPath
+                       << "or relative path:" << doc->m_pdfRelativePath;
+            doc->m_needsPdfRelink = true;
         }
     }
     

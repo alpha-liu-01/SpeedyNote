@@ -8,5 +8,11 @@
     
     <!-- External cache for shared files -->
     <external-cache-path name="external_cache" path="." />
+    
+    <!-- Internal files directory for exports (Phase 1: Share/Export feature) -->
+    <files-path name="exports" path="exports/" />
+    
+    <!-- Internal files directory for temp files during export -->
+    <files-path name="temp" path="temp/" />
 </paths>
 

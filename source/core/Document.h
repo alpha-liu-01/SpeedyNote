@@ -114,8 +114,9 @@ public:
      * 
      * Version history:
      * - 1: Initial .snb bundle format (2026-01)
+     * - 2: Added pdf_relative_path for portable .snbx packages (2026-01)
      */
-    static constexpr int BUNDLE_FORMAT_VERSION = 1;
+    static constexpr int BUNDLE_FORMAT_VERSION = 2;
     
     // ===== Document Mode =====
     
@@ -656,6 +657,38 @@ public:
     QString pdfPath() const { return m_pdfPath; }
     
     /**
+     * @brief Get the relative path to the PDF file.
+     * @return Relative path (from document.json location), or empty if not set.
+     * 
+     * Phase SHARE: Used for portable .snbx packages. When importing, if the
+     * absolute path fails, the relative path is tried. Relative paths are
+     * calculated from the document.json file location.
+     */
+    QString pdfRelativePath() const { return m_pdfRelativePath; }
+    
+    /**
+     * @brief Set the relative path to the PDF file.
+     * @param path Relative path from document.json location.
+     */
+    void setPdfRelativePath(const QString& path) { m_pdfRelativePath = path; }
+    
+    /**
+     * @brief Check if PDF needs to be relinked.
+     * @return True if neither absolute nor relative path could locate the PDF.
+     * 
+     * Phase SHARE: Set by loadBundle() when PDF path resolution fails.
+     * DocumentManager checks this flag and shows PdfRelinkDialog if true.
+     */
+    bool needsPdfRelink() const { return m_needsPdfRelink; }
+    
+    /**
+     * @brief Clear the PDF relink flag.
+     * 
+     * Call after successfully relinking or if user chooses to continue without PDF.
+     */
+    void clearNeedsPdfRelink() { m_needsPdfRelink = false; }
+    
+    /**
      * @brief Get the PDF provider for advanced operations.
      * @return Pointer to the provider, or nullptr if not loaded.
      * 
@@ -1176,8 +1209,10 @@ public:
 private:
     // ===== PDF Reference (Task 1.2.4) =====
     QString m_pdfPath;                              ///< Path to external PDF file
+    QString m_pdfRelativePath;                      ///< Relative path from document.json (Phase SHARE)
     QString m_pdfHash;                              ///< SHA-256 hash of first 1MB (format: "sha256:...")
     qint64 m_pdfSize = 0;                           ///< File size in bytes (for quick verification)
+    bool m_needsPdfRelink = false;                  ///< True if PDF not found at either path (Phase SHARE)
     std::unique_ptr<PdfProvider> m_pdfProvider;    ///< Loaded PDF (may be null)
     
     // ===== Pages (Task 1.2.5) =====

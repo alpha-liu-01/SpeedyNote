@@ -63,8 +63,12 @@ void NavigationBar::setupUi()
     mainLayout->addWidget(m_fullscreenButton);
     
     m_shareButton = new ActionButton(this);
-    m_shareButton->setThemedIcon("export");  // Using export as share placeholder
-    m_shareButton->setToolTip(tr("Share (Coming Soon)"));
+    m_shareButton->setThemedIcon("export");
+#ifdef Q_OS_ANDROID
+    m_shareButton->setToolTip(tr("Share Notebook"));
+#else
+    m_shareButton->setToolTip(tr("Export Notebook"));
+#endif
     mainLayout->addWidget(m_shareButton);
     
     m_rightSidebarButton = new ToggleButton(this);

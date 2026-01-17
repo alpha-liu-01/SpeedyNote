@@ -6,6 +6,12 @@
 #include <QScreen>
 #include <QGuiApplication>
 #include <QDir>
+#include <QFile>
+#include <QStandardPaths>
+
+#ifdef Q_OS_ANDROID
+#include "../android/PdfPickerAndroid.h"
+#endif
 
 PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
                                    const QString& storedHash,
@@ -21,8 +27,8 @@ PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
     setModal(true);
     
     // Set reasonable size
-    setMinimumSize(500, 200);
-    setMaximumSize(600, 300);
+    setMinimumSize(500, 380);
+    setMaximumSize(600, 480);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     
     setupUI();
@@ -174,14 +180,30 @@ void PdfRelinkDialog::onRelinkPdf()
         startDir = QDir::homePath();
     }
     
+#ifdef Q_OS_ANDROID
+    // Track copied PDFs for cleanup if user chooses "Choose Different"
+    // On Android, picked files are copied to /pdfs/ directory, and if rejected
+    // (hash mismatch + "Choose Different"), we should clean them up
+    QString androidPdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
+#endif
+    
     // Loop to allow "Choose Different" from mismatch dialog
     while (true) {
-        QString selectedPdf = QFileDialog::getOpenFileName(
+        QString selectedPdf;
+        
+#ifdef Q_OS_ANDROID
+        // Use shared Android PDF picker (handles SAF permissions properly)
+        // See source/android/PdfPickerAndroid.cpp for implementation
+        selectedPdf = PdfPickerAndroid::pickPdfFile();
+#else
+        // Desktop: Use native file dialog
+        selectedPdf = QFileDialog::getOpenFileName(
             this,
             tr("Locate PDF File"),
             startDir,
             tr("PDF Files (*.pdf);;All Files (*)")
         );
+#endif
         
         if (selectedPdf.isEmpty()) {
             // User cancelled file dialog
@@ -208,11 +230,25 @@ void PdfRelinkDialog::onRelinkPdf()
         // (loop continues) or "Cancel" (we should exit)
         // Check if we should exit entirely
         if (result == Cancel) {
+#ifdef Q_OS_ANDROID
+            // Clean up the rejected PDF copy (it's in our sandbox, safe to delete)
+            if (selectedPdf.startsWith(androidPdfsDir)) {
+                QFile::remove(selectedPdf);
+            }
+#endif
             reject();
             return;
         }
         
-        // User chose "Choose Different" - update start directory and loop
+        // User chose "Choose Different" - clean up rejected file and loop
+#ifdef Q_OS_ANDROID
+        // Clean up the rejected PDF copy before picking a new one
+        if (selectedPdf.startsWith(androidPdfsDir)) {
+            QFile::remove(selectedPdf);
+        }
+#endif
+        
+        // Note: On Android, startDir is not used since SAF picker doesn't support it
         startDir = pdfInfo.absolutePath();
     }
 }

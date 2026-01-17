@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.0.0 LANGUAGES CXX)
+project(SpeedyNote VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -45,7 +45,7 @@ if(WIN32)
         set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation")
         set(SDL2_ROOT "C:/msys64/clang64" CACHE PATH "Path to SDL2")
         message(STATUS "Detected x86_64 Windows - using clang64 toolchain")
-    endif()
+endif()
 
     # CMake paths
     set(CMAKE_PREFIX_PATH "${QT_PATH}/lib/cmake" "${SDL2_ROOT}/lib/cmake")
@@ -98,7 +98,7 @@ elseif(APPLE)
     
     set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@6")
     include_directories(${CMAKE_CURRENT_BINARY_DIR} "${HOMEBREW_PREFIX}/include")
-
+    
     # Find dependencies
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     find_package(PkgConfig REQUIRED)
@@ -114,7 +114,7 @@ elseif(APPLE)
         pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
-
+    
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
         message(STATUS "🚀 Optimizing for Apple Silicon")
@@ -151,7 +151,7 @@ elseif(ANDROID)
     # No controller support on Android
     set(ENABLE_CONTROLLER_SUPPORT OFF)
     set(WIN_RESOURCES "")
-
+    
 elseif(UNIX)
     # =========================================================================
     # Linux Configuration
@@ -187,22 +187,28 @@ elseif(UNIX)
 endif()
 
 # ============================================================================
+# Third-party Libraries (cross-platform)
+# ============================================================================
+# miniz: ZIP library for .snbx package export/import (MIT license)
+include_directories(${CMAKE_SOURCE_DIR}/thirdparty/miniz)
+
+# ============================================================================
 # Translation Files
 # ============================================================================
 set(TS_FILES
-    ${CMAKE_SOURCE_DIR}/resources/translations/app_zh.ts
-    ${CMAKE_SOURCE_DIR}/resources/translations/app_es.ts
-    ${CMAKE_SOURCE_DIR}/resources/translations/app_fr.ts
+        ${CMAKE_SOURCE_DIR}/resources/translations/app_zh.ts
+        ${CMAKE_SOURCE_DIR}/resources/translations/app_es.ts
+        ${CMAKE_SOURCE_DIR}/resources/translations/app_fr.ts
 )
 
 # ============================================================================
 # QMarkdownTextEdit (bundled library)
 # ============================================================================
 set(QMARKDOWNTEXTEDIT_SOURCES
-    markdown/qmarkdowntextedit.cpp
-    markdown/markdownhighlighter.cpp
-    markdown/qownlanguagedata.cpp
-    markdown/qplaintexteditsearchwidget.cpp
+        markdown/qmarkdowntextedit.cpp
+        markdown/markdownhighlighter.cpp
+        markdown/qownlanguagedata.cpp
+        markdown/qplaintexteditsearchwidget.cpp
 )
 
 qt6_wrap_cpp(QMARKDOWNTEXTEDIT_MOC_SOURCES markdown/linenumberarea.h)
@@ -283,6 +289,8 @@ set(UI_SOURCES
     source/ui/actionbars/PagePanelActionBar.cpp
     # Banners
     source/ui/banners/MissingPdfBanner.cpp
+    # Dialogs
+    source/ui/dialogs/SaveDocumentDialog.cpp
     # Launcher
     source/ui/launcher/Launcher.cpp
     source/ui/launcher/LauncherNavButton.cpp
@@ -304,7 +312,7 @@ if(ANDROID)
         source/pdf/PdfMismatchDialog.cpp
     )
 else()
-    set(PDF_SOURCES
+set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
         source/pdf/PopplerPdfProvider.cpp
         source/pdf/PdfRelinkDialog.cpp
@@ -321,6 +329,23 @@ if(ENABLE_CONTROLLER_SUPPORT)
     )
 endif()
 
+# Sharing module (cross-platform .snbx package export/import)
+# Uses miniz library for ZIP creation/extraction (MIT license, thirdparty/miniz/)
+set(SHARING_SOURCES
+    source/sharing/NotebookExporter.cpp
+    source/sharing/NotebookImporter.cpp
+    source/sharing/ExportDialog.cpp
+    thirdparty/miniz/miniz.c
+)
+
+# Android-specific utilities
+set(ANDROID_PLATFORM_SOURCES "")
+if(ANDROID)
+    set(ANDROID_PLATFORM_SOURCES
+        source/android/PdfPickerAndroid.cpp
+    )
+endif()
+
 # Desktop-only sources (tests require Qt::Test)
 set(DESKTOP_ONLY_SOURCES "")
 if(NOT ANDROID)
@@ -334,22 +359,24 @@ endif()
 # Main Application Sources
 # ============================================================================
 set(APP_SOURCES
-    source/Main.cpp
-    source/MainWindow.cpp
+        source/Main.cpp
+        source/MainWindow.cpp
     source/ControlPanelDialog.cpp
     source/text/MarkdownNoteEntry.cpp
     source/ui/MarkdownNotesSidebar.cpp
-    ${CORE_SOURCES}
+        ${CORE_SOURCES}
     ${OBJECT_SOURCES}
-    ${UI_SOURCES}
-    ${PDF_SOURCES}
+        ${UI_SOURCES}
+        ${PDF_SOURCES}
     ${CONTROLLER_SOURCES}
+    ${SHARING_SOURCES}
+    ${ANDROID_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
-    ${QMARKDOWNTEXTEDIT_SOURCES}
+        ${QMARKDOWNTEXTEDIT_SOURCES}
     ${QMARKDOWNTEXTEDIT_MOC_SOURCES}
-    ${QMARKDOWNTEXTEDIT_UI_HEADERS}
+        ${QMARKDOWNTEXTEDIT_UI_HEADERS}
     ${QRCC_FILES}
-    ${WIN_RESOURCES}
+        ${WIN_RESOURCES}
 )
 
 # ============================================================================
@@ -391,11 +418,11 @@ if(LRELEASE_EXECUTABLE)
         get_filename_component(_qm ${_ts} NAME_WE)
         set(_qm_file ${CMAKE_CURRENT_BINARY_DIR}/${_qm}.qm)
         add_custom_command(
-            OUTPUT ${_qm_file}
-            COMMAND ${LRELEASE_EXECUTABLE} ${_ts} -qm ${_qm_file}
-            DEPENDS ${_ts}
-            COMMENT "Generating ${_qm_file}"
-            VERBATIM
+                OUTPUT ${_qm_file}
+                COMMAND ${LRELEASE_EXECUTABLE} ${_ts} -qm ${_qm_file}
+                DEPENDS ${_ts}
+                COMMENT "Generating ${_qm_file}"
+                VERBATIM
         )
         list(APPEND QM_FILES ${_qm_file})
     endforeach()
@@ -407,8 +434,8 @@ endif()
 # ============================================================================
 if(WIN32)
     set(PLATFORM_LIBS
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
-        PkgConfig::POPPLER
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
+            PkgConfig::POPPLER
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
@@ -417,8 +444,8 @@ if(WIN32)
 
 elseif(APPLE)
     set(PLATFORM_LIBS
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
-        ${POPPLER_LIBRARIES}
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
+            ${POPPLER_LIBRARIES}
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
@@ -434,8 +461,8 @@ elseif(ANDROID)
 
 elseif(UNIX)
     set(PLATFORM_LIBS
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
-        PkgConfig::POPPLER
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
+            PkgConfig::POPPLER
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
@@ -467,6 +494,6 @@ elseif(UNIX AND NOT ANDROID)
         install(FILES ${RESOURCE_QM_FILES} DESTINATION share/speedynote/translations)
     endif()
     install(FILES resources/icons/mainicon.png
-        DESTINATION share/icons/hicolor/256x256/apps
-        RENAME com.github.alpha_liu_01.SpeedyNote.png)
+            DESTINATION share/icons/hicolor/256x256/apps
+            RENAME com.github.alpha_liu_01.SpeedyNote.png)
 endif()

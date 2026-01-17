@@ -18,6 +18,7 @@
 #include <QShowEvent>
 #include <QGraphicsOpacityEffect>
 #include <QFile>
+#include <QFileDialog>
 #include <QApplication>
 #include <QScroller>
 #include <QScrollBar>
@@ -35,6 +36,111 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QStandardPaths>
+#include <QEventLoop>
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QCoreApplication>
+#include <jni.h>
+#endif
+
+// ============================================================================
+// Android Package Picker (JNI Integration)
+// ============================================================================
+#ifdef Q_OS_ANDROID
+
+namespace {
+    // Static variables for async package picker result
+    static QString s_pickedPackagePath;
+    static bool s_packagePickerCancelled = false;
+    static QEventLoop* s_packagePickerLoop = nullptr;
+}
+
+// JNI callback: Called from Java when a package file is successfully picked and copied
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_ImportHelper_onPackageFilePicked(JNIEnv *env, jclass /*clazz*/, jstring localPath)
+{
+    const char* pathChars = env->GetStringUTFChars(localPath, nullptr);
+    s_pickedPackagePath = QString::fromUtf8(pathChars);
+    env->ReleaseStringUTFChars(localPath, pathChars);
+    
+    s_packagePickerCancelled = false;
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "JNI callback: Package picked -" << s_pickedPackagePath;
+#endif
+    
+    if (s_packagePickerLoop) {
+        s_packagePickerLoop->quit();
+    }
+}
+
+// JNI callback: Called from Java when package picking is cancelled or fails
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_ImportHelper_onPackagePickCancelled(JNIEnv * /*env*/, jclass /*clazz*/)
+{
+    s_pickedPackagePath.clear();
+    s_packagePickerCancelled = true;
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "JNI callback: Package pick cancelled";
+#endif
+    
+    if (s_packagePickerLoop) {
+        s_packagePickerLoop->quit();
+    }
+}
+
+// Helper function to pick a .snbx package file on Android via SAF
+static QString pickSnbxFileAndroid()
+{
+    // Reset state
+    s_pickedPackagePath.clear();
+    s_packagePickerCancelled = false;
+    
+    // Get the destination directory for imported packages
+    QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/imports";
+    QDir().mkpath(destDir);
+    
+    // Clean up any leftover files from previous failed/interrupted imports
+    // This prevents disk space leaks from accumulated import failures
+    QDir importsDir(destDir);
+    for (const QString& entry : importsDir.entryList(QDir::Files | QDir::NoDotAndDotDot)) {
+        QString filePath = importsDir.absoluteFilePath(entry);
+        QFile::remove(filePath);
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "pickSnbxFileAndroid: Cleaned up old import:" << filePath;
+#endif
+    }
+    
+    // Get the Activity
+    QJniObject activity = QNativeInterface::QAndroidApplication::context();
+    if (!activity.isValid()) {
+        qWarning() << "pickSnbxFileAndroid: Failed to get Android context";
+        return QString();
+    }
+    
+    // Call ImportHelper.pickPackageFile(activity, destDir)
+    QJniObject::callStaticMethod<void>(
+        "org/speedynote/app/ImportHelper",
+        "pickPackageFile",
+        "(Landroid/app/Activity;Ljava/lang/String;)V",
+        activity.object<jobject>(),
+        QJniObject::fromString(destDir).object<jstring>()
+    );
+    
+    // Wait for the result (file picker is async)
+    QEventLoop loop;
+    s_packagePickerLoop = &loop;
+    loop.exec();
+    s_packagePickerLoop = nullptr;
+    
+    if (s_packagePickerCancelled || s_pickedPackagePath.isEmpty()) {
+        return QString();
+    }
+    
+    return s_pickedPackagePath;
+}
+
+#endif // Q_OS_ANDROID
 
 Launcher::Launcher(QWidget* parent)
     : QMainWindow(parent)
@@ -340,6 +446,27 @@ void Launcher::setupFAB()
     connect(m_fab, &FloatingActionButton::createPaged, this, &Launcher::createNewPaged);
     connect(m_fab, &FloatingActionButton::openPdf, this, &Launcher::openPdfRequested);
     connect(m_fab, &FloatingActionButton::openNotebook, this, &Launcher::openNotebookRequested);
+    
+    // Import package - platform-specific handling
+    connect(m_fab, &FloatingActionButton::importPackage, this, [this]() {
+#ifdef Q_OS_ANDROID
+        // Use ImportHelper to pick .snbx file via SAF
+        QString packagePath = pickSnbxFileAndroid();
+        if (!packagePath.isEmpty()) {
+            emit notebookSelected(packagePath);  // DocumentManager handles .snbx extraction
+        }
+#else
+        // Desktop: Use QFileDialog
+        QString packagePath = QFileDialog::getOpenFileName(this,
+            tr("Import Notebook Package"),
+            QDir::homePath(),
+            tr("SpeedyNote Package (*.snbx)"));
+        
+        if (!packagePath.isEmpty()) {
+            emit notebookSelected(packagePath);  // DocumentManager handles .snbx extraction
+        }
+#endif
+    });
 }
 
 bool Launcher::isDarkMode() const
@@ -479,6 +606,12 @@ void Launcher::showEvent(QShowEvent* event)
     bool hasMainWindow = (MainWindow::findExistingMainWindow() != nullptr);
     if (m_returnBtn) {
         m_returnBtn->setVisible(hasMainWindow);
+    }
+    
+    // Refresh timeline if date has changed since last shown
+    // This handles scenarios like system sleep/hibernate during midnight
+    if (m_timelineModel) {
+        m_timelineModel->refreshIfDateChanged();
     }
 }
 
@@ -925,11 +1058,14 @@ QString Launcher::findImportedPdfPath(const QString& bundlePath)
         return QString(); // Not a PDF-backed document
     }
     
-    // Check if the PDF is in our imported PDFs sandbox directory
-    // On Android: /data/data/org.speedynote.app/files/pdfs/
-    QString sandboxPdfDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
+    // Check if the PDF is in our sandbox directories:
+    // 1. /files/pdfs/ - Direct PDF imports via SAF (BUG-A003)
+    // 2. /files/notebooks/embedded/ - PDFs extracted from .snbx packages (Phase 2)
+    QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QString sandboxPdfDir = appDataDir + "/pdfs";
+    QString embeddedDir = appDataDir + "/notebooks/embedded";
     
-    if (pdfPath.startsWith(sandboxPdfDir)) {
+    if (pdfPath.startsWith(sandboxPdfDir) || pdfPath.startsWith(embeddedDir)) {
         // This PDF was imported to our sandbox - safe to delete
         return pdfPath;
     }

@@ -28,6 +28,8 @@
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
 #include "core/NotebookLibrary.h" // Phase P.4.6: For saving thumbnails
 #include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
+#include "sharing/NotebookExporter.h" // Phase 1: Export notebooks as .snbx
+#include "sharing/ExportDialog.h"     // Phase 1: Export dialog UI
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include <QVBoxLayout>
@@ -85,105 +87,16 @@
 #include <QJniEnvironment>
 #include <QCoreApplication>
 #include <QEventLoop>
+#include "ui/dialogs/SaveDocumentDialog.h"  // BUG-A002: Touch-friendly save dialog
 
 // ============================================================================
 // Android PDF File Picker (BUG-A003)
 // ============================================================================
-// Uses a custom Java helper to pick PDFs with proper SAF permission handling.
-// The Java code copies the file to local storage while permission is valid,
-// then calls back to C++ with the local file path.
+// Uses shared PdfPickerAndroid utility (source/android/PdfPickerAndroid.cpp)
+// which wraps PdfFileHelper.java for proper SAF permission handling.
 // ============================================================================
 
-namespace {
-    // Static variables for async file picker result
-    static QString s_pickedPdfPath;
-    static bool s_pdfPickerCancelled = false;
-    static QEventLoop* s_pdfPickerLoop = nullptr;
-}
-
-// JNI callback: Called from Java when a PDF file is successfully picked and copied
-extern "C" JNIEXPORT void JNICALL
-Java_org_speedynote_app_PdfFileHelper_onPdfFilePicked(JNIEnv *env, jclass /*clazz*/, jstring localPath)
-{
-    const char* pathChars = env->GetStringUTFChars(localPath, nullptr);
-    s_pickedPdfPath = QString::fromUtf8(pathChars);
-    env->ReleaseStringUTFChars(localPath, pathChars);
-    
-    s_pdfPickerCancelled = false;
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "JNI callback: PDF picked -" << s_pickedPdfPath;
-#endif
-    
-    if (s_pdfPickerLoop) {
-        s_pdfPickerLoop->quit();
-    }
-}
-
-// JNI callback: Called from Java when PDF picking is cancelled or fails
-extern "C" JNIEXPORT void JNICALL
-Java_org_speedynote_app_PdfFileHelper_onPdfPickCancelled(JNIEnv * /*env*/, jclass /*clazz*/)
-{
-    s_pickedPdfPath.clear();
-    s_pdfPickerCancelled = true;
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "JNI callback: PDF pick cancelled";
-#endif
-    
-    if (s_pdfPickerLoop) {
-        s_pdfPickerLoop->quit();
-    }
-}
-
-// Opens the Android file picker for PDFs and waits for the result.
-// Returns the local file path, or empty string if cancelled.
-static QString pickPdfFileAndroid()
-{
-    // Reset state
-    s_pickedPdfPath.clear();
-    s_pdfPickerCancelled = false;
-    
-    // Get the destination directory for imported PDFs
-    QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
-    QDir().mkpath(destDir);
-    
-    // Get the Activity
-    QJniObject activity = QNativeInterface::QAndroidApplication::context();
-    if (!activity.isValid()) {
-        qWarning() << "pickPdfFileAndroid: Failed to get Android context";
-        return QString();
-    }
-    
-    // Call Java helper to open the file picker
-    QJniObject destDirJni = QJniObject::fromString(destDir);
-    QJniObject::callStaticMethod<void>(
-        "org/speedynote/app/PdfFileHelper",
-        "pickPdfFile",
-        "(Landroid/app/Activity;Ljava/lang/String;)V",
-        activity.object(),
-        destDirJni.object<jstring>());
-    
-    QJniEnvironment env;
-    if (env.checkAndClearExceptions()) {
-        qWarning() << "pickPdfFileAndroid: Exception calling pickPdfFile";
-        return QString();
-    }
-    
-    // Wait for the callback using a local event loop
-    QEventLoop loop;
-    s_pdfPickerLoop = &loop;
-    
-    // Timeout after 2 minutes (user should have picked a file by then)
-    QTimer::singleShot(120000, &loop, &QEventLoop::quit);
-    
-    loop.exec();
-    s_pdfPickerLoop = nullptr;
-    
-    if (s_pdfPickerCancelled || s_pickedPdfPath.isEmpty()) {
-        return QString();
-    }
-    
-    return s_pickedPdfPath;
-}
+#include "android/PdfPickerAndroid.h"
 
 #endif // Q_OS_ANDROID
 #include <QPointer>
@@ -1058,10 +971,106 @@ void MainWindow::setupUi() {
         Q_UNUSED(checked);
         toggleFullscreen();
     });
-    connect(m_navigationBar, &NavigationBar::shareClicked, this, []() {
-        // Stub - placeholder, does nothing
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "NavigationBar: Share clicked (stub - not implemented)";
+    connect(m_navigationBar, &NavigationBar::shareClicked, this, [this]() {
+        // Phase 1: Export notebook as .snbx package
+        DocumentViewport* vp = currentViewport();
+        Document* doc = vp ? vp->document() : nullptr;
+        if (!doc) {
+            QMessageBox::warning(this, tr("Export Failed"), 
+                tr("No document is currently open."));
+            return;
+        }
+        
+        // Ensure document is saved before exporting
+        if (doc->bundlePath().isEmpty()) {
+            QMessageBox::warning(this, tr("Export Failed"),
+                tr("Please save the document before exporting."));
+            return;
+        }
+        
+        // Show export dialog
+        ExportDialog dialog(doc, this);
+        if (dialog.exec() != QDialog::Accepted) {
+            return;
+        }
+        
+#ifdef Q_OS_ANDROID
+        // Android: Export to cache, then share via share sheet
+        QString cachePath = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+        QString exportDir = cachePath + "/exports";
+        QDir exportDirObj(exportDir);
+        
+        // Clean up old exports to prevent disk space leaks
+        // (User may cancel share sheet or export multiple times)
+        if (exportDirObj.exists()) {
+            QStringList oldFiles = exportDirObj.entryList(QStringList() << "*.snbx", QDir::Files);
+            for (const QString& oldFile : oldFiles) {
+                exportDirObj.remove(oldFile);
+            }
+        } else {
+            exportDirObj.mkpath(".");
+        }
+        
+        // Sanitize filename for Android
+        QString safeName = doc->name;
+        safeName.replace(QRegularExpression("[\\\\/:*?\"<>|]"), "_");
+        QString exportPath = exportDir + "/" + safeName + ".snbx";
+        
+        NotebookExporter::ExportOptions options;
+        options.includePdf = dialog.includePdf();
+        options.destPath = exportPath;
+        
+        auto result = NotebookExporter::exportPackage(doc, options);
+        if (result.success) {
+            // Call ShareHelper.shareFile via JNI
+            QJniObject activity = QNativeInterface::QAndroidApplication::context();
+            QJniObject::callStaticMethod<void>(
+                "org/speedynote/app/ShareHelper",
+                "shareFile",
+                "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)V",
+                activity.object<jobject>(),
+                QJniObject::fromString(exportPath).object<jstring>(),
+                QJniObject::fromString("application/octet-stream").object<jstring>()
+            );
+        } else {
+            QMessageBox::warning(this, tr("Export Failed"), result.errorMessage);
+        }
+#else
+        // Desktop: Show save dialog
+        QString defaultPath = QDir::homePath() + "/" + doc->name + ".snbx";
+        QString destPath = QFileDialog::getSaveFileName(this,
+            tr("Export Notebook"),
+            defaultPath,
+            tr("SpeedyNote Package (*.snbx)"));
+        
+        if (destPath.isEmpty()) {
+            return;  // User cancelled
+        }
+        
+        NotebookExporter::ExportOptions options;
+        options.includePdf = dialog.includePdf();
+        options.destPath = destPath;
+        
+        auto result = NotebookExporter::exportPackage(doc, options);
+        if (result.success) {
+            // Show success message with file size
+            QString sizeStr;
+            if (result.fileSize < 1024) {
+                sizeStr = tr("%1 bytes").arg(result.fileSize);
+            } else if (result.fileSize < 1024 * 1024) {
+                sizeStr = tr("%1 KB").arg(result.fileSize / 1024);
+            } else {
+                double sizeMB = static_cast<double>(result.fileSize) / (1024.0 * 1024.0);
+                sizeStr = tr("%1 MB").arg(sizeMB, 0, 'f', 1);
+            }
+            
+            QMessageBox::information(this, tr("Export Complete"),
+                tr("Notebook exported successfully.\n\nFile: %1\nSize: %2")
+                    .arg(QFileInfo(destPath).fileName())
+                    .arg(sizeStr));
+        } else {
+            QMessageBox::warning(this, tr("Export Failed"), result.errorMessage);
+        }
 #endif
     });
     connect(m_navigationBar, &NavigationBar::rightSidebarToggled, this, [this](bool checked) {
@@ -2270,21 +2279,16 @@ void MainWindow::saveDocument()
     QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
     QDir().mkpath(notebooksDir);
     
-    // Show a simple input dialog for the document name
+    // Show touch-friendly save dialog (replaces QInputDialog::getText which was too small)
     bool ok;
-    QString docName = QInputDialog::getText(this, 
-        isEdgeless ? tr("Save Canvas") : tr("Save Document"),
-        tr("Document name:"),
-        QLineEdit::Normal,
-        defaultName,
-        &ok);
+    QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
+    QString docName = SaveDocumentDialog::getDocumentName(this, dialogTitle, defaultName, &ok);
     
     if (!ok || docName.isEmpty()) {
         return; // User cancelled
     }
     
-    // Sanitize the filename (remove invalid characters)
-    docName = docName.replace(QRegularExpression("[<>:\"/\\\\|?*]"), "_");
+    // Note: SaveDocumentDialog already sanitizes the filename
     filePath = notebooksDir + "/" + docName + ".snb";
     
     // Check if file exists and ask for overwrite confirmation
@@ -2652,9 +2656,9 @@ void MainWindow::openPdfDocument(const QString &filePath)
     // If no file path provided, open file dialog for PDF selection
     if (pdfPath.isEmpty()) {
 #ifdef Q_OS_ANDROID
-        // BUG-A003: Use custom Android file picker that handles SAF permissions properly.
-        // The Java helper copies the PDF to local storage while permission is valid.
-        pdfPath = pickPdfFileAndroid();
+        // BUG-A003: Use shared Android PDF picker that handles SAF permissions properly.
+        // See source/android/PdfPickerAndroid.cpp for implementation.
+        pdfPath = PdfPickerAndroid::pickPdfFile();
         
         if (pdfPath.isEmpty()) {
             // User cancelled or error

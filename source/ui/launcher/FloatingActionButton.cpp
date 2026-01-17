@@ -5,6 +5,7 @@
 #include <QMouseEvent>
 #include <QApplication>
 #include <QToolTip>
+#include <QMap>
 
 FloatingActionButton::FloatingActionButton(QWidget* parent)
     : QWidget(parent)
@@ -25,7 +26,13 @@ FloatingActionButton::FloatingActionButton(QWidget* parent)
 void FloatingActionButton::setupUi()
 {
     // Calculate total size needed
-    int totalHeight = MAIN_BUTTON_SIZE + 4 * (ACTION_BUTTON_SIZE + BUTTON_SPACING);
+    // 5 buttons on desktop, 4 on Android (Open Notebook hidden)
+#ifdef Q_OS_ANDROID
+    int numActionButtons = 4;  // Open Notebook hidden on Android
+#else
+    int numActionButtons = 5;
+#endif
+    int totalHeight = MAIN_BUTTON_SIZE + numActionButtons * (ACTION_BUTTON_SIZE + BUTTON_SPACING);
     int totalWidth = MAIN_BUTTON_SIZE;
     setFixedSize(totalWidth, totalHeight);
     
@@ -58,8 +65,15 @@ void FloatingActionButton::setupUi()
     m_pagedBtn = createActionButton("bookmark", tr("New Paged Notebook"));
     m_pdfBtn = createActionButton("pdf", tr("Open PDF for Annotation"));
     m_openBtn = createActionButton("folder", tr("Open Notebook (.snb)"));
+    m_importBtn = createActionButton("import", tr("Import Package (.snbx)"));
     
-    m_actionButtons << m_edgelessBtn << m_pagedBtn << m_pdfBtn << m_openBtn;
+    m_actionButtons << m_edgelessBtn << m_pagedBtn << m_pdfBtn << m_openBtn << m_importBtn;
+    
+    // Hide "Open Notebook" on Android - users should use Import Package instead
+#ifdef Q_OS_ANDROID
+    m_openBtn->setVisible(false);
+    m_actionButtons.removeOne(m_openBtn);
+#endif
     
     // Connect action buttons
     connect(m_edgelessBtn, &QPushButton::clicked, this, [this]() {
@@ -77,6 +91,10 @@ void FloatingActionButton::setupUi()
     connect(m_openBtn, &QPushButton::clicked, this, [this]() {
         setExpanded(false);
         emit openNotebook();
+    });
+    connect(m_importBtn, &QPushButton::clicked, this, [this]() {
+        setExpanded(false);
+        emit importPackage();
     });
     
     // Initial positions
@@ -249,17 +267,18 @@ void FloatingActionButton::setDarkMode(bool dark)
     if (m_darkMode != dark) {
         m_darkMode = dark;
         
+        // Map buttons to their icon names
+        QMap<QPushButton*, QString> buttonIcons;
+        buttonIcons[m_edgelessBtn] = "fullscreen";
+        buttonIcons[m_pagedBtn] = "bookmark";
+        buttonIcons[m_pdfBtn] = "pdf";
+        buttonIcons[m_openBtn] = "folder";
+        buttonIcons[m_importBtn] = "import";
+        
         // Update action button styles and icons
-        for (int i = 0; i < m_actionButtons.size(); ++i) {
-            QPushButton* btn = m_actionButtons[i];
-            
-            QString iconName;
-            switch (i) {
-                case 0: iconName = "fullscreen"; break;
-                case 1: iconName = "bookmark"; break;
-                case 2: iconName = "pdf"; break;
-                case 3: iconName = "folder"; break;
-            }
+        for (QPushButton* btn : m_actionButtons) {
+            QString iconName = buttonIcons.value(btn);
+            if (iconName.isEmpty()) continue;
             
             QString iconPath = dark 
                 ? QString(":/resources/icons/%1_reversed.png").arg(iconName)

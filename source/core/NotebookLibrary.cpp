@@ -62,9 +62,10 @@ void NotebookLibrary::addToRecent(const QString& bundlePath)
         // Update lastAccessed and refresh metadata
         existing->lastAccessed = QDateTime::currentDateTime();
         
-        // Re-read lastModified from file system
-        QFileInfo bundleInfo(bundlePath);
-        existing->lastModified = bundleInfo.lastModified();
+        // Re-read lastModified from document.json (not the folder!)
+        // Folder mtime only changes when files are added/removed, not modified
+        QFileInfo docJsonInfo(bundlePath + "/document.json");
+        existing->lastModified = docJsonInfo.lastModified();
         
         markDirty();
         return;
@@ -97,9 +98,10 @@ void NotebookLibrary::addToRecent(const QString& bundlePath)
     nb.documentId = obj["notebook_id"].toString();
     nb.lastAccessed = QDateTime::currentDateTime();
     
-    // Get lastModified from file system (more accurate than JSON)
-    QFileInfo bundleInfo(bundlePath);
-    nb.lastModified = bundleInfo.lastModified();
+    // Get lastModified from document.json file (not the folder!)
+    // Folder mtime only changes when files are added/removed, not modified
+    QFileInfo docJsonInfo(bundlePath + "/document.json");
+    nb.lastModified = docJsonInfo.lastModified();
     
     // Determine type from mode field
     QString mode = obj["mode"].toString();

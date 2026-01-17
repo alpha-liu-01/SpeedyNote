@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 15, 2026 (Optimized first-time save of PDF documents)
+**Last Updated:** Jan 16, 2026 (Fixed timeline time display not refreshing)
 
 ---
 
@@ -33,6 +33,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 | **MD** | Markdown | Markdown notes integration |
 | **PERF** | Performance | Lag, memory, CPU issues |
 | **UI** | UI/UX | Visual glitches, layout issues |
+| **LAUNCH** | Launcher | Launcher screen, Timeline, FAB |
 | **MISC** | Miscellaneous | Other issues |
 
 ---
@@ -804,6 +805,95 @@ Same logic applied to edgeless tiles for consistency.
 
 ---
 
+### Launcher (LAUNCH)
+
+#### BUG-LAUNCH-001: Timeline time display not refreshing after document save
+**Priority:** 🟡 P2 | **Status:** ✅ FIXED
+
+**Symptom:** 
+After editing and saving a document, closing it, and returning to the Launcher, the "Last Modified" time displayed on the Timeline delegate was not updated. The time still showed when the document was first opened, not when it was last saved.
+
+**Steps to Reproduce:**
+1. Launch SpeedyNote, open a notebook from Timeline
+2. Make edits to the document
+3. Save the document (Ctrl+S)
+4. Close the document/application
+5. Relaunch SpeedyNote
+6. Timeline shows old time (e.g., "Today at 2:00 PM" instead of "Today at 4:30 PM")
+
+**Expected:** Timeline should show the actual last modified time from the saved document
+**Actual:** Timeline showed stale time from when the document was first opened
+
+**Root Cause:** 
+`NotebookLibrary::addToRecent()` was reading `lastModified` from the **bundle folder's** modification time instead of the files inside it:
+
+```cpp
+// WRONG: Folder mtime doesn't change when files inside are modified
+QFileInfo bundleInfo(bundlePath);
+existing->lastModified = bundleInfo.lastModified();
+```
+
+On most filesystems (Linux ext4, Windows NTFS, macOS APFS), modifying files *inside* a folder does NOT update the folder's mtime. The folder mtime only changes when files are added or removed, not when existing files are edited.
+
+When saving a document:
+1. `document.json` inside the `.snb` folder is overwritten with new content ✓
+2. The `.snb` folder's mtime stays the same ✗
+3. `addToRecent()` reads the unchanged folder mtime ✗
+4. Timeline displays the stale time ✗
+
+**Fix:**
+Changed to use `document.json`'s modification time, which is always updated on save:
+
+```cpp
+// CORRECT: document.json is always written on save
+QFileInfo docJsonInfo(bundlePath + "/document.json");
+existing->lastModified = docJsonInfo.lastModified();
+```
+
+Applied in two locations:
+1. Existing notebook update path (line ~66)
+2. New notebook creation path (line ~101)
+
+**Files Modified:**
+- `source/core/NotebookLibrary.cpp` (two `QFileInfo` paths changed)
+
+**Verified:** [x] Save updates Timeline time correctly
+**Verified:** [x] Time persists correctly after app restart
+
+---
+
+#### BUG-LAUNCH-002: Timeline sections not refreshing at midnight
+**Priority:** 🟢 P3 | **Status:** ✅ FIXED
+
+**Symptom:** 
+If the Launcher was left open overnight, the "Today" and "Yesterday" section headers would become incorrect after midnight. A document modified at 11:00 PM would still show under "Today" even after midnight when it should be "Yesterday".
+
+**Root Cause:** 
+The `TimelineModel::sectionForDate()` computed sections based on `QDate::currentDate()` at the time `buildDisplayList()` was called. There was no mechanism to refresh sections when the date changed.
+
+**Fix:**
+Added automatic midnight refresh:
+
+1. **Midnight timer** in `TimelineModel`:
+   - Timer fires at midnight + 1 second
+   - Calls `reload()` to rebuild sections with fresh date
+   - Reschedules for next midnight
+
+2. **Show event refresh** in `Launcher`:
+   - When launcher becomes visible, checks if date changed
+   - Handles system sleep/hibernate during midnight
+   - Calls `refreshIfDateChanged()` to reload if needed
+
+**Files Modified:**
+- `source/ui/launcher/TimelineModel.h` (added `m_midnightTimer`, `m_lastKnownDate`, `refreshIfDateChanged()`)
+- `source/ui/launcher/TimelineModel.cpp` (timer setup, `scheduleMidnightRefresh()`, `refreshIfDateChanged()`)
+- `source/ui/launcher/Launcher.cpp` (`showEvent` calls `refreshIfDateChanged()`)
+
+**Verified:** [x] Timeline refreshes correctly at midnight
+**Verified:** [x] Launcher refresh works after system wake from sleep
+
+---
+
 ### Miscellaneous (MISC)
 
 #### BUG-MISC-001: Dead code returnToLauncher() shows placeholder message
@@ -1382,8 +1472,9 @@ Additionally, the document was deleted while the viewport still held a reference
 | Markdown | 0 | 0 | 0 | 0 |
 | Performance | 0 | 0 | 2 | 2 |
 | UI/UX | 0 | 0 | 4 | 4 |
+| Launcher | 0 | 0 | 2 | 2 |
 | Miscellaneous | 0 | 0 | 6 | 6 |
-| **TOTAL** | **0** | **0** | **26** | **26** |
+| **TOTAL** | **0** | **0** | **28** | **28** |
 
 ---
 

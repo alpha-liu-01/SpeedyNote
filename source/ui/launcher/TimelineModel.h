@@ -3,6 +3,8 @@
 
 #include <QAbstractListModel>
 #include <QList>
+#include <QTimer>
+#include <QDate>
 #include "../../core/NotebookLibrary.h"
 
 /**
@@ -51,6 +53,17 @@ public:
      * Call this when the library changes or when the view becomes visible.
      */
     void reload();
+    
+    /**
+     * @brief Refresh if the date has changed since last reload.
+     * 
+     * Call this when the view becomes visible to handle scenarios where:
+     * - The system was asleep/hibernated during midnight
+     * - The launcher was hidden for an extended period
+     * 
+     * @return True if a reload was triggered, false if data was still fresh.
+     */
+    bool refreshIfDateChanged();
 
 signals:
     /**
@@ -72,6 +85,11 @@ private:
      * Groups notebooks by section and inserts section headers.
      */
     void buildDisplayList();
+    
+    /**
+     * @brief Schedule timer to fire at next midnight for date rollover refresh.
+     */
+    void scheduleMidnightRefresh();
 
     // Internal item representation
     struct DisplayItem {
@@ -81,6 +99,10 @@ private:
     };
     
     QList<DisplayItem> m_items;
+    
+    // Date tracking for automatic refresh
+    QTimer* m_midnightTimer = nullptr;  ///< Timer that fires at midnight
+    QDate m_lastKnownDate;              ///< Date when sections were last computed
 };
 
 #endif // TIMELINEMODEL_H

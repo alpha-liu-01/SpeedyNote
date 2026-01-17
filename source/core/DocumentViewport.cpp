@@ -2835,7 +2835,24 @@ bool DocumentViewport::event(QEvent* event)
         event->type() == QEvent::TouchEnd ||
         event->type() == QEvent::TouchCancel) {
         
-        if (m_touchHandler && m_touchHandler->handleTouchEvent(static_cast<QTouchEvent*>(event))) {
+        QTouchEvent* touchEvent = static_cast<QTouchEvent*>(event);
+        
+        // Check if the touch started on a child widget (like MissingPdfBanner)
+        // If so, let Qt's normal event propagation handle it instead of intercepting
+        if (event->type() == QEvent::TouchBegin && !touchEvent->points().isEmpty()) {
+            QPointF touchPos = touchEvent->points().first().position();
+            QWidget* childWidget = childAt(touchPos.toPoint());
+            
+            // If touch is on a child widget (not directly on DocumentViewport),
+            // let Qt handle normal event propagation to the child
+            if (childWidget && childWidget != this) {
+                // Don't intercept - let the event propagate to child widgets
+                // This allows banner buttons, etc. to receive touch input
+                return QWidget::event(event);
+            }
+        }
+        
+        if (m_touchHandler && m_touchHandler->handleTouchEvent(touchEvent)) {
             return true;
         }
     }

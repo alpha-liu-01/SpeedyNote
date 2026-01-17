@@ -3,16 +3,35 @@
 
 #include <QDate>
 #include <QDateTime>
+#include <QTime>
 
 TimelineModel::TimelineModel(QObject* parent)
     : QAbstractListModel(parent)
+    , m_lastKnownDate(QDate::currentDate())
 {
     // Connect to library changes
     connect(NotebookLibrary::instance(), &NotebookLibrary::libraryChanged,
             this, &TimelineModel::reload);
     
+    // Setup midnight timer for automatic date rollover refresh
+    m_midnightTimer = new QTimer(this);
+    m_midnightTimer->setSingleShot(true);
+    connect(m_midnightTimer, &QTimer::timeout, this, [this]() {
+        // Check if date actually changed (handles timezone/DST edge cases)
+        QDate today = QDate::currentDate();
+        if (today != m_lastKnownDate) {
+            m_lastKnownDate = today;
+            reload();  // Refresh sections and trigger repaint
+        }
+        // Schedule next midnight check
+        scheduleMidnightRefresh();
+    });
+    
     // Initial load
     reload();
+    
+    // Schedule first midnight refresh
+    scheduleMidnightRefresh();
 }
 
 int TimelineModel::rowCount(const QModelIndex& parent) const
@@ -103,6 +122,19 @@ void TimelineModel::reload()
     emit dataReloaded();
 }
 
+bool TimelineModel::refreshIfDateChanged()
+{
+    QDate today = QDate::currentDate();
+    if (today != m_lastKnownDate) {
+        m_lastKnownDate = today;
+        reload();
+        // Reschedule midnight timer since date changed
+        scheduleMidnightRefresh();
+        return true;
+    }
+    return false;
+}
+
 QString TimelineModel::sectionForDate(const QDateTime& date) const
 {
     if (!date.isValid()) {
@@ -151,6 +183,9 @@ void TimelineModel::buildDisplayList()
 {
     m_items.clear();
     
+    // Track the date when sections were computed
+    m_lastKnownDate = QDate::currentDate();
+    
     QList<NotebookInfo> notebooks = NotebookLibrary::instance()->recentNotebooks();
     
     if (notebooks.isEmpty()) {
@@ -179,5 +214,21 @@ void TimelineModel::buildDisplayList()
         item.notebook = notebook;
         m_items.append(item);
     }
+}
+
+void TimelineModel::scheduleMidnightRefresh()
+{
+    // Calculate milliseconds until midnight + 1 second (to ensure we're past midnight)
+    QDateTime now = QDateTime::currentDateTime();
+    QDateTime midnight = QDateTime(now.date().addDays(1), QTime(0, 0, 1));
+    
+    qint64 msUntilMidnight = now.msecsTo(midnight);
+    
+    // Sanity check: if calculation is negative or too large, use fallback
+    if (msUntilMidnight <= 0 || msUntilMidnight > 24 * 60 * 60 * 1000 + 1000) {
+        msUntilMidnight = 60 * 60 * 1000;  // Fallback: check in 1 hour
+    }
+    
+    m_midnightTimer->start(static_cast<int>(msUntilMidnight));
 }
 

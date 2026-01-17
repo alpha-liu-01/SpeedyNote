@@ -14,11 +14,13 @@ import org.qtproject.qt.android.bindings.QtActivity;
  * 
  * Extends QtActivity to:
  * 1. Handle Activity results from the PDF file picker (BUG-A003)
- * 2. Enable high-rate stylus input via requestUnbufferedDispatch() (BUG-A004)
- * 3. Provide system dark mode detection for theme synchronization (BUG-A007)
+ * 2. Handle Activity results from the .snbx package importer (Phase 2)
+ * 3. Enable high-rate stylus input via requestUnbufferedDispatch() (BUG-A004)
+ * 4. Provide system dark mode detection for theme synchronization (BUG-A007)
  * 
  * This is necessary because:
  * - PDF picker: We need to process the file picker result while SAF permission is valid
+ * - Package importer: Same SAF handling for .snbx files
  * - Stylus input: Android batches touch events at 60Hz by default; we want 240Hz
  * - Dark mode: Qt doesn't automatically detect Android's system theme setting
  */
@@ -87,6 +89,12 @@ public class SpeedyNoteActivity extends QtActivity {
         // First, let our PDF helper try to handle it
         if (PdfFileHelper.handleActivityResult(requestCode, resultCode, data)) {
             Log.d(TAG, "PdfFileHelper handled the result");
+            return;
+        }
+        
+        // Try the package import helper
+        if (ImportHelper.handleActivityResult(requestCode, resultCode, data)) {
+            Log.d(TAG, "ImportHelper handled the result");
             return;
         }
         

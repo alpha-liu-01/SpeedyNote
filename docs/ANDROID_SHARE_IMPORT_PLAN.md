@@ -227,7 +227,7 @@ android/app-resources/AndroidManifest.xml  # FileProvider, intent filters
 |-------|------------|----------------|
 | Phase 1: Export/Share | Medium | 2-3 hours |
 | Phase 2: Import | Medium | 2-3 hours |
-| Phase 3: PDF Relink | Low | 1 hour |
+| Phase 3: PDF Relink | Low | 30 min (reuses PdfFileHelper) |
 | Phase 4: Intent Handling | Low | 1 hour |
 
 **Total:** ~6-8 hours
@@ -531,7 +531,7 @@ I agree with Option C.
 | Phase 0: Dual path system in Document | Medium | 1-2 hours |
 | Phase 1: Export/Share (cross-platform) | Medium | 3-4 hours |
 | Phase 2: Import (cross-platform) | Medium | 3-4 hours |
-| Phase 3: PDF Relink on Android | Low | 1 hour |
+| Phase 3: PDF Relink on Android | Low | 30 min (reuses PdfFileHelper.java) |
 | Phase 4: Intent Handling | Low | 1 hour |
 
 **Total:** ~10-12 hours
@@ -693,15 +693,21 @@ Implementation using Qt's private ZIP classes or QuaZip:
 **File:** `CMakeLists.txt`
 
 ```cmake
-# Add sharing module
+# Add sharing module (uses miniz for ZIP, MIT license)
 set(SHARING_SOURCES
     source/sharing/NotebookExporter.cpp
     source/sharing/NotebookImporter.cpp
+    thirdparty/miniz/miniz.c
 )
 
-# Note: Qt 6 has QZipReader/QZipWriter in QtCore (private API)
-# Alternative: Use QuaZip library or miniz
+# Include miniz headers
+include_directories(${CMAKE_SOURCE_DIR}/thirdparty/miniz)
 ```
+
+> **Implementation Note (2026-01-16):** We use miniz (https://github.com/richgel999/miniz)
+> instead of Qt's private `QZipWriter` API. Qt6::GuiPrivate requires private headers
+> that are not available on all platforms (e.g., Linux desktop packages don't ship them).
+> miniz is a public domain single-header C library that provides cross-platform ZIP support.
 
 ### Step 1.3: Create ShareHelper.java (Android only)
 
@@ -967,38 +973,120 @@ connect(m_fab, &FloatingActionButton::importPackageRequested, this, [this]() {
 
 **Goal:** Make PdfRelinkDialog work with Android SAF.
 
-**Estimated Time:** 1 hour
+**Estimated Time:** 30 minutes
 
-### Step 3.1: Create PdfRelinkHelper.java
+> **Simplification Note (2026-01-16):** Originally planned to create a separate 
+> `PdfRelinkHelper.java`, but we can **reuse the existing `PdfFileHelper.java`** 
+> from BUG-A003. The SAF picker + copy-to-sandbox logic is identical - only the
+> callback target differs. This reduces code duplication and implementation time.
 
-**File:** `android/app-resources/src/org/speedynote/app/PdfRelinkHelper.java`
+### Step 3.1: Add Android JNI Integration to PdfRelinkDialog
 
-Reuse logic from PdfFileHelper:
-- Open SAF picker for PDF files
-- Copy to sandbox
-- Call back with local path
+**File:** `source/pdf/PdfRelinkDialog.cpp`
 
-### Step 3.2: Update PdfRelinkDialog
+Add the same JNI pattern used in `MainWindow.cpp` for PDF picking:
+
+```cpp
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QEventLoop>
+#include <jni.h>
+
+namespace {
+    static QString s_relinkPdfPath;
+    static bool s_relinkCancelled = false;
+    static QEventLoop* s_relinkLoop = nullptr;
+}
+
+// JNI callbacks - reuse PdfFileHelper's native methods
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_PdfFileHelper_onPdfFilePickedForRelink(JNIEnv *env, jclass, jstring path)
+{
+    const char* pathChars = env->GetStringUTFChars(path, nullptr);
+    s_relinkPdfPath = QString::fromUtf8(pathChars);
+    env->ReleaseStringUTFChars(path, pathChars);
+    s_relinkCancelled = false;
+    if (s_relinkLoop) s_relinkLoop->quit();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_PdfFileHelper_onPdfPickCancelledForRelink(JNIEnv*, jclass)
+{
+    s_relinkPdfPath.clear();
+    s_relinkCancelled = true;
+    if (s_relinkLoop) s_relinkLoop->quit();
+}
+
+QString PdfRelinkDialog::pickPdfFileAndroid()
+{
+    s_relinkPdfPath.clear();
+    s_relinkCancelled = false;
+    
+    QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
+    QDir().mkpath(destDir);
+    
+    QJniObject activity = QNativeInterface::QAndroidApplication::context();
+    QJniObject::callStaticMethod<void>(
+        "org/speedynote/app/PdfFileHelper",
+        "pickPdfFile",
+        "(Landroid/app/Activity;Ljava/lang/String;)V",
+        activity.object<jobject>(),
+        QJniObject::fromString(destDir).object<jstring>()
+    );
+    
+    QEventLoop loop;
+    s_relinkLoop = &loop;
+    loop.exec();
+    s_relinkLoop = nullptr;
+    
+    return s_relinkCancelled ? QString() : s_relinkPdfPath;
+}
+#endif
+```
+
+**Wait - Issue Identified:** The JNI callback function names are tied to the Java native method declarations. We can't have two different C++ functions for the same Java method.
+
+**Revised Approach:** Use a **request context flag** to distinguish callers, OR simply call the existing `MainWindow::pickPdfFileAndroid()` if it's accessible.
+
+**Simplest Solution:** Make the PDF picker a shared utility that both `MainWindow` and `PdfRelinkDialog` can use:
+
+1. Move `pickPdfFileAndroid()` and JNI callbacks to a shared location (e.g., `PdfPickerAndroid.cpp`)
+2. Both `MainWindow` and `PdfRelinkDialog` call this shared function
+3. Return the picked path, caller handles the result
+
+### Step 3.2: Update PdfRelinkDialog for Android
 
 **File:** `source/pdf/PdfRelinkDialog.cpp`
 
 ```cpp
-void PdfRelinkDialog::onRelinkPdf() {
+void PdfRelinkDialog::onLocatePdf() {
+    QString newPath;
+    
 #ifdef Q_OS_ANDROID
-    // Use JNI to call PdfRelinkHelper
-    pickPdfFileAndroid();
+    // Use shared Android PDF picker (reuses PdfFileHelper.java)
+    newPath = pickPdfFileAndroid();  // Shared utility function
 #else
     // Existing QFileDialog code
-    ...
+    newPath = QFileDialog::getOpenFileName(this, 
+        tr("Locate PDF"), 
+        QDir::homePath(), 
+        tr("PDF Files (*.pdf)"));
 #endif
+
+    if (!newPath.isEmpty()) {
+        // Update document with new PDF path
+        m_document->relinkPdf(newPath);
+        accept();  // Close dialog on success
+    }
 }
 ```
 
 ### Step 3.3: Test Phase 3
 
-1. Import .snbx without PDF → Relink dialog appears
+1. Import `.snbx` without embedded PDF → Verify relink dialog appears
 2. Tap "Locate PDF" → SAF picker opens
-3. Select PDF → Copied to sandbox, document loads
+3. Select PDF → File copied to sandbox, document loads with PDF
+4. Verify PDF path saved correctly in `document.json`
 
 ---
 
@@ -1086,10 +1174,10 @@ public void onCreate(Bundle savedInstanceState) {
 - [ ] Test: Import on Android
 - [ ] Test: Duplicate name handling
 
-### Phase 3: PDF Relink on Android
-- [ ] Create PdfRelinkHelper.java
-- [ ] Update PdfRelinkDialog for Android
-- [ ] Test: Relink PDF on Android
+### Phase 3: PDF Relink on Android (Simplified)
+- [ ] Create shared Android PDF picker utility (or reuse existing)
+- [ ] Update PdfRelinkDialog for Android SAF
+- [ ] Test: Relink PDF on Android (import .snbx without PDF, locate via SAF)
 
 ### Phase 4: Intent Handling
 - [ ] Register .snbx MIME type
