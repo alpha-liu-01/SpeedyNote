@@ -20,7 +20,7 @@ void NavigationBar::setupUi()
     
     auto *mainLayout = new QHBoxLayout(this);
     mainLayout->setContentsMargins(4, 4, 4, 4);
-    mainLayout->setSpacing(2);
+    mainLayout->setSpacing(4);
     
     // === Left side buttons ===
     m_launcherButton = new ActionButton(this);
@@ -114,7 +114,7 @@ void NavigationBar::setFilename(const QString &filename)
     m_fullFilename = filename;
     
     // Elide if too long (max ~200px for filename area)
-    QString displayName = elideFilename(filename, 200);
+    QString displayName = elideFilename(filename, 250);
     m_filenameButton->setText(displayName);
     
     // Show full name in tooltip if elided
@@ -177,7 +177,8 @@ void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor)
         "   background: transparent; "
         "   border: none; "
         "   padding: 4px 12px; "
-        "   font-weight: bold; "
+        "   font-weight: normal; "
+        "   font-size: 18px; "
         "} "
         "QPushButton:hover { "
         "   background: rgba(%2, 30); "

@@ -23,7 +23,6 @@ URL="https://github.com/alpha-liu-01/SpeedyNote"
 LICENSE="MIT"
 
 # Default values
-DISTRO=""
 PACKAGE_FORMATS=()
 AUTO_DETECT=true
 
@@ -287,10 +286,9 @@ build_project() {
     rm -rf build
     mkdir -p build
     
-    # Compile translations if lrelease is available
-    if command_exists lrelease; then
-        echo -e "${YELLOW}Compiling translation files...${NC}"
-        # lrelease ./resources/translations/app_zh.ts ./resources/translations/app_fr.ts ./resources/translations/app_es.ts
+    # Copy pre-compiled translation files if they exist
+    if [ -d "resources/translations" ] && ls resources/translations/*.qm 1>/dev/null 2>&1; then
+        echo -e "${YELLOW}Copying translation files...${NC}"
         cp resources/translations/*.qm build/ 2>/dev/null || true
     fi
     
@@ -312,7 +310,7 @@ build_project() {
     echo -e "${GREEN}Build successful!${NC}"
 }
 
-# Function to create desktop file with PDF and SPN MIME type association
+# Function to create desktop file with PDF MIME type association
 create_desktop_file() {
     local desktop_file="$1"
     cat > "$desktop_file" << EOF
@@ -326,234 +324,11 @@ Icon=speedynote
 Terminal=false
 StartupNotify=true
 Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;package;
-MimeType=application/pdf;application/x-speedynote-package;
+Keywords=notes;pdf;annotation;writing;
+MimeType=application/pdf;
 EOF
 }
 
-# Function to create PDF-to-SPN desktop action file (REMOVED - using launcher instead)
-# create_pdf_action_file() {
-#     local action_file="$1"
-#     cat > "$action_file" << EOF
-# [Desktop Entry]
-# Version=1.0
-# Type=Application
-# Name=Create SpeedyNote Package
-# Comment=Create a SpeedyNote package from PDF
-# Exec=speedynote --create-new %F
-# Icon=speedynote
-# Terminal=false
-# StartupNotify=true
-# Categories=Office;Education;
-# Keywords=notes;pdf;annotation;package;create;
-# MimeType=application/pdf;
-# NoDisplay=true
-# EOF
-# }
-
-# Function to create SPN template file for "New" context menu (REMOVED - using launcher instead)
-# create_spn_template() {
-#     local template_file="$1"
-#     # Create a minimal .spn template file that file managers can copy
-#     echo "Contents" > "$template_file"
-# }
-
-# Function to create file templates for "New" context menu (REMOVED - using launcher instead)
-# create_file_templates() {
-#     local pkg_dir="$1"
-#     
-#     # Create template directory
-#     mkdir -p "$pkg_dir/usr/share/templates"
-#     
-#     # Create .spn template file
-#     create_spn_template "$pkg_dir/usr/share/templates/Empty SpeedyNote Package.spn"
-#     
-#     # Create desktop file for template (KDE)
-#     cat > "$pkg_dir/usr/share/templates/Empty SpeedyNote Package.desktop" << 'EOF'
-# [Desktop Entry]
-# Name=SpeedyNote Package
-# Name[es]=Paquete SpeedyNote
-# Name[fr]=Package SpeedyNote
-# Name[zh]=SpeedyNote 包
-# Comment=Create a new SpeedyNote package
-# Comment[es]=Crear un nuevo paquete SpeedyNote
-# Comment[fr]=Créer un nouveau package SpeedyNote
-# Comment[zh]=创建新的 SpeedyNote 包
-# URL=Empty SpeedyNote Package.spn
-# Type=Link
-# Icon=speedynote
-# EOF
-# 
-#     # Create Nautilus template
-#     mkdir -p "$pkg_dir/usr/share/nautilus-python/extensions"
-#     cat > "$pkg_dir/usr/share/nautilus-python/extensions/speedynote_template.py" << 'EOF'
-# #!/usr/bin/env python3
-# """
-# Nautilus extension to add SpeedyNote Package to "New Document" menu
-# """
-# 
-# import os
-# import subprocess
-# from gi.repository import Nautilus, GObject, Gio
-# 
-# class SpeedyNoteTemplateProvider(GObject.GObject, Nautilus.MenuProvider):
-#     def __init__(self):
-#         super().__init__()
-# 
-#     def get_background_items(self, window, current_folder):
-#         """Add SpeedyNote Package to right-click background menu"""
-#         if not current_folder:
-#             return []
-# 
-#         # Create menu item
-#         item = Nautilus.MenuItem(
-#             name='SpeedyNoteTemplate::create_spn',
-#             label='SpeedyNote Package',
-#             tip='Create a new SpeedyNote package'
-#         )
-#         
-#         # Connect callback
-#         item.connect('activate', self._create_spn_package, current_folder)
-#         
-#         # Create submenu for "New Document"
-#         submenu = Nautilus.Menu()
-#         submenu.append_item(item)
-#         
-#         # Create parent menu item
-#         parent_item = Nautilus.MenuItem(
-#             name='SpeedyNoteTemplate::new_document',
-#             label='New Document',
-#             tip='Create new documents'
-#         )
-#         parent_item.set_submenu(submenu)
-#         
-#         return [parent_item]
-# 
-#     def _create_spn_package(self, menu, current_folder):
-#         """Create a new SpeedyNote package"""
-#         folder_path = current_folder.get_location().get_path()
-#         
-#         # Generate unique filename
-#         base_name = "New SpeedyNote Package"
-#         counter = 1
-#         spn_path = os.path.join(folder_path, f"{base_name}.spn")
-#         
-#         while os.path.exists(spn_path):
-#             spn_path = os.path.join(folder_path, f"{base_name} {counter}.spn")
-#             counter += 1
-#         
-#         try:
-#             # Create SpeedyNote package using silent mode
-#             subprocess.run(['speedynote', '--create-silent', spn_path], check=True)
-#         except (subprocess.CalledProcessError, FileNotFoundError):
-#             # Fallback: create minimal template
-#             with open(spn_path, 'w') as f:
-#                 f.write("Contents")
-# EOF
-#     chmod +x "$pkg_dir/usr/share/nautilus-python/extensions/speedynote_template.py"
-# }
-
-# Function to create MIME type definition for .spn files
-create_mime_xml() {
-    local mime_file="$1"
-    cat > "$mime_file" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-    <mime-type type="application/x-speedynote-package">
-        <comment>SpeedyNote Package</comment>
-        <comment xml:lang="es">Paquete de SpeedyNote</comment>
-        <comment xml:lang="fr">Package SpeedyNote</comment>
-        <comment xml:lang="zh">SpeedyNote 包</comment>
-        <icon name="speedynote"/>
-        <glob pattern="*.spn"/>
-        <magic priority="50">
-            <match type="string" offset="0" value="Contents"/>
-        </magic>
-    </mime-type>
-</mime-info>
-EOF
-}
-
-# Function to create file manager integration scripts (REMOVED - using launcher instead)
-# create_file_manager_integration() {
-#     local pkg_dir="$1"
-#     
-#     # Create Nautilus (GNOME) script for "Create SpeedyNote Package"
-#     mkdir -p "$pkg_dir/usr/share/nautilus/scripts"
-#     cat > "$pkg_dir/usr/share/nautilus/scripts/Create SpeedyNote Package" << 'EOF'
-# #!/bin/bash
-# # Nautilus script to create SpeedyNote package from PDF
-# 
-# if [ -n "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" ]; then
-#     while IFS= read -r file; do
-#         if [[ "$file" == *.pdf ]]; then
-#             # Extract directory and filename
-#             dir=$(dirname "$file")
-#             basename=$(basename "$file" .pdf)
-#             spn_path="$dir/$basename.spn"
-#             
-#             # Create SpeedyNote package
-#             speedynote --create-silent "$spn_path" "$file"
-#         fi
-#     done <<< "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS"
-# fi
-# EOF
-#     chmod +x "$pkg_dir/usr/share/nautilus/scripts/Create SpeedyNote Package"
-#     
-#     # Create Dolphin (KDE) service menu
-#     mkdir -p "$pkg_dir/usr/share/kservices5/ServiceMenus"
-#     cat > "$pkg_dir/usr/share/kservices5/ServiceMenus/speedynote-create-package.desktop" << 'EOF'
-# [Desktop Entry]
-# Type=Service
-# X-KDE-ServiceTypes=KonqPopupMenu/Plugin
-# MimeType=application/pdf;
-# Actions=CreateSpeedyNotePackage;
-# 
-# [Desktop Action CreateSpeedyNotePackage]
-# Name=Create SpeedyNote Package
-# Name[es]=Crear Paquete SpeedyNote
-# Name[fr]=Créer un Package SpeedyNote
-# Name[zh]=创建 SpeedyNote 包
-# Icon=speedynote
-# Exec=sh -c 'dir=$(dirname "%f"); base=$(basename "%f" .pdf); speedynote --create-silent "$dir/$base.spn" "%f"'
-# EOF
-#     
-#     # Create Thunar (XFCE) custom action
-#     mkdir -p "$pkg_dir/usr/share/Thunar/sendto"
-#     cat > "$pkg_dir/usr/share/Thunar/sendto/speedynote-create-package.desktop" << 'EOF'
-# [Desktop Entry]
-# Version=1.0
-# Type=Application
-# Name=Create SpeedyNote Package
-# Name[es]=Crear Paquete SpeedyNote
-# Name[fr]=Créer un Package SpeedyNote
-# Name[zh]=创建 SpeedyNote 包
-# Comment=Create a SpeedyNote package from PDF
-# Icon=speedynote
-# Exec=sh -c 'for file in %F; do if [[ "$file" == *.pdf ]]; then dir=$(dirname "$file"); base=$(basename "$file" .pdf); speedynote --create-silent "$dir/$base.spn" "$file"; fi; done'
-# MimeType=application/pdf;
-# Categories=Office;
-# EOF
-# 
-#     # Create PCManFM (LXDE/LXQt) action
-#     mkdir -p "$pkg_dir/usr/share/file-manager/actions"
-#     cat > "$pkg_dir/usr/share/file-manager/actions/speedynote-create-package.desktop" << 'EOF'
-# [Desktop Entry]
-# Type=Action
-# Name=Create SpeedyNote Package
-# Name[es]=Crear Paquete SpeedyNote
-# Name[fr]=Créer un Package SpeedyNote
-# Name[zh]=创建 SpeedyNote 包
-# Comment=Create a SpeedyNote package from PDF
-# Icon=speedynote
-# Profiles=profile-zero;
-# 
-# [X-Action-Profile profile-zero]
-# MimeTypes=application/pdf;
-# Exec=sh -c 'for file in %F; do if [[ "$file" == *.pdf ]]; then dir=$(dirname "$file"); base=$(basename "$file" .pdf); speedynote --create-silent "$dir/$base.spn" "$file"; fi; done'
-# Name=Create SpeedyNote Package
-# EOF
-# }
 
 # Function to create DEB package
 create_deb_package() {
@@ -566,7 +341,6 @@ create_deb_package() {
     mkdir -p "$PKG_DIR/usr/share/applications"
     mkdir -p "$PKG_DIR/usr/share/pixmaps"
     mkdir -p "$PKG_DIR/usr/share/doc/$PKGNAME"
-    mkdir -p "$PKG_DIR/usr/share/mime/packages"
     
     # Create control file
     cat > "$PKG_DIR/DEBIAN/control" << EOF
@@ -583,15 +357,10 @@ Description: $DESCRIPTION
  support and controller input capabilities.
 EOF
     
-    # Create postinst script for MIME database update
+    # Create postinst script for desktop database update
     cat > "$PKG_DIR/DEBIAN/postinst" << 'EOF'
 #!/bin/bash
 set -e
-
-# Update MIME database
-if [ -x /usr/bin/update-mime-database ]; then
-    update-mime-database /usr/share/mime
-fi
 
 # Update desktop database
 if [ -x /usr/bin/update-desktop-database ]; then
@@ -607,11 +376,6 @@ EOF
 set -e
 
 if [ "$1" = "remove" ]; then
-    # Update MIME database
-    if [ -x /usr/bin/update-mime-database ]; then
-        update-mime-database /usr/share/mime
-    fi
-    
     # Update desktop database
     if [ -x /usr/bin/update-desktop-database ]; then
         update-desktop-database -q /usr/share/applications
@@ -637,9 +401,6 @@ EOF
     
     # Create desktop file with PDF association
     create_desktop_file "$PKG_DIR/usr/share/applications/speedynote.desktop"
-    
-    # Create MIME type definition for .spn files
-    create_mime_xml "$PKG_DIR/usr/share/mime/packages/application-x-speedynote-package.xml"
     
     # Build package
     dpkg-deb --build "$PKG_DIR" "${PKGNAME}_${PKGVER}-${PKGREL}_$(dpkg --print-architecture).deb"
@@ -697,7 +458,6 @@ mkdir -p %{buildroot}/usr/bin
 mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/usr/share/pixmaps
 mkdir -p %{buildroot}/usr/share/doc/%{name}
-mkdir -p %{buildroot}/usr/share/mime/packages
 
 install -m755 %{_vpath_builddir}/NoteApp %{buildroot}/usr/bin/speedynote
 install -m644 resources/icons/mainicon.png %{buildroot}/usr/share/pixmaps/speedynote.png
@@ -722,41 +482,21 @@ Icon=speedynote
 Terminal=false
 StartupNotify=true
 Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;package;
-MimeType=application/pdf;application/x-speedynote-package;
+Keywords=notes;pdf;annotation;writing;
+MimeType=application/pdf;
 EOFDESKTOP
-
-cat > %{buildroot}/usr/share/mime/packages/application-x-speedynote-package.xml << EOFMIME
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-    <mime-type type="application/x-speedynote-package">
-        <comment>SpeedyNote Package</comment>
-        <comment xml:lang="es">Paquete de SpeedyNote</comment>
-        <comment xml:lang="fr">Package SpeedyNote</comment>
-        <comment xml:lang="zh">SpeedyNote 包</comment>
-        <icon name="speedynote"/>
-        <glob pattern="*.spn"/>
-        <magic priority="50">
-            <match type="string" offset="0" value="Contents"/>
-        </magic>
-    </mime-type>
-</mime-info>
-EOFMIME
 
 %post
 /usr/bin/update-desktop-database -q /usr/share/applications || :
-/usr/bin/update-mime-database /usr/share/mime &> /dev/null || :
 
 %postun
 /usr/bin/update-desktop-database -q /usr/share/applications || :
-/usr/bin/update-mime-database /usr/share/mime &> /dev/null || :
 
 %files
 /usr/bin/speedynote
 /usr/share/applications/speedynote.desktop
 /usr/share/pixmaps/speedynote.png
 /usr/share/doc/%{name}/README.md
-/usr/share/mime/packages/application-x-speedynote-package.xml
 /usr/share/speedynote/translations/
 
 %changelog
@@ -835,41 +575,21 @@ Icon=speedynote
 Terminal=false
 StartupNotify=true
 Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;package;
-MimeType=application/pdf;application/x-speedynote-package;
+Keywords=notes;pdf;annotation;writing;
+MimeType=application/pdf;
 EOFDESKTOP
-
-    install -Dm644 /dev/stdin "\$pkgdir/usr/share/mime/packages/application-x-speedynote-package.xml" << EOFMIME
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-    <mime-type type="application/x-speedynote-package">
-        <comment>SpeedyNote Package</comment>
-        <comment xml:lang="es">Paquete de SpeedyNote</comment>
-        <comment xml:lang="fr">Package SpeedyNote</comment>
-        <comment xml:lang="zh">SpeedyNote 包</comment>
-        <icon name="speedynote"/>
-        <glob pattern="*.spn"/>
-        <magic priority="50">
-            <match type="string" offset="0" value="Contents"/>
-        </magic>
-    </mime-type>
-</mime-info>
-EOFMIME
 }
 
 post_install() {
     update-desktop-database -q
-    update-mime-database /usr/share/mime
 }
 
 post_upgrade() {
     update-desktop-database -q
-    update-mime-database /usr/share/mime
 }
 
 post_remove() {
     update-desktop-database -q
-    update-mime-database /usr/share/mime
 }
 EOF
     
@@ -952,26 +672,9 @@ Icon=speedynote
 Terminal=false
 StartupNotify=true
 Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;package;
-MimeType=application/pdf;application/x-speedynote-package;
+Keywords=notes;pdf;annotation;writing;
+MimeType=application/pdf;
 EOFDESKTOP
-
-    install -Dm644 /dev/stdin "\$pkgdir/usr/share/mime/packages/application-x-speedynote-package.xml" << EOFMIME
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-    <mime-type type="application/x-speedynote-package">
-        <comment>SpeedyNote Package</comment>
-        <comment xml:lang="es">Paquete de SpeedyNote</comment>
-        <comment xml:lang="fr">Package SpeedyNote</comment>
-        <comment xml:lang="zh">SpeedyNote 包</comment>
-        <icon name="speedynote"/>
-        <glob pattern="*.spn"/>
-        <magic priority="50">
-            <match type="string" offset="0" value="Contents"/>
-        </magic>
-    </mime-type>
-</mime-info>
-EOFMIME
 }
 EOF
     
@@ -979,9 +682,8 @@ EOF
     cat > "${PKGNAME}.post-install" << 'EOF'
 #!/bin/sh
 
-# Update desktop and MIME databases
+# Update desktop database
 update-desktop-database -q /usr/share/applications 2>/dev/null || true
-update-mime-database /usr/share/mime 2>/dev/null || true
 
 exit 0
 EOF
@@ -1039,8 +741,7 @@ show_package_info() {
     echo
     echo -e "${CYAN}=== File Association ===${NC}"
     echo -e "✅ PDF Association: SpeedyNote available in 'Open with' menu for PDF files"
-    echo -e "✅ .spn Package Association: Double-click .spn files to open in SpeedyNote"
-    echo -e "✅ Launcher Integration: Use SpeedyNote launcher for creating new packages and managing documents"
+    echo -e "✅ Launcher Integration: Use SpeedyNote launcher for creating and importing notebooks"
 }
 
 # Main execution
