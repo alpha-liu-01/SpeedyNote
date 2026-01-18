@@ -110,6 +110,12 @@ DocumentViewport::~DocumentViewport()
         m_gestureTimeoutTimer->stop();
     }
     
+    // Stop touch handler gestures (including inertia timer)
+    // Must happen before m_gesture.reset() to avoid accessing stale gesture state
+    if (m_touchHandler) {
+        m_touchHandler->setMode(TouchGestureMode::Disabled);
+    }
+    
     // Clear gesture cached frame (releases memory)
     m_gesture.reset();
     
@@ -5299,10 +5305,15 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
 void DocumentViewport::pasteForObjectSelect()
 {
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "pasteForObjectSelect: Called";
+    qDebug() << "pasteForObjectSelect: Called, insertMode =" 
+             << (m_objectInsertMode == ObjectInsertMode::Image ? "Image" : "Link");
 #endif
     
     // Phase O2.4.2: Tool-aware paste for ObjectSelect tool
+    // Paste priority depends on ObjectInsertMode:
+    // - Image mode: System clipboard images take priority, then internal clipboard
+    // - Link mode: Internal clipboard takes priority (ignore system clipboard images)
+    
     QClipboard* clipboard = QGuiApplication::clipboard();
     if (!clipboard || !clipboard->mimeData()) {
 #ifdef SPEEDYNOTE_DEBUG
@@ -5313,29 +5324,51 @@ void DocumentViewport::pasteForObjectSelect()
     
     const QMimeData* mimeData = clipboard->mimeData();
     
-    // Priority 1: System clipboard has raw image data (e.g., copied from browser/image editor)
+    // ===== Link mode: Internal clipboard takes priority =====
+    // When user is in Link mode, they're focused on LinkObjects.
+    // System clipboard images should NOT interrupt pasting copied LinkObjects.
+    if (m_objectInsertMode == ObjectInsertMode::Link) {
+        // Priority 1 (Link mode): Internal object clipboard
+        if (!m_objectClipboard.isEmpty()) {
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "pasteForObjectSelect (Link mode): Internal clipboard has" 
+                     << m_objectClipboard.size() << "objects";
+#endif
+            pasteObjects();
+            return;
+        }
+        
+        // Priority 2 (Link mode): Fall through - no internal clipboard content
+        // In Link mode, we don't paste system clipboard images.
+        // User can switch to Image mode if they want to paste an image.
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "pasteForObjectSelect (Link mode): No internal clipboard content, skipping system clipboard";
+#endif
+        return;
+    }
+    
+    // ===== Image mode: System clipboard takes priority =====
+    // Priority 1 (Image mode): System clipboard has raw image data
     if (mimeData->hasImage()) {
 #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pasteForObjectSelect: Clipboard has raw image, calling insertImageFromClipboard()";
+        qDebug() << "pasteForObjectSelect (Image mode): Clipboard has raw image";
 #endif
         insertImageFromClipboard();
         return;
     }
     
-    // Priority 2 (BF.1): File URLs (e.g., copied from Windows File Explorer)
-    // When you copy a PNG file in Explorer, the clipboard has URLs, not raw image data.
-    // hasImage() returns false, but hasUrls() returns true with the file path.
+    // Priority 2 (Image mode/BF.1): File URLs (e.g., copied from Windows File Explorer)
     if (mimeData->hasUrls()) {
         QList<QUrl> urls = mimeData->urls();
 #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pasteForObjectSelect: Clipboard has URLs:" << urls;
+        qDebug() << "pasteForObjectSelect (Image mode): Clipboard has URLs:" << urls;
 #endif
         
         for (const QUrl& url : urls) {
             if (url.isLocalFile()) {
                 QString filePath = url.toLocalFile();
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "pasteForObjectSelect: Checking file:" << filePath;
+                qDebug() << "pasteForObjectSelect (Image mode): Checking file:" << filePath;
 #endif
                 
                 // Check if it's an image file
@@ -5345,7 +5378,7 @@ void DocumentViewport::pasteForObjectSelect()
                     lower.endsWith(".gif") || lower.endsWith(".webp")) {
                     
 #ifdef SPEEDYNOTE_DEBUG
-                    qDebug() << "pasteForObjectSelect: Loading image from file:" << filePath;
+                    qDebug() << "pasteForObjectSelect (Image mode): Loading image from file:" << filePath;
 #endif
                     insertImageFromFile(filePath);
                     return;  // Only insert first image
@@ -5353,14 +5386,16 @@ void DocumentViewport::pasteForObjectSelect()
             }
         }
 #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pasteForObjectSelect: No valid image files in URLs";
+        qDebug() << "pasteForObjectSelect (Image mode): No valid image files in URLs";
 #endif
     }
     
-    // Priority 3: Internal object clipboard (O2.6.3)
+    // Priority 3 (Image mode): Internal object clipboard
+    // Even in Image mode, paste internal objects if no system clipboard image
     if (!m_objectClipboard.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pasteForObjectSelect: Internal clipboard has" << m_objectClipboard.size() << "objects";
+        qDebug() << "pasteForObjectSelect (Image mode): Internal clipboard has" 
+                 << m_objectClipboard.size() << "objects";
 #endif
         pasteObjects();
         return;
@@ -5369,9 +5404,6 @@ void DocumentViewport::pasteForObjectSelect()
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "pasteForObjectSelect: Nothing to paste";
 #endif
-    
-    // If neither clipboard has content, do nothing
-    // (No fallback to lasso paste - that's a separate tool)
 }
 
 void DocumentViewport::insertImageFromClipboard()
@@ -5401,14 +5433,15 @@ void DocumentViewport::insertImageFromClipboard()
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "insertImageFromClipboard: image.isNull() =" << image.isNull() 
              << "size =" << image.size();
+#endif
 
+    // CRITICAL: This check must be OUTSIDE debug block to prevent crash in release builds
     if (image.isNull()) {
-        #ifdef SPEEDYNOTE_DEBUG
+#ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertImageFromClipboard: No valid image in clipboard";
-        #endif
+#endif
         return;
     }
-#endif
     
     // 2. Create ImageObject with setPixmap()
     auto imgObj = std::make_unique<ImageObject>();
@@ -5432,7 +5465,9 @@ void DocumentViewport::insertImageFromClipboard()
     // This allows user to immediately annotate the image with the active layer
     int activeLayer = m_document->isEdgeless() 
         ? m_edgelessActiveLayerIndex 
-        : m_document->page(m_currentPageIndex)->activeLayerIndex;
+        : (m_document->page(m_currentPageIndex) 
+           ? m_document->page(m_currentPageIndex)->activeLayerIndex 
+           : 0);
     int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
     imgObj->setLayerAffinity(defaultAffinity);
 #ifdef SPEEDYNOTE_DEBUG
@@ -5573,7 +5608,9 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     // This allows user to immediately annotate the image with the active layer
     int activeLayer = m_document->isEdgeless() 
         ? m_edgelessActiveLayerIndex 
-        : m_document->page(m_currentPageIndex)->activeLayerIndex;
+        : (m_document->page(m_currentPageIndex) 
+           ? m_document->page(m_currentPageIndex)->activeLayerIndex 
+           : 0);
     int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
     imgObj->setLayerAffinity(defaultAffinity);
 #ifdef SPEEDYNOTE_DEBUG
@@ -5971,6 +6008,9 @@ void DocumentViewport::pasteObjects()
         InsertedObject* rawPtr = obj.get();
         
         // Add to appropriate page/tile
+        // Track tile coord for undo (edgeless mode)
+        Document::TileCoord insertedTileCoord = {0, 0};
+        
         if (m_document->isEdgeless()) {
             // Calculate which tile the object belongs to based on its position
             auto coord = m_document->tileCoordForPoint(obj->position);
@@ -5995,6 +6035,7 @@ void DocumentViewport::pasteObjects()
             
             targetTile->addObject(std::move(obj));
             m_document->markTileDirty(coord);
+            insertedTileCoord = coord;
         } else {
             // Paged mode: add to current page
             Page* targetPage = m_document->page(m_currentPageIndex);
@@ -6017,6 +6058,9 @@ void DocumentViewport::pasteObjects()
         // Update max object extent
         m_document->updateMaxObjectExtent(rawPtr);
         
+        // Create undo entry for this pasted object
+        pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
+        
         // Track for selection
         pastedObjects.append(rawPtr);
     }
@@ -6025,8 +6069,6 @@ void DocumentViewport::pasteObjects()
     for (InsertedObject* obj : pastedObjects) {
         selectObject(obj, true);  // addToSelection = true
     }
-    
-    // TODO O2.7: Create undo entries for paste
     
     if (!pastedObjects.isEmpty()) {
         emit documentModified();

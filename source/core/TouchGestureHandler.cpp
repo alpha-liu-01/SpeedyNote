@@ -25,6 +25,14 @@ void TouchGestureHandler::setMode(TouchGestureMode mode)
         return;
     }
     
+    // Stop inertia timer if running (critical: must happen before mode change)
+    // Without this, inertia would continue even after mode changes to Disabled
+    if (m_inertiaTimer && m_inertiaTimer->isActive()) {
+        m_inertiaTimer->stop();
+        m_viewport->endPanGesture();
+        m_velocitySamples.clear();
+    }
+    
     // End any active gesture when mode changes
     if (m_panActive) {
         endTouchPan(false);  // No inertia when mode changes

@@ -666,7 +666,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     }
     
     QMenu menu(this);
-    QAction* starAction = menu.addAction(isStarred ? tr("★ Unstar") : tr("☆ Star"));
+    QAction* starAction = menu.addAction(isStarred ? tr("Unstar") : tr("Star"));
     connect(starAction, &QAction::triggered, this, [this, bundlePath]() {
         toggleNotebookStar(bundlePath);
     });
@@ -697,7 +697,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
         folderMenu->addSeparator();
         
         // Create new folder
-        QAction* newFolderAction = folderMenu->addAction(tr("+ New Folder..."));
+        QAction* newFolderAction = folderMenu->addAction(tr("New Folder..."));
         connect(newFolderAction, &QAction::triggered, this, [this, bundlePath]() {
             bool ok;
             QString name = QInputDialog::getText(this, tr("New Folder"),
@@ -713,13 +713,13 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     }
     
     // Rename action
-    QAction* renameAction = menu.addAction(tr("✏ Rename"));
+    QAction* renameAction = menu.addAction(tr("Rename"));
     connect(renameAction, &QAction::triggered, this, [this, bundlePath]() {
         renameNotebook(bundlePath);
     });
     
     // Duplicate action
-    QAction* duplicateAction = menu.addAction(tr("📋 Duplicate"));
+    QAction* duplicateAction = menu.addAction(tr("Duplicate"));
     connect(duplicateAction, &QAction::triggered, this, [this, bundlePath]() {
         duplicateNotebook(bundlePath);
     });
@@ -727,7 +727,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     menu.addSeparator();
     
     // Show in file manager action
-    QAction* showAction = menu.addAction(tr("📂 Show in File Manager"));
+    QAction* showAction = menu.addAction(tr("Show in File Manager"));
     connect(showAction, &QAction::triggered, this, [this, bundlePath]() {
         showInFileManager(bundlePath);
     });
@@ -735,7 +735,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     menu.addSeparator();
     
     // Delete action
-    QAction* deleteAction = menu.addAction(tr("🗑 Delete"));
+    QAction* deleteAction = menu.addAction(tr("Delete"));
     connect(deleteAction, &QAction::triggered, this, [this, bundlePath]() {
         deleteNotebook(bundlePath);
     });
@@ -748,7 +748,7 @@ void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& gl
     QMenu menu(this);
     
     // Rename action
-    QAction* renameAction = menu.addAction(tr("✏ Rename"));
+    QAction* renameAction = menu.addAction(tr("Rename"));
     connect(renameAction, &QAction::triggered, this, [this, folderName]() {
         bool ok;
         QString newName = QInputDialog::getText(this, tr("Rename Folder"),
@@ -771,7 +771,7 @@ void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& gl
     menu.addSeparator();
     
     // Delete action
-    QAction* deleteAction = menu.addAction(tr("🗑 Delete Folder"));
+    QAction* deleteAction = menu.addAction(tr("Delete Folder"));
     connect(deleteAction, &QAction::triggered, this, [this, folderName]() {
         QMessageBox::StandardButton reply = QMessageBox::question(
             this,
