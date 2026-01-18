@@ -4933,16 +4933,12 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                 if (m_document->isEdgeless()) {
                     // May need to relocate to different tile if position changed
                     relocateObjectsToCorrectTiles();
-                    // Mark tile dirty
-                    for (const auto& coord : m_document->allLoadedTileCoords()) {
-                        Page* tile = m_document->getTile(coord.first, coord.second);
-                        if (tile && tile->objectById(obj->id)) {
-                            m_document->markTileDirty(coord);
-                            break;
-                        }
-                    }
+                    // Mark tile dirty - use cached tile coord for efficiency
+                    m_document->markTileDirty(m_dragObjectTileCoord);
                 } else {
-                    m_document->markPageDirty(m_currentPageIndex);
+                    // Use cached page index for efficiency
+                    int pageIdx = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
+                    m_document->markPageDirty(pageIdx);
                 }
             }
             
@@ -4984,21 +4980,29 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     // Also mark tiles dirty for objects that didn't relocate
                     // (they still moved within their tile)
                     if (relocated < m_selectedObjects.size()) {
-                        for (InsertedObject* obj : m_selectedObjects) {
-                            if (!obj) continue;
-                            // Find tile containing this object and mark dirty
-                            for (const auto& coord : m_document->allLoadedTileCoords()) {
-                                Page* tile = m_document->getTile(coord.first, coord.second);
-                                if (tile && tile->objectById(obj->id)) {
-                                    m_document->markTileDirty(coord);
-                                    break;
+                        // PERF: For single selection, use cached tile coord
+                        if (m_selectedObjects.size() == 1 && 
+                            (m_dragObjectTileCoord.first != 0 || m_dragObjectTileCoord.second != 0 ||
+                             m_document->getTile(0, 0))) {
+                            m_document->markTileDirty(m_dragObjectTileCoord);
+                        } else {
+                            // Multi-selection: need to search for each object's tile
+                            for (InsertedObject* obj : m_selectedObjects) {
+                                if (!obj) continue;
+                                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                                    Page* tile = m_document->getTile(coord.first, coord.second);
+                                    if (tile && tile->objectById(obj->id)) {
+                                        m_document->markTileDirty(coord);
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
                 } else {
-                    // Paged mode: mark current page dirty
-                    m_document->markPageDirty(m_currentPageIndex);
+                    // Paged mode: use cached page index for efficiency
+                    int pageIdx = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
+                    m_document->markPageDirty(pageIdx);
                 }
             }
             
@@ -5018,14 +5022,17 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     Document::TileCoord newTile = {0, 0};
                     
                     if (m_document->isEdgeless()) {
-                        // Calculate tile coords from positions
-                        // oldPos and obj->position are tile-local, so we need to find tiles
-                        // For now, use object's current tile (relocateObjectsToCorrectTiles already handled movement)
-                        for (const auto& coord : m_document->allLoadedTileCoords()) {
-                            Page* tile = m_document->getTile(coord.first, coord.second);
-                            if (tile && tile->objectById(obj->id)) {
-                                newTile = coord;
-                                break;
+                        // PERF: For single selection, use cached tile coord
+                        if (m_selectedObjects.size() == 1) {
+                            newTile = m_dragObjectTileCoord;
+                        } else {
+                            // Multi-selection: need to search for object's tile
+                            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                                Page* tile = m_document->getTile(coord.first, coord.second);
+                                if (tile && tile->objectById(obj->id)) {
+                                    newTile = coord;
+                                    break;
+                                }
                             }
                         }
                         // Old tile is same as new if no relocation happened
@@ -5137,22 +5144,18 @@ int DocumentViewport::relocateObjectsToCorrectTiles()
             continue;
         }
         
-        // Update selection pointer before adding (addObject will take ownership)
+        // Get raw pointer BEFORE std::move (for updating selection)
         InsertedObject* newPtr = extracted.get();
+        Q_UNUSED(newPtr);  // Selection update not needed - see note below
         
-        // Add to new tile
+        // Add to new tile (transfers ownership)
         newTile->addObject(std::move(extracted));
         
-        // Update m_selectedObjects to point to the object in its new location
-        int idx = m_selectedObjects.indexOf(nullptr);  // Won't work - object moved
-        // Actually, we need to find by old pointer which is now invalid
-        // The object is the same but the pointer changed... Actually no, the pointer
-        // is the same because unique_ptr just transfers ownership
-        // But wait - we got newPtr before the move, let me re-check...
-        
-        // Actually the pointer itself (the address) doesn't change when we move unique_ptr
-        // The unique_ptr just transfers ownership. So newPtr should still be valid
-        // and should still be in m_selectedObjects
+        // Note on m_selectedObjects: The raw pointer in m_selectedObjects remains valid
+        // because unique_ptr::get() returns the same address before and after moving
+        // the unique_ptr. The object itself doesn't move in memory - only ownership
+        // is transferred from oldTile to newTile. So m_selectedObjects still points
+        // to the same valid object, now owned by newTile.
         
         // Mark both tiles dirty
         m_document->markTileDirty(info.currentTile);
@@ -5736,8 +5739,8 @@ void DocumentViewport::deleteSelectedObjects()
             for (const auto& coord : m_document->allLoadedTileCoords()) {
                 Page* tile = m_document->getTile(coord.first, coord.second);
                 if (tile && tile->objectById(obj->id)) {
-                    // TODO O2.7: Create undo entry with serialized object data
-                    // pushObjectDeleteUndo(obj, coord);
+                    // Create undo entry BEFORE removing (object still valid)
+                    pushObjectDeleteUndo(obj, -1, coord);
                     
                     // Remove object from tile
                     tile->removeObject(obj->id);
@@ -5764,8 +5767,8 @@ void DocumentViewport::deleteSelectedObjects()
                 
                 // Check if object is on current page
                 if (currentPage->objectById(obj->id)) {
-                    // TODO O2.7: Create undo entry with serialized object data
-                    // pushObjectDeleteUndo(obj, m_currentPageIndex);
+                    // Create undo entry BEFORE removing (object still valid)
+                    pushObjectDeleteUndo(obj, m_currentPageIndex, {});
                     
                     // Remove object from page
                     currentPage->removeObject(obj->id);
@@ -5778,6 +5781,9 @@ void DocumentViewport::deleteSelectedObjects()
                     for (int i : m_document->loadedPageIndices()) {
                         Page* page = m_document->page(i);  // Already loaded, no disk I/O
                         if (page && page->objectById(obj->id)) {
+                            // Create undo entry BEFORE removing (object still valid)
+                            pushObjectDeleteUndo(obj, i, {});
+                            
                             page->removeObject(obj->id);
                             m_document->markPageDirty(i);
                             deletedCount++;
