@@ -59,7 +59,7 @@ DocumentManager::~DocumentManager()
 Document* DocumentManager::createDocument(const QString& name)
 {
     // Create a new document with default settings
-    auto docPtr = Document::createNew(name.isEmpty() ? QStringLiteral("Untitled") : name);
+    auto docPtr = Document::createNew(name.isEmpty() ? tr("Untitled") : name);
     
     if (!docPtr) {
         qWarning() << "DocumentManager::createDocument: Failed to create document";

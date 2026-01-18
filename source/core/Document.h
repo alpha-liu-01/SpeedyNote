@@ -18,6 +18,7 @@
 #include "Page.h"
 #include "../pdf/PdfProvider.h"
 
+#include <QCoreApplication>  // For translate() in displayName()
 #include <QString>
 #include <QDateTime>
 #include <QColor>
@@ -212,9 +213,13 @@ public:
     
     /**
      * @brief Get a display title for the document.
-     * @return The name if set, otherwise "Untitled".
+     * @return The name if set, otherwise "Untitled" (translated).
      */
-    QString displayName() const { return name.isEmpty() ? QStringLiteral("Untitled") : name; }
+    QString displayName() const { 
+        return name.isEmpty() 
+            ? QCoreApplication::translate("Document", "Untitled") 
+            : name; 
+    }
     
     /**
      * @brief Check if this is an edgeless (infinite canvas) document.

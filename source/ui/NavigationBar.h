@@ -98,7 +98,7 @@ private:
     
     // State
     bool m_darkMode = false;
-    QColor m_accentColor = QColor(0x22, 0x77, 0xCC);  // #2277CC default
+    QColor m_accentColor = QColor(0x31, 0x68, 0x82);  // #316882 default
 };
 
 #endif // NAVIGATIONBAR_H

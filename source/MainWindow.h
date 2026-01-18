@@ -33,7 +33,6 @@
 #include "ui/TabManager.h"
 #include "core/DocumentManager.h"
 #include "core/ToolType.h"
-#include <QElapsedTimer>
 
 // Toolbar extraction includes
 #include "ui/NavigationBar.h"
@@ -316,7 +315,6 @@ private slots:
     void insertPageInDocument();  // Phase 3: Insert page after current (Ctrl+Shift+I)
     void deletePageInDocument();  // Phase 3B: Delete current page (Ctrl+Shift+D)
     void openPdfDocument(const QString &filePath = QString());       // doc-1.4: Open PDF file (Ctrl+Shift+O)
-    qreal getDevicePixelRatio(); 
     bool isDarkMode();
  
 private:
@@ -555,15 +553,7 @@ private:
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
     
-    // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
-    bool trackpadModeActive = false;
-    QTimer *trackpadModeTimer = nullptr;
-    QElapsedTimer lastWheelEventTimer;
-    
-
-  
-    
-    // Event filter for scrollbar hover detection and dial container drag
+    // Event filter for scrollbar hover detection
     bool eventFilter(QObject *obj, QEvent *event) override;
     
     // Update scrollbar positions based on container size
