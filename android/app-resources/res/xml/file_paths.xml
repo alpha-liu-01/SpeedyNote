@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- External files directory for documents -->
+    <external-files-path name="documents" path="." />
+    
+    <!-- Cache directory for temporary files -->
+    <cache-path name="cache" path="." />
+    
+    <!-- External cache for shared files -->
+    <external-cache-path name="external_cache" path="." />
+    
+    <!-- Internal files directory for exports (Phase 1: Share/Export feature) -->
+    <files-path name="exports" path="exports/" />
+    
+    <!-- Internal files directory for temp files during export -->
+    <files-path name="temp" path="temp/" />
+</paths>
+

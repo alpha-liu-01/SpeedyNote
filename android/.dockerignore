@@ -1,0 +1,28 @@
+# SpeedyNote Android Docker Build Context
+# Ignore these files when building the Docker image
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.apk
+
+# IDE files
+.idea/
+*.pro.user
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Other platforms
+*.exe
+*.dll
+*.deb
+

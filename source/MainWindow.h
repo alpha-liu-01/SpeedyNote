@@ -2,181 +2,82 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include "InkCanvas.h"
-#include "MarkdownNotesSidebar.h"
-#include <QPushButton>
-#include <QLabel>
+// #include "InkCanvas.h"  // Phase 3.1.7: Disconnected - using DocumentViewport
+#include "ui/MarkdownNotesSidebar.h"
+#include "core/Page.h"  // Phase 3.1.8: For Page::BackgroundType
+#include "core/MarkdownNote.h"  // Phase M.3: For loading markdown notes
+// #include "RecentNotebooksManager.h"  // TODO G.6: Re-enable after LauncherWindow remake
+
 #include <QTimer>
-#include <QFuture>
-#include <QLineEdit>
-#include <QSlider>
+#include <QPointer>
 #include <QScrollBar>
-#include <QComboBox>
 #include <QSpinBox>
-#include <QRadioButton>
-#include <QDialog>
-#include <QFileDialog>
-#include <QListWidget>
-#include <QStackedWidget>
-#include <QTreeWidget>
-#include <QDial>
-#include "SimpleAudio.h"
-#include <QFont>
-#include <QQueue>
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "SDLControllerManager.h"
-#include "ButtonMappingTypes.h"
-#include "RecentNotebooksManager.h"
+#endif
 #include <QResizeEvent>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
 #include <QKeyEvent>
-#include <QTabletEvent>
 #include <QMenu>
 #include <QCloseEvent>
-#include "ControlPanelDialog.h"
-#include "PictureWindowManager.h"
-#include "SpnPackageManager.h"
+// Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
-#include <QLocalSocket>
+#ifndef Q_OS_ANDROID
 #include <QSharedMemory>
+#endif
+// Phase C.1.5: QTabWidget removed - using QTabBar + QStackedWidget
+// Phase C.2: Using custom TabBar class
+#include "ui/TabBar.h"
+#include <QStackedWidget>
+
+// Phase 3.1: New architecture includes
+#include "ui/TabManager.h"
+#include "core/DocumentManager.h"
+#include "core/ToolType.h"
+#include <QElapsedTimer>
+
+// Toolbar extraction includes
+#include "ui/NavigationBar.h"
+#include "ui/Toolbar.h"
+#include "ui/sidebars/LeftSidebarContainer.h"  // Phase S3: Left sidebar container
+
+// Phase D: Subtoolbar includes
+class SubToolbarContainer;
+class PenSubToolbar;
+class MarkerSubToolbar;
+class HighlighterSubToolbar;
+class ObjectSelectSubToolbar;
+
+// Action Bar includes
+class ActionBarContainer;
+class LassoActionBar;
+class ObjectSelectActionBar;
+class TextSelectionActionBar;
+class ClipboardActionBar;
+class PagePanelActionBar;
+
+// Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
+// Will be reimplemented in Phase 3.3 if needed
+// Guard to prevent redefinition if InkCanvas.h is also included
+#ifndef TOUCHGESTUREMODE_DEFINED
+#define TOUCHGESTUREMODE_DEFINED
+enum class TouchGestureMode {
+    Disabled,     // Touch gestures completely off
+    YAxisOnly,    // Only Y-axis panning allowed (X-axis and zoom locked)
+    Full          // Full touch gestures (panning and zoom)
+};
+#endif
+
 
 // Forward declarations
 class QTreeWidgetItem;
 class QProgressDialog;
+class DocumentViewport;
+class LayerPanel;
+class PagePanel;
+class DebugOverlay;
 namespace Poppler { 
     class Document; 
     class OutlineItem;
-}
-
-// #include "HandwritingLineEdit.h"
-
-enum DialMode {
-    None,
-    PageSwitching,
-    ZoomControl,
-    ThicknessControl,
-    ToolSwitching,
-    PresetSelection,
-    PanAndPageScroll
-};
-
-enum class ControllerAction {
-    None,
-    ToggleFullscreen,
-    ToggleDial,
-    Zoom50,
-    ZoomOut,
-    Zoom200,
-    AddPreset,
-    DeletePage,
-    FastForward,
-    OpenControlPanel,
-    RedColor,
-    BlueColor,
-    YellowColor,
-    GreenColor,
-    BlackColor,
-    WhiteColor,
-    CustomColor,
-    ToggleSidebar,
-    Save,
-    StraightLineTool,
-    RopeTool,
-    SetPenTool,
-    SetMarkerTool,
-    SetEraserTool,
-    TogglePdfTextSelection,
-    ToggleOutline,
-    ToggleBookmarks,
-    AddBookmark,
-    ToggleTouchGestures,
-    PreviousPage,
-    NextPage
-};
-
-// Stylus button actions (hold-to-enable style)
-enum class StylusButtonAction {
-    None,
-    HoldStraightLine,    // Enable straight line mode while held
-    HoldLasso,           // Enable lasso/rope tool while held
-    HoldEraser,          // Enable eraser while held
-    HoldTextSelection    // Enable PDF text selection while held
-};
-
-[[maybe_unused]] static QString actionToString(ControllerAction action) {
-    switch (action) {
-        case ControllerAction::ToggleFullscreen: return "Toggle Fullscreen";
-        case ControllerAction::ToggleDial: return "Toggle Dial";
-        case ControllerAction::Zoom50: return "Zoom 50%";
-        case ControllerAction::ZoomOut: return "Zoom Out";
-        case ControllerAction::Zoom200: return "Zoom 200%";
-        case ControllerAction::AddPreset: return "Add Preset";
-        case ControllerAction::DeletePage: return "Delete Page";
-        case ControllerAction::FastForward: return "Fast Forward";
-        case ControllerAction::OpenControlPanel: return "Open Control Panel";
-        case ControllerAction::RedColor: return "Red";
-        case ControllerAction::BlueColor: return "Blue";
-        case ControllerAction::YellowColor: return "Yellow";
-        case ControllerAction::GreenColor: return "Green";
-        case ControllerAction::BlackColor: return "Black";
-        case ControllerAction::WhiteColor: return "White";
-        case ControllerAction::CustomColor: return "Custom Color";
-        case ControllerAction::ToggleSidebar: return "Toggle Sidebar";
-        case ControllerAction::Save: return "Save";
-        case ControllerAction::StraightLineTool: return "Straight Line Tool";
-        case ControllerAction::RopeTool: return "Rope Tool";
-        case ControllerAction::SetPenTool: return "Set Pen Tool";
-        case ControllerAction::SetMarkerTool: return "Set Marker Tool";
-        case ControllerAction::SetEraserTool: return "Set Eraser Tool";
-        case ControllerAction::TogglePdfTextSelection: return "Toggle PDF Text Selection";
-        case ControllerAction::ToggleOutline: return "Toggle PDF Outline";
-        case ControllerAction::ToggleBookmarks: return "Toggle Bookmarks";
-        case ControllerAction::AddBookmark: return "Add/Remove Bookmark";
-        case ControllerAction::ToggleTouchGestures: return "Toggle Touch Gestures";
-        case ControllerAction::PreviousPage: return "Previous Page";
-        case ControllerAction::NextPage: return "Next Page";
-        default: return "None";
-    }
-}
-
-[[maybe_unused]] static ControllerAction stringToAction(const QString &str) {
-    // Convert internal key to ControllerAction enum
-    InternalControllerAction internalAction = ButtonMappingHelper::internalKeyToAction(str);
-    
-    switch (internalAction) {
-        case InternalControllerAction::None: return ControllerAction::None;
-        case InternalControllerAction::ToggleFullscreen: return ControllerAction::ToggleFullscreen;
-        case InternalControllerAction::ToggleDial: return ControllerAction::ToggleDial;
-        case InternalControllerAction::Zoom50: return ControllerAction::Zoom50;
-        case InternalControllerAction::ZoomOut: return ControllerAction::ZoomOut;
-        case InternalControllerAction::Zoom200: return ControllerAction::Zoom200;
-        case InternalControllerAction::AddPreset: return ControllerAction::AddPreset;
-        case InternalControllerAction::DeletePage: return ControllerAction::DeletePage;
-        case InternalControllerAction::FastForward: return ControllerAction::FastForward;
-        case InternalControllerAction::OpenControlPanel: return ControllerAction::OpenControlPanel;
-        case InternalControllerAction::RedColor: return ControllerAction::RedColor;
-        case InternalControllerAction::BlueColor: return ControllerAction::BlueColor;
-        case InternalControllerAction::YellowColor: return ControllerAction::YellowColor;
-        case InternalControllerAction::GreenColor: return ControllerAction::GreenColor;
-        case InternalControllerAction::BlackColor: return ControllerAction::BlackColor;
-        case InternalControllerAction::WhiteColor: return ControllerAction::WhiteColor;
-        case InternalControllerAction::CustomColor: return ControllerAction::CustomColor;
-        case InternalControllerAction::ToggleSidebar: return ControllerAction::ToggleSidebar;
-        case InternalControllerAction::Save: return ControllerAction::Save;
-        case InternalControllerAction::StraightLineTool: return ControllerAction::StraightLineTool;
-        case InternalControllerAction::RopeTool: return ControllerAction::RopeTool;
-        case InternalControllerAction::SetPenTool: return ControllerAction::SetPenTool;
-        case InternalControllerAction::SetMarkerTool: return ControllerAction::SetMarkerTool;
-        case InternalControllerAction::SetEraserTool: return ControllerAction::SetEraserTool;
-        case InternalControllerAction::TogglePdfTextSelection: return ControllerAction::TogglePdfTextSelection;
-        case InternalControllerAction::ToggleOutline: return ControllerAction::ToggleOutline;
-        case InternalControllerAction::ToggleBookmarks: return ControllerAction::ToggleBookmarks;
-        case InternalControllerAction::AddBookmark: return ControllerAction::AddBookmark;
-        case InternalControllerAction::ToggleTouchGestures: return ControllerAction::ToggleTouchGestures;
-        case InternalControllerAction::PreviousPage: return ControllerAction::PreviousPage;
-        case InternalControllerAction::NextPage: return ControllerAction::NextPage;
-    }
-    return ControllerAction::None;
 }
 
 // Forward declarations
@@ -186,59 +87,23 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
+    /**
+     * @brief Construct MainWindow.
+     * @param parent Parent widget.
+     * 
+     * Phase 3.1: Always uses new DocumentViewport architecture.
+     * Legacy InkCanvas support has been removed.
+     */
     explicit MainWindow(QWidget *parent = nullptr);
     virtual ~MainWindow();
-    int getCurrentPageForCanvas(InkCanvas *canvas); 
-
-    bool lowResPreviewEnabled = true;
-
-    void setLowResPreviewEnabled(bool enabled);
-    bool isLowResPreviewEnabled() const;
-
-    bool areBenchmarkControlsVisible() const;
-    void setBenchmarkControlsVisible(bool visible);
-
-    bool zoomButtonsVisible = true;
-    bool areZoomButtonsVisible() const;
-    void setZoomButtonsVisible(bool visible);
-
-    bool scrollOnTopEnabled = false;
-    bool isScrollOnTopEnabled() const;
-    void setScrollOnTopEnabled(bool enabled);
+    
+    // int getCurrentPageForCanvas(InkCanvas *canvas);  // MW1.4: Stub - returns 0
 
     TouchGestureMode touchGestureMode = TouchGestureMode::Full;
     TouchGestureMode previousTouchGestureMode = TouchGestureMode::Full; // Store state before text selection
     TouchGestureMode getTouchGestureMode() const;
     void setTouchGestureMode(TouchGestureMode mode);
     void cycleTouchGestureMode(); // Cycle through: Disabled -> YAxisOnly -> Full -> Disabled
-
-#ifdef Q_OS_LINUX
-    // Palm rejection settings (Linux only - Windows has built-in palm rejection)
-    bool palmRejectionEnabled = false;
-    int palmRejectionDelayMs = 500; // Default 500ms delay before restoring touch gestures
-    
-    bool isPalmRejectionEnabled() const { return palmRejectionEnabled; }
-    void setPalmRejectionEnabled(bool enabled);
-    int getPalmRejectionDelay() const { return palmRejectionDelayMs; }
-    void setPalmRejectionDelay(int delayMs);
-#endif
-
-    // Stylus side button mapping settings
-    StylusButtonAction stylusButtonAAction = StylusButtonAction::None;
-    StylusButtonAction stylusButtonBAction = StylusButtonAction::None;
-    Qt::MouseButton stylusButtonAQt = Qt::MiddleButton; // Which Qt button maps to "Button A"
-    Qt::MouseButton stylusButtonBQt = Qt::RightButton;  // Which Qt button maps to "Button B"
-    
-    StylusButtonAction getStylusButtonAAction() const { return stylusButtonAAction; }
-    StylusButtonAction getStylusButtonBAction() const { return stylusButtonBAction; }
-    Qt::MouseButton getStylusButtonAQt() const { return stylusButtonAQt; }
-    Qt::MouseButton getStylusButtonBQt() const { return stylusButtonBQt; }
-    void setStylusButtonAAction(StylusButtonAction action);
-    void setStylusButtonBAction(StylusButtonAction action);
-    void setStylusButtonAQt(Qt::MouseButton button);
-    void setStylusButtonBQt(Qt::MouseButton button);
-    void saveStylusButtonSettings();
-    void loadStylusButtonSettings();
 
     // Theme settings
     QColor customAccentColor;
@@ -249,467 +114,376 @@ public:
     void setCustomAccentColor(const QColor &color);
     bool isUsingCustomAccentColor() const { return useCustomAccentColor; }
     void setUseCustomAccentColor(bool use);
-    
-    // Color palette settings for control panel
-    bool isUsingBrighterPalette() const { return useBrighterPalette; }
-    void setUseBrighterPalette(bool use);
-    
+
+    /**
+     * @brief Apply background settings to the current document and viewport.
+     * @param type Background type (None, Grid, Lines)
+     * @param bgColor Background color
+     * @param gridColor Grid/line color
+     * @param gridSpacing Grid spacing in pixels
+     * @param lineSpacing Line spacing in pixels
+     */
+    void applyBackgroundSettings(Page::BackgroundType type, const QColor& bgColor,
+                                 const QColor& gridColor, int gridSpacing, int lineSpacing);
+
     QColor getDefaultPenColor();
 
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDLControllerManager *controllerManager = nullptr;
     QThread *controllerThread = nullptr;
-
-    QString getHoldMapping(const QString &buttonName);
-    QString getPressMapping(const QString &buttonName);
-
-    void saveButtonMappings();
-    void loadButtonMappings();
-
-    void setHoldMapping(const QString &buttonName, const QString &dialMode);
-    void setPressMapping(const QString &buttonName, const QString &action);
-    DialMode dialModeFromString(const QString &mode);
-    
-    // ✅ Mouse dial mapping management
-    void setMouseDialMapping(const QString &combination, const QString &dialMode);
-    QString getMouseDialMapping(const QString &combination) const;
-    QMap<QString, QString> getMouseDialMappings() const;
-    void saveMouseDialMappings();
-    void loadMouseDialMappings();
+#endif
 
 
-    void openPdfFile(const QString &pdfPath); // ✅ Open PDF file directly
-    void openSpnPackage(const QString &spnPath);
-    void createNewSpnPackage(const QString &spnPath); // ✅ Create new empty SPN package
     
     // Single instance functionality
     static bool isInstanceRunning();
     static bool sendToExistingInstance(const QString &filePath);
     void setupSingleInstanceServer();
     
+    /**
+     * @brief Find an existing MainWindow among all top-level widgets.
+     * @return Pointer to existing MainWindow, or nullptr if none exists.
+     * 
+     * Phase P.1: Extracted from LauncherWindow for reuse.
+     */
+    static MainWindow* findExistingMainWindow();
+    
+    /**
+     * @brief Preserve window state when transitioning from another window.
+     * @param sourceWindow The window whose state to preserve (size, position, maximized/fullscreen).
+     * @param isExistingWindow If true, just show without changing size/position.
+     * 
+     * Phase P.1: Extracted from LauncherWindow for reuse.
+     */
+    void preserveWindowState(QWidget* sourceWindow, bool isExistingWindow = false);
+    
     // Theme/palette management
     static void updateApplicationPalette(); // Update Qt application palette based on dark mode
-    void openFileInNewTab(const QString &filePath); // ✅ Open .spn package directly
-    bool showLastAccessedPageDialog(InkCanvas *canvas); // ✅ Show dialog for last accessed page
-
-    int getPdfDPI() const { return pdfRenderDPI; }
-    void setPdfDPI(int dpi);
-
-    // void loadUserSettings();  // New
-    void savePdfDPI(int dpi); // New
-
-    // Background settings persistence
-    void saveDefaultBackgroundSettings(BackgroundStyle style, QColor color, int density);
-    void loadDefaultBackgroundSettings(BackgroundStyle &style, QColor &color, int &density);
-    void applyDefaultBackgroundToCanvas(InkCanvas *canvas); // ✅ Helper to apply default background settings
+    void openFileInNewTab(const QString &filePath); // Open file (PDF, .snb) in new tab via single-instance
+    
+    /**
+     * @brief Close a document by its ID (save first if modified).
+     * @param documentId The document's UUID.
+     * @return True if the document was closed (or wasn't open), false if user cancelled.
+     * 
+     * Used when a document needs to be closed before an external operation
+     * (e.g., renaming the folder in Launcher). Prompts to save if modified.
+     */
+    bool closeDocumentById(const QString& documentId);
+    
+    /**
+     * @brief Show PDF open dialog and open selected PDF in a new tab.
+     * 
+     * Phase P.4: Made public for Launcher integration.
+     * Routes through DocumentManager::loadDocument().
+     */
+    void showOpenPdfDialog();
     
     void saveThemeSettings();
     void loadThemeSettings();
     void updateTheme(); // Apply current theme settings
-    void updateTabSizes(); // Update tab widths adaptively
+    // REMOVED: updateTabSizes removed - tab sizing functionality deleted
     
-    void migrateOldButtonMappings();
-    QString migrateOldDialModeString(const QString &oldString);
-    QString migrateOldActionString(const QString &oldString);
+    // REMOVED MW7.6: migrateOldButtonMappings and migrateOldActionString removed - old mapping system deleted
 
-    InkCanvas* currentCanvas(); // Made public for RecentNotebooksDialog
-    void saveCurrentPage(); // Made public for RecentNotebooksDialog
-    void saveCurrentPageConcurrent(); // Concurrent version for smooth page flipping
+    // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
+    DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
+
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
-    void switchPageWithDirection(int pageNumber, int direction); // Enhanced page switching with direction tracking
-    void updateTabLabel(); // Made public for RecentNotebooksDialog
-    QSpinBox *pageInput; // Made public for RecentNotebooksDialog
-    QPushButton *prevPageButton; // Previous page button
-    QPushButton *nextPageButton; // Next page button
+    // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
+
+    QSpinBox *pageInput = nullptr; // Made public for RecentNotebooksDialog
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
-    void addKeyboardMapping(const QString &keySequence, const QString &action);
-    void removeKeyboardMapping(const QString &keySequence);
-    QMap<QString, QString> getKeyboardMappings() const;
+    // REMOVED MW7.6: addKeyboardMapping, removeKeyboardMapping, and getKeyboardMappings removed - old mapping system deleted
     
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // Controller access
     SDLControllerManager* getControllerManager() const { return controllerManager; }
     void reconnectControllerSignals(); // Reconnect controller signals after reconnection
-
-    void updateDialButtonState();     // Update dial button state when switching tabs
-    void updateFastForwardButtonState(); // Update fast forward button state when switching tabs
-    void updateToolButtonStates();   // Update tool button states when switching tabs
-    void handleColorButtonClick();    // Handle tool switching when color buttons are clicked
-    void updateThicknessSliderForCurrentTool(); // Update thickness slider to reflect current tool's thickness
-    void updatePdfTextSelectButtonState(); // Update PDF text selection button state when switching tabs
-    void updateBookmarkButtonState(); // Update bookmark toggle button state
-    bool selectFolder(); // Select save folder - moved to public for ControlPanelDialog access, returns true on success
+#endif
 
     void addNewTab();
-
-    // Find tab with given notebook ID, returns tab index or -1 if not found
-    int findTabWithNotebookId(const QString &notebookId);
     
-    // Check if notebook is already open, switch to it if so
-    // Returns true if notebook was already open (and switched to), false otherwise
-    bool switchToExistingNotebook(const QString &spnPath);
+    /**
+     * @brief Create a new tab with an edgeless (infinite canvas) document.
+     * 
+     * Edgeless mode provides an infinite canvas where tiles are created
+     * on-demand as the user draws.
+     */
+    void addNewEdgelessTab();
 
-    // Shared launcher instance to prevent memory leaks (moved from private)
-    static LauncherWindow *sharedLauncher;
+    /**
+     * TEMPORARY: Load edgeless document from .snb bundle directory.
+     * Uses QFileDialog::getExistingDirectory() to select the .snb folder.
+     * 
+     * TODO: Replace with unified file picker that handles both files and bundles,
+     * possibly by packaging .snb as a single file (zip/tar) in the future.
+     */
+    void loadFolderDocument();
+    
+    // ========== Phase P.4.2: Launcher Interface Methods ==========
+    
+    /**
+     * @brief Check if any documents are currently open.
+     * @return True if at least one tab/document is open.
+     * 
+     * Used by Launcher to determine if MainWindow should be reused.
+     */
+    bool hasOpenDocuments() const;
+    
+    /**
+     * @brief Switch to an already-open document tab.
+     * @param bundlePath Path to the .snb bundle to switch to.
+     * @return True if document was found and switched to, false otherwise.
+     * 
+     * If the document is already open in a tab, switches to that tab
+     * instead of opening a duplicate.
+     */
+    bool switchToDocument(const QString& bundlePath);
+    
+    /**
+     * @brief Bring this window to the front.
+     * 
+     * Convenience method that calls show(), raise(), and activateWindow().
+     * Used by Launcher when transitioning to MainWindow.
+     */
+    void bringToFront();
 
+    // Phase 3.1: sharedLauncher disconnected - will be re-linked later
+    // static LauncherWindow *sharedLauncher;
+
+#ifndef Q_OS_ANDROID
     static QSharedMemory *sharedMemory;
+#endif
     
     // Static cleanup method for signal handlers
     static void cleanupSharedResources();
 
+
+
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;  // New: Handle keyboard shortcuts
+    void keyReleaseEvent(QKeyEvent *event) override; // Track Ctrl key release for trackpad pinch-zoom detection
+    // REMOVED: tabletEvent removed - tablet event handling deleted
+
+#ifdef Q_OS_WIN
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override; // Handle Windows theme changes
+#endif
+    void closeEvent(QCloseEvent *event) override; // ✅ Add auto-save on program close
+    
+    // IME support for multi-language input
+    void inputMethodEvent(QInputMethodEvent *event) override;
+    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+
 private slots:
-    void toggleBenchmark();
-    void updateBenchmarkDisplay();
+
     void onNewConnection(); // Handle new instance connections
-    void applyCustomColor(); // Added function for custom color input
-    void updateThickness(int value); // New function for thickness control
-    void adjustThicknessForZoom(int oldZoom, int newZoom); // Adjust thickness when zoom changes
-    void changeTool(int index);
-    void saveCanvas(); // Save canvas to file
-    void deleteCurrentPage();
 
-    void loadPdf();
-    void clearPdf();
-    void handleSmartPdfButton(); // ✅ Smart PDF button that handles all PDF operations
-    void exportAnnotatedPdf(); // Export PDF with all annotations overlaid
-    void exportCanvasOnlyNotebook(const QString &saveFolder, const QString &notebookId); // Export canvas-only notebook (no PDF)
-    void exportAnnotatedPdfFullRender(const QString &exportPath, const QSet<int> &annotatedPages, bool exportWholeDocument = true, int exportStartPage = 0, int exportEndPage = -1); // Full render fallback
-    bool createAnnotatedPagesPdf(const QString &outputPath, const QList<int> &pages, QProgressDialog &progress); // Create temp PDF
-    bool mergePdfWithPdftk(const QString &originalPdf, const QString &annotatedPagesPdf, const QString &outputPdf, const QList<int> &annotatedPageNumbers, QString *errorMsg = nullptr, bool exportWholeDocument = true, int exportStartPage = 0, int exportEndPage = -1); // Merge using pdftk
-    
-    // PDF outline preservation helpers
-    bool extractPdfOutlineData(const QString &pdfPath, QString &outlineData); // Extract PDF metadata including outline
-    QString filterAndAdjustOutline(const QString &metadataContent, int startPage, int endPage, int pageOffset); // Filter and adjust outline for page range
-    bool applyOutlineToPdf(const QString &pdfPath, const QString &outlineData); // Apply outline to PDF using pdftk
-    
-    // Helper function to show page range dialog (returns false if cancelled)
-    bool showPageRangeDialog(int totalPages, bool &exportWholeDocument, int &startPage, int &endPage);
-
-    void updateZoom();
-    void onZoomSliderChanged(int value); // Handle manual zoom slider changes
-    void applyZoom();
-    void updatePanRange();
     void updatePanX(int value);
     void updatePanY(int value);
 
-    void selectBackground(); // Added back
 
     void forceUIRefresh();
 
-    void switchTab(int index);
-    
+
     void removeTabAt(int index);
-    void toggleZoomSlider();
-    void toggleThicknessSlider(); // Added function to toggle thickness slider
+    // void toggleThicknessSlider(); // Added function to toggle thickness slider
     void toggleFullscreen();
     void showJumpToPageDialog();
     void goToPreviousPage(); // Go to previous page
     void goToNextPage();     // Go to next page
     void onPageInputChanged(int newPage); // Handle spinbox page changes with direction tracking
 
-    void toggleDial();  // ✅ Show/Hide dial
-    void positionDialContainer(); // ✅ Position dial container intelligently
-    void handleDialInput(int angle);  // ✅ Handle touch input
-    void onDialReleased();
-    // void processPageSwitch();
-    void initializeDialSound();
 
-    void changeDialMode(DialMode mode);
-    void handleDialZoom(int angle);
-    void handleDialThickness(int angle); // Added function to handle thickness control
-    void onZoomReleased();
-    void onThicknessReleased(); // Added function to handle thickness control
-    // void updateCustomColor();
-    void updateDialDisplay();
-    // void handleModeSelection(int angle);
-
-    void handleToolSelection(int angle);
-    void onToolReleased();
-
-
-    void handlePresetSelection(int angle);
-    void onPresetReleased();
-    void addColorPreset();
-    void updateColorPalette(); // Update colors based on current palette mode
-    QColor getPaletteColor(const QString &colorName); // Get color based on current palette
+    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+    void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
+    void centerViewportContent(int tabIndex);  // Phase 3.3: One-time horizontal centering
+    void updateLayerPanelForViewport(DocumentViewport* viewport);  // Phase 5.1: Update LayerPanel
+    void updateOutlinePanelForDocument(Document* doc);  // Phase E.2: Update OutlinePanel for document
+    void updatePagePanelForViewport(DocumentViewport* viewport);  // Page Panel: Task 5.1: Update PagePanel
+    void notifyPageStructureChanged(Document* doc, int currentPage = -1);  // Helper: Update PagePanel after page add/remove
+    void showPdfRelinkDialog(DocumentViewport* viewport);  // Phase R.4: Unified PDF relink handler
+    void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
+    void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
+    void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
+    
+    // Phase doc-1: Document operations
+    void saveDocument();          // doc-1.1: Save document to JSON file (Ctrl+S)
+    void loadDocument();          // doc-1.2: Load document from JSON file (Ctrl+O)
+    void addPageToDocument();     // doc-1.0: Add page at end of document (Ctrl+Shift+A)
+    void insertPageInDocument();  // Phase 3: Insert page after current (Ctrl+Shift+I)
+    void deletePageInDocument();  // Phase 3B: Delete current page (Ctrl+Shift+D)
+    void openPdfDocument(const QString &filePath = QString());       // doc-1.4: Open PDF file (Ctrl+Shift+O)
     qreal getDevicePixelRatio(); 
-
     bool isDarkMode();
-    QIcon loadThemedIcon(const QString& baseName);
-    QIcon loadThemedIconReversed(const QString& baseName);
-    void updateButtonIcon(QPushButton* button, const QString& iconName);
-    QString createButtonStyle(bool darkMode);
-
-    void handleDialPanScroll(int angle);  // Add missing function declaration
-    void onPanScrollReleased();           // Add missing function declaration
-
-    // Touch gesture handlers
-    void handleTouchZoomChange(int newZoom);
-    void handleTouchPanChange(int panX, int panY);
-    void handleTouchGestureEnd(); // Add handler for touch gesture completion
-    void handleTouchPanningChanged(bool active); // Handler for touch panning start/stop (window performance optimization)
-    
-    // Color button state management
-    void updateColorButtonStates();
-    void selectColorButton(QPushButton* selectedButton);
-    void updateStraightLineButtonState();
-    void updateRopeToolButtonState(); // New slot for rope tool button
-    
-    
-    
-
-public slots:
-    void updatePictureButtonState(); // Public slot for picture button state
-    void onAutoScrollRequested(int direction);
-    void onEarlySaveRequested();
-
+ 
 private:
-    void setPenTool();               // Set pen tool
-    void setMarkerTool();            // Set marker tool
-    void setEraserTool();            // Set eraser tool
 
-    QColor getContrastingTextColor(const QColor &backgroundColor);
-    void updateCustomColorButtonStyle(const QColor &color);
+    // Note: returnToLauncher() removed - obsolete, replaced by toggleLauncher()
     
-    void returnToLauncher(); // Return to launcher window
+    /**
+     * @brief Phase P.4.6: Render a thumbnail for page 0 of a document.
+     * @param doc The document to render from.
+     * @return The rendered thumbnail, or null pixmap on failure.
+     * 
+     * Used to save thumbnails to NotebookLibrary when closing documents.
+     * Renders synchronously at a reasonable size for launcher display.
+     */
+    QPixmap renderPage0Thumbnail(Document* doc);
     
-    void showPendingTooltip(); // Show tooltip with throttling
+    /**
+     * @brief Phase P.4.4: Toggle the launcher visibility.
+     * 
+     * If launcher is visible, hides it and brings MainWindow to front.
+     * If launcher is hidden, shows it.
+     * Connected to Ctrl+H shortcut and launcher button in NavigationBar.
+     */
+    void toggleLauncher();
     
-    void showRopeSelectionMenu(const QPoint &position); // Show context menu for rope tool selection
-    
-    // PDF Outline functionality
-    void toggleOutlineSidebar();     // Toggle PDF outline sidebar
-    void onOutlineItemClicked(QTreeWidgetItem *item, int column); // Handle outline item clicks
-    void loadPdfOutline();           // Load PDF outline/bookmarks
-    void addOutlineItem(const Poppler::OutlineItem& outlineItem, QTreeWidgetItem* parentItem); // Add outline item recursively
-    Poppler::Document* getPdfDocument(); // Get PDF document from current canvas
-    void updateOutlineSelection(int pageNumber); // Update outline selection based on current page
-    
-    // Bookmark sidebar functionality
-    void toggleBookmarksSidebar();   // Toggle bookmarks sidebar
-    void onBookmarkItemClicked(QTreeWidgetItem *item, int column); // Handle bookmark item clicks
-    void loadBookmarks();            // Load bookmarks from file
-    void saveBookmarks();            // Save bookmarks to file
-    void toggleCurrentPageBookmark(); // Add/remove current page from bookmarks
-    
+    /**
+     * @brief Phase P.4.3: Show the "+" button dropdown menu.
+     * 
+     * Displays a menu with options:
+     * - New Edgeless Canvas (Ctrl+Shift+N)
+     * - New Paged Notebook (Ctrl+N)
+     * - ───────────────
+     * - Open PDF... (Ctrl+Shift+O)
+     * - Open Notebook... (Ctrl+Shift+L)
+     */
+    void showAddMenu();
+
     // Markdown notes sidebar functionality
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
-    void onMarkdownNotesUpdated();      // Handle markdown notes updates
-    void onMarkdownNoteContentChanged(const QString &noteId, const MarkdownNoteData &data); // Handle note content changes
-    void onMarkdownNoteDeleted(const QString &noteId); // Handle note deletion
-    void onHighlightLinkClicked(const QString &highlightId); // Handle highlight link clicks
-    void onHighlightDoubleClicked(const QString &highlightId); // Handle highlight double-clicks
-    void loadMarkdownNotesForCurrentPage(); // Load notes for currently visible page(s)
-
-private:
-    InkCanvas *canvas;
-    QPushButton *benchmarkButton;
-    QLabel *benchmarkLabel;
-    QTimer *benchmarkTimer;
-    bool benchmarking;
-
-
-
-    QPushButton *redButton;
-    QPushButton *blueButton;
-    QPushButton *yellowButton;
-    QPushButton *greenButton;
-    QPushButton *blackButton;
-    QPushButton *whiteButton;
-    QLineEdit *customColorInput;
-    QPushButton *customColorButton;
-    QPushButton *thicknessButton; // Added thickness button
-    QSlider *thicknessSlider; // Added thickness slider
-    QFrame *thicknessFrame; // Added thickness frame
-    QComboBox *toolSelector;
-    QPushButton *penToolButton;    // Individual pen tool button
-    QPushButton *markerToolButton; // Individual marker tool button
-    QPushButton *eraserToolButton; // Individual eraser tool button
-    QPushButton *deletePageButton;
-    QPushButton *selectFolderButton; // Button to select folder
-    QPushButton *saveButton; // Button to save file
-    QPushButton *fullscreenButton;
-    QPushButton *openControlPanelButton;
-    QPushButton *openRecentNotebooksButton; // Added button
-
-    QPushButton *loadPdfButton;
-    QPushButton *clearPdfButton;
-    QPushButton *exportPdfButton; // Button to export annotated PDF
-    QPushButton *pdfTextSelectButton; // Button to toggle PDF text selection mode
-    QPushButton *toggleTabBarButton;
     
-    // Overflow menu for infrequently used actions
-    QPushButton *overflowMenuButton;
+    /**
+     * @brief Phase M.3: Load markdown notes for the current page from LinkObjects.
+     * @return List of NoteDisplayData for all markdown notes on current page.
+     * 
+     * Iterates through LinkObjects on the current page, loads markdown note
+     * files for each Markdown-type slot, and returns display data.
+     */
+    QList<NoteDisplayData> loadNotesForCurrentPage();
+    
+    /**
+     * @brief Phase M.3: Navigate to and select a LinkObject on the current page.
+     * @param linkObjectId The UUID of the LinkObject to navigate to.
+     * 
+     * Scrolls the viewport to center the LinkObject and selects it.
+     * Implementation in Task M.3.6.
+     */
+    void navigateToLinkObject(const QString& linkObjectId);
+    
+    /**
+     * @brief Phase M.4: Search markdown notes across pages.
+     * @param query Search query string.
+     * @param fromPage Start page index (0-based).
+     * @param toPage End page index (0-based).
+     * @return List of matching notes with display data.
+     * 
+     * Searches LinkObject.description (100 pts), note title (75 pts), 
+     * and note content (50 pts). Results sorted by score descending.
+     */
+    QList<NoteDisplayData> searchMarkdownNotes(const QString& query, int fromPage, int toPage);
+
     QMenu *overflowMenu;
-
-    QMap<InkCanvas*, int> pageMap;
-    
-
-    QPushButton *backgroundButton; // New button to set background
-    QPushButton *straightLineToggleButton; // Button to toggle straight line mode
-    QPushButton *ropeToolButton; // Button to toggle rope tool mode
-    QPushButton *insertPictureButton; // Button to insert pictures
-
-    QSlider *zoomSlider;
-    QPushButton *zoomButton;
-    QFrame *zoomFrame;
-    QPushButton *dezoomButton;
-    QPushButton *zoom50Button;
-    QPushButton *zoom200Button;
-    QWidget *zoomContainer;
-    QLineEdit *zoomInput;
+    QAction* m_relinkPdfAction = nullptr;  // Phase R.4: Relink PDF menu action
     QScrollBar *panXSlider;
     QScrollBar *panYSlider;
 
 
-    QListWidget *tabList;          // Horizontal tab bar
-    QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
-    QPushButton *addTabButton;     // Button to add tabs
-    QWidget *tabBarContainer;      // Container for horizontal tab bar
+    // QListWidget *tabList;          // Horizontal tab bar
+    // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
+    
+    // Phase C.1.5: New tab system (QTabBar + QStackedWidget via TabManager)
+    // Phase C.2: Using custom TabBar class for theming
+    TabManager *m_tabManager = nullptr;     // Manages tabs and DocumentViewports
+    DocumentManager *m_documentManager = nullptr;  // Manages Document lifecycle
+    TabBar *m_tabBar = nullptr;            // Custom tab bar with built-in theming
+    QStackedWidget *m_viewportStack = nullptr;  // Viewport container
+    
+    // Toolbar extraction: NavigationBar (Phase A)
+    NavigationBar *m_navigationBar = nullptr;
+    
+    // Toolbar extraction: Toolbar (Phase B)
+    Toolbar *m_toolbar = nullptr;
+    
+    // Phase D: Subtoolbar system
+    SubToolbarContainer *m_subtoolbarContainer = nullptr;
+    PenSubToolbar *m_penSubToolbar = nullptr;
+    MarkerSubToolbar *m_markerSubToolbar = nullptr;
+    HighlighterSubToolbar *m_highlighterSubToolbar = nullptr;
+    ObjectSelectSubToolbar *m_objectSelectSubToolbar = nullptr;
+    QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
+    int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
+    QHash<int, int> m_sidebarTabStates;  // Per-document-tab sidebar tab index
+    
+    // Action Bar system
+    ActionBarContainer *m_actionBarContainer = nullptr;
+    LassoActionBar *m_lassoActionBar = nullptr;
+    ObjectSelectActionBar *m_objectSelectActionBar = nullptr;
+    TextSelectionActionBar *m_textSelectionActionBar = nullptr;
+    ClipboardActionBar *m_clipboardActionBar = nullptr;
+    PagePanelActionBar *m_pagePanelActionBar = nullptr;
+    
+    // Page Panel: Task 5.3: Pending delete state for undo support
+    int m_pendingDeletePageIndex = -1;
+    
+    // Phase C.1.5: addTabButton removed - functionality now in NavigationBar
+    QWidget *tabBarContainer;      // Container for horizontal tab bar (legacy, hidden)
     
     // PDF Outline Sidebar
-    QWidget *outlineSidebar;       // Container for PDF outline
-    QTreeWidget *outlineTree;      // Tree widget for PDF bookmarks/outline
-    QPushButton *toggleOutlineButton; // Floating tab button to toggle outline sidebar
-    bool outlineSidebarVisible = false;
+    // REMOVED MW7.5: Outline sidebar variables removed - outline sidebar deleted
     
-    // Bookmarks Sidebar
-    QWidget *bookmarksSidebar;     // Container for bookmarks
-    QTreeWidget *bookmarksTree;    // Tree widget for bookmarks
-    QPushButton *toggleBookmarksButton; // Floating tab button to toggle bookmarks sidebar
-    QPushButton *toggleBookmarkButton; // Button to add/remove current page bookmark
-    QPushButton *touchGesturesButton; // Touch gestures toggle button
-    bool bookmarksSidebarVisible = false;
+    // REMOVED MW7.4: Bookmarks Sidebar removed - bookmark implementation deleted
     
-    void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
-    QMap<int, QString> bookmarks;  // Map of page number to bookmark title
-    QPushButton *jumpToPageButton; // Button to jump to a specific page
+    // Phase S3: Left Sidebar Container (replaces floating tabs)
+    LeftSidebarContainer *m_leftSidebar = nullptr;  // Tabbed container for left panels
+    LayerPanel *m_layerPanel = nullptr;             // Reference to LayerPanel in container
+    PagePanel *m_pagePanel = nullptr;               // Reference to PagePanel in container
+    // QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel
+    // QPushButton *toggleLayerPanelButton = nullptr; // Floating tab button to toggle layer panel
+    bool layerPanelVisible = true;                   // Layer panel visible by default
+    
+    // void positionLeftSidebarTabs();  // Position the floating tabs for left sidebars
+    
+    // Debug Overlay (development tool - easily disabled for production)
+    class DebugOverlay* m_debugOverlay = nullptr;  // Floating debug info panel
+    void toggleDebugOverlay();                      // Toggle debug overlay visibility
+    
+    // Two-column layout toggle (Ctrl+2)
+    void toggleAutoLayout();                        // Toggle auto 1/2 column layout mode
+    // REMOVED MW7.4: bookmarks QMap removed - bookmark implementation deleted
+    // QPushButton *jumpToPageButton; // Button to jump to a specific page
     
     // Markdown Notes Sidebar
     MarkdownNotesSidebar *markdownNotesSidebar;  // Sidebar for markdown notes
-    QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
+    // QPushButton *toggleMarkdownNotesButton; // Button to toggle markdown notes sidebar
     bool markdownNotesSidebarVisible = false;
 
-    // Dial Mode Toolbar (vertical, right side)
-    QWidget *dialToolbar = nullptr;           // Foldable vertical toolbar for dial mode buttons
-    QPushButton *dialToolbarToggle = nullptr; // Floating tab button to fold/unfold the dial toolbar
-    bool dialToolbarExpanded = true;          // Track expanded/collapsed state
-    void positionDialToolbarTab();            // Position the floating tab at the edge of the toolbar
-
-    QWidget *dialContainer = nullptr;  // ✅ Floating dial container
-    QDial *pageDial = nullptr;  // ✅ The dial itself
-    QDial *modeDial = nullptr;  // ✅ Mode dial
-    QPushButton *dialToggleButton;  // ✅ Toggle button
-    bool fastForwardMode = false;  // ✅ Toggle fast forward
-    QPushButton *fastForwardButton;  // ✅ Fast forward button    
-    int lastAngle = 0;
-    int startAngle = 0;
-    bool tracking = false;
-    int accumulatedRotation = 0;
-    SimpleAudio *dialClickSound = nullptr;
-
-    int grossTotalClicks = 0;
-
-    DialMode temporaryDialMode = None;
-    
-    // ✅ Mouse dial control system
-    QTimer *mouseDialTimer;
-    QSet<Qt::MouseButton> pressedMouseButtons;
-    bool mouseDialModeActive = false;
-    QString currentMouseDialCombination;
-    QMap<QString, QString> mouseDialMappings; // combination -> dial mode
-
-    QComboBox *dialModeSelector; // ✅ Mode selector
-
-    DialMode currentDialMode = PanAndPageScroll; // ✅ Default mode
-
-    // Removed unused colorPreview widget
-
-    QLabel *dialDisplay = nullptr; // ✅ Display for dial mode
-
-    QFrame *dialColorPreview;
-    QLabel *dialIconView;
-    QFont pixelFont; // ✅ Font for pixel effect
-    // QLabel *modeIndicator; ✅ Indicator for mode selection
-    // QLabel *dialNeedle;
-
-    QPushButton *btnPageSwitch;
-    QPushButton *btnZoom;
-    QPushButton *btnThickness;
-
-    QPushButton *btnTool;
-    QPushButton *btnPresets;
-    QPushButton *btnPannScroll;
-    int tempClicks = 0;
-
-    QPushButton *dialHiddenButton; // ✅ Invisible tap button over OLED display
-
-    QQueue<QColor> colorPresets; // ✅ FIFO queue for color presets
-    QPushButton *addPresetButton; // ✅ Button to add current color to queue
-    int currentPresetIndex = 0; // ✅ Track selected preset
-
-    // Color palette mode (independent of UI theme)
-    bool useBrighterPalette = false; // false = darker colors, true = brighter colors
-
-    qreal initialDpr = 1.0; // Will be set in constructor
 
     QWidget *sidebarContainer;  // Container for sidebar
-    QWidget *controlBar;        // Control toolbar
 
-    void setTemporaryDialMode(DialMode mode);
-    void clearTemporaryDialMode();
     
     // ✅ Mouse dial controls
-    void startMouseDialMode(const QString &combination);
-    void stopMouseDialMode();
-    void handleMouseWheelDial(int delta);
-    QString mouseButtonCombinationToString(const QSet<Qt::MouseButton> &buttons) const;
     
     // ✅ Override mouse events for dial control
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
 
-    bool controlBarVisible = true;  // Track controlBar visibility state
-    void toggleControlBar();        // Function to toggle controlBar visibility
-    void cycleZoomLevels();         // Function to cycle through 0.5x, 1x, 2x zoom levels
-    bool sidebarWasVisibleBeforeFullscreen = true;  // Track sidebar state before fullscreen
 
-    int accumulatedRotationAfterLimit = 0; 
-
-    int pendingPageFlip = 0;  // -1 for previous, +1 for next, 0 for no flip. This is used for mode PanAndPageScroll
-
-    // Add in MainWindow class:
-    QMap<QString, QString> buttonHoldMapping;
-    QMap<QString, QString> buttonPressMapping;
-    QMap<QString, ControllerAction> buttonPressActionMapping;
-
-    // New: Keyboard mapping support
-    QMap<QString, QString> keyboardMappings;  // keySequence -> action internal key
-    QMap<QString, ControllerAction> keyboardActionMapping;  // keySequence -> action enum
-
-    // Tooltip handling for pen input
     QTimer *tooltipTimer;
     QWidget *lastHoveredWidget;
     QPoint pendingTooltipPos;
     
-    // Concurrent save handling for autoscroll synchronization
-    QFuture<void> concurrentSaveFuture;
+ 
 
-    void handleButtonHeld(const QString &buttonName);
-    void handleButtonReleased(const QString &buttonName);
+    // TODO G.6: Re-enable after LauncherWindow remake
+    // RecentNotebooksManager *recentNotebooksManager;
 
-    void handleControllerButton(const QString &buttonName);
-    
-    // New: Keyboard mapping methods
-    void handleKeyboardShortcut(const QString &keySequence);
-    void saveKeyboardMappings();
-    void loadKeyboardMappings();
 
-    bool ensureTabHasUniqueSaveFolder(InkCanvas* canvas); // Returns true if tab can be closed
-
-    RecentNotebooksManager *recentNotebooksManager; // Added manager instance
-
-    int pdfRenderDPI = 192;  // Default to 288 DPI
     
     // Single instance support
     QLocalServer *localServer;
@@ -721,44 +495,60 @@ private:
 
     bool scrollbarsVisible = false;
     QTimer *scrollbarHideTimer = nullptr;
+    bool m_hasKeyboard = false;  // MW5.8: Cached keyboard detection result
+    
+    // MW5.8: Keyboard detection and scrollbar visibility
+    bool hasPhysicalKeyboard();   // Check if physical keyboard is connected
+    void showScrollbars();        // Show scrollbars and reset hide timer
+    void hideScrollbars();        // Hide scrollbars
+    
+    // Phase 3.3: Viewport scroll signal connections (for proper cleanup)
+    QMetaObject::Connection m_hScrollConn;
+    QMetaObject::Connection m_vScrollConn;
+    QPointer<DocumentViewport> m_connectedViewport;  // QPointer for safe dangling check
+    
+    // CR-2B: Tool/mode signal connections (for keyboard shortcut sync)
+    QMetaObject::Connection m_toolChangedConn;
+    QMetaObject::Connection m_straightLineModeConn;
+    
+    // Phase D: Auto-highlight sync connection (subtoolbar ↔ viewport)
+    QMetaObject::Connection m_autoHighlightConn;
+    
+    // Phase D: Object mode sync connections (subtoolbar ↔ viewport)
+    QMetaObject::Connection m_insertModeConn;
+    QMetaObject::Connection m_actionModeConn;
+    QMetaObject::Connection m_selectionChangedConn;
+    
+    // Action Bar: Selection state connections (viewport → action bar container)
+    QMetaObject::Connection m_lassoSelectionConn;
+    QMetaObject::Connection m_objectSelectionForActionBarConn;
+    QMetaObject::Connection m_textSelectionConn;
+    QMetaObject::Connection m_strokeClipboardConn;
+    QMetaObject::Connection m_objectClipboardConn;
+    
+    // Phase 5.1: LayerPanel page change connection
+    QMetaObject::Connection m_layerPanelPageConn;
+    
+    // Phase E.2: OutlinePanel page change connection (for section highlighting)
+    QMetaObject::Connection m_outlinePageConn;
+    
+    // Page Panel: Task 5.2: PagePanel page change connection
+    QMetaObject::Connection m_pagePanelPageConn;
+    QMetaObject::Connection m_pagePanelContentConn;  // For documentModified → thumbnail invalidation
+    QMetaObject::Connection m_pagePanelActionBarConn;  // For currentPageChanged → action bar sync
+    QMetaObject::Connection m_documentModifiedConn;    // BUG FIX: documentModified → mark doc/tab modified
+    QMetaObject::Connection m_markdownNotesPageConn;  // Phase M.3: For page change → notes reload
+    QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
+    QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
+    QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)
     bool trackpadModeActive = false;
     QTimer *trackpadModeTimer = nullptr;
     QElapsedTimer lastWheelEventTimer;
     
-#ifdef Q_OS_LINUX
-    // Palm rejection internal state
-    bool palmRejectionActive = false; // Whether we're currently suppressing touch gestures
-    TouchGestureMode palmRejectionOriginalMode = TouchGestureMode::Full; // Original mode before suppression
-    QTimer *palmRejectionTimer = nullptr; // Timer for delayed restore
-    
-    void onStylusProximityEnter(); // Called when stylus enters proximity or touches
-    void onStylusProximityLeave(); // Called when stylus leaves proximity or releases
-    void restoreTouchGestureMode(); // Called by timer to restore original mode
-#endif
-    
-    // Stylus button state tracking (hold-to-enable)
-    bool stylusButtonAActive = false;
-    bool stylusButtonBActive = false;
-    ToolType previousToolBeforeStylusA = ToolType::Pen;
-    ToolType previousToolBeforeStylusB = ToolType::Pen;
-    bool previousStraightLineModeA = false;
-    bool previousStraightLineModeB = false;
-    bool previousRopeToolModeA = false;
-    bool previousRopeToolModeB = false;
-    bool previousTextSelectionModeA = false;
-    bool previousTextSelectionModeB = false;
-    
-    // Text selection delayed disable (for stylus button hold)
-    bool textSelectionPendingDisable = false; // True when waiting for text selection interaction to complete
-    bool textSelectionWasButtonA = false; // Track which button enabled text selection
-    
-    void enableStylusButtonMode(Qt::MouseButton button);
-    void disableStylusButtonMode(Qt::MouseButton button);
-    void handleStylusButtonPress(Qt::MouseButtons buttons);
-    void handleStylusButtonRelease(Qt::MouseButtons buttons, Qt::MouseButton releasedButton);
-    void onPdfTextSelectionCleared(); // Called when text selection is cleared, auto-disables if pending
+
+  
     
     // Event filter for scrollbar hover detection and dial container drag
     bool eventFilter(QObject *obj, QEvent *event) override;
@@ -766,44 +556,29 @@ private:
     // Update scrollbar positions based on container size
     void updateScrollbarPositions();
     
-    // Handle edge proximity detection for scrollbar visibility
-    void handleEdgeProximity(InkCanvas* canvas, const QPoint& pos);
+    // Phase D: Subtoolbar setup and positioning
+    void setupSubToolbars();           // Create and connect subtoolbars
+    void updateSubToolbarPosition();   // Update position on viewport resize
     
-    // Responsive toolbar management
-    bool isToolbarTwoRows = false;
-    QVBoxLayout *controlLayoutVertical = nullptr;
-    QHBoxLayout *controlLayoutSingle = nullptr;
-    QHBoxLayout *controlLayoutFirstRow = nullptr;
-    QHBoxLayout *controlLayoutSecondRow = nullptr;
-    void updateToolbarLayout();
-    void createSingleRowLayout(bool centered = true);
-    void createTwoRowLayout();
+    // Action Bar setup and positioning
+    void setupActionBars();            // Create and connect action bars
+    void updateActionBarPosition();    // Update position on viewport resize
+    void setupPagePanelActionBar();    // Page Panel: Task 5.3: Create and connect PagePanelActionBar
+    void updatePagePanelActionBarVisibility();  // Page Panel: Task 5.4: Update visibility based on tab and document
+    
+    // Phase E.2: PDF Outline Panel connections
+    void setupOutlinePanelConnections();  // Connect outline panel signals
+    
+    // Page Panel: Task 5.2: Page Panel connections
+    void setupPagePanelConnections();  // Connect page panel signals
+    
+    // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     
     // Helper function for tab text eliding
     QString elideTabText(const QString &text, int maxWidth);
     
-    // Add timer for delayed layout updates
-    QTimer *layoutUpdateTimer = nullptr;
-    
-    // Separator line for 2-row layout
-    QFrame *separatorLine = nullptr;
-    
-protected:
-    void resizeEvent(QResizeEvent *event) override;
-    void keyPressEvent(QKeyEvent *event) override;  // New: Handle keyboard shortcuts
-    void keyReleaseEvent(QKeyEvent *event) override; // Track Ctrl key release for trackpad pinch-zoom detection
-    void tabletEvent(QTabletEvent *event) override; // Handle pen hover for tooltips
-#ifdef Q_OS_LINUX
-    bool event(QEvent *event) override; // Handle tablet proximity events for palm rejection
-#endif
-#ifdef Q_OS_WIN
-    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override; // Handle Windows theme changes
-#endif
-    void closeEvent(QCloseEvent *event) override; // ✅ Add auto-save on program close
-    
-    // IME support for multi-language input
-    void inputMethodEvent(QInputMethodEvent *event) override;
-    QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
+    // Layout timers and separators - REMOVED MW4.3: No longer needed
 };
 
 #endif // MAINWINDOW_H
+

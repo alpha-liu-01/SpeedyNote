@@ -1,0 +1,87 @@
+/*
+ * SpeedyNote Tab Bar Styles - Light Mode
+ * 
+ * Placeholders (replaced at runtime):
+ * - {{TAB_BAR_BG}}     - Tab bar background (accent color)
+ * - {{TAB_BG}}         - Inactive tab background (washed accent)
+ * - {{TAB_TEXT}}       - Tab text color
+ * - {{TAB_SELECTED_BG}} - Selected tab background (system gray)
+ * - {{TAB_HOVER_BG}}   - Tab hover background
+ * - {{CLOSE_ICON}}     - Close button icon filename
+ * - {{RIGHT_ARROW}}    - Right scroll arrow icon
+ * - {{LEFT_ARROW}}     - Left scroll arrow icon
+ */
+
+/* ==========================================================================
+   Tab Bar Container
+   ========================================================================== */
+
+QTabBar {
+    background-color: {{TAB_BAR_BG}};
+    border: none;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+/* ==========================================================================
+   Individual Tabs
+   ========================================================================== */
+
+QTabBar::tab {
+    background-color: {{TAB_BG}};
+    color: {{TAB_TEXT}};
+    padding: 8px 16px;
+    padding-left: 8px;
+    border: none;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    min-width: 80px;
+    max-width: 300px;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background-color: {{TAB_SELECTED_BG}};
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: {{TAB_HOVER_BG}};
+}
+
+/* ==========================================================================
+   Close Button
+   ========================================================================== */
+
+QTabBar::close-button {
+    image: url(:/resources/icons/{{CLOSE_ICON}});
+    subcontrol-position: left;
+    padding: 4px;
+}
+
+QTabBar::close-button:hover {
+    background-color: rgba(0, 0, 0, 30);
+    border-radius: 2px;
+}
+
+/* ==========================================================================
+   Scroll Buttons (for tab overflow)
+   ========================================================================== */
+
+QTabBar QToolButton {
+    background-color: {{TAB_BAR_BG}};
+    border: none;
+    padding: 4px;
+}
+
+QTabBar QToolButton:hover {
+    background-color: {{TAB_HOVER_BG}};
+}
+
+QTabBar QToolButton::right-arrow {
+    image: url(:/resources/icons/{{RIGHT_ARROW}});
+}
+
+QTabBar QToolButton::left-arrow {
+    image: url(:/resources/icons/{{LEFT_ARROW}});
+}
+

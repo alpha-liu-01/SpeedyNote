@@ -1,0 +1,104 @@
+/*
+ * SpeedyNote Toolbar Button Styles - Dark Mode
+ * 
+ * Same structure as buttons.qss but with colors optimized for dark backgrounds.
+ * Uses white/light highlights instead of dark.
+ */
+
+/* ==========================================================================
+   Base Toolbar Button Styles (all types)
+   ========================================================================== */
+
+QPushButton#ActionButton,
+QPushButton#ToggleButton,
+QPushButton#ThreeStateButton,
+QPushButton#ToolButton {
+    min-width: 36px;
+    min-height: 36px;
+    max-width: 36px;
+    max-height: 36px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    padding: 0px;
+}
+
+/* ==========================================================================
+   Dark Mode Styles
+   ========================================================================== */
+
+/* Action Button - Dark Mode */
+QPushButton#ActionButton:hover {
+    background: rgba(255, 255, 255, 50);
+}
+
+QPushButton#ActionButton:pressed {
+    background: rgba(0, 0, 0, 50);
+}
+
+/* Toggle Button - Dark Mode */
+QPushButton#ToggleButton:hover {
+    background: rgba(255, 255, 255, 50);
+}
+
+QPushButton#ToggleButton:checked {
+    background: rgba(255, 255, 255, 100);
+}
+
+QPushButton#ToggleButton:checked:hover {
+    background: rgba(255, 255, 255, 120);
+}
+
+QPushButton#ToggleButton:pressed {
+    background: rgba(0, 0, 0, 50);
+}
+
+/* Tool Button - Dark Mode (same as Toggle) */
+QPushButton#ToolButton:hover {
+    background: rgba(255, 255, 255, 50);
+}
+
+QPushButton#ToolButton:checked {
+    background: rgba(255, 255, 255, 100);
+}
+
+QPushButton#ToolButton:checked:hover {
+    background: rgba(255, 255, 255, 120);
+}
+
+QPushButton#ToolButton:pressed {
+    background: rgba(0, 0, 0, 50);
+}
+
+/* Three-State Button - Dark Mode */
+QPushButton#ThreeStateButton:hover {
+    background: rgba(255, 255, 255, 50);
+}
+
+QPushButton#ThreeStateButton:pressed {
+    background: rgba(0, 0, 0, 50);
+}
+
+/* State 0: Default/Off (no special background) */
+QPushButton#ThreeStateButton[state="0"] {
+    background: transparent;
+}
+
+/* State 1: Middle/Y-Axis Only (red shade - same for both themes) */
+QPushButton#ThreeStateButton[state="1"] {
+    background: rgba(255, 100, 100, 120);
+}
+
+QPushButton#ThreeStateButton[state="1"]:hover {
+    background: rgba(255, 120, 120, 140);
+}
+
+/* State 2: Full/On */
+QPushButton#ThreeStateButton[state="2"] {
+    background: rgba(255, 255, 255, 100);
+}
+
+QPushButton#ThreeStateButton[state="2"]:hover {
+    background: rgba(255, 255, 255, 120);
+}
+

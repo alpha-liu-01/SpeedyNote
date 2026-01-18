@@ -1,129 +1,227 @@
-#ifdef _WIN32
-#include <windows.h>
-#endif
+// ============================================================================
+// SpeedyNote - Main Entry Point
+// ============================================================================
 
 #include <QApplication>
-#include <QPalette>
 #include <QTranslator>
 #include <QLocale>
-#include <QFile>
-#include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
-#include <QColor>
 #include <QFont>
-#include <QFontDatabase>
-#include "MainWindow.h"
-#include "LauncherWindow.h"
-#include "SpnPackageManager.h"
-#include "InkCanvas.h" // For BackgroundStyle enum
 
+#include "MainWindow.h"
+#include "ui/launcher/Launcher.h"
+
+// Platform-specific includes
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <shlobj.h>
 #endif
 
-#ifdef Q_OS_WIN
-// Helper function to detect Windows dark mode
-static bool isWindowsDarkMode() {
-    QSettings settings("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 
-                       QSettings::NativeFormat);
-    int appsUseLightTheme = settings.value("AppsUseLightTheme", 1).toInt();
-    return (appsUseLightTheme == 0);
-}
-
-// Helper function to detect Windows 11
-static bool isWindows11() {
-    // Windows 11 is build 22000 or higher
-    // Use QSysInfo to check Windows version
-    return QSysInfo::kernelVersion().split('.')[2].toInt() >= 22000;
-}
-#endif
-
-// Helper function to set nice Windows fonts (Segoe UI + Dengxian for Chinese)
-static void applyWindowsFonts(QApplication &app) {
-#ifdef Q_OS_WIN
-    // Use Segoe UI as the primary font (Windows Metro/Fluent UI font)
-    // with Dengxian (等线) as fallback for Chinese characters
-    QFont font("Segoe UI", 9);
-    font.setStyleHint(QFont::SansSerif);
-    font.setHintingPreference(QFont::PreferFullHinting);
-    
-    // Set font families with fallbacks for Chinese text
-    // Priority: Segoe UI -> Dengxian (等线) -> Microsoft YaHei (微软雅黑) -> system default
-    QStringList fontFamilies;
-    fontFamilies << "Segoe UI" << "Dengxian" << "Microsoft YaHei" << "SimHei";
-    font.setFamilies(fontFamilies);
-    
-    app.setFont(font);
+// Controller support
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
+#include <SDL2/SDL.h>
+#define SPEEDYNOTE_SDL_QUIT() SDL_Quit()
 #else
-    Q_UNUSED(app);
+#define SPEEDYNOTE_SDL_QUIT() ((void)0)
 #endif
+
+// Android helpers
+#ifdef Q_OS_ANDROID
+#include <QDebug>
+#include <QPalette>
+#include <QJniObject>
+
+static void logAndroidPaths()
+{
+    // Log storage paths for debugging
+    qDebug() << "=== Android Storage Paths ===";
+    qDebug() << "  AppDataLocation:" << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    qDebug() << "  DocumentsLocation:" << QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    qDebug() << "  DownloadLocation:" << QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+    qDebug() << "  CacheLocation:" << QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    qDebug() << "=============================";
+    
+    // Note: On Android 13+ (API 33+), READ_EXTERNAL_STORAGE is deprecated.
+    // PDF file access requires Storage Access Framework (SAF).
+    // QFileDialog uses SAF, but content:// URI handling in Qt may have issues.
 }
 
-// Helper function to apply dark/light palette to Qt application
-static void applySystemPalette(QApplication &app) {
-#ifdef Q_OS_WIN
-    // Windows 11 has native dark/light mode support with WinUI 3, so use default style
-    // For older Windows versions, use Fusion style for proper dark mode support
-    if (!isWindows11()) {
-        if (isWindowsDarkMode()) {
-            app.setStyle("Fusion");
-        } else {
-            app.setStyle("windowsvista");
-        }
-    }
+/**
+ * Query Android system for dark mode setting via JNI.
+ * Calls SpeedyNoteActivity.isDarkMode() static method.
+ */
+static bool isAndroidDarkMode()
+{
+    // callStaticMethod<jboolean> returns the primitive directly, not a QJniObject
+    return QJniObject::callStaticMethod<jboolean>(
+        "org/speedynote/app/SpeedyNoteActivity",
+        "isDarkMode",
+        "()Z"
+    );
+}
 
-    if (isWindowsDarkMode()) {
-        // Create a comprehensive dark palette for Qt widgets
+/**
+ * Apply appropriate palette based on Android system theme.
+ * Uses Fusion style for consistent cross-platform theming.
+ */
+static void applyAndroidPalette(QApplication& app)
+{
+    // Use Fusion style on Android - it properly respects palette colors
+    // The default "android" style has inconsistent palette support
+    app.setStyle("Fusion");
+    
+    bool darkMode = isAndroidDarkMode();
+    qDebug() << "Android dark mode:" << darkMode;
+    
+    if (darkMode) {
+        // Dark palette - same colors as Windows dark mode for consistency
         QPalette darkPalette;
-
-        // Base colors
+        
         QColor darkGray(53, 53, 53);
         QColor gray(128, 128, 128);
-        QColor black(25, 25, 25);
         QColor blue(42, 130, 218);
-        QColor lightGray(180, 180, 180);
-
-        // Window colors (main background)
+        
         darkPalette.setColor(QPalette::Window, QColor(45, 45, 45));
         darkPalette.setColor(QPalette::WindowText, Qt::white);
-
-        // Base (text input background) colors
         darkPalette.setColor(QPalette::Base, QColor(35, 35, 35));
         darkPalette.setColor(QPalette::AlternateBase, darkGray);
         darkPalette.setColor(QPalette::Text, Qt::white);
-
-        // Tooltip colors
         darkPalette.setColor(QPalette::ToolTipBase, QColor(60, 60, 60));
         darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-
-        // Button colors (critical for dialogs)
         darkPalette.setColor(QPalette::Button, darkGray);
         darkPalette.setColor(QPalette::ButtonText, Qt::white);
-
-        // 3D effects and borders (critical for proper widget rendering)
         darkPalette.setColor(QPalette::Light, QColor(80, 80, 80));
         darkPalette.setColor(QPalette::Midlight, QColor(65, 65, 65));
         darkPalette.setColor(QPalette::Dark, QColor(35, 35, 35));
         darkPalette.setColor(QPalette::Mid, QColor(50, 50, 50));
         darkPalette.setColor(QPalette::Shadow, QColor(20, 20, 20));
-
-        // Bright text
         darkPalette.setColor(QPalette::BrightText, Qt::red);
-
-        // Link colors
         darkPalette.setColor(QPalette::Link, blue);
         darkPalette.setColor(QPalette::LinkVisited, QColor(blue).lighter());
-
-        // Highlight colors (selection)
         darkPalette.setColor(QPalette::Highlight, blue);
         darkPalette.setColor(QPalette::HighlightedText, Qt::white);
+        darkPalette.setColor(QPalette::PlaceholderText, gray);
+        
+        darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, gray);
+        darkPalette.setColor(QPalette::Disabled, QPalette::Text, gray);
+        darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, gray);
+        darkPalette.setColor(QPalette::Disabled, QPalette::Base, QColor(50, 50, 50));
+        darkPalette.setColor(QPalette::Disabled, QPalette::Button, QColor(50, 50, 50));
+        darkPalette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(80, 80, 80));
+        
+        app.setPalette(darkPalette);
+    } else {
+        // Light palette - explicitly set for consistency
+        QPalette lightPalette;
+        
+        QColor lightGray(240, 240, 240);
+        QColor gray(160, 160, 160);
+        QColor blue(0, 120, 215);
+        
+        lightPalette.setColor(QPalette::Window, QColor(240, 240, 240));
+        lightPalette.setColor(QPalette::WindowText, Qt::black);
+        lightPalette.setColor(QPalette::Base, Qt::white);
+        lightPalette.setColor(QPalette::AlternateBase, lightGray);
+        lightPalette.setColor(QPalette::Text, Qt::black);
+        lightPalette.setColor(QPalette::ToolTipBase, QColor(255, 255, 220));
+        lightPalette.setColor(QPalette::ToolTipText, Qt::black);
+        lightPalette.setColor(QPalette::Button, lightGray);
+        lightPalette.setColor(QPalette::ButtonText, Qt::black);
+        lightPalette.setColor(QPalette::Light, Qt::white);
+        lightPalette.setColor(QPalette::Midlight, QColor(227, 227, 227));
+        lightPalette.setColor(QPalette::Dark, QColor(160, 160, 160));
+        lightPalette.setColor(QPalette::Mid, QColor(200, 200, 200));
+        lightPalette.setColor(QPalette::Shadow, QColor(105, 105, 105));
+        lightPalette.setColor(QPalette::BrightText, Qt::red);
+        lightPalette.setColor(QPalette::Link, blue);
+        lightPalette.setColor(QPalette::LinkVisited, QColor(blue).darker());
+        lightPalette.setColor(QPalette::Highlight, blue);
+        lightPalette.setColor(QPalette::HighlightedText, Qt::white);
+        lightPalette.setColor(QPalette::PlaceholderText, gray);
+        
+        lightPalette.setColor(QPalette::Disabled, QPalette::WindowText, gray);
+        lightPalette.setColor(QPalette::Disabled, QPalette::Text, gray);
+        lightPalette.setColor(QPalette::Disabled, QPalette::ButtonText, gray);
+        lightPalette.setColor(QPalette::Disabled, QPalette::Base, lightGray);
+        lightPalette.setColor(QPalette::Disabled, QPalette::Button, lightGray);
+        lightPalette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(180, 180, 180));
+        
+        app.setPalette(lightPalette);
+    }
+}
+#endif
 
-        // Placeholder text (for line edits, spin boxes, etc.)
+// Test includes (desktop only)
+#ifndef Q_OS_ANDROID
+#include "core/PageTests.h"
+#include "core/DocumentTests.h"
+#include "core/DocumentViewportTests.h"
+#include "ui/ToolbarButtonTests.h"
+#include "objects/LinkObjectTests.h"
+#include "ui/ToolbarButtonTestWidget.h"
+#endif
+
+// ============================================================================
+// Platform Helpers
+// ============================================================================
+
+#ifdef Q_OS_WIN
+static bool isWindowsDarkMode()
+{
+    QSettings settings("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                       QSettings::NativeFormat);
+    return settings.value("AppsUseLightTheme", 1).toInt() == 0;
+}
+
+static bool isWindows11()
+{
+    return QSysInfo::kernelVersion().split('.')[2].toInt() >= 22000;
+}
+
+static void applyWindowsFonts(QApplication& app)
+{
+    QFont font("Segoe UI", 9);
+    font.setStyleHint(QFont::SansSerif);
+    font.setHintingPreference(QFont::PreferFullHinting);
+    font.setFamilies({"Segoe UI", "Dengxian", "Microsoft YaHei", "SimHei"});
+    app.setFont(font);
+}
+
+static void applyWindowsPalette(QApplication& app)
+{
+    if (!isWindows11()) {
+        app.setStyle(isWindowsDarkMode() ? "Fusion" : "windowsvista");
+    }
+
+    if (isWindowsDarkMode()) {
+        QPalette darkPalette;
+
+        QColor darkGray(53, 53, 53);
+        QColor gray(128, 128, 128);
+        QColor blue(42, 130, 218);
+
+        darkPalette.setColor(QPalette::Window, QColor(45, 45, 45));
+        darkPalette.setColor(QPalette::WindowText, Qt::white);
+        darkPalette.setColor(QPalette::Base, QColor(35, 35, 35));
+        darkPalette.setColor(QPalette::AlternateBase, darkGray);
+        darkPalette.setColor(QPalette::Text, Qt::white);
+        darkPalette.setColor(QPalette::ToolTipBase, QColor(60, 60, 60));
+        darkPalette.setColor(QPalette::ToolTipText, Qt::white);
+        darkPalette.setColor(QPalette::Button, darkGray);
+        darkPalette.setColor(QPalette::ButtonText, Qt::white);
+        darkPalette.setColor(QPalette::Light, QColor(80, 80, 80));
+        darkPalette.setColor(QPalette::Midlight, QColor(65, 65, 65));
+        darkPalette.setColor(QPalette::Dark, QColor(35, 35, 35));
+        darkPalette.setColor(QPalette::Mid, QColor(50, 50, 50));
+        darkPalette.setColor(QPalette::Shadow, QColor(20, 20, 20));
+        darkPalette.setColor(QPalette::BrightText, Qt::red);
+        darkPalette.setColor(QPalette::Link, blue);
+        darkPalette.setColor(QPalette::LinkVisited, QColor(blue).lighter());
+        darkPalette.setColor(QPalette::Highlight, blue);
+        darkPalette.setColor(QPalette::HighlightedText, Qt::white);
         darkPalette.setColor(QPalette::PlaceholderText, gray);
 
-        // Disabled colors (all color groups)
         darkPalette.setColor(QPalette::Disabled, QPalette::WindowText, gray);
         darkPalette.setColor(QPalette::Disabled, QPalette::Text, gray);
         darkPalette.setColor(QPalette::Disabled, QPalette::ButtonText, gray);
@@ -132,243 +230,264 @@ static void applySystemPalette(QApplication &app) {
         darkPalette.setColor(QPalette::Disabled, QPalette::Highlight, QColor(80, 80, 80));
 
         app.setPalette(darkPalette);
-    } else {
-        // Use default Windows style and palette for light mode
-        app.setPalette(QPalette());
     }
-#else
-    // On Linux, Qt usually handles this correctly via the desktop environment
-    // So we don't override the palette
-#endif
 }
 
-int main(int argc, char *argv[]) {
-#ifdef _WIN32
-    FreeConsole();  // Hide console safely on Windows
-
-    
-    // DEBUG: Show console for trackpad gesture debugging
-    /*
+static void enableDebugConsole()
+{
+#ifdef SPEEDYNOTE_DEBUG
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
-    */
-    
+#else
+    FreeConsole();
 #endif
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
-    SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
+}
+#endif // Q_OS_WIN
 
-    /*
-    qDebug() << "SDL2 version:" << SDL_GetRevision();
-    qDebug() << "Num Joysticks:" << SDL_NumJoysticks();
+// ============================================================================
+// Translation Loading
+// ============================================================================
 
-    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
-        if (SDL_IsGameController(i)) {
-            qDebug() << "Controller" << i << "is" << SDL_GameControllerNameForIndex(i);
-        } else {
-            qDebug() << "Joystick" << i << "is not a recognized controller";
-        }
-    }
-    */  // For sdl2 debugging
-    
-
-
-    // Enable Windows IME support for multi-language input
-    QApplication app(argc, argv);
-    
-    // High DPI scaling is automatically enabled in Qt 6+
-    // No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps
-
-    // Apply system-appropriate palette (dark/light) on Windows
-    applySystemPalette(app);
-    
-    // Apply nice Windows fonts (Segoe UI + Dengxian for Chinese)
-    applyWindowsFonts(app);
-
-    // ✅ DISK CLEANUP: Clean up orphaned temp directories from previous sessions on startup
-    // Since .spn files are extracted to temp folders with hash-based names, orphaned folders
-    // from crashes/force-close can accumulate. This cleanup runs on startup to free disk space.
-    SpnPackageManager::cleanupOrphanedTempDirs();
-    
-    QTranslator translator;
-    
-    // Check for manual language override
+static void loadTranslations(QApplication& app, QTranslator& translator)
+{
     QSettings settings("SpeedyNote", "App");
     bool useSystemLanguage = settings.value("useSystemLanguage", true).toBool();
+
     QString langCode;
-    
     if (useSystemLanguage) {
-        // Use system language
-        QString locale = QLocale::system().name(); // e.g., "zh_CN", "es_ES"
-        langCode = locale.section('_', 0, 0); // e.g., "zh"
+        langCode = QLocale::system().name().section('_', 0, 0);
     } else {
-        // Use manual override
         langCode = settings.value("languageOverride", "en").toString();
     }
 
-    // Debug: Uncomment these lines to debug translation loading issues
-    // printf("Locale: %s\n", locale.toStdString().c_str());
-    // printf("Language Code: %s\n", langCode.toStdString().c_str());
-
-    // Try multiple paths to find translation files
     QStringList translationPaths = {
-        QCoreApplication::applicationDirPath(),  // Same directory as executable (Windows/portable)
-        QCoreApplication::applicationDirPath() + "/translations",  // translations subdirectory (Windows)
-        "/usr/share/speedynote/translations",  // Standard Linux installation path
-        "/usr/local/share/speedynote/translations",  // Local Linux installation path
-        QStandardPaths::locate(QStandardPaths::GenericDataLocation, "speedynote/translations", QStandardPaths::LocateDirectory),  // XDG data directories
-        ":/resources/translations"  // Qt resource system (fallback)
+        QCoreApplication::applicationDirPath(),
+        QCoreApplication::applicationDirPath() + "/translations",
+        "/usr/share/speedynote/translations",
+        "/usr/local/share/speedynote/translations",
+        QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                               "speedynote/translations", QStandardPaths::LocateDirectory),
+        ":/resources/translations"
     };
-    
-    bool translationLoaded = false;
-    for (const QString &path : translationPaths) {
-        QString translationFile = path + "/app_" + langCode + ".qm";
-        if (translator.load(translationFile)) {
+
+    for (const QString& path : translationPaths) {
+        if (translator.load(path + "/app_" + langCode + ".qm")) {
             app.installTranslator(&translator);
-            translationLoaded = true;
-            // Debug: Uncomment this line to see which translation file was loaded
-            // printf("Translation loaded from: %s\n", translationFile.toStdString().c_str());
             break;
         }
     }
-    
-    if (!translationLoaded) {
-        // Debug: Uncomment this line to see when translation loading fails
-        // printf("No translation file found for language: %s\n", langCode.toStdString().c_str());
+}
+
+// ============================================================================
+// Launcher Setup
+// ============================================================================
+
+static void connectLauncherSignals(Launcher* launcher)
+{
+    // Helper to get or create MainWindow
+    auto getMainWindow = [](Launcher* l) -> std::pair<MainWindow*, bool> {
+        MainWindow* w = MainWindow::findExistingMainWindow();
+        bool existing = (w != nullptr);
+        if (!w) {
+            w = new MainWindow();
+            w->setAttribute(Qt::WA_DeleteOnClose);
+        }
+        w->preserveWindowState(l, existing);
+        w->bringToFront();
+        return {w, existing};
+    };
+
+    QObject::connect(launcher, &Launcher::notebookSelected, [=](const QString& bundlePath) {
+        auto [w, _] = getMainWindow(launcher);
+        if (!w->switchToDocument(bundlePath)) {
+            w->openFileInNewTab(bundlePath);
+        }
+        launcher->hideWithAnimation();
+    });
+
+    QObject::connect(launcher, &Launcher::createNewEdgeless, [=]() {
+        auto [w, _] = getMainWindow(launcher);
+        w->addNewEdgelessTab();
+        launcher->hideWithAnimation();
+    });
+
+    QObject::connect(launcher, &Launcher::createNewPaged, [=]() {
+        auto [w, _] = getMainWindow(launcher);
+        w->addNewTab();
+        launcher->hideWithAnimation();
+    });
+
+    QObject::connect(launcher, &Launcher::openPdfRequested, [=]() {
+        auto [w, _] = getMainWindow(launcher);
+        w->showOpenPdfDialog();
+        launcher->hideWithAnimation();
+    });
+
+    QObject::connect(launcher, &Launcher::openNotebookRequested, [=]() {
+        auto [w, _] = getMainWindow(launcher);
+        w->loadFolderDocument();
+        launcher->hideWithAnimation();
+    });
+}
+
+// ============================================================================
+// Test Runners (Desktop Only)
+// ============================================================================
+
+#ifndef Q_OS_ANDROID
+static int runTests(const QString& testType)
+{
+#ifdef Q_OS_WIN
+    AllocConsole();
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+#endif
+
+    bool success = false;
+
+    if (testType == "page") {
+        success = PageTests::runAllTests();
+    } else if (testType == "document") {
+        success = DocumentTests::runAllTests();
+    } else if (testType == "linkobject") {
+        success = LinkObjectTests::runAllTests();
+    } else if (testType == "buttons") {
+        return QTest::qExec(new ToolbarButtonTests());
     }
 
+    SPEEDYNOTE_SDL_QUIT();
+    return success ? 0 : 1;
+}
+#endif
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+int main(int argc, char* argv[])
+{
+#ifdef Q_OS_WIN
+    enableDebugConsole();
+#endif
+
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
+    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
+    SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
+#endif
+
+    QApplication app(argc, argv);
+    app.setOrganizationName("SpeedyNote");
+    app.setApplicationName("App");
+
+#ifdef Q_OS_WIN
+    applyWindowsPalette(app);
+    applyWindowsFonts(app);
+#endif
+
+#ifdef Q_OS_ANDROID
+    logAndroidPaths();
+    applyAndroidPalette(app);
+#endif
+
+    QTranslator translator;
+    loadTranslations(app, translator);
+
+    // ========== Parse Command Line Arguments ==========
     QString inputFile;
     bool createNewPackage = false;
-    bool createSilent = false;
-    
-    if (argc >= 2) {
-        QString firstArg = QString::fromLocal8Bit(argv[1]);
-        if (firstArg == "--create-new" && argc >= 3) {
-            // Handle --create-new command (opens SpeedyNote)
-            createNewPackage = true;
-            inputFile = QString::fromLocal8Bit(argv[2]);
-        } else if (firstArg == "--create-silent" && argc >= 3) {
-            // Handle --create-silent command (creates file and exits)
-            createSilent = true;
-            inputFile = QString::fromLocal8Bit(argv[2]);
-        } else {
-            // Regular file argument
-            inputFile = firstArg;
-        }
-        // qDebug() << "Input file received:" << inputFile << "Create new:" << createNewPackage << "Create silent:" << createSilent;
-    }
 
-    // Handle silent creation (context menu) - create file and exit immediately
-    if (createSilent && !inputFile.isEmpty()) {
-        if (inputFile.toLower().endsWith(".spn")) {
-            // Check if file already exists
-            if (QFile::exists(inputFile)) {
-                return 1; // Exit with error code
-            }
-            
-            // Get the base name for the notebook (without .spn extension)
-            QFileInfo fileInfo(inputFile);
-            QString notebookName = fileInfo.baseName();
-            
-            // ✅ Load user's default background settings
-            QSettings settings("SpeedyNote", "App");
-            BackgroundStyle defaultStyle = static_cast<BackgroundStyle>(
-                settings.value("defaultBackgroundStyle", static_cast<int>(BackgroundStyle::Grid)).toInt());
-            QColor defaultColor = QColor(settings.value("defaultBackgroundColor", "#FFFFFF").toString());
-            int defaultDensity = settings.value("defaultBackgroundDensity", 30).toInt();
-            
-            // Ensure valid values
-            if (!defaultColor.isValid()) defaultColor = Qt::white;
-            if (defaultDensity < 10) defaultDensity = 10;
-            if (defaultDensity > 200) defaultDensity = 200;
-            
-            // Create the new .spn package with user's preferred background settings
-            if (SpnPackageManager::createSpnPackageWithBackground(inputFile, notebookName, 
-                                                                  defaultStyle, defaultColor, defaultDensity)) {
-                // ✅ Notify Windows Explorer to refresh (fix file manager issue)
-#ifdef Q_OS_WIN
-                SHChangeNotify(SHCNE_CREATE, SHCNF_PATH, inputFile.toStdWString().c_str(), nullptr);
+#ifndef Q_OS_ANDROID
+    QString testToRun;
+    bool runButtonVisualTest = false;
+    bool runViewportTests = false;
 #endif
-                SDL_Quit(); // Clean up SDL
-                return 0; // Exit successfully
-            } else {
-                SDL_Quit(); // Clean up SDL
-                return 1; // Exit with error code
-            }
+
+    for (int i = 1; i < argc; ++i) {
+        QString arg = QString::fromLocal8Bit(argv[i]);
+
+        if (arg == "--create-new" && i + 1 < argc) {
+            createNewPackage = true;
+            inputFile = QString::fromLocal8Bit(argv[++i]);
         }
-        SDL_Quit(); // Clean up SDL
-        return 1; // Invalid file extension
+#ifndef Q_OS_ANDROID
+        else if (arg == "--test-page") {
+            testToRun = "page";
+        } else if (arg == "--test-document") {
+            testToRun = "document";
+        } else if (arg == "--test-viewport") {
+            runViewportTests = true;
+        } else if (arg == "--test-buttons") {
+            testToRun = "buttons";
+        } else if (arg == "--test-buttons-visual") {
+            runButtonVisualTest = true;
+        } else if (arg == "--test-linkobject") {
+            testToRun = "linkobject";
+        }
+#endif
+        else if (!arg.startsWith("--") && inputFile.isEmpty()) {
+            inputFile = arg;
+        }
     }
 
-    // Check if another instance is already running
+#ifndef Q_OS_ANDROID
+    // Handle test commands
+    if (!testToRun.isEmpty()) {
+        return runTests(testToRun);
+    }
+
+    if (runViewportTests) {
+        int result = DocumentViewportTests::runVisualTest();
+        SPEEDYNOTE_SDL_QUIT();
+        return result;
+    }
+
+    if (runButtonVisualTest) {
+        auto* testWidget = new ToolbarButtonTestWidget();
+        testWidget->setAttribute(Qt::WA_DeleteOnClose);
+        testWidget->show();
+        int result = app.exec();
+        SPEEDYNOTE_SDL_QUIT();
+        return result;
+    }
+#endif
+
+    // ========== Single Instance Check ==========
     if (MainWindow::isInstanceRunning()) {
         if (!inputFile.isEmpty()) {
-            // Prepare command for existing instance
-            QString command;
-            if (createNewPackage) {
-                command = QString("--create-new|%1").arg(inputFile);
-            } else {
-                command = inputFile;
-            }
-            
-            // Send command to existing instance
+            QString command = createNewPackage
+                ? QString("--create-new|%1").arg(inputFile)
+                : inputFile;
+
             if (MainWindow::sendToExistingInstance(command)) {
-                SDL_Quit(); // Clean up SDL before exiting
-                return 0; // Exit successfully, command sent to existing instance
+                SPEEDYNOTE_SDL_QUIT();
+                return 0;
             }
         }
-        // If no command to send or sending failed, just exit
-        SDL_Quit(); // Clean up SDL before exiting
+        SPEEDYNOTE_SDL_QUIT();
         return 0;
     }
 
-    // Determine which window to show based on command line arguments
+    // ========== Launch Application ==========
     int exitCode = 0;
-    
+
     if (!inputFile.isEmpty()) {
-        // If a file is specified, go directly to MainWindow
-        // Allocate on heap to avoid destructor issues on exit
-        MainWindow *w = new MainWindow();
-        w->setAttribute(Qt::WA_DeleteOnClose); // Qt will delete when closed
-        
-        if (createNewPackage) {
-            // Handle --create-new command
-            if (inputFile.toLower().endsWith(".spn")) {
-                w->show(); // Show window first
-                w->createNewSpnPackage(inputFile);
-            } else {
-                // Invalid file extension for new package
-                w->show();
-            }
-        } else {
-            // Check file extension to determine how to handle it
-            if (inputFile.toLower().endsWith(".pdf")) {
-                // Handle PDF file association
-                w->show(); // Show window first for dialog parent
-                w->openPdfFile(inputFile);
-            } else if (inputFile.toLower().endsWith(".spn")) {
-                // Handle SpeedyNote package
-                w->show(); // Show window first
-                w->openSpnPackage(inputFile);
-            } else {
-                // Unknown file type, just show the application
-                w->show();
-            }
-        }
+        // File argument provided - open directly in MainWindow
+        auto* w = new MainWindow();
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        w->show();
+        w->openFileInNewTab(inputFile);
         exitCode = app.exec();
     } else {
-        // No file specified - show the launcher window
-        // Create the launcher and set it as the shared instance
-        LauncherWindow *launcher = new LauncherWindow();
-        MainWindow::sharedLauncher = launcher; // Set as shared instance
+        // No file - show Launcher
+        auto* launcher = new Launcher();
+        launcher->setAttribute(Qt::WA_DeleteOnClose);
+        connectLauncherSignals(launcher);
         launcher->show();
         exitCode = app.exec();
     }
-    
-    // Clean up SDL before exiting to properly release HID device handles
-    // This is especially important on macOS where HID handles can remain locked
-    SDL_Quit();
-    
+
+    SPEEDYNOTE_SDL_QUIT();
     return exitCode;
 }

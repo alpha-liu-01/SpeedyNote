@@ -1,124 +1,250 @@
 ﻿# 📝 SpeedyNote
 
 <div align="center">
-<img src="https://i.imgur.com/Q7HPQwK.png" width="300"></img>
-</div>
-<br></br>
-<div align="center">
-<a href="https://hellogithub.com/repository/alpha-liu-01/SpeedyNote" target="_blank"><img src="https://abroad.hellogithub.com/v1/widgets/recommend.svg?rid=e86680d007424ab59d68d5e787ad5c12&claim_uid=e5oCIWstjbEUv9D" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
-</div>
 
+<img src="https://i.imgur.com/Q7HPQwK.png" width="200" alt="SpeedyNote Logo">
+
+**A blazing-fast, cross-platform note-taking app for stylus users**
+
+*Built for students who need iPad-quality annotation on budget hardware*
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-brightgreen)]()
+[![Qt](https://img.shields.io/badge/Qt-6.x-41CD52?logo=qt)]()
+
+[English](#-features) • [中文](./docs/zh_Hans/readme_chn.md)
+
+</div>
 
 ---
-_A lightweight, fast, and stylus-optimized note-taking app built for classic tablet PCs, low-resolution screens, and
-vintage hardware._
 
-如果您恰好不懂英文，请移步[中文README](./readme/zh_Hans.md)
+## Why SpeedyNote?
 
-
-
-![cover](https://i.imgur.com/4YMM2Fx.png)
+| The Problem | SpeedyNote's Solution |
+|-------------|----------------------|
+| 💸 OneNote doesn't support PDF annotation | ✅ Full PDF support with fast rendering |
+| 🐌 Xournal++ is painfully slow on large PDFs | ✅ 360Hz input on a Celeron N4000 (1.1GHz) |
+| 💰 GoodNotes/Notability cost $10+ and require iPad | ✅ Free & open source, runs on $50 tablets |
+| 📱 Most note apps are mobile-only or desktop-only | ✅ Same experience on Windows, Linux, macOS & Android |
 
 ---
 
 ## ✨ Features
 
-- 🖊️ **Pressure-sensitive inking** with stylus support
-- 📄 **Multi-page notebooks** with tabbed or scrollable page view
-- 📌 **PDF & PowerPoint background integration** with annotation overlay
-- 🌀 **Dial UI + Joy-Con support** for intuitive one-handed control
-- 🎨 **Per-page background styles**: grid, lined, or blank (customizable)
-- 💾 **Portable `.spn` notebooks** for note storage
-- 🔎 **Zoom, pan, thickness, and color preset switching** via dial
-- 🗔 **Markdown sticky notes are supported** for text-based notes
-- 💡 **Designed for low-spec devices** (133Hz Sample Rate @ Intel Atom N450)
-- 🌏 **Supports multiple languages across the globe** (Covers half the global population)
+### 🚀 Performance First
+- **360Hz stylus polling** on low-end hardware (tested: Celeron N4000 @ 1.1GHz)
+- **Instant PDF loading** - large documents open in seconds, not minutes
+- **Small memory footprint** - native C++ with no Electron bloat
+- **ARM64 native builds** - optimized for Snapdragon laptops and Rockchip Chromebooks
+
+### 🖊️ Professional Drawing Tools
+- **Pressure-sensitive inking** with Pen, Marker, and Highlighter tools
+- **Vector-based strokes** - zoom infinitely without pixelation
+- **Multi-layer editing** (SAI2-style) - add, delete, reorder, merge layers
+- **Stroke eraser** with full undo/redo support
+- **Touch gestures** - two-finger pan, pinch-to-zoom, palm rejection
+
+### 📄 Document Modes
+- **Paged Notebooks** - traditional page-by-page notes (`.snb)
+- **Edgeless Canvas** - infinite whiteboard with lazy-loading tiles (`.snb)
+- **PDF Backgrounds** - annotate PDFs with clickable internal links
+- **Sharing** - `.snbx` note bundles allows easy cross-platform note sharing. 
+
+### 🎯 Tablet-First UX
+- **Action bars** - context-sensitive buttons appear when you need them
+- **Subtoolbars** - quick access to tool settings without menu diving
+- **Page panel** - thumbnail navigation with drag-to-reorder
+- **PDF outline** - click TOC entries to jump to sections
+
+### 🔗 Advanced Features
+- **Link objects** - create clickable links to markdown notes, URLs, or positions
+- **Markdown notes** - attach rich text notes to any page or position
+- **Multi-tab editing** - work on multiple documents simultaneously
+- **Auto-save** - never lose work with automatic backup
 
 ---
 
 ## 📸 Screenshots
 
-| Drawing                                  | Dial UI / Joycon Controls               | Overlay Grid Options                     |
-| ---------------------------------------- | --------------------------------------- | ---------------------------------------- |
-| ![draw](https://i.imgur.com/iARL6Vo.gif) | ![pdf](https://i.imgur.com/NnrqOQQ.gif) | ![grid](https://i.imgur.com/YaEdx1p.gif) |
+<!-- TODO: Replace with actual screenshots -->
+
+| PDF Annotation | Layer Panel | Page Thumbnails |
+|----------------|-------------|-----------------|
+| ![PDF](https://i.imgur.com/xgmYhfK.png) | ![Layers](https://i.imgur.com/NelpAMv.png) | ![Pages](https://i.imgur.com/A93UeAT.png) |
+
+| Edgeless Canvas | Action Bar | Subtoolbar |
+|-----------------|------------|------------|
+| ![Edgeless](https://i.imgur.com/wHLeyIj.png) | ![Action](https://i.imgur.com/wHLeyIj.png) | ![Subtoolbar](https://i.imgur.com/VSvZaxA.png) |
+
+| Link Objects | Markdown Support | Android |
+|-----------------|------------|------------|
+| ![LinkObjects](https://i.imgur.com/QkEw57Y.png) | ![Markdown](https://i.imgur.com/yKVJw5E.png) | ![Android](https://i.imgur.com/rfAJMNF.png) |
 
 ---
 
 ## 🚀 Getting Started
 
-### ✅ Requirements
+### System Requirements
 
-- Windows 7/8/10/11/macOS 12+/Ubuntu/Debian/Fedora/RedHat/ArchLinux/AlpineLinux
-- Qt 5 or Qt 6 runtime (bundled in Windows releases)
-- Stylus input (Wacom recommended)
-- **LibreOffice** (optional, required for PowerPoint file support)
+| Platform | Minimum | Recommended |
+|----------|---------|-------------|
+| **Windows** | Windows 10 1809 | Windows 11 |
+| **macOS** | macOS 12 (to be tested) | macOS 15+ |
+| **Linux** | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
+| **Android** | Android 8.0 (API 26) | Android 13+ |
+
+**Hardware:** Any x86_64 or ARM64 CPU. Tested on Intel Core i5 470UM (2010), Celeron N4000, Snapdragon 7c Gen 2, Rockchip RK3399
 
 ### 💾 Installation
 
----
+#### Windows / macOS / Linux
 
-#### Windows
+Download the latest release from **[GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases)** or the official website.
 
-Download the installer from [SpeedyNote official site](https://www.speedynote.org) 
-Windows 7 or Windows 8 users may download the 32-bit legacy version instead.  
+| Platform | Package |
+|----------|---------|
+| Windows | `.exe` installer |
+| macOS | `.dmg` disk image (to be offered) |
+| Debian/Ubuntu | `.deb` package |
+| Fedora/RHEL | `.rpm` package |
+| Arch Linux | `.pkg.tar.zst` package |
 
-#### Linux
+#### Android
 
-Download the `deb`,`rpm` `.pkg.tar.zst` or `.apk` packages from [SpeedyNote official site](https://www.speedynote.org) and install them locally, or
+**Option 1: Google Play Store** (coming soon), supports development  
+**Option 2: Build from source** - Free, see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
 
-For Debian/Ubuntu users, you can get SpeedyNote from `apt.speedynote.org` and run
+>  The Play Store version is a convenience fee. The source code is always free under GPL v3.
+
+#### Linux APT Repository (Debian/Ubuntu)
+
 ```bash
-wget -O- https://apt.speedynote.org/speedynote-release-key.gpg | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/speedynote.gpg && echo "deb [arch=amd64,arm64 signed-by=/etc/apt/trusted.gpg.d/speedynote.gpg] https://apt.speedynote.org stable main" | sudo tee /etc/apt/sources.list.d/speedynote.list && sudo apt update && sudo apt install speedynote
+# Add repository and install
+wget -O- https://apt.speedynote.org/speedynote-release-key.gpg | \
+  sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/speedynote.gpg
+
+echo "deb [arch=amd64,arm64 signed-by=/etc/apt/trusted.gpg.d/speedynote.gpg] \
+  https://apt.speedynote.org stable main" | \
+  sudo tee /etc/apt/sources.list.d/speedynote.list
+
+sudo apt update && sudo apt install speedynote
 ```
-this command to install SpeedyNote to your computer, and update with `sudo apt update && sudo apt upgrade` commands. 
 
-🛠️ Usage
+---
 
-1. Launch `SpeedyNote` shortcut on desktop
-2. Click `Open PDF` to annotate a PDF document or click `New` to create a new notebook without loading a PDF.
-3. Start writing/drawing using your stylus
-4. Use the **MagicDial** or **Joy-Con** to change tools, zoom, scroll, or switch pages
-5. Click the `×` on the tab and save the notebook as a `.spn` package
+## 🛠️ Building From Source
 
-###### OR
+### Prerequisites
 
-1. Right click a PDF file in File Explorer (or equivalent)
-2. Click open with and select SpeedyNote
-3. Create an `spn` notebook package in the directory of the PDF file
-4. Next time when you double click the `spn` notebook, all the notes with the PDF background will be loaded.
-5. Start writing/drawing using your stylus
+| Platform | Requirements |
+|----------|--------------|
+| All | CMake 3.16+, C++17 compiler |
+| Windows | MSYS2 with clang64/clangarm64 toolchain |
+| macOS | Xcode Command Line Tools, Homebrew |
+| Linux | Qt 6.4+ dev packages, Poppler-Qt6 |
+| Android | Docker (see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)) |
+
+### Quick Build
+
+```bash
+# Clone the repository
+git clone https://github.com/alpha-liu-01/SpeedyNote.git
+cd SpeedyNote
+
+# Windows (MSYS2 clang64 shell)
+./compile.ps1
+
+# macOS
+./compile-mac.sh
+
+# Linux
+./compile.sh
+# Or build packages: ./build-package.sh
+```
+
+### Detailed Build Guides
+
+- [Windows Build Guide](./docs/build_docs/SpeedyNote_Windows_Build_en.md)
+- [macOS Build Guide](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)
+- [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
 
 
 ---
 
-## 🎮 Controller Support
+## 📁 File Formats
 
-SpeedyNote supports controller input, ideal for tablet users:
+| Format | Description | Use Case |
+|--------|-------------|----------|
+| `.snb` | Bundle folder with tiles | Edgeless canvas, large projects |
+| `.snbx` | Compressed bundle (ZIP) | Sharing, backup |
 
-- ✅ **Left Joy-Con supported**
-- 🎛️ Analog stick → Dial control
-- 🔘 Buttons can be mapped to:
-  - Control the dial with multiple features
-  - Toggle fullscreen
-  - Change color / thickness
-  - Open control panel
-  - Create/delete pages
-
-> Long press + turn = hold-and-turn mappings
+**Note:** The legacy `.spn` format from v0.x is not supported.
 
 ---
 
-## 📁 Building From Source
+## 🌍 Supported Languages
 
-#### Windows
+SpeedyNote supports multiple languages:
 
-[Windows Build Documentation](./docs/SpeedyNote_Windows_Build_en.md)
+- 🇺🇸 English
+- 🇨🇳 简体中文 (Simplified Chinese)
+- 🇪🇸 Español (Spanish) (partial)
+- 🇫🇷 Français (French) (partial)
 
-#### Darwin
-[Darwin Build Documentation](./docs/SpeedyNote_Darwin_Build_en.md)
+> Contributions for additional translations are welcome!
 
-#### Linux
+---
 
-1. run  `./build-package.sh`
-2. Install the packages for your Linux distro.
-   `.deb`, `rpm`, `.pkg.tar.zst` and `.apk` are tested and working.
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to:
+
+- 🐛 Report bugs via [GitHub Issues](https://github.com/alpha-liu-01/SpeedyNote/issues)
+- 💡 Suggest features
+- 🌍 Add translations
+- 🔧 Submit pull requests
+
+---
+
+## 📜 License
+
+SpeedyNote is licensed under the **GNU General Public License v3.0**.
+
+- ✅ Free to use, modify, and distribute
+- ✅ Source code always available
+- ✅ Commercial use allowed (Play Store version)
+- 📋 Derivative works must also be GPL v3
+
+See [LICENSE](./LICENSE) for details.
+
+### Third-Party Libraries
+
+| Library | License | Usage |
+|---------|---------|-------|
+| Qt 6 | LGPL v3 | UI framework |
+| Poppler | GPL v2/v3 | PDF rendering (desktop) |
+| MuPDF | AGPL v3 | PDF rendering (Android) |
+| QMarkdownTextEdit | MIT | Markdown editor |
+| miniz | MIT | ZIP compression |
+
+---
+
+## 💖 Support the Project
+
+If SpeedyNote helps you, consider:
+
+- ☕ [Buy me a coffee](buymeacoffee.com/alphaliu01)
+- ⭐ Starring this repository
+- 📱 Purchasing the Android version on Google Play
+- 🐛 Reporting bugs and suggesting improvements
+- 🌍 Contributing translations
+
+---
+
+<div align="center">
+
+**Made with ❤️ for students who deserve better tools**
+
+*SpeedyNote v1.0.0*
+
+</div>

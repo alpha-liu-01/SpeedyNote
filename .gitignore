@@ -46,6 +46,7 @@ dmg_temp/
 # Editor
 .vs/
 .idea/
+.cursor/
 .vscode/
 .DS_Store
 
@@ -55,7 +56,13 @@ dllpack/
 poppler-24.08.0/
 share/
 old/
+docs/private/
 32-bitdll/
 qt6/
 qt5/
 misc/
+android/test-app/
+android/mupdf-build/
+android/build-app/
+SpeedyNote-Android-android-conan/
+plans.txt

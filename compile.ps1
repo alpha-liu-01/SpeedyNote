@@ -1,7 +1,8 @@
 param(
     [switch]$arm64,      # Build for ARM64 Windows (Snapdragon)
     [switch]$old,        # Build for older x86_64 CPUs (SSE3/SSSE3)
-    [switch]$legacy      # Alias for -old
+    [switch]$legacy,     # Alias for -old
+    [switch]$debug       # Enable verbose debug output (qDebug)
 )
 
 # ✅ Determine architecture and set appropriate toolchain
@@ -99,9 +100,17 @@ if ($arm64) {
     $cmakeArgs += "-DCPU_ARCH=$cpuArch"
 }
 
+if ($debug) {
+    $cmakeArgs += "-DENABLE_DEBUG_OUTPUT=ON"
+    Write-Host "Debug Output: ENABLED" -ForegroundColor Yellow
+} else {
+    $cmakeArgs += "-DENABLE_DEBUG_OUTPUT=OFF"
+    Write-Host "Debug Output: DISABLED" -ForegroundColor Gray
+}
+
 # ✅ Configure and build
 & "$toolchainPath\bin\cmake.exe" @cmakeArgs ..
-& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j16
+& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j32
 
 # ✅ Deploy Qt runtime
 & "$toolchainPath\bin\windeployqt6.exe" "NoteApp.exe"

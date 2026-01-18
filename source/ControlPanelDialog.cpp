@@ -1,8 +1,11 @@
 #include "ControlPanelDialog.h"
 #include "MainWindow.h"
+#include "core/Page.h"
+
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "ButtonMappingTypes.h"
 #include "SDLControllerManager.h"
-#include "SpnPackageManager.h"
+#endif
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -22,38 +25,40 @@
 #include <QTimer>
 #include <QTabletEvent>
 
-ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, InkCanvas *targetCanvas, QWidget *parent)
-    : QDialog(parent), canvas(targetCanvas), selectedColor(canvas->getBackgroundColor()), mainWindowRef(mainWindow) {
+// Android keyboard fix (BUG-A001)
+#ifdef Q_OS_ANDROID
+#include <QGuiApplication>
+#include <QInputMethod>
+#endif
 
-    setWindowTitle(tr("Canvas Control Panel"));
-    resize(400, 200);
+ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
+    : QDialog(parent), mainWindowRef(mainWindow) {
+
+    setWindowTitle(tr("Settings"));
+    resize(450, 400);
 
     tabWidget = new QTabWidget(this);
 
-    // === Tabs ===
-    createBackgroundTab();
-    tabWidget->addTab(backgroundTab, tr("Background"));
-    if (mainWindowRef) {
-        createPerformanceTab();
-        tabWidget->addTab(performanceTab, tr("Performance"));
-        createToolbarTab();
-    }
-    createButtonMappingTab();
+    // === Working Tabs ===
+    createBackgroundTab();  // Background settings (first tab for importance)
+    
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
+    // Note: createButtonMappingTab() removed - dial system was deleted (MW7.2)
     createControllerMappingTab();
-    createKeyboardMappingTab();
-    createMouseDialTab();
+#endif
+
     createThemeTab();
     createLanguageTab();
-    createCompatibilityTab();
     createCacheTab();
     createAboutTab();
+    
     // === Buttons ===
     applyButton = new QPushButton(tr("Apply"));
     okButton = new QPushButton(tr("OK"));
     cancelButton = new QPushButton(tr("Cancel"));
 
     connect(applyButton, &QPushButton::clicked, this, &ControlPanelDialog::applyChanges);
-    connect(okButton, &QPushButton::clicked, this, [=]() {
+    connect(okButton, &QPushButton::clicked, this, [this]() {
         applyChanges();
         accept();
     });
@@ -69,11 +74,161 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, InkCanvas *target
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(tabWidget);
     mainLayout->addLayout(buttonLayout);
-
-    loadFromCanvas();
+    
+    // Load current settings into UI
+    loadSettings();
 }
 
+void ControlPanelDialog::done(int result)
+{
+#ifdef Q_OS_ANDROID
+    // BUG-A001 Fix: Defer dialog close to let Android keyboard operations complete.
+    // Qt 6.7.x has a bug where closing a dialog with text inputs causes a crash
+    // in QtInputDelegate.resetSoftwareKeyboard() - the async lambda accesses 
+    // QtEditText.m_optionsChanged after the widget is destroyed.
+    // 
+    // Solution: Hide keyboard, clear focus, then defer the actual close by 150ms
+    // to give the Android UI thread time to complete keyboard operations.
+    
+    // Prevent re-entry if already deferring
+    static bool isDeferring = false;
+    if (isDeferring) {
+        QDialog::done(result);
+        return;
+    }
+    
+    // Clear focus from current widget
+    if (QWidget* focused = QApplication::focusWidget()) {
+        focused->clearFocus();
+    }
+    
+    // Hide keyboard
+    if (QGuiApplication::inputMethod()) {
+        QGuiApplication::inputMethod()->hide();
+        QGuiApplication::inputMethod()->commit();
+    }
+    
+    // Defer the actual close
+    isDeferring = true;
+    int savedResult = result;
+    QTimer::singleShot(150, this, [this, savedResult]() {
+        isDeferring = false;
+        QDialog::done(savedResult);
+    });
+    return;  // Don't call base done() immediately
+#else
+    QDialog::done(result);
+#endif
+}
 
+void ControlPanelDialog::loadSettings()
+{
+    QSettings settings("SpeedyNote", "App");
+    
+    // Load page size setting
+    // Default: US Letter (816 × 1056 px at 96 DPI)
+    qreal defaultWidth = settings.value("page/width", 816).toReal();
+    qreal defaultHeight = settings.value("page/height", 1056).toReal();
+    QSizeF savedSize(defaultWidth, defaultHeight);
+    
+    // Find the matching preset (or default to US Letter if no match)
+    int pageSizeIndex = 5;  // Default: US Letter (index 5)
+    for (int i = 0; i < pageSizeCombo->count(); ++i) {
+        QSizeF presetSize = pageSizeCombo->itemData(i).toSizeF();
+        if (qFuzzyCompare(presetSize.width(), savedSize.width()) &&
+            qFuzzyCompare(presetSize.height(), savedSize.height())) {
+            pageSizeIndex = i;
+            break;
+        }
+    }
+    pageSizeCombo->setCurrentIndex(pageSizeIndex);
+    onPageSizePresetChanged(pageSizeIndex);
+    
+    // Load background settings
+    // Default: Grid (enum value 3)
+    int bgType = settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt();
+    int comboIndex = styleCombo->findData(bgType);
+    if (comboIndex >= 0) {
+        styleCombo->setCurrentIndex(comboIndex);
+    }
+    
+    selectedBgColor = QColor(settings.value("background/color", "#ffffff").toString());
+    bgColorButton->setStyleSheet(QString("background-color: %1").arg(selectedBgColor.name()));
+    
+    selectedGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+    gridColorButton->setStyleSheet(QString("background-color: %1").arg(selectedGridColor.name()));
+    
+    gridSpacingSpin->setValue(settings.value("background/gridSpacing", 32).toInt());
+    lineSpacingSpin->setValue(settings.value("background/lineSpacing", 32).toInt());
+    
+    // Load theme settings
+    if (mainWindowRef) {
+        useCustomAccentCheckbox->setChecked(mainWindowRef->isUsingCustomAccentColor());
+        selectedAccentColor = mainWindowRef->getCustomAccentColor();
+        accentColorButton->setStyleSheet(QString("background-color: %1").arg(selectedAccentColor.name()));
+        accentColorButton->setEnabled(useCustomAccentCheckbox->isChecked());
+    }
+    
+    // Load language settings
+    bool useSystemLang = settings.value("useSystemLanguage", true).toBool();
+    QString overrideLang = settings.value("languageOverride", "en").toString();
+    
+    useSystemLanguageCheckbox->setChecked(useSystemLang);
+    languageCombo->setEnabled(!useSystemLang);
+    
+    for (int i = 0; i < languageCombo->count(); ++i) {
+        if (languageCombo->itemData(i).toString() == overrideLang) {
+            languageCombo->setCurrentIndex(i);
+            break;
+        }
+    }
+}
+
+void ControlPanelDialog::applyChanges()
+{
+    if (!mainWindowRef) return;
+    
+    QSettings settings("SpeedyNote", "App");
+    
+    // Apply page size settings to QSettings (for new documents only)
+    QSizeF selectedPageSize = pageSizeCombo->currentData().toSizeF();
+    settings.setValue("page/width", selectedPageSize.width());
+    settings.setValue("page/height", selectedPageSize.height());
+    // Note: Page size is NOT applied to current document - only affects new documents
+    
+    // Apply background settings to QSettings (for new documents)
+    // Use the data value (enum value), not the combo index
+    int bgTypeValue = styleCombo->currentData().toInt();
+    settings.setValue("background/type", bgTypeValue);
+    settings.setValue("background/color", selectedBgColor.name());
+    settings.setValue("background/gridColor", selectedGridColor.name());
+    settings.setValue("background/gridSpacing", gridSpacingSpin->value());
+    settings.setValue("background/lineSpacing", lineSpacingSpin->value());
+    
+    // Apply background settings to current document (if any)
+    mainWindowRef->applyBackgroundSettings(
+        static_cast<Page::BackgroundType>(bgTypeValue),
+        selectedBgColor,
+        selectedGridColor,
+        gridSpacingSpin->value(),
+        lineSpacingSpin->value()
+    );
+    
+    // Apply theme settings
+    mainWindowRef->setUseCustomAccentColor(useCustomAccentCheckbox->isChecked());
+    if (selectedAccentColor.isValid()) {
+        mainWindowRef->setCustomAccentColor(selectedAccentColor);
+    }
+    
+    // Apply language settings
+    settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
+    if (!useSystemLanguageCheckbox->isChecked()) {
+        QString selectedLang = languageCombo->currentData().toString();
+        settings.setValue("languageOverride", selectedLang);
+    }
+}
+
+/*
 void ControlPanelDialog::createBackgroundTab() {
     backgroundTab = new QWidget(this);
 
@@ -119,7 +274,9 @@ void ControlPanelDialog::chooseColor() {
         colorButton->setStyleSheet(QString("background-color: %1").arg(selectedColor.name()));
     }
 }
+*/
 
+/*
 void ControlPanelDialog::applyChanges() {
     if (!canvas) return;
 
@@ -180,7 +337,9 @@ void ControlPanelDialog::applyChanges() {
         }
     }
 }
+*/
 
+/*
 void ControlPanelDialog::loadFromCanvas() {
     styleCombo->setCurrentIndex(static_cast<int>(canvas->getBackgroundStyle()));
     densitySpin->setValue(canvas->getBackgroundDensity());
@@ -225,8 +384,8 @@ void ControlPanelDialog::loadFromCanvas() {
         }
     }
 }
-
-
+*/
+/*
 void ControlPanelDialog::createPerformanceTab() {
     performanceTab = new QWidget();
     QVBoxLayout *layout = new QVBoxLayout(performanceTab);
@@ -287,7 +446,8 @@ void ControlPanelDialog::createPerformanceTab() {
 
     // return performanceTab;
 }
-
+*/
+/*
 void ControlPanelDialog::createToolbarTab(){
     toolbarTab = new QWidget(this);
     QVBoxLayout *toolbarLayout = new QVBoxLayout(toolbarTab);
@@ -431,8 +591,8 @@ void ControlPanelDialog::createToolbarTab(){
     // Connect the checkbox
     connect(benchmarkVisibilityCheckbox, &QCheckBox::toggled, mainWindowRef, &MainWindow::setBenchmarkControlsVisible);
 }
-
-
+*/
+/*
 void ControlPanelDialog::createButtonMappingTab() {
     QWidget *buttonTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(buttonTab);
@@ -468,6 +628,9 @@ void ControlPanelDialog::createButtonMappingTab() {
     buttonTab->setLayout(layout);
     tabWidget->addTab(buttonTab, tr("Button Mapping"));
 }
+*/
+
+/*
 
 void ControlPanelDialog::createKeyboardMappingTab() {
     keyboardTab = new QWidget(this);
@@ -516,7 +679,8 @@ void ControlPanelDialog::createKeyboardMappingTab() {
     
     tabWidget->addTab(keyboardTab, tr("Keyboard Shortcuts"));
 }
-
+*/
+/*
 void ControlPanelDialog::createMouseDialTab() {
     mouseDialTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(mouseDialTab);
@@ -594,6 +758,194 @@ void ControlPanelDialog::createMouseDialTab() {
     
     tabWidget->addTab(mouseDialTab, tr("Mouse Dial Control"));
 }
+*/
+
+void ControlPanelDialog::createBackgroundTab() {
+    backgroundTab = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(backgroundTab);
+    
+    // Add some spacing at the top
+    layout->addSpacing(10);
+    
+    // Title
+    QLabel *titleLabel = new QLabel(tr("Default Page & Background Settings"), backgroundTab);
+    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
+    layout->addWidget(titleLabel);
+    
+    QLabel *descLabel = new QLabel(tr("These settings apply to newly created documents only. "
+                                      "Background changes will also be applied to the current document."), backgroundTab);
+    descLabel->setWordWrap(true);
+    descLabel->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 15px;");
+    layout->addWidget(descLabel);
+    
+    // ========== PAGE SIZE SECTION ==========
+    QLabel *pageSectionLabel = new QLabel(tr("Default Page Size"), backgroundTab);
+    pageSectionLabel->setStyleSheet("font-weight: bold; margin-top: 5px;");
+    layout->addWidget(pageSectionLabel);
+    
+    // Page Size Preset
+    QHBoxLayout *pageSizeLayout = new QHBoxLayout();
+    QLabel *pageSizeLabel = new QLabel(tr("Paper Size:"), backgroundTab);
+    pageSizeLabel->setMinimumWidth(120);
+    pageSizeLayout->addWidget(pageSizeLabel);
+    
+    pageSizeCombo = new QComboBox(backgroundTab);
+    // ISO/JIS sizes (commonly used internationally)
+    // Format: "Name", QVariant with QSizeF(width, height) at 96 DPI
+    // mm to px at 96 DPI: mm * 96 / 25.4
+    pageSizeCombo->addItem(tr("A3 (297 × 420 mm)"), QSizeF(1123, 1587));
+    pageSizeCombo->addItem(tr("B4 (250 × 353 mm)"), QSizeF(945, 1334));
+    pageSizeCombo->addItem(tr("A4 (210 × 297 mm)"), QSizeF(794, 1123));
+    pageSizeCombo->addItem(tr("B5 (176 × 250 mm)"), QSizeF(665, 945));
+    pageSizeCombo->addItem(tr("A5 (148 × 210 mm)"), QSizeF(559, 794));
+    // US Imperial sizes (commonly used in US)
+    pageSizeCombo->addItem(tr("US Letter (8.5 × 11 in)"), QSizeF(816, 1056));
+    pageSizeCombo->addItem(tr("US Legal (8.5 × 14 in)"), QSizeF(816, 1344));
+    pageSizeCombo->addItem(tr("US Tabloid (11 × 17 in)"), QSizeF(1056, 1632));
+    
+    connect(pageSizeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ControlPanelDialog::onPageSizePresetChanged);
+    pageSizeLayout->addWidget(pageSizeCombo, 1);
+    layout->addLayout(pageSizeLayout);
+    
+    // Page Size Dimensions (read-only display)
+    QHBoxLayout *pageDimLayout = new QHBoxLayout();
+    QLabel *pageDimLabel = new QLabel(tr("Dimensions:"), backgroundTab);
+    pageDimLabel->setMinimumWidth(120);
+    pageDimLayout->addWidget(pageDimLabel);
+    
+    pageSizeDimLabel = new QLabel(backgroundTab);
+    pageSizeDimLabel->setStyleSheet("color: #666; font-style: italic;");
+    pageDimLayout->addWidget(pageSizeDimLabel);
+    pageDimLayout->addStretch();
+    layout->addLayout(pageDimLayout);
+    
+    layout->addSpacing(15);
+    
+    // ========== BACKGROUND SECTION ==========
+    QLabel *bgSectionLabel = new QLabel(tr("Default Background"), backgroundTab);
+    bgSectionLabel->setStyleSheet("font-weight: bold;");
+    layout->addWidget(bgSectionLabel);
+    
+    // Background Style
+    QHBoxLayout *styleLayout = new QHBoxLayout();
+    QLabel *styleLabel = new QLabel(tr("Background Style:"), backgroundTab);
+    styleLabel->setMinimumWidth(120);
+    styleLayout->addWidget(styleLabel);
+    
+    styleCombo = new QComboBox(backgroundTab);
+    // Values must match Page::BackgroundType enum: None=0, PDF=1, Custom=2, Grid=3, Lines=4
+    styleCombo->addItem(tr("None"), static_cast<int>(Page::BackgroundType::None));     // 0
+    styleCombo->addItem(tr("Grid"), static_cast<int>(Page::BackgroundType::Grid));     // 3
+    styleCombo->addItem(tr("Lines"), static_cast<int>(Page::BackgroundType::Lines));   // 4
+    styleLayout->addWidget(styleCombo, 1);
+    layout->addLayout(styleLayout);
+    
+    layout->addSpacing(10);
+    
+    // Background Color
+    QHBoxLayout *bgColorLayout = new QHBoxLayout();
+    QLabel *bgColorLabel = new QLabel(tr("Background Color:"), backgroundTab);
+    bgColorLabel->setMinimumWidth(120);
+    bgColorLayout->addWidget(bgColorLabel);
+    
+    bgColorButton = new QPushButton(backgroundTab);
+    bgColorButton->setFixedSize(100, 30);
+    bgColorButton->setStyleSheet("background-color: #ffffff");
+    connect(bgColorButton, &QPushButton::clicked, this, &ControlPanelDialog::chooseBackgroundColor);
+    bgColorLayout->addWidget(bgColorButton);
+    bgColorLayout->addStretch();
+    layout->addLayout(bgColorLayout);
+    
+    // Grid/Line Color
+    QHBoxLayout *gridColorLayout = new QHBoxLayout();
+    QLabel *gridColorLabel = new QLabel(tr("Grid/Line Color:"), backgroundTab);
+    gridColorLabel->setMinimumWidth(120);
+    gridColorLayout->addWidget(gridColorLabel);
+    
+    gridColorButton = new QPushButton(backgroundTab);
+    gridColorButton->setFixedSize(100, 30);
+    gridColorButton->setStyleSheet("background-color: #c8c8c8");
+    connect(gridColorButton, &QPushButton::clicked, this, &ControlPanelDialog::chooseGridColor);
+    gridColorLayout->addWidget(gridColorButton);
+    gridColorLayout->addStretch();
+    layout->addLayout(gridColorLayout);
+    
+    layout->addSpacing(10);
+    
+    // Grid Spacing
+    QHBoxLayout *gridSpacingLayout = new QHBoxLayout();
+    QLabel *gridSpacingLabel = new QLabel(tr("Grid Spacing:"), backgroundTab);
+    gridSpacingLabel->setMinimumWidth(120);
+    gridSpacingLayout->addWidget(gridSpacingLabel);
+    
+    gridSpacingSpin = new QSpinBox(backgroundTab);
+    gridSpacingSpin->setRange(8, 128);
+    gridSpacingSpin->setSingleStep(8);
+    gridSpacingSpin->setSuffix(" px");
+    gridSpacingSpin->setValue(32);
+    gridSpacingLayout->addWidget(gridSpacingSpin);
+    gridSpacingLayout->addStretch();
+    layout->addLayout(gridSpacingLayout);
+    
+    // Line Spacing
+    QHBoxLayout *lineSpacingLayout = new QHBoxLayout();
+    QLabel *lineSpacingLabel = new QLabel(tr("Line Spacing:"), backgroundTab);
+    lineSpacingLabel->setMinimumWidth(120);
+    lineSpacingLayout->addWidget(lineSpacingLabel);
+    
+    lineSpacingSpin = new QSpinBox(backgroundTab);
+    lineSpacingSpin->setRange(8, 128);
+    lineSpacingSpin->setSingleStep(8);
+    lineSpacingSpin->setSuffix(" px");
+    lineSpacingSpin->setValue(32);
+    lineSpacingLayout->addWidget(lineSpacingSpin);
+    lineSpacingLayout->addStretch();
+    layout->addLayout(lineSpacingLayout);
+    
+    // Note about 32px default
+    QLabel *noteLabel = new QLabel(tr("Note: 32px spacing is recommended as it divides evenly into "
+                                      "the 1024px tile size used by the edgeless canvas."), backgroundTab);
+    noteLabel->setWordWrap(true);
+    noteLabel->setStyleSheet("color: gray; font-size: 10px; margin-top: 15px;");
+    layout->addWidget(noteLabel);
+    
+    layout->addStretch();
+    
+    // Initialize colors
+    selectedBgColor = QColor("#ffffff");
+    selectedGridColor = QColor("#c8c8c8");
+    
+    // Initialize page size display
+    onPageSizePresetChanged(pageSizeCombo->currentIndex());
+    
+    tabWidget->addTab(backgroundTab, tr("Page"));
+}
+
+void ControlPanelDialog::onPageSizePresetChanged(int index) {
+    if (index < 0 || !pageSizeCombo || !pageSizeDimLabel) return;
+    
+    QSizeF size = pageSizeCombo->itemData(index).toSizeF();
+    pageSizeDimLabel->setText(tr("%1 × %2 px (at 96 DPI)")
+        .arg(static_cast<int>(size.width()))
+        .arg(static_cast<int>(size.height())));
+}
+
+void ControlPanelDialog::chooseBackgroundColor() {
+    QColor chosen = QColorDialog::getColor(selectedBgColor, this, tr("Select Background Color"));
+    if (chosen.isValid()) {
+        selectedBgColor = chosen;
+        bgColorButton->setStyleSheet(QString("background-color: %1").arg(selectedBgColor.name()));
+    }
+}
+
+void ControlPanelDialog::chooseGridColor() {
+    QColor chosen = QColorDialog::getColor(selectedGridColor, this, tr("Select Grid/Line Color"));
+    if (chosen.isValid()) {
+        selectedGridColor = chosen;
+        gridColorButton->setStyleSheet(QString("background-color: %1").arg(selectedGridColor.name()));
+    }
+}
 
 void ControlPanelDialog::createThemeTab() {
     themeTab = new QWidget(this);
@@ -623,6 +975,8 @@ void ControlPanelDialog::createThemeTab() {
     connect(useCustomAccentCheckbox, &QCheckBox::toggled, accentColorButton, &QPushButton::setEnabled);
     connect(useCustomAccentCheckbox, &QCheckBox::toggled, accentColorLabel, &QLabel::setEnabled);
     
+
+    /*
     // Color palette preference
     useBrighterPaletteCheckbox = new QCheckBox(tr("Use Brighter Color Palette"), themeTab);
     layout->addWidget(useBrighterPaletteCheckbox);
@@ -631,7 +985,7 @@ void ControlPanelDialog::createThemeTab() {
     paletteNote->setWordWrap(true);
     paletteNote->setStyleSheet("color: gray; font-size: 10px;");
     layout->addWidget(paletteNote);
-    
+    */
     layout->addStretch();
     
     tabWidget->addTab(themeTab, tr("Theme"));
@@ -645,6 +999,7 @@ void ControlPanelDialog::chooseAccentColor() {
     }
 }
 
+/*
 void ControlPanelDialog::addKeyboardMapping() {
     // Step 1: Capture key sequence
     KeyCaptureDialog captureDialog(this);
@@ -717,7 +1072,8 @@ void ControlPanelDialog::removeKeyboardMapping() {
         keyboardTable->removeRow(currentRow);
     }
 }
-
+*/
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 void ControlPanelDialog::createControllerMappingTab() {
     controllerMappingTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(controllerMappingTab);
@@ -841,6 +1197,8 @@ void ControlPanelDialog::updateControllerStatus() {
         controllerStatusLabel->setStyleSheet("color: red; font-weight: bold;");
     }
 }
+#endif
+
 
 void ControlPanelDialog::createAboutTab() {
     aboutTab = new QWidget(this);
@@ -880,7 +1238,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(5);
     
     // Version
-    QLabel *versionLabel = new QLabel(tr("Version 0.12.2"), aboutTab);
+    QLabel *versionLabel = new QLabel(tr("Version 1.0.0"), aboutTab);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 14px; color: #7f8c8d;");
     layout->addWidget(versionLabel);
@@ -905,7 +1263,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(10);
     
     // Copyright
-    QLabel *copyrightLabel = new QLabel(tr("© 2025 SpeedyNote. All rights reserved."), aboutTab);
+    QLabel *copyrightLabel = new QLabel(tr("© 2026 SpeedyNote. All rights reserved."), aboutTab);
     copyrightLabel->setAlignment(Qt::AlignCenter);
     copyrightLabel->setStyleSheet("font-size: 10px; color: #95a5a6;");
     layout->addWidget(copyrightLabel);
@@ -954,7 +1312,8 @@ void ControlPanelDialog::createCacheTab() {
     layout->addSpacing(20);
 
     // Show cache size
-    qint64 cacheSize = SpnPackageManager::getTempDirsTotalSize();
+    // Phase P.1: SpnPackageManager removed - cache management will be reimplemented in NotebookLibrary
+    qint64 cacheSize = 0;  // TODO: Implement with NotebookLibrary::getTempDirsTotalSize()
     QString cacheSizeText = QString::number(cacheSize / 1024.0 / 1024.0, 'f', 2) + " MB";
     QLabel *cacheSizeLabel = new QLabel(tr("Current cache size: %1").arg(cacheSizeText), cacheTab);
     cacheSizeLabel->setAlignment(Qt::AlignCenter);
@@ -991,17 +1350,17 @@ void ControlPanelDialog::createCacheTab() {
         );
 
         if (reply == QMessageBox::Yes) {
-            // Clean up orphaned temp directories
-            SpnPackageManager::cleanupOrphanedTempDirs();
-
-            // Update cache size display
-            qint64 newCacheSize = SpnPackageManager::getTempDirsTotalSize();
+            // Phase P.1: SpnPackageManager removed - cache cleanup will be reimplemented
+            // TODO: Implement with NotebookLibrary::cleanupOrphanedTempDirs()
+            
+            // Update cache size display (currently disabled)
+            qint64 newCacheSize = 0;  // TODO: Implement with NotebookLibrary
             QString newCacheSizeText = QString::number(newCacheSize / 1024.0 / 1024.0, 'f', 2) + " MB";
             cacheSizeLabel->setText(tr("Current cache size: %1").arg(newCacheSizeText));
 
             // Show feedback message
             QMessageBox::information(this, tr("Cache Cleared"), 
-                tr("Temporary cache files have been cleared successfully."));
+                tr("Cache cleanup is temporarily disabled during architecture migration."));
         }
     });
 
@@ -1116,6 +1475,7 @@ void ControlPanelDialog::createLanguageTab() {
     tabWidget->addTab(languageTab, tr("Language"));
 }
 
+/*
 void ControlPanelDialog::createCompatibilityTab() {
     compatibilityTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(compatibilityTab);
@@ -1136,7 +1496,7 @@ void ControlPanelDialog::createCompatibilityTab() {
     layout->addWidget(folderSectionLabel);
     
     QLabel *folderDescriptionLabel = new QLabel(tr("This feature allows you to manually select a save folder for your notes. "
-                                                  "This is only for converting old folder-based notebooks to the new .spn format."), compatibilityTab);
+                                                  "SpeedyNote uses .snb folder bundles for notebook storage."), compatibilityTab);
     folderDescriptionLabel->setWordWrap(true);
     folderDescriptionLabel->setStyleSheet("font-size: 11px; margin-bottom: 10px;");
     layout->addWidget(folderDescriptionLabel);
@@ -1287,3 +1647,5 @@ void ControlPanelDialog::detectStylusButton(bool isButtonA) {
                 .arg(isButtonA ? tr("Button A") : tr("Button B")));
     }
 }
+
+*/

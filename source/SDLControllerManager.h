@@ -1,6 +1,8 @@
 #ifndef SDLCONTROLLERMANAGER_H
 #define SDLCONTROLLERMANAGER_H
 
+#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
+
 #include <QObject>
 #include <QMap>
 #include <QString>
@@ -64,5 +66,7 @@ private:
     const quint32 HOLD_THRESHOLD = 300;  // ms
     const quint32 POLL_INTERVAL = 16;    // ms
 };
+
+#endif // SPEEDYNOTE_CONTROLLER_SUPPORT
 
 #endif // SDLCONTROLLERMANAGER_H

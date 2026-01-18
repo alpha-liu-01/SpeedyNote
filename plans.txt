@@ -1,0 +1,702 @@
+=============================================================================
+                    SPEEDYNOTE VIEWPORT MIGRATION PLAN
+=============================================================================
+
+STATUS: Phase 1 ✅ | Phase 2A ✅ | Phase 3 ✅ COMPLETE | Phase 4 NEXT
+LAST UPDATED: Dec 29, 2024
+
+=============================================================================
+                         ARCHITECTURE OVERVIEW
+=============================================================================
+
+BEFORE (Current):
+┌─────────────────────────────────────────────────────────────┐
+│                        MainWindow                            │
+│  - Tab management, page switching, ALL UI widgets           │
+└────────────────────────┬────────────────────────────────────┘
+                         │ owns
+┌────────────────────────▼────────────────────────────────────┐
+│                        InkCanvas                             │
+│  - Document model (PDF, strokes, metadata) ← MIXED          │
+│  - View (rendering, pan/zoom)              ← TOGETHER       │
+│  - Input handling (tablet, mouse, touch)                     │
+│  - Combined canvas hack (2 pages stacked)                    │
+│  - ~7000 lines of code                                       │
+└─────────────────────────────────────────────────────────────┘
+
+AFTER (Target):
+┌─────────────────────────────────────────────────────────────┐
+│                        MainWindow                            │
+│  - Global tool state (ToolType, color, thickness)           │
+│  - Menus, toolbars, status bar                              │
+│  - Coordinates: TabManager, DocumentManager, LayerPanel      │
+└───────┬──────────────────────┬──────────────────────┬───────┘
+        │                      │                      │
+        ▼                      ▼                      ▼
+┌───────────────┐    ┌─────────────────┐    ┌───────────────┐
+│ DocumentMgr   │    │   TabManager    │    │  LayerPanel   │
+│ (✓ Phase 3)   │    │  (✓ Phase 3)    │    │ (✓ Phase 3)   │
+│               │    │                 │    │               │
+│ OWNS:         │    │ WRAPS:          │    │ TALKS TO:     │
+│ - Documents   │    │ - QTabWidget    │    │ - Page        │
+│               │    │ - Viewports     │    │ (directly!)   │
+└───────┬───────┘    └────────┬────────┘    └───────────────┘
+        │                     │
+        │ OWNS                │ CREATES
+        ▼                     ▼
+┌────────────────────────────────────────────────────────────┐
+│                    Document (✅ BUILT)                      │
+│  - List of Pages                                            │
+│  - PDF reference (PdfProvider)                              │
+│  - Notebook metadata & bookmarks                            │
+└───────────────────────┬────────────────────────────────────┘
+                        │ contains
+┌───────────────────────▼────────────────────────────────────┐
+│                    DocumentViewport (✅ BUILT)              │
+│  - REFERENCES Document (doesn't own)                        │
+│  - Pan/zoom/view state (per-document)                       │
+│  - Renders visible pages                                    │
+│  - Routes input to correct page                             │
+│  - currentPage() → for LayerPanel                           │
+└───────────────────────┬────────────────────────────────────┘
+                        │ renders
+┌───────────────────────▼────────────────────────────────────┐
+│                     Page (✅ BUILT)                         │
+│  - Vector layers (multi-layer support!)                     │
+│  - activeLayerIndex (for drawing)                           │
+│  - addLayer(), removeLayer(), moveLayer()                   │
+│  - Background (PDF / grid / lines / custom)                 │
+└─────────────────────────────────────────────────────────────┘
+
+=============================================================================
+                    PHASE 0: PREPARATION (✅ COMPLETE)
+=============================================================================
+
+[✅] 0.1 Map all MainWindow ↔ InkCanvas interactions
+     → docs/MIGRATION_PHASE0_INTERACTIONS.md
+     → 318 method calls, 18 signal/slot connections
+
+[✅] 0.2 Map all isCombinedCanvas locations  
+     → docs/MIGRATION_PHASE0_COMBINED_CANVAS.md
+     → ~500-700 lines to eliminate
+
+[✅] 0.3 Document page-related widgets
+     → docs/MIGRATION_PHASE0_WIDGETS.md
+     → 22+ widgets, 20 signals, 32 handlers to reconnect
+
+=============================================================================
+                PHASE 1: NEW DATA STRUCTURES (✅ COMPLETE)
+=============================================================================
+
+[✅] 1.1 Page class (~810 lines) - docs/MIGRATION_PHASE1_SUBPLAN.md
+     ├── source/strokes/StrokePoint.h
+     ├── source/strokes/VectorStroke.h
+     ├── source/layers/VectorLayer.h (with stroke cache)
+     ├── source/objects/InsertedObject.h/.cpp
+     ├── source/objects/ImageObject.h/.cpp
+     ├── source/core/Page.h/.cpp
+     └── source/core/PageTests.h (--test-page)
+
+[✅] 1.2 Document class (~1170 lines) - docs/MIGRATION_PHASE1_2_SUBPLAN.md
+     ├── source/pdf/PdfProvider.h (interface)
+     ├── source/pdf/PopplerPdfProvider.h/.cpp
+     ├── source/core/Document.h/.cpp
+     └── source/core/DocumentTests.h (--test-document)
+
+[✅] 1.3 DocumentViewport class (~1600 lines) - docs/MIGRATION_PHASE1_3_SUBPLAN.md
+     ├── source/core/DocumentViewport.h/.cpp
+     ├── source/core/DocumentViewportTests.h (--test-viewport)
+     ├── Layout engine (SingleColumn, TwoColumn)
+     ├── Pan/zoom with coordinate transforms
+     ├── PDF cache (2-4 pages, DPI-aware)
+     ├── Stroke cache pre-loading
+     ├── Input routing (mouse/tablet → page)
+     ├── Resize handling
+     └── Signal system for MainWindow sync
+
+=============================================================================
+            PHASE 2: DRAWING IMPLEMENTATION - MIGRATION (✅ COMPLETE)
+=============================================================================
+
+→ See: docs/MIGRATION_PHASE2_SUBPLAN.md for detailed breakdown
+
+NOTE: This was a MIGRATION from VectorCanvas, not a rewrite!
+All drawing logic from VectorCanvas now works in DocumentViewport.
+VectorCanvas is FROZEN and will be deleted in Phase 5.
+
+----- Phase 2A: Core Drawing ✅ COMPLETE -----
+
+[✅] 2.1 Tool State Management (~100 lines)
+     - Tool state in DocumentViewport (ToolType, color, thickness)
+     - setCurrentTool(), setPenColor(), setPenThickness(), setEraserSize()
+
+[✅] 2.2 Stroke Creation (~250 lines)
+     - Point decimation (1.5px threshold)
+     - Strokes stored in Page→VectorLayer
+     - Zoom-aware caching eliminates aliasing
+
+[✅] 2.3 Incremental Stroke Rendering (~150 lines)
+     - currentStrokeCache pattern for smooth 360Hz drawing
+     - CPU usage ~18% on Celeron N4000
+
+[✅] 2.4 Eraser Tool (~150 lines)
+     - Hardware eraser detection (stylus flip)
+     - Visual eraser cursor (dashed circle)
+
+[✅] 2.5 Per-Page Undo/Redo (~200 lines)
+     - Per-page stacks (50 actions max)
+     - Ctrl+Z / Ctrl+Y keyboard handling
+
+[✅] 2.6 Benchmark Integration (~50 lines)
+     - Paint rate measurement (toggle with B key)
+
+[✅] 2.7 Manual Testing Complete
+     - All core drawing features verified in --test-viewport
+
+----- Phase 2B: Additional Tools (READY TO IMPLEMENT) -----
+
+→ See: docs/MIGRATION_PHASE2B_SUBPLAN.md for detailed breakdown
+
+[  ] 2.8 Marker Tool (~150 lines)
+     - Fixed opacity (50%), fixed thickness, separate color (#E6FF6E)
+     - No pressure sensitivity, reuses pen stroke infrastructure
+
+[  ] 2.9 Straight Line Mode (~200 lines)
+     - Toggle mode works with Pen and Marker
+     - Preview line while dragging, free angle
+     - Future: ruler/angle snapping
+
+[  ] 2.10 Lasso Selection Tool (~400 lines)
+     - Freeform selection, entire strokes, active layer only
+     - Transform: move, scale, rotate
+     - Clipboard: copy, cut, paste (within/across pages/tiles)
+     - Marching ants or dashed selection border
+
+[  ] 2.11 Highlighter Tool - DEFERRED
+     - Requires PDF text box integration (Phase 4)
+
+NOTE: Phase 3 complete - MainWindow fully integrated, ready for 2B tools.
+
+=============================================================================
+              PHASE 3: MAINWINDOW INTEGRATION BRIDGE
+=============================================================================
+
+→ See: docs/MIGRATION_PHASE3_SUBPLAN.md for detailed breakdown
+→ See: docs/MIGRATION_PHASE3_NOTES.md for implementation notes
+
+Integrate DocumentViewport into MainWindow, replacing InkCanvas.
+BREAKING CHANGE: Old .spn files NOT supported (version 1.0.0-rc1).
+
+NEW ARCHITECTURE COMPONENTS:
+- DocumentManager: Owns Documents, handles file I/O
+- TabManager: Thin wrapper for QTabWidget operations
+- LayerPanel: Multi-layer editing UI (bottom-left sidebar, SAI2-style)
+- Global tool state + per-document view state
+
+----- Phase 3.0: Pre-Integration Setup ✅ COMPLETE -----
+
+[✅] 3.0.1 DocumentManager Class (~150 lines)
+     - source/core/DocumentManager.h/.cpp
+
+[✅] 3.0.2 TabManager Class (~100 lines)
+     - source/ui/TabManager.h/.cpp
+
+[✅] 3.0.3 LayerPanel Class (~250 lines)
+     - source/ui/LayerPanel.h/.cpp
+
+[✅] 3.0.4 Command Line Flag - REMOVED
+     - --use-new-viewport removed, new viewport is now default
+
+----- Phase 3.1: Disconnect InkCanvas ✅ COMPLETE -----
+
+[✅] 3.1.1 Replace Tab System with QTabWidget
+[✅] 3.1.2 Remove addNewTab() InkCanvas code
+[✅] 3.1.3 Remove VectorCanvas buttons
+[✅] 3.1.4 Create currentViewport() helper
+[✅] 3.1.5 Stub InkCanvas signal handlers
+[✅] 3.1.6 Remove page navigation methods
+[✅] 3.1.7 Remove InkCanvas includes/members
+[✅] 3.1.8 Disable ControlPanelDialog
+[✅] 3.1.9 Stub markdown handlers
+
+Note: InkCanvas.cpp still compiles but is not used. Full removal in Phase 5.
+Disconnected files: LauncherWindow.cpp, ControlPanelDialog.cpp
+
+----- Phase 3.2: Add DocumentViewport ✅ COMPLETE -----
+
+[✅] 3.2.1 Initialize Managers
+     - DocumentManager, TabManager created in MainWindow constructor
+
+[✅] 3.2.2 Create Tab with DocumentViewport
+     - addNewTab() creates Document + DocumentViewport via managers
+
+[✅] 3.2.3 Basic Rendering Verification
+     - App launches, tabs work, drawing works
+
+----- Phase 3.3: Core Features Reconnection ✅ COMPLETE -----
+
+[✅] 3.3.1 Tool Selection
+     - Pen/Eraser buttons → currentViewport()->setCurrentTool()
+
+[✅] 3.3.2 Pen Color & Thickness
+     - Color buttons → currentViewport()->setPenColor()
+     - Thickness slider → currentViewport()->setPenThickness()
+
+[✅] 3.3.3 Pan/Zoom Controls
+     - Zoom 50%/100%/200% buttons, zoom slider
+     - Scroll bars connected to viewport
+     - Deferred zoom/pan rendering for smooth 60+ FPS gestures
+
+[✅] 3.3.4 Page Navigation
+     - Page spinbox, prev/next buttons connected
+
+[✅] 3.3.5 Undo/Redo
+     - Per-page undo for paged mode
+     - Global undo stack for edgeless mode (multi-tile strokes)
+
+----- Phase 3.4: Layer Management UI ✅ COMPLETE -----
+
+[✅] 3.4.1 Add LayerPanel to Sidebar
+     - Bottom-left, below PDF outline/bookmarks
+     - Foldable toggle button (like other sidebars)
+
+[✅] 3.4.2 Connect LayerPanel to Current Page/Document
+     - Paged mode: talks directly to Page
+     - Edgeless mode: talks to Document manifest
+
+[✅] 3.4.3 Connect LayerPanel Signals
+     - Layer changes → document modified → tile dirty
+
+[✅] 3.4.4 Multi-Layer Features (expanded from original plan)
+     - Add/delete/rename/reorder layers
+     - Toggle visibility, checkbox selection
+     - Merge selected layers, duplicate layer
+     - Edgeless: manifest-based layer definitions
+     → See: docs/MIGRATION_LAYER_SUBPLAN.md
+
+----- Phase 3.5: File Operations ✅ COMPLETE -----
+
+[✅] 3.5.1 New Document
+     - Paged notebook (Ctrl+N) and Edgeless canvas (Ctrl+Shift+N)
+
+[✅] 3.5.2 Save Document
+     - Paged: .json format (single file)
+     - Edgeless: .snb bundle (document.json + tiles/)
+
+[✅] 3.5.3 Load Document
+     - Both formats supported, lazy loading for edgeless
+
+[✅] 3.5.4 PDF Loading
+     - Open PDF dialog, page-by-page backgrounds
+
+[✅] 3.5.5 Temp Auto-save (added)
+     - Unsaved edgeless documents get temp bundle
+     - Prompt save on close, cleanup on discard
+
+----- Phase 3.6: Verification ✅ COMPLETE -----
+
+[✅] 3.6.1 Feature Verification
+     - Core drawing, layers, save/load all tested
+
+[✅] 3.6.2 Debug Overlay Migration
+     - Moved from DocumentViewport to source/ui/DebugOverlay
+     - Modular, extensible, toggle with F12
+     - Timer-based updates, draggable
+
+----- Phase 3.E: Edgeless Mode (BONUS - not in original plan) -----
+
+[✅] E1: Core Tile Infrastructure
+     - 1024x1024 tiles, sparse 2D grid, lazy load/evict
+
+[✅] E2: Viewport Rendering
+     - Render visible tiles, min zoom enforcement
+
+[✅] E3: Stroke Drawing with Splitting
+     - Strokes split across tile boundaries
+
+[✅] E4: Eraser Across Tiles
+     - Per-tile erasing, empty tile deletion
+
+[✅] E5: Serialization
+     - Tile-based save/load, manifest for layer definitions
+
+[✅] E6: Undo/Redo (global stack)
+     - Multi-segment stroke undo/redo
+
+[✅] E7: Deferred Zoom/Pan
+     - Cached frame during gestures for smooth performance
+
+→ See: docs/MIGRATION_EDGELESS_SUBPLAN.md
+
+PROGRESS: Phase 3 COMPLETE ✅
+
+=============================================================================
+                    PHASE 4: WIDGET MIGRATION
+=============================================================================
+
+Reconnect remaining MainWindow widgets to DocumentViewport.
+Most core features already working from Phase 3.
+
+Priority: HIGH (Core functionality)
+[✅] 4.1 Outline & Bookmarks (PARTIAL - outline works, bookmarks stubbed)
+     - outlineTree → scrollToPage() ✓
+     - bookmarkList → needs Document::bookmarks()
+
+[✅] 4.2 Touch Gestures
+     - Two-finger pan, pinch zoom
+     - Trackpad gestures
+     - Palm rejection (Linux)
+
+[X] 4.3 Controller Support
+     - MagicDial / Joy-Con integration
+     - SDLControllerManager connection
+
+Priority: MEDIUM (Enhanced features)
+[✅] 4.4 Picture Windows
+     - PictureWindow integration with Page objects
+     - Insert/resize/delete operations
+
+[✅] 4.5 Markdown Notes Sidebar
+     - markdownNotesSidebar integration
+     - Per-page markdown notes
+
+[✅] 4.6 ControlPanelDialog Migration
+     - Connect settings to DocumentViewport
+     - Currently disabled (Phase 3.1.8)
+
+Priority: LOW (Can be deferred)
+[✅] 4.7 Phase 2B Tools
+     - Marker, Straight Line, Lasso, Highlighter
+     - Easier now with full MainWindow integration
+
+=============================================================================
+                         PHASE 5: CLEANUP
+=============================================================================
+
+Remove old code once Phase 4 is complete.
+
+[✅] 5.1 Delete InkCanvas (~7000 lines)
+     - All pixmap-based canvas code
+     - Combined canvas hack
+     - source/InkCanvas.h/.cpp
+
+[✅] 5.2 Delete VectorCanvas (~800 lines)
+     - Test overlay implementation (now in DebugOverlay)
+     - source/VectorCanvas.h/.cpp
+
+[✅] 5.3 MainWindow Cleanup
+     - Remove any remaining InkCanvas references
+     - Remove stubbed/unused handlers
+     - General code organization
+
+[✅] 5.4 Re-enable LauncherWindow
+     - Reconnect LauncherWindow.cpp
+     - Update for new Document/Viewport architecture
+
+[✅] 5.5 Final Testing & Performance Validation
+     - Full feature regression test
+     - Performance on low-end hardware
+
+[x] 5.6 Update Documentation
+     - README updates
+     - File format documentation (.json, .snb)
+
+=============================================================================
+                          FILE STRUCTURE
+=============================================================================
+
+source/
+├── core/                         ✅ COMPLETE (Phase 1-3)
+│   ├── Document.h / Document.cpp      (edgeless tile mgmt, layer manifest)
+│   ├── DocumentManager.h / .cpp       (owns Documents, file I/O)
+│   ├── DocumentTests.h
+│   ├── Page.h / Page.cpp              (tile for edgeless, page for paged)
+│   ├── PageTests.h
+│   ├── DocumentViewport.h / .cpp      (rendering, input, undo/redo)
+│   ├── DocumentViewportTests.h
+│   └── ToolType.h
+├── ui/                           ✅ COMPLETE (Phase 3)
+│   ├── TabManager.h / TabManager.cpp
+│   ├── LayerPanel.h / LayerPanel.cpp  (full layer management UI)
+│   └── DebugOverlay.h / DebugOverlay.cpp  ← NEW (modular debug panel)
+├── layers/                       ✅ COMPLETE
+│   └── VectorLayer.h
+├── strokes/                      ✅ COMPLETE
+│   ├── StrokePoint.h
+│   └── VectorStroke.h
+├── objects/                      ✅ COMPLETE
+│   ├── InsertedObject.h / InsertedObject.cpp
+│   └── ImageObject.h / ImageObject.cpp
+├── pdf/                          ✅ COMPLETE
+│   ├── PdfProvider.h
+│   └── PopplerPdfProvider.h / PopplerPdfProvider.cpp
+├── InkCanvas.h / InkCanvas.cpp   (legacy - to be removed in Phase 5)
+├── VectorCanvas.h / VectorCanvas.cpp (frozen - to be removed in Phase 5)
+└── MainWindow.h / MainWindow.cpp (Phase 3 integration complete)
+
+=============================================================================
+                         TEST COMMANDS
+=============================================================================
+
+./NoteApp.exe --test-page        # Phase 1.1 tests (Page, Layer, Object)
+./NoteApp.exe --test-document    # Phase 1.2 tests (Document, PDF)
+./NoteApp.exe --test-viewport    # Phase 1.3/2 tests (DocumentViewport visual)
+./NoteApp.exe                    # Normal app (new architecture is default)
+
+Keyboard shortcuts:
+  Ctrl+N              New paged notebook
+  Ctrl+Shift+N        New edgeless canvas
+  Ctrl+Shift+L        Load edgeless (.snb)
+  F12                 Toggle debug overlay
+  B                   Toggle benchmark mode
+
+=============================================================================
+                       ESTIMATED EFFORT
+=============================================================================
+
+Phase 0: COMPLETE ✅
+Phase 1: COMPLETE ✅
+Phase 2A: COMPLETE ✅ (~1000 lines - core drawing)
+Phase 2B: DEFERRED (additional tools - ~850 lines)
+Phase 3: COMPLETE ✅ (MainWindow + LayerPanel + Edgeless mode)
+Phase 4: ~3-4 days (widget migration - touch gestures, controllers, etc.)
+Phase 5: ~1-2 days (cleanup - remove InkCanvas, VectorCanvas)
+
+Remaining for MVP: ~4-6 days (Phase 4 + 5)
+Remaining with Phase 2B tools: ~6-8 days
+
+=============================================================================
+                          KEY DECISIONS
+=============================================================================
+
+PHASE 1-2 DECISIONS:
+1. ONE DocumentViewport per tab (like InkCanvas today)
+2. Per-page undo/redo (not global) - for paged mode
+3. PDF cache: 2 pages (single col) / 4 pages (two col), single DPI
+4. Continuous scrolling (not snap-to-page)
+5. Edgeless canvas = sparse grid of 1024x1024 tiles
+
+PHASE 3 DECISIONS:
+6. DocumentManager: YES - owns all Documents, handles file I/O
+7. TabManager: YES - thin wrapper for code organization
+8. LayerPanel: Talks to Page (paged) or Document manifest (edgeless)
+9. Tool state: GLOBAL (industry standard - Photoshop, SAI2, etc.)
+10. View state: PER-DOCUMENT (zoom, pan, current page)
+11. Old .spn files: NOT SUPPORTED (breaking change for v1.0.0-rc1)
+12. File formats: .json (paged), .snb bundle (edgeless)
+13. Layer Panel: Bottom-left sidebar, foldable toggle
+
+EDGELESS MODE DECISIONS (Phase 3.E):
+14. Tile size: 1024x1024 pixels (good balance of granularity vs overhead)
+15. Lazy loading: Tiles loaded on demand, evicted when distant
+16. Stroke splitting: Strokes crossing tile boundaries split into segments
+17. Layer manifest: Stored in document.json, NOT per-tile
+18. Undo/redo: Global stack for edgeless (handles multi-tile strokes)
+19. Temp auto-save: Unsaved edgeless gets temp .snb for lazy loading
+20. Deferred rendering: Cached frame during zoom/pan gestures
+
+=============================================================================
+                       REFERENCE IMPLEMENTATIONS
+=============================================================================
+
+VectorCanvas (source/VectorCanvas.h/.cpp):
+⚠️  FROZEN - Will be deleted in Phase 5
+    Was prototype for DocumentViewport.
+
+InkCanvas (source/InkCanvas.h/.cpp):
+⚠️  LEGACY - Will be deleted in Phase 5
+    Not used in new architecture.
+
+DocumentViewport (source/core/DocumentViewport.h/.cpp):
+✅  PRODUCTION - ~3700 lines
+    - Paged mode: multi-page, continuous scroll
+    - Edgeless mode: infinite canvas with tiles
+    - Per-page undo (paged) / global undo (edgeless)
+    - Deferred zoom/pan for smooth gestures
+
+Document (source/core/Document.h/.cpp):
+✅  PRODUCTION - ~1800 lines
+    - Paged mode: list of Pages
+    - Edgeless mode: sparse tile grid + layer manifest
+    - Lazy load/evict tiles, temp bundle auto-save
+
+LayerPanel (source/ui/LayerPanel.h/.cpp):
+✅  PRODUCTION - ~840 lines
+    - Full layer management UI (SAI2-style)
+    - Paged: talks to Page directly
+    - Edgeless: talks to Document manifest
+
+DebugOverlay (source/ui/DebugOverlay.h/.cpp):
+✅  DEVELOPMENT TOOL - ~340 lines
+    - Modular, extensible debug panel
+    - Toggle with F12, draggable
+    - Timer-based updates (30 FPS)
+
+=============================================================================
+                        DOCUMENTATION
+=============================================================================
+
+docs/
+├── MIGRATION_PHASE0_*.md          Phase 0 analysis
+├── MIGRATION_PHASE1_*.md          Phase 1 implementation
+├── MIGRATION_PHASE2_SUBPLAN.md    Phase 2A core drawing
+├── MIGRATION_PHASE2B_SUBPLAN.md   Phase 2B additional tools (Marker, Line, Lasso)
+├── MIGRATION_PHASE3_*.md          Phase 3 integration
+├── MIGRATION_EDGELESS_SUBPLAN.md  Edgeless mode implementation
+├── MIGRATION_LAYER_SUBPLAN.md     Layer panel + manifest architecture
+├── MIGRATION_DOC1_SUBPLAN.md      Deferred zoom/pan rendering
+└── VIEWPORT_RECONSTRUCTION_SUBPLAN.md  Viewport architecture
+
+=============================================================================
+
+
+Now we finally arrive at a junction. SpeedyNote is architecturally complete now, but incomplete feature wise. 
+Here are the remaining phases to complete the SpeedyNote remake:
+
+=============================================================================
+PHASE D: Tablet UX & Tool Enhancement (Tablet-first priority)
+=============================================================================
+
+D.1: PDF Internal Link Clicking [SMALL - HIGH VALUE] ✅ DONE
+     - Highlighter tool now makes PDF page links clickable
+     - Hand cursor on link hover, I-beam cursor otherwise
+     - Internal links navigate to page, external URLs open in browser
+     - See PDF_TEXT_SELECTION_SUBPLAN.md A.11 for details
+
+D.2: Subtoolbar Framework [MEDIUM] ✅ DONE
+     - Create shared infrastructure for tool-specific subtoolbars
+     - Should be touch-friendly (large buttons, clear icons)
+     - Appears below main toolbar when tool is selected
+
+D.3: ObjectSelect Subtoolbar [MEDIUM] ✅ DONE
+     - Replace temporary keyboard shortcuts (Ctrl+,/./6/7/8/9/0)
+     - Mode switches: Image/Link insert mode, Create/Select action mode
+     - Slot buttons (1/2/3) with visual state (empty/filled/type icon)
+     - "Pick position" mode for Position links
+
+D.4: Action Bar [MEDIUM] ✅ DONE
+     - Context-sensitive floating buttons for tablet users
+     - Shows: Copy/Paste/Delete/Undo/Redo when relevant
+     - Appears on selection, disappears after action
+     - Should integrate visually with subtoolbar
+
+D.5: Other Tool Subtoolbars [FUTURE] ✅ DONE
+     - Pen: thickness, color shortcuts
+     - Eraser: mode (stroke/pixel), size
+     - Highlighter: color, auto-highlight toggle
+     - Lasso: transform options
+
+=============================================================================
+PHASE E: Left Sidebar Features
+=============================================================================
+
+E.1: Sidebar Container Refresh [SMALL] ✅ NO NEED
+     - Make tab switching touch-friendly (larger tap targets)
+     - Container already exists, LayerPanel already in a tab
+
+E.2: PDF Outline Panel [MEDIUM] ✅ DONE
+     - Display Poppler's TOC/outline data
+     - Click entry → navigate to page
+     - Scroll document → highlight current section
+     - Expand/collapse nested sections
+
+E.3: Page Panel [MEDIUM-LARGE] ✅ DONE 
+     - Page thumbnails for quick navigation
+     - Click → navigate to page
+     - Drag to reorder pages (??) I don't think we implemented that feature... 
+     - Visual indicator for current page
+     - Add/delete page buttons
+
+E.4: LayerPanel Refresh [SMALL-MEDIUM]
+     - Make touch-friendly (larger buttons, better spacing)
+     - Logic should already work with new architecture
+
+=============================================================================
+PHASE F: Markdown Integration (Phase C.6 completion)
+=============================================================================
+
+F.1: Assess Existing Markdown Code [RESEARCH] ✅ DONE
+     - Review QMarkdownTextEdit integration
+     - Understand old page-by-page loading architecture
+     - Identify what needs to change for LinkObject connection
+
+F.2: LinkObject → Markdown Connection [MEDIUM] ✅ DONE
+     - Create note from LinkSlot (Ctrl+0 on empty slot)
+     - Open existing note from LinkSlot
+     - Store note files in document bundle
+
+F.3: Note Lifecycle Management [SMALL] ✅ DONE
+     - Handle orphaned notes (LinkObject deleted)
+     - Handle broken references (note file deleted)
+
+-----------------------------------------------------------------------------------------------------------------------------
+
+LATER (Post-core features):
+
+G.1: Polish UX ✅ DONE
+     - Tab switching behavior (unsaved changes warning)
+     - Missing PDF handling (file moved/deleted)
+     - Error states and recovery
+
+G.2: Packaging Format Finalization ✅ DONE
+     - Currently using .snb bundle (folder structure)
+     - Decide: keep folder vs zip compression
+     - Temp file location (tmp vs same folder)
+     - Old .spn format is incompatible - clean break
+
+G.3: Control Panel Remake ✅ DONE
+     - Most old options don't make sense with new architecture
+     - Focus on: theme, default tool settings, performance tuning
+
+G.4: File Explorer Integration (Not planned any more)
+     - Double-click .snb → open SpeedyNote
+     - File associations for Windows/Linux
+
+G.5: Shortcut Hub
+     - Centralized keyboard/mouse/controller shortcut customization
+     - Reconnect SDLController for WACOM remote-like UX
+
+G.6: LauncherWindow Reconnect/Remake ✅ DONE
+     - Recent documents list
+     - Quick open for frequently edited notes
+
+G.7: Legacy Code Cleanup ✅ DONE
+     - Remove PictureWindow and other obsolete code
+     - Clean up unused includes and dead code paths
+
+-------------------------------------------------------------------------------------------------------------------------------
+
+FUTURE (Post Windows/Linux release):
+
+H.1: Android Port ✅ DONE
+     - Need alternative PDF provider (Poppler dependencies too heavy)
+     - SDL2 also problematic on Android
+     - Investigate: MuPDF, PDFium, or Android's native PDF renderer
+     - Sandbox/persistence challenges to investigate
+
+H.2: iOS/iPadOS Port (??)
+     - Qt for iOS exists
+     - Without SDL2/Poppler, may be more feasible
+     - Would need iOS-native PDF rendering
+
+...
+
+=============================================================================
+DESIGN DECISIONS (Post-Phase C Discussion)
+=============================================================================
+
+Platform Priority: Tablet-first (tablet PCs), but must work on desktop too.
+
+Markdown Sidebar: UI exists (QMarkdownTextEdit). Old architecture tied notes to 
+                  highlights and loaded page-by-page. Needs refactoring for 
+                  LinkObject-based connection.
+
+LayerPanel: Functional but ugly, not tablet-friendly. Sidebar container exists.
+
+PDF Outline: Poppler provides TOC data. Need display + click-to-navigate + 
+             scroll-to-highlight-current-section.
+
+Bookmark Panel: REMOVED. LinkObjects + markdown notes replace traditional bookmarks.
+
+PDF Links: Text selection tool currently doesn't make PDF internal links clickable.
+           This is a gap that needs to be addressed (added as D.1).

@@ -53,6 +53,10 @@
     <file>resources/icons/up_arrow_reversed.png</file>
     <file>resources/icons/down_arrow.png</file>
     <file>resources/icons/down_arrow_reversed.png</file>
+    <file>resources/icons/left_arrow.png</file>
+    <file>resources/icons/left_arrow_reversed.png</file>
+    <file>resources/icons/right_arrow.png</file>
+    <file>resources/icons/right_arrow_reversed.png</file>
     <file>resources/icons/outline.png</file>
     <file>resources/icons/outline_reversed.png</file>
     <file>resources/icons/bookmark.png</file>
@@ -98,24 +102,58 @@
     <file>resources/icons/rope_reversed.png</file>
     <file>resources/icons/recent.png</file>
     <file>resources/icons/recent_reversed.png</file>
+    <file>resources/icons/layer.png</file>
+    <file>resources/icons/layer_reversed.png</file>
     <file>resources/icons/hand.png</file>
     <file>resources/icons/hand_reversed.png</file>
     <file>resources/icons/clipboard.png</file>
     <file>resources/icons/clipboard_reversed.png</file>
-    <file>resources/reversed_icons/color_reversed.png</file>
-    <file>resources/reversed_icons/bookpage_reversed.png</file>
-    <file>resources/reversed_icons/zoom_reversed.png</file>
-    <file>resources/reversed_icons/thickness_reversed.png</file>
-    <file>resources/reversed_icons/eraser_reversed.png</file>
-    <file>resources/reversed_icons/marker_reversed.png</file>
-    <file>resources/reversed_icons/pen_reversed.png</file>
-    <file>resources/reversed_icons/preset_reversed.png</file>
-    <file>resources/sounds/dial_click.wav</file>
-    <file>resources/fonts/PixelFont.ttf</file>
-    <file>resources/fonts/Jersey20-Regular.ttf</file>
+    <file>resources/icons/visible.png</file>
+    <file>resources/icons/visible_reversed.png</file>
+    <file>resources/icons/notvisible.png</file>
+    <file>resources/icons/notvisible_reversed.png</file>
+    <file>resources/icons/leftsidebar.png</file>
+    <file>resources/icons/leftsidebar_reversed.png</file>
+    <file>resources/icons/rightsidebar.png</file>
+    <file>resources/icons/rightsidebar_reversed.png</file>
+    <file>resources/icons/undo.png</file>
+    <file>resources/icons/undo_reversed.png</file>
+    <file>resources/icons/redo.png</file>
+    <file>resources/icons/redo_reversed.png</file>
+    <file>resources/icons/shape.png</file>
+    <file>resources/icons/shape_reversed.png</file>
+    <file>resources/icons/objectinsert.png</file>
+    <file>resources/icons/objectinsert_reversed.png</file>
+    <file>resources/icons/text.png</file>
+    <file>resources/icons/text_reversed.png</file>
+    <file>resources/icons/link_quote.png</file>
+    <file>resources/icons/link.png</file>
+    <file>resources/icons/link_reversed.png</file>
+    <file>resources/icons/url.png</file>
+    <file>resources/icons/url_reversed.png</file>
+    <file>resources/icons/select.png</file>
+    <file>resources/icons/select_reversed.png</file>
+    <file>resources/icons/linkicon.png</file>
+    <file>resources/icons/linkicon_reversed.png</file>
+    <file>resources/icons/cut.png</file>
+    <file>resources/icons/cut_reversed.png</file>
+    <file>resources/icons/paste.png</file>
+    <file>resources/icons/paste_reversed.png</file>
+    <file>resources/icons/layer_uparrow.png</file>
+    <file>resources/icons/layer_uparrow_reversed.png</file>
+    <file>resources/icons/layer_downarrow.png</file>
+    <file>resources/icons/layer_downarrow_reversed.png</file>
     <file>resources/translations/app_zh.qm</file>
     <file>resources/translations/app_es.qm</file>
     <file>resources/translations/app_fr.qm</file>
+    <file>resources/styles/buttons.qss</file>
+    <file>resources/styles/buttons_dark.qss</file>
+    <file>resources/styles/tabs.qss</file>
+    <file>resources/styles/tabs_dark.qss</file>
+    <file>resources/styles/markdown_sidebar.qss</file>
+    <file>resources/styles/markdown_sidebar_dark.qss</file>
+    <file>resources/styles/launcher.qss</file>
+    <file>resources/styles/launcher_dark.qss</file>
     
 </qresource>
 </RCC>
