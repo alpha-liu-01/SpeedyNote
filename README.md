@@ -9,7 +9,7 @@
 *Built for students who need iPad-quality annotation on budget hardware*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-brightgreen)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-brightgreen)]()
 [![Qt](https://img.shields.io/badge/Qt-6.x-41CD52?logo=qt)]()
 
 [English](#-features) • [中文](./readme/zh_Hans.md)
@@ -70,15 +70,15 @@
 
 | PDF Annotation | Layer Panel | Page Thumbnails |
 |----------------|-------------|-----------------|
-| ![PDF](https://via.placeholder.com/300x200?text=PDF+Annotation) | ![Layers](https://via.placeholder.com/300x200?text=Layer+Panel) | ![Pages](https://via.placeholder.com/300x200?text=Page+Panel) |
+| ![PDF](https://i.imgur.com/xgmYhfK.png) | ![Layers](https://i.imgur.com/NelpAMv.png) | ![Pages](https://i.imgur.com/A93UeAT.png) |
 
 | Edgeless Canvas | Action Bar | Subtoolbar |
 |-----------------|------------|------------|
-| ![Edgeless](https://via.placeholder.com/300x200?text=Infinite+Canvas) | ![Action](https://via.placeholder.com/300x200?text=Action+Bar) | ![Subtoolbar](https://via.placeholder.com/300x200?text=Subtoolbar) |
+| ![Edgeless](https://i.imgur.com/wHLeyIj.png) | ![Action](https://i.imgur.com/wHLeyIj.png) | ![Subtoolbar](https://i.imgur.com/VSvZaxA.png) |
 
 | Link Objects | Markdown Support | Android |
 |-----------------|------------|------------|
-| ![Edgeless](https://via.placeholder.com/300x200?text=Infinite+Canvas) | ![Action](https://via.placeholder.com/300x200?text=Action+Bar) | ![Subtoolbar](https://via.placeholder.com/300x200?text=Subtoolbar) |
+| ![LinkObjects](https://i.imgur.com/QkEw57Y.png) | ![Markdown](https://i.imgur.com/yKVJw5E.png) | ![Android](https://i.imgur.com/rfAJMNF.png) |
 
 ---
 
@@ -99,7 +99,7 @@
 
 #### Windows / macOS / Linux
 
-Download the latest release from **[GitHub Releases](https://github.com/user/SpeedyNote/releases)** or the official website.
+Download the latest release from **[GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases)** or the official website.
 
 | Platform | Package |
 |----------|---------|
@@ -188,8 +188,8 @@ SpeedyNote supports multiple languages:
 
 - 🇺🇸 English
 - 🇨🇳 简体中文 (Simplified Chinese)
-- 🇪🇸 Español (Spanish)
-- 🇫🇷 Français (French)
+- 🇪🇸 Español (Spanish) (partial)
+- 🇫🇷 Français (French) (partial)
 
 > Contributions for additional translations are welcome!
 
