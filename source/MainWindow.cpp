@@ -455,14 +455,7 @@ MainWindow::MainWindow(QWidget *parent)
     
     loadUserSettings();
 
-    // REMOVED: Benchmark controls removed - buttons deleted
-    // setBenchmarkControlsVisible(false);
-    
-    // TODO G.6: Re-enable after LauncherWindow remake
-    // recentNotebooksManager = RecentNotebooksManager::getInstance(this);
 
-    // MW2.2: Removed dial initialization
-    
     // Force IME activation after a short delay to ensure proper initialization
     QTimer::singleShot(500, this, [this]() {
         QInputMethod *inputMethod = QGuiApplication::inputMethod();
@@ -572,13 +565,6 @@ void MainWindow::setupUi() {
         scrollbarHideTimer->start();
     }
     
-    // Trackpad mode timer: maintains trackpad state across rapid events
-    trackpadModeTimer = new QTimer(this);
-    trackpadModeTimer->setSingleShot(true);
-    trackpadModeTimer->setInterval(350);
-    connect(trackpadModeTimer, &QTimer::timeout, this, [this]() {
-        trackpadModeActive = false;
-    });
     
 
     // panXSlider->setFixedHeight(30);
@@ -1330,53 +1316,6 @@ void MainWindow::switchPage(int pageIndex) {
     // pageInput update is handled by currentPageChanged signal connection
 }
 
-
-qreal MainWindow::getDevicePixelRatio(){
-    QScreen *screen = QGuiApplication::primaryScreen();
-    qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
-    QString platformName = QGuiApplication::platformName();
-    
-    if (platformName == "wayland") {
-        // Check if user has set a manual override
-        QSettings settings;
-        qreal manualScale = settings.value("display/waylandDpiScale", 0.0).toReal();
-        
-        // If user set a manual value (anything > 0.0), use it
-        // 0.0 = Auto, 1.00 = explicit 100%, etc.
-        if (manualScale > 0.0) {
-            return manualScale;
-        }
-        
-        // Try to derive actual scale factor from physical vs logical DPI
-        if (screen) {
-            qreal physicalDpi = screen->physicalDotsPerInch();
-            qreal logicalDpi = screen->logicalDotsPerInch();
-            
-            // Try calculating from physical DPI / logical DPI
-            if (logicalDpi > 0 && physicalDpi > 0) {
-                qreal calculatedScale = physicalDpi / logicalDpi;
-                if (qAbs(calculatedScale - 1.0) >= 0.01) {
-                    return calculatedScale;
-                }
-            }
-            
-            // If that doesn't work, try physical DPI / 96
-            if (physicalDpi > 0) {
-                qreal calculatedScale = physicalDpi / 96.0;
-                if (qAbs(calculatedScale - 1.0) >= 0.01) {
-                    return calculatedScale;
-                }
-            }
-        }
-        
-        return dpr;
-    }
-    
-    // X11/Windows: use standard device pixel ratio
-    return dpr;
-}
-
-
 void MainWindow::updatePanX(int value) {
     // Phase 3.3: Convert slider value to fraction and apply to viewport
     if (DocumentViewport* vp = currentViewport()) {
@@ -1764,9 +1703,23 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         Document* doc = viewport->document();
         markdownNotesSidebar->setEdgelessMode(doc && doc->isEdgeless());
         
+        // Set initial page info for search range defaults
+        if (doc && !doc->isEdgeless()) {
+            markdownNotesSidebar->setCurrentPageInfo(viewport->currentPageIndex(), doc->pageCount());
+        }
+        
         m_markdownNotesPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
-                this, [this](int /*pageIndex*/) {
-            if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
+                this, [this](int pageIndex) {
+            if (!markdownNotesSidebar) return;
+            
+            // Update page info for search range defaults
+            DocumentViewport* vp = currentViewport();
+            if (vp && vp->document() && !vp->document()->isEdgeless()) {
+                markdownNotesSidebar->setCurrentPageInfo(pageIndex, vp->document()->pageCount());
+            }
+            
+            // Refresh notes display
+            if (markdownNotesSidebar->isVisible()) {
                 markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
             }
         });
@@ -3069,64 +3022,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         else if (event->type() == QEvent::TabletMove) {
             // TODO Phase 3.3: Implement tablet hover handling
         }
-        // ========================================================================
-        // Wheel event handling
-        else if (event->type() == QEvent::Wheel) {
-            // MW2.2: Removed mouseDialModeActive check
-
-            // Phase 3.1.8: Use touchGestureMode member directly instead of InkCanvas
-            
-            QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
-            
-            // --- Timing-based detection ---
-            qint64 timeSinceLastEvent = lastWheelEventTimer.isValid() ? lastWheelEventTimer.elapsed() : -1;
-            lastWheelEventTimer.restart();
-            
-            // --- Extract wheel event properties ---
-            const int angleX = qAbs(wheelEvent->angleDelta().x());
-            const int angleY = qAbs(wheelEvent->angleDelta().y());
-            const bool hasPixelDelta = !wheelEvent->pixelDelta().isNull();
-            const bool hasScrollPhase = wheelEvent->phase() != Qt::NoScrollPhase;
-            const bool hasCtrlModifier = wheelEvent->modifiers() & Qt::ControlModifier;
-            
-            // --- Mouse wheel detection ---
-            // A real mouse wheel produces exactly 120 units per step with no trackpad signals
-            const bool hasExactWheelStep = (angleY == 120 && angleX == 0) || (angleX == 120 && angleY == 0);
-            const bool looksLikeMouseWheel = hasExactWheelStep && !hasPixelDelta && !hasScrollPhase && !hasCtrlModifier;
-            const bool isMouseWheel = looksLikeMouseWheel && timeSinceLastEvent > 5;
-            
-            // --- Route event ---
-            // Phase 3.1.8: Use member variable touchGestureMode directly
-            if (touchGestureMode == TouchGestureMode::Disabled) {
-                // Disabled mode: mouse wheel works, trackpad blocked
-                if (!isMouseWheel) {
-                    return true; // Block trackpad
-                }
-            } else if (!isMouseWheel) {
-                // Normal mode: send trackpad events to DocumentViewport
-                trackpadModeActive = true;
-                trackpadModeTimer->start();
-                return false; // Let DocumentViewport handle
-            }
-            
-            // --- Exit trackpad mode if this is definitely a mouse wheel event ---
-            if (trackpadModeActive) {
-                trackpadModeActive = false;
-                trackpadModeTimer->stop();
-            }
-            
-            // --- Let DocumentViewport handle mouse wheel scrolling natively ---
-            // Phase 3.3: DocumentViewport's wheelEvent() handles all scroll/zoom
-            // with proper pan overshoot support. The sliders are updated via
-            // the scroll fraction signals (horizontalScrollChanged/verticalScrollChanged).
-            // 
-            // Previously this code handled mouse wheel via sliders which clamped
-            // to 0-10000 (no overshoot). Now we let DocumentViewport handle it.
-            return false;
-        }
+        // Wheel events are now handled entirely by DocumentViewport::wheelEvent()
+        // including trackpad blocking when TouchGestureMode::Disabled
     }
-
-    // MW2.2: dialContainer drag handling removed - dial system deleted
 
     return QObject::eventFilter(obj, event);
 }

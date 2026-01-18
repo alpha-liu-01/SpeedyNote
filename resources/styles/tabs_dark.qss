@@ -55,12 +55,14 @@ QTabBar::tab:hover:!selected {
 QTabBar::close-button {
     image: url(:/resources/icons/{{CLOSE_ICON}});
     subcontrol-position: left;
-    padding: 4px;
+    width: 16px;
+    height: 16px;
+    padding: 2px;
+    border-radius: 10px;  /* (16 + 2*2) / 2 = 10 for circular button */
 }
 
 QTabBar::close-button:hover {
     background-color: rgba(255, 255, 255, 50);
-    border-radius: 2px;
 }
 
 /* ==========================================================================
