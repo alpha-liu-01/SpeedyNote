@@ -231,20 +231,30 @@ void DocumentViewport::setDocument(Document* doc)
     m_panOffset = QPointF(0, 0);
     m_currentPageIndex = 0;
     
-    // If document exists, restore last accessed page
-    if (m_document && m_document->lastAccessedPage > 0) {
-        m_currentPageIndex = qMin(m_document->lastAccessedPage, 
-                                   m_document->pageCount() - 1);
-        
-        // Defer scrollToPage to next event loop iteration
-        // This ensures the widget has correct dimensions before calculating scroll position
-        if (m_currentPageIndex > 0) {
-            QTimer::singleShot(0, this, [this, pageToRestore = m_currentPageIndex]() {
-                if (m_document && pageToRestore < m_document->pageCount()) {
-                    scrollToPage(pageToRestore);
+    // If document exists, restore last accessed page or zoom to width
+    if (m_document) {
+        if (m_document->lastAccessedPage > 0) {
+            m_currentPageIndex = qMin(m_document->lastAccessedPage, 
+                                       m_document->pageCount() - 1);
+            
+            // Defer scrollToPage to next event loop iteration
+            // This ensures the widget has correct dimensions before calculating scroll position
+            if (m_currentPageIndex > 0) {
+                QTimer::singleShot(0, this, [this, pageToRestore = m_currentPageIndex]() {
+                    if (m_document && pageToRestore < m_document->pageCount()) {
+                        scrollToPage(pageToRestore);
 #ifdef SPEEDYNOTE_DEBUG
-                    qDebug() << "Restored last accessed page:" << pageToRestore;
+                        qDebug() << "Restored last accessed page:" << pageToRestore;
 #endif
+                    }
+                });
+            }
+        } else if (!m_document->isEdgeless()) {
+            // New paged document: zoom to fit page width
+            // Deferred to ensure widget has correct dimensions
+            QTimer::singleShot(0, this, [this]() {
+                if (m_document && !m_document->isEdgeless()) {
+                    zoomToWidth();
                 }
             });
         }
@@ -956,7 +966,7 @@ void DocumentViewport::zoomToWidth()
     }
     
     // Calculate zoom to fit page width with some margin
-    qreal marginFraction = 0.05;  // 5% margin on each side
+    qreal marginFraction = 0.02;  // 2% margin on each side
     qreal availWidth = width() * (1.0 - 2 * marginFraction);
     
     qreal newZoom = availWidth / pageSize.width();

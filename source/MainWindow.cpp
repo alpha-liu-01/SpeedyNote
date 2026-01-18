@@ -2681,9 +2681,8 @@ void MainWindow::openPdfDocument(const QString &filePath)
     int tabIndex = m_tabManager->createTab(doc, doc->displayName());
     
     if (tabIndex >= 0) {
-        // Center the viewport content
-        centerViewportContent(tabIndex);
-        
+        // Note: zoomToWidth() is called automatically by DocumentViewport::setDocument()
+        // for new paged documents, which also handles horizontal centering.
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "openPdfDocument: Loaded PDF with" << doc->pageCount() 
                  << "pages from" << filePath;
@@ -2763,22 +2762,13 @@ void MainWindow::addNewTab() {
     QString tabTitle = doc->displayName();
     int tabIndex = m_tabManager->createTab(doc, tabTitle);
     
-    // qDebug() << "Created new tab at index" << tabIndex << "with document:" << tabTitle;
-    
     // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
     if (m_tabBar) {
         m_tabBar->setCurrentIndex(tabIndex);
     }
     
-    // Phase 3.3: Center content horizontally (one-time initial offset)
-    // Defer to next event loop iteration so viewport has its final size
-    QTimer::singleShot(0, this, [this, tabIndex]() {
-        centerViewportContent(tabIndex);
-    });
-    
-    // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
-    
-    return;    
+    // Note: zoomToWidth() is called automatically by DocumentViewport::setDocument()
+    // for new paged documents, which also handles horizontal centering.
 }
 
 void MainWindow::addNewEdgelessTab()
