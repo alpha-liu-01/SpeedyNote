@@ -151,13 +151,8 @@ void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor)
     pal.setColor(QPalette::Window, accentColor);
     setPalette(pal);
     
-    // Apply button styles to each button individually instead of parent widget
-    // This avoids the stylesheet interfering with our palette background
-    for (QObject *child : children()) {
-        if (auto *button = qobject_cast<ToolbarButton*>(child)) {
-            button->setDarkMode(darkMode);
-        }
-    }
+    // Apply button stylesheets (hover effects, sizing, etc.)
+    ButtonStyles::applyToWidget(this, darkMode);
     
     // Update all button icons for theme
     m_launcherButton->setDarkMode(darkMode);
