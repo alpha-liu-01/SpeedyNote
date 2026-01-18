@@ -233,7 +233,7 @@ See [LICENSE](./LICENSE) for details.
 
 If SpeedyNote helps you, consider:
 
-- ☕ [Buy me a coffee](buymeacoffee.com/alphaliu01)
+- ☕ [Buy me a coffee](https://buymeacoffee.com/alphaliu01)
 - ⭐ Starring this repository
 - 📱 Purchasing the Android version on Google Play
 - 🐛 Reporting bugs and suggesting improvements
