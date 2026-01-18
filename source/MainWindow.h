@@ -324,6 +324,19 @@ private:
     // Note: returnToLauncher() removed - obsolete, replaced by toggleLauncher()
     
     /**
+     * @brief Save a new document with dialog prompt (Android-aware).
+     * @param doc The document to save.
+     * @return true if saved successfully, false if cancelled or failed.
+     * 
+     * On Android: Uses SaveDocumentDialog (touch-friendly) and saves to app-private storage.
+     * On Desktop: Uses QFileDialog for standard save dialog.
+     * 
+     * This is the single source of truth for "Save As" functionality.
+     * Used by saveDocument(), tab close handlers, and window close event.
+     */
+    bool saveNewDocumentWithDialog(Document* doc);
+    
+    /**
      * @brief Phase P.4.6: Render a thumbnail for page 0 of a document.
      * @param doc The document to render from.
      * @return The rendered thumbnail, or null pixmap on failure.

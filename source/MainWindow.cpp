@@ -414,34 +414,9 @@ MainWindow::MainWindow(QWidget *parent)
                         return;  // Don't close if save failed
                     }
                 } else {
-                    // Show save dialog for new documents
-                    QString defaultName = doc->name.isEmpty() 
-                        ? (doc->isEdgeless() ? "Untitled Canvas" : "Untitled Document") 
-                        : doc->name;
-                    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
-                    
-                    QString savePath = QFileDialog::getSaveFileName(
-                        this,
-                        doc->isEdgeless() ? tr("Save Canvas") : tr("Save Document"),
-                        defaultPath,
-                        tr("SpeedyNote Bundle (*.snb)")
-                    );
-                    
-                    if (savePath.isEmpty()) {
-                        // User cancelled save dialog - don't close
-                        return;
-                    }
-                    
-                    // Ensure .snb extension
-                    if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
-                        savePath += ".snb";
-                    }
-                    
-                    // Save to the chosen location
-                    if (!m_documentManager->saveDocumentAs(doc, savePath)) {
-                        QMessageBox::critical(this, tr("Save Error"),
-                            tr("Failed to save to:\n%1").arg(savePath));
-                        return;  // Don't close if save failed
+                    // New document - use Android-aware save dialog
+                    if (!saveNewDocumentWithDialog(doc)) {
+                        return;  // User cancelled or save failed - don't close
                     }
                 }
                 
@@ -2215,6 +2190,106 @@ void MainWindow::notifyPageStructureChanged(Document* doc, int currentPage)
 }
 
 // ============================================================================
+// Helper: Save new document with dialog prompt (Android-aware)
+// ============================================================================
+
+bool MainWindow::saveNewDocumentWithDialog(Document* doc)
+{
+    // Single source of truth for "Save As" functionality
+    // Works correctly on both Android (app-private storage) and desktop (file dialog)
+    
+    if (!doc || !m_documentManager) {
+        return false;
+    }
+    
+    bool isEdgeless = doc->isEdgeless();
+    QString defaultName = doc->name.isEmpty() 
+        ? (isEdgeless ? "Untitled Canvas" : "Untitled Document")
+        : doc->name;
+    
+    QString filePath;
+    
+#ifdef Q_OS_ANDROID
+    // Android: Save to app-private storage using touch-friendly dialog
+    QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+    QDir().mkpath(notebooksDir);
+    
+    bool ok;
+    QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
+    QString docName = SaveDocumentDialog::getDocumentName(this, dialogTitle, defaultName, &ok);
+    
+    if (!ok || docName.isEmpty()) {
+        return false; // User cancelled
+    }
+    
+    filePath = notebooksDir + "/" + docName + ".snb";
+    
+    // Check if file exists and ask for overwrite confirmation
+    if (QDir(filePath).exists()) {
+        if (QMessageBox::question(this, tr("Overwrite?"),
+                tr("A document named '%1' already exists.\nDo you want to replace it?").arg(docName),
+                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+            return false;
+        }
+    }
+#else
+    // Desktop: Use standard file dialog
+    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+    
+    filePath = QFileDialog::getSaveFileName(
+        this,
+        isEdgeless ? tr("Save Canvas") : tr("Save Document"),
+        defaultPath,
+        tr("SpeedyNote Bundle (*.snb)")
+    );
+    
+    if (filePath.isEmpty()) {
+        return false; // User cancelled
+    }
+#endif
+    
+    // Ensure .snb extension
+    if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
+        filePath += ".snb";
+    }
+    
+    // Update document name from file name
+    QFileInfo fileInfo(filePath);
+    doc->name = fileInfo.baseName();
+    
+    // Save using DocumentManager
+    if (!m_documentManager->saveDocumentAs(doc, filePath)) {
+        QMessageBox::critical(this, tr("Save Error"),
+            tr("Failed to save document to:\n%1").arg(filePath));
+        return false;
+    }
+    
+    // Phase P.4.6: Save thumbnail to NotebookLibrary
+    if (!isEdgeless && doc->pageCount() > 0) {
+        QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
+        if (thumbnail.isNull()) {
+            thumbnail = renderPage0Thumbnail(doc);
+        }
+        if (!thumbnail.isNull()) {
+            NotebookLibrary::instance()->saveThumbnail(filePath, thumbnail);
+        }
+    }
+    
+    // Register with NotebookLibrary
+    NotebookLibrary::instance()->addToRecent(filePath);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    if (isEdgeless) {
+        qDebug() << "saveNewDocumentWithDialog: Saved edgeless canvas to" << filePath;
+    } else {
+        qDebug() << "saveNewDocumentWithDialog: Saved" << doc->pageCount() << "pages to" << filePath;
+    }
+#endif
+    
+    return true;
+}
+
+// ============================================================================
 // Phase doc-1: Document Operations
 // ============================================================================
 
@@ -2299,77 +2374,12 @@ void MainWindow::saveDocument()
                 return;
             }
             
-    // ✅ New document or temp bundle - show Save As dialog
-    // Phase O1.7.6: All documents now use unified .snb bundle format
-    QString defaultName = doc->name.isEmpty() ? 
-        (isEdgeless ? "Untitled Canvas" : "Untitled") : doc->name;
-    
-    QString filePath;
-    
-#ifdef Q_OS_ANDROID
-    // BUG-A002 Fix: On Android, save to app-private storage.
-    // Android's Storage Access Framework (SAF) returns content:// URIs which don't support
-    // directory creation. Since .snb bundles are directories, we must use app-private storage
-    // where we have full filesystem access.
-    QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
-    QDir().mkpath(notebooksDir);
-    
-    // Show touch-friendly save dialog (replaces QInputDialog::getText which was too small)
-    bool ok;
-    QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
-    QString docName = SaveDocumentDialog::getDocumentName(this, dialogTitle, defaultName, &ok);
-    
-    if (!ok || docName.isEmpty()) {
-        return; // User cancelled
+    // ✅ New document or temp bundle - use unified save dialog
+    if (!saveNewDocumentWithDialog(doc)) {
+        return;  // User cancelled or save failed
     }
     
-    // Note: SaveDocumentDialog already sanitizes the filename
-    filePath = notebooksDir + "/" + docName + ".snb";
-    
-    // Check if file exists and ask for overwrite confirmation
-    if (QDir(filePath).exists()) {
-        if (QMessageBox::question(this, tr("Overwrite?"),
-                tr("A document named '%1' already exists.\nDo you want to replace it?").arg(docName),
-                QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
-            return;
-        }
-    }
-#else
-    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
-    
-    QString filter = tr("SpeedyNote Bundle (*.snb);;All Files (*)");
-    QString dialogTitle = isEdgeless ? tr("Save Canvas") : tr("Save Document");
-    
-    filePath = QFileDialog::getSaveFileName(
-        this,
-        dialogTitle,
-        defaultPath,
-        filter
-    );
-    
-    if (filePath.isEmpty()) {
-        // User cancelled
-        return;
-    }
-#endif
-            
-    // Ensure .snb extension (Phase O1.7.6: unified bundle format)
-    if (!filePath.endsWith(".snb", Qt::CaseInsensitive)) {
-        filePath += ".snb";
-    }
-        
-    // Update document name from file name (without extension)
-    QFileInfo fileInfo(filePath);
-    doc->name = fileInfo.baseName();
-        
-    // Use DocumentManager to save (handles all the file I/O and state updates)
-    if (!m_documentManager->saveDocumentAs(doc, filePath)) {
-        QMessageBox::critical(this, tr("Save Error"),
-            tr("Failed to save document to:\n%1").arg(filePath));
-                return;
-        }
-        
-    // Update tab title (remove * prefix) and NavigationBar
+    // Update tab title and NavigationBar
     int currentIndex = m_tabManager->currentIndex();
     if (currentIndex >= 0) {
         m_tabManager->setTabTitle(currentIndex, doc->name);
@@ -2377,31 +2387,6 @@ void MainWindow::saveDocument()
     }
     if (m_navigationBar) {
         m_navigationBar->setFilename(doc->name);
-    }
-    
-    // Phase P.4.6: Save thumbnail to NotebookLibrary
-    if (!isEdgeless && doc->pageCount() > 0) {
-        QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
-        if (thumbnail.isNull()) {
-            thumbnail = renderPage0Thumbnail(doc);
-        }
-        if (!thumbnail.isNull()) {
-            NotebookLibrary::instance()->saveThumbnail(filePath, thumbnail);
-        }
-    }
-    
-    // Phase P.4.6: Register newly saved document with NotebookLibrary
-    NotebookLibrary::instance()->addToRecent(filePath);
-    
-    if (isEdgeless) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "saveDocument: Saved edgeless canvas with"
-                 << doc->tileIndexCount() << "tiles to" << filePath;
-#endif
-                } else {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "saveDocument: Saved" << doc->pageCount() << "pages to" << filePath;
-#endif
     }
 }
 
@@ -5172,35 +5157,11 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                             // Don't abort - let them quit without saving if save failed
                         }
                     } else {
-                        // Show save dialog for new documents
-                        QString defaultName = doc->name.isEmpty() 
-                            ? (doc->isEdgeless() ? "Untitled Canvas" : "Untitled Document")
-                            : doc->name;
-                        QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
-                        
-                        QString savePath = QFileDialog::getSaveFileName(
-                            this,
-                            doc->isEdgeless() ? tr("Save Canvas") : tr("Save Document"),
-                            defaultPath,
-                            tr("SpeedyNote Bundle (*.snb)")
-                        );
-                        
-                        if (savePath.isEmpty()) {
+                        // New document - use Android-aware save dialog
+                        if (!saveNewDocumentWithDialog(doc)) {
                             // User cancelled save dialog - abort quit
                             event->ignore();
                             return;
-                        }
-                        
-                        // Ensure .snb extension
-                        if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
-                            savePath += ".snb";
-                        }
-                        
-                        // Save to the chosen location
-                        if (!m_documentManager->saveDocumentAs(doc, savePath)) {
-                            QMessageBox::critical(this, tr("Save Error"),
-                                tr("Failed to save to:\n%1\n\nQuit anyway?").arg(savePath));
-                            // Don't abort - let them quit without saving if save failed
                         }
                     }
                 }
@@ -5474,32 +5435,9 @@ bool MainWindow::closeDocumentById(const QString& documentId)
                         return false;
                     }
                 } else {
-                    // No path - need Save As dialog
-                    QString defaultName = doc->name.isEmpty() 
-                        ? (doc->isEdgeless() ? "Untitled Canvas" : "Untitled Document")
-                        : doc->name;
-                    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
-                    
-                    QString savePath = QFileDialog::getSaveFileName(
-                        this,
-                        doc->isEdgeless() ? tr("Save Canvas") : tr("Save Document"),
-                        defaultPath,
-                        tr("SpeedyNote Bundle (*.snb)")
-                    );
-                    
-                    if (savePath.isEmpty()) {
-                        // User cancelled - don't close
-                        return false;
-                    }
-                    
-                    if (!savePath.endsWith(".snb", Qt::CaseInsensitive)) {
-                        savePath += ".snb";
-                    }
-                    
-                    if (!m_documentManager->saveDocumentAs(doc, savePath)) {
-                        QMessageBox::critical(this, tr("Save Error"),
-                            tr("Failed to save document."));
-                        return false;
+                    // No path - use Android-aware save dialog
+                    if (!saveNewDocumentWithDialog(doc)) {
+                        return false;  // User cancelled or save failed
                     }
                 }
             }
