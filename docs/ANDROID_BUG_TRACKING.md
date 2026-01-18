@@ -25,6 +25,7 @@
 | **BUG-A006** | PDF Page Switch Crash | ✅ Fixed (multi-layer fix) |
 | **BUG-A007** | Dark Mode Not Syncing | ✅ Fixed (JNI + Fusion style) |
 | **BUG-A008** | Stylus Eraser Not Working | ✅ Fixed (JNI tool type detection) |
+| **BUG-A009** | CJK Font Rendering Incorrect | ✅ Fixed (locale-aware font fallback) |
 
 **All critical bugs resolved!** 🎉
 
@@ -607,6 +608,67 @@ In `DocumentViewport::tabletToPointerEvent()`, query Android's tool type if Qt's
 - ✅ Stylus eraser tip now erases correctly on Android
 - ✅ Pen tip still draws correctly
 - ✅ Tool type detected before Qt processes the event (no timing issues)
+
+---
+
+### BUG-A009: CJK Font Rendering Incorrect
+**Status:** ✅ Fixed  
+**Priority:** Medium  
+**Category:** UI / Fonts / Localization
+**Platform:** Android only
+
+**Description:**  
+Chinese characters display incorrectly - showing a mix of Simplified Chinese, Traditional Chinese, and Japanese Kanji variants instead of consistent glyphs.
+
+**Root Cause:**  
+Qt on Android doesn't properly use Android's locale-aware font fallback. When a character isn't in the primary font (Roboto), Qt picks glyphs from various CJK fonts without considering the system locale, resulting in mixed glyph variants.
+
+**Symptoms (BEFORE fix):**
+- Chinese text has inconsistent appearance
+- Some characters appear as Japanese Kanji variants
+- Mixed Simplified/Traditional Chinese glyphs in the same text
+
+**Fix Applied:**
+
+Added `applyAndroidFonts()` function in `Main.cpp` that:
+1. Detects system locale (zh_CN, zh_TW, ja_JP, etc.)
+2. Sets up appropriate CJK font fallback chain based on locale
+3. Uses Noto Sans CJK variants with locale-specific priority
+
+```cpp
+static void applyAndroidFonts(QApplication& app)
+{
+    QString locale = QLocale::system().name();
+    QFont font("Roboto", 14);
+    
+    if (locale.startsWith("zh_CN") || locale.startsWith("zh_Hans")) {
+        // Simplified Chinese - prioritize SC variant
+        font.setFamilies({"Roboto", "Noto Sans CJK SC", "Noto Sans SC", ...});
+    } else if (locale.startsWith("zh_TW") || locale.startsWith("zh_HK")) {
+        // Traditional Chinese - prioritize TC variant
+        font.setFamilies({"Roboto", "Noto Sans CJK TC", "Noto Sans TC", ...});
+    } else if (locale.startsWith("ja")) {
+        // Japanese - prioritize JP variant
+        font.setFamilies({"Roboto", "Noto Sans CJK JP", ...});
+    }
+    // ... etc
+    
+    app.setFont(font);
+}
+```
+
+**Files Modified:**
+- `source/Main.cpp`
+  - Added `applyAndroidFonts()` with locale-aware CJK font fallback
+  - Called `applyAndroidFonts(app)` after `applyAndroidPalette(app)`
+
+**Desktop Impact:** None - all changes are wrapped in `#ifdef Q_OS_ANDROID`.
+
+**Result:**
+- ✅ Chinese characters display consistently based on system locale
+- ✅ Simplified Chinese devices show SC glyphs
+- ✅ Traditional Chinese devices show TC glyphs
+- ✅ Japanese devices show JP glyphs
 
 ---
 

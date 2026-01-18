@@ -150,6 +150,56 @@ static void applyAndroidPalette(QApplication& app)
         app.setPalette(lightPalette);
     }
 }
+
+/**
+ * Apply proper fonts for Android with CJK (Chinese-Japanese-Korean) support.
+ * 
+ * Qt on Android doesn't properly use Android's locale-aware font fallback,
+ * causing CJK characters to display with mixed glyphs (SC/TC/JP variants).
+ * 
+ * This function sets up a font family list that:
+ * 1. Uses Roboto as the primary font (Android's default)
+ * 2. Falls back to Noto Sans CJK SC for Simplified Chinese
+ * 3. Includes other CJK variants as additional fallbacks
+ */
+static void applyAndroidFonts(QApplication& app)
+{
+    // Get current system locale to determine CJK preference
+    QString locale = QLocale::system().name();  // e.g., "zh_CN", "zh_TW", "ja_JP"
+    
+    QFont font("Roboto", 14);  // Android's default font, slightly larger for touch
+    font.setStyleHint(QFont::SansSerif);
+    
+    // Set up CJK fallback chain based on locale
+    // The order matters - first matching font with the glyph wins
+    if (locale.startsWith("zh_CN") || locale.startsWith("zh_Hans")) {
+        // Simplified Chinese - prioritize SC variant
+        font.setFamilies({"Roboto", "Noto Sans CJK SC", "Noto Sans SC", 
+                          "Source Han Sans SC", "Droid Sans Fallback"});
+    } else if (locale.startsWith("zh_TW") || locale.startsWith("zh_HK") || locale.startsWith("zh_Hant")) {
+        // Traditional Chinese - prioritize TC variant
+        font.setFamilies({"Roboto", "Noto Sans CJK TC", "Noto Sans TC",
+                          "Source Han Sans TC", "Droid Sans Fallback"});
+    } else if (locale.startsWith("ja")) {
+        // Japanese - prioritize JP variant
+        font.setFamilies({"Roboto", "Noto Sans CJK JP", "Noto Sans JP",
+                          "Source Han Sans JP", "Droid Sans Fallback"});
+    } else if (locale.startsWith("ko")) {
+        // Korean - prioritize KR variant
+        font.setFamilies({"Roboto", "Noto Sans CJK KR", "Noto Sans KR",
+                          "Source Han Sans KR", "Droid Sans Fallback"});
+    } else {
+        // Default: use SC as fallback (most complete CJK coverage)
+        font.setFamilies({"Roboto", "Noto Sans CJK SC", "Noto Sans SC",
+                          "Droid Sans Fallback"});
+    }
+    
+    app.setFont(font);
+    #ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "Android font configured for locale:" << locale 
+             << "families:" << font.families();
+    #endif
+}
 #endif
 
 // Test includes (desktop only)
@@ -389,6 +439,7 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_ANDROID
     logAndroidPaths();
     applyAndroidPalette(app);
+    applyAndroidFonts(app);
 #endif
 
     QTranslator translator;
