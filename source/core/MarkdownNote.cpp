@@ -6,6 +6,7 @@
 
 #include "MarkdownNote.h"
 
+#include <QCoreApplication>  // For translate()
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
@@ -91,12 +92,12 @@ MarkdownNote MarkdownNote::loadFromFile(const QString& filePath)
         } else {
             // Malformed front matter (no closing ---) - treat entire file as content
             note.content = fileContent;
-            note.title = QStringLiteral("Untitled");
+            note.title = QCoreApplication::translate("MarkdownNote", "Untitled");
         }
     } else {
         // No front matter - treat entire file as content
         note.content = fileContent;
-        note.title = QStringLiteral("Untitled");
+        note.title = QCoreApplication::translate("MarkdownNote", "Untitled");
     }
     
     return note;

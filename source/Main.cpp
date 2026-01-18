@@ -7,6 +7,7 @@
 #include <QLocale>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QLibraryInfo>
 #include <QFont>
 
 #include "MainWindow.h"
@@ -310,7 +311,16 @@ static void loadTranslations(QApplication& app, QTranslator& translator)
     } else {
         langCode = settings.value("languageOverride", "en").toString();
     }
+    
+    // Load Qt's base translations (for standard dialogs: Save, Cancel, etc.)
+    // This must be loaded before the app translator so app translations take priority
+    static QTranslator qtBaseTranslator;
+    QString qtTranslationsPath = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+    if (qtBaseTranslator.load("qtbase_" + langCode, qtTranslationsPath)) {
+        app.installTranslator(&qtBaseTranslator);
+    }
 
+    // Load SpeedyNote's translations
     QStringList translationPaths = {
         QCoreApplication::applicationDirPath(),
         QCoreApplication::applicationDirPath() + "/translations",

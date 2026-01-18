@@ -245,6 +245,6 @@ If SpeedyNote helps you, consider:
 
 **Made with ❤️ for students who deserve better tools**
 
-*SpeedyNote v1.0.0*
+*SpeedyNote v1.0*
 
 </div>

@@ -6414,9 +6414,9 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
     
     // Simple context menu (TEMPORARY UI)
     QMenu menu;
-    QAction* posAction = menu.addAction("Add Position Link");
-    QAction* urlAction = menu.addAction("Add URL Link");
-    QAction* mdAction = menu.addAction("Add Markdown Note");
+    QAction* posAction = menu.addAction(tr("Add Position Link"));
+    QAction* urlAction = menu.addAction(tr("Add URL Link"));
+    QAction* mdAction = menu.addAction(tr("Add Markdown Note"));
     
     QAction* selected = menu.exec(QCursor::pos());
     
@@ -6426,7 +6426,7 @@ void DocumentViewport::addLinkToSlot(int slotIndex)
         qDebug() << "addLinkToSlot: Position link - TODO: implement pick position mode";
         #endif
     } else if (selected == urlAction) {
-        QString url = QInputDialog::getText(this, "Add URL", "Enter URL:");
+        QString url = QInputDialog::getText(this, tr("Add URL"), tr("Enter URL:"));
         if (!url.isEmpty()) {
             link->linkSlots[slotIndex].type = LinkSlot::Type::Url;
             link->linkSlots[slotIndex].url = url;
