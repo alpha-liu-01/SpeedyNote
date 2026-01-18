@@ -12,7 +12,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-brightgreen)]()
 [![Qt](https://img.shields.io/badge/Qt-6.x-41CD52?logo=qt)]()
 
-[English](#-features) • [中文](./readme/zh_Hans.md)
+[English](#-features) • [中文](./docs/zh_Hans/readme_chn.md)
 
 </div>
 
@@ -88,7 +88,7 @@
 
 | Platform | Minimum | Recommended |
 |----------|---------|-------------|
-| **Windows** | Windows 10 x64 | Windows 11 |
+| **Windows** | Windows 10 1809 | Windows 11 |
 | **macOS** | macOS 12 (to be tested) | macOS 15+ |
 | **Linux** | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
 | **Android** | Android 8.0 (API 26) | Android 13+ |
@@ -112,7 +112,7 @@ Download the latest release from **[GitHub Releases](https://github.com/alpha-li
 #### Android
 
 **Option 1: Google Play Store** (coming soon), supports development  
-**Option 2: Build from source** - Free, see [Android Build Guide](./docs/ANDROID_BUILD_GUIDE.md)
+**Option 2: Build from source** - Free, see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
 
 >  The Play Store version is a convenience fee. The source code is always free under GPL v3.
 
@@ -142,13 +142,13 @@ sudo apt update && sudo apt install speedynote
 | Windows | MSYS2 with clang64/clangarm64 toolchain |
 | macOS | Xcode Command Line Tools, Homebrew |
 | Linux | Qt 6.4+ dev packages, Poppler-Qt6 |
-| Android | Docker (see [Android Build Guide](./docs/ANDROID_BUILD_GUIDE.md)) |
+| Android | Docker (see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)) |
 
 ### Quick Build
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/SpeedyNote.git
+git clone https://github.com/alpha-liu-01/SpeedyNote.git
 cd SpeedyNote
 
 # Windows (MSYS2 clang64 shell)
@@ -164,9 +164,9 @@ cd SpeedyNote
 
 ### Detailed Build Guides
 
-- [Windows Build Guide](./docs/SpeedyNote_Windows_Build_en.md)
-- [macOS Build Guide](./docs/SpeedyNote_Darwin_Build_en.md)
-- [Android Build Guide](./docs/ANDROID_BUILD_GUIDE.md)
+- [Windows Build Guide](./docs/build_docs/SpeedyNote_Windows_Build_en.md)
+- [macOS Build Guide](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)
+- [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
 
 
 ---
