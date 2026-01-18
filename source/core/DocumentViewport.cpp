@@ -33,6 +33,11 @@
 #include <QGuiApplication> // For clipboard access (O2.4)
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QMimeData>      // For clipboard content type check (O2.4)
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>       // BUG-A008: JNI for eraser tool type detection
+#include <QJniEnvironment>  // BUG-A008: For cached JNI method calls
+#endif
 #include <QFileDialog>    // For insertImageFromDialog (Phase C.0.5)
 #include <QDesktopServices>  // For opening URLs (Phase C.4.3)
 #include <QUrl>              // For URL handling (Phase C.4.3)
@@ -3603,6 +3608,33 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
             pe.isEraser = true;
         }
     }
+    
+#ifdef Q_OS_ANDROID
+    // BUG-A008: Qt on Android doesn't properly translate Android's TOOL_TYPE_ERASER
+    // to QPointingDevice::PointerType::Eraser. Query Android directly via JNI.
+    // 
+    // Performance: Cache the JNI class/method to avoid repeated lookups at 240Hz.
+    // The static variables are initialized once on first call.
+    if (!pe.isEraser) {
+        static jclass activityClass = nullptr;
+        static jmethodID isEraserMethod = nullptr;
+        
+        if (!activityClass) {
+            QJniEnvironment env;
+            jclass localClass = env->FindClass("org/speedynote/app/SpeedyNoteActivity");
+            if (localClass) {
+                activityClass = static_cast<jclass>(env->NewGlobalRef(localClass));
+                isEraserMethod = env->GetStaticMethodID(activityClass, "isEraserToolActive", "()Z");
+                env->DeleteLocalRef(localClass);
+            }
+        }
+        
+        if (activityClass && isEraserMethod) {
+            QJniEnvironment env;
+            pe.isEraser = static_cast<bool>(env->CallStaticBooleanMethod(activityClass, isEraserMethod));
+        }
+    }
+#endif
     
     // Barrel buttons - Qt provides via buttons()
     // Common mappings: barrel button 1 = Qt::MiddleButton, barrel button 2 = Qt::RightButton

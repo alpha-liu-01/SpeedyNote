@@ -30,6 +30,16 @@ public class SpeedyNoteActivity extends QtActivity {
     // Singleton reference for JNI calls
     private static SpeedyNoteActivity sInstance;
     
+    // Stylus eraser tool detection (BUG-A008: Hardware eraser not working)
+    // Qt on Android doesn't properly translate Android's TOOL_TYPE_ERASER
+    // to QPointingDevice::PointerType::Eraser, so we detect it here and
+    // expose it via JNI for C++ to query.
+    private static volatile boolean sEraserToolActive = false;
+    
+    // Cached content view for unbuffered dispatch (performance optimization)
+    // Avoids calling findViewById() on every touch event at 240Hz
+    private View mCachedContentView = null;
+    
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -64,19 +74,45 @@ public class SpeedyNoteActivity extends QtActivity {
     }
     
     /**
-     * Intercept all touch events to request unbuffered dispatch.
+     * Check if the stylus eraser tool is currently active.
+     * Called from C++ via JNI because Qt doesn't properly detect eraser tool type.
+     * 
+     * @return true if eraser tip is being used, false for pen tip or other input
+     */
+    public static boolean isEraserToolActive() {
+        return sEraserToolActive;
+    }
+    
+    /**
+     * Intercept all touch events for:
+     * 1. Requesting unbuffered dispatch (240Hz stylus input)
+     * 2. Detecting eraser tool type (BUG-A008 fix)
      * 
      * On API 31+, this tells Android to deliver touch/stylus events at the
      * hardware's native rate (e.g., 240Hz) instead of batching them at 60Hz.
      * This results in smoother, more responsive drawing.
+     * 
+     * Performance: All operations here are O(1) with cached values.
+     * - Content view is cached (avoids findViewById at 240Hz)
+     * - Eraser check uses early-exit loop
      */
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
+        // Detect eraser tool type before Qt processes the event
+        // Only check for stylus events (optimization: skip finger events)
+        int toolType = event.getToolType(0);
+        if (toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER) {
+            sEraserToolActive = (toolType == MotionEvent.TOOL_TYPE_ERASER);
+        }
+        
         // Request unbuffered dispatch for high-rate stylus input (API 31+)
+        // Use cached content view to avoid findViewById() overhead at 240Hz
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            View contentView = findViewById(android.R.id.content);
-            if (contentView != null) {
-                contentView.requestUnbufferedDispatch(event);
+            if (mCachedContentView == null) {
+                mCachedContentView = findViewById(android.R.id.content);
+            }
+            if (mCachedContentView != null) {
+                mCachedContentView.requestUnbufferedDispatch(event);
             }
         }
         return super.dispatchTouchEvent(event);
