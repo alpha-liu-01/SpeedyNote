@@ -1045,6 +1045,20 @@ void MainWindow::setupUi() {
         // Toggle markdown notes sidebar
         if (markdownNotesSidebar) {
             markdownNotesSidebar->setVisible(checked);
+            markdownNotesSidebarVisible = checked;
+            
+            // Load notes when sidebar becomes visible
+            if (checked) {
+                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            }
+            
+            // Force layout update and reposition action bar
+            if (centralWidget() && centralWidget()->layout()) {
+                centralWidget()->layout()->invalidate();
+                centralWidget()->layout()->activate();
+            }
+            QApplication::processEvents();
+            updateActionBarPosition();
         }
     });
     connect(m_navigationBar, &NavigationBar::menuRequested, this, [this]() {
@@ -1496,6 +1510,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_markdownNoteOpenConn);
         m_markdownNoteOpenConn = {};
     }
+    // M.7.3: Disconnect linkObjectList connection
+    if (m_linkObjectListConn) {
+        disconnect(m_linkObjectListConn);
+        m_linkObjectListConn = {};
+    }
     // Phase R.4: Disconnect PDF relink connection
     if (m_pdfRelinkConn) {
         disconnect(m_pdfRelinkConn);
@@ -1798,6 +1817,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             // Scroll to the note and set it to edit mode
             markdownNotesSidebar->scrollToNote(noteId);
             markdownNotesSidebar->setNoteEditMode(noteId, true);
+        });
+        
+        // M.7.3: Handle linkObjectListMayHaveChanged signal (objects add/remove, tile eviction)
+        m_linkObjectListConn = connect(viewport, &DocumentViewport::linkObjectListMayHaveChanged,
+                this, [this]() {
+            if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
+                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            }
         });
     }
     
@@ -4670,6 +4697,9 @@ void MainWindow::toggleMarkdownNotesSidebar() {
         vp->update();
     }
     
+    // Update action bar position after sidebar visibility change
+    updateActionBarPosition();
+    
     // Reposition floating tabs after layout settles
     QTimer::singleShot(0, this, [this]() {
         // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
@@ -4728,77 +4758,129 @@ QList<NoteDisplayData> MainWindow::loadNotesForCurrentPage()
             Page* tile = doc->getTile(coord.first, coord.second);
             extractNotesFromPage(tile);
         }
+        
+        // M.7.2: Update hidden tiles warning
+        int loadedCount = doc->tileCount();
+        int totalCount = doc->tileIndexCount();
+        if (markdownNotesSidebar) {
+            markdownNotesSidebar->setHiddenTilesWarning(loadedCount < totalCount, loadedCount, totalCount);
+        }
     } else {
         // Paged mode: use current page
         int pageIndex = vp->currentPageIndex();
         Page* page = doc->page(pageIndex);
         extractNotesFromPage(page);
+        
+        // M.7.2: Hide warning for paged mode
+        if (markdownNotesSidebar) {
+            markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
+        }
     }
     
     return results;
 }
 
 // Phase M.3: Navigate to and select a LinkObject
+// Phase M.7.1: Added edgeless mode support
 void MainWindow::navigateToLinkObject(const QString& linkObjectId)
 {
     DocumentViewport* vp = currentViewport();
     if (!vp || !vp->document()) return;
     
     Document* doc = vp->document();
-    
-    // Search for LinkObject - check current page first (most likely), then all pages
-    int currentPage = vp->currentPageIndex();
     InsertedObject* foundObject = nullptr;
-    int foundPageIndex = -1;
     
-    // Helper lambda to search a page
-    auto searchPage = [&](int pageIdx) -> bool {
-        Page* page = doc->page(pageIdx);
-        if (!page) return false;
+    if (doc->isEdgeless()) {
+        // Edgeless mode: search through loaded tiles
+        int foundTileX = 0;
+        int foundTileY = 0;
         
-        for (const auto& objPtr : page->objects) {
-            if (objPtr->id == linkObjectId) {
-                foundObject = objPtr.get();
-                foundPageIndex = pageIdx;
-                return true;
+        for (const auto& coord : doc->allLoadedTileCoords()) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            
+            for (const auto& objPtr : tile->objects) {
+                if (objPtr->id == linkObjectId) {
+                    foundObject = objPtr.get();
+                    foundTileX = coord.first;
+                    foundTileY = coord.second;
+                    break;
+                }
+            }
+            if (foundObject) break;
+        }
+        
+        if (!foundObject) {
+            qWarning() << "navigateToLinkObject: LinkObject not found in loaded tiles:" << linkObjectId;
+            return;
+        }
+        
+        // Calculate document-global position (tile origin + object position)
+        QPointF tileOrigin(foundTileX * Document::EDGELESS_TILE_SIZE,
+                           foundTileY * Document::EDGELESS_TILE_SIZE);
+        QPointF objectCenter = tileOrigin + foundObject->position + 
+            QPointF(foundObject->size.width() / 2.0, foundObject->size.height() / 2.0);
+        
+        // Navigate to the object position (reuses back-link navigation)
+        vp->navigateToEdgelessPosition(foundTileX, foundTileY, objectCenter);
+        
+        // Select the object
+        vp->selectObject(foundObject);
+        
+    } else {
+        // Paged mode: search through pages
+        int currentPage = vp->currentPageIndex();
+        int foundPageIndex = -1;
+        
+        // Helper lambda to search a page
+        auto searchPage = [&](int pageIdx) -> bool {
+            Page* page = doc->page(pageIdx);
+            if (!page) return false;
+            
+            for (const auto& objPtr : page->objects) {
+                if (objPtr->id == linkObjectId) {
+                    foundObject = objPtr.get();
+                    foundPageIndex = pageIdx;
+                    return true;
+                }
+            }
+            return false;
+        };
+        
+        // Search current page first
+        if (!searchPage(currentPage)) {
+            // Not on current page - search all pages
+            for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
+                if (pageIdx == currentPage) continue;  // Already checked
+                if (searchPage(pageIdx)) break;
             }
         }
-        return false;
-    };
-    
-    // Search current page first
-    if (!searchPage(currentPage)) {
-        // Not on current page - search all pages
-        for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
-            if (pageIdx == currentPage) continue;  // Already checked
-            if (searchPage(pageIdx)) break;
+        
+        if (!foundObject) {
+            qWarning() << "navigateToLinkObject: LinkObject not found:" << linkObjectId;
+            return;
         }
+        
+        // Navigate to page if needed
+        if (foundPageIndex != currentPage) {
+            vp->scrollToPage(foundPageIndex);
+        }
+        
+        // Calculate object center and convert to normalized coordinates for scrolling
+        QSizeF pageSize = doc->pageSizeAt(foundPageIndex);
+        if (pageSize.width() > 0 && pageSize.height() > 0) {
+            QPointF objectCenter = foundObject->position + 
+                QPointF(foundObject->size.width() / 2.0, foundObject->size.height() / 2.0);
+            QPointF normalizedPos(
+                objectCenter.x() / pageSize.width(),
+                objectCenter.y() / pageSize.height()
+            );
+            vp->scrollToPositionOnPage(foundPageIndex, normalizedPos);
+        }
+        
+        // Select the object (this will show slot buttons in subtoolbar)
+        vp->selectObject(foundObject);
     }
-    
-    if (!foundObject) {
-        qWarning() << "navigateToLinkObject: LinkObject not found:" << linkObjectId;
-        return;
-    }
-    
-    // Navigate to page if needed
-    if (foundPageIndex != currentPage) {
-        vp->scrollToPage(foundPageIndex);
-    }
-    
-    // Calculate object center and convert to normalized coordinates for scrolling
-    QSizeF pageSize = doc->pageSizeAt(foundPageIndex);
-    if (pageSize.width() > 0 && pageSize.height() > 0) {
-        QPointF objectCenter = foundObject->position + 
-            QPointF(foundObject->size.width() / 2.0, foundObject->size.height() / 2.0);
-        QPointF normalizedPos(
-            objectCenter.x() / pageSize.width(),
-            objectCenter.y() / pageSize.height()
-        );
-        vp->scrollToPositionOnPage(foundPageIndex, normalizedPos);
-    }
-    
-    // Select the object (this will show slot buttons in subtoolbar)
-    vp->selectObject(foundObject);
 }
 
 // Phase M.4: Search markdown notes across pages

@@ -46,6 +46,15 @@ public:
      * @param edgeless true for edgeless document, false for paged document.
      */
     void setEdgelessMode(bool edgeless);
+    
+    /**
+     * @brief Show/hide warning about hidden tiles in edgeless mode.
+     * @param hasHiddenTiles true if some tiles are not loaded (notes may be hidden).
+     * @param loadedCount Number of tiles currently loaded.
+     * @param totalCount Total number of tiles in the document.
+     */
+    void setHiddenTilesWarning(bool hasHiddenTiles, int loadedCount = 0, int totalCount = 0);
+    
     void exitSearchMode();
     void onNewNoteCreated(); // Auto-exit search mode when a new note is created
     
@@ -127,6 +136,9 @@ private:
     QWidget *scrollContent;
     QVBoxLayout *scrollLayout;
     QLabel *emptyLabel;
+    
+    // M.7.2: Warning for hidden tiles in edgeless mode
+    QLabel *hiddenTilesWarningLabel = nullptr;
     
     QList<MarkdownNoteEntry*> noteEntries;
     bool isDarkMode = false;

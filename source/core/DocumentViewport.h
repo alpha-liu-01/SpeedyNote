@@ -1235,7 +1235,21 @@ public slots:
      * locations. Scrolls to the page and centers the view on the position.
      * No-op if page UUID not found.
      */
-    void navigateToPosition(const QString& pageUuid, const QPointF& position);
+    void navigateToPosition(QString pageUuid, QPointF position);
+    
+    /**
+     * @brief Navigate to a specific position in an edgeless document.
+     * @param tileX Target tile X coordinate.
+     * @param tileY Target tile Y coordinate.
+     * @param docPosition Position in document coordinates to center on.
+     * 
+     * Used by LinkObject Position slots to navigate to linked locations
+     * in edgeless mode. Centers the view on the specified document position.
+     * 
+     * Note: docPosition is passed by VALUE because tile eviction during
+     * update() can destroy the source object, invalidating any reference.
+     */
+    void navigateToEdgelessPosition(int tileX, int tileY, QPointF docPosition);
     
     /**
      * @brief Scroll by a delta amount.
@@ -1430,6 +1444,20 @@ signals:
      * @brief Emitted when the document is modified.
      */
     void documentModified();
+    
+    /**
+     * @brief Emitted when the list of LinkObjects may have changed.
+     * 
+     * This is more targeted than documentModified() and should be used by
+     * the markdown notes sidebar to refresh its display.
+     * 
+     * Emitted when:
+     * - Objects are pasted (may include LinkObjects)
+     * - Objects are deleted (may include LinkObjects)
+     * - Undo/redo is performed (may affect LinkObjects)
+     * - Tiles are loaded/evicted in edgeless mode
+     */
+    void linkObjectListMayHaveChanged();
     
     /**
      * @brief Emitted when the current tool changes.

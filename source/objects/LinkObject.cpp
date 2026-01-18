@@ -19,9 +19,17 @@ QJsonObject LinkSlot::toJson() const
             break;
         case Type::Position:
             obj["type"] = "position";
-            obj["pageUuid"] = targetPageUuid;
             obj["x"] = targetPosition.x();
             obj["y"] = targetPosition.y();
+            if (isEdgelessTarget) {
+                // Edgeless mode: store tile coordinates
+                obj["edgeless"] = true;
+                obj["tileX"] = edgelessTileX;
+                obj["tileY"] = edgelessTileY;
+            } else {
+                // Paged mode: store page UUID
+                obj["pageUuid"] = targetPageUuid;
+            }
             break;
         case Type::Url:
             obj["type"] = "url";
@@ -43,8 +51,17 @@ LinkSlot LinkSlot::fromJson(const QJsonObject& obj)
     
     if (typeStr == "position") {
         slot.type = Type::Position;
-        slot.targetPageUuid = obj["pageUuid"].toString();
         slot.targetPosition = QPointF(obj["x"].toDouble(), obj["y"].toDouble());
+        if (obj["edgeless"].toBool()) {
+            // Edgeless mode: load tile coordinates
+            slot.isEdgelessTarget = true;
+            slot.edgelessTileX = obj["tileX"].toInt();
+            slot.edgelessTileY = obj["tileY"].toInt();
+        } else {
+            // Paged mode: load page UUID
+            slot.isEdgelessTarget = false;
+            slot.targetPageUuid = obj["pageUuid"].toString();
+        }
     } else if (typeStr == "url") {
         slot.type = Type::Url;
         slot.url = obj["url"].toString();
@@ -220,11 +237,28 @@ std::unique_ptr<LinkObject> LinkObject::cloneWithBackLink(const QString& sourceP
     copy->iconColor = iconColor;
     // Note: position will be set by caller
     
-    // Auto-fill slot 0 with back-link to original position
+    // Auto-fill slot 0 with back-link to original position (paged mode)
     copy->linkSlots[0].type = LinkSlot::Type::Position;
+    copy->linkSlots[0].isEdgelessTarget = false;
     copy->linkSlots[0].targetPageUuid = sourcePageUuid;
     copy->linkSlots[0].targetPosition = position;
     
     return copy;
 }
 
+std::unique_ptr<LinkObject> LinkObject::cloneWithBackLinkEdgeless(int tileX, int tileY, const QPointF& docPosition) const
+{
+    auto copy = std::make_unique<LinkObject>();
+    copy->description = description;
+    copy->iconColor = iconColor;
+    // Note: position will be set by caller
+    
+    // Auto-fill slot 0 with back-link to original position (edgeless mode)
+    copy->linkSlots[0].type = LinkSlot::Type::Position;
+    copy->linkSlots[0].isEdgelessTarget = true;
+    copy->linkSlots[0].edgelessTileX = tileX;
+    copy->linkSlots[0].edgelessTileY = tileY;
+    copy->linkSlots[0].targetPosition = docPosition;  // Document coordinates
+    
+    return copy;
+}

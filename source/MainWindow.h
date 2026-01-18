@@ -539,6 +539,7 @@ private:
     QMetaObject::Connection m_documentModifiedConn;    // BUG FIX: documentModified → mark doc/tab modified
     QMetaObject::Connection m_markdownNotesPageConn;  // Phase M.3: For page change → notes reload
     QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
+    QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
     
     // Trackpad vs mouse wheel routing (see eventFilter wheel handling)

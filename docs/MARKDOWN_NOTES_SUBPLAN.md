@@ -985,7 +985,8 @@ void MarkdownNotesSidebar::setNoteEditMode(const QString& noteId, bool editMode)
 | M.4 | Search Integration | ~80 | ✅ Done |
 | M.5 | MainWindow Integration | ~40 | ✅ Done |
 | M.6 | Post-Integration UX Improvements | ~120 | ✅ Done |
-| **Total** | | **~770** |
+| M.7 | Edgeless Mode Bug Fixes | ~90 | ✅ Done |
+| **Total** | | **~860** |
 
 ## Implementation Order
 
@@ -1227,6 +1228,138 @@ For search in edgeless mode, page range parameters are ignored (all loaded tiles
 **Observation:** `QDir().mkpath(notes)` is called on every invocation, even if directory already exists.
 
 **Assessment:** `mkpath()` is idempotent and fast when directory exists. Could cache the result, but overhead is negligible.
+
+---
+
+# Phase M.7: Edgeless Mode Bug Fixes
+
+**Goal:** Fix markdown notes sidebar bugs specific to edgeless mode.
+
+**Date Identified:** January 17, 2026
+
+---
+
+## Bug Overview
+
+| Bug ID | Description | Severity | Status |
+|--------|-------------|----------|--------|
+| M.7.1 | `navigateToLinkObject()` doesn't search tiles | 🔴 Critical | ✅ FIXED |
+| M.7.2 | Notes only show from LOADED tiles | 🟡 Medium | ✅ FIXED (Option D) |
+| M.7.3 | No sidebar refresh on tile load/evict | 🟡 Medium | ✅ FIXED |
+
+---
+
+## Bug M.7.1: navigateToLinkObject() doesn't work in edgeless mode ✅ FIXED
+
+**Location:** `source/MainWindow.cpp` lines 4742-4840
+
+**Symptom:** Clicking the "🔗" jump button on a markdown note entry in the sidebar does nothing when viewing an edgeless document. The console shows: `"LinkObject not found: {uuid}"`.
+
+**Root Cause:** The `navigateToLinkObject()` function only searched pages using `doc->page(pageIdx)`. In edgeless mode, objects are stored in tiles, not pages.
+
+**Fix Applied:**
+1. Check `doc->isEdgeless()` at the start
+2. For edgeless mode:
+   - Search through `allLoadedTileCoords()` for the object
+   - When found, calculate document-global position: `tileOrigin + objectPosition + center offset`
+   - Call `navigateToEdgelessPosition()` (reused from back-link feature)
+   - Select the object via `vp->selectObject()`
+3. For paged mode: Unchanged
+
+**Lines changed:** ~40
+
+---
+
+## Bug M.7.2: Notes only show from LOADED tiles
+
+**Location:** `source/MainWindow.cpp` lines 4725-4730
+
+**Symptom:** In edgeless mode, markdown notes disappear from the sidebar when you pan far away (causing the tile to be evicted), even though the notes still exist on disk.
+
+**Root Cause:** `loadNotesForCurrentPage()` only iterates through `allLoadedTileCoords()`:
+
+```cpp
+// Current behavior - only checks loaded tiles:
+for (const auto& coord : doc->allLoadedTileCoords()) {
+    Page* tile = doc->getTile(coord.first, coord.second);
+    extractNotesFromPage(tile);
+}
+```
+
+When tiles are evicted from memory (to save RAM), their notes are no longer visible in the sidebar.
+
+**Impact:** Notes appear/disappear unexpectedly as user pans around the edgeless canvas.
+
+**Design Decision Required:**
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| **A** | Keep current behavior | Simple, no changes | Confusing UX |
+| **B** | Load all tiles on sidebar open | Complete list | Memory spike, slow |
+| **C** | Scan tile manifest without loading | Fast, complete | Requires manifest parsing |
+| **D** | Show "notes may be hidden" warning | Informs user | Still incomplete list |
+
+**Status:** ✅ FIXED (Option D implemented)
+
+**Fix Applied:**
+1. Added `hiddenTilesWarningLabel` to `MarkdownNotesSidebar` 
+2. Added `setHiddenTilesWarning(bool, int, int)` method to show/hide warning with tile counts
+3. Updated `loadNotesForCurrentPage()` to call `setHiddenTilesWarning()` after loading notes
+4. Warning displays: "⚠️ Showing notes from X of Y tiles. Pan around to load more tiles and see their notes."
+5. Warning has proper light/dark mode styling
+
+**Files Modified:**
+- `source/ui/MarkdownNotesSidebar.h` - Added warning label and method
+- `source/ui/MarkdownNotesSidebar.cpp` - Implemented warning UI and `setHiddenTilesWarning()`
+- `source/MainWindow.cpp` - Call `setHiddenTilesWarning()` in `loadNotesForCurrentPage()`
+
+---
+
+## Bug M.7.3: No sidebar refresh when objects/tiles change
+
+**Location:** `source/MainWindow.cpp` - no connection to object/tile events
+
+**Symptom:** When LinkObjects are deleted, pasted, or when undo/redo affects objects, the markdown notes sidebar does NOT update. In edgeless mode, tile eviction also doesn't trigger a refresh.
+
+**Root Cause:** There was no signal connection between object changes and `loadNotesForCurrentPage()`.
+
+**Impact:** Sidebar becomes stale when objects are added/removed. This affects BOTH paged and edgeless modes.
+
+**Status:** ✅ FIXED
+
+**Fix Applied:**
+Added a new signal `linkObjectListMayHaveChanged()` to `DocumentViewport` that fires when:
+1. Objects are deleted (deleteSelectedObjects)
+2. Objects are pasted (pasteObjects)
+3. Undo/redo of object insert/delete (both paged and edgeless modes)
+4. Tiles are evicted in edgeless mode
+
+This signal is more targeted than `documentModified()` (which fires on every stroke) and avoids excessive sidebar reloads.
+
+**Files Modified:**
+- `source/core/DocumentViewport.h` - Added `linkObjectListMayHaveChanged()` signal
+- `source/core/DocumentViewport.cpp` - Emit signal in 6 places (delete, paste, undo×2, redo×2, evict)
+- `source/MainWindow.h` - Added `m_linkObjectListConn` connection member
+- `source/MainWindow.cpp` - Connect signal to reload sidebar
+
+**Note:** Tile loading is harder to track because it happens on-demand throughout the code. The signal currently fires on eviction. Users can pan around to load tiles, which will also update the warning from M.7.2.
+
+---
+
+## M.7 Implementation Order
+
+1. **M.7.1** - Critical: Jump button broken in edgeless mode
+2. **M.7.2** - Medium: Incomplete note list (add warning first)
+3. **M.7.3** - Low: Stale sidebar (may defer if M.7.2 adds warning)
+
+---
+
+## M.7 Testing Checklist
+
+- [ ] M.7.1: Click jump button on note in edgeless mode → navigates to LinkObject
+- [ ] M.7.1: LinkObject is selected after navigation
+- [ ] M.7.2: Warning shown when tiles are not fully loaded (if Option D)
+- [ ] M.7.3: New tiles loading adds their notes to sidebar (if implemented)
 
 ---
 

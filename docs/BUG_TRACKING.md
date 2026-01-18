@@ -6,7 +6,7 @@ This document tracks bugs, regressions, and polish issues discovered during and 
 
 **Format:** `BUG-{CATEGORY}-{NUMBER}` (e.g., `BUG-VP-001` for viewport bugs)
 
-**Last Updated:** Jan 17, 2026 (Fixed Page Panel touch drag conflicts with scroll gestures)
+**Last Updated:** Jan 17, 2026 (Fixed edgeless back-link navigation)
 
 ---
 
@@ -289,6 +289,96 @@ Implemented custom auto-scroll in `dragMoveEvent()` that only triggers when drag
 ---
 
 ### Objects (OBJ)
+
+#### BUG-OBJ-001: Edgeless back-links navigate to wrong position
+**Priority:** 🟠 P1 | **Status:** ✅ FIXED
+
+**Symptom:** 
+When copying a LinkObject in edgeless mode, the back-link (slot 0) that should return to the original object's position instead navigated to a completely wrong location - roughly the "negation" of the correct position.
+
+**Steps to Reproduce:**
+1. Open an edgeless document
+2. Create a LinkObject at some position (e.g., pan offset -6620, 4351)
+3. Copy the LinkObject (Ctrl+C)
+4. Pan far away to a different location
+5. Paste the LinkObject (Ctrl+V)
+6. Click slot 0 (back-link) on the pasted LinkObject
+7. Viewport navigates to wrong position (e.g., pan offset 6819, -4446 instead of -6620, 4351)
+
+**Expected:** Back-link should navigate to the original LinkObject's position
+**Actual:** Navigation went to approximately the negated coordinates
+
+**Root Cause:** 
+Two separate issues:
+
+**Issue 1: Inverted coordinate formula**
+The `navigateToEdgelessPosition()` function had the wrong formula for calculating pan offset:
+
+```cpp
+// WRONG comment and formula:
+// documentToViewport(pos) = (pos + panOffset) * zoom
+QPointF newPanOffset = viewportCenter / m_zoomLevel - docPosition;
+```
+
+But the actual `documentToViewport()` implementation was:
+```cpp
+// ACTUAL formula in documentToViewport():
+return (docPt - m_panOffset) * m_zoomLevel;  // Note: MINUS panOffset
+```
+
+This sign difference caused the calculated pan offset to be inverted.
+
+**Issue 2: Dangling reference**
+The `docPosition` parameter was passed by `const QPointF&`, but the LinkObject containing this position could be evicted from memory during the `update()` call within the navigation function, causing undefined behavior.
+
+**Fix:**
+
+**Part 1: Correct the coordinate formula**
+```cpp
+// CORRECT formula derivation:
+// documentToViewport(pos) = (pos - panOffset) * zoom
+// To center docPosition: viewportCenter = (docPosition - panOffset) * zoom
+// Therefore: panOffset = docPosition - viewportCenter / zoom
+
+QPointF newPanOffset = docPosition - viewportCenter / m_zoomLevel;
+```
+
+**Part 2: Pass position by value**
+Changed function signature from `const QPointF&` to `QPointF` to ensure a local copy:
+```cpp
+// Before:
+void navigateToEdgelessPosition(int tileX, int tileY, const QPointF& docPosition);
+
+// After:
+void navigateToEdgelessPosition(int tileX, int tileY, QPointF docPosition);
+```
+
+**Part 3: Extended LinkSlot for edgeless mode**
+Added edgeless-specific fields to `LinkSlot`:
+- `bool isEdgelessTarget` - distinguishes edgeless position links from paged links
+- `int edgelessTileX`, `int edgelessTileY` - tile coordinates (informational)
+- Serialization: writes `edgeless`, `tileX`, `tileY` instead of `pageUuid`
+
+**Part 4: Edgeless-aware back-link creation**
+Added `LinkObject::cloneWithBackLinkEdgeless()` that stores document-global coordinates instead of page UUID:
+```cpp
+copy->linkSlots[0].type = LinkSlot::Type::Position;
+copy->linkSlots[0].isEdgelessTarget = true;
+copy->linkSlots[0].edgelessTileX = tileX;
+copy->linkSlots[0].edgelessTileY = tileY;
+copy->linkSlots[0].targetPosition = docPosition;  // Document-global coordinates
+```
+
+**Files Modified:**
+- `source/objects/LinkObject.h` (added edgeless fields to LinkSlot, added cloneWithBackLinkEdgeless)
+- `source/objects/LinkObject.cpp` (serialization, cloneWithBackLinkEdgeless implementation)
+- `source/core/DocumentViewport.h` (added navigateToEdgelessPosition, changed position parameters to pass by value)
+- `source/core/DocumentViewport.cpp` (fixed formula, implemented edgeless navigation, updated copySelectedObjects and activateLinkSlot)
+
+**Verified:** [x] Back-links in edgeless mode navigate to correct position
+**Verified:** [x] Back-links in paged mode still work correctly
+**Verified:** [x] Edgeless links serialize/deserialize correctly
+**Verified:** [x] No dangling reference issues during navigation
 
 ---
 
@@ -1555,7 +1645,7 @@ Additionally, the document was deleted while the viewport still held a reference
 | Drawing | 0 | 0 | 0 | 0 |
 | Lasso | 0 | 0 | 0 | 0 |
 | Highlighter | 0 | 0 | 0 | 0 |
-| Objects | 0 | 0 | 0 | 0 |
+| Objects | 0 | 0 | 1 | 1 |
 | Layers | 0 | 0 | 0 | 0 |
 | Pages | 0 | 0 | 4 | 4 |
 | PDF | 0 | 0 | 0 | 0 |
@@ -1571,7 +1661,7 @@ Additionally, the document was deleted while the viewport still held a reference
 | UI/UX | 0 | 0 | 4 | 4 |
 | Launcher | 0 | 0 | 2 | 2 |
 | Miscellaneous | 0 | 0 | 6 | 6 |
-| **TOTAL** | **0** | **0** | **29** | **29** |
+| **TOTAL** | **0** | **0** | **30** | **30** |
 
 ---
 

@@ -447,16 +447,30 @@ void DocumentViewport::recenterHorizontally()
     // Calculate viewport width in document coordinates
     qreal viewportWidth = width() / zoomLevel;
     
-    // Only center if content is narrower than viewport
     if (contentSize.width() < viewportWidth) {
-        // Calculate the offset needed to center content
+        // Case 1: Content is narrower than viewport - center it
         // Negative pan X shifts content to the right (toward center)
         qreal centeringOffset = (viewportWidth - contentSize.width()) / 2.0;
-        
-        // Set pan with negative X to center horizontally, keep Y unchanged
         m_panOffset.setX(-centeringOffset);
-        
         emit panChanged(m_panOffset);
+    } else {
+        // Case 2: Viewport is narrower than content - clamp pan to valid range
+        // This ensures we don't show empty space on one side while content
+        // is still available on the other side
+        
+        // Minimum pan: 0 (left edge of content at left edge of viewport)
+        // Maximum pan: content.width - viewport.width (right edge at right edge)
+        qreal minX = 0.0;
+        qreal maxX = contentSize.width() - viewportWidth;
+        
+        // Clamp current pan to this range (preserves user's horizontal scroll position
+        // while preventing unnecessary empty space)
+        qreal clampedX = qBound(minX, m_panOffset.x(), maxX);
+        
+        if (!qFuzzyCompare(m_panOffset.x(), clampedX)) {
+            m_panOffset.setX(clampedX);
+            emit panChanged(m_panOffset);
+        }
     }
 }
 
@@ -777,7 +791,7 @@ void DocumentViewport::scrollToPositionOnPage(int pageIndex, QPointF normalizedP
                  */
 }
 
-void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF& position)
+void DocumentViewport::navigateToPosition(QString pageUuid, QPointF position)
 {
     // Phase C.5.1: Navigate to a specific page position (for LinkObject Position slots)
     if (!m_document || pageUuid.isEmpty()) {
@@ -817,6 +831,43 @@ void DocumentViewport::navigateToPosition(const QString& pageUuid, const QPointF
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "navigateToPosition: Navigated to page" << targetPageIndex 
              << "position" << position;
+#endif
+}
+
+void DocumentViewport::navigateToEdgelessPosition(int tileX, int tileY, QPointF docPosition)
+{
+    // Navigate to a specific position in an edgeless document
+    if (!m_document || !m_document->isEdgeless()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "navigateToEdgelessPosition: Invalid target (not edgeless)";
+#endif
+        return;
+    }
+    
+    // The tile coordinates are informational - we use docPosition directly
+    Q_UNUSED(tileX);
+    Q_UNUSED(tileY);
+    
+    // Calculate pan offset to center the target document position in viewport
+    // Goal: documentToViewport(docPosition) should equal viewportCenter
+    // documentToViewport(pos) = (pos - panOffset) * zoom
+    // So: (docPosition - panOffset) * zoom = viewportCenter
+    // Therefore: panOffset = docPosition - viewportCenter / zoom
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    QPointF newPanOffset = docPosition - viewportCenter / m_zoomLevel;
+    
+    setPanOffset(newPanOffset);
+    
+    update();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    // Verify: viewportCenter = (docCenter - panOffset) * zoom
+    // So: docCenter = viewportCenter/zoom + panOffset
+    QPointF actualCenter = viewportCenter / m_zoomLevel + m_panOffset;
+    qDebug() << "navigateToEdgelessPosition: target docPosition =" << docPosition
+             << "| new panOffset =" << m_panOffset
+             << "| actual viewport center (doc coords) =" << actualCenter
+             << "| difference =" << (actualCenter - docPosition);
 #endif
 }
 
@@ -1246,27 +1297,43 @@ QRectF DocumentViewport::objectBoundsInViewport(InsertedObject* obj) const
     // Get object's document-space position
     QPointF docPos;
     
+    // PERF FIX: During drag/resize, use cached tile/page index instead of searching
+    // This is called multiple times per frame during drag, so caching is critical
+    bool useCachedLocation = (m_isDraggingObjects || m_isResizingObject) &&
+                             m_selectedObjects.size() == 1 &&
+                             m_selectedObjects.first() == obj;
+    
     if (m_document->isEdgeless()) {
-        // Edgeless: object position is tile-local, need to find the tile
-        for (const auto& coord : m_document->allLoadedTileCoords()) {
-            Page* tile = m_document->getTile(coord.first, coord.second);
-            if (tile && tile->objectById(obj->id)) {
-                // Found the tile containing this object
-                QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
-                                   coord.second * Document::EDGELESS_TILE_SIZE);
-                docPos = tileOrigin + obj->position;
-                break;
+        if (useCachedLocation) {
+            // Fast path: use cached tile coordinate
+            QPointF tileOrigin(m_dragObjectTileCoord.first * Document::EDGELESS_TILE_SIZE,
+                               m_dragObjectTileCoord.second * Document::EDGELESS_TILE_SIZE);
+            docPos = tileOrigin + obj->position;
+        } else {
+            // Slow path: search all tiles (only when not dragging)
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(obj->id)) {
+                    QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                       coord.second * Document::EDGELESS_TILE_SIZE);
+                    docPos = tileOrigin + obj->position;
+                    break;
+                }
             }
         }
     } else {
-        // Paged: object position is page-local
-        // Find which page contains this object
-        // PERF FIX: Only search loaded pages to avoid triggering lazy loading
-        for (int i : m_document->loadedPageIndices()) {
-            Page* page = m_document->page(i);  // Already loaded, no disk I/O
-            if (page && page->objectById(obj->id)) {
-                docPos = pagePosition(i) + obj->position;
-                break;
+        if (useCachedLocation && m_dragObjectPageIndex >= 0) {
+            // Fast path: use cached page index
+            docPos = pagePosition(m_dragObjectPageIndex) + obj->position;
+        } else {
+            // Slow path: search pages
+            // PERF FIX: Only search loaded pages to avoid triggering lazy loading
+            for (int i : m_document->loadedPageIndices()) {
+                Page* page = m_document->page(i);  // Already loaded, no disk I/O
+                if (page && page->objectById(obj->id)) {
+                    docPos = pagePosition(i) + obj->position;
+                    break;
+                }
             }
         }
     }
@@ -3453,6 +3520,11 @@ void DocumentViewport::evictDistantTiles()
     
     if (selectionChanged) {
         emit objectSelectionChanged();
+    }
+    
+    // M.7.3: Notify that tiles were evicted (sidebar may need refresh)
+    if (evictedCount > 0) {
+        emit linkObjectListMayHaveChanged();
     }
     
 #ifdef SPEEDYNOTE_DEBUG
@@ -5732,6 +5804,7 @@ void DocumentViewport::deleteSelectedObjects()
     // Emit modification signal
     if (deletedCount > 0) {
         emit documentModified();
+        emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
     }
     
     update();
@@ -5758,19 +5831,56 @@ void DocumentViewport::copySelectedObjects()
         // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
         // with a back-link to the original position
         if (auto* link = dynamic_cast<LinkObject*>(obj)) {
-            // Find source page UUID - O(1) since selected objects are on current page
-            QString sourcePageUuid;
-            if (m_document->isPaged()) {
-                // In paged mode, selected objects are always on the current page
+            if (m_document->isEdgeless()) {
+                // Edgeless mode: find the tile containing this object
+                // and create back-link with tile coordinates + document position
+                bool foundTile = false;
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (tile && tile->objectById(link->id)) {
+                        // Found the tile - calculate document coordinates
+                        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                                           coord.second * Document::EDGELESS_TILE_SIZE);
+                        QPointF docPos = tileOrigin + link->position;
+                        
+#ifdef SPEEDYNOTE_DEBUG
+                        qDebug() << "copySelectedObjects (edgeless): link->id =" << link->id
+                                 << "tile coord =" << coord.first << "," << coord.second
+                                 << "tileOrigin =" << tileOrigin
+                                 << "link->position (tile-local) =" << link->position
+                                 << "docPos (calculated) =" << docPos;
+#endif
+                        
+                        // Create clone with back-link to this position
+                        auto clone = link->cloneWithBackLinkEdgeless(coord.first, coord.second, docPos);
+#ifdef SPEEDYNOTE_DEBUG
+                        qDebug() << "  Back-link slot will store: tileX =" << coord.first 
+                                 << "tileY =" << coord.second
+                                 << "targetPosition =" << clone->linkSlots[0].targetPosition;
+#endif
+                        m_objectClipboard.append(clone->toJson());
+                        foundTile = true;
+                        break;
+                    }
+                }
+                if (!foundTile) {
+                    // Fallback: copy without back-link if tile not found
+#ifdef SPEEDYNOTE_DEBUG
+                    qDebug() << "copySelectedObjects (edgeless): tile not found for link->id =" << link->id;
+#endif
+                    m_objectClipboard.append(link->toJson());
+                }
+            } else {
+                // Paged mode: use page UUID
+                QString sourcePageUuid;
                 Page* currentPage = m_document->page(m_currentPageIndex);
                 if (currentPage) {
                     sourcePageUuid = currentPage->uuid;
                 }
+                
+                auto clone = link->cloneWithBackLink(sourcePageUuid);
+                m_objectClipboard.append(clone->toJson());
             }
-            // Note: Edgeless mode doesn't have page UUIDs, back-link will be empty
-            
-            auto clone = link->cloneWithBackLink(sourcePageUuid);
-            m_objectClipboard.append(clone->toJson());
         } else {
             m_objectClipboard.append(obj->toJson());
         }
@@ -5914,6 +6024,7 @@ void DocumentViewport::pasteObjects()
     
     if (!pastedObjects.isEmpty()) {
         emit documentModified();
+        emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
     }
     
     update();
@@ -6067,7 +6178,23 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     emit documentModified();
     update();
     
+#ifdef SPEEDYNOTE_DEBUG
+    if (m_document && m_document->isEdgeless()) {
+        QPointF docPos = viewportToDocument(mapFromGlobal(QCursor::pos()));
+        auto coord = m_document->tileCoordForPoint(docPos);
+        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                           coord.second * Document::EDGELESS_TILE_SIZE);
+        qDebug() << "createLinkObjectAtPosition (edgeless): "
+                 << "pagePos (stored as position) =" << pagePos
+                 << "tile =" << coord.first << "," << coord.second
+                 << "docPos from cursor =" << docPos
+                 << "tileOrigin =" << tileOrigin;
+    } else {
     qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
+    }
+#else
+    qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
+#endif
 }
 
 // ===== Link Slot Activation (Phase C.4.3) =====
@@ -6108,12 +6235,26 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
     // Activate the slot based on type
     switch (slot.type) {
         case LinkSlot::Type::Position:
-            // Phase C.5.1: Navigate to page position
+            // Navigate to position (paged or edgeless)
+            if (slot.isEdgelessTarget) {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "activateLinkSlot: Edgeless position link"
+                         << "tileX =" << slot.edgelessTileX
+                         << "tileY =" << slot.edgelessTileY
+                         << "targetPosition =" << slot.targetPosition;
+#endif
+                // Edgeless mode: navigate to tile + document position
+                navigateToEdgelessPosition(slot.edgelessTileX, slot.edgelessTileY, slot.targetPosition);
+            } else {
+                // Paged mode: navigate to page UUID + page-local position
             navigateToPosition(slot.targetPageUuid, slot.targetPosition);
+            }
             break;
             
         case LinkSlot::Type::Url:
+#ifdef SPEEDYNOTE_DEBUG
             qDebug() << "activateLinkSlot: Opening URL" << slot.url;
+#endif
             QDesktopServices::openUrl(QUrl(slot.url));
             break;
             
@@ -10134,6 +10275,13 @@ void DocumentViewport::undoEdgeless()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
+    
+    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
+    if (action.type == PageUndoAction::ObjectInsert ||
+        action.type == PageUndoAction::ObjectDelete) {
+        emit linkObjectListMayHaveChanged();
+    }
+    
     update();
 }
 
@@ -10344,6 +10492,13 @@ void DocumentViewport::redoEdgeless()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
+    
+    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
+    if (action.type == PageUndoAction::ObjectInsert ||
+        action.type == PageUndoAction::ObjectDelete) {
+        emit linkObjectListMayHaveChanged();
+    }
+    
     update();
 }
 
@@ -10513,6 +10668,13 @@ void DocumentViewport::undo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
+    
+    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
+    if (action.type == PageUndoAction::ObjectInsert ||
+        action.type == PageUndoAction::ObjectDelete) {
+        emit linkObjectListMayHaveChanged();
+    }
+    
     update();
 }
 
@@ -10669,6 +10831,13 @@ void DocumentViewport::redo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
+    
+    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
+    if (action.type == PageUndoAction::ObjectInsert ||
+        action.type == PageUndoAction::ObjectDelete) {
+        emit linkObjectListMayHaveChanged();
+    }
+    
     update();
 }
 

@@ -15,16 +15,21 @@
 struct LinkSlot {
     enum class Type {
         Empty,      ///< Slot is unused
-        Position,   ///< Links to a page position (pageUuid + coordinates)
+        Position,   ///< Links to a page position (pageUuid + coordinates) or edgeless position
         Url,        ///< Links to an external URL
         Markdown    ///< Links to a markdown note (by ID)
     };
     
     Type type = Type::Empty;
     
-    // Position link data
+    // Position link data (paged mode)
     QString targetPageUuid;
-    QPointF targetPosition;
+    QPointF targetPosition;      ///< Page-local coordinates for paged, document coordinates for edgeless
+    
+    // Position link data (edgeless mode)
+    bool isEdgelessTarget = false;  ///< True if linking to an edgeless document position
+    int edgelessTileX = 0;          ///< Target tile X coordinate (for edgeless)
+    int edgelessTileY = 0;          ///< Target tile Y coordinate (for edgeless)
     
     // URL link data
     QString url;
@@ -79,8 +84,11 @@ public:
     bool hasEmptySlot() const;
     int firstEmptySlotIndex() const;
     
-    // Copy with back-link
+    // Copy with back-link (paged mode)
     std::unique_ptr<LinkObject> cloneWithBackLink(const QString& sourcePageUuid) const;
+    
+    // Copy with back-link (edgeless mode)
+    std::unique_ptr<LinkObject> cloneWithBackLinkEdgeless(int tileX, int tileY, const QPointF& docPosition) const;
     
 private:
     // Icon rendering (lazy-loaded to avoid QPixmap before QApplication)

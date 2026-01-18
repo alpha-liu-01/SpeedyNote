@@ -44,7 +44,26 @@ void MarkdownNotesSidebar::setupUI() {
     emptyLabel->setAlignment(Qt::AlignCenter);
     emptyLabel->setWordWrap(true);
     
+    // M.7.2: Warning label for hidden tiles in edgeless mode
+    hiddenTilesWarningLabel = new QLabel(this);
+    hiddenTilesWarningLabel->setObjectName("HiddenTilesWarning");
+    hiddenTilesWarningLabel->setAlignment(Qt::AlignCenter);
+    hiddenTilesWarningLabel->setWordWrap(true);
+    hiddenTilesWarningLabel->setVisible(false);
+    hiddenTilesWarningLabel->setStyleSheet(
+        "QLabel {"
+        "  background-color: #fff3cd;"
+        "  color: #856404;"
+        "  border: 1px solid #ffc107;"
+        "  border-radius: 12px;"
+        "  padding: 8px 12px;"
+        "  margin: 8px 12px;"
+        "  font-size: 12px;"
+        "}"
+    );
+    
     mainLayout->addWidget(searchContainer);
+    mainLayout->addWidget(hiddenTilesWarningLabel);
     mainLayout->addWidget(scrollArea, 1); // Give scroll area stretch priority
     mainLayout->addWidget(emptyLabel);
     mainLayout->addStretch(); // Push everything to the top when scroll area is hidden
@@ -183,6 +202,53 @@ void MarkdownNotesSidebar::setEdgelessMode(bool edgeless) {
         if (edgeless) {
             searchAllPagesCheckBox->setChecked(true);
         }
+        
+        // Hide warning when switching modes
+        if (hiddenTilesWarningLabel) {
+            hiddenTilesWarningLabel->setVisible(false);
+        }
+    }
+}
+
+void MarkdownNotesSidebar::setHiddenTilesWarning(bool hasHiddenTiles, int loadedCount, int totalCount) {
+    if (!hiddenTilesWarningLabel) return;
+    
+    if (hasHiddenTiles && isEdgeless) {
+        // Show warning with tile counts
+        QString warningText = tr("⚠️ Showing notes from %1 of %2 tiles. "
+                                  "Pan around to load more tiles and see their notes.")
+                              .arg(loadedCount).arg(totalCount);
+        hiddenTilesWarningLabel->setText(warningText);
+        hiddenTilesWarningLabel->setVisible(true);
+        
+        // Update style for dark mode
+        if (isDarkMode) {
+            hiddenTilesWarningLabel->setStyleSheet(
+                "QLabel {"
+                "  background-color: #3d3520;"
+                "  color: #ffc107;"
+                "  border: 1px solid #665c00;"
+                "  border-radius: 12px;"
+                "  padding: 8px 12px;"
+                "  margin: 8px 12px;"
+                "  font-size: 12px;"
+                "}"
+            );
+        } else {
+            hiddenTilesWarningLabel->setStyleSheet(
+                "QLabel {"
+                "  background-color: #fff3cd;"
+                "  color: #856404;"
+                "  border: 1px solid #ffc107;"
+                "  border-radius: 12px;"
+                "  padding: 8px 12px;"
+                "  margin: 8px 12px;"
+                "  font-size: 12px;"
+                "}"
+            );
+        }
+    } else {
+        hiddenTilesWarningLabel->setVisible(false);
     }
 }
 
