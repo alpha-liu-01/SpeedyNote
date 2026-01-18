@@ -4134,6 +4134,12 @@ void MainWindow::setupPagePanelActionBar()
             
             // Update UI
             notifyPageStructureChanged(doc, newPage);
+            
+            // Mark tab as modified (page deleted)
+            int tabIndex = m_tabManager->currentIndex();
+            if (tabIndex >= 0) {
+                m_tabManager->markTabModified(tabIndex, true);
+            }
         } else {
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "Page Panel: Delete failed for page" << deleteIndex;
@@ -4285,6 +4291,12 @@ void MainWindow::setupPagePanelConnections()
                     // Update page panel to reflect new order
                     if (m_pagePanel) {
                         m_pagePanel->invalidateAllThumbnails();
+                    }
+                    
+                    // Mark tab as modified (page order changed)
+                    int tabIndex = m_tabManager->currentIndex();
+                    if (tabIndex >= 0) {
+                        m_tabManager->markTabModified(tabIndex, true);
                     }
                     
 #ifdef SPEEDYNOTE_DEBUG
