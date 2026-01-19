@@ -517,18 +517,34 @@ EOF
 create_arch_package() {
     echo -e "${YELLOW}Creating Arch package...${NC}"
     
-    # Create source tarball
-    tar -czf "${PKGNAME}-${PKGVER}.tar.gz" \
+    # Create a dedicated build directory for makepkg
+    ARCH_BUILD_DIR="arch-pkg"
+    rm -rf "$ARCH_BUILD_DIR"
+    mkdir -p "$ARCH_BUILD_DIR"
+    
+    # Create source tarball with proper directory structure (like RPM does)
+    # The tarball root should be ${PKGNAME}-${PKGVER}/ not ./
+    CURRENT_DIR=$(basename "$PWD")
+    cd ..
+    tar -czf "${CURRENT_DIR}/${ARCH_BUILD_DIR}/${PKGNAME}-${PKGVER}.tar.gz" \
         --exclude=build \
         --exclude=.git* \
         --exclude="*.tar.gz" \
         --exclude="*.pkg.tar.zst" \
+        --exclude="*.rpm" \
+        --exclude="*.deb" \
+        --exclude="*.apk" \
         --exclude=pkg \
         --exclude=src \
-        .
+        --exclude=arch-pkg \
+        --exclude=debian-pkg \
+        --exclude=alpine-pkg \
+        --transform "s|^${CURRENT_DIR}|${PKGNAME}-${PKGVER}|" \
+        "${CURRENT_DIR}/"
+    cd "${CURRENT_DIR}"
     
-    # Create PKGBUILD
-    cat > PKGBUILD << EOF
+    # Create PKGBUILD in the build directory
+    cat > "$ARCH_BUILD_DIR/PKGBUILD" << EOF
 # Maintainer: $MAINTAINER
 pkgname=$PKGNAME
 pkgver=$PKGVER
@@ -543,13 +559,16 @@ source=("\${pkgname}-\${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-    cd "\$srcdir"
+    cd "\$srcdir/\${pkgname}-\${pkgver}"
     cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-    cmake --build build --parallel
+    # Limit parallelism to avoid OOM on systems with many cores but limited RAM
+    # Use half of available cores, minimum 1
+    local jobs=\$(( (\$(nproc) + 1) / 2 ))
+    cmake --build build --parallel \$jobs
 }
 
 package() {
-    cd "\$srcdir"
+    cd "\$srcdir/\${pkgname}-\${pkgver}"
     install -Dm755 "build/NoteApp" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/speedynote.png"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
@@ -593,8 +612,14 @@ post_remove() {
 }
 EOF
     
-    # Build package
+    # Build package from the dedicated directory
+    cd "$ARCH_BUILD_DIR"
     makepkg -f
+    
+    # Copy the package back to project root
+    cd ..
+    cp "$ARCH_BUILD_DIR/${PKGNAME}-${PKGVER}-${PKGREL}-${PKGARCH}.pkg.tar.zst" . 2>/dev/null || \
+    cp "$ARCH_BUILD_DIR"/${PKGNAME}-${PKGVER}-${PKGREL}-*.pkg.tar.zst . 2>/dev/null || true
     
     echo -e "${GREEN}Arch package created: ${PKGNAME}-${PKGVER}-${PKGREL}-${PKGARCH}.pkg.tar.zst${NC}"
 }
@@ -643,7 +668,9 @@ sha256sums="$CHECKSUM"
 
 build() {
     cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-    cmake --build build --parallel
+    # Limit parallelism to avoid OOM on systems with many cores but limited RAM
+    local jobs=\$(( (\$(nproc) + 1) / 2 ))
+    cmake --build build --parallel \$jobs
 }
 
 package() {
@@ -698,8 +725,9 @@ EOF
 # Function to clean up
 cleanup() {
     echo -e "${YELLOW}Cleaning up build artifacts...${NC}"
-    rm -rf build debian-pkg alpine-pkg
+    rm -rf build debian-pkg alpine-pkg arch-pkg
     rm -f "${PKGNAME}-${PKGVER}.tar.gz"
+    rm -f PKGBUILD  # Remove any stale PKGBUILD from project root
     echo -e "${GREEN}Cleanup complete${NC}"
 }
 
@@ -765,8 +793,13 @@ main() {
         exit 1
     fi
     
-    # Step 3: Build project
-    build_project
+    # Step 3: Build project (only needed for DEB which uses pre-built binary)
+    # RPM, Arch, and Alpine all build from source in their respective build systems
+    if [[ " ${PACKAGE_FORMATS[*]} " =~ " deb " ]]; then
+        build_project
+    else
+        echo -e "${YELLOW}Skipping pre-build (target formats build from source)${NC}"
+    fi
     
     # Step 4: Create packages
     for format in "${PACKAGE_FORMATS[@]}"; do
