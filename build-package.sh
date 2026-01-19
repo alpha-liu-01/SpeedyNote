@@ -561,7 +561,10 @@ sha256sums=('SKIP')
 build() {
     cd "\$srcdir/\${pkgname}-\${pkgver}"
     cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-    cmake --build build --parallel
+    # Limit parallelism to avoid OOM on systems with many cores but limited RAM
+    # Use half of available cores, minimum 1
+    local jobs=\$(( (\$(nproc) + 1) / 2 ))
+    cmake --build build --parallel \$jobs
 }
 
 package() {
@@ -665,7 +668,9 @@ sha256sums="$CHECKSUM"
 
 build() {
     cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-    cmake --build build --parallel
+    # Limit parallelism to avoid OOM on systems with many cores but limited RAM
+    local jobs=\$(( (\$(nproc) + 1) / 2 ))
+    cmake --build build --parallel \$jobs
 }
 
 package() {
@@ -788,8 +793,13 @@ main() {
         exit 1
     fi
     
-    # Step 3: Build project
-    build_project
+    # Step 3: Build project (only needed for DEB which uses pre-built binary)
+    # RPM, Arch, and Alpine all build from source in their respective build systems
+    if [[ " ${PACKAGE_FORMATS[*]} " =~ " deb " ]]; then
+        build_project
+    else
+        echo -e "${YELLOW}Skipping pre-build (target formats build from source)${NC}"
+    fi
     
     # Step 4: Create packages
     for format in "${PACKAGE_FORMATS[@]}"; do
