@@ -666,7 +666,7 @@ This will overwrite your current configuration.</source>
     <message>
         <location filename="../../source/core/Document.h" line="220"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题笔记</translation>
     </message>
 </context>
 <context>
@@ -740,7 +740,12 @@ Error output:
     <message>
         <location filename="../../source/core/DocumentManager.cpp" line="62"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentManager.cpp" line="83"/>
+        <source>Untitled Canvas</source>
+        <translation type="unfinished">无标题画布</translation>
     </message>
 </context>
 <context>
@@ -806,7 +811,7 @@ Error output:
     <message>
         <location filename="../../source/sharing/ExportDialog.cpp" line="60"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
         <location filename="../../source/sharing/ExportDialog.cpp" line="62"/>
@@ -1233,7 +1238,7 @@ This action cannot be undone.</source>
         <location filename="../../source/MainWindow.cpp" line="236"/>
         <location filename="../../source/MainWindow.cpp" line="872"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="388"/>
@@ -1392,6 +1397,16 @@ Size: %2</source>
 
 文件名：%1
 体积：%2</translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="2160"/>
+        <source>Untitled Canvas</source>
+        <translation type="unfinished">无标题画布</translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="2160"/>
+        <source>Untitled Document</source>
+        <translation type="unfinished">无标题文档</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="2182"/>
@@ -1596,7 +1611,7 @@ Quit anyway?</source>
         <location filename="../../source/core/MarkdownNote.cpp" line="95"/>
         <location filename="../../source/core/MarkdownNote.cpp" line="100"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题</translation>
     </message>
 </context>
 <context>
@@ -1761,7 +1776,7 @@ Quit anyway?</source>
     <message>
         <location filename="../../source/ui/NavigationBar.cpp" line="50"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
         <location filename="../../source/ui/NavigationBar.cpp" line="53"/>

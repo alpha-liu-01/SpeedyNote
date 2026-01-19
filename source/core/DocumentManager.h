@@ -56,7 +56,7 @@ public:
     
     /**
      * @brief Create a new edgeless (infinite canvas) document.
-     * @param name Optional name for the document (default: "Untitled Canvas").
+     * @param name Optional name for the document (default: tr("Untitled Canvas")).
      * @return Pointer to the newly created document.
      * 
      * The document is owned by DocumentManager.

@@ -729,6 +729,11 @@ Error output:
         <source>Untitled</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <location filename="../../source/core/DocumentManager.cpp" line="83"/>
+        <source>Untitled Canvas</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>DocumentViewport</name>
@@ -1381,6 +1386,16 @@ This action cannot be undone.</source>
 
 File: %1
 Size: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="2160"/>
+        <source>Untitled Canvas</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="2160"/>
+        <source>Untitled Document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

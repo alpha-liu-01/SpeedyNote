@@ -2157,7 +2157,7 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     
     bool isEdgeless = doc->isEdgeless();
     QString defaultName = doc->name.isEmpty() 
-        ? (isEdgeless ? "Untitled Canvas" : "Untitled Document")
+        ? (isEdgeless ? tr("Untitled Canvas") : tr("Untitled Document"))
         : doc->name;
     
     QString filePath;

@@ -41,6 +41,10 @@ void TouchGestureHandler::setMode(TouchGestureMode mode)
         endTouchPinch();
     }
     
+    // Clear all tracking state for clean start in new mode
+    m_trackedTouchIds.clear();
+    m_activeTouchPoints = 0;
+    
     m_mode = mode;
 }
 
@@ -54,9 +58,26 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     const auto& points = event->points();
     
-    // ===== Count ACTIVE touch points (exclude Released) =====
-    // This is critical! Qt includes Released points in points() for TouchUpdate.
-    // Without filtering, we'd count a just-lifted finger as still active.
+    // ===== Track touch point IDs across events (Android fix) =====
+    // On Android, touch events may not include all active points in every event.
+    // For example, a TouchUpdate may only include the point that moved, not
+    // stationary points. By tracking IDs across events, we know the TRUE finger count.
+    //
+    // BUG-A005 v3: This fixes ~40% failure rate where 2-finger pinch was detected
+    // as 1-finger pan because Android only reported one finger per event.
+    for (const auto& pt : points) {
+        if (pt.state() == QEventPoint::Pressed) {
+            m_trackedTouchIds.insert(pt.id());
+        } else if (pt.state() == QEventPoint::Released) {
+            m_trackedTouchIds.remove(pt.id());
+        }
+    }
+    
+    // Use tracked ID count for true finger count
+    m_activeTouchPoints = m_trackedTouchIds.size();
+    
+    // Also build activePoints list for accessing current event's point data
+    // (still needed for position calculations)
     QVector<const QEventPoint*> activePoints;
     activePoints.reserve(points.size());
     for (const auto& pt : points) {
@@ -64,7 +85,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             activePoints.append(&pt);
         }
     }
-    m_activeTouchPoints = activePoints.size();
     
     // ===== Interrupt inertia on any new touch =====
     if (event->type() == QEvent::TouchBegin && m_inertiaTimer->isActive()) {
@@ -162,7 +182,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // ===== Handle 3+→2 finger transition =====
-        if (m_activeTouchPoints == 2 && !m_pinchActive && !m_panActive) {
+        // Guard: need position data for both fingers
+        if (m_activeTouchPoints == 2 && !m_pinchActive && !m_panActive && activePoints.size() >= 2) {
             // Coming from 3+ fingers, start pinch
             if (m_mode != TouchGestureMode::YAxisOnly) {
                 const auto& p1 = *activePoints[0];
@@ -188,7 +209,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // ===== Handle 3+→1 or 2→1 finger transition =====
-        if (m_activeTouchPoints == 1 && !m_panActive) {
+        // Guard: need at least 1 point's data
+        if (m_activeTouchPoints == 1 && !m_panActive && !activePoints.isEmpty()) {
             // Coming from pinch or 3+ fingers, start pan with remaining finger
             if (m_pinchActive) {
                 endTouchPinch();
@@ -207,7 +229,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // TG.2.2: Single-finger pan update
-        if (m_panActive && m_activeTouchPoints == 1) {
+        // Guard: need at least 1 point's data
+        if (m_panActive && m_activeTouchPoints == 1 && !activePoints.isEmpty()) {
             const auto& point = *activePoints.first();
             QPointF currentPos = point.position();
             QPointF delta = currentPos - m_lastPos;
@@ -246,7 +269,9 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // ===== Handle 1→2 finger transition (pan to pinch) =====
-        if (m_activeTouchPoints == 2 && !m_pinchActive) {
+        // Note: m_activeTouchPoints uses ID tracking, but we need position data for both fingers
+        // Guard against case where event only has 1 point's data (wait for full event)
+        if (m_activeTouchPoints == 2 && !m_pinchActive && activePoints.size() >= 2) {
             // Y-axis only mode: disable pinch-to-zoom
             if (m_mode == TouchGestureMode::YAxisOnly) {
                 event->accept();
@@ -290,7 +315,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // TG.4: Pinch-to-zoom update (already in pinch mode)
-        if (m_activeTouchPoints == 2 && m_pinchActive) {
+        // Guard: need position data for both fingers
+        if (m_activeTouchPoints == 2 && m_pinchActive && activePoints.size() >= 2) {
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
@@ -350,9 +376,10 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             }
         }
         
-        // Reset tap tracking
+        // Reset all tracking for next touch sequence
         m_threeFingerTimerActive = false;
         m_activeTouchPoints = 0;
+        m_trackedTouchIds.clear();  // Clear ID tracking for next sequence
         event->accept();
         return true;
     }

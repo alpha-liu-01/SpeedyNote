@@ -35,6 +35,7 @@
 *.pkg.tar.zst
 *.apk
 *.dmg
+*.aab
 
 # Compressed files
 *.7z
@@ -66,3 +67,4 @@ android/mupdf-build/
 android/build-app/
 SpeedyNote-Android-android-conan/
 plans.txt
+/android/signing/

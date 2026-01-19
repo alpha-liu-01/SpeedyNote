@@ -16,6 +16,7 @@
 #include <QObject>
 #include <QPointF>
 #include <QVector>
+#include <QSet>
 #include <QElapsedTimer>
 #include <QTimer>
 
@@ -115,7 +116,8 @@ private:
     static constexpr int INERTIA_INTERVAL_MS = 16;      ///< ~60 FPS
     
     // ===== Multi-touch Tracking =====
-    int m_activeTouchPoints = 0;             ///< Number of active touch points
+    int m_activeTouchPoints = 0;             ///< Number of active touch points (derived from tracked IDs)
+    QSet<int> m_trackedTouchIds;             ///< Track touch point IDs across events (fixes Android event splitting)
     
     // ===== 3-Finger Tap Detection =====
     QElapsedTimer m_threeFingerTimer;        ///< Timer for 3-finger tap detection

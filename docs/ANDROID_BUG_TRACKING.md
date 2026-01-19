@@ -261,7 +261,7 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 ---
 
 ### BUG-A005: Pinch-to-Zoom Unreliable
-**Status:** ✅ Fixed (v2)  
+**Status:** ✅ Fixed (v3)  
 **Priority:** Medium  
 **Category:** Touch Input / Gestures
 **Platform:** Android only
@@ -272,7 +272,7 @@ Pinch-to-zoom gestures only trigger about 1 in 5 times. Once triggered, the zoom
 **Root Cause (Original - Partially Fixed):**  
 The `TouchGestureHandler::handleTouchEvent()` only handled 1-finger and 3-finger cases in the `TouchBegin` event. On Android, when two fingers touch nearly simultaneously, the system may send a `TouchBegin` event with 2 points directly.
 
-**Root Cause (v2 - Fully Fixed):**  
+**Root Cause (v2 - Improved):**  
 The original fix improved reliability from ~30% to ~70%, but three additional issues remained:
 
 1. **Released points counted as active**: `points.size()` includes ALL touch points, including those with state `Released`. When a finger lifts, the point is still in the event but with `Released` state. The code was counting released points as active, causing:
@@ -283,57 +283,70 @@ The original fix improved reliability from ~30% to ~70%, but three additional is
 
 3. **Inconsistent state flags**: When 2-finger `TouchBegin` happened, `m_panActive` wasn't explicitly cleared, potentially leaving conflicting state.
 
-**Symptoms (BEFORE v2 fix):**
-- Pinch-to-zoom gesture works ~70% of the time (improved from 30%)
-- Lifting one finger during pinch causes stuck gesture
-- Gesture state sometimes inconsistent
+**Root Cause (v3 - Fully Fixed):**  
+The v2 fix improved reliability to ~60%, but open beta testing revealed ~40% failure rate persisted. The issue: **Android may not include all active touch points in every event**.
 
-**Fix Applied (v2):**
-Complete rewrite of touch point counting and state transitions:
+When two fingers touch nearly simultaneously on Android:
+1. First finger → `TouchBegin` with 1 point → pan starts
+2. Second finger arrives, but `TouchUpdate` may only contain the newly pressed point (second finger) and not the stationary first finger
+3. Per-event counting sees only 1 active point, missing the second finger entirely
+
+The v2 code counted `activePoints.size()` which only reflects points **in the current event**, not all fingers currently on screen.
+
+**Fix Applied (v3):**
+Track touch point IDs across events instead of counting per-event:
 
 ```cpp
-// ===== Count ACTIVE touch points (exclude Released) =====
-// This is critical! Qt includes Released points in points() for TouchUpdate.
-// Without filtering, we'd count a just-lifted finger as still active.
-QVector<const QEventPoint*> activePoints;
-activePoints.reserve(points.size());
+// Member variable
+QSet<int> m_trackedTouchIds;
+
+// In handleTouchEvent:
+// Track IDs across events (fixes Android event splitting)
 for (const auto& pt : points) {
-    if (pt.state() != QEventPoint::Released) {
-        activePoints.append(&pt);
+    if (pt.state() == QEventPoint::Pressed) {
+        m_trackedTouchIds.insert(pt.id());
+    } else if (pt.state() == QEventPoint::Released) {
+        m_trackedTouchIds.remove(pt.id());
     }
 }
-m_activeTouchPoints = activePoints.size();
+
+// True finger count from tracked IDs
+m_activeTouchPoints = m_trackedTouchIds.size();
+
+// Also build activePoints for position data (still needed)
+// But add guards: only access position data when available
+if (m_activeTouchPoints == 2 && !m_pinchActive && activePoints.size() >= 2) {
+    // Safe to access both fingers' positions
+}
 ```
 
-Key improvements:
-- Filter out `Released` points when counting active touches
-- Proper 2→1 transition: pinch ends, pan starts with remaining finger
-- Proper 1→2 transition: pan ends, pinch starts
-- Clean state management: explicit `m_panActive = false` / `m_pinchActive = false`
-- Use `activePoints` array instead of raw `points` for gesture calculations
+Key improvements (v3):
+- **ID-based tracking**: `QSet<int> m_trackedTouchIds` tracks which fingers are currently down
+- **Cross-event counting**: True finger count persists across events even when Android only sends partial data
+- **Safety guards**: Added `activePoints.size() >= 2` checks before accessing 2 fingers' position data
+- **Clean state reset**: Clear tracked IDs on `TouchEnd`, `TouchCancel`, and mode changes
 
-**Why This Works:**
-1. **Accurate finger count**: By filtering out `Released` points, we know exactly how many fingers are currently touching the screen.
-2. **State machine transitions**: The code now properly handles all transitions:
-   - 0→1 finger: Start pan
-   - 1→2 fingers: End pan, start pinch
-   - 2→1 finger: End pinch, start pan with remaining finger
-   - 1/2→0 fingers: End active gesture
-3. **Clean state**: Explicit clearing of conflicting state flags prevents stuck gestures.
+**Why v3 Works:**
+1. **Cross-event awareness**: By tracking IDs, we know 2 fingers are down even if current event only shows 1
+2. **Deferred transition**: When we detect 2 fingers but don't have both positions, we wait until next event with full data
+3. **No false positives**: IDs are only added on `Pressed` state, removed on `Released`, cleared on sequence end
 
 **Files Modified:**
-- `source/core/TouchGestureHandler.cpp`
-  - Added `activePoints` array filtering out `Released` points
-  - Added 2→1 finger transition (pinch to pan)
-  - Restructured 1→2 finger transition for clarity
-  - Explicit state flag management in all branches
+- `source/core/TouchGestureHandler.h`
+  - Added `#include <QSet>`
+  - Added `QSet<int> m_trackedTouchIds` member
 
-**Desktop Impact:** None - desktop platforms typically use mouse/touchpad for gestures and don't exhibit the same touch point lifecycle. The fix improves robustness without changing behavior.
+- `source/core/TouchGestureHandler.cpp`
+  - Added ID tracking logic at start of `handleTouchEvent()`
+  - Added `activePoints.size() >= N` guards to all position-data access
+  - Clear `m_trackedTouchIds` in `setMode()` and on `TouchEnd`/`TouchCancel`
+
+**Desktop Impact:** None - desktop platforms deliver complete touch data. The fix improves robustness without changing behavior.
 
 **Result:**
-- Pinch-to-zoom now triggers reliably on every attempt
+- Pinch-to-zoom now triggers reliably (ID tracking catches all 2-finger scenarios)
 - Smooth transitions between pan and pinch when fingers are added/removed
-- No more stuck gesture states
+- No crashes from accessing missing position data
 
 ---
 
