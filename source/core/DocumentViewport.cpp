@@ -99,6 +99,27 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Touch gesture handler (encapsulates pan/zoom/tap logic)
     m_touchHandler = new TouchGestureHandler(this, this);
     
+    // Tablet hover timer - detects when stylus leaves viewport by timeout
+    // When stylus hovers to another widget, we stop receiving TabletMove events.
+    // This timer fires if no tablet hover event received within the interval.
+    m_tabletHoverTimer = new QTimer(this);
+    m_tabletHoverTimer->setSingleShot(true);
+    m_tabletHoverTimer->setInterval(100);  // 100ms - short enough to feel responsive
+    connect(m_tabletHoverTimer, &QTimer::timeout, this, [this]() {
+        // No tablet hover event received - stylus must have left
+        if (m_pointerInViewport && !m_pointerActive) {
+            m_pointerInViewport = false;
+            
+            // Trigger repaint to hide eraser cursor
+            if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
+                qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+                QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                                  eraserRadius * 2, eraserRadius * 2);
+                update(cursorRect.toRect());
+            }
+        }
+    });
+    
     // Initialize PDF cache capacity based on default layout mode
     updatePdfCacheCapacity();
 }
@@ -2565,6 +2586,27 @@ void DocumentViewport::focusOutEvent(QFocusEvent* event)
     QWidget::focusOutEvent(event);
 }
 
+void DocumentViewport::enterEvent(QEnterEvent* event)
+{
+    m_pointerInViewport = true;
+    QWidget::enterEvent(event);
+}
+
+void DocumentViewport::leaveEvent(QEvent* event)
+{
+    m_pointerInViewport = false;
+    
+    // Trigger repaint to hide eraser cursor when pointer leaves viewport
+    if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
+        qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+        QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                          eraserRadius * 2, eraserRadius * 2);
+        update(cursorRect.toRect());
+    }
+    
+    QWidget::leaveEvent(event);
+}
+
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
     // Determine event type
@@ -2582,6 +2624,46 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         default:
             event->ignore();
             return;
+    }
+    
+    // ===== Tablet Hover Tracking for Eraser Cursor =====
+    // TabletMove events arrive even when the pen is hovering (not pressed).
+    // We need to track position for eraser cursor even during hover.
+    // handlePointerEvent() returns early if m_pointerActive is false,
+    // so we handle hover tracking separately here.
+    if (event->type() == QEvent::TabletMove && !m_pointerActive) {
+        QPointF newPos = event->position();
+        
+        // Check if stylus is within widget bounds
+        // Unlike mouse, tablet doesn't trigger leaveEvent when stylus moves outside
+        m_pointerInViewport = rect().contains(newPos.toPoint());
+        
+        // Restart hover timer - if no tablet event for 100ms, stylus left
+        // This handles the case where stylus hovers to another widget
+        // (we stop receiving events, timer fires, cursor hidden)
+        if (m_tabletHoverTimer) {
+            m_tabletHoverTimer->start();
+        }
+        
+        // Check if eraser tool is active or this is hardware eraser
+        bool isEraserHover = (m_currentTool == ToolType::Eraser) ||
+                             (event->pointerType() == QPointingDevice::PointerType::Eraser);
+        
+        if (isEraserHover) {
+            QPointF oldPos = m_lastPointerPos;
+            m_lastPointerPos = newPos;
+            
+            // Trigger repaint for eraser cursor update
+            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+            QRectF newRect(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+            update(oldRect.united(newRect).toRect());
+        }
+        
+        event->accept();
+        return;
     }
     
     PointerEvent pe = tabletToPointerEvent(event, peType);
@@ -2940,6 +3022,27 @@ TouchGestureMode DocumentViewport::touchGestureMode() const
 
 bool DocumentViewport::event(QEvent* event)
 {
+    // ===== Tablet Proximity Events =====
+    // These are sent when the stylus enters or leaves the detection range of the tablet.
+    // Used to hide eraser cursor when pen is lifted away from the tablet surface.
+    if (event->type() == QEvent::TabletEnterProximity) {
+        m_pointerInViewport = true;
+        return true;
+    }
+    
+    if (event->type() == QEvent::TabletLeaveProximity) {
+        m_pointerInViewport = false;
+        
+        // Trigger repaint to hide eraser cursor when pen leaves proximity
+        if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
+            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                              eraserRadius * 2, eraserRadius * 2);
+            update(cursorRect.toRect());
+        }
+        return true;
+    }
+    
     // Forward touch events to handler
     if (event->type() == QEvent::TouchBegin ||
         event->type() == QEvent::TouchUpdate ||
@@ -10020,8 +10123,15 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
         return;
     }
     
-    // Only draw if pointer is within the viewport
-    // Note: Don't use isNull() - QPointF(0,0) is a valid position!
+    // Only draw if pointer is currently inside the viewport
+    // m_pointerInViewport is set by enterEvent/leaveEvent for reliable tracking
+    // This fixes the issue where cursor would stay visible after pen leaves
+    if (!m_pointerInViewport) {
+        return;
+    }
+    
+    // Additional check: pointer position should be within bounds
+    // (defensive check in case enterEvent wasn't called)
     if (!rect().contains(m_lastPointerPos.toPoint())) {
         return;
     }

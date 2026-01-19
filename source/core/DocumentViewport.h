@@ -1599,6 +1599,8 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
     void tabletEvent(QTabletEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;   ///< Track pointer entering viewport
+    void leaveEvent(QEvent* event) override;        ///< Track pointer leaving viewport
     bool event(QEvent* event) override;  ///< Forwards touch events to handler
     
 private:
@@ -2085,6 +2087,8 @@ private:
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
     bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
+    bool m_pointerInViewport = false;   ///< True when pointer is hovering inside viewport (for eraser cursor)
+    QTimer* m_tabletHoverTimer = nullptr; ///< Timer to detect when tablet stylus leaves (no events = left)
     
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn

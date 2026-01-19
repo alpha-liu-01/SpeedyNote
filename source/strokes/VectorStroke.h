@@ -80,17 +80,19 @@ struct VectorStroke {
         }
         
         // Single-point stroke (dot): check distance to the single point
+        // Use baseThickness/2 because that's the actual visual radius of the stroke
         if (points.size() == 1) {
             qreal dx = point.x() - points[0].pos.x();
             qreal dy = point.y() - points[0].pos.y();
             qreal distSq = dx * dx + dy * dy;
-            qreal threshold = tolerance + baseThickness;
+            qreal threshold = tolerance + baseThickness / 2.0;
             return distSq < threshold * threshold;
         }
         
         // Multi-point stroke: check each segment
+        // Hit when eraser edge (tolerance) touches stroke edge (baseThickness/2)
         for (int i = 1; i < points.size(); ++i) {
-            if (distanceToSegment(point, points[i-1].pos, points[i].pos) < tolerance + baseThickness) {
+            if (distanceToSegment(point, points[i-1].pos, points[i].pos) < tolerance + baseThickness / 2.0) {
                 return true;
             }
         }
