@@ -136,6 +136,11 @@ DocumentViewport::~DocumentViewport()
         m_gestureTimeoutTimer->stop();
     }
     
+    // Stop tablet hover timer (prevents lambda firing during destruction)
+    if (m_tabletHoverTimer) {
+        m_tabletHoverTimer->stop();
+    }
+    
     // Stop touch handler gestures (including inertia timer)
     // Must happen before m_gesture.reset() to avoid accessing stale gesture state
     if (m_touchHandler) {
@@ -2586,6 +2591,29 @@ void DocumentViewport::focusOutEvent(QFocusEvent* event)
     QWidget::focusOutEvent(event);
 }
 
+void DocumentViewport::hideEvent(QHideEvent* event)
+{
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] hideEvent - clearing gesture state"
+             << "wasActive:" << m_gesture.isActive();
+#endif
+    
+    // BUG-A005 v4 FIX: Clear gesture state when viewport is hidden
+    // When user goes to launcher and comes back, any stale gesture state
+    // would block new gestures (beginZoomGesture returns early if isActive())
+    if (m_gesture.isActive()) {
+        m_gesture.reset();
+        m_gestureTimeoutTimer->stop();
+    }
+    
+    // Also reset touch handler state
+    if (m_touchHandler) {
+        m_touchHandler->setMode(m_touchHandler->mode());  // Re-apply mode to clear state
+    }
+    
+    QWidget::hideEvent(event);
+}
+
 void DocumentViewport::enterEvent(QEnterEvent* event)
 {
     m_pointerInViewport = true;
@@ -2816,9 +2844,16 @@ void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
 void DocumentViewport::beginZoomGesture(QPointF centerPoint)
 {
     if (m_gesture.isActive()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[DocumentViewport] beginZoomGesture BLOCKED - already active!"
+                 << "activeType:" << m_gesture.activeType;
+#endif
         return;  // Already in gesture
     }
     
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] beginZoomGesture STARTED";
+#endif
     m_gesture.activeType = ViewportGestureState::Zoom;
     m_gesture.startZoom = m_zoomLevel;
     m_gesture.targetZoom = m_zoomLevel;
@@ -2845,6 +2880,16 @@ void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
         beginZoomGesture(centerPoint);
     }
     
+#ifdef SPEEDYNOTE_DEBUG
+    static int updateCount = 0;
+    updateCount++;
+    if (updateCount % 10 == 1) {  // Log every 10th update to avoid spam
+        qDebug() << "[DocumentViewport] updateZoomGesture"
+                 << "scale:" << scaleFactor
+                 << "targetZoom:" << m_gesture.targetZoom * scaleFactor;
+    }
+#endif
+    
     // Accumulate zoom (multiplicative for smooth feel)
     m_gesture.targetZoom *= scaleFactor;
     m_gesture.targetZoom = qBound(MIN_ZOOM, m_gesture.targetZoom, MAX_ZOOM);
@@ -2862,6 +2907,11 @@ void DocumentViewport::endZoomGesture()
     if (m_gesture.activeType != ViewportGestureState::Zoom) {
         return;  // Not in zoom gesture
     }
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] endZoomGesture"
+             << "finalZoom:" << m_gesture.targetZoom;
+#endif
     
     // Stop timeout timer
     m_gestureTimeoutTimer->stop();
@@ -3032,6 +3082,11 @@ bool DocumentViewport::event(QEvent* event)
     
     if (event->type() == QEvent::TabletLeaveProximity) {
         m_pointerInViewport = false;
+        
+        // Stop hover timer - no need to wait for timeout, we know stylus left
+        if (m_tabletHoverTimer) {
+            m_tabletHoverTimer->stop();
+        }
         
         // Trigger repaint to hide eraser cursor when pen leaves proximity
         if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
@@ -4022,15 +4077,18 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     QColor strokeColor;
     qreal strokeThickness;
     bool useFixedPressure = false;  // Marker uses fixed thickness (ignores pressure)
+    StrokeCapStyle capStyle = StrokeCapStyle::Round;  // Default round caps for pen
     
     if (m_currentTool == ToolType::Marker) {
         strokeColor = m_markerColor;        // Includes alpha for opacity
         strokeThickness = m_markerThickness;
         useFixedPressure = true;            // Fixed thickness, no pressure variation
+        capStyle = StrokeCapStyle::Flat;    // Flat caps for marker (no alpha compounding)
     } else {
         strokeColor = m_penColor;
         strokeThickness = m_penThickness;
         useFixedPressure = false;           // Pen uses pressure for thickness
+        capStyle = StrokeCapStyle::Round;   // Round caps for pen
     }
     
     // For edgeless mode, we don't require a page hit - we use document coordinates
@@ -4046,6 +4104,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         m_currentStroke.color = strokeColor;
         m_currentStroke.baseThickness = strokeThickness;
+        m_currentStroke.capStyle = capStyle;
         
         // Reset incremental rendering cache
         resetCurrentStrokeCache();
@@ -4076,6 +4135,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_currentStroke.color = strokeColor;
     m_currentStroke.baseThickness = strokeThickness;
+    m_currentStroke.capStyle = capStyle;
     
     // Reset incremental rendering cache (Task 2.3)
     resetCurrentStrokeCache();
@@ -4450,15 +4510,18 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
         return;
     }
     
-    // Determine color and thickness based on current tool
+    // Determine color, thickness, and cap style based on current tool
     QColor strokeColor;
     qreal strokeThickness;
+    StrokeCapStyle capStyle;
     if (m_currentTool == ToolType::Marker) {
         strokeColor = m_markerColor;
         strokeThickness = m_markerThickness;
+        capStyle = StrokeCapStyle::Flat;    // Flat caps for marker
     } else {
         strokeColor = m_penColor;
         strokeThickness = m_penThickness;
+        capStyle = StrokeCapStyle::Round;   // Round caps for pen
     }
     
     // Create stroke with just two points (start and end)
@@ -4466,6 +4529,7 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
     stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     stroke.color = strokeColor;
     stroke.baseThickness = strokeThickness;
+    stroke.capStyle = capStyle;
     
     // Both points have pressure 1.0 (no pressure variation for straight lines)
     StrokePoint startPt;
@@ -4585,6 +4649,7 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 localStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 localStroke.color = strokeColor;
                 localStroke.baseThickness = strokeThickness;
+                localStroke.capStyle = capStyle;  // Preserve cap style from tool
                 
                 QPointF tileOrigin(seg.coord.first * Document::EDGELESS_TILE_SIZE,
                                    seg.coord.second * Document::EDGELESS_TILE_SIZE);
@@ -7949,6 +8014,7 @@ void DocumentViewport::renderLassoSelection(QPainter& painter)
             transformedStroke.id = stroke.id;
             transformedStroke.color = stroke.color;
             transformedStroke.baseThickness = stroke.baseThickness;
+            transformedStroke.capStyle = stroke.capStyle;  // Preserve cap style
             
             for (const StrokePoint& pt : stroke.points) {
                 StrokePoint tPt;
@@ -9647,6 +9713,9 @@ VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect, const Q
     // Stroke width = rectangle height (text line height)
     stroke.baseThickness = rect.height();
     
+    // Use flat caps for highlights (like markers) to avoid alpha compounding
+    stroke.capStyle = StrokeCapStyle::Flat;
+    
     // Create a horizontal line through the center of the rectangle
     // This is how markers work: a thick line that covers the text area
     StrokePoint startPoint;
@@ -9915,8 +9984,9 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
             cachePainter.drawLine(p0.pos, p1.pos);
         }
         
-        // Draw start cap if this is the first render
-        if (m_lastRenderedPointIndex == 0 && n >= 1) {
+        // Draw start cap if this is the first render (only for Round cap style)
+        if (m_lastRenderedPointIndex == 0 && n >= 1 && 
+            m_currentStroke.capStyle == StrokeCapStyle::Round) {
             qreal startRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[0].pressure, 1.0) / 2.0;
             cachePainter.setPen(Qt::NoPen);
             cachePainter.setBrush(drawColor);
@@ -9937,7 +10007,8 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     }
     
     // Draw end cap at current position (always needs updating as it moves)
-    if (n >= 1) {
+    // Only for Round cap style - Flat caps (markers) don't need end caps
+    if (n >= 1 && m_currentStroke.capStyle == StrokeCapStyle::Round) {
         // Apply transform to draw end cap at correct position
         painter.save();
         painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);

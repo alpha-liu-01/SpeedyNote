@@ -261,7 +261,7 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 ---
 
 ### BUG-A005: Pinch-to-Zoom Unreliable
-**Status:** ✅ Fixed (v3)  
+**Status:** ✅ Fixed (v5)  
 **Priority:** Medium  
 **Category:** Touch Input / Gestures
 **Platform:** Android only
@@ -283,7 +283,7 @@ The original fix improved reliability from ~30% to ~70%, but three additional is
 
 3. **Inconsistent state flags**: When 2-finger `TouchBegin` happened, `m_panActive` wasn't explicitly cleared, potentially leaving conflicting state.
 
-**Root Cause (v3 - Fully Fixed):**  
+**Root Cause (v3 - Improved Further):**  
 The v2 fix improved reliability to ~60%, but open beta testing revealed ~40% failure rate persisted. The issue: **Android may not include all active touch points in every event**.
 
 When two fingers touch nearly simultaneously on Android:
@@ -291,62 +291,76 @@ When two fingers touch nearly simultaneously on Android:
 2. Second finger arrives, but `TouchUpdate` may only contain the newly pressed point (second finger) and not the stationary first finger
 3. Per-event counting sees only 1 active point, missing the second finger entirely
 
-The v2 code counted `activePoints.size()` which only reflects points **in the current event**, not all fingers currently on screen.
+**Root Cause (v4 - Fixed stale state issues):**  
+Spurious `TouchCancel` events were generated when input focus changed (e.g., stylus hovering to toolbar), and when returning from launcher. These caused corrupted tracking state. Fixed with:
+- Defensive reset of `m_trackedTouchIds` on `TouchBegin`
+- `DocumentViewport::hideEvent()` to clear gesture state when viewport is hidden
 
-**Fix Applied (v3):**
-Track touch point IDs across events instead of counting per-event:
+**Root Cause (v5 - Fixed post-sleep/wake behavior):**  
+After device sleep/wake, Android sends `TouchUpdate` events with **only one point** (the finger that moved), even when two fingers are down. The v3/v4 fixes tracked the correct finger count, but pinch **updates** still required `activePoints.size() >= 2` to calculate the zoom. Since only one point was in the event, updates were skipped entirely:
+
+```
+// Log when broken (after sleep/wake):
+beginZoomGesture STARTED
+endZoomGesture           // NO updates in between!
+
+// Log when working:
+beginZoomGesture STARTED
+Pinch update #N          // Updates happen
+updateZoomGesture scale: X.XX
+endZoomGesture
+```
+
+**Fix Applied (v5):**
+Cache last-known positions for each touch point ID. When an update event only contains 1 point, use the cached position for the other finger:
 
 ```cpp
 // Member variable
-QSet<int> m_trackedTouchIds;
+QHash<int, QPointF> m_lastTouchPositions;
 
-// In handleTouchEvent:
-// Track IDs across events (fixes Android event splitting)
+// In handleTouchEvent - track positions:
 for (const auto& pt : points) {
     if (pt.state() == QEventPoint::Pressed) {
         m_trackedTouchIds.insert(pt.id());
+        m_lastTouchPositions.insert(pt.id(), pt.position());
     } else if (pt.state() == QEventPoint::Released) {
         m_trackedTouchIds.remove(pt.id());
+        m_lastTouchPositions.remove(pt.id());
+    } else {
+        // Updated or Stationary - cache latest position
+        m_lastTouchPositions.insert(pt.id(), pt.position());
     }
 }
 
-// True finger count from tracked IDs
-m_activeTouchPoints = m_trackedTouchIds.size();
-
-// Also build activePoints for position data (still needed)
-// But add guards: only access position data when available
-if (m_activeTouchPoints == 2 && !m_pinchActive && activePoints.size() >= 2) {
-    // Safe to access both fingers' positions
+// In pinch update - use cached positions when event is incomplete:
+if (m_activeTouchPoints == 2 && m_pinchActive) {
+    QPointF pos1, pos2;
+    // Get from event...
+    // If only 1 position in event, get other from m_lastTouchPositions
 }
 ```
 
-Key improvements (v3):
-- **ID-based tracking**: `QSet<int> m_trackedTouchIds` tracks which fingers are currently down
-- **Cross-event counting**: True finger count persists across events even when Android only sends partial data
-- **Safety guards**: Added `activePoints.size() >= 2` checks before accessing 2 fingers' position data
-- **Clean state reset**: Clear tracked IDs on `TouchEnd`, `TouchCancel`, and mode changes
-
-**Why v3 Works:**
-1. **Cross-event awareness**: By tracking IDs, we know 2 fingers are down even if current event only shows 1
-2. **Deferred transition**: When we detect 2 fingers but don't have both positions, we wait until next event with full data
-3. **No false positives**: IDs are only added on `Pressed` state, removed on `Released`, cleared on sequence end
+Key improvements (v5):
+- **Position caching**: `QHash<int, QPointF> m_lastTouchPositions` stores last known position for each finger
+- **Fallback lookup**: When event has only 1 point, retrieve other position from cache
+- **No waiting required**: Pinch updates proceed immediately using cached data instead of being skipped
 
 **Files Modified:**
 - `source/core/TouchGestureHandler.h`
-  - Added `#include <QSet>`
-  - Added `QSet<int> m_trackedTouchIds` member
+  - Added `#include <QHash>`
+  - Added `QHash<int, QPointF> m_lastTouchPositions` member
 
 - `source/core/TouchGestureHandler.cpp`
-  - Added ID tracking logic at start of `handleTouchEvent()`
-  - Added `activePoints.size() >= N` guards to all position-data access
-  - Clear `m_trackedTouchIds` in `setMode()` and on `TouchEnd`/`TouchCancel`
+  - Updated ID tracking to also cache positions
+  - Rewrote pinch update block to use cached positions as fallback
+  - Clear `m_lastTouchPositions` alongside `m_trackedTouchIds` in all reset paths
 
 **Desktop Impact:** None - desktop platforms deliver complete touch data. The fix improves robustness without changing behavior.
 
 **Result:**
-- Pinch-to-zoom now triggers reliably (ID tracking catches all 2-finger scenarios)
-- Smooth transitions between pan and pinch when fingers are added/removed
-- No crashes from accessing missing position data
+- Pinch-to-zoom updates reliably even after sleep/wake
+- No more "begin → end with no updates" scenarios
+- Smooth zooming by using last-known positions when Android sends partial data
 
 ---
 

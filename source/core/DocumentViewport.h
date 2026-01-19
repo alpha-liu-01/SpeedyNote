@@ -1598,6 +1598,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void hideEvent(QHideEvent* event) override;     ///< Clear gesture state when hidden
     void tabletEvent(QTabletEvent* event) override;
     void enterEvent(QEnterEvent* event) override;   ///< Track pointer entering viewport
     void leaveEvent(QEvent* event) override;        ///< Track pointer leaving viewport

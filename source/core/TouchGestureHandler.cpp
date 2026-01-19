@@ -43,6 +43,7 @@ void TouchGestureHandler::setMode(TouchGestureMode mode)
     
     // Clear all tracking state for clean start in new mode
     m_trackedTouchIds.clear();
+    m_lastTouchPositions.clear();
     m_activeTouchPoints = 0;
     
     m_mode = mode;
@@ -65,11 +66,28 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     //
     // BUG-A005 v3: This fixes ~40% failure rate where 2-finger pinch was detected
     // as 1-finger pan because Android only reported one finger per event.
+    //
+    // BUG-A005 v4: On Android, spurious TouchCancel events can be generated when
+    // input focus changes (e.g., stylus hovers to toolbar). These cancels can
+    // corrupt the ID tracking state. On TouchBegin, we reset tracking to ensure
+    // a clean start for the new gesture sequence.
+    if (event->type() == QEvent::TouchBegin) {
+        // Reset any stale tracking state from previous (possibly cancelled) sequence
+        // This ensures the new gesture starts with accurate finger count
+        m_trackedTouchIds.clear();
+        m_lastTouchPositions.clear();
+    }
+    
     for (const auto& pt : points) {
         if (pt.state() == QEventPoint::Pressed) {
             m_trackedTouchIds.insert(pt.id());
+            m_lastTouchPositions.insert(pt.id(), pt.position());
         } else if (pt.state() == QEventPoint::Released) {
             m_trackedTouchIds.remove(pt.id());
+            m_lastTouchPositions.remove(pt.id());
+        } else {
+            // Updated or Stationary - cache latest position
+            m_lastTouchPositions.insert(pt.id(), pt.position());
         }
     }
     
@@ -95,6 +113,12 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     // ===== TouchBegin =====
     if (event->type() == QEvent::TouchBegin) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[TouchGestureHandler] TouchBegin"
+                 << "activePoints:" << activePoints.size()
+                 << "trackedIds:" << m_trackedTouchIds.size()
+                 << "activeTouchPoints:" << m_activeTouchPoints;
+#endif
         if (activePoints.size() == 1) {
             // TG.2.1: Single finger touch - start pan
             const auto& point = *activePoints.first();
@@ -230,6 +254,14 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         
         // TG.2.2: Single-finger pan update
         // Guard: need at least 1 point's data
+#ifdef SPEEDYNOTE_DEBUG
+        // Log mismatch between tracked IDs and active points (helps diagnose Android issues)
+        if (m_activeTouchPoints == 2 && !m_pinchActive && activePoints.size() < 2) {
+            qDebug() << "[TouchGestureHandler] MISMATCH: trackedIds=" << m_activeTouchPoints
+                     << "but activePoints=" << activePoints.size()
+                     << "(waiting for full event data)";
+        }
+#endif
         if (m_panActive && m_activeTouchPoints == 1 && !activePoints.isEmpty()) {
             const auto& point = *activePoints.first();
             QPointF currentPos = point.position();
@@ -272,6 +304,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         // Note: m_activeTouchPoints uses ID tracking, but we need position data for both fingers
         // Guard against case where event only has 1 point's data (wait for full event)
         if (m_activeTouchPoints == 2 && !m_pinchActive && activePoints.size() >= 2) {
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "[TouchGestureHandler] Starting pinch (1→2 transition)"
+                     << "trackedIds:" << m_trackedTouchIds.size()
+                     << "viewportGestureActive:" << m_viewport->isGestureActive();
+#endif
             // Y-axis only mode: disable pinch-to-zoom
             if (m_mode == TouchGestureMode::YAxisOnly) {
                 event->accept();
@@ -315,35 +352,81 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // TG.4: Pinch-to-zoom update (already in pinch mode)
-        // Guard: need position data for both fingers
-        if (m_activeTouchPoints == 2 && m_pinchActive && activePoints.size() >= 2) {
-            const auto& p1 = *activePoints[0];
-            const auto& p2 = *activePoints[1];
+        // BUG-A005 v5: After sleep/wake, Android may only send 1 point per TouchUpdate
+        // even when 2 fingers are down. Use cached positions to get both finger locations.
+        if (m_activeTouchPoints == 2 && m_pinchActive) {
+            // Get positions for both fingers - use event data if available, else cached positions
+            QPointF pos1, pos2;
+            bool havePos1 = false, havePos2 = false;
+            int pos1Id = -1;  // Track which ID we used for pos1
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
-            qreal distance = QLineF(pos1, pos2).length();
-            
-            // Avoid division by zero
-            if (distance < 1.0) {
-                distance = 1.0;
+            // Get positions from current event (prefer fresh data)
+            for (const auto* pt : activePoints) {
+                if (!havePos1) {
+                    pos1 = pt->position();
+                    pos1Id = pt->id();
+                    havePos1 = true;
+                } else if (!havePos2) {
+                    pos2 = pt->position();
+                    havePos2 = true;
+                    break;
+                }
             }
             
-            // Update pinch - use frame-to-frame ratio for smooth incremental zoom
-            // Each frame: scaleFactor = currentDistance / previousDistance
-            // This compounds correctly: total scale = product of all frame ratios
-            qreal incrementalScale = distance / m_pinchStartDistance;
+            // If we only got 1 position from event, get the other finger's position from cache
+            if (havePos1 && !havePos2 && m_lastTouchPositions.size() >= 2) {
+                // Find the cached position for the OTHER finger (not pos1Id)
+                for (auto it = m_lastTouchPositions.constBegin(); it != m_lastTouchPositions.constEnd(); ++it) {
+                    if (it.key() != pos1Id) {
+                        pos2 = it.value();
+                        havePos2 = true;
+                        break;
+                    }
+                }
+            }
             
-            // FIX: Use ORIGINAL centroid (m_pinchCentroid) instead of current centroid
-            // When zoom center changes frame-to-frame, it creates an implicit pan effect
-            // that's mathematically derived from the zoom transform, NOT from finger direction.
-            // This causes counterintuitive "opposite direction" panning.
-            // Using fixed center = predictable zoom behavior, no unexpected panning.
-            m_viewport->updateZoomGesture(incrementalScale, m_pinchCentroid);
-            
-            // Update distance tracking for next frame's scale calculation
-            m_pinchStartDistance = distance;
-            // Note: NOT updating m_pinchCentroid - zoom stays centered on initial touch
+            // Only process if we have both positions
+            if (havePos1 && havePos2) {
+#ifdef SPEEDYNOTE_DEBUG
+                static int pinchUpdateCount = 0;
+                pinchUpdateCount++;
+                if (pinchUpdateCount % 20 == 1) {  // Log every 20th to avoid spam
+                    qDebug() << "[TouchGestureHandler] Pinch update #" << pinchUpdateCount
+                             << "activePoints:" << activePoints.size()
+                             << "cachedPositions:" << m_lastTouchPositions.size();
+                }
+#endif
+                qreal distance = QLineF(pos1, pos2).length();
+                
+                // Avoid division by zero
+                if (distance < 1.0) {
+                    distance = 1.0;
+                }
+                
+                // Update pinch - use frame-to-frame ratio for smooth incremental zoom
+                // Each frame: scaleFactor = currentDistance / previousDistance
+                // This compounds correctly: total scale = product of all frame ratios
+                qreal incrementalScale = distance / m_pinchStartDistance;
+                
+                // FIX: Use ORIGINAL centroid (m_pinchCentroid) instead of current centroid
+                // When zoom center changes frame-to-frame, it creates an implicit pan effect
+                // that's mathematically derived from the zoom transform, NOT from finger direction.
+                // This causes counterintuitive "opposite direction" panning.
+                // Using fixed center = predictable zoom behavior, no unexpected panning.
+                m_viewport->updateZoomGesture(incrementalScale, m_pinchCentroid);
+                
+                // Update distance tracking for next frame's scale calculation
+                m_pinchStartDistance = distance;
+                // Note: NOT updating m_pinchCentroid - zoom stays centered on initial touch
+            }
+#ifdef SPEEDYNOTE_DEBUG
+            else {
+                qDebug() << "[TouchGestureHandler] Pinch update SKIPPED - missing position data"
+                         << "havePos1:" << havePos1 << "havePos2:" << havePos2
+                         << "activePoints:" << activePoints.size()
+                         << "cachedPositions:" << m_lastTouchPositions.size();
+            }
+#endif
             
             event->accept();
             return true;
@@ -352,6 +435,15 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     // ===== TouchEnd / TouchCancel =====
     if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
+#ifdef SPEEDYNOTE_DEBUG
+        if (event->type() == QEvent::TouchCancel) {
+            qDebug() << "[TouchGestureHandler] TouchCancel received!"
+                     << "panActive:" << m_panActive
+                     << "pinchActive:" << m_pinchActive
+                     << "trackedIds:" << m_trackedTouchIds.size();
+        }
+#endif
+        
         // TG.2.3: End pan gesture
         if (m_panActive) {
             // Start inertia only on normal end (not cancel)
@@ -377,9 +469,13 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         }
         
         // Reset all tracking for next touch sequence
+        // Note: Even if this is a spurious TouchCancel, the next TouchBegin will
+        // reset tracking anyway (BUG-A005 v4 fix), so clearing here is safe.
         m_threeFingerTimerActive = false;
         m_activeTouchPoints = 0;
-        m_trackedTouchIds.clear();  // Clear ID tracking for next sequence
+        m_trackedTouchIds.clear();
+        m_lastTouchPositions.clear();
+        
         event->accept();
         return true;
     }

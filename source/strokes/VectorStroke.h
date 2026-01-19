@@ -19,6 +19,17 @@
 #include <QUuid>
 
 /**
+ * @brief Cap style for stroke endpoints.
+ * 
+ * Round: Ellipse caps at start/end (default for pen strokes)
+ * Flat: No caps, polygon ends are flat/rectangular (for marker strokes)
+ */
+enum class StrokeCapStyle {
+    Round,  ///< Round caps (ellipses at endpoints) - default
+    Flat    ///< Flat caps (no additional drawing at endpoints)
+};
+
+/**
  * @brief A complete vector stroke consisting of multiple points.
  * 
  * Represents a single pen stroke from pen-down to pen-up.
@@ -31,6 +42,7 @@ struct VectorStroke {
     QColor color;                   ///< Stroke color
     qreal baseThickness;            ///< Base thickness before pressure scaling
     QRectF boundingBox;             ///< Cached bounding box for fast culling/hit testing
+    StrokeCapStyle capStyle = StrokeCapStyle::Round;  ///< Cap style for endpoints
     
     /**
      * @brief Default constructor.
@@ -101,13 +113,17 @@ struct VectorStroke {
     
     /**
      * @brief Serialize to JSON.
-     * @return JSON object containing id, color, thickness, and points array.
+     * @return JSON object containing id, color, thickness, capStyle, and points array.
      */
     QJsonObject toJson() const {
         QJsonObject obj;
         obj["id"] = id;
         obj["color"] = color.name(QColor::HexArgb);
         obj["thickness"] = baseThickness;
+        // Only save capStyle if not default (Round) to minimize file size
+        if (capStyle != StrokeCapStyle::Round) {
+            obj["capStyle"] = static_cast<int>(capStyle);
+        }
         QJsonArray pointsArray;
         for (const auto& pt : points) {
             pointsArray.append(pt.toJson());
@@ -126,6 +142,11 @@ struct VectorStroke {
         stroke.id = obj["id"].toString();
         stroke.color = QColor(obj["color"].toString());
         stroke.baseThickness = obj["thickness"].toDouble(5.0);
+        
+        // Load capStyle (default to Round for backwards compatibility)
+        if (obj.contains("capStyle")) {
+            stroke.capStyle = static_cast<StrokeCapStyle>(obj["capStyle"].toInt(0));
+        }
         
         // Generate UUID if missing (for backwards compatibility)
         if (stroke.id.isEmpty()) {

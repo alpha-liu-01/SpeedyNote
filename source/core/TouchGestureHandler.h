@@ -17,6 +17,7 @@
 #include <QPointF>
 #include <QVector>
 #include <QSet>
+#include <QHash>
 #include <QElapsedTimer>
 #include <QTimer>
 
@@ -118,6 +119,7 @@ private:
     // ===== Multi-touch Tracking =====
     int m_activeTouchPoints = 0;             ///< Number of active touch points (derived from tracked IDs)
     QSet<int> m_trackedTouchIds;             ///< Track touch point IDs across events (fixes Android event splitting)
+    QHash<int, QPointF> m_lastTouchPositions; ///< Last known position for each touch ID (fixes Android partial updates)
     
     // ===== 3-Finger Tap Detection =====
     QElapsedTimer m_threeFingerTimer;        ///< Timer for 3-finger tap detection

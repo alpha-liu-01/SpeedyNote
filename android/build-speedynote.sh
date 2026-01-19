@@ -41,6 +41,7 @@ set -e
 BUILD_APK=false
 BUILD_AAB=false
 USE_RELEASE_SIGNING=false
+ENABLE_DEBUG_LOGGING=false
 
 # Default: APK only (backward compatible)
 if [ $# -eq 0 ]; then
@@ -66,8 +67,12 @@ while [ $# -gt 0 ]; do
             USE_RELEASE_SIGNING=true
             shift
             ;;
+        --debug)
+            ENABLE_DEBUG_LOGGING=true
+            shift
+            ;;
         --help|-h)
-            echo "Usage: $0 [--apk|--aab|--both] [--release]"
+            echo "Usage: $0 [--apk|--aab|--both] [--release] [--debug]"
             echo ""
             echo "Output options:"
             echo "  --apk       Build APK only (default)"
@@ -77,6 +82,10 @@ while [ $# -gt 0 ]; do
             echo "Signing options:"
             echo "  --release   Use release keystore instead of debug"
             echo ""
+            echo "Debug options:"
+            echo "  --debug     Enable debug logging (SPEEDYNOTE_DEBUG)"
+            echo "              View logs with: adb logcat -s Qt:D 2>&1 | grep -i speedynote"
+            echo ""
             echo "Release signing environment variables:"
             echo "  RELEASE_KEYSTORE    Path to release keystore file (required)"
             echo "  RELEASE_KEY_ALIAS   Key alias in the keystore (required)"
@@ -84,8 +93,8 @@ while [ $# -gt 0 ]; do
             echo "  RELEASE_KEY_PASS    Key password (optional, defaults to RELEASE_STORE_PASS)"
             echo ""
             echo "Examples:"
-            echo "  # Debug build (for testing)"
-            echo "  $0 --apk"
+            echo "  # Debug build with logging (for development)"
+            echo "  $0 --apk --debug"
             echo ""
             echo "  # Release build for Play Store"
             echo "  export RELEASE_KEYSTORE=/path/to/release.keystore"
@@ -140,6 +149,14 @@ cd "${BUILD_DIR}"
 rm -rf CMakeCache.txt CMakeFiles
 
 echo "=== Configuring with CMake ==="
+
+# Build CMake args
+CMAKE_EXTRA_ARGS=""
+if [ "$ENABLE_DEBUG_LOGGING" = true ]; then
+    echo "  Debug logging: ENABLED"
+    CMAKE_EXTRA_ARGS="-DENABLE_DEBUG_OUTPUT=ON"
+fi
+
 # Note: NDK r27 supports API 35 natively
 cmake \
     -DCMAKE_TOOLCHAIN_FILE="${QT_ANDROID}/lib/cmake/Qt6/qt.toolchain.cmake" \
@@ -155,6 +172,7 @@ cmake \
     -DMUPDF_INCLUDE_DIR:PATH="${MUPDF_INCLUDE_DIR}" \
     -DMUPDF_LIBRARIES:STRING="${MUPDF_LIB_DIR}/libmupdf.a;${MUPDF_LIB_DIR}/libmupdf-third.a" \
     -DENABLE_CONTROLLER_SUPPORT=OFF \
+    ${CMAKE_EXTRA_ARGS} \
     -G Ninja \
     "${WORKSPACE_DIR}"
 

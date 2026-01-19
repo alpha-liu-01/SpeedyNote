@@ -264,11 +264,14 @@ public:
         painter.setBrush(stroke.color);
         painter.drawPolygon(polygon, Qt::WindingFill);
         
-        // Draw round end caps for a smooth look
-        qreal startRadius = halfWidths[0];
-        qreal endRadius = halfWidths[n - 1];
-        painter.drawEllipse(stroke.points[0].pos, startRadius, startRadius);
-        painter.drawEllipse(stroke.points[n - 1].pos, endRadius, endRadius);
+        // Draw round end caps for a smooth look (only for Round cap style)
+        // Flat cap style (used by markers) relies on the polygon's natural flat ends
+        if (stroke.capStyle == StrokeCapStyle::Round) {
+            qreal startRadius = halfWidths[0];
+            qreal endRadius = halfWidths[n - 1];
+            painter.drawEllipse(stroke.points[0].pos, startRadius, startRadius);
+            painter.drawEllipse(stroke.points[n - 1].pos, endRadius, endRadius);
+        }
     }
     
     // ===== Serialization =====
