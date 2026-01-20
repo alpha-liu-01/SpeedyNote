@@ -738,47 +738,47 @@ Error output:
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="1848"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1894"/>
         <source>No document loaded</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5754"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6050"/>
         <source>Insert Image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5756"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6052"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6417"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6713"/>
         <source>Add Position Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6418"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6714"/>
         <source>Add URL Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6419"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6715"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6429"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6725"/>
         <source>Add URL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6429"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6725"/>
         <source>Enter URL:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6580"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6876"/>
         <source>Untitled Note</source>
         <translation type="unfinished"></translation>
     </message>
