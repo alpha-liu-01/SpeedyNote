@@ -2619,9 +2619,9 @@ void DocumentViewport::hideEvent(QHideEvent* event)
         m_gestureTimeoutTimer->stop();
     }
     
-    // Also reset touch handler state
+    // Also reset touch handler state (Option 2: Clean Break)
     if (m_touchHandler) {
-        m_touchHandler->setMode(m_touchHandler->mode());  // Re-apply mode to clear state
+        m_touchHandler->resetAllState();
     }
     
     QWidget::hideEvent(event);
