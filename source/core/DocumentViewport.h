@@ -1605,6 +1605,17 @@ protected:
     void leaveEvent(QEvent* event) override;        ///< Track pointer leaving viewport
     bool event(QEvent* event) override;  ///< Forwards touch events to handler
     
+#ifdef Q_OS_ANDROID
+private slots:
+    /**
+     * @brief Handle application state changes (Android only).
+     * 
+     * Resets touch gesture state when app resumes from background.
+     * This fixes unreliable gestures after screen lock/unlock or app switch.
+     */
+    void onApplicationStateChanged(Qt::ApplicationState state);
+#endif
+    
 private:
     // ===== Document Reference =====
     Document* m_document = nullptr;
@@ -1629,7 +1640,7 @@ private:
     // This prevents crashes from stale touch state after sleep/wake
     QElapsedTimer m_touchCooldownTimer;
     bool m_touchCooldownActive = false;
-    static constexpr qint64 TOUCH_COOLDOWN_MS = 150;
+    static constexpr qint64 TOUCH_COOLDOWN_MS = 300;
     
     // =========================================================================
     // CUSTOMIZABLE VALUES

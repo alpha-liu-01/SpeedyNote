@@ -6,6 +6,72 @@
 #include <QDebug>
 #include <cmath>  // For std::sqrt, std::abs
 
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QJniEnvironment>
+
+// ===== Native Android Touch Query Functions (JNI) =====
+// These functions query the Java side for ground-truth touch state.
+// Qt's touch event layer can become corrupted after sleep/wake on Android,
+// so we use native Android touch tracking as verification.
+
+namespace {
+
+/**
+ * Query native Android touch count.
+ * @return Number of fingers currently touching, or -1 if JNI call fails.
+ */
+int getNativeTouchCount()
+{
+    jint result = QJniObject::callStaticMethod<jint>(
+        "org/speedynote/app/SpeedyNoteActivity",
+        "getNativeTouchCount", "()I");
+    return static_cast<int>(result);
+}
+
+/**
+ * Query time since last native touch event.
+ * @return Milliseconds since last touch, or -1 if JNI call fails.
+ */
+qint64 getTimeSinceLastNativeTouch()
+{
+    jlong result = QJniObject::callStaticMethod<jlong>(
+        "org/speedynote/app/SpeedyNoteActivity",
+        "getTimeSinceLastTouch", "()J");
+    return static_cast<qint64>(result);
+}
+
+/**
+ * Query native touch positions for first 2 touch points.
+ * @param pos1 Output: position of first touch point
+ * @param pos2 Output: position of second touch point
+ * @return true if positions retrieved successfully, false on JNI error
+ */
+bool getNativeTouchPositions(QPointF& pos1, QPointF& pos2)
+{
+    QJniEnvironment env;
+    jclass activityClass = env->FindClass("org/speedynote/app/SpeedyNoteActivity");
+    if (!activityClass) return false;
+    
+    jmethodID method = env->GetStaticMethodID(activityClass, "getNativeTouchPositions", "()[F");
+    if (!method) return false;
+    
+    jfloatArray result = (jfloatArray)env->CallStaticObjectMethod(activityClass, method);
+    if (!result) return false;
+    
+    jfloat* positions = env->GetFloatArrayElements(result, nullptr);
+    if (!positions) return false;
+    
+    pos1 = QPointF(positions[0], positions[1]);
+    pos2 = QPointF(positions[2], positions[3]);
+    
+    env->ReleaseFloatArrayElements(result, positions, 0);
+    return true;
+}
+
+}  // anonymous namespace
+#endif  // Q_OS_ANDROID
+
 // ===== Constructor =====
 
 TouchGestureHandler::TouchGestureHandler(DocumentViewport* viewport, QObject* parent)
@@ -131,11 +197,40 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     // corrupt the ID tracking state. On TouchBegin, we reset tracking to ensure
     // a clean start for the new gesture sequence.
     if (event->type() == QEvent::TouchBegin) {
-        // Reset any stale tracking state from previous (possibly cancelled) sequence
-        // This ensures the new gesture starts with accurate finger count
+        // NUCLEAR RESET - forget everything from before
+        // This prevents stale state from previous (possibly corrupted) sequence
         m_trackedTouchIds.clear();
         m_lastTouchPositions.clear();
         m_touchIdLastSeenTime.clear();
+        m_activeTouchPoints = 0;
+        
+        // Clear any lingering gesture state without calling viewport methods
+        // (viewport may be in an inconsistent state after app resume)
+        if (m_panActive) {
+            m_panActive = false;
+            // Don't call endTouchPan - just abandon the gesture silently
+        }
+        if (m_pinchActive) {
+            m_pinchActive = false;
+            // Don't call endTouchPinch - just abandon silently
+        }
+        
+        // Stop inertia if running (prevents callbacks during reset)
+        if (m_inertiaTimer && m_inertiaTimer->isActive()) {
+            m_inertiaTimer->stop();
+            m_velocitySamples.clear();
+        }
+        
+#ifdef Q_OS_ANDROID
+        // Debug: Log native touch count at gesture start for diagnostics
+        int nativeCount = getNativeTouchCount();
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[TouchGestureHandler] TouchBegin NUCLEAR RESET"
+                 << "nativeCount:" << nativeCount;
+#else
+        Q_UNUSED(nativeCount);
+#endif
+#endif
     }
     
     // BUG-A005 v6/v7: Track when each ID was last seen
@@ -210,6 +305,50 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             activePoints.append(&pt);
         }
     }
+    
+#ifdef Q_OS_ANDROID
+    // ===== Verify Qt touch count with native Android =====
+    // After sleep/wake, Qt's touch tracking can become corrupted.
+    // If native Android says we have 2 fingers but Qt only reports 1,
+    // use native positions to ensure the pinch gesture works.
+    int nativeCount = getNativeTouchCount();
+    qint64 timeSinceNative = getTimeSinceLastNativeTouch();
+    
+    // Only trust native if data is fresh (< 100ms old)
+    if (nativeCount > 0 && timeSinceNative >= 0 && timeSinceNative < 100) {
+        int qtActivePoints = activePoints.size();
+        
+        // If native says 2+ fingers but Qt only has 0-1, Qt lost a touch point
+        if (nativeCount >= 2 && qtActivePoints < 2) {
+            // Get native positions (in screen/activity coordinates, physical pixels)
+            QPointF nativePos1, nativePos2;
+            if (getNativeTouchPositions(nativePos1, nativePos2)) {
+                // Convert from screen coordinates to widget-local coordinates
+                // Native positions are in PHYSICAL pixels relative to the screen
+                // mapToGlobal returns LOGICAL pixels
+                // We need widget-local LOGICAL pixels
+                QPointF widgetGlobalPos = m_viewport->mapToGlobal(QPointF(0, 0));
+                qreal dpr = m_viewport->devicePixelRatio();
+                
+                // Convert: divide by DPR first (physical→logical), then subtract widget offset
+                // Order matters! mapToGlobal returns logical coords, so we must convert
+                // native to logical before subtracting.
+                QPointF localPos1 = nativePos1 / dpr - widgetGlobalPos;
+                QPointF localPos2 = nativePos2 / dpr - widgetGlobalPos;
+                
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[TouchGestureHandler] MISMATCH: native=" << nativeCount
+                         << "qt=" << qtActivePoints
+                         << "nativePos1:" << nativePos1 << "nativePos2:" << nativePos2
+                         << "localPos1:" << localPos1 << "localPos2:" << localPos2
+                         << "widgetGlobal:" << widgetGlobalPos << "dpr:" << dpr;
+#endif
+                // Force 2-finger gesture with converted positions
+                return handleTwoFingerGestureNative(event, localPos1, localPos2);
+            }
+        }
+    }
+#endif
     
     // ===== Interrupt inertia on any new touch =====
     if (event->type() == QEvent::TouchBegin && m_inertiaTimer->isActive()) {
@@ -573,6 +712,25 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     // ===== TouchEnd / TouchCancel =====
     if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
+#ifdef Q_OS_ANDROID
+        // Verify with native Android before ending gesture
+        // Qt may send spurious TouchEnd when native still has fingers down
+        if (event->type() == QEvent::TouchEnd) {
+            int nativeCount = getNativeTouchCount();
+            qint64 timeSinceNative = getTimeSinceLastNativeTouch();
+            
+            // Only trust native if data is fresh
+            if (nativeCount >= 2 && timeSinceNative >= 0 && timeSinceNative < 100) {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[TouchGestureHandler] TouchEnd but native has" << nativeCount
+                         << "touches - ignoring spurious end event";
+#endif
+                event->accept();
+                return true;  // Ignore spurious TouchEnd, keep gesture active
+            }
+        }
+#endif
+        
 #ifdef SPEEDYNOTE_DEBUG
         if (event->type() == QEvent::TouchCancel) {
             qDebug() << "[TouchGestureHandler] TouchCancel received!"
@@ -708,3 +866,72 @@ void TouchGestureHandler::onInertiaFrame()
     QPointF panDelta = m_inertiaVelocity * INERTIA_INTERVAL_MS;
     m_viewport->updatePanGesture(panDelta);
 }
+
+#ifdef Q_OS_ANDROID
+// ===== Native Android Two-Finger Gesture Handler =====
+
+bool TouchGestureHandler::handleTwoFingerGestureNative(QTouchEvent* event,
+                                                        QPointF pos1, QPointF pos2)
+{
+    QPointF centroid = (pos1 + pos2) / 2.0;
+    qreal distance = QLineF(pos1, pos2).length();
+    if (distance < 1.0) distance = 1.0;
+    
+    if (!m_pinchActive) {
+        // Transition from pan to pinch (or start fresh pinch)
+        if (m_panActive) {
+            endTouchPan(false);  // No inertia when transitioning
+        }
+        
+        // Stop inertia if running
+        if (m_inertiaTimer && m_inertiaTimer->isActive()) {
+            m_inertiaTimer->stop();
+            m_viewport->endPanGesture();
+            m_velocitySamples.clear();
+        }
+        
+        m_pinchActive = true;
+        m_pinchStartDistance = distance;
+        m_initialDistance = distance;
+        m_zoomActivated = false;
+        m_smoothedScale = 1.0;
+        m_viewport->beginZoomGesture(centroid);
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[TouchGestureHandler] Started NATIVE 2-finger gesture"
+                 << "distance:" << distance << "centroid:" << centroid;
+#endif
+    } else {
+        // Update existing pinch - apply zoom smoothing
+        qreal rawScale = distance / m_pinchStartDistance;
+        
+        // Activate zoom if threshold exceeded
+        if (!m_zoomActivated && m_initialDistance > 0) {
+            qreal distanceChange = std::abs(distance - m_initialDistance) / m_initialDistance;
+            if (distanceChange > ZOOM_ACTIVATION_THRESHOLD) {
+                m_zoomActivated = true;
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[TouchGestureHandler] NATIVE zoom activated! change:" << distanceChange;
+#endif
+            }
+        }
+        
+        // Apply scale dead zone and smoothing
+        qreal targetScale = 1.0;
+        if (m_zoomActivated) {
+            if (std::abs(rawScale - 1.0) > ZOOM_SCALE_DEAD_ZONE) {
+                targetScale = rawScale;
+            }
+        }
+        
+        m_smoothedScale = m_smoothedScale * (1.0 - ZOOM_SMOOTHING_FACTOR) 
+                        + targetScale * ZOOM_SMOOTHING_FACTOR;
+        
+        m_viewport->updateZoomGesture(m_smoothedScale, centroid);
+        m_pinchStartDistance = distance;
+    }
+    
+    event->accept();
+    return true;
+}
+#endif  // Q_OS_ANDROID

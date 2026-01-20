@@ -167,4 +167,19 @@ private:
      * @brief Handle a 3-finger tap gesture.
      */
     void on3FingerTap();
+    
+#ifdef Q_OS_ANDROID
+    /**
+     * @brief Handle 2-finger gesture using native Android positions.
+     * 
+     * Called when Qt's touch tracking seems corrupted but native Android
+     * reports 2 fingers. Uses JNI-provided positions to ensure pinch works.
+     * 
+     * @param event The touch event (for accepting)
+     * @param pos1 Native position of first finger
+     * @param pos2 Native position of second finger
+     * @return true (always handles the event)
+     */
+    bool handleTwoFingerGestureNative(QTouchEvent* event, QPointF pos1, QPointF pos2);
+#endif
 };

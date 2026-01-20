@@ -99,6 +99,13 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Touch gesture handler (encapsulates pan/zoom/tap logic)
     m_touchHandler = new TouchGestureHandler(this, this);
     
+#ifdef Q_OS_ANDROID
+    // Handle app suspend/resume (screen lock, home button, etc.)
+    // Resets touch state when app returns to foreground to fix gesture reliability
+    connect(qApp, &QGuiApplication::applicationStateChanged,
+            this, &DocumentViewport::onApplicationStateChanged);
+#endif
+    
     // Tablet hover timer - detects when stylus leaves viewport by timeout
     // When stylus hovers to another widget, we stop receiving TabletMove events.
     // This timer fires if no tablet hover event received within the interval.
@@ -2648,6 +2655,35 @@ void DocumentViewport::showEvent(QShowEvent* event)
     
     QWidget::showEvent(event);
 }
+
+#ifdef Q_OS_ANDROID
+void DocumentViewport::onApplicationStateChanged(Qt::ApplicationState state)
+{
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] Application state changed to:" 
+             << (state == Qt::ApplicationActive ? "Active" :
+                 state == Qt::ApplicationSuspended ? "Suspended" :
+                 state == Qt::ApplicationInactive ? "Inactive" : "Hidden");
+#endif
+    
+    if (state == Qt::ApplicationActive) {
+        // App returning to foreground - reset ALL touch state
+        // This is critical for Android where Qt's touch tracking gets corrupted
+        // after screen lock/unlock or app switching
+        if (m_touchHandler) {
+            m_touchHandler->reset();
+        }
+        if (m_gesture.isActive()) {
+            m_gesture.reset();
+            m_gestureTimeoutTimer->stop();
+        }
+        
+        // Start touch cooldown - reject touches briefly to let system stabilize
+        m_touchCooldownActive = true;
+        m_touchCooldownTimer.start();
+    }
+}
+#endif
 
 void DocumentViewport::enterEvent(QEnterEvent* event)
 {
