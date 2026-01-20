@@ -2147,6 +2147,8 @@ private:
         // Zoom-specific state
         qreal targetZoom = 1.0;                      ///< Target zoom (accumulates changes)
         QPointF zoomCenter;                          ///< Zoom center in viewport coords
+        QPointF initialCentroid;                     ///< Initial centroid for pan calculation (viewport coords)
+        bool initialCentroidSet = false;             ///< Whether initial centroid has been captured
         
         // Pan-specific state
         QPointF targetPan;                           ///< Target pan offset (accumulates changes)
@@ -2156,6 +2158,7 @@ private:
         void reset() {
             activeType = None;
             cachedFrame = QPixmap();
+            initialCentroidSet = false;
         }
     };
     ViewportGestureState m_gesture;

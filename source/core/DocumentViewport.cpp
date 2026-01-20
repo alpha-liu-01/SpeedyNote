@@ -1786,13 +1786,26 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed over quality
         
         if (m_gesture.activeType == ViewportGestureState::Zoom) {
-            // ZOOM: Scale the cached frame around zoom center
+            // ZOOM + PAN: Scale the cached frame around zoom center, with pan offset
             qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
             QSizeF scaledSize = logicalSize * relativeScale;
             
             // The zoom center should remain fixed in viewport coords
             QPointF center = m_gesture.zoomCenter;
             QPointF scaledOrigin = center - (center * relativeScale);
+            
+            // Add pan offset from centroid movement (gallery-style 2-finger gesture)
+            // Pan is in document coords, convert to viewport pixels at START zoom level
+            // Then scale by relativeScale since the cached frame is being scaled
+            if (m_gesture.initialCentroidSet) {
+                QPointF panDeltaDoc = m_gesture.targetPan - m_gesture.startPan;
+                // Convert to viewport pixels: doc coords * zoom = pixels
+                // Use startZoom since we're transforming the original cached frame
+                // Negate because pan offset increase = viewport content moves opposite
+                QPointF panDeltaPixels = panDeltaDoc * m_gesture.startZoom * -1.0;
+                // The pan needs to be applied at the scaled size
+                scaledOrigin += panDeltaPixels * relativeScale;
+            }
             
             painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_gesture.cachedFrame, 
                               m_gesture.cachedFrame.rect());
@@ -2861,6 +2874,11 @@ void DocumentViewport::beginZoomGesture(QPointF centerPoint)
     m_gesture.startPan = m_panOffset;
     m_gesture.targetPan = m_panOffset;
     
+    // Track initial centroid for pan calculation during zoom gesture
+    // This enables simultaneous pan+zoom (gallery-style 2-finger gestures)
+    m_gesture.initialCentroid = centerPoint;
+    m_gesture.initialCentroidSet = true;
+    
     // Capture current viewport as cached frame for fast scaling
     m_gesture.cachedFrame = grab();
     // Store device pixel ratio for correct scaling on high-DPI displays
@@ -2895,6 +2913,16 @@ void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
     m_gesture.targetZoom = qBound(MIN_ZOOM, m_gesture.targetZoom, MAX_ZOOM);
     m_gesture.zoomCenter = centerPoint;
     
+    // Calculate pan from centroid movement (for gallery-style 2-finger gestures)
+    // The centroid movement in viewport pixels needs to be converted to document coords
+    // using the START zoom level (since we're transforming the cached frame)
+    if (m_gesture.initialCentroidSet) {
+        QPointF centroidDelta = centerPoint - m_gesture.initialCentroid;
+        // Convert viewport pixels to document coords (at start zoom level)
+        // Negate because moving finger right should pan view left (reveal content on right)
+        m_gesture.targetPan = m_gesture.startPan - centroidDelta / m_gesture.startZoom;
+    }
+    
     // Restart timeout timer (each event resets the timeout)
     m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
     
@@ -2922,11 +2950,18 @@ void DocumentViewport::endZoomGesture()
                  : MIN_ZOOM;
     qreal finalZoom = qBound(minZ, m_gesture.targetZoom, MAX_ZOOM);
     
-    // Calculate new pan offset to keep center point fixed
-    // The center point should map to the same document point before and after zoom
+    // Calculate new pan offset combining:
+    // 1. Zoom center correction (keep center point fixed during zoom)
+    // 2. Centroid movement pan (gallery-style 2-finger gesture)
     QPointF center = m_gesture.zoomCenter;
     QPointF docPtAtCenter = center / m_gesture.startZoom + m_gesture.startPan;
-    QPointF newPan = docPtAtCenter - center / finalZoom;
+    QPointF zoomCorrectedPan = docPtAtCenter - center / finalZoom;
+    
+    // Add the centroid-based pan offset
+    // targetPan already contains startPan + centroid delta, so we need to add
+    // just the delta on top of the zoom-corrected pan
+    QPointF centroidPanDelta = m_gesture.targetPan - m_gesture.startPan;
+    QPointF newPan = zoomCorrectedPan + centroidPanDelta;
     
     // Clear gesture state BEFORE applying zoom (to avoid recursion in paintEvent)
     m_gesture.reset();
@@ -9966,7 +10001,12 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         }
         
         // Use line-based rendering for incremental updates (fast)
-        QPen pen(drawColor, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        // Use FlatCap for markers (Flat capStyle) to get flat ends at stroke start/end
+        // For FlatCap, we need to manually fill internal joints to avoid gaps
+        Qt::PenCapStyle penCap = (m_currentStroke.capStyle == StrokeCapStyle::Round) 
+                                  ? Qt::RoundCap : Qt::FlatCap;
+        QPen pen(drawColor, 1.0, Qt::SolidLine, penCap, Qt::RoundJoin);
+        bool needJointFill = (m_currentStroke.capStyle == StrokeCapStyle::Flat);
         
         // Start from the last rendered point (or 1 if starting fresh)
         int startIdx = qMax(1, m_lastRenderedPointIndex);
@@ -9982,6 +10022,16 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
             pen.setWidthF(width);
             cachePainter.setPen(pen);
             cachePainter.drawLine(p0.pos, p1.pos);
+            
+            // For FlatCap strokes, fill the internal joint at p0 (where this segment
+            // connects to the previous segment). Skip point 0 (stroke start should stay flat).
+            // The current end (point n-1) is always p1, never p0, so it stays flat too.
+            if (needJointFill && i > 1) {
+                qreal jointRadius = qMax(m_currentStroke.baseThickness * p0.pressure, 1.0) / 2.0;
+                cachePainter.setPen(Qt::NoPen);
+                cachePainter.setBrush(drawColor);
+                cachePainter.drawEllipse(p0.pos, jointRadius, jointRadius);
+            }
         }
         
         // Draw start cap if this is the first render (only for Round cap style)
