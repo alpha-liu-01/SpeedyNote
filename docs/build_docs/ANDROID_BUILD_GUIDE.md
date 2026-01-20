@@ -48,8 +48,11 @@ If you just want to build quickly and the Docker image already exists:
 # Inside container: build MuPDF (first time only)
 ./android/build-mupdf.sh
 
-# Build SpeedyNote APK
+# Build SpeedyNote APK (for testing)
 ./android/build-speedynote.sh
+
+# Or build both APK and AAB (for testing + Play Store)
+./android/build-speedynote.sh --both
 
 # Exit container and install on device
 exit
@@ -216,9 +219,53 @@ Key environment variables:
 
 ### `android/build-speedynote.sh`
 
-Builds the full SpeedyNote APK.
+Builds the SpeedyNote APK and/or AAB (Android App Bundle).
 
-Key environment variables:
+**Usage:**
+```bash
+./android/build-speedynote.sh [options]
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `--apk` | Build APK only (default) |
+| `--aab` | Build AAB only (for Play Store submission) |
+| `--both` | Build both APK and AAB |
+| `--release` | Use release keystore (requires environment variables) |
+| `--help` | Show usage information |
+
+**Examples:**
+```bash
+# Build APK only (default, backward compatible, debug signed)
+./android/build-speedynote.sh
+
+# Build AAB for Play Store (debug signed - for testing only)
+./android/build-speedynote.sh --aab
+
+# Build both APK and AAB
+./android/build-speedynote.sh --both
+
+# Build release-signed AAB for Play Store submission
+export RELEASE_KEYSTORE=/path/to/release.keystore
+export RELEASE_KEY_ALIAS=speedynote
+export RELEASE_STORE_PASS=your_secure_password
+./android/build-speedynote.sh --aab --release
+```
+
+**Output files:**
+- `android/SpeedyNote.apk` - For testing and sideloading (if `--apk` or `--both`)
+- `android/SpeedyNote.aab` - For Google Play Store submission (if `--aab` or `--both`)
+
+**Release signing environment variables:**
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `RELEASE_KEYSTORE` | Yes | Path to your release keystore file |
+| `RELEASE_KEY_ALIAS` | Yes | Key alias in the keystore |
+| `RELEASE_STORE_PASS` | Yes | Keystore password |
+| `RELEASE_KEY_PASS` | No | Key password (defaults to `RELEASE_STORE_PASS`) |
+
+**Build environment variables:**
 - `QT_ANDROID` - Qt Android installation (default: `/opt/qt/6.9.3/android_arm64_v8a`)
 - `QT_HOST` - Qt host tools (default: `/opt/qt/6.9.3/gcc_64`)
 - `MUPDF_INCLUDE_DIR` - MuPDF headers
@@ -248,7 +295,8 @@ SpeedyNote/
 │   │   ├── include/
 │   │   └── lib/
 │   ├── build-app/              # CMake build directory (generated)
-│   └── SpeedyNote.apk          # Final APK (generated)
+│   ├── SpeedyNote.apk          # Final APK (generated, --apk or --both)
+│   └── SpeedyNote.aab          # Final AAB (generated, --aab or --both)
 ├── source/
 │   └── pdf/
 │       ├── PdfProvider.h       # Abstract PDF interface
@@ -438,12 +486,57 @@ rm -rf android/mupdf-build
 
 ## Release Build
 
-For production releases, you'll need to:
+For Google Play Store submission, you need to sign your app with a release keystore.
 
-1. Create a release signing keystore
-2. Update `build-speedynote.sh` with release signing credentials
-3. Enable ProGuard/R8 for code shrinking
-4. Add proper app icons in `android/app-resources/res/`
+### Step 1: Create Release Keystore (One-Time Setup)
+
+```bash
+# Create a release keystore (keep this file safe forever!)
+keytool -genkey -v \
+    -keystore release.keystore \
+    -alias speedynote \
+    -keyalg RSA \
+    -keysize 2048 \
+    -validity 10000 \
+    -storepass YOUR_SECURE_PASSWORD \
+    -keypass YOUR_SECURE_PASSWORD \
+    -dname "CN=Your Name,O=Your Organization,L=City,ST=State,C=Country"
+```
+
+⚠️ **Critical:** 
+- Use a strong, unique password
+- **Back up the keystore file** in multiple secure locations
+- **If you lose it, you can NEVER update your app** on Play Store
+
+### Step 2: Build Release AAB
+
+```bash
+# Set environment variables (don't commit these to git!)
+export RELEASE_KEYSTORE=/path/to/release.keystore
+export RELEASE_KEY_ALIAS=speedynote
+export RELEASE_STORE_PASS=your_secure_password
+
+# Enter Docker and build
+./android/docker-shell.sh
+./android/build-speedynote.sh --aab --release
+```
+
+### Step 3: Upload to Play Store
+
+1. Go to [Google Play Console](https://play.google.com/console)
+2. Create or select your app
+3. Go to **Release** → **Production** (or Testing track)
+4. Upload `android/SpeedyNote.aab`
+5. Enable **Play App Signing** (recommended - Google manages your signing key)
+
+### Security Tips
+
+| Do | Don't |
+|----|-------|
+| Store keystore in secure backup | Commit keystore to git |
+| Use environment variables for passwords | Hardcode passwords in scripts |
+| Enable Play App Signing | Share keystore with others |
+| Keep password in password manager | Use simple passwords |
 
 ---
 

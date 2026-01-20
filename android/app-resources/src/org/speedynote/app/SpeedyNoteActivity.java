@@ -36,6 +36,20 @@ public class SpeedyNoteActivity extends QtActivity {
     // expose it via JNI for C++ to query.
     private static volatile boolean sEraserToolActive = false;
     
+    // ===== Native Touch Tracking (for gesture reliability) =====
+    // Qt's touch event layer can lose track of touch points after sleep/wake
+    // or app switching. These values are tracked at the native Android level
+    // and queried via JNI when Qt's touch count seems wrong.
+    
+    /** Current number of active touch points, tracked at the native Android level. */
+    private static volatile int sNativeTouchCount = 0;
+    
+    /** Last time any touch event was received (epoch ms), for stale detection. */
+    private static volatile long sLastTouchTimestamp = 0;
+    
+    /** Positions of active touch points (max 2 tracked): x1, y1, x2, y2. */
+    private static volatile float[] sTouchPositions = new float[4];
+    
     // Cached content view for unbuffered dispatch (performance optimization)
     // Avoids calling findViewById() on every touch event at 240Hz
     private View mCachedContentView = null;
@@ -83,6 +97,38 @@ public class SpeedyNoteActivity extends QtActivity {
         return sEraserToolActive;
     }
     
+    // ===== Native Touch Query Methods (called from C++ via JNI) =====
+    
+    /**
+     * Get the current native touch count.
+     * Called from C++ to verify Qt's touch state when gestures seem unreliable.
+     * 
+     * @return Number of fingers currently touching the screen (0-10)
+     */
+    public static int getNativeTouchCount() {
+        return sNativeTouchCount;
+    }
+    
+    /**
+     * Get milliseconds since last touch event.
+     * Used to detect if native touch state is stale.
+     * 
+     * @return Time in milliseconds since last touch event
+     */
+    public static long getTimeSinceLastTouch() {
+        return System.currentTimeMillis() - sLastTouchTimestamp;
+    }
+    
+    /**
+     * Get native touch positions (x1, y1, x2, y2).
+     * Returns positions of first 2 touch points for pinch gesture verification.
+     * 
+     * @return float array with [x1, y1, x2, y2] in screen coordinates
+     */
+    public static float[] getNativeTouchPositions() {
+        return sTouchPositions;
+    }
+    
     /**
      * Intercept all touch events for:
      * 1. Requesting unbuffered dispatch (240Hz stylus input)
@@ -103,6 +149,33 @@ public class SpeedyNoteActivity extends QtActivity {
         int toolType = event.getToolType(0);
         if (toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER) {
             sEraserToolActive = (toolType == MotionEvent.TOOL_TYPE_ERASER);
+        }
+        
+        // ===== Track native touch count for gesture reliability =====
+        // Qt's touch tracking can become corrupted after sleep/wake.
+        // Track ground truth at native Android level for JNI verification.
+        int action = event.getActionMasked();
+        
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            sNativeTouchCount = event.getPointerCount();
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            sNativeTouchCount = 0;
+        } else if (action == MotionEvent.ACTION_POINTER_UP) {
+            sNativeTouchCount = event.getPointerCount() - 1;
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            sNativeTouchCount = event.getPointerCount();
+        }
+        
+        sLastTouchTimestamp = System.currentTimeMillis();
+        
+        // Track positions of first 2 touch points (for pinch gesture verification)
+        if (event.getPointerCount() >= 1) {
+            sTouchPositions[0] = event.getX(0);
+            sTouchPositions[1] = event.getY(0);
+        }
+        if (event.getPointerCount() >= 2) {
+            sTouchPositions[2] = event.getX(1);
+            sTouchPositions[3] = event.getY(1);
         }
         
         // Request unbuffered dispatch for high-rate stylus input (API 31+)

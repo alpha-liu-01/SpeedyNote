@@ -261,7 +261,7 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 ---
 
 ### BUG-A005: Pinch-to-Zoom Unreliable
-**Status:** ✅ Fixed (v2)  
+**Status:** ✅ Fixed (v7)  
 **Priority:** Medium  
 **Category:** Touch Input / Gestures
 **Platform:** Android only
@@ -272,7 +272,7 @@ Pinch-to-zoom gestures only trigger about 1 in 5 times. Once triggered, the zoom
 **Root Cause (Original - Partially Fixed):**  
 The `TouchGestureHandler::handleTouchEvent()` only handled 1-finger and 3-finger cases in the `TouchBegin` event. On Android, when two fingers touch nearly simultaneously, the system may send a `TouchBegin` event with 2 points directly.
 
-**Root Cause (v2 - Fully Fixed):**  
+**Root Cause (v2 - Improved):**  
 The original fix improved reliability from ~30% to ~70%, but three additional issues remained:
 
 1. **Released points counted as active**: `points.size()` includes ALL touch points, including those with state `Released`. When a finger lifts, the point is still in the event but with `Released` state. The code was counting released points as active, causing:
@@ -283,57 +283,321 @@ The original fix improved reliability from ~30% to ~70%, but three additional is
 
 3. **Inconsistent state flags**: When 2-finger `TouchBegin` happened, `m_panActive` wasn't explicitly cleared, potentially leaving conflicting state.
 
-**Symptoms (BEFORE v2 fix):**
-- Pinch-to-zoom gesture works ~70% of the time (improved from 30%)
-- Lifting one finger during pinch causes stuck gesture
-- Gesture state sometimes inconsistent
+**Root Cause (v3 - Improved Further):**  
+The v2 fix improved reliability to ~60%, but open beta testing revealed ~40% failure rate persisted. The issue: **Android may not include all active touch points in every event**.
 
-**Fix Applied (v2):**
-Complete rewrite of touch point counting and state transitions:
+When two fingers touch nearly simultaneously on Android:
+1. First finger → `TouchBegin` with 1 point → pan starts
+2. Second finger arrives, but `TouchUpdate` may only contain the newly pressed point (second finger) and not the stationary first finger
+3. Per-event counting sees only 1 active point, missing the second finger entirely
 
-```cpp
-// ===== Count ACTIVE touch points (exclude Released) =====
-// This is critical! Qt includes Released points in points() for TouchUpdate.
-// Without filtering, we'd count a just-lifted finger as still active.
-QVector<const QEventPoint*> activePoints;
-activePoints.reserve(points.size());
-for (const auto& pt : points) {
-    if (pt.state() != QEventPoint::Released) {
-        activePoints.append(&pt);
-    }
-}
-m_activeTouchPoints = activePoints.size();
+**Root Cause (v4 - Fixed stale state issues):**  
+Spurious `TouchCancel` events were generated when input focus changed (e.g., stylus hovering to toolbar), and when returning from launcher. These caused corrupted tracking state. Fixed with:
+- Defensive reset of `m_trackedTouchIds` on `TouchBegin`
+- `DocumentViewport::hideEvent()` to clear gesture state when viewport is hidden
+
+**Root Cause (v5 - Fixed post-sleep/wake behavior):**  
+After device sleep/wake, Android sends `TouchUpdate` events with **only one point** (the finger that moved), even when two fingers are down. The v3/v4 fixes tracked the correct finger count, but pinch **updates** still required `activePoints.size() >= 2` to calculate the zoom. Since only one point was in the event, updates were skipped entirely:
+
+```
+// Log when broken (after sleep/wake):
+beginZoomGesture STARTED
+endZoomGesture           // NO updates in between!
+
+// Log when working:
+beginZoomGesture STARTED
+Pinch update #N          // Updates happen
+updateZoomGesture scale: X.XX
+endZoomGesture
 ```
 
-Key improvements:
-- Filter out `Released` points when counting active touches
-- Proper 2→1 transition: pinch ends, pan starts with remaining finger
-- Proper 1→2 transition: pan ends, pinch starts
-- Clean state management: explicit `m_panActive = false` / `m_pinchActive = false`
-- Use `activePoints` array instead of raw `points` for gesture calculations
+**Fix Applied (v5):**
+Cache last-known positions for each touch point ID. When an update event only contains 1 point, use the cached position for the other finger:
 
-**Why This Works:**
-1. **Accurate finger count**: By filtering out `Released` points, we know exactly how many fingers are currently touching the screen.
-2. **State machine transitions**: The code now properly handles all transitions:
-   - 0→1 finger: Start pan
-   - 1→2 fingers: End pan, start pinch
-   - 2→1 finger: End pinch, start pan with remaining finger
-   - 1/2→0 fingers: End active gesture
-3. **Clean state**: Explicit clearing of conflicting state flags prevents stuck gestures.
+```cpp
+// Member variable
+QHash<int, QPointF> m_lastTouchPositions;
+
+// In handleTouchEvent - track positions:
+for (const auto& pt : points) {
+    if (pt.state() == QEventPoint::Pressed) {
+        m_trackedTouchIds.insert(pt.id());
+        m_lastTouchPositions.insert(pt.id(), pt.position());
+    } else if (pt.state() == QEventPoint::Released) {
+        m_trackedTouchIds.remove(pt.id());
+        m_lastTouchPositions.remove(pt.id());
+    } else {
+        // Updated or Stationary - cache latest position
+        m_lastTouchPositions.insert(pt.id(), pt.position());
+    }
+}
+
+// In pinch update - use cached positions when event is incomplete:
+if (m_activeTouchPoints == 2 && m_pinchActive) {
+    QPointF pos1, pos2;
+    // Get from event...
+    // If only 1 position in event, get other from m_lastTouchPositions
+}
+```
+
+Key improvements (v5):
+- **Position caching**: `QHash<int, QPointF> m_lastTouchPositions` stores last known position for each finger
+- **Fallback lookup**: When event has only 1 point, retrieve other position from cache
+- **No waiting required**: Pinch updates proceed immediately using cached data instead of being skipped
 
 **Files Modified:**
-- `source/core/TouchGestureHandler.cpp`
-  - Added `activePoints` array filtering out `Released` points
-  - Added 2→1 finger transition (pinch to pan)
-  - Restructured 1→2 finger transition for clarity
-  - Explicit state flag management in all branches
+- `source/core/TouchGestureHandler.h`
+  - Added `#include <QHash>`
+  - Added `QHash<int, QPointF> m_lastTouchPositions` member
 
-**Desktop Impact:** None - desktop platforms typically use mouse/touchpad for gestures and don't exhibit the same touch point lifecycle. The fix improves robustness without changing behavior.
+- `source/core/TouchGestureHandler.cpp`
+  - Updated ID tracking to also cache positions
+  - Rewrote pinch update block to use cached positions as fallback
+  - Clear `m_lastTouchPositions` alongside `m_trackedTouchIds` in all reset paths
+
+**Desktop Impact:** None - desktop platforms deliver complete touch data. The fix improves robustness without changing behavior.
+
+**Root Cause (v6 - Fixed stale ID and position issues):**  
+After sleep/wake, two issues persisted:
+
+1. **Single finger causing zoom**: When one finger lifted, Android sometimes didn't send a `Released` event. The ID stayed in `m_trackedTouchIds`, so `m_activeTouchPoints` was still 2 even with only 1 finger down. This caused single-finger movements to trigger zoom calculations.
+
+2. **Stale cached positions**: The `m_lastTouchPositions` cache held the old position of the "phantom" finger that had already lifted. Zoom calculations used this stale position, causing erratic zoom behavior.
+
+Log evidence showing the problem:
+```
+[TouchGestureHandler] Pinch update # 3441 activePoints: 1 cachedPositions: 2
+```
+This shows the current event only had 1 active point, but the cache still had 2 positions - one of which was stale.
+
+**Fix Applied (v6):**
+Detect and remove stale touch IDs that Android "forgot" to send `Released` for:
+
+```cpp
+// New member variable
+QHash<int, int> m_touchIdMissingCount;  // Count consecutive events where ID was missing
+static constexpr int MAX_MISSING_COUNT = 3;  // Remove after 3 consecutive misses
+
+// In handleTouchEvent:
+QSet<int> idsSeenThisEvent;
+for (const auto& pt : points) {
+    idsSeenThisEvent.insert(pt.id());
+    // ... existing tracking logic ...
+    m_touchIdMissingCount.remove(pt.id());  // Reset counter if seen
+}
+
+// Detect stale IDs
+for (int trackedId : m_trackedTouchIds) {
+    if (!idsSeenThisEvent.contains(trackedId)) {
+        m_touchIdMissingCount[trackedId]++;
+        if (m_touchIdMissingCount[trackedId] >= MAX_MISSING_COUNT) {
+            // Remove stale ID from tracking and cache
+            m_trackedTouchIds.remove(trackedId);
+            m_lastTouchPositions.remove(trackedId);
+        }
+    }
+}
+
+m_activeTouchPoints = m_trackedTouchIds.size();  // Now accurate
+```
+
+Key improvements (v6):
+- **Stale detection**: Track how many consecutive events each ID was missing from
+- **Automatic cleanup**: After 3 consecutive misses, assume finger lifted and remove ID
+- **Cache sync**: Stale positions removed alongside stale IDs
+- **Proper transitions**: When finger count drops from 2→1, pinch ends and pan starts correctly
+
+**Files Modified:**
+- `source/core/TouchGestureHandler.h`
+  - Added `QHash<int, int> m_touchIdMissingCount` member
+  - Added `MAX_MISSING_COUNT = 3` constant
+
+- `source/core/TouchGestureHandler.cpp`
+  - Track which IDs are seen in each event
+  - Increment missing count for IDs not seen
+  - Remove stale IDs after 3 consecutive misses
+  - Clear `m_touchIdMissingCount` in all reset paths
+
+**Result (v6):**
+- No more "phantom finger" causing single-finger zoom
+- Stale cached positions automatically cleaned up
+- Proper 2→1 finger transition when one finger lifts without `Released` event
+- Reliable pinch-to-zoom even after sleep/wake cycles
+
+**Root Cause (v7 - Fixed premature stale detection):**
+The v6 event-count-based stale detection was too aggressive. When a second finger touches for pinch but stays **stationary**, Android only sends data for the moving first finger. The stationary finger was removed as "stale" after just 3 events (~30ms):
+
+```
+[TouchGestureHandler] Starting pinch (1→2 transition) trackedIds: 2
+[DocumentViewport] beginZoomGesture STARTED
+[TouchGestureHandler] Removing stale touch ID 2 (missing for 3 consecutive events)  // 30ms later!
+[DocumentViewport] endZoomGesture
+```
+
+This caused pinch gestures to immediately fail when the second finger was stationary.
+
+**Fix Applied (v7):**
+Switched from event-count-based to **time-based** stale detection:
+
+```cpp
+// Old (v6) - too aggressive:
+QHash<int, int> m_touchIdMissingCount;
+static constexpr int MAX_MISSING_COUNT = 3;  // Removed after 3 events!
+
+// New (v7) - time-based:
+QHash<int, qint64> m_touchIdLastSeenTime;  // Timestamp when last seen
+static constexpr qint64 STALE_TIMEOUT_MS = 500;  // Removed after 500ms
+
+// In handleTouchEvent:
+qint64 currentTime = QDateTime::currentMSecsSinceEpoch();
+
+for (const auto& pt : points) {
+    // Update timestamp for seen points
+    m_touchIdLastSeenTime.insert(pt.id(), currentTime);
+}
+
+// Check for stale IDs
+for (int trackedId : m_trackedTouchIds) {
+    qint64 elapsed = currentTime - m_touchIdLastSeenTime.value(trackedId, 0);
+    if (elapsed > STALE_TIMEOUT_MS) {
+        // Remove stale ID
+    }
+}
+```
+
+Key improvements (v7):
+- **Time-based detection**: 500ms timeout instead of 3 events
+- **Stationary fingers preserved**: A finger not moving won't be removed until 500ms with no data
+- **Still catches phantom fingers**: After sleep/wake, if a finger truly lifted without Released event, it gets cleaned up after 500ms
+
+**Files Modified:**
+- `source/core/TouchGestureHandler.h`
+  - Changed `QHash<int, int> m_touchIdMissingCount` to `QHash<int, qint64> m_touchIdLastSeenTime`
+  - Changed `MAX_MISSING_COUNT = 3` to `STALE_TIMEOUT_MS = 500`
+
+- `source/core/TouchGestureHandler.cpp`
+  - Added `#include <QDateTime>`
+  - Use `QDateTime::currentMSecsSinceEpoch()` for timestamps
+  - Time-based stale check instead of event-count-based
+
+**Result (v7):**
+- Stationary second finger during pinch is no longer prematurely removed
+- Pinch gestures work even when one finger is stationary
+- Phantom fingers still cleaned up after 500ms timeout
+
+**Root Cause (v7b - Fixed rapid start/end after tab switch):**
+After `hideEvent` (tab switch), Android could send spurious `Released` events for old touch IDs. This immediately dropped `m_activeTouchPoints` to 1, triggering the 2→1 transition that ended the pinch:
+
+```
+19:39:16.027: Starting pinch trackedIds: 2
+19:39:16.070: endZoomGesture  // 43ms later, NO stale removal - immediate transition!
+19:39:16.118: Starting pinch
+19:39:16.179: endZoomGesture  // Another immediate end
+```
+
+The rapid start/end cycle happened because each new pinch attempt was immediately cancelled by the 2→1 transition.
+
+**Fix Applied (v7b):**
+Made pinch mode "sticky" - don't immediately transition to pan when finger count drops to 1:
+
+```cpp
+// 2→1 finger transition block
+if (m_activeTouchPoints == 1 && !m_panActive && !activePoints.isEmpty()) {
+    // BUG-A005 v7b: If pinch is active, DON'T immediately transition to pan.
+    // After hideEvent (tab switch), Android may send spurious Released events
+    // that temporarily drop finger count to 1.
+    if (m_pinchActive) {
+        // Don't end pinch, just skip this update
+        // Pinch will resume if second finger comes back
+        event->accept();
+        return true;
+    }
+    // ... start pan only if NOT coming from pinch ...
+}
+```
+
+Additionally, when the stale timeout (500ms) legitimately removes a phantom finger during pinch, we now properly end the pinch and allow pan transition:
+
+```cpp
+// After stale removal
+if (staleRemovalDuringPinch && m_activeTouchPoints == 1 && m_pinchActive) {
+    endTouchPinch();  // Now confident the finger is truly gone
+    // Pan transition happens in 2→1 block since m_pinchActive is now false
+}
+```
+
+**Result (v7b):**
+- Pinch is "sticky" - transient 1-finger states don't immediately end the pinch
+- After tab switch, pinch gestures remain stable
+- Stale timeout (500ms) still properly cleans up phantom fingers
+- When stale removal happens, proper pinch→pan transition occurs
+- Still unreliable after certain tab switches
+
+---
+
+### BUG-A005 v8: Complete Redesign - Gallery Style Gestures
+
+**Root Cause (Final):**
+After extensive debugging, we identified that the fundamental problem is the **1→2 finger transition**. No matter how much caching or stale detection we added, the core design required tracking transitions between finger counts - which Android's unreliable touch event reporting made impossible to do reliably.
+
+**Solution: Complete Architecture Redesign**
+
+Replaced the old gesture system with a smartphone gallery-style approach:
+
+| Fingers | Old Design | New Design |
+|---------|------------|------------|
+| 1 finger | Pan (navigation) | Tool mode (drawing/eraser) - passed through |
+| 2 fingers | Zoom only | Pan + Zoom simultaneously |
+| 3+ fingers | Tap detection | Same (tap detection) |
+
+**Key Principles:**
+1. **No transitions to track** - 1 finger always = tool, 2 fingers always = pan+zoom
+2. **No position caching** - Only process when BOTH fingers have valid data
+3. **Simultaneous pan+zoom** - Like Google Maps/Photos app
+4. **Simple state machine** - Just `Idle ↔ GestureActive`
+
+**Files Changed:**
+- `source/core/TouchGestureHandler.h` - Complete rewrite
+- `source/core/TouchGestureHandler.cpp` - Complete rewrite  
+- `source/core/TouchGestureHandlerLegacy.h/cpp` - Old code preserved for reference
+
+**New Code (simplified):**
+```cpp
+// Only process 2-finger gestures when we have BOTH points
+if (fingerCount == 2) {
+    QPointF p1 = activePoints[0]->position();
+    QPointF p2 = activePoints[1]->position();
+    QPointF centroid = (p1 + p2) / 2.0;
+    qreal distance = QLineF(p1, p2).length();
+    
+    if (!m_gestureActive) {
+        // Start both pan AND zoom
+        m_viewport->beginPanGesture();
+        m_viewport->beginZoomGesture(centroid);
+        m_gestureActive = true;
+    } else {
+        // Update both simultaneously
+        QPointF panDelta = centroid - m_lastCentroid;
+        qreal scale = distance / m_lastDistance;
+        m_viewport->updatePanGesture(panDelta);
+        m_viewport->updateZoomGesture(scale, centroid);
+    }
+}
+
+// 1 finger - pass through to tool handling
+if (fingerCount == 1) {
+    if (m_gestureActive) {
+        endGesture(true);  // End with inertia
+    }
+    return false;  // Let viewport handle as drawing/eraser input
+}
+```
 
 **Result:**
-- Pinch-to-zoom now triggers reliably on every attempt
-- Smooth transitions between pan and pinch when fingers are added/removed
-- No more stuck gesture states
+- No transition tracking = no transition bugs
+- Simple and robust gesture detection
+- Standard UX (matches Google Maps, Photos, Samsung Notes)
+- Pending user testing...
 
 ---
 

@@ -16,6 +16,8 @@
 #include <QObject>
 #include <QPointF>
 #include <QVector>
+#include <QSet>
+#include <QHash>
 #include <QElapsedTimer>
 #include <QTimer>
 
@@ -51,7 +53,7 @@ public:
      * @param parent QObject parent for memory management.
      */
     explicit TouchGestureHandler(DocumentViewport* viewport, QObject* parent = nullptr);
-    ~TouchGestureHandler() = default;
+    ~TouchGestureHandler();
     
     /**
      * @brief Handle a touch event.
@@ -59,6 +61,14 @@ public:
      * @return True if event was handled, false otherwise.
      */
     bool handleTouchEvent(QTouchEvent* event);
+    
+    /**
+     * @brief Reset all gesture state.
+     * 
+     * Call this when the viewport is hidden, document changes, or app resumes.
+     * Clears all tracking state, stops inertia, and ends any active gestures.
+     */
+    void reset();
     
     /**
      * @brief Set the touch gesture mode.
@@ -100,7 +110,21 @@ private:
     // ===== Pinch-to-zoom Tracking =====
     bool m_pinchActive = false;              ///< Whether a pinch gesture is in progress
     qreal m_pinchStartDistance = 0;          ///< Distance between fingers at start (for incremental scaling)
-    QPointF m_pinchCentroid;                 ///< Centroid of pinch gesture (fixed at start)
+    qreal m_initialDistance = 0;             ///< Distance at gesture start (for zoom threshold)
+    bool m_zoomActivated = false;            ///< Whether zoom threshold has been exceeded
+    qreal m_smoothedScale = 1.0;             ///< Exponentially smoothed scale factor
+    
+    // Zoom dead zone: don't zoom until finger distance changes by this percentage
+    // This prevents zoom "shaking" during pan-only 2-finger gestures
+    static constexpr qreal ZOOM_ACTIVATION_THRESHOLD = 0.1;  ///< 10% change required to activate
+    
+    // Scale dead zone: treat scale values within this range of 1.0 as exactly 1.0
+    // This prevents zoom jitter from small finger distance variations
+    static constexpr qreal ZOOM_SCALE_DEAD_ZONE = 0.007;  ///< 0.7% dead zone
+    
+    // Zoom smoothing: exponential moving average factor (0-1)
+    // Higher = more responsive but jittery, Lower = smoother but laggy
+    static constexpr qreal ZOOM_SMOOTHING_FACTOR = 0.4;
     
     // ===== Velocity Tracking for Inertia =====
     QVector<QPointF> m_velocitySamples;      ///< Recent velocity samples (pixels/ms) for averaging
@@ -115,7 +139,11 @@ private:
     static constexpr int INERTIA_INTERVAL_MS = 16;      ///< ~60 FPS
     
     // ===== Multi-touch Tracking =====
-    int m_activeTouchPoints = 0;             ///< Number of active touch points
+    int m_activeTouchPoints = 0;             ///< Number of active touch points (derived from tracked IDs)
+    QSet<int> m_trackedTouchIds;             ///< Track touch point IDs across events (fixes Android event splitting)
+    QHash<int, QPointF> m_lastTouchPositions; ///< Last known position for each touch ID (fixes Android partial updates)
+    QHash<int, qint64> m_touchIdLastSeenTime; ///< Timestamp (ms) when each ID was last seen in an event
+    static constexpr qint64 STALE_TIMEOUT_MS = 500; ///< Remove ID if not seen for this many milliseconds
     
     // ===== 3-Finger Tap Detection =====
     QElapsedTimer m_threeFingerTimer;        ///< Timer for 3-finger tap detection
@@ -139,4 +167,19 @@ private:
      * @brief Handle a 3-finger tap gesture.
      */
     void on3FingerTap();
+    
+#ifdef Q_OS_ANDROID
+    /**
+     * @brief Handle 2-finger gesture using native Android positions.
+     * 
+     * Called when Qt's touch tracking seems corrupted but native Android
+     * reports 2 fingers. Uses JNI-provided positions to ensure pinch works.
+     * 
+     * @param event The touch event (for accepting)
+     * @param pos1 Native position of first finger
+     * @param pos2 Native position of second finger
+     * @return true (always handles the event)
+     */
+    bool handleTwoFingerGestureNative(QTouchEvent* event, QPointF pos1, QPointF pos2);
+#endif
 };

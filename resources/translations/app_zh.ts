@@ -430,8 +430,8 @@ Continue?</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1241"/>
-        <source>Version 1.0.1</source>
-        <translation type="unfinished">1.0.1 版本</translation>
+        <source>Version 1.0.2</source>
+        <translation type="unfinished">1.0.2 版本</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1258"/>
@@ -666,7 +666,7 @@ This will overwrite your current configuration.</source>
     <message>
         <location filename="../../source/core/Document.h" line="220"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题笔记</translation>
     </message>
 </context>
 <context>
@@ -740,53 +740,58 @@ Error output:
     <message>
         <location filename="../../source/core/DocumentManager.cpp" line="62"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentManager.cpp" line="83"/>
+        <source>Untitled Canvas</source>
+        <translation type="unfinished">无标题画布</translation>
     </message>
 </context>
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="1848"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1894"/>
         <source>No document loaded</source>
         <translation type="unfinished">没有加载文档</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5754"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6050"/>
         <source>Insert Image</source>
         <translation type="unfinished">插入图片</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5756"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6052"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished">图片  (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;全部文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6417"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6713"/>
         <source>Add Position Link</source>
         <translation type="unfinished">添加位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6418"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6714"/>
         <source>Add URL Link</source>
         <translation type="unfinished">添加URL链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6419"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6715"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished">添加Markdown笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6429"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6725"/>
         <source>Add URL</source>
         <translation type="unfinished">添加URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6429"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6725"/>
         <source>Enter URL:</source>
         <translation type="unfinished">输入URL：</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6580"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6876"/>
         <source>Untitled Note</source>
         <translation type="unfinished">无标题笔记</translation>
     </message>
@@ -806,7 +811,7 @@ Error output:
     <message>
         <location filename="../../source/sharing/ExportDialog.cpp" line="60"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
         <location filename="../../source/sharing/ExportDialog.cpp" line="62"/>
@@ -1233,7 +1238,7 @@ This action cannot be undone.</source>
         <location filename="../../source/MainWindow.cpp" line="236"/>
         <location filename="../../source/MainWindow.cpp" line="872"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="388"/>
@@ -1302,8 +1307,8 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="149"/>
-        <source>SpeedyNote 1.0.1</source>
-        <translation type="unfinished">极疾记 1.0.1</translation>
+        <source>SpeedyNote 1.0.2</source>
+        <translation type="unfinished">极疾记 1.0.2</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="768"/>
@@ -1392,6 +1397,16 @@ Size: %2</source>
 
 文件名：%1
 体积：%2</translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="2160"/>
+        <source>Untitled Canvas</source>
+        <translation type="unfinished">无标题画布</translation>
+    </message>
+    <message>
+        <location filename="../../source/MainWindow.cpp" line="2160"/>
+        <source>Untitled Document</source>
+        <translation type="unfinished">无标题文档</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="2182"/>
@@ -1596,7 +1611,7 @@ Quit anyway?</source>
         <location filename="../../source/core/MarkdownNote.cpp" line="95"/>
         <location filename="../../source/core/MarkdownNote.cpp" line="100"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题</translation>
     </message>
 </context>
 <context>
@@ -1761,7 +1776,7 @@ Quit anyway?</source>
     <message>
         <location filename="../../source/ui/NavigationBar.cpp" line="50"/>
         <source>Untitled</source>
-        <translation type="unfinished">未命名笔记</translation>
+        <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
         <location filename="../../source/ui/NavigationBar.cpp" line="53"/>
@@ -2480,12 +2495,12 @@ and select &quot;Star&quot; to add it here.</source>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="33"/>
         <source>Pen Tool (P)</source>
-        <translation type="unfinished">钢笔</translation>
+        <translation type="unfinished">钢笔 (P)</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="41"/>
         <source>Marker Tool (M)</source>
-        <translation type="unfinished">记号笔</translation>
+        <translation type="unfinished">记号笔 (M)</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="48"/>
@@ -2495,12 +2510,12 @@ and select &quot;Star&quot; to add it here.</source>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="55"/>
         <source>Straight Line Mode (/)</source>
-        <translation type="unfinished">直线开关</translation>
+        <translation type="unfinished">直线开关 (/)</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="62"/>
         <source>Lasso Selection Tool (L)</source>
-        <translation type="unfinished">套索工具</translation>
+        <translation type="unfinished">套索工具 (L)</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="69"/>
@@ -2510,7 +2525,7 @@ and select &quot;Star&quot; to add it here.</source>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="76"/>
         <source>Text Tool (T)</source>
-        <translation type="unfinished">文字工具</translation>
+        <translation type="unfinished">文字工具 (T)</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="86"/>

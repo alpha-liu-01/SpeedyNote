@@ -1598,8 +1598,23 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void hideEvent(QHideEvent* event) override;     ///< Clear gesture state when hidden
+    void showEvent(QShowEvent* event) override;     ///< Start touch cooldown after becoming visible
     void tabletEvent(QTabletEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;   ///< Track pointer entering viewport
+    void leaveEvent(QEvent* event) override;        ///< Track pointer leaving viewport
     bool event(QEvent* event) override;  ///< Forwards touch events to handler
+    
+#ifdef Q_OS_ANDROID
+private slots:
+    /**
+     * @brief Handle application state changes (Android only).
+     * 
+     * Resets touch gesture state when app resumes from background.
+     * This fixes unreliable gestures after screen lock/unlock or app switch.
+     */
+    void onApplicationStateChanged(Qt::ApplicationState state);
+#endif
     
 private:
     // ===== Document Reference =====
@@ -1620,6 +1635,12 @@ private:
     // ===== Touch Gesture Handler =====
     // Touch gesture logic is encapsulated in TouchGestureHandler (see TouchGestureHandler.h)
     TouchGestureHandler* m_touchHandler = nullptr;  ///< Handles touch pan/zoom/tap
+    
+    // Touch cooldown: reject touch events briefly after becoming visible
+    // This prevents crashes from stale touch state after sleep/wake
+    QElapsedTimer m_touchCooldownTimer;
+    bool m_touchCooldownActive = false;
+    static constexpr qint64 TOUCH_COOLDOWN_MS = 300;
     
     // =========================================================================
     // CUSTOMIZABLE VALUES
@@ -2085,6 +2106,8 @@ private:
     GestureState m_gestureState;        ///< Multi-touch gesture state
     QPointF m_lastPointerPos;           ///< Last pointer position (for delta calculation)
     bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
+    bool m_pointerInViewport = false;   ///< True when pointer is hovering inside viewport (for eraser cursor)
+    QTimer* m_tabletHoverTimer = nullptr; ///< Timer to detect when tablet stylus leaves (no events = left)
     
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
@@ -2142,6 +2165,8 @@ private:
         // Zoom-specific state
         qreal targetZoom = 1.0;                      ///< Target zoom (accumulates changes)
         QPointF zoomCenter;                          ///< Zoom center in viewport coords
+        QPointF initialCentroid;                     ///< Initial centroid for pan calculation (viewport coords)
+        bool initialCentroidSet = false;             ///< Whether initial centroid has been captured
         
         // Pan-specific state
         QPointF targetPan;                           ///< Target pan offset (accumulates changes)
@@ -2151,6 +2176,7 @@ private:
         void reset() {
             activeType = None;
             cachedFrame = QPixmap();
+            initialCentroidSet = false;
         }
     };
     ViewportGestureState m_gesture;

@@ -80,7 +80,7 @@ Document* DocumentManager::createEdgelessDocument(const QString& name)
 {
     // Create a new edgeless (infinite canvas) document
     auto docPtr = Document::createNew(
-        name.isEmpty() ? QStringLiteral("Untitled Canvas") : name,
+        name.isEmpty() ? tr("Untitled Canvas") : name,
         Document::Mode::Edgeless
     );
     

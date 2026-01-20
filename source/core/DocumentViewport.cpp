@@ -99,6 +99,34 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Touch gesture handler (encapsulates pan/zoom/tap logic)
     m_touchHandler = new TouchGestureHandler(this, this);
     
+#ifdef Q_OS_ANDROID
+    // Handle app suspend/resume (screen lock, home button, etc.)
+    // Resets touch state when app returns to foreground to fix gesture reliability
+    connect(qApp, &QGuiApplication::applicationStateChanged,
+            this, &DocumentViewport::onApplicationStateChanged);
+#endif
+    
+    // Tablet hover timer - detects when stylus leaves viewport by timeout
+    // When stylus hovers to another widget, we stop receiving TabletMove events.
+    // This timer fires if no tablet hover event received within the interval.
+    m_tabletHoverTimer = new QTimer(this);
+    m_tabletHoverTimer->setSingleShot(true);
+    m_tabletHoverTimer->setInterval(100);  // 100ms - short enough to feel responsive
+    connect(m_tabletHoverTimer, &QTimer::timeout, this, [this]() {
+        // No tablet hover event received - stylus must have left
+        if (m_pointerInViewport && !m_pointerActive) {
+            m_pointerInViewport = false;
+            
+            // Trigger repaint to hide eraser cursor
+            if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
+                qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+                QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                                  eraserRadius * 2, eraserRadius * 2);
+                update(cursorRect.toRect());
+            }
+        }
+    });
+    
     // Initialize PDF cache capacity based on default layout mode
     updatePdfCacheCapacity();
 }
@@ -113,6 +141,11 @@ DocumentViewport::~DocumentViewport()
     // Stop gesture timer
     if (m_gestureTimeoutTimer) {
         m_gestureTimeoutTimer->stop();
+    }
+    
+    // Stop tablet hover timer (prevents lambda firing during destruction)
+    if (m_tabletHoverTimer) {
+        m_tabletHoverTimer->stop();
     }
     
     // Stop touch handler gestures (including inertia timer)
@@ -1760,13 +1793,26 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);  // Speed over quality
         
         if (m_gesture.activeType == ViewportGestureState::Zoom) {
-            // ZOOM: Scale the cached frame around zoom center
+            // ZOOM + PAN: Scale the cached frame around zoom center, with pan offset
             qreal relativeScale = m_gesture.targetZoom / m_gesture.startZoom;
             QSizeF scaledSize = logicalSize * relativeScale;
             
             // The zoom center should remain fixed in viewport coords
             QPointF center = m_gesture.zoomCenter;
             QPointF scaledOrigin = center - (center * relativeScale);
+            
+            // Add pan offset from centroid movement (gallery-style 2-finger gesture)
+            // Pan is in document coords, convert to viewport pixels at START zoom level
+            // Then scale by relativeScale since the cached frame is being scaled
+            if (m_gesture.initialCentroidSet) {
+                QPointF panDeltaDoc = m_gesture.targetPan - m_gesture.startPan;
+                // Convert to viewport pixels: doc coords * zoom = pixels
+                // Use startZoom since we're transforming the original cached frame
+                // Negate because pan offset increase = viewport content moves opposite
+                QPointF panDeltaPixels = panDeltaDoc * m_gesture.startZoom * -1.0;
+                // The pan needs to be applied at the scaled size
+                scaledOrigin += panDeltaPixels * relativeScale;
+            }
             
             painter.drawPixmap(QRectF(scaledOrigin, scaledSize), m_gesture.cachedFrame, 
                               m_gesture.cachedFrame.rect());
@@ -2565,6 +2611,101 @@ void DocumentViewport::focusOutEvent(QFocusEvent* event)
     QWidget::focusOutEvent(event);
 }
 
+void DocumentViewport::hideEvent(QHideEvent* event)
+{
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] hideEvent - clearing gesture state"
+             << "wasActive:" << m_gesture.isActive();
+#endif
+    
+    // BUG-A005 v4 FIX: Clear gesture state when viewport is hidden
+    // When user goes to launcher and comes back, any stale gesture state
+    // would block new gestures (beginZoomGesture returns early if isActive())
+    if (m_gesture.isActive()) {
+        m_gesture.reset();
+        m_gestureTimeoutTimer->stop();
+    }
+    
+    // Also reset touch handler state including inertia
+    // This prevents inertia callbacks from accessing invalid widget state
+    if (m_touchHandler) {
+        m_touchHandler->reset();
+    }
+    
+    QWidget::hideEvent(event);
+}
+
+void DocumentViewport::showEvent(QShowEvent* event)
+{
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] showEvent - starting touch cooldown";
+#endif
+    
+    // Start touch cooldown period
+    // After sleep/wake or tab switching, Android may send stale touch events
+    // that can crash Qt's touch event processing. Reject all touch events
+    // for a brief period to let the system stabilize.
+    m_touchCooldownActive = true;
+    m_touchCooldownTimer.start();
+    
+    // Also ensure touch handler is reset
+    if (m_touchHandler) {
+        m_touchHandler->reset();
+    }
+    
+    QWidget::showEvent(event);
+}
+
+#ifdef Q_OS_ANDROID
+void DocumentViewport::onApplicationStateChanged(Qt::ApplicationState state)
+{
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] Application state changed to:" 
+             << (state == Qt::ApplicationActive ? "Active" :
+                 state == Qt::ApplicationSuspended ? "Suspended" :
+                 state == Qt::ApplicationInactive ? "Inactive" : "Hidden");
+#endif
+    
+    if (state == Qt::ApplicationActive) {
+        // App returning to foreground - reset ALL touch state
+        // This is critical for Android where Qt's touch tracking gets corrupted
+        // after screen lock/unlock or app switching
+        if (m_touchHandler) {
+            m_touchHandler->reset();
+        }
+        if (m_gesture.isActive()) {
+            m_gesture.reset();
+            m_gestureTimeoutTimer->stop();
+        }
+        
+        // Start touch cooldown - reject touches briefly to let system stabilize
+        m_touchCooldownActive = true;
+        m_touchCooldownTimer.start();
+    }
+}
+#endif
+
+void DocumentViewport::enterEvent(QEnterEvent* event)
+{
+    m_pointerInViewport = true;
+    QWidget::enterEvent(event);
+}
+
+void DocumentViewport::leaveEvent(QEvent* event)
+{
+    m_pointerInViewport = false;
+    
+    // Trigger repaint to hide eraser cursor when pointer leaves viewport
+    if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
+        qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+        QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                          eraserRadius * 2, eraserRadius * 2);
+        update(cursorRect.toRect());
+    }
+    
+    QWidget::leaveEvent(event);
+}
+
 void DocumentViewport::tabletEvent(QTabletEvent* event)
 {
     // Determine event type
@@ -2582,6 +2723,46 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         default:
             event->ignore();
             return;
+    }
+    
+    // ===== Tablet Hover Tracking for Eraser Cursor =====
+    // TabletMove events arrive even when the pen is hovering (not pressed).
+    // We need to track position for eraser cursor even during hover.
+    // handlePointerEvent() returns early if m_pointerActive is false,
+    // so we handle hover tracking separately here.
+    if (event->type() == QEvent::TabletMove && !m_pointerActive) {
+        QPointF newPos = event->position();
+        
+        // Check if stylus is within widget bounds
+        // Unlike mouse, tablet doesn't trigger leaveEvent when stylus moves outside
+        m_pointerInViewport = rect().contains(newPos.toPoint());
+        
+        // Restart hover timer - if no tablet event for 100ms, stylus left
+        // This handles the case where stylus hovers to another widget
+        // (we stop receiving events, timer fires, cursor hidden)
+        if (m_tabletHoverTimer) {
+            m_tabletHoverTimer->start();
+        }
+        
+        // Check if eraser tool is active or this is hardware eraser
+        bool isEraserHover = (m_currentTool == ToolType::Eraser) ||
+                             (event->pointerType() == QPointingDevice::PointerType::Eraser);
+        
+        if (isEraserHover) {
+            QPointF oldPos = m_lastPointerPos;
+            m_lastPointerPos = newPos;
+            
+            // Trigger repaint for eraser cursor update
+            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+            QRectF newRect(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+            update(oldRect.united(newRect).toRect());
+        }
+        
+        event->accept();
+        return;
     }
     
     PointerEvent pe = tabletToPointerEvent(event, peType);
@@ -2734,15 +2915,35 @@ void DocumentViewport::zoomAtPoint(qreal newZoom, QPointF viewportPt)
 void DocumentViewport::beginZoomGesture(QPointF centerPoint)
 {
     if (m_gesture.isActive()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[DocumentViewport] beginZoomGesture BLOCKED - already active!"
+                 << "activeType:" << m_gesture.activeType;
+#endif
         return;  // Already in gesture
     }
     
+    // Safety check: don't start gesture if widget is not in a valid state
+    if (!isVisible() || !isEnabled()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[DocumentViewport] beginZoomGesture BLOCKED - widget not visible/enabled";
+#endif
+        return;
+    }
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] beginZoomGesture STARTED";
+#endif
     m_gesture.activeType = ViewportGestureState::Zoom;
     m_gesture.startZoom = m_zoomLevel;
     m_gesture.targetZoom = m_zoomLevel;
     m_gesture.zoomCenter = centerPoint;
     m_gesture.startPan = m_panOffset;
     m_gesture.targetPan = m_panOffset;
+    
+    // Track initial centroid for pan calculation during zoom gesture
+    // This enables simultaneous pan+zoom (gallery-style 2-finger gestures)
+    m_gesture.initialCentroid = centerPoint;
+    m_gesture.initialCentroidSet = true;
     
     // Capture current viewport as cached frame for fast scaling
     m_gesture.cachedFrame = grab();
@@ -2763,10 +2964,30 @@ void DocumentViewport::updateZoomGesture(qreal scaleFactor, QPointF centerPoint)
         beginZoomGesture(centerPoint);
     }
     
+#ifdef SPEEDYNOTE_DEBUG
+    static int updateCount = 0;
+    updateCount++;
+    if (updateCount % 10 == 1) {  // Log every 10th update to avoid spam
+        qDebug() << "[DocumentViewport] updateZoomGesture"
+                 << "scale:" << scaleFactor
+                 << "targetZoom:" << m_gesture.targetZoom * scaleFactor;
+    }
+#endif
+    
     // Accumulate zoom (multiplicative for smooth feel)
     m_gesture.targetZoom *= scaleFactor;
     m_gesture.targetZoom = qBound(MIN_ZOOM, m_gesture.targetZoom, MAX_ZOOM);
     m_gesture.zoomCenter = centerPoint;
+    
+    // Calculate pan from centroid movement (for gallery-style 2-finger gestures)
+    // The centroid movement in viewport pixels needs to be converted to document coords
+    // using the START zoom level (since we're transforming the cached frame)
+    if (m_gesture.initialCentroidSet) {
+        QPointF centroidDelta = centerPoint - m_gesture.initialCentroid;
+        // Convert viewport pixels to document coords (at start zoom level)
+        // Negate because moving finger right should pan view left (reveal content on right)
+        m_gesture.targetPan = m_gesture.startPan - centroidDelta / m_gesture.startZoom;
+    }
     
     // Restart timeout timer (each event resets the timeout)
     m_gestureTimeoutTimer->start(GESTURE_TIMEOUT_MS);
@@ -2781,6 +3002,11 @@ void DocumentViewport::endZoomGesture()
         return;  // Not in zoom gesture
     }
     
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] endZoomGesture"
+             << "finalZoom:" << m_gesture.targetZoom;
+#endif
+    
     // Stop timeout timer
     m_gestureTimeoutTimer->stop();
     
@@ -2790,11 +3016,18 @@ void DocumentViewport::endZoomGesture()
                  : MIN_ZOOM;
     qreal finalZoom = qBound(minZ, m_gesture.targetZoom, MAX_ZOOM);
     
-    // Calculate new pan offset to keep center point fixed
-    // The center point should map to the same document point before and after zoom
+    // Calculate new pan offset combining:
+    // 1. Zoom center correction (keep center point fixed during zoom)
+    // 2. Centroid movement pan (gallery-style 2-finger gesture)
     QPointF center = m_gesture.zoomCenter;
     QPointF docPtAtCenter = center / m_gesture.startZoom + m_gesture.startPan;
-    QPointF newPan = docPtAtCenter - center / finalZoom;
+    QPointF zoomCorrectedPan = docPtAtCenter - center / finalZoom;
+    
+    // Add the centroid-based pan offset
+    // targetPan already contains startPan + centroid delta, so we need to add
+    // just the delta on top of the zoom-corrected pan
+    QPointF centroidPanDelta = m_gesture.targetPan - m_gesture.startPan;
+    QPointF newPan = zoomCorrectedPan + centroidPanDelta;
     
     // Clear gesture state BEFORE applying zoom (to avoid recursion in paintEvent)
     m_gesture.reset();
@@ -2831,6 +3064,14 @@ void DocumentViewport::beginPanGesture()
 {
     if (m_gesture.isActive()) {
         return;  // Already in gesture
+    }
+    
+    // Safety check: don't start gesture if widget is not in a valid state
+    if (!isVisible() || !isEnabled()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[DocumentViewport] beginPanGesture BLOCKED - widget not visible/enabled";
+#endif
+        return;
     }
     
     m_gesture.activeType = ViewportGestureState::Pan;
@@ -2940,11 +3181,56 @@ TouchGestureMode DocumentViewport::touchGestureMode() const
 
 bool DocumentViewport::event(QEvent* event)
 {
+    // ===== Tablet Proximity Events =====
+    // These are sent when the stylus enters or leaves the detection range of the tablet.
+    // Used to hide eraser cursor when pen is lifted away from the tablet surface.
+    if (event->type() == QEvent::TabletEnterProximity) {
+        m_pointerInViewport = true;
+        return true;
+    }
+    
+    if (event->type() == QEvent::TabletLeaveProximity) {
+        m_pointerInViewport = false;
+        
+        // Stop hover timer - no need to wait for timeout, we know stylus left
+        if (m_tabletHoverTimer) {
+            m_tabletHoverTimer->stop();
+        }
+        
+        // Trigger repaint to hide eraser cursor when pen leaves proximity
+        if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
+            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                              eraserRadius * 2, eraserRadius * 2);
+            update(cursorRect.toRect());
+        }
+        return true;
+    }
+    
     // Forward touch events to handler
     if (event->type() == QEvent::TouchBegin ||
         event->type() == QEvent::TouchUpdate ||
         event->type() == QEvent::TouchEnd ||
         event->type() == QEvent::TouchCancel) {
+        
+        // Touch cooldown: reject all touch events briefly after becoming visible
+        // This prevents crashes from stale touch state after sleep/wake on Android
+        if (m_touchCooldownActive) {
+            if (m_touchCooldownTimer.elapsed() < TOUCH_COOLDOWN_MS) {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[DocumentViewport] Touch event rejected - cooldown active"
+                         << "elapsed:" << m_touchCooldownTimer.elapsed() << "ms";
+#endif
+                event->accept();  // Accept but ignore
+                return true;
+            } else {
+                // Cooldown expired
+                m_touchCooldownActive = false;
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[DocumentViewport] Touch cooldown ended";
+#endif
+            }
+        }
         
         QTouchEvent* touchEvent = static_cast<QTouchEvent*>(event);
         
@@ -3919,15 +4205,18 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     QColor strokeColor;
     qreal strokeThickness;
     bool useFixedPressure = false;  // Marker uses fixed thickness (ignores pressure)
+    StrokeCapStyle capStyle = StrokeCapStyle::Round;  // Default round caps for pen
     
     if (m_currentTool == ToolType::Marker) {
         strokeColor = m_markerColor;        // Includes alpha for opacity
         strokeThickness = m_markerThickness;
         useFixedPressure = true;            // Fixed thickness, no pressure variation
+        capStyle = StrokeCapStyle::Flat;    // Flat caps for marker (no alpha compounding)
     } else {
         strokeColor = m_penColor;
         strokeThickness = m_penThickness;
         useFixedPressure = false;           // Pen uses pressure for thickness
+        capStyle = StrokeCapStyle::Round;   // Round caps for pen
     }
     
     // For edgeless mode, we don't require a page hit - we use document coordinates
@@ -3943,6 +4232,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         m_currentStroke.color = strokeColor;
         m_currentStroke.baseThickness = strokeThickness;
+        m_currentStroke.capStyle = capStyle;
         
         // Reset incremental rendering cache
         resetCurrentStrokeCache();
@@ -3973,6 +4263,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_currentStroke.color = strokeColor;
     m_currentStroke.baseThickness = strokeThickness;
+    m_currentStroke.capStyle = capStyle;
     
     // Reset incremental rendering cache (Task 2.3)
     resetCurrentStrokeCache();
@@ -4347,15 +4638,18 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
         return;
     }
     
-    // Determine color and thickness based on current tool
+    // Determine color, thickness, and cap style based on current tool
     QColor strokeColor;
     qreal strokeThickness;
+    StrokeCapStyle capStyle;
     if (m_currentTool == ToolType::Marker) {
         strokeColor = m_markerColor;
         strokeThickness = m_markerThickness;
+        capStyle = StrokeCapStyle::Flat;    // Flat caps for marker
     } else {
         strokeColor = m_penColor;
         strokeThickness = m_penThickness;
+        capStyle = StrokeCapStyle::Round;   // Round caps for pen
     }
     
     // Create stroke with just two points (start and end)
@@ -4363,6 +4657,7 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
     stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     stroke.color = strokeColor;
     stroke.baseThickness = strokeThickness;
+    stroke.capStyle = capStyle;
     
     // Both points have pressure 1.0 (no pressure variation for straight lines)
     StrokePoint startPt;
@@ -4482,6 +4777,7 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 localStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 localStroke.color = strokeColor;
                 localStroke.baseThickness = strokeThickness;
+                localStroke.capStyle = capStyle;  // Preserve cap style from tool
                 
                 QPointF tileOrigin(seg.coord.first * Document::EDGELESS_TILE_SIZE,
                                    seg.coord.second * Document::EDGELESS_TILE_SIZE);
@@ -7846,6 +8142,7 @@ void DocumentViewport::renderLassoSelection(QPainter& painter)
             transformedStroke.id = stroke.id;
             transformedStroke.color = stroke.color;
             transformedStroke.baseThickness = stroke.baseThickness;
+            transformedStroke.capStyle = stroke.capStyle;  // Preserve cap style
             
             for (const StrokePoint& pt : stroke.points) {
                 StrokePoint tPt;
@@ -9544,6 +9841,9 @@ VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect, const Q
     // Stroke width = rectangle height (text line height)
     stroke.baseThickness = rect.height();
     
+    // Use flat caps for highlights (like markers) to avoid alpha compounding
+    stroke.capStyle = StrokeCapStyle::Flat;
+    
     // Create a horizontal line through the center of the rectangle
     // This is how markers work: a thick line that covers the text area
     StrokePoint startPoint;
@@ -9794,7 +10094,12 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         }
         
         // Use line-based rendering for incremental updates (fast)
-        QPen pen(drawColor, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        // Use FlatCap for markers (Flat capStyle) to get flat ends at stroke start/end
+        // For FlatCap, we need to manually fill internal joints to avoid gaps
+        Qt::PenCapStyle penCap = (m_currentStroke.capStyle == StrokeCapStyle::Round) 
+                                  ? Qt::RoundCap : Qt::FlatCap;
+        QPen pen(drawColor, 1.0, Qt::SolidLine, penCap, Qt::RoundJoin);
+        bool needJointFill = (m_currentStroke.capStyle == StrokeCapStyle::Flat);
         
         // Start from the last rendered point (or 1 if starting fresh)
         int startIdx = qMax(1, m_lastRenderedPointIndex);
@@ -9810,10 +10115,21 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
             pen.setWidthF(width);
             cachePainter.setPen(pen);
             cachePainter.drawLine(p0.pos, p1.pos);
+            
+            // For FlatCap strokes, fill the internal joint at p0 (where this segment
+            // connects to the previous segment). Skip point 0 (stroke start should stay flat).
+            // The current end (point n-1) is always p1, never p0, so it stays flat too.
+            if (needJointFill && i > 1) {
+                qreal jointRadius = qMax(m_currentStroke.baseThickness * p0.pressure, 1.0) / 2.0;
+                cachePainter.setPen(Qt::NoPen);
+                cachePainter.setBrush(drawColor);
+                cachePainter.drawEllipse(p0.pos, jointRadius, jointRadius);
+            }
         }
         
-        // Draw start cap if this is the first render
-        if (m_lastRenderedPointIndex == 0 && n >= 1) {
+        // Draw start cap if this is the first render (only for Round cap style)
+        if (m_lastRenderedPointIndex == 0 && n >= 1 && 
+            m_currentStroke.capStyle == StrokeCapStyle::Round) {
             qreal startRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[0].pressure, 1.0) / 2.0;
             cachePainter.setPen(Qt::NoPen);
             cachePainter.setBrush(drawColor);
@@ -9834,7 +10150,8 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     }
     
     // Draw end cap at current position (always needs updating as it moves)
-    if (n >= 1) {
+    // Only for Round cap style - Flat caps (markers) don't need end caps
+    if (n >= 1 && m_currentStroke.capStyle == StrokeCapStyle::Round) {
         // Apply transform to draw end cap at correct position
         painter.save();
         painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
@@ -10020,8 +10337,15 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
         return;
     }
     
-    // Only draw if pointer is within the viewport
-    // Note: Don't use isNull() - QPointF(0,0) is a valid position!
+    // Only draw if pointer is currently inside the viewport
+    // m_pointerInViewport is set by enterEvent/leaveEvent for reliable tracking
+    // This fixes the issue where cursor would stay visible after pen leaves
+    if (!m_pointerInViewport) {
+        return;
+    }
+    
+    // Additional check: pointer position should be within bounds
+    // (defensive check in case enterEvent wasn't called)
     if (!rect().contains(m_lastPointerPos.toPoint())) {
         return;
     }

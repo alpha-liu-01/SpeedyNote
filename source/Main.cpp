@@ -81,7 +81,7 @@ static void applyAndroidPalette(QApplication& app)
         
         QColor darkGray(53, 53, 53);
         QColor gray(128, 128, 128);
-        QColor blue(42, 130, 218);
+        QColor blue("#316882");  // SpeedyNote default teal accent
         
         darkPalette.setColor(QPalette::Window, QColor(45, 45, 45));
         darkPalette.setColor(QPalette::WindowText, Qt::white);
@@ -250,7 +250,7 @@ static void applyWindowsPalette(QApplication& app)
 
         QColor darkGray(53, 53, 53);
         QColor gray(128, 128, 128);
-        QColor blue(42, 130, 218);
+        QColor blue("#316882");  // SpeedyNote default teal accent
 
         darkPalette.setColor(QPalette::Window, QColor(45, 45, 45));
         darkPalette.setColor(QPalette::WindowText, Qt::white);
