@@ -204,21 +204,27 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         m_touchIdLastSeenTime.clear();
         m_activeTouchPoints = 0;
         
-        // Clear any lingering gesture state without calling viewport methods
-        // (viewport may be in an inconsistent state after app resume)
-        if (m_panActive) {
-            m_panActive = false;
-            // Don't call endTouchPan - just abandon the gesture silently
-        }
-        if (m_pinchActive) {
-            m_pinchActive = false;
-            // Don't call endTouchPinch - just abandon silently
-        }
-        
-        // Stop inertia if running (prevents callbacks during reset)
+        // Stop inertia if running (must happen first)
         if (m_inertiaTimer && m_inertiaTimer->isActive()) {
             m_inertiaTimer->stop();
             m_velocitySamples.clear();
+        }
+        
+        // Clear handler's gesture flags
+        m_panActive = false;
+        m_pinchActive = false;
+        
+        // CRITICAL: Also reset the viewport's gesture state
+        // Without this, the viewport keeps a stale grabbed pixmap and
+        // subsequent gestures would transform it instead of capturing fresh.
+        // This was the difference between Android and desktop behavior.
+        if (m_viewport->isGestureActive()) {
+            if (m_viewport->isPanGestureActive()) {
+                m_viewport->endPanGesture();
+            }
+            if (m_viewport->isZoomGestureActive()) {
+                m_viewport->endZoomGesture();
+            }
         }
         
 #ifdef Q_OS_ANDROID
