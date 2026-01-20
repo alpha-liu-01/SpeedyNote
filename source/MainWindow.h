@@ -191,7 +191,6 @@ public:
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
 
-    QSpinBox *pageInput = nullptr; // Made public for RecentNotebooksDialog
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
     // REMOVED MW7.6: addKeyboardMapping, removeKeyboardMapping, and getKeyboardMappings removed - old mapping system deleted
@@ -293,8 +292,6 @@ private slots:
     void showJumpToPageDialog();
     void goToPreviousPage(); // Go to previous page
     void goToNextPage();     // Go to next page
-    void onPageInputChanged(int newPage); // Handle spinbox page changes with direction tracking
-
 
     // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3

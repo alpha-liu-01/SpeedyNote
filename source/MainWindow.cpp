@@ -1313,7 +1313,6 @@ void MainWindow::switchPage(int pageIndex) {
     if (!vp) return;
     
     vp->scrollToPage(pageIndex);
-    // pageInput update is handled by currentPageChanged signal connection
 }
 
 void MainWindow::updatePanX(int value) {
@@ -1983,15 +1982,6 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
             m_layerPanel->setCurrentPage(page);
         });
         
-        // Phase S4: Connect viewport's currentPageChanged to update pageInput spinbox
-        connect(viewport, &DocumentViewport::currentPageChanged, 
-                this, [this](int pageIndex) {
-            if (pageInput) {
-                pageInput->blockSignals(true);
-                pageInput->setValue(pageIndex + 1);  // Convert 0-based to 1-based for display
-                pageInput->blockSignals(false);
-            }
-        });
     }
 }
 
@@ -2911,19 +2901,11 @@ void MainWindow::showJumpToPageDialog() {
     int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     
     bool ok;
-    int newPage = QInputDialog::getInt(this, "Jump to Page", "Enter Page Number:", 
+    int newPage = QInputDialog::getInt(this, tr("Jump to Page"), tr("Enter Page Number:"), 
                                        currentPage, 1, 9999, 1, &ok);
     if (ok) {
-        // ✅ Use direction-aware page switching for jump-to-page
-        int direction = (newPage > currentPage) ? 1 : (newPage < currentPage) ? -1 : 0;
-        if (direction != 0) {
-            switchPage(newPage);
-        } else {
-            switchPage(newPage); // Same page, no direction needed
-        }
-        if (pageInput) {
-        pageInput->setValue(newPage);
-        }
+        // Convert 1-based user input to 0-based index for switchPage()
+        switchPage(newPage - 1);
     }
 }
 
@@ -2939,11 +2921,6 @@ void MainWindow::goToNextPage() {
     DocumentViewport* vp = currentViewport();
     if (!vp) return;
     switchPage(vp->currentPageIndex() + 1);
-}
-
-void MainWindow::onPageInputChanged(int newPage) {
-    // Phase S4: newPage is 1-based (from spinbox), convert to 0-based for switchPage
-    switchPage(newPage - 1);
 }
 
 
