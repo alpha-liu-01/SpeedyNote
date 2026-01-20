@@ -146,7 +146,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.0.1"));
+    setWindowTitle(tr("SpeedyNote 1.0.2"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -3041,7 +3041,7 @@ void MainWindow::updateApplicationPalette() {
         QColor darkGray(53, 53, 53);
         QColor gray(128, 128, 128);
         QColor black(25, 25, 25);
-        QColor blue(42, 130, 218);
+        QColor blue("#316882");  // SpeedyNote default teal accent
         QColor lightGray(180, 180, 180);
         
         // Window colors (main background)
@@ -3288,12 +3288,12 @@ void MainWindow::saveThemeSettings() {
 void MainWindow::loadThemeSettings() {
     QSettings settings("SpeedyNote", "App");
     useCustomAccentColor = settings.value("useCustomAccentColor", false).toBool();
-    QString colorName = settings.value("customAccentColor", "#0078D4").toString();
+    QString colorName = settings.value("customAccentColor", "#316882").toString();
     customAccentColor = QColor(colorName);
     
     // Ensure valid values
     if (!customAccentColor.isValid()) {
-        customAccentColor = QColor("#0078D4"); // Default blue
+        customAccentColor = QColor("#316882"); // Default teal accent
     }
     
     // Apply theme immediately after loading
