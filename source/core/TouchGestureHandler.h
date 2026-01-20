@@ -1,21 +1,23 @@
 #pragma once
 
 // ============================================================================
-// TouchGestureHandler - Option 2: Clean Break + Hysteresis
+// TouchGestureHandler - Handles touch gestures for DocumentViewport
 // ============================================================================
-// Redesigned for reliability on Android (BUG-A005 final fix v2)
+// Part of the Touch Gesture Hub (Phase TG)
 //
-// Design principles:
-// - 1 finger = Pan gesture (for navigation)
-// - 2 fingers = Zoom gesture (pinch to zoom)
-// - Clean break on finger count change (end gesture, clear state, start fresh)
-// - Hysteresis: require N stable frames before changing gesture modes
-// - No mixed transitions (the source of all bugs)
+// This class encapsulates all touch gesture logic:
+// - Single-finger pan with inertia
+// - Pinch-to-zoom (in Full mode)
+// - 3-finger tap detection
+//
+// It calls back to DocumentViewport's deferred gesture APIs for smooth rendering.
 // ============================================================================
 
 #include <QObject>
 #include <QPointF>
 #include <QVector>
+#include <QSet>
+#include <QHash>
 #include <QElapsedTimer>
 #include <QTimer>
 
@@ -36,11 +38,9 @@ enum class TouchGestureMode {
 /**
  * @brief Handles touch gestures for DocumentViewport.
  * 
- * Option 2 Design:
- * - 1 finger: pan gesture (with inertia)
- * - 2 fingers: pinch-to-zoom gesture (no pan during zoom)
- * - Clean break on finger count change: fully end one gesture before starting another
- * - Hysteresis: require stable finger count for N frames before switching modes
+ * Processes touch events and translates them into pan/zoom operations
+ * by calling the viewport's deferred gesture API. This keeps touch logic
+ * separate from the main viewport rendering code.
  */
 class TouchGestureHandler : public QObject
 {
@@ -53,14 +53,22 @@ public:
      * @param parent QObject parent for memory management.
      */
     explicit TouchGestureHandler(DocumentViewport* viewport, QObject* parent = nullptr);
-    ~TouchGestureHandler() = default;
+    ~TouchGestureHandler();
     
     /**
      * @brief Handle a touch event.
      * @param event The touch event to process.
-     * @return True if event was handled, false to pass through.
+     * @return True if event was handled, false otherwise.
      */
     bool handleTouchEvent(QTouchEvent* event);
+    
+    /**
+     * @brief Reset all gesture state.
+     * 
+     * Call this when the viewport is hidden, document changes, or app resumes.
+     * Clears all tracking state, stops inertia, and ends any active gestures.
+     */
+    void reset();
     
     /**
      * @brief Set the touch gesture mode.
@@ -77,15 +85,9 @@ public:
     
     /**
      * @brief Check if a touch gesture is currently active.
-     * Includes active pan/zoom or inertia animation.
+     * Includes active pan, pinch, or inertia animation.
      */
-    bool isActive() const { return m_gestureType != GestureType::None || (m_inertiaTimer && m_inertiaTimer->isActive()); }
-    
-    /**
-     * @brief Force reset all gesture state.
-     * Call this on tab switch, hideEvent, etc. to prevent stale state.
-     */
-    void resetAllState();
+    bool isActive() const { return m_panActive || m_pinchActive || (m_inertiaTimer && m_inertiaTimer->isActive()); }
 
 private slots:
     /**
@@ -95,104 +97,72 @@ private slots:
     void onInertiaFrame();
 
 private:
-    // ===== Gesture Type =====
-    enum class GestureType {
-        None,       // No gesture active
-        OneFinger,  // 1-finger pan
-        TwoFinger   // 2-finger zoom
-    };
-    
     // ===== Viewport Reference =====
     DocumentViewport* m_viewport;  ///< Viewport to control (not owned)
     
     // ===== Mode =====
     TouchGestureMode m_mode = TouchGestureMode::Disabled;
     
-    // ===== Current Gesture State =====
-    GestureType m_gestureType = GestureType::None;
+    // ===== Single-finger Pan Tracking =====
+    bool m_panActive = false;                ///< Whether a touch pan is in progress
+    QPointF m_lastPos;                       ///< Last touch position (viewport coords)
     
-    // ===== Hysteresis State =====
-    int m_pendingFingerCount = 0;       ///< The finger count we're transitioning to
-    int m_hysteresisCounter = 0;        ///< How many frames we've seen this count
-    static constexpr int HYSTERESIS_THRESHOLD = 3;  ///< Frames required before mode switch
-    
-    // ===== Transition Lockout =====
-    // After ending a gesture via hysteresis (e.g., 2→1 finger), don't immediately
-    // start a new gesture. Wait for a fresh TouchBegin to avoid stale position data.
-    bool m_waitingForFreshTouch = false;
-    
-    // ===== 1-Finger Pan State =====
-    QPointF m_lastPanPosition;          ///< Last position for delta calculation
-    
-    // ===== 2-Finger Zoom State =====
-    QPointF m_lastCentroid;             ///< Last centroid position
-    qreal m_lastDistance = 0;           ///< Last finger distance (for zoom scale)
-    qreal m_initialDistance = 0;        ///< Distance at gesture start (for zoom threshold)
-    bool m_zoomActivated = false;       ///< Whether zoom threshold has been exceeded
-    qreal m_smoothedScale = 1.0;        ///< Exponentially smoothed scale factor
+    // ===== Pinch-to-zoom Tracking =====
+    bool m_pinchActive = false;              ///< Whether a pinch gesture is in progress
+    qreal m_pinchStartDistance = 0;          ///< Distance between fingers at start (for incremental scaling)
+    QPointF m_pinchCentroid;                 ///< Centroid of pinch gesture (fixed at start)
+    qreal m_initialDistance = 0;             ///< Distance at gesture start (for zoom threshold)
+    bool m_zoomActivated = false;            ///< Whether zoom threshold has been exceeded
+    qreal m_smoothedScale = 1.0;             ///< Exponentially smoothed scale factor
     
     // Zoom dead zone: don't zoom until finger distance changes by this percentage
-    // This prevents zoom "shaking" during pan-only gestures
-    static constexpr qreal ZOOM_ACTIVATION_THRESHOLD = 0.1;  ///< 10% change required
+    // This prevents zoom "shaking" during pan-only 2-finger gestures
+    static constexpr qreal ZOOM_ACTIVATION_THRESHOLD = 0.1;  ///< 10% change required to activate
     
     // Scale dead zone: treat scale values within this range of 1.0 as exactly 1.0
     // This prevents zoom jitter from small finger distance variations
-    static constexpr qreal ZOOM_SCALE_DEAD_ZONE = 0.002;  ///< 0.2%
+    static constexpr qreal ZOOM_SCALE_DEAD_ZONE = 0.007;  ///< 0.7% dead zone
     
     // Zoom smoothing: exponential moving average factor (0-1)
     // Higher = more responsive but jittery, Lower = smoother but laggy
     static constexpr qreal ZOOM_SMOOTHING_FACTOR = 0.4;
     
     // ===== Velocity Tracking for Inertia =====
-    QVector<QPointF> m_velocitySamples;      ///< Recent velocity samples (pixels/ms)
+    QVector<QPointF> m_velocitySamples;      ///< Recent velocity samples (pixels/ms) for averaging
     QElapsedTimer m_velocityTimer;           ///< Timer for velocity calculation
-    static constexpr int MAX_VELOCITY_SAMPLES = 5;
+    static constexpr int MAX_VELOCITY_SAMPLES = 5;  ///< Max samples to keep
     
     // ===== Inertia Animation =====
     QTimer* m_inertiaTimer = nullptr;        ///< Timer for inertia animation frames
     QPointF m_inertiaVelocity;               ///< Current inertia velocity (doc coords/ms)
-    static constexpr qreal INERTIA_FRICTION = 0.92;
-    static constexpr qreal INERTIA_MIN_VELOCITY = 0.05;
-    static constexpr int INERTIA_INTERVAL_MS = 16;  ///< ~60 FPS
+    static constexpr qreal INERTIA_FRICTION = 0.92;     ///< Velocity multiplier per frame (lower = more resistance)
+    static constexpr qreal INERTIA_MIN_VELOCITY = 0.05; ///< Stop threshold (doc coords/ms)
+    static constexpr int INERTIA_INTERVAL_MS = 16;      ///< ~60 FPS
+    
+    // ===== Multi-touch Tracking =====
+    int m_activeTouchPoints = 0;             ///< Number of active touch points (derived from tracked IDs)
+    QSet<int> m_trackedTouchIds;             ///< Track touch point IDs across events (fixes Android event splitting)
+    QHash<int, QPointF> m_lastTouchPositions; ///< Last known position for each touch ID (fixes Android partial updates)
+    QHash<int, qint64> m_touchIdLastSeenTime; ///< Timestamp (ms) when each ID was last seen in an event
+    static constexpr qint64 STALE_TIMEOUT_MS = 500; ///< Remove ID if not seen for this many milliseconds
     
     // ===== 3-Finger Tap Detection =====
-    QElapsedTimer m_threeFingerTimer;
-    bool m_threeFingerTimerActive = false;
-    static constexpr qint64 TAP_MAX_DURATION_MS = 300;
+    QElapsedTimer m_threeFingerTimer;        ///< Timer for 3-finger tap detection
+    bool m_threeFingerTimerActive = false;   ///< Whether 3-finger timer is running
+    static constexpr qint64 TAP_MAX_DURATION_MS = 300;  ///< Max duration for tap detection
     
     // ===== Helper Methods =====
     
     /**
-     * @brief End the current gesture completely and clear state.
+     * @brief End the current touch pan gesture.
      * @param startInertia If true, start inertia animation if velocity is sufficient.
      */
-    void endGesture(bool startInertia);
+    void endTouchPan(bool startInertia);
     
     /**
-     * @brief Start a 1-finger pan gesture.
-     * @param position The initial finger position.
+     * @brief End the current pinch-to-zoom gesture.
      */
-    void beginOneFinger(QPointF position);
-    
-    /**
-     * @brief Update a 1-finger pan gesture.
-     * @param position The current finger position.
-     */
-    void updateOneFinger(QPointF position);
-    
-    /**
-     * @brief Start a 2-finger zoom gesture.
-     * @param p1 Position of first finger.
-     * @param p2 Position of second finger.
-     */
-    void beginTwoFinger(QPointF p1, QPointF p2);
-    
-    /**
-     * @brief Update a 2-finger zoom gesture.
-     * @param p1 Position of first finger.
-     * @param p2 Position of second finger.
-     */
-    void updateTwoFinger(QPointF p1, QPointF p2);
+    void endTouchPinch();
     
     /**
      * @brief Handle a 3-finger tap gesture.

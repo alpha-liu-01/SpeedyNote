@@ -2619,12 +2619,34 @@ void DocumentViewport::hideEvent(QHideEvent* event)
         m_gestureTimeoutTimer->stop();
     }
     
-    // Also reset touch handler state (Option 2: Clean Break)
+    // Also reset touch handler state including inertia
+    // This prevents inertia callbacks from accessing invalid widget state
     if (m_touchHandler) {
-        m_touchHandler->resetAllState();
+        m_touchHandler->reset();
     }
     
     QWidget::hideEvent(event);
+}
+
+void DocumentViewport::showEvent(QShowEvent* event)
+{
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[DocumentViewport] showEvent - starting touch cooldown";
+#endif
+    
+    // Start touch cooldown period
+    // After sleep/wake or tab switching, Android may send stale touch events
+    // that can crash Qt's touch event processing. Reject all touch events
+    // for a brief period to let the system stabilize.
+    m_touchCooldownActive = true;
+    m_touchCooldownTimer.start();
+    
+    // Also ensure touch handler is reset
+    if (m_touchHandler) {
+        m_touchHandler->reset();
+    }
+    
+    QWidget::showEvent(event);
 }
 
 void DocumentViewport::enterEvent(QEnterEvent* event)
@@ -2864,6 +2886,14 @@ void DocumentViewport::beginZoomGesture(QPointF centerPoint)
         return;  // Already in gesture
     }
     
+    // Safety check: don't start gesture if widget is not in a valid state
+    if (!isVisible() || !isEnabled()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[DocumentViewport] beginZoomGesture BLOCKED - widget not visible/enabled";
+#endif
+        return;
+    }
+    
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[DocumentViewport] beginZoomGesture STARTED";
 #endif
@@ -2998,6 +3028,14 @@ void DocumentViewport::beginPanGesture()
 {
     if (m_gesture.isActive()) {
         return;  // Already in gesture
+    }
+    
+    // Safety check: don't start gesture if widget is not in a valid state
+    if (!isVisible() || !isEnabled()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[DocumentViewport] beginPanGesture BLOCKED - widget not visible/enabled";
+#endif
+        return;
     }
     
     m_gesture.activeType = ViewportGestureState::Pan;
@@ -3138,6 +3176,25 @@ bool DocumentViewport::event(QEvent* event)
         event->type() == QEvent::TouchUpdate ||
         event->type() == QEvent::TouchEnd ||
         event->type() == QEvent::TouchCancel) {
+        
+        // Touch cooldown: reject all touch events briefly after becoming visible
+        // This prevents crashes from stale touch state after sleep/wake on Android
+        if (m_touchCooldownActive) {
+            if (m_touchCooldownTimer.elapsed() < TOUCH_COOLDOWN_MS) {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[DocumentViewport] Touch event rejected - cooldown active"
+                         << "elapsed:" << m_touchCooldownTimer.elapsed() << "ms";
+#endif
+                event->accept();  // Accept but ignore
+                return true;
+            } else {
+                // Cooldown expired
+                m_touchCooldownActive = false;
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[DocumentViewport] Touch cooldown ended";
+#endif
+            }
+        }
         
         QTouchEvent* touchEvent = static_cast<QTouchEvent*>(event);
         

@@ -21,7 +21,7 @@
 | **BUG-A002** | Document Never Saves | ✅ Fixed (app-private storage) |
 | **BUG-A003** | PDF Loading Fails | ✅ Fixed (Java SAF handler + storage management) |
 | **BUG-A004** | Extreme Stroke Lag | ✅ Fixed (Qt 6.9.3 + 240Hz unbuffered) |
-| **BUG-A005** | Pinch-to-Zoom Unreliable | ✅ Fixed (v9: Clean Break + Hysteresis) |
+| **BUG-A005** | Pinch-to-Zoom Unreliable | ✅ Fixed (2-finger TouchBegin handler) |
 | **BUG-A006** | PDF Page Switch Crash | ✅ Fixed (multi-layer fix) |
 | **BUG-A007** | Dark Mode Not Syncing | ✅ Fixed (JNI + Fusion style) |
 | **BUG-A008** | Stylus Eraser Not Working | ✅ Fixed (JNI tool type detection) |
@@ -261,7 +261,7 @@ public boolean dispatchTouchEvent(MotionEvent event) {
 ---
 
 ### BUG-A005: Pinch-to-Zoom Unreliable
-**Status:** ✅ Fixed (v9)  
+**Status:** ✅ Fixed (v7)  
 **Priority:** Medium  
 **Category:** Touch Input / Gestures
 **Platform:** Android only
@@ -598,83 +598,6 @@ if (fingerCount == 1) {
 - Simple and robust gesture detection
 - Standard UX (matches Google Maps, Photos, Samsung Notes)
 - Pending user testing...
-
----
-
-### BUG-A005 v9: Option 2 - Clean Break + Hysteresis + 1-Finger Pan
-
-**User Feedback on v8:**
-While the v8 2-finger pan+zoom worked, user wanted to restore 1-finger pan for single-handed navigation, while keeping 2-finger for zoom-only. The challenge was preventing the two gestures from colliding during finger transitions.
-
-**Solution: Option 2 Design**
-
-| Fingers | Gesture | Notes |
-|---------|---------|-------|
-| 1 finger | Pan | Single-finger navigation |
-| 2 fingers | Zoom | Pinch-to-zoom only, no pan mixing |
-| 3+ fingers | Tap | Toggle sidebar |
-
-**Key Mechanisms:**
-
-1. **Clean Break on Finger Count Change**
-   - When finger count changes, fully END the current gesture
-   - Clear ALL state (positions, zoom, hysteresis counters)
-   - Only THEN start new gesture mode
-   - No partial/mixed states possible
-
-2. **Hysteresis (Anti-Jitter)**
-   - Require N stable frames (default: 3) before switching gesture modes
-   - Prevents spurious finger events from causing rapid mode switches
-   - During hysteresis, continue current gesture, ignore new finger count
-
-3. **Explicit State Machine**
-   ```
-   GestureType::None → GestureType::OneFinger (1 finger stable for 3 frames)
-   GestureType::None → GestureType::TwoFinger (2 fingers stable for 3 frames)
-   GestureType::OneFinger → GestureType::TwoFinger (clean break, 3-frame hysteresis)
-   GestureType::TwoFinger → GestureType::OneFinger (clean break, 3-frame hysteresis)
-   ```
-
-4. **Complete Reset on Tab Switch**
-   - `DocumentViewport::hideEvent()` calls `m_touchHandler->resetAllState()`
-   - Clears gesture type, hysteresis counters, velocity samples, zoom state
-   - Prevents stale state from previous viewport affecting new one
-
-**Key Code:**
-```cpp
-// Hysteresis: don't switch immediately when finger count changes
-if (m_gestureType != GestureType::None && expectedType != m_gestureType) {
-    if (m_pendingFingerCount != fingerCount) {
-        m_pendingFingerCount = fingerCount;
-        m_hysteresisCounter = 1;
-    } else {
-        m_hysteresisCounter++;
-    }
-    
-    if (m_hysteresisCounter >= HYSTERESIS_THRESHOLD) {
-        // CLEAN BREAK: End current gesture completely
-        endGesture(false);  // No inertia on mode switch
-        // Reset hysteresis, then start new gesture below
-        m_pendingFingerCount = 0;
-        m_hysteresisCounter = 0;
-    } else {
-        // Still in hysteresis, continue current gesture
-        // Don't process the new finger count yet
-        return true;
-    }
-}
-```
-
-**Files Changed:**
-- `source/core/TouchGestureHandler.h` - Added hysteresis members, GestureType enum, resetAllState()
-- `source/core/TouchGestureHandler.cpp` - Implemented clean break + hysteresis logic
-- `source/core/DocumentViewport.cpp` - Updated hideEvent to call resetAllState()
-
-**Result:**
-- 1-finger pan for single-handed navigation ✅
-- 2-finger zoom for precise scaling ✅
-- No gesture collisions due to hysteresis ✅
-- No stale state bugs due to clean breaks ✅
 
 ---
 

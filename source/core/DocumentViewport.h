@@ -1599,6 +1599,7 @@ protected:
     void keyReleaseEvent(QKeyEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
     void hideEvent(QHideEvent* event) override;     ///< Clear gesture state when hidden
+    void showEvent(QShowEvent* event) override;     ///< Start touch cooldown after becoming visible
     void tabletEvent(QTabletEvent* event) override;
     void enterEvent(QEnterEvent* event) override;   ///< Track pointer entering viewport
     void leaveEvent(QEvent* event) override;        ///< Track pointer leaving viewport
@@ -1623,6 +1624,12 @@ private:
     // ===== Touch Gesture Handler =====
     // Touch gesture logic is encapsulated in TouchGestureHandler (see TouchGestureHandler.h)
     TouchGestureHandler* m_touchHandler = nullptr;  ///< Handles touch pan/zoom/tap
+    
+    // Touch cooldown: reject touch events briefly after becoming visible
+    // This prevents crashes from stale touch state after sleep/wake
+    QElapsedTimer m_touchCooldownTimer;
+    bool m_touchCooldownActive = false;
+    static constexpr qint64 TOUCH_COOLDOWN_MS = 150;
     
     // =========================================================================
     // CUSTOMIZABLE VALUES
