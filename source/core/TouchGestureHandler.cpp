@@ -54,18 +54,34 @@ bool getNativeTouchPositions(QPointF& pos1, QPointF& pos2)
     if (!activityClass) return false;
     
     jmethodID method = env->GetStaticMethodID(activityClass, "getNativeTouchPositions", "()[F");
-    if (!method) return false;
+    if (!method) {
+        env->DeleteLocalRef(activityClass);
+        return false;
+    }
     
     jfloatArray result = (jfloatArray)env->CallStaticObjectMethod(activityClass, method);
+    env->DeleteLocalRef(activityClass);  // No longer needed
+    
     if (!result) return false;
     
+    // Verify array has expected size (4 elements: x1, y1, x2, y2)
+    jsize arrayLen = env->GetArrayLength(result);
+    if (arrayLen < 4) {
+        env->DeleteLocalRef(result);
+        return false;
+    }
+    
     jfloat* positions = env->GetFloatArrayElements(result, nullptr);
-    if (!positions) return false;
+    if (!positions) {
+        env->DeleteLocalRef(result);
+        return false;
+    }
     
     pos1 = QPointF(positions[0], positions[1]);
     pos2 = QPointF(positions[2], positions[3]);
     
-    env->ReleaseFloatArrayElements(result, positions, 0);
+    env->ReleaseFloatArrayElements(result, positions, JNI_ABORT);  // JNI_ABORT: don't copy back
+    env->DeleteLocalRef(result);  // Clean up local reference
     return true;
 }
 
@@ -218,13 +234,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         // Without this, the viewport keeps a stale grabbed pixmap and
         // subsequent gestures would transform it instead of capturing fresh.
         // This was the difference between Android and desktop behavior.
-        if (m_viewport->isGestureActive()) {
-            if (m_viewport->isPanGestureActive()) {
-                m_viewport->endPanGesture();
-            }
-            if (m_viewport->isZoomGestureActive()) {
-                m_viewport->endZoomGesture();
-            }
+        if (m_viewport->isPanGestureActive()) {
+            m_viewport->endPanGesture();
+        }
+        if (m_viewport->isZoomGestureActive()) {
+            m_viewport->endZoomGesture();
         }
         
 #ifdef Q_OS_ANDROID
