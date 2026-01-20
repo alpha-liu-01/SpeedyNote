@@ -47,6 +47,10 @@ void TouchGestureHandler::reset()
     m_panActive = false;
     m_pinchActive = false;
     
+    // Clear position-based state (prevents stale values after resume)
+    m_lastPos = QPointF();
+    m_pinchStartDistance = 0;
+    
     // Clear zoom smoothing state
     m_initialDistance = 0;
     m_zoomActivated = false;
@@ -262,7 +266,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             m_panActive = false;  // Ensure clean state
             m_pinchActive = true;
             m_pinchStartDistance = distance;
-            m_pinchCentroid = centroid;
             m_initialDistance = distance;   // For zoom threshold calculation
             m_zoomActivated = false;        // Zoom starts inactive (dead zone)
             m_smoothedScale = 1.0;          // Reset smoothed scale
@@ -330,7 +333,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                 
                 m_pinchActive = true;
                 m_pinchStartDistance = distance;
-                m_pinchCentroid = centroid;
                 m_initialDistance = distance;   // For zoom threshold calculation
                 m_zoomActivated = false;        // Zoom starts inactive (dead zone)
                 m_smoothedScale = 1.0;          // Reset smoothed scale
@@ -452,7 +454,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             // Start pinch gesture
             m_pinchActive = true;
             m_pinchStartDistance = distance;
-            m_pinchCentroid = centroid;
             m_initialDistance = distance;   // For zoom threshold calculation
             m_zoomActivated = false;        // Zoom starts inactive (dead zone)
             m_smoothedScale = 1.0;          // Reset smoothed scale

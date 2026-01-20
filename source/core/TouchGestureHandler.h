@@ -110,7 +110,6 @@ private:
     // ===== Pinch-to-zoom Tracking =====
     bool m_pinchActive = false;              ///< Whether a pinch gesture is in progress
     qreal m_pinchStartDistance = 0;          ///< Distance between fingers at start (for incremental scaling)
-    QPointF m_pinchCentroid;                 ///< Centroid of pinch gesture (fixed at start)
     qreal m_initialDistance = 0;             ///< Distance at gesture start (for zoom threshold)
     bool m_zoomActivated = false;            ///< Whether zoom threshold has been exceeded
     qreal m_smoothedScale = 1.0;             ///< Exponentially smoothed scale factor
