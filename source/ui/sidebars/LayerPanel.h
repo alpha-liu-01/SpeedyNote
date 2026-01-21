@@ -204,6 +204,43 @@ public:
      * @brief Deselect all layers (uncheck all checkboxes).
      */
     void deselectAllLayers();
+    
+    /**
+     * @brief Toggle select all/none layers.
+     * If any selected, deselects all; otherwise selects all.
+     */
+    void toggleSelectAllLayers();
+
+    // =========================================================================
+    // Keyboard Shortcut Actions (Phase 6.6)
+    // =========================================================================
+    
+    /**
+     * @brief Add a new layer (keyboard shortcut action).
+     * Creates a new layer, sets it active, and refreshes the list.
+     */
+    void addNewLayerAction();
+    
+    /**
+     * @brief Toggle visibility of the active layer.
+     */
+    void toggleActiveLayerVisibility();
+    
+    /**
+     * @brief Select the topmost layer as active.
+     */
+    void selectTopLayer();
+    
+    /**
+     * @brief Select the bottommost layer as active.
+     */
+    void selectBottomLayer();
+    
+    /**
+     * @brief Merge selected layers (keyboard shortcut action).
+     * Requires 2+ layers to be selected.
+     */
+    void mergeSelectedLayers();
 
 private slots:
     /**

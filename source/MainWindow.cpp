@@ -1307,14 +1307,23 @@ void MainWindow::setupManagedShortcuts()
         }
     });
     
-    // ===== Edgeless Navigation (delegated to viewport) =====
+    // ===== Home Key (context-dependent: edgeless origin OR first page) =====
+    // Note: edgeless.home and navigation.first_page share the same "Home" key
+    // We only create ONE QShortcut to avoid Qt ambiguity, and dispatch based on document type
     createShortcut("edgeless.home", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            if (vp->document() && vp->document()->isEdgeless()) {
-                vp->returnToOrigin();
+            if (vp->document()) {
+                if (vp->document()->isEdgeless()) {
+                    vp->returnToOrigin();
+                } else {
+                    // Paged document: Home = first page
+                    vp->scrollToPage(0);
+                }
             }
         }
     });
+    // Note: navigation.first_page is NOT created separately - handled by edgeless.home above
+    
     createShortcut("edgeless.go_back", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             if (vp->document() && vp->document()->isEdgeless()) {
@@ -1324,6 +1333,125 @@ void MainWindow::setupManagedShortcuts()
                 // Paged: Backspace acts as delete (same as Delete key)
                 vp->handleDeleteAction();
             }
+        }
+    });
+    
+    // ===== Page Navigation (paged documents only) =====
+    createShortcut("navigation.prev_page", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && !vp->document()->isEdgeless()) {
+                int current = vp->currentPageIndex();
+                if (current > 0) {
+                    vp->scrollToPage(current - 1);
+                }
+            }
+        }
+    });
+    createShortcut("navigation.next_page", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && !vp->document()->isEdgeless()) {
+                int current = vp->currentPageIndex();
+                int lastPage = vp->document()->pageCount() - 1;
+                if (current < lastPage) {
+                    vp->scrollToPage(current + 1);
+                }
+            }
+        }
+    });
+    // navigation.first_page is handled by edgeless.home (same "Home" key, context-dependent)
+    
+    createShortcut("navigation.last_page", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && !vp->document()->isEdgeless()) {
+                int lastPage = vp->document()->pageCount() - 1;
+                vp->scrollToPage(lastPage);
+            }
+        }
+    });
+    
+    // ===== Tab Navigation =====
+    createShortcut("navigation.next_tab", [this]() {
+        if (m_tabManager) {
+            m_tabManager->switchToNextTab();
+        }
+    });
+    createShortcut("navigation.prev_tab", [this]() {
+        if (m_tabManager) {
+            m_tabManager->switchToPrevTab();
+        }
+    });
+    createShortcut("file.close_tab", [this]() {
+        // Use tabCloseAttempted signal flow to properly handle unsaved changes
+        if (m_tabManager && m_tabManager->tabCount() > 0) {
+            int currentIndex = m_tabManager->currentIndex();
+            DocumentViewport* vp = m_tabManager->currentViewport();
+            if (vp) {
+                emit m_tabManager->tabCloseAttempted(currentIndex, vp);
+            }
+        }
+    });
+    
+    // ===== Zoom Shortcuts =====
+    createShortcut("zoom.in", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomIn();
+        }
+    });
+    createShortcut("zoom.in_alt", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomIn();
+        }
+    });
+    createShortcut("zoom.out", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomOut();
+        }
+    });
+    createShortcut("zoom.fit", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomToFit();
+        }
+    });
+    createShortcut("zoom.100", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomToActualSize();
+        }
+    });
+    createShortcut("zoom.fit_width", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomToWidth();
+        }
+    });
+    
+    // ===== Layer Operations =====
+    createShortcut("layer.new", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->addNewLayerAction();
+        }
+    });
+    createShortcut("layer.toggle_visibility", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->toggleActiveLayerVisibility();
+        }
+    });
+    createShortcut("layer.select_all", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->toggleSelectAllLayers();
+        }
+    });
+    createShortcut("layer.select_top", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->selectTopLayer();
+        }
+    });
+    createShortcut("layer.select_bottom", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->selectBottomLayer();
+        }
+    });
+    createShortcut("layer.merge", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->mergeSelectedLayers();
         }
     });
     

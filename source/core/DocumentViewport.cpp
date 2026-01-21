@@ -1080,7 +1080,7 @@ void DocumentViewport::syncPositionToDocument()
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[PositionHistory] Synced to document: lastPos =" << currentPos
-             << "| history size =" << reversed.size();
+             << "| history size =" << historyVec.size();
 #endif
 }
 
@@ -1211,6 +1211,40 @@ void DocumentViewport::zoomToWidth()
     clampPanOffset();
     update();
     emit panChanged(m_panOffset);
+}
+
+void DocumentViewport::zoomIn()
+{
+    // Zoom step factor (1.25x = 25% increase per step)
+    static constexpr qreal ZOOM_STEP = 1.25;
+    
+    qreal newZoom = m_zoomLevel * ZOOM_STEP;
+    newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    setZoomLevel(newZoom);
+    
+    // Recenter content for paged documents (no-op for edgeless)
+    recenterHorizontally();
+}
+
+void DocumentViewport::zoomOut()
+{
+    // Zoom step factor (1/1.25 = 20% decrease per step)
+    static constexpr qreal ZOOM_STEP = 1.25;
+    
+    qreal newZoom = m_zoomLevel / ZOOM_STEP;
+    newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    setZoomLevel(newZoom);
+    
+    // Recenter content for paged documents (no-op for edgeless)
+    recenterHorizontally();
+}
+
+void DocumentViewport::zoomToActualSize()
+{
+    setZoomLevel(1.0);
+    
+    // Recenter content for paged documents (no-op for edgeless)
+    recenterHorizontally();
 }
 
 void DocumentViewport::scrollToHome()

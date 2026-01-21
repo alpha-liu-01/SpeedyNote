@@ -1368,6 +1368,21 @@ public slots:
     void zoomToWidth();
     
     /**
+     * @brief Zoom in by a step factor (default 1.25x).
+     */
+    void zoomIn();
+    
+    /**
+     * @brief Zoom out by a step factor (default 1.25x).
+     */
+    void zoomOut();
+    
+    /**
+     * @brief Zoom to 100% (actual size) and recenter.
+     */
+    void zoomToActualSize();
+    
+    /**
      * @brief Scroll to the home position (origin).
      */
     void scrollToHome();

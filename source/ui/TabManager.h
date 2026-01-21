@@ -85,6 +85,16 @@ public:
      */
     void closeCurrentTab();
 
+    /**
+     * @brief Switch to the next tab (wraps around to first if at last).
+     */
+    void switchToNextTab();
+
+    /**
+     * @brief Switch to the previous tab (wraps around to last if at first).
+     */
+    void switchToPrevTab();
+
     // =========================================================================
     // Access
     // =========================================================================
