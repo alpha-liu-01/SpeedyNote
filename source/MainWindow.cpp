@@ -345,26 +345,33 @@ MainWindow::MainWindow(QWidget *parent)
         // FEATURE-DOC-001: Update lastAccessedPage for paged documents
         // This ensures the page position is saved even if no other edits were made
         bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
-        bool pagePositionChanged = false;
+        bool positionChanged = false;
         
         if (!doc->isEdgeless()) {
             int currentPage = vp->currentPageIndex();
             if (doc->lastAccessedPage != currentPage) {
                 doc->lastAccessedPage = currentPage;
-                pagePositionChanged = true;
+                positionChanged = true;
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "tabCloseAttempted: lastAccessedPage changed to" << currentPage;
 #endif
             }
+        } else {
+            // Phase 4: Sync edgeless position before closing tab
+            vp->syncPositionToDocument();
+            positionChanged = true;  // Always consider position changed for edgeless
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "tabCloseAttempted: Synced edgeless position";
+#endif
         }
         
-        // FEATURE-DOC-001: Auto-save if only page position changed (no content changes)
+        // FEATURE-DOC-001: Auto-save if only position changed (no content changes)
         // This is a silent save - no prompt needed for just navigation
-        if (pagePositionChanged && !isUsingTemp && !doc->modified) {
+        if (positionChanged && !isUsingTemp && !doc->modified) {
             QString existingPath = m_documentManager->documentPath(doc);
             if (!existingPath.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "tabCloseAttempted: Auto-saving to persist lastAccessedPage";
+                qDebug() << "tabCloseAttempted: Auto-saving to persist position";
 #endif
                 m_documentManager->saveDocument(doc);
                 // Don't show error dialog - this is a best-effort save for position only
@@ -2311,6 +2318,9 @@ void MainWindow::saveDocument()
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "saveDocument: Setting lastAccessedPage to" << doc->lastAccessedPage;
 #endif
+    } else {
+        // Phase 4: Sync edgeless position history to document before saving
+        viewport->syncPositionToDocument();
     }
             
     if (!existingPath.isEmpty() && !isUsingTemp) {
@@ -4981,16 +4991,26 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
 #endif
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-    // ========== UPDATE LAST ACCESSED PAGE FOR ALL DOCUMENTS ==========
-    // Before checking for unsaved changes, update lastAccessedPage for all paged documents
+    // ========== UPDATE POSITIONS FOR ALL DOCUMENTS ==========
+    // Before checking for unsaved changes, update positions for all documents
     // This ensures the position is saved even if the document was saved earlier in the session
     if (m_tabManager && m_documentManager) {
         for (int i = 0; i < m_tabManager->tabCount(); ++i) {
             Document* doc = m_tabManager->documentAt(i);
-            if (!doc || doc->isEdgeless()) continue;
+            if (!doc) continue;
             
             DocumentViewport* vp = m_tabManager->viewportAt(i);
-            if (vp) {
+            if (!vp) continue;
+            
+            if (doc->isEdgeless()) {
+                // Phase 4: Sync edgeless position before app exit
+                vp->syncPositionToDocument();
+                doc->markModified();
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "closeEvent: Synced edgeless position for" << doc->displayName();
+#endif
+            } else {
+                // Paged: update lastAccessedPage
                 int currentPage = vp->currentPageIndex();
                 if (doc->lastAccessedPage != currentPage) {
                     doc->lastAccessedPage = currentPage;

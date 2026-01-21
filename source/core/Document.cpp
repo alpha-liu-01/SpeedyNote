@@ -2121,6 +2121,26 @@ bool Document::saveBundle(const QString& path)
         }
         manifest["layers"] = layersArray;
         manifest["active_layer_index"] = m_edgelessActiveLayerIndex;
+        
+        // Phase 4: Write position history to manifest
+        QJsonObject lastPosObj;
+        lastPosObj["x"] = m_edgelessLastPosition.x();
+        lastPosObj["y"] = m_edgelessLastPosition.y();
+        manifest["last_position"] = lastPosObj;
+        
+        QJsonArray posHistoryArray;
+        for (const QPointF& pos : m_edgelessPositionHistory) {
+            QJsonObject posObj;
+            posObj["x"] = pos.x();
+            posObj["y"] = pos.y();
+            posHistoryArray.append(posObj);
+        }
+        manifest["position_history"] = posHistoryArray;
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "saveToBundle: Saved edgeless position" << m_edgelessLastPosition
+                 << "with" << m_edgelessPositionHistory.size() << "history entries";
+#endif
     } else {
         // ========== PAGED MODE SAVE (Phase O1.7.4) ==========
         if (!QDir().mkpath(path + "/pages")) {
@@ -2482,9 +2502,32 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
             doc->m_edgelessLayers.push_back(defaultLayer);
         }
         
+        // Phase 4: Parse position history from manifest
+        if (obj.contains("last_position")) {
+            QJsonObject lastPosObj = obj["last_position"].toObject();
+            doc->m_edgelessLastPosition = QPointF(
+                lastPosObj["x"].toDouble(0.0),
+                lastPosObj["y"].toDouble(0.0)
+            );
+        }
+        
+        if (obj.contains("position_history")) {
+            QJsonArray posHistoryArray = obj["position_history"].toArray();
+            doc->m_edgelessPositionHistory.clear();
+            for (const auto& val : posHistoryArray) {
+                QJsonObject posObj = val.toObject();
+                doc->m_edgelessPositionHistory.append(QPointF(
+                    posObj["x"].toDouble(0.0),
+                    posObj["y"].toDouble(0.0)
+                ));
+            }
+        }
+        
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Loaded edgeless bundle from" << path << "with" << doc->m_tileIndex.size() 
-                 << "tiles indexed," << doc->m_edgelessLayers.size() << "layers";
+                 << "tiles indexed," << doc->m_edgelessLayers.size() << "layers"
+                 << "| last position:" << doc->m_edgelessLastPosition
+                 << "| history size:" << doc->m_edgelessPositionHistory.size();
 #endif
     } else {
         // ========== PAGED MODE LOADING (Phase O1.7.4) ==========

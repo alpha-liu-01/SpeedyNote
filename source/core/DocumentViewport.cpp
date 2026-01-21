@@ -81,6 +81,26 @@ static bool eventMatchesAction(QKeyEvent* event, const QString& actionId)
     
     // Combine key with modifiers
     Qt::KeyboardModifiers mods = event->modifiers();
+    
+    // When Shift is pressed with number keys, Qt reports the shifted symbol
+    // (e.g., Shift+1 → !, Shift+2 → @). Convert back to base number keys
+    // to match shortcuts stored as "Ctrl+Shift+1" etc.
+    if (mods & Qt::ShiftModifier) {
+        switch (key) {
+            case Qt::Key_Exclam:      key = Qt::Key_1; break;  // ! → 1
+            case Qt::Key_At:          key = Qt::Key_2; break;  // @ → 2
+            case Qt::Key_NumberSign:  key = Qt::Key_3; break;  // # → 3
+            case Qt::Key_Dollar:      key = Qt::Key_4; break;  // $ → 4
+            case Qt::Key_Percent:     key = Qt::Key_5; break;  // % → 5
+            case Qt::Key_AsciiCircum: key = Qt::Key_6; break;  // ^ → 6
+            case Qt::Key_Ampersand:   key = Qt::Key_7; break;  // & → 7
+            case Qt::Key_Asterisk:    key = Qt::Key_8; break;  // * → 8
+            case Qt::Key_ParenLeft:   key = Qt::Key_9; break;  // ( → 9
+            case Qt::Key_ParenRight:  key = Qt::Key_0; break;  // ) → 0
+            default: break;
+        }
+    }
+    
     int combined = key;
     if (mods & Qt::ControlModifier) combined |= Qt::CTRL;
     if (mods & Qt::ShiftModifier) combined |= Qt::SHIFT;
@@ -312,9 +332,17 @@ void DocumentViewport::setDocument(Document* doc)
     m_panOffset = QPointF(0, 0);
     m_currentPageIndex = 0;
     
-    // If document exists, restore last accessed page or zoom to width
+    // If document exists, restore last accessed page/position or set initial view
     if (m_document) {
-        if (m_document->lastAccessedPage > 0) {
+        if (m_document->isEdgeless()) {
+            // Phase 4: Restore edgeless position from document
+            // Deferred to ensure widget has correct dimensions
+            QTimer::singleShot(0, this, [this]() {
+                if (m_document && m_document->isEdgeless()) {
+                    restorePositionFromDocument();
+                }
+            });
+        } else if (m_document->lastAccessedPage > 0) {
             m_currentPageIndex = qMin(m_document->lastAccessedPage, 
                                        m_document->pageCount() - 1);
             
@@ -330,7 +358,7 @@ void DocumentViewport::setDocument(Document* doc)
                     }
                 });
             }
-        } else if (!m_document->isEdgeless()) {
+        } else {
             // New paged document: zoom to fit page width
             // Deferred to ensure widget has correct dimensions
             QTimer::singleShot(0, this, [this]() {
@@ -966,6 +994,176 @@ void DocumentViewport::navigateToEdgelessPosition(int tileX, int tileY, QPointF 
              << "| actual viewport center (doc coords) =" << actualCenter
              << "| difference =" << (actualCenter - docPosition);
 #endif
+}
+
+// ============================================================================
+// Edgeless Position History (Phase 4)
+// ============================================================================
+
+QPointF DocumentViewport::currentCenterPosition() const
+{
+    // Calculate the document position at the center of the viewport
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    return viewportCenter / m_zoomLevel + m_panOffset;
+}
+
+void DocumentViewport::pushPositionHistory()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    QPointF currentPos = currentCenterPosition();
+    
+    // Don't push if we're already at this position (avoid duplicates)
+    if (!m_edgelessPositionHistory.isEmpty()) {
+        QPointF lastPos = m_edgelessPositionHistory.top();
+        // Consider positions within 10 pixels as "same"
+        if ((currentPos - lastPos).manhattanLength() < 10.0) {
+            return;
+        }
+    }
+    
+    // Trim history if at capacity
+    while (m_edgelessPositionHistory.size() >= MAX_POSITION_HISTORY) {
+        // Remove oldest (bottom) entry - inefficient but simple
+        // For a small stack (20 items), this is acceptable
+        QStack<QPointF> temp;
+        while (m_edgelessPositionHistory.size() > 1) {
+            temp.push(m_edgelessPositionHistory.pop());
+        }
+        m_edgelessPositionHistory.pop();  // Remove oldest
+        while (!temp.isEmpty()) {
+            m_edgelessPositionHistory.push(temp.pop());
+        }
+    }
+    
+    m_edgelessPositionHistory.push(currentPos);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Pushed position:" << currentPos 
+             << "| History size:" << m_edgelessPositionHistory.size();
+#endif
+}
+
+void DocumentViewport::returnToOrigin()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Save current position before jumping
+    pushPositionHistory();
+    
+    // Navigate to origin (0, 0)
+    QPointF origin(0.0, 0.0);
+    
+    // Use the existing navigation method with tile (0, 0)
+    navigateToEdgelessPosition(0, 0, origin);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Returned to origin";
+#endif
+}
+
+void DocumentViewport::goBackPosition()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    if (m_edgelessPositionHistory.isEmpty()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[PositionHistory] Go back: history empty";
+#endif
+        return;
+    }
+    
+    QPointF previousPos = m_edgelessPositionHistory.pop();
+    
+    // Calculate tile coordinates from document position (for logging/debugging)
+    // Tile size is 4000x4000 by default
+    constexpr qreal TILE_SIZE = 4000.0;
+    int tileX = static_cast<int>(std::floor(previousPos.x() / TILE_SIZE));
+    int tileY = static_cast<int>(std::floor(previousPos.y() / TILE_SIZE));
+    
+    navigateToEdgelessPosition(tileX, tileY, previousPos);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Went back to:" << previousPos
+             << "| tile:" << tileX << "," << tileY
+             << "| Remaining history:" << m_edgelessPositionHistory.size();
+#endif
+}
+
+bool DocumentViewport::hasPositionHistory() const
+{
+    return !m_edgelessPositionHistory.isEmpty();
+}
+
+void DocumentViewport::syncPositionToDocument()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Save current viewport center position
+    QPointF currentPos = currentCenterPosition();
+    m_document->setEdgelessLastPosition(currentPos);
+    
+    // Convert QStack to QVector for Document storage
+    QVector<QPointF> historyVec;
+    historyVec.reserve(m_edgelessPositionHistory.size());
+    
+    // QStack doesn't have direct iterator, so we need to copy
+    // Note: This preserves the order (bottom to top = oldest to newest)
+    QStack<QPointF> tempStack = m_edgelessPositionHistory;
+    QVector<QPointF> reversed;
+    while (!tempStack.isEmpty()) {
+        reversed.prepend(tempStack.pop());
+    }
+    
+    m_document->setEdgelessPositionHistory(reversed);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Synced to document: lastPos =" << currentPos
+             << "| history size =" << reversed.size();
+#endif
+}
+
+void DocumentViewport::restorePositionFromDocument()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Restore position history from Document
+    const QVector<QPointF>& savedHistory = m_document->edgelessPositionHistory();
+    m_edgelessPositionHistory.clear();
+    for (const QPointF& pos : savedHistory) {
+        m_edgelessPositionHistory.push(pos);
+    }
+    
+    // Navigate to the last saved position
+    QPointF lastPos = m_document->edgelessLastPosition();
+    if (!lastPos.isNull()) {
+        // Calculate tile coordinates
+        constexpr qreal TILE_SIZE = 4000.0;
+        int tileX = static_cast<int>(std::floor(lastPos.x() / TILE_SIZE));
+        int tileY = static_cast<int>(std::floor(lastPos.y() / TILE_SIZE));
+        
+        navigateToEdgelessPosition(tileX, tileY, lastPos);
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[PositionHistory] Restored from document: lastPos =" << lastPos
+                 << "| history size =" << m_edgelessPositionHistory.size();
+#endif
+    }
 }
 
 void DocumentViewport::scrollBy(QPointF delta)
@@ -2622,6 +2820,23 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         redo();
         event->accept();
         return;
+    }
+    
+    // ===== Edgeless Navigation Shortcuts (Phase 4) =====
+    if (m_document && m_document->isEdgeless()) {
+        // Return to origin (default: Home)
+        if (eventMatchesAction(event, "edgeless.home")) {
+            returnToOrigin();
+            event->accept();
+            return;
+        }
+        
+        // Go back to previous position (default: Backspace)
+        if (eventMatchesAction(event, "edgeless.go_back")) {
+            goBackPosition();
+            event->accept();
+            return;
+        }
     }
     
     // ===== Debug Shortcut (kept as hardcoded - development only) =====
@@ -6709,6 +6924,9 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
                          << "tileY =" << slot.edgelessTileY
                          << "targetPosition =" << slot.targetPosition;
 #endif
+                // Save current position before jumping (Phase 4)
+                pushPositionHistory();
+                
                 // Edgeless mode: navigate to tile + document position
                 navigateToEdgelessPosition(slot.edgelessTileX, slot.edgelessTileY, slot.targetPosition);
             } else {

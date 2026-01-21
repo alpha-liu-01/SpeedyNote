@@ -1,6 +1,7 @@
 #include "ControlPanelDialog.h"
 #include "MainWindow.h"
 #include "core/Page.h"
+#include "core/ShortcutManager.h"
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "ButtonMappingTypes.h"
@@ -13,6 +14,9 @@
 #include <QCheckBox>
 #include <QSpacerItem>
 #include <QTableWidget>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QHeaderView>
 #include <QPushButton>
 #include <QColorDialog>
 #include <QInputDialog>
@@ -24,6 +28,10 @@
 #include <QSettings>
 #include <QTimer>
 #include <QTabletEvent>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QDir>
+#include <QFileInfo>
 
 // Android keyboard fix (BUG-A001)
 #ifdef Q_OS_ANDROID
@@ -41,6 +49,7 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
 
     // === Working Tabs ===
     createBackgroundTab();  // Background settings (first tab for importance)
+    createShortcutsTab();   // Phase 5.1: Keyboard shortcuts tab
     
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // Note: createButtonMappingTab() removed - dial system was deleted (MW7.2)
@@ -920,6 +929,301 @@ void ControlPanelDialog::createBackgroundTab() {
     onPageSizePresetChanged(pageSizeCombo->currentIndex());
     
     tabWidget->addTab(backgroundTab, tr("Page"));
+}
+
+// ============================================================================
+// Phase 5.1: Keyboard Shortcuts Tab
+// ============================================================================
+
+void ControlPanelDialog::createShortcutsTab()
+{
+    shortcutsTab = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(shortcutsTab);
+    
+    // Add some spacing at the top
+    layout->addSpacing(10);
+    
+    // Title
+    QLabel *titleLabel = new QLabel(tr("Keyboard Shortcuts"), shortcutsTab);
+    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold;");
+    layout->addWidget(titleLabel);
+    
+    QLabel *descLabel = new QLabel(tr("Double-click a shortcut to edit. Changes are saved automatically."), shortcutsTab);
+    descLabel->setWordWrap(true);
+    descLabel->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;");
+    layout->addWidget(descLabel);
+    
+    // Tree widget for shortcuts (organized by category)
+    shortcutsTree = new QTreeWidget(shortcutsTab);
+    shortcutsTree->setHeaderLabels({tr("Action"), tr("Shortcut"), tr("Default")});
+    shortcutsTree->setColumnCount(3);
+    shortcutsTree->setRootIsDecorated(true);
+    shortcutsTree->setAlternatingRowColors(true);
+    shortcutsTree->setSelectionMode(QAbstractItemView::SingleSelection);
+    
+    // Set column widths
+    shortcutsTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    shortcutsTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    shortcutsTree->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    shortcutsTree->setMinimumWidth(350);
+    
+    // Connect double-click to edit
+    connect(shortcutsTree, &QTreeWidget::itemDoubleClicked,
+            this, &ControlPanelDialog::onShortcutItemDoubleClicked);
+    
+    layout->addWidget(shortcutsTree, 1);  // stretch factor 1
+    
+    // Button row
+    QHBoxLayout *buttonLayout = new QHBoxLayout();
+    
+    QPushButton *editButton = new QPushButton(tr("Edit"), shortcutsTab);
+    editButton->setToolTip(tr("Edit the selected shortcut"));
+    connect(editButton, &QPushButton::clicked, this, &ControlPanelDialog::onEditShortcut);
+    buttonLayout->addWidget(editButton);
+    
+    QPushButton *resetButton = new QPushButton(tr("Reset"), shortcutsTab);
+    resetButton->setToolTip(tr("Reset the selected shortcut to default"));
+    connect(resetButton, &QPushButton::clicked, this, &ControlPanelDialog::onResetShortcut);
+    buttonLayout->addWidget(resetButton);
+    
+    buttonLayout->addStretch();
+    
+    resetAllShortcutsButton = new QPushButton(tr("Reset All to Defaults"), shortcutsTab);
+    resetAllShortcutsButton->setToolTip(tr("Reset all shortcuts to their default values"));
+    connect(resetAllShortcutsButton, &QPushButton::clicked, 
+            this, &ControlPanelDialog::onResetAllShortcuts);
+    buttonLayout->addWidget(resetAllShortcutsButton);
+    
+    layout->addLayout(buttonLayout);
+    
+    // Open config folder button
+    QHBoxLayout *folderLayout = new QHBoxLayout();
+    folderLayout->addStretch();
+    
+    openConfigFolderButton = new QPushButton(tr("Open Config Folder"), shortcutsTab);
+    openConfigFolderButton->setToolTip(tr("Open the folder containing shortcuts.json"));
+    connect(openConfigFolderButton, &QPushButton::clicked,
+            this, &ControlPanelDialog::onOpenConfigFolder);
+    folderLayout->addWidget(openConfigFolderButton);
+    
+    layout->addLayout(folderLayout);
+    
+    // Populate the tree with shortcuts
+    populateShortcutsTree();
+    
+    tabWidget->addTab(shortcutsTab, tr("Shortcuts"));
+}
+
+void ControlPanelDialog::populateShortcutsTree()
+{
+    shortcutsTree->clear();
+    
+    ShortcutManager* sm = ShortcutManager::instance();
+    QStringList categories = sm->allCategories();
+    
+    // Create category items
+    QMap<QString, QTreeWidgetItem*> categoryItems;
+    
+    for (const QString& category : categories) {
+        QTreeWidgetItem* catItem = new QTreeWidgetItem(shortcutsTree);
+        catItem->setText(0, category);
+        catItem->setFlags(catItem->flags() & ~Qt::ItemIsSelectable);
+        catItem->setExpanded(true);
+        
+        // Style category header
+        QFont boldFont = catItem->font(0);
+        boldFont.setBold(true);
+        catItem->setFont(0, boldFont);
+        
+        categoryItems[category] = catItem;
+    }
+    
+    // Add action items under their categories
+    for (const QString& category : categories) {
+        QStringList actions = sm->actionsInCategory(category);
+        QTreeWidgetItem* catItem = categoryItems[category];
+        
+        for (const QString& actionId : actions) {
+            QTreeWidgetItem* item = new QTreeWidgetItem(catItem);
+            item->setData(0, Qt::UserRole, actionId);  // Store actionId
+            
+            updateShortcutDisplay(item, actionId);
+        }
+    }
+}
+
+void ControlPanelDialog::updateShortcutDisplay(QTreeWidgetItem* item, const QString& actionId)
+{
+    ShortcutManager* sm = ShortcutManager::instance();
+    
+    QString displayName = sm->displayNameForAction(actionId);
+    QString currentShortcut = sm->shortcutForAction(actionId);
+    QString defaultShortcut = sm->defaultShortcutForAction(actionId);
+    bool isOverridden = sm->isUserOverridden(actionId);
+    
+    item->setText(0, displayName);
+    item->setText(1, currentShortcut);
+    item->setText(2, defaultShortcut);
+    
+    // Highlight if overridden
+    if (isOverridden) {
+        item->setForeground(1, QColor("#e67e22"));  // Orange for custom
+        QFont font = item->font(1);
+        font.setBold(true);
+        item->setFont(1, font);
+    } else {
+        item->setForeground(1, QColor("#999999"));  // Default color
+        QFont font = item->font(1);
+        font.setBold(false);
+        item->setFont(1, font);
+    }
+    
+    // Check for conflicts
+    QStringList conflicts = sm->findConflicts(currentShortcut, actionId);
+    if (!conflicts.isEmpty()) {
+        item->setForeground(1, QColor("#e74c3c"));  // Red for conflict
+        QString conflictNames;
+        for (const QString& conflictId : conflicts) {
+            if (!conflictNames.isEmpty()) conflictNames += ", ";
+            conflictNames += sm->displayNameForAction(conflictId);
+        }
+        item->setToolTip(1, tr("Conflict with: %1").arg(conflictNames));
+    } else {
+        item->setToolTip(1, QString());
+    }
+}
+
+void ControlPanelDialog::onShortcutItemDoubleClicked(QTreeWidgetItem* item, int column)
+{
+    Q_UNUSED(column)
+    
+    if (!item) return;
+    
+    QString actionId = item->data(0, Qt::UserRole).toString();
+    if (actionId.isEmpty()) return;  // Category item
+    
+    // Open key capture dialog
+    KeyCaptureDialog dialog(this);
+    dialog.setWindowTitle(tr("Capture Shortcut for: %1").arg(item->text(0)));
+    
+    if (dialog.exec() == QDialog::Accepted) {
+        QString newShortcut = dialog.getCapturedKeySequence();
+        if (!newShortcut.isEmpty()) {
+            ShortcutManager* sm = ShortcutManager::instance();
+            
+            // Check for conflicts
+            QStringList conflicts = sm->findConflicts(newShortcut, actionId);
+            if (!conflicts.isEmpty()) {
+                QString conflictNames;
+                for (const QString& conflictId : conflicts) {
+                    if (!conflictNames.isEmpty()) conflictNames += "\n";
+                    conflictNames += "• " + sm->displayNameForAction(conflictId);
+                }
+                
+                QMessageBox::StandardButton reply = QMessageBox::warning(
+                    this,
+                    tr("Shortcut Conflict"),
+                    tr("The shortcut '%1' is already used by:\n%2\n\nDo you want to use it anyway?")
+                        .arg(newShortcut)
+                        .arg(conflictNames),
+                    QMessageBox::Yes | QMessageBox::No,
+                    QMessageBox::No
+                );
+                
+                if (reply != QMessageBox::Yes) {
+                    return;
+                }
+            }
+            
+            // Set the new shortcut
+            sm->setUserShortcut(actionId, newShortcut);
+            sm->saveUserShortcuts();
+            
+            // Update display
+            updateShortcutDisplay(item, actionId);
+        }
+    }
+}
+
+void ControlPanelDialog::onEditShortcut()
+{
+    QTreeWidgetItem* item = shortcutsTree->currentItem();
+    if (item) {
+        onShortcutItemDoubleClicked(item, 0);
+    } else {
+        QMessageBox::information(this, tr("No Selection"),
+            tr("Please select a shortcut to edit."));
+    }
+}
+
+void ControlPanelDialog::onResetShortcut()
+{
+    QTreeWidgetItem* item = shortcutsTree->currentItem();
+    if (!item) {
+        QMessageBox::information(this, tr("No Selection"),
+            tr("Please select a shortcut to reset."));
+        return;
+    }
+    
+    QString actionId = item->data(0, Qt::UserRole).toString();
+    if (actionId.isEmpty()) return;  // Category item
+    
+    ShortcutManager* sm = ShortcutManager::instance();
+    
+    if (!sm->isUserOverridden(actionId)) {
+        QMessageBox::information(this, tr("Already Default"),
+            tr("This shortcut is already using the default value."));
+        return;
+    }
+    
+    sm->clearUserShortcut(actionId);
+    sm->saveUserShortcuts();
+    
+    // Update display
+    updateShortcutDisplay(item, actionId);
+}
+
+void ControlPanelDialog::onResetAllShortcuts()
+{
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        tr("Reset All Shortcuts"),
+        tr("Are you sure you want to reset all shortcuts to their default values?\n\n"
+           "This cannot be undone."),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No
+    );
+    
+    if (reply == QMessageBox::Yes) {
+        ShortcutManager* sm = ShortcutManager::instance();
+        sm->resetAllToDefaults();
+        sm->saveUserShortcuts();
+        
+        // Refresh the entire tree
+        populateShortcutsTree();
+        
+        QMessageBox::information(this, tr("Shortcuts Reset"),
+            tr("All shortcuts have been reset to their default values."));
+    }
+}
+
+void ControlPanelDialog::onOpenConfigFolder()
+{
+    ShortcutManager* sm = ShortcutManager::instance();
+    QString configPath = sm->configFilePath();
+    
+    // Get the directory containing the config file
+    QFileInfo fileInfo(configPath);
+    QString folderPath = fileInfo.absolutePath();
+    
+    // Ensure the directory exists
+    QDir dir(folderPath);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+    
+    // Open in file manager
+    QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
 }
 
 void ControlPanelDialog::onPageSizePresetChanged(int index) {

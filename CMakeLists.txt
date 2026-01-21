@@ -363,6 +363,7 @@ set(APP_SOURCES
         source/Main.cpp
         source/MainWindow.cpp
     source/ControlPanelDialog.cpp
+    source/ui/dialogs/KeyCaptureDialog.cpp
     source/text/MarkdownNoteEntry.cpp
     source/ui/MarkdownNotesSidebar.cpp
         ${CORE_SOURCES}

@@ -7,6 +7,47 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDebug>
+#include <QRegularExpression>
+
+// ============================================================================
+// Shortcut Normalization Helper
+// ============================================================================
+
+/**
+ * @brief Normalize a shortcut string to use number keys instead of shifted symbols.
+ * 
+ * When Shift is pressed with number keys, Qt may report the shifted symbol
+ * (e.g., "Ctrl+Shift+!" instead of "Ctrl+Shift+1"). This function converts
+ * these back to the base number format for consistent storage and matching.
+ */
+static QString normalizeShortcut(const QString& shortcut)
+{
+    if (shortcut.isEmpty()) {
+        return shortcut;
+    }
+    
+    // Only normalize if Shift is present and the shortcut ends with a shifted symbol
+    if (!shortcut.contains("Shift+", Qt::CaseInsensitive)) {
+        return shortcut;
+    }
+    
+    // Map of shifted symbols to their base number keys
+    static const QHash<QChar, QChar> shiftedToNumber = {
+        {'!', '1'}, {'@', '2'}, {'#', '3'}, {'$', '4'}, {'%', '5'},
+        {'^', '6'}, {'&', '7'}, {'*', '8'}, {'(', '9'}, {')', '0'}
+    };
+    
+    // Check if the last character is a shifted symbol
+    QChar lastChar = shortcut.at(shortcut.length() - 1);
+    if (shiftedToNumber.contains(lastChar)) {
+        QString normalized = shortcut;
+        normalized.chop(1);
+        normalized.append(shiftedToNumber.value(lastChar));
+        return normalized;
+    }
+    
+    return shortcut;
+}
 
 // ============================================================================
 // Singleton Instance
@@ -70,11 +111,13 @@ void ShortcutManager::registerDefaults()
     
     // ===== Navigation =====
     registerAction("navigation.launcher", "Ctrl+L", tr("Toggle Launcher"), tr("Navigation"));
-    registerAction("navigation.prev_page", "Page Up", tr("Previous Page"), tr("Navigation"));
-    registerAction("navigation.next_page", "Page Down", tr("Next Page"), tr("Navigation"));
-    registerAction("navigation.first_page", "Home", tr("First Page"), tr("Navigation"));
-    registerAction("navigation.last_page", "End", tr("Last Page"), tr("Navigation"));
-    registerAction("navigation.go_to_page", "Ctrl+G", tr("Go to Page..."), tr("Navigation"));
+    // Page navigation - only for paged documents (not edgeless)
+    registerAction("navigation.prev_page", "Page Up", tr("Previous Page"), tr("Navigation"), Scope::PagedOnly);
+    registerAction("navigation.next_page", "Page Down", tr("Next Page"), tr("Navigation"), Scope::PagedOnly);
+    registerAction("navigation.first_page", "Home", tr("First Page"), tr("Navigation"), Scope::PagedOnly);
+    registerAction("navigation.last_page", "End", tr("Last Page"), tr("Navigation"), Scope::PagedOnly);
+    registerAction("navigation.go_to_page", "Ctrl+G", tr("Go to Page..."), tr("Navigation"), Scope::PagedOnly);
+    // Tab navigation - global
     registerAction("navigation.next_tab", "Ctrl+Tab", tr("Next Tab"), tr("Navigation"));
     registerAction("navigation.prev_tab", "Ctrl+Shift+Tab", tr("Previous Tab"), tr("Navigation"));
     registerAction("navigation.escape", "Escape", tr("Escape/Cancel"), tr("Navigation"));
@@ -150,9 +193,9 @@ void ShortcutManager::registerDefaults()
     registerAction("app.keyboard_shortcuts", "Ctrl+Alt+Shift+K", tr("Keyboard Shortcuts"), tr("Application"));
     registerAction("app.find", "Ctrl+F", tr("Find in Document"), tr("Application"));
     
-    // ===== Edgeless Navigation =====
-    registerAction("edgeless.home", "Home", tr("Return to Origin"), tr("Edgeless"));
-    registerAction("edgeless.go_back", "Backspace", tr("Go Back"), tr("Edgeless"));
+    // ===== Edgeless Navigation (only for edgeless documents) =====
+    registerAction("edgeless.home", "Home", tr("Return to Origin"), tr("Edgeless"), Scope::EdgelessOnly);
+    registerAction("edgeless.go_back", "Backspace", tr("Go Back"), tr("Edgeless"), Scope::EdgelessOnly);
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[ShortcutManager] Registered" << m_shortcuts.size() << "default shortcuts";
@@ -166,7 +209,8 @@ void ShortcutManager::registerDefaults()
 void ShortcutManager::registerAction(const QString& actionId,
                                      const QString& defaultShortcut,
                                      const QString& displayName,
-                                     const QString& category)
+                                     const QString& category,
+                                     Scope scope)
 {
     if (actionId.isEmpty()) {
         qWarning() << "[ShortcutManager] Cannot register action with empty ID";
@@ -179,6 +223,7 @@ void ShortcutManager::registerAction(const QString& actionId,
         entry.defaultShortcut = defaultShortcut;
         entry.displayName = displayName;
         entry.category = category;
+        entry.scope = scope;
     } else {
         // New entry
         ShortcutEntry entry;
@@ -186,6 +231,7 @@ void ShortcutManager::registerAction(const QString& actionId,
         entry.userShortcut = QString();  // No override initially
         entry.displayName = displayName;
         entry.category = category;
+        entry.scope = scope;
         m_shortcuts.insert(actionId, entry);
     }
     
@@ -194,6 +240,17 @@ void ShortcutManager::registerAction(const QString& actionId,
              << "default:" << defaultShortcut
              << "category:" << category;
 #endif
+}
+
+bool ShortcutManager::scopesCanConflict(Scope a, Scope b)
+{
+    // Global conflicts with everything
+    if (a == Scope::Global || b == Scope::Global) {
+        return true;
+    }
+    // PagedOnly and EdgelessOnly don't conflict with each other
+    // (they're mutually exclusive contexts)
+    return a == b;
 }
 
 bool ShortcutManager::hasAction(const QString& actionId) const
@@ -261,10 +318,19 @@ void ShortcutManager::setUserShortcut(const QString& actionId, const QString& sh
         return;
     }
     
+    // Normalize the shortcut to handle shifted symbols (e.g., "Ctrl+Shift+@" → "Ctrl+Shift+2")
+    QString normalizedShortcut = normalizeShortcut(shortcut);
+    
     ShortcutEntry& entry = it.value();
     QString oldShortcut = shortcutForAction(actionId);
     
-    entry.userShortcut = shortcut;
+    // If the new shortcut matches the default, clear the override instead
+    // This avoids storing redundant overrides
+    if (normalizedShortcut == entry.defaultShortcut) {
+        entry.userShortcut.clear();
+    } else {
+        entry.userShortcut = normalizedShortcut;
+    }
     
     QString newShortcut = shortcutForAction(actionId);
     if (oldShortcut != newShortcut) {
@@ -377,7 +443,8 @@ void ShortcutManager::loadUserShortcuts()
     int loadedCount = 0;
     for (auto it = overrides.begin(); it != overrides.end(); ++it) {
         QString actionId = it.key();
-        QString shortcut = it.value().toString();
+        // Normalize the shortcut to handle old format (e.g., "Ctrl+Shift+@" → "Ctrl+Shift+2")
+        QString shortcut = normalizeShortcut(it.value().toString());
         
         // Only apply if action exists (it may have been registered by now,
         // or will be registered later - we store the override anyway)
@@ -460,6 +527,15 @@ QStringList ShortcutManager::findConflicts(const QString& shortcut,
         return conflicts;
     }
     
+    // Get the scope of the action we're checking (if provided)
+    Scope excludeScope = Scope::Global;
+    if (!excludeActionId.isEmpty()) {
+        auto excludeIt = m_shortcuts.constFind(excludeActionId);
+        if (excludeIt != m_shortcuts.constEnd()) {
+            excludeScope = excludeIt.value().scope;
+        }
+    }
+    
     for (auto it = m_shortcuts.constBegin(); it != m_shortcuts.constEnd(); ++it) {
         if (it.key() == excludeActionId) {
             continue;
@@ -472,7 +548,11 @@ QStringList ShortcutManager::findConflicts(const QString& shortcut,
         
         QKeySequence currentSeq(currentShortcut);
         if (currentSeq == targetSeq) {
-            conflicts.append(it.key());
+            // Check if scopes can conflict
+            // PagedOnly and EdgelessOnly don't conflict with each other
+            if (scopesCanConflict(excludeScope, it.value().scope)) {
+                conflicts.append(it.key());
+            }
         }
     }
     

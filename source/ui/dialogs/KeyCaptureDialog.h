@@ -7,6 +7,7 @@
 #include <QKeyEvent>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QEvent>
 
 class KeyCaptureDialog : public QDialog {
     Q_OBJECT
@@ -17,6 +18,7 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    bool event(QEvent *event) override;  // For capturing Tab key
 
 private slots:
     void clearSequence();

@@ -1261,6 +1261,56 @@ public slots:
      */
     void navigateToEdgelessPosition(int tileX, int tileY, QPointF docPosition);
     
+    // ===== Edgeless Position History (Phase 4) =====
+    
+    /**
+     * @brief Return to the origin (0, 0) in edgeless mode.
+     * 
+     * Saves the current position to history before jumping to origin.
+     * Bound to Home key by default.
+     * No-op if not in edgeless mode.
+     */
+    void returnToOrigin();
+    
+    /**
+     * @brief Go back to the previous position in edgeless history.
+     * 
+     * Pops the most recent position from history and navigates there.
+     * Bound to Backspace key by default.
+     * No-op if history is empty or not in edgeless mode.
+     */
+    void goBackPosition();
+    
+    /**
+     * @brief Check if there's position history to go back to.
+     * @return True if position history stack is not empty.
+     */
+    bool hasPositionHistory() const;
+    
+    /**
+     * @brief Get the current viewport center position in document coordinates.
+     * @return The document position at the center of the viewport.
+     * 
+     * Used for position history and persistence.
+     */
+    QPointF currentCenterPosition() const;
+    
+    /**
+     * @brief Sync position history to the document for persistence.
+     * 
+     * Call before saving the document. Copies the viewport's current position
+     * and history stack to the Document for JSON serialization.
+     */
+    void syncPositionToDocument();
+    
+    /**
+     * @brief Restore position and history from the document.
+     * 
+     * Call after loading the document. Reads the Document's persisted position
+     * data and restores the viewport state.
+     */
+    void restorePositionFromDocument();
+    
     /**
      * @brief Scroll by a delta amount.
      * @param delta Scroll delta in document coordinates.
@@ -2140,6 +2190,18 @@ private:
     QStack<EdgelessUndoAction> m_edgelessUndoStack;  ///< Global undo stack for edgeless mode
     QStack<EdgelessUndoAction> m_edgelessRedoStack;  ///< Global redo stack for edgeless mode
     static constexpr int MAX_UNDO_EDGELESS = 100;    ///< Max edgeless undo actions (~2MB)
+    
+    // ===== Edgeless Position History (Phase 4) =====
+    QStack<QPointF> m_edgelessPositionHistory;       ///< Stack of previous viewport positions
+    static constexpr int MAX_POSITION_HISTORY = 20;  ///< Max saved positions
+    
+    /**
+     * @brief Push the current position to history stack.
+     * 
+     * Called before navigation jumps (origin, link slots, etc.)
+     * to enable "go back" functionality.
+     */
+    void pushPositionHistory();
     
     // ===== Benchmark State (Task 2.6) =====
     bool m_benchmarking = false;                      ///< Whether benchmarking is active

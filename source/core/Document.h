@@ -633,6 +633,32 @@ public:
      */
     const std::vector<LayerDefinition>& edgelessLayers() const { return m_edgelessLayers; }
     
+    // ===== Edgeless Position History (Phase 4) =====
+    
+    /**
+     * @brief Get the last viewport position for edgeless mode.
+     * @return Document coordinates of the last viewport center.
+     */
+    QPointF edgelessLastPosition() const { return m_edgelessLastPosition; }
+    
+    /**
+     * @brief Set the last viewport position for edgeless mode.
+     * @param pos Document coordinates of the viewport center.
+     */
+    void setEdgelessLastPosition(const QPointF& pos) { m_edgelessLastPosition = pos; }
+    
+    /**
+     * @brief Get the position history stack for edgeless mode.
+     * @return Vector of document coordinates (most recent last).
+     */
+    const QVector<QPointF>& edgelessPositionHistory() const { return m_edgelessPositionHistory; }
+    
+    /**
+     * @brief Set the position history stack for edgeless mode.
+     * @param history Vector of document coordinates.
+     */
+    void setEdgelessPositionHistory(const QVector<QPointF>& history) { m_edgelessPositionHistory = history; }
+    
     // =========================================================================
     // PDF Reference Management (Task 1.2.4)
     // =========================================================================
@@ -1278,6 +1304,15 @@ private:
     
     /// True if layer manifest has unsaved changes (need to save document.json).
     bool m_edgelessManifestDirty = false;
+    
+    // ===== Edgeless Position History (Phase 4) =====
+    /// Last viewport center position in document coordinates.
+    /// Used to restore position when reopening the document.
+    QPointF m_edgelessLastPosition{0.0, 0.0};
+    
+    /// Navigation history for "go back" functionality.
+    /// Stores document coordinates of previous viewport positions.
+    QVector<QPointF> m_edgelessPositionHistory;
     
     // ===== UUID→Index Cache (Phase C.0.2) =====
     /// Cached mapping from page UUID to index for O(1) lookups.

@@ -85,7 +85,7 @@ signals:
      * @brief Emitted when user wants to open an existing .snb notebook.
      */
     void openNotebookRequested();
-    
+
     /**
      * @brief Emitted when user presses Escape to return to MainWindow.
      * MainWindow should check if there are open tabs before toggling.

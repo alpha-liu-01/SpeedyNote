@@ -9,9 +9,11 @@
 #include <QLabel>
 #include <QColor>
 #include <QSpinBox>
+#include <QTreeWidget>
+
+#include "ui/dialogs/KeyCaptureDialog.h"
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include "KeyCaptureDialog.h"
 #include "ControllerMappingDialog.h"
 #endif
 
@@ -102,6 +104,20 @@ private:
     // === About tab ===
     QWidget *aboutTab;
     void createAboutTab();
+
+    // === Keyboard Shortcuts tab (Phase 5.1) ===
+    QWidget *shortcutsTab;
+    QTreeWidget *shortcutsTree;
+    QPushButton *resetAllShortcutsButton;
+    QPushButton *openConfigFolderButton;
+    void createShortcutsTab();
+    void populateShortcutsTree();
+    void onShortcutItemDoubleClicked(QTreeWidgetItem* item, int column);
+    void onEditShortcut();
+    void onResetShortcut();
+    void onResetAllShortcuts();
+    void onOpenConfigFolder();
+    void updateShortcutDisplay(QTreeWidgetItem* item, const QString& actionId);
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // === Controller Mapping tab (conditional) ===

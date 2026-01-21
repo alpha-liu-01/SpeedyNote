@@ -48,12 +48,22 @@ public:
     void registerDefaults();
     
     /**
+     * @brief Scope for shortcut conflict detection (public for registerAction).
+     */
+    enum class Scope {
+        Global,       ///< Applies to both paged and edgeless documents
+        PagedOnly,    ///< Only applies to paged documents
+        EdgelessOnly  ///< Only applies to edgeless documents
+    };
+    
+    /**
      * @brief Register an action with its default shortcut.
      * 
      * @param actionId Unique identifier (e.g., "file.save", "tool.pen")
      * @param defaultShortcut Default key sequence string (e.g., "Ctrl+S", "B")
      * @param displayName Human-readable name for UI (e.g., "Save Document")
      * @param category Category for grouping in UI (e.g., "File", "Tools")
+     * @param scope Document mode scope for conflict detection (default: Global)
      * 
      * If the action is already registered, this updates the default/display/category
      * but preserves any user override.
@@ -61,7 +71,8 @@ public:
     void registerAction(const QString& actionId,
                         const QString& defaultShortcut,
                         const QString& displayName,
-                        const QString& category);
+                        const QString& category,
+                        Scope scope = Scope::Global);
     
     /**
      * @brief Check if an action is registered.
@@ -201,7 +212,16 @@ private:
         QString userShortcut;      ///< User override (empty = use default)
         QString displayName;       ///< Human-readable name for UI
         QString category;          ///< Category for grouping
+        Scope scope = Scope::Global;  ///< Document mode scope for conflict detection
     };
+    
+    /**
+     * @brief Check if two scopes can conflict.
+     * 
+     * Global conflicts with everything. PagedOnly and EdgelessOnly don't
+     * conflict with each other because they're mutually exclusive.
+     */
+    static bool scopesCanConflict(Scope a, Scope b);
     
     /// All registered shortcuts, keyed by action ID
     QHash<QString, ShortcutEntry> m_shortcuts;
