@@ -62,6 +62,7 @@
 #include <QWheelEvent>
 #include <QTimer>
 #include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
+#include "core/ShortcutManager.h"  // Keyboard shortcut hub
 #include <QInputDevice>  // MW5.8: For keyboard detection
 #include <QColorDialog>  // Phase 3.1.8: For custom color picker
 #include <QProcess>
@@ -1172,86 +1173,97 @@ void MainWindow::setupUi() {
     });
     
     // =========================================================================
-    // Phase doc-1: Application-wide keyboard shortcuts
-    // Using QShortcut with ApplicationShortcut context for guaranteed behavior
-    // regardless of which widget has focus.
+    // Keyboard Shortcut Hub: Setup managed shortcuts
+    // All shortcuts now go through ShortcutManager for customization support
     // =========================================================================
+    setupManagedShortcuts();
+}
+
+// ============================================================================
+// Keyboard Shortcut Hub: Setup and Management
+// ============================================================================
+
+void MainWindow::setupManagedShortcuts()
+{
+    auto* sm = ShortcutManager::instance();
     
-    // Save Document: Ctrl+S - save document to JSON file
-    QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
-    saveShortcut->setContext(Qt::ApplicationShortcut);
-    connect(saveShortcut, &QShortcut::activated, this, &MainWindow::saveDocument);
+    // Helper lambda to create and register a managed shortcut
+    auto createShortcut = [this, sm](const QString& actionId, 
+                                      std::function<void()> callback,
+                                      Qt::ShortcutContext context = Qt::ApplicationShortcut) {
+        QKeySequence seq = sm->keySequenceForAction(actionId);
+        QShortcut* shortcut = new QShortcut(seq, this);
+        shortcut->setContext(context);
+        connect(shortcut, &QShortcut::activated, this, callback);
+        m_managedShortcuts.insert(actionId, shortcut);
+    };
     
-    // Phase P.4.7: Removed Ctrl+O shortcut - obsolete with Launcher integration
-    // File opening is now handled by:
-    // - Launcher (recent notebooks, starred, search)
-    // - "+" menu → Open PDF... (Ctrl+Shift+O)
-    // - "+" menu → Open Notebook... (Ctrl+Shift+L)
+    // ===== File Operations =====
+    createShortcut("file.save", [this]() { saveDocument(); });
+    createShortcut("file.new_paged", [this]() { addNewTab(); });
+    createShortcut("file.new_edgeless", [this]() { addNewEdgelessTab(); });
+    createShortcut("file.open_pdf", [this]() { openPdfDocument(); });
+    createShortcut("file.open_notebook", [this]() { loadFolderDocument(); });
+    // file.close_tab - TODO: implement closeCurrentTab()
+    // file.export - TODO: implement export action
     
-    // Add Page: Ctrl+Shift+A - appends new page at end of document
-    QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
-    addPageShortcut->setContext(Qt::ApplicationShortcut);
-    connect(addPageShortcut, &QShortcut::activated, this, &MainWindow::addPageToDocument);
+    // ===== Document/Page Operations =====
+    createShortcut("document.add_page", [this]() { addPageToDocument(); });
+    createShortcut("document.insert_page", [this]() { insertPageInDocument(); });
+    createShortcut("document.delete_page", [this]() { deletePageInDocument(); });
+    // document.duplicate_page - TODO: implement
     
-    // Insert Page: Ctrl+Shift+I - inserts new page after current page
-    QShortcut* insertPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this);
-    insertPageShortcut->setContext(Qt::ApplicationShortcut);
-    connect(insertPageShortcut, &QShortcut::activated, this, &MainWindow::insertPageInDocument);
-    
-    // Delete Page: Ctrl+Shift+D - delete current page
-    QShortcut* deletePageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this);
-    deletePageShortcut->setContext(Qt::ApplicationShortcut);
-    connect(deletePageShortcut, &QShortcut::activated, this, &MainWindow::deletePageInDocument);
-    
-    // New Edgeless Canvas: Ctrl+Shift+N - creates infinite canvas document
-    QShortcut* newEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this);
-    newEdgelessShortcut->setContext(Qt::ApplicationShortcut);
-    connect(newEdgelessShortcut, &QShortcut::activated, this, &MainWindow::addNewEdgelessTab);
-    
-    // New Paged Notebook: Ctrl+N - creates paged document (Phase P.4.3)
-    QShortcut* newPagedShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_N), this);
-    newPagedShortcut->setContext(Qt::ApplicationShortcut);
-    connect(newPagedShortcut, &QShortcut::activated, this, &MainWindow::addNewTab);
-    
-    // Toggle Launcher: Ctrl+H - show/hide launcher (Phase P.4.4)
-    QShortcut* launcherShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_H), this);
-    launcherShortcut->setContext(Qt::ApplicationShortcut);
-    connect(launcherShortcut, &QShortcut::activated, this, &MainWindow::toggleLauncher);
-    
-    // Go to Launcher: Escape - go to launcher when no modal dialogs open (Phase P.4.4)
-    QShortcut* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
-    escapeShortcut->setContext(Qt::WindowShortcut);
-    connect(escapeShortcut, &QShortcut::activated, this, [this]() {
+    // ===== Navigation =====
+    createShortcut("navigation.launcher", [this]() { toggleLauncher(); });
+    createShortcut("navigation.escape", [this]() {
         // Only toggle launcher if no modal dialog is open
         if (!QApplication::activeModalWidget()) {
             toggleLauncher();
         }
+    }, Qt::WindowShortcut);  // WindowShortcut for Escape
+    createShortcut("navigation.go_to_page", [this]() { showJumpToPageDialog(); });
+    // navigation.next_tab, navigation.prev_tab - TODO: implement tab switching
+    // navigation.prev_page, navigation.next_page - handled in DocumentViewport
+    
+    // ===== View =====
+    createShortcut("view.debug_overlay", [this]() { toggleDebugOverlay(); });
+    createShortcut("view.auto_layout", [this]() { toggleAutoLayout(); });
+    createShortcut("view.fullscreen", [this]() { toggleFullscreen(); });
+    
+    // ===== Application =====
+    createShortcut("app.settings", [this]() { 
+        // Show control panel dialog
+        // TODO: Get ControlPanelDialog reference and show it
+    });
+    createShortcut("app.find", [this]() {
+        // Placeholder for future find feature
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[MainWindow] Find feature not yet implemented";
+#endif
     });
     
-    // TEMPORARY: Load Bundle (.snb folder): Ctrl+Shift+L
-    // Phase O1.7.6: Now handles BOTH paged and edgeless bundles
-    // TODO: Replace with unified file picker when .snb becomes a single file (QDataStream packaging)
-    QShortcut* loadBundleShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), this);
-    loadBundleShortcut->setContext(Qt::ApplicationShortcut);
-    connect(loadBundleShortcut, &QShortcut::activated, this, &MainWindow::loadFolderDocument);
+    // Connect to ShortcutManager's change signal for dynamic updates
+    connect(sm, &ShortcutManager::shortcutChanged,
+            this, &MainWindow::onShortcutChanged);
     
-    // Open PDF: Ctrl+Shift+O - open PDF file in new tab
-    QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
-    openPdfShortcut->setContext(Qt::ApplicationShortcut);
-    connect(openPdfShortcut, &QShortcut::activated, this, [this]() { openPdfDocument(); });
-    
-    // Debug Overlay toggle (F12) - developer tools style, like browser devtools
-    // Note: Ctrl+Shift+D is already used for Delete Page
-    QShortcut* debugOverlayShortcut = new QShortcut(QKeySequence(Qt::Key_F12), this);
-    debugOverlayShortcut->setContext(Qt::ApplicationShortcut);
-    connect(debugOverlayShortcut, &QShortcut::activated, this, &MainWindow::toggleDebugOverlay);
-    
-    // Two-column auto layout toggle (Ctrl+2) - toggle between 1-column only and auto 1/2 column
-    // Only applies to paged documents (not edgeless)
-    QShortcut* autoLayoutShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_2), this);
-    autoLayoutShortcut->setContext(Qt::ApplicationShortcut);
-    connect(autoLayoutShortcut, &QShortcut::activated, this, &MainWindow::toggleAutoLayout);
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MainWindow] Registered" << m_managedShortcuts.size() << "managed shortcuts";
+#endif
+}
 
+void MainWindow::onShortcutChanged(const QString& actionId, const QString& newShortcut)
+{
+    // Update the QShortcut if we manage this action
+    auto it = m_managedShortcuts.find(actionId);
+    if (it != m_managedShortcuts.end()) {
+        QShortcut* shortcut = it.value();
+        QKeySequence newSeq(newShortcut);
+        shortcut->setKey(newSeq);
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[MainWindow] Updated shortcut:" << actionId << "->" << newShortcut;
+#endif
+    }
 }
 
 MainWindow::~MainWindow() {
@@ -4393,12 +4405,12 @@ void MainWindow::showAddMenu() {
     
     // New Edgeless Canvas
     QAction* newEdgelessAction = menu.addAction(tr("New Edgeless Canvas"));
-    newEdgelessAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
+    newEdgelessAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.new_edgeless"));
     connect(newEdgelessAction, &QAction::triggered, this, &MainWindow::addNewEdgelessTab);
     
     // New Paged Notebook
     QAction* newPagedAction = menu.addAction(tr("New Paged Notebook"));
-    newPagedAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    newPagedAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.new_paged"));
     connect(newPagedAction, &QAction::triggered, this, &MainWindow::addNewTab);
     
     // Separator
@@ -4406,12 +4418,12 @@ void MainWindow::showAddMenu() {
     
     // Open PDF...
     QAction* openPdfAction = menu.addAction(tr("Open PDF..."));
-    openPdfAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    openPdfAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.open_pdf"));
     connect(openPdfAction, &QAction::triggered, this, &MainWindow::showOpenPdfDialog);
     
     // Open Notebook...
     QAction* openNotebookAction = menu.addAction(tr("Open Notebook..."));
-    openNotebookAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    openNotebookAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.open_notebook"));
     connect(openNotebookAction, &QAction::triggered, this, &MainWindow::loadFolderDocument);
     
     // Position menu below the add button

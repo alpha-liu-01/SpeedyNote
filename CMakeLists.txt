@@ -233,6 +233,7 @@ set(CORE_SOURCES
     source/core/NotebookLibrary.cpp
     source/core/TouchGestureHandler.cpp
     source/core/MarkdownNote.cpp
+    source/core/ShortcutManager.cpp
 )
 
 # Inserted objects (images, links, etc.)

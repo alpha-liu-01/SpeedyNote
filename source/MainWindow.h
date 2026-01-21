@@ -278,6 +278,9 @@ protected:
 private slots:
 
     void onNewConnection(); // Handle new instance connections
+    
+    // Keyboard Shortcut Hub: Handle shortcut changes from ShortcutManager
+    void onShortcutChanged(const QString& actionId, const QString& newShortcut);
 
     void updatePanX(int value);
     void updatePanY(int value);
@@ -578,6 +581,10 @@ private:
     QString elideTabText(const QString &text, int maxWidth);
     
     // Layout timers and separators - REMOVED MW4.3: No longer needed
+    
+    // Keyboard Shortcut Hub: Managed shortcuts
+    QHash<QString, QShortcut*> m_managedShortcuts;
+    void setupManagedShortcuts();  // Initialize shortcuts from ShortcutManager
 };
 
 #endif // MAINWINDOW_H

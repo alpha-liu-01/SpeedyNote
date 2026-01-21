@@ -222,7 +222,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         
         // Stop inertia if running (must happen first)
         if (m_inertiaTimer && m_inertiaTimer->isActive()) {
-            m_inertiaTimer->stop();
+        m_inertiaTimer->stop();
             m_velocitySamples.clear();
         }
         
@@ -235,7 +235,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         // subsequent gestures would transform it instead of capturing fresh.
         // This was the difference between Android and desktop behavior.
         if (m_viewport->isPanGestureActive()) {
-            m_viewport->endPanGesture();
+        m_viewport->endPanGesture();
         }
         if (m_viewport->isZoomGestureActive()) {
             m_viewport->endZoomGesture();
@@ -355,7 +355,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                 // native to logical before subtracting.
                 QPointF localPos1 = nativePos1 / dpr - widgetGlobalPos;
                 QPointF localPos2 = nativePos2 / dpr - widgetGlobalPos;
-                
+    
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "[TouchGestureHandler] MISMATCH: native=" << nativeCount
                          << "qt=" << qtActivePoints
@@ -406,10 +406,10 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             // This is common on Android where both fingers can arrive in same event
             if (m_mode == TouchGestureMode::YAxisOnly) {
                 // Y-axis only mode: ignore pinch, just accept the event
-                event->accept();
-                return true;
-            }
-            
+        event->accept();
+        return true;
+    }
+    
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
@@ -444,11 +444,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             }
             if (m_pinchActive) {
                 endTouchPinch();
-            }
-            
-            event->accept();
-            return true;
         }
+        
+        event->accept();
+        return true;
+    }
     }
     
     // ===== TouchUpdate =====
@@ -459,8 +459,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             if (!m_threeFingerTimerActive) {
                 m_threeFingerTimer.start();
                 m_threeFingerTimerActive = true;
-            }
-            
+    }
+    
             // Suspend any active gesture while 3+ fingers are down
             if (m_panActive) {
                 endTouchPan(false);
@@ -485,11 +485,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                 QPointF pos2 = p2.position();
                 QPointF centroid = (pos1 + pos2) / 2.0;
                 qreal distance = QLineF(pos1, pos2).length();
-                
-                if (distance < 1.0) {
-                    distance = 1.0;
-                }
-                
+        
+        if (distance < 1.0) {
+            distance = 1.0;
+        }
+        
                 m_pinchActive = true;
                 m_pinchStartDistance = distance;
                 m_initialDistance = distance;   // For zoom threshold calculation
@@ -722,11 +722,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                          << "havePos1:" << havePos1 << "havePos2:" << havePos2
                          << "activePoints:" << activePoints.size()
                          << "cachedPositions:" << m_lastTouchPositions.size();
-            }
+        }
 #endif
-            
-            event->accept();
-            return true;
+        
+        event->accept();
+        return true;
         }
     }
     
@@ -750,7 +750,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             }
         }
 #endif
-        
+                
 #ifdef SPEEDYNOTE_DEBUG
         if (event->type() == QEvent::TouchCancel) {
             qDebug() << "[TouchGestureHandler] TouchCancel received!"
@@ -759,7 +759,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                      << "trackedIds:" << m_trackedTouchIds.size();
         }
 #endif
-        
+                
         // TG.2.3: End pan gesture
         if (m_panActive) {
             // Start inertia only on normal end (not cancel)
@@ -768,8 +768,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         
         if (m_pinchActive) {
             endTouchPinch();
-        }
-        
+                    }
+                    
         // TG.5: Check for 3-finger tap
         // A valid tap requires: 3 fingers were down, duration < 300ms, all fingers released
         if (event->type() == QEvent::TouchEnd && m_threeFingerTimerActive) {
@@ -813,14 +813,14 @@ void TouchGestureHandler::endTouchPan(bool startInertia)
     m_panActive = false;
     
     // TG.3: Calculate average velocity and potentially start inertia
-    if (startInertia && !m_velocitySamples.isEmpty()) {
+        if (startInertia && !m_velocitySamples.isEmpty()) {
         // Calculate average velocity from recent samples (pixels per ms)
-        QPointF avgVelocity(0, 0);
+            QPointF avgVelocity(0, 0);
         for (const QPointF& velocity : m_velocitySamples) {
             avgVelocity += velocity;
-        }
-        avgVelocity /= m_velocitySamples.size();
-        
+            }
+            avgVelocity /= m_velocitySamples.size();
+            
         // Convert velocity from pixels/ms to document coords/ms
         m_inertiaVelocity = avgVelocity / m_viewport->zoomLevel();
         
@@ -832,17 +832,17 @@ void TouchGestureHandler::endTouchPan(bool startInertia)
         // Check minimum velocity threshold (in document coords/ms)
         qreal speed = std::sqrt(m_inertiaVelocity.x() * m_inertiaVelocity.x() +
                                 m_inertiaVelocity.y() * m_inertiaVelocity.y());
-        
-        if (speed > INERTIA_MIN_VELOCITY) {
+            
+            if (speed > INERTIA_MIN_VELOCITY) {
             // Start inertia animation (keep using deferred pan)
             m_inertiaTimer->start(INERTIA_INTERVAL_MS);
             m_velocitySamples.clear();
             return;  // Don't end pan gesture yet - inertia will use it
+            }
         }
-    }
-    
+        
     // No inertia - end pan gesture immediately
-    m_viewport->endPanGesture();
+        m_viewport->endPanGesture();
     m_velocitySamples.clear();
 }
 
@@ -871,7 +871,7 @@ void TouchGestureHandler::onInertiaFrame()
     m_inertiaVelocity *= INERTIA_FRICTION;
     
     // Check if velocity is below threshold
-    qreal speed = std::sqrt(m_inertiaVelocity.x() * m_inertiaVelocity.x() +
+    qreal speed = std::sqrt(m_inertiaVelocity.x() * m_inertiaVelocity.x() + 
                             m_inertiaVelocity.y() * m_inertiaVelocity.y());
     
     if (speed < INERTIA_MIN_VELOCITY) {
