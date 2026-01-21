@@ -184,6 +184,8 @@ void ShortcutManager::registerDefaults()
     registerAction("view.fullscreen", "F11", tr("Toggle Fullscreen"), tr("View"));
     registerAction("view.debug_overlay", "F12", tr("Toggle Debug Overlay"), tr("View"));
     registerAction("view.auto_layout", "Ctrl+Shift+2", tr("Toggle Auto Layout"), tr("View"));
+    registerAction("view.left_sidebar", "Ctrl+Shift+L", tr("Toggle Left Sidebar"), tr("View"));
+    registerAction("view.right_sidebar", "Ctrl+Shift+M", tr("Toggle Right Sidebar"), tr("View"));
     
     // ===== PDF Features =====
     registerAction("pdf.auto_highlight", "Ctrl+H", tr("Toggle Auto-Highlight"), tr("PDF"));

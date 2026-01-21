@@ -88,6 +88,17 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
     loadSettings();
 }
 
+void ControlPanelDialog::switchToKeyboardShortcutsTab()
+{
+    // Find the "Shortcuts" tab and switch to it
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        if (tabWidget->tabText(i) == tr("Shortcuts")) {
+            tabWidget->setCurrentIndex(i);
+            return;
+        }
+    }
+}
+
 void ControlPanelDialog::done(int result)
 {
 #ifdef Q_OS_ANDROID

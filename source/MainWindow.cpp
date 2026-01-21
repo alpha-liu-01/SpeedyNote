@@ -1248,17 +1248,47 @@ void MainWindow::setupManagedShortcuts()
     createShortcut("view.debug_overlay", [this]() { toggleDebugOverlay(); });
     createShortcut("view.auto_layout", [this]() { toggleAutoLayout(); });
     createShortcut("view.fullscreen", [this]() { toggleFullscreen(); });
+    createShortcut("view.left_sidebar", [this]() {
+        if (m_leftSidebar && m_navigationBar) {
+            bool newState = !m_leftSidebar->isVisible();
+            m_leftSidebar->setVisible(newState);
+            m_navigationBar->setLeftSidebarChecked(newState);
+        }
+    });
+    createShortcut("view.right_sidebar", [this]() {
+        if (markdownNotesSidebar && m_navigationBar) {
+            bool newState = !markdownNotesSidebar->isVisible();
+            markdownNotesSidebar->setVisible(newState);
+            markdownNotesSidebarVisible = newState;
+            m_navigationBar->setRightSidebarChecked(newState);
+        }
+    });
     
     // ===== Application =====
     createShortcut("app.settings", [this]() { 
         // Show control panel dialog
-        // TODO: Get ControlPanelDialog reference and show it
+        ControlPanelDialog dialog(this, this);
+        dialog.exec();
+    });
+    createShortcut("app.keyboard_shortcuts", [this]() {
+        // Show control panel dialog and switch to Keyboard Shortcuts tab
+        ControlPanelDialog dialog(this, this);
+        dialog.switchToKeyboardShortcutsTab();
+        dialog.exec();
     });
     createShortcut("app.find", [this]() {
         // Placeholder for future find feature
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MainWindow] Find feature not yet implemented";
 #endif
+    });
+    
+    // ===== Export/Share =====
+    createShortcut("file.export", [this]() {
+        // Trigger the share/export action (same as NavigationBar share button)
+        if (m_navigationBar) {
+            emit m_navigationBar->shareClicked();
+        }
     });
     
     // ===== Tools (delegated to viewport) =====

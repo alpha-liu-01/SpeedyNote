@@ -41,6 +41,12 @@ public:
      * @param parent Parent widget.
      */
     explicit ControlPanelDialog(MainWindow *mainWindow, QWidget *parent = nullptr);
+    
+    /**
+     * @brief Switch to the Keyboard Shortcuts tab.
+     * Used by keyboard shortcut Ctrl+Alt+Shift+K.
+     */
+    void switchToKeyboardShortcutsTab();
 
 protected:
     /**
