@@ -1216,10 +1216,22 @@ void MainWindow::setupManagedShortcuts()
     // ===== Navigation =====
     createShortcut("navigation.launcher", [this]() { toggleLauncher(); });
     createShortcut("navigation.escape", [this]() {
-        // Only toggle launcher if no modal dialog is open
-        if (!QApplication::activeModalWidget()) {
-            toggleLauncher();
+        // Only process if no modal dialog is open
+        if (QApplication::activeModalWidget()) {
+            return;
         }
+        
+        // First, let the current viewport try to handle Escape
+        // (cancel lasso selection, deselect objects, cancel text selection)
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->handleEscapeKey()) {
+                // Viewport handled Escape (cancelled something)
+                return;
+            }
+        }
+        
+        // Nothing to cancel in viewport - toggle to launcher
+        toggleLauncher();
     }, Qt::WindowShortcut);  // WindowShortcut for Escape
     createShortcut("navigation.go_to_page", [this]() { showJumpToPageDialog(); });
     // navigation.next_tab, navigation.prev_tab - TODO: implement tab switching
@@ -1509,11 +1521,21 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     });
     
     // CR-2B: Connect tool/mode signals for keyboard shortcut sync
-    m_toolChangedConn = connect(viewport, &DocumentViewport::toolChanged, this, [this](ToolType) {
-        // REMOVED: updateToolButtonStates call removed - tool button state functionality deleted
-        // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
-    // updateThicknessSliderForCurrentTool();
-        // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+    // When tool is changed via keyboard shortcuts or programmatically,
+    // update the toolbar button and subtoolbar to match
+    m_toolChangedConn = connect(viewport, &DocumentViewport::toolChanged, this, [this](ToolType tool) {
+        // Update toolbar to show correct button selected
+        if (m_toolbar) {
+            m_toolbar->setCurrentTool(tool);
+        }
+        // Update subtoolbar container to show correct subtoolbar
+        if (m_subtoolbarContainer) {
+            m_subtoolbarContainer->onToolChanged(tool);
+        }
+        // Update action bar container for tool context
+        if (m_actionBarContainer) {
+            m_actionBarContainer->onToolChanged(tool);
+        }
     });
     
     // Phase D: Connect straight line mode sync (viewport → toolbar)
@@ -2895,6 +2917,13 @@ DocumentViewport* MainWindow::currentViewport() const {
         return m_tabManager->currentViewport();
     }
     return nullptr;
+}
+
+int MainWindow::tabCount() const {
+    if (m_tabBar) {
+        return m_tabBar->count();
+    }
+    return 0;
 }
 
 

@@ -19,6 +19,7 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QCloseEvent>
+#include <QShortcut>  // For m_managedShortcuts hash
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
 #ifndef Q_OS_ANDROID
@@ -187,6 +188,7 @@ public:
 
     // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
+    int tabCount() const;  // Returns number of open tabs (used by Launcher for Escape handling)
 
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls

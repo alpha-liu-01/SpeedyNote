@@ -6,6 +6,7 @@
 
 #include "DocumentViewport.h"
 #include "TouchGestureHandler.h"
+#include "ShortcutManager.h"        // Keyboard shortcut hub
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
@@ -31,6 +32,10 @@
 #include <QSet>       // For efficient ID lookup in eraseAt
 #include <QClipboard>     // For clipboard access (O2.4)
 #include <QGuiApplication> // For clipboard access (O2.4)
+#include <QApplication>    // For focusWidget() - text input focus check
+#include <QLineEdit>       // For text input focus check
+#include <QTextEdit>       // For text input focus check
+#include <QPlainTextEdit>  // For text input focus check
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QMimeData>      // For clipboard content type check (O2.4)
 
@@ -48,6 +53,44 @@
 
 // PDF uses 72 DPI, Page uses 96 DPI - scale factor for coordinate conversion
 static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
+
+// ===== Shortcut Matching Helper =====
+
+/**
+ * @brief Check if a key event matches a ShortcutManager action.
+ * 
+ * @param event The key event to check
+ * @param actionId The action ID from ShortcutManager
+ * @return true if the event matches the action's shortcut
+ */
+static bool eventMatchesAction(QKeyEvent* event, const QString& actionId)
+{
+    QKeySequence actionSeq = ShortcutManager::instance()->keySequenceForAction(actionId);
+    if (actionSeq.isEmpty()) {
+        return false;
+    }
+    
+    // Build a key sequence from the event
+    int key = event->key();
+    
+    // Skip modifier-only keys
+    if (key == Qt::Key_Control || key == Qt::Key_Shift || 
+        key == Qt::Key_Alt || key == Qt::Key_Meta) {
+        return false;
+    }
+    
+    // Combine key with modifiers
+    Qt::KeyboardModifiers mods = event->modifiers();
+    int combined = key;
+    if (mods & Qt::ControlModifier) combined |= Qt::CTRL;
+    if (mods & Qt::ShiftModifier) combined |= Qt::SHIFT;
+    if (mods & Qt::AltModifier) combined |= Qt::ALT;
+    if (mods & Qt::MetaModifier) combined |= Qt::META;
+    
+    QKeySequence eventSeq(combined);
+    
+    return eventSeq == actionSeq;
+}
 static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
 
 // ===== Constructor & Destructor =====
@@ -2354,127 +2397,118 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             }
         }
         
-        // Phase O3.5.2: Layer affinity shortcuts (Alt+[ / Alt+] / Alt+\)
+        // Phase O3.5.2: Layer affinity shortcuts (via ShortcutManager)
         // These change which layer the object renders relative to
         if (hasSelectedObjects()) {
-            bool alt = event->modifiers() & Qt::AltModifier;
-            bool ctrl = event->modifiers() & Qt::ControlModifier;
-            
-            if (alt && !ctrl) {
-                // Alt+] - Increase affinity (move object up in layer stack)
-                if (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight) {
-                    increaseSelectedAffinity();
-                    event->accept();
-                    return;
-                }
-                // Alt+[ - Decrease affinity (move object down in layer stack)
-                if (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft) {
-                    decreaseSelectedAffinity();
-                    event->accept();
-                    return;
-                }
-                // Alt+\ - Send to background (affinity = -1)
-                if (event->key() == Qt::Key_Backslash || event->key() == Qt::Key_Bar) {
-                    sendSelectedToBackground();
-                    event->accept();
-                    return;
-                }
+            // Increase affinity (default: Alt+])
+            if (eventMatchesAction(event, "object.affinity_up")) {
+                increaseSelectedAffinity();
+                event->accept();
+                return;
+            }
+            // Decrease affinity (default: Alt+[)
+            if (eventMatchesAction(event, "object.affinity_down")) {
+                decreaseSelectedAffinity();
+                event->accept();
+                return;
+            }
+            // Send to background (default: Alt+\)
+            if (eventMatchesAction(event, "object.affinity_background")) {
+                sendSelectedToBackground();
+                event->accept();
+                return;
             }
         }
         
-        // Z-order shortcuts (O2.8.2)
-        // Note: On most keyboards, Shift+[ = { and Shift+] = }
-        // Qt reports the character produced, not the physical key, so we need to check
-        // for both bracket keys (Ctrl+[/]) and brace keys (Ctrl+Shift produces {/})
+        // Z-order shortcuts (via ShortcutManager)
         if (hasSelectedObjects()) {
-            bool ctrl = event->modifiers() & Qt::ControlModifier;
-            bool shift = event->modifiers() & Qt::ShiftModifier;
-            
-            // Ctrl+] = bring forward, Ctrl+Shift+] (which produces }) = bring to front
-            if (ctrl && (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight)) {
-                if (shift || event->key() == Qt::Key_BraceRight) {
-                    // Ctrl+Shift+] (or Ctrl+}) → bring to front
-                    bringSelectedToFront();
-                } else {
-                    // Ctrl+] → bring forward
-                    bringSelectedForward();
-                }
+            // Bring to front (default: Ctrl+Shift+])
+            if (eventMatchesAction(event, "object.bring_front")) {
+                bringSelectedToFront();
                 event->accept();
                 return;
             }
-            
-            // Ctrl+[ = send backward, Ctrl+Shift+[ (which produces {) = send to back
-            if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft)) {
-                if (shift || event->key() == Qt::Key_BraceLeft) {
-                    // Ctrl+Shift+[ (or Ctrl+{) → send to back
-                    sendSelectedToBack();
-                } else {
-                    // Ctrl+[ → send backward
-                    sendSelectedBackward();
-                }
+            // Bring forward (default: Ctrl+])
+            if (eventMatchesAction(event, "object.bring_forward")) {
+                bringSelectedForward();
+                event->accept();
+                return;
+            }
+            // Send backward (default: Ctrl+[)
+            if (eventMatchesAction(event, "object.send_backward")) {
+                sendSelectedBackward();
+                event->accept();
+                return;
+            }
+            // Send to back (default: Ctrl+Shift+[)
+            if (eventMatchesAction(event, "object.send_back")) {
+                sendSelectedToBack();
                 event->accept();
                 return;
             }
         }
         
-        // Phase C.4.2: Mode switching shortcuts
-        if (event->modifiers() == Qt::ControlModifier) {
-            // Ctrl+< or Ctrl+, → Image mode
-            if (event->key() == Qt::Key_Less || event->key() == Qt::Key_Comma) {
-                m_objectInsertMode = ObjectInsertMode::Image;
-                emit objectInsertModeChanged(m_objectInsertMode);
+        // Phase C.4.2: Mode switching shortcuts (via ShortcutManager)
+        
+        // Image insert mode (default: I)
+        if (eventMatchesAction(event, "object.mode_image")) {
+            m_objectInsertMode = ObjectInsertMode::Image;
+            emit objectInsertModeChanged(m_objectInsertMode);
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Image insert mode";
+            qDebug() << "Switched to Image insert mode";
 #endif
-                event->accept();
-                return;
-            }
-            // Ctrl+> or Ctrl+. → Link mode
-            if (event->key() == Qt::Key_Greater || event->key() == Qt::Key_Period) {
-                m_objectInsertMode = ObjectInsertMode::Link;
-                emit objectInsertModeChanged(m_objectInsertMode);
+            event->accept();
+            return;
+        }
+        // Link insert mode (default: Ctrl+.)
+        if (eventMatchesAction(event, "object.mode_link")) {
+            m_objectInsertMode = ObjectInsertMode::Link;
+            emit objectInsertModeChanged(m_objectInsertMode);
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Link insert mode";
+            qDebug() << "Switched to Link insert mode";
 #endif
-                event->accept();
-                return;
-            }
-            // Ctrl+6 → Create mode
-            if (event->key() == Qt::Key_6) {
-                m_objectActionMode = ObjectActionMode::Create;
-                emit objectActionModeChanged(m_objectActionMode);
+            event->accept();
+            return;
+        }
+        // Create mode (default: Ctrl+6)
+        if (eventMatchesAction(event, "object.mode_create")) {
+            m_objectActionMode = ObjectActionMode::Create;
+            emit objectActionModeChanged(m_objectActionMode);
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Create mode";
+            qDebug() << "Switched to Create mode";
 #endif
-                event->accept();
-                return;
-            }
-            // Ctrl+7 → Select mode
-            if (event->key() == Qt::Key_7) {
-                m_objectActionMode = ObjectActionMode::Select;
-                emit objectActionModeChanged(m_objectActionMode);
+            event->accept();
+            return;
+        }
+        // Select mode (default: Ctrl+7)
+        if (eventMatchesAction(event, "object.mode_select")) {
+            m_objectActionMode = ObjectActionMode::Select;
+            emit objectActionModeChanged(m_objectActionMode);
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Select mode";
+            qDebug() << "Switched to Select mode";
 #endif
-                event->accept();
-                return;
-            }
-            // Ctrl+8/9/0 → Access link slots (Phase C.4.3)
-            if (event->key() == Qt::Key_8) {
-                activateLinkSlot(0);
-                event->accept();
-                return;
-            }
-            if (event->key() == Qt::Key_9) {
-                activateLinkSlot(1);
-                event->accept();
-                return;
-            }
-            if (event->key() == Qt::Key_0) {
-                activateLinkSlot(2);
-                event->accept();
-                return;
-            }
+            event->accept();
+            return;
+        }
+        
+        // Link slot shortcuts (via ShortcutManager)
+        // Slot 1 (default: Ctrl+8)
+        if (eventMatchesAction(event, "link.slot_1")) {
+            activateLinkSlot(0);
+            event->accept();
+            return;
+        }
+        // Slot 2 (default: Ctrl+9)
+        if (eventMatchesAction(event, "link.slot_2")) {
+            activateLinkSlot(1);
+            event->accept();
+            return;
+        }
+        // Slot 3 (default: Alt+0)
+        if (eventMatchesAction(event, "link.slot_3")) {
+            activateLinkSlot(2);
+            event->accept();
+            return;
         }
     }
     
@@ -2487,8 +2521,8 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
             return;
         }
         
-        // Phase B.2: Toggle auto-highlight mode (Ctrl+H)
-        if (event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_H) {
+        // Phase B.2: Toggle auto-highlight mode (via ShortcutManager, default: Ctrl+H)
+        if (eventMatchesAction(event, "pdf.auto_highlight")) {
             setAutoHighlightEnabled(!m_autoHighlightEnabled);
             event->accept();
             return;
@@ -2509,55 +2543,101 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         }
     }
     
-    // Tool switching shortcuts (for testing and quick access)
-    switch (event->key()) {
-        case Qt::Key_P:
-            // P = Pen tool
+    // ===== Text Input Focus Check =====
+    // Single-key shortcuts (B, E, L, M, V) must NOT trigger when editing text
+    // in QLineEdit, QTextEdit, or QPlainTextEdit widgets
+    QWidget* focusedWidget = QApplication::focusWidget();
+    bool textInputActive = qobject_cast<QLineEdit*>(focusedWidget) ||
+                           qobject_cast<QTextEdit*>(focusedWidget) ||
+                           qobject_cast<QPlainTextEdit*>(focusedWidget);
+    
+    // ===== Tool Switching Shortcuts (via ShortcutManager) =====
+    // Note: Single-key shortcuts are handled here, NOT in MainWindow,
+    // because they should only work when DocumentViewport has focus
+    // (prevents conflict with text editing in dialogs/panels)
+    
+    // Only process single-key tool shortcuts if NOT editing text
+    if (!textInputActive) {
+        // Pen tool (default: B for Brush, Photoshop-style)
+        if (eventMatchesAction(event, "tool.pen")) {
             setCurrentTool(ToolType::Pen);
             event->accept();
             return;
-            
-        case Qt::Key_E:
-            // E = Eraser tool
+        }
+        
+        // Eraser tool (default: E)
+        if (eventMatchesAction(event, "tool.eraser")) {
             setCurrentTool(ToolType::Eraser);
             event->accept();
             return;
-            
-        case Qt::Key_O:
-            // O = Object Select tool (Phase O2.9)
+        }
+        
+        // Lasso tool (default: L)
+        if (eventMatchesAction(event, "tool.lasso")) {
+            setCurrentTool(ToolType::Lasso);
+            event->accept();
+            return;
+        }
+        
+        // Text Highlighter tool (default: T) - for PDF text selection/highlighting
+        if (eventMatchesAction(event, "tool.highlighter")) {
+            setCurrentTool(ToolType::Highlighter);
+            event->accept();
+            return;
+        }
+        
+        // Marker tool (default: M)
+        if (eventMatchesAction(event, "tool.marker")) {
+            setCurrentTool(ToolType::Marker);
+            event->accept();
+            return;
+        }
+        
+        // Object Select tool (default: V for Move, Photoshop-style)
+        if (eventMatchesAction(event, "tool.object_select")) {
             setCurrentTool(ToolType::ObjectSelect);
             event->accept();
             return;
-            
-        case Qt::Key_B:
-            // B = Toggle benchmark
-            if (m_benchmarking) {
-                stopBenchmark();
-            } else {
-                startBenchmark();
-            }
-            update();
-            event->accept();
-            return;
-            
-        case Qt::Key_Z:
-            // Ctrl+Z = Undo
-            if (event->modifiers() & Qt::ControlModifier) {
-                undo();
-                event->accept();
-                return;
-            }
-            break;
-            
-        case Qt::Key_Y:
-            // Ctrl+Y = Redo
-            if (event->modifiers() & Qt::ControlModifier) {
-                redo();
-                event->accept();
-                return;
-            }
-            break;
+        }
+    } // end !textInputActive
+    
+    // ===== Edit Shortcuts (via ShortcutManager) =====
+    
+    // Undo (default: Ctrl+Z)
+    if (eventMatchesAction(event, "edit.undo")) {
+        undo();
+        event->accept();
+        return;
     }
+    
+    // Redo (default: Ctrl+Shift+Z)
+    if (eventMatchesAction(event, "edit.redo")) {
+        redo();
+        event->accept();
+        return;
+    }
+    
+    // Redo alternative (default: Ctrl+Y)
+    if (eventMatchesAction(event, "edit.redo_alt")) {
+        redo();
+        event->accept();
+        return;
+    }
+    
+    // ===== Debug Shortcut (kept as hardcoded - development only) =====
+#ifdef SPEEDYNOTE_DEBUG
+    // B = Toggle benchmark (debug builds only, conflicts with tool.pen in release)
+    if (event->key() == Qt::Key_F10) {
+        if (m_benchmarking) {
+            stopBenchmark();
+        } else {
+            startBenchmark();
+        }
+        update();
+        event->accept();
+        return;
+    }
+#endif
     
     // Pass unhandled keys to parent
     QWidget::keyPressEvent(event);
@@ -8810,6 +8890,48 @@ void DocumentViewport::cancelSelectionTransform()
     // Simply clear the selection without applying the transform
     // The original strokes remain untouched
     clearLassoSelection();
+}
+
+bool DocumentViewport::handleEscapeKey()
+{
+    // Handle Escape key for cancelling selections/states.
+    // Returns true if something was cancelled, false if nothing to cancel.
+    // Called by MainWindow to determine whether to toggle to launcher.
+    
+    // Priority 1: Cancel lasso selection or drawing (Lasso tool only)
+    // Note: Lasso selection is cleared when switching away from Lasso tool,
+    // so this check only needs to handle the Lasso tool.
+    if (m_currentTool == ToolType::Lasso) {
+        if (m_lassoSelection.isValid() || m_isDrawingLasso) {
+            cancelSelectionTransform();
+            return true;
+        }
+    }
+    
+    // Priority 2: Deselect objects or clear object clipboard (ObjectSelect tool only)
+    if (m_currentTool == ToolType::ObjectSelect) {
+        if (hasSelectedObjects() || !m_objectClipboard.isEmpty()) {
+            cancelObjectSelectAction();
+            return true;
+        }
+    }
+    
+    // Priority 3: Cancel text selection (Highlighter tool only)
+    // Note: Text selection is cleared when switching away from Highlighter tool.
+    if (m_currentTool == ToolType::Highlighter) {
+        if (m_textSelection.isValid() || m_textSelection.isSelecting) {
+            bool hadValidSelection = m_textSelection.isValid();
+            m_textSelection.clear();
+            if (hadValidSelection) {
+                emit textSelectionChanged(false);
+            }
+            update();
+            return true;
+        }
+    }
+    
+    // Nothing to cancel
+    return false;
 }
 
 // ===== Clipboard Operations (Task 2.10.7) =====

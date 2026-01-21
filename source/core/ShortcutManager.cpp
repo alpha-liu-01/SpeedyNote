@@ -82,10 +82,10 @@ void ShortcutManager::registerDefaults()
     // ===== Tools (Photoshop-style) =====
     registerAction("tool.pen", "B", tr("Pen Tool"), tr("Tools"));
     registerAction("tool.eraser", "E", tr("Eraser Tool"), tr("Tools"));
-    registerAction("tool.highlighter", "L", tr("Highlighter/Lasso Tool"), tr("Tools"));
+    registerAction("tool.lasso", "L", tr("Lasso Tool"), tr("Tools"));
+    registerAction("tool.highlighter", "T", tr("Text Highlighter Tool"), tr("Tools"));
     registerAction("tool.marker", "M", tr("Marker Tool"), tr("Tools"));
     registerAction("tool.object_select", "V", tr("Object Select Tool"), tr("Tools"));
-    registerAction("tool.text_select", "W", tr("Text Selection Tool"), tr("Tools"));
     registerAction("tool.pan", "H", tr("Pan Tool (Hold)"), tr("Tools"));
     
     // ===== Editing =====

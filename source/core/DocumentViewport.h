@@ -838,6 +838,16 @@ public:
     bool hasTextSelection() const { return m_textSelection.isValid(); }
     
     /**
+     * @brief Handle Escape key for cancelling selections.
+     * @return True if Escape was handled (something was cancelled), 
+     *         false if nothing to cancel.
+     * 
+     * Called by MainWindow when Escape is pressed. If this returns false,
+     * MainWindow should toggle to the launcher.
+     */
+    bool handleEscapeKey();
+    
+    /**
      * @brief Check if the internal stroke clipboard has content.
      * @return True if strokes can be pasted.
      * 

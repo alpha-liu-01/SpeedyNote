@@ -389,6 +389,19 @@ static void connectLauncherSignals(Launcher* launcher)
         w->loadFolderDocument();
         launcher->hideWithAnimation();
     });
+    
+    // Handle Escape/return to MainWindow request
+    // Only return if MainWindow exists and has open tabs
+    QObject::connect(launcher, &Launcher::returnToMainWindowRequested, [=]() {
+        MainWindow* w = MainWindow::findExistingMainWindow();
+        if (w && w->tabCount() > 0) {
+            // MainWindow exists with open tabs - toggle back to it
+            w->preserveWindowState(launcher, true);
+            w->bringToFront();
+            launcher->hideWithAnimation();
+        }
+        // Otherwise, do nothing (stay on Launcher)
+    });
 }
 
 // ============================================================================

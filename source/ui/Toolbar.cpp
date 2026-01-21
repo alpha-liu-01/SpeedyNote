@@ -27,10 +27,10 @@ void Toolbar::setupUi()
     m_toolGroup = new QButtonGroup(this);
     m_toolGroup->setExclusive(true);
     
-    // Pen
+    // Pen (Photoshop-style: B for Brush)
     m_penButton = new ToolButton(this);
     m_penButton->setThemedIcon("pen");
-    m_penButton->setToolTip(tr("Pen Tool (P)"));
+    m_penButton->setToolTip(tr("Pen Tool (B)"));
     m_penButton->setChecked(true);  // Default tool
     m_toolGroup->addButton(m_penButton);
     mainLayout->addWidget(m_penButton);
@@ -63,17 +63,17 @@ void Toolbar::setupUi()
     m_toolGroup->addButton(m_lassoButton);
     mainLayout->addWidget(m_lassoButton);
     
-    // Object Insert
+    // Object Insert (Photoshop-style: V for Move/Select)
     m_objectInsertButton = new ToolButton(this);
     m_objectInsertButton->setThemedIcon("objectinsert");
-    m_objectInsertButton->setToolTip(tr("Insert Object"));
+    m_objectInsertButton->setToolTip(tr("Object Select Tool (V)"));
     m_toolGroup->addButton(m_objectInsertButton);
     mainLayout->addWidget(m_objectInsertButton);
     
-    // Text
+    // Text Highlighter (PDF text selection)
     m_textButton = new ToolButton(this);
     m_textButton->setThemedIcon("text");
-    m_textButton->setToolTip(tr("Text Tool (T)"));
+    m_textButton->setToolTip(tr("Text Highlighter Tool (T)"));
     m_toolGroup->addButton(m_textButton);
     mainLayout->addWidget(m_textButton);
     
@@ -88,7 +88,7 @@ void Toolbar::setupUi()
     
     m_redoButton = new ActionButton(this);
     m_redoButton->setThemedIcon("redo");
-    m_redoButton->setToolTip(tr("Redo (Ctrl+Y)"));
+    m_redoButton->setToolTip(tr("Redo (Ctrl+Shift+Z / Ctrl+Y)"));
     mainLayout->addWidget(m_redoButton);
     
     // === Gap before touch gesture ===
