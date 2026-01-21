@@ -29,9 +29,9 @@ Document::~Document()
 {
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document DESTROYED:" << this << "id=" << id.left(8) 
-             << "pages=" << m_pages.size() << "tiles=" << m_tiles.size();
+             << "pages=" << m_pageOrder.size() << "tiles=" << m_tiles.size();
 #endif
-    // Note: m_pages, m_tiles, and m_pdfProvider are unique_ptr, auto-cleaned
+    // Note: m_loadedPages, m_tiles, and m_pdfProvider are unique_ptr, auto-cleaned
 }
 
 // ===== Factory Methods =====
@@ -284,78 +284,55 @@ QVector<PdfOutlineItem> Document::pdfOutline() const
 
 Page* Document::page(int index)
 {
-    // Lazy loading mode: use m_pageOrder and m_loadedPages
-    if (!m_pageOrder.isEmpty()) {
-        if (index < 0 || index >= m_pageOrder.size()) {
-            return nullptr;
-        }
-        
-        QString uuid = m_pageOrder[index];
-        
-        // Check if already loaded
-        auto it = m_loadedPages.find(uuid);
-        if (it != m_loadedPages.end()) {
-            return it->second.get();
-        }
-        
-        // Load on demand
-        if (!loadPageFromDisk(index)) {
-            return nullptr;
-        }
-        
-        return m_loadedPages[uuid].get();
-    }
-    
-    // Legacy mode: use m_pages
-    if (index < 0 || index >= static_cast<int>(m_pages.size())) {
+    // Bounds check
+    if (index < 0 || index >= m_pageOrder.size()) {
         return nullptr;
     }
-    return m_pages[index].get();
+    
+    QString uuid = m_pageOrder[index];
+    
+    // Check if already loaded
+    auto it = m_loadedPages.find(uuid);
+    if (it != m_loadedPages.end()) {
+        return it->second.get();
+    }
+    
+    // Load on demand
+    if (!loadPageFromDisk(index)) {
+        return nullptr;
+    }
+    
+    return m_loadedPages[uuid].get();
 }
 
 const Page* Document::page(int index) const
 {
-    // Lazy loading mode: use m_pageOrder and m_loadedPages
-    if (!m_pageOrder.isEmpty()) {
-        if (index < 0 || index >= m_pageOrder.size()) {
-            return nullptr;
-        }
-        
-        QString uuid = m_pageOrder[index];
-        
-        // Check if already loaded
-        auto it = m_loadedPages.find(uuid);
-        if (it != m_loadedPages.end()) {
-            return it->second.get();
-        }
-        
-        // Load on demand
-        if (!loadPageFromDisk(index)) {
-            return nullptr;
-        }
-        
-        return m_loadedPages.at(uuid).get();
-    }
-    
-    // Legacy mode: use m_pages
-    if (index < 0 || index >= static_cast<int>(m_pages.size())) {
+    // Bounds check
+    if (index < 0 || index >= m_pageOrder.size()) {
         return nullptr;
     }
-    return m_pages[index].get();
+    
+    QString uuid = m_pageOrder[index];
+    
+    // Check if already loaded
+    auto it = m_loadedPages.find(uuid);
+    if (it != m_loadedPages.end()) {
+        return it->second.get();
+    }
+    
+    // Load on demand
+    if (!loadPageFromDisk(index)) {
+        return nullptr;
+    }
+    
+    return m_loadedPages.at(uuid).get();
 }
 
 // ===== Paged Mode Lazy Loading Accessors (Phase O1.7) =====
 
 bool Document::isPageLoaded(int index) const
 {
-    // Currently using legacy m_pages - all pages are loaded
-    // TODO: When lazy loading is enabled, check m_loadedPages instead
-    if (m_pageOrder.isEmpty()) {
-        // Legacy mode: all pages in m_pages are loaded
-        return index >= 0 && index < static_cast<int>(m_pages.size());
-    }
-    
-    // Lazy loading mode: check if page is in m_loadedPages
+    // Bounds check
     if (index < 0 || index >= m_pageOrder.size()) {
         return false;
     }
@@ -366,23 +343,9 @@ bool Document::isPageLoaded(int index) const
 QVector<int> Document::loadedPageIndices() const
 {
     QVector<int> result;
-    
-    if (m_pageOrder.isEmpty()) {
-        // Legacy mode: all pages are loaded - return all indices
-        // This is fine since legacy mode doesn't have thousands of pages anyway
-        result.reserve(static_cast<int>(m_pages.size()));
-        for (int i = 0; i < static_cast<int>(m_pages.size()); ++i) {
-            result.append(i);
-        }
-        return result;
-    }
-    
-    // Lazy loading mode: iterate through loaded pages (typically small set)
-    // and find their indices in m_pageOrder
     result.reserve(static_cast<int>(m_loadedPages.size()));
     
-    // Build UUID -> index lookup if we don't have one cached
-    // For now, iterate through m_loadedPages and find each in m_pageOrder
+    // Iterate through loaded pages and find their indices in m_pageOrder
     // This is O(loaded * pageCount) but loaded is typically < 10
     for (const auto& [uuid, page] : m_loadedPages) {
         int idx = m_pageOrder.indexOf(uuid);
@@ -395,13 +358,6 @@ QVector<int> Document::loadedPageIndices() const
 
 QString Document::pageUuidAt(int index) const
 {
-    // Currently using legacy m_pages - no UUIDs yet
-    // TODO: When lazy loading is enabled, use m_pageOrder
-    if (m_pageOrder.isEmpty()) {
-        // Legacy mode: no UUIDs, return empty
-        return QString();
-    }
-    
     if (index < 0 || index >= m_pageOrder.size()) {
         return QString();
     }
@@ -410,22 +366,21 @@ QString Document::pageUuidAt(int index) const
 
 QSizeF Document::pageSizeAt(int index) const
 {
-    // First try metadata (for lazy loading without loading full page)
-    if (!m_pageOrder.isEmpty() && index >= 0 && index < m_pageOrder.size()) {
-        QString uuid = m_pageOrder[index];
-        auto it = m_pageMetadata.find(uuid);
-        if (it != m_pageMetadata.end()) {
-            return it->second;
-        }
+    // Bounds check
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return QSizeF();
     }
     
-    // Fallback to legacy m_pages
-    if (index >= 0 && index < static_cast<int>(m_pages.size())) {
-        return m_pages[index]->size;
+    // Use cached metadata (avoids loading the full page)
+    QString uuid = m_pageOrder[index];
+    auto it = m_pageMetadata.find(uuid);
+    if (it != m_pageMetadata.end()) {
+        return it->second;
     }
     
-    // Not found
-    return QSizeF();
+    // Fallback: load the page and get its size
+    const Page* p = page(index);
+    return p ? p->size : QSizeF();
 }
 
 bool Document::loadPageFromDisk(int index) const
@@ -601,16 +556,17 @@ void Document::evictPage(int index)
 
 void Document::markPageDirty(int index)
 {
-    if (!m_pageOrder.isEmpty() && index >= 0 && index < m_pageOrder.size()) {
-        QString uuid = m_pageOrder[index];
-        m_dirtyPages.insert(uuid);
-        markModified();
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return;
     }
+    QString uuid = m_pageOrder[index];
+    m_dirtyPages.insert(uuid);
+    markModified();
 }
 
 bool Document::isPageDirty(int index) const
 {
-    if (m_pageOrder.isEmpty() || index < 0 || index >= m_pageOrder.size()) {
+    if (index < 0 || index >= m_pageOrder.size()) {
         return false;
     }
     QString uuid = m_pageOrder[index];
@@ -625,20 +581,11 @@ void Document::rebuildUuidCache() const
 {
     m_uuidToIndexCache.clear();
     
-    // For lazy-loaded paged mode, use m_pageOrder directly (no disk I/O)
-    if (!m_pageOrder.isEmpty()) {
-        for (int i = 0; i < m_pageOrder.size(); i++) {
-            const QString& uuid = m_pageOrder[i];
-            if (!uuid.isEmpty()) {
-                m_uuidToIndexCache[uuid] = i;
-            }
-        }
-    } else {
-        // Non-lazy mode: pages are loaded in m_pages vector
-        for (int i = 0; i < static_cast<int>(m_pages.size()); i++) {
-            if (m_pages[i] && !m_pages[i]->uuid.isEmpty()) {
-                m_uuidToIndexCache[m_pages[i]->uuid] = i;
-            }
+    // Build cache from m_pageOrder (no disk I/O needed)
+    for (int i = 0; i < m_pageOrder.size(); i++) {
+        const QString& uuid = m_pageOrder[i];
+        if (!uuid.isEmpty()) {
+            m_uuidToIndexCache[uuid] = i;
         }
     }
     
@@ -672,30 +619,19 @@ Page* Document::addPage()
     auto newPage = createDefaultPage();
     Page* pagePtr = newPage.get();
     
-    // Phase O1.7: Support lazy loading mode
-    if (!m_pageOrder.isEmpty()) {
-        // Phase C.0.1: Use the page's own UUID (generated in Page constructor)
-        QString uuid = newPage->uuid;
-        
-        // Add to page order and metadata
-        m_pageOrder.append(uuid);
-        m_pageMetadata[uuid] = newPage->size;
-        
-        // Store in loaded pages
-        m_loadedPages[uuid] = std::move(newPage);
-        
-        // Mark as dirty
-        m_dirtyPages.insert(uuid);
-        
-        // Phase C.0.2: Invalidate UUID cache
-        invalidateUuidCache();
-    } else {
-        // Legacy mode
-    m_pages.push_back(std::move(newPage));
-        
-        // Phase C.0.2: Invalidate UUID cache
-        invalidateUuidCache();
-    }
+    // Use page's own UUID (generated in Page constructor)
+    QString uuid = newPage->uuid;
+    
+    // Add to page order and metadata
+    m_pageOrder.append(uuid);
+    m_pageMetadata[uuid] = newPage->size;
+    
+    // Store in loaded pages
+    m_loadedPages[uuid] = std::move(newPage);
+    
+    // Mark as dirty
+    m_dirtyPages.insert(uuid);
+    invalidateUuidCache();
     
     markModified();
     return pagePtr;
@@ -703,47 +639,26 @@ Page* Document::addPage()
 
 Page* Document::insertPage(int index)
 {
-    // Phase O1.7: Support lazy loading mode
-    if (!m_pageOrder.isEmpty()) {
-        // Allow inserting at the end (index == size)
-        if (index < 0 || index > m_pageOrder.size()) {
-            return nullptr;
-        }
-        
-        auto newPage = createDefaultPage();
-        Page* pagePtr = newPage.get();
-        
-        // Phase C.0.1: Use the page's own UUID (generated in Page constructor)
-        QString uuid = newPage->uuid;
-        
-        // Insert into page order
-        m_pageOrder.insert(index, uuid);
-        m_pageMetadata[uuid] = newPage->size;
-        
-        // Store in loaded pages
-        m_loadedPages[uuid] = std::move(newPage);
-        
-        // Mark as dirty
-        m_dirtyPages.insert(uuid);
-        
-        // Phase C.0.2: Invalidate UUID cache (page order changed)
-        invalidateUuidCache();
-        
-        markModified();
-        return pagePtr;
-    }
-    
-    // Legacy mode
     // Allow inserting at the end (index == size)
-    if (index < 0 || index > static_cast<int>(m_pages.size())) {
+    if (index < 0 || index > m_pageOrder.size()) {
         return nullptr;
     }
     
     auto newPage = createDefaultPage();
     Page* pagePtr = newPage.get();
-    m_pages.insert(m_pages.begin() + index, std::move(newPage));
     
-    // Phase C.0.2: Invalidate UUID cache (page order changed)
+    // Use page's own UUID (generated in Page constructor)
+    QString uuid = newPage->uuid;
+    
+    // Insert into page order
+    m_pageOrder.insert(index, uuid);
+    m_pageMetadata[uuid] = newPage->size;
+    
+    // Store in loaded pages
+    m_loadedPages[uuid] = std::move(newPage);
+    
+    // Mark as dirty
+    m_dirtyPages.insert(uuid);
     invalidateUuidCache();
     
     markModified();
@@ -766,103 +681,61 @@ Page* Document::addPageForPdf(int pdfPageIndex)
         newPage->size = QSizeF(pdfSize.width() * scale, pdfSize.height() * scale);
     }
     
+    // Use lazy loading mode from the start
+    QString uuid = newPage->uuid;
     Page* pagePtr = newPage.get();
-    m_pages.push_back(std::move(newPage));
+    
+    m_pageOrder.append(uuid);
+    m_pageMetadata[uuid] = newPage->size;
+    m_pagePdfIndex[uuid] = pdfPageIndex;  // Track PDF page mapping
+    m_loadedPages[uuid] = std::move(newPage);
+    m_dirtyPages.insert(uuid);
+    invalidateUuidCache();
+    
     markModified();
     return pagePtr;
 }
 
 bool Document::removePage(int index)
 {
-    // Phase O1.7: Support lazy loading mode
-    if (!m_pageOrder.isEmpty()) {
-        // Cannot remove if index invalid
-        if (index < 0 || index >= m_pageOrder.size()) {
-            return false;
-        }
-        
-        // Cannot remove the last page
-        if (m_pageOrder.size() <= 1) {
-            return false;
-        }
-        
-        QString uuid = m_pageOrder[index];
-        
-        // Remove from page order
-        m_pageOrder.removeAt(index);
-        
-        // Evict from memory if loaded
-        m_loadedPages.erase(uuid);
-        
-        // Remove from dirty tracking
-        m_dirtyPages.erase(uuid);
-        
-        // Remove metadata
-        m_pageMetadata.erase(uuid);
-        
-        // Remove PDF page index tracking
-        m_pagePdfIndex.erase(uuid);
-        
-        // Track for deletion on next save
-        m_deletedPages.insert(uuid);
-        
-        // Phase C.0.2: Invalidate UUID cache (page order changed)
-        invalidateUuidCache();
-        
-        markModified();
-        return true;
-    }
-    
-    // Legacy mode
     // Cannot remove if index invalid
-    if (index < 0 || index >= static_cast<int>(m_pages.size())) {
+    if (index < 0 || index >= m_pageOrder.size()) {
         return false;
     }
     
     // Cannot remove the last page
-    if (m_pages.size() <= 1) {
+    if (m_pageOrder.size() <= 1) {
         return false;
     }
     
-    m_pages.erase(m_pages.begin() + index);
+    QString uuid = m_pageOrder[index];
     
-    // Phase C.0.2: Invalidate UUID cache (page order changed)
+    // Remove from page order
+    m_pageOrder.removeAt(index);
+    
+    // Evict from memory if loaded
+    m_loadedPages.erase(uuid);
+    
+    // Remove from dirty tracking
+    m_dirtyPages.erase(uuid);
+    
+    // Remove metadata
+    m_pageMetadata.erase(uuid);
+    
+    // Remove PDF page index tracking
+    m_pagePdfIndex.erase(uuid);
+    
+    // Track for deletion on next save
+    m_deletedPages.insert(uuid);
+    
     invalidateUuidCache();
-    
     markModified();
     return true;
 }
 
 bool Document::movePage(int from, int to)
 {
-    // Phase O1.7: Support lazy loading mode
-    if (!m_pageOrder.isEmpty()) {
-        int count = m_pageOrder.size();
-        
-        // Validate indices
-        if (from < 0 || from >= count || to < 0 || to >= count) {
-            return false;
-        }
-        
-        // No-op if same position
-        if (from == to) {
-            return true;
-        }
-        
-        // Just reorder the UUID list - no file changes needed!
-        QString uuid = m_pageOrder[from];
-        m_pageOrder.removeAt(from);
-        m_pageOrder.insert(to, uuid);
-        
-        // Phase C.0.2: Invalidate UUID cache (page order changed)
-        invalidateUuidCache();
-        
-        markModified();
-        return true;
-    }
-    
-    // Legacy mode
-    int count = static_cast<int>(m_pages.size());
+    int count = m_pageOrder.size();
     
     // Validate indices
     if (from < 0 || from >= count || to < 0 || to >= count) {
@@ -874,16 +747,12 @@ bool Document::movePage(int from, int to)
         return true;
     }
     
-    // Extract the page
-    auto pageToMove = std::move(m_pages[from]);
-    m_pages.erase(m_pages.begin() + from);
+    // Just reorder the UUID list - no file changes needed!
+    QString uuid = m_pageOrder[from];
+    m_pageOrder.removeAt(from);
+    m_pageOrder.insert(to, uuid);
     
-    // Insert at new position
-    m_pages.insert(m_pages.begin() + to, std::move(pageToMove));
-    
-    // Phase C.0.2: Invalidate UUID cache (page order changed)
     invalidateUuidCache();
-    
     markModified();
     return true;
 }
@@ -910,36 +779,38 @@ const Page* Document::edgelessPage() const
 
 void Document::ensureMinimumPages()
 {
-    if (m_pages.empty()) {
-        auto newPage = createDefaultPage();
-        
-        // For edgeless mode, mark the page as unbounded
-        if (mode == Mode::Edgeless) {
-            // Edgeless pages have no fixed size (effectively infinite)
-            // We use a large default but it can extend beyond
-            newPage->size = QSizeF(4096, 4096);
-        }
-        
-        m_pages.push_back(std::move(newPage));
+    // Check if we already have pages
+    if (!m_pageOrder.isEmpty()) {
+        return;
     }
-}
-
-int Document::findPageByPdfPage(int pdfPageIndex) const
-{
-    for (int i = 0; i < static_cast<int>(m_pages.size()); ++i) {
-        const Page* p = m_pages[i].get();
-        if (p->backgroundType == Page::BackgroundType::PDF && 
-            p->pdfPageNumber == pdfPageIndex) {
-            return i;
-        }
+    
+    auto newPage = createDefaultPage();
+    
+    // For edgeless mode, mark the page as unbounded
+    if (mode == Mode::Edgeless) {
+        // Edgeless pages have no fixed size (effectively infinite)
+        // We use a large default but it can extend beyond
+        newPage->size = QSizeF(4096, 4096);
     }
-    return -1;
+    
+    // Use lazy loading mode from the start
+    QString uuid = newPage->uuid;
+    m_pageOrder.append(uuid);
+    m_pageMetadata[uuid] = newPage->size;
+    m_loadedPages[uuid] = std::move(newPage);
+    m_dirtyPages.insert(uuid);
+    invalidateUuidCache();
 }
 
 void Document::createPagesForPdf()
 {
-    // Clear existing pages
-    m_pages.clear();
+    // Clear existing pages (lazy loading structures)
+    m_pageOrder.clear();
+    m_pageMetadata.clear();
+    m_pagePdfIndex.clear();
+    m_loadedPages.clear();
+    m_dirtyPages.clear();
+    invalidateUuidCache();
     
     if (!isPdfLoaded()) {
         // No PDF loaded, create a single default page
@@ -949,16 +820,14 @@ void Document::createPagesForPdf()
     
     // Create one page per PDF page
     int count = pdfPageCount();
-    
-    // Pre-allocate to avoid repeated vector reallocations
-    m_pages.reserve(static_cast<size_t>(count));
+    m_pageOrder.reserve(count);
     
     for (int i = 0; i < count; ++i) {
         addPageForPdf(i);
     }
     
     // Ensure at least one page
-    if (m_pages.empty()) {
+    if (m_pageOrder.isEmpty()) {
         ensureMinimumPages();
     }
     
@@ -1205,8 +1074,9 @@ void Document::recalculateMaxObjectExtent()
         // - When loaded, their objects will update maxObjectExtent via addObject
         // - Worst case: margin is temporarily too small until tiles are loaded
     } else {
-        // Scan all pages
-        for (const auto& page : m_pages) {
+        // Scan loaded pages (lazy loading mode)
+        for (const auto& pair : m_loadedPages) {
+            Page* page = pair.second.get();
             for (const auto& obj : page->objects) {
                 int extent = static_cast<int>(qMax(obj->size.width(), obj->size.height()));
                 newMax = qMax(newMax, extent);
@@ -1229,9 +1099,10 @@ QVector<Document::Bookmark> Document::getBookmarks() const
 {
     QVector<Bookmark> result;
     
-    for (int i = 0; i < static_cast<int>(m_pages.size()); ++i) {
-        const Page* p = m_pages[i].get();
-        if (p->isBookmarked) {
+    int count = pageCount();
+    for (int i = 0; i < count; ++i) {
+        const Page* p = page(i);
+        if (p && p->isBookmarked) {
             result.append({i, p->bookmarkLabel});
         }
     }
@@ -1286,14 +1157,16 @@ int Document::nextBookmark(int fromPage) const
     
     // Search from fromPage+1 to end
     for (int i = fromPage + 1; i < count; ++i) {
-        if (m_pages[i]->isBookmarked) {
+        const Page* p = page(i);
+        if (p && p->isBookmarked) {
             return i;
         }
     }
     
     // Wrap around: search from 0 to fromPage
     for (int i = 0; i <= fromPage && i < count; ++i) {
-        if (m_pages[i]->isBookmarked) {
+        const Page* p = page(i);
+        if (p && p->isBookmarked) {
             return i;
         }
     }
@@ -1308,14 +1181,16 @@ int Document::prevBookmark(int fromPage) const
     
     // Search from fromPage-1 down to 0
     for (int i = fromPage - 1; i >= 0; --i) {
-        if (m_pages[i]->isBookmarked) {
+        const Page* p = page(i);
+        if (p && p->isBookmarked) {
             return i;
         }
     }
     
     // Wrap around: search from end down to fromPage
     for (int i = count - 1; i >= fromPage && i >= 0; --i) {
-        if (m_pages[i]->isBookmarked) {
+        const Page* p = page(i);
+        if (p && p->isBookmarked) {
             return i;
         }
     }
@@ -1336,13 +1211,15 @@ bool Document::toggleBookmark(int pageIndex, const QString& label)
 
 int Document::bookmarkCount() const
 {
-    int count = 0;
-    for (const auto& p : m_pages) {
-        if (p->isBookmarked) {
-            ++count;
+    int result = 0;
+    int count = pageCount();
+    for (int i = 0; i < count; ++i) {
+        const Page* p = page(i);
+        if (p && p->isBookmarked) {
+            ++result;
         }
     }
-    return count;
+    return result;
 }
 
 // =========================================================================
@@ -1483,14 +1360,18 @@ std::unique_ptr<Document> Document::fromFullJson(const QJsonObject& obj)
 
 int Document::loadPagesFromJson(const QJsonArray& pagesArray)
 {
-    // Clear existing pages
-    m_pages.clear();
+    // Clear existing pages (lazy loading structures)
+    m_pageOrder.clear();
+    m_pageMetadata.clear();
+    m_pagePdfIndex.clear();
+    m_loadedPages.clear();
+    m_dirtyPages.clear();
+    invalidateUuidCache();
     
     // Phase O1.5: Reset max object extent when reloading pages
     m_maxObjectExtent = 0;
     
-    // Pre-allocate to avoid repeated vector reallocations
-    m_pages.reserve(static_cast<size_t>(pagesArray.size()));
+    m_pageOrder.reserve(pagesArray.size());
     
     int loadedCount = 0;
     
@@ -1511,7 +1392,17 @@ int Document::loadPagesFromJson(const QJsonArray& pagesArray)
                     m_maxObjectExtent = extent;
                 }
             }
-            m_pages.push_back(std::move(page));
+            
+            // Use lazy loading structures
+            QString uuid = page->uuid;
+            m_pageOrder.append(uuid);
+            m_pageMetadata[uuid] = page->size;
+            if (page->backgroundType == Page::BackgroundType::PDF) {
+                m_pagePdfIndex[uuid] = page->pdfPageNumber;
+            }
+            m_loadedPages[uuid] = std::move(page);
+            m_dirtyPages.insert(uuid);  // Mark as dirty since loaded from JSON
+            
             ++loadedCount;
         }
     }
@@ -1526,8 +1417,12 @@ QJsonArray Document::pagesToJson() const
 {
     QJsonArray pagesArray;
     
-    for (const auto& page : m_pages) {
-        pagesArray.append(page->toJson());
+    // Iterate pages in order
+    for (const QString& uuid : m_pageOrder) {
+        auto it = m_loadedPages.find(uuid);
+        if (it != m_loadedPages.end()) {
+            pagesArray.append(it->second->toJson());
+        }
     }
     
     return pagesArray;
@@ -1920,17 +1815,9 @@ int Document::saveUnsavedImages(const QString& bundlePath)
             processPage(pair.second.get());
         }
     } else {
-        // Paged mode: process both legacy pages and lazy-loaded pages
-        if (m_pageOrder.isEmpty()) {
-            // Legacy paged mode
-            for (auto& page : m_pages) {
-                processPage(page.get());
-            }
-        } else {
-            // Lazy-loaded paged mode
-            for (auto& pair : m_loadedPages) {
-                processPage(pair.second.get());
-            }
+        // Paged mode: process loaded pages
+        for (auto& pair : m_loadedPages) {
+            processPage(pair.second.get());
         }
     }
     
@@ -2148,37 +2035,6 @@ bool Document::saveBundle(const QString& path)
                 qDebug() << "Cannot create pages directory" << path;
             #endif
             return false;
-        }
-        
-        // Convert legacy pages to UUID-based format if needed
-        if (m_pageOrder.isEmpty() && !m_pages.empty()) {
-            for (auto& page : m_pages) {
-                // Phase C.0.1: Use the page's own UUID (generated in Page constructor)
-                QString uuid = page->uuid;
-                m_pageOrder.append(uuid);
-                m_pageMetadata[uuid] = page->size;
-                
-                // Track PDF page index for pristine page synthesis
-                if (page->backgroundType == Page::BackgroundType::PDF) {
-                    m_pagePdfIndex[uuid] = page->pdfPageNumber;
-                }
-                
-                m_loadedPages[uuid] = std::move(page);
-                
-                // Only mark as dirty if page has user content or bookmarks
-                // Pristine PDF pages don't need individual files
-                Page* loadedPage = m_loadedPages[uuid].get();
-                bool isPristinePdfPage = (loadedPage->backgroundType == Page::BackgroundType::PDF)
-                                         && !loadedPage->hasContent()
-                                         && !loadedPage->isBookmarked;
-                if (!isPristinePdfPage) {
-                    m_dirtyPages.insert(uuid);
-                }
-            }
-            m_pages.clear();
-            
-            // Phase C.0.2: Invalidate UUID cache after migration
-            invalidateUuidCache();
         }
         
         // Write page_order to manifest

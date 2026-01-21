@@ -863,9 +863,7 @@ public:
      * Phase O1.7: Returns m_pageOrder.size() in lazy loading mode.
      */
     int pageCount() const { 
-        return m_pageOrder.isEmpty() 
-            ? static_cast<int>(m_pages.size()) 
-            : m_pageOrder.size(); 
+        return m_pageOrder.size(); 
     }
     
     /**
@@ -1052,15 +1050,6 @@ public:
     void ensureMinimumPages();
     
     /**
-     * @brief Find the document page index for a given PDF page.
-     * @param pdfPageIndex 0-based PDF page index.
-     * @return Document page index, or -1 if not found.
-     * 
-     * Searches pages with BackgroundType::PDF for matching pdfPageNumber.
-     */
-    int findPageByPdfPage(int pdfPageIndex) const;
-    
-    /**
      * @brief Create pages for all PDF pages.
      * 
      * Creates one document page per PDF page, each configured with
@@ -1245,9 +1234,6 @@ private:
     qint64 m_pdfSize = 0;                           ///< File size in bytes (for quick verification)
     bool m_needsPdfRelink = false;                  ///< True if PDF not found at either path (Phase SHARE)
     std::unique_ptr<PdfProvider> m_pdfProvider;    ///< Loaded PDF (may be null)
-    
-    // ===== Pages (Task 1.2.5) =====
-    std::vector<std::unique_ptr<Page>> m_pages;    ///< All pages in paged mode (legacy, before O1.7)
     
     // ===== Paged Mode Lazy Loading (Phase O1.7) =====
     /// Ordered list of page UUIDs. Defines page order in the document.
