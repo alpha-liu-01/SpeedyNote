@@ -1218,7 +1218,6 @@ void MainWindow::setupManagedShortcuts()
     createShortcut("document.add_page", [this]() { addPageToDocument(); });
     createShortcut("document.insert_page", [this]() { insertPageInDocument(); });
     createShortcut("document.delete_page", [this]() { deletePageInDocument(); });
-    // document.duplicate_page - TODO: implement
     
     // ===== Navigation =====
     createShortcut("navigation.launcher", [this]() { toggleLauncher(); });

@@ -107,7 +107,6 @@ void ShortcutManager::registerDefaults()
     registerAction("document.add_page", "Ctrl+Shift+A", tr("Add Page (Append)"), tr("Document"));
     registerAction("document.insert_page", "Ctrl+Shift+I", tr("Insert Page"), tr("Document"));
     registerAction("document.delete_page", "Ctrl+Shift+D", tr("Delete Page"), tr("Document"));
-    registerAction("document.duplicate_page", "Ctrl+Shift+J", tr("Duplicate Page"), tr("Document"));
     
     // ===== Navigation =====
     registerAction("navigation.launcher", "Ctrl+L", tr("Toggle Launcher"), tr("Navigation"));

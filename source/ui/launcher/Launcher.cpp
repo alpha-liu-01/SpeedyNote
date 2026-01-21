@@ -645,6 +645,12 @@ void Launcher::keyPressEvent(QKeyEvent* event)
         return;
     }
     
+    // Ctrl+F switches to search view
+    if (event->key() == Qt::Key_F && event->modifiers() == Qt::ControlModifier) {
+        switchToView(View::Search);
+        return;
+    }
+    
     QMainWindow::keyPressEvent(event);
 }
 
