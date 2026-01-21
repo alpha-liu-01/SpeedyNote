@@ -6,7 +6,7 @@
 
 #include "DocumentViewport.h"
 #include "TouchGestureHandler.h"
-#include "ShortcutManager.h"        // Keyboard shortcut hub
+// Note: ShortcutManager.h no longer needed here - all shortcuts handled by MainWindow
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
@@ -53,65 +53,10 @@
 
 // PDF uses 72 DPI, Page uses 96 DPI - scale factor for coordinate conversion
 static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
-
-// ===== Shortcut Matching Helper =====
-
-/**
- * @brief Check if a key event matches a ShortcutManager action.
- * 
- * @param event The key event to check
- * @param actionId The action ID from ShortcutManager
- * @return true if the event matches the action's shortcut
- */
-static bool eventMatchesAction(QKeyEvent* event, const QString& actionId)
-{
-    QKeySequence actionSeq = ShortcutManager::instance()->keySequenceForAction(actionId);
-    if (actionSeq.isEmpty()) {
-        return false;
-    }
-    
-    // Build a key sequence from the event
-    int key = event->key();
-    
-    // Skip modifier-only keys
-    if (key == Qt::Key_Control || key == Qt::Key_Shift || 
-        key == Qt::Key_Alt || key == Qt::Key_Meta) {
-        return false;
-    }
-    
-    // Combine key with modifiers
-    Qt::KeyboardModifiers mods = event->modifiers();
-    
-    // When Shift is pressed with number keys, Qt reports the shifted symbol
-    // (e.g., Shift+1 → !, Shift+2 → @). Convert back to base number keys
-    // to match shortcuts stored as "Ctrl+Shift+1" etc.
-    if (mods & Qt::ShiftModifier) {
-        switch (key) {
-            case Qt::Key_Exclam:      key = Qt::Key_1; break;  // ! → 1
-            case Qt::Key_At:          key = Qt::Key_2; break;  // @ → 2
-            case Qt::Key_NumberSign:  key = Qt::Key_3; break;  // # → 3
-            case Qt::Key_Dollar:      key = Qt::Key_4; break;  // $ → 4
-            case Qt::Key_Percent:     key = Qt::Key_5; break;  // % → 5
-            case Qt::Key_AsciiCircum: key = Qt::Key_6; break;  // ^ → 6
-            case Qt::Key_Ampersand:   key = Qt::Key_7; break;  // & → 7
-            case Qt::Key_Asterisk:    key = Qt::Key_8; break;  // * → 8
-            case Qt::Key_ParenLeft:   key = Qt::Key_9; break;  // ( → 9
-            case Qt::Key_ParenRight:  key = Qt::Key_0; break;  // ) → 0
-            default: break;
-        }
-    }
-    
-    int combined = key;
-    if (mods & Qt::ControlModifier) combined |= Qt::CTRL;
-    if (mods & Qt::ShiftModifier) combined |= Qt::SHIFT;
-    if (mods & Qt::AltModifier) combined |= Qt::ALT;
-    if (mods & Qt::MetaModifier) combined |= Qt::META;
-    
-    QKeySequence eventSeq(combined);
-    
-    return eventSeq == actionSeq;
-}
 static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
+
+// Note: eventMatchesAction() helper was removed - all keyboard shortcuts
+// are now handled by MainWindow's QShortcut system for focus-independent operation.
 
 // ===== Constructor & Destructor =====
 
@@ -1025,15 +970,18 @@ void DocumentViewport::pushPositionHistory()
         }
     }
     
-    // Trim history if at capacity
-    while (m_edgelessPositionHistory.size() >= MAX_POSITION_HISTORY) {
-        // Remove oldest (bottom) entry - inefficient but simple
-        // For a small stack (20 items), this is acceptable
+    // Trim history if at capacity - remove oldest (bottom) entry
+    // QStack doesn't have removeFirst(), so we pop all except oldest, discard oldest, repush
+    // O(n) but acceptable for small MAX_POSITION_HISTORY (20 items)
+    if (m_edgelessPositionHistory.size() >= MAX_POSITION_HISTORY) {
         QStack<QPointF> temp;
+        // Move all except the bottom (oldest) to temp
         while (m_edgelessPositionHistory.size() > 1) {
             temp.push(m_edgelessPositionHistory.pop());
         }
-        m_edgelessPositionHistory.pop();  // Remove oldest
+        // Discard the oldest (now the only item left)
+        m_edgelessPositionHistory.pop();
+        // Restore the rest
         while (!temp.isEmpty()) {
             m_edgelessPositionHistory.push(temp.pop());
         }
@@ -1116,18 +1064,19 @@ void DocumentViewport::syncPositionToDocument()
     m_document->setEdgelessLastPosition(currentPos);
     
     // Convert QStack to QVector for Document storage
+    // QStack stores items in LIFO order, so we need to reverse to get oldest-to-newest
     QVector<QPointF> historyVec;
     historyVec.reserve(m_edgelessPositionHistory.size());
     
-    // QStack doesn't have direct iterator, so we need to copy
-    // Note: This preserves the order (bottom to top = oldest to newest)
+    // Copy stack to temp, then pop into vector (gives us correct order)
     QStack<QPointF> tempStack = m_edgelessPositionHistory;
-    QVector<QPointF> reversed;
     while (!tempStack.isEmpty()) {
-        reversed.prepend(tempStack.pop());
+        historyVec.append(tempStack.pop());  // O(1) append instead of O(n) prepend
     }
+    // Reverse to get oldest-to-newest order
+    std::reverse(historyVec.begin(), historyVec.end());
     
-    m_document->setEdgelessPositionHistory(reversed);
+    m_document->setEdgelessPositionHistory(historyVec);
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[PositionHistory] Synced to document: lastPos =" << currentPos
@@ -2518,326 +2467,21 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         return;
     }
     
-    // Task 2.10.8: Lasso selection keyboard shortcuts
-    if (m_currentTool == ToolType::Lasso) {
-        // Copy (Ctrl+C)
-        if (event->matches(QKeySequence::Copy)) {
-            copySelection();
-            event->accept();
-            return;
-        }
-        // Cut (Ctrl+X)
-        if (event->matches(QKeySequence::Cut)) {
-            cutSelection();
-            event->accept();
-            return;
-        }
-        // Paste (Ctrl+V)
-        if (event->matches(QKeySequence::Paste)) {
-            pasteSelection();
-            event->accept();
-            return;
-        }
-        // Delete selection
-        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-            if (m_lassoSelection.isValid()) {
-                deleteSelection();
-                event->accept();
-                return;
-            }
-        }
-        // Cancel selection (Escape)
-        if (event->key() == Qt::Key_Escape) {
-            if (m_lassoSelection.isValid() || m_isDrawingLasso) {
-                cancelSelectionTransform();
-                event->accept();
-                return;
-            }
-        }
-    }
+    // ===== Note: Most keyboard shortcuts moved to MainWindow =====
+    // The following shortcuts are now handled by MainWindow's QShortcut system
+    // so they work regardless of which widget has focus:
+    // - Tool shortcuts (B, E, L, T, M, V)
+    // - Edit shortcuts (Undo, Redo, Copy, Cut, Paste, Delete)
+    // - Object manipulation (Z-order, Affinity, Mode switching, Link slots)
+    // - Edgeless navigation (Home, Backspace)
+    // - PDF/Highlighter features (Auto-highlight)
+    //
+    // Escape key handling is done via handleEscapeKey() called from MainWindow.
     
-    // Phase O2.4: ObjectSelect tool keyboard shortcuts
-    if (m_currentTool == ToolType::ObjectSelect) {
-        
-        // Copy (Ctrl+C) - copy selected objects to internal clipboard (O2.6)
-        if (event->matches(QKeySequence::Copy)) {
-            if (hasSelectedObjects()) {
-                copySelectedObjects();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Paste (Ctrl+V) - tool-aware paste for objects
-        if (event->matches(QKeySequence::Paste)) {
-            pasteForObjectSelect();
-            event->accept();
-            return;
-        }
-        
-        // Delete key - remove selected objects (O2.5)
-        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-            if (hasSelectedObjects()) {
-                deleteSelectedObjects();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Escape key - deselect objects or clear clipboard
-        if (event->key() == Qt::Key_Escape) {
-            // If objects are selected, deselect them
-            // If no objects but clipboard has content, clear clipboard
-            if (hasSelectedObjects() || !m_objectClipboard.isEmpty()) {
-                cancelObjectSelectAction();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Phase O3.5.2: Layer affinity shortcuts (via ShortcutManager)
-        // These change which layer the object renders relative to
-        if (hasSelectedObjects()) {
-            // Increase affinity (default: Alt+])
-            if (eventMatchesAction(event, "object.affinity_up")) {
-                increaseSelectedAffinity();
-                event->accept();
-                return;
-            }
-            // Decrease affinity (default: Alt+[)
-            if (eventMatchesAction(event, "object.affinity_down")) {
-                decreaseSelectedAffinity();
-                event->accept();
-                return;
-            }
-            // Send to background (default: Alt+\)
-            if (eventMatchesAction(event, "object.affinity_background")) {
-                sendSelectedToBackground();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Z-order shortcuts (via ShortcutManager)
-        if (hasSelectedObjects()) {
-            // Bring to front (default: Ctrl+Shift+])
-            if (eventMatchesAction(event, "object.bring_front")) {
-                bringSelectedToFront();
-                event->accept();
-                return;
-            }
-            // Bring forward (default: Ctrl+])
-            if (eventMatchesAction(event, "object.bring_forward")) {
-                bringSelectedForward();
-                event->accept();
-                return;
-            }
-            // Send backward (default: Ctrl+[)
-            if (eventMatchesAction(event, "object.send_backward")) {
-                sendSelectedBackward();
-                event->accept();
-                return;
-            }
-            // Send to back (default: Ctrl+Shift+[)
-            if (eventMatchesAction(event, "object.send_back")) {
-                sendSelectedToBack();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Phase C.4.2: Mode switching shortcuts (via ShortcutManager)
-        
-        // Image insert mode (default: I)
-        if (eventMatchesAction(event, "object.mode_image")) {
-            m_objectInsertMode = ObjectInsertMode::Image;
-            emit objectInsertModeChanged(m_objectInsertMode);
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Switched to Image insert mode";
-#endif
-            event->accept();
-            return;
-        }
-        // Link insert mode (default: Ctrl+.)
-        if (eventMatchesAction(event, "object.mode_link")) {
-            m_objectInsertMode = ObjectInsertMode::Link;
-            emit objectInsertModeChanged(m_objectInsertMode);
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Switched to Link insert mode";
-#endif
-            event->accept();
-            return;
-        }
-        // Create mode (default: Ctrl+6)
-        if (eventMatchesAction(event, "object.mode_create")) {
-            m_objectActionMode = ObjectActionMode::Create;
-            emit objectActionModeChanged(m_objectActionMode);
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Switched to Create mode";
-#endif
-            event->accept();
-            return;
-        }
-        // Select mode (default: Ctrl+7)
-        if (eventMatchesAction(event, "object.mode_select")) {
-            m_objectActionMode = ObjectActionMode::Select;
-            emit objectActionModeChanged(m_objectActionMode);
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Switched to Select mode";
-#endif
-            event->accept();
-            return;
-        }
-        
-        // Link slot shortcuts (via ShortcutManager)
-        // Slot 1 (default: Ctrl+8)
-        if (eventMatchesAction(event, "link.slot_1")) {
-            activateLinkSlot(0);
-            event->accept();
-            return;
-        }
-        // Slot 2 (default: Ctrl+9)
-        if (eventMatchesAction(event, "link.slot_2")) {
-            activateLinkSlot(1);
-            event->accept();
-            return;
-        }
-        // Slot 3 (default: Alt+0)
-        if (eventMatchesAction(event, "link.slot_3")) {
-            activateLinkSlot(2);
-            event->accept();
-            return;
-        }
-    }
-    
-    // Phase A & B: Highlighter tool keyboard shortcuts
-    if (m_currentTool == ToolType::Highlighter) {
-        // Copy (Ctrl+C) - copy selected text to clipboard
-        if (event->matches(QKeySequence::Copy)) {
-            copySelectedTextToClipboard();
-            event->accept();
-            return;
-        }
-        
-        // Phase B.2: Toggle auto-highlight mode (via ShortcutManager, default: Ctrl+H)
-        if (eventMatchesAction(event, "pdf.auto_highlight")) {
-            setAutoHighlightEnabled(!m_autoHighlightEnabled);
-            event->accept();
-            return;
-        }
-        
-        // Cancel selection (Escape)
-        if (event->key() == Qt::Key_Escape) {
-            if (m_textSelection.isValid() || m_textSelection.isSelecting) {
-                bool hadValidSelection = m_textSelection.isValid();
-                m_textSelection.clear();
-                if (hadValidSelection) {
-                    emit textSelectionChanged(false);
-                }
-                update();
-                event->accept();
-                return;
-            }
-        }
-    }
-    
-    // ===== Text Input Focus Check =====
-    // Single-key shortcuts (B, E, L, M, V) must NOT trigger when editing text
-    // in QLineEdit, QTextEdit, or QPlainTextEdit widgets
-    QWidget* focusedWidget = QApplication::focusWidget();
-    bool textInputActive = qobject_cast<QLineEdit*>(focusedWidget) ||
-                           qobject_cast<QTextEdit*>(focusedWidget) ||
-                           qobject_cast<QPlainTextEdit*>(focusedWidget);
-    
-    // ===== Tool Switching Shortcuts (via ShortcutManager) =====
-    // Note: Single-key shortcuts are handled here, NOT in MainWindow,
-    // because they should only work when DocumentViewport has focus
-    // (prevents conflict with text editing in dialogs/panels)
-    
-    // Only process single-key tool shortcuts if NOT editing text
-    if (!textInputActive) {
-        // Pen tool (default: B for Brush, Photoshop-style)
-        if (eventMatchesAction(event, "tool.pen")) {
-            setCurrentTool(ToolType::Pen);
-            event->accept();
-            return;
-        }
-        
-        // Eraser tool (default: E)
-        if (eventMatchesAction(event, "tool.eraser")) {
-            setCurrentTool(ToolType::Eraser);
-            event->accept();
-            return;
-        }
-        
-        // Lasso tool (default: L)
-        if (eventMatchesAction(event, "tool.lasso")) {
-            setCurrentTool(ToolType::Lasso);
-            event->accept();
-            return;
-        }
-        
-        // Text Highlighter tool (default: T) - for PDF text selection/highlighting
-        if (eventMatchesAction(event, "tool.highlighter")) {
-            setCurrentTool(ToolType::Highlighter);
-            event->accept();
-            return;
-        }
-        
-        // Marker tool (default: M)
-        if (eventMatchesAction(event, "tool.marker")) {
-            setCurrentTool(ToolType::Marker);
-            event->accept();
-            return;
-        }
-        
-        // Object Select tool (default: V for Move, Photoshop-style)
-        if (eventMatchesAction(event, "tool.object_select")) {
-            setCurrentTool(ToolType::ObjectSelect);
-            event->accept();
-            return;
-        }
-    } // end !textInputActive
-    
-    // ===== Edit Shortcuts (via ShortcutManager) =====
-    
-    // Undo (default: Ctrl+Z)
-    if (eventMatchesAction(event, "edit.undo")) {
-        undo();
-        event->accept();
-        return;
-    }
-    
-    // Redo (default: Ctrl+Shift+Z)
-    if (eventMatchesAction(event, "edit.redo")) {
-        redo();
-        event->accept();
-        return;
-    }
-    
-    // Redo alternative (default: Ctrl+Y)
-    if (eventMatchesAction(event, "edit.redo_alt")) {
-        redo();
-        event->accept();
-        return;
-    }
-    
-    // ===== Edgeless Navigation Shortcuts (Phase 4) =====
-    if (m_document && m_document->isEdgeless()) {
-        // Return to origin (default: Home)
-        if (eventMatchesAction(event, "edgeless.home")) {
-            returnToOrigin();
-            event->accept();
-            return;
-        }
-        
-        // Go back to previous position (default: Backspace)
-        if (eventMatchesAction(event, "edgeless.go_back")) {
-            goBackPosition();
-            event->accept();
-            return;
-        }
-    }
+    // ===== Note: Tool/Edit/Edgeless shortcuts moved to MainWindow =====
+    // Tool shortcuts (B, E, L, T, M, V), Undo/Redo, and Edgeless navigation
+    // are now handled by MainWindow's QShortcut system so they work 
+    // regardless of which widget has focus.
     
     // ===== Debug Shortcut (kept as hardcoded - development only) =====
 #ifdef SPEEDYNOTE_DEBUG
@@ -9150,6 +8794,91 @@ bool DocumentViewport::handleEscapeKey()
     
     // Nothing to cancel
     return false;
+}
+
+// ===== Context-Dependent Shortcut Handlers =====
+// Called by MainWindow's QShortcut system
+
+void DocumentViewport::handleCopyAction()
+{
+    // Copy behavior depends on current tool and selection state
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                copySelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            if (hasSelectedObjects()) {
+                copySelectedObjects();
+            }
+            break;
+            
+        case ToolType::Highlighter:
+            if (m_textSelection.isValid()) {
+                copySelectedTextToClipboard();
+            }
+            break;
+            
+        default:
+            // No copy action for other tools
+            break;
+    }
+}
+
+void DocumentViewport::handleCutAction()
+{
+    // Cut currently only works for Lasso tool
+    if (m_currentTool == ToolType::Lasso && m_lassoSelection.isValid()) {
+        cutSelection();
+    }
+}
+
+void DocumentViewport::handlePasteAction()
+{
+    // Paste behavior depends on current tool
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_clipboard.hasContent) {
+                pasteSelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            pasteForObjectSelect();
+            break;
+            
+        default:
+            // No paste action for other tools
+            break;
+    }
+}
+
+void DocumentViewport::handleDeleteAction()
+{
+    // Delete behavior depends on current tool and selection state
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                deleteSelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            if (hasSelectedObjects()) {
+                deleteSelectedObjects();
+            }
+            break;
+            
+        case ToolType::Highlighter:
+            // For highlighter, Escape cancels selection, Delete doesn't do anything special
+            // (we can't delete PDF text)
+            break;
+            
+        default:
+            break;
+    }
 }
 
 // ===== Clipboard Operations (Task 2.10.7) =====

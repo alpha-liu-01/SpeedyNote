@@ -847,6 +847,46 @@ public:
      */
     bool handleEscapeKey();
     
+    // ========== Context-Dependent Shortcut Handlers ==========
+    // These are called by MainWindow's QShortcut system and handle
+    // the action based on the current tool and selection state.
+    
+    /**
+     * @brief Handle Copy action based on current context.
+     * 
+     * Behavior depends on current tool:
+     * - Lasso: Copy selected strokes
+     * - ObjectSelect: Copy selected objects
+     * - Highlighter: Copy selected text to system clipboard
+     */
+    void handleCopyAction();
+    
+    /**
+     * @brief Handle Cut action based on current context.
+     * 
+     * Currently only works for Lasso tool (cut selected strokes).
+     */
+    void handleCutAction();
+    
+    /**
+     * @brief Handle Paste action based on current context.
+     * 
+     * Behavior depends on current tool:
+     * - Lasso: Paste strokes from internal clipboard
+     * - ObjectSelect: Paste objects from internal clipboard
+     */
+    void handlePasteAction();
+    
+    /**
+     * @brief Handle Delete action based on current context.
+     * 
+     * Deletes current selection based on tool:
+     * - Lasso: Delete selected strokes
+     * - ObjectSelect: Delete selected objects
+     * - Highlighter: Clear text selection
+     */
+    void handleDeleteAction();
+    
     /**
      * @brief Check if the internal stroke clipboard has content.
      * @return True if strokes can be pasted.

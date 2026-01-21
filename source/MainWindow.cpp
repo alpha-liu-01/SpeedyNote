@@ -1261,6 +1261,211 @@ void MainWindow::setupManagedShortcuts()
 #endif
     });
     
+    // ===== Tools (delegated to viewport) =====
+    // These need to check if text input is active before firing
+    auto createToolShortcut = [this, sm](const QString& actionId, ToolType tool) {
+        QKeySequence seq = sm->keySequenceForAction(actionId);
+        QShortcut* shortcut = new QShortcut(seq, this);
+        shortcut->setContext(Qt::ApplicationShortcut);
+        connect(shortcut, &QShortcut::activated, this, [this, tool]() {
+            // Skip if text input widget has focus (single-key shortcuts conflict with typing)
+            QWidget* focused = QApplication::focusWidget();
+            if (qobject_cast<QLineEdit*>(focused) ||
+                qobject_cast<QTextEdit*>(focused) ||
+                qobject_cast<QPlainTextEdit*>(focused)) {
+                return;
+            }
+            
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setCurrentTool(tool);
+            }
+        });
+        m_managedShortcuts.insert(actionId, shortcut);
+    };
+    
+    createToolShortcut("tool.pen", ToolType::Pen);
+    createToolShortcut("tool.eraser", ToolType::Eraser);
+    createToolShortcut("tool.lasso", ToolType::Lasso);
+    createToolShortcut("tool.highlighter", ToolType::Highlighter);
+    createToolShortcut("tool.marker", ToolType::Marker);
+    createToolShortcut("tool.object_select", ToolType::ObjectSelect);
+    
+    // ===== Edit (delegated to viewport) =====
+    createShortcut("edit.undo", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->undo();
+        }
+    });
+    createShortcut("edit.redo", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->redo();
+        }
+    });
+    createShortcut("edit.redo_alt", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->redo();
+        }
+    });
+    
+    // ===== Edgeless Navigation (delegated to viewport) =====
+    createShortcut("edgeless.home", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && vp->document()->isEdgeless()) {
+                vp->returnToOrigin();
+            }
+        }
+    });
+    createShortcut("edgeless.go_back", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && vp->document()->isEdgeless()) {
+                // Edgeless: Backspace navigates back in position history
+                vp->goBackPosition();
+            } else {
+                // Paged: Backspace acts as delete (same as Delete key)
+                vp->handleDeleteAction();
+            }
+        }
+    });
+    
+    // ===== Context-Dependent Edit Operations (delegated to viewport) =====
+    // These behave differently based on current tool and selection
+    createShortcut("edit.copy", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handleCopyAction();
+        }
+    });
+    createShortcut("edit.cut", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handleCutAction();
+        }
+    });
+    createShortcut("edit.paste", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handlePasteAction();
+        }
+    });
+    createShortcut("edit.delete", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handleDeleteAction();
+        }
+    });
+    
+    // ===== Object Manipulation (delegated to viewport, ObjectSelect tool) =====
+    // Z-Order
+    createShortcut("object.bring_front", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->bringSelectedToFront();
+            }
+        }
+    });
+    createShortcut("object.bring_forward", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->bringSelectedForward();
+            }
+        }
+    });
+    createShortcut("object.send_backward", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->sendSelectedBackward();
+            }
+        }
+    });
+    createShortcut("object.send_back", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->sendSelectedToBack();
+            }
+        }
+    });
+    
+    // Affinity
+    createShortcut("object.affinity_up", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->increaseSelectedAffinity();
+            }
+        }
+    });
+    createShortcut("object.affinity_down", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->decreaseSelectedAffinity();
+            }
+        }
+    });
+    createShortcut("object.affinity_background", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->sendSelectedToBackground();
+            }
+        }
+    });
+    
+    // Object Mode Switching
+    createShortcut("object.mode_image", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Image);
+            }
+        }
+    });
+    createShortcut("object.mode_link", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Link);
+            }
+        }
+    });
+    createShortcut("object.mode_create", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectActionMode(DocumentViewport::ObjectActionMode::Create);
+            }
+        }
+    });
+    createShortcut("object.mode_select", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectActionMode(DocumentViewport::ObjectActionMode::Select);
+            }
+        }
+    });
+    
+    // ===== Link Slots (delegated to viewport) =====
+    createShortcut("link.slot_1", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->activateLinkSlot(0);
+            }
+        }
+    });
+    createShortcut("link.slot_2", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->activateLinkSlot(1);
+            }
+        }
+    });
+    createShortcut("link.slot_3", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->activateLinkSlot(2);
+            }
+        }
+    });
+    
+    // ===== PDF/Highlighter Features =====
+    createShortcut("pdf.auto_highlight", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::Highlighter) {
+                vp->setAutoHighlightEnabled(!vp->isAutoHighlightEnabled());
+            }
+        }
+    });
+    
     // Connect to ShortcutManager's change signal for dynamic updates
     connect(sm, &ShortcutManager::shortcutChanged,
             this, &MainWindow::onShortcutChanged);
