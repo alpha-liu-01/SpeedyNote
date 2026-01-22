@@ -20,6 +20,7 @@
 #include <QMenu>
 #include <QCloseEvent>
 #include <QShortcut>  // For m_managedShortcuts hash
+#include <memory>     // For std::unique_ptr
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
 #ifndef Q_OS_ANDROID
@@ -43,6 +44,12 @@
 // Phase D: Subtoolbar includes
 class SubToolbarContainer;
 class PenSubToolbar;
+
+// PDF Search
+class PdfSearchBar;
+class PdfSearchEngine;
+struct PdfSearchMatch;
+struct PdfSearchState;
 class MarkerSubToolbar;
 class HighlighterSubToolbar;
 class ObjectSelectSubToolbar;
@@ -440,6 +447,11 @@ private:
     ClipboardActionBar *m_clipboardActionBar = nullptr;
     PagePanelActionBar *m_pagePanelActionBar = nullptr;
     
+    // PDF Search
+    PdfSearchBar *m_pdfSearchBar = nullptr;
+    PdfSearchEngine *m_searchEngine = nullptr;
+    std::unique_ptr<PdfSearchState> m_searchState;
+    
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
     
@@ -576,6 +588,16 @@ private:
     
     // Page Panel: Task 5.2: Page Panel connections
     void setupPagePanelConnections();  // Connect page panel signals
+    
+    // PDF Search
+    void setupPdfSearch();             // Create search bar and engine
+    void updatePdfSearchBarPosition(); // Update position on viewport resize
+    void showPdfSearchBar();           // Show and focus search bar (Ctrl+F)
+    void hidePdfSearchBar();           // Hide search bar and clear highlights
+    void onSearchNext(const QString& text, bool caseSensitive, bool wholeWord);
+    void onSearchPrev(const QString& text, bool caseSensitive, bool wholeWord);
+    void onSearchMatchFound(const PdfSearchMatch& match, const QVector<PdfSearchMatch>& pageMatches);
+    void onSearchNotFound(bool wrapped);
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

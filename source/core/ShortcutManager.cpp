@@ -193,6 +193,8 @@ void ShortcutManager::registerDefaults()
     registerAction("app.settings", "Ctrl+K", tr("Settings"), tr("Application"));
     registerAction("app.keyboard_shortcuts", "Ctrl+Alt+Shift+K", tr("Keyboard Shortcuts"), tr("Application"));
     registerAction("app.find", "Ctrl+F", tr("Find in Document"), tr("Application"));
+    registerAction("app.find_next", "F3", tr("Find Next"), tr("Application"));
+    registerAction("app.find_prev", "Shift+F3", tr("Find Previous"), tr("Application"));
     
     // ===== Edgeless Navigation (only for edgeless documents) =====
     registerAction("edgeless.home", "Home", tr("Return to Origin"), tr("Edgeless"), Scope::EdgelessOnly);

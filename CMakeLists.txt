@@ -274,6 +274,7 @@ set(UI_SOURCES
     source/ui/widgets/UndoDeleteButton.cpp
     source/ui/widgets/LayerItemWidget.cpp
     source/ui/widgets/LayerPanelPillButton.cpp
+    source/ui/widgets/PdfSearchBar.cpp
     # Subtoolbars
     source/ui/subtoolbars/SubToolbar.cpp
     source/ui/subtoolbars/SubToolbarContainer.cpp
@@ -310,6 +311,7 @@ if(ANDROID)
         source/pdf/MuPdfProvider.cpp
         source/pdf/PdfRelinkDialog.cpp
         source/pdf/PdfMismatchDialog.cpp
+        source/pdf/PdfSearchEngine.cpp
     )
 else()
 set(PDF_SOURCES
@@ -317,6 +319,7 @@ set(PDF_SOURCES
         source/pdf/PopplerPdfProvider.cpp
         source/pdf/PdfRelinkDialog.cpp
         source/pdf/PdfMismatchDialog.cpp
+        source/pdf/PdfSearchEngine.cpp
     )
 endif()
 

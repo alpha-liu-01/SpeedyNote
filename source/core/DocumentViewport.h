@@ -30,6 +30,7 @@ enum class TouchGestureMode {
 #include "ToolType.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
+#include "../pdf/PdfSearchEngine.h"
 #include <QStack>
 #include <QMap>
 
@@ -836,6 +837,31 @@ public:
      * Action Bar: Used to sync state on tab switch.
      */
     bool hasTextSelection() const { return m_textSelection.isValid(); }
+    
+    // ===== PDF Search Highlighting =====
+    
+    /**
+     * @brief Set search matches to highlight on the current page.
+     * @param matches All matches on the page.
+     * @param currentIndex Index of the current (focused) match.
+     * @param pageIndex Page where matches are located.
+     * 
+     * Call this when a search result is found. The viewport will highlight
+     * all matches on the page in yellow, with the current match in orange.
+     */
+    void setSearchMatches(const QVector<PdfSearchMatch>& matches, int currentIndex, int pageIndex);
+    
+    /**
+     * @brief Clear all search match highlights.
+     * 
+     * Call this when the search bar is closed.
+     */
+    void clearSearchMatches();
+    
+    /**
+     * @brief Check if there are search matches being displayed.
+     */
+    bool hasSearchMatches() const { return !m_searchMatches.isEmpty(); }
     
     /**
      * @brief Handle Escape key for cancelling selections.
@@ -1952,6 +1978,13 @@ private:
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
     bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
     
+    // ===== PDF Search Highlighting =====
+    QVector<PdfSearchMatch> m_searchMatches;       ///< All matches on current page
+    int m_currentSearchMatchIndex = -1;            ///< Which match is "current" (orange)
+    int m_searchMatchPageIndex = -1;               ///< Page where matches are displayed
+    QColor m_searchHighlightCurrent = QColor(255, 165, 0, 128);  ///< Orange, 50% alpha
+    QColor m_searchHighlightOther = QColor(255, 255, 0, 128);    ///< Yellow, 50% alpha
+    
     // ===== Object Selection (Phase O2) =====
     
     /**
@@ -2839,6 +2872,13 @@ private:
      * @param pageIndex The page being rendered.
      */
     void renderTextSelectionOverlay(QPainter& painter, int pageIndex);
+    
+    /**
+     * @brief Render PDF search match highlights on a page.
+     * @param painter The painter to render to (page-transformed).
+     * @param pageIndex The page being rendered.
+     */
+    void renderSearchMatchesOverlay(QPainter& painter, int pageIndex);
     
     /**
      * @brief Create a marker-style stroke for a highlight rectangle (Phase B.6).

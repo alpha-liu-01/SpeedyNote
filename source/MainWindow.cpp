@@ -29,6 +29,8 @@
 #include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
 #include "sharing/NotebookExporter.h" // Phase 1: Export notebooks as .snbx
 #include "sharing/ExportDialog.h"     // Phase 1: Export dialog UI
+#include "ui/widgets/PdfSearchBar.h"  // PDF text search bar
+#include "pdf/PdfSearchEngine.h"      // PDF text search engine
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include <QVBoxLayout>
@@ -184,6 +186,11 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Connect TabManager signals
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
+        // Phase 6.1: Hide PDF search bar when switching tabs to prevent stale state
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            hidePdfSearchBar();
+        }
+        
         // Save/restore left sidebar tab selection per document tab
         // IMPORTANT: Must be FIRST, before updatePagePanelForViewport() which modifies sidebar tabs
         int newIndex = m_tabManager->currentIndex();
@@ -259,6 +266,13 @@ MainWindow::MainWindow(QWidget *parent)
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
     // TabManager::closeTab() emits this signal before deleting the viewport
     connect(m_tabManager, &TabManager::tabCloseRequested, this, [this](int index, DocumentViewport* vp) {
+        // Phase 6.2: Cancel search if the document being closed has an active search
+        if (vp && m_searchEngine && vp == currentViewport()) {
+            if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+                hidePdfSearchBar();  // This also cancels and clears the cache
+            }
+        }
+        
         // Clean up subtoolbar per-tab state to prevent memory leak
         if (m_subtoolbarContainer) {
             m_subtoolbarContainer->clearTabState(index);
@@ -1105,6 +1119,9 @@ void MainWindow::setupUi() {
     // Setup action bars
     setupActionBars();
     
+    // PDF Search: Setup search bar
+    setupPdfSearch();
+    
     // Phase E.2: Setup outline panel connections
     setupOutlinePanelConnections();
     
@@ -1227,7 +1244,13 @@ void MainWindow::setupManagedShortcuts()
             return;
         }
         
-        // First, let the current viewport try to handle Escape
+        // First, close PDF search bar if it's open
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            hidePdfSearchBar();
+            return;
+        }
+        
+        // Next, let the current viewport try to handle Escape
         // (cancel lasso selection, deselect objects, cancel text selection)
         if (DocumentViewport* vp = currentViewport()) {
             if (vp->handleEscapeKey()) {
@@ -1276,10 +1299,26 @@ void MainWindow::setupManagedShortcuts()
         dialog.exec();
     });
     createShortcut("app.find", [this]() {
-        // Placeholder for future find feature
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "[MainWindow] Find feature not yet implemented";
-#endif
+        // Show PDF search bar (only works for PDF documents)
+        showPdfSearchBar();
+    });
+    createShortcut("app.find_next", [this]() {
+        // F3: Find next (only works when search bar is visible)
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            QString text = m_pdfSearchBar->searchText();
+            if (!text.isEmpty()) {
+                emit m_pdfSearchBar->searchNextRequested(text, m_pdfSearchBar->caseSensitive(), m_pdfSearchBar->wholeWord());
+            }
+        }
+    });
+    createShortcut("app.find_prev", [this]() {
+        // Shift+F3: Find previous (only works when search bar is visible)
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            QString text = m_pdfSearchBar->searchText();
+            if (!text.isEmpty()) {
+                emit m_pdfSearchBar->searchPrevRequested(text, m_pdfSearchBar->caseSensitive(), m_pdfSearchBar->wholeWord());
+            }
+        }
     });
     
     // ===== Export/Share =====
@@ -3842,6 +3881,9 @@ void MainWindow::updateScrollbarPositions() {
     
     // Update action bar position
     updateActionBarPosition();
+    
+    // Update PDF search bar position
+    updatePdfSearchBarPosition();
 }
 
 // =========================================================================
@@ -4219,6 +4261,278 @@ void MainWindow::updateActionBarPosition()
     
     // Ensure it's raised above viewport content
     m_actionBarContainer->raise();
+}
+
+// =========================================================================
+// PDF Search Bar Setup and Positioning
+// =========================================================================
+
+void MainWindow::setupPdfSearch()
+{
+    if (!m_canvasContainer) {
+        qWarning() << "setupPdfSearch: canvasContainer not yet created";
+        return;
+    }
+    
+    // Create search bar as child of canvas container (floats over viewport)
+    m_pdfSearchBar = new PdfSearchBar(m_canvasContainer);
+    m_pdfSearchBar->hide();  // Hidden by default
+    
+    // Initialize search state
+    m_searchState = std::make_unique<PdfSearchState>();
+    
+    // Create search engine
+    m_searchEngine = new PdfSearchEngine(this);
+    
+    // Connect search bar signals to trigger search
+    connect(m_pdfSearchBar, &PdfSearchBar::searchNextRequested, this, [this](const QString& text, bool caseSensitive, bool wholeWord) {
+        onSearchNext(text, caseSensitive, wholeWord);
+    });
+    
+    connect(m_pdfSearchBar, &PdfSearchBar::searchPrevRequested, this, [this](const QString& text, bool caseSensitive, bool wholeWord) {
+        onSearchPrev(text, caseSensitive, wholeWord);
+    });
+    
+    connect(m_pdfSearchBar, &PdfSearchBar::closed, this, [this]() {
+        hidePdfSearchBar();
+    });
+    
+    // Connect search engine signals
+    connect(m_searchEngine, &PdfSearchEngine::matchFound, this, 
+            &MainWindow::onSearchMatchFound);
+    connect(m_searchEngine, &PdfSearchEngine::notFound, this,
+            &MainWindow::onSearchNotFound);
+    
+    // Position at bottom of viewport
+    updatePdfSearchBarPosition();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "PDF search bar initialized";
+#endif
+}
+
+void MainWindow::updatePdfSearchBarPosition()
+{
+    if (!m_pdfSearchBar || !m_canvasContainer) {
+        return;
+    }
+    
+    // Position at the bottom of the canvas container
+    QRect viewportRect = m_canvasContainer->rect();
+    
+    // Calculate search bar geometry: full width, at bottom
+    int barHeight = m_pdfSearchBar->height();
+    int y = viewportRect.height() - barHeight;
+    
+    m_pdfSearchBar->setGeometry(0, y, viewportRect.width(), barHeight);
+    
+    // Ensure it's raised above viewport content
+    m_pdfSearchBar->raise();
+}
+
+void MainWindow::showPdfSearchBar()
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_pdfSearchBar) {
+        return;
+    }
+    
+    // Only show for PDF documents
+    Document *doc = vp->document();
+    if (!doc || !doc->isPdfLoaded()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[MainWindow] Ctrl+F ignored: not a PDF document";
+#endif
+        return;
+    }
+    
+    // Update position before showing
+    updatePdfSearchBarPosition();
+    
+    // Show and focus the search bar
+    m_pdfSearchBar->showAndFocus();
+    
+    // Sync dark mode
+    m_pdfSearchBar->setDarkMode(isDarkMode());
+}
+
+void MainWindow::hidePdfSearchBar()
+{
+    if (!m_pdfSearchBar) {
+        return;
+    }
+    
+    // Cancel any ongoing search and clear cache to free memory
+    if (m_searchEngine) {
+        m_searchEngine->cancel();
+        m_searchEngine->clearCache();
+    }
+    
+    m_pdfSearchBar->hide();
+    m_pdfSearchBar->clearStatus();
+    
+    // Clear search highlights from viewport
+    if (DocumentViewport *vp = currentViewport()) {
+        vp->clearSearchMatches();
+    }
+    
+    // Reset search state
+    if (m_searchState) {
+        m_searchState->clear();
+    }
+    
+    // Return focus to viewport
+    if (DocumentViewport *vp = currentViewport()) {
+        vp->setFocus();
+    }
+}
+
+void MainWindow::onSearchNext(const QString& text, bool caseSensitive, bool wholeWord)
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_searchEngine || !m_searchState) {
+        return;
+    }
+    
+    Document *doc = vp->document();
+    if (!doc || !doc->isPdfLoaded()) {
+        return;
+    }
+    
+    // Set the document on the engine
+    m_searchEngine->setDocument(doc);
+    
+    // Clear status before searching
+    m_pdfSearchBar->clearStatus();
+    
+    // Determine start position
+    int startPage = 0;
+    int startMatchIndex = -1;
+    
+    if (m_searchState->hasCurrentMatch() && m_searchState->searchText == text) {
+        // Continue from current match
+        startPage = m_searchState->currentPageIndex;
+        startMatchIndex = m_searchState->currentMatchIndex;
+    } else {
+        // New search or text changed - start from current visible page
+        startPage = vp->currentPageIndex();
+        startMatchIndex = -1;
+        
+        // Reset search state for new search
+        m_searchState->clear();
+    }
+    
+    // Update search state
+    m_searchState->searchText = text;
+    m_searchState->caseSensitive = caseSensitive;
+    m_searchState->wholeWord = wholeWord;
+    
+    // Trigger search
+    m_searchEngine->findNext(text, caseSensitive, wholeWord, startPage, startMatchIndex);
+}
+
+void MainWindow::onSearchPrev(const QString& text, bool caseSensitive, bool wholeWord)
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_searchEngine || !m_searchState) {
+        return;
+    }
+    
+    Document *doc = vp->document();
+    if (!doc || !doc->isPdfLoaded()) {
+        return;
+    }
+    
+    // Set the document on the engine
+    m_searchEngine->setDocument(doc);
+    
+    // Clear status before searching
+    m_pdfSearchBar->clearStatus();
+    
+    // Determine start position
+    int startPage = 0;
+    int startMatchIndex = -1;
+    
+    if (m_searchState->hasCurrentMatch() && m_searchState->searchText == text) {
+        // Continue from current match
+        startPage = m_searchState->currentPageIndex;
+        startMatchIndex = m_searchState->currentMatchIndex;
+    } else {
+        // New search or text changed - start from current visible page
+        startPage = vp->currentPageIndex();
+        startMatchIndex = -1;
+        
+        // Reset search state for new search
+        m_searchState->clear();
+    }
+    
+    // Update search state
+    m_searchState->searchText = text;
+    m_searchState->caseSensitive = caseSensitive;
+    m_searchState->wholeWord = wholeWord;
+    
+    // Trigger search
+    m_searchEngine->findPrev(text, caseSensitive, wholeWord, startPage, startMatchIndex);
+}
+
+void MainWindow::onSearchMatchFound(const PdfSearchMatch& match, 
+                                     const QVector<PdfSearchMatch>& pageMatches)
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_searchState) {
+        return;
+    }
+    
+    // Update search state
+    m_searchState->currentPageIndex = match.pageIndex;
+    m_searchState->currentMatchIndex = match.matchIndex;
+    m_searchState->currentPageMatches = pageMatches;
+    
+    // Navigate to the page with the match
+    vp->scrollToPage(match.pageIndex);
+    
+    // Update viewport highlights
+    // Find the index of current match within pageMatches
+    int currentIdx = -1;
+    for (int i = 0; i < pageMatches.size(); ++i) {
+        if (pageMatches[i].matchIndex == match.matchIndex) {
+            currentIdx = i;
+            break;
+        }
+    }
+    
+    vp->setSearchMatches(pageMatches, currentIdx, match.pageIndex);
+    
+    // Clear any previous "not found" status
+    m_pdfSearchBar->clearStatus();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MainWindow] Search match found on page" << match.pageIndex 
+             << "match" << match.matchIndex << "of" << pageMatches.size();
+#endif
+}
+
+void MainWindow::onSearchNotFound(bool wrapped)
+{
+    Q_UNUSED(wrapped)
+    
+    if (m_pdfSearchBar) {
+        m_pdfSearchBar->setStatus(tr("No results found"));
+    }
+    
+    // Clear any existing highlights
+    if (DocumentViewport *vp = currentViewport()) {
+        vp->clearSearchMatches();
+    }
+    
+    // Reset match state but keep search text
+    if (m_searchState) {
+        m_searchState->resetMatch();
+    }
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MainWindow] Search not found, wrapped:" << wrapped;
+#endif
 }
 
 // =========================================================================
@@ -4844,6 +5158,7 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     // This catches maximize/restore events that might not trigger canvas container resize
     updateSubToolbarPosition();
     updateActionBarPosition();
+    updatePdfSearchBarPosition();
 }
 
 

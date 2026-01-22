@@ -9810,6 +9810,31 @@ void DocumentViewport::finalizeTextSelection()
              // << (m_textSelection.selectedText.length() > 50 ? "..." : "");
 }
 
+// ============================================================================
+// PDF Search Highlighting
+// ============================================================================
+
+void DocumentViewport::setSearchMatches(const QVector<PdfSearchMatch>& matches, 
+                                         int currentIndex, int pageIndex)
+{
+    m_searchMatches = matches;
+    m_currentSearchMatchIndex = currentIndex;
+    m_searchMatchPageIndex = pageIndex;
+    
+    // Trigger repaint to show highlights
+    update();
+}
+
+void DocumentViewport::clearSearchMatches()
+{
+    m_searchMatches.clear();
+    m_currentSearchMatchIndex = -1;
+    m_searchMatchPageIndex = -1;
+    
+    // Trigger repaint to remove highlights
+    update();
+}
+
 void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
 {
     loadTextBoxesForPage(pageIndex);
@@ -9925,6 +9950,42 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
             pdfRect.width() * PDF_TO_PAGE_SCALE,
             pdfRect.height() * PDF_TO_PAGE_SCALE
         );
+        painter.drawRect(pageRect);
+    }
+    
+    painter.restore();
+}
+
+void DocumentViewport::renderSearchMatchesOverlay(QPainter& painter, int pageIndex)
+{
+    // Only render if we have matches on this page
+    if (m_searchMatches.isEmpty() || m_searchMatchPageIndex != pageIndex) {
+        return;
+    }
+    
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    
+    // Draw all matches
+    for (int i = 0; i < m_searchMatches.size(); ++i) {
+        const PdfSearchMatch& match = m_searchMatches[i];
+        
+        // Choose color: orange for current, yellow for others
+        QColor fillColor = (i == m_currentSearchMatchIndex) 
+            ? m_searchHighlightCurrent 
+            : m_searchHighlightOther;
+        
+        painter.setBrush(fillColor);
+        
+        // Convert PDF coords to page coords
+        const QRectF& pdfRect = match.boundingRect;
+        QRectF pageRect(
+            pdfRect.x() * PDF_TO_PAGE_SCALE,
+            pdfRect.y() * PDF_TO_PAGE_SCALE,
+            pdfRect.width() * PDF_TO_PAGE_SCALE,
+            pdfRect.height() * PDF_TO_PAGE_SCALE
+        );
+        
         painter.drawRect(pageRect);
     }
     
@@ -11846,6 +11907,9 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     if (m_currentTool == ToolType::Highlighter) {
         renderTextSelectionOverlay(painter, pageIndex);
     }
+    
+    // 5b. Render PDF search match highlights
+    renderSearchMatchesOverlay(painter, pageIndex);
     
     // 6. Draw page border (optional, for visual separation)
     // CUSTOMIZABLE: Page border color (theme setting)
