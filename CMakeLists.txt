@@ -167,7 +167,55 @@ elseif(UNIX)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    include_directories(${CMAKE_CURRENT_BINARY_DIR})
+    # MuPDF for PDF export (static libraries)
+    # Headers in /usr/include/mupdf/, libs in /usr/lib/
+    set(MUPDF_INCLUDE_DIR "/usr/include")
+    set(MUPDF_LIBRARY_MAIN "/usr/lib/libmupdf.a")
+    set(MUPDF_LIBRARY_THIRD "/usr/lib/libmupdf-third.a")
+    
+    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
+        message(STATUS "✅ MuPDF found for PDF export")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        
+        # MuPDF static libs require these system libraries via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)  # Optional
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)        # HTML5 parser
+        
+        # Find mujs library (JavaScript support in MuPDF)
+        find_library(MUJS_LIBRARY NAMES mujs PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
+        
+        set(MUPDF_LIBRARIES 
+            ${MUPDF_LIBRARY_MAIN} 
+            ${MUPDF_LIBRARY_THIRD}
+            PkgConfig::HARFBUZZ
+            PkgConfig::FREETYPE
+            PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2
+            m pthread z
+        )
+        # Add optional dependencies if found
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(MUJS_LIBRARY)
+            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Install with: sudo apt install libmupdf-dev")
+        set(MUPDF_FOUND FALSE)
+    endif()
+
+    include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
 
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
@@ -312,14 +360,16 @@ if(ANDROID)
         source/pdf/PdfRelinkDialog.cpp
         source/pdf/PdfMismatchDialog.cpp
         source/pdf/PdfSearchEngine.cpp
+        source/pdf/MuPdfExporter.cpp
     )
 else()
-set(PDF_SOURCES
+    set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
         source/pdf/PopplerPdfProvider.cpp
         source/pdf/PdfRelinkDialog.cpp
         source/pdf/PdfMismatchDialog.cpp
         source/pdf/PdfSearchEngine.cpp
+        source/pdf/MuPdfExporter.cpp
     )
 endif()
 
@@ -471,6 +521,10 @@ elseif(UNIX)
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
+    endif()
+    # Add MuPDF for PDF export
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 endif()
