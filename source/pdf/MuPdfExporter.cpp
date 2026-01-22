@@ -14,13 +14,33 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
+#include <QBuffer>
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
+#include <QPainter>
 #include <QRegularExpression>
 #include <QSet>
 
 #include <algorithm> // for std::sort
+#include <cmath>     // for cosf, sinf, M_PI
+
+// Forward declarations for static helper functions defined later in this file
+static fz_buffer* buildStrokesContentStream(fz_context* ctx, const Page* page);
+static int getSourcePageRotation(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
+static fz_rect getSourcePageBBox(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
+static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
+                           const ImageObject* img, fz_buffer* contentBuf,
+                           pdf_obj* resources, int imageIndex, float pageHeightPt,
+                           const PdfExportOptions& options);
+
+/**
+ * @brief Scale factor from SpeedyNote units (96 DPI) to PDF points (72 DPI).
+ * 
+ * PDF points are 1/72 inch, SpeedyNote uses 96 pixels per inch.
+ * Scale = 72/96 = 0.75
+ */
+static constexpr float SN_TO_PDF_SCALE = 72.0f / 96.0f;
 
 // ============================================================================
 // Construction / Destruction
@@ -453,17 +473,160 @@ bool MuPdfExporter::graftPage(int pageIndex)
 
 bool MuPdfExporter::renderModifiedPage(int pageIndex)
 {
-    // TODO: Phase 3-4 implementation
-    // 1. Create new page with source PDF dimensions
-    // 2. Import source PDF page as XObject (preserves vectors)
-    // 3. Add XObject reference to content stream
-    // 4. Convert strokes to MuPDF paths and add to content stream
-    // 5. Add images
+    if (!m_outputDoc || !m_ctx || !m_document) {
+        return false;
+    }
     
-    qDebug() << "[MuPdfExporter] renderModifiedPage" << pageIndex << "(TODO)";
+    Page* page = m_document->page(pageIndex);
+    if (!page) return false;
     
-    // For now, fall back to blank page rendering
-    return renderBlankPage(pageIndex);
+    // Get the source PDF page number for this SpeedyNote page
+    int pdfPageNum = page->pdfPageNumber;
+    if (pdfPageNum < 0 || !m_sourcePdf) {
+        // No PDF background - use blank page rendering
+        return renderBlankPage(pageIndex);
+    }
+    
+    QSizeF pageSize = page->size;
+    
+    // Convert page size from SpeedyNote units (96 DPI) to PDF points (72 DPI)
+    float widthPt = pageSize.width() * SN_TO_PDF_SCALE;
+    float heightPt = pageSize.height() * SN_TO_PDF_SCALE;
+    
+    // Import the source PDF page as an XObject
+    pdf_obj* bgXObject = importPageAsXObject(pdfPageNum);
+    if (!bgXObject) {
+        qWarning() << "[MuPdfExporter] Failed to import PDF page as XObject, falling back to blank";
+        return renderBlankPage(pageIndex);
+    }
+    
+    // Build strokes content (may be nullptr if no strokes)
+    fz_buffer* strokesContent = buildStrokesContentStream(m_ctx, page);
+    
+    // Build combined content stream: background XObject + strokes
+    fz_buffer* combinedContent = nullptr;
+    pdf_obj* resources = nullptr;
+    
+    // Get source page properties for rotation handling
+    int srcRotation = getSourcePageRotation(m_ctx, m_sourcePdf, pdfPageNum);
+    fz_rect srcBBox = getSourcePageBBox(m_ctx, m_sourcePdf, pdfPageNum);
+    
+    fz_try(m_ctx) {
+        // Create content buffer
+        combinedContent = fz_new_buffer(m_ctx, 1024);
+        
+        // Save graphics state, draw background XObject, restore
+        // The XObject is referenced as /BGForm in the Resources dictionary
+        fz_append_string(m_ctx, combinedContent, "q\n");
+        
+        // Apply transformation matrix for rotated pages
+        // The XObject content is stored "unrotated", but the page had a /Rotate entry
+        // We need to apply the rotation when drawing the XObject
+        //
+        // PDF transformation matrix: [a b c d e f]
+        // Represents: x' = ax + cy + e, y' = bx + dy + f
+        //
+        // For rotation around origin:
+        //   0°:   [1 0 0 1 0 0]       (identity)
+        //   90°:  [0 1 -1 0 w 0]      (rotate + translate)
+        //   180°: [-1 0 0 -1 w h]
+        //   270°: [0 -1 1 0 0 h]
+        //
+        // Where w and h are the page dimensions
+        
+        if (srcRotation != 0) {
+            char matrixCmd[128];
+            float bboxW = srcBBox.x1 - srcBBox.x0;
+            float bboxH = srcBBox.y1 - srcBBox.y0;
+            
+            switch (srcRotation) {
+                case 90:
+                    // Rotate 90° CW: [0 1 -1 0 bboxH 0]
+                    snprintf(matrixCmd, sizeof(matrixCmd), 
+                             "0 1 -1 0 %.4f 0 cm\n", bboxH);
+                    break;
+                case 180:
+                    // Rotate 180°: [-1 0 0 -1 bboxW bboxH]
+                    snprintf(matrixCmd, sizeof(matrixCmd), 
+                             "-1 0 0 -1 %.4f %.4f cm\n", bboxW, bboxH);
+                    break;
+                case 270:
+                    // Rotate 270° CW (90° CCW): [0 -1 1 0 0 bboxW]
+                    snprintf(matrixCmd, sizeof(matrixCmd), 
+                             "0 -1 1 0 0 %.4f cm\n", bboxW);
+                    break;
+                default:
+                    matrixCmd[0] = '\0';
+                    break;
+            }
+            
+            if (matrixCmd[0] != '\0') {
+                fz_append_string(m_ctx, combinedContent, matrixCmd);
+                qDebug() << "[MuPdfExporter] Applied rotation" << srcRotation 
+                         << "to page" << pageIndex;
+            }
+        }
+        
+        // Handle CropBox offset if it doesn't start at origin
+        if (srcBBox.x0 != 0 || srcBBox.y0 != 0) {
+            char translateCmd[64];
+            snprintf(translateCmd, sizeof(translateCmd), 
+                     "1 0 0 1 %.4f %.4f cm\n", -srcBBox.x0, -srcBBox.y0);
+            fz_append_string(m_ctx, combinedContent, translateCmd);
+        }
+        
+        // Draw the background XObject
+        fz_append_string(m_ctx, combinedContent, "/BGForm Do\n");
+        fz_append_string(m_ctx, combinedContent, "Q\n");
+        
+        // Append strokes content if we have any
+        if (strokesContent) {
+            fz_append_buffer(m_ctx, combinedContent, strokesContent);
+        }
+        
+        // Create Resources dictionary with XObject reference
+        resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
+        
+        // Create XObject subdictionary with background form
+        pdf_obj* xobjectDict = pdf_new_dict(m_ctx, m_outputDoc, 4);
+        pdf_dict_put(m_ctx, xobjectDict, pdf_new_name(m_ctx, "BGForm"), bgXObject);
+        pdf_dict_put(m_ctx, resources, PDF_NAME(XObject), xobjectDict);
+        
+        // Add images if any
+        int imageIndex = 0;
+        for (const auto& obj : page->objects) {
+            if (obj->type() == QStringLiteral("image")) {
+                const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj.get());
+                if (imgObj && imgObj->isLoaded()) {
+                    addImageToPage(m_ctx, m_outputDoc, imgObj, combinedContent, resources, imageIndex++, heightPt, m_options);
+                }
+            }
+        }
+        
+        // Create the page with our resources and content
+        fz_rect mediabox = fz_make_rect(0, 0, widthPt, heightPt);
+        pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, 
+                                         resources, combinedContent);
+        pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
+    }
+    fz_always(m_ctx) {
+        if (combinedContent) {
+            fz_drop_buffer(m_ctx, combinedContent);
+        }
+        if (strokesContent) {
+            fz_drop_buffer(m_ctx, strokesContent);
+        }
+        // Note: resources and bgXObject are owned by the document now, don't drop
+    }
+    fz_catch(m_ctx) {
+        qWarning() << "[MuPdfExporter] Failed to create modified page" << pageIndex
+                   << ":" << fz_caught_message(m_ctx);
+        return false;
+    }
+    
+    qDebug() << "[MuPdfExporter] Rendered modified page" << pageIndex 
+             << "(PDF page" << pdfPageNum << "+ strokes)";
+    return true;
 }
 
 bool MuPdfExporter::renderBlankPage(int pageIndex)
@@ -478,21 +641,68 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
     QSizeF pageSize = page->size;
     
     // Convert page size from SpeedyNote units (96 DPI) to PDF points (72 DPI)
-    float widthPt = pageSize.width() * 72.0f / 96.0f;
-    float heightPt = pageSize.height() * 72.0f / 96.0f;
+    float widthPt = pageSize.width() * SN_TO_PDF_SCALE;
+    float heightPt = pageSize.height() * SN_TO_PDF_SCALE;
+    
+    // Build content stream with strokes (may be nullptr if no strokes)
+    fz_buffer* strokesContent = buildStrokesContentStream(m_ctx, page);
+    
+    // Check if page has images to add
+    bool hasImages = !page->objects.empty();
+    
+    fz_buffer* finalContent = nullptr;
+    pdf_obj* resources = nullptr;
     
     fz_try(m_ctx) {
-        // Create a new blank page with the correct dimensions
         fz_rect mediabox = fz_make_rect(0, 0, widthPt, heightPt);
-        pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, nullptr, nullptr);
-        pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
         
-        // TODO: Phase 3 - Add strokes as vector paths
-        // TODO: Phase 5 - Add images
+        if (hasImages) {
+            // Create resources dictionary for images
+            resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
+            
+            // Create combined content buffer
+            finalContent = fz_new_buffer(m_ctx, 1024);
+            
+            // First, add strokes if any
+            if (strokesContent) {
+                unsigned char* data;
+                size_t len = fz_buffer_storage(m_ctx, strokesContent, &data);
+                fz_append_data(m_ctx, finalContent, data, len);
+            }
+            
+            // Add images
+            int imageIndex = 0;
+            for (const auto& obj : page->objects) {
+                if (obj->type() == QStringLiteral("image")) {
+                    const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj.get());
+                    if (imgObj && imgObj->isLoaded()) {
+                        addImageToPage(m_ctx, m_outputDoc, imgObj, finalContent, resources, imageIndex++, heightPt, m_options);
+                    }
+                }
+            }
+            
+            // Create page with resources and combined content
+            pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, resources, finalContent);
+            pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
+        } else {
+            // No images - simple path with just strokes
+            pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, nullptr, strokesContent);
+            pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
+        }
+        
         // TODO: Phase 6 - Add page background (grid, lines, color)
     }
+    fz_always(m_ctx) {
+        if (strokesContent) {
+            fz_drop_buffer(m_ctx, strokesContent);
+        }
+        if (finalContent) {
+            fz_drop_buffer(m_ctx, finalContent);
+        }
+        // Note: resources is owned by the page, no need to drop
+    }
     fz_catch(m_ctx) {
-        qWarning() << "[MuPdfExporter] Failed to create blank page" << pageIndex
+        qWarning() << "[MuPdfExporter] Failed to create page" << pageIndex
                    << ":" << fz_caught_message(m_ctx);
         return false;
     }
@@ -501,10 +711,121 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
 }
 
 // ============================================================================
-// Vector Stroke Conversion (Phase 3 - TODO)
+// Vector Stroke Conversion (Phase 3)
 // ============================================================================
 
-fz_path* MuPdfExporter::polygonToPath(const QPolygonF& polygon)
+/**
+ * @brief Kappa constant for approximating circles with cubic Bezier curves.
+ * 
+ * A circle can be approximated by 4 cubic Bezier curves. The control points
+ * are placed at distance kappa * radius from the arc endpoints.
+ * kappa = 4 * (sqrt(2) - 1) / 3 ≈ 0.5522847498
+ */
+static constexpr float CIRCLE_KAPPA = 0.5522847498f;
+
+/**
+ * @brief Transform a point from SpeedyNote coords to PDF coords.
+ */
+static inline void transformPoint(float& x, float& y, qreal pageHeightSn)
+{
+    x = x * SN_TO_PDF_SCALE;
+    y = static_cast<float>(pageHeightSn - y) * SN_TO_PDF_SCALE;
+}
+
+/**
+ * @brief Append a filled polygon to the content stream buffer.
+ * 
+ * Writes PDF path operators: m (moveto), l (lineto), h (closepath), f (fill).
+ */
+static void appendPolygonToBuffer(fz_context* ctx, fz_buffer* buf, 
+                                   const QPolygonF& polygon, qreal pageHeightSn)
+{
+    if (polygon.isEmpty()) return;
+    
+    char cmd[64];
+    
+    // Move to first point
+    float x = static_cast<float>(polygon[0].x());
+    float y = static_cast<float>(polygon[0].y());
+    transformPoint(x, y, pageHeightSn);
+    snprintf(cmd, sizeof(cmd), "%.4f %.4f m\n", x, y);
+    fz_append_string(ctx, buf, cmd);
+    
+    // Line to remaining points
+    for (int i = 1; i < polygon.size(); ++i) {
+        x = static_cast<float>(polygon[i].x());
+        y = static_cast<float>(polygon[i].y());
+        transformPoint(x, y, pageHeightSn);
+        snprintf(cmd, sizeof(cmd), "%.4f %.4f l\n", x, y);
+        fz_append_string(ctx, buf, cmd);
+    }
+    
+    // Close and fill (non-zero winding rule for self-intersecting strokes)
+    fz_append_string(ctx, buf, "h f\n");
+}
+
+/**
+ * @brief Append a filled circle to the content stream buffer.
+ * 
+ * Approximates a circle using 4 cubic Bezier curves (standard PDF technique).
+ * Uses operators: m (moveto), c (curveto), h (closepath), f (fill).
+ */
+static void appendCircleToBuffer(fz_context* ctx, fz_buffer* buf,
+                                  const QPointF& center, qreal radius, qreal pageHeightSn)
+{
+    if (radius <= 0) return;
+    
+    // Transform center to PDF coords
+    float cx = static_cast<float>(center.x());
+    float cy = static_cast<float>(center.y());
+    transformPoint(cx, cy, pageHeightSn);
+    float r = static_cast<float>(radius) * SN_TO_PDF_SCALE;
+    
+    // Control point offset for Bezier approximation
+    float k = r * CIRCLE_KAPPA;
+    
+    char cmd[128];
+    
+    // Start at right point of circle (3 o'clock)
+    snprintf(cmd, sizeof(cmd), "%.4f %.4f m\n", cx + r, cy);
+    fz_append_string(ctx, buf, cmd);
+    
+    // Top-right quadrant (to 12 o'clock)
+    snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f %.4f %.4f %.4f c\n",
+             cx + r, cy + k,      // control point 1
+             cx + k, cy + r,      // control point 2
+             cx, cy + r);         // end point
+    fz_append_string(ctx, buf, cmd);
+    
+    // Top-left quadrant (to 9 o'clock)
+    snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f %.4f %.4f %.4f c\n",
+             cx - k, cy + r,
+             cx - r, cy + k,
+             cx - r, cy);
+    fz_append_string(ctx, buf, cmd);
+    
+    // Bottom-left quadrant (to 6 o'clock)
+    snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f %.4f %.4f %.4f c\n",
+             cx - r, cy - k,
+             cx - k, cy - r,
+             cx, cy - r);
+    fz_append_string(ctx, buf, cmd);
+    
+    // Bottom-right quadrant (back to 3 o'clock)
+    snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f %.4f %.4f %.4f c\n",
+             cx + k, cy - r,
+             cx + r, cy - k,
+             cx + r, cy);
+    fz_append_string(ctx, buf, cmd);
+    
+    // Close and fill
+    fz_append_string(ctx, buf, "h f\n");
+}
+
+// NOTE: This function is currently unused but reserved for Phase 4 (PDF XObject background).
+// When rendering modified pages with PDF backgrounds, we may need fz_path objects
+// for use with fz_fill_path() on a drawing device, rather than content stream operators.
+fz_path* MuPdfExporter::polygonToPath(const QPolygonF& polygon, qreal pageHeightSn)
 {
     if (polygon.isEmpty() || !m_ctx) {
         return nullptr;
@@ -515,12 +836,18 @@ fz_path* MuPdfExporter::polygonToPath(const QPolygonF& polygon)
     fz_try(m_ctx) {
         path = fz_new_path(m_ctx);
         
-        // Move to first point
-        fz_moveto(m_ctx, path, polygon[0].x(), polygon[0].y());
+        // Transform first point and move to it
+        // SpeedyNote: origin at top-left, 96 DPI
+        // PDF: origin at bottom-left, 72 DPI (points)
+        float x = static_cast<float>(polygon[0].x()) * SN_TO_PDF_SCALE;
+        float y = static_cast<float>(pageHeightSn - polygon[0].y()) * SN_TO_PDF_SCALE;
+        fz_moveto(m_ctx, path, x, y);
         
-        // Line to remaining points
+        // Line to remaining points with same transformation
         for (int i = 1; i < polygon.size(); ++i) {
-            fz_lineto(m_ctx, path, polygon[i].x(), polygon[i].y());
+            x = static_cast<float>(polygon[i].x()) * SN_TO_PDF_SCALE;
+            y = static_cast<float>(pageHeightSn - polygon[i].y()) * SN_TO_PDF_SCALE;
+            fz_lineto(m_ctx, path, x, y);
         }
         
         // Close the path (for filled polygons)
@@ -537,63 +864,549 @@ fz_path* MuPdfExporter::polygonToPath(const QPolygonF& polygon)
     return path;
 }
 
-bool MuPdfExporter::addStrokesToPage(pdf_page* pdfPage, const Page* page)
+/**
+ * @brief Build content stream buffer with all strokes from a page.
+ * @param ctx MuPDF context
+ * @param page The SpeedyNote page containing strokes
+ * @return fz_buffer with PDF content stream commands (caller must drop), or nullptr
+ * 
+ * This is a static helper function (not a class method) because fz_buffer
+ * cannot be forward declared in the header (it's a typedef in MuPDF).
+ */
+static fz_buffer* buildStrokesContentStream(fz_context* ctx, const Page* page)
 {
-    // TODO: Phase 3 implementation
-    // 1. Get all strokes from all layers
-    // 2. For each stroke, build polygon using VectorLayer logic
-    // 3. Convert polygon to MuPDF path
-    // 4. Set fill color
-    // 5. Add path to page content stream
+    if (!page || !ctx) {
+        return nullptr;
+    }
     
-    Q_UNUSED(pdfPage)
-    Q_UNUSED(page)
+    // Check if page has any strokes
+    bool hasStrokes = false;
+    for (const auto& layer : page->vectorLayers) {
+        if (!layer->strokes().isEmpty()) {
+            hasStrokes = true;
+            break;
+        }
+    }
     
-    return true;
+    if (!hasStrokes) {
+        return nullptr;  // No strokes to render
+    }
+    
+    fz_buffer* buf = nullptr;
+    qreal pageHeightSn = page->size.height();
+    
+    fz_try(ctx) {
+        buf = fz_new_buffer(ctx, 4096);  // Initial capacity
+        
+        // Save graphics state
+        fz_append_string(ctx, buf, "q\n");
+        
+        // Iterate through all layers (bottom to top)
+        // NOTE: Layer opacity and stroke alpha are not yet supported in PDF export.
+        // This would require setting up ExtGState resources for transparency.
+        // For now, all strokes are exported as fully opaque.
+        for (const auto& layer : page->vectorLayers) {
+            // Safety check for null shared_ptr
+            if (!layer) {
+                continue;
+            }
+            
+            if (!layer->visible || layer->strokes().isEmpty()) {
+                continue;
+            }
+            
+            // Process each stroke in the layer
+            for (const VectorStroke& stroke : layer->strokes()) {
+                // Build the stroke polygon using existing VectorLayer logic
+                VectorLayer::StrokePolygonResult polyResult = VectorLayer::buildStrokePolygon(stroke);
+                
+                // Set fill color (RGB values 0-1)
+                // Note: Alpha is ignored for now (requires ExtGState for PDF transparency)
+                float r = stroke.color.redF();
+                float g = stroke.color.greenF();
+                float b = stroke.color.blueF();
+                
+                // Format: "r g b rg" for RGB fill color
+                char colorCmd[64];
+                snprintf(colorCmd, sizeof(colorCmd), "%.4f %.4f %.4f rg\n", r, g, b);
+                fz_append_string(ctx, buf, colorCmd);
+                
+                if (polyResult.isSinglePoint) {
+                    // Single point - draw as a filled circle
+                    appendCircleToBuffer(ctx, buf, polyResult.startCapCenter, 
+                                        polyResult.startCapRadius, pageHeightSn);
+                } else if (!polyResult.polygon.isEmpty()) {
+                    // Multi-point stroke - draw the polygon
+                    appendPolygonToBuffer(ctx, buf, polyResult.polygon, pageHeightSn);
+                    
+                    // Draw round end caps if needed
+                    if (polyResult.hasRoundCaps) {
+                        appendCircleToBuffer(ctx, buf, polyResult.startCapCenter,
+                                            polyResult.startCapRadius, pageHeightSn);
+                        appendCircleToBuffer(ctx, buf, polyResult.endCapCenter,
+                                            polyResult.endCapRadius, pageHeightSn);
+                    }
+                }
+            }
+        }
+        
+        // Restore graphics state
+        fz_append_string(ctx, buf, "Q\n");
+    }
+    fz_catch(ctx) {
+        qWarning() << "[MuPdfExporter] Failed to build strokes content stream:" 
+                   << fz_caught_message(ctx);
+        if (buf) {
+            fz_drop_buffer(ctx, buf);
+        }
+        return nullptr;
+    }
+    
+    return buf;
 }
 
 // ============================================================================
-// PDF Background (Phase 4 - TODO)
+// PDF Background (Phase 4)
 // ============================================================================
+
+/**
+ * @brief Get the rotation value of a source PDF page.
+ * @param ctx MuPDF context
+ * @param srcPdf Source PDF document
+ * @param pageIndex Page index (0-based)
+ * @return Rotation in degrees (0, 90, 180, or 270), normalized
+ */
+static int getSourcePageRotation(fz_context* ctx, pdf_document* srcPdf, int pageIndex)
+{
+    int rotation = 0;
+    
+    fz_try(ctx) {
+        pdf_obj* pageObj = pdf_lookup_page_obj(ctx, srcPdf, pageIndex);
+        pdf_obj* rotateObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(Rotate));
+        if (rotateObj) {
+            rotation = pdf_to_int(ctx, rotateObj);
+            // Normalize to 0, 90, 180, or 270
+            rotation = ((rotation % 360) + 360) % 360;
+            // Only accept valid rotation values
+            if (rotation != 0 && rotation != 90 && rotation != 180 && rotation != 270) {
+                rotation = 0;
+            }
+        }
+    }
+    fz_catch(ctx) {
+        rotation = 0;
+    }
+    
+    return rotation;
+}
+
+/**
+ * @brief Get the BBox of a source PDF page (CropBox or MediaBox).
+ * @param ctx MuPDF context
+ * @param srcPdf Source PDF document
+ * @param pageIndex Page index (0-based)
+ * @return Page bounds as fz_rect
+ */
+static fz_rect getSourcePageBBox(fz_context* ctx, pdf_document* srcPdf, int pageIndex)
+{
+    fz_rect bbox = fz_empty_rect;
+    
+    fz_try(ctx) {
+        pdf_obj* pageObj = pdf_lookup_page_obj(ctx, srcPdf, pageIndex);
+        
+        // Try CropBox first, fall back to MediaBox
+        pdf_obj* boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(CropBox));
+        if (!boxObj) {
+            boxObj = pdf_dict_get_inheritable(ctx, pageObj, PDF_NAME(MediaBox));
+        }
+        
+        if (boxObj) {
+            bbox = pdf_to_rect(ctx, boxObj);
+        }
+    }
+    fz_catch(ctx) {
+        bbox = fz_empty_rect;
+    }
+    
+    return bbox;
+}
 
 pdf_obj* MuPdfExporter::importPageAsXObject(int sourcePageIndex)
 {
-    // TODO: Phase 4 implementation
-    // Use pdf_page_contentes_from_annot or similar to import page as XObject
+    // Validate we have source PDF and output document
+    if (!m_sourcePdf || !m_outputDoc || !m_ctx) {
+        qWarning() << "[MuPdfExporter] importPageAsXObject: No source PDF or output document";
+        return nullptr;
+    }
     
-    Q_UNUSED(sourcePageIndex)
-    return nullptr;
+    // Validate page index
+    int srcPageCount = pdf_count_pages(m_ctx, m_sourcePdf);
+    if (sourcePageIndex < 0 || sourcePageIndex >= srcPageCount) {
+        qWarning() << "[MuPdfExporter] importPageAsXObject: Page" << sourcePageIndex
+                   << "out of range (source has" << srcPageCount << "pages)";
+        return nullptr;
+    }
+    
+    pdf_obj* xobj = nullptr;
+    
+    fz_try(m_ctx) {
+        // Load the source page object
+        pdf_obj* srcPageObj = pdf_lookup_page_obj(m_ctx, m_sourcePdf, sourcePageIndex);
+        
+        // Get page properties
+        // MediaBox defines the page coordinate system
+        pdf_obj* mediaBox = pdf_dict_get_inheritable(m_ctx, srcPageObj, PDF_NAME(MediaBox));
+        if (!mediaBox) {
+            fz_throw(m_ctx, FZ_ERROR_GENERIC, "Source page has no MediaBox");
+        }
+        
+        // Get CropBox if it exists (actual visible area), otherwise use MediaBox
+        pdf_obj* cropBox = pdf_dict_get_inheritable(m_ctx, srcPageObj, PDF_NAME(CropBox));
+        pdf_obj* bbox = cropBox ? cropBox : mediaBox;
+        
+        // Get page Resources (fonts, images, color spaces, etc.)
+        pdf_obj* srcResources = pdf_dict_get_inheritable(m_ctx, srcPageObj, PDF_NAME(Resources));
+        
+        // Get page Contents stream(s)
+        pdf_obj* srcContents = pdf_dict_get(m_ctx, srcPageObj, PDF_NAME(Contents));
+        
+        // Create the Form XObject dictionary in output document
+        xobj = pdf_new_dict(m_ctx, m_outputDoc, 8);
+        
+        // Set required Form XObject properties
+        pdf_dict_put(m_ctx, xobj, PDF_NAME(Type), PDF_NAME(XObject));
+        pdf_dict_put(m_ctx, xobj, PDF_NAME(Subtype), PDF_NAME(Form));
+        pdf_dict_put(m_ctx, xobj, PDF_NAME(FormType), pdf_new_int(m_ctx, 1));
+        
+        // Copy BBox (use graft to handle indirect references)
+        pdf_obj* graftedBBox = pdf_graft_mapped_object(m_ctx, m_graftMap, bbox);
+        pdf_dict_put(m_ctx, xobj, PDF_NAME(BBox), graftedBBox);
+        
+        // Copy Resources (graft to resolve references and copy fonts/images)
+        if (srcResources) {
+            pdf_obj* graftedResources = pdf_graft_mapped_object(m_ctx, m_graftMap, srcResources);
+            pdf_dict_put(m_ctx, xobj, PDF_NAME(Resources), graftedResources);
+        }
+        
+        // Handle page contents
+        // Contents can be a single stream or an array of streams
+        if (srcContents) {
+            fz_buffer* contentBuf = nullptr;
+            
+            fz_try(m_ctx) {
+                if (pdf_is_array(m_ctx, srcContents)) {
+                    // Multiple content streams - concatenate them
+                    contentBuf = fz_new_buffer(m_ctx, 1024);
+                    
+                    int numStreams = pdf_array_len(m_ctx, srcContents);
+                    for (int i = 0; i < numStreams; ++i) {
+                        pdf_obj* stream = pdf_array_get(m_ctx, srcContents, i);
+                        fz_buffer* streamBuf = pdf_load_stream(m_ctx, stream);
+                        if (streamBuf) {
+                            // Add space between streams
+                            if (i > 0) {
+                                fz_append_byte(m_ctx, contentBuf, ' ');
+                            }
+                            fz_append_buffer(m_ctx, contentBuf, streamBuf);
+                            fz_drop_buffer(m_ctx, streamBuf);
+                        }
+                    }
+                } else {
+                    // Single content stream - copy it directly
+                    contentBuf = pdf_load_stream(m_ctx, srcContents);
+                }
+                
+                // Add the content stream to the XObject
+                if (contentBuf) {
+                    pdf_update_stream(m_ctx, m_outputDoc, xobj, contentBuf, 0);
+                }
+            }
+            fz_always(m_ctx) {
+                if (contentBuf) fz_drop_buffer(m_ctx, contentBuf);
+            }
+            fz_catch(m_ctx) {
+                fz_rethrow(m_ctx);  // Re-throw to outer catch block
+            }
+        }
+        
+        // Add the XObject to the output document's object table
+        pdf_update_object(m_ctx, m_outputDoc, pdf_to_num(m_ctx, xobj), xobj);
+    }
+    fz_catch(m_ctx) {
+        qWarning() << "[MuPdfExporter] importPageAsXObject failed:"
+                   << fz_caught_message(m_ctx);
+        // Don't drop xobj here - it may have been partially added to document
+        return nullptr;
+    }
+    
+    qDebug() << "[MuPdfExporter] Imported page" << sourcePageIndex << "as XObject";
+    return xobj;
 }
 
 // ============================================================================
 // Image Handling (Phase 5 - TODO)
 // ============================================================================
 
-bool MuPdfExporter::addImageToPage(const ImageObject* img, pdf_page* pdfPage)
+static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
+                           const ImageObject* img, fz_buffer* contentBuf,
+                           pdf_obj* resources, int imageIndex, float pageHeightPt,
+                           const PdfExportOptions& options)
 {
-    // TODO: Phase 5 implementation
-    // 1. Get QImage from ImageObject
-    // 2. Apply transforms (position, scale, rotation)
-    // 3. Compress appropriately (JPEG/PNG)
-    // 4. Embed as Image XObject
-    // 5. Add to page content stream
+    if (!img || !contentBuf || !resources || !ctx || !outputDoc) {
+        return false;
+    }
     
-    Q_UNUSED(img)
-    Q_UNUSED(pdfPage)
+    // Check if image is loaded
+    if (!img->isLoaded() || img->pixmap().isNull()) {
+        qWarning() << "[MuPdfExporter] Image not loaded:" << img->imagePath;
+        return false;
+    }
+    
+    // Skip invisible images
+    if (!img->visible) {
+        return true;
+    }
+    
+    // Get image data
+    QImage qimg = img->pixmap().toImage();
+    if (qimg.isNull()) {
+        qWarning() << "[MuPdfExporter] Failed to convert pixmap to image";
+        return false;
+    }
+    
+    // Determine if image has alpha
+    bool hasAlpha = qimg.hasAlphaChannel();
+    
+    // Calculate display size in PDF points
+    // SpeedyNote uses 96 DPI, PDF uses 72 DPI
+    float displayWidthPt = static_cast<float>(img->size.width()) * SN_TO_PDF_SCALE;
+    float displayHeightPt = static_cast<float>(img->size.height()) * SN_TO_PDF_SCALE;
+    
+    // Skip zero-size images (would cause invalid transformation matrix)
+    if (displayWidthPt <= 0 || displayHeightPt <= 0) {
+        qWarning() << "[MuPdfExporter] Skipping zero-size image";
+        return true;
+    }
+    
+    QSizeF displaySizePt(displayWidthPt, displayHeightPt);
+    
+    // Compress with downsampling
+    QByteArray compressedData = MuPdfExporter::compressImage(qimg, hasAlpha, displaySizePt, options.dpi);
+    if (compressedData.isEmpty()) {
+        qWarning() << "[MuPdfExporter] Failed to compress image";
+        return false;
+    }
+    
+    fz_buffer* imgBuf = nullptr;
+    fz_image* fzImage = nullptr;
+    
+    fz_try(ctx) {
+        // Create image from compressed data
+        imgBuf = fz_new_buffer_from_copied_data(ctx, 
+            reinterpret_cast<const unsigned char*>(compressedData.constData()),
+            compressedData.size());
+        
+        fzImage = fz_new_image_from_buffer(ctx, imgBuf);
+        fz_drop_buffer(ctx, imgBuf);
+        imgBuf = nullptr;  // Prevent double-drop in fz_always
+        
+        // Add image to PDF as XObject
+        pdf_obj* imgXObj = pdf_add_image(ctx, outputDoc, fzImage);
+        fz_drop_image(ctx, fzImage);
+        fzImage = nullptr;  // Prevent double-drop in fz_always
+        
+        // Get or create XObject dictionary in resources
+        pdf_obj* xobjectDict = pdf_dict_get(ctx, resources, PDF_NAME(XObject));
+        if (!xobjectDict) {
+            xobjectDict = pdf_new_dict(ctx, outputDoc, 4);
+            pdf_dict_put(ctx, resources, PDF_NAME(XObject), xobjectDict);
+        }
+        
+        // Add image XObject with unique name
+        char imgName[16];
+        snprintf(imgName, sizeof(imgName), "Img%d", imageIndex);
+        pdf_dict_put(ctx, xobjectDict, pdf_new_name(ctx, imgName), imgXObj);
+        
+        // Build transformation matrix for position, scale, and rotation
+        // PDF image XObjects are 1x1 unit, so we need to scale to display size
+        // Position is relative to page origin (bottom-left in PDF)
+        
+        float posX = static_cast<float>(img->position.x()) * SN_TO_PDF_SCALE;
+        float posY = static_cast<float>(img->position.y()) * SN_TO_PDF_SCALE;
+        
+        // Convert Y from top-left origin to bottom-left origin
+        // The image's top-left corner in PDF coords
+        float pdfY = pageHeightPt - posY - displayHeightPt;
+        
+        // Append drawing commands to content buffer
+        fz_append_string(ctx, contentBuf, "q\n");  // Save graphics state
+        
+        if (img->rotation != 0.0) {
+            // For rotation, we need to:
+            // 1. Translate to image center
+            // 2. Rotate
+            // 3. Translate back
+            // 4. Scale and position
+            
+            float centerX = posX + displayWidthPt / 2.0f;
+            float centerY = pdfY + displayHeightPt / 2.0f;
+            float radians = static_cast<float>(img->rotation * M_PI / 180.0);
+            float cosR = cosf(radians);
+            float sinR = sinf(radians);
+            
+            // Combined matrix: translate to center, rotate, translate back, then scale/position
+            // This is complex, so let's build it step by step in the content stream
+            char cmd[256];
+            
+            // Translate to center, rotate, translate back
+            snprintf(cmd, sizeof(cmd), 
+                     "1 0 0 1 %.4f %.4f cm\n",  // Translate to center
+                     centerX, centerY);
+            fz_append_string(ctx, contentBuf, cmd);
+            
+            snprintf(cmd, sizeof(cmd),
+                     "%.4f %.4f %.4f %.4f 0 0 cm\n",  // Rotate
+                     cosR, sinR, -sinR, cosR);
+            fz_append_string(ctx, contentBuf, cmd);
+            
+            snprintf(cmd, sizeof(cmd),
+                     "1 0 0 1 %.4f %.4f cm\n",  // Translate back
+                     -displayWidthPt / 2.0f, -displayHeightPt / 2.0f);
+            fz_append_string(ctx, contentBuf, cmd);
+            
+            // Scale to display size (image XObject is 1x1)
+            snprintf(cmd, sizeof(cmd),
+                     "%.4f 0 0 %.4f 0 0 cm\n",
+                     displayWidthPt, displayHeightPt);
+            fz_append_string(ctx, contentBuf, cmd);
+        } else {
+            // No rotation - simple scale and position
+            char cmd[128];
+            snprintf(cmd, sizeof(cmd),
+                     "%.4f 0 0 %.4f %.4f %.4f cm\n",
+                     displayWidthPt, displayHeightPt, posX, pdfY);
+            fz_append_string(ctx, contentBuf, cmd);
+        }
+        
+        // Draw the image
+        char doCmd[32];
+        snprintf(doCmd, sizeof(doCmd), "/%s Do\n", imgName);
+        fz_append_string(ctx, contentBuf, doCmd);
+        
+        fz_append_string(ctx, contentBuf, "Q\n");  // Restore graphics state
+        
+        qDebug() << "[MuPdfExporter] Added image" << imageIndex 
+                 << "at (" << posX << "," << pdfY << ")"
+                 << "size" << displayWidthPt << "x" << displayHeightPt
+                 << "rotation" << img->rotation;
+    }
+    fz_always(ctx) {
+        // Clean up any resources that weren't transferred to the document
+        if (imgBuf) fz_drop_buffer(ctx, imgBuf);
+        if (fzImage) fz_drop_image(ctx, fzImage);
+    }
+    fz_catch(ctx) {
+        qWarning() << "[MuPdfExporter] Failed to add image:" << fz_caught_message(ctx);
+        return false;
+    }
     
     return true;
 }
 
-QByteArray MuPdfExporter::compressImage(const QImage& image, bool hasAlpha, int targetDpi)
+QByteArray MuPdfExporter::compressImage(const QImage& image, bool hasAlpha,
+                                         const QSizeF& displaySizePt, int targetDpi)
 {
-    // TODO: Phase 5 implementation
-    // Smart compression: JPEG for photos, PNG for transparency
+    if (image.isNull()) {
+        return QByteArray();
+    }
     
-    Q_UNUSED(image)
-    Q_UNUSED(hasAlpha)
-    Q_UNUSED(targetDpi)
+    // Calculate if downsampling is needed
+    // Display size is in PDF points (72 DPI)
+    // Calculate the pixel size needed at target DPI
+    QImage workImage = image;
     
-    return QByteArray();
+    if (displaySizePt.width() > 0 && displaySizePt.height() > 0 && targetDpi > 0) {
+        // Display size in inches
+        qreal displayWidthInches = displaySizePt.width() / 72.0;
+        qreal displayHeightInches = displaySizePt.height() / 72.0;
+        
+        // Required pixels at target DPI
+        int requiredWidth = qRound(displayWidthInches * targetDpi);
+        int requiredHeight = qRound(displayHeightInches * targetDpi);
+        
+        // Only downsample if image is larger than needed
+        // (never upsample - that would increase file size without quality benefit)
+        if (image.width() > requiredWidth || image.height() > requiredHeight) {
+            // Calculate scale factor (maintain aspect ratio)
+            qreal scaleX = static_cast<qreal>(requiredWidth) / image.width();
+            qreal scaleY = static_cast<qreal>(requiredHeight) / image.height();
+            qreal scale = qMin(scaleX, scaleY);
+            
+            int newWidth = qRound(image.width() * scale);
+            int newHeight = qRound(image.height() * scale);
+            
+            // Ensure minimum size of 1x1
+            newWidth = qMax(1, newWidth);
+            newHeight = qMax(1, newHeight);
+            
+            qDebug() << "[MuPdfExporter] Downsampling image from"
+                     << image.width() << "x" << image.height()
+                     << "to" << newWidth << "x" << newHeight
+                     << "(target:" << targetDpi << "DPI)";
+            
+            // Use smooth transformation for high quality downsampling
+            workImage = image.scaled(newWidth, newHeight, 
+                                     Qt::KeepAspectRatio, 
+                                     Qt::SmoothTransformation);
+        }
+    }
+    
+    // Compress the (possibly downsampled) image
+    QByteArray result;
+    QBuffer buffer(&result);
+    buffer.open(QIODevice::WriteOnly);
+    
+    if (hasAlpha) {
+        // PNG for images with transparency
+        // PNG is lossless and preserves alpha channel
+        if (!workImage.save(&buffer, "PNG")) {
+            qWarning() << "[MuPdfExporter] Failed to compress image as PNG";
+            return QByteArray();
+        }
+        qDebug() << "[MuPdfExporter] Compressed image as PNG:" 
+                 << workImage.width() << "x" << workImage.height()
+                 << "->" << result.size() << "bytes";
+    } else {
+        // JPEG for opaque images (photos)
+        // JPEG is lossy but much smaller for photographic content
+        // Quality 85 is a good balance between size and quality
+        QImage opaqueImage = workImage;
+        
+        // Convert to RGB if necessary (JPEG doesn't support alpha)
+        if (opaqueImage.hasAlphaChannel()) {
+            // Create an opaque version by compositing on white background
+            QImage rgb(opaqueImage.size(), QImage::Format_RGB888);
+            rgb.fill(Qt::white);
+            QPainter painter(&rgb);
+            painter.drawImage(0, 0, opaqueImage);
+            painter.end();
+            opaqueImage = rgb;
+        } else if (opaqueImage.format() != QImage::Format_RGB888 &&
+                   opaqueImage.format() != QImage::Format_RGB32) {
+            opaqueImage = opaqueImage.convertToFormat(QImage::Format_RGB888);
+        }
+        
+        if (!opaqueImage.save(&buffer, "JPEG", 85)) {
+            qWarning() << "[MuPdfExporter] Failed to compress image as JPEG";
+            return QByteArray();
+        }
+        qDebug() << "[MuPdfExporter] Compressed image as JPEG:" 
+                 << workImage.width() << "x" << workImage.height()
+                 << "->" << result.size() << "bytes";
+    }
+    
+    buffer.close();
+    return result;
 }
 
 // ============================================================================

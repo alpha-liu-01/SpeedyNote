@@ -157,46 +157,48 @@ public:
     // ===== Rendering =====
     
     /**
-     * @brief Render all strokes in this layer.
-     * @param painter The QPainter to render to (should have antialiasing enabled).
+     * @brief Result of building a stroke polygon.
      * 
-     * Note: This does not apply layer opacity - the caller (Viewport) should
-     * handle opacity by rendering to an intermediate pixmap if opacity < 1.0.
+     * Contains the filled polygon representing the stroke outline, plus
+     * information about round end caps if needed. This is used by both
+     * QPainter rendering and PDF export.
      */
-    void render(QPainter& painter) const {
-        if (!visible || m_strokes.isEmpty()) {
-            return;
-        }
-        
-        for (const auto& stroke : m_strokes) {
-            renderStroke(painter, stroke);
-        }
-    }
+    struct StrokePolygonResult {
+        QPolygonF polygon;              ///< The filled polygon outline
+        bool isSinglePoint = false;     ///< True if stroke is just a dot
+        bool hasRoundCaps = false;      ///< True if round end caps should be drawn
+        QPointF startCapCenter;         ///< Center of start cap ellipse
+        qreal startCapRadius = 0;       ///< Radius of start cap
+        QPointF endCapCenter;           ///< Center of end cap ellipse
+        qreal endCapRadius = 0;         ///< Radius of end cap
+    };
     
     /**
-     * @brief Render a single stroke (static helper for shared use).
-     * @param painter The QPainter to render to.
-     * @param stroke The stroke to render.
+     * @brief Build the filled polygon for a stroke (reusable for rendering and export).
+     * @param stroke The stroke to convert.
+     * @return StrokePolygonResult containing polygon and cap information.
      * 
-     * This uses the optimized filled-polygon rendering for variable-width strokes.
-     * Can be used by VectorCanvas, VectorLayer, or any other component.
+     * This extracts the polygon generation logic so it can be used by:
+     * - QPainter rendering (VectorLayer::renderStroke)
+     * - PDF export (MuPdfExporter - converts to MuPDF paths)
+     * 
+     * The polygon represents the variable-width stroke outline:
+     * - Left edge goes forward along the stroke
+     * - Right edge goes backward
+     * - This creates a closed shape that can be filled
      */
-    static void renderStroke(QPainter& painter, const VectorStroke& stroke) {
-        if (stroke.points.size() < 2) {
-            // Single point - draw a dot
-            if (stroke.points.size() == 1) {
-                qreal radius = stroke.baseThickness * stroke.points[0].pressure / 2.0;
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(stroke.color);
-                painter.drawEllipse(stroke.points[0].pos, radius, radius);
-            }
-            return;
-        }
+    static StrokePolygonResult buildStrokePolygon(const VectorStroke& stroke) {
+        StrokePolygonResult result;
         
-        // ========== OPTIMIZATION: Render as filled polygon ==========
-        // Instead of N drawLine() calls with varying widths, render the stroke
-        // as a single filled polygon representing the variable-width outline.
-        // This is much faster: 1 draw call instead of N, and GPU-friendly.
+        if (stroke.points.size() < 2) {
+            // Single point - just a dot
+            if (stroke.points.size() == 1) {
+                result.isSinglePoint = true;
+                result.startCapCenter = stroke.points[0].pos;
+                result.startCapRadius = stroke.baseThickness * stroke.points[0].pressure / 2.0;
+            }
+            return result;
+        }
         
         const int n = stroke.points.size();
         
@@ -247,30 +249,78 @@ public:
         }
         
         // Build polygon: left edge forward, then right edge backward
-        QPolygonF polygon;
-        polygon.reserve(n * 2 + 2);
+        result.polygon.reserve(n * 2 + 2);
         
         for (int i = 0; i < n; ++i) {
-            polygon << leftEdge[i];
+            result.polygon << leftEdge[i];
         }
         for (int i = n - 1; i >= 0; --i) {
-            polygon << rightEdge[i];
+            result.polygon << rightEdge[i];
+        }
+        
+        // Set up round cap information (only used for Round cap style)
+        if (stroke.capStyle == StrokeCapStyle::Round) {
+            result.hasRoundCaps = true;
+            result.startCapCenter = stroke.points[0].pos;
+            result.startCapRadius = halfWidths[0];
+            result.endCapCenter = stroke.points[n - 1].pos;
+            result.endCapRadius = halfWidths[n - 1];
+        }
+        
+        return result;
+    }
+    
+    /**
+     * @brief Render all strokes in this layer.
+     * @param painter The QPainter to render to (should have antialiasing enabled).
+     * 
+     * Note: This does not apply layer opacity - the caller (Viewport) should
+     * handle opacity by rendering to an intermediate pixmap if opacity < 1.0.
+     */
+    void render(QPainter& painter) const {
+        if (!visible || m_strokes.isEmpty()) {
+            return;
+        }
+        
+        for (const auto& stroke : m_strokes) {
+            renderStroke(painter, stroke);
+        }
+    }
+    
+    /**
+     * @brief Render a single stroke (static helper for shared use).
+     * @param painter The QPainter to render to.
+     * @param stroke The stroke to render.
+     * 
+     * This uses the optimized filled-polygon rendering for variable-width strokes.
+     * Can be used by VectorCanvas, VectorLayer, or any other component.
+     */
+    static void renderStroke(QPainter& painter, const VectorStroke& stroke) {
+        StrokePolygonResult poly = buildStrokePolygon(stroke);
+        
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(stroke.color);
+        
+        if (poly.isSinglePoint) {
+            // Single point - draw a dot
+            painter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
+            return;
+        }
+        
+        if (poly.polygon.isEmpty()) {
+            return;
         }
         
         // Draw filled polygon with WindingFill to handle self-intersections
         // OddEvenFill (default) leaves holes where stroke crosses itself
         // WindingFill fills all enclosed areas regardless of winding count
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(stroke.color);
-        painter.drawPolygon(polygon, Qt::WindingFill);
+        painter.drawPolygon(poly.polygon, Qt::WindingFill);
         
         // Draw round end caps for a smooth look (only for Round cap style)
         // Flat cap style (used by markers) relies on the polygon's natural flat ends
-        if (stroke.capStyle == StrokeCapStyle::Round) {
-            qreal startRadius = halfWidths[0];
-            qreal endRadius = halfWidths[n - 1];
-            painter.drawEllipse(stroke.points[0].pos, startRadius, startRadius);
-            painter.drawEllipse(stroke.points[n - 1].pos, endRadius, endRadius);
+        if (poly.hasRoundCaps) {
+            painter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
+            painter.drawEllipse(poly.endCapCenter, poly.endCapRadius, poly.endCapRadius);
         }
     }
     

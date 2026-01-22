@@ -62,11 +62,12 @@ class VectorStroke;
 class ImageObject;
 
 // Forward declarations for MuPDF types (avoid exposing mupdf headers in public API)
+// Note: fz_buffer cannot be forward declared (it's a typedef in MuPDF)
 struct fz_context;
 struct fz_document;
+struct fz_path;
 struct pdf_document;
 struct pdf_page;
-struct fz_path;
 struct pdf_obj;
 
 /**
@@ -149,6 +150,24 @@ public:
      * - "" or "all" → all pages
      */
     static QVector<int> parsePageRange(const QString& rangeString, int totalPages);
+    
+    /**
+     * @brief Compress an image for PDF embedding with optional downsampling.
+     * @param image Source image
+     * @param hasAlpha Whether image has transparency
+     * @param displaySizePt Display size in PDF points (72 DPI)
+     * @param targetDpi Target resolution for downsampling (e.g., 300)
+     * @return Compressed image data (JPEG or PNG)
+     * 
+     * If the image resolution exceeds what's needed for targetDpi at the given
+     * display size, it will be downsampled to reduce file size.
+     * 
+     * Example: A 2000x1000 image displayed at 100x50 pt (1.39" x 0.69")
+     * has effective DPI of 1440. If targetDpi is 300, it will be downsampled
+     * to ~417x208 pixels.
+     */
+    static QByteArray compressImage(const QImage& image, bool hasAlpha, 
+                                    const QSizeF& displaySizePt, int targetDpi);
 
 signals:
     /**
@@ -227,19 +246,22 @@ private:
     // ===== Vector Stroke Conversion =====
     
     /**
-     * @brief Convert a QPolygonF to a MuPDF path.
-     * @param polygon The polygon representing a stroke outline
+     * @brief Convert a QPolygonF to a MuPDF path with coordinate transformation.
+     * @param polygon The polygon representing a stroke outline (SpeedyNote coords)
+     * @param pageHeightSn Page height in SpeedyNote units (96 DPI), for Y-axis flip
      * @return MuPDF path object (caller must free with fz_drop_path)
+     * 
+     * Coordinate transformation applied:
+     * - SpeedyNote uses 96 DPI with top-left origin
+     * - PDF uses 72 DPI (points) with bottom-left origin
+     * - X: x_pdf = x_sn * (72/96)
+     * - Y: y_pdf = (pageHeight - y_sn) * (72/96)
      */
-    fz_path* polygonToPath(const QPolygonF& polygon);
+    fz_path* polygonToPath(const QPolygonF& polygon, qreal pageHeightSn);
     
-    /**
-     * @brief Add all strokes from a page to the PDF.
-     * @param pdfPage The PDF page to add strokes to
-     * @param page The SpeedyNote page containing strokes
-     * @return true if successful
-     */
-    bool addStrokesToPage(pdf_page* pdfPage, const Page* page);
+    // Note: buildStrokesContentStream() is implemented as a static helper
+    // function in MuPdfExporter.cpp to avoid exposing fz_buffer in the header
+    // (fz_buffer is a typedef in MuPDF and cannot be forward declared)
     
     // ===== PDF Background =====
     
@@ -252,22 +274,8 @@ private:
     
     // ===== Image Handling =====
     
-    /**
-     * @brief Add an ImageObject to the PDF page.
-     * @param img The ImageObject to embed
-     * @param pdfPage Target PDF page
-     * @return true if successful
-     */
-    bool addImageToPage(const ImageObject* img, pdf_page* pdfPage);
-    
-    /**
-     * @brief Compress an image for PDF embedding.
-     * @param image Source image
-     * @param hasAlpha Whether image has transparency
-     * @param targetDpi Target resolution for downsampling
-     * @return Compressed image data (JPEG or PNG)
-     */
-    QByteArray compressImage(const QImage& image, bool hasAlpha, int targetDpi);
+    // Note: addImageToPage is implemented as a static helper function in MuPdfExporter.cpp
+    // to avoid exposing MuPDF types (fz_buffer, pdf_obj) in the header.
     
     // ===== Metadata and Outline =====
     

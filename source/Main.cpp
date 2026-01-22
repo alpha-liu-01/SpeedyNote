@@ -210,6 +210,7 @@ static void applyAndroidFonts(QApplication& app)
 #include "core/DocumentViewportTests.h"
 #include "ui/ToolbarButtonTests.h"
 #include "objects/LinkObjectTests.h"
+#include "pdf/MuPdfExporterTests.h"
 #include "ui/ToolbarButtonTestWidget.h"
 #endif
 
@@ -425,6 +426,8 @@ static int runTests(const QString& testType)
         success = DocumentTests::runAllTests();
     } else if (testType == "linkobject") {
         success = LinkObjectTests::runAllTests();
+    } else if (testType == "pdfexporter") {
+        success = MuPdfExporterTests::runAllTests();
     } else if (testType == "buttons") {
         return QTest::qExec(new ToolbarButtonTests());
     }
@@ -498,6 +501,8 @@ int main(int argc, char* argv[])
             runButtonVisualTest = true;
         } else if (arg == "--test-linkobject") {
             testToRun = "linkobject";
+        } else if (arg == "--test-pdfexporter") {
+            testToRun = "pdfexporter";
         }
 #endif
         else if (!arg.startsWith("--") && inputFile.isEmpty()) {
