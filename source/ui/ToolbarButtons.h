@@ -65,6 +65,7 @@ public:
 
 protected:
     virtual void updateIcon();
+    bool event(QEvent *event) override;
     
     QString m_iconBaseName;
     bool m_darkMode = false;

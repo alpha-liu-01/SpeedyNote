@@ -2,6 +2,7 @@
 #include <QMouseEvent>
 #include <QFile>
 #include <QTextStream>
+#include <QEvent>
 
 // ============================================================================
 // ButtonStyles
@@ -74,6 +75,27 @@ void ToolbarButton::updateIcon()
     
     setIcon(QIcon(path));
     setIconSize(QSize(24, 24)); // Icon slightly smaller than button for padding
+}
+
+bool ToolbarButton::event(QEvent *event)
+{
+    // Fix for stuck pressed/hover state when menu/popup steals focus:
+    // When the window loses activation or the button is hidden,
+    // force a repaint to clear any stuck visual state.
+    switch (event->type()) {
+        case QEvent::WindowDeactivate:
+        case QEvent::Hide:
+        case QEvent::Leave:
+            // Force Qt to re-evaluate button state and repaint
+            // This clears stuck :pressed or :hover states
+            setAttribute(Qt::WA_UnderMouse, false);
+            update();
+            break;
+        default:
+            break;
+    }
+    
+    return QPushButton::event(event);
 }
 
 // ============================================================================
