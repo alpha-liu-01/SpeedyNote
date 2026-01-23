@@ -57,6 +57,10 @@ if(WIN32)
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-x86_64")
         message(STATUS "Detected x86_64 Windows - using clang64 toolchain")
     endif()
+    
+    # Convert paths to forward slashes to avoid escaping issues with backslashes
+    file(TO_CMAKE_PATH "${QT_PATH}" QT_PATH)
+    file(TO_CMAKE_PATH "${SDL2_ROOT}" SDL2_ROOT)
     message(STATUS "QT_PATH: ${QT_PATH}")
 
     # CMake paths
