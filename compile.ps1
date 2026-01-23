@@ -160,8 +160,15 @@ if (Test-Path $ntlddExe) {
     # Get all dependencies recursively using ntldd
     $ntlddOutput = & $ntlddExe -R "NoteApp.exe" 2>$null
     
+    # Debug: Show how many lines ntldd returned
+    $ntlddLineCount = ($ntlddOutput | Measure-Object).Count
+    Write-Host "   ntldd found $ntlddLineCount dependency entries" -ForegroundColor Gray
+    
     # Parse ntldd output: "dllname.dll => /path/to/dll (0xaddress)" or "dllname.dll => not found"
+    # ntldd may output MSYS2 paths (/clangarm64/...) or Windows paths (C:/msys64/...)
     $dllsToCopy = @{}
+    $skippedSystem = 0
+    $skippedNotFound = 0
     foreach ($line in $ntlddOutput) {
         if ($line -match '^\s*(\S+\.dll)\s+=>\s+(.+?)\s*(\(0x|$)') {
             $dllName = $Matches[1]
@@ -171,17 +178,29 @@ if (Test-Path $ntlddExe) {
             if (-not (Test-SystemDll $dllPath)) {
                 # Convert MSYS2 paths to Windows paths if needed
                 if ($dllPath.StartsWith("/")) {
+                    # MSYS2 format: /clangarm64/bin/foo.dll or /clang64/bin/foo.dll
                     $dllPath = $dllPath -replace "^/$toolchain", $toolchainPath
                     $dllPath = $dllPath -replace "/", "\"
+                } elseif ($dllPath -match "^[A-Za-z]:/") {
+                    # Already Windows format with forward slashes: C:/msys64/clangarm64/bin/foo.dll
+                    $dllPath = $dllPath -replace "/", "\"
                 }
+                # If it's already a Windows path with backslashes, use as-is
                 
-                if ((Test-Path $dllPath) -and (-not $dllsToCopy.ContainsKey($dllName))) {
-                    $dllsToCopy[$dllName] = $dllPath
+                if (Test-Path $dllPath) {
+                    if (-not $dllsToCopy.ContainsKey($dllName)) {
+                        $dllsToCopy[$dllName] = $dllPath
+                    }
+                } else {
+                    $skippedNotFound++
                 }
+            } else {
+                $skippedSystem++
             }
         }
     }
     
+    Write-Host "   Skipped $skippedSystem system DLLs, $skippedNotFound not found" -ForegroundColor Gray
     Write-Host "Found $($dllsToCopy.Count) dependencies to copy" -ForegroundColor Gray
     
     # Copy all detected DLLs
@@ -220,7 +239,8 @@ ldd NoteApp.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
         }
     } else {
         Write-Host "⚠️  Neither ntldd nor MSYS2 bash found. Please install ntldd:" -ForegroundColor Red
-        Write-Host "   pacman -S mingw-w64-$toolchain-ntldd" -ForegroundColor Yellow
+        Write-Host "   pacman -S mingw-w64-clang-aarch64-ntldd (ARM64)" -ForegroundColor Yellow
+        Write-Host "   pacman -S mingw-w64-clang-x86_64-ntldd (x64)" -ForegroundColor Yellow
         exit 1
     }
 }
