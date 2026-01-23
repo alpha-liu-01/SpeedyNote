@@ -83,9 +83,17 @@ endif()
         
         find_library(MUJS_LIBRARY NAMES mujs PATHS "${QT_PATH}/lib")
         
-        set(MUPDF_LIBRARIES 
-            ${MUPDF_LIBRARY_MAIN} 
-            ${MUPDF_LIBRARY_THIRD}
+        # Start with main library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
+        
+        # libmupdf-third.a is optional - MSYS2 may bundle deps into main lib
+        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        endif()
+        
+        # Add pkg-config dependencies
+        list(APPEND MUPDF_LIBRARIES
             PkgConfig::HARFBUZZ
             PkgConfig::FREETYPE
             PkgConfig::LIBJPEG
@@ -184,9 +192,17 @@ elseif(APPLE)
         
         find_library(MUJS_LIBRARY NAMES mujs PATHS "${HOMEBREW_PREFIX}/lib")
         
-        set(MUPDF_LIBRARIES 
-            ${MUPDF_LIBRARY_MAIN} 
-            ${MUPDF_LIBRARY_THIRD}
+        # Start with main library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
+        
+        # libmupdf-third.a is optional - Homebrew may bundle deps into main lib
+        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        endif()
+        
+        # Add pkg-config dependencies
+        list(APPEND MUPDF_LIBRARIES
             PkgConfig::HARFBUZZ
             PkgConfig::FREETYPE
             PkgConfig::LIBJPEG
@@ -291,9 +307,17 @@ elseif(UNIX)
         # Find mujs library (JavaScript support in MuPDF)
         find_library(MUJS_LIBRARY NAMES mujs PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
         
-        set(MUPDF_LIBRARIES 
-            ${MUPDF_LIBRARY_MAIN} 
-            ${MUPDF_LIBRARY_THIRD}
+        # Start with main library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
+        
+        # libmupdf-third.a is optional - some distros bundle deps into main lib
+        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        endif()
+        
+        # Add pkg-config dependencies and system libs
+        list(APPEND MUPDF_LIBRARIES
             PkgConfig::HARFBUZZ
             PkgConfig::FREETYPE
             PkgConfig::LIBJPEG
