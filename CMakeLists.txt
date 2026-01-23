@@ -67,24 +67,23 @@ if(WIN32)
     endif()
 
     # MuPDF for PDF export (dynamic linking via MSYS2)
-    # Look for the DLL import library first (dynamic), fallback to static if not found
+    # MSYS2 naming: import library = libmupdf.dll.a, DLL = libmupdf.dll
     set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
     
-    # Try to find the dynamic library import lib first
-    find_library(MUPDF_LIBRARY_DLL NAMES mupdf.dll mupdf
-        PATHS "${QT_PATH}/lib" NO_DEFAULT_PATH)
-    
-    if(MUPDF_LIBRARY_DLL)
+    # Try to find the DLL import library (libmupdf.dll.a)
+    # This file is used at link time to link against the DLL
+    if(EXISTS "${QT_PATH}/lib/libmupdf.dll.a")
+        set(MUPDF_LIBRARY_DLL "${QT_PATH}/lib/libmupdf.dll.a")
         message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY_DLL}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
         set(MUPDF_FOUND TRUE)
         
-        # Dynamic linking - just need the import library
+        # Dynamic linking - use the import library
         set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_DLL})
         
         # mujs may also be dynamically linked
-        find_library(MUJS_LIBRARY NAMES mujs.dll mujs PATHS "${QT_PATH}/lib" NO_DEFAULT_PATH)
-        if(MUJS_LIBRARY)
+        if(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
+            set(MUJS_LIBRARY "${QT_PATH}/lib/libmujs.dll.a")
             list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
             message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
         endif()
@@ -92,7 +91,7 @@ if(WIN32)
         message(STATUS "   MuPDF libraries: ${MUPDF_LIBRARIES}")
         message(STATUS "   Note: Requires libmupdf.dll at runtime (copied by ntldd)")
     else()
-        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "⚠️ MuPDF dynamic library not found - PDF export will be disabled")
         message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
         set(MUPDF_FOUND FALSE)
     endif()
