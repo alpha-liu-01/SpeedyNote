@@ -33,7 +33,7 @@ pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw
 pacman -S mingw-w64-clang-x86_64-poppler mingw-w64-clang-x86_64-poppler-qt6
 
 # PDF export (MuPDF and dependencies) - OPTIONAL
-pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-harfbuzz mingw-w64-clang-x86_64-freetype mingw-w64-clang-x86_64-libjpeg-turbo mingw-w64-clang-x86_64-openjpeg2 mingw-w64-clang-x86_64-gumbo-parser
+pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-harfbuzz mingw-w64-clang-x86_64-freetype mingw-w64-clang-x86_64-libjpeg-turbo mingw-w64-clang-x86_64-openjpeg2 mingw-w64-clang-x86_64-gumbo-parser mingw-w64-clang-x86_64-mujs
 
 # Controller support (optional)
 pacman -S mingw-w64-clang-x86_64-SDL2

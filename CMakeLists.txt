@@ -66,74 +66,31 @@ if(WIN32)
         add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    # MuPDF for PDF export (static libraries via MSYS2)
+    # MuPDF for PDF export (dynamic linking via MSYS2)
+    # Look for the DLL import library first (dynamic), fallback to static if not found
     set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
-    set(MUPDF_LIBRARY_MAIN "${QT_PATH}/lib/libmupdf.a")
-    set(MUPDF_LIBRARY_THIRD "${QT_PATH}/lib/libmupdf-third.a")
     
-    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
-        message(STATUS "✅ MuPDF found for PDF export: ${MUPDF_LIBRARY_MAIN}")
+    # Try to find the dynamic library import lib first
+    find_library(MUPDF_LIBRARY_DLL NAMES mupdf.dll mupdf
+        PATHS "${QT_PATH}/lib" NO_DEFAULT_PATH)
+    
+    if(MUPDF_LIBRARY_DLL)
+        message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY_DLL}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
         set(MUPDF_FOUND TRUE)
         
-        # MuPDF static libs require these system libraries via pkg-config
-        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
-        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
-        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
-        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
-        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
-        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
-        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
-        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
-        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
+        # Dynamic linking - just need the import library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_DLL})
         
-        find_library(MUJS_LIBRARY NAMES mujs PATHS "${QT_PATH}/lib")
-        
-        # Start with main library
-        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
-        
-        # libmupdf-third.a contains bundled third-party dependencies
-        # Some package builds bundle everything into libmupdf.a, so this is optional
-        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
-            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
-            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
-        else()
-            message(STATUS "   Note: mupdf-third not found (may be bundled into libmupdf.a)")
-        endif()
-        
-        # Add pkg-config dependencies (including zlib and brotli for MuPDF)
-        list(APPEND MUPDF_LIBRARIES
-            PkgConfig::HARFBUZZ
-            PkgConfig::FREETYPE
-            PkgConfig::LIBJPEG
-            PkgConfig::LIBOPENJP2
-            PkgConfig::ZLIB
-        )
-        if(BROTLIDEC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
-            message(STATUS "   Found brotli decoder")
-        endif()
-        if(BROTLIENC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
-            message(STATUS "   Found brotli encoder")
-        endif()
-        if(JBIG2DEC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
-            message(STATUS "   Found jbig2dec")
-        endif()
-        if(GUMBO_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
-            message(STATUS "   Found gumbo")
-        endif()
+        # mujs may also be dynamically linked
+        find_library(MUJS_LIBRARY NAMES mujs.dll mujs PATHS "${QT_PATH}/lib" NO_DEFAULT_PATH)
         if(MUJS_LIBRARY)
             list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
             message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
-        else()
-            message(STATUS "   ⚠️ mujs not found - JavaScript in PDFs won't work")
         endif()
         
-        # Debug: show all MuPDF libraries that will be linked
         message(STATUS "   MuPDF libraries: ${MUPDF_LIBRARIES}")
+        message(STATUS "   Note: Requires libmupdf.dll at runtime (copied by ntldd)")
     else()
         message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
         message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
@@ -322,66 +279,82 @@ elseif(UNIX)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    # MuPDF for PDF export (static libraries)
+    # MuPDF for PDF export (prefer dynamic linking)
     # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
     set(MUPDF_INCLUDE_DIR "/usr/include")
-    find_library(MUPDF_LIBRARY_MAIN NAMES mupdf libmupdf.a
-        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
-        NO_DEFAULT_PATH)
-    find_library(MUPDF_LIBRARY_THIRD NAMES mupdf-third libmupdf-third.a
-        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
-        NO_DEFAULT_PATH)
     
-    if(MUPDF_LIBRARY_MAIN)
-        message(STATUS "✅ MuPDF found for PDF export: ${MUPDF_LIBRARY_MAIN}")
+    # First try to find dynamic library (libmupdf.so)
+    find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
+        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
+    
+    if(MUPDF_LIBRARY_DYNAMIC AND NOT MUPDF_LIBRARY_DYNAMIC MATCHES "\\.a$")
+        # Found dynamic library
+        message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY_DYNAMIC}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
         set(MUPDF_FOUND TRUE)
         
-        # MuPDF static libs require these system libraries via pkg-config
-        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
-        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
-        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
-        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
-        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)  # Optional
-        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)        # HTML5 parser
+        # Dynamic linking - just need the shared library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_DYNAMIC})
         
-        # Find mujs library (JavaScript support in MuPDF)
-        find_library(MUJS_LIBRARY NAMES mujs
+        # mujs may also be dynamically linked
+        find_library(MUJS_LIBRARY NAMES libmujs.so mujs
             PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
-        
-        # Start with main library
-        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
-        
-        # libmupdf-third.a is optional - some distros bundle deps into main lib
-        if(MUPDF_LIBRARY_THIRD)
-            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
-            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
-        endif()
-        
-        # Add pkg-config dependencies and system libs
-        list(APPEND MUPDF_LIBRARIES
-            PkgConfig::HARFBUZZ
-            PkgConfig::FREETYPE
-            PkgConfig::LIBJPEG
-            PkgConfig::LIBOPENJP2
-            m pthread z
-        )
-        # Add optional dependencies if found
-        if(JBIG2DEC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
-        endif()
-        if(GUMBO_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
-        endif()
-        if(MUJS_LIBRARY)
+        if(MUJS_LIBRARY AND NOT MUJS_LIBRARY MATCHES "\\.a$")
             list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
             message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
         endif()
+        
+        message(STATUS "   Note: Requires libmupdf.so at runtime")
     else()
-        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
-        message(STATUS "   Install with: sudo apt install libmupdf-dev (Debian/Ubuntu)")
-        message(STATUS "              or: sudo dnf install mupdf-devel (Fedora/RHEL)")
-        set(MUPDF_FOUND FALSE)
+        # No dynamic library found - try static as fallback
+        find_library(MUPDF_LIBRARY_STATIC NAMES libmupdf.a
+            PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
+            NO_DEFAULT_PATH)
+        
+        if(MUPDF_LIBRARY_STATIC)
+            message(STATUS "✅ MuPDF found for PDF export (static): ${MUPDF_LIBRARY_STATIC}")
+            add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+            set(MUPDF_FOUND TRUE)
+            
+            # Static linking requires additional dependencies
+            pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+            pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+            pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+            pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+            pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+            pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+            
+            find_library(MUPDF_LIBRARY_THIRD NAMES libmupdf-third.a
+                PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
+                NO_DEFAULT_PATH)
+            find_library(MUJS_LIBRARY NAMES mujs
+                PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
+            
+            set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_STATIC})
+            if(MUPDF_LIBRARY_THIRD)
+                list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+                message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+            endif()
+            
+            list(APPEND MUPDF_LIBRARIES
+                PkgConfig::HARFBUZZ PkgConfig::FREETYPE PkgConfig::LIBJPEG PkgConfig::LIBOPENJP2
+                m pthread z)
+            if(JBIG2DEC_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+            endif()
+            if(GUMBO_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+            endif()
+            if(MUJS_LIBRARY)
+                list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+                message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+            endif()
+        else()
+            message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+            message(STATUS "   Install with: sudo apt install libmupdf-dev (Debian/Ubuntu)")
+            message(STATUS "              or: sudo dnf install mupdf-devel (Fedora/RHEL)")
+            set(MUPDF_FOUND FALSE)
+        endif()
     endif()
 
     include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
@@ -666,16 +639,13 @@ if(WIN32)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
     
-    # Add MuPDF for PDF export
+    # Add MuPDF for PDF export (dynamic linking)
     if(MUPDF_FOUND)
-        # MuPDF static libraries and dependencies
         list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
-        message(STATUS "MuPDF: Will link with: ${MUPDF_LIBRARIES}")
+        message(STATUS "MuPDF: Will link dynamically with: ${MUPDF_LIBRARIES}")
     else()
         message(STATUS "MuPDF: NOT linking (MUPDF_FOUND=${MUPDF_FOUND})")
     endif()
-    
-    message(STATUS "Windows PLATFORM_LIBS: ${PLATFORM_LIBS}")
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
 elseif(APPLE)
