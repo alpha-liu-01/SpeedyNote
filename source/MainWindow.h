@@ -313,6 +313,7 @@ private slots:
     void updatePagePanelForViewport(DocumentViewport* viewport);  // Page Panel: Task 5.1: Update PagePanel
     void notifyPageStructureChanged(Document* doc, int currentPage = -1);  // Helper: Update PagePanel after page add/remove
     void showPdfRelinkDialog(DocumentViewport* viewport);  // Phase R.4: Unified PDF relink handler
+    void showPdfExportDialog();  // Phase 8: PDF Export dialog
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
@@ -409,6 +410,7 @@ private:
 
     QMenu *overflowMenu;
     QAction* m_relinkPdfAction = nullptr;  // Phase R.4: Relink PDF menu action
+    QAction* m_exportPdfAction = nullptr;  // Phase 8: Export to PDF menu action
     QScrollBar *panXSlider;
     QScrollBar *panYSlider;
 

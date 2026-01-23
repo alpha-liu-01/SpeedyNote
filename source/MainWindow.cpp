@@ -31,6 +31,8 @@
 #include "sharing/ExportDialog.h"     // Phase 1: Export dialog UI
 #include "ui/widgets/PdfSearchBar.h"  // PDF text search bar
 #include "pdf/PdfSearchEngine.h"      // PDF text search engine
+#include "ui/dialogs/PdfExportDialog.h"  // Phase 8: PDF export dialog
+#include "pdf/MuPdfExporter.h"           // Phase 8: PDF export engine
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include <QVBoxLayout>
@@ -785,6 +787,11 @@ void MainWindow::setupUi() {
         showPdfRelinkDialog(currentViewport());
     });
     
+    // PDF Export action (Ctrl+P)
+    m_exportPdfAction = overflowMenu->addAction(tr("Export to PDF..."));
+    m_exportPdfAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.export_pdf"));
+    connect(m_exportPdfAction, &QAction::triggered, this, &MainWindow::showPdfExportDialog);
+    
     overflowMenu->addSeparator();
     
     QAction *zoom50Action = overflowMenu->addAction(tr("Zoom 50%"));
@@ -1260,7 +1267,7 @@ void MainWindow::setupManagedShortcuts()
         }
         
         // Nothing to cancel in viewport - toggle to launcher
-        toggleLauncher();
+            toggleLauncher();
     }, Qt::WindowShortcut);  // WindowShortcut for Escape
     createShortcut("navigation.go_to_page", [this]() { showJumpToPageDialog(); });
     // navigation.next_tab, navigation.prev_tab - TODO: implement tab switching
@@ -1327,6 +1334,9 @@ void MainWindow::setupManagedShortcuts()
         if (m_navigationBar) {
             emit m_navigationBar->shareClicked();
         }
+    });
+    createShortcut("file.export_pdf", [this]() {
+        showPdfExportDialog();
     });
     
     // ===== Tools (delegated to viewport) =====
@@ -2465,6 +2475,89 @@ void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
             viewport->hideMissingPdfBanner();
         }
         // Cancel: do nothing, banner remains visible
+    }
+}
+
+// ============================================================================
+// Phase 8: PDF Export Dialog
+// ============================================================================
+
+void MainWindow::showPdfExportDialog()
+{
+    DocumentViewport* viewport = currentViewport();
+    if (!viewport) {
+        QMessageBox::warning(this, tr("Export to PDF"), 
+                             tr("No document is currently open."));
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        QMessageBox::warning(this, tr("Export to PDF"),
+                             tr("No document is currently open."));
+        return;
+    }
+    
+    // Check if document is paged (PDF export only makes sense for paged documents)
+    if (doc->isEdgeless()) {
+        QMessageBox::warning(this, tr("Export to PDF"),
+                             tr("PDF export is only available for paged documents.\n"
+                                "Edgeless canvas export is not yet supported."));
+        return;
+    }
+    
+    // Check for unsaved changes - require saving first
+    if (doc->modified) {
+        QMessageBox::StandardButton result = QMessageBox::question(
+            this, tr("Save Document First"),
+            tr("The document has unsaved changes.\n"
+               "Please save the document before exporting to PDF.\n\n"
+               "Would you like to save now?"),
+            QMessageBox::Save | QMessageBox::Cancel);
+        
+        if (result == QMessageBox::Save) {
+            saveDocument();
+            // If still modified after save attempt, user cancelled or save failed
+            if (doc->modified) {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+    
+    // Show the export dialog
+    PdfExportDialog dialog(doc, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        // Get export options from dialog
+        PdfExportOptions options;
+        options.outputPath = dialog.outputPath();
+        options.pageRange = dialog.pageRange();
+        options.dpi = dialog.dpi();
+        options.preserveMetadata = true;
+        options.preserveOutline = true;
+        
+        // Create exporter and export
+        MuPdfExporter exporter;
+        exporter.setDocument(doc);
+        
+        // TODO: Phase 9 - Show progress dialog instead of blocking
+        // For now, just do a blocking export with a wait cursor
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        PdfExportResult result = exporter.exportPdf(options);
+        QApplication::restoreOverrideCursor();
+        
+        if (result.success) {
+            QMessageBox::information(this, tr("Export Complete"),
+                                     tr("PDF exported successfully!\n\n"
+                                        "Pages exported: %1\n"
+                                        "File size: %2 KB")
+                                     .arg(result.pagesExported)
+                                     .arg(result.fileSizeBytes / 1024));
+        } else {
+            QMessageBox::warning(this, tr("Export Failed"),
+                                 tr("Failed to export PDF:\n%1").arg(result.errorMessage));
+        }
     }
 }
 
@@ -4977,8 +5070,15 @@ QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
     // Get the page (may trigger lazy load)
     Page* page = doc->page(0);
     if (!page) {
+        qWarning() << "renderPage0Thumbnail: page(0) returned nullptr";
         painter.end();
         return thumbnail;  // Return white placeholder
+    }
+    
+    // Defensive check: verify page has layers (should always have at least 1)
+    int layerCount = page->layerCount();
+    if (layerCount <= 0) {
+        qWarning() << "renderPage0Thumbnail: page has no layers, skipping layer rendering";
     }
     
     // Render PDF background if available
@@ -4996,8 +5096,8 @@ QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
     // Render background
     page->renderBackground(painter, pdfBackground.isNull() ? nullptr : &pdfBackground, 1.0);
     
-    // Render vector layers
-    for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
+    // Render vector layers (with bounds check)
+    for (int layerIdx = 0; layerIdx < layerCount; ++layerIdx) {
         VectorLayer* layer = page->layer(layerIdx);
         if (layer && layer->visible) {
             layer->render(painter);

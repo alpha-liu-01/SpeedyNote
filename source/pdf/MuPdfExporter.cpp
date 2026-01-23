@@ -27,8 +27,13 @@
 
 // Forward declarations for static helper functions defined later in this file
 static fz_buffer* buildStrokesContentStream(fz_context* ctx, const Page* page);
+static void appendLayerStrokesToBuffer(fz_context* ctx, fz_buffer* buf, 
+                                       const VectorLayer* layer, qreal pageHeightSn);
 static int getSourcePageRotation(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
 static fz_rect getSourcePageBBox(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
+static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
+                                      fz_outline* srcOutline, 
+                                      const std::map<int, int>& pdfToExportIndex);
 static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
                            const ImageObject* img, fz_buffer* contentBuf,
                            pdf_obj* resources, int imageIndex, float pageHeightPt,
@@ -500,10 +505,7 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         return renderBlankPage(pageIndex);
     }
     
-    // Build strokes content (may be nullptr if no strokes)
-    fz_buffer* strokesContent = buildStrokesContentStream(m_ctx, page);
-    
-    // Build combined content stream: background XObject + strokes
+    // Build combined content stream: background XObject + layers + objects
     fz_buffer* combinedContent = nullptr;
     pdf_obj* resources = nullptr;
     
@@ -579,11 +581,6 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         fz_append_string(m_ctx, combinedContent, "/BGForm Do\n");
         fz_append_string(m_ctx, combinedContent, "Q\n");
         
-        // Append strokes content if we have any
-        if (strokesContent) {
-            fz_append_buffer(m_ctx, combinedContent, strokesContent);
-        }
-        
         // Create Resources dictionary with XObject reference
         resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
         
@@ -592,16 +589,82 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         pdf_dict_put(m_ctx, xobjectDict, pdf_new_name(m_ctx, "BGForm"), bgXObject);
         pdf_dict_put(m_ctx, resources, PDF_NAME(XObject), xobjectDict);
         
-        // Add images if any
+        // Render content with proper layer affinity ordering:
+        // 1. Objects with affinity -1 (below all strokes)
+        // 2. Layer 0 strokes
+        // 3. Objects with affinity 0
+        // 4. Layer 1 strokes
+        // 5. Objects with affinity 1
+        // ... and so on
+        // N. Objects with affinity >= numLayers (always on top)
+        
         int imageIndex = 0;
-        for (const auto& obj : page->objects) {
-            if (obj->type() == QStringLiteral("image")) {
-                const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj.get());
-                if (imgObj && imgObj->isLoaded()) {
-                    addImageToPage(m_ctx, m_outputDoc, imgObj, combinedContent, resources, imageIndex++, heightPt, m_options);
+        int numLayers = static_cast<int>(page->vectorLayers.size());
+        qreal pageHeightSn = page->size.height();
+        
+        // Save graphics state for strokes/objects
+        fz_append_string(m_ctx, combinedContent, "q\n");
+        
+        // Helper lambda to add objects with a specific affinity (sorted by zOrder)
+        auto addObjectsWithAffinity = [&](int affinity) {
+            auto it = page->objectsByAffinity.find(affinity);
+            if (it == page->objectsByAffinity.end()) return;
+            
+            // Sort by zOrder (the map stores pointers, not owned objects)
+            std::vector<InsertedObject*> sorted = it->second;
+            std::sort(sorted.begin(), sorted.end(), 
+                      [](const InsertedObject* a, const InsertedObject* b) {
+                          return a->zOrder < b->zOrder;
+                      });
+            
+            for (const InsertedObject* obj : sorted) {
+                if (obj->type() == QStringLiteral("image")) {
+                    const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj);
+                    if (imgObj && imgObj->isLoaded()) {
+                        addImageToPage(m_ctx, m_outputDoc, imgObj, combinedContent, resources, imageIndex++, heightPt, m_options);
+                    }
+                }
+            }
+        };
+        
+        // 1. Objects with affinity -1 (below all strokes)
+        addObjectsWithAffinity(-1);
+        
+        // 2. Interleave layers and objects
+        for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
+            // Render this layer's strokes
+            if (layerIdx < static_cast<int>(page->vectorLayers.size())) {
+                appendLayerStrokesToBuffer(m_ctx, combinedContent, 
+                                          page->vectorLayers[layerIdx].get(), pageHeightSn);
+            }
+            
+            // Render objects with affinity = layerIdx (above this layer, below next)
+            addObjectsWithAffinity(layerIdx);
+        }
+        
+        // 3. Objects with affinity >= numLayers (always on top of all strokes)
+        for (const auto& [affinity, objects] : page->objectsByAffinity) {
+            if (affinity >= numLayers) {
+                // Sort by zOrder
+                std::vector<InsertedObject*> sorted = objects;
+                std::sort(sorted.begin(), sorted.end(), 
+                          [](const InsertedObject* a, const InsertedObject* b) {
+                              return a->zOrder < b->zOrder;
+                          });
+                
+                for (const InsertedObject* obj : sorted) {
+                    if (obj->type() == QStringLiteral("image")) {
+                        const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj);
+                        if (imgObj && imgObj->isLoaded()) {
+                            addImageToPage(m_ctx, m_outputDoc, imgObj, combinedContent, resources, imageIndex++, heightPt, m_options);
+                        }
+                    }
                 }
             }
         }
+        
+        // Restore graphics state
+        fz_append_string(m_ctx, combinedContent, "Q\n");
         
         // Create the page with our resources and content
         fz_rect mediabox = fz_make_rect(0, 0, widthPt, heightPt);
@@ -613,9 +676,6 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         if (combinedContent) {
             fz_drop_buffer(m_ctx, combinedContent);
         }
-        if (strokesContent) {
-            fz_drop_buffer(m_ctx, strokesContent);
-        }
         // Note: resources and bgXObject are owned by the document now, don't drop
     }
     fz_catch(m_ctx) {
@@ -625,8 +685,116 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
     }
     
     qDebug() << "[MuPdfExporter] Rendered modified page" << pageIndex 
-             << "(PDF page" << pdfPageNum << "+ strokes)";
+             << "(PDF page" << pdfPageNum << "+ layers/objects)";
     return true;
+}
+
+// ============================================================================
+// Page Background Rendering (Phase 6)
+// ============================================================================
+
+/**
+ * @brief Build PDF content stream for page background (color, grid, lines).
+ * @param ctx MuPDF context
+ * @param page SpeedyNote page with background settings
+ * @param widthPt Page width in PDF points
+ * @param heightPt Page height in PDF points
+ * @return Buffer containing background content stream, or nullptr if no background needed
+ * 
+ * This renders:
+ * - Background color (if not white)
+ * - Grid pattern (BackgroundType::Grid)
+ * - Ruled lines (BackgroundType::Lines)
+ * 
+ * Note: Custom background images are handled separately as XObjects.
+ */
+static fz_buffer* buildBackgroundContentStream(fz_context* ctx, const Page* page,
+                                                float widthPt, float heightPt)
+{
+    if (!ctx || !page) return nullptr;
+    
+    // Check if we need to render any background
+    bool needsColorFill = (page->backgroundColor != Qt::white);
+    bool needsGrid = (page->backgroundType == Page::BackgroundType::Grid);
+    bool needsLines = (page->backgroundType == Page::BackgroundType::Lines);
+    
+    if (!needsColorFill && !needsGrid && !needsLines) {
+        return nullptr;  // Default white background, nothing to draw
+    }
+    
+    fz_buffer* buf = nullptr;
+    
+    fz_try(ctx) {
+        buf = fz_new_buffer(ctx, 512);
+        char cmd[128];
+        
+        // 1. Fill background color (if not white)
+        if (needsColorFill) {
+            // Set fill color (RGB, 0-1 range)
+            float r = page->backgroundColor.redF();
+            float g = page->backgroundColor.greenF();
+            float b = page->backgroundColor.blueF();
+            
+            snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f rg\n", r, g, b);
+            fz_append_string(ctx, buf, cmd);
+            
+            // Draw filled rectangle covering entire page
+            snprintf(cmd, sizeof(cmd), "0 0 %.4f %.4f re f\n", widthPt, heightPt);
+            fz_append_string(ctx, buf, cmd);
+        }
+        
+        // 2. Draw grid or lines
+        if (needsGrid || needsLines) {
+            // Set stroke color for grid/lines
+            float r = page->gridColor.redF();
+            float g = page->gridColor.greenF();
+            float b = page->gridColor.blueF();
+            
+            snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f RG\n", r, g, b);
+            fz_append_string(ctx, buf, cmd);
+            
+            // Set line width (0.5 pt is a good default for grid lines)
+            fz_append_string(ctx, buf, "0.5 w\n");
+            
+            if (needsGrid) {
+                // Grid spacing in PDF points
+                float spacingPt = static_cast<float>(page->gridSpacing) * SN_TO_PDF_SCALE;
+                if (spacingPt < 1.0f) spacingPt = 10.0f;  // Minimum spacing
+                
+                // Draw vertical lines (same in both coordinate systems)
+                for (float x = spacingPt; x < widthPt; x += spacingPt) {
+                    snprintf(cmd, sizeof(cmd), "%.4f 0 m %.4f %.4f l S\n", x, x, heightPt);
+                    fz_append_string(ctx, buf, cmd);
+                }
+                
+                // Draw horizontal lines
+                // SpeedyNote: first line at y=spacing from top
+                // PDF: y=0 is at bottom, so first line is at heightPt - spacingPt
+                for (float pdfY = heightPt - spacingPt; pdfY > 0; pdfY -= spacingPt) {
+                    snprintf(cmd, sizeof(cmd), "0 %.4f m %.4f %.4f l S\n", pdfY, widthPt, pdfY);
+                    fz_append_string(ctx, buf, cmd);
+                }
+            } else if (needsLines) {
+                // Line spacing in PDF points
+                float spacingPt = static_cast<float>(page->lineSpacing) * SN_TO_PDF_SCALE;
+                if (spacingPt < 1.0f) spacingPt = 10.0f;  // Minimum spacing
+                
+                // Draw horizontal lines only (ruled paper)
+                // SpeedyNote: first line at y=spacing from top
+                // PDF: y=0 is at bottom, so first line is at heightPt - spacingPt
+                for (float pdfY = heightPt - spacingPt; pdfY > 0; pdfY -= spacingPt) {
+                    snprintf(cmd, sizeof(cmd), "0 %.4f m %.4f %.4f l S\n", pdfY, widthPt, pdfY);
+                    fz_append_string(ctx, buf, cmd);
+                }
+            }
+        }
+    }
+    fz_catch(ctx) {
+        if (buf) fz_drop_buffer(ctx, buf);
+        return nullptr;
+    }
+    
+    return buf;
 }
 
 bool MuPdfExporter::renderBlankPage(int pageIndex)
@@ -644,11 +812,27 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
     float widthPt = pageSize.width() * SN_TO_PDF_SCALE;
     float heightPt = pageSize.height() * SN_TO_PDF_SCALE;
     
-    // Build content stream with strokes (may be nullptr if no strokes)
-    fz_buffer* strokesContent = buildStrokesContentStream(m_ctx, page);
+    // Build background content stream (color, grid, lines)
+    fz_buffer* backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt);
     
     // Check if page has images to add
     bool hasImages = !page->objects.empty();
+    
+    // Check for custom background image
+    bool hasCustomBackground = (page->backgroundType == Page::BackgroundType::Custom && 
+                                !page->customBackground.isNull());
+    
+    // Check if page has strokes
+    bool hasStrokes = false;
+    for (const auto& layer : page->vectorLayers) {
+        if (layer && !layer->strokes().isEmpty()) {
+            hasStrokes = true;
+            break;
+        }
+    }
+    
+    // Determine if we need a combined content buffer
+    bool needsCombined = (backgroundContent != nullptr) || hasImages || hasCustomBackground || hasStrokes;
     
     fz_buffer* finalContent = nullptr;
     pdf_obj* resources = nullptr;
@@ -656,45 +840,175 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
     fz_try(m_ctx) {
         fz_rect mediabox = fz_make_rect(0, 0, widthPt, heightPt);
         
-        if (hasImages) {
-            // Create resources dictionary for images
-            resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
-            
+        if (needsCombined) {
             // Create combined content buffer
             finalContent = fz_new_buffer(m_ctx, 1024);
             
-            // First, add strokes if any
-            if (strokesContent) {
+            // Create resources dictionary (may be needed for custom background or images)
+            if (hasCustomBackground || hasImages) {
+                resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
+            }
+            
+            int imageIndex = 0;
+            
+            // 1. Background color/grid/lines first
+            if (backgroundContent) {
                 unsigned char* data;
-                size_t len = fz_buffer_storage(m_ctx, strokesContent, &data);
+                size_t len = fz_buffer_storage(m_ctx, backgroundContent, &data);
                 fz_append_data(m_ctx, finalContent, data, len);
             }
             
-            // Add images
-            int imageIndex = 0;
-            for (const auto& obj : page->objects) {
-                if (obj->type() == QStringLiteral("image")) {
-                    const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj.get());
-                    if (imgObj && imgObj->isLoaded()) {
-                        addImageToPage(m_ctx, m_outputDoc, imgObj, finalContent, resources, imageIndex++, heightPt, m_options);
+            // 2. Custom background image (covers entire page, before strokes)
+            if (hasCustomBackground) {
+                // Convert QPixmap to QImage
+                QImage bgImage = page->customBackground.toImage();
+                if (!bgImage.isNull()) {
+                    // Compress the background image
+                    bool hasAlpha = bgImage.hasAlphaChannel();
+                    QSizeF displaySizePt(widthPt, heightPt);
+                    QByteArray compressedData = compressImage(bgImage, hasAlpha, displaySizePt, m_options.dpi);
+                    
+                    if (!compressedData.isEmpty()) {
+                        // Create image XObject with proper memory management
+                        fz_buffer* imgBuf = nullptr;
+                        fz_image* fzImage = nullptr;
+                        
+                        fz_try(m_ctx) {
+                            imgBuf = fz_new_buffer_from_copied_data(m_ctx,
+                                reinterpret_cast<const unsigned char*>(compressedData.constData()),
+                                compressedData.size());
+                            
+                            fzImage = fz_new_image_from_buffer(m_ctx, imgBuf);
+                            fz_drop_buffer(m_ctx, imgBuf);
+                            imgBuf = nullptr;  // Prevent double-drop
+                            
+                            pdf_obj* imgXObj = pdf_add_image(m_ctx, m_outputDoc, fzImage);
+                            fz_drop_image(m_ctx, fzImage);
+                            fzImage = nullptr;  // Prevent double-drop
+                            
+                            // Add to resources
+                            pdf_obj* xobjectDict = pdf_dict_get(m_ctx, resources, PDF_NAME(XObject));
+                            if (!xobjectDict) {
+                                xobjectDict = pdf_new_dict(m_ctx, m_outputDoc, 4);
+                                pdf_dict_put(m_ctx, resources, PDF_NAME(XObject), xobjectDict);
+                            }
+                            
+                            char imgName[16];
+                            snprintf(imgName, sizeof(imgName), "Img%d", imageIndex++);
+                            pdf_dict_put(m_ctx, xobjectDict, pdf_new_name(m_ctx, imgName), imgXObj);
+                            
+                            // Draw image covering entire page
+                            char cmd[128];
+                            fz_append_string(m_ctx, finalContent, "q\n");
+                            snprintf(cmd, sizeof(cmd), "%.4f 0 0 %.4f 0 0 cm\n", widthPt, heightPt);
+                            fz_append_string(m_ctx, finalContent, cmd);
+                            snprintf(cmd, sizeof(cmd), "/%s Do\n", imgName);
+                            fz_append_string(m_ctx, finalContent, cmd);
+                            fz_append_string(m_ctx, finalContent, "Q\n");
+                            
+                            qDebug() << "[MuPdfExporter] Added custom background image";
+                        }
+                        fz_always(m_ctx) {
+                            if (imgBuf) fz_drop_buffer(m_ctx, imgBuf);
+                            if (fzImage) fz_drop_image(m_ctx, fzImage);
+                        }
+                        fz_catch(m_ctx) {
+                            qWarning() << "[MuPdfExporter] Failed to add custom background:" 
+                                       << fz_caught_message(m_ctx);
+                            // Continue without background (non-fatal)
+                        }
                     }
                 }
             }
+            
+            // 3. Render content with proper layer affinity ordering:
+            //    - Objects with affinity -1 (below all strokes)
+            //    - Layer 0 strokes
+            //    - Objects with affinity 0
+            //    - Layer 1 strokes
+            //    - Objects with affinity 1
+            //    - ... and so on
+            //    - Objects with affinity >= numLayers (always on top)
+            
+            int numLayers = static_cast<int>(page->vectorLayers.size());
+            qreal pageHeightSn = page->size.height();
+            
+            // Save graphics state for strokes/objects
+            fz_append_string(m_ctx, finalContent, "q\n");
+            
+            // Helper lambda to add objects with a specific affinity (sorted by zOrder)
+            auto addObjectsWithAffinity = [&](int affinity) {
+                auto it = page->objectsByAffinity.find(affinity);
+                if (it == page->objectsByAffinity.end()) return;
+                
+                // Sort by zOrder
+                std::vector<InsertedObject*> sorted = it->second;
+                std::sort(sorted.begin(), sorted.end(), 
+                          [](const InsertedObject* a, const InsertedObject* b) {
+                              return a->zOrder < b->zOrder;
+                          });
+                
+                for (const InsertedObject* obj : sorted) {
+                    if (obj->type() == QStringLiteral("image")) {
+                        const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj);
+                        if (imgObj && imgObj->isLoaded()) {
+                            addImageToPage(m_ctx, m_outputDoc, imgObj, finalContent, resources, imageIndex++, heightPt, m_options);
+                        }
+                    }
+                }
+            };
+            
+            // Objects with affinity -1 (below all strokes)
+            addObjectsWithAffinity(-1);
+            
+            // Interleave layers and objects
+            for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
+                // Render this layer's strokes
+                if (layerIdx < static_cast<int>(page->vectorLayers.size())) {
+                    appendLayerStrokesToBuffer(m_ctx, finalContent, 
+                                              page->vectorLayers[layerIdx].get(), pageHeightSn);
+                }
+                
+                // Render objects with affinity = layerIdx (above this layer, below next)
+                addObjectsWithAffinity(layerIdx);
+            }
+            
+            // Objects with affinity >= numLayers (always on top of all strokes)
+            for (const auto& [affinity, objects] : page->objectsByAffinity) {
+                if (affinity >= numLayers) {
+                    // Sort by zOrder
+                    std::vector<InsertedObject*> sorted = objects;
+                    std::sort(sorted.begin(), sorted.end(), 
+                              [](const InsertedObject* a, const InsertedObject* b) {
+                                  return a->zOrder < b->zOrder;
+                              });
+                    
+                    for (const InsertedObject* obj : sorted) {
+                        if (obj->type() == QStringLiteral("image")) {
+                            const ImageObject* imgObj = dynamic_cast<const ImageObject*>(obj);
+                            if (imgObj && imgObj->isLoaded()) {
+                                addImageToPage(m_ctx, m_outputDoc, imgObj, finalContent, resources, imageIndex++, heightPt, m_options);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Restore graphics state
+            fz_append_string(m_ctx, finalContent, "Q\n");
             
             // Create page with resources and combined content
             pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, resources, finalContent);
             pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
         } else {
-            // No images - simple path with just strokes
-            pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, nullptr, strokesContent);
+            // Simple path - completely empty page (no strokes, no objects, no background)
+            pdf_obj* pageObj = pdf_add_page(m_ctx, m_outputDoc, mediabox, 0, nullptr, nullptr);
             pdf_insert_page(m_ctx, m_outputDoc, -1, pageObj);
         }
-        
-        // TODO: Phase 6 - Add page background (grid, lines, color)
     }
     fz_always(m_ctx) {
-        if (strokesContent) {
-            fz_drop_buffer(m_ctx, strokesContent);
+        if (backgroundContent) {
+            fz_drop_buffer(m_ctx, backgroundContent);
         }
         if (finalContent) {
             fz_drop_buffer(m_ctx, finalContent);
@@ -965,6 +1279,54 @@ static fz_buffer* buildStrokesContentStream(fz_context* ctx, const Page* page)
     return buf;
 }
 
+/**
+ * @brief Append a single layer's strokes to the content buffer.
+ * @param ctx MuPDF context
+ * @param buf Buffer to append to (must not be null)
+ * @param layer The vector layer to render
+ * @param pageHeightSn Page height in SpeedyNote coordinates (for Y-flip)
+ * 
+ * This is used by the interleaved rendering to render layers one at a time,
+ * allowing objects to be inserted between layers based on their affinity.
+ */
+static void appendLayerStrokesToBuffer(fz_context* ctx, fz_buffer* buf, 
+                                       const VectorLayer* layer, qreal pageHeightSn)
+{
+    if (!ctx || !buf || !layer) return;
+    
+    if (!layer->visible || layer->strokes().isEmpty()) {
+        return;
+    }
+    
+    for (const VectorStroke& stroke : layer->strokes()) {
+        // Build the stroke polygon using existing VectorLayer logic
+        VectorLayer::StrokePolygonResult polyResult = VectorLayer::buildStrokePolygon(stroke);
+        
+        // Set fill color (RGB values 0-1)
+        float r = stroke.color.redF();
+        float g = stroke.color.greenF();
+        float b = stroke.color.blueF();
+        
+        char colorCmd[64];
+        snprintf(colorCmd, sizeof(colorCmd), "%.4f %.4f %.4f rg\n", r, g, b);
+        fz_append_string(ctx, buf, colorCmd);
+        
+        if (polyResult.isSinglePoint) {
+            appendCircleToBuffer(ctx, buf, polyResult.startCapCenter, 
+                                polyResult.startCapRadius, pageHeightSn);
+        } else if (!polyResult.polygon.isEmpty()) {
+            appendPolygonToBuffer(ctx, buf, polyResult.polygon, pageHeightSn);
+            
+            if (polyResult.hasRoundCaps) {
+                appendCircleToBuffer(ctx, buf, polyResult.startCapCenter,
+                                    polyResult.startCapRadius, pageHeightSn);
+                appendCircleToBuffer(ctx, buf, polyResult.endCapCenter,
+                                    polyResult.endCapRadius, pageHeightSn);
+            }
+        }
+    }
+}
+
 // ============================================================================
 // PDF Background (Phase 4)
 // ============================================================================
@@ -1088,6 +1450,16 @@ pdf_obj* MuPdfExporter::importPageAsXObject(int sourcePageIndex)
             pdf_dict_put(m_ctx, xobj, PDF_NAME(Resources), graftedResources);
         }
         
+        // Add the XObject to the output document's object table FIRST
+        // This converts it from a direct object to an indirect object with a proper
+        // object number. This must be done before pdf_update_stream() which requires
+        // an indirect object.
+        //
+        // BUG FIX: Previously we used pdf_update_object(ctx, doc, pdf_to_num(xobj), xobj)
+        // but pdf_to_num() returns 0 for direct objects (no object number assigned yet),
+        // which caused the XObject to overwrite the root object, breaking the PDF.
+        xobj = pdf_add_object(m_ctx, m_outputDoc, xobj);
+        
         // Handle page contents
         // Contents can be a single stream or an array of streams
         if (srcContents) {
@@ -1116,7 +1488,7 @@ pdf_obj* MuPdfExporter::importPageAsXObject(int sourcePageIndex)
                     contentBuf = pdf_load_stream(m_ctx, srcContents);
                 }
                 
-                // Add the content stream to the XObject
+                // Add the content stream to the XObject (now an indirect object)
                 if (contentBuf) {
                     pdf_update_stream(m_ctx, m_outputDoc, xobj, contentBuf, 0);
                 }
@@ -1128,9 +1500,6 @@ pdf_obj* MuPdfExporter::importPageAsXObject(int sourcePageIndex)
                 fz_rethrow(m_ctx);  // Re-throw to outer catch block
             }
         }
-        
-        // Add the XObject to the output document's object table
-        pdf_update_object(m_ctx, m_outputDoc, pdf_to_num(m_ctx, xobj), xobj);
     }
     fz_catch(m_ctx) {
         qWarning() << "[MuPdfExporter] importPageAsXObject failed:"
@@ -1250,7 +1619,11 @@ static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
             
             float centerX = posX + displayWidthPt / 2.0f;
             float centerY = pdfY + displayHeightPt / 2.0f;
-            float radians = static_cast<float>(img->rotation * M_PI / 180.0);
+            
+            // Negate rotation angle to account for Y-axis flip
+            // SpeedyNote: Y increases downward, positive rotation = counterclockwise
+            // PDF: Y increases upward, so we need to negate to preserve visual rotation direction
+            float radians = static_cast<float>(-img->rotation * M_PI / 180.0);
             float cosR = cosf(radians);
             float sinR = sinf(radians);
             
@@ -1420,18 +1793,61 @@ bool MuPdfExporter::writeMetadata()
     }
     
     fz_try(m_ctx) {
-        // Set Producer to SpeedyNote
+        // Get or create Info dictionary
         pdf_obj* info = pdf_dict_get(m_ctx, pdf_trailer(m_ctx, m_outputDoc), PDF_NAME(Info));
         if (!info) {
-            info = pdf_new_dict(m_ctx, m_outputDoc, 4);
+            info = pdf_new_dict(m_ctx, m_outputDoc, 8);
             pdf_dict_put_drop(m_ctx, pdf_trailer(m_ctx, m_outputDoc), PDF_NAME(Info), info);
         }
         
-        // Add SpeedyNote as Producer
+        // Copy metadata from source PDF if available
+        if (m_sourceDoc) {
+            // Copy Title
+            char titleBuf[512] = {0};
+            if (fz_lookup_metadata(m_ctx, m_sourceDoc, 
+                                   "info:Title", titleBuf, sizeof(titleBuf)) > 0 && titleBuf[0]) {
+                pdf_dict_put_text_string(m_ctx, info, PDF_NAME(Title), titleBuf);
+            }
+            
+            // Copy Author
+            char authorBuf[256] = {0};
+            if (fz_lookup_metadata(m_ctx, m_sourceDoc,
+                                   "info:Author", authorBuf, sizeof(authorBuf)) > 0 && authorBuf[0]) {
+                pdf_dict_put_text_string(m_ctx, info, PDF_NAME(Author), authorBuf);
+            }
+            
+            // Copy Subject
+            char subjectBuf[512] = {0};
+            if (fz_lookup_metadata(m_ctx, m_sourceDoc,
+                                   "info:Subject", subjectBuf, sizeof(subjectBuf)) > 0 && subjectBuf[0]) {
+                pdf_dict_put_text_string(m_ctx, info, PDF_NAME(Subject), subjectBuf);
+            }
+            
+            // Copy Keywords
+            char keywordsBuf[1024] = {0};
+            if (fz_lookup_metadata(m_ctx, m_sourceDoc,
+                                   "info:Keywords", keywordsBuf, sizeof(keywordsBuf)) > 0 && keywordsBuf[0]) {
+                pdf_dict_put_text_string(m_ctx, info, PDF_NAME(Keywords), keywordsBuf);
+            }
+            
+            // Copy Creator (original authoring application)
+            char creatorBuf[256] = {0};
+            if (fz_lookup_metadata(m_ctx, m_sourceDoc,
+                                   "info:Creator", creatorBuf, sizeof(creatorBuf)) > 0 && creatorBuf[0]) {
+                pdf_dict_put_text_string(m_ctx, info, PDF_NAME(Creator), creatorBuf);
+            }
+        }
+        
+        // Add/override Producer with SpeedyNote attribution
         pdf_dict_put_text_string(m_ctx, info, PDF_NAME(Producer), "SpeedyNote 1.0");
         
-        // TODO: Copy metadata from source PDF if available
-        // TODO: Update modification date
+        // Update ModDate to current time (PDF date format: D:YYYYMMDDHHmmSS)
+        QDateTime now = QDateTime::currentDateTime();
+        QString modDateStr = QStringLiteral("D:%1").arg(now.toString("yyyyMMddHHmmss"));
+        QByteArray modDateUtf8 = modDateStr.toUtf8();
+        pdf_dict_put_text_string(m_ctx, info, PDF_NAME(ModDate), modDateUtf8.constData());
+        
+        qDebug() << "[MuPdfExporter] Wrote metadata, ModDate:" << modDateStr;
     }
     fz_catch(m_ctx) {
         qWarning() << "[MuPdfExporter] Failed to write metadata:" << fz_caught_message(m_ctx);
@@ -1443,15 +1859,210 @@ bool MuPdfExporter::writeMetadata()
 
 bool MuPdfExporter::writeOutline(const QVector<int>& exportedPages)
 {
-    // TODO: Phase 7 implementation
-    // 1. Read outline from source PDF
-    // 2. Filter to only include entries for exported pages
-    // 3. Remap page indices
-    // 4. Write to output PDF
+    // No source PDF means no outline to copy
+    if (!m_sourcePdf || !m_outputDoc || !m_ctx || !m_document) {
+        return true;  // Not an error, just nothing to do
+    }
     
-    Q_UNUSED(exportedPages)
+    // Load outline from source PDF
+    fz_outline* srcOutline = nullptr;
+    fz_try(m_ctx) {
+        srcOutline = fz_load_outline(m_ctx, m_sourceDoc);
+    }
+    fz_catch(m_ctx) {
+        qDebug() << "[MuPdfExporter] No outline in source PDF";
+        return true;  // No outline is fine
+    }
     
+    if (!srcOutline) {
+        return true;  // No outline to copy
+    }
+    
+    // Build mapping: PDF page index → export page index
+    // 
+    // Document pages can be:
+    // - PDF-backed: page->pdfPageNumber >= 0
+    // - Inserted: page->pdfPageNumber < 0 (blank, grid, custom, etc.)
+    //
+    // exportedPages[i] = document page index
+    // We need: pdfPageIndex → i (the export index)
+    
+    std::map<int, int> pdfToExportIndex;
+    
+    for (int exportIdx = 0; exportIdx < exportedPages.size(); ++exportIdx) {
+        int docPageIdx = exportedPages[exportIdx];
+        const Page* page = m_document->page(docPageIdx);
+        if (page && page->pdfPageNumber >= 0) {
+            // This document page is backed by a PDF page
+            pdfToExportIndex[page->pdfPageNumber] = exportIdx;
+        }
+    }
+    
+    if (pdfToExportIndex.empty()) {
+        // No PDF pages in export, outline would be useless
+        fz_drop_outline(m_ctx, srcOutline);
+        qDebug() << "[MuPdfExporter] No PDF pages in export, skipping outline";
+        return true;
+    }
+    
+    // Recursively build and write the outline
+    fz_try(m_ctx) {
+        pdf_obj* outlines = writeOutlineRecursive(m_ctx, m_outputDoc, srcOutline, pdfToExportIndex);
+        
+        if (outlines) {
+            // Set the document catalog's Outlines entry
+            pdf_obj* catalog = pdf_dict_get(m_ctx, pdf_trailer(m_ctx, m_outputDoc), PDF_NAME(Root));
+            if (catalog) {
+                pdf_dict_put(m_ctx, catalog, PDF_NAME(Outlines), outlines);
+                pdf_dict_put(m_ctx, catalog, PDF_NAME(PageMode), PDF_NAME(UseOutlines));
+            }
+        }
+    }
+    fz_always(m_ctx) {
+        fz_drop_outline(m_ctx, srcOutline);
+    }
+    fz_catch(m_ctx) {
+        qWarning() << "[MuPdfExporter] Failed to write outline:" << fz_caught_message(m_ctx);
+        return false;
+    }
+    
+    qDebug() << "[MuPdfExporter] Wrote outline with" << pdfToExportIndex.size() << "PDF page mappings";
     return true;
+}
+
+/**
+ * Static helper to recursively build outline tree for output PDF.
+ * Uses fz_outline which cannot be forward-declared in the header.
+ */
+static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
+                                      fz_outline* srcOutline,
+                                      const std::map<int, int>& pdfToExportIndex)
+{
+    if (!srcOutline || !outputDoc || !ctx) {
+        return nullptr;
+    }
+    
+    // First pass: collect valid outline entries (those pointing to exported pages)
+    // We need this to set up First/Last/Prev/Next pointers correctly
+    struct OutlineEntry {
+        fz_outline* src;
+        int exportPageIndex;
+        pdf_obj* pdfObj;
+    };
+    std::vector<OutlineEntry> validEntries;
+    
+    for (fz_outline* ol = srcOutline; ol; ol = ol->next) {
+        int pdfPage = ol->page.page;
+        
+        // Check if this entry points to an exported page
+        auto it = pdfToExportIndex.find(pdfPage);
+        if (it != pdfToExportIndex.end() || ol->down) {
+            // Entry is valid if:
+            // - It points to an exported page, OR
+            // - It has children (might have valid children even if parent target is excluded)
+            OutlineEntry entry;
+            entry.src = ol;
+            entry.exportPageIndex = (it != pdfToExportIndex.end()) ? it->second : -1;
+            entry.pdfObj = nullptr;
+            validEntries.push_back(entry);
+        }
+    }
+    
+    if (validEntries.empty()) {
+        return nullptr;
+    }
+    
+    // Create outline items
+    for (size_t i = 0; i < validEntries.size(); ++i) {
+        OutlineEntry& entry = validEntries[i];
+        fz_outline* ol = entry.src;
+        
+        // Create the outline item dictionary and add it as an indirect object
+        // This is crucial - pdf_new_dict creates a direct object, but outline items
+        // need to be indirect objects (with proper object numbers) for the PDF's
+        // xref table. Without this, pdf_save_document causes infinite recursion
+        // in pdf_set_obj_parent when trying to serialize the object tree.
+        pdf_obj* item = pdf_new_dict(ctx, outputDoc, 6);
+        item = pdf_add_object(ctx, outputDoc, item);
+        entry.pdfObj = item;
+        
+        // Set title
+        if (ol->title && ol->title[0]) {
+            pdf_dict_put_text_string(ctx, item, PDF_NAME(Title), ol->title);
+        }
+        
+        // Set destination if this entry points to an exported page
+        if (entry.exportPageIndex >= 0) {
+            // Create destination array: [page /Fit] or [page /XYZ x y z]
+            // For simplicity, use /Fit (fit page in window)
+            pdf_obj* dest = pdf_new_array(ctx, outputDoc, 2);
+            
+            // Get the page object by index
+            pdf_obj* pageRef = pdf_lookup_page_obj(ctx, outputDoc, entry.exportPageIndex);
+            pdf_array_push(ctx, dest, pageRef);
+            pdf_array_push(ctx, dest, PDF_NAME(Fit));
+            
+            pdf_dict_put_drop(ctx, item, PDF_NAME(Dest), dest);
+        }
+        
+        // Handle children recursively
+        if (ol->down) {
+            pdf_obj* children = writeOutlineRecursive(ctx, outputDoc, ol->down, pdfToExportIndex);
+            if (children) {
+                // children is the root outline object, get First/Last from it
+                pdf_obj* firstChild = pdf_dict_get(ctx, children, PDF_NAME(First));
+                pdf_obj* lastChild = pdf_dict_get(ctx, children, PDF_NAME(Last));
+                int childCount = pdf_dict_get_int(ctx, children, PDF_NAME(Count));
+                
+                if (firstChild && lastChild) {
+                    pdf_dict_put(ctx, item, PDF_NAME(First), firstChild);
+                    pdf_dict_put(ctx, item, PDF_NAME(Last), lastChild);
+                    
+                    // Set parent on all children
+                    for (pdf_obj* child = firstChild; child; 
+                         child = pdf_dict_get(ctx, child, PDF_NAME(Next))) {
+                        pdf_dict_put(ctx, child, PDF_NAME(Parent), item);
+                    }
+                    
+                    // Set Count (negative means closed)
+                    int count = ol->is_open ? childCount : -childCount;
+                    if (count != 0) {
+                        pdf_dict_put_int(ctx, item, PDF_NAME(Count), count);
+                    }
+                }
+                
+                // Don't drop children - it's just a container we extracted from
+            }
+        }
+    }
+    
+    // Link items with Prev/Next
+    for (size_t i = 0; i < validEntries.size(); ++i) {
+        pdf_obj* item = validEntries[i].pdfObj;
+        
+        if (i > 0) {
+            pdf_dict_put(ctx, item, PDF_NAME(Prev), validEntries[i-1].pdfObj);
+        }
+        if (i < validEntries.size() - 1) {
+            pdf_dict_put(ctx, item, PDF_NAME(Next), validEntries[i+1].pdfObj);
+        }
+    }
+    
+    // Create container with First/Last/Count
+    // The container also needs to be an indirect object for proper xref handling
+    pdf_obj* container = pdf_new_dict(ctx, outputDoc, 4);
+    container = pdf_add_object(ctx, outputDoc, container);
+    pdf_dict_put(ctx, container, PDF_NAME(Type), PDF_NAME(Outlines));
+    pdf_dict_put(ctx, container, PDF_NAME(First), validEntries.front().pdfObj);
+    pdf_dict_put(ctx, container, PDF_NAME(Last), validEntries.back().pdfObj);
+    pdf_dict_put_int(ctx, container, PDF_NAME(Count), static_cast<int>(validEntries.size()));
+    
+    // Set Parent on top-level items to point to the container
+    for (const auto& entry : validEntries) {
+        pdf_dict_put(ctx, entry.pdfObj, PDF_NAME(Parent), container);
+    }
+    
+    return container;
 }
 
 // ============================================================================

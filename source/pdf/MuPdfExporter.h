@@ -23,6 +23,7 @@
 #include <QVector>
 
 #include <atomic>
+#include <map>
 
 // Forward declarations (shared by both real and stub)
 class Document;
@@ -291,6 +292,8 @@ private:
      * @return true if successful
      */
     bool writeOutline(const QVector<int>& exportedPages);
+    // Note: writeOutlineRecursive is a static helper in MuPdfExporter.cpp
+    // (uses fz_outline which cannot be forward-declared)
     
     // ===== Finalization =====
     

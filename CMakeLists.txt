@@ -417,6 +417,7 @@ set(APP_SOURCES
         source/MainWindow.cpp
     source/ControlPanelDialog.cpp
     source/ui/dialogs/KeyCaptureDialog.cpp
+    source/ui/dialogs/PdfExportDialog.cpp
     source/text/MarkdownNoteEntry.cpp
     source/ui/MarkdownNotesSidebar.cpp
         ${CORE_SOURCES}

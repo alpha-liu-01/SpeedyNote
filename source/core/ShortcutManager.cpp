@@ -102,6 +102,7 @@ void ShortcutManager::registerDefaults()
     registerAction("file.open_notebook", "Ctrl+Shift+O", tr("Open Notebook"), tr("File"));
     registerAction("file.close_tab", "Ctrl+W", tr("Close Tab"), tr("File"));
     registerAction("file.export", "Ctrl+Shift+E", tr("Export/Share"), tr("File"));
+    registerAction("file.export_pdf", "Ctrl+P", tr("Export to PDF"), tr("File"));
     
     // ===== Document/Page Operations =====
     registerAction("document.add_page", "Ctrl+Shift+A", tr("Add Page (Append)"), tr("Document"));
