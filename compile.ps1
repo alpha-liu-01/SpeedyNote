@@ -257,7 +257,7 @@ foreach ($popplerDll in $popplerDlls) {
 }
 
 Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
-Write-Host "   Note: MuPDF is statically linked (no libmupdf.dll needed)" -ForegroundColor Gray
+Write-Host "   Note: MuPDF for PDF export is statically linked (if enabled in CMake)" -ForegroundColor Gray
 
 # ✅ Copy Poppler data files (fonts, etc.)
 Copy-Item -Path "$toolchainPath\share\poppler" -Destination "..\build\share\poppler" -Recurse -Force
