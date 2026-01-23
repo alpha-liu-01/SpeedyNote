@@ -308,14 +308,20 @@ build_project() {
     
     # Determine number of parallel jobs based on architecture
     # ARM64 devices often have limited memory/thermal headroom, so use half the cores
-    if [[ "$(uname -m)" == "aarch64" ]]; then
-        JOBS=$(( ($(nproc) + 1) / 2 ))
-        echo -e "${YELLOW}Compiling with $JOBS parallel jobs (ARM64: half of $(nproc) cores)...${NC}"
+    ARCH=$(uname -m)
+    CORES=$(nproc)
+    echo -e "${YELLOW}Detected architecture: $ARCH with $CORES cores${NC}"
+    
+    if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+        JOBS=$(( (CORES + 1) / 2 ))
+        if [[ $JOBS -lt 1 ]]; then JOBS=1; fi
+        echo -e "${YELLOW}Compiling with $JOBS parallel jobs (ARM64: half of $CORES cores)...${NC}"
     else
-        JOBS=$(nproc)
-        echo -e "${YELLOW}Compiling with $JOBS parallel jobs (x64: all cores)...${NC}"
+        JOBS=$CORES
+        echo -e "${YELLOW}Compiling with $JOBS parallel jobs (x64: all $CORES cores)...${NC}"
     fi
-    make -j$JOBS
+    
+    make -j"$JOBS"
     
     if [[ ! -f "NoteApp" ]]; then
         echo -e "${RED}Build failed: NoteApp executable not found${NC}"

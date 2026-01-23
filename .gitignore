@@ -66,5 +66,6 @@ android/test-app/
 android/mupdf-build/
 android/build-app/
 SpeedyNote-Android-android-conan/
+private_scripts/
 plans.txt
 /android/signing/
