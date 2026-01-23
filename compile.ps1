@@ -72,10 +72,23 @@ if (Test-Path ".\build" -PathType Container) {
         Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
     }
     
-    # If it STILL exists, warn but continue (incremental build)
+    # If it STILL exists, at minimum delete CMake cache files to avoid stale config
     if (Test-Path ".\build" -PathType Container) {
-        Write-Host "⚠️  Could not fully clean build folder (files may be locked)" -ForegroundColor Yellow
-        Write-Host "   Continuing with incremental build..." -ForegroundColor Yellow
+        Write-Host "⚠️  Could not fully clean build folder - cleaning CMake cache..." -ForegroundColor Yellow
+        # These files MUST be deleted for a clean CMake configuration
+        Remove-Item -Path ".\build\CMakeCache.txt" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\CMakeFiles" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\cmake_install.cmake" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\Makefile" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\.cmake" -Recurse -Force -ErrorAction SilentlyContinue
+        
+        # Verify CMake cache is gone
+        if (Test-Path ".\build\CMakeCache.txt") {
+            Write-Host "❌ FATAL: Cannot delete CMakeCache.txt - please close any programs using the build folder" -ForegroundColor Red
+            Write-Host "   Try: Close File Explorer, IDE, or restart the computer" -ForegroundColor Yellow
+            exit 1
+        }
+        Write-Host "   CMake cache cleaned, continuing with partial rebuild..." -ForegroundColor Yellow
     } else {
         New-Item -ItemType Directory -Path ".\build" | Out-Null
     }
