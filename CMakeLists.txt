@@ -92,13 +92,13 @@ if(WIN32)
         # Start with main library
         set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
         
-        # libmupdf-third.a is required for static linking - contains bundled dependencies
+        # libmupdf-third.a contains bundled third-party dependencies
+        # Some package builds bundle everything into libmupdf.a, so this is optional
         if(EXISTS "${MUPDF_LIBRARY_THIRD}")
             list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
             message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
         else()
-            message(STATUS "   ⚠️ mupdf-third not found at: ${MUPDF_LIBRARY_THIRD}")
-            message(STATUS "   Static linking may have unresolved symbols")
+            message(STATUS "   Note: mupdf-third not found (may be bundled into libmupdf.a)")
         endif()
         
         # Add pkg-config dependencies (including zlib and brotli for MuPDF)
@@ -665,22 +665,17 @@ if(WIN32)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
-    # Add MuPDF for PDF export - use whole-archive to ensure all symbols are included
+    
+    # Add MuPDF for PDF export
     if(MUPDF_FOUND)
-        # For MinGW/Clang, use whole-archive to prevent linker from dropping "unused" symbols
-        list(APPEND PLATFORM_LIBS -Wl,--whole-archive ${MUPDF_LIBRARY_MAIN})
-        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
-            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARY_THIRD})
-        endif()
-        list(APPEND PLATFORM_LIBS -Wl,--no-whole-archive)
-        # Add the remaining MuPDF dependencies (pkg-config libraries)
-        foreach(LIB ${MUPDF_LIBRARIES})
-            if(NOT "${LIB}" STREQUAL "${MUPDF_LIBRARY_MAIN}" AND NOT "${LIB}" STREQUAL "${MUPDF_LIBRARY_THIRD}")
-                list(APPEND PLATFORM_LIBS ${LIB})
-            endif()
-        endforeach()
-        message(STATUS "MuPDF linking with --whole-archive for Windows")
+        # MuPDF static libraries and dependencies
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+        message(STATUS "MuPDF: Will link with: ${MUPDF_LIBRARIES}")
+    else()
+        message(STATUS "MuPDF: NOT linking (MUPDF_FOUND=${MUPDF_FOUND})")
     endif()
+    
+    message(STATUS "Windows PLATFORM_LIBS: ${PLATFORM_LIBS}")
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
 elseif(APPLE)
