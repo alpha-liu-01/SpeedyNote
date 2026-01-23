@@ -63,6 +63,55 @@ endif()
         add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
+    # MuPDF for PDF export (static libraries via MSYS2)
+    set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
+    set(MUPDF_LIBRARY_MAIN "${QT_PATH}/lib/libmupdf.a")
+    set(MUPDF_LIBRARY_THIRD "${QT_PATH}/lib/libmupdf-third.a")
+    
+    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
+        message(STATUS "✅ MuPDF found for PDF export")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        
+        # MuPDF static libs require these system libraries via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        
+        find_library(MUJS_LIBRARY NAMES mujs PATHS "${QT_PATH}/lib")
+        
+        set(MUPDF_LIBRARIES 
+            ${MUPDF_LIBRARY_MAIN} 
+            ${MUPDF_LIBRARY_THIRD}
+            PkgConfig::HARFBUZZ
+            PkgConfig::FREETYPE
+            PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2
+        )
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(MUJS_LIBRARY)
+            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Install with: pacman -S mingw-w64-clang-x86_64-mupdf")
+        set(MUPDF_FOUND FALSE)
+    endif()
+
+    # Add MuPDF include directory if found
+    if(MUPDF_FOUND)
+        include_directories(${MUPDF_INCLUDE_DIR})
+    endif()
+
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
         message(STATUS "🚀 Optimizing for ARM64 Windows (Snapdragon)")
@@ -115,6 +164,55 @@ elseif(APPLE)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
     
+    # MuPDF for PDF export (via Homebrew)
+    set(MUPDF_INCLUDE_DIR "${HOMEBREW_PREFIX}/include")
+    set(MUPDF_LIBRARY_MAIN "${HOMEBREW_PREFIX}/lib/libmupdf.a")
+    set(MUPDF_LIBRARY_THIRD "${HOMEBREW_PREFIX}/lib/libmupdf-third.a")
+    
+    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
+        message(STATUS "✅ MuPDF found for PDF export")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        
+        # MuPDF static libs require these system libraries via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        
+        find_library(MUJS_LIBRARY NAMES mujs PATHS "${HOMEBREW_PREFIX}/lib")
+        
+        set(MUPDF_LIBRARIES 
+            ${MUPDF_LIBRARY_MAIN} 
+            ${MUPDF_LIBRARY_THIRD}
+            PkgConfig::HARFBUZZ
+            PkgConfig::FREETYPE
+            PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2
+        )
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(MUJS_LIBRARY)
+            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Install with: brew install mupdf")
+        set(MUPDF_FOUND FALSE)
+    endif()
+
+    # Add MuPDF include directory if found
+    if(MUPDF_FOUND)
+        include_directories(${MUPDF_INCLUDE_DIR})
+    endif()
+
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
         message(STATUS "🚀 Optimizing for Apple Silicon")
@@ -500,6 +598,10 @@ if(WIN32)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
+    # Add MuPDF for PDF export
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+    endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
 elseif(APPLE)
@@ -509,6 +611,10 @@ elseif(APPLE)
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
+    endif()
+    # Add MuPDF for PDF export
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 

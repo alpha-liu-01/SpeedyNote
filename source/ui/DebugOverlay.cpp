@@ -239,7 +239,7 @@ QString DebugOverlay::generatePagedInfo() const
     .arg(m_viewport->canRedo() ? "Y" : "N")
     .arg(m_viewport->isBenchmarking() 
          ? QString("%1 Hz").arg(m_viewport->getPaintRate()) 
-         : "OFF (press B)");
+         : "OFF (press F10)");
 }
 
 QString DebugOverlay::generateCustomSections() const

@@ -115,76 +115,137 @@ if ($debug) {
 # ✅ Deploy Qt runtime
 & "$toolchainPath\bin\windeployqt6.exe" "NoteApp.exe"
 
-# ✅ Copy required DLLs (for Poppler and SDL2 dependencies)
-Write-Host "Copying required DLLs from $toolchainPath\bin..." -ForegroundColor Cyan
-
-$requiredDlls = @(
-    "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll", "libreadline8.dll", "Qt6Core.dll", "libdouble-conversion.dll", "libicudt78.dll", "libnghttp2-14.dll", "librhash.dll", "Qt6Gui.dll", "libexpat-1.dll", "libicuin78.dll", "libnghttp3-9.dll", "libsharpyuv-0.dll", "Qt6Network.dll", "libffi-8.dll", "libicuio78.dll", "libngtcp2-16.dll", "libssh2-1.dll", "Qt6Widgets.dll", "libfontconfig-1.dll", "libicutest78.dll", "libngtcp2_crypto_gnutls-8.dll", "libssl-3.dll", "libssl-3-x64.dll", "SDL2.dll", "libformw6.dll", "libicutu78.dll", "libngtcp2_crypto_ossl-0.dll", "libsystre-0.dll", "libLTO.dll", "libfreetype-6.dll", "libicuuc78.dll", "libngtcp2_crypto_ossl.dll", "libtasn1-6.dll", "libLerc.dll", "libgif-7.dll", "libidn2-0.dll", "libnspr4.dll", "libtermcap-0.dll", "libRemarks.dll", "libgio-2.0-0.dll", "libintl-8.dll", "libomp.dll", "libtiff-6.dll", "libarchive-13.dll", "libgirepository-2.0-0.dll", "libjbig-0.dll", "libopenjp2-7.dll", "libtiffxx-6.dll", "libasprintf-0.dll", "libglib-2.0-0.dll", "libjpeg-8.dll", "libopenjpip-7.dll", "libtre-5.dll", "libb2-1.dll", "libgmodule-2.0-0.dll", "libjsoncpp-26.dll", "libp11-kit-0.dll", "libturbojpeg.dll", "libbrotlicommon.dll", "libgmp-10.dll", "liblcms2-2.dll", "libpanelw6.dll", "libunistring-5.dll", "libbrotlidec.dll", "libgmpxx-4.dll", "liblcms2_fast_float-2.dll", "libpcre2-16-0.dll", "libunwind.dll", "libbrotlienc.dll", "libgnutls-30.dll", "liblldb.dll", "libpcre2-32-0.dll", "libuv-1.dll", "libbz2-1.dll", "libgnutls-openssl-27.dll", "liblz4.dll", "libpcre2-8-0.dll", "libwebp-7.dll", "libc++.dll", "libgnutlsxx-30.dll", "liblzma-5.dll", "libpcre2-posix-3.dll", "libwebpdecoder-3.dll", "libcairo-2.dll", "libgobject-2.0-0.dll", "liblzo2-2.dll", "libpixman-1-0.dll", "libwebpdemux-2.dll", "libcairo-gobject-2.dll", "libgraphite2.dll", "libmd4c-html.dll", "libpkgconf-7.dll", "libwebpmux-3.dll", "libcairo-script-interpreter-2.dll", "libgthread-2.0-0.dll", "libmd4c.dll", "libplc4.dll", "libwinpthread-1.dll", "libcares-2.dll", "libharfbuzz-0.dll", "libmenuw6.dll", "libplds4.dll", "libzstd.dll", "libcharset-1.dll", "libharfbuzz-gobject-0.dll", "libmpdec++-4.dll", "libpng16-16.dll", "nss3.dll", "libcrypto-3.dll", "libcrypto-3-x64.dll", "libharfbuzz-subset-0.dll", "libmpdec-4.dll", "nssutil3.dll", "libcurl-4.dll", "libhistory8.dll", "libncurses++w6.dll", "libpoppler-qt6-3.dll", "smime3.dll", "libdbus-1-3.dll", "libhogweed-6.dll", "libncursesw6.dll", "libpsl-5.dll", "zlib1.dll"
-)
+# ✅ Copy required DLLs automatically using ntldd (recursive dependency detection)
+Write-Host "Detecting and copying required DLLs..." -ForegroundColor Cyan
 
 $sourceDir = "$toolchainPath\bin"
 $copiedCount = 0
+$ntlddExe = "$toolchainPath\bin\ntldd.exe"
 
-# ✅ Copy libpoppler-*.dll dynamically (handles any version like 152, 153, etc.)
-$popplerDlls = Get-ChildItem -Path "$sourceDir\libpoppler-*.dll" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^libpoppler-\d{3}\.dll$' }
-foreach ($popplerDll in $popplerDlls) {
-    $destPath = $popplerDll.Name
-    if (-not (Test-Path $destPath)) {
-        Copy-Item -Path $popplerDll.FullName -Destination $destPath -Force
-        $copiedCount++
-        Write-Host "  Found and copied: $($popplerDll.Name)" -ForegroundColor Gray
+# Windows system directories to exclude (DLLs from these are provided by Windows)
+$systemPaths = @(
+    "C:\Windows",
+    "C:\WINDOWS", 
+    "$env:SystemRoot",
+    "$env:windir"
+) | Where-Object { $_ } | ForEach-Object { $_.ToLower() }
+
+function Test-SystemDll {
+    param([string]$dllPath)
+    $lowerPath = $dllPath.ToLower()
+    foreach ($sysPath in $systemPaths) {
+        if ($lowerPath.StartsWith($sysPath)) { return $true }
     }
+    # Also exclude "not found" entries
+    if ($lowerPath -match "not found") { return $true }
+    return $false
 }
 
-# ✅ Copy other required DLLs
-$missingDlls = @()
-foreach ($dll in $requiredDlls) {
-    $sourcePath = Join-Path $sourceDir $dll
-    $destPath = $dll  # We're already in the build directory
-
-    if (Test-Path $sourcePath) {
+if (Test-Path $ntlddExe) {
+    Write-Host "Using ntldd for automatic dependency detection..." -ForegroundColor Gray
+    
+    # Get all dependencies recursively using ntldd
+    $ntlddOutput = & $ntlddExe -R "NoteApp.exe" 2>$null
+    
+    # Parse ntldd output: "dllname.dll => /path/to/dll (0xaddress)" or "dllname.dll => not found"
+    $dllsToCopy = @{}
+    foreach ($line in $ntlddOutput) {
+        if ($line -match '^\s*(\S+\.dll)\s+=>\s+(.+?)\s*(\(0x|$)') {
+            $dllName = $Matches[1]
+            $dllPath = $Matches[2].Trim()
+            
+            # Skip system DLLs and "not found" entries
+            if (-not (Test-SystemDll $dllPath)) {
+                # Convert MSYS2 paths to Windows paths if needed
+                if ($dllPath.StartsWith("/")) {
+                    $dllPath = $dllPath -replace "^/$toolchain", $toolchainPath
+                    $dllPath = $dllPath -replace "/", "\"
+                }
+                
+                if ((Test-Path $dllPath) -and (-not $dllsToCopy.ContainsKey($dllName))) {
+                    $dllsToCopy[$dllName] = $dllPath
+                }
+            }
+        }
+    }
+    
+    Write-Host "Found $($dllsToCopy.Count) dependencies to copy" -ForegroundColor Gray
+    
+    # Copy all detected DLLs
+    foreach ($dll in $dllsToCopy.GetEnumerator()) {
+        $destPath = $dll.Key
         if (-not (Test-Path $destPath)) {
-            Copy-Item -Path $sourcePath -Destination $destPath -Force
+            Copy-Item -Path $dll.Value -Destination $destPath -Force
             $copiedCount++
         }
+    }
+    
+} else {
+    Write-Host "ntldd not found, using MSYS2 bash + ldd for dependency detection..." -ForegroundColor Yellow
+    
+    # Fallback: Use MSYS2 bash to run ldd
+    $bashExe = "$msys2Root\usr\bin\bash.exe"
+    if (Test-Path $bashExe) {
+        $lddScript = @"
+export PATH="/$toolchain/bin:`$PATH"
+ldd NoteApp.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
+"@
+        $lddOutput = & $bashExe -lc $lddScript 2>$null
+        
+        foreach ($dllPath in $lddOutput) {
+            if ($dllPath -and $dllPath.Trim()) {
+                # Convert MSYS2 path to Windows path
+                $winPath = $dllPath -replace "^/$toolchain", $toolchainPath
+                $winPath = $winPath -replace "/", "\"
+                $dllName = Split-Path -Leaf $winPath
+                
+                if ((Test-Path $winPath) -and (-not (Test-Path $dllName))) {
+                    Copy-Item -Path $winPath -Destination $dllName -Force
+                    $copiedCount++
+                }
+            }
+        }
     } else {
-        $missingDlls += $dll
+        Write-Host "⚠️  Neither ntldd nor MSYS2 bash found. Please install ntldd:" -ForegroundColor Red
+        Write-Host "   pacman -S mingw-w64-$toolchain-ntldd" -ForegroundColor Yellow
+        exit 1
     }
 }
 
-Write-Host "Copied $copiedCount DLL(s) from $toolchain\bin" -ForegroundColor Green
-
-# ✅ Warn about missing DLLs
-if ($missingDlls.Count -gt 0) {
-    Write-Host "⚠️  Warning: The following DLLs from the required list were not found and could not be copied:" -ForegroundColor Yellow
-    foreach ($missingDll in $missingDlls) {
-        Write-Host "  - $missingDll" -ForegroundColor Red
+# ✅ Also copy any versioned libpoppler DLLs that might have been missed
+$popplerDlls = Get-ChildItem -Path "$sourceDir\libpoppler-*.dll" -ErrorAction SilentlyContinue | 
+    Where-Object { $_.Name -match '^libpoppler-\d+\.dll$' }
+foreach ($popplerDll in $popplerDlls) {
+    if (-not (Test-Path $popplerDll.Name)) {
+        Copy-Item -Path $popplerDll.FullName -Destination $popplerDll.Name -Force
+        $copiedCount++
+        Write-Host "  Also copied: $($popplerDll.Name)" -ForegroundColor Gray
     }
-    Write-Host "   This may indicate version changes or missing dependencies. Please verify the DLL names." -ForegroundColor Yellow
 }
 
-# Copy share folder
+# ✅ Ensure MuPDF dependencies are included (for PDF export)
+# These are statically linked but we copy them just in case
+$mupdfRelatedDlls = @("libmupdf.dll", "libmujs.dll")
+foreach ($dll in $mupdfRelatedDlls) {
+    $sourcePath = Join-Path $sourceDir $dll
+    if ((Test-Path $sourcePath) -and (-not (Test-Path $dll))) {
+        Copy-Item -Path $sourcePath -Destination $dll -Force
+        $copiedCount++
+        Write-Host "  Also copied: $dll (MuPDF)" -ForegroundColor Gray
+    }
+}
+
+Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
+
+# ✅ Copy Poppler data files (fonts, etc.)
 Copy-Item -Path "$toolchainPath\share\poppler" -Destination "..\build\share\poppler" -Recurse -Force
 
-# ✅ Copy pdftk for optimized PDF export (if available in MSYS2)
-$pdftkExe = "$toolchainPath\bin\pdftk.exe"
+Write-Host ""
+Write-Host "✅ Build complete!" -ForegroundColor Green
+Write-Host "   PDF rendering: Poppler" -ForegroundColor Cyan
+Write-Host "   PDF export: MuPDF (statically linked)" -ForegroundColor Cyan
+Write-Host ""
 
-if (Test-Path $pdftkExe) {
-    Copy-Item -Path $pdftkExe -Destination "pdftk.exe" -Force
-    Write-Host "✅ Copied pdftk.exe from MSYS2 for optimized PDF export" -ForegroundColor Green
-} else {
-    Write-Host "ℹ️  pdftk.exe not found in MSYS2 - checking system PATH..." -ForegroundColor Cyan
-    
-    # Check if pdftk is available in system PATH (e.g., installed from pdftk.com)
-    try {
-        $pdftkCheck = Get-Command pdftk -ErrorAction Stop
-        Write-Host "✅ Found pdftk in system PATH: $($pdftkCheck.Source)" -ForegroundColor Green
-    } catch {
-        Write-Host "⚠️  pdftk not found - PDF export will use slower fallback method" -ForegroundColor Yellow
-        Write-Host "   Option 1: pacman -S mingw-w64-$toolchain-pdftk" -ForegroundColor Yellow
-        Write-Host "   Option 2: Download from https://www.pdflabs.com/tools/pdftk-the-pdf-toolkit/" -ForegroundColor Yellow
-    }
-}
-
+# ✅ Run the application
 ./NoteApp.exe
 cd ../

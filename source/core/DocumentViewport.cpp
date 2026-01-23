@@ -2560,7 +2560,7 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
     
     // ===== Debug Shortcut (kept as hardcoded - development only) =====
 #ifdef SPEEDYNOTE_DEBUG
-    // B = Toggle benchmark (debug builds only, conflicts with tool.pen in release)
+    // F10 = Toggle benchmark (debug builds only, conflicts with tool.pen in release)
     if (event->key() == Qt::Key_F10) {
         if (m_benchmarking) {
             stopBenchmark();
