@@ -310,13 +310,17 @@ elseif(UNIX)
     endif()
 
     # MuPDF for PDF export (static libraries)
-    # Headers in /usr/include/mupdf/, libs in /usr/lib/
+    # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
     set(MUPDF_INCLUDE_DIR "/usr/include")
-    set(MUPDF_LIBRARY_MAIN "/usr/lib/libmupdf.a")
-    set(MUPDF_LIBRARY_THIRD "/usr/lib/libmupdf-third.a")
+    find_library(MUPDF_LIBRARY_MAIN NAMES mupdf libmupdf.a
+        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
+        NO_DEFAULT_PATH)
+    find_library(MUPDF_LIBRARY_THIRD NAMES mupdf-third libmupdf-third.a
+        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
+        NO_DEFAULT_PATH)
     
-    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
-        message(STATUS "✅ MuPDF found for PDF export")
+    if(MUPDF_LIBRARY_MAIN)
+        message(STATUS "✅ MuPDF found for PDF export: ${MUPDF_LIBRARY_MAIN}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
         set(MUPDF_FOUND TRUE)
         
@@ -329,13 +333,14 @@ elseif(UNIX)
         pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)        # HTML5 parser
         
         # Find mujs library (JavaScript support in MuPDF)
-        find_library(MUJS_LIBRARY NAMES mujs PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
+        find_library(MUJS_LIBRARY NAMES mujs
+            PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
         
         # Start with main library
         set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
         
         # libmupdf-third.a is optional - some distros bundle deps into main lib
-        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+        if(MUPDF_LIBRARY_THIRD)
             list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
             message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
         endif()
@@ -361,7 +366,8 @@ elseif(UNIX)
         endif()
     else()
         message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
-        message(STATUS "   Install with: sudo apt install libmupdf-dev")
+        message(STATUS "   Install with: sudo apt install libmupdf-dev (Debian/Ubuntu)")
+        message(STATUS "              or: sudo dnf install mupdf-devel (Fedora/RHEL)")
         set(MUPDF_FOUND FALSE)
     endif()
 
