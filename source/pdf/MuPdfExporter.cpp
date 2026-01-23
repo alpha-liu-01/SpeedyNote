@@ -102,9 +102,11 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
     m_cancelled.store(false);
     m_lastError.clear();
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Starting export:"
              << pageIndices.size() << "pages at" << options.dpi << "DPI"
              << "to" << options.outputPath;
+    #endif
     
     // Initialize MuPDF
     if (!initContext()) {
@@ -194,7 +196,9 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
         // Clean up partial output file if it exists
         if (QFile::exists(options.outputPath)) {
             QFile::remove(options.outputPath);
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "[MuPdfExporter] Removed partial output file";
+            #endif
         }
         
         emit exportFailed(result.errorMessage);
@@ -210,11 +214,11 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
     cleanup();
     result.success = true;
     m_isExporting = false;
-    
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Export complete:"
              << result.pagesExported << "pages,"
              << (result.fileSizeBytes / 1024) << "KB";
-    
+    #endif
     emit exportComplete();
     return result;
 }
@@ -257,9 +261,25 @@ QVector<int> MuPdfExporter::parsePageRange(const QString& rangeString, int total
             int start = rangeMatch.captured(1).toInt();
             int end = rangeMatch.captured(2).toInt();
             
-            // Convert to 0-based and clamp
-            start = qMax(1, qMin(start, totalPages)) - 1;
-            end = qMax(1, qMin(end, totalPages)) - 1;
+            // Validate range is within document bounds
+            // Return empty (error) if entire range is out of bounds
+            if (start > totalPages && end > totalPages) {
+                qWarning() << "[MuPdfExporter] Page range" << start << "-" << end 
+                           << "is completely out of bounds (document has" << totalPages << "pages)";
+                return QVector<int>();  // Invalid range
+            }
+            if (start < 1 && end < 1) {
+                qWarning() << "[MuPdfExporter] Page range" << start << "-" << end << "is invalid";
+                return QVector<int>();  // Invalid range
+            }
+            
+            // Clamp partial overlaps (e.g., "1-100" on a 10-page doc exports 1-10)
+            start = qMax(1, qMin(start, totalPages));
+            end = qMax(1, qMin(end, totalPages));
+            
+            // Convert to 0-based
+            start -= 1;
+            end -= 1;
             
             // Handle reversed ranges
             if (start > end) {
@@ -280,18 +300,26 @@ QVector<int> MuPdfExporter::parsePageRange(const QString& rangeString, int total
         if (singleMatch.hasMatch()) {
             int page = singleMatch.captured(1).toInt();
             
-            // Convert to 0-based and clamp
-            page = qMax(1, qMin(page, totalPages)) - 1;
+            // Validate page is within document bounds
+            if (page < 1 || page > totalPages) {
+                qWarning() << "[MuPdfExporter] Page" << page 
+                           << "is out of bounds (document has" << totalPages << "pages)";
+                return QVector<int>();  // Invalid page
+            }
             
-            if (!seen.contains(page)) {
-                result.append(page);
-                seen.insert(page);
+            // Convert to 0-based
+            int pageIndex = page - 1;
+            
+            if (!seen.contains(pageIndex)) {
+                result.append(pageIndex);
+                seen.insert(pageIndex);
             }
             continue;
         }
         
-        // Invalid part - skip with warning
+        // Invalid part - return empty to signal error
         qWarning() << "[MuPdfExporter] Invalid page range part:" << part;
+        return QVector<int>();
     }
     
     // Sort the result for consistent ordering
@@ -335,7 +363,9 @@ bool MuPdfExporter::initContext()
         return false;
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Context initialized";
+    #endif
     return true;
 }
 
@@ -376,7 +406,9 @@ bool MuPdfExporter::openSourcePdf()
     QString pdfPath = m_document->pdfPath();
     if (pdfPath.isEmpty()) {
         // No source PDF - this is fine for blank notebooks
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] No source PDF (blank document)";
+        #endif
         return true;
     }
     
@@ -420,8 +452,10 @@ bool MuPdfExporter::openSourcePdf()
         return false;
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Opened source PDF:" << pdfPath
              << "with" << fz_count_pages(m_ctx, m_sourceDoc) << "pages";
+    #endif
     return true;
 }
 
@@ -589,8 +623,10 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
             
             if (matrixCmd[0] != '\0') {
                 fz_append_string(m_ctx, combinedContent, matrixCmd);
+                #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "[MuPdfExporter] Applied rotation" << srcRotation 
                          << "to page" << pageIndex;
+                #endif
             }
         }
         
@@ -709,8 +745,10 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         return false;
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Rendered modified page" << pageIndex 
              << "(PDF page" << pdfPageNum << "+ layers/objects)";
+    #endif
     return true;
 }
 
@@ -932,7 +970,9 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
                             fz_append_string(m_ctx, finalContent, cmd);
                             fz_append_string(m_ctx, finalContent, "Q\n");
                             
+                            #ifdef SPEEDYNOTE_DEBUG
                             qDebug() << "[MuPdfExporter] Added custom background image";
+                            #endif
                         }
                         fz_always(m_ctx) {
                             if (imgBuf) fz_drop_buffer(m_ctx, imgBuf);
@@ -1534,7 +1574,9 @@ pdf_obj* MuPdfExporter::importPageAsXObject(int sourcePageIndex)
         return nullptr;
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Imported page" << sourcePageIndex << "as XObject";
+    #endif
     return xobj;
 }
 
@@ -1694,10 +1736,12 @@ static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
         
         fz_append_string(ctx, contentBuf, "Q\n");  // Restore graphics state
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] Added image" << imageIndex 
                  << "at (" << posX << "," << pdfY << ")"
                  << "size" << displayWidthPt << "x" << displayHeightPt
                  << "rotation" << img->rotation;
+        #endif
     }
     fz_always(ctx) {
         // Clean up any resources that weren't transferred to the document
@@ -1748,11 +1792,12 @@ QByteArray MuPdfExporter::compressImage(const QImage& image, bool hasAlpha,
             newWidth = qMax(1, newWidth);
             newHeight = qMax(1, newHeight);
             
+            #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "[MuPdfExporter] Downsampling image from"
                      << image.width() << "x" << image.height()
                      << "to" << newWidth << "x" << newHeight
                      << "(target:" << targetDpi << "DPI)";
-            
+            #endif
             // Use smooth transformation for high quality downsampling
             workImage = image.scaled(newWidth, newHeight, 
                                      Qt::KeepAspectRatio, 
@@ -1772,9 +1817,11 @@ QByteArray MuPdfExporter::compressImage(const QImage& image, bool hasAlpha,
             qWarning() << "[MuPdfExporter] Failed to compress image as PNG";
             return QByteArray();
         }
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] Compressed image as PNG:" 
                  << workImage.width() << "x" << workImage.height()
                  << "->" << result.size() << "bytes";
+        #endif
     } else {
         // JPEG for opaque images (photos)
         // JPEG is lossy but much smaller for photographic content
@@ -1799,9 +1846,11 @@ QByteArray MuPdfExporter::compressImage(const QImage& image, bool hasAlpha,
             qWarning() << "[MuPdfExporter] Failed to compress image as JPEG";
             return QByteArray();
         }
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] Compressed image as JPEG:" 
                  << workImage.width() << "x" << workImage.height()
                  << "->" << result.size() << "bytes";
+        #endif
     }
     
     buffer.close();
@@ -1873,7 +1922,9 @@ bool MuPdfExporter::writeMetadata()
         QByteArray modDateUtf8 = modDateStr.toUtf8();
         pdf_dict_put_text_string(m_ctx, info, PDF_NAME(ModDate), modDateUtf8.constData());
         
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] Wrote metadata, ModDate:" << modDateStr;
+        #endif
     }
     fz_catch(m_ctx) {
         qWarning() << "[MuPdfExporter] Failed to write metadata:" << fz_caught_message(m_ctx);
@@ -1896,7 +1947,9 @@ bool MuPdfExporter::writeOutline(const QVector<int>& exportedPages)
         srcOutline = fz_load_outline(m_ctx, m_sourceDoc);
     }
     fz_catch(m_ctx) {
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] No outline in source PDF";
+        #endif
         return true;  // No outline is fine
     }
     
@@ -1927,7 +1980,9 @@ bool MuPdfExporter::writeOutline(const QVector<int>& exportedPages)
     if (pdfToExportIndex.empty()) {
         // No PDF pages in export, outline would be useless
         fz_drop_outline(m_ctx, srcOutline);
+        #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "[MuPdfExporter] No PDF pages in export, skipping outline";
+        #endif
         return true;
     }
     
@@ -1952,7 +2007,9 @@ bool MuPdfExporter::writeOutline(const QVector<int>& exportedPages)
         return false;
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Wrote outline with" << pdfToExportIndex.size() << "PDF page mappings";
+    #endif
     return true;
 }
 
@@ -2130,7 +2187,9 @@ bool MuPdfExporter::saveDocument(const QString& outputPath)
         return false;
     }
     
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MuPdfExporter] Saved to" << outputPath;
+    #endif
     return true;
 }
 

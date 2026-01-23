@@ -404,9 +404,10 @@ MainWindow::MainWindow(QWidget *parent)
         bool needsSavePrompt = false;
         
         if (doc->isEdgeless()) {
-            // Edgeless: check if it has tiles and is in temp bundle
+            // Edgeless: check if modified OR (in temp bundle with tiles)
+            // BUG FIX: Also check doc->modified for position history changes
             bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
-            needsSavePrompt = isUsingTemp && hasContent;
+            needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
         } else {
             // Paged: check if modified OR (in temp bundle with pages)
             bool hasContent = doc->pageCount() > 0;
@@ -5863,9 +5864,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
             bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
             
             if (doc->isEdgeless()) {
-                // Edgeless: check if it has tiles and is in temp bundle
+                // Edgeless: check if modified OR (in temp bundle with tiles)
+                // BUG FIX: Also check doc->modified for position history changes
                 bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
-                needsSavePrompt = isUsingTemp && hasContent;
+                needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
             } else {
                 // Paged: check if modified OR (in temp bundle with pages)
                 bool hasContent = doc->pageCount() > 0;
@@ -6292,15 +6294,20 @@ void MainWindow::openFileInNewTab(const QString &filePath)
     // Use QTimer::singleShot(0) to ensure viewport geometry is ready
     bool isEdgeless = doc->isEdgeless();
     if (isEdgeless) {
-        // Edgeless: Center on origin (offset by a small margin)
-        QTimer::singleShot(0, this, [this, tabIndex]() {
-            if (m_tabManager) {
-                DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
-                if (viewport) {
-                    viewport->setPanOffset(QPointF(-100, -100));
+        // Edgeless: Only set default position if document has no saved position
+        // Documents with saved positions will have their position restored by DocumentViewport
+        if (doc->edgelessLastPosition().isNull()) {
+            QTimer::singleShot(0, this, [this, tabIndex]() {
+                if (m_tabManager) {
+                    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+                    if (viewport) {
+                        // New document: center on origin (offset by a small margin)
+                        viewport->setPanOffset(QPointF(-100, -100));
+                    }
                 }
-            }
-        });
+            });
+        }
+        // else: Document has saved position - DocumentViewport::showEvent/resizeEvent will restore it
     } else {
         // Paged: Center content horizontally within the viewport
         centerViewportContent(tabIndex);

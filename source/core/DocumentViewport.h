@@ -1372,10 +1372,12 @@ public slots:
     /**
      * @brief Restore position and history from the document.
      * 
-     * Call after loading the document. Reads the Document's persisted position
-     * data and restores the viewport state.
+     * Called during initial viewport setup. Sets pan offset directly without
+     * triggering an update() - the caller is responsible for triggering repaint.
+     * 
+     * @return true if position was restored, false if no saved position
      */
-    void restorePositionFromDocument();
+    bool applyRestoredEdgelessPosition();
     
     /**
      * @brief Scroll by a delta amount.
@@ -1772,6 +1774,7 @@ private:
     qreal m_zoomLevel = 1.0;
     QPointF m_panOffset;
     int m_currentPageIndex = 0;
+    bool m_needsPositionRestore = false;  ///< BUG FIX: Edgeless position needs restore in showEvent
     
     // ===== Touch Gesture Handler =====
     // Touch gesture logic is encapsulated in TouchGestureHandler (see TouchGestureHandler.h)

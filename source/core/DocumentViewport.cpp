@@ -276,17 +276,37 @@ void DocumentViewport::setDocument(Document* doc)
     m_zoomLevel = 1.0;
     m_panOffset = QPointF(0, 0);
     m_currentPageIndex = 0;
+    m_needsPositionRestore = false;  // Reset deferred restore flag for new document
+    m_edgelessPositionHistory.clear();  // Clear old position history for new document
+    
+    // Track if we need to defer update for edgeless position restore
+    bool deferUpdateForEdgeless = false;
     
     // If document exists, restore last accessed page/position or set initial view
     if (m_document) {
         if (m_document->isEdgeless()) {
             // Phase 4: Restore edgeless position from document
-            // Deferred to ensure widget has correct dimensions
-            QTimer::singleShot(0, this, [this]() {
-                if (m_document && m_document->isEdgeless()) {
-                    restorePositionFromDocument();
-                }
-            });
+            QPointF lastPos = m_document->edgelessLastPosition();
+            
+            // If there's a saved position, defer update and restore in showEvent
+            // This ensures the first paint uses the correct pan offset
+            if (!lastPos.isNull()) {
+                deferUpdateForEdgeless = true;
+                // NOTE: We can't calculate the correct pan offset here because
+                // width() and height() may not be valid yet. Just set the flag
+                // and let showEvent do the proper restore.
+            }
+            
+            // If widget is already visible with valid dimensions, restore now
+            // Otherwise mark for restore in showEvent/resizeEvent
+            if (isVisible() && width() > 0 && height() > 0) {
+                // Widget is visible with valid dimensions - restore now
+                applyRestoredEdgelessPosition();
+                // Don't set flag - we already restored
+            } else {
+                // Widget not yet visible - restore in showEvent/resizeEvent
+                m_needsPositionRestore = true;
+            }
         } else if (m_document->lastAccessedPage > 0) {
             m_currentPageIndex = qMin(m_document->lastAccessedPage, 
                                        m_document->pageCount() - 1);
@@ -314,8 +334,10 @@ void DocumentViewport::setDocument(Document* doc)
         }
     }
     
-    // Trigger repaint
-    update();
+    // Trigger repaint (skip for edgeless with saved position - restore will trigger it)
+    if (!deferUpdateForEdgeless) {
+        update();
+    }
     
     // Emit signals
     emit zoomChanged(m_zoomLevel);
@@ -926,9 +948,8 @@ void DocumentViewport::navigateToEdgelessPosition(int tileX, int tileY, QPointF 
     QPointF viewportCenter(width() / 2.0, height() / 2.0);
     QPointF newPanOffset = docPosition - viewportCenter / m_zoomLevel;
     
+    // setPanOffset already calls update()
     setPanOffset(newPanOffset);
-    
-    update();
     
 #ifdef SPEEDYNOTE_DEBUG
     // Verify: viewportCenter = (docCenter - panOffset) * zoom
@@ -1011,6 +1032,10 @@ void DocumentViewport::returnToOrigin()
     // Use the existing navigation method with tile (0, 0)
     navigateToEdgelessPosition(0, 0, origin);
     
+    // BUG FIX: Mark document as modified so position history is saved
+    // This ensures the * indicator shows on the tab
+    emit documentModified();
+    
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[PositionHistory] Returned to origin";
 #endif
@@ -1032,13 +1057,15 @@ void DocumentViewport::goBackPosition()
     
     QPointF previousPos = m_edgelessPositionHistory.pop();
     
-    // Calculate tile coordinates from document position (for logging/debugging)
-    // Tile size is 4000x4000 by default
-    constexpr qreal TILE_SIZE = 4000.0;
-    int tileX = static_cast<int>(std::floor(previousPos.x() / TILE_SIZE));
-    int tileY = static_cast<int>(std::floor(previousPos.y() / TILE_SIZE));
+    // Calculate tile coordinates from document position
+    int tileX = static_cast<int>(std::floor(previousPos.x() / Document::EDGELESS_TILE_SIZE));
+    int tileY = static_cast<int>(std::floor(previousPos.y() / Document::EDGELESS_TILE_SIZE));
     
     navigateToEdgelessPosition(tileX, tileY, previousPos);
+    
+    // BUG FIX: Mark document as modified so position history is saved
+    // This ensures the * indicator shows on the tab
+    emit documentModified();
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[PositionHistory] Went back to:" << previousPos
@@ -1084,11 +1111,15 @@ void DocumentViewport::syncPositionToDocument()
 #endif
 }
 
-void DocumentViewport::restorePositionFromDocument()
+bool DocumentViewport::applyRestoredEdgelessPosition()
 {
-    // Only applies to edgeless mode
+    // Only applies to edgeless mode with valid dimensions
     if (!m_document || !m_document->isEdgeless()) {
-        return;
+        return false;
+    }
+    
+    if (width() <= 0 || height() <= 0) {
+        return false;  // Can't calculate pan offset without valid dimensions
     }
     
     // Restore position history from Document
@@ -1098,21 +1129,22 @@ void DocumentViewport::restorePositionFromDocument()
         m_edgelessPositionHistory.push(pos);
     }
     
-    // Navigate to the last saved position
+    // Calculate pan offset to center the saved position
     QPointF lastPos = m_document->edgelessLastPosition();
-    if (!lastPos.isNull()) {
-        // Calculate tile coordinates
-        constexpr qreal TILE_SIZE = 4000.0;
-        int tileX = static_cast<int>(std::floor(lastPos.x() / TILE_SIZE));
-        int tileY = static_cast<int>(std::floor(lastPos.y() / TILE_SIZE));
-        
-        navigateToEdgelessPosition(tileX, tileY, lastPos);
-        
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "[PositionHistory] Restored from document: lastPos =" << lastPos
-                 << "| history size =" << m_edgelessPositionHistory.size();
-#endif
+    if (lastPos.isNull()) {
+        return false;  // No saved position
     }
+    
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    m_panOffset = lastPos - viewportCenter / m_zoomLevel;
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Applied restored position: lastPos =" << lastPos
+             << "| panOffset =" << m_panOffset
+             << "| history size =" << m_edgelessPositionHistory.size();
+#endif
+    
+    return true;
 }
 
 void DocumentViewport::scrollBy(QPointF delta)
@@ -2262,7 +2294,16 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     // This ensures content doesn't jump around during window resize or rotation
     
     if (!m_document || event->oldSize().isEmpty()) {
-        // No document or first resize - just clamp and update
+        // No document or first resize
+        
+        // BUG FIX: If edgeless position restore is pending (showEvent couldn't do it
+        // because widget had zero dimensions), do it now that we have valid size
+        if (m_document && m_document->isEdgeless() && m_needsPositionRestore) {
+            if (applyRestoredEdgelessPosition()) {
+                m_needsPositionRestore = false;
+            }
+        }
+        
         clampPanOffset();
         update();
         emitScrollFractions();
@@ -2624,6 +2665,16 @@ void DocumentViewport::showEvent(QShowEvent* event)
     // Also ensure touch handler is reset
     if (m_touchHandler) {
         m_touchHandler->reset();
+    }
+    
+    // BUG FIX: For edgeless documents with saved position, set pan offset NOW
+    // BEFORE the base class processes showEvent (which may trigger a paint).
+    // This ensures the first paint uses the correct pan offset.
+    if (m_document && m_document->isEdgeless() && m_needsPositionRestore) {
+        if (applyRestoredEdgelessPosition()) {
+            m_needsPositionRestore = false;
+        }
+        // If restore failed (invalid dimensions), resizeEvent will handle it
     }
     
     QWidget::showEvent(event);

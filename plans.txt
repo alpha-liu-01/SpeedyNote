@@ -157,22 +157,22 @@ VectorCanvas is FROZEN and will be deleted in Phase 5.
 
 → See: docs/MIGRATION_PHASE2B_SUBPLAN.md for detailed breakdown
 
-[  ] 2.8 Marker Tool (~150 lines)
+[✅] 2.8 Marker Tool (~150 lines)
      - Fixed opacity (50%), fixed thickness, separate color (#E6FF6E)
      - No pressure sensitivity, reuses pen stroke infrastructure
 
-[  ] 2.9 Straight Line Mode (~200 lines)
+[✅] 2.9 Straight Line Mode (~200 lines)
      - Toggle mode works with Pen and Marker
      - Preview line while dragging, free angle
      - Future: ruler/angle snapping
 
-[  ] 2.10 Lasso Selection Tool (~400 lines)
+[✅] 2.10 Lasso Selection Tool (~400 lines)
      - Freeform selection, entire strokes, active layer only
      - Transform: move, scale, rotate
      - Clipboard: copy, cut, paste (within/across pages/tiles)
      - Marching ants or dashed selection border
 
-[  ] 2.11 Highlighter Tool - DEFERRED
+[✅] 2.11 Highlighter Tool - DEFERRED
      - Requires PDF text box integration (Phase 4)
 
 NOTE: Phase 3 complete - MainWindow fully integrated, ready for 2B tools.

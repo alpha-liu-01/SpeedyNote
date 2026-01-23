@@ -137,33 +137,42 @@ inline bool testParsePageRange()
         }
     }
     
-    // Test 8: Out of bounds - page 0 (invalid, should clamp to 1)
+    // Test 8: Out of bounds - page 0 (invalid, should return error)
     {
         QVector<int> result = MuPdfExporter::parsePageRange("0", 5);
-        QVector<int> expected = {0};  // Clamped to page 1 → index 0
         
-        if (result != expected) {
-            qDebug() << "FAIL: '0' should clamp to page 1 (index 0)";
-            qDebug() << "  Expected:" << expected;
+        if (!result.isEmpty()) {
+            qDebug() << "FAIL: '0' should return empty (invalid page)";
             qDebug() << "  Got:" << result;
             success = false;
         } else {
-            qDebug() << "  - Out of bounds '0' → clamp: OK";
+            qDebug() << "  - Out of bounds '0' → error: OK";
         }
     }
     
-    // Test 9: Out of bounds - page 100 in 5-page doc (clamp to 5)
+    // Test 9: Out of bounds - page 100 in 5-page doc (should return error)
     {
         QVector<int> result = MuPdfExporter::parsePageRange("100", 5);
-        QVector<int> expected = {4};  // Clamped to page 5 → index 4
         
-        if (result != expected) {
-            qDebug() << "FAIL: '100' should clamp to last page";
-            qDebug() << "  Expected:" << expected;
+        if (!result.isEmpty()) {
+            qDebug() << "FAIL: '100' in 5-page doc should return empty (out of bounds)";
             qDebug() << "  Got:" << result;
             success = false;
         } else {
-            qDebug() << "  - Out of bounds '100' → clamp: OK";
+            qDebug() << "  - Out of bounds '100' → error: OK";
+        }
+    }
+    
+    // Test 9b: Out of bounds range - pages 1000-1002 in 2-page doc
+    {
+        QVector<int> result = MuPdfExporter::parsePageRange("1000-1002", 2);
+        
+        if (!result.isEmpty()) {
+            qDebug() << "FAIL: '1000-1002' in 2-page doc should return empty";
+            qDebug() << "  Got:" << result;
+            success = false;
+        } else {
+            qDebug() << "  - Out of bounds range '1000-1002' → error: OK";
         }
     }
     
@@ -212,18 +221,16 @@ inline bool testParsePageRange()
         }
     }
     
-    // Test 13: Invalid input is skipped "1, abc, 3"
+    // Test 13: Invalid input causes error "1, abc, 3"
     {
         QVector<int> result = MuPdfExporter::parsePageRange("1, abc, 3", 5);
-        QVector<int> expected = {0, 2};  // "abc" is skipped
         
-        if (result != expected) {
-            qDebug() << "FAIL: Invalid parts should be skipped";
-            qDebug() << "  Expected:" << expected;
+        if (!result.isEmpty()) {
+            qDebug() << "FAIL: Invalid input 'abc' should return empty (error)";
             qDebug() << "  Got:" << result;
             success = false;
         } else {
-            qDebug() << "  - Invalid input skipped: OK";
+            qDebug() << "  - Invalid input causes error: OK";
         }
     }
     
@@ -264,6 +271,22 @@ inline bool testParsePageRange()
             success = false;
         } else {
             qDebug() << "  - Result sorted: OK";
+        }
+    }
+    
+    // Test 17: Partial overlap - range extends beyond document is clamped
+    // "1-100" on a 10-page doc should export pages 1-10
+    {
+        QVector<int> result = MuPdfExporter::parsePageRange("1-100", 10);
+        QVector<int> expected = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+        
+        if (result != expected) {
+            qDebug() << "FAIL: '1-100' on 10-page doc should clamp to 1-10";
+            qDebug() << "  Expected:" << expected;
+            qDebug() << "  Got:" << result;
+            success = false;
+        } else {
+            qDebug() << "  - Partial overlap (clamped): OK";
         }
     }
     
