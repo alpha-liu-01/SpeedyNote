@@ -110,7 +110,19 @@ if ($debug) {
 
 # ✅ Configure and build
 & "$toolchainPath\bin\cmake.exe" @cmakeArgs ..
-& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j32
+
+# Determine number of parallel jobs based on architecture
+# ARM64 devices often have limited memory/thermal headroom, so use half the cores
+$cpuCount = [Environment]::ProcessorCount
+if ($arm64) {
+    $jobs = [Math]::Max(1, [Math]::Floor($cpuCount / 2))
+    Write-Host "Using $jobs parallel jobs (ARM64: half of $cpuCount cores)" -ForegroundColor Gray
+} else {
+    $jobs = $cpuCount
+    Write-Host "Using $jobs parallel jobs (x64: all $cpuCount cores)" -ForegroundColor Gray
+}
+
+& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j$jobs
 
 # ✅ Deploy Qt runtime
 & "$toolchainPath\bin\windeployqt6.exe" "NoteApp.exe"

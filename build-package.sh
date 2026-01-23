@@ -306,8 +306,22 @@ build_project() {
     echo -e "${YELLOW}Configuring build with maximum performance optimizations...${NC}"
     cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr ..
     
-    echo -e "${YELLOW}Compiling with $(nproc) parallel jobs...${NC}"
-    make -j$(nproc)
+    # Determine number of parallel jobs based on architecture
+    # ARM64 devices often have limited memory/thermal headroom, so use half the cores
+    ARCH=$(uname -m)
+    CORES=$(nproc)
+    echo -e "${YELLOW}Detected architecture: $ARCH with $CORES cores${NC}"
+    
+    if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+        JOBS=$(( (CORES + 1) / 2 ))
+        if [[ $JOBS -lt 1 ]]; then JOBS=1; fi
+        echo -e "${YELLOW}Compiling with $JOBS parallel jobs (ARM64: half of $CORES cores)...${NC}"
+    else
+        JOBS=$CORES
+        echo -e "${YELLOW}Compiling with $JOBS parallel jobs (x64: all $CORES cores)...${NC}"
+    fi
+    
+    make -j"$JOBS"
     
     if [[ ! -f "NoteApp" ]]; then
         echo -e "${RED}Build failed: NoteApp executable not found${NC}"
@@ -458,7 +472,12 @@ PDF export support, and controller input capabilities.
 
 %build
 %cmake -DCMAKE_BUILD_TYPE=Release
+# ARM64 devices often have limited memory/thermal headroom, so use half the cores
+%ifarch aarch64
+%cmake_build -- -j\$(( (\$(nproc) + 1) / 2 ))
+%else
 %cmake_build
+%endif
 
 %install
 rm -rf %{buildroot}
