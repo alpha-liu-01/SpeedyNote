@@ -113,6 +113,14 @@ public:
     void invalidateAllThumbnails();
     
     /**
+     * @brief Cancel all pending thumbnail renders and wait for them to complete.
+     * 
+     * Use this before operations that access Document pages directly
+     * to avoid race conditions with background thumbnail rendering.
+     */
+    void cancelPendingRenders();
+    
+    /**
      * @brief Set the device pixel ratio for high DPI rendering.
      * @param dpr Device pixel ratio (e.g., 2.0 for Retina displays).
      */

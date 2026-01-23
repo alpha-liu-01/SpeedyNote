@@ -346,6 +346,16 @@ void PageThumbnailModel::invalidateAllThumbnails()
     }
 }
 
+void PageThumbnailModel::cancelPendingRenders()
+{
+    // Cancel all pending thumbnail renders and wait for completion.
+    // This is used before operations that access Document pages directly
+    // (like MainWindow::renderPage0Thumbnail) to avoid race conditions
+    // with background thumbnail rendering that also accesses Document::page().
+    m_renderer->cancelAll();
+    m_pendingThumbnails.clear();
+}
+
 // ============================================================================
 // Slots
 // ============================================================================

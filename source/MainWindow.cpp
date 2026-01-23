@@ -303,6 +303,12 @@ MainWindow::MainWindow(QWidget *parent)
                     
                     // If no cached thumbnail, render one synchronously
                     if (thumbnail.isNull()) {
+                        // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                        // accessing Document::page() directly. Background renders also call
+                        // Document::page() which modifies m_loadedPages without synchronization.
+                        if (m_pagePanel) {
+                            m_pagePanel->cancelPendingRenders();
+                        }
                         thumbnail = renderPage0Thumbnail(doc);
                     }
                     
@@ -2746,6 +2752,12 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     if (!isEdgeless && doc->pageCount() > 0) {
         QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
         if (thumbnail.isNull()) {
+            // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+            // accessing Document::page() directly. Background renders also call
+            // Document::page() which modifies m_loadedPages without synchronization.
+            if (m_pagePanel) {
+                m_pagePanel->cancelPendingRenders();
+            }
             thumbnail = renderPage0Thumbnail(doc);
         }
         if (!thumbnail.isNull()) {
@@ -2835,6 +2847,12 @@ void MainWindow::saveDocument()
         if (!isEdgeless && doc->pageCount() > 0) {
             QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
             if (thumbnail.isNull()) {
+                // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                // accessing Document::page() directly. Background renders also call
+                // Document::page() which modifies m_loadedPages without synchronization.
+                if (m_pagePanel) {
+                    m_pagePanel->cancelPendingRenders();
+                }
                 thumbnail = renderPage0Thumbnail(doc);
             }
             if (!thumbnail.isNull()) {
