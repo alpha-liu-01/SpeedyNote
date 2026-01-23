@@ -24,11 +24,13 @@
 
 #include <algorithm> // for std::sort
 #include <cmath>     // for cosf, sinf, M_PI
+#include <map>       // for ExtGState alpha cache
 
 // Forward declarations for static helper functions defined later in this file
-static fz_buffer* buildStrokesContentStream(fz_context* ctx, const Page* page);
-static void appendLayerStrokesToBuffer(fz_context* ctx, fz_buffer* buf, 
-                                       const VectorLayer* layer, qreal pageHeightSn);
+static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
+                                       fz_buffer* buf, pdf_obj* resources,
+                                       const VectorLayer* layer, qreal pageHeightSn,
+                                       int& gsIndex, std::map<int, QString>& alphaToGsName);
 static int getSourcePageRotation(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
 static fz_rect getSourcePageBBox(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
 static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
@@ -184,6 +186,13 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
     if (!saveDocument(options.outputPath)) {
         result.errorMessage = tr("Failed to save PDF file");
         cleanup();
+        
+        // Clean up partial output file if it exists
+        if (QFile::exists(options.outputPath)) {
+            QFile::remove(options.outputPath);
+            qDebug() << "[MuPdfExporter] Removed partial output file";
+        }
+        
         emit exportFailed(result.errorMessage);
         m_isExporting = false;
         return result;
@@ -599,6 +608,8 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         // N. Objects with affinity >= numLayers (always on top)
         
         int imageIndex = 0;
+        int gsIndex = 0;  // Counter for ExtGState names (for stroke transparency)
+        std::map<int, QString> alphaToGsName;  // Cache: alpha (0-100) -> GS name
         int numLayers = static_cast<int>(page->vectorLayers.size());
         qreal pageHeightSn = page->size.height();
         
@@ -632,11 +643,9 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         
         // 2. Interleave layers and objects
         for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
-            // Render this layer's strokes
-            if (layerIdx < static_cast<int>(page->vectorLayers.size())) {
-                appendLayerStrokesToBuffer(m_ctx, combinedContent, 
-                                          page->vectorLayers[layerIdx].get(), pageHeightSn);
-            }
+            // Render this layer's strokes (with transparency support)
+            appendLayerStrokesToBuffer(m_ctx, m_outputDoc, combinedContent, resources, 
+                                      page->vectorLayers[layerIdx].get(), pageHeightSn, gsIndex, alphaToGsName);
             
             // Render objects with affinity = layerIdx (above this layer, below next)
             addObjectsWithAffinity(layerIdx);
@@ -844,12 +853,13 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
             // Create combined content buffer
             finalContent = fz_new_buffer(m_ctx, 1024);
             
-            // Create resources dictionary (may be needed for custom background or images)
-            if (hasCustomBackground || hasImages) {
-                resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
-            }
+            // Create resources dictionary (needed for custom background, images, or stroke transparency)
+            // We create it whenever we have content, as strokes may need ExtGState for transparency
+            resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
             
             int imageIndex = 0;
+            int gsIndex = 0;  // Counter for ExtGState names (for stroke transparency)
+            std::map<int, QString> alphaToGsName;  // Cache: alpha (0-100) -> GS name
             
             // 1. Background color/grid/lines first
             if (backgroundContent) {
@@ -963,11 +973,9 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
             
             // Interleave layers and objects
             for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
-                // Render this layer's strokes
-                if (layerIdx < static_cast<int>(page->vectorLayers.size())) {
-                    appendLayerStrokesToBuffer(m_ctx, finalContent, 
-                                              page->vectorLayers[layerIdx].get(), pageHeightSn);
-                }
+                // Render this layer's strokes (with transparency support)
+                appendLayerStrokesToBuffer(m_ctx, m_outputDoc, finalContent, resources,
+                                          page->vectorLayers[layerIdx].get(), pageHeightSn, gsIndex, alphaToGsName);
                 
                 // Render objects with affinity = layerIdx (above this layer, below next)
                 addObjectsWithAffinity(layerIdx);
@@ -1136,9 +1144,9 @@ static void appendCircleToBuffer(fz_context* ctx, fz_buffer* buf,
     fz_append_string(ctx, buf, "h f\n");
 }
 
-// NOTE: This function is currently unused but reserved for Phase 4 (PDF XObject background).
-// When rendering modified pages with PDF backgrounds, we may need fz_path objects
-// for use with fz_fill_path() on a drawing device, rather than content stream operators.
+// NOTE: This function is currently unused. The implementation uses content stream operators
+// (via appendPolygonToBuffer) instead of fz_path objects. Kept for potential future use
+// with fz_fill_path() on a drawing device if needed for advanced rendering scenarios.
 fz_path* MuPdfExporter::polygonToPath(const QPolygonF& polygon, qreal pageHeightSn)
 {
     if (polygon.isEmpty() || !m_ctx) {
@@ -1179,118 +1187,94 @@ fz_path* MuPdfExporter::polygonToPath(const QPolygonF& polygon, qreal pageHeight
 }
 
 /**
- * @brief Build content stream buffer with all strokes from a page.
+ * @brief Get or create an ExtGState resource for a given alpha value.
  * @param ctx MuPDF context
- * @param page The SpeedyNote page containing strokes
- * @return fz_buffer with PDF content stream commands (caller must drop), or nullptr
+ * @param outputDoc Output PDF document
+ * @param resources Resources dictionary to add ExtGState to
+ * @param alpha The fill alpha value (0.0 to 1.0)
+ * @param gsIndex Current graphics state index (will be incremented only if new entry created)
+ * @param alphaToGsName Cache mapping alpha values to existing GS names (for reuse)
+ * @return The name of the ExtGState (e.g., "GS0", "GS1", etc.) or empty if alpha is 1.0
  * 
- * This is a static helper function (not a class method) because fz_buffer
- * cannot be forward declared in the header (it's a typedef in MuPDF).
+ * Creates an ExtGState dictionary with:
+ *   /Type /ExtGState
+ *   /ca <alpha>   (fill alpha)
+ * 
+ * The ExtGState is added to resources under /ExtGState/<name>.
+ * 
+ * OPTIMIZATION: Caches ExtGState entries by alpha value (quantized to 2 decimal places).
+ * Multiple strokes with the same opacity reuse the same ExtGState entry.
  */
-static fz_buffer* buildStrokesContentStream(fz_context* ctx, const Page* page)
+static QString getOrCreateExtGState(fz_context* ctx, pdf_document* outputDoc,
+                                     pdf_obj* resources, float alpha, int& gsIndex,
+                                     std::map<int, QString>& alphaToGsName)
 {
-    if (!page || !ctx) {
-        return nullptr;
+    // If fully opaque, no need for ExtGState
+    if (alpha >= 0.999f) {
+        return QString();
     }
     
-    // Check if page has any strokes
-    bool hasStrokes = false;
-    for (const auto& layer : page->vectorLayers) {
-        if (!layer->strokes().isEmpty()) {
-            hasStrokes = true;
-            break;
-        }
+    // Clamp alpha to valid range
+    alpha = qBound(0.0f, alpha, 1.0f);
+    
+    // Quantize alpha to 2 decimal places (0-100 integer key)
+    // This avoids creating separate entries for alpha 0.501 vs 0.502
+    int alphaKey = qRound(alpha * 100.0f);
+    
+    // Check if we already have an ExtGState for this alpha
+    auto it = alphaToGsName.find(alphaKey);
+    if (it != alphaToGsName.end()) {
+        return it->second;  // Reuse existing ExtGState
     }
     
-    if (!hasStrokes) {
-        return nullptr;  // No strokes to render
+    // Generate unique name for this graphics state
+    QString gsName = QStringLiteral("GS%1").arg(gsIndex++);
+    QByteArray gsNameUtf8 = gsName.toUtf8();
+    
+    // Get or create ExtGState dictionary in resources
+    pdf_obj* extGStateDict = pdf_dict_get(ctx, resources, PDF_NAME(ExtGState));
+    if (!extGStateDict) {
+        extGStateDict = pdf_new_dict(ctx, outputDoc, 4);
+        pdf_dict_put(ctx, resources, PDF_NAME(ExtGState), extGStateDict);
     }
     
-    fz_buffer* buf = nullptr;
-    qreal pageHeightSn = page->size.height();
+    // Create the graphics state dictionary
+    pdf_obj* gsDict = pdf_new_dict(ctx, outputDoc, 2);
+    pdf_dict_put(ctx, gsDict, PDF_NAME(Type), PDF_NAME(ExtGState));
+    pdf_dict_put_real(ctx, gsDict, PDF_NAME(ca), alpha);  // Fill alpha (lowercase 'ca')
     
-    fz_try(ctx) {
-        buf = fz_new_buffer(ctx, 4096);  // Initial capacity
-        
-        // Save graphics state
-        fz_append_string(ctx, buf, "q\n");
-        
-        // Iterate through all layers (bottom to top)
-        // NOTE: Layer opacity and stroke alpha are not yet supported in PDF export.
-        // This would require setting up ExtGState resources for transparency.
-        // For now, all strokes are exported as fully opaque.
-        for (const auto& layer : page->vectorLayers) {
-            // Safety check for null shared_ptr
-            if (!layer) {
-                continue;
-            }
-            
-            if (!layer->visible || layer->strokes().isEmpty()) {
-                continue;
-            }
-            
-            // Process each stroke in the layer
-            for (const VectorStroke& stroke : layer->strokes()) {
-                // Build the stroke polygon using existing VectorLayer logic
-                VectorLayer::StrokePolygonResult polyResult = VectorLayer::buildStrokePolygon(stroke);
-                
-                // Set fill color (RGB values 0-1)
-                // Note: Alpha is ignored for now (requires ExtGState for PDF transparency)
-                float r = stroke.color.redF();
-                float g = stroke.color.greenF();
-                float b = stroke.color.blueF();
-                
-                // Format: "r g b rg" for RGB fill color
-                char colorCmd[64];
-                snprintf(colorCmd, sizeof(colorCmd), "%.4f %.4f %.4f rg\n", r, g, b);
-                fz_append_string(ctx, buf, colorCmd);
-                
-                if (polyResult.isSinglePoint) {
-                    // Single point - draw as a filled circle
-                    appendCircleToBuffer(ctx, buf, polyResult.startCapCenter, 
-                                        polyResult.startCapRadius, pageHeightSn);
-                } else if (!polyResult.polygon.isEmpty()) {
-                    // Multi-point stroke - draw the polygon
-                    appendPolygonToBuffer(ctx, buf, polyResult.polygon, pageHeightSn);
-                    
-                    // Draw round end caps if needed
-                    if (polyResult.hasRoundCaps) {
-                        appendCircleToBuffer(ctx, buf, polyResult.startCapCenter,
-                                            polyResult.startCapRadius, pageHeightSn);
-                        appendCircleToBuffer(ctx, buf, polyResult.endCapCenter,
-                                            polyResult.endCapRadius, pageHeightSn);
-                    }
-                }
-            }
-        }
-        
-        // Restore graphics state
-        fz_append_string(ctx, buf, "Q\n");
-    }
-    fz_catch(ctx) {
-        qWarning() << "[MuPdfExporter] Failed to build strokes content stream:" 
-                   << fz_caught_message(ctx);
-        if (buf) {
-            fz_drop_buffer(ctx, buf);
-        }
-        return nullptr;
-    }
+    // Add to ExtGState dictionary
+    pdf_dict_put(ctx, extGStateDict, pdf_new_name(ctx, gsNameUtf8.constData()), gsDict);
     
-    return buf;
+    // Cache for reuse
+    alphaToGsName[alphaKey] = gsName;
+    
+    return gsName;
 }
 
 /**
  * @brief Append a single layer's strokes to the content buffer.
  * @param ctx MuPDF context
+ * @param outputDoc Output PDF document (for creating ExtGState resources)
  * @param buf Buffer to append to (must not be null)
+ * @param resources Resources dictionary (for adding ExtGState entries)
  * @param layer The vector layer to render
  * @param pageHeightSn Page height in SpeedyNote coordinates (for Y-flip)
+ * @param gsIndex Current graphics state index counter (modified by function)
+ * @param alphaToGsName Cache for ExtGState names by alpha value (for reuse)
  * 
  * This is used by the interleaved rendering to render layers one at a time,
  * allowing objects to be inserted between layers based on their affinity.
+ * 
+ * Opacity handling:
+ * - Layer opacity is applied to all strokes in the layer
+ * - Stroke color alpha is multiplied with layer opacity
+ * - Total alpha < 1.0 creates an ExtGState with fill alpha (ca)
  */
-static void appendLayerStrokesToBuffer(fz_context* ctx, fz_buffer* buf, 
-                                       const VectorLayer* layer, qreal pageHeightSn)
+static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
+                                       fz_buffer* buf, pdf_obj* resources,
+                                       const VectorLayer* layer, qreal pageHeightSn,
+                                       int& gsIndex, std::map<int, QString>& alphaToGsName)
 {
     if (!ctx || !buf || !layer) return;
     
@@ -1298,9 +1282,30 @@ static void appendLayerStrokesToBuffer(fz_context* ctx, fz_buffer* buf,
         return;
     }
     
+    // Get layer opacity
+    float layerOpacity = static_cast<float>(layer->opacity);
+    
     for (const VectorStroke& stroke : layer->strokes()) {
         // Build the stroke polygon using existing VectorLayer logic
         VectorLayer::StrokePolygonResult polyResult = VectorLayer::buildStrokePolygon(stroke);
+        
+        // Calculate effective alpha (stroke alpha × layer opacity)
+        float strokeAlpha = static_cast<float>(stroke.color.alphaF());
+        float effectiveAlpha = strokeAlpha * layerOpacity;
+        bool needsTransparency = (effectiveAlpha < 0.999f) && resources && outputDoc;
+        
+        // Save graphics state if using transparency (so we can restore after)
+        if (needsTransparency) {
+            fz_append_string(ctx, buf, "q\n");
+            
+            // Apply transparency via ExtGState (reuses existing entry if same alpha)
+            QString gsName = getOrCreateExtGState(ctx, outputDoc, resources, effectiveAlpha, gsIndex, alphaToGsName);
+            if (!gsName.isEmpty()) {
+                char gsCmd[32];
+                snprintf(gsCmd, sizeof(gsCmd), "/%s gs\n", gsName.toUtf8().constData());
+                fz_append_string(ctx, buf, gsCmd);
+            }
+        }
         
         // Set fill color (RGB values 0-1)
         float r = stroke.color.redF();
@@ -1323,6 +1328,11 @@ static void appendLayerStrokesToBuffer(fz_context* ctx, fz_buffer* buf,
                 appendCircleToBuffer(ctx, buf, polyResult.endCapCenter,
                                     polyResult.endCapRadius, pageHeightSn);
             }
+        }
+        
+        // Restore graphics state if we saved it for transparency
+        if (needsTransparency) {
+            fz_append_string(ctx, buf, "Q\n");
         }
     }
 }
@@ -1948,6 +1958,7 @@ static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
         fz_outline* src;
         int exportPageIndex;
         pdf_obj* pdfObj;
+        pdf_obj* childrenContainer;  // Store children result from recursive call
     };
     std::vector<OutlineEntry> validEntries;
     
@@ -1956,16 +1967,32 @@ static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
         
         // Check if this entry points to an exported page
         auto it = pdfToExportIndex.find(pdfPage);
-        if (it != pdfToExportIndex.end() || ol->down) {
-            // Entry is valid if:
-            // - It points to an exported page, OR
-            // - It has children (might have valid children even if parent target is excluded)
+        bool pointsToExportedPage = (it != pdfToExportIndex.end());
+        
+        // For entries with children, we need to check if any child (recursively)
+        // points to an exported page. We do this by attempting the recursive call
+        // and seeing if it produces any valid entries.
+        pdf_obj* childrenContainer = nullptr;
+        bool hasValidChildren = false;
+        
+        if (ol->down) {
+            childrenContainer = writeOutlineRecursive(ctx, outputDoc, ol->down, pdfToExportIndex);
+            hasValidChildren = (childrenContainer != nullptr);
+        }
+        
+        // Entry is valid if:
+        // - It points to an exported page, OR
+        // - It has children that recursively contain valid entries
+        if (pointsToExportedPage || hasValidChildren) {
             OutlineEntry entry;
             entry.src = ol;
-            entry.exportPageIndex = (it != pdfToExportIndex.end()) ? it->second : -1;
+            entry.exportPageIndex = pointsToExportedPage ? it->second : -1;
             entry.pdfObj = nullptr;
+            entry.childrenContainer = childrenContainer;
             validEntries.push_back(entry);
         }
+        // If neither condition is met, the entry and its children are all outside
+        // the export range - skip it entirely
     }
     
     if (validEntries.empty()) {
@@ -2005,33 +2032,29 @@ static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
             pdf_dict_put_drop(ctx, item, PDF_NAME(Dest), dest);
         }
         
-        // Handle children recursively
-        if (ol->down) {
-            pdf_obj* children = writeOutlineRecursive(ctx, outputDoc, ol->down, pdfToExportIndex);
-            if (children) {
-                // children is the root outline object, get First/Last from it
-                pdf_obj* firstChild = pdf_dict_get(ctx, children, PDF_NAME(First));
-                pdf_obj* lastChild = pdf_dict_get(ctx, children, PDF_NAME(Last));
-                int childCount = pdf_dict_get_int(ctx, children, PDF_NAME(Count));
+        // Handle children (already processed in first pass)
+        if (entry.childrenContainer) {
+            pdf_obj* children = entry.childrenContainer;
+            // children is the root outline object, get First/Last from it
+            pdf_obj* firstChild = pdf_dict_get(ctx, children, PDF_NAME(First));
+            pdf_obj* lastChild = pdf_dict_get(ctx, children, PDF_NAME(Last));
+            int childCount = pdf_dict_get_int(ctx, children, PDF_NAME(Count));
+            
+            if (firstChild && lastChild) {
+                pdf_dict_put(ctx, item, PDF_NAME(First), firstChild);
+                pdf_dict_put(ctx, item, PDF_NAME(Last), lastChild);
                 
-                if (firstChild && lastChild) {
-                    pdf_dict_put(ctx, item, PDF_NAME(First), firstChild);
-                    pdf_dict_put(ctx, item, PDF_NAME(Last), lastChild);
-                    
-                    // Set parent on all children
-                    for (pdf_obj* child = firstChild; child; 
-                         child = pdf_dict_get(ctx, child, PDF_NAME(Next))) {
-                        pdf_dict_put(ctx, child, PDF_NAME(Parent), item);
-                    }
-                    
-                    // Set Count (negative means closed)
-                    int count = ol->is_open ? childCount : -childCount;
-                    if (count != 0) {
-                        pdf_dict_put_int(ctx, item, PDF_NAME(Count), count);
-                    }
+                // Set parent on all children
+                for (pdf_obj* child = firstChild; child; 
+                     child = pdf_dict_get(ctx, child, PDF_NAME(Next))) {
+                    pdf_dict_put(ctx, child, PDF_NAME(Parent), item);
                 }
                 
-                // Don't drop children - it's just a container we extracted from
+                // Set Count (negative means closed)
+                int count = ol->is_open ? childCount : -childCount;
+                if (count != 0) {
+                    pdf_dict_put_int(ctx, item, PDF_NAME(Count), count);
+                }
             }
         }
     }
