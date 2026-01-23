@@ -66,35 +66,84 @@ if(WIN32)
         add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    # MuPDF for PDF export (dynamic linking via MSYS2)
-    # MSYS2 naming: import library = libmupdf.dll.a, DLL = libmupdf.dll
+    # MuPDF for PDF export via MSYS2
+    # Try dynamic linking first (libmupdf.dll.a), fallback to static (libmupdf.a)
     set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
     
-    # Try to find the DLL import library (libmupdf.dll.a)
-    # This file is used at link time to link against the DLL
+    # First check for dynamic library (import lib for DLL)
     if(EXISTS "${QT_PATH}/lib/libmupdf.dll.a")
-        set(MUPDF_LIBRARY_DLL "${QT_PATH}/lib/libmupdf.dll.a")
-        message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY_DLL}")
+        set(MUPDF_LIBRARY "${QT_PATH}/lib/libmupdf.dll.a")
+        message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
         set(MUPDF_FOUND TRUE)
-        
-        # Dynamic linking - use the import library
-        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_DLL})
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY})
         
         # mujs may also be dynamically linked
         if(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
-            set(MUJS_LIBRARY "${QT_PATH}/lib/libmujs.dll.a")
-            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
-            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.dll.a")
+            message(STATUS "   Found mujs (dynamic)")
+        endif()
+        message(STATUS "   Note: Requires libmupdf.dll at runtime (copied by ntldd)")
+        
+    # Fallback to static library
+    elseif(EXISTS "${QT_PATH}/lib/libmupdf.a")
+        set(MUPDF_LIBRARY "${QT_PATH}/lib/libmupdf.a")
+        message(STATUS "✅ MuPDF found for PDF export (static): ${MUPDF_LIBRARY}")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY})
+        
+        # Static linking requires additional dependencies
+        if(EXISTS "${QT_PATH}/lib/libmupdf-third.a")
+            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmupdf-third.a")
+            message(STATUS "   Found mupdf-third")
         endif()
         
-        message(STATUS "   MuPDF libraries: ${MUPDF_LIBRARIES}")
-        message(STATUS "   Note: Requires libmupdf.dll at runtime (copied by ntldd)")
+        # Find mujs (static)
+        if(EXISTS "${QT_PATH}/lib/libmujs.a")
+            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.a")
+            message(STATUS "   Found mujs (static)")
+        elseif(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
+            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.dll.a")
+            message(STATUS "   Found mujs (dynamic)")
+        endif()
+        
+        # Static MuPDF needs these dependencies via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
+        
+        list(APPEND MUPDF_LIBRARIES
+            PkgConfig::HARFBUZZ PkgConfig::FREETYPE PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2 PkgConfig::ZLIB)
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(BROTLIDEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+        endif()
+        if(BROTLIENC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+        endif()
+        message(STATUS "   Note: Statically linked (no libmupdf.dll needed)")
     else()
-        message(STATUS "⚠️ MuPDF dynamic library not found - PDF export will be disabled")
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Checked: ${QT_PATH}/lib/libmupdf.dll.a (dynamic)")
+        message(STATUS "   Checked: ${QT_PATH}/lib/libmupdf.a (static)")
         message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
         set(MUPDF_FOUND FALSE)
     endif()
+    
+    message(STATUS "   MuPDF libraries: ${MUPDF_LIBRARIES}")
 
     # Add MuPDF include directory if found
     if(MUPDF_FOUND)

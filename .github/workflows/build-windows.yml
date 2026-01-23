@@ -40,6 +40,25 @@ jobs:
           choco install innosetup -y
         shell: pwsh
 
+      - name: Check MuPDF installation
+        run: |
+          Write-Host "Checking MuPDF library files..." -ForegroundColor Cyan
+          $toolchainPath = "D:\a\_temp\msys64\clang64"
+          
+          Write-Host "Looking for MuPDF in: $toolchainPath\lib" -ForegroundColor Gray
+          Get-ChildItem -Path "$toolchainPath\lib" -Filter "*mupdf*" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "  Found: $($_.Name)" -ForegroundColor Green
+          }
+          Get-ChildItem -Path "$toolchainPath\lib" -Filter "*mujs*" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "  Found: $($_.Name)" -ForegroundColor Green
+          }
+          
+          Write-Host "Looking for MuPDF DLLs in: $toolchainPath\bin" -ForegroundColor Gray
+          Get-ChildItem -Path "$toolchainPath\bin" -Filter "*mupdf*" -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "  Found: $($_.Name)" -ForegroundColor Green
+          }
+        shell: pwsh
+
       - name: Build
         timeout-minutes: 60
         run: |
