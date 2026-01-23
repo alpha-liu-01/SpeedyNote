@@ -1,4 +1,4 @@
-name: Build SpeedyNote DEB/RPM Packages
+name: Build SpeedyNote Linux Packages
 
 on:
   push:
@@ -10,20 +10,12 @@ on:
 
 jobs:
   build-deb:
-    name: Build DEB Package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, arm64]
+    name: Build DEB Package (Ubuntu/Debian)
+    runs-on: ubuntu-24.04
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Set up QEMU for multi-architecture
-        if: matrix.arch != 'x86_64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: ${{ matrix.arch == 'arm64' && 'arm64' || 'amd64' }}
 
       - name: Install build dependencies
         run: |
@@ -37,35 +29,31 @@ jobs:
             libpoppler-qt6-dev \
             libsdl2-dev \
             libasound2-dev \
+            libmupdf-dev \
+            libharfbuzz-dev \
+            libfreetype-dev \
+            libjpeg-dev \
+            libopenjp2-7-dev \
             dpkg-dev \
-            devscripts \
-            qemu-user-static
+            devscripts
 
-      - name: Create DEB package
+      - name: Build and create DEB package
         run: |
-          # 设置架构环境变量
-          export BUILD_ARCH=${{ matrix.arch }}
+          chmod +x ./build-package.sh
           ./build-package.sh --deb
 
       - name: Upload DEB package
         uses: actions/upload-artifact@v4
         with:
-          name: speedynote-deb-package-${{ matrix.arch }}
+          name: speedynote-deb-amd64
           path: "*.deb"
 
   build-rpm:
-    name: Build RPM Package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-        include:
-          - arch: x86_64
-            container_image: fedora:latest
-          - arch: aarch64
-            container_image: fedora:latest
+    name: Build RPM Package (Fedora/RHEL)
+    runs-on: ubuntu-24.04
     container:
-      image: ${{ matrix.container_image }}
+      image: fedora:latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -81,17 +69,46 @@ jobs:
             poppler-qt6-devel \
             SDL2-devel \
             alsa-lib-devel \
+            mupdf-devel \
+            harfbuzz-devel \
+            freetype-devel \
+            libjpeg-turbo-devel \
+            openjpeg2-devel \
             rpm-build \
-            qemu-user-static
+            rpm-devel
 
-      - name: Create RPM package
+      - name: Build and create RPM package
         run: |
-          # 设置架构环境变量
-          export BUILD_ARCH=${{ matrix.arch }}
+          chmod +x ./build-package.sh
           ./build-package.sh --rpm
 
       - name: Upload RPM package
         uses: actions/upload-artifact@v4
         with:
-          name: speedynote-rpm-package-${{ matrix.arch }}
+          name: speedynote-rpm-x86_64
           path: "*.rpm"
+
+  # Note: ARM64 builds require native ARM64 runners (ubuntu-24.04-arm64)
+  # which may not be available on all GitHub plans.
+  # Uncomment below when ARM64 runners are available:
+  #
+  # build-deb-arm64:
+  #   name: Build DEB Package (ARM64)
+  #   runs-on: ubuntu-24.04-arm64
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #     - name: Install build dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y cmake make pkg-config qt6-base-dev qt6-tools-dev \
+  #           libpoppler-qt6-dev libsdl2-dev libasound2-dev libmupdf-dev \
+  #           libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev \
+  #           dpkg-dev devscripts
+  #     - name: Build and create DEB package
+  #       run: ./build-package.sh --deb
+  #     - name: Upload DEB package
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: speedynote-deb-arm64
+  #         path: "*.deb"
