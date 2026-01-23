@@ -72,7 +72,7 @@ if(WIN32)
     set(MUPDF_LIBRARY_THIRD "${QT_PATH}/lib/libmupdf-third.a")
     
     if(EXISTS "${MUPDF_LIBRARY_MAIN}")
-        message(STATUS "✅ MuPDF found for PDF export")
+        message(STATUS "✅ MuPDF found for PDF export: ${MUPDF_LIBRARY_MAIN}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
         set(MUPDF_FOUND TRUE)
         
@@ -92,10 +92,13 @@ if(WIN32)
         # Start with main library
         set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
         
-        # libmupdf-third.a is optional - MSYS2 may bundle deps into main lib
+        # libmupdf-third.a contains bundled third-party dependencies
+        # Some package builds bundle everything into libmupdf.a, so this is optional
         if(EXISTS "${MUPDF_LIBRARY_THIRD}")
             list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
             message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        else()
+            message(STATUS "   Note: mupdf-third not found (may be bundled into libmupdf.a)")
         endif()
         
         # Add pkg-config dependencies (including zlib and brotli for MuPDF)
@@ -116,14 +119,21 @@ if(WIN32)
         endif()
         if(JBIG2DEC_FOUND)
             list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+            message(STATUS "   Found jbig2dec")
         endif()
         if(GUMBO_FOUND)
             list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+            message(STATUS "   Found gumbo")
         endif()
         if(MUJS_LIBRARY)
             list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
             message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        else()
+            message(STATUS "   ⚠️ mujs not found - JavaScript in PDFs won't work")
         endif()
+        
+        # Debug: show all MuPDF libraries that will be linked
+        message(STATUS "   MuPDF libraries: ${MUPDF_LIBRARIES}")
     else()
         message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
         message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
@@ -655,10 +665,17 @@ if(WIN32)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
+    
     # Add MuPDF for PDF export
     if(MUPDF_FOUND)
+        # MuPDF static libraries and dependencies
         list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+        message(STATUS "MuPDF: Will link with: ${MUPDF_LIBRARIES}")
+    else()
+        message(STATUS "MuPDF: NOT linking (MUPDF_FOUND=${MUPDF_FOUND})")
     endif()
+    
+    message(STATUS "Windows PLATFORM_LIBS: ${PLATFORM_LIBS}")
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
 elseif(APPLE)

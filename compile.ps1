@@ -52,11 +52,48 @@ if (-not $msys2Root) {
 
 $toolchainPath = "$msys2Root\$toolchain"
 
+# Clean and recreate build folder
 if (Test-Path ".\build" -PathType Container) {
-    rm -r build
-    mkdir build
+    # Kill any running NoteApp instances that might lock files
+    $noteAppProcesses = Get-Process -Name "NoteApp" -ErrorAction SilentlyContinue
+    if ($noteAppProcesses) {
+        Write-Host "Stopping running NoteApp instances..." -ForegroundColor Yellow
+        $noteAppProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+    
+    # Try to remove the build folder
+    Write-Host "Cleaning build folder..." -ForegroundColor Gray
+    Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # If it still exists, try again with a delay
+    if (Test-Path ".\build" -PathType Container) {
+        Start-Sleep -Seconds 1
+        Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    
+    # If it STILL exists, at minimum delete CMake cache files to avoid stale config
+    if (Test-Path ".\build" -PathType Container) {
+        Write-Host "⚠️  Could not fully clean build folder - cleaning CMake cache..." -ForegroundColor Yellow
+        # These files MUST be deleted for a clean CMake configuration
+        Remove-Item -Path ".\build\CMakeCache.txt" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\CMakeFiles" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\cmake_install.cmake" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\Makefile" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path ".\build\.cmake" -Recurse -Force -ErrorAction SilentlyContinue
+        
+        # Verify CMake cache is gone
+        if (Test-Path ".\build\CMakeCache.txt") {
+            Write-Host "❌ FATAL: Cannot delete CMakeCache.txt - please close any programs using the build folder" -ForegroundColor Red
+            Write-Host "   Try: Close File Explorer, IDE, or restart the computer" -ForegroundColor Yellow
+            exit 1
+        }
+        Write-Host "   CMake cache cleaned, continuing with partial rebuild..." -ForegroundColor Yellow
+    } else {
+        New-Item -ItemType Directory -Path ".\build" | Out-Null
+    }
 } else {
-    mkdir build
+    New-Item -ItemType Directory -Path ".\build" | Out-Null
 }
 
 # ✅ Compile .ts → .qm files
@@ -257,7 +294,7 @@ foreach ($popplerDll in $popplerDlls) {
 }
 
 Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
-Write-Host "   Note: MuPDF is statically linked (no libmupdf.dll needed)" -ForegroundColor Gray
+Write-Host "   Note: MuPDF for PDF export is statically linked (if enabled in CMake)" -ForegroundColor Gray
 
 # ✅ Copy Poppler data files (fonts, etc.)
 Copy-Item -Path "$toolchainPath\share\poppler" -Destination "..\build\share\poppler" -Recurse -Force
