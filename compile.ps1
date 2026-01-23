@@ -247,6 +247,39 @@ Write-Host "   PDF rendering: Poppler" -ForegroundColor Cyan
 Write-Host "   PDF export: MuPDF (statically linked)" -ForegroundColor Cyan
 Write-Host ""
 
+# ✅ Clean up build artifacts (not needed for packaging)
+Write-Host "Cleaning up build artifacts..." -ForegroundColor Gray
+$cleanupItems = @(
+    ".qt",                    # Qt internal cache
+    "NoteApp_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
+    "CMakeFiles",             # CMake internal files
+    "CMakeCache.txt",         # CMake cache
+    "cmake_install.cmake",    # CMake install script
+    "Makefile",               # Generated Makefile
+    "compile_commands.json",  # Clang compilation database
+    "qrc_*.cpp",              # Generated resource files
+    "*.o",                    # Object files
+    "*.obj"                   # Object files (MSVC style)
+)
+
+$cleanedCount = 0
+foreach ($pattern in $cleanupItems) {
+    $items = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue -Force
+    foreach ($item in $items) {
+        if ($item.PSIsContainer) {
+            Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        } else {
+            Remove-Item -Path $item.FullName -Force -ErrorAction SilentlyContinue
+        }
+        $cleanedCount++
+    }
+}
+Write-Host "   Removed $cleanedCount build artifact(s)" -ForegroundColor Gray
+
+Write-Host ""
+Write-Host "📦 Build folder is ready for packaging with Inno Setup" -ForegroundColor Green
+Write-Host ""
+
 # ✅ Run the application
 ./NoteApp.exe
 cd ../

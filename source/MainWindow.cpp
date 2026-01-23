@@ -151,7 +151,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.1.0"));
+    setWindowTitle(tr("SpeedyNote 1.1.1"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -4734,6 +4734,11 @@ void MainWindow::setupPagePanelActionBar()
         if (DocumentViewport* vp = currentViewport()) {
             m_pagePanelActionBar->setAutoLayoutEnabled(vp->autoLayoutEnabled());
         }
+    });
+    
+    // Search: Toggle the PDF search bar (Ctrl+F)
+    connect(m_pagePanelActionBar, &PagePanelActionBar::searchClicked, this, [this]() {
+        showPdfSearchBar();
     });
     
     // -------------------------------------------------------------------------

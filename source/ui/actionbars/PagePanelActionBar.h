@@ -138,6 +138,13 @@ signals:
      * The caller should toggle between 1-column and auto 1/2 column mode.
      */
     void layoutToggleClicked();
+    
+    /**
+     * @brief Emitted when the search button is clicked.
+     * 
+     * The caller should toggle the PDF search bar.
+     */
+    void searchClicked();
 
 private slots:
     void onWheelPageChanged(int page);
@@ -147,6 +154,7 @@ private:
     void setupConnections();
 
     // Navigation buttons
+    ActionBarButton* m_searchButton = nullptr;        // PDF search (Ctrl+F)
     ActionBarButton* m_pageUpButton = nullptr;
     PageWheelPicker* m_wheelPicker = nullptr;
     ActionBarButton* m_pageDownButton = nullptr;

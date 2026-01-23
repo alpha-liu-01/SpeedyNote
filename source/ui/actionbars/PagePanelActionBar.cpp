@@ -15,6 +15,12 @@ void PagePanelActionBar::setupUI()
 {
     // === Navigation Section ===
     
+    // Search button (PDF text search, Ctrl+F)
+    m_searchButton = new ActionBarButton(this);
+    m_searchButton->setIconName("zoom");
+    m_searchButton->setToolTip(tr("Find in Document (Ctrl+F)"));
+    addButton(m_searchButton);
+    
     // Page Up button
     m_pageUpButton = new ActionBarButton(this);
     m_pageUpButton->setIconName("up_arrow");
@@ -63,6 +69,10 @@ void PagePanelActionBar::setupUI()
 
 void PagePanelActionBar::setupConnections()
 {
+    // Search signal
+    connect(m_searchButton, &ActionBarButton::clicked,
+            this, &PagePanelActionBar::searchClicked);
+    
     // Navigation signals
     connect(m_pageUpButton, &ActionBarButton::clicked,
             this, &PagePanelActionBar::pageUpClicked);
@@ -158,6 +168,9 @@ void PagePanelActionBar::setDarkMode(bool darkMode)
     ActionBar::setDarkMode(darkMode);
     
     // Propagate to all child widgets
+    if (m_searchButton) {
+        m_searchButton->setDarkMode(darkMode);
+    }
     if (m_pageUpButton) {
         m_pageUpButton->setDarkMode(darkMode);
     }

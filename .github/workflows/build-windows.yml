@@ -3,7 +3,7 @@ name: Build SpeedyNote Windows Installer
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags (e.g., v1.1.0, v2.0.0-beta)
+      - 'v*'  # Trigger on version tags (e.g., v1.1.1, v2.0.0-beta)
 
 jobs:
   build-windows:
@@ -193,6 +193,38 @@ jobs:
             Copy-Item -Path $shareSource -Destination "share" -Recurse -Force
             Write-Host "Copied Poppler data files" -ForegroundColor Green
           }
+          Write-Host "::endgroup::"
+          
+          Write-Host "::endgroup::"
+          
+          Write-Host "::group::Clean up build artifacts" -ForegroundColor Cyan
+          # Remove build artifacts not needed for packaging
+          $cleanupItems = @(
+            ".qt",                    # Qt internal cache
+            "NoteApp_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
+            "CMakeFiles",             # CMake internal files
+            "CMakeCache.txt",         # CMake cache
+            "cmake_install.cmake",    # CMake install script
+            "Makefile",               # Generated Makefile
+            "compile_commands.json",  # Clang compilation database
+            "qrc_*.cpp",              # Generated resource files
+            "*.o",                    # Object files
+            "*.obj"                   # Object files (MSVC style)
+          )
+          
+          $cleanedCount = 0
+          foreach ($pattern in $cleanupItems) {
+            $items = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue -Force
+            foreach ($item in $items) {
+              if ($item.PSIsContainer) {
+                Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+              } else {
+                Remove-Item -Path $item.FullName -Force -ErrorAction SilentlyContinue
+              }
+              $cleanedCount++
+            }
+          }
+          Write-Host "Removed $cleanedCount build artifact(s)" -ForegroundColor Gray
           Write-Host "::endgroup::"
           
           Write-Host "Build completed successfully!" -ForegroundColor Green

@@ -147,7 +147,7 @@ void PdfSearchBar::setupUi()
     // Search input
     m_searchInput = new QLineEdit(this);
     m_searchInput->setPlaceholderText(tr("Search in PDF..."));
-    m_searchInput->setMinimumWidth(200);
+    m_searchInput->setMinimumWidth(110);
     m_searchInput->setClearButtonEnabled(true);
     layout->addWidget(m_searchInput, 1);  // Stretch
     
