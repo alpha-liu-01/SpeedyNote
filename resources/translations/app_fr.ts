@@ -496,7 +496,7 @@ Continue?</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1556"/>
-        <source>Version 1.0.2</source>
+        <source>Version 1.1.0</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1380,7 +1380,7 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="154"/>
-        <source>SpeedyNote 1.0.2</source>
+        <source>SpeedyNote 1.1.0</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
