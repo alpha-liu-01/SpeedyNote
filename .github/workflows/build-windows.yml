@@ -76,7 +76,9 @@ jobs:
             "-DCMAKE_CXX_COMPILER=clang++",
             "-DCMAKE_MAKE_PROGRAM=mingw32-make",
             "-DCMAKE_BUILD_TYPE=Release",
-            "-DENABLE_DEBUG_OUTPUT=OFF"
+            "-DENABLE_DEBUG_OUTPUT=OFF",
+            "-DQT_PATH=$toolchainPath",
+            "-DSDL2_ROOT=$toolchainPath"
           )
           
           & cmake @cmakeArgs ..
@@ -84,7 +86,8 @@ jobs:
           Write-Host "::endgroup::"
           
           Write-Host "::group::Build project" -ForegroundColor Cyan
-          & cmake --build . --config Release -- -j$env:NUMBER_OF_PROCESSORS
+          # Use 4 parallel jobs (GitHub Actions runners have 2 cores, but 4 jobs is usually safe)
+          & cmake --build . --config Release -- -j4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "::endgroup::"
           
