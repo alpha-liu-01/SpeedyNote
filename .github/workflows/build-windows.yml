@@ -230,22 +230,3 @@ jobs:
         with:
           name: speedynote-windows-installer-x86_64
           path: "Output/*.exe"
-
-      - name: Upload Portable Build
-        uses: actions/upload-artifact@v4
-        with:
-          name: speedynote-windows-portable-x86_64
-          path: |
-            build/NoteApp.exe
-            build/*.dll
-            build/share/
-            build/*.qm
-            build/platforms/
-            build/styles/
-            build/imageformats/
-            build/iconengines/
-            build/tls/
-
-  # ARM64 cross-compilation (builds x86_64 binary that can run on ARM64 via emulation)
-  # Note: GitHub Actions doesn't have native ARM64 Windows runners yet
-  # When available, this can be updated to use native compilation
