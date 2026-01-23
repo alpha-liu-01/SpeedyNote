@@ -34,6 +34,9 @@ jobs:
             libfreetype-dev \
             libjpeg-dev \
             libopenjp2-7-dev \
+            libjbig2dec0-dev \
+            libgumbo-dev \
+            libmujs-dev \
             dpkg-dev \
             devscripts
 
@@ -74,6 +77,9 @@ jobs:
             freetype-devel \
             libjpeg-turbo-devel \
             openjpeg2-devel \
+            jbig2dec-devel \
+            gumbo-parser-devel \
+            mujs-devel \
             rpm-build \
             rpm-devel
 
