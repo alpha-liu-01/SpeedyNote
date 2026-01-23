@@ -52,11 +52,35 @@ if (-not $msys2Root) {
 
 $toolchainPath = "$msys2Root\$toolchain"
 
+# Clean and recreate build folder
 if (Test-Path ".\build" -PathType Container) {
-    rm -r build
-    mkdir build
+    # Kill any running NoteApp instances that might lock files
+    $noteAppProcesses = Get-Process -Name "NoteApp" -ErrorAction SilentlyContinue
+    if ($noteAppProcesses) {
+        Write-Host "Stopping running NoteApp instances..." -ForegroundColor Yellow
+        $noteAppProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+    
+    # Try to remove the build folder
+    Write-Host "Cleaning build folder..." -ForegroundColor Gray
+    Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
+    
+    # If it still exists, try again with a delay
+    if (Test-Path ".\build" -PathType Container) {
+        Start-Sleep -Seconds 1
+        Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    
+    # If it STILL exists, warn but continue (incremental build)
+    if (Test-Path ".\build" -PathType Container) {
+        Write-Host "⚠️  Could not fully clean build folder (files may be locked)" -ForegroundColor Yellow
+        Write-Host "   Continuing with incremental build..." -ForegroundColor Yellow
+    } else {
+        New-Item -ItemType Directory -Path ".\build" | Out-Null
+    }
 } else {
-    mkdir build
+    New-Item -ItemType Directory -Path ".\build" | Out-Null
 }
 
 # ✅ Compile .ts → .qm files
