@@ -577,8 +577,8 @@ Continue?</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1556"/>
-        <source>Version 1.1.0</source>
-        <translation type="unfinished">1.1.0 版本</translation>
+        <source>Version 1.1.1</source>
+        <translation type="unfinished">1.1.1 版本</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1573"/>
@@ -1389,19 +1389,19 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="419"/>
-        <location filename="../../source/MainWindow.cpp" line="5883"/>
+        <location filename="../../source/MainWindow.cpp" line="5888"/>
         <source>canvas</source>
         <translation type="unfinished">画布</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="419"/>
-        <location filename="../../source/MainWindow.cpp" line="5883"/>
+        <location filename="../../source/MainWindow.cpp" line="5888"/>
         <source>document</source>
         <translation type="unfinished">文档</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="422"/>
-        <location filename="../../source/MainWindow.cpp" line="5886"/>
+        <location filename="../../source/MainWindow.cpp" line="5891"/>
         <source>Save Changes?</source>
         <translation type="unfinished">保存修改？</translation>
     </message>
@@ -1414,8 +1414,8 @@ This action cannot be undone.</source>
         <location filename="../../source/MainWindow.cpp" line="443"/>
         <location filename="../../source/MainWindow.cpp" line="2779"/>
         <location filename="../../source/MainWindow.cpp" line="2868"/>
-        <location filename="../../source/MainWindow.cpp" line="5910"/>
-        <location filename="../../source/MainWindow.cpp" line="6188"/>
+        <location filename="../../source/MainWindow.cpp" line="5915"/>
+        <location filename="../../source/MainWindow.cpp" line="6193"/>
         <source>Save Error</source>
         <translation type="unfinished">保存失败</translation>
     </message>
@@ -1454,8 +1454,8 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="154"/>
-        <source>SpeedyNote 1.1.0</source>
-        <translation type="unfinished">极疾记 1.1.0</translation>
+        <source>SpeedyNote 1.1.1</source>
+        <translation type="unfinished">极疾记 1.1.1</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="804"/>
@@ -1745,32 +1745,32 @@ document.json manifest 缺失。
         <translation type="unfinished">没有找到结果</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5273"/>
+        <location filename="../../source/MainWindow.cpp" line="5278"/>
         <source>New Edgeless Canvas</source>
         <translation type="unfinished">新的无边笔记</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5278"/>
+        <location filename="../../source/MainWindow.cpp" line="5283"/>
         <source>New Paged Notebook</source>
         <translation type="unfinished">新的分页笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5286"/>
+        <location filename="../../source/MainWindow.cpp" line="5291"/>
         <source>Open PDF...</source>
         <translation type="unfinished">打开PDF...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5291"/>
+        <location filename="../../source/MainWindow.cpp" line="5296"/>
         <source>Open Notebook...</source>
         <translation type="unfinished">打开笔记本...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5887"/>
+        <location filename="../../source/MainWindow.cpp" line="5892"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation type="unfinished">这个 %1 &quot;%2&quot;有未保存的变更。你要在退出之前保存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5911"/>
+        <location filename="../../source/MainWindow.cpp" line="5916"/>
         <source>Failed to save document to:
 %1
 
@@ -1780,12 +1780,12 @@ Quit anyway?</source>
 仍要退出吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6189"/>
+        <location filename="../../source/MainWindow.cpp" line="6194"/>
         <source>Failed to save document before closing.</source>
         <translation type="unfinished">无法在退出前保存文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6234"/>
+        <location filename="../../source/MainWindow.cpp" line="6239"/>
         <source>The file does not exist:
 %1</source>
         <translation type="unfinished">这个文件不存在：
@@ -1793,20 +1793,20 @@ Quit anyway?</source>
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6265"/>
-        <location filename="../../source/MainWindow.cpp" line="6283"/>
+        <location filename="../../source/MainWindow.cpp" line="6270"/>
+        <location filename="../../source/MainWindow.cpp" line="6288"/>
         <source>Open Error</source>
         <translation type="unfinished">打开失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6266"/>
+        <location filename="../../source/MainWindow.cpp" line="6271"/>
         <source>Failed to open file:
 %1</source>
         <translation type="unfinished">无法打开文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6284"/>
+        <location filename="../../source/MainWindow.cpp" line="6289"/>
         <source>Failed to create tab for:
 %1</source>
         <translation type="unfinished">无法打开标签页给：
@@ -1828,7 +1828,7 @@ Quit anyway?</source>
         <translation type="unfinished">导出成功</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6233"/>
+        <location filename="../../source/MainWindow.cpp" line="6238"/>
         <source>File Not Found</source>
         <translation type="unfinished">找不到文件</translation>
     </message>
@@ -2268,38 +2268,43 @@ Please remove the password and try again.</source>
     <name>PagePanelActionBar</name>
     <message>
         <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="21"/>
+        <source>Find in Document (Ctrl+F)</source>
+        <translation type="unfinished">在文档中查找 (Ctrl+F)</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="27"/>
         <source>Previous Page (Page Up)</source>
         <translation type="unfinished">上一页</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="26"/>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="32"/>
         <source>Drag to scroll through pages</source>
         <translation type="unfinished">滑动来翻页</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="32"/>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="38"/>
         <source>Next Page (Page Down)</source>
         <translation type="unfinished">下一页</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="38"/>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="44"/>
         <source>Toggle Column Layout (Ctrl+2)
 1 = Single Column
 A = Auto 1/2 Columns</source>
         <translation type="unfinished">在1列和自动2列布局中切换</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="49"/>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="55"/>
         <source>Add Page at End</source>
         <translation type="unfinished">在末尾添加页</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="55"/>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="61"/>
         <source>Insert Page After Current</source>
         <translation type="unfinished">在当前页后插入页</translation>
     </message>
     <message>
-        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="60"/>
+        <location filename="../../source/ui/actionbars/PagePanelActionBar.cpp" line="66"/>
         <source>Delete Current Page</source>
         <translation type="unfinished">删除本页</translation>
     </message>
@@ -3310,7 +3315,7 @@ Try a different search term.</source>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="188"/>
         <source>Toggle Right Sidebar</source>
-        <translation type="unfinished">开关游侧栏</translation>
+        <translation type="unfinished">开关右侧栏</translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="191"/>
