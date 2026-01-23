@@ -2,7 +2,8 @@ param(
     [switch]$arm64,      # Build for ARM64 Windows (Snapdragon)
     [switch]$old,        # Build for older x86_64 CPUs (SSE3/SSSE3)
     [switch]$legacy,     # Alias for -old
-    [switch]$debug       # Enable verbose debug output (qDebug)
+    [switch]$debug,      # Enable verbose debug output (qDebug)
+    [switch]$norun       # Don't run the application after building (for CI/remote builds)
 )
 
 # ✅ Determine architecture and set appropriate toolchain
@@ -280,6 +281,10 @@ Write-Host ""
 Write-Host "📦 Build folder is ready for packaging with Inno Setup" -ForegroundColor Green
 Write-Host ""
 
-# ✅ Run the application
-./NoteApp.exe
 cd ../
+
+# ✅ Run the application (unless -norun flag is set)
+if (-not $norun) {
+    Write-Host "Launching application..." -ForegroundColor Cyan
+    & .\build\NoteApp.exe
+}

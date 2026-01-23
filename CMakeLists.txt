@@ -37,15 +37,18 @@ if(WIN32)
     message(STATUS "🪟 Configuring for Windows")
     
     # Detect architecture and set toolchain paths
+    # Use FORCE to ensure path is updated when switching between architectures
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
-        set(QT_PATH "C:/msys64/clangarm64" CACHE PATH "Path to Qt installation")
-        set(SDL2_ROOT "C:/msys64/clangarm64" CACHE PATH "Path to SDL2")
+        set(QT_PATH "C:/msys64/clangarm64" CACHE PATH "Path to Qt installation" FORCE)
+        set(SDL2_ROOT "C:/msys64/clangarm64" CACHE PATH "Path to SDL2" FORCE)
+        set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-aarch64")
         message(STATUS "Detected ARM64 Windows - using clangarm64 toolchain")
     else()
-        set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation")
-        set(SDL2_ROOT "C:/msys64/clang64" CACHE PATH "Path to SDL2")
+        set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation" FORCE)
+        set(SDL2_ROOT "C:/msys64/clang64" CACHE PATH "Path to SDL2" FORCE)
+        set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-x86_64")
         message(STATUS "Detected x86_64 Windows - using clang64 toolchain")
-endif()
+    endif()
 
     # CMake paths
     set(CMAKE_PREFIX_PATH "${QT_PATH}/lib/cmake" "${SDL2_ROOT}/lib/cmake")
@@ -123,7 +126,7 @@ endif()
         endif()
     else()
         message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
-        message(STATUS "   Install with: pacman -S mingw-w64-clang-x86_64-mupdf")
+        message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
         set(MUPDF_FOUND FALSE)
     endif()
 
