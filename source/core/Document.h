@@ -633,6 +633,32 @@ public:
      */
     const std::vector<LayerDefinition>& edgelessLayers() const { return m_edgelessLayers; }
     
+    // ===== Edgeless Position History (Phase 4) =====
+    
+    /**
+     * @brief Get the last viewport position for edgeless mode.
+     * @return Document coordinates of the last viewport center.
+     */
+    QPointF edgelessLastPosition() const { return m_edgelessLastPosition; }
+    
+    /**
+     * @brief Set the last viewport position for edgeless mode.
+     * @param pos Document coordinates of the viewport center.
+     */
+    void setEdgelessLastPosition(const QPointF& pos) { m_edgelessLastPosition = pos; }
+    
+    /**
+     * @brief Get the position history stack for edgeless mode.
+     * @return Vector of document coordinates (most recent last).
+     */
+    const QVector<QPointF>& edgelessPositionHistory() const { return m_edgelessPositionHistory; }
+    
+    /**
+     * @brief Set the position history stack for edgeless mode.
+     * @param history Vector of document coordinates.
+     */
+    void setEdgelessPositionHistory(const QVector<QPointF>& history) { m_edgelessPositionHistory = history; }
+    
     // =========================================================================
     // PDF Reference Management (Task 1.2.4)
     // =========================================================================
@@ -837,9 +863,7 @@ public:
      * Phase O1.7: Returns m_pageOrder.size() in lazy loading mode.
      */
     int pageCount() const { 
-        return m_pageOrder.isEmpty() 
-            ? static_cast<int>(m_pages.size()) 
-            : m_pageOrder.size(); 
+        return m_pageOrder.size(); 
     }
     
     /**
@@ -1024,15 +1048,6 @@ public:
      * Called automatically by factory methods.
      */
     void ensureMinimumPages();
-    
-    /**
-     * @brief Find the document page index for a given PDF page.
-     * @param pdfPageIndex 0-based PDF page index.
-     * @return Document page index, or -1 if not found.
-     * 
-     * Searches pages with BackgroundType::PDF for matching pdfPageNumber.
-     */
-    int findPageByPdfPage(int pdfPageIndex) const;
     
     /**
      * @brief Create pages for all PDF pages.
@@ -1220,9 +1235,6 @@ private:
     bool m_needsPdfRelink = false;                  ///< True if PDF not found at either path (Phase SHARE)
     std::unique_ptr<PdfProvider> m_pdfProvider;    ///< Loaded PDF (may be null)
     
-    // ===== Pages (Task 1.2.5) =====
-    std::vector<std::unique_ptr<Page>> m_pages;    ///< All pages in paged mode (legacy, before O1.7)
-    
     // ===== Paged Mode Lazy Loading (Phase O1.7) =====
     /// Ordered list of page UUIDs. Defines page order in the document.
     /// Pages are loaded on-demand from pages/{uuid}.json files.
@@ -1278,6 +1290,15 @@ private:
     
     /// True if layer manifest has unsaved changes (need to save document.json).
     bool m_edgelessManifestDirty = false;
+    
+    // ===== Edgeless Position History (Phase 4) =====
+    /// Last viewport center position in document coordinates.
+    /// Used to restore position when reopening the document.
+    QPointF m_edgelessLastPosition{0.0, 0.0};
+    
+    /// Navigation history for "go back" functionality.
+    /// Stores document coordinates of previous viewport positions.
+    QVector<QPointF> m_edgelessPositionHistory;
     
     // ===== UUID→Index Cache (Phase C.0.2) =====
     /// Cached mapping from page UUID to index for O(1) lookups.

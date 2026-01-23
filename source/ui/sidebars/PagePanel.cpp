@@ -304,6 +304,16 @@ void PagePanel::invalidateAllThumbnails()
     }
 }
 
+void PagePanel::cancelPendingRenders()
+{
+    // Cancel all pending thumbnail renders and wait for completion.
+    // This is used before operations that access Document pages directly
+    // (like MainWindow::renderPage0Thumbnail) to avoid race conditions.
+    if (m_model) {
+        m_model->cancelPendingRenders();
+    }
+}
+
 void PagePanel::performPendingInvalidation()
 {
     if (m_needsFullRefresh) {

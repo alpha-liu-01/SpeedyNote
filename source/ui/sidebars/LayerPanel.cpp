@@ -705,6 +705,87 @@ void LayerPanel::deselectAllLayers()
     emit selectionChanged(selectedLayerIndices());
 }
 
+void LayerPanel::toggleSelectAllLayers()
+{
+    // Same logic as the All/None button
+    if (selectedLayerCount() > 0) {
+        deselectAllLayers();
+    } else {
+        selectAllLayers();
+    }
+}
+
+// ============================================================================
+// Phase 6.6: Keyboard Shortcut Actions
+// ============================================================================
+
+void LayerPanel::addNewLayerAction()
+{
+    // Delegate to the button handler which has the full workflow
+    onAddLayerClicked();
+}
+
+void LayerPanel::toggleActiveLayerVisibility()
+{
+    if (!m_page && !m_edgelessDoc) {
+        return;
+    }
+    
+    int activeIndex = getActiveLayerIndex();
+    int layerCount = getLayerCount();
+    if (activeIndex < 0 || activeIndex >= layerCount) {
+        return;
+    }
+    
+    bool currentVisible = getLayerVisible(activeIndex);
+    setLayerVisible(activeIndex, !currentVisible);
+    
+    // Update the widget if it exists
+    int widgetIdx = layerIndexToWidgetIndex(activeIndex);
+    if (widgetIdx >= 0 && widgetIdx < m_layerItems.size()) {
+        m_layerItems[widgetIdx]->setLayerVisible(!currentVisible);
+    }
+    
+    emit layerVisibilityChanged(activeIndex, !currentVisible);
+}
+
+void LayerPanel::selectTopLayer()
+{
+    if (!m_page && !m_edgelessDoc) {
+        return;
+    }
+    
+    int layerCount = getLayerCount();
+    if (layerCount <= 0) {
+        return;
+    }
+    
+    // Top layer has the highest index
+    int topIndex = layerCount - 1;
+    onLayerItemClicked(topIndex);
+}
+
+void LayerPanel::selectBottomLayer()
+{
+    if (!m_page && !m_edgelessDoc) {
+        return;
+    }
+    
+    int layerCount = getLayerCount();
+    if (layerCount <= 0) {
+        return;
+    }
+    
+    // Bottom layer has index 0
+    onLayerItemClicked(0);
+}
+
+void LayerPanel::mergeSelectedLayers()
+{
+    // Delegate to the button handler which has the full workflow
+    onMergeClicked();
+}
+
 // ============================================================================
 // Phase 5.3/L.2: Selection Slots
 // ============================================================================

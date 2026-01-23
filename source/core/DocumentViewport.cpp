@@ -6,6 +6,7 @@
 
 #include "DocumentViewport.h"
 #include "TouchGestureHandler.h"
+// Note: ShortcutManager.h no longer needed here - all shortcuts handled by MainWindow
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
@@ -31,6 +32,10 @@
 #include <QSet>       // For efficient ID lookup in eraseAt
 #include <QClipboard>     // For clipboard access (O2.4)
 #include <QGuiApplication> // For clipboard access (O2.4)
+#include <QApplication>    // For focusWidget() - text input focus check
+#include <QLineEdit>       // For text input focus check
+#include <QTextEdit>       // For text input focus check
+#include <QPlainTextEdit>  // For text input focus check
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QMimeData>      // For clipboard content type check (O2.4)
 
@@ -49,6 +54,9 @@
 // PDF uses 72 DPI, Page uses 96 DPI - scale factor for coordinate conversion
 static constexpr qreal PDF_TO_PAGE_SCALE = 96.0 / 72.0;  // PDF coords → Page coords
 static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF coords
+
+// Note: eventMatchesAction() helper was removed - all keyboard shortcuts
+// are now handled by MainWindow's QShortcut system for focus-independent operation.
 
 // ===== Constructor & Destructor =====
 
@@ -268,10 +276,38 @@ void DocumentViewport::setDocument(Document* doc)
     m_zoomLevel = 1.0;
     m_panOffset = QPointF(0, 0);
     m_currentPageIndex = 0;
+    m_needsPositionRestore = false;  // Reset deferred restore flag for new document
+    m_edgelessPositionHistory.clear();  // Clear old position history for new document
     
-    // If document exists, restore last accessed page or zoom to width
+    // Track if we need to defer update for edgeless position restore
+    bool deferUpdateForEdgeless = false;
+    
+    // If document exists, restore last accessed page/position or set initial view
     if (m_document) {
-        if (m_document->lastAccessedPage > 0) {
+        if (m_document->isEdgeless()) {
+            // Phase 4: Restore edgeless position from document
+            QPointF lastPos = m_document->edgelessLastPosition();
+            
+            // If there's a saved position, defer update and restore in showEvent
+            // This ensures the first paint uses the correct pan offset
+            if (!lastPos.isNull()) {
+                deferUpdateForEdgeless = true;
+                // NOTE: We can't calculate the correct pan offset here because
+                // width() and height() may not be valid yet. Just set the flag
+                // and let showEvent do the proper restore.
+            }
+            
+            // If widget is already visible with valid dimensions, restore now
+            // Otherwise mark for restore in showEvent/resizeEvent
+            if (isVisible() && width() > 0 && height() > 0) {
+                // Widget is visible with valid dimensions - restore now
+                applyRestoredEdgelessPosition();
+                // Don't set flag - we already restored
+            } else {
+                // Widget not yet visible - restore in showEvent/resizeEvent
+                m_needsPositionRestore = true;
+            }
+        } else if (m_document->lastAccessedPage > 0) {
             m_currentPageIndex = qMin(m_document->lastAccessedPage, 
                                        m_document->pageCount() - 1);
             
@@ -287,7 +323,7 @@ void DocumentViewport::setDocument(Document* doc)
                     }
                 });
             }
-        } else if (!m_document->isEdgeless()) {
+        } else {
             // New paged document: zoom to fit page width
             // Deferred to ensure widget has correct dimensions
             QTimer::singleShot(0, this, [this]() {
@@ -298,8 +334,10 @@ void DocumentViewport::setDocument(Document* doc)
         }
     }
     
-    // Trigger repaint
-    update();
+    // Trigger repaint (skip for edgeless with saved position - restore will trigger it)
+    if (!deferUpdateForEdgeless) {
+        update();
+    }
     
     // Emit signals
     emit zoomChanged(m_zoomLevel);
@@ -910,9 +948,8 @@ void DocumentViewport::navigateToEdgelessPosition(int tileX, int tileY, QPointF 
     QPointF viewportCenter(width() / 2.0, height() / 2.0);
     QPointF newPanOffset = docPosition - viewportCenter / m_zoomLevel;
     
+    // setPanOffset already calls update()
     setPanOffset(newPanOffset);
-    
-    update();
     
 #ifdef SPEEDYNOTE_DEBUG
     // Verify: viewportCenter = (docCenter - panOffset) * zoom
@@ -923,6 +960,191 @@ void DocumentViewport::navigateToEdgelessPosition(int tileX, int tileY, QPointF 
              << "| actual viewport center (doc coords) =" << actualCenter
              << "| difference =" << (actualCenter - docPosition);
 #endif
+}
+
+// ============================================================================
+// Edgeless Position History (Phase 4)
+// ============================================================================
+
+QPointF DocumentViewport::currentCenterPosition() const
+{
+    // Calculate the document position at the center of the viewport
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    return viewportCenter / m_zoomLevel + m_panOffset;
+}
+
+void DocumentViewport::pushPositionHistory()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    QPointF currentPos = currentCenterPosition();
+    
+    // Don't push if we're already at this position (avoid duplicates)
+    if (!m_edgelessPositionHistory.isEmpty()) {
+        QPointF lastPos = m_edgelessPositionHistory.top();
+        // Consider positions within 10 pixels as "same"
+        if ((currentPos - lastPos).manhattanLength() < 10.0) {
+            return;
+        }
+    }
+    
+    // Trim history if at capacity - remove oldest (bottom) entry
+    // QStack doesn't have removeFirst(), so we pop all except oldest, discard oldest, repush
+    // O(n) but acceptable for small MAX_POSITION_HISTORY (20 items)
+    if (m_edgelessPositionHistory.size() >= MAX_POSITION_HISTORY) {
+        QStack<QPointF> temp;
+        // Move all except the bottom (oldest) to temp
+        while (m_edgelessPositionHistory.size() > 1) {
+            temp.push(m_edgelessPositionHistory.pop());
+        }
+        // Discard the oldest (now the only item left)
+        m_edgelessPositionHistory.pop();
+        // Restore the rest
+        while (!temp.isEmpty()) {
+            m_edgelessPositionHistory.push(temp.pop());
+        }
+    }
+    
+    m_edgelessPositionHistory.push(currentPos);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Pushed position:" << currentPos 
+             << "| History size:" << m_edgelessPositionHistory.size();
+#endif
+}
+
+void DocumentViewport::returnToOrigin()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Save current position before jumping
+    pushPositionHistory();
+    
+    // Navigate to origin (0, 0)
+    QPointF origin(0.0, 0.0);
+    
+    // Use the existing navigation method with tile (0, 0)
+    navigateToEdgelessPosition(0, 0, origin);
+    
+    // BUG FIX: Mark document as modified so position history is saved
+    // This ensures the * indicator shows on the tab
+    emit documentModified();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Returned to origin";
+#endif
+}
+
+void DocumentViewport::goBackPosition()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    if (m_edgelessPositionHistory.isEmpty()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[PositionHistory] Go back: history empty";
+#endif
+        return;
+    }
+    
+    QPointF previousPos = m_edgelessPositionHistory.pop();
+    
+    // Calculate tile coordinates from document position
+    int tileX = static_cast<int>(std::floor(previousPos.x() / Document::EDGELESS_TILE_SIZE));
+    int tileY = static_cast<int>(std::floor(previousPos.y() / Document::EDGELESS_TILE_SIZE));
+    
+    navigateToEdgelessPosition(tileX, tileY, previousPos);
+    
+    // BUG FIX: Mark document as modified so position history is saved
+    // This ensures the * indicator shows on the tab
+    emit documentModified();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Went back to:" << previousPos
+             << "| tile:" << tileX << "," << tileY
+             << "| Remaining history:" << m_edgelessPositionHistory.size();
+#endif
+}
+
+bool DocumentViewport::hasPositionHistory() const
+{
+    return !m_edgelessPositionHistory.isEmpty();
+}
+
+void DocumentViewport::syncPositionToDocument()
+{
+    // Only applies to edgeless mode
+    if (!m_document || !m_document->isEdgeless()) {
+        return;
+    }
+    
+    // Save current viewport center position
+    QPointF currentPos = currentCenterPosition();
+    m_document->setEdgelessLastPosition(currentPos);
+    
+    // Convert QStack to QVector for Document storage
+    // QStack stores items in LIFO order, so we need to reverse to get oldest-to-newest
+    QVector<QPointF> historyVec;
+    historyVec.reserve(m_edgelessPositionHistory.size());
+    
+    // Copy stack to temp, then pop into vector (gives us correct order)
+    QStack<QPointF> tempStack = m_edgelessPositionHistory;
+    while (!tempStack.isEmpty()) {
+        historyVec.append(tempStack.pop());  // O(1) append instead of O(n) prepend
+    }
+    // Reverse to get oldest-to-newest order
+    std::reverse(historyVec.begin(), historyVec.end());
+    
+    m_document->setEdgelessPositionHistory(historyVec);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Synced to document: lastPos =" << currentPos
+             << "| history size =" << historyVec.size();
+#endif
+}
+
+bool DocumentViewport::applyRestoredEdgelessPosition()
+{
+    // Only applies to edgeless mode with valid dimensions
+    if (!m_document || !m_document->isEdgeless()) {
+        return false;
+    }
+    
+    if (width() <= 0 || height() <= 0) {
+        return false;  // Can't calculate pan offset without valid dimensions
+    }
+    
+    // Restore position history from Document
+    const QVector<QPointF>& savedHistory = m_document->edgelessPositionHistory();
+    m_edgelessPositionHistory.clear();
+    for (const QPointF& pos : savedHistory) {
+        m_edgelessPositionHistory.push(pos);
+    }
+    
+    // Calculate pan offset to center the saved position
+    QPointF lastPos = m_document->edgelessLastPosition();
+    if (lastPos.isNull()) {
+        return false;  // No saved position
+    }
+    
+    QPointF viewportCenter(width() / 2.0, height() / 2.0);
+    m_panOffset = lastPos - viewportCenter / m_zoomLevel;
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[PositionHistory] Applied restored position: lastPos =" << lastPos
+             << "| panOffset =" << m_panOffset
+             << "| history size =" << m_edgelessPositionHistory.size();
+#endif
+    
+    return true;
 }
 
 void DocumentViewport::scrollBy(QPointF delta)
@@ -1021,6 +1243,40 @@ void DocumentViewport::zoomToWidth()
     clampPanOffset();
     update();
     emit panChanged(m_panOffset);
+}
+
+void DocumentViewport::zoomIn()
+{
+    // Zoom step factor (1.25x = 25% increase per step)
+    static constexpr qreal ZOOM_STEP = 1.25;
+    
+    qreal newZoom = m_zoomLevel * ZOOM_STEP;
+    newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    setZoomLevel(newZoom);
+    
+    // Recenter content for paged documents (no-op for edgeless)
+    recenterHorizontally();
+}
+
+void DocumentViewport::zoomOut()
+{
+    // Zoom step factor (1/1.25 = 20% decrease per step)
+    static constexpr qreal ZOOM_STEP = 1.25;
+    
+    qreal newZoom = m_zoomLevel / ZOOM_STEP;
+    newZoom = qBound(MIN_ZOOM, newZoom, MAX_ZOOM);
+    setZoomLevel(newZoom);
+    
+    // Recenter content for paged documents (no-op for edgeless)
+    recenterHorizontally();
+}
+
+void DocumentViewport::zoomToActualSize()
+{
+    setZoomLevel(1.0);
+    
+    // Recenter content for paged documents (no-op for edgeless)
+    recenterHorizontally();
 }
 
 void DocumentViewport::scrollToHome()
@@ -2038,7 +2294,16 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     // This ensures content doesn't jump around during window resize or rotation
     
     if (!m_document || event->oldSize().isEmpty()) {
-        // No document or first resize - just clamp and update
+        // No document or first resize
+        
+        // BUG FIX: If edgeless position restore is pending (showEvent couldn't do it
+        // because widget had zero dimensions), do it now that we have valid size
+        if (m_document && m_document->isEdgeless() && m_needsPositionRestore) {
+            if (applyRestoredEdgelessPosition()) {
+                m_needsPositionRestore = false;
+            }
+        }
+        
         clampPanOffset();
         update();
         emitScrollFractions();
@@ -2277,287 +2542,36 @@ void DocumentViewport::keyPressEvent(QKeyEvent* event)
         return;
     }
     
-    // Task 2.10.8: Lasso selection keyboard shortcuts
-    if (m_currentTool == ToolType::Lasso) {
-        // Copy (Ctrl+C)
-        if (event->matches(QKeySequence::Copy)) {
-            copySelection();
-            event->accept();
-            return;
-        }
-        // Cut (Ctrl+X)
-        if (event->matches(QKeySequence::Cut)) {
-            cutSelection();
-            event->accept();
-            return;
-        }
-        // Paste (Ctrl+V)
-        if (event->matches(QKeySequence::Paste)) {
-            pasteSelection();
-            event->accept();
-            return;
-        }
-        // Delete selection
-        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-            if (m_lassoSelection.isValid()) {
-                deleteSelection();
-                event->accept();
-                return;
-            }
-        }
-        // Cancel selection (Escape)
-        if (event->key() == Qt::Key_Escape) {
-            if (m_lassoSelection.isValid() || m_isDrawingLasso) {
-                cancelSelectionTransform();
-                event->accept();
-                return;
-            }
-        }
-    }
+    // ===== Note: Most keyboard shortcuts moved to MainWindow =====
+    // The following shortcuts are now handled by MainWindow's QShortcut system
+    // so they work regardless of which widget has focus:
+    // - Tool shortcuts (B, E, L, T, M, V)
+    // - Edit shortcuts (Undo, Redo, Copy, Cut, Paste, Delete)
+    // - Object manipulation (Z-order, Affinity, Mode switching, Link slots)
+    // - Edgeless navigation (Home, Backspace)
+    // - PDF/Highlighter features (Auto-highlight)
+    //
+    // Escape key handling is done via handleEscapeKey() called from MainWindow.
     
-    // Phase O2.4: ObjectSelect tool keyboard shortcuts
-    if (m_currentTool == ToolType::ObjectSelect) {
-        
-        // Copy (Ctrl+C) - copy selected objects to internal clipboard (O2.6)
-        if (event->matches(QKeySequence::Copy)) {
-            if (hasSelectedObjects()) {
-                copySelectedObjects();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Paste (Ctrl+V) - tool-aware paste for objects
-        if (event->matches(QKeySequence::Paste)) {
-            pasteForObjectSelect();
-            event->accept();
-            return;
-        }
-        
-        // Delete key - remove selected objects (O2.5)
-        if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
-            if (hasSelectedObjects()) {
-                deleteSelectedObjects();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Escape key - deselect objects or clear clipboard
-        if (event->key() == Qt::Key_Escape) {
-            // If objects are selected, deselect them
-            // If no objects but clipboard has content, clear clipboard
-            if (hasSelectedObjects() || !m_objectClipboard.isEmpty()) {
-                cancelObjectSelectAction();
-                event->accept();
-                return;
-            }
-        }
-        
-        // Phase O3.5.2: Layer affinity shortcuts (Alt+[ / Alt+] / Alt+\)
-        // These change which layer the object renders relative to
-        if (hasSelectedObjects()) {
-            bool alt = event->modifiers() & Qt::AltModifier;
-            bool ctrl = event->modifiers() & Qt::ControlModifier;
-            
-            if (alt && !ctrl) {
-                // Alt+] - Increase affinity (move object up in layer stack)
-                if (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight) {
-                    increaseSelectedAffinity();
-                    event->accept();
-                    return;
-                }
-                // Alt+[ - Decrease affinity (move object down in layer stack)
-                if (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft) {
-                    decreaseSelectedAffinity();
-                    event->accept();
-                    return;
-                }
-                // Alt+\ - Send to background (affinity = -1)
-                if (event->key() == Qt::Key_Backslash || event->key() == Qt::Key_Bar) {
-                    sendSelectedToBackground();
-                    event->accept();
-                    return;
-                }
-            }
-        }
-        
-        // Z-order shortcuts (O2.8.2)
-        // Note: On most keyboards, Shift+[ = { and Shift+] = }
-        // Qt reports the character produced, not the physical key, so we need to check
-        // for both bracket keys (Ctrl+[/]) and brace keys (Ctrl+Shift produces {/})
-        if (hasSelectedObjects()) {
-            bool ctrl = event->modifiers() & Qt::ControlModifier;
-            bool shift = event->modifiers() & Qt::ShiftModifier;
-            
-            // Ctrl+] = bring forward, Ctrl+Shift+] (which produces }) = bring to front
-            if (ctrl && (event->key() == Qt::Key_BracketRight || event->key() == Qt::Key_BraceRight)) {
-                if (shift || event->key() == Qt::Key_BraceRight) {
-                    // Ctrl+Shift+] (or Ctrl+}) → bring to front
-                    bringSelectedToFront();
-                } else {
-                    // Ctrl+] → bring forward
-                    bringSelectedForward();
-                }
-                event->accept();
-                return;
-            }
-            
-            // Ctrl+[ = send backward, Ctrl+Shift+[ (which produces {) = send to back
-            if (ctrl && (event->key() == Qt::Key_BracketLeft || event->key() == Qt::Key_BraceLeft)) {
-                if (shift || event->key() == Qt::Key_BraceLeft) {
-                    // Ctrl+Shift+[ (or Ctrl+{) → send to back
-                    sendSelectedToBack();
-                } else {
-                    // Ctrl+[ → send backward
-                    sendSelectedBackward();
-                }
-                event->accept();
-                return;
-            }
-        }
-        
-        // Phase C.4.2: Mode switching shortcuts
-        if (event->modifiers() == Qt::ControlModifier) {
-            // Ctrl+< or Ctrl+, → Image mode
-            if (event->key() == Qt::Key_Less || event->key() == Qt::Key_Comma) {
-                m_objectInsertMode = ObjectInsertMode::Image;
-                emit objectInsertModeChanged(m_objectInsertMode);
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Image insert mode";
-#endif
-                event->accept();
-                return;
-            }
-            // Ctrl+> or Ctrl+. → Link mode
-            if (event->key() == Qt::Key_Greater || event->key() == Qt::Key_Period) {
-                m_objectInsertMode = ObjectInsertMode::Link;
-                emit objectInsertModeChanged(m_objectInsertMode);
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Link insert mode";
-#endif
-                event->accept();
-                return;
-            }
-            // Ctrl+6 → Create mode
-            if (event->key() == Qt::Key_6) {
-                m_objectActionMode = ObjectActionMode::Create;
-                emit objectActionModeChanged(m_objectActionMode);
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Create mode";
-#endif
-                event->accept();
-                return;
-            }
-            // Ctrl+7 → Select mode
-            if (event->key() == Qt::Key_7) {
-                m_objectActionMode = ObjectActionMode::Select;
-                emit objectActionModeChanged(m_objectActionMode);
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "Switched to Select mode";
-#endif
-                event->accept();
-                return;
-            }
-            // Ctrl+8/9/0 → Access link slots (Phase C.4.3)
-            if (event->key() == Qt::Key_8) {
-                activateLinkSlot(0);
-                event->accept();
-                return;
-            }
-            if (event->key() == Qt::Key_9) {
-                activateLinkSlot(1);
-                event->accept();
-                return;
-            }
-            if (event->key() == Qt::Key_0) {
-                activateLinkSlot(2);
-                event->accept();
-                return;
-            }
-        }
-    }
+    // ===== Note: Tool/Edit/Edgeless shortcuts moved to MainWindow =====
+    // Tool shortcuts (B, E, L, T, M, V), Undo/Redo, and Edgeless navigation
+    // are now handled by MainWindow's QShortcut system so they work 
+    // regardless of which widget has focus.
     
-    // Phase A & B: Highlighter tool keyboard shortcuts
-    if (m_currentTool == ToolType::Highlighter) {
-        // Copy (Ctrl+C) - copy selected text to clipboard
-        if (event->matches(QKeySequence::Copy)) {
-            copySelectedTextToClipboard();
-            event->accept();
-            return;
+    // ===== Debug Shortcut (kept as hardcoded - development only) =====
+#ifdef SPEEDYNOTE_DEBUG
+    // F10 = Toggle benchmark (debug builds only, conflicts with tool.pen in release)
+    if (event->key() == Qt::Key_F10) {
+        if (m_benchmarking) {
+            stopBenchmark();
+        } else {
+            startBenchmark();
         }
-        
-        // Phase B.2: Toggle auto-highlight mode (Ctrl+H)
-        if (event->modifiers() == Qt::ControlModifier && event->key() == Qt::Key_H) {
-            setAutoHighlightEnabled(!m_autoHighlightEnabled);
-            event->accept();
-            return;
-        }
-        
-        // Cancel selection (Escape)
-        if (event->key() == Qt::Key_Escape) {
-            if (m_textSelection.isValid() || m_textSelection.isSelecting) {
-                bool hadValidSelection = m_textSelection.isValid();
-                m_textSelection.clear();
-                if (hadValidSelection) {
-                    emit textSelectionChanged(false);
-                }
-                update();
-                event->accept();
-                return;
-            }
-        }
+        update();
+        event->accept();
+        return;
     }
-    
-    // Tool switching shortcuts (for testing and quick access)
-    switch (event->key()) {
-        case Qt::Key_P:
-            // P = Pen tool
-            setCurrentTool(ToolType::Pen);
-            event->accept();
-            return;
-            
-        case Qt::Key_E:
-            // E = Eraser tool
-            setCurrentTool(ToolType::Eraser);
-            event->accept();
-            return;
-            
-        case Qt::Key_O:
-            // O = Object Select tool (Phase O2.9)
-            setCurrentTool(ToolType::ObjectSelect);
-            event->accept();
-            return;
-            
-        case Qt::Key_B:
-            // B = Toggle benchmark
-            if (m_benchmarking) {
-                stopBenchmark();
-            } else {
-                startBenchmark();
-            }
-            update();
-            event->accept();
-            return;
-            
-        case Qt::Key_Z:
-            // Ctrl+Z = Undo
-            if (event->modifiers() & Qt::ControlModifier) {
-                undo();
-                event->accept();
-                return;
-            }
-            break;
-            
-        case Qt::Key_Y:
-            // Ctrl+Y = Redo
-            if (event->modifiers() & Qt::ControlModifier) {
-                redo();
-                event->accept();
-                return;
-            }
-            break;
-    }
+#endif
     
     // Pass unhandled keys to parent
     QWidget::keyPressEvent(event);
@@ -2651,6 +2665,16 @@ void DocumentViewport::showEvent(QShowEvent* event)
     // Also ensure touch handler is reset
     if (m_touchHandler) {
         m_touchHandler->reset();
+    }
+    
+    // BUG FIX: For edgeless documents with saved position, set pan offset NOW
+    // BEFORE the base class processes showEvent (which may trigger a paint).
+    // This ensures the first paint uses the correct pan offset.
+    if (m_document && m_document->isEdgeless() && m_needsPositionRestore) {
+        if (applyRestoredEdgelessPosition()) {
+            m_needsPositionRestore = false;
+        }
+        // If restore failed (invalid dimensions), resizeEvent will handle it
     }
     
     QWidget::showEvent(event);
@@ -6629,6 +6653,9 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
                          << "tileY =" << slot.edgelessTileY
                          << "targetPosition =" << slot.targetPosition;
 #endif
+                // Save current position before jumping (Phase 4)
+                pushPositionHistory();
+                
                 // Edgeless mode: navigate to tile + document position
                 navigateToEdgelessPosition(slot.edgelessTileX, slot.edgelessTileY, slot.targetPosition);
             } else {
@@ -8812,6 +8839,133 @@ void DocumentViewport::cancelSelectionTransform()
     clearLassoSelection();
 }
 
+bool DocumentViewport::handleEscapeKey()
+{
+    // Handle Escape key for cancelling selections/states.
+    // Returns true if something was cancelled, false if nothing to cancel.
+    // Called by MainWindow to determine whether to toggle to launcher.
+    
+    // Priority 1: Cancel lasso selection or drawing (Lasso tool only)
+    // Note: Lasso selection is cleared when switching away from Lasso tool,
+    // so this check only needs to handle the Lasso tool.
+    if (m_currentTool == ToolType::Lasso) {
+        if (m_lassoSelection.isValid() || m_isDrawingLasso) {
+            cancelSelectionTransform();
+            return true;
+        }
+    }
+    
+    // Priority 2: Deselect objects or clear object clipboard (ObjectSelect tool only)
+    if (m_currentTool == ToolType::ObjectSelect) {
+        if (hasSelectedObjects() || !m_objectClipboard.isEmpty()) {
+            cancelObjectSelectAction();
+            return true;
+        }
+    }
+    
+    // Priority 3: Cancel text selection (Highlighter tool only)
+    // Note: Text selection is cleared when switching away from Highlighter tool.
+    if (m_currentTool == ToolType::Highlighter) {
+        if (m_textSelection.isValid() || m_textSelection.isSelecting) {
+            bool hadValidSelection = m_textSelection.isValid();
+            m_textSelection.clear();
+            if (hadValidSelection) {
+                emit textSelectionChanged(false);
+            }
+            update();
+            return true;
+        }
+    }
+    
+    // Nothing to cancel
+    return false;
+}
+
+// ===== Context-Dependent Shortcut Handlers =====
+// Called by MainWindow's QShortcut system
+
+void DocumentViewport::handleCopyAction()
+{
+    // Copy behavior depends on current tool and selection state
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                copySelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            if (hasSelectedObjects()) {
+                copySelectedObjects();
+            }
+            break;
+            
+        case ToolType::Highlighter:
+            if (m_textSelection.isValid()) {
+                copySelectedTextToClipboard();
+            }
+            break;
+            
+        default:
+            // No copy action for other tools
+            break;
+    }
+}
+
+void DocumentViewport::handleCutAction()
+{
+    // Cut currently only works for Lasso tool
+    if (m_currentTool == ToolType::Lasso && m_lassoSelection.isValid()) {
+        cutSelection();
+    }
+}
+
+void DocumentViewport::handlePasteAction()
+{
+    // Paste behavior depends on current tool
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_clipboard.hasContent) {
+                pasteSelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            pasteForObjectSelect();
+            break;
+            
+        default:
+            // No paste action for other tools
+            break;
+    }
+}
+
+void DocumentViewport::handleDeleteAction()
+{
+    // Delete behavior depends on current tool and selection state
+    switch (m_currentTool) {
+        case ToolType::Lasso:
+            if (m_lassoSelection.isValid()) {
+                deleteSelection();
+            }
+            break;
+            
+        case ToolType::ObjectSelect:
+            if (hasSelectedObjects()) {
+                deleteSelectedObjects();
+            }
+            break;
+            
+        case ToolType::Highlighter:
+            // For highlighter, Escape cancels selection, Delete doesn't do anything special
+            // (we can't delete PDF text)
+            break;
+            
+        default:
+            break;
+    }
+}
+
 // ===== Clipboard Operations (Task 2.10.7) =====
 
 void DocumentViewport::copySelection()
@@ -9707,6 +9861,31 @@ void DocumentViewport::finalizeTextSelection()
              // << (m_textSelection.selectedText.length() > 50 ? "..." : "");
 }
 
+// ============================================================================
+// PDF Search Highlighting
+// ============================================================================
+
+void DocumentViewport::setSearchMatches(const QVector<PdfSearchMatch>& matches, 
+                                         int currentIndex, int pageIndex)
+{
+    m_searchMatches = matches;
+    m_currentSearchMatchIndex = currentIndex;
+    m_searchMatchPageIndex = pageIndex;
+    
+    // Trigger repaint to show highlights
+    update();
+}
+
+void DocumentViewport::clearSearchMatches()
+{
+    m_searchMatches.clear();
+    m_currentSearchMatchIndex = -1;
+    m_searchMatchPageIndex = -1;
+    
+    // Trigger repaint to remove highlights
+    update();
+}
+
 void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
 {
     loadTextBoxesForPage(pageIndex);
@@ -9822,6 +10001,42 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
             pdfRect.width() * PDF_TO_PAGE_SCALE,
             pdfRect.height() * PDF_TO_PAGE_SCALE
         );
+        painter.drawRect(pageRect);
+    }
+    
+    painter.restore();
+}
+
+void DocumentViewport::renderSearchMatchesOverlay(QPainter& painter, int pageIndex)
+{
+    // Only render if we have matches on this page
+    if (m_searchMatches.isEmpty() || m_searchMatchPageIndex != pageIndex) {
+        return;
+    }
+    
+    painter.save();
+    painter.setPen(Qt::NoPen);
+    
+    // Draw all matches
+    for (int i = 0; i < m_searchMatches.size(); ++i) {
+        const PdfSearchMatch& match = m_searchMatches[i];
+        
+        // Choose color: orange for current, yellow for others
+        QColor fillColor = (i == m_currentSearchMatchIndex) 
+            ? m_searchHighlightCurrent 
+            : m_searchHighlightOther;
+        
+        painter.setBrush(fillColor);
+        
+        // Convert PDF coords to page coords
+        const QRectF& pdfRect = match.boundingRect;
+        QRectF pageRect(
+            pdfRect.x() * PDF_TO_PAGE_SCALE,
+            pdfRect.y() * PDF_TO_PAGE_SCALE,
+            pdfRect.width() * PDF_TO_PAGE_SCALE,
+            pdfRect.height() * PDF_TO_PAGE_SCALE
+        );
+        
         painter.drawRect(pageRect);
     }
     
@@ -11743,6 +11958,9 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
     if (m_currentTool == ToolType::Highlighter) {
         renderTextSelectionOverlay(painter, pageIndex);
     }
+    
+    // 5b. Render PDF search match highlights
+    renderSearchMatchesOverlay(painter, pageIndex);
     
     // 6. Draw page border (optional, for visual separation)
     // CUSTOMIZABLE: Page border color (theme setting)

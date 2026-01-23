@@ -19,6 +19,8 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QCloseEvent>
+#include <QShortcut>  // For m_managedShortcuts hash
+#include <memory>     // For std::unique_ptr
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
 #ifndef Q_OS_ANDROID
@@ -42,6 +44,12 @@
 // Phase D: Subtoolbar includes
 class SubToolbarContainer;
 class PenSubToolbar;
+
+// PDF Search
+class PdfSearchBar;
+class PdfSearchEngine;
+struct PdfSearchMatch;
+struct PdfSearchState;
 class MarkerSubToolbar;
 class HighlighterSubToolbar;
 class ObjectSelectSubToolbar;
@@ -187,11 +195,11 @@ public:
 
     // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
+    int tabCount() const;  // Returns number of open tabs (used by Launcher for Escape handling)
 
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
 
-    QSpinBox *pageInput = nullptr; // Made public for RecentNotebooksDialog
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
     // REMOVED MW7.6: addKeyboardMapping, removeKeyboardMapping, and getKeyboardMappings removed - old mapping system deleted
@@ -279,6 +287,9 @@ protected:
 private slots:
 
     void onNewConnection(); // Handle new instance connections
+    
+    // Keyboard Shortcut Hub: Handle shortcut changes from ShortcutManager
+    void onShortcutChanged(const QString& actionId, const QString& newShortcut);
 
     void updatePanX(int value);
     void updatePanY(int value);
@@ -293,8 +304,6 @@ private slots:
     void showJumpToPageDialog();
     void goToPreviousPage(); // Go to previous page
     void goToNextPage();     // Go to next page
-    void onPageInputChanged(int newPage); // Handle spinbox page changes with direction tracking
-
 
     // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
     void connectViewportScrollSignals(DocumentViewport* viewport);  // Phase 3.3
@@ -304,6 +313,7 @@ private slots:
     void updatePagePanelForViewport(DocumentViewport* viewport);  // Page Panel: Task 5.1: Update PagePanel
     void notifyPageStructureChanged(Document* doc, int currentPage = -1);  // Helper: Update PagePanel after page add/remove
     void showPdfRelinkDialog(DocumentViewport* viewport);  // Phase R.4: Unified PDF relink handler
+    void showPdfExportDialog();  // Phase 8: PDF Export dialog
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
@@ -400,6 +410,7 @@ private:
 
     QMenu *overflowMenu;
     QAction* m_relinkPdfAction = nullptr;  // Phase R.4: Relink PDF menu action
+    QAction* m_exportPdfAction = nullptr;  // Phase 8: Export to PDF menu action
     QScrollBar *panXSlider;
     QScrollBar *panYSlider;
 
@@ -437,6 +448,11 @@ private:
     TextSelectionActionBar *m_textSelectionActionBar = nullptr;
     ClipboardActionBar *m_clipboardActionBar = nullptr;
     PagePanelActionBar *m_pagePanelActionBar = nullptr;
+    
+    // PDF Search
+    PdfSearchBar *m_pdfSearchBar = nullptr;
+    PdfSearchEngine *m_searchEngine = nullptr;
+    std::unique_ptr<PdfSearchState> m_searchState;
     
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
@@ -575,12 +591,26 @@ private:
     // Page Panel: Task 5.2: Page Panel connections
     void setupPagePanelConnections();  // Connect page panel signals
     
+    // PDF Search
+    void setupPdfSearch();             // Create search bar and engine
+    void updatePdfSearchBarPosition(); // Update position on viewport resize
+    void showPdfSearchBar();           // Show and focus search bar (Ctrl+F)
+    void hidePdfSearchBar();           // Hide search bar and clear highlights
+    void onSearchNext(const QString& text, bool caseSensitive, bool wholeWord);
+    void onSearchPrev(const QString& text, bool caseSensitive, bool wholeWord);
+    void onSearchMatchFound(const PdfSearchMatch& match, const QVector<PdfSearchMatch>& pageMatches);
+    void onSearchNotFound(bool wrapped);
+    
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     
     // Helper function for tab text eliding
     QString elideTabText(const QString &text, int maxWidth);
     
     // Layout timers and separators - REMOVED MW4.3: No longer needed
+    
+    // Keyboard Shortcut Hub: Managed shortcuts
+    QHash<QString, QShortcut*> m_managedShortcuts;
+    void setupManagedShortcuts();  // Initialize shortcuts from ShortcutManager
 };
 
 #endif // MAINWINDOW_H

@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.speedynote.app"
     android:versionCode="1"
-    android:versionName="1.0.2"
+    android:versionName="1.1.0"
     android:installLocation="auto">
 
     <!-- Permissions -->
@@ -48,7 +48,7 @@
             android:launchMode="singleTop"
             android:screenOrientation="unspecified"
             android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustPan">
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

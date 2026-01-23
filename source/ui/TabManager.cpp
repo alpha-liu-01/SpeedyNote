@@ -133,6 +133,28 @@ void TabManager::closeCurrentTab()
     }
 }
 
+void TabManager::switchToNextTab()
+{
+    if (!m_tabBar || m_viewports.size() <= 1) {
+        return;  // No tabs or only one tab - nothing to switch
+    }
+    
+    int current = m_tabBar->currentIndex();
+    int next = (current + 1) % m_viewports.size();  // Wrap around to first
+    m_tabBar->setCurrentIndex(next);
+}
+
+void TabManager::switchToPrevTab()
+{
+    if (!m_tabBar || m_viewports.size() <= 1) {
+        return;  // No tabs or only one tab - nothing to switch
+    }
+    
+    int current = m_tabBar->currentIndex();
+    int prev = (current - 1 + m_viewports.size()) % m_viewports.size();  // Wrap around to last
+    m_tabBar->setCurrentIndex(prev);
+}
+
 // ============================================================================
 // Access
 // ============================================================================

@@ -29,6 +29,10 @@
 #include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
 #include "sharing/NotebookExporter.h" // Phase 1: Export notebooks as .snbx
 #include "sharing/ExportDialog.h"     // Phase 1: Export dialog UI
+#include "ui/widgets/PdfSearchBar.h"  // PDF text search bar
+#include "pdf/PdfSearchEngine.h"      // PDF text search engine
+#include "ui/dialogs/PdfExportDialog.h"  // Phase 8: PDF export dialog
+#include "pdf/MuPdfExporter.h"           // Phase 8: PDF export engine
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include <QVBoxLayout>
@@ -62,6 +66,7 @@
 #include <QWheelEvent>
 #include <QTimer>
 #include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
+#include "core/ShortcutManager.h"  // Keyboard shortcut hub
 #include <QInputDevice>  // MW5.8: For keyboard detection
 #include <QColorDialog>  // Phase 3.1.8: For custom color picker
 #include <QProcess>
@@ -146,7 +151,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.0.2"));
+    setWindowTitle(tr("SpeedyNote 1.1.0"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -183,6 +188,11 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Connect TabManager signals
     connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
+        // Phase 6.1: Hide PDF search bar when switching tabs to prevent stale state
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            hidePdfSearchBar();
+        }
+        
         // Save/restore left sidebar tab selection per document tab
         // IMPORTANT: Must be FIRST, before updatePagePanelForViewport() which modifies sidebar tabs
         int newIndex = m_tabManager->currentIndex();
@@ -258,6 +268,13 @@ MainWindow::MainWindow(QWidget *parent)
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
     // TabManager::closeTab() emits this signal before deleting the viewport
     connect(m_tabManager, &TabManager::tabCloseRequested, this, [this](int index, DocumentViewport* vp) {
+        // Phase 6.2: Cancel search if the document being closed has an active search
+        if (vp && m_searchEngine && vp == currentViewport()) {
+            if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+                hidePdfSearchBar();  // This also cancels and clears the cache
+            }
+        }
+        
         // Clean up subtoolbar per-tab state to prevent memory leak
         if (m_subtoolbarContainer) {
             m_subtoolbarContainer->clearTabState(index);
@@ -286,6 +303,12 @@ MainWindow::MainWindow(QWidget *parent)
                     
                     // If no cached thumbnail, render one synchronously
                     if (thumbnail.isNull()) {
+                        // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                        // accessing Document::page() directly. Background renders also call
+                        // Document::page() which modifies m_loadedPages without synchronization.
+                        if (m_pagePanel) {
+                            m_pagePanel->cancelPendingRenders();
+                        }
                         thumbnail = renderPage0Thumbnail(doc);
                     }
                     
@@ -344,26 +367,33 @@ MainWindow::MainWindow(QWidget *parent)
         // FEATURE-DOC-001: Update lastAccessedPage for paged documents
         // This ensures the page position is saved even if no other edits were made
         bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
-        bool pagePositionChanged = false;
+        bool positionChanged = false;
         
         if (!doc->isEdgeless()) {
             int currentPage = vp->currentPageIndex();
             if (doc->lastAccessedPage != currentPage) {
                 doc->lastAccessedPage = currentPage;
-                pagePositionChanged = true;
+                positionChanged = true;
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "tabCloseAttempted: lastAccessedPage changed to" << currentPage;
 #endif
             }
+        } else {
+            // Phase 4: Sync edgeless position before closing tab
+            vp->syncPositionToDocument();
+            positionChanged = true;  // Always consider position changed for edgeless
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "tabCloseAttempted: Synced edgeless position";
+#endif
         }
         
-        // FEATURE-DOC-001: Auto-save if only page position changed (no content changes)
+        // FEATURE-DOC-001: Auto-save if only position changed (no content changes)
         // This is a silent save - no prompt needed for just navigation
-        if (pagePositionChanged && !isUsingTemp && !doc->modified) {
+        if (positionChanged && !isUsingTemp && !doc->modified) {
             QString existingPath = m_documentManager->documentPath(doc);
             if (!existingPath.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "tabCloseAttempted: Auto-saving to persist lastAccessedPage";
+                qDebug() << "tabCloseAttempted: Auto-saving to persist position";
 #endif
                 m_documentManager->saveDocument(doc);
                 // Don't show error dialog - this is a best-effort save for position only
@@ -374,9 +404,10 @@ MainWindow::MainWindow(QWidget *parent)
         bool needsSavePrompt = false;
         
         if (doc->isEdgeless()) {
-            // Edgeless: check if it has tiles and is in temp bundle
+            // Edgeless: check if modified OR (in temp bundle with tiles)
+            // BUG FIX: Also check doc->modified for position history changes
             bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
-            needsSavePrompt = isUsingTemp && hasContent;
+            needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
         } else {
             // Paged: check if modified OR (in temp bundle with pages)
             bool hasContent = doc->pageCount() > 0;
@@ -763,6 +794,11 @@ void MainWindow::setupUi() {
         showPdfRelinkDialog(currentViewport());
     });
     
+    // PDF Export action (Ctrl+P)
+    m_exportPdfAction = overflowMenu->addAction(tr("Export to PDF..."));
+    m_exportPdfAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.export_pdf"));
+    connect(m_exportPdfAction, &QAction::triggered, this, &MainWindow::showPdfExportDialog);
+    
     overflowMenu->addSeparator();
     
     QAction *zoom50Action = overflowMenu->addAction(tr("Zoom 50%"));
@@ -1097,6 +1133,9 @@ void MainWindow::setupUi() {
     // Setup action bars
     setupActionBars();
     
+    // PDF Search: Setup search bar
+    setupPdfSearch();
+    
     // Phase E.2: Setup outline panel connections
     setupOutlinePanelConnections();
     
@@ -1172,86 +1211,496 @@ void MainWindow::setupUi() {
     });
     
     // =========================================================================
-    // Phase doc-1: Application-wide keyboard shortcuts
-    // Using QShortcut with ApplicationShortcut context for guaranteed behavior
-    // regardless of which widget has focus.
+    // Keyboard Shortcut Hub: Setup managed shortcuts
+    // All shortcuts now go through ShortcutManager for customization support
     // =========================================================================
+    setupManagedShortcuts();
+}
+
+// ============================================================================
+// Keyboard Shortcut Hub: Setup and Management
+// ============================================================================
+
+void MainWindow::setupManagedShortcuts()
+{
+    auto* sm = ShortcutManager::instance();
     
-    // Save Document: Ctrl+S - save document to JSON file
-    QShortcut* saveShortcut = new QShortcut(QKeySequence::Save, this);
-    saveShortcut->setContext(Qt::ApplicationShortcut);
-    connect(saveShortcut, &QShortcut::activated, this, &MainWindow::saveDocument);
+    // Helper lambda to create and register a managed shortcut
+    auto createShortcut = [this, sm](const QString& actionId, 
+                                      std::function<void()> callback,
+                                      Qt::ShortcutContext context = Qt::ApplicationShortcut) {
+        QKeySequence seq = sm->keySequenceForAction(actionId);
+        QShortcut* shortcut = new QShortcut(seq, this);
+        shortcut->setContext(context);
+        connect(shortcut, &QShortcut::activated, this, callback);
+        m_managedShortcuts.insert(actionId, shortcut);
+    };
     
-    // Phase P.4.7: Removed Ctrl+O shortcut - obsolete with Launcher integration
-    // File opening is now handled by:
-    // - Launcher (recent notebooks, starred, search)
-    // - "+" menu → Open PDF... (Ctrl+Shift+O)
-    // - "+" menu → Open Notebook... (Ctrl+Shift+L)
+    // ===== File Operations =====
+    createShortcut("file.save", [this]() { saveDocument(); });
+    createShortcut("file.new_paged", [this]() { addNewTab(); });
+    createShortcut("file.new_edgeless", [this]() { addNewEdgelessTab(); });
+    createShortcut("file.open_pdf", [this]() { openPdfDocument(); });
+    createShortcut("file.open_notebook", [this]() { loadFolderDocument(); });
+    // file.close_tab - TODO: implement closeCurrentTab()
+    // file.export - TODO: implement export action
     
-    // Add Page: Ctrl+Shift+A - appends new page at end of document
-    QShortcut* addPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_A), this);
-    addPageShortcut->setContext(Qt::ApplicationShortcut);
-    connect(addPageShortcut, &QShortcut::activated, this, &MainWindow::addPageToDocument);
+    // ===== Document/Page Operations =====
+    createShortcut("document.add_page", [this]() { addPageToDocument(); });
+    createShortcut("document.insert_page", [this]() { insertPageInDocument(); });
+    createShortcut("document.delete_page", [this]() { deletePageInDocument(); });
     
-    // Insert Page: Ctrl+Shift+I - inserts new page after current page
-    QShortcut* insertPageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this);
-    insertPageShortcut->setContext(Qt::ApplicationShortcut);
-    connect(insertPageShortcut, &QShortcut::activated, this, &MainWindow::insertPageInDocument);
-    
-    // Delete Page: Ctrl+Shift+D - delete current page
-    QShortcut* deletePageShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this);
-    deletePageShortcut->setContext(Qt::ApplicationShortcut);
-    connect(deletePageShortcut, &QShortcut::activated, this, &MainWindow::deletePageInDocument);
-    
-    // New Edgeless Canvas: Ctrl+Shift+N - creates infinite canvas document
-    QShortcut* newEdgelessShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N), this);
-    newEdgelessShortcut->setContext(Qt::ApplicationShortcut);
-    connect(newEdgelessShortcut, &QShortcut::activated, this, &MainWindow::addNewEdgelessTab);
-    
-    // New Paged Notebook: Ctrl+N - creates paged document (Phase P.4.3)
-    QShortcut* newPagedShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_N), this);
-    newPagedShortcut->setContext(Qt::ApplicationShortcut);
-    connect(newPagedShortcut, &QShortcut::activated, this, &MainWindow::addNewTab);
-    
-    // Toggle Launcher: Ctrl+H - show/hide launcher (Phase P.4.4)
-    QShortcut* launcherShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_H), this);
-    launcherShortcut->setContext(Qt::ApplicationShortcut);
-    connect(launcherShortcut, &QShortcut::activated, this, &MainWindow::toggleLauncher);
-    
-    // Go to Launcher: Escape - go to launcher when no modal dialogs open (Phase P.4.4)
-    QShortcut* escapeShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
-    escapeShortcut->setContext(Qt::WindowShortcut);
-    connect(escapeShortcut, &QShortcut::activated, this, [this]() {
-        // Only toggle launcher if no modal dialog is open
-        if (!QApplication::activeModalWidget()) {
+    // ===== Navigation =====
+    createShortcut("navigation.launcher", [this]() { toggleLauncher(); });
+    createShortcut("navigation.escape", [this]() {
+        // Only process if no modal dialog is open
+        if (QApplication::activeModalWidget()) {
+            return;
+        }
+        
+        // First, close PDF search bar if it's open
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            hidePdfSearchBar();
+            return;
+        }
+        
+        // Next, let the current viewport try to handle Escape
+        // (cancel lasso selection, deselect objects, cancel text selection)
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->handleEscapeKey()) {
+                // Viewport handled Escape (cancelled something)
+                return;
+            }
+        }
+        
+        // Nothing to cancel in viewport - toggle to launcher
             toggleLauncher();
+    }, Qt::WindowShortcut);  // WindowShortcut for Escape
+    createShortcut("navigation.go_to_page", [this]() { showJumpToPageDialog(); });
+    // navigation.next_tab, navigation.prev_tab - TODO: implement tab switching
+    // navigation.prev_page, navigation.next_page - handled in DocumentViewport
+    
+    // ===== View =====
+    createShortcut("view.debug_overlay", [this]() { toggleDebugOverlay(); });
+    createShortcut("view.auto_layout", [this]() { toggleAutoLayout(); });
+    createShortcut("view.fullscreen", [this]() { toggleFullscreen(); });
+    createShortcut("view.left_sidebar", [this]() {
+        if (m_leftSidebar && m_navigationBar) {
+            bool newState = !m_leftSidebar->isVisible();
+            m_leftSidebar->setVisible(newState);
+            m_navigationBar->setLeftSidebarChecked(newState);
+        }
+    });
+    createShortcut("view.right_sidebar", [this]() {
+        if (markdownNotesSidebar && m_navigationBar) {
+            bool newState = !markdownNotesSidebar->isVisible();
+            markdownNotesSidebar->setVisible(newState);
+            markdownNotesSidebarVisible = newState;
+            m_navigationBar->setRightSidebarChecked(newState);
         }
     });
     
-    // TEMPORARY: Load Bundle (.snb folder): Ctrl+Shift+L
-    // Phase O1.7.6: Now handles BOTH paged and edgeless bundles
-    // TODO: Replace with unified file picker when .snb becomes a single file (QDataStream packaging)
-    QShortcut* loadBundleShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L), this);
-    loadBundleShortcut->setContext(Qt::ApplicationShortcut);
-    connect(loadBundleShortcut, &QShortcut::activated, this, &MainWindow::loadFolderDocument);
+    // ===== Application =====
+    createShortcut("app.settings", [this]() { 
+        // Show control panel dialog
+        ControlPanelDialog dialog(this, this);
+        dialog.exec();
+    });
+    createShortcut("app.keyboard_shortcuts", [this]() {
+        // Show control panel dialog and switch to Keyboard Shortcuts tab
+        ControlPanelDialog dialog(this, this);
+        dialog.switchToKeyboardShortcutsTab();
+        dialog.exec();
+    });
+    createShortcut("app.find", [this]() {
+        // Show PDF search bar (only works for PDF documents)
+        showPdfSearchBar();
+    });
+    createShortcut("app.find_next", [this]() {
+        // F3: Find next (only works when search bar is visible)
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            QString text = m_pdfSearchBar->searchText();
+            if (!text.isEmpty()) {
+                emit m_pdfSearchBar->searchNextRequested(text, m_pdfSearchBar->caseSensitive(), m_pdfSearchBar->wholeWord());
+            }
+        }
+    });
+    createShortcut("app.find_prev", [this]() {
+        // Shift+F3: Find previous (only works when search bar is visible)
+        if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
+            QString text = m_pdfSearchBar->searchText();
+            if (!text.isEmpty()) {
+                emit m_pdfSearchBar->searchPrevRequested(text, m_pdfSearchBar->caseSensitive(), m_pdfSearchBar->wholeWord());
+            }
+        }
+    });
     
-    // Open PDF: Ctrl+Shift+O - open PDF file in new tab
-    QShortcut* openPdfShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O), this);
-    openPdfShortcut->setContext(Qt::ApplicationShortcut);
-    connect(openPdfShortcut, &QShortcut::activated, this, [this]() { openPdfDocument(); });
+    // ===== Export/Share =====
+    createShortcut("file.export", [this]() {
+        // Trigger the share/export action (same as NavigationBar share button)
+        if (m_navigationBar) {
+            emit m_navigationBar->shareClicked();
+        }
+    });
+    createShortcut("file.export_pdf", [this]() {
+        showPdfExportDialog();
+    });
     
-    // Debug Overlay toggle (F12) - developer tools style, like browser devtools
-    // Note: Ctrl+Shift+D is already used for Delete Page
-    QShortcut* debugOverlayShortcut = new QShortcut(QKeySequence(Qt::Key_F12), this);
-    debugOverlayShortcut->setContext(Qt::ApplicationShortcut);
-    connect(debugOverlayShortcut, &QShortcut::activated, this, &MainWindow::toggleDebugOverlay);
+    // ===== Tools (delegated to viewport) =====
+    // These need to check if text input is active before firing
+    auto createToolShortcut = [this, sm](const QString& actionId, ToolType tool) {
+        QKeySequence seq = sm->keySequenceForAction(actionId);
+        QShortcut* shortcut = new QShortcut(seq, this);
+        shortcut->setContext(Qt::ApplicationShortcut);
+        connect(shortcut, &QShortcut::activated, this, [this, tool]() {
+            // Skip if text input widget has focus (single-key shortcuts conflict with typing)
+            QWidget* focused = QApplication::focusWidget();
+            if (qobject_cast<QLineEdit*>(focused) ||
+                qobject_cast<QTextEdit*>(focused) ||
+                qobject_cast<QPlainTextEdit*>(focused)) {
+                return;
+            }
+            
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setCurrentTool(tool);
+            }
+        });
+        m_managedShortcuts.insert(actionId, shortcut);
+    };
     
-    // Two-column auto layout toggle (Ctrl+2) - toggle between 1-column only and auto 1/2 column
-    // Only applies to paged documents (not edgeless)
-    QShortcut* autoLayoutShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_2), this);
-    autoLayoutShortcut->setContext(Qt::ApplicationShortcut);
-    connect(autoLayoutShortcut, &QShortcut::activated, this, &MainWindow::toggleAutoLayout);
+    createToolShortcut("tool.pen", ToolType::Pen);
+    createToolShortcut("tool.eraser", ToolType::Eraser);
+    createToolShortcut("tool.lasso", ToolType::Lasso);
+    createToolShortcut("tool.highlighter", ToolType::Highlighter);
+    createToolShortcut("tool.marker", ToolType::Marker);
+    createToolShortcut("tool.object_select", ToolType::ObjectSelect);
+    
+    // ===== Edit (delegated to viewport) =====
+    createShortcut("edit.undo", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->undo();
+        }
+    });
+    createShortcut("edit.redo", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->redo();
+        }
+    });
+    createShortcut("edit.redo_alt", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->redo();
+        }
+    });
+    
+    // ===== Home Key (context-dependent: edgeless origin OR first page) =====
+    // Note: edgeless.home and navigation.first_page share the same "Home" key
+    // We only create ONE QShortcut to avoid Qt ambiguity, and dispatch based on document type
+    createShortcut("edgeless.home", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document()) {
+                if (vp->document()->isEdgeless()) {
+                    vp->returnToOrigin();
+                } else {
+                    // Paged document: Home = first page
+                    vp->scrollToPage(0);
+                }
+            }
+        }
+    });
+    // Note: navigation.first_page is NOT created separately - handled by edgeless.home above
+    
+    createShortcut("edgeless.go_back", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && vp->document()->isEdgeless()) {
+                // Edgeless: Backspace navigates back in position history
+                vp->goBackPosition();
+            } else {
+                // Paged: Backspace acts as delete (same as Delete key)
+                vp->handleDeleteAction();
+            }
+        }
+    });
+    
+    // ===== Page Navigation (paged documents only) =====
+    createShortcut("navigation.prev_page", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && !vp->document()->isEdgeless()) {
+                int current = vp->currentPageIndex();
+                if (current > 0) {
+                    vp->scrollToPage(current - 1);
+                }
+            }
+        }
+    });
+    createShortcut("navigation.next_page", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && !vp->document()->isEdgeless()) {
+                int current = vp->currentPageIndex();
+                int lastPage = vp->document()->pageCount() - 1;
+                if (current < lastPage) {
+                    vp->scrollToPage(current + 1);
+                }
+            }
+        }
+    });
+    // navigation.first_page is handled by edgeless.home (same "Home" key, context-dependent)
+    
+    createShortcut("navigation.last_page", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->document() && !vp->document()->isEdgeless()) {
+                int lastPage = vp->document()->pageCount() - 1;
+                vp->scrollToPage(lastPage);
+            }
+        }
+    });
+    
+    // ===== Tab Navigation =====
+    createShortcut("navigation.next_tab", [this]() {
+        if (m_tabManager) {
+            m_tabManager->switchToNextTab();
+        }
+    });
+    createShortcut("navigation.prev_tab", [this]() {
+        if (m_tabManager) {
+            m_tabManager->switchToPrevTab();
+        }
+    });
+    createShortcut("file.close_tab", [this]() {
+        // Use tabCloseAttempted signal flow to properly handle unsaved changes
+        if (m_tabManager && m_tabManager->tabCount() > 0) {
+            int currentIndex = m_tabManager->currentIndex();
+            DocumentViewport* vp = m_tabManager->currentViewport();
+            if (vp) {
+                emit m_tabManager->tabCloseAttempted(currentIndex, vp);
+            }
+        }
+    });
+    
+    // ===== Zoom Shortcuts =====
+    createShortcut("zoom.in", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomIn();
+        }
+    });
+    createShortcut("zoom.in_alt", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomIn();
+        }
+    });
+    createShortcut("zoom.out", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomOut();
+        }
+    });
+    createShortcut("zoom.fit", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomToFit();
+        }
+    });
+    createShortcut("zoom.100", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomToActualSize();
+        }
+    });
+    createShortcut("zoom.fit_width", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->zoomToWidth();
+        }
+    });
+    
+    // ===== Layer Operations =====
+    createShortcut("layer.new", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->addNewLayerAction();
+        }
+    });
+    createShortcut("layer.toggle_visibility", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->toggleActiveLayerVisibility();
+        }
+    });
+    createShortcut("layer.select_all", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->toggleSelectAllLayers();
+        }
+    });
+    createShortcut("layer.select_top", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->selectTopLayer();
+        }
+    });
+    createShortcut("layer.select_bottom", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->selectBottomLayer();
+        }
+    });
+    createShortcut("layer.merge", [this]() {
+        if (m_layerPanel) {
+            m_layerPanel->mergeSelectedLayers();
+        }
+    });
+    
+    // ===== Context-Dependent Edit Operations (delegated to viewport) =====
+    // These behave differently based on current tool and selection
+    createShortcut("edit.copy", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handleCopyAction();
+        }
+    });
+    createShortcut("edit.cut", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handleCutAction();
+        }
+    });
+    createShortcut("edit.paste", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handlePasteAction();
+        }
+    });
+    createShortcut("edit.delete", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->handleDeleteAction();
+        }
+    });
+    
+    // ===== Object Manipulation (delegated to viewport, ObjectSelect tool) =====
+    // Z-Order
+    createShortcut("object.bring_front", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->bringSelectedToFront();
+            }
+        }
+    });
+    createShortcut("object.bring_forward", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->bringSelectedForward();
+            }
+        }
+    });
+    createShortcut("object.send_backward", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->sendSelectedBackward();
+            }
+        }
+    });
+    createShortcut("object.send_back", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->sendSelectedToBack();
+            }
+        }
+    });
+    
+    // Affinity
+    createShortcut("object.affinity_up", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->increaseSelectedAffinity();
+            }
+        }
+    });
+    createShortcut("object.affinity_down", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->decreaseSelectedAffinity();
+            }
+        }
+    });
+    createShortcut("object.affinity_background", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect && vp->hasSelectedObjects()) {
+                vp->sendSelectedToBackground();
+            }
+        }
+    });
+    
+    // Object Mode Switching
+    createShortcut("object.mode_image", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Image);
+            }
+        }
+    });
+    createShortcut("object.mode_link", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Link);
+            }
+        }
+    });
+    createShortcut("object.mode_create", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectActionMode(DocumentViewport::ObjectActionMode::Create);
+            }
+        }
+    });
+    createShortcut("object.mode_select", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectActionMode(DocumentViewport::ObjectActionMode::Select);
+            }
+        }
+    });
+    
+    // ===== Link Slots (delegated to viewport) =====
+    createShortcut("link.slot_1", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->activateLinkSlot(0);
+            }
+        }
+    });
+    createShortcut("link.slot_2", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->activateLinkSlot(1);
+            }
+        }
+    });
+    createShortcut("link.slot_3", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->activateLinkSlot(2);
+            }
+        }
+    });
+    
+    // ===== PDF/Highlighter Features =====
+    createShortcut("pdf.auto_highlight", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::Highlighter) {
+                vp->setAutoHighlightEnabled(!vp->isAutoHighlightEnabled());
+            }
+        }
+    });
+    
+    // Connect to ShortcutManager's change signal for dynamic updates
+    connect(sm, &ShortcutManager::shortcutChanged,
+            this, &MainWindow::onShortcutChanged);
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MainWindow] Registered" << m_managedShortcuts.size() << "managed shortcuts";
+#endif
+}
 
+void MainWindow::onShortcutChanged(const QString& actionId, const QString& newShortcut)
+{
+    // Update the QShortcut if we manage this action
+    auto it = m_managedShortcuts.find(actionId);
+    if (it != m_managedShortcuts.end()) {
+        QShortcut* shortcut = it.value();
+        QKeySequence newSeq(newShortcut);
+        shortcut->setKey(newSeq);
+        
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[MainWindow] Updated shortcut:" << actionId << "->" << newShortcut;
+#endif
+    }
 }
 
 MainWindow::~MainWindow() {
@@ -1313,7 +1762,6 @@ void MainWindow::switchPage(int pageIndex) {
     if (!vp) return;
     
     vp->scrollToPage(pageIndex);
-    // pageInput update is handled by currentPageChanged signal connection
 }
 
 void MainWindow::updatePanX(int value) {
@@ -1498,11 +1946,21 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     });
     
     // CR-2B: Connect tool/mode signals for keyboard shortcut sync
-    m_toolChangedConn = connect(viewport, &DocumentViewport::toolChanged, this, [this](ToolType) {
-        // REMOVED: updateToolButtonStates call removed - tool button state functionality deleted
-        // REMOVED: updateThicknessSliderForCurrentTool removed - thicknessSlider deleted
-    // updateThicknessSliderForCurrentTool();
-        // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
+    // When tool is changed via keyboard shortcuts or programmatically,
+    // update the toolbar button and subtoolbar to match
+    m_toolChangedConn = connect(viewport, &DocumentViewport::toolChanged, this, [this](ToolType tool) {
+        // Update toolbar to show correct button selected
+        if (m_toolbar) {
+            m_toolbar->setCurrentTool(tool);
+        }
+        // Update subtoolbar container to show correct subtoolbar
+        if (m_subtoolbarContainer) {
+            m_subtoolbarContainer->onToolChanged(tool);
+        }
+        // Update action bar container for tool context
+        if (m_actionBarContainer) {
+            m_actionBarContainer->onToolChanged(tool);
+        }
     });
     
     // Phase D: Connect straight line mode sync (viewport → toolbar)
@@ -1983,15 +2441,6 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
             m_layerPanel->setCurrentPage(page);
         });
         
-        // Phase S4: Connect viewport's currentPageChanged to update pageInput spinbox
-        connect(viewport, &DocumentViewport::currentPageChanged, 
-                this, [this](int pageIndex) {
-            if (pageInput) {
-                pageInput->blockSignals(true);
-                pageInput->setValue(pageIndex + 1);  // Convert 0-based to 1-based for display
-                pageInput->blockSignals(false);
-            }
-        });
     }
 }
 
@@ -2033,6 +2482,121 @@ void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
             viewport->hideMissingPdfBanner();
         }
         // Cancel: do nothing, banner remains visible
+    }
+}
+
+// ============================================================================
+// Phase 8: PDF Export Dialog
+// ============================================================================
+
+void MainWindow::showPdfExportDialog()
+{
+#ifdef Q_OS_ANDROID
+    QString dialogTitle = tr("Share as PDF");
+#else
+    QString dialogTitle = tr("Export to PDF");
+#endif
+    
+    DocumentViewport* viewport = currentViewport();
+    if (!viewport) {
+        QMessageBox::warning(this, dialogTitle, 
+                             tr("No document is currently open."));
+        return;
+    }
+    
+    Document* doc = viewport->document();
+    if (!doc) {
+        QMessageBox::warning(this, dialogTitle,
+                             tr("No document is currently open."));
+        return;
+    }
+    
+    // Check if document is paged (PDF export only makes sense for paged documents)
+    if (doc->isEdgeless()) {
+        QMessageBox::warning(this, dialogTitle,
+                             tr("PDF export is only available for paged documents.\n"
+                                "Edgeless canvas export is not yet supported."));
+        return;
+    }
+    
+    // Check for unsaved changes - require saving first
+    if (doc->modified) {
+#ifdef Q_OS_ANDROID
+        QString savePrompt = tr("The document has unsaved changes.\n"
+                                "Please save the document before sharing as PDF.\n\n"
+                                "Would you like to save now?");
+#else
+        QString savePrompt = tr("The document has unsaved changes.\n"
+                                "Please save the document before exporting to PDF.\n\n"
+                                "Would you like to save now?");
+#endif
+        QMessageBox::StandardButton result = QMessageBox::question(
+            this, tr("Save Document First"),
+            savePrompt,
+            QMessageBox::Save | QMessageBox::Cancel);
+        
+        if (result == QMessageBox::Save) {
+            saveDocument();
+            // If still modified after save attempt, user cancelled or save failed
+            if (doc->modified) {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+    
+    // Show the export dialog
+    PdfExportDialog dialog(doc, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        // Get export options from dialog
+        PdfExportOptions options;
+        options.outputPath = dialog.outputPath();
+        options.pageRange = dialog.pageRange();
+        options.dpi = dialog.dpi();
+        options.preserveMetadata = true;
+        options.preserveOutline = true;
+        
+        // Create exporter and export
+        MuPdfExporter exporter;
+        exporter.setDocument(doc);
+        
+        // Blocking export with wait cursor
+        // Note: Progress dialog was considered (Phase 9) but deemed unnecessary
+        // due to excellent export performance (even 3000-page PDFs export quickly)
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        PdfExportResult result = exporter.exportPdf(options);
+        QApplication::restoreOverrideCursor();
+        
+        if (result.success) {
+#ifdef Q_OS_ANDROID
+            // Android: Share the exported PDF via share sheet
+            QJniObject activity = QNativeInterface::QAndroidApplication::context();
+            QJniObject::callStaticMethod<void>(
+                "org/speedynote/app/ShareHelper",
+                "shareFileWithTitle",
+                "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+                activity.object<jobject>(),
+                QJniObject::fromString(options.outputPath).object<jstring>(),
+                QJniObject::fromString("application/pdf").object<jstring>(),
+                QJniObject::fromString(tr("Share PDF")).object<jstring>()
+            );
+            // Note: The exported file is in the cache directory.
+            // Old PDFs are cleaned up before each new export (in PdfExportDialog::outputPath).
+            // The share intent copies the file, so cleanup is safe.
+#else
+            // Desktop: Show success message
+            QMessageBox::information(this, tr("Export Complete"),
+                                     tr("PDF exported successfully!\n\n"
+                                        "Pages exported: %1\n"
+                                        "File size: %2 KB")
+                                     .arg(result.pagesExported)
+                                     .arg(result.fileSizeBytes / 1024));
+#endif
+        } else {
+            QMessageBox::warning(this, tr("Export Failed"),
+                                 tr("Failed to export PDF:\n%1").arg(result.errorMessage));
+        }
     }
 }
 
@@ -2221,6 +2785,12 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     if (!isEdgeless && doc->pageCount() > 0) {
         QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
         if (thumbnail.isNull()) {
+            // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+            // accessing Document::page() directly. Background renders also call
+            // Document::page() which modifies m_loadedPages without synchronization.
+            if (m_pagePanel) {
+                m_pagePanel->cancelPendingRenders();
+            }
             thumbnail = renderPage0Thumbnail(doc);
         }
         if (!thumbnail.isNull()) {
@@ -2287,6 +2857,9 @@ void MainWindow::saveDocument()
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "saveDocument: Setting lastAccessedPage to" << doc->lastAccessedPage;
 #endif
+    } else {
+        // Phase 4: Sync edgeless position history to document before saving
+        viewport->syncPositionToDocument();
     }
             
     if (!existingPath.isEmpty() && !isUsingTemp) {
@@ -2307,6 +2880,12 @@ void MainWindow::saveDocument()
         if (!isEdgeless && doc->pageCount() > 0) {
             QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
             if (thumbnail.isNull()) {
+                // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                // accessing Document::page() directly. Background renders also call
+                // Document::page() which modifies m_loadedPages without synchronization.
+                if (m_pagePanel) {
+                    m_pagePanel->cancelPendingRenders();
+                }
                 thumbnail = renderPage0Thumbnail(doc);
             }
             if (!thumbnail.isNull()) {
@@ -2895,6 +3474,13 @@ DocumentViewport* MainWindow::currentViewport() const {
     return nullptr;
 }
 
+int MainWindow::tabCount() const {
+    if (m_tabBar) {
+        return m_tabBar->count();
+    }
+    return 0;
+}
+
 
 void MainWindow::toggleFullscreen() {
     if (isFullScreen()) {
@@ -2911,19 +3497,11 @@ void MainWindow::showJumpToPageDialog() {
     int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
     
     bool ok;
-    int newPage = QInputDialog::getInt(this, "Jump to Page", "Enter Page Number:", 
+    int newPage = QInputDialog::getInt(this, tr("Jump to Page"), tr("Enter Page Number:"), 
                                        currentPage, 1, 9999, 1, &ok);
     if (ok) {
-        // ✅ Use direction-aware page switching for jump-to-page
-        int direction = (newPage > currentPage) ? 1 : (newPage < currentPage) ? -1 : 0;
-        if (direction != 0) {
-            switchPage(newPage);
-        } else {
-            switchPage(newPage); // Same page, no direction needed
-        }
-        if (pageInput) {
-        pageInput->setValue(newPage);
-        }
+        // Convert 1-based user input to 0-based index for switchPage()
+        switchPage(newPage - 1);
     }
 }
 
@@ -2939,11 +3517,6 @@ void MainWindow::goToNextPage() {
     DocumentViewport* vp = currentViewport();
     if (!vp) return;
     switchPage(vp->currentPageIndex() + 1);
-}
-
-void MainWindow::onPageInputChanged(int newPage) {
-    // Phase S4: newPage is 1-based (from spinbox), convert to 0-based for switchPage
-    switchPage(newPage - 1);
 }
 
 
@@ -3452,6 +4025,9 @@ void MainWindow::updateScrollbarPositions() {
     
     // Update action bar position
     updateActionBarPosition();
+    
+    // Update PDF search bar position
+    updatePdfSearchBarPosition();
 }
 
 // =========================================================================
@@ -3829,6 +4405,278 @@ void MainWindow::updateActionBarPosition()
     
     // Ensure it's raised above viewport content
     m_actionBarContainer->raise();
+}
+
+// =========================================================================
+// PDF Search Bar Setup and Positioning
+// =========================================================================
+
+void MainWindow::setupPdfSearch()
+{
+    if (!m_canvasContainer) {
+        qWarning() << "setupPdfSearch: canvasContainer not yet created";
+        return;
+    }
+    
+    // Create search bar as child of canvas container (floats over viewport)
+    m_pdfSearchBar = new PdfSearchBar(m_canvasContainer);
+    m_pdfSearchBar->hide();  // Hidden by default
+    
+    // Initialize search state
+    m_searchState = std::make_unique<PdfSearchState>();
+    
+    // Create search engine
+    m_searchEngine = new PdfSearchEngine(this);
+    
+    // Connect search bar signals to trigger search
+    connect(m_pdfSearchBar, &PdfSearchBar::searchNextRequested, this, [this](const QString& text, bool caseSensitive, bool wholeWord) {
+        onSearchNext(text, caseSensitive, wholeWord);
+    });
+    
+    connect(m_pdfSearchBar, &PdfSearchBar::searchPrevRequested, this, [this](const QString& text, bool caseSensitive, bool wholeWord) {
+        onSearchPrev(text, caseSensitive, wholeWord);
+    });
+    
+    connect(m_pdfSearchBar, &PdfSearchBar::closed, this, [this]() {
+        hidePdfSearchBar();
+    });
+    
+    // Connect search engine signals
+    connect(m_searchEngine, &PdfSearchEngine::matchFound, this, 
+            &MainWindow::onSearchMatchFound);
+    connect(m_searchEngine, &PdfSearchEngine::notFound, this,
+            &MainWindow::onSearchNotFound);
+    
+    // Position at bottom of viewport
+    updatePdfSearchBarPosition();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "PDF search bar initialized";
+#endif
+}
+
+void MainWindow::updatePdfSearchBarPosition()
+{
+    if (!m_pdfSearchBar || !m_canvasContainer) {
+        return;
+    }
+    
+    // Position at the bottom of the canvas container
+    QRect viewportRect = m_canvasContainer->rect();
+    
+    // Calculate search bar geometry: full width, at bottom
+    int barHeight = m_pdfSearchBar->height();
+    int y = viewportRect.height() - barHeight;
+    
+    m_pdfSearchBar->setGeometry(0, y, viewportRect.width(), barHeight);
+    
+    // Ensure it's raised above viewport content
+    m_pdfSearchBar->raise();
+}
+
+void MainWindow::showPdfSearchBar()
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_pdfSearchBar) {
+        return;
+    }
+    
+    // Only show for PDF documents
+    Document *doc = vp->document();
+    if (!doc || !doc->isPdfLoaded()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[MainWindow] Ctrl+F ignored: not a PDF document";
+#endif
+        return;
+    }
+    
+    // Update position before showing
+    updatePdfSearchBarPosition();
+    
+    // Show and focus the search bar
+    m_pdfSearchBar->showAndFocus();
+    
+    // Sync dark mode
+    m_pdfSearchBar->setDarkMode(isDarkMode());
+}
+
+void MainWindow::hidePdfSearchBar()
+{
+    if (!m_pdfSearchBar) {
+        return;
+    }
+    
+    // Cancel any ongoing search and clear cache to free memory
+    if (m_searchEngine) {
+        m_searchEngine->cancel();
+        m_searchEngine->clearCache();
+    }
+    
+    m_pdfSearchBar->hide();
+    m_pdfSearchBar->clearStatus();
+    
+    // Clear search highlights from viewport
+    if (DocumentViewport *vp = currentViewport()) {
+        vp->clearSearchMatches();
+    }
+    
+    // Reset search state
+    if (m_searchState) {
+        m_searchState->clear();
+    }
+    
+    // Return focus to viewport
+    if (DocumentViewport *vp = currentViewport()) {
+        vp->setFocus();
+    }
+}
+
+void MainWindow::onSearchNext(const QString& text, bool caseSensitive, bool wholeWord)
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_searchEngine || !m_searchState) {
+        return;
+    }
+    
+    Document *doc = vp->document();
+    if (!doc || !doc->isPdfLoaded()) {
+        return;
+    }
+    
+    // Set the document on the engine
+    m_searchEngine->setDocument(doc);
+    
+    // Clear status before searching
+    m_pdfSearchBar->clearStatus();
+    
+    // Determine start position
+    int startPage = 0;
+    int startMatchIndex = -1;
+    
+    if (m_searchState->hasCurrentMatch() && m_searchState->searchText == text) {
+        // Continue from current match
+        startPage = m_searchState->currentPageIndex;
+        startMatchIndex = m_searchState->currentMatchIndex;
+    } else {
+        // New search or text changed - start from current visible page
+        startPage = vp->currentPageIndex();
+        startMatchIndex = -1;
+        
+        // Reset search state for new search
+        m_searchState->clear();
+    }
+    
+    // Update search state
+    m_searchState->searchText = text;
+    m_searchState->caseSensitive = caseSensitive;
+    m_searchState->wholeWord = wholeWord;
+    
+    // Trigger search
+    m_searchEngine->findNext(text, caseSensitive, wholeWord, startPage, startMatchIndex);
+}
+
+void MainWindow::onSearchPrev(const QString& text, bool caseSensitive, bool wholeWord)
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_searchEngine || !m_searchState) {
+        return;
+    }
+    
+    Document *doc = vp->document();
+    if (!doc || !doc->isPdfLoaded()) {
+        return;
+    }
+    
+    // Set the document on the engine
+    m_searchEngine->setDocument(doc);
+    
+    // Clear status before searching
+    m_pdfSearchBar->clearStatus();
+    
+    // Determine start position
+    int startPage = 0;
+    int startMatchIndex = -1;
+    
+    if (m_searchState->hasCurrentMatch() && m_searchState->searchText == text) {
+        // Continue from current match
+        startPage = m_searchState->currentPageIndex;
+        startMatchIndex = m_searchState->currentMatchIndex;
+    } else {
+        // New search or text changed - start from current visible page
+        startPage = vp->currentPageIndex();
+        startMatchIndex = -1;
+        
+        // Reset search state for new search
+        m_searchState->clear();
+    }
+    
+    // Update search state
+    m_searchState->searchText = text;
+    m_searchState->caseSensitive = caseSensitive;
+    m_searchState->wholeWord = wholeWord;
+    
+    // Trigger search
+    m_searchEngine->findPrev(text, caseSensitive, wholeWord, startPage, startMatchIndex);
+}
+
+void MainWindow::onSearchMatchFound(const PdfSearchMatch& match, 
+                                     const QVector<PdfSearchMatch>& pageMatches)
+{
+    DocumentViewport *vp = currentViewport();
+    if (!vp || !m_searchState) {
+        return;
+    }
+    
+    // Update search state
+    m_searchState->currentPageIndex = match.pageIndex;
+    m_searchState->currentMatchIndex = match.matchIndex;
+    m_searchState->currentPageMatches = pageMatches;
+    
+    // Navigate to the page with the match
+    vp->scrollToPage(match.pageIndex);
+    
+    // Update viewport highlights
+    // Find the index of current match within pageMatches
+    int currentIdx = -1;
+    for (int i = 0; i < pageMatches.size(); ++i) {
+        if (pageMatches[i].matchIndex == match.matchIndex) {
+            currentIdx = i;
+            break;
+        }
+    }
+    
+    vp->setSearchMatches(pageMatches, currentIdx, match.pageIndex);
+    
+    // Clear any previous "not found" status
+    m_pdfSearchBar->clearStatus();
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MainWindow] Search match found on page" << match.pageIndex 
+             << "match" << match.matchIndex << "of" << pageMatches.size();
+#endif
+}
+
+void MainWindow::onSearchNotFound(bool wrapped)
+{
+    Q_UNUSED(wrapped)
+    
+    if (m_pdfSearchBar) {
+        m_pdfSearchBar->setStatus(tr("No results found"));
+    }
+    
+    // Clear any existing highlights
+    if (DocumentViewport *vp = currentViewport()) {
+        vp->clearSearchMatches();
+    }
+    
+    // Reset match state but keep search text
+    if (m_searchState) {
+        m_searchState->resetMatch();
+    }
+    
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[MainWindow] Search not found, wrapped:" << wrapped;
+#endif
 }
 
 // =========================================================================
@@ -4273,8 +5121,15 @@ QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
     // Get the page (may trigger lazy load)
     Page* page = doc->page(0);
     if (!page) {
+        qWarning() << "renderPage0Thumbnail: page(0) returned nullptr";
         painter.end();
         return thumbnail;  // Return white placeholder
+    }
+    
+    // Defensive check: verify page has layers (should always have at least 1)
+    int layerCount = page->layerCount();
+    if (layerCount <= 0) {
+        qWarning() << "renderPage0Thumbnail: page has no layers, skipping layer rendering";
     }
     
     // Render PDF background if available
@@ -4292,8 +5147,8 @@ QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
     // Render background
     page->renderBackground(painter, pdfBackground.isNull() ? nullptr : &pdfBackground, 1.0);
     
-    // Render vector layers
-    for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
+    // Render vector layers (with bounds check)
+    for (int layerIdx = 0; layerIdx < layerCount; ++layerIdx) {
         VectorLayer* layer = page->layer(layerIdx);
         if (layer && layer->visible) {
             layer->render(painter);
@@ -4416,12 +5271,12 @@ void MainWindow::showAddMenu() {
     
     // New Edgeless Canvas
     QAction* newEdgelessAction = menu.addAction(tr("New Edgeless Canvas"));
-    newEdgelessAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_N));
+    newEdgelessAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.new_edgeless"));
     connect(newEdgelessAction, &QAction::triggered, this, &MainWindow::addNewEdgelessTab);
     
     // New Paged Notebook
     QAction* newPagedAction = menu.addAction(tr("New Paged Notebook"));
-    newPagedAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_N));
+    newPagedAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.new_paged"));
     connect(newPagedAction, &QAction::triggered, this, &MainWindow::addNewTab);
     
     // Separator
@@ -4429,12 +5284,12 @@ void MainWindow::showAddMenu() {
     
     // Open PDF...
     QAction* openPdfAction = menu.addAction(tr("Open PDF..."));
-    openPdfAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_O));
+    openPdfAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.open_pdf"));
     connect(openPdfAction, &QAction::triggered, this, &MainWindow::showOpenPdfDialog);
     
     // Open Notebook...
     QAction* openNotebookAction = menu.addAction(tr("Open Notebook..."));
-    openNotebookAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_L));
+    openNotebookAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.open_notebook"));
     connect(openNotebookAction, &QAction::triggered, this, &MainWindow::loadFolderDocument);
     
     // Position menu below the add button
@@ -4454,6 +5309,7 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     // This catches maximize/restore events that might not trigger canvas container resize
     updateSubToolbarPosition();
     updateActionBarPosition();
+    updatePdfSearchBarPosition();
 }
 
 
@@ -4963,16 +5819,26 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
 #endif
 
 void MainWindow::closeEvent(QCloseEvent *event) {
-    // ========== UPDATE LAST ACCESSED PAGE FOR ALL DOCUMENTS ==========
-    // Before checking for unsaved changes, update lastAccessedPage for all paged documents
+    // ========== UPDATE POSITIONS FOR ALL DOCUMENTS ==========
+    // Before checking for unsaved changes, update positions for all documents
     // This ensures the position is saved even if the document was saved earlier in the session
     if (m_tabManager && m_documentManager) {
         for (int i = 0; i < m_tabManager->tabCount(); ++i) {
             Document* doc = m_tabManager->documentAt(i);
-            if (!doc || doc->isEdgeless()) continue;
+            if (!doc) continue;
             
             DocumentViewport* vp = m_tabManager->viewportAt(i);
-            if (vp) {
+            if (!vp) continue;
+            
+            if (doc->isEdgeless()) {
+                // Phase 4: Sync edgeless position before app exit
+                vp->syncPositionToDocument();
+                doc->markModified();
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "closeEvent: Synced edgeless position for" << doc->displayName();
+#endif
+            } else {
+                // Paged: update lastAccessedPage
                 int currentPage = vp->currentPageIndex();
                 if (doc->lastAccessedPage != currentPage) {
                     doc->lastAccessedPage = currentPage;
@@ -4998,9 +5864,10 @@ void MainWindow::closeEvent(QCloseEvent *event) {
             bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
             
             if (doc->isEdgeless()) {
-                // Edgeless: check if it has tiles and is in temp bundle
+                // Edgeless: check if modified OR (in temp bundle with tiles)
+                // BUG FIX: Also check doc->modified for position history changes
                 bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
-                needsSavePrompt = isUsingTemp && hasContent;
+                needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
             } else {
                 // Paged: check if modified OR (in temp bundle with pages)
                 bool hasContent = doc->pageCount() > 0;
@@ -5427,15 +6294,20 @@ void MainWindow::openFileInNewTab(const QString &filePath)
     // Use QTimer::singleShot(0) to ensure viewport geometry is ready
     bool isEdgeless = doc->isEdgeless();
     if (isEdgeless) {
-        // Edgeless: Center on origin (offset by a small margin)
-        QTimer::singleShot(0, this, [this, tabIndex]() {
-            if (m_tabManager) {
-                DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
-                if (viewport) {
-                    viewport->setPanOffset(QPointF(-100, -100));
+        // Edgeless: Only set default position if document has no saved position
+        // Documents with saved positions will have their position restored by DocumentViewport
+        if (doc->edgelessLastPosition().isNull()) {
+            QTimer::singleShot(0, this, [this, tabIndex]() {
+                if (m_tabManager) {
+                    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+                    if (viewport) {
+                        // New document: center on origin (offset by a small margin)
+                        viewport->setPanOffset(QPointF(-100, -100));
+                    }
                 }
-            }
-        });
+            });
+        }
+        // else: Document has saved position - DocumentViewport::showEvent/resizeEvent will restore it
     } else {
         // Paged: Center content horizontally within the viewport
         centerViewportContent(tabIndex);

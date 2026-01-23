@@ -30,6 +30,7 @@ enum class TouchGestureMode {
 #include "ToolType.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
+#include "../pdf/PdfSearchEngine.h"
 #include <QStack>
 #include <QMap>
 
@@ -837,6 +838,81 @@ public:
      */
     bool hasTextSelection() const { return m_textSelection.isValid(); }
     
+    // ===== PDF Search Highlighting =====
+    
+    /**
+     * @brief Set search matches to highlight on the current page.
+     * @param matches All matches on the page.
+     * @param currentIndex Index of the current (focused) match.
+     * @param pageIndex Page where matches are located.
+     * 
+     * Call this when a search result is found. The viewport will highlight
+     * all matches on the page in yellow, with the current match in orange.
+     */
+    void setSearchMatches(const QVector<PdfSearchMatch>& matches, int currentIndex, int pageIndex);
+    
+    /**
+     * @brief Clear all search match highlights.
+     * 
+     * Call this when the search bar is closed.
+     */
+    void clearSearchMatches();
+    
+    /**
+     * @brief Check if there are search matches being displayed.
+     */
+    bool hasSearchMatches() const { return !m_searchMatches.isEmpty(); }
+    
+    /**
+     * @brief Handle Escape key for cancelling selections.
+     * @return True if Escape was handled (something was cancelled), 
+     *         false if nothing to cancel.
+     * 
+     * Called by MainWindow when Escape is pressed. If this returns false,
+     * MainWindow should toggle to the launcher.
+     */
+    bool handleEscapeKey();
+    
+    // ========== Context-Dependent Shortcut Handlers ==========
+    // These are called by MainWindow's QShortcut system and handle
+    // the action based on the current tool and selection state.
+    
+    /**
+     * @brief Handle Copy action based on current context.
+     * 
+     * Behavior depends on current tool:
+     * - Lasso: Copy selected strokes
+     * - ObjectSelect: Copy selected objects
+     * - Highlighter: Copy selected text to system clipboard
+     */
+    void handleCopyAction();
+    
+    /**
+     * @brief Handle Cut action based on current context.
+     * 
+     * Currently only works for Lasso tool (cut selected strokes).
+     */
+    void handleCutAction();
+    
+    /**
+     * @brief Handle Paste action based on current context.
+     * 
+     * Behavior depends on current tool:
+     * - Lasso: Paste strokes from internal clipboard
+     * - ObjectSelect: Paste objects from internal clipboard
+     */
+    void handlePasteAction();
+    
+    /**
+     * @brief Handle Delete action based on current context.
+     * 
+     * Deletes current selection based on tool:
+     * - Lasso: Delete selected strokes
+     * - ObjectSelect: Delete selected objects
+     * - Highlighter: Clear text selection
+     */
+    void handleDeleteAction();
+    
     /**
      * @brief Check if the internal stroke clipboard has content.
      * @return True if strokes can be pasted.
@@ -1251,6 +1327,58 @@ public slots:
      */
     void navigateToEdgelessPosition(int tileX, int tileY, QPointF docPosition);
     
+    // ===== Edgeless Position History (Phase 4) =====
+    
+    /**
+     * @brief Return to the origin (0, 0) in edgeless mode.
+     * 
+     * Saves the current position to history before jumping to origin.
+     * Bound to Home key by default.
+     * No-op if not in edgeless mode.
+     */
+    void returnToOrigin();
+    
+    /**
+     * @brief Go back to the previous position in edgeless history.
+     * 
+     * Pops the most recent position from history and navigates there.
+     * Bound to Backspace key by default.
+     * No-op if history is empty or not in edgeless mode.
+     */
+    void goBackPosition();
+    
+    /**
+     * @brief Check if there's position history to go back to.
+     * @return True if position history stack is not empty.
+     */
+    bool hasPositionHistory() const;
+    
+    /**
+     * @brief Get the current viewport center position in document coordinates.
+     * @return The document position at the center of the viewport.
+     * 
+     * Used for position history and persistence.
+     */
+    QPointF currentCenterPosition() const;
+    
+    /**
+     * @brief Sync position history to the document for persistence.
+     * 
+     * Call before saving the document. Copies the viewport's current position
+     * and history stack to the Document for JSON serialization.
+     */
+    void syncPositionToDocument();
+    
+    /**
+     * @brief Restore position and history from the document.
+     * 
+     * Called during initial viewport setup. Sets pan offset directly without
+     * triggering an update() - the caller is responsible for triggering repaint.
+     * 
+     * @return true if position was restored, false if no saved position
+     */
+    bool applyRestoredEdgelessPosition();
+    
     /**
      * @brief Scroll by a delta amount.
      * @param delta Scroll delta in document coordinates.
@@ -1266,6 +1394,21 @@ public slots:
      * @brief Zoom to fit the page width in the viewport.
      */
     void zoomToWidth();
+    
+    /**
+     * @brief Zoom in by a step factor (default 1.25x).
+     */
+    void zoomIn();
+    
+    /**
+     * @brief Zoom out by a step factor (default 1.25x).
+     */
+    void zoomOut();
+    
+    /**
+     * @brief Zoom to 100% (actual size) and recenter.
+     */
+    void zoomToActualSize();
     
     /**
      * @brief Scroll to the home position (origin).
@@ -1631,6 +1774,7 @@ private:
     qreal m_zoomLevel = 1.0;
     QPointF m_panOffset;
     int m_currentPageIndex = 0;
+    bool m_needsPositionRestore = false;  ///< BUG FIX: Edgeless position needs restore in showEvent
     
     // ===== Touch Gesture Handler =====
     // Touch gesture logic is encapsulated in TouchGestureHandler (see TouchGestureHandler.h)
@@ -1836,6 +1980,13 @@ private:
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
     bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
+    
+    // ===== PDF Search Highlighting =====
+    QVector<PdfSearchMatch> m_searchMatches;       ///< All matches on current page
+    int m_currentSearchMatchIndex = -1;            ///< Which match is "current" (orange)
+    int m_searchMatchPageIndex = -1;               ///< Page where matches are displayed
+    QColor m_searchHighlightCurrent = QColor(255, 165, 0, 128);  ///< Orange, 50% alpha
+    QColor m_searchHighlightOther = QColor(255, 255, 0, 128);    ///< Yellow, 50% alpha
     
     // ===== Object Selection (Phase O2) =====
     
@@ -2130,6 +2281,18 @@ private:
     QStack<EdgelessUndoAction> m_edgelessUndoStack;  ///< Global undo stack for edgeless mode
     QStack<EdgelessUndoAction> m_edgelessRedoStack;  ///< Global redo stack for edgeless mode
     static constexpr int MAX_UNDO_EDGELESS = 100;    ///< Max edgeless undo actions (~2MB)
+    
+    // ===== Edgeless Position History (Phase 4) =====
+    QStack<QPointF> m_edgelessPositionHistory;       ///< Stack of previous viewport positions
+    static constexpr int MAX_POSITION_HISTORY = 20;  ///< Max saved positions
+    
+    /**
+     * @brief Push the current position to history stack.
+     * 
+     * Called before navigation jumps (origin, link slots, etc.)
+     * to enable "go back" functionality.
+     */
+    void pushPositionHistory();
     
     // ===== Benchmark State (Task 2.6) =====
     bool m_benchmarking = false;                      ///< Whether benchmarking is active
@@ -2712,6 +2875,13 @@ private:
      * @param pageIndex The page being rendered.
      */
     void renderTextSelectionOverlay(QPainter& painter, int pageIndex);
+    
+    /**
+     * @brief Render PDF search match highlights on a page.
+     * @param painter The painter to render to (page-transformed).
+     * @param pageIndex The page being rendered.
+     */
+    void renderSearchMatchesOverlay(QPainter& painter, int pageIndex);
     
     /**
      * @brief Create a marker-style stroke for a highlight rectangle (Phase B.6).

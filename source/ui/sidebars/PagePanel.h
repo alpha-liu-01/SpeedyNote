@@ -139,6 +139,14 @@ public:
      * @brief Invalidate all thumbnails.
      */
     void invalidateAllThumbnails();
+    
+    /**
+     * @brief Cancel all pending thumbnail renders and wait for completion.
+     * 
+     * Use before operations that access Document pages directly
+     * to avoid race conditions with background thumbnail rendering.
+     */
+    void cancelPendingRenders();
 
 signals:
     /**

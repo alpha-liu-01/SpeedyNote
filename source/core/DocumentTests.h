@@ -988,22 +988,7 @@ inline bool testActualPdfLoad()
     
     qDebug() << "  - PDF reload after deserialize: OK";
     
-    // Test 11: findPageByPdfPage
-    int foundPage = doc->findPageByPdfPage(0);
-    if (foundPage != 0) {
-        qDebug() << "FAIL: findPageByPdfPage(0) should return 0, got:" << foundPage;
-        success = false;
-    }
-    
-    int notFoundPage = doc->findPageByPdfPage(9999);
-    if (notFoundPage != -1) {
-        qDebug() << "FAIL: findPageByPdfPage(9999) should return -1";
-        success = false;
-    }
-    
-    qDebug() << "  - findPageByPdfPage(): OK";
-    
-    // Test 12: Insert page in PDF document (pages shouldn't break)
+    // Test 11: Insert page in PDF document (pages shouldn't break)
     int originalCount = doc->pageCount();
     Page* inserted = doc->insertPage(1);
     

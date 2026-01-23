@@ -632,15 +632,22 @@ void Launcher::onTimelineItemClicked(const QModelIndex& index)
 
 void Launcher::keyPressEvent(QKeyEvent* event)
 {
-    // Escape key hides launcher
+    // Escape key requests return to MainWindow
+    // MainWindow will check if there are open tabs before toggling
     if (event->key() == Qt::Key_Escape) {
-        hideWithAnimation();
+        emit returnToMainWindowRequested();
         return;
     }
     
-    // Ctrl+H also hides (toggle shortcut)
-    if (event->key() == Qt::Key_H && event->modifiers() == Qt::ControlModifier) {
-        hideWithAnimation();
+    // Ctrl+L also toggles (launcher shortcut)
+    if (event->key() == Qt::Key_L && event->modifiers() == Qt::ControlModifier) {
+        emit returnToMainWindowRequested();
+        return;
+    }
+    
+    // Ctrl+F switches to search view
+    if (event->key() == Qt::Key_F && event->modifiers() == Qt::ControlModifier) {
+        switchToView(View::Search);
         return;
     }
     

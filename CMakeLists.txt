@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.0.2 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -63,6 +63,75 @@ endif()
         add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
+    # MuPDF for PDF export (static libraries via MSYS2)
+    set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
+    set(MUPDF_LIBRARY_MAIN "${QT_PATH}/lib/libmupdf.a")
+    set(MUPDF_LIBRARY_THIRD "${QT_PATH}/lib/libmupdf-third.a")
+    
+    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
+        message(STATUS "✅ MuPDF found for PDF export")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        
+        # MuPDF static libs require these system libraries via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
+        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
+        
+        find_library(MUJS_LIBRARY NAMES mujs PATHS "${QT_PATH}/lib")
+        
+        # Start with main library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
+        
+        # libmupdf-third.a is optional - MSYS2 may bundle deps into main lib
+        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        endif()
+        
+        # Add pkg-config dependencies (including zlib and brotli for MuPDF)
+        list(APPEND MUPDF_LIBRARIES
+            PkgConfig::HARFBUZZ
+            PkgConfig::FREETYPE
+            PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2
+            PkgConfig::ZLIB
+        )
+        if(BROTLIDEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+            message(STATUS "   Found brotli decoder")
+        endif()
+        if(BROTLIENC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+            message(STATUS "   Found brotli encoder")
+        endif()
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(MUJS_LIBRARY)
+            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Install with: pacman -S mingw-w64-clang-x86_64-mupdf")
+        set(MUPDF_FOUND FALSE)
+    endif()
+
+    # Add MuPDF include directory if found
+    if(MUPDF_FOUND)
+        include_directories(${MUPDF_INCLUDE_DIR})
+    endif()
+
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
         message(STATUS "🚀 Optimizing for ARM64 Windows (Snapdragon)")
@@ -115,6 +184,75 @@ elseif(APPLE)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
     
+    # MuPDF for PDF export (via Homebrew)
+    set(MUPDF_INCLUDE_DIR "${HOMEBREW_PREFIX}/include")
+    set(MUPDF_LIBRARY_MAIN "${HOMEBREW_PREFIX}/lib/libmupdf.a")
+    set(MUPDF_LIBRARY_THIRD "${HOMEBREW_PREFIX}/lib/libmupdf-third.a")
+    
+    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
+        message(STATUS "✅ MuPDF found for PDF export")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        
+        # MuPDF static libs require these system libraries via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
+        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
+        
+        find_library(MUJS_LIBRARY NAMES mujs PATHS "${HOMEBREW_PREFIX}/lib")
+        
+        # Start with main library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
+        
+        # libmupdf-third.a is optional - Homebrew may bundle deps into main lib
+        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        endif()
+        
+        # Add pkg-config dependencies (including zlib and brotli for MuPDF)
+        list(APPEND MUPDF_LIBRARIES
+            PkgConfig::HARFBUZZ
+            PkgConfig::FREETYPE
+            PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2
+            PkgConfig::ZLIB
+        )
+        if(BROTLIDEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+            message(STATUS "   Found brotli decoder")
+        endif()
+        if(BROTLIENC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+            message(STATUS "   Found brotli encoder")
+        endif()
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(MUJS_LIBRARY)
+            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Install with: brew install mupdf")
+        set(MUPDF_FOUND FALSE)
+    endif()
+
+    # Add MuPDF include directory if found
+    if(MUPDF_FOUND)
+        include_directories(${MUPDF_INCLUDE_DIR})
+    endif()
+
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
         message(STATUS "🚀 Optimizing for Apple Silicon")
@@ -148,6 +286,10 @@ elseif(ANDROID)
     
     include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
     
+    # Enable MuPDF export on Android (MuPDF is always available on Android)
+    add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+    message(STATUS "✅ MuPDF PDF export enabled for Android")
+    
     # No controller support on Android
     set(ENABLE_CONTROLLER_SUPPORT OFF)
     set(WIN_RESOURCES "")
@@ -167,7 +309,63 @@ elseif(UNIX)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    include_directories(${CMAKE_CURRENT_BINARY_DIR})
+    # MuPDF for PDF export (static libraries)
+    # Headers in /usr/include/mupdf/, libs in /usr/lib/
+    set(MUPDF_INCLUDE_DIR "/usr/include")
+    set(MUPDF_LIBRARY_MAIN "/usr/lib/libmupdf.a")
+    set(MUPDF_LIBRARY_THIRD "/usr/lib/libmupdf-third.a")
+    
+    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
+        message(STATUS "✅ MuPDF found for PDF export")
+        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+        set(MUPDF_FOUND TRUE)
+        
+        # MuPDF static libs require these system libraries via pkg-config
+        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)  # Optional
+        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)        # HTML5 parser
+        
+        # Find mujs library (JavaScript support in MuPDF)
+        find_library(MUJS_LIBRARY NAMES mujs PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
+        
+        # Start with main library
+        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
+        
+        # libmupdf-third.a is optional - some distros bundle deps into main lib
+        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+            list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
+            message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
+        endif()
+        
+        # Add pkg-config dependencies and system libs
+        list(APPEND MUPDF_LIBRARIES
+            PkgConfig::HARFBUZZ
+            PkgConfig::FREETYPE
+            PkgConfig::LIBJPEG
+            PkgConfig::LIBOPENJP2
+            m pthread z
+        )
+        # Add optional dependencies if found
+        if(JBIG2DEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+        endif()
+        if(GUMBO_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+        endif()
+        if(MUJS_LIBRARY)
+            list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
+            message(STATUS "   Found mujs: ${MUJS_LIBRARY}")
+        endif()
+    else()
+        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Install with: sudo apt install libmupdf-dev")
+        set(MUPDF_FOUND FALSE)
+    endif()
+
+    include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
 
     # CPU optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
@@ -233,6 +431,7 @@ set(CORE_SOURCES
     source/core/NotebookLibrary.cpp
     source/core/TouchGestureHandler.cpp
     source/core/MarkdownNote.cpp
+    source/core/ShortcutManager.cpp
 )
 
 # Inserted objects (images, links, etc.)
@@ -273,6 +472,7 @@ set(UI_SOURCES
     source/ui/widgets/UndoDeleteButton.cpp
     source/ui/widgets/LayerItemWidget.cpp
     source/ui/widgets/LayerPanelPillButton.cpp
+    source/ui/widgets/PdfSearchBar.cpp
     # Subtoolbars
     source/ui/subtoolbars/SubToolbar.cpp
     source/ui/subtoolbars/SubToolbarContainer.cpp
@@ -309,13 +509,17 @@ if(ANDROID)
         source/pdf/MuPdfProvider.cpp
         source/pdf/PdfRelinkDialog.cpp
         source/pdf/PdfMismatchDialog.cpp
+        source/pdf/PdfSearchEngine.cpp
+        source/pdf/MuPdfExporter.cpp
     )
 else()
-set(PDF_SOURCES
+    set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
         source/pdf/PopplerPdfProvider.cpp
         source/pdf/PdfRelinkDialog.cpp
         source/pdf/PdfMismatchDialog.cpp
+        source/pdf/PdfSearchEngine.cpp
+        source/pdf/MuPdfExporter.cpp
     )
 endif()
 
@@ -362,6 +566,8 @@ set(APP_SOURCES
         source/Main.cpp
         source/MainWindow.cpp
     source/ControlPanelDialog.cpp
+    source/ui/dialogs/KeyCaptureDialog.cpp
+    source/ui/dialogs/PdfExportDialog.cpp
     source/text/MarkdownNoteEntry.cpp
     source/ui/MarkdownNotesSidebar.cpp
         ${CORE_SOURCES}
@@ -440,6 +646,10 @@ if(WIN32)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
+    # Add MuPDF for PDF export
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+    endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
 elseif(APPLE)
@@ -449,6 +659,10 @@ elseif(APPLE)
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
+    endif()
+    # Add MuPDF for PDF export
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
@@ -466,6 +680,10 @@ elseif(UNIX)
     )
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
+    endif()
+    # Add MuPDF for PDF export
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 endif()

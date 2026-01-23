@@ -210,6 +210,7 @@ static void applyAndroidFonts(QApplication& app)
 #include "core/DocumentViewportTests.h"
 #include "ui/ToolbarButtonTests.h"
 #include "objects/LinkObjectTests.h"
+#include "pdf/MuPdfExporterTests.h"
 #include "ui/ToolbarButtonTestWidget.h"
 #endif
 
@@ -389,6 +390,19 @@ static void connectLauncherSignals(Launcher* launcher)
         w->loadFolderDocument();
         launcher->hideWithAnimation();
     });
+    
+    // Handle Escape/return to MainWindow request
+    // Only return if MainWindow exists and has open tabs
+    QObject::connect(launcher, &Launcher::returnToMainWindowRequested, [=]() {
+        MainWindow* w = MainWindow::findExistingMainWindow();
+        if (w && w->tabCount() > 0) {
+            // MainWindow exists with open tabs - toggle back to it
+            w->preserveWindowState(launcher, true);
+            w->bringToFront();
+            launcher->hideWithAnimation();
+        }
+        // Otherwise, do nothing (stay on Launcher)
+    });
 }
 
 // ============================================================================
@@ -412,6 +426,8 @@ static int runTests(const QString& testType)
         success = DocumentTests::runAllTests();
     } else if (testType == "linkobject") {
         success = LinkObjectTests::runAllTests();
+    } else if (testType == "pdfexporter") {
+        success = MuPdfExporterTests::runAllTests();
     } else if (testType == "buttons") {
         return QTest::qExec(new ToolbarButtonTests());
     }
@@ -485,6 +501,8 @@ int main(int argc, char* argv[])
             runButtonVisualTest = true;
         } else if (arg == "--test-linkobject") {
             testToRun = "linkobject";
+        } else if (arg == "--test-pdfexporter") {
+            testToRun = "pdfexporter";
         }
 #endif
         else if (!arg.startsWith("--") && inputFile.isEmpty()) {
