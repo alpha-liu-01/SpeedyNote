@@ -214,6 +214,14 @@ jobs:
             exit 1
           }
           
+          # Download unofficial Chinese Simplified language file for Inno Setup
+          # (not included in standard installation)
+          # Source: https://github.com/jrsoftware/issrc/blob/main/Files/Languages/Unofficial/ChineseSimplified.isl
+          $islUrl = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+          $islPath = "C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl"
+          Write-Host "Downloading Chinese Simplified language file..." -ForegroundColor Gray
+          Invoke-WebRequest -Uri $islUrl -OutFile $islPath
+          
           # Create Output directory for installer
           New-Item -ItemType Directory -Path "Output" -Force | Out-Null
           
