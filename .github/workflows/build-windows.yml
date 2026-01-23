@@ -1,4 +1,4 @@
-name: Build SpeedyNote EXE Packages
+name: Build SpeedyNote Windows Installer
 
 on:
   push:
@@ -9,23 +9,10 @@ on:
     types: [ created ]
 
 jobs:
-  build-exe:
-    name: Build Windows EXE
+  build-windows:
+    name: Build Windows x86_64
     runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x86_64, arm64]
-        include:
-          - arch: x86_64
-            msys_prefix: mingw-w64-clang-x86_64
-            msystem: CLANG64
-            build_args: ""
-            runner: windows-latest
-          - arch: arm64
-            msys_prefix: mingw-w64-clang-x86_64
-            msystem: CLANG64
-            build_args: "-arm64"
-            runner: windows-arm64
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,33 +20,41 @@ jobs:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ matrix.msystem }}
+          msystem: CLANG64
           update: true
           install: >
-            ${{ matrix.msys_prefix }}-clang
-            ${{ matrix.msys_prefix }}-lld
-            ${{ matrix.msys_prefix }}-make
-            ${{ matrix.msys_prefix }}-cmake
-            ${{ matrix.msys_prefix }}-pkgconf
-            ${{ matrix.msys_prefix }}-pkg-config
-            ${{ matrix.msys_prefix }}-qt6-base
-            ${{ matrix.msys_prefix }}-qt6-tools
-            ${{ matrix.msys_prefix }}-qt6-translations
-            ${{ matrix.msys_prefix }}-poppler
-            ${{ matrix.msys_prefix }}-poppler-qt6
-            ${{ matrix.msys_prefix }}-SDL2
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-lld
+            mingw-w64-clang-x86_64-make
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-pkg-config
+            mingw-w64-clang-x86_64-qt6-base
+            mingw-w64-clang-x86_64-qt6-tools
+            mingw-w64-clang-x86_64-qt6-translations
+            mingw-w64-clang-x86_64-poppler
+            mingw-w64-clang-x86_64-poppler-qt6
+            mingw-w64-clang-x86_64-SDL2
+            mingw-w64-clang-x86_64-mupdf
+            mingw-w64-clang-x86_64-ntldd
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+        shell: pwsh
 
       - name: Build
         timeout-minutes: 60
         run: |
           $ErrorActionPreference = "Stop"
+          $toolchainPath = "D:\a\_temp\msys64\clang64"
           
           Write-Host "::group::Prepare build directory" -ForegroundColor Cyan
           if (Test-Path "build") { Remove-Item -Path "build" -Recurse -Force }
           New-Item -ItemType Directory -Path "build" | Out-Null
           
           # Compile translations
-          $lreleaseExe = "D:\a\_temp\msys64\${{ matrix.msystem }}\bin\lrelease-qt6.exe"
+          $lreleaseExe = "$toolchainPath\bin\lrelease-qt6.exe"
           if (Test-Path $lreleaseExe) {
             Write-Host "Compiling translation files..." -ForegroundColor Green
             & $lreleaseExe ./resources/translations/app_zh.ts ./resources/translations/app_fr.ts ./resources/translations/app_es.ts
@@ -72,7 +67,7 @@ jobs:
           Set-Location build
           
           # Setup environment - add MSYS2 to PATH
-          $env:PATH = "D:\a\_temp\msys64\${{ matrix.msystem }}\bin;$env:PATH"
+          $env:PATH = "$toolchainPath\bin;$env:PATH"
           
           Write-Host "::group::Configure CMake" -ForegroundColor Cyan
           $cmakeArgs = @(
@@ -80,22 +75,19 @@ jobs:
             "-DCMAKE_C_COMPILER=clang",
             "-DCMAKE_CXX_COMPILER=clang++",
             "-DCMAKE_MAKE_PROGRAM=mingw32-make",
-            "-DCMAKE_BUILD_TYPE=Release"
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DENABLE_DEBUG_OUTPUT=OFF",
+            "-DQT_PATH=$toolchainPath",
+            "-DSDL2_ROOT=$toolchainPath"
           )
-          
-          if ("${{ matrix.arch }}" -eq "arm64") {
-            $cmakeArgs += "-DCMAKE_SYSTEM_PROCESSOR=arm64"
-          } else {
-            $cmakeArgs += "-DCPU_ARCH=modern"
-          }
           
           & cmake @cmakeArgs ..
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "::endgroup::"
           
           Write-Host "::group::Build project" -ForegroundColor Cyan
-          Write-Host "Building with single-threaded compilation to avoid memory issues..." -ForegroundColor Yellow
-          & cmake --build . --config Release -- -j16
+          # Use 4 parallel jobs (GitHub Actions runners have 2 cores, but 4 jobs is usually safe)
+          & cmake --build . --config Release -- -j4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "::endgroup::"
           
@@ -104,35 +96,101 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "::endgroup::"
           
-          Write-Host "::group::Copy dependencies" -ForegroundColor Cyan
-          $sourceDir = "D:\a\_temp\msys64\${{ matrix.msystem }}\bin"
+          Write-Host "::group::Copy dependencies (automatic detection with ntldd)" -ForegroundColor Cyan
           
-          # Copy required DLLs
-          $dllPatterns = @(
-            "libpoppler-*.dll", "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll",
-            "libexpat-1.dll", "libicuin*.dll", "libicuuc*.dll", "libicudt*.dll",
-            "libfreetype-6.dll", "libfontconfig-1.dll", "libglib-2.0-0.dll",
-            "libintl-8.dll", "libpng16-16.dll", "libjpeg-8.dll", "libtiff-*.dll",
-            "libopenjp2-*.dll", "liblcms2-2.dll", "libcrypto-3*.dll", "libssl-3*.dll",
-            "libzstd.dll", "zlib1.dll", "libbz2-1.dll", "liblzma-5.dll",
-            "libpoppler-qt6-*.dll", "SDL2.dll", "libharfbuzz-0.dll", "libgraphite2.dll",
-            "libbrotlidec.dll", "libbrotlicommon.dll", "libpcre2-16-0.dll",
-            "libgobject-2.0-0.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll",
-            "libwinpthread-1.dll", "libc++.dll", "libunwind.dll"
-          )
-          
+          $sourceDir = "$toolchainPath\bin"
           $copiedCount = 0
-          foreach ($pattern in $dllPatterns) {
-            $files = Get-ChildItem -Path $sourceDir -Filter $pattern -ErrorAction SilentlyContinue
-            foreach ($file in $files) {
-              Copy-Item -Path $file.FullName -Destination . -Force -ErrorAction SilentlyContinue
-              $copiedCount++
+          $ntlddExe = "$toolchainPath\bin\ntldd.exe"
+          
+          # Windows system directories to exclude
+          $systemPaths = @("c:\windows") 
+          
+          function Test-SystemDll {
+            param([string]$dllPath)
+            $lowerPath = $dllPath.ToLower()
+            foreach ($sysPath in $systemPaths) {
+              if ($lowerPath.StartsWith($sysPath)) { return $true }
+            }
+            if ($lowerPath -match "not found") { return $true }
+            return $false
+          }
+          
+          if (Test-Path $ntlddExe) {
+            Write-Host "Using ntldd for automatic dependency detection..." -ForegroundColor Gray
+            
+            # Get all dependencies recursively
+            $ntlddOutput = & $ntlddExe -R "NoteApp.exe" 2>$null
+            
+            $dllsToCopy = @{}
+            foreach ($line in $ntlddOutput) {
+              if ($line -match '^\s*(\S+\.dll)\s+=>\s+(.+?)\s*(\(0x|$)') {
+                $dllName = $Matches[1]
+                $dllPath = $Matches[2].Trim()
+                
+                if (-not (Test-SystemDll $dllPath)) {
+                  if ($dllPath.StartsWith("/")) {
+                    $dllPath = $dllPath -replace "^/clang64", $toolchainPath
+                    $dllPath = $dllPath -replace "/", "\"
+                  }
+                  
+                  if ((Test-Path $dllPath) -and (-not $dllsToCopy.ContainsKey($dllName))) {
+                    $dllsToCopy[$dllName] = $dllPath
+                  }
+                }
+              }
+            }
+            
+            Write-Host "Found $($dllsToCopy.Count) dependencies to copy" -ForegroundColor Gray
+            
+            foreach ($dll in $dllsToCopy.GetEnumerator()) {
+              $destPath = $dll.Key
+              if (-not (Test-Path $destPath)) {
+                Copy-Item -Path $dll.Value -Destination $destPath -Force
+                $copiedCount++
+              }
+            }
+          } else {
+            Write-Host "ntldd not found, using fallback DLL list..." -ForegroundColor Yellow
+            
+            # Fallback: copy common DLLs by pattern
+            $dllPatterns = @(
+              "libpoppler-*.dll", "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll",
+              "libexpat-1.dll", "libicuin*.dll", "libicuuc*.dll", "libicudt*.dll",
+              "libfreetype-6.dll", "libfontconfig-1.dll", "libglib-2.0-0.dll",
+              "libintl-8.dll", "libpng16-16.dll", "libjpeg-8.dll", "libtiff-*.dll",
+              "libopenjp2-*.dll", "liblcms2-2.dll", "libcrypto-3*.dll", "libssl-3*.dll",
+              "libzstd.dll", "zlib1.dll", "libbz2-1.dll", "liblzma-5.dll",
+              "libpoppler-qt6-*.dll", "SDL2.dll", "libharfbuzz-0.dll", "libgraphite2.dll",
+              "libbrotlidec.dll", "libbrotlicommon.dll", "libpcre2-16-0.dll",
+              "libgobject-2.0-0.dll", "libc++.dll", "libunwind.dll", "libwinpthread-1.dll"
+            )
+            
+            foreach ($pattern in $dllPatterns) {
+              $files = Get-ChildItem -Path $sourceDir -Filter $pattern -ErrorAction SilentlyContinue
+              foreach ($file in $files) {
+                if (-not (Test-Path $file.Name)) {
+                  Copy-Item -Path $file.FullName -Destination . -Force -ErrorAction SilentlyContinue
+                  $copiedCount++
+                }
+              }
             }
           }
-          Write-Host "Copied $copiedCount DLL files" -ForegroundColor Green
           
-          # Copy share folder
-          $shareSource = "D:\a\_temp\msys64\${{ matrix.msystem }}\share\poppler"
+          # Ensure versioned Poppler DLLs are copied
+          $popplerDlls = Get-ChildItem -Path "$sourceDir\libpoppler-*.dll" -ErrorAction SilentlyContinue | 
+            Where-Object { $_.Name -match '^libpoppler-\d+\.dll$' }
+          foreach ($popplerDll in $popplerDlls) {
+            if (-not (Test-Path $popplerDll.Name)) {
+              Copy-Item -Path $popplerDll.FullName -Destination $popplerDll.Name -Force
+              $copiedCount++
+              Write-Host "  Also copied: $($popplerDll.Name)" -ForegroundColor Gray
+            }
+          }
+          
+          Write-Host "Copied $copiedCount DLL(s)" -ForegroundColor Green
+          
+          # Copy Poppler data files
+          $shareSource = "$toolchainPath\share\poppler"
           if (Test-Path $shareSource) {
             New-Item -ItemType Directory -Path "share" -Force | Out-Null
             Copy-Item -Path $shareSource -Destination "share" -Recurse -Force
@@ -146,8 +204,40 @@ jobs:
           Set-Location ..
         shell: pwsh
 
-      - name: Upload EXE
+      - name: Create Inno Setup Installer
+        run: |
+          Write-Host "Creating Windows installer with Inno Setup..." -ForegroundColor Cyan
+          
+          # Verify build directory exists
+          if (-not (Test-Path "build\NoteApp.exe")) {
+            Write-Host "Error: NoteApp.exe not found in build directory" -ForegroundColor Red
+            exit 1
+          }
+          
+          # Download unofficial Chinese Simplified language file for Inno Setup
+          # (not included in standard installation)
+          # Source: https://github.com/jrsoftware/issrc/blob/main/Files/Languages/Unofficial/ChineseSimplified.isl
+          $islUrl = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+          $islPath = "C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl"
+          Write-Host "Downloading Chinese Simplified language file..." -ForegroundColor Gray
+          Invoke-WebRequest -Uri $islUrl -OutFile $islPath
+          
+          # Create Output directory for installer
+          New-Item -ItemType Directory -Path "Output" -Force | Out-Null
+          
+          # Run Inno Setup compiler
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging.iss
+          if ($LASTEXITCODE -ne 0) { 
+            Write-Host "Inno Setup compilation failed" -ForegroundColor Red
+            exit $LASTEXITCODE 
+          }
+          
+          Write-Host "Installer created successfully!" -ForegroundColor Green
+          Get-ChildItem -Path "Output" -Filter "*.exe" | Format-List Name,Length,LastWriteTime
+        shell: pwsh
+
+      - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          name: speedynote-windows-package-${{ matrix.arch }}
-          path: "build/*.exe"
+          name: speedynote-windows-installer-x86_64
+          path: "Output/*.exe"

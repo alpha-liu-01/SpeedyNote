@@ -223,19 +223,8 @@ foreach ($popplerDll in $popplerDlls) {
     }
 }
 
-# ✅ Ensure MuPDF dependencies are included (for PDF export)
-# These are statically linked but we copy them just in case
-$mupdfRelatedDlls = @("libmupdf.dll", "libmujs.dll")
-foreach ($dll in $mupdfRelatedDlls) {
-    $sourcePath = Join-Path $sourceDir $dll
-    if ((Test-Path $sourcePath) -and (-not (Test-Path $dll))) {
-        Copy-Item -Path $sourcePath -Destination $dll -Force
-        $copiedCount++
-        Write-Host "  Also copied: $dll (MuPDF)" -ForegroundColor Gray
-    }
-}
-
 Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
+Write-Host "   Note: MuPDF is statically linked (no libmupdf.dll needed)" -ForegroundColor Gray
 
 # ✅ Copy Poppler data files (fonts, etc.)
 Copy-Item -Path "$toolchainPath\share\poppler" -Destination "..\build\share\poppler" -Recurse -Force
