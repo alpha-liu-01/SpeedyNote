@@ -1,4 +1,4 @@
-name: Build SpeedyNote Packages
+name: Build SpeedyNote EXE Packages
 
 on:
   push:
@@ -9,111 +9,23 @@ on:
     types: [ created ]
 
 jobs:
-  build-deb:
-    name: Build DEB Package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, arm64]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU for multi-architecture
-        if: matrix.arch != 'x86_64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: ${{ matrix.arch == 'arm64' && 'arm64' || 'amd64' }}
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake \
-            make \
-            pkg-config \
-            qt6-base-dev \
-            qt6-tools-dev \
-            libpoppler-qt6-dev \
-            libsdl2-dev \
-            libasound2-dev \
-            dpkg-dev \
-            devscripts \
-            qemu-user-static
-
-      - name: Create DEB package
-        run: |
-          # 设置架构环境变量
-          export BUILD_ARCH=${{ matrix.arch }}
-          ./build-package.sh --deb
-
-      - name: Upload DEB package
-        uses: actions/upload-artifact@v4
-        with:
-          name: speedynote-deb-package-${{ matrix.arch }}
-          path: "*.deb"
-
-  build-rpm:
-    name: Build RPM Package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-        include:
-          - arch: x86_64
-            container_image: fedora:latest
-          - arch: aarch64
-            container_image: fedora:latest
-    container:
-      image: ${{ matrix.container_image }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          dnf install -y \
-            cmake \
-            make \
-            pkgconf \
-            qt6-qtbase-devel \
-            qt6-qttools-devel \
-            poppler-qt6-devel \
-            SDL2-devel \
-            alsa-lib-devel \
-            rpm-build \
-            qemu-user-static
-
-      - name: Create RPM package
-        run: |
-          # 设置架构环境变量
-          export BUILD_ARCH=${{ matrix.arch }}
-          ./build-package.sh --rpm
-
-      - name: Upload RPM package
-        uses: actions/upload-artifact@v4
-        with:
-          name: speedynote-rpm-package-${{ matrix.arch }}
-          path: "*.rpm"
-
   build-exe:
     name: Build Windows EXE
     runs-on: windows-latest
-    if: github.event_name != 'push'
     strategy:
       matrix:
-        arch: [x86_64]
-        # Temporarily disabled ARM64 build until toolchain is stable
-        # arch: [x86_64, arm64]
+        arch: [x86_64, arm64]
         include:
           - arch: x86_64
             msys_prefix: mingw-w64-clang-x86_64
             msystem: CLANG64
             build_args: ""
-          # - arch: arm64
-          #   msys_prefix: mingw-w64-clang-aarch64
-          #   msystem: CLANGARM64
-          #   build_args: "-arm64"
+            runner: windows-latest
+          - arch: arm64
+            msys_prefix: mingw-w64-clang-x86_64
+            msystem: CLANG64
+            build_args: "-arm64"
+            runner: windows-arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -129,6 +41,7 @@ jobs:
             ${{ matrix.msys_prefix }}-make
             ${{ matrix.msys_prefix }}-cmake
             ${{ matrix.msys_prefix }}-pkgconf
+            ${{ matrix.msys_prefix }}-pkg-config
             ${{ matrix.msys_prefix }}-qt6-base
             ${{ matrix.msys_prefix }}-qt6-tools
             ${{ matrix.msys_prefix }}-qt6-translations
@@ -238,65 +151,3 @@ jobs:
         with:
           name: speedynote-windows-package-${{ matrix.arch }}
           path: "build/*.exe"
-
-  # build-dmg:
-  #   name: Build macOS DMG
-  #   runs-on: macos-latest
-  #   strategy:
-  #     matrix:
-  #       arch: [x86_64, arm64]
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup Homebrew
-  #       run: |
-  #         brew install qt@6
-  #         brew install poppler
-  #         brew install sdl2
-
-  #     - name: Build
-  #       shell: bash
-  #       run: |
-  #         ./build_poppler_qt6.sh
-  #         ./compile-mac.sh
-
-  #     - name: Upload DMG
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: speedynote-macos-package-${{ matrix.arch }}
-  #         path: "*.dmg"
-
-  release:
-    name: Create Release
-    needs: [build-deb, build-rpm, build-exe]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release'
-    steps:
-      - name: Download DEB packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: speedynote-deb-package-*
-          path: .
-
-      - name: Download RPM packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: speedynote-rpm-package-*
-          path: .
-
-      - name: Download EXE packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: speedynote-windows-package-*
-          path: .
-
-      - name: Upload packages to release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            **/*.deb
-            **/*.rpm
-            **/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

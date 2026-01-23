@@ -1,0 +1,43 @@
+name: Build SpeedyNote DMG Packages
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+  release:
+    types: [ created ]
+
+jobs:
+  build-dmg:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Homebrew
+        run: |
+          brew install qt@6
+          brew install poppler
+          brew install sdl2
+          brew install create-dmg
+
+      - name: Build
+        shell: bash
+        run: |
+          ./build_poppler_qt6.sh
+          ./compile-mac.sh << EOF
+          y
+          2
+          1
+          EOF
+
+      - name: Upload DMG package
+        uses: actions/upload-artifact@v4
+        with:
+          name: speedynote-dmg-package-${{ matrix.arch }}
+          path: "*.dmg"

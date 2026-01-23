@@ -1,0 +1,97 @@
+name: Build SpeedyNote DEB/RPM Packages
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+    branches: ['main']
+  release:
+    types: [ created ]
+
+jobs:
+  build-deb:
+    name: Build DEB Package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for multi-architecture
+        if: matrix.arch != 'x86_64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.arch == 'arm64' && 'arm64' || 'amd64' }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            make \
+            pkg-config \
+            qt6-base-dev \
+            qt6-tools-dev \
+            libpoppler-qt6-dev \
+            libsdl2-dev \
+            libasound2-dev \
+            dpkg-dev \
+            devscripts \
+            qemu-user-static
+
+      - name: Create DEB package
+        run: |
+          # 设置架构环境变量
+          export BUILD_ARCH=${{ matrix.arch }}
+          ./build-package.sh --deb
+
+      - name: Upload DEB package
+        uses: actions/upload-artifact@v4
+        with:
+          name: speedynote-deb-package-${{ matrix.arch }}
+          path: "*.deb"
+
+  build-rpm:
+    name: Build RPM Package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            container_image: fedora:latest
+          - arch: aarch64
+            container_image: fedora:latest
+    container:
+      image: ${{ matrix.container_image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            cmake \
+            make \
+            pkgconf \
+            qt6-qtbase-devel \
+            qt6-qttools-devel \
+            poppler-qt6-devel \
+            SDL2-devel \
+            alsa-lib-devel \
+            rpm-build \
+            qemu-user-static
+
+      - name: Create RPM package
+        run: |
+          # 设置架构环境变量
+          export BUILD_ARCH=${{ matrix.arch }}
+          ./build-package.sh --rpm
+
+      - name: Upload RPM package
+        uses: actions/upload-artifact@v4
+        with:
+          name: speedynote-rpm-package-${{ matrix.arch }}
+          path: "*.rpm"
