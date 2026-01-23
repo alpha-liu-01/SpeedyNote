@@ -159,20 +159,25 @@ check_project_directory() {
 }
 
 # Function to get dependencies for each distribution
+# Note: MuPDF is dynamically linked where shared libraries are available
 get_dependencies() {
     local format=$1
     case $format in
         deb)
+            # libmupdf not available as shared library on Debian/Ubuntu - uses static linking
             echo "libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, libpoppler-qt6-3t64 | libpoppler-qt6-3, libsdl2-2.0-0, libasound2"
             ;;
         rpm)
-            echo "qt6-qtbase, poppler-qt6, SDL2, alsa-lib"
+            # mupdf-libs provides libmupdf.so for dynamic linking
+            echo "qt6-qtbase, poppler-qt6, mupdf-libs, SDL2, alsa-lib"
             ;;
         arch)
-            echo "qt6-base, poppler-qt6, sdl2-compat, alsa-lib"
+            # mupdf provides libmupdf.so
+            echo "qt6-base, poppler-qt6, mupdf, sdl2-compat, alsa-lib"
             ;;
         apk)
-            echo "qt6-qtbase, poppler-qt6, sdl2, alsa-lib"
+            # mupdf provides libmupdf.so
+            echo "qt6-qtbase, poppler-qt6, mupdf, sdl2, alsa-lib"
             ;;
     esac
 }
