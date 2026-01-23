@@ -80,6 +80,9 @@ endif()
         pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
         pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
         pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
+        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
         
         find_library(MUJS_LIBRARY NAMES mujs PATHS "${QT_PATH}/lib")
         
@@ -92,13 +95,22 @@ endif()
             message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
         endif()
         
-        # Add pkg-config dependencies
+        # Add pkg-config dependencies (including zlib and brotli for MuPDF)
         list(APPEND MUPDF_LIBRARIES
             PkgConfig::HARFBUZZ
             PkgConfig::FREETYPE
             PkgConfig::LIBJPEG
             PkgConfig::LIBOPENJP2
+            PkgConfig::ZLIB
         )
+        if(BROTLIDEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+            message(STATUS "   Found brotli decoder")
+        endif()
+        if(BROTLIENC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+            message(STATUS "   Found brotli encoder")
+        endif()
         if(JBIG2DEC_FOUND)
             list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
         endif()
@@ -189,6 +201,9 @@ elseif(APPLE)
         pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
         pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
         pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
+        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
         
         find_library(MUJS_LIBRARY NAMES mujs PATHS "${HOMEBREW_PREFIX}/lib")
         
@@ -201,13 +216,22 @@ elseif(APPLE)
             message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
         endif()
         
-        # Add pkg-config dependencies
+        # Add pkg-config dependencies (including zlib and brotli for MuPDF)
         list(APPEND MUPDF_LIBRARIES
             PkgConfig::HARFBUZZ
             PkgConfig::FREETYPE
             PkgConfig::LIBJPEG
             PkgConfig::LIBOPENJP2
+            PkgConfig::ZLIB
         )
+        if(BROTLIDEC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+            message(STATUS "   Found brotli decoder")
+        endif()
+        if(BROTLIENC_FOUND)
+            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+            message(STATUS "   Found brotli encoder")
+        endif()
         if(JBIG2DEC_FOUND)
             list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
         endif()

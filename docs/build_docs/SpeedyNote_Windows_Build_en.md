@@ -40,7 +40,7 @@ pacman -S mingw-w64-clang-x86_64-SDL2
 ```
 
 > **Note:** PDF export requires MuPDF. If `mingw-w64-clang-x86_64-mupdf` is not available, PDF export will be disabled on Windows. The app will still function normally for viewing and annotating PDFs.
-``mingw-w64-clang-x86_64-pkgconf`` is only used for ``lupdate-qt6.exe`` to parse the new translations.
+> ``mingw-w64-clang-x86_64-pkgconf`` is only used for ``lupdate-qt6.exe`` to parse the new translations.
 
 **For ARM64 systems:** Replace `x86_64` with `aarch64` in the commands above, and use `clangarm64` instead of `clang64` in the paths below. 
 
