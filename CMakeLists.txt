@@ -37,18 +37,27 @@ if(WIN32)
     message(STATUS "🪟 Configuring for Windows")
     
     # Detect architecture and set toolchain paths
-    # Use FORCE to ensure path is updated when switching between architectures
+    # Only set defaults if not already provided via -DQT_PATH=...
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
-        set(QT_PATH "C:/msys64/clangarm64" CACHE PATH "Path to Qt installation" FORCE)
-        set(SDL2_ROOT "C:/msys64/clangarm64" CACHE PATH "Path to SDL2" FORCE)
+        if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
+            set(QT_PATH "C:/msys64/clangarm64" CACHE PATH "Path to Qt installation")
+        endif()
+        if(NOT DEFINED SDL2_ROOT OR SDL2_ROOT STREQUAL "")
+            set(SDL2_ROOT "C:/msys64/clangarm64" CACHE PATH "Path to SDL2")
+        endif()
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-aarch64")
         message(STATUS "Detected ARM64 Windows - using clangarm64 toolchain")
     else()
-        set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation" FORCE)
-        set(SDL2_ROOT "C:/msys64/clang64" CACHE PATH "Path to SDL2" FORCE)
+        if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
+            set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation")
+        endif()
+        if(NOT DEFINED SDL2_ROOT OR SDL2_ROOT STREQUAL "")
+            set(SDL2_ROOT "C:/msys64/clang64" CACHE PATH "Path to SDL2")
+        endif()
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-x86_64")
         message(STATUS "Detected x86_64 Windows - using clang64 toolchain")
     endif()
+    message(STATUS "QT_PATH: ${QT_PATH}")
 
     # CMake paths
     set(CMAKE_PREFIX_PATH "${QT_PATH}/lib/cmake" "${SDL2_ROOT}/lib/cmake")
