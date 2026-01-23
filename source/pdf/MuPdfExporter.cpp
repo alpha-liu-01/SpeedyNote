@@ -100,6 +100,7 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
     m_options = options;
     m_isExporting = true;
     m_cancelled.store(false);
+    m_lastError.clear();
     
     qDebug() << "[MuPdfExporter] Starting export:"
              << pageIndices.size() << "pages at" << options.dpi << "DPI"
@@ -116,7 +117,10 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
     
     // Open source PDF if document has one
     if (!openSourcePdf()) {
-        result.errorMessage = tr("Failed to open source PDF");
+        // Use detailed error message if available
+        result.errorMessage = m_lastError.isEmpty() 
+            ? tr("Failed to open source PDF") 
+            : m_lastError;
         cleanup();
         emit exportFailed(result.errorMessage);
         m_isExporting = false;
@@ -378,6 +382,7 @@ bool MuPdfExporter::openSourcePdf()
     
     if (!QFile::exists(pdfPath)) {
         qWarning() << "[MuPdfExporter] Source PDF not found:" << pdfPath;
+        m_lastError = tr("Source PDF file not found: %1").arg(pdfPath);
         return false;
     }
     
@@ -386,12 +391,22 @@ bool MuPdfExporter::openSourcePdf()
     fz_try(m_ctx) {
         m_sourceDoc = fz_open_document(m_ctx, pathUtf8.constData());
         
+        // Check for password-protected PDF
+        if (fz_needs_password(m_ctx, m_sourceDoc)) {
+            qWarning() << "[MuPdfExporter] Source PDF is password-protected";
+            fz_drop_document(m_ctx, m_sourceDoc);
+            m_sourceDoc = nullptr;
+            m_lastError = tr("Cannot export password-protected PDF.\nPlease remove the password and try again.");
+            return false;
+        }
+        
         // Verify it's a PDF (for grafting capabilities)
         m_sourcePdf = pdf_document_from_fz_document(m_ctx, m_sourceDoc);
         if (!m_sourcePdf) {
             qWarning() << "[MuPdfExporter] Source is not a PDF document";
             fz_drop_document(m_ctx, m_sourceDoc);
             m_sourceDoc = nullptr;
+            m_lastError = tr("Source file is not a valid PDF document.");
             return false;
         }
         
@@ -401,6 +416,7 @@ bool MuPdfExporter::openSourcePdf()
     }
     fz_catch(m_ctx) {
         qWarning() << "[MuPdfExporter] Failed to open source PDF:" << fz_caught_message(m_ctx);
+        m_lastError = tr("Failed to open source PDF: %1").arg(QString::fromUtf8(fz_caught_message(m_ctx)));
         return false;
     }
     

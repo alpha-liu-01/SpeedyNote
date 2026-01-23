@@ -324,6 +324,7 @@ private:
     bool m_isExporting = false;
     std::atomic<bool> m_cancelled{false};  ///< Thread-safe cancellation flag
     PdfExportOptions m_options;
+    QString m_lastError;  ///< Detailed error message from last failed operation
 };
 
 #else // SPEEDYNOTE_MUPDF_EXPORT not defined

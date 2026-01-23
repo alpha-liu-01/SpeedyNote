@@ -2490,23 +2490,29 @@ void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
 
 void MainWindow::showPdfExportDialog()
 {
+#ifdef Q_OS_ANDROID
+    QString dialogTitle = tr("Share as PDF");
+#else
+    QString dialogTitle = tr("Export to PDF");
+#endif
+    
     DocumentViewport* viewport = currentViewport();
     if (!viewport) {
-        QMessageBox::warning(this, tr("Export to PDF"), 
+        QMessageBox::warning(this, dialogTitle, 
                              tr("No document is currently open."));
         return;
     }
     
     Document* doc = viewport->document();
     if (!doc) {
-        QMessageBox::warning(this, tr("Export to PDF"),
+        QMessageBox::warning(this, dialogTitle,
                              tr("No document is currently open."));
         return;
     }
     
     // Check if document is paged (PDF export only makes sense for paged documents)
     if (doc->isEdgeless()) {
-        QMessageBox::warning(this, tr("Export to PDF"),
+        QMessageBox::warning(this, dialogTitle,
                              tr("PDF export is only available for paged documents.\n"
                                 "Edgeless canvas export is not yet supported."));
         return;
@@ -2514,11 +2520,18 @@ void MainWindow::showPdfExportDialog()
     
     // Check for unsaved changes - require saving first
     if (doc->modified) {
+#ifdef Q_OS_ANDROID
+        QString savePrompt = tr("The document has unsaved changes.\n"
+                                "Please save the document before sharing as PDF.\n\n"
+                                "Would you like to save now?");
+#else
+        QString savePrompt = tr("The document has unsaved changes.\n"
+                                "Please save the document before exporting to PDF.\n\n"
+                                "Would you like to save now?");
+#endif
         QMessageBox::StandardButton result = QMessageBox::question(
             this, tr("Save Document First"),
-            tr("The document has unsaved changes.\n"
-               "Please save the document before exporting to PDF.\n\n"
-               "Would you like to save now?"),
+            savePrompt,
             QMessageBox::Save | QMessageBox::Cancel);
         
         if (result == QMessageBox::Save) {
@@ -2547,19 +2560,38 @@ void MainWindow::showPdfExportDialog()
         MuPdfExporter exporter;
         exporter.setDocument(doc);
         
-        // TODO: Phase 9 - Show progress dialog instead of blocking
-        // For now, just do a blocking export with a wait cursor
+        // Blocking export with wait cursor
+        // Note: Progress dialog was considered (Phase 9) but deemed unnecessary
+        // due to excellent export performance (even 3000-page PDFs export quickly)
         QApplication::setOverrideCursor(Qt::WaitCursor);
         PdfExportResult result = exporter.exportPdf(options);
         QApplication::restoreOverrideCursor();
         
         if (result.success) {
+#ifdef Q_OS_ANDROID
+            // Android: Share the exported PDF via share sheet
+            QJniObject activity = QNativeInterface::QAndroidApplication::context();
+            QJniObject::callStaticMethod<void>(
+                "org/speedynote/app/ShareHelper",
+                "shareFileWithTitle",
+                "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+                activity.object<jobject>(),
+                QJniObject::fromString(options.outputPath).object<jstring>(),
+                QJniObject::fromString("application/pdf").object<jstring>(),
+                QJniObject::fromString(tr("Share PDF")).object<jstring>()
+            );
+            // Note: The exported file is in the cache directory.
+            // Old PDFs are cleaned up before each new export (in PdfExportDialog::outputPath).
+            // The share intent copies the file, so cleanup is safe.
+#else
+            // Desktop: Show success message
             QMessageBox::information(this, tr("Export Complete"),
                                      tr("PDF exported successfully!\n\n"
                                         "Pages exported: %1\n"
                                         "File size: %2 KB")
                                      .arg(result.pagesExported)
                                      .arg(result.fileSizeBytes / 1024));
+#endif
         } else {
             QMessageBox::warning(this, tr("Export Failed"),
                                  tr("Failed to export PDF:\n%1").arg(result.errorMessage));

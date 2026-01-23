@@ -12,6 +12,7 @@
 #include <QRadioButton>
 #include <QSpinBox>
 #include <QButtonGroup>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -29,24 +30,37 @@ PdfExportDialog::PdfExportDialog(Document* document, QWidget* parent)
     : QDialog(parent)
     , m_document(document)
 {
+#ifdef Q_OS_ANDROID
+    setWindowTitle(tr("Share as PDF"));
+#else
     setWindowTitle(tr("Export to PDF"));
+#endif
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
     setModal(true);
     
     // Reasonable dialog size
+#ifdef Q_OS_ANDROID
+    // On Android, let the dialog adapt to screen size
+    // Qt's Android integration handles sizing appropriately
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+#else
     setMinimumSize(500, 420);
     setMaximumSize(700, 550);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+#endif
     
     setupUI();
     
-    // Set default output path
+#ifndef Q_OS_ANDROID
+    // Set default output path (desktop only)
     m_outputEdit->setText(generateDefaultFilename());
+#endif
     
     // Initial validation
     validateAndUpdateExportButton();
     
-    // Center the dialog
+#ifndef Q_OS_ANDROID
+    // Center the dialog (desktop only - Android handles positioning)
     if (parent) {
         move(parent->geometry().center() - rect().center());
     } else {
@@ -55,6 +69,7 @@ PdfExportDialog::PdfExportDialog(Document* document, QWidget* parent)
             move(screen->geometry().center() - rect().center());
         }
     }
+#endif
 }
 
 // ============================================================================
@@ -68,14 +83,19 @@ void PdfExportDialog::setupUI()
     mainLayout->setContentsMargins(24, 24, 24, 24);
     
     // ===== Title =====
+#ifdef Q_OS_ANDROID
+    QLabel* titleLabel = new QLabel(tr("Share as PDF"));
+#else
     QLabel* titleLabel = new QLabel(tr("Export to PDF"));
+#endif
     titleLabel->setStyleSheet("font-size: 18px; font-weight: bold;");
     titleLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(titleLabel);
     
     mainLayout->addSpacing(8);
     
-    // ===== Output Path Section =====
+    // ===== Output Path Section (Desktop only - Android uses share intent) =====
+#ifndef Q_OS_ANDROID
     QGroupBox* outputGroup = new QGroupBox(tr("Output File"));
     QHBoxLayout* outputLayout = new QHBoxLayout(outputGroup);
     outputLayout->setSpacing(8);
@@ -95,6 +115,13 @@ void PdfExportDialog::setupUI()
     outputLayout->addWidget(m_browseBtn);
     
     mainLayout->addWidget(outputGroup);
+#else
+    // On Android, show a note about sharing
+    QLabel* shareNote = new QLabel(tr("The exported PDF will be shared using Android's share sheet."));
+    shareNote->setWordWrap(true);
+    shareNote->setStyleSheet("color: palette(mid); font-size: 13px; padding: 8px;");
+    mainLayout->addWidget(shareNote);
+#endif
     
     // ===== Page Range Section =====
     QGroupBox* pagesGroup = new QGroupBox(tr("Pages"));
@@ -206,8 +233,13 @@ void PdfExportDialog::setupUI()
     connect(m_cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
     buttonLayout->addWidget(m_cancelBtn);
     
+#ifdef Q_OS_ANDROID
+    m_exportBtn = new QPushButton(tr("Share"));
+    // No icon on Android - share intent will show its own icon
+#else
     m_exportBtn = new QPushButton(tr("Export"));
     m_exportBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DialogSaveButton));
+#endif
     m_exportBtn->setMinimumSize(100, 40);
     m_exportBtn->setDefault(true);
     m_exportBtn->setStyleSheet(R"(
@@ -245,6 +277,8 @@ void PdfExportDialog::setupUI()
 
 void PdfExportDialog::onBrowseClicked()
 {
+#ifndef Q_OS_ANDROID
+    // Desktop: file dialog for output path
     // Default to Documents folder
     QString defaultDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     
@@ -271,6 +305,8 @@ void PdfExportDialog::onBrowseClicked()
         }
         m_outputEdit->setText(filePath);
     }
+#endif
+    // Android: No browse button - uses share intent
 }
 
 void PdfExportDialog::onPageRangeToggled(bool rangeSelected)
@@ -297,11 +333,13 @@ void PdfExportDialog::validateAndUpdateExportButton()
 {
     bool valid = true;
     
-    // Check output path
-    QString outputPath = m_outputEdit->text().trimmed();
-    if (outputPath.isEmpty()) {
+#ifndef Q_OS_ANDROID
+    // Check output path (desktop only - Android uses share intent)
+    QString path = m_outputEdit->text().trimmed();
+    if (path.isEmpty()) {
         valid = false;
     }
+#endif
     
     // Check page range if selected
     if (m_pageRangeRadio->isChecked()) {
@@ -323,6 +361,31 @@ void PdfExportDialog::validateAndUpdateExportButton()
 
 QString PdfExportDialog::outputPath() const
 {
+#ifdef Q_OS_ANDROID
+    // On Android, return a temp path in the cache directory
+    // The actual sharing happens via ShareHelper
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    
+    // Ensure cache directory exists
+    QDir().mkpath(cacheDir);
+    
+    // Clean up any old exported PDFs to prevent disk space leaks
+    // The share intent copies the file, so we can safely delete old exports
+    QDir dir(cacheDir);
+    QStringList pdfFiles = dir.entryList(QStringList() << "*.pdf", QDir::Files);
+    for (const QString& pdfFile : pdfFiles) {
+        QFile::remove(dir.absoluteFilePath(pdfFile));
+    }
+    
+    QString baseName = "exported";
+    if (m_document) {
+        QString docName = m_document->name;
+        if (!docName.isEmpty()) {
+            baseName = docName;
+        }
+    }
+    return cacheDir + "/" + baseName + ".pdf";
+#else
     QString path = m_outputEdit->text().trimmed();
     
     // Ensure .pdf extension
@@ -331,6 +394,7 @@ QString PdfExportDialog::outputPath() const
     }
     
     return path;
+#endif
 }
 
 QString PdfExportDialog::pageRange() const

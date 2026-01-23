@@ -148,6 +148,10 @@ elseif(ANDROID)
     
     include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
     
+    # Enable MuPDF export on Android (MuPDF is always available on Android)
+    add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+    message(STATUS "✅ MuPDF PDF export enabled for Android")
+    
     # No controller support on Android
     set(ENABLE_CONTROLLER_SUPPORT OFF)
     set(WIN_RESOURCES "")
