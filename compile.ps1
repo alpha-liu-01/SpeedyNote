@@ -122,7 +122,7 @@ if ($arm64) {
     Write-Host "Using $jobs parallel jobs (x64: all $cpuCount cores)" -ForegroundColor Gray
 }
 
-& "$toolchainPath\bin\cmake.exe" --build . --config Release -- -j$jobs
+& "$toolchainPath\bin\cmake.exe" --build . --config Release --parallel $jobs
 
 # ✅ Deploy Qt runtime
 & "$toolchainPath\bin\windeployqt6.exe" "NoteApp.exe"
