@@ -159,25 +159,29 @@ check_project_directory() {
 }
 
 # Function to get dependencies for each distribution
-# Note: MuPDF is dynamically linked where shared libraries are available
+# Note: MuPDF linking strategy varies by distro:
+#   - Ubuntu 24.04 (GitHub Actions): No libmupdf shared library available, uses static linking
+#   - Debian 13+ (Trixie): Has libmupdf25.1, can use dynamic linking
+#   - For local arm64 Debian builds with dynamic linking, manually add libmupdf25.1 to deps
 get_dependencies() {
     local format=$1
     case $format in
         deb)
-            # libmupdf not available as shared library on Debian/Ubuntu - uses static linking
-            echo "libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, libpoppler-qt6-3t64 | libpoppler-qt6-3, libsdl2-2.0-0, libasound2"
+            # No libmupdf dependency - Ubuntu uses static linking (no shared lib available)
+            # For Debian 13+ arm64 builds with dynamic linking, add: libmupdf25.1
+            echo "libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, libpoppler-qt6-3t64 | libpoppler-qt6-3"
             ;;
         rpm)
             # mupdf-libs provides libmupdf.so for dynamic linking
-            echo "qt6-qtbase, poppler-qt6, mupdf-libs, SDL2, alsa-lib"
+            echo "qt6-qtbase, poppler-qt6, mupdf-libs"
             ;;
         arch)
             # mupdf provides libmupdf.so
-            echo "qt6-base, poppler-qt6, mupdf, sdl2-compat, alsa-lib"
+            echo "qt6-base, poppler-qt6, mupdf"
             ;;
         apk)
             # mupdf provides libmupdf.so
-            echo "qt6-qtbase, poppler-qt6, mupdf, sdl2, alsa-lib"
+            echo "qt6-qtbase, poppler-qt6, mupdf"
             ;;
     esac
 }

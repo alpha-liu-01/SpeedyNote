@@ -97,13 +97,19 @@ if (Test-Path ".\build" -PathType Container) {
 }
 
 # ✅ Compile .ts → .qm files
-$lreleaseExe = "$toolchainPath\bin\lrelease-qt6.exe"
-if (Test-Path $lreleaseExe) {
-    Write-Host "Compiling translation files..." -ForegroundColor Cyan
+$lreleaseExe = $null
+if (Test-Path "$toolchainPath\bin\lrelease-qt6.exe") {
+    $lreleaseExe = "$toolchainPath\bin\lrelease-qt6.exe"
+} elseif (Test-Path "$toolchainPath\bin\lrelease.exe") {
+    $lreleaseExe = "$toolchainPath\bin\lrelease.exe"
+}
+
+if ($lreleaseExe) {
+    Write-Host "Compiling translation files using $lreleaseExe..." -ForegroundColor Cyan
     & $lreleaseExe ./resources/translations/app_zh.ts ./resources/translations/app_fr.ts ./resources/translations/app_es.ts
     Copy-Item -Path ".\resources\translations\*.qm" -Destination ".\build" -Force
 } else {
-    Write-Host "⚠️  Warning: lrelease-qt6.exe not found at $lreleaseExe" -ForegroundColor Yellow
+    Write-Host "⚠️  Warning: Neither lrelease-qt6.exe nor lrelease.exe found in $toolchainPath\bin" -ForegroundColor Yellow
     Write-Host "   Skipping translation compilation. Install mingw-w64-$toolchain-qt6-tools if needed." -ForegroundColor Yellow
 }
 
