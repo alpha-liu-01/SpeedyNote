@@ -686,8 +686,10 @@ int DocumentManager::autoSaveModifiedDocuments()
         if (!doc) continue;
         
         // Check if document has unsaved changes
-        bool isModified = m_modifiedFlags.value(doc, false);
-        if (!isModified) {
+        // IMPORTANT: Use hasUnsavedChanges() which checks both m_modifiedFlags
+        // AND doc->modified. User edits often set doc->modified directly
+        // (e.g., when writing strokes), not through DocumentManager::markModified()
+        if (!hasUnsavedChanges(doc)) {
             continue;  // No changes to save
         }
         
