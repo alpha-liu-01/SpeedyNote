@@ -186,6 +186,7 @@ public:
      * - Left edge goes forward along the stroke
      * - Right edge goes backward
      * - This creates a closed shape that can be filled
+     * - Round caps are drawn separately as ellipses
      */
     static StrokePolygonResult buildStrokePolygon(const VectorStroke& stroke) {
         StrokePolygonResult result;
@@ -195,7 +196,9 @@ public:
             if (stroke.points.size() == 1) {
                 result.isSinglePoint = true;
                 result.startCapCenter = stroke.points[0].pos;
-                result.startCapRadius = stroke.baseThickness * stroke.points[0].pressure / 2.0;
+                // Apply minimum width (1.0) consistent with multi-point strokes
+                qreal width = stroke.baseThickness * stroke.points[0].pressure;
+                result.startCapRadius = qMax(width, 1.0) / 2.0;
             }
             return result;
         }
@@ -249,7 +252,7 @@ public:
         }
         
         // Build polygon: left edge forward, then right edge backward
-        result.polygon.reserve(n * 2 + 2);
+        result.polygon.reserve(n * 2);
         
         for (int i = 0; i < n; ++i) {
             result.polygon << leftEdge[i];
@@ -258,14 +261,12 @@ public:
             result.polygon << rightEdge[i];
         }
         
-        // Set up round cap information (only used for Round cap style)
-        if (stroke.capStyle == StrokeCapStyle::Round) {
-            result.hasRoundCaps = true;
-            result.startCapCenter = stroke.points[0].pos;
-            result.startCapRadius = halfWidths[0];
-            result.endCapCenter = stroke.points[n - 1].pos;
-            result.endCapRadius = halfWidths[n - 1];
-        }
+        // Set up round cap information
+        result.hasRoundCaps = true;
+        result.startCapCenter = stroke.points[0].pos;
+        result.startCapRadius = halfWidths[0];
+        result.endCapCenter = stroke.points[n - 1].pos;
+        result.endCapRadius = halfWidths[n - 1];
         
         return result;
     }
@@ -294,15 +295,18 @@ public:
      * 
      * This uses the optimized filled-polygon rendering for variable-width strokes.
      * Can be used by VectorCanvas, VectorLayer, or any other component.
+     * 
+     * For semi-transparent strokes with round caps, renders to a temp buffer at
+     * full opacity then blits with the stroke's alpha to avoid alpha compounding
+     * where the caps overlap the stroke body.
      */
     static void renderStroke(QPainter& painter, const VectorStroke& stroke) {
         StrokePolygonResult poly = buildStrokePolygon(stroke);
         
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(stroke.color);
-        
         if (poly.isSinglePoint) {
-            // Single point - draw a dot
+            // Single point - draw a dot (no alpha compounding issue)
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(stroke.color);
             painter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
             return;
         }
@@ -311,16 +315,77 @@ public:
             return;
         }
         
-        // Draw filled polygon with WindingFill to handle self-intersections
-        // OddEvenFill (default) leaves holes where stroke crosses itself
-        // WindingFill fills all enclosed areas regardless of winding count
-        painter.drawPolygon(poly.polygon, Qt::WindingFill);
+        // Check if we need special handling for semi-transparent strokes with round caps
+        // The issue: polygon body + cap ellipses overlap, causing alpha compounding
+        // The fix: render everything to temp buffer at full opacity, then blit with alpha
+        int strokeAlpha = stroke.color.alpha();
+        bool needsAlphaCompositing = (strokeAlpha < 255) && poly.hasRoundCaps;
         
-        // Draw round end caps for a smooth look (only for Round cap style)
-        // Flat cap style (used by markers) relies on the polygon's natural flat ends
-        if (poly.hasRoundCaps) {
-            painter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
-            painter.drawEllipse(poly.endCapCenter, poly.endCapRadius, poly.endCapRadius);
+        if (needsAlphaCompositing) {
+            // Calculate bounding rect for the temp buffer
+            // Use polygon bounds if stroke.boundingBox is invalid (empty or not updated)
+            QRectF bounds = stroke.boundingBox;
+            if (bounds.isEmpty() || !bounds.isValid()) {
+                bounds = poly.polygon.boundingRect();
+            }
+            // Expand for caps (which may extend beyond the point positions)
+            qreal maxRadius = qMax(poly.startCapRadius, poly.endCapRadius);
+            bounds.adjust(-maxRadius - 2, -maxRadius - 2, maxRadius + 2, maxRadius + 2);
+            
+            // Safety check: ensure bounds are valid and reasonable
+            if (bounds.isEmpty() || bounds.width() > 10000 || bounds.height() > 10000) {
+                // Fallback to direct rendering if bounds are invalid or too large
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(stroke.color);
+                painter.drawPolygon(poly.polygon, Qt::WindingFill);
+                painter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
+                painter.drawEllipse(poly.endCapCenter, poly.endCapRadius, poly.endCapRadius);
+                return;
+            }
+            
+            // Create temp buffer (use painter's device pixel ratio for high DPI)
+            qreal dpr = painter.device() ? painter.device()->devicePixelRatioF() : 1.0;
+            QSize bufferSize(static_cast<int>(bounds.width() * dpr) + 1,
+                             static_cast<int>(bounds.height() * dpr) + 1);
+            QPixmap tempBuffer(bufferSize);
+            tempBuffer.setDevicePixelRatio(dpr);
+            tempBuffer.fill(Qt::transparent);
+            
+            // Render to temp buffer at full opacity
+            QPainter tempPainter(&tempBuffer);
+            tempPainter.setRenderHint(QPainter::Antialiasing, true);
+            tempPainter.translate(-bounds.topLeft());
+            
+            QColor opaqueColor = stroke.color;
+            opaqueColor.setAlpha(255);
+            tempPainter.setPen(Qt::NoPen);
+            tempPainter.setBrush(opaqueColor);
+            
+            // Draw polygon and caps at full opacity
+            tempPainter.drawPolygon(poly.polygon, Qt::WindingFill);
+            tempPainter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
+            tempPainter.drawEllipse(poly.endCapCenter, poly.endCapRadius, poly.endCapRadius);
+            tempPainter.end();
+            
+            // Blit temp buffer to output with stroke's alpha
+            // Use save/restore to ensure opacity is properly restored even if something fails
+            painter.save();
+            painter.setOpacity(strokeAlpha / 255.0);
+            painter.drawPixmap(bounds.topLeft(), tempBuffer);
+            painter.restore();
+        } else {
+            // Standard rendering for opaque strokes (no alpha compounding issue)
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(stroke.color);
+            
+            // Draw filled polygon with WindingFill to handle self-intersections
+            painter.drawPolygon(poly.polygon, Qt::WindingFill);
+            
+            // Draw round end caps
+            if (poly.hasRoundCaps) {
+                painter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
+                painter.drawEllipse(poly.endCapCenter, poly.endCapRadius, poly.endCapRadius);
+            }
         }
     }
     

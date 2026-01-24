@@ -4229,18 +4229,15 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     QColor strokeColor;
     qreal strokeThickness;
     bool useFixedPressure = false;  // Marker uses fixed thickness (ignores pressure)
-    StrokeCapStyle capStyle = StrokeCapStyle::Round;  // Default round caps for pen
     
     if (m_currentTool == ToolType::Marker) {
         strokeColor = m_markerColor;        // Includes alpha for opacity
         strokeThickness = m_markerThickness;
         useFixedPressure = true;            // Fixed thickness, no pressure variation
-        capStyle = StrokeCapStyle::Flat;    // Flat caps for marker (no alpha compounding)
     } else {
         strokeColor = m_penColor;
         strokeThickness = m_penThickness;
         useFixedPressure = false;           // Pen uses pressure for thickness
-        capStyle = StrokeCapStyle::Round;   // Round caps for pen
     }
     
     // For edgeless mode, we don't require a page hit - we use document coordinates
@@ -4256,7 +4253,6 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         m_currentStroke.color = strokeColor;
         m_currentStroke.baseThickness = strokeThickness;
-        m_currentStroke.capStyle = capStyle;
         
         // Reset incremental rendering cache
         resetCurrentStrokeCache();
@@ -4287,7 +4283,6 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     m_currentStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_currentStroke.color = strokeColor;
     m_currentStroke.baseThickness = strokeThickness;
-    m_currentStroke.capStyle = capStyle;
     
     // Reset incremental rendering cache (Task 2.3)
     resetCurrentStrokeCache();
@@ -4453,14 +4448,20 @@ void DocumentViewport::finishStrokeEdgeless()
         
         if (ptTile != currentSegment.coord) {
             // Tile boundary crossed!
-            // End current segment (include this point for overlap at boundary)
+            // Both segments need the boundary-crossing line segment (prevPt → pt)
+            // so that each segment's cap is covered by the other's stroke body.
+            StrokePoint prevPt = currentSegment.points.last();
+            
+            // End current segment WITH the new point (extends past boundary)
             currentSegment.points.append(pt);
             segments.append(currentSegment);
             
-            // Start new segment (also include this point for overlap)
+            // Start new segment with PREVIOUS point (extends before boundary)
+            // Now both tiles have the line segment crossing the boundary
             currentSegment.coord = ptTile;
             currentSegment.points.clear();
-            currentSegment.points.append(pt);  // Overlap point
+            currentSegment.points.append(prevPt);  // Previous point (in old tile)
+            currentSegment.points.append(pt);      // Current point (in new tile)
         } else {
             // Same tile, just add point
             currentSegment.points.append(pt);
@@ -4584,14 +4585,20 @@ QVector<QPair<Document::TileCoord, VectorStroke>> DocumentViewport::addStrokeToE
         
         if (ptTile != currentSegment.coord) {
             // Tile boundary crossed!
-            // End current segment (include this point for overlap at boundary)
+            // Both segments need the boundary-crossing line segment (prevPt → pt)
+            // so that each segment's cap is covered by the other's stroke body.
+            StrokePoint prevPt = currentSegment.points.last();
+            
+            // End current segment WITH the new point (extends past boundary)
             currentSegment.points.append(pt);
             segments.append(currentSegment);
             
-            // Start new segment (also include this point for overlap)
+            // Start new segment with PREVIOUS point (extends before boundary)
+            // Now both tiles have the line segment crossing the boundary
             currentSegment.coord = ptTile;
             currentSegment.points.clear();
-            currentSegment.points.append(pt);  // Overlap point
+            currentSegment.points.append(prevPt);  // Previous point (in old tile)
+            currentSegment.points.append(pt);      // Current point (in new tile)
         } else {
             // Same tile, just add point
             currentSegment.points.append(pt);
@@ -4662,18 +4669,15 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
         return;
     }
     
-    // Determine color, thickness, and cap style based on current tool
+    // Determine color and thickness based on current tool
     QColor strokeColor;
     qreal strokeThickness;
-    StrokeCapStyle capStyle;
     if (m_currentTool == ToolType::Marker) {
         strokeColor = m_markerColor;
         strokeThickness = m_markerThickness;
-        capStyle = StrokeCapStyle::Flat;    // Flat caps for marker
     } else {
         strokeColor = m_penColor;
         strokeThickness = m_penThickness;
-        capStyle = StrokeCapStyle::Round;   // Round caps for pen
     }
     
     // Create stroke with just two points (start and end)
@@ -4681,7 +4685,6 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
     stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     stroke.color = strokeColor;
     stroke.baseThickness = strokeThickness;
-    stroke.capStyle = capStyle;
     
     // Both points have pressure 1.0 (no pressure variation for straight lines)
     StrokePoint startPt;
@@ -4801,7 +4804,6 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 localStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
                 localStroke.color = strokeColor;
                 localStroke.baseThickness = strokeThickness;
-                localStroke.capStyle = capStyle;  // Preserve cap style from tool
                 
                 QPointF tileOrigin(seg.coord.first * Document::EDGELESS_TILE_SIZE,
                                    seg.coord.second * Document::EDGELESS_TILE_SIZE);
@@ -8169,7 +8171,6 @@ void DocumentViewport::renderLassoSelection(QPainter& painter)
             transformedStroke.id = stroke.id;
             transformedStroke.color = stroke.color;
             transformedStroke.baseThickness = stroke.baseThickness;
-            transformedStroke.capStyle = stroke.capStyle;  // Preserve cap style
             
             for (const StrokePoint& pt : stroke.points) {
                 StrokePoint tPt;
@@ -10056,9 +10057,6 @@ VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect, const Q
     // Stroke width = rectangle height (text line height)
     stroke.baseThickness = rect.height();
     
-    // Use flat caps for highlights (like markers) to avoid alpha compounding
-    stroke.capStyle = StrokeCapStyle::Flat;
-    
     // Create a horizontal line through the center of the rectangle
     // This is how markers work: a thick line that covers the text area
     StrokePoint startPoint;
@@ -10209,7 +10207,8 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
     // Only repaint the small region around the new point instead of the entire widget.
     // This significantly improves performance, especially on lower-end hardware.
     
-    qreal padding = m_penThickness * 2 * m_zoomLevel;  // Extra padding for stroke width
+    // Use current stroke's thickness (may be pen or marker - marker is typically larger)
+    qreal padding = m_currentStroke.baseThickness * 2 * m_zoomLevel;  // Extra padding for stroke width
     
     // Convert page position to viewport coordinates
     QPointF vpPos = pageToViewport(m_activeDrawingPage, pagePos);
@@ -10309,12 +10308,8 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         }
         
         // Use line-based rendering for incremental updates (fast)
-        // Use FlatCap for markers (Flat capStyle) to get flat ends at stroke start/end
-        // For FlatCap, we need to manually fill internal joints to avoid gaps
-        Qt::PenCapStyle penCap = (m_currentStroke.capStyle == StrokeCapStyle::Round) 
-                                  ? Qt::RoundCap : Qt::FlatCap;
-        QPen pen(drawColor, 1.0, Qt::SolidLine, penCap, Qt::RoundJoin);
-        bool needJointFill = (m_currentStroke.capStyle == StrokeCapStyle::Flat);
+        // RoundCap ensures segments connect smoothly at joints
+        QPen pen(drawColor, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         
         // Start from the last rendered point (or 1 if starting fresh)
         int startIdx = qMax(1, m_lastRenderedPointIndex);
@@ -10330,21 +10325,10 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
             pen.setWidthF(width);
             cachePainter.setPen(pen);
             cachePainter.drawLine(p0.pos, p1.pos);
-            
-            // For FlatCap strokes, fill the internal joint at p0 (where this segment
-            // connects to the previous segment). Skip point 0 (stroke start should stay flat).
-            // The current end (point n-1) is always p1, never p0, so it stays flat too.
-            if (needJointFill && i > 1) {
-                qreal jointRadius = qMax(m_currentStroke.baseThickness * p0.pressure, 1.0) / 2.0;
-                cachePainter.setPen(Qt::NoPen);
-                cachePainter.setBrush(drawColor);
-                cachePainter.drawEllipse(p0.pos, jointRadius, jointRadius);
-            }
         }
         
-        // Draw start cap if this is the first render (only for Round cap style)
-        if (m_lastRenderedPointIndex == 0 && n >= 1 && 
-            m_currentStroke.capStyle == StrokeCapStyle::Round) {
+        // Draw start cap if this is the first render
+        if (m_lastRenderedPointIndex == 0 && n >= 1) {
             qreal startRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[0].pressure, 1.0) / 2.0;
             cachePainter.setPen(Qt::NoPen);
             cachePainter.setBrush(drawColor);
@@ -10365,8 +10349,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     }
     
     // Draw end cap at current position (always needs updating as it moves)
-    // Only for Round cap style - Flat caps (markers) don't need end caps
-    if (n >= 1 && m_currentStroke.capStyle == StrokeCapStyle::Round) {
+    if (n >= 1) {
         // Apply transform to draw end cap at correct position
         painter.save();
         painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
