@@ -169,14 +169,17 @@ public:
     void openFileInNewTab(const QString &filePath); // Open file (PDF, .snb) in new tab via single-instance
     
     /**
-     * @brief Close a document by its ID (save first if modified).
+     * @brief Close a document by its ID.
      * @param documentId The document's UUID.
-     * @return True if the document was closed (or wasn't open), false if user cancelled.
+     * @param discardChanges If true, close without saving (for delete operations).
+     *                       If false (default), save first if modified.
+     * @return True if the document was closed (or wasn't open), false if user cancelled save.
      * 
-     * Used when a document needs to be closed before an external operation
-     * (e.g., renaming the folder in Launcher). Prompts to save if modified.
+     * Used when a document needs to be closed before an external operation:
+     * - Rename: discardChanges=false (save first, then rename)
+     * - Delete: discardChanges=true (just close, file will be deleted anyway)
      */
-    bool closeDocumentById(const QString& documentId);
+    bool closeDocumentById(const QString& documentId, bool discardChanges = false);
     
     /**
      * @brief Show PDF open dialog and open selected PDF in a new tab.
@@ -330,6 +333,30 @@ private slots:
 private:
 
     // Note: returnToLauncher() removed - obsolete, replaced by toggleLauncher()
+    
+    /**
+     * @brief Sync a document's viewport position to the document model.
+     * @param doc The document to sync.
+     * @param vp The viewport showing the document.
+     * @return true if position was updated, false if unchanged.
+     * 
+     * For paged documents: updates lastAccessedPage from viewport's current page.
+     * For edgeless documents: calls syncPositionToDocument() to save canvas position.
+     * 
+     * NOTE: This does NOT mark the document as modified. The caller should
+     * decide whether to mark modified based on context:
+     * - For save operations: don't mark (save will persist the position)
+     * - For auto-save/close: mark modified so the document gets saved
+     */
+    bool syncDocumentPosition(Document* doc, DocumentViewport* vp);
+    
+    /**
+     * @brief Sync positions for all open documents AND mark them modified.
+     * 
+     * Iterates all tabs, syncs position, and marks modified if position changed.
+     * Used before auto-save (Android) and before closeEvent checks.
+     */
+    void syncAllDocumentPositions();
     
     /**
      * @brief Save a new document with dialog prompt (Android-aware).

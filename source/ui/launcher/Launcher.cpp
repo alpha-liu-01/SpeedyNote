@@ -817,6 +817,18 @@ void Launcher::deleteNotebook(const QString& bundlePath)
     );
     
     if (reply == QMessageBox::Yes) {
+        // BUG-TAB-002 FIX: If this notebook is open in MainWindow, close it first
+        // This prevents undefined behavior (editing deleted files, save failures)
+        // Use discardChanges=true because we're deleting - saving is pointless
+        QString docId = Document::peekBundleId(bundlePath);
+        if (!docId.isEmpty()) {
+            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+            if (mainWindow) {
+                // Close without saving - user already confirmed permanent delete
+                mainWindow->closeDocumentById(docId, true);  // discardChanges=true
+            }
+        }
+        
 #ifdef Q_OS_ANDROID
         // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
         // If so, delete the PDF too to prevent storage leaks

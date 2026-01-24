@@ -151,13 +151,55 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.1.1"));
+    setWindowTitle(tr("SpeedyNote 1.1.2"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
     // Setup signal handlers for proper cleanup on Linux (not Android)
     setupLinuxSignalHandlers();
+#endif
+
+#ifdef Q_OS_ANDROID
+    // On Android, auto-save all modified documents when app goes to background
+    // This is critical because the app may be killed without closeEvent()
+    // when user swipes from recents. Without this:
+    // 1. Unsaved changes would be lost
+    // 2. New documents wouldn't appear in Launcher
+    // 
+    // Note: This connect is set up early in constructor, but m_documentManager
+    // is initialized just after. The lambda captures 'this' and checks for null.
+    connect(qApp, &QGuiApplication::applicationStateChanged,
+            this, [this](Qt::ApplicationState state) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[MainWindow] Application state changed to:" 
+                 << (state == Qt::ApplicationActive ? "Active" :
+                     state == Qt::ApplicationSuspended ? "Suspended" :
+                     state == Qt::ApplicationInactive ? "Inactive" : "Hidden");
+#endif
+        if (state == Qt::ApplicationSuspended || state == Qt::ApplicationInactive) {
+            // Sync positions for all documents before auto-save
+            // This ensures lastAccessedPage/edgeless position is saved
+            syncAllDocumentPositions();
+            
+            if (m_documentManager) {
+                // autoSaveModifiedDocuments() also saves NotebookLibrary internally
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[MainWindow] Triggering auto-save, document count:" << m_documentManager->documentCount();
+#endif
+                int saved = m_documentManager->autoSaveModifiedDocuments();
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[MainWindow] Auto-saved" << saved << "documents";
+#endif
+            } else {
+#ifdef SPEEDYNOTE_DEBUG
+                qDebug() << "[MainWindow] m_documentManager is null, only saving NotebookLibrary";
+#endif
+                // Fallback: save NotebookLibrary directly if DocumentManager not ready
+                NotebookLibrary::instance()->save();
+            }
+        }
+    });
 #endif
 
     // Enable IME support for multi-language input
@@ -364,28 +406,10 @@ MainWindow::MainWindow(QWidget *parent)
             return;
         }
         
-        // FEATURE-DOC-001: Update lastAccessedPage for paged documents
-        // This ensures the page position is saved even if no other edits were made
+        // FEATURE-DOC-001: Update lastAccessedPage/edgeless position
+        // This ensures the position is saved even if no other edits were made
         bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
-        bool positionChanged = false;
-        
-        if (!doc->isEdgeless()) {
-            int currentPage = vp->currentPageIndex();
-            if (doc->lastAccessedPage != currentPage) {
-                doc->lastAccessedPage = currentPage;
-                positionChanged = true;
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "tabCloseAttempted: lastAccessedPage changed to" << currentPage;
-#endif
-            }
-        } else {
-            // Phase 4: Sync edgeless position before closing tab
-            vp->syncPositionToDocument();
-            positionChanged = true;  // Always consider position changed for edgeless
-#ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "tabCloseAttempted: Synced edgeless position";
-#endif
-        }
+        bool positionChanged = syncDocumentPosition(doc, vp);
         
         // FEATURE-DOC-001: Auto-save if only position changed (no content changes)
         // This is a silent save - no prompt needed for just navigation
@@ -2851,16 +2875,8 @@ void MainWindow::saveDocument()
     QString existingPath = m_documentManager->documentPath(doc);
     bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
             
-    // Update lastAccessedPage before saving (for restoring position on reload)
-    if (!doc->isEdgeless()) {
-        doc->lastAccessedPage = viewport->currentPageIndex();
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "saveDocument: Setting lastAccessedPage to" << doc->lastAccessedPage;
-#endif
-    } else {
-        // Phase 4: Sync edgeless position history to document before saving
-        viewport->syncPositionToDocument();
-    }
+    // Sync position before saving (for restoring position on reload)
+    syncDocumentPosition(doc, viewport);
             
     if (!existingPath.isEmpty() && !isUsingTemp) {
         // ✅ Document was previously saved to permanent location - save in-place
@@ -5085,6 +5101,60 @@ void MainWindow::preserveWindowState(QWidget* sourceWindow, bool isExistingWindo
 // The active implementation is toggleLauncher() which handles smooth fade transitions
 // between MainWindow and Launcher. See line ~4052.
 
+// ============================================================================
+// Document Position Sync Helpers
+// ============================================================================
+
+bool MainWindow::syncDocumentPosition(Document* doc, DocumentViewport* vp)
+{
+    // Syncs viewport position to document WITHOUT marking modified.
+    // Returns true if position was updated.
+    // Caller decides whether to mark modified based on context.
+    
+    if (!doc || !vp) {
+        return false;
+    }
+    
+    if (doc->isEdgeless()) {
+        // Edgeless: sync canvas position/zoom to document
+        // Note: syncPositionToDocument() updates internal state but doesn't mark modified
+        vp->syncPositionToDocument();
+        return true;  // Position always "changes" for edgeless (can't easily detect)
+    } else {
+        // Paged: update lastAccessedPage if changed
+        int currentPage = vp->currentPageIndex();
+        if (doc->lastAccessedPage != currentPage) {
+            doc->lastAccessedPage = currentPage;
+            return true;  // Position actually changed
+        }
+        return false;  // Position unchanged
+    }
+}
+
+void MainWindow::syncAllDocumentPositions()
+{
+    // Syncs positions for all documents AND marks them modified.
+    // Used before app exit/background where we want to persist positions.
+    
+    if (!m_tabManager || !m_documentManager) {
+        return;
+    }
+    
+    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+        Document* doc = m_tabManager->documentAt(i);
+        if (!doc) continue;
+        
+        DocumentViewport* vp = m_tabManager->viewportAt(i);
+        if (!vp) continue;
+        
+        if (syncDocumentPosition(doc, vp)) {
+            doc->markModified();  // Mark modified so auto-save will pick it up
+        }
+    }
+}
+
+// ============================================================================
+
 QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
 {
     // Phase P.4.6: Render page-0 thumbnail for saving to NotebookLibrary
@@ -5827,35 +5897,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     // ========== UPDATE POSITIONS FOR ALL DOCUMENTS ==========
     // Before checking for unsaved changes, update positions for all documents
     // This ensures the position is saved even if the document was saved earlier in the session
-    if (m_tabManager && m_documentManager) {
-        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-            Document* doc = m_tabManager->documentAt(i);
-            if (!doc) continue;
-            
-            DocumentViewport* vp = m_tabManager->viewportAt(i);
-            if (!vp) continue;
-            
-            if (doc->isEdgeless()) {
-                // Phase 4: Sync edgeless position before app exit
-                vp->syncPositionToDocument();
-                doc->markModified();
-#ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "closeEvent: Synced edgeless position for" << doc->displayName();
-#endif
-            } else {
-                // Paged: update lastAccessedPage
-                int currentPage = vp->currentPageIndex();
-                if (doc->lastAccessedPage != currentPage) {
-                    doc->lastAccessedPage = currentPage;
-                    // Mark as needing save for this metadata update
-                    doc->markModified();
-#ifdef SPEEDYNOTE_DEBUG
-                    qDebug() << "closeEvent: Updated lastAccessedPage to" << currentPage << "for" << doc->displayName();
-#endif
-                }
-            }
-        }
-    }
+    syncAllDocumentPositions();
     
     // ========== CHECK FOR UNSAVED DOCUMENTS ==========
     // Iterate through all tabs and prompt for unsaved documents
@@ -5933,6 +5975,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         
         // REMOVED MW7.4: Save bookmarks removed - bookmark implementation deleted
         // saveBookmarks();
+    
+    // Flush NotebookLibrary to disk before exiting
+    // This ensures any pending addToRecent() calls are persisted, even if
+    // the debounced save timer hasn't fired yet. Critical for new documents
+    // saved during closeEvent - without this, they won't appear in the Launcher.
+    NotebookLibrary::instance()->save();
     
     // Accept the close event to allow the program to close
     event->accept();
@@ -6174,7 +6222,7 @@ void MainWindow::cleanupSharedResources()
 #endif
 }
 
-bool MainWindow::closeDocumentById(const QString& documentId)
+bool MainWindow::closeDocumentById(const QString& documentId, bool discardChanges)
 {
     // Find the document by ID among open tabs
     if (!m_tabManager) {
@@ -6184,23 +6232,28 @@ bool MainWindow::closeDocumentById(const QString& documentId)
     for (int i = 0; i < m_tabManager->tabCount(); ++i) {
         Document* doc = m_tabManager->documentAt(i);
         if (doc && doc->id == documentId) {
-            // Found the document - save if modified, then close
-            if (m_documentManager && m_documentManager->hasUnsavedChanges(doc)) {
-                QString existingPath = m_documentManager->documentPath(doc);
-                if (!existingPath.isEmpty()) {
-                    // Has existing path - save in place
-                    if (!m_documentManager->saveDocument(doc)) {
-                        QMessageBox::critical(this, tr("Save Error"),
-                            tr("Failed to save document before closing."));
-                        return false;
-                    }
-                } else {
-                    // No path - use Android-aware save dialog
-                    if (!saveNewDocumentWithDialog(doc)) {
-                        return false;  // User cancelled or save failed
+            // Found the document
+            
+            if (!discardChanges) {
+                // Save if modified (for rename operations)
+                if (m_documentManager && m_documentManager->hasUnsavedChanges(doc)) {
+                    QString existingPath = m_documentManager->documentPath(doc);
+                    if (!existingPath.isEmpty()) {
+                        // Has existing path - save in place
+                        if (!m_documentManager->saveDocument(doc)) {
+                            QMessageBox::critical(this, tr("Save Error"),
+                                tr("Failed to save document before closing."));
+                            return false;
+                        }
+                    } else {
+                        // No path - use Android-aware save dialog
+                        if (!saveNewDocumentWithDialog(doc)) {
+                            return false;  // User cancelled or save failed
+                        }
                     }
                 }
             }
+            // else: discardChanges=true - just close without saving (for delete)
             
             // Close the tab
             removeTabAt(i);
