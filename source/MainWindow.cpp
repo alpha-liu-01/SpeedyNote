@@ -160,6 +160,19 @@ MainWindow::MainWindow(QWidget *parent)
     setupLinuxSignalHandlers();
 #endif
 
+#ifdef Q_OS_ANDROID
+    // On Android, save NotebookLibrary when app goes to background
+    // This is critical because the app may be killed without closeEvent()
+    // If a new document was saved during the session, we need to persist
+    // the library so it appears in the Launcher after app restart
+    connect(qApp, &QGuiApplication::applicationStateChanged,
+            this, [](Qt::ApplicationState state) {
+        if (state == Qt::ApplicationSuspended || state == Qt::ApplicationInactive) {
+            NotebookLibrary::instance()->save();
+        }
+    });
+#endif
+
     // Enable IME support for multi-language input
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setFocusPolicy(Qt::StrongFocus);
@@ -5933,6 +5946,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         
         // REMOVED MW7.4: Save bookmarks removed - bookmark implementation deleted
         // saveBookmarks();
+    
+    // Flush NotebookLibrary to disk before exiting
+    // This ensures any pending addToRecent() calls are persisted, even if
+    // the debounced save timer hasn't fired yet. Critical for new documents
+    // saved during closeEvent - without this, they won't appear in the Launcher.
+    NotebookLibrary::instance()->save();
     
     // Accept the close event to allow the program to close
     event->accept();
