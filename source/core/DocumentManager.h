@@ -89,6 +89,20 @@ public:
     void cleanupTempBundle(Document* doc);
 
     /**
+     * @brief Auto-save all modified documents (for Android background save).
+     * @return Number of documents saved.
+     * 
+     * For documents with existing paths: saves in-place.
+     * For new documents: saves to app storage with auto-generated name.
+     * All saved documents are added to NotebookLibrary.
+     * 
+     * This is designed for Android where the app may be killed without
+     * closeEvent() when swiped from recents. Call this when the app
+     * goes to background (ApplicationSuspended/ApplicationInactive).
+     */
+    int autoSaveModifiedDocuments();
+
+    /**
      * @brief Load a document from a file.
      * @param path Path to the file (.snb bundle or .pdf).
      * @return Pointer to the loaded document, or nullptr on failure.
@@ -286,8 +300,9 @@ private:
     // Settings key for recent documents
     static const QString SETTINGS_RECENT_KEY;
     
-    // Temp bundle prefix for unsaved edgeless documents
+    // Temp bundle prefixes for unsaved documents
     static const QString TEMP_EDGELESS_PREFIX;
+    static const QString TEMP_PAGED_PREFIX;
 
     // Load/save recent documents from/to QSettings
     void loadRecentFromSettings();
@@ -296,6 +311,9 @@ private:
     // Internal: actually perform the save
     bool doSave(Document* doc, const QString& path);
     
-    // Create a unique temp bundle path for an edgeless document
+    // Create a unique temp bundle path for a document (edgeless or paged)
     QString createTempBundlePath(Document* doc);
+    
+    // Create a permanent auto-save path in app storage (for Android)
+    QString createAutoSavePath(Document* doc);
 };

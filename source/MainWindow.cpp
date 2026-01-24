@@ -151,7 +151,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.1.1"));
+    setWindowTitle(tr("SpeedyNote 1.1.2"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -161,14 +161,29 @@ MainWindow::MainWindow(QWidget *parent)
 #endif
 
 #ifdef Q_OS_ANDROID
-    // On Android, save NotebookLibrary when app goes to background
+    // On Android, auto-save all modified documents when app goes to background
     // This is critical because the app may be killed without closeEvent()
-    // If a new document was saved during the session, we need to persist
-    // the library so it appears in the Launcher after app restart
+    // when user swipes from recents. Without this:
+    // 1. Unsaved changes would be lost
+    // 2. New documents wouldn't appear in Launcher
+    // 
+    // Note: This connect is set up early in constructor, but m_documentManager
+    // is initialized just after. The lambda captures 'this' and checks for null.
     connect(qApp, &QGuiApplication::applicationStateChanged,
-            this, [](Qt::ApplicationState state) {
+            this, [this](Qt::ApplicationState state) {
         if (state == Qt::ApplicationSuspended || state == Qt::ApplicationInactive) {
-            NotebookLibrary::instance()->save();
+            if (m_documentManager) {
+                // autoSaveModifiedDocuments() also saves NotebookLibrary internally
+                int saved = m_documentManager->autoSaveModifiedDocuments();
+#ifdef SPEEDYNOTE_DEBUG
+                if (saved > 0) {
+                    qDebug() << "Android background: Auto-saved" << saved << "documents";
+                }
+#endif
+            } else {
+                // Fallback: save NotebookLibrary directly if DocumentManager not ready
+                NotebookLibrary::instance()->save();
+            }
         }
     });
 #endif

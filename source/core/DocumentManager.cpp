@@ -16,13 +16,16 @@
 #include <QJsonObject>
 #include <QStandardPaths>
 #include <QUuid>
+#include <QDateTime>
+#include <QRegularExpression>
 #include <QDebug>
 
 // Settings key for recent documents persistence
 const QString DocumentManager::SETTINGS_RECENT_KEY = QStringLiteral("RecentDocuments");
 
-// Temp bundle prefix for unsaved edgeless documents
+// Temp bundle prefixes for unsaved documents
 const QString DocumentManager::TEMP_EDGELESS_PREFIX = QStringLiteral("speedynote_edgeless_");
+const QString DocumentManager::TEMP_PAGED_PREFIX = QStringLiteral("speedynote_paged_");
 
 // ============================================================================
 // Constructor / Destructor
@@ -533,7 +536,7 @@ bool DocumentManager::doSave(Document* doc, const QString& path)
 }
 
 // ============================================================================
-// Temp Bundle Management (Edgeless Auto-save)
+// Temp Bundle Management (Edgeless/Paged Auto-save)
 // ============================================================================
 
 QString DocumentManager::createTempBundlePath(Document* doc)
@@ -542,11 +545,12 @@ QString DocumentManager::createTempBundlePath(Document* doc)
         return QString();
     }
     
-    // Create temp directory path for unsaved edgeless documents:
-    // QStandardPaths::TempLocation + "speedynote_edgeless_" + uuid
+    // Create temp directory path for unsaved documents:
+    // QStandardPaths::TempLocation + prefix + uuid
     QString tempBase = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     QString uuid = doc->id.left(8);  // Use first 8 chars of doc ID for uniqueness
-    QString tempPath = tempBase + "/" + TEMP_EDGELESS_PREFIX + uuid + ".snb";
+    QString prefix = doc->isEdgeless() ? TEMP_EDGELESS_PREFIX : TEMP_PAGED_PREFIX;
+    QString tempPath = tempBase + "/" + prefix + uuid + ".snb";
     
     // Create the directory
     QDir dir;
@@ -555,13 +559,80 @@ QString DocumentManager::createTempBundlePath(Document* doc)
         return QString();
     }
     
-    // Create tiles subdirectory
-    if (!dir.mkpath(tempPath + "/tiles")) {
-        qWarning() << "DocumentManager: Failed to create tiles subdirectory:" << tempPath + "/tiles";
+    // Create subdirectories based on document type
+    bool subdirOk = false;
+    if (doc->isEdgeless()) {
+        // Edgeless needs tiles subdirectory
+        subdirOk = dir.mkpath(tempPath + "/tiles");
+        if (!subdirOk) {
+            qWarning() << "DocumentManager: Failed to create tiles subdirectory:" << tempPath + "/tiles";
+        }
+    } else {
+        // Paged needs pages subdirectory
+        subdirOk = dir.mkpath(tempPath + "/pages");
+        if (!subdirOk) {
+            qWarning() << "DocumentManager: Failed to create pages subdirectory:" << tempPath + "/pages";
+        }
+    }
+    
+    // If subdirectory creation failed, clean up the parent directory to avoid disk space leak
+    if (!subdirOk) {
+        QDir(tempPath).removeRecursively();
         return QString();
     }
     
     return tempPath;
+}
+
+QString DocumentManager::createAutoSavePath(Document* doc)
+{
+    if (!doc) {
+        return QString();
+    }
+    
+    // Create path in app's permanent storage (survives system cleanup)
+    // This is used for Android auto-save where we want documents to persist
+    QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+    QDir().mkpath(notebooksDir);
+    
+    // Use document name if available, otherwise generate from UUID
+    QString baseName = doc->name;
+    if (baseName.isEmpty()) {
+        baseName = doc->isEdgeless() ? tr("Untitled Canvas") : tr("Untitled");
+    }
+    
+    // Sanitize filename: remove/replace characters invalid for filenames
+    // Invalid chars on various platforms: / \ : * ? " < > |
+    baseName.replace(QRegularExpression(R"([/\\:*?"<>|])"), "_");
+    baseName = baseName.trimmed();
+    if (baseName.isEmpty()) {
+        baseName = doc->isEdgeless() ? tr("Untitled Canvas") : tr("Untitled");
+    }
+    
+    // Ensure unique filename
+    QString filePath = notebooksDir + "/" + baseName + ".snb";
+    if (QDir(filePath).exists()) {
+        // File exists - append UUID suffix to make unique
+        QString uuid = doc->id.left(8);
+        filePath = notebooksDir + "/" + baseName + "_" + uuid + ".snb";
+        
+        // If UUID-suffixed path also exists (from a previous crashed session),
+        // keep appending more UUID characters until we find a unique name
+        int uuidLen = 8;
+        while (QDir(filePath).exists() && uuidLen < doc->id.length()) {
+            uuidLen += 4;
+            uuid = doc->id.left(qMin(uuidLen, doc->id.length()));
+            filePath = notebooksDir + "/" + baseName + "_" + uuid + ".snb";
+        }
+        
+        // Final fallback: append timestamp if UUID is exhausted
+        if (QDir(filePath).exists()) {
+            QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
+            filePath = notebooksDir + "/" + baseName + "_" + timestamp + ".snb";
+        }
+    }
+    
+    return filePath;
 }
 
 bool DocumentManager::isUsingTempBundle(Document* doc) const
@@ -605,4 +676,73 @@ void DocumentManager::cleanupTempBundle(Document* doc)
             qWarning() << "DocumentManager: Failed to clean up temp bundle:" << tempPath;
         }
     }
+}
+
+int DocumentManager::autoSaveModifiedDocuments()
+{
+    int savedCount = 0;
+    
+    for (Document* doc : m_documents) {
+        if (!doc) continue;
+        
+        // Check if document has unsaved changes
+        bool isModified = m_modifiedFlags.value(doc, false);
+        if (!isModified) {
+            continue;  // No changes to save
+        }
+        
+        QString existingPath = m_documentPaths.value(doc);
+        bool isUsingTemp = isUsingTempBundle(doc);
+        bool hasPermPath = !existingPath.isEmpty() && !isUsingTemp;
+        
+        QString savePath;
+        bool isNewDocument = false;
+        
+        if (hasPermPath) {
+            // Document has a permanent save path - save in-place
+            savePath = existingPath;
+        } else {
+            // New document - create auto-save path in app storage
+            savePath = createAutoSavePath(doc);
+            isNewDocument = true;
+            
+            if (savePath.isEmpty()) {
+                qWarning() << "DocumentManager: Failed to create auto-save path for" << doc->name;
+                continue;
+            }
+        }
+        
+        // Perform the save
+        if (doc->saveBundle(savePath)) {
+            // Update document path if this was a new save location
+            if (isNewDocument) {
+                m_documentPaths[doc] = savePath;
+                
+                // Clean up temp bundle if it existed (edgeless docs)
+                cleanupTempBundle(doc);
+            }
+            
+            // Clear modified flag
+            clearModified(doc);
+            
+            // Add to NotebookLibrary so it appears in Launcher
+            NotebookLibrary::instance()->addToRecent(savePath);
+            
+            savedCount++;
+            
+#ifdef SPEEDYNOTE_DEBUG
+            qDebug() << "DocumentManager: Auto-saved" << doc->name << "to" << savePath;
+#endif
+        } else {
+            qWarning() << "DocumentManager: Failed to auto-save" << doc->name << "to" << savePath;
+        }
+    }
+    
+    // Flush NotebookLibrary to disk immediately
+    // Critical: without this, the library changes won't persist if app is killed
+    // Always save, even if savedCount is 0, to flush any pending library changes
+    // (e.g., documents opened during the session)
+    NotebookLibrary::instance()->save();
+    
+    return savedCount;
 }
