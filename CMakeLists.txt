@@ -68,7 +68,11 @@ if(WIN32)
     include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
     # Find dependencies
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+    if(ENABLE_DEBUG_OUTPUT)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+    else()
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    endif()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
     
@@ -200,7 +204,11 @@ elseif(APPLE)
     include_directories(${CMAKE_CURRENT_BINARY_DIR} "${HOMEBREW_PREFIX}/include")
     
     # Find dependencies
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+    if(ENABLE_DEBUG_OUTPUT)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+    else()
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    endif()
     find_package(PkgConfig REQUIRED)
     
     # Poppler (manual config - no .pc file on macOS)
@@ -331,7 +339,11 @@ elseif(UNIX)
     # =========================================================================
     message(STATUS "🐧 Configuring for Linux")
     
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+    if(ENABLE_DEBUG_OUTPUT)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+    else()
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    endif()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
 
@@ -603,9 +615,9 @@ if(ANDROID)
     )
 endif()
 
-# Desktop-only sources (tests require Qt::Test)
+# Desktop-only sources (tests require Qt::Test, debug builds only)
 set(DESKTOP_ONLY_SOURCES "")
-if(NOT ANDROID)
+if(NOT ANDROID AND ENABLE_DEBUG_OUTPUT)
     set(DESKTOP_ONLY_SOURCES
         source/ui/ToolbarButtonTests.cpp
         source/ui/ToolbarButtonTestWidget.cpp
@@ -693,9 +705,12 @@ endif()
 # ============================================================================
 if(WIN32)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
             PkgConfig::POPPLER
     )
+    if(ENABLE_DEBUG_OUTPUT)
+        list(APPEND PLATFORM_LIBS Qt6::Test)
+    endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
@@ -711,9 +726,12 @@ if(WIN32)
 
 elseif(APPLE)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
             ${POPPLER_LIBRARIES}
     )
+    if(ENABLE_DEBUG_OUTPUT)
+        list(APPEND PLATFORM_LIBS Qt6::Test)
+    endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
     endif()
@@ -732,9 +750,12 @@ elseif(ANDROID)
 
 elseif(UNIX)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Test
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
             PkgConfig::POPPLER
     )
+    if(ENABLE_DEBUG_OUTPUT)
+        list(APPEND PLATFORM_LIBS Qt6::Test)
+    endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
     endif()

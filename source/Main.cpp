@@ -203,8 +203,8 @@ static void applyAndroidFonts(QApplication& app)
 }
 #endif
 
-// Test includes (desktop only)
-#ifndef Q_OS_ANDROID
+// Test includes (desktop debug builds only)
+#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
 #include "core/DocumentViewportTests.h"
@@ -406,10 +406,10 @@ static void connectLauncherSignals(Launcher* launcher)
 }
 
 // ============================================================================
-// Test Runners (Desktop Only)
+// Test Runners (Desktop Debug Builds Only)
 // ============================================================================
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
 static int runTests(const QString& testType)
 {
 #ifdef Q_OS_WIN
@@ -475,7 +475,7 @@ int main(int argc, char* argv[])
     QString inputFile;
     bool createNewPackage = false;
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
     QString testToRun;
     bool runButtonVisualTest = false;
     bool runViewportTests = false;
@@ -488,7 +488,7 @@ int main(int argc, char* argv[])
             createNewPackage = true;
             inputFile = QString::fromLocal8Bit(argv[++i]);
         }
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
         else if (arg == "--test-page") {
             testToRun = "page";
         } else if (arg == "--test-document") {
@@ -510,7 +510,7 @@ int main(int argc, char* argv[])
         }
     }
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
     // Handle test commands
     if (!testToRun.isEmpty()) {
         return runTests(testToRun);
