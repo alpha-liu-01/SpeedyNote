@@ -2,6 +2,8 @@
 #include <QHBoxLayout>
 #include <QGuiApplication>
 #include <QPalette>
+#include <QPainter>
+#include <QStyleOption>
 
 Toolbar::Toolbar(QWidget *parent)
     : QWidget(parent)
@@ -194,6 +196,9 @@ void Toolbar::updateTheme(bool darkMode)
     pal.setColor(QPalette::Window, sysPalette.color(QPalette::Window));
     setPalette(pal);
     
+    // Store border color for paintEvent (unified gray: dark #4d4d4d, light #D0D0D0)
+    m_borderColor = darkMode ? QColor(0x4d, 0x4d, 0x4d) : QColor(0xD0, 0xD0, 0xD0);
+    
     // Apply button styles
     ButtonStyles::applyToWidget(this, darkMode);
     
@@ -208,6 +213,31 @@ void Toolbar::updateTheme(bool darkMode)
     m_undoButton->setDarkMode(darkMode);
     m_redoButton->setDarkMode(darkMode);
     m_touchGestureButton->setDarkMode(darkMode);
+    
+    // Trigger repaint for border
+    update();
+}
+
+void Toolbar::paintEvent(QPaintEvent *event)
+{
+    // Let the base class handle the default painting (background via palette)
+    QWidget::paintEvent(event);
+    
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+    
+    // Draw bottom border line
+    painter.setPen(QPen(m_borderColor, 1));
+    painter.drawLine(0, height() - 1, width(), height() - 1);
+    
+    // Draw subtle shadow gradient below the border (2 pixel gradient)
+    QColor shadowColor = m_darkMode ? QColor(0, 0, 0, 40) : QColor(0, 0, 0, 20);
+    painter.setPen(QPen(shadowColor, 1));
+    // The shadow will be drawn on the widgets below, but we can hint at depth
+    // by drawing a slightly darker line above the border
+    QColor innerShadow = m_darkMode ? QColor(0, 0, 0, 30) : QColor(0, 0, 0, 15);
+    painter.setPen(QPen(innerShadow, 1));
+    painter.drawLine(0, height() - 2, width(), height() - 2);
 }
 
 void Toolbar::setUndoEnabled(bool enabled)

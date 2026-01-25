@@ -17,6 +17,7 @@
 #include "ui/subtoolbars/MarkerSubToolbar.h"
 #include "ui/subtoolbars/HighlighterSubToolbar.h"
 #include "ui/subtoolbars/ObjectSelectSubToolbar.h"
+#include "ui/subtoolbars/EraserSubToolbar.h"
 #include "ui/actionbars/ActionBarContainer.h"
 #include "ui/actionbars/LassoActionBar.h"
 #include "ui/actionbars/ObjectSelectActionBar.h"
@@ -151,7 +152,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.1.4"));
+    setWindowTitle(tr("SpeedyNote 1.1.5"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -2367,6 +2368,11 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
     if (m_highlighterSubToolbar) {
         viewport->setHighlighterColor(m_highlighterSubToolbar->currentColor());
     }
+    
+    // Apply eraser size
+    if (m_eraserSubToolbar) {
+        viewport->setEraserSize(m_eraserSubToolbar->currentSize());
+    }
 }
 
 void MainWindow::centerViewportContent(int tabIndex) {
@@ -3842,10 +3848,10 @@ void MainWindow::updateTheme() {
     
     // REMOVED MW5.1: controlBar styling removed - replaced by NavigationBar and Toolbar
     
-    // Common floating tab styling colors (solid, not transparent)
-    QString tabBgColor = darkMode ? "#3A3A3A" : "#EAEAEA";
-    QString tabHoverColor = darkMode ? "#4A4A4A" : "#DADADA";
-    QString tabBorderColor = darkMode ? "#555555" : "#CCCCCC";
+    // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
+    QString tabBgColor = darkMode ? "#2a2e32" : "#F5F5F5";
+    QString tabHoverColor = darkMode ? "#3a3e42" : "#E8E8E8";
+    QString tabBorderColor = darkMode ? "#4d4d4d" : "#D0D0D0";
     
     // MW2.2: Removed dial toolbar styling
     
@@ -4065,13 +4071,15 @@ void MainWindow::setupSubToolbars()
     m_markerSubToolbar = new MarkerSubToolbar();
     m_highlighterSubToolbar = new HighlighterSubToolbar();
     m_objectSelectSubToolbar = new ObjectSelectSubToolbar();
+    m_eraserSubToolbar = new EraserSubToolbar();
     
     // Register subtoolbars with container
     m_subtoolbarContainer->setSubToolbar(ToolType::Pen, m_penSubToolbar);
     m_subtoolbarContainer->setSubToolbar(ToolType::Marker, m_markerSubToolbar);
     m_subtoolbarContainer->setSubToolbar(ToolType::Highlighter, m_highlighterSubToolbar);
     m_subtoolbarContainer->setSubToolbar(ToolType::ObjectSelect, m_objectSelectSubToolbar);
-    // Eraser, Lasso - no subtoolbar (nullptr by default)
+    m_subtoolbarContainer->setSubToolbar(ToolType::Eraser, m_eraserSubToolbar);
+    // Lasso - no subtoolbar (nullptr by default)
     
     // Connect tool changes from Toolbar to SubToolbarContainer
     connect(m_toolbar, &Toolbar::toolSelected, 
@@ -4134,6 +4142,13 @@ void MainWindow::setupSubToolbars()
     connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::slotCleared, this, [this](int index) {
         if (DocumentViewport* vp = currentViewport()) {
             vp->clearLinkSlot(index);
+        }
+    });
+    
+    // Connect EraserSubToolbar signals to viewport
+    connect(m_eraserSubToolbar, &EraserSubToolbar::eraserSizeChanged, this, [this](qreal size) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setEraserSize(size);
         }
     });
     

@@ -47,11 +47,11 @@ void ObjectSelectActionBar::setupButtons()
     separator->setFrameShape(QFrame::HLine);
     separator->setFrameShadow(QFrame::Sunken);
     separator->setFixedHeight(2);
-    // Set initial color based on current theme
+    // Set initial color based on current theme (unified gray: dark #4d4d4d, light #D0D0D0)
     if (isDarkMode()) {
-        separator->setStyleSheet("background-color: #555555; border: none;");
+        separator->setStyleSheet("background-color: #4d4d4d; border: none;");
     } else {
-        separator->setStyleSheet("background-color: #CCCCCC; border: none;");
+        separator->setStyleSheet("background-color: #D0D0D0; border: none;");
     }
     m_layout->addWidget(separator, 0, Qt::AlignHCenter);
     m_separator = separator;

@@ -3,7 +3,7 @@
 // ============================================================================
 // StrokePoint - A single point in a vector stroke with pressure
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.4)
+// Part of the new SpeedyNote document architecture (Phase 1.1.5)
 // Extracted from VectorCanvas.h for modularity
 // ============================================================================
 

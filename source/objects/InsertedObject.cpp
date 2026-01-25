@@ -1,7 +1,7 @@
 // ============================================================================
 // InsertedObject - Implementation
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.4)
+// Part of the new SpeedyNote document architecture (Phase 1.1.5)
 // ============================================================================
 
 #include "InsertedObject.h"

@@ -15,6 +15,7 @@
 
 #include <QPainter>
 #include <QPaintEvent>
+#include <QRegion>
 #include <QResizeEvent>
 #include <QMouseEvent>
 #include <QTabletEvent>
@@ -126,11 +127,13 @@ DocumentViewport::DocumentViewport(QWidget* parent)
             m_pointerInViewport = false;
             
             // Trigger repaint to hide eraser cursor
+            // Use elliptical region to match circular cursor shape
+            // Use toAlignedRect() to properly round floating-point to integer coords
             if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
                 qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-                QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
-                                  eraserRadius * 2, eraserRadius * 2);
-                update(cursorRect.toRect());
+                QRectF cursorRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                                   eraserRadius * 2, eraserRadius * 2);
+                update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
             }
         }
     });
@@ -392,7 +395,8 @@ void DocumentViewport::setDarkMode(bool dark)
     
     // Cache background color to avoid recalculating on every paint
     // Dark mode: dark gray, Light mode: light gray
-    m_backgroundColor = dark ? QColor(64, 64, 64) : QColor(224, 224, 224);
+    // Unified gray colors: dark #4d4d4d (secondary), light #D0D0D0 (secondary)
+    m_backgroundColor = dark ? QColor(0x4d, 0x4d, 0x4d) : QColor(0xD0, 0xD0, 0xD0);
     
     // Update palette for auto-fill background
     QPalette pal = palette();
@@ -2405,15 +2409,17 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
         m_lastPointerPos = event->position();
         
         // Request repaint if eraser tool is active (to update cursor)
-        // Use targeted update for efficiency
+        // Use elliptical regions to match circular eraser cursor
+        // Use toAlignedRect() to properly round floating-point to integer coords
         if (m_currentTool == ToolType::Eraser) {
             qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-            // Union of old and new cursor positions
-            QRectF dirtyRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
-                             eraserRadius * 2, eraserRadius * 2);
-            QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
-                           eraserRadius * 2, eraserRadius * 2);
-            update(dirtyRect.united(oldRect).toRect());
+            QRectF newRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                            eraserRadius * 2, eraserRadius * 2);
+            QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                            eraserRadius * 2, eraserRadius * 2);
+            QRegion dirtyRegion(oldRectF.toAlignedRect(), QRegion::Ellipse);
+            dirtyRegion += QRegion(newRectF.toAlignedRect(), QRegion::Ellipse);
+            update(dirtyRegion);
         }
         // Phase D.1: Update cursor for PDF link hover in Highlighter tool
         else if (m_currentTool == ToolType::Highlighter) {
@@ -2720,11 +2726,13 @@ void DocumentViewport::leaveEvent(QEvent* event)
     m_pointerInViewport = false;
     
     // Trigger repaint to hide eraser cursor when pointer leaves viewport
+    // Use elliptical region to match circular cursor shape
+    // Use toAlignedRect() to properly round floating-point to integer coords
     if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
         qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-        QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
-                          eraserRadius * 2, eraserRadius * 2);
-        update(cursorRect.toRect());
+        QRectF cursorRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+        update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
     }
     
     QWidget::leaveEvent(event);
@@ -2777,12 +2785,16 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
             m_lastPointerPos = newPos;
             
             // Trigger repaint for eraser cursor update
+            // Use elliptical regions to match circular cursor shape
+            // Use toAlignedRect() to properly round floating-point to integer coords
             qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-            QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
-                           eraserRadius * 2, eraserRadius * 2);
-            QRectF newRect(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
-                           eraserRadius * 2, eraserRadius * 2);
-            update(oldRect.united(newRect).toRect());
+            QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                            eraserRadius * 2, eraserRadius * 2);
+            QRectF newRectF(newPos.x() - eraserRadius, newPos.y() - eraserRadius,
+                            eraserRadius * 2, eraserRadius * 2);
+            QRegion dirtyRegion(oldRectF.toAlignedRect(), QRegion::Ellipse);
+            dirtyRegion += QRegion(newRectF.toAlignedRect(), QRegion::Ellipse);
+            update(dirtyRegion);
         }
         
         event->accept();
@@ -3222,11 +3234,13 @@ bool DocumentViewport::event(QEvent* event)
         }
         
         // Trigger repaint to hide eraser cursor when pen leaves proximity
+        // Use elliptical region to match circular cursor shape
+        // Use toAlignedRect() to properly round floating-point to integer coords
         if (m_currentTool == ToolType::Eraser || m_hardwareEraserActive) {
             qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-            QRectF cursorRect(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
-                              eraserRadius * 2, eraserRadius * 2);
-            update(cursorRect.toRect());
+            QRectF cursorRectF(m_lastPointerPos.x() - eraserRadius, m_lastPointerPos.y() - eraserRadius,
+                               eraserRadius * 2, eraserRadius * 2);
+            update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
         }
         return true;
     }
@@ -4018,10 +4032,12 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
         eraseAt(pe);
         // CRITICAL FIX: Always update cursor area on press to show the eraser cursor
         // eraseAt() only updates when strokes are removed, but we need to show cursor immediately
+        // Use elliptical region to match the circular eraser cursor
+        // Use toAlignedRect() to properly round floating-point to integer coords
         qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-        QRectF cursorRect(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
-                          eraserRadius * 2, eraserRadius * 2);
-        update(cursorRect.toRect());
+        QRectF cursorRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
+                           eraserRadius * 2, eraserRadius * 2);
+        update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
     } else if (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker) {
         // Task 2.9: Straight line mode - record start point instead of normal stroke
         if (m_straightLineMode) {
@@ -4082,13 +4098,23 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         eraseAt(pe);
         // CRITICAL FIX: eraseAt() only calls update() when strokes are removed!
         // We must ALWAYS update the cursor area to show cursor movement.
-        // Update region around BOTH old and new cursor positions.
+        // 
+        // FIX: Use QRegion with two separate elliptical regions instead of
+        // their bounding box union. This prevents the "square brush" visual
+        // artifact where the entire bounding rectangle appears refreshed.
+        // Use toAlignedRect() to properly round floating-point to integer coords.
         qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-        QRectF oldRect(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
-                       eraserRadius * 2, eraserRadius * 2);
-        QRectF newRect(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
-                       eraserRadius * 2, eraserRadius * 2);
-        update(oldRect.united(newRect).toRect());
+        
+        // Create elliptical regions for old and new positions (approximates circles)
+        QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
+                        eraserRadius * 2, eraserRadius * 2);
+        QRectF newRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
+                        eraserRadius * 2, eraserRadius * 2);
+        
+        // Use elliptical regions for more accurate circular dirty areas
+        QRegion dirtyRegion(oldRectF.toAlignedRect(), QRegion::Ellipse);
+        dirtyRegion += QRegion(newRectF.toAlignedRect(), QRegion::Ellipse);
+        update(dirtyRegion);
         return;  // Don't fall through to stroke continuation
     }
     
@@ -4427,51 +4453,9 @@ void DocumentViewport::finishStrokeEdgeless()
     
     // ========== STROKE SPLITTING AT TILE BOUNDARIES ==========
     // Strategy: Walk through all points, group consecutive points by tile.
-    // When crossing a tile boundary, end current segment and start a new one.
-    // Overlapping point at boundary ensures visual continuity.
-    
-    struct TileSegment {
-        Document::TileCoord coord;
-        QVector<StrokePoint> points;
-    };
-    QVector<TileSegment> segments;
-    
-    // Start first segment
-    TileSegment currentSegment;
-    currentSegment.coord = m_document->tileCoordForPoint(m_currentStroke.points.first().pos);
-    currentSegment.points.append(m_currentStroke.points.first());
-    
-    // Walk through remaining points
-    for (int i = 1; i < m_currentStroke.points.size(); ++i) {
-        const StrokePoint& pt = m_currentStroke.points[i];
-        Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
-        
-        if (ptTile != currentSegment.coord) {
-            // Tile boundary crossed!
-            // Both segments need the boundary-crossing line segment (prevPt → pt)
-            // so that each segment's cap is covered by the other's stroke body.
-            StrokePoint prevPt = currentSegment.points.last();
-            
-            // End current segment WITH the new point (extends past boundary)
-            currentSegment.points.append(pt);
-            segments.append(currentSegment);
-            
-            // Start new segment with PREVIOUS point (extends before boundary)
-            // Now both tiles have the line segment crossing the boundary
-            currentSegment.coord = ptTile;
-            currentSegment.points.clear();
-            currentSegment.points.append(prevPt);  // Previous point (in old tile)
-            currentSegment.points.append(pt);      // Current point (in new tile)
-        } else {
-            // Same tile, just add point
-            currentSegment.points.append(pt);
-        }
-    }
-    
-    // Don't forget the last segment
-    if (!currentSegment.points.isEmpty()) {
-        segments.append(currentSegment);
-    }
+    // Split stroke into tile segments using the common helper
+    // (handles boundary crossings with overlapping points for visual continuity)
+    QVector<TileSegment> segments = splitStrokeIntoTileSegments(m_currentStroke.points);
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Edgeless: Stroke split into" << segments.size() << "segments";
@@ -4563,52 +4547,9 @@ QVector<QPair<Document::TileCoord, VectorStroke>> DocumentViewport::addStrokeToE
         return addedStrokes;
     }
     
-    // Strategy: Walk through all points, group consecutive points by tile.
-    // When crossing a tile boundary, end current segment and start a new one.
-    // Overlapping point at boundary ensures visual continuity.
-    
-    struct TileSegment {
-        Document::TileCoord coord;
-        QVector<StrokePoint> points;
-    };
-    QVector<TileSegment> segments;
-    
-    // Start first segment
-    TileSegment currentSegment;
-    currentSegment.coord = m_document->tileCoordForPoint(stroke.points.first().pos);
-    currentSegment.points.append(stroke.points.first());
-    
-    // Walk through remaining points
-    for (int i = 1; i < stroke.points.size(); ++i) {
-        const StrokePoint& pt = stroke.points[i];
-        Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
-        
-        if (ptTile != currentSegment.coord) {
-            // Tile boundary crossed!
-            // Both segments need the boundary-crossing line segment (prevPt → pt)
-            // so that each segment's cap is covered by the other's stroke body.
-            StrokePoint prevPt = currentSegment.points.last();
-            
-            // End current segment WITH the new point (extends past boundary)
-            currentSegment.points.append(pt);
-            segments.append(currentSegment);
-            
-            // Start new segment with PREVIOUS point (extends before boundary)
-            // Now both tiles have the line segment crossing the boundary
-            currentSegment.coord = ptTile;
-            currentSegment.points.clear();
-            currentSegment.points.append(prevPt);  // Previous point (in old tile)
-            currentSegment.points.append(pt);      // Current point (in new tile)
-        } else {
-            // Same tile, just add point
-            currentSegment.points.append(pt);
-        }
-    }
-    
-    // Don't forget the last segment
-    if (!currentSegment.points.isEmpty()) {
-        segments.append(currentSegment);
-    }
+    // Split stroke into tile segments using the common helper
+    // (handles boundary crossings with overlapping points for visual continuity)
+    QVector<TileSegment> segments = splitStrokeIntoTileSegments(stroke.points);
     
 #ifdef SPEEDYNOTE_DEBUG
     if (segments.size() > 1) {
@@ -4756,35 +4697,9 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 linePoints.append(pt);
             }
             
-            // Split at tile boundaries (same logic as finishStrokeEdgeless)
-            struct TileSegment {
-                Document::TileCoord coord;
-                QVector<StrokePoint> points;
-            };
-            QVector<TileSegment> segments;
-            
-            TileSegment currentSegment;
-            currentSegment.coord = m_document->tileCoordForPoint(linePoints.first().pos);
-            currentSegment.points.append(linePoints.first());
-            
-            for (int i = 1; i < linePoints.size(); ++i) {
-                const StrokePoint& pt = linePoints[i];
-                Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
-                
-                if (ptTile != currentSegment.coord) {
-                    currentSegment.points.append(pt);
-                    segments.append(currentSegment);
-                    
-                    currentSegment.coord = ptTile;
-                    currentSegment.points.clear();
-                    currentSegment.points.append(pt);
-                } else {
-                    currentSegment.points.append(pt);
-                }
-            }
-            if (!currentSegment.points.isEmpty()) {
-                segments.append(currentSegment);
-            }
+            // Split at tile boundaries using the common helper
+            // (handles boundary crossings with overlapping points for visual continuity)
+            QVector<TileSegment> segments = splitStrokeIntoTileSegments(linePoints);
             
             // Add each segment to its tile
             QVector<QPair<Document::TileCoord, VectorStroke>> addedStrokes;
@@ -10433,12 +10348,14 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     emit documentModified();
     
     // ========== OPTIMIZATION: Dirty Region Update for Eraser ==========
-    // Calculate region around eraser position for targeted repaint
-    qreal eraserRadius = m_eraserSize * m_zoomLevel;
+    // Calculate elliptical region around eraser position for targeted repaint
+    // Use ellipse to match the circular eraser shape and avoid "square brush" artifact
+    // Use toAlignedRect() to properly round floating-point to integer coords
+    qreal eraserRadius = m_eraserSize * m_zoomLevel + 10;  // Add padding for stroke edges
     QPointF vpPos = pe.viewportPos;
-    QRectF dirtyRect(vpPos.x() - eraserRadius - 10, vpPos.y() - eraserRadius - 10,
-                     (eraserRadius + 10) * 2, (eraserRadius + 10) * 2);
-    update(dirtyRect.toRect());
+    QRectF dirtyRectF(vpPos.x() - eraserRadius, vpPos.y() - eraserRadius,
+                      eraserRadius * 2, eraserRadius * 2);
+    update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
 }
 
 void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
@@ -10518,11 +10435,12 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
         pushEdgelessUndoAction(undoAction);
         emit documentModified();
         
-        // Dirty region update
-        qreal eraserRadius = m_eraserSize * m_zoomLevel;
-        QRectF dirtyRect(viewportPos.x() - eraserRadius - 10, viewportPos.y() - eraserRadius - 10,
-                         (eraserRadius + 10) * 2, (eraserRadius + 10) * 2);
-        update(dirtyRect.toRect());
+        // Dirty region update - use elliptical region to match circular eraser
+        // Use toAlignedRect() to properly round floating-point to integer coords
+        qreal eraserRadius = m_eraserSize * m_zoomLevel + 10;  // Add padding for stroke edges
+        QRectF dirtyRectF(viewportPos.x() - eraserRadius, viewportPos.y() - eraserRadius,
+                          eraserRadius * 2, eraserRadius * 2);
+        update(QRegion(dirtyRectF.toAlignedRect(), QRegion::Ellipse));
     }
 }
 
@@ -11128,6 +11046,56 @@ void DocumentViewport::trimEdgelessUndoStack()
         // Remove oldest entry (at the bottom of the stack = index 0)
         m_edgelessUndoStack.remove(0);
     }
+}
+
+QVector<DocumentViewport::TileSegment> DocumentViewport::splitStrokeIntoTileSegments(
+    const QVector<StrokePoint>& points) const
+{
+    QVector<TileSegment> segments;
+    
+    if (points.isEmpty() || !m_document) {
+        return segments;
+    }
+    
+    // Start first segment
+    TileSegment currentSegment;
+    currentSegment.coord = m_document->tileCoordForPoint(points.first().pos);
+    currentSegment.points.append(points.first());
+    
+    // Walk through remaining points, detecting tile boundary crossings
+    for (int i = 1; i < points.size(); ++i) {
+        const StrokePoint& pt = points[i];
+        Document::TileCoord ptTile = m_document->tileCoordForPoint(pt.pos);
+        
+        if (ptTile != currentSegment.coord) {
+            // Tile boundary crossed!
+            // Both segments need the boundary-crossing line segment (prevPt → pt)
+            // so that each segment's cap is covered by the other's stroke body.
+            // (BUG-DRW-004 fix)
+            StrokePoint prevPt = currentSegment.points.last();
+            
+            // End current segment WITH the new point (extends past boundary)
+            currentSegment.points.append(pt);
+            segments.append(currentSegment);
+            
+            // Start new segment with PREVIOUS point (extends before boundary)
+            // Now both tiles have the line segment crossing the boundary
+            currentSegment.coord = ptTile;
+            currentSegment.points.clear();
+            currentSegment.points.append(prevPt);  // Previous point (in old tile)
+            currentSegment.points.append(pt);      // Current point (in new tile)
+        } else {
+            // Same tile, just add point
+            currentSegment.points.append(pt);
+        }
+    }
+    
+    // Don't forget the last segment
+    if (!currentSegment.points.isEmpty()) {
+        segments.append(currentSegment);
+    }
+    
+    return segments;
 }
 
 void DocumentViewport::undo()

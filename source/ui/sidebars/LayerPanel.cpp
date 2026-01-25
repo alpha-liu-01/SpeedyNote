@@ -892,29 +892,30 @@ void LayerPanel::onDuplicateClicked()
 void LayerPanel::updateScrollAreaStyle()
 {
     // Style the scroll area with a subtle inset background
+    // Unified gray colors: dark #2a2e32/#4d4d4d, light #F5F5F5/#D0D0D0
     QString scrollStyle;
     QString containerStyle;
     
     if (m_darkMode) {
-        // Dark mode: darker inset background
+        // Dark mode: unified dark gray
         scrollStyle = QStringLiteral(
             "QScrollArea { "
-            "  background-color: #2a2a2a; "
-            "  border: 1px solid #3a3a3a; "
+            "  background-color: #2a2e32; "
+            "  border: 1px solid #4d4d4d; "
             "  border-radius: 6px; "
             "}"
             "QScrollBar:vertical { "
-            "  background: #2a2a2a; "
+            "  background: #2a2e32; "
             "  width: 8px; "
             "  margin: 2px; "
             "}"
             "QScrollBar::handle:vertical { "
-            "  background: #555555; "
+            "  background: #4d4d4d; "
             "  border-radius: 3px; "
             "  min-height: 20px; "
             "}"
             "QScrollBar::handle:vertical:hover { "
-            "  background: #666666; "
+            "  background: #5d5d5d; "
             "}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { "
             "  height: 0px; "
@@ -922,25 +923,25 @@ void LayerPanel::updateScrollAreaStyle()
         );
         containerStyle = QStringLiteral("background-color: transparent;");
     } else {
-        // Light mode: subtle gray inset
+        // Light mode: unified light gray
         scrollStyle = QStringLiteral(
             "QScrollArea { "
-            "  background-color: #f0f0f0; "
-            "  border: 1px solid #d0d0d0; "
+            "  background-color: #F5F5F5; "
+            "  border: 1px solid #D0D0D0; "
             "  border-radius: 6px; "
             "}"
             "QScrollBar:vertical { "
-            "  background: #f0f0f0; "
+            "  background: #F5F5F5; "
             "  width: 8px; "
             "  margin: 2px; "
             "}"
             "QScrollBar::handle:vertical { "
-            "  background: #b0b0b0; "
+            "  background: #D0D0D0; "
             "  border-radius: 3px; "
             "  min-height: 20px; "
             "}"
             "QScrollBar::handle:vertical:hover { "
-            "  background: #999999; "
+            "  background: #B0B0B0; "
             "}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { "
             "  height: 0px; "

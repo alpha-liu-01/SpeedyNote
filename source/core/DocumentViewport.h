@@ -3030,6 +3030,39 @@ private:
      */
     void trimEdgelessUndoStack();
     
+    // ===== Edgeless Tile Splitting Helpers =====
+    
+    /**
+     * @brief A segment of a stroke belonging to a single tile.
+     * 
+     * Used when splitting strokes that cross tile boundaries in edgeless mode.
+     * Each segment contains the portion of the stroke within one tile,
+     * with overlapping points at boundaries to ensure visual continuity.
+     */
+    struct TileSegment {
+        Document::TileCoord coord;      ///< The tile this segment belongs to
+        QVector<StrokePoint> points;    ///< Points in document coordinates
+    };
+    
+    /**
+     * @brief Split a sequence of stroke points into tile segments.
+     * 
+     * When a stroke crosses tile boundaries in edgeless mode, it must be
+     * split into separate segments for storage in different tiles.
+     * 
+     * To ensure visual continuity at boundaries (no visible gaps or caps),
+     * the boundary-crossing line segment is included in BOTH adjacent tiles:
+     * - Segment A ends with the point past the boundary
+     * - Segment B starts with the point before the boundary
+     * 
+     * This way, each segment's round cap at the boundary is covered by
+     * the other segment's stroke body.
+     * 
+     * @param points The stroke points in document coordinates.
+     * @return Vector of TileSegments, each containing points for one tile.
+     */
+    QVector<TileSegment> splitStrokeIntoTileSegments(const QVector<StrokePoint>& points) const;
+    
     // ===== Rendering Helpers (Task 1.3.3) =====
     
     /**

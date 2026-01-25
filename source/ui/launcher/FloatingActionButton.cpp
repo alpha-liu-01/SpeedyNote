@@ -117,10 +117,10 @@ QPushButton* FloatingActionButton::createActionButton(const QString& iconName,
     btn->setIcon(QIcon(iconPath));
     btn->setIconSize(QSize(24, 24));
     
-    // Style
-    QString bgColor = m_darkMode ? "#424242" : "#ffffff";
-    QString hoverColor = m_darkMode ? "#525252" : "#f5f5f5";
-    QString pressColor = m_darkMode ? "#616161" : "#e0e0e0";
+    // Style - unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
+    QString bgColor = m_darkMode ? "#2a2e32" : "#F5F5F5";
+    QString hoverColor = m_darkMode ? "#3a3e42" : "#E8E8E8";
+    QString borderColor = m_darkMode ? "#4d4d4d" : "#D0D0D0";
     
     btn->setStyleSheet(QString(
         "QPushButton {"
@@ -134,7 +134,7 @@ QPushButton* FloatingActionButton::createActionButton(const QString& iconName,
     ).arg(bgColor)
      .arg(ACTION_BUTTON_SIZE / 2)
      .arg(hoverColor)
-     .arg(m_darkMode ? "#616161" : "#e0e0e0"));
+     .arg(borderColor));
     
     return btn;
 }
@@ -285,9 +285,10 @@ void FloatingActionButton::setDarkMode(bool dark)
                 : QString(":/resources/icons/%1.png").arg(iconName);
             btn->setIcon(QIcon(iconPath));
             
-            QString bgColor = dark ? "#424242" : "#ffffff";
-            QString hoverColor = dark ? "#525252" : "#f5f5f5";
-            QString borderColor = dark ? "#616161" : "#e0e0e0";
+            // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
+            QString bgColor = dark ? "#2a2e32" : "#F5F5F5";
+            QString hoverColor = dark ? "#3a3e42" : "#E8E8E8";
+            QString borderColor = dark ? "#4d4d4d" : "#D0D0D0";
             
             btn->setStyleSheet(QString(
                 "QPushButton {"

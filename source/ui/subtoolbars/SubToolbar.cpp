@@ -29,11 +29,11 @@ void SubToolbar::addSeparator()
     separator->setFixedHeight(2);
     separator->setFixedWidth(SUBTOOLBAR_WIDTH - 2 * PADDING);
     
-    // Style the separator based on theme
+    // Style the separator based on theme (unified gray: dark #4d4d4d, light #D0D0D0)
     if (isDarkMode()) {
-        separator->setStyleSheet("background-color: #555555; border: none;");
+        separator->setStyleSheet("background-color: #4d4d4d; border: none;");
     } else {
-        separator->setStyleSheet("background-color: #CCCCCC; border: none;");
+        separator->setStyleSheet("background-color: #D0D0D0; border: none;");
     }
     
     m_layout->addWidget(separator, 0, Qt::AlignHCenter);
@@ -54,12 +54,13 @@ void SubToolbar::addStretch()
 void SubToolbar::setupStyle()
 {
     // Set background and border via stylesheet
+    // Unified gray colors: dark #2a2e32/#4d4d4d, light #F5F5F5/#D0D0D0
     QString bgColor;
     QString borderColor;
     
     if (isDarkMode()) {
-        bgColor = "#2D2D2D";
-        borderColor = "#404040";
+        bgColor = "#2a2e32";
+        borderColor = "#4d4d4d";
     } else {
         bgColor = "#F5F5F5";
         borderColor = "#D0D0D0";
@@ -101,15 +102,15 @@ void SubToolbar::setDarkMode(bool darkMode)
     // Update the subtoolbar's own styling (background, border, shadow)
     setupStyle();
     
-    // Update separator styling
+    // Update separator styling (unified gray: dark #4d4d4d, light #D0D0D0)
     // Find all QFrame children that are separators and update their style
     const auto frames = findChildren<QFrame*>();
     for (QFrame* frame : frames) {
         if (frame->frameShape() == QFrame::HLine) {
             if (isDarkMode()) {
-                frame->setStyleSheet("background-color: #555555; border: none;");
+                frame->setStyleSheet("background-color: #4d4d4d; border: none;");
             } else {
-                frame->setStyleSheet("background-color: #CCCCCC; border: none;");
+                frame->setStyleSheet("background-color: #D0D0D0; border: none;");
             }
         }
     }
