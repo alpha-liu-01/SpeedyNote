@@ -31,19 +31,30 @@ void ThumbnailRenderer::requestThumbnail(Document* doc, int pageIndex, int width
         return;  // Already rendering
     }
     
-    for (const RenderTask& task : m_pendingTasks) {
-        if (task.pageIndex == pageIndex) {
+    for (const ThumbnailSnapshot& pending : m_pendingTasks) {
+        if (pending.pageIndex == pageIndex) {
             return;  // Already queued
         }
     }
     
+    locker.unlock();
+    
+    // Create snapshot on main thread (thread-safe copy of page data)
+    // This MUST happen before we start the async task
+    ThumbnailSnapshot snapshot = createSnapshot(doc, pageIndex, width, dpr);
+    if (!snapshot.valid) {
+        return;  // Failed to create snapshot (page unavailable)
+    }
+    
+    locker.relock();
+    
+    // Double-check after snapshot creation (in case another request came in)
+    if (m_activePages.contains(pageIndex)) {
+        return;
+    }
+    
     // Add to pending queue
-    RenderTask task;
-    task.doc = doc;
-    task.pageIndex = pageIndex;
-    task.width = width;
-    task.dpr = dpr;
-    m_pendingTasks.append(task);
+    m_pendingTasks.append(std::move(snapshot));
     
     locker.unlock();
     
@@ -76,8 +87,8 @@ bool ThumbnailRenderer::isPending(int pageIndex) const
         return true;
     }
     
-    for (const RenderTask& task : m_pendingTasks) {
-        if (task.pageIndex == pageIndex) {
+    for (const ThumbnailSnapshot& pending : m_pendingTasks) {
+        if (pending.pageIndex == pageIndex) {
             return true;
         }
     }
@@ -97,10 +108,11 @@ void ThumbnailRenderer::startNextTask()
     
     // Check if we can start more renders
     while (m_activeWatchers.size() < m_maxConcurrent && !m_pendingTasks.isEmpty()) {
-        RenderTask task = m_pendingTasks.takeFirst();
+        ThumbnailSnapshot snapshot = std::move(m_pendingTasks.takeFirst());
         
         // Mark as active
-        m_activePages.insert(task.pageIndex);
+        int pageIndex = snapshot.pageIndex;
+        m_activePages.insert(pageIndex);
         
         // Create future watcher
         auto* watcher = new QFutureWatcher<QPair<int, QPixmap>>(this);
@@ -109,10 +121,11 @@ void ThumbnailRenderer::startNextTask()
         
         m_activeWatchers.append(watcher);
         
-        // Start async render
-        QFuture<QPair<int, QPixmap>> future = QtConcurrent::run([task]() {
-            QPixmap result = renderThumbnailSync(task);
-            return qMakePair(task.pageIndex, result);
+        // Move snapshot into lambda - background thread owns it now
+        // No live Document/Page access from background thread!
+        QFuture<QPair<int, QPixmap>> future = QtConcurrent::run([snapshot = std::move(snapshot)]() {
+            QPixmap result = renderFromSnapshot(snapshot);
+            return qMakePair(snapshot.pageIndex, result);
         });
         
         watcher->setFuture(future);
@@ -160,31 +173,116 @@ void ThumbnailRenderer::onRenderFinished()
     startNextTask();
 }
 
-QPixmap ThumbnailRenderer::renderThumbnailSync(const RenderTask& task)
+ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
+    Document* doc, int pageIndex, int width, qreal dpr)
 {
-    Document* doc = task.doc;
-    int pageIndex = task.pageIndex;
-    int width = task.width;
-    qreal dpr = task.dpr;
-    
-    // Safety: Validate document pointer and page index
-    // Note: This can't fully protect against use-after-free if doc is deleted
-    // concurrently, but PageThumbnailModel::setDocument() calls cancelAll() and
-    // waits for all tasks to complete before clearing the document reference.
-    if (!doc || pageIndex < 0) {
-        return QPixmap();
-    }
-    
-    // Check page count (can fail if doc was modified concurrently)
-    int pageCount = doc->pageCount();
-    if (pageIndex >= pageCount) {
-        return QPixmap();
-    }
+    ThumbnailSnapshot snapshot;
+    snapshot.pageIndex = pageIndex;
+    snapshot.width = width;
+    snapshot.dpr = dpr;
     
     // Get page size from metadata (doesn't trigger lazy load)
     QSizeF pageSize = doc->pageSizeAt(pageIndex);
     if (pageSize.isEmpty()) {
         pageSize = QSizeF(612, 792);  // Default US Letter
+    }
+    snapshot.pageSize = pageSize;
+    
+    // Try to get the page (may trigger lazy load)
+    // This is safe because we're on the main thread
+    Page* page = doc->page(pageIndex);
+    if (!page) {
+        // Page not available - return invalid snapshot
+        return snapshot;
+    }
+    
+    // Copy background settings
+    snapshot.backgroundType = page->backgroundType;
+    snapshot.backgroundColor = page->backgroundColor;
+    snapshot.gridColor = page->gridColor;
+    snapshot.gridSpacing = page->gridSpacing;
+    snapshot.lineSpacing = page->lineSpacing;
+    
+    // Calculate thumbnail dimensions for PDF rendering
+    qreal aspectRatio = pageSize.height() / pageSize.width();
+    int thumbnailWidth = width;
+    int thumbnailHeight = static_cast<int>(width * aspectRatio);
+    
+    // Pre-render PDF background on main thread if needed
+    if (doc->isPdfLoaded() && page->pdfPageNumber >= 0) {
+        qreal pdfDpi = (thumbnailWidth * dpr) / (pageSize.width() / 72.0);
+        pdfDpi = qMin(pdfDpi, 150.0);  // Cap at 150 DPI for thumbnails
+        
+        QImage pdfImage = doc->renderPdfPageToImage(page->pdfPageNumber, pdfDpi);
+        if (!pdfImage.isNull()) {
+            snapshot.pdfBackground = QPixmap::fromImage(pdfImage);
+        }
+    }
+    
+    // Deep copy stroke data from all layers
+    for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
+        VectorLayer* layer = page->layer(layerIdx);
+        if (layer) {
+            LayerSnapshot layerSnap;
+            layerSnap.visible = layer->visible;
+            layerSnap.opacity = layer->opacity;
+            // Deep copy strokes - Qt's implicit sharing is thread-safe for reads
+            layerSnap.strokes = layer->strokes();
+            snapshot.layers.append(std::move(layerSnap));
+        }
+    }
+    
+    // Pre-render objects to a pixmap on main thread
+    // Objects may contain QPixmap data that isn't safe to share across threads
+    if (page->objectCount() > 0 && pageSize.width() > 0 && pageSize.height() > 0) {
+        // Calculate physical size for the objects layer
+        int physicalWidth = static_cast<int>(thumbnailWidth * dpr);
+        int physicalHeight = static_cast<int>(thumbnailHeight * dpr);
+        
+        if (physicalWidth > 0 && physicalHeight > 0) {
+            snapshot.objectsLayer = QPixmap(physicalWidth, physicalHeight);
+            
+            if (!snapshot.objectsLayer.isNull()) {
+                snapshot.hasObjects = true;
+                snapshot.objectsLayer.setDevicePixelRatio(dpr);
+                snapshot.objectsLayer.fill(Qt::transparent);
+                
+                QPainter objPainter(&snapshot.objectsLayer);
+                if (objPainter.isActive()) {
+                    objPainter.setRenderHint(QPainter::Antialiasing, true);
+                    objPainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                    
+                    // Scale to fit page into thumbnail
+                    qreal scaleX = static_cast<qreal>(thumbnailWidth) / pageSize.width();
+                    qreal scaleY = static_cast<qreal>(thumbnailHeight) / pageSize.height();
+                    qreal scale = qMin(scaleX, scaleY);
+                    objPainter.scale(scale, scale);
+                    
+                    // Render all objects
+                    page->renderObjects(objPainter, 1.0);
+                    objPainter.end();
+                }
+            }
+        }
+    }
+    
+    snapshot.valid = true;
+    return snapshot;
+}
+
+QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
+{
+    if (!snapshot.valid) {
+        return QPixmap();
+    }
+    
+    int width = snapshot.width;
+    qreal dpr = snapshot.dpr;
+    QSizeF pageSize = snapshot.pageSize;
+    
+    // Safety check: prevent division by zero
+    if (pageSize.width() <= 0 || pageSize.height() <= 0) {
+        return QPixmap();
     }
     
     // Calculate thumbnail dimensions
@@ -196,57 +294,79 @@ QPixmap ThumbnailRenderer::renderThumbnailSync(const RenderTask& task)
     int physicalWidth = static_cast<int>(thumbnailWidth * dpr);
     int physicalHeight = static_cast<int>(thumbnailHeight * dpr);
     
+    // Safety check: ensure valid dimensions
+    if (physicalWidth <= 0 || physicalHeight <= 0) {
+        return QPixmap();
+    }
+    
     // Create pixmap
     QPixmap thumbnail(physicalWidth, physicalHeight);
+    if (thumbnail.isNull()) {
+        // Pixmap creation failed (e.g., out of memory)
+        return QPixmap();
+    }
     thumbnail.setDevicePixelRatio(dpr);
     thumbnail.fill(Qt::white);  // Default background
     
     QPainter painter(&thumbnail);
+    if (!painter.isActive()) {
+        // Painter failed to initialize
+        return QPixmap();
+    }
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     
-    // Calculate scale factor: how to fit page into thumbnail
+    // Calculate scale factor
     qreal scaleX = static_cast<qreal>(thumbnailWidth) / pageSize.width();
     qreal scaleY = static_cast<qreal>(thumbnailHeight) / pageSize.height();
     qreal scale = qMin(scaleX, scaleY);
     
     painter.scale(scale, scale);
     
-    // Try to get the page (may trigger lazy load)
-    Page* page = doc->page(pageIndex);
-    if (!page) {
-        // Page not available - return white placeholder
-        painter.end();
-        return thumbnail;
+    // 1. Render background
+    QRectF pageRect(0, 0, pageSize.width(), pageSize.height());
+    
+    if (!snapshot.pdfBackground.isNull()) {
+        // PDF background - draw scaled to fit
+        painter.drawPixmap(pageRect.toRect(), snapshot.pdfBackground);
+    } else {
+        // Use Page's static helper for background pattern
+        Page::renderBackgroundPattern(
+            painter,
+            pageRect,
+            snapshot.backgroundColor,
+            snapshot.backgroundType,
+            snapshot.gridColor,
+            snapshot.gridSpacing,
+            snapshot.lineSpacing
+        );
     }
     
-    // 1. Render page background
-    QPixmap pdfBackground;
-    if (doc->isPdfLoaded() && page->pdfPageNumber >= 0) {
-        // Calculate DPI for PDF rendering
-        // We want the PDF to be rendered at the thumbnail's target resolution
-        qreal pdfDpi = (thumbnailWidth * dpr) / (pageSize.width() / 72.0);
-        pdfDpi = qMin(pdfDpi, 150.0);  // Cap at 150 DPI for thumbnails
+    // 2. Render vector layers from snapshot (thread-safe - all data is local)
+    for (const LayerSnapshot& layerSnap : snapshot.layers) {
+        if (!layerSnap.visible) {
+            continue;
+        }
         
-        QImage pdfImage = doc->renderPdfPageToImage(page->pdfPageNumber, pdfDpi);
-        if (!pdfImage.isNull()) {
-            pdfBackground = QPixmap::fromImage(pdfImage);
+        painter.save();
+        if (layerSnap.opacity < 1.0) {
+            painter.setOpacity(layerSnap.opacity);
         }
+        
+        // Render each stroke using VectorLayer's static method
+        for (const VectorStroke& stroke : layerSnap.strokes) {
+            VectorLayer::renderStroke(painter, stroke);
+        }
+        
+        painter.restore();
     }
     
-    // Render background (solid color, grid, lines, or PDF)
-    page->renderBackground(painter, pdfBackground.isNull() ? nullptr : &pdfBackground, 1.0);
-    
-    // 2. Render vector layers
-    for (int layerIdx = 0; layerIdx < page->layerCount(); ++layerIdx) {
-        VectorLayer* layer = page->layer(layerIdx);
-        if (layer && layer->visible) {
-            layer->render(painter);
-        }
+    // 3. Render pre-rendered objects layer
+    if (snapshot.hasObjects && !snapshot.objectsLayer.isNull()) {
+        // Reset transform to draw the pre-rendered pixmap at 1:1
+        painter.resetTransform();
+        painter.drawPixmap(0, 0, snapshot.objectsLayer);
     }
-    
-    // 3. Render inserted objects
-    page->renderObjects(painter, 1.0);
     
     painter.end();
     return thumbnail;

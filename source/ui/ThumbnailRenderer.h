@@ -6,6 +6,10 @@
 // Part of the Page Panel feature (Task 3.1)
 // Renders page thumbnails in background threads using QtConcurrent.
 // Emits thumbnailReady signal when rendering completes.
+//
+// Thread Safety (BUG-PERF-003 fix):
+// Page data is snapshot-copied on the main thread before async rendering.
+// Background threads never access live Document/Page objects.
 // ============================================================================
 
 #include <QObject>
@@ -14,6 +18,10 @@
 #include <QMutex>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <QColor>
+
+#include "../strokes/VectorStroke.h"
+#include "../core/Page.h"
 
 class Document;
 
@@ -77,23 +85,79 @@ private slots:
     void onRenderFinished();
     
 private:
-    struct RenderTask {
-        Document* doc;
-        int pageIndex;
-        int width;
-        qreal dpr;
+    /**
+     * @brief Thread-safe snapshot of a layer's stroke data.
+     * 
+     * Contains deep copies of strokes that can be safely accessed
+     * from background threads without synchronization.
+     */
+    struct LayerSnapshot {
+        bool visible = true;
+        qreal opacity = 1.0;
+        QVector<VectorStroke> strokes;  // Deep copy of stroke data
     };
     
     /**
-     * @brief Render a thumbnail synchronously (called in worker thread).
+     * @brief Thread-safe snapshot of all data needed to render a thumbnail.
      * 
-     * This method is thread-safe and does not access any member variables
-     * except through the task parameter.
+     * Created on the main thread by capturing page state, then passed
+     * to background threads for rendering. Background threads never
+     * access live Document/Page objects.
+     */
+    struct ThumbnailSnapshot {
+        // Basic info
+        int pageIndex = -1;
+        int width = 0;
+        qreal dpr = 1.0;
+        QSizeF pageSize;
+        
+        // Background settings
+        Page::BackgroundType backgroundType = Page::BackgroundType::None;
+        QColor backgroundColor = Qt::white;
+        QColor gridColor = QColor(200, 200, 200);
+        int gridSpacing = 32;
+        int lineSpacing = 32;
+        
+        // Pre-rendered PDF background (rendered on main thread)
+        QPixmap pdfBackground;
+        
+        // Stroke layers (deep copied)
+        QVector<LayerSnapshot> layers;
+        
+        // Pre-rendered objects layer (rendered on main thread)
+        // Objects may contain QPixmap data that isn't safe to copy across threads
+        QPixmap objectsLayer;
+        bool hasObjects = false;
+        
+        // Validity flag
+        bool valid = false;
+    };
+    
+    /**
+     * @brief Create a thread-safe snapshot of page data.
      * 
-     * @param task The render task parameters.
+     * MUST be called on the main thread. Copies all data needed for
+     * thumbnail rendering so background threads don't need to access
+     * live Document/Page objects.
+     * 
+     * @param doc The document (main thread access only).
+     * @param pageIndex The page index to snapshot.
+     * @param width Target thumbnail width.
+     * @param dpr Device pixel ratio.
+     * @return Snapshot with all render data, or invalid snapshot on failure.
+     */
+    static ThumbnailSnapshot createSnapshot(Document* doc, int pageIndex, int width, qreal dpr);
+    
+    /**
+     * @brief Render a thumbnail from a snapshot (called in worker thread).
+     * 
+     * This method is fully thread-safe - it only accesses the snapshot data
+     * which was copied on the main thread. No live Document/Page access.
+     * 
+     * @param snapshot The thread-safe page snapshot.
      * @return The rendered thumbnail, or null pixmap on failure.
      */
-    static QPixmap renderThumbnailSync(const RenderTask& task);
+    static QPixmap renderFromSnapshot(const ThumbnailSnapshot& snapshot);
     
     /**
      * @brief Start the next pending task if slots are available.
@@ -101,7 +165,7 @@ private:
     void startNextTask();
     
     // Pending pages that have been requested but not yet started
-    QList<RenderTask> m_pendingTasks;
+    QList<ThumbnailSnapshot> m_pendingTasks;
     
     // Pages currently being rendered
     QSet<int> m_activePages;
