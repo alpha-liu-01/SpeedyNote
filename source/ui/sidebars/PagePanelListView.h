@@ -4,6 +4,7 @@
 #include <QListView>
 #include <QTimer>
 #include <QPoint>
+#include <QElapsedTimer>
 
 class QDragMoveEvent;
 
@@ -57,11 +58,14 @@ protected:
 
 private slots:
     void onLongPressTimeout();
+    void onKineticScrollTick();
 
 private:
     void ungrabScroller();
     void regrabScroller();
     void setupTouchScrolling();
+    void startKineticScroll(qreal velocity);
+    void stopKineticScroll();
     
     QTimer m_longPressTimer;
     QPoint m_pressPos;              // Position where press started
@@ -74,10 +78,20 @@ private:
     int m_touchScrollStartPos = 0;  // Scroll position at touch start
     bool m_touchScrolling = false;  // True if currently touch-scrolling
     
+    // Kinetic scrolling state
+    QTimer m_kineticTimer;
+    QElapsedTimer m_velocityTimer;  // For calculating velocity
+    qreal m_kineticVelocity = 0.0;  // Current velocity in pixels/ms
+    qreal m_lastVelocity = 0.0;     // Last calculated velocity (for release)
+    
     static constexpr int LONG_PRESS_MS = 400;            // Time to trigger long-press
     static constexpr int LONG_PRESS_MOVE_THRESHOLD = 15; // Max movement in pixels
     static constexpr int AUTO_SCROLL_MARGIN = 50;        // Pixels from edge to trigger
     static constexpr int AUTO_SCROLL_MAX_SPEED = 10;     // Max pixels per event
+    static constexpr int KINETIC_TICK_MS = 16;           // ~60 FPS
+    static constexpr qreal KINETIC_DECELERATION = 0.92;  // Velocity multiplier per tick (faster decay)
+    static constexpr qreal KINETIC_MIN_VELOCITY = 0.05;  // Stop below this (pixels/ms)
+    static constexpr qreal KINETIC_MAX_VELOCITY = 3.0;   // Cap velocity (pixels/ms)
 };
 
 #endif // PAGEPANELLISTVIEW_H

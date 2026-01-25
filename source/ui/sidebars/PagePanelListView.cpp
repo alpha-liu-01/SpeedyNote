@@ -25,6 +25,11 @@ PagePanelListView::PagePanelListView(QWidget* parent)
     connect(&m_longPressTimer, &QTimer::timeout,
             this, &PagePanelListView::onLongPressTimeout);
     
+    // Configure kinetic scroll timer
+    m_kineticTimer.setInterval(KINETIC_TICK_MS);
+    connect(&m_kineticTimer, &QTimer::timeout,
+            this, &PagePanelListView::onKineticScrollTick);
+    
     // Setup manual touch scrolling (no QScroller - it causes conflicts)
     setupTouchScrolling();
     
@@ -32,7 +37,8 @@ PagePanelListView::PagePanelListView(QWidget* parent)
     // Monitor scroll position changes
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
         qDebug() << "[SCROLL] pos:" << value 
-                 << "touchScrolling:" << m_touchScrolling;
+                 << "touchScrolling:" << m_touchScrolling
+                 << "kinetic:" << m_kineticTimer.isActive();
     });
 #endif
 }
@@ -104,8 +110,15 @@ void PagePanelListView::mousePressEvent(QMouseEvent* event)
         m_isTouchInput = (event->source() != Qt::MouseEventNotSynthesized);
         
         if (m_isTouchInput) {
+            // Stop any ongoing kinetic scroll
+            stopKineticScroll();
+            
             // Store scroll position at touch start for manual scrolling
             m_touchScrollStartPos = verticalScrollBar()->value();
+            
+            // Initialize velocity tracking
+            m_velocityTimer.start();
+            m_lastVelocity = 0.0;
             
             // Start long-press timer for drag-and-drop
             bool canDrag = m_pressedIndex.isValid() && 
@@ -174,6 +187,16 @@ void PagePanelListView::mouseReleaseEvent(QMouseEvent* event)
                     // Emit the clicked signal that PagePanel listens to
                     emit clicked(index);
                 }
+            } else {
+                // Use the velocity that was calculated during dragging
+#if SPEEDYNOTE_DEBUG
+                qDebug() << "[RELEASE] velocity:" << m_lastVelocity << "px/ms";
+#endif
+                
+                // Start kinetic scroll if velocity is significant
+                if (qAbs(m_lastVelocity) > KINETIC_MIN_VELOCITY) {
+                    startKineticScroll(m_lastVelocity);
+                }
             }
             
             event->accept();
@@ -206,17 +229,44 @@ void PagePanelListView::mouseMoveEvent(QMouseEvent* event)
             return;
         }
         
+        // Get timing for velocity calculation
+        qint64 currentTime = m_velocityTimer.elapsed();
+        int currentY = event->pos().y();
+        
         // Manual touch scrolling: scroll by the Y delta from press position
-        int deltaY = event->pos().y() - m_pressPos.y();
+        int deltaY = currentY - m_pressPos.y();
         int newScrollPos = m_touchScrollStartPos - deltaY;  // Subtract because scroll up = finger down
+        int oldScrollPos = verticalScrollBar()->value();
         verticalScrollBar()->setValue(newScrollPos);
+        
+        // Calculate velocity from actual scroll change (more accurate than finger position)
+        // Velocity = scroll position change per millisecond
+        // Use exponential smoothing to reduce noise
+        int scrollDelta = newScrollPos - oldScrollPos;
+        
+        // Get time since last move and restart timer for next frame
+        qint64 frameTime = m_velocityTimer.restart();
+        
+        if (frameTime > 0 && scrollDelta != 0) {
+            // Instantaneous velocity (scroll delta / time)
+            qreal instantVelocity = static_cast<qreal>(scrollDelta) / static_cast<qreal>(frameTime);
+            
+            // Exponential smoothing: blend with previous velocity
+            // Higher alpha = more responsive but noisier, lower = smoother but laggier
+            constexpr qreal alpha = 0.4;
+            m_lastVelocity = alpha * instantVelocity + (1.0 - alpha) * m_lastVelocity;
+        } else if (frameTime > 50) {
+            // If no movement for a while, decay velocity
+            m_lastVelocity *= 0.5;
+        }
         
 #if SPEEDYNOTE_DEBUG
         static int moveCount = 0;
         if (++moveCount % 10 == 0) {
             qDebug() << "[MOVE] pos:" << event->pos() 
                      << "deltaY:" << deltaY
-                     << "scrollPos:" << newScrollPos;
+                     << "scrollPos:" << newScrollPos
+                     << "velocity:" << m_lastVelocity;
         }
 #endif
         
@@ -344,7 +394,7 @@ void PagePanelListView::onLongPressTimeout()
 }
 
 // ============================================================================
-// QScroller Management
+// QScroller Management (legacy - no longer used)
 // ============================================================================
 
 void PagePanelListView::ungrabScroller()
@@ -355,4 +405,55 @@ void PagePanelListView::ungrabScroller()
 void PagePanelListView::regrabScroller()
 {
     // No-op: we don't use QScroller anymore (manual touch scrolling)
+}
+
+// ============================================================================
+// Kinetic Scrolling
+// ============================================================================
+
+void PagePanelListView::startKineticScroll(qreal velocity)
+{
+    // Cap velocity to prevent excessive scrolling
+    m_kineticVelocity = qBound(-KINETIC_MAX_VELOCITY, velocity, KINETIC_MAX_VELOCITY);
+    m_kineticTimer.start();
+    
+#if SPEEDYNOTE_DEBUG
+    qDebug() << "[KINETIC] start, velocity:" << m_kineticVelocity << "px/ms (input:" << velocity << ")";
+#endif
+}
+
+void PagePanelListView::stopKineticScroll()
+{
+    if (m_kineticTimer.isActive()) {
+        m_kineticTimer.stop();
+        m_kineticVelocity = 0.0;
+        
+#if SPEEDYNOTE_DEBUG
+        qDebug() << "[KINETIC] stop";
+#endif
+    }
+}
+
+void PagePanelListView::onKineticScrollTick()
+{
+    // Apply velocity to scroll position
+    int scrollDelta = static_cast<int>(m_kineticVelocity * KINETIC_TICK_MS);
+    int currentPos = verticalScrollBar()->value();
+    int newPos = currentPos + scrollDelta;
+    
+    // Clamp to valid range
+    int minPos = verticalScrollBar()->minimum();
+    int maxPos = verticalScrollBar()->maximum();
+    newPos = qBound(minPos, newPos, maxPos);
+    
+    verticalScrollBar()->setValue(newPos);
+    
+    // Apply deceleration
+    m_kineticVelocity *= KINETIC_DECELERATION;
+    
+    // Stop if velocity is too low or we hit the bounds
+    bool hitBounds = (newPos == minPos || newPos == maxPos) && scrollDelta != 0;
+    if (qAbs(m_kineticVelocity) < KINETIC_MIN_VELOCITY || hitBounds) {
+        stopKineticScroll();
+    }
 }

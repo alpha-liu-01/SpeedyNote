@@ -6,6 +6,10 @@
 OutlinePanelTreeWidget::OutlinePanelTreeWidget(QWidget* parent)
     : QTreeWidget(parent)
 {
+    // Configure kinetic scroll timer
+    m_kineticTimer.setInterval(KINETIC_TICK_MS);
+    connect(&m_kineticTimer, &QTimer::timeout,
+            this, &OutlinePanelTreeWidget::onKineticScrollTick);
 }
 
 void OutlinePanelTreeWidget::mousePressEvent(QMouseEvent* event)
@@ -16,8 +20,16 @@ void OutlinePanelTreeWidget::mousePressEvent(QMouseEvent* event)
         m_isTouchInput = (event->source() != Qt::MouseEventNotSynthesized);
         
         if (m_isTouchInput) {
+            // Stop any ongoing kinetic scroll
+            stopKineticScroll();
+            
             // Store scroll position at touch start for manual scrolling
             m_touchScrollStartPos = verticalScrollBar()->value();
+            
+            // Initialize velocity tracking
+            m_velocityTimer.start();
+            m_lastVelocity = 0.0;
+            
             event->accept();
             return;
         }
@@ -67,6 +79,11 @@ void OutlinePanelTreeWidget::mouseReleaseEvent(QMouseEvent* event)
                         emit itemClicked(item, 0);
                     }
                 }
+            } else {
+                // Use the velocity that was calculated during dragging
+                if (qAbs(m_lastVelocity) > KINETIC_MIN_VELOCITY) {
+                    startKineticScroll(m_lastVelocity);
+                }
             }
             event->accept();
             return;
@@ -74,6 +91,49 @@ void OutlinePanelTreeWidget::mouseReleaseEvent(QMouseEvent* event)
     }
     
     QTreeWidget::mouseReleaseEvent(event);
+}
+
+// ============================================================================
+// Kinetic Scrolling
+// ============================================================================
+
+void OutlinePanelTreeWidget::startKineticScroll(qreal velocity)
+{
+    // Cap velocity to prevent excessive scrolling
+    m_kineticVelocity = qBound(-KINETIC_MAX_VELOCITY, velocity, KINETIC_MAX_VELOCITY);
+    m_kineticTimer.start();
+}
+
+void OutlinePanelTreeWidget::stopKineticScroll()
+{
+    if (m_kineticTimer.isActive()) {
+        m_kineticTimer.stop();
+        m_kineticVelocity = 0.0;
+    }
+}
+
+void OutlinePanelTreeWidget::onKineticScrollTick()
+{
+    // Apply velocity to scroll position
+    int scrollDelta = static_cast<int>(m_kineticVelocity * KINETIC_TICK_MS);
+    int currentPos = verticalScrollBar()->value();
+    int newPos = currentPos + scrollDelta;
+    
+    // Clamp to valid range
+    int minPos = verticalScrollBar()->minimum();
+    int maxPos = verticalScrollBar()->maximum();
+    newPos = qBound(minPos, newPos, maxPos);
+    
+    verticalScrollBar()->setValue(newPos);
+    
+    // Apply deceleration
+    m_kineticVelocity *= KINETIC_DECELERATION;
+    
+    // Stop if velocity is too low or we hit the bounds
+    bool hitBounds = (newPos == minPos || newPos == maxPos) && scrollDelta != 0;
+    if (qAbs(m_kineticVelocity) < KINETIC_MIN_VELOCITY || hitBounds) {
+        stopKineticScroll();
+    }
 }
 
 void OutlinePanelTreeWidget::mouseMoveEvent(QMouseEvent* event)
@@ -85,11 +145,33 @@ void OutlinePanelTreeWidget::mouseMoveEvent(QMouseEvent* event)
             m_touchScrolling = true;
         }
         
+        // Get timing for velocity calculation
+        qint64 currentTime = m_velocityTimer.elapsed();
+        int currentY = event->pos().y();
+        
         if (m_touchScrolling) {
             // Manual touch scrolling: scroll by the Y delta from press position
-            int deltaY = event->pos().y() - m_pressPos.y();
+            int deltaY = currentY - m_pressPos.y();
             int newScrollPos = m_touchScrollStartPos - deltaY;
+            int oldScrollPos = verticalScrollBar()->value();
             verticalScrollBar()->setValue(newScrollPos);
+            
+            // Calculate velocity from actual scroll change
+            int scrollDelta = newScrollPos - oldScrollPos;
+            
+            // Get time since last move and restart timer for next frame
+            qint64 frameTime = m_velocityTimer.restart();
+            
+            if (frameTime > 0 && scrollDelta != 0) {
+                qreal instantVelocity = static_cast<qreal>(scrollDelta) / static_cast<qreal>(frameTime);
+                
+                // Exponential smoothing
+                constexpr qreal alpha = 0.4;
+                m_lastVelocity = alpha * instantVelocity + (1.0 - alpha) * m_lastVelocity;
+            } else if (frameTime > 50) {
+                // If no movement for a while, decay velocity
+                m_lastVelocity *= 0.5;
+            }
         }
         
         event->accept();
