@@ -1305,52 +1305,52 @@ This action cannot be undone.</source>
 <context>
     <name>LayerPanel</name>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="51"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="50"/>
         <source>Layers</source>
         <translation type="unfinished">图层</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="83"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="84"/>
         <source>All/None</source>
         <translation type="unfinished">全选/不选</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="84"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="85"/>
         <source>Toggle select all/none</source>
         <translation type="unfinished">按一下全选，再按全不选</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="89"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="90"/>
         <source>Merge</source>
         <translation type="unfinished">合并</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="90"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="91"/>
         <source>Merge selected layers (2+ required)</source>
         <translation type="unfinished">合并选中的图层（至少选中2个）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="108"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="109"/>
         <source>Add new layer</source>
         <translation type="unfinished">添加新的图层</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="115"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="116"/>
         <source>Remove selected layer</source>
         <translation type="unfinished">移除选中的图层</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="122"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="123"/>
         <source>Move layer up</source>
         <translation type="unfinished">把图层往上移</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="129"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="130"/>
         <source>Move layer down</source>
         <translation type="unfinished">把图层往下放</translation>
     </message>
     <message>
-        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="136"/>
+        <location filename="../../source/ui/sidebars/LayerPanel.cpp" line="137"/>
         <source>Duplicate selected layer</source>
         <translation type="unfinished">克隆选中的图层</translation>
     </message>
