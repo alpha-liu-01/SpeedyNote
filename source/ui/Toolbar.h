@@ -3,8 +3,11 @@
 
 #include <QWidget>
 #include <QButtonGroup>
+#include <QColor>
 #include "ToolbarButtons.h"
 #include "../core/ToolType.h"
+
+class QPaintEvent;
 
 /**
  * Toolbar - Tab-specific tool selection and actions.
@@ -73,6 +76,9 @@ signals:
     // Mode
     void touchGestureModeChanged(int mode);
 
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
 private:
     void setupUi();
     void connectSignals();
@@ -98,6 +104,7 @@ private:
     
     // State
     bool m_darkMode = false;
+    QColor m_borderColor;  // Bottom border color (unified gray)
 };
 
 #endif // TOOLBAR_H

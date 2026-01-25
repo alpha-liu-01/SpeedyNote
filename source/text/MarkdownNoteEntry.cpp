@@ -126,8 +126,9 @@ void MarkdownNoteEntry::setupUI() {
 void MarkdownNoteEntry::applyStyle() {
     // Styles are now primarily from QSS loaded by parent sidebar
     // Only set dynamic properties here
-    QString bgColor = isDarkMode ? "#252525" : "#ffffff";
-    QString borderColor = isDarkMode ? "#353535" : "#e4e7ec";
+    // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
+    QString bgColor = isDarkMode ? "#2a2e32" : "#ffffff";
+    QString borderColor = isDarkMode ? "#4d4d4d" : "#D0D0D0";
     QString textColor = isDarkMode ? "#e6e6e6" : "#1d2939";
     QString previewColor = isDarkMode ? "#909090" : "#667085";
     QString deleteHoverBg = isDarkMode ? "#4d2828" : "#ffccc7";
@@ -144,8 +145,8 @@ void MarkdownNoteEntry::applyStyle() {
             border-color: %4;
         }
     )").arg(bgColor, borderColor, 
-            isDarkMode ? "#2a2a2a" : "#fafbfc",
-            isDarkMode ? "#454545" : "#d0d5dd"));
+            isDarkMode ? "#3a3e42" : "#F5F5F5",
+            isDarkMode ? "#4d4d4d" : "#D0D0D0"));
     
     // Title edit
     titleEdit->setStyleSheet(QString(R"(
@@ -161,7 +162,7 @@ void MarkdownNoteEntry::applyStyle() {
             background-color: %2;
             border-radius: 4px;
         }
-    )").arg(textColor, isDarkMode ? "#353535" : "#f2f4f7"));
+    )").arg(textColor, isDarkMode ? "#3a3e42" : "#F5F5F5"));
     
     // Preview label
     previewLabel->setStyleSheet(QString(R"(

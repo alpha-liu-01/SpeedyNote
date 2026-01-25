@@ -53,6 +53,7 @@ struct PdfSearchState;
 class MarkerSubToolbar;
 class HighlighterSubToolbar;
 class ObjectSelectSubToolbar;
+class EraserSubToolbar;
 
 // Action Bar includes
 class ActionBarContainer;
@@ -464,6 +465,7 @@ private:
     MarkerSubToolbar *m_markerSubToolbar = nullptr;
     HighlighterSubToolbar *m_highlighterSubToolbar = nullptr;
     ObjectSelectSubToolbar *m_objectSelectSubToolbar = nullptr;
+    EraserSubToolbar *m_eraserSubToolbar = nullptr;
     QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
     int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
     QHash<int, int> m_sidebarTabStates;  // Per-document-tab sidebar tab index

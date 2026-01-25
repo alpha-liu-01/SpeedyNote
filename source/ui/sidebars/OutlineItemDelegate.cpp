@@ -51,22 +51,23 @@ void OutlineItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
     bool isSelected = option.state & QStyle::State_Selected;
     bool isHovered = option.state & QStyle::State_MouseOver;
 
+    // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
     if (m_darkMode) {
         textColor = QColor("#E0E0E0");
         pageColor = QColor("#A0A0A0");
-        dotColor = QColor("#606060");
+        dotColor = QColor("#4d4d4d");
         
         if (isSelected) {
-            bgColor = QColor("#3D3D3D");
+            bgColor = QColor("#4d4d4d");
         } else if (isHovered) {
-            bgColor = QColor("#353535");
+            bgColor = QColor("#3a3e42");
         } else {
-            bgColor = QColor("#2D2D2D");
+            bgColor = QColor("#2a2e32");
         }
     } else {
         textColor = QColor("#333333");
         pageColor = QColor("#666666");
-        dotColor = QColor("#B0B0B0");
+        dotColor = QColor("#D0D0D0");
         
         if (isSelected) {
             bgColor = QColor("#D0D0D0");

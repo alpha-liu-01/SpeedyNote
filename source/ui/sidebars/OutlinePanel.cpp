@@ -310,7 +310,8 @@ void OutlinePanel::updateTheme(bool darkMode)
         m_delegate->setDarkMode(darkMode);
     }
 
-    QString bgColor = darkMode ? "#2D2D2D" : "#F5F5F5";
+    // Unified gray colors: dark #2a2e32, light #F5F5F5
+    QString bgColor = darkMode ? "#2a2e32" : "#F5F5F5";
 
     // Stylesheet only for tree container and branch arrows
     // Item painting is handled by the custom delegate

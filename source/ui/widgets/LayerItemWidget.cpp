@@ -352,11 +352,11 @@ QColor LayerItemWidget::backgroundColor() const
             return QColor(210, 230, 250);  // Desaturated cornflower blue for light mode
         }
     } else {
-        // Normal layer - matches scroll area inset
+        // Normal layer - unified gray colors: dark #2a2e32, light #F5F5F5
         if (isDarkMode()) {
-            return QColor(42, 42, 42);  // Matches #2a2a2a scroll area
+            return QColor(0x2a, 0x2e, 0x32);  // Unified dark primary #2a2e32
         } else {
-            return QColor(240, 240, 240);  // Matches #f0f0f0 scroll area
+            return QColor(0xF5, 0xF5, 0xF5);  // Unified light primary #F5F5F5
         }
     }
 }

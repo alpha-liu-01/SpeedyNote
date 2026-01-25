@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.1.4 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.1.5 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -543,6 +543,7 @@ set(UI_SOURCES
     source/ui/subtoolbars/SubToolbarContainer.cpp
     source/ui/subtoolbars/PenSubToolbar.cpp
     source/ui/subtoolbars/MarkerSubToolbar.cpp
+    source/ui/subtoolbars/EraserSubToolbar.cpp
     source/ui/subtoolbars/HighlighterSubToolbar.cpp
     source/ui/subtoolbars/ObjectSelectSubToolbar.cpp
     # Action bars

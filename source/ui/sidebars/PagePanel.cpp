@@ -240,7 +240,8 @@ void PagePanel::setDarkMode(bool dark)
 
 void PagePanel::applyTheme()
 {
-    QString bgColor = m_darkMode ? "#2D2D2D" : "#F5F5F5";
+    // Unified gray colors: dark #2a2e32, light #F5F5F5
+    QString bgColor = m_darkMode ? "#2a2e32" : "#F5F5F5";
     
     m_listView->setStyleSheet(QString(R"(
         QListView {
