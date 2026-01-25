@@ -148,6 +148,23 @@ void PageThumbnailDelegate::setPageAspectRatio(qreal ratio)
     }
 }
 
+QRect PageThumbnailDelegate::thumbnailRect(const QRect& itemRect, qreal aspectRatio) const
+{
+    // Use provided aspect ratio or default
+    if (aspectRatio < 0) {
+        aspectRatio = m_pageAspectRatio;
+    }
+    
+    // Calculate thumbnail height from width and aspect ratio
+    const int thumbHeight = static_cast<int>(m_thumbnailWidth * aspectRatio);
+    
+    // Calculate thumbnail rect (centered horizontally in the item)
+    const int thumbX = itemRect.left() + (itemRect.width() - m_thumbnailWidth) / 2;
+    const int thumbY = itemRect.top() + VERTICAL_PADDING;
+    
+    return QRect(thumbX, thumbY, m_thumbnailWidth, thumbHeight);
+}
+
 // ============================================================================
 // Private Helpers
 // ============================================================================

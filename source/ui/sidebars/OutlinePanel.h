@@ -32,6 +32,7 @@
 #include "../../pdf/PdfProvider.h"  // For PdfOutlineItem (QVector requires complete type)
 
 class OutlineItemDelegate;
+class OutlinePanelTreeWidget;
 
 /**
  * @brief Widget for displaying and navigating PDF outline (table of contents).
@@ -134,7 +135,7 @@ private:
     QTreeWidgetItem* findItemForPage(int pageIndex);
     QString getItemPath(QTreeWidgetItem* item) const;
 
-    QTreeWidget* m_tree = nullptr;
+    OutlinePanelTreeWidget* m_tree = nullptr;
     OutlineItemDelegate* m_delegate = nullptr;
     QVector<PdfOutlineItem> m_outline;  // Cached for state restoration
 

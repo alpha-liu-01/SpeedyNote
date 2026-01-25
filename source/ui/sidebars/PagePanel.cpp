@@ -5,7 +5,6 @@
 #include "../../core/Document.h"
 #include <QVBoxLayout>
 #include <QScrollBar>
-#include <QScroller>
 #include <QTimer>
 #include <QResizeEvent>
 
@@ -98,7 +97,7 @@ void PagePanel::configureListView()
     m_listView->setAttribute(Qt::WA_Hover, true);
     m_listView->viewport()->setAttribute(Qt::WA_Hover, true);
     
-    // Note: Touch scrolling (QScroller) is handled by PagePanelListView
+    // Note: Touch scrolling is handled manually by PagePanelListView
 }
 
 void PagePanel::setupConnections()
@@ -351,14 +350,24 @@ void PagePanel::onItemClicked(const QModelIndex& index)
         return;
     }
     
-    // BUG-UI-002 FIX: Ignore clicks when QScroller is actively scrolling
-    // This prevents touch scroll gestures from being detected as clicks
-    QScroller* scroller = QScroller::scroller(m_listView->viewport());
-    if (scroller) {
-        QScroller::State state = scroller->state();
-        if (state == QScroller::Dragging || state == QScroller::Scrolling) {
-            return;  // Ignore click during scroll
-        }
+    // Note: With manual touch scrolling in PagePanelListView,
+    // clicked() is only emitted for taps, not during scrolling
+    
+    // Only respond to clicks within the thumbnail region (not the frame/padding)
+    // This makes it easier to scroll without accidentally switching pages
+    QPoint clickPos = m_listView->lastPressPosition();
+    QRect itemRect = m_listView->visualRect(index);
+    
+    // Get aspect ratio for this specific page
+    qreal aspectRatio = index.data(PageThumbnailModel::PageAspectRatioRole).toReal();
+    if (aspectRatio <= 0) {
+        aspectRatio = -1;  // Use delegate's default
+    }
+    
+    QRect thumbRect = m_delegate->thumbnailRect(itemRect, aspectRatio);
+    
+    if (!thumbRect.contains(clickPos)) {
+        return;  // Click was outside thumbnail - ignore (allow scrolling in padding area)
     }
     
     int pageIndex = index.data(PageThumbnailModel::PageIndexRole).toInt();

@@ -1,8 +1,8 @@
 #include "OutlinePanel.h"
+#include "OutlinePanelTreeWidget.h"
 #include "OutlineItemDelegate.h"
 // Note: PdfProvider.h already included via OutlinePanel.h
 
-#include <QScroller>
 #include <QHeaderView>
 #include <QApplication>
 #include <QPalette>
@@ -27,8 +27,8 @@ void OutlinePanel::setupUi()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // Create tree widget
-    m_tree = new QTreeWidget(this);
+    // Create tree widget (custom subclass that handles touch scrolling properly)
+    m_tree = new OutlinePanelTreeWidget(this);
     m_tree->setHeaderHidden(true);
     m_tree->setRootIsDecorated(true);
     m_tree->setIndentation(20);
@@ -43,8 +43,8 @@ void OutlinePanel::setupUi()
     m_tree->setAttribute(Qt::WA_Hover, true);
     m_tree->viewport()->setAttribute(Qt::WA_Hover, true);
     
-    // Enable kinetic scrolling for touch only (not mouse - mouse should click normally)
-    QScroller::grabGesture(m_tree->viewport(), QScroller::TouchGesture);
+    // Don't use QScroller - it conflicts with QTreeWidget and causes bounce-back
+    // Manual touch scrolling is implemented in OutlinePanelTreeWidget
     m_tree->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_tree->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
 
@@ -212,15 +212,8 @@ void OutlinePanel::onItemClicked(QTreeWidgetItem* item, int column)
         return;
     }
     
-    // BUG-UI-002 FIX: Ignore clicks when QScroller is actively scrolling
-    // This prevents touch scroll gestures from being detected as clicks
-    QScroller* scroller = QScroller::scroller(m_tree->viewport());
-    if (scroller) {
-        QScroller::State state = scroller->state();
-        if (state == QScroller::Dragging || state == QScroller::Scrolling) {
-            return;  // Ignore click during scroll
-        }
-    }
+    // Note: With manual touch scrolling in OutlinePanelTreeWidget,
+    // itemClicked is only emitted for taps, not during scrolling
 
     int pageIndex = item->data(0, PageRole).toInt();
     if (pageIndex < 0) {
