@@ -19,7 +19,6 @@
 #include <QIcon>
 #include <QPalette>
 #include <QApplication>
-#include <QScroller>
 #include <algorithm>  // Phase 5.4: for std::sort in merge
 
 // ============================================================================
@@ -63,8 +62,10 @@ void LayerPanel::setupUI()
     // Phase L.4: Apply themed background to scroll area
     updateScrollAreaStyle();
     
-    // Enable touch scrolling
-    QScroller::grabGesture(m_layerScrollArea->viewport(), QScroller::TouchGesture);
+    // Note: QScroller causes conflicts on Android, but LayerPanel uses QScrollArea
+    // which doesn't have the same issues as QListView/QTreeWidget.
+    // For now, disable kinetic scrolling - touch will scroll directly via native handling.
+    // TODO: Implement manual touch scrolling if needed
     
     // Container widget inside scroll area
     m_layerContainer = new QWidget();

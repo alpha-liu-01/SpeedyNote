@@ -3,12 +3,14 @@
 
 #include <QMouseEvent>
 #include <QDragMoveEvent>
-#include <QScroller>
-#include <QScrollerProperties>
 #include <QScrollBar>
 #include <QDrag>
 #include <QMimeData>
 #include <QPainter>
+#include <QDebug>
+
+// Debug flag for touch scrolling diagnostics
+#define SPEEDYNOTE_DEBUG 1
 
 // ============================================================================
 // Constructor
@@ -23,8 +25,16 @@ PagePanelListView::PagePanelListView(QWidget* parent)
     connect(&m_longPressTimer, &QTimer::timeout,
             this, &PagePanelListView::onLongPressTimeout);
     
-    // Setup touch scrolling (QScroller)
+    // Setup manual touch scrolling (no QScroller - it causes conflicts)
     setupTouchScrolling();
+    
+#if SPEEDYNOTE_DEBUG
+    // Monitor scroll position changes
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
+        qDebug() << "[SCROLL] pos:" << value 
+                 << "touchScrolling:" << m_touchScrolling;
+    });
+#endif
 }
 
 void PagePanelListView::beginDrag(Qt::DropActions supportedActions)
@@ -39,19 +49,10 @@ void PagePanelListView::beginDrag(Qt::DropActions supportedActions)
 
 void PagePanelListView::setupTouchScrolling()
 {
-    // Enable kinetic scrolling for touch only (not mouse)
-    QScroller::grabGesture(viewport(), QScroller::TouchGesture);
-    m_scrollerGrabbed = true;
-    
-    // Configure scroller properties
-    QScroller* scroller = QScroller::scroller(viewport());
-    if (scroller) {
-        QScrollerProperties props = scroller->scrollerProperties();
-        props.setScrollMetric(QScrollerProperties::DecelerationFactor, 0.3);
-        props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-        props.setScrollMetric(QScrollerProperties::SnapTime, 0.3);
-        scroller->setScrollerProperties(props);
-    }
+    // Don't use QScroller at all - it conflicts with QListView's native handling
+    // and causes the bounce-back/reverse acceleration bug.
+    // Instead, we implement manual touch scrolling in the mouse event handlers.
+    m_scrollerGrabbed = false;
 }
 
 // ============================================================================
@@ -60,6 +61,24 @@ void PagePanelListView::setupTouchScrolling()
 
 bool PagePanelListView::viewportEvent(QEvent* event)
 {
+#if SPEEDYNOTE_DEBUG
+    // Log touch-related events
+    if (event->type() == QEvent::TouchBegin || 
+        event->type() == QEvent::TouchUpdate ||
+        event->type() == QEvent::TouchEnd || 
+        event->type() == QEvent::TouchCancel) {
+        QString typeStr;
+        switch (event->type()) {
+            case QEvent::TouchBegin: typeStr = "TouchBegin"; break;
+            case QEvent::TouchUpdate: typeStr = "TouchUpdate"; break;
+            case QEvent::TouchEnd: typeStr = "TouchEnd"; break;
+            case QEvent::TouchCancel: typeStr = "TouchCancel"; break;
+            default: typeStr = "Unknown"; break;
+        }
+        qDebug() << "[VIEWPORT] event:" << typeStr << "scrollPos:" << verticalScrollBar()->value();
+    }
+#endif
+
     // Fallback cleanup for touch end/cancel (main cleanup is in mouseReleaseEvent)
     // This handles edge cases like interrupted touches that don't generate mouse release
     if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
@@ -79,22 +98,41 @@ void PagePanelListView::mousePressEvent(QMouseEvent* event)
         m_pressPos = event->pos();
         m_pressedIndex = indexAt(event->pos());
         m_longPressTriggered = false;
+        m_touchScrolling = false;
         
         // Detect touch vs stylus/mouse via event source
-        // Touch events are synthesized by the system, stylus/mouse are not
-        m_isTouchInput = (event->source() == Qt::MouseEventSynthesizedBySystem);
+        m_isTouchInput = (event->source() != Qt::MouseEventNotSynthesized);
         
         if (m_isTouchInput) {
-            // Touch: check if item can be dragged and start long-press timer
+            // Store scroll position at touch start for manual scrolling
+            m_touchScrollStartPos = verticalScrollBar()->value();
+            
+            // Start long-press timer for drag-and-drop
             bool canDrag = m_pressedIndex.isValid() && 
                            m_pressedIndex.data(PageThumbnailModel::CanDragRole).toBool();
             if (canDrag) {
                 m_longPressTimer.start();
             }
+            
+#if SPEEDYNOTE_DEBUG
+            qDebug() << "[PRESS] pos:" << event->pos() 
+                     << "isTouch: true"
+                     << "scrollPos:" << m_touchScrollStartPos;
+#endif
+            
+            // Accept event - we handle touch scrolling manually
+            event->accept();
+            return;
         }
-        // Stylus/mouse: let QListView handle immediate drag
+        
+#if SPEEDYNOTE_DEBUG
+        qDebug() << "[PRESS] pos:" << event->pos() 
+                 << "isTouch: false (mouse/stylus)"
+                 << "scrollPos:" << verticalScrollBar()->value();
+#endif
     }
     
+    // Mouse/stylus: let QListView handle normally
     QListView::mousePressEvent(event);
 }
 
@@ -103,49 +141,98 @@ void PagePanelListView::mouseReleaseEvent(QMouseEvent* event)
     if (event->button() == Qt::LeftButton) {
         m_longPressTimer.stop();
         
+        bool wasTouchInput = m_isTouchInput;
+        bool wasScrolling = m_touchScrolling;
+        
+#if SPEEDYNOTE_DEBUG
+        qDebug() << "[RELEASE] pos:" << event->pos() 
+                 << "wasTouch:" << wasTouchInput
+                 << "wasScrolling:" << wasScrolling
+                 << "scrollPos:" << verticalScrollBar()->value();
+#endif
+        
         if (m_longPressTriggered) {
             m_longPressTriggered = false;
             m_isTouchInput = false;
+            m_touchScrolling = false;
             
             // Re-enable auto-scroll
             setAutoScroll(true);
             
-            // Re-enable scroller
-            if (!m_scrollerGrabbed) {
-                regrabScroller();
+            event->accept();
+            return;
+        }
+        
+        if (wasTouchInput) {
+            m_isTouchInput = false;
+            m_touchScrolling = false;
+            
+            // If this was a tap (not a scroll), emit clicked signal manually
+            if (!wasScrolling) {
+                QModelIndex index = indexAt(event->pos());
+                if (index.isValid() && index == m_pressedIndex) {
+                    // Emit the clicked signal that PagePanel listens to
+                    emit clicked(index);
+                }
             }
             
             event->accept();
             return;
         }
         
-        // Re-enable scroller if we disabled it
-        if (!m_scrollerGrabbed) {
-            regrabScroller();
-        }
+        m_isTouchInput = false;
+        m_touchScrolling = false;
     }
     
-    m_isTouchInput = false;
+    // Mouse/stylus: let QListView handle normally
     QListView::mouseReleaseEvent(event);
 }
 
 void PagePanelListView::mouseMoveEvent(QMouseEvent* event)
 {
-    // Cancel long-press timer if moved too far (user is scrolling/dragging)
-    if (m_longPressTimer.isActive()) {
-        QPoint delta = event->pos() - m_pressPos;
-        if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
-            m_longPressTimer.stop();
-            // For touch: movement without long-press = scrolling (handled by QScroller)
+    if (m_isTouchInput) {
+        // Cancel long-press timer if moved too far (user is scrolling)
+        if (m_longPressTimer.isActive()) {
+            QPoint delta = event->pos() - m_pressPos;
+            if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
+                m_longPressTimer.stop();
+                m_touchScrolling = true;
+            }
         }
-    }
-    
-    // During long-press drag, don't let QListView process mouse moves (prevents scroll)
-    if (m_longPressTriggered && m_isTouchInput) {
+        
+        // During long-press drag, don't scroll
+        if (m_longPressTriggered) {
+            event->accept();
+            return;
+        }
+        
+        // Manual touch scrolling: scroll by the Y delta from press position
+        int deltaY = event->pos().y() - m_pressPos.y();
+        int newScrollPos = m_touchScrollStartPos - deltaY;  // Subtract because scroll up = finger down
+        verticalScrollBar()->setValue(newScrollPos);
+        
+#if SPEEDYNOTE_DEBUG
+        static int moveCount = 0;
+        if (++moveCount % 10 == 0) {
+            qDebug() << "[MOVE] pos:" << event->pos() 
+                     << "deltaY:" << deltaY
+                     << "scrollPos:" << newScrollPos;
+        }
+#endif
+        
         event->accept();
         return;
     }
     
+    // Cancel long-press for mouse/stylus too
+    if (m_longPressTimer.isActive()) {
+        QPoint delta = event->pos() - m_pressPos;
+        if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
+            m_longPressTimer.stop();
+        }
+    }
+    
+    // Mouse/stylus: let QListView handle normally
     QListView::mouseMoveEvent(event);
 }
 
@@ -262,16 +349,10 @@ void PagePanelListView::onLongPressTimeout()
 
 void PagePanelListView::ungrabScroller()
 {
-    if (m_scrollerGrabbed) {
-        QScroller::ungrabGesture(viewport());
-        m_scrollerGrabbed = false;
-    }
+    // No-op: we don't use QScroller anymore (manual touch scrolling)
 }
 
 void PagePanelListView::regrabScroller()
 {
-    if (!m_scrollerGrabbed) {
-        QScroller::grabGesture(viewport(), QScroller::TouchGesture);
-        m_scrollerGrabbed = true;
-    }
+    // No-op: we don't use QScroller anymore (manual touch scrolling)
 }

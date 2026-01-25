@@ -62,6 +62,16 @@ public:
      * @brief Get the current page aspect ratio.
      */
     qreal pageAspectRatio() const { return m_pageAspectRatio; }
+    
+    /**
+     * @brief Calculate the thumbnail rectangle within an item rect.
+     * @param itemRect The full item rectangle.
+     * @param aspectRatio The page aspect ratio (height/width). Use -1 for default.
+     * @return The thumbnail rectangle in the same coordinate system as itemRect.
+     * 
+     * Used to determine if a click is within the thumbnail region vs the frame/padding.
+     */
+    QRect thumbnailRect(const QRect& itemRect, qreal aspectRatio = -1) const;
 
 private:
     /**

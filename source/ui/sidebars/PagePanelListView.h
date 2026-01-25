@@ -30,6 +30,12 @@ public:
      */
     void beginDrag(Qt::DropActions supportedActions);
     
+    /**
+     * @brief Get the last mouse press position (viewport coordinates).
+     * Used to determine if click was within thumbnail region.
+     */
+    QPoint lastPressPosition() const { return m_pressPos; }
+    
 signals:
     /**
      * @brief Emitted when a drag should start for the given index.
@@ -63,6 +69,10 @@ private:
     bool m_longPressTriggered = false;
     bool m_isTouchInput = false;    // True if current input is touch (not stylus/mouse)
     bool m_scrollerGrabbed = true;  // Track QScroller grab state
+    
+    // Manual touch scrolling state
+    int m_touchScrollStartPos = 0;  // Scroll position at touch start
+    bool m_touchScrolling = false;  // True if currently touch-scrolling
     
     static constexpr int LONG_PRESS_MS = 400;            // Time to trigger long-press
     static constexpr int LONG_PRESS_MOVE_THRESHOLD = 15; // Max movement in pixels
