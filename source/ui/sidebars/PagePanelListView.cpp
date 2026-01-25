@@ -9,8 +9,8 @@
 #include <QPainter>
 #include <QDebug>
 
-// Debug flag for touch scrolling diagnostics
-#define SPEEDYNOTE_DEBUG 1
+// Debug flag for touch scrolling diagnostics (set to 1 to enable)
+#define SPEEDYNOTE_DEBUG 0
 
 // ============================================================================
 // Constructor
@@ -55,10 +55,8 @@ void PagePanelListView::beginDrag(Qt::DropActions supportedActions)
 
 void PagePanelListView::setupTouchScrolling()
 {
-    // Don't use QScroller at all - it conflicts with QListView's native handling
-    // and causes the bounce-back/reverse acceleration bug.
-    // Instead, we implement manual touch scrolling in the mouse event handlers.
-    m_scrollerGrabbed = false;
+    // Manual touch scrolling is implemented in the mouse event handlers.
+    // We don't use QScroller because it conflicts with QListView's native handling.
 }
 
 // ============================================================================
@@ -214,12 +212,13 @@ void PagePanelListView::mouseReleaseEvent(QMouseEvent* event)
 void PagePanelListView::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_isTouchInput) {
-        // Cancel long-press timer if moved too far (user is scrolling)
-        if (m_longPressTimer.isActive()) {
-            QPoint delta = event->pos() - m_pressPos;
-            if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
+        // Check if moved enough to count as scrolling (not a tap)
+        QPoint delta = event->pos() - m_pressPos;
+        if (!m_touchScrolling && delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
+            m_touchScrolling = true;
+            // Cancel long-press timer if active (user is scrolling, not trying to drag)
+            if (m_longPressTimer.isActive()) {
                 m_longPressTimer.stop();
-                m_touchScrolling = true;
             }
         }
         
@@ -229,8 +228,6 @@ void PagePanelListView::mouseMoveEvent(QMouseEvent* event)
             return;
         }
         
-        // Get timing for velocity calculation
-        qint64 currentTime = m_velocityTimer.elapsed();
         int currentY = event->pos().y();
         
         // Manual touch scrolling: scroll by the Y delta from press position
@@ -379,32 +376,15 @@ void PagePanelListView::onLongPressTimeout()
     m_longPressTriggered = true;
     
     if (m_pressedIndex.isValid()) {
-        // Ungrab scroller now that we're starting drag
-        ungrabScroller();
-        
         // Disable QListView's auto-scroll during drag (we implement our own in dragMoveEvent)
         setAutoScroll(false);
         
-        // Select the item (it might not be selected if QScroller was handling the touch)
+        // Select the item
         setCurrentIndex(m_pressedIndex);
         
         // Notify PagePanel to start drag operation
         emit dragRequested(m_pressedIndex);
     }
-}
-
-// ============================================================================
-// QScroller Management (legacy - no longer used)
-// ============================================================================
-
-void PagePanelListView::ungrabScroller()
-{
-    // No-op: we don't use QScroller anymore (manual touch scrolling)
-}
-
-void PagePanelListView::regrabScroller()
-{
-    // No-op: we don't use QScroller anymore (manual touch scrolling)
 }
 
 // ============================================================================

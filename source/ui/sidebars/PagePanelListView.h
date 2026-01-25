@@ -9,15 +9,13 @@
 class QDragMoveEvent;
 
 /**
- * @brief A QListView subclass that enables touch drag-and-drop via long-press.
+ * @brief A QListView subclass with manual touch scrolling and long-press drag-and-drop.
  * 
- * Resolves the conflict between QScroller (touch scrolling) and Qt's drag-and-drop:
- * - Short touch/move → QScroller handles scrolling
- * - Long-press (400ms) → Initiates drag, QScroller disabled during drag
- * - Stylus/mouse → Immediate drag (no long-press needed)
- * 
- * This class manages its own QScroller lifecycle to properly handle the
- * ungrab/regrab cycle needed for touch drag-and-drop.
+ * Implements custom touch handling to avoid conflicts with Qt's native scrolling:
+ * - Touch drag → Manual kinetic scrolling with deceleration
+ * - Touch tap → Emit clicked() signal
+ * - Long-press (400ms) → Initiate drag-and-drop
+ * - Stylus/mouse → Standard QListView behavior
  */
 class PagePanelListView : public QListView {
     Q_OBJECT
@@ -61,8 +59,6 @@ private slots:
     void onKineticScrollTick();
 
 private:
-    void ungrabScroller();
-    void regrabScroller();
     void setupTouchScrolling();
     void startKineticScroll(qreal velocity);
     void stopKineticScroll();
@@ -72,7 +68,6 @@ private:
     QModelIndex m_pressedIndex;     // Index that was pressed
     bool m_longPressTriggered = false;
     bool m_isTouchInput = false;    // True if current input is touch (not stylus/mouse)
-    bool m_scrollerGrabbed = true;  // Track QScroller grab state
     
     // Manual touch scrolling state
     int m_touchScrollStartPos = 0;  // Scroll position at touch start
