@@ -339,41 +339,46 @@ elseif(UNIX)
     # =========================================================================
     message(STATUS "🐧 Configuring for Linux")
     
+    # -------------------------------------------------------------------------
+    # Detect musl libc (Alpine Linux, postmarketOS, etc.)
+    # On musl, we use MuPDF for all PDF operations to avoid symbol collision
+    # between MuPDF and Poppler/OpenJPEG shared libraries.
+    # -------------------------------------------------------------------------
+    set(USE_MUSL_MUPDF OFF)
+    if(EXISTS "/lib/ld-musl-aarch64.so.1" OR EXISTS "/lib/ld-musl-x86_64.so.1" OR
+       EXISTS "/lib/libc.musl-aarch64.so.1" OR EXISTS "/lib/libc.musl-x86_64.so.1")
+        set(USE_MUSL_MUPDF ON)
+        message(STATUS "🏔️  Detected musl libc (Alpine/postmarketOS) - will use MuPDF for all PDF operations")
+    endif()
+    
     if(ENABLE_DEBUG_OUTPUT)
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     else()
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
     endif()
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
+    
+    # Poppler is only required on glibc systems; on musl we use MuPDF exclusively
+    if(NOT USE_MUSL_MUPDF)
+        pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
+    else()
+        message(STATUS "   Skipping Poppler (using MuPDF for PDF rendering on musl)")
+    endif()
 
     if(ENABLE_CONTROLLER_SUPPORT)
         pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    # MuPDF for PDF export
-    # By default, prefer dynamic linking. Use -DMUPDF_FORCE_STATIC=ON to force static.
-    # Alpine Linux requires static linking due to symbol collision between MuPDF and Poppler/OpenJPEG.
-    option(MUPDF_FORCE_STATIC "Force static linking of MuPDF (required for Alpine Linux)" OFF)
-    
+    # MuPDF for PDF export (prefer dynamic linking)
     # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
     set(MUPDF_INCLUDE_DIR "/usr/include")
     
-    # First try to find dynamic library (libmupdf.so) unless forced static
-    set(MUPDF_USE_DYNAMIC FALSE)
-    if(NOT MUPDF_FORCE_STATIC)
-        find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
-            PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
-        
-        if(MUPDF_LIBRARY_DYNAMIC AND NOT MUPDF_LIBRARY_DYNAMIC MATCHES "\\.a$")
-            set(MUPDF_USE_DYNAMIC TRUE)
-        endif()
-    else()
-        message(STATUS "MuPDF: Forcing static linking (MUPDF_FORCE_STATIC=ON)")
-    endif()
+    # First try to find dynamic library (libmupdf.so)
+    find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
+        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
     
-    if(MUPDF_USE_DYNAMIC)
+    if(MUPDF_LIBRARY_DYNAMIC AND NOT MUPDF_LIBRARY_DYNAMIC MATCHES "\\.a$")
         # Found dynamic library
         message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY_DYNAMIC}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
@@ -407,11 +412,8 @@ elseif(UNIX)
             pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
             pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
             pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
-            pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
             pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
             pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
-            pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
-            pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
             
             find_library(MUPDF_LIBRARY_THIRD NAMES libmupdf-third.a
                 PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
@@ -427,20 +429,12 @@ elseif(UNIX)
             
             list(APPEND MUPDF_LIBRARIES
                 PkgConfig::HARFBUZZ PkgConfig::FREETYPE PkgConfig::LIBJPEG PkgConfig::LIBOPENJP2
-                PkgConfig::ZLIB m pthread)
+                m pthread z)
             if(JBIG2DEC_FOUND)
                 list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
             endif()
             if(GUMBO_FOUND)
                 list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
-            endif()
-            if(BROTLIDEC_FOUND)
-                list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
-                message(STATUS "   Found brotli decoder")
-            endif()
-            if(BROTLIENC_FOUND)
-                list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
-                message(STATUS "   Found brotli encoder")
             endif()
             if(MUJS_LIBRARY)
                 list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
@@ -594,7 +588,10 @@ set(UI_SOURCES
 )
 
 # PDF abstraction layer (platform-specific backend)
-if(ANDROID)
+# - Android: MuPDF (smaller, bundled)
+# - Alpine/musl: MuPDF (avoids Poppler/OpenJPEG symbol collision)
+# - Desktop glibc: Poppler (feature-rich)
+if(ANDROID OR USE_MUSL_MUPDF)
     set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
         source/pdf/MuPdfProvider.cpp
@@ -603,6 +600,9 @@ if(ANDROID)
         source/pdf/PdfSearchEngine.cpp
         source/pdf/MuPdfExporter.cpp
     )
+    if(USE_MUSL_MUPDF)
+        message(STATUS "   PDF provider: MuPDF (musl libc)")
+    endif()
 else()
     set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
@@ -777,17 +777,28 @@ elseif(ANDROID)
 elseif(UNIX)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
-            PkgConfig::POPPLER
     )
+    # On musl (Alpine), we use MuPDF exclusively; on glibc, we use Poppler + MuPDF for export
+    if(USE_MUSL_MUPDF)
+        # MuPDF handles all PDF operations on musl - no Poppler needed
+        if(MUPDF_FOUND)
+            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+            message(STATUS "Linking MuPDF for PDF rendering and export (musl)")
+        else()
+            message(WARNING "MuPDF not found - PDF support will be unavailable on musl")
+        endif()
+    else()
+        # glibc: Use Poppler for rendering, MuPDF for export
+        list(APPEND PLATFORM_LIBS PkgConfig::POPPLER)
+        if(MUPDF_FOUND)
+            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+        endif()
+    endif()
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)
     endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
-    endif()
-    # Add MuPDF for PDF export
-    if(MUPDF_FOUND)
-        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 endif()
