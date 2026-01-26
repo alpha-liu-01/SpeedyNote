@@ -42,6 +42,17 @@ detect_architecture() {
     esac
 }
 
+# Function to detect if running on Alpine Linux
+is_alpine_linux() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        if [[ "$ID" == "alpine" ]]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 # Function to build the project
 build_project() {
     local debug_flag="OFF"
@@ -93,7 +104,18 @@ build_project() {
     
     # Configure and build with optimizations
     echo -e "${YELLOW}Configuring build with maximum performance optimizations...${NC}"
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_DEBUG_OUTPUT=$debug_flag ..
+    
+    # Build CMake arguments
+    CMAKE_ARGS="-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_DEBUG_OUTPUT=$debug_flag"
+    
+    # Alpine Linux: Force static MuPDF linking to avoid symbol collision with Poppler/OpenJPEG
+    # The dynamic libmupdf.so on Alpine causes crashes due to musl's simpler symbol resolution
+    if is_alpine_linux; then
+        echo -e "${CYAN}Alpine Linux detected: Using static MuPDF linking${NC}"
+        CMAKE_ARGS="$CMAKE_ARGS -DMUPDF_FORCE_STATIC=ON"
+    fi
+    
+    cmake $CMAKE_ARGS ..
     
     echo -e "${YELLOW}Compiling with $(nproc) parallel jobs...${NC}"
     make -j$(nproc)
