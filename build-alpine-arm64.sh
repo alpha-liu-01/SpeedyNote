@@ -89,14 +89,58 @@ check_packaging_dependencies() {
     return 0
 }
 
+# Function to check and setup abuild signing keys
+check_abuild_keys() {
+    echo -e "${YELLOW}Checking abuild signing key setup...${NC}"
+    
+    # Check if private key is configured
+    if [[ ! -f "$HOME/.abuild/abuild.conf" ]] || ! grep -q "PACKAGER_PRIVKEY" "$HOME/.abuild/abuild.conf" 2>/dev/null; then
+        echo -e "${YELLOW}No abuild signing key configured. Generating one...${NC}"
+        abuild-keygen -a -n
+    fi
+    
+    # Get the private key path from config
+    PRIVKEY=$(grep "PACKAGER_PRIVKEY" "$HOME/.abuild/abuild.conf" 2>/dev/null | cut -d'"' -f2)
+    if [[ -z "$PRIVKEY" ]] || [[ ! -f "$PRIVKEY" ]]; then
+        echo -e "${RED}Error: Could not find private key${NC}"
+        echo "Please run: abuild-keygen -a"
+        return 1
+    fi
+    
+    # Check if the corresponding public key is installed in /etc/apk/keys
+    PUBKEY="${PRIVKEY}.pub"
+    PUBKEY_NAME=$(basename "$PUBKEY")
+    
+    if [[ ! -f "/etc/apk/keys/$PUBKEY_NAME" ]]; then
+        echo -e "${YELLOW}Public key not installed in /etc/apk/keys/${NC}"
+        echo -e "${YELLOW}This is required to create the package repository index.${NC}"
+        echo
+        
+        # Try to install it with sudo
+        echo -e "${CYAN}Attempting to install public key (requires sudo)...${NC}"
+        if sudo cp "$PUBKEY" "/etc/apk/keys/"; then
+            echo -e "${GREEN}Public key installed successfully!${NC}"
+        else
+            echo -e "${RED}Could not install public key automatically.${NC}"
+            echo -e "${YELLOW}Please run manually: sudo cp $PUBKEY /etc/apk/keys/${NC}"
+            echo
+            echo -e "${YELLOW}Continuing anyway - package will be built but index may fail...${NC}"
+        fi
+    else
+        echo -e "${GREEN}Signing key is properly configured!${NC}"
+    fi
+    
+    return 0
+}
+
 # Function to get Alpine dependencies
 get_dependencies() {
-    echo "qt6-qtbase, poppler-qt6, sdl2, alsa-lib"
+    echo "qt6-qtbase, qt6-qttools, poppler-qt6, mupdf-libs"
 }
 
 # Function to get Alpine build dependencies
 get_build_dependencies() {
-    echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, poppler-qt6, poppler-qt5-dev, sdl2-dev, alsa-lib-dev"
+    echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, qt6-declarative-dev, qt6-qttranslations-dev, poppler-qt6, mupdf-dev, poppler-qt5-dev"
 }
 
 # Function to create Alpine package
@@ -145,8 +189,8 @@ pkgrel=$PKGREL
 pkgdesc="$DESCRIPTION"
 url="$URL"
 arch="aarch64"
-license="MIT"
-# depends="$(get_dependencies)"  # Commented out to avoid dependency issues
+license="GPL-3.0-or-later"
+depends="$(get_dependencies)"  # Commented out to avoid dependency issues
 options="!check"  # No tests to run
 source="\$pkgname-\$pkgver.tar.gz"
 builddir="\$srcdir/speedynote-src"
@@ -183,7 +227,7 @@ package() {
     # Create desktop file
     install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
 [Desktop Entry]
-Version=1.0
+Version=1.1.5
 Type=Application
 Name=SpeedyNote
 Comment=$DESCRIPTION
@@ -235,19 +279,39 @@ EOF
     # Build package (source tarball already created above)
     echo -e "${YELLOW}Building Alpine package...${NC}"
     # Use -K to keep going on errors, -r for clean build, -d to skip dependency check
-    abuild -K -r -d
+    # Capture the result but don't fail immediately (index creation may fail even if package succeeds)
+    set +e
+    abuild -K -r -d 2>&1 | tee /tmp/abuild_output.log
+    ABUILD_RESULT=${PIPESTATUS[0]}
+    set -e
     
     cd ..
-    echo -e "${GREEN}Alpine package created successfully!${NC}"
     
-    # Find and display the created package
-    APK_FILE=$(find ~/packages -name "${PKGNAME}-${PKGVER}-*.apk" 2>/dev/null | head -1)
-    if [[ -n "$APK_FILE" ]]; then
+    # Find the created package (it's created before index, so may exist even if abuild "failed")
+    APK_FILE=$(find ~/packages -name "${PKGNAME}-${PKGVER}-*.apk" -newer alpine-pkg/APKBUILD 2>/dev/null | head -1)
+    
+    if [[ -n "$APK_FILE" ]] && [[ -f "$APK_FILE" ]]; then
+        echo -e "${GREEN}Alpine package created successfully!${NC}"
         echo -e "${GREEN}Package location: $APK_FILE${NC}"
         echo -e "${GREEN}Package size: $(du -h "$APK_FILE" | cut -f1)${NC}"
+        
+        # Check if index creation failed (common issue with untrusted keys)
+        if [[ $ABUILD_RESULT -ne 0 ]]; then
+            if grep -q "UNTRUSTED signature" /tmp/abuild_output.log 2>/dev/null; then
+                echo
+                echo -e "${YELLOW}Note: Repository index creation failed due to untrusted signature.${NC}"
+                echo -e "${YELLOW}The .apk package itself was created successfully!${NC}"
+                echo -e "${YELLOW}To fix this for future builds, run:${NC}"
+                echo -e "${CYAN}  sudo cp ~/.abuild/*.rsa.pub /etc/apk/keys/${NC}"
+            fi
+        fi
     else
-        echo -e "${YELLOW}Package created in ~/packages/ directory${NC}"
+        echo -e "${RED}Error: Package creation failed${NC}"
+        echo -e "${YELLOW}Check the build log above for details${NC}"
+        exit 1
     fi
+    
+    rm -f /tmp/abuild_output.log
 }
 
 # Function to clean up
@@ -299,13 +363,16 @@ main() {
         exit 1
     fi
     
-    # Step 3: Create package
+    # Step 3: Check abuild signing key setup
+    check_abuild_keys
+    
+    # Step 4: Create package
     create_apk_package
     
-    # Step 4: Cleanup
+    # Step 5: Cleanup
     cleanup
     
-    # Step 5: Show final information
+    # Step 6: Show final information
     show_package_info
     
     echo
