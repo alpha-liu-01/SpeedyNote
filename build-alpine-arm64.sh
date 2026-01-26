@@ -140,7 +140,7 @@ get_dependencies() {
 
 # Function to get Alpine build dependencies
 get_build_dependencies() {
-    echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, qt6-declarative-dev, qt6-qttranslations-dev, poppler-qt6, mupdf-dev, poppler-qt5-dev"
+    echo "cmake make pkgconf qt6-qtbase-dev qt6-qttools-dev qt6-declarative-dev qt6-qttranslations-dev poppler-qt6 mupdf-dev poppler-qt5-dev"
 }
 
 # Function to create Alpine package
