@@ -135,12 +135,12 @@ check_abuild_keys() {
 
 # Function to get Alpine dependencies
 get_dependencies() {
-    echo "qt6-qtbase qt6-qttools poppler-qt6 mupdf-libs"
+    echo "qt6-qtbase qt6-qttools mupdf-libs"
 }
 
 # Function to get Alpine build dependencies
 get_build_dependencies() {
-    echo "cmake make pkgconf qt6-qtbase-dev qt6-qttools-dev qt6-declarative-dev qt6-qttranslations-dev poppler-qt6 mupdf-dev poppler-qt5-dev"
+    echo "cmake make pkgconf qt6-qtbase-dev qt6-qttools-dev qt6-declarative-dev qt6-qttranslations-dev mupdf-dev"
 }
 
 # Function to create Alpine package
@@ -165,14 +165,7 @@ create_apk_package() {
     cp CMakeLists.txt alpine-pkg/speedynote-src/
     mkdir -p alpine-pkg/speedynote-src/prebuilt
     cp build/NoteApp alpine-pkg/speedynote-src/prebuilt/
-    
-    # Include Poppler font data for Asian text rendering
-    if [ -d "share/" ]; then
-        echo -e "${GREEN}Including Poppler font data for Asian text rendering...${NC}"
-        cp -r share/ alpine-pkg/speedynote-src/
-    else
-        echo -e "${YELLOW}Warning: share/ folder not found - Asian text rendering may not work correctly${NC}"
-    fi
+
     
     # Create tarball from alpine-pkg directory
     cd alpine-pkg
@@ -216,13 +209,6 @@ package() {
         done
     fi
     
-    # Install Poppler font data for Asian text rendering
-    if [ -d "share/poppler" ]; then
-        install -dm755 "\$pkgdir/usr/share/poppler"
-        cp -r share/poppler/* "\$pkgdir/usr/share/poppler/"
-        find "\$pkgdir/usr/share/poppler" -type f -exec chmod 644 {} \\;
-        find "\$pkgdir/usr/share/poppler" -type d -exec chmod 755 {} \\;
-    fi
     
     # Create desktop file
     install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
@@ -345,7 +331,6 @@ show_package_info() {
     echo -e "✅ Desktop Integration: Application menu entry with proper categorization"
     echo -e "✅ MIME Type Support: Proper file type recognition"
     echo -e "✅ Translation Support: Multi-language interface support"
-    echo -e "✅ Asian Text Support: Includes Poppler font data for Chinese, Japanese, Korean text rendering"
 }
 
 # Main execution
