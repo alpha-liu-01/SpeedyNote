@@ -91,12 +91,12 @@ check_packaging_dependencies() {
 
 # Function to get Alpine dependencies
 get_dependencies() {
-    echo "qt6-qtbase, poppler-qt6, sdl2, alsa-lib"
+    echo "qt6-qtbase, qt6-qttools, poppler-qt6, mupdf-libs"
 }
 
 # Function to get Alpine build dependencies
 get_build_dependencies() {
-    echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, poppler-qt6, poppler-qt5-dev, sdl2-dev, alsa-lib-dev"
+    echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, qt6-declarative-dev, qt6-qttranslations-dev, poppler-qt6, mupdf-dev, poppler-qt5-dev"
 }
 
 # Function to create Alpine package
@@ -145,8 +145,8 @@ pkgrel=$PKGREL
 pkgdesc="$DESCRIPTION"
 url="$URL"
 arch="aarch64"
-license="MIT"
-# depends="$(get_dependencies)"  # Commented out to avoid dependency issues
+license="GPL-3.0-or-later"
+depends="$(get_dependencies)"  # Commented out to avoid dependency issues
 options="!check"  # No tests to run
 source="\$pkgname-\$pkgver.tar.gz"
 builddir="\$srcdir/speedynote-src"
@@ -183,7 +183,7 @@ package() {
     # Create desktop file
     install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
 [Desktop Entry]
-Version=1.0
+Version=1.1.5
 Type=Application
 Name=SpeedyNote
 Comment=$DESCRIPTION
