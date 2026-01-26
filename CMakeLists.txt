@@ -352,15 +352,28 @@ elseif(UNIX)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    # MuPDF for PDF export (prefer dynamic linking)
+    # MuPDF for PDF export
+    # By default, prefer dynamic linking. Use -DMUPDF_FORCE_STATIC=ON to force static.
+    # Alpine Linux requires static linking due to symbol collision between MuPDF and Poppler/OpenJPEG.
+    option(MUPDF_FORCE_STATIC "Force static linking of MuPDF (required for Alpine Linux)" OFF)
+    
     # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
     set(MUPDF_INCLUDE_DIR "/usr/include")
     
-    # First try to find dynamic library (libmupdf.so)
-    find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
-        PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
+    # First try to find dynamic library (libmupdf.so) unless forced static
+    set(MUPDF_USE_DYNAMIC FALSE)
+    if(NOT MUPDF_FORCE_STATIC)
+        find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
+            PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu)
+        
+        if(MUPDF_LIBRARY_DYNAMIC AND NOT MUPDF_LIBRARY_DYNAMIC MATCHES "\\.a$")
+            set(MUPDF_USE_DYNAMIC TRUE)
+        endif()
+    else()
+        message(STATUS "MuPDF: Forcing static linking (MUPDF_FORCE_STATIC=ON)")
+    endif()
     
-    if(MUPDF_LIBRARY_DYNAMIC AND NOT MUPDF_LIBRARY_DYNAMIC MATCHES "\\.a$")
+    if(MUPDF_USE_DYNAMIC)
         # Found dynamic library
         message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY_DYNAMIC}")
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
@@ -394,8 +407,11 @@ elseif(UNIX)
             pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
             pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
             pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+            pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
             pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
             pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+            pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+            pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
             
             find_library(MUPDF_LIBRARY_THIRD NAMES libmupdf-third.a
                 PATHS /usr/lib /usr/lib64 /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu
@@ -411,12 +427,20 @@ elseif(UNIX)
             
             list(APPEND MUPDF_LIBRARIES
                 PkgConfig::HARFBUZZ PkgConfig::FREETYPE PkgConfig::LIBJPEG PkgConfig::LIBOPENJP2
-                m pthread z)
+                PkgConfig::ZLIB m pthread)
             if(JBIG2DEC_FOUND)
                 list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
             endif()
             if(GUMBO_FOUND)
                 list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+            endif()
+            if(BROTLIDEC_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+                message(STATUS "   Found brotli decoder")
+            endif()
+            if(BROTLIENC_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+                message(STATUS "   Found brotli encoder")
             endif()
             if(MUJS_LIBRARY)
                 list(APPEND MUPDF_LIBRARIES ${MUJS_LIBRARY})
