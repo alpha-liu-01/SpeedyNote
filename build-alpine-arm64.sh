@@ -135,7 +135,7 @@ check_abuild_keys() {
 
 # Function to get Alpine dependencies
 get_dependencies() {
-    echo "qt6-qtbase, qt6-qttools, poppler-qt6, mupdf-libs"
+    echo "qt6-qtbase qt6-qttools poppler-qt6 mupdf-libs"
 }
 
 # Function to get Alpine build dependencies
