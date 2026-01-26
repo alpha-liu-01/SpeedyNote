@@ -339,13 +339,31 @@ elseif(UNIX)
     # =========================================================================
     message(STATUS "🐧 Configuring for Linux")
     
+    # -------------------------------------------------------------------------
+    # Detect musl libc (Alpine Linux, postmarketOS, etc.)
+    # On musl, we use MuPDF for all PDF operations to avoid symbol collision
+    # between MuPDF and Poppler/OpenJPEG shared libraries.
+    # -------------------------------------------------------------------------
+    set(USE_MUSL_MUPDF OFF)
+    if(EXISTS "/lib/ld-musl-aarch64.so.1" OR EXISTS "/lib/ld-musl-x86_64.so.1" OR
+       EXISTS "/lib/libc.musl-aarch64.so.1" OR EXISTS "/lib/libc.musl-x86_64.so.1")
+        set(USE_MUSL_MUPDF ON)
+        message(STATUS "🏔️  Detected musl libc (Alpine/postmarketOS) - will use MuPDF for all PDF operations")
+    endif()
+    
     if(ENABLE_DEBUG_OUTPUT)
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
     else()
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
     endif()
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
+    
+    # Poppler is only required on glibc systems; on musl we use MuPDF exclusively
+    if(NOT USE_MUSL_MUPDF)
+        pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
+    else()
+        message(STATUS "   Skipping Poppler (using MuPDF for PDF rendering on musl)")
+    endif()
 
     if(ENABLE_CONTROLLER_SUPPORT)
         pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
@@ -570,7 +588,10 @@ set(UI_SOURCES
 )
 
 # PDF abstraction layer (platform-specific backend)
-if(ANDROID)
+# - Android: MuPDF (smaller, bundled)
+# - Alpine/musl: MuPDF (avoids Poppler/OpenJPEG symbol collision)
+# - Desktop glibc: Poppler (feature-rich)
+if(ANDROID OR USE_MUSL_MUPDF)
     set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
         source/pdf/MuPdfProvider.cpp
@@ -579,6 +600,9 @@ if(ANDROID)
         source/pdf/PdfSearchEngine.cpp
         source/pdf/MuPdfExporter.cpp
     )
+    if(USE_MUSL_MUPDF)
+        message(STATUS "   PDF provider: MuPDF (musl libc)")
+    endif()
 else()
     set(PDF_SOURCES
         source/pdf/PdfProviderFactory.cpp
@@ -753,17 +777,28 @@ elseif(ANDROID)
 elseif(UNIX)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
-            PkgConfig::POPPLER
     )
+    # On musl (Alpine), we use MuPDF exclusively; on glibc, we use Poppler + MuPDF for export
+    if(USE_MUSL_MUPDF)
+        # MuPDF handles all PDF operations on musl - no Poppler needed
+        if(MUPDF_FOUND)
+            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+            message(STATUS "Linking MuPDF for PDF rendering and export (musl)")
+        else()
+            message(WARNING "MuPDF not found - PDF support will be unavailable on musl")
+        endif()
+    else()
+        # glibc: Use Poppler for rendering, MuPDF for export
+        list(APPEND PLATFORM_LIBS PkgConfig::POPPLER)
+        if(MUPDF_FOUND)
+            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+        endif()
+    endif()
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)
     endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
-    endif()
-    # Add MuPDF for PDF export
-    if(MUPDF_FOUND)
-        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 endif()
