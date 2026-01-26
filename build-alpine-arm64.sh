@@ -226,23 +226,6 @@ Keywords=notes;pdf;annotation;writing;package;
 MimeType=application/pdf;application/x-speedynote-package;
 EOFDESKTOP
 
-    # Create MIME type definition for .spn files
-    install -Dm644 /dev/stdin "\$pkgdir/usr/share/mime/packages/application-x-speedynote-package.xml" << EOFMIME
-<?xml version="1.0" encoding="UTF-8"?>
-<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-    <mime-type type="application/x-speedynote-package">
-        <comment>SpeedyNote Package</comment>
-        <comment xml:lang="es">Paquete de SpeedyNote</comment>
-        <comment xml:lang="fr">Package SpeedyNote</comment>
-        <comment xml:lang="zh">SpeedyNote 包</comment>
-        <icon name="speedynote"/>
-        <glob pattern="*.spn"/>
-        <magic priority="50">
-            <match type="string" offset="0" value="Contents"/>
-        </magic>
-    </mime-type>
-</mime-info>
-EOFMIME
 }
 EOF
     
@@ -316,7 +299,6 @@ show_package_info() {
     echo -e "Architecture: aarch64 (ARM64)"
     echo -e "Format: Alpine Linux (.apk)"
     echo -e "PDF file association: Enabled"
-    echo -e ".spn file association: Enabled"
     echo
     
     echo -e "${CYAN}=== Installation Instructions ===${NC}"
@@ -327,7 +309,6 @@ show_package_info() {
     
     echo -e "${CYAN}=== Features ===${NC}"
     echo -e "✅ PDF Association: SpeedyNote available in 'Open with' menu for PDF files"
-    echo -e "✅ .spn Package Association: Double-click .spn files to open in SpeedyNote"
     echo -e "✅ Desktop Integration: Application menu entry with proper categorization"
     echo -e "✅ MIME Type Support: Proper file type recognition"
     echo -e "✅ Translation Support: Multi-language interface support"
