@@ -180,9 +180,8 @@ get_dependencies() {
             echo "qt6-base, poppler-qt6, mupdf"
             ;;
         apk)
-            # Note: mupdf is NOT needed at runtime because we statically link it
-            # to avoid symbol collision with Poppler/OpenJPEG on musl libc
-            echo "qt6-qtbase, poppler-qt6"
+            # mupdf provides libmupdf.so
+            echo "qt6-qtbase, poppler-qt6, mupdf"
             ;;
     esac
 }
@@ -207,9 +206,9 @@ get_build_dependencies() {
             echo "cmake, make, pkgconf, qt6-base, qt6-tools, poppler-qt6, sdl2-compat, alsa-lib, mupdf, harfbuzz, freetype2, libjpeg-turbo, openjpeg2, jbig2dec, gumbo-parser, mujs"
             ;;
         apk)
-            # MuPDF for PDF export (static linking to avoid symbol collision with Poppler/OpenJPEG on musl)
-            # jbig2dec, gumbo, mujs, brotli are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, poppler-qt6, poppler-qt5-dev, sdl2-dev, alsa-lib-dev, mupdf-dev, harfbuzz-dev, freetype-dev, libjpeg-turbo-dev, openjpeg-dev, jbig2dec-dev, gumbo-dev, mujs-dev, brotli-dev, zlib-dev"
+            # MuPDF for PDF export (static linking, needs dev packages for build)
+            # jbig2dec, gumbo, mujs are MuPDF's optional dependencies
+            echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, poppler-qt6, poppler-qt5-dev, sdl2-dev, alsa-lib-dev, mupdf-dev, harfbuzz-dev, freetype-dev, libjpeg-turbo-dev, openjpeg-dev, jbig2dec-dev, gumbo-dev, mujs-dev"
             ;;
     esac
 }

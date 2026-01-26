@@ -134,16 +134,13 @@ check_abuild_keys() {
 }
 
 # Function to get Alpine dependencies
-# Note: mupdf-libs is NOT needed because we statically link MuPDF to avoid
-# symbol collision with Poppler/OpenJPEG on musl libc
 get_dependencies() {
-    echo "qt6-qtbase qt6-qttools poppler-qt6"
+    echo "qt6-qtbase qt6-qttools poppler-qt6 mupdf-libs"
 }
 
 # Function to get Alpine build dependencies
-# Note: Build via compile.sh which detects Alpine and uses -DMUPDF_FORCE_STATIC=ON
 get_build_dependencies() {
-    echo "cmake make pkgconf qt6-qtbase-dev qt6-qttools-dev qt6-declarative-dev qt6-qttranslations-dev poppler-qt6 mupdf-dev poppler-qt5-dev harfbuzz-dev freetype-dev libjpeg-turbo-dev openjpeg-dev jbig2dec-dev gumbo-dev mujs-dev brotli-dev zlib-dev"
+    echo "cmake make pkgconf qt6-qtbase-dev qt6-qttools-dev qt6-declarative-dev qt6-qttranslations-dev poppler-qt6 mupdf-dev poppler-qt5-dev"
 }
 
 # Function to create Alpine package
