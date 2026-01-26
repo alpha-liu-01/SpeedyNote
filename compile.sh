@@ -42,13 +42,27 @@ detect_architecture() {
     esac
 }
 
-# Function to detect if running on Alpine Linux
+# Function to detect if running on Alpine Linux or Alpine-based distros (e.g., PostmarketOS)
+# These systems use musl libc and need static MuPDF linking to avoid symbol collisions
 is_alpine_linux() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
+        # Check for Alpine itself
         if [[ "$ID" == "alpine" ]]; then
             return 0
         fi
+        # Check for Alpine-based distros (e.g., PostmarketOS)
+        if [[ "$ID" == "postmarketos" ]]; then
+            return 0
+        fi
+        # Check ID_LIKE for Alpine-based distros
+        if [[ "$ID_LIKE" == *"alpine"* ]]; then
+            return 0
+        fi
+    fi
+    # Also check for musl libc directly (fallback detection)
+    if ldd --version 2>&1 | grep -q "musl"; then
+        return 0
     fi
     return 1
 }
