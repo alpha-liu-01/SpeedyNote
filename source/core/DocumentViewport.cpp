@@ -5015,11 +5015,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     
     // Phase C.4.4: Create mode - insert object at click position instead of selecting
     if (m_objectActionMode == ObjectActionMode::Create) {
-        // BUG FIX: Use pe.pageHit which was computed at event creation time,
-        // NOT viewportToPage(pe.viewportPos) which recalculates and can give
-        // different results if pan/zoom changed between event creation and now
-        // (e.g., due to currentPageChanged signal handlers).
-        PageHit hit = pe.pageHit;
+        PageHit hit = viewportToPage(pe.viewportPos);
         if (hit.pageIndex < 0) {
             // Click not on any page - ignore in paged mode
             if (!m_document->isEdgeless()) {
@@ -5043,7 +5039,8 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             insertImageFromDialog();
         } else {
             // Create empty LinkObject at position
-            createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint);
+            // Pass viewportPos so edgeless mode can determine correct tile
+            createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint, pe.viewportPos);
         }
         return;
     }
@@ -6435,7 +6432,7 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
 #endif
 }
 
-void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos)
+void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos, const QPointF& viewportPos)
 {
     // Phase C.4.5: Create empty LinkObject at specified position
     if (!m_document) return;
@@ -6452,8 +6449,11 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     
     if (m_document->isEdgeless()) {
         // Edgeless mode: pagePos is already tile-local from handlePointerPress_ObjectSelect
-        // We need to find which tile based on document coordinates
-        QPointF docPos = viewportToDocument(mapFromGlobal(QCursor::pos()));
+        // BUG FIX: Use viewportPos from the input event to determine tile coordinate.
+        // Previously used QCursor::pos() which gives wrong results for tablet/stylus input
+        // (cursor position can differ from tablet event position, causing objects to be
+        // placed on the wrong tile - typically 1 tile to the right on leftmost tiles).
+        QPointF docPos = viewportToDocument(viewportPos);
         auto coord = m_document->tileCoordForPoint(docPos);
         
         Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
@@ -6511,14 +6511,14 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     
 #ifdef SPEEDYNOTE_DEBUG
     if (m_document && m_document->isEdgeless()) {
-        QPointF docPos = viewportToDocument(mapFromGlobal(QCursor::pos()));
+        QPointF docPos = viewportToDocument(viewportPos);
         auto coord = m_document->tileCoordForPoint(docPos);
         QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
                            coord.second * Document::EDGELESS_TILE_SIZE);
         qDebug() << "createLinkObjectAtPosition (edgeless): "
                  << "pagePos (stored as position) =" << pagePos
                  << "tile =" << coord.first << "," << coord.second
-                 << "docPos from cursor =" << docPos
+                 << "docPos from viewportPos =" << docPos
                  << "tileOrigin =" << tileOrigin;
     } else {
     qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
@@ -9399,8 +9399,7 @@ void DocumentViewport::updateHighlighterCursor()
 void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
 {
     // Check if highlighter is enabled on this page
-    // Use pe.pageHit (pre-computed) to avoid coordinate drift from pan/zoom changes
-    PageHit hit = pe.pageHit;
+    PageHit hit = viewportToPage(pe.viewportPos);
     if (!hit.valid()) {
         bool hadSelection = m_textSelection.isValid();
         m_textSelection.clear();
@@ -9502,8 +9501,7 @@ void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
         return;
     }
     
-    // Use pe.pageHit (pre-computed) to avoid coordinate drift from pan/zoom changes
-    PageHit hit = pe.pageHit;
+    PageHit hit = viewportToPage(pe.viewportPos);
     if (!hit.valid() || hit.pageIndex != m_textSelection.pageIndex) {
         // Moved off the page - for now, just ignore moves outside the page
         return;
