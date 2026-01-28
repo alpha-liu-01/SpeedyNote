@@ -3,7 +3,7 @@
 // ============================================================================
 // InsertedObject - Abstract base class for all insertable objects
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.6)
+// Part of the new SpeedyNote document architecture (Phase 1.1.2)
 // 
 // InsertedObject is the base for any content that can be placed on a page:
 // - Images (ImageObject)

@@ -3,7 +3,7 @@
 // ============================================================================
 // VectorStroke - A complete stroke (pen down → pen up)
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.6)
+// Part of the new SpeedyNote document architecture (Phase 1.1.2)
 // Extracted from VectorCanvas.h for modularity
 // ============================================================================
 
