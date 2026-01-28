@@ -2763,9 +2763,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
     // handlePointerEvent() returns early if m_pointerActive is false,
     // so we handle hover tracking separately here.
     if (event->type() == QEvent::TabletMove && !m_pointerActive) {
-        // Use globalPosition() + mapFromGlobal() for reliable coordinates
-        // (same fix as in tabletToPointerEvent)
-        QPointF newPos = mapFromGlobal(event->globalPosition().toPoint());
+        QPointF newPos = event->position();
         
         // Check if stylus is within widget bounds
         // Unlike mouse, tablet doesn't trigger leaveEvent when stylus moves outside
@@ -3912,12 +3910,7 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     PointerEvent pe;
     pe.type = type;
     pe.source = PointerEvent::Stylus;
-    
-    // Use globalPosition() + mapFromGlobal() for more reliable coordinates
-    // On some Linux systems (especially with Wacom digitizers on Wayland/KDE),
-    // event->position() can be intermittently incorrect. The global position
-    // is more reliably reported by tablet drivers.
-    pe.viewportPos = mapFromGlobal(event->globalPosition().toPoint());
+    pe.viewportPos = event->position();
     pe.pageHit = viewportToPage(pe.viewportPos);
     
     // Tablet pressure and tilt
@@ -5022,7 +5015,11 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     
     // Phase C.4.4: Create mode - insert object at click position instead of selecting
     if (m_objectActionMode == ObjectActionMode::Create) {
-        PageHit hit = viewportToPage(pe.viewportPos);
+        // BUG FIX: Use pe.pageHit which was computed at event creation time,
+        // NOT viewportToPage(pe.viewportPos) which recalculates and can give
+        // different results if pan/zoom changed between event creation and now
+        // (e.g., due to currentPageChanged signal handlers).
+        PageHit hit = pe.pageHit;
         if (hit.pageIndex < 0) {
             // Click not on any page - ignore in paged mode
             if (!m_document->isEdgeless()) {
@@ -6526,8 +6523,6 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     } else {
     qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
     }
-#else
-    qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
 #endif
 }
 
@@ -9404,7 +9399,8 @@ void DocumentViewport::updateHighlighterCursor()
 void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
 {
     // Check if highlighter is enabled on this page
-    PageHit hit = viewportToPage(pe.viewportPos);
+    // Use pe.pageHit (pre-computed) to avoid coordinate drift from pan/zoom changes
+    PageHit hit = pe.pageHit;
     if (!hit.valid()) {
         bool hadSelection = m_textSelection.isValid();
         m_textSelection.clear();
@@ -9506,7 +9502,8 @@ void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
         return;
     }
     
-    PageHit hit = viewportToPage(pe.viewportPos);
+    // Use pe.pageHit (pre-computed) to avoid coordinate drift from pan/zoom changes
+    PageHit hit = pe.pageHit;
     if (!hit.valid() || hit.pageIndex != m_textSelection.pageIndex) {
         // Moved off the page - for now, just ignore moves outside the page
         return;
