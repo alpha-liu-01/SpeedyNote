@@ -1160,8 +1160,13 @@ public:
      * 
      * Phase C.4.5: Creates a new LinkObject with empty slots at the
      * specified position, adds to page, pushes undo, and selects it.
+     * 
+     * @param pageIndex Page index (paged mode) or 0 placeholder (edgeless)
+     * @param pagePos Tile-local or page-local position for the object
+     * @param viewportPos Viewport position from the input event (used to determine
+     *                    which tile in edgeless mode - do NOT use QCursor::pos())
      */
-    void createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos);
+    void createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos, const QPointF& viewportPos);
     
     /**
      * @brief Create a LinkObject for a text highlight.
