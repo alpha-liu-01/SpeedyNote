@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="1.1.5"
+PKGVER="1.1.6"
 PKGREL="1"
 MAINTAINER="SpeedyNote Team <speedynote@example.com>"
 DESCRIPTION="A fast note-taking application with PDF annotation support and controller input"
@@ -213,7 +213,7 @@ package() {
     # Create desktop file
     install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
 [Desktop Entry]
-Version=1.1.5
+Version=1.1.6
 Type=Application
 Name=SpeedyNote
 Comment=$DESCRIPTION

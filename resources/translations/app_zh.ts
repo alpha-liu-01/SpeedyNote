@@ -577,8 +577,8 @@ Continue?</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1556"/>
-        <source>Version 1.1.5</source>
-        <translation type="unfinished">1.1.5 版本</translation>
+        <source>Version 1.1.6</source>
+        <translation type="unfinished">1.1.6 版本</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1573"/>
@@ -1471,8 +1471,8 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="155"/>
-        <source>SpeedyNote 1.1.5</source>
-        <translation type="unfinished">极疾记 1.1.5</translation>
+        <source>SpeedyNote 1.1.6</source>
+        <translation type="unfinished">极疾记 1.1.6</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="829"/>

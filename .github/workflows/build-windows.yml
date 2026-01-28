@@ -3,7 +3,7 @@ name: Build SpeedyNote Windows Installer
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags (e.g., v1.1.5, v2.0.0-beta)
+      - 'v*'  # Trigger on version tags (e.g., v1.1.6, v2.0.0-beta)
 
 jobs:
   build-windows:

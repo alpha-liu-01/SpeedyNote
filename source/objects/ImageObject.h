@@ -3,7 +3,7 @@
 // ============================================================================
 // ImageObject - An image inserted onto a page
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.5)
+// Part of the new SpeedyNote document architecture (Phase 1.1.6)
 // 
 // ImageObject represents an image that has been inserted onto a page.
 // It stores the path to the image file and caches the pixmap for rendering.
