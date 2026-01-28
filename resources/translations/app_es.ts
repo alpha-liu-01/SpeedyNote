@@ -889,42 +889,42 @@ Error output:
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5991"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="5992"/>
         <source>Insert Image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5993"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="5994"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6657"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6659"/>
         <source>Add Position Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6658"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6660"/>
         <source>Add URL Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6659"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6661"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6669"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6671"/>
         <source>Add URL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6669"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6671"/>
         <source>Enter URL:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6820"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6822"/>
         <source>Untitled Note</source>
         <translation type="unfinished"></translation>
     </message>
