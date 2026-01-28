@@ -3,7 +3,7 @@
 // ============================================================================
 // VectorLayer - A single layer containing vector strokes
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.6)
+// Part of the new SpeedyNote document architecture (Phase 1.1.2)
 // A layer is a data container for strokes with visibility/opacity control.
 // No widget functionality - rendering is done by the Viewport.
 // ============================================================================

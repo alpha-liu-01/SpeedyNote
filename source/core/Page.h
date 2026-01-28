@@ -3,7 +3,7 @@
 // ============================================================================
 // Page - A single page in a document
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.1.6)
+// Part of the new SpeedyNote document architecture (Phase 1.1.2)
 // 
 // Page is the coordinator that brings together:
 // - Vector layers (containing strokes)
