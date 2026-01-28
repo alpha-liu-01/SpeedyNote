@@ -26,8 +26,6 @@ sudo apt install libpoppler-qt6-dev
 # PDF export (MuPDF and dependencies)
 sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev
 
-# Optional: Controller support
-sudo apt install libsdl2-dev
 ```
 
 #### Dependency Summary
@@ -52,17 +50,11 @@ sudo apt install libsdl2-dev
 git clone https://github.com/alpha-liu-01/SpeedyNote.git
 cd SpeedyNote
 
-# Create build directory
-mkdir build && cd build
-
-# Configure
-cmake ..
-
-# Build
-make -j$(nproc)
+# Build SpeedyNote
+./compile.sh
 
 # Run
-./NoteApp
+cd build && ./NoteApp
 ```
 
 #### Build Options
@@ -140,6 +132,15 @@ sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel poppler-qt6-de
 
 ```bash
 sudo pacman -S cmake qt6-base qt6-tools poppler-qt6 mupdf harfbuzz freetype2 libjpeg-turbo openjpeg2 gumbo-parser mujs
+```
+#### Alpine Linux and postmarketOS
+
+Note that the Alpine Linux version doesn't rely on Poppler. mupdf handles both PDF rendering and export. 
+
+```bash
+sudo apk add build-base cmake abuild qt6-qtbase-dev qt6-qttools-dev qt6-qtdeclarative-dev mupdf-dev
+./compile.sh
+./build-alpine-arm64.sh
 ```
 
 ---
