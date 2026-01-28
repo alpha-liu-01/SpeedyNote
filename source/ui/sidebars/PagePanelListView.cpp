@@ -10,7 +10,7 @@
 #include <QDebug>
 
 // Debug flag for touch scrolling diagnostics (set to 1 to enable)
-#define SPEEDYNOTE_DEBUG 0
+
 
 // ============================================================================
 // Constructor

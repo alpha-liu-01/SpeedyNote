@@ -2763,7 +2763,9 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
     // handlePointerEvent() returns early if m_pointerActive is false,
     // so we handle hover tracking separately here.
     if (event->type() == QEvent::TabletMove && !m_pointerActive) {
-        QPointF newPos = event->position();
+        // Use globalPosition() + mapFromGlobal() for reliable coordinates
+        // (same fix as in tabletToPointerEvent)
+        QPointF newPos = mapFromGlobal(event->globalPosition().toPoint());
         
         // Check if stylus is within widget bounds
         // Unlike mouse, tablet doesn't trigger leaveEvent when stylus moves outside
@@ -3910,7 +3912,12 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     PointerEvent pe;
     pe.type = type;
     pe.source = PointerEvent::Stylus;
-    pe.viewportPos = event->position();
+    
+    // Use globalPosition() + mapFromGlobal() for more reliable coordinates
+    // On some Linux systems (especially with Wacom digitizers on Wayland/KDE),
+    // event->position() can be intermittently incorrect. The global position
+    // is more reliably reported by tablet drivers.
+    pe.viewportPos = mapFromGlobal(event->globalPosition().toPoint());
     pe.pageHit = viewportToPage(pe.viewportPos);
     
     // Tablet pressure and tilt
