@@ -6,8 +6,8 @@
 
 // Version information
 1 VERSIONINFO
-FILEVERSION 1,1,5,0
-PRODUCTVERSION 1,1,5,0
+FILEVERSION 1,1,6,0
+PRODUCTVERSION 1,1,6,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -20,12 +20,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "SpeedyNote"
             VALUE "FileDescription", "SpeedyNote - Fast Digital Note Taking Application"
-            VALUE "FileVersion", "1.1.5.0"
+            VALUE "FileVersion", "1.1.6.0"
             VALUE "InternalName", "NoteApp"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "NoteApp.exe"
             VALUE "ProductName", "SpeedyNote"
-            VALUE "ProductVersion", "1.1.5.0"
+            VALUE "ProductVersion", "1.1.6.0"
         END
     END
     BLOCK "VarFileInfo"
