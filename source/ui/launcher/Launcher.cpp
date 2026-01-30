@@ -7,6 +7,7 @@
 #include "StarredView.h"
 #include "SearchView.h"
 #include "FloatingActionButton.h"
+#include "../ThemeColors.h"
 #include "../../MainWindow.h"
 #include "../../core/NotebookLibrary.h"
 #include "../../core/Document.h"
@@ -375,6 +376,11 @@ void Launcher::setupTimeline()
     layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(0);
     
+    // Setup select mode header (L-007) - initially hidden
+    setupTimelineSelectModeHeader();
+    layout->addWidget(m_timelineSelectModeHeader);
+    m_timelineSelectModeHeader->setVisible(false);
+    
     // Create model
     m_timelineModel = new TimelineModel(this);
     
@@ -392,7 +398,7 @@ void Launcher::setupTimeline()
     // Create list view (configured in constructor for IconMode grid layout)
     m_timelineList = new TimelineListView(m_timelineView);
     m_timelineList->setObjectName("TimelineList");
-    m_timelineList->setModel(m_timelineModel);
+    m_timelineList->setTimelineModel(m_timelineModel);
     
     // Create composite delegate that handles both item types
     auto* compositeDelegate = new CompositeTimelineDelegate(
@@ -403,7 +409,7 @@ void Launcher::setupTimeline()
     connect(m_timelineList, &QListView::clicked,
             this, &Launcher::onTimelineItemClicked);
     
-    // 3-dot menu button, right-click, or long-press shows context menu
+    // 3-dot menu button or right-click shows context menu (only when NOT in select mode)
     // TimelineListView handles all input and emits menuRequested
     connect(m_timelineList, &TimelineListView::menuRequested,
             this, [this](const QModelIndex& index, const QPoint& globalPos) {
@@ -415,7 +421,15 @@ void Launcher::setupTimeline()
         }
     });
     
-    // TODO (L-007): longPressed will enter batch select mode
+    // Long-press enters batch select mode (L-007)
+    connect(m_timelineList, &TimelineListView::longPressed,
+            this, &Launcher::onTimelineLongPressed);
+    
+    // Connect select mode signals (L-007)
+    connect(m_timelineList, &TimelineListView::selectModeChanged,
+            this, &Launcher::onTimelineSelectModeChanged);
+    connect(m_timelineList, &TimelineListView::batchSelectionChanged,
+            this, &Launcher::onTimelineBatchSelectionChanged);
     
     layout->addWidget(m_timelineList);
 }
@@ -660,9 +674,20 @@ void Launcher::onTimelineItemClicked(const QModelIndex& index)
 
 void Launcher::keyPressEvent(QKeyEvent* event)
 {
-    // Escape key requests return to MainWindow
-    // MainWindow will check if there are open tabs before toggling
+    // Escape key: first exit select mode if active, then return to MainWindow
     if (event->key() == Qt::Key_Escape) {
+        // Check if any view is in batch select mode and exit it first
+        if (m_currentView == View::Timeline && m_timelineList->isSelectMode()) {
+            m_timelineList->exitSelectMode();
+            return;
+        }
+        if (m_currentView == View::Starred && m_starredView->isSelectModeActive()) {
+            m_starredView->exitSelectMode();
+            return;
+        }
+        
+        // No select mode active - request return to MainWindow
+        // MainWindow will check if there are open tabs before toggling
         emit returnToMainWindowRequested();
         return;
     }
@@ -1074,6 +1099,181 @@ void Launcher::showInFileManager(const QString& bundlePath)
     // Note: Can't select file, just opens folder
     QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
 #endif
+}
+
+// =============================================================================
+// Timeline Select Mode (L-007)
+// =============================================================================
+
+void Launcher::setupTimelineSelectModeHeader()
+{
+    constexpr int HEADER_HEIGHT = 48;
+    
+    m_timelineSelectModeHeader = new QWidget(m_timelineView);
+    m_timelineSelectModeHeader->setFixedHeight(HEADER_HEIGHT);
+    m_timelineSelectModeHeader->setObjectName("TimelineSelectModeHeader");
+    
+    auto* headerLayout = new QHBoxLayout(m_timelineSelectModeHeader);
+    headerLayout->setContentsMargins(0, 0, 8, 8);
+    headerLayout->setSpacing(8);
+    
+    // Back button (←)
+    m_timelineBackButton = new QPushButton(m_timelineSelectModeHeader);
+    m_timelineBackButton->setObjectName("TimelineBackButton");
+    m_timelineBackButton->setText("←");
+    m_timelineBackButton->setFixedSize(40, 40);
+    m_timelineBackButton->setFlat(true);
+    m_timelineBackButton->setCursor(Qt::PointingHandCursor);
+    
+    QFont backFont = m_timelineBackButton->font();
+    backFont.setPointSize(18);
+    m_timelineBackButton->setFont(backFont);
+    
+    connect(m_timelineBackButton, &QPushButton::clicked, this, [this]() {
+        m_timelineList->exitSelectMode();
+    });
+    
+    headerLayout->addWidget(m_timelineBackButton);
+    
+    // Selection count label
+    m_timelineSelectionCountLabel = new QLabel(m_timelineSelectModeHeader);
+    m_timelineSelectionCountLabel->setObjectName("TimelineSelectionCountLabel");
+    
+    QFont countFont = m_timelineSelectionCountLabel->font();
+    countFont.setPointSize(14);
+    countFont.setBold(true);
+    m_timelineSelectionCountLabel->setFont(countFont);
+    
+    headerLayout->addWidget(m_timelineSelectionCountLabel, 1);  // Stretch
+    
+    // Overflow menu button (⋮)
+    m_timelineOverflowMenuButton = new QPushButton(m_timelineSelectModeHeader);
+    m_timelineOverflowMenuButton->setObjectName("TimelineOverflowMenuButton");
+    m_timelineOverflowMenuButton->setText("⋮");
+    m_timelineOverflowMenuButton->setFixedSize(40, 40);
+    m_timelineOverflowMenuButton->setFlat(true);
+    m_timelineOverflowMenuButton->setCursor(Qt::PointingHandCursor);
+    
+    QFont menuFont = m_timelineOverflowMenuButton->font();
+    menuFont.setPointSize(18);
+    m_timelineOverflowMenuButton->setFont(menuFont);
+    
+    connect(m_timelineOverflowMenuButton, &QPushButton::clicked, 
+            this, &Launcher::showTimelineOverflowMenu);
+    
+    headerLayout->addWidget(m_timelineOverflowMenuButton);
+}
+
+void Launcher::showTimelineSelectModeHeader(int count)
+{
+    // Update count label
+    if (count == 1) {
+        m_timelineSelectionCountLabel->setText(tr("1 selected"));
+    } else {
+        m_timelineSelectionCountLabel->setText(tr("%1 selected").arg(count));
+    }
+    
+    // Update colors based on dark mode
+    bool dark = isDarkMode();
+    QColor textColor = ThemeColors::textPrimary(dark);
+    
+    QString buttonStyle = QString(
+        "QPushButton { color: %1; border: none; background: transparent; }"
+        "QPushButton:hover { background: %2; border-radius: 20px; }"
+        "QPushButton:pressed { background: %3; border-radius: 20px; }"
+    ).arg(textColor.name(),
+          ThemeColors::itemHover(dark).name(),
+          ThemeColors::pressed(dark).name());
+    
+    m_timelineBackButton->setStyleSheet(buttonStyle);
+    m_timelineOverflowMenuButton->setStyleSheet(buttonStyle);
+    
+    QPalette labelPal = m_timelineSelectionCountLabel->palette();
+    labelPal.setColor(QPalette::WindowText, textColor);
+    m_timelineSelectionCountLabel->setPalette(labelPal);
+    
+    // Show header
+    m_timelineSelectModeHeader->setVisible(true);
+}
+
+void Launcher::hideTimelineSelectModeHeader()
+{
+    m_timelineSelectModeHeader->setVisible(false);
+}
+
+void Launcher::showTimelineOverflowMenu()
+{
+    QMenu menu(this);
+    
+    int selectedCount = m_timelineList->selectionCount();
+    
+    // Select All / Deselect All
+    QAction* selectAllAction = menu.addAction(tr("Select All"));
+    connect(selectAllAction, &QAction::triggered, this, [this]() {
+        m_timelineList->selectAll();
+    });
+    
+    QAction* deselectAllAction = menu.addAction(tr("Deselect All"));
+    deselectAllAction->setEnabled(selectedCount > 0);
+    connect(deselectAllAction, &QAction::triggered, this, [this]() {
+        m_timelineList->deselectAll();
+    });
+    
+    menu.addSeparator();
+    
+    // Move to Folder... (L-008 will implement FolderPickerDialog)
+    QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
+    moveToFolderAction->setEnabled(selectedCount > 0);
+    connect(moveToFolderAction, &QAction::triggered, this, [this]() {
+        // TODO (L-008): Open FolderPickerDialog for folder selection
+        QStringList selected = m_timelineList->selectedBundlePaths();
+        qDebug() << "Move to folder:" << selected.size() << "notebooks (FolderPickerDialog not yet implemented)";
+    });
+    
+    // Star Selected (Timeline uses Star instead of Unstar)
+    QAction* starAction = menu.addAction(tr("Star Selected"));
+    starAction->setEnabled(selectedCount > 0);
+    connect(starAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_timelineList->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            NotebookLibrary::instance()->starNotebooks(selected);
+            m_timelineList->exitSelectMode();
+        }
+    });
+    
+    // Position menu relative to overflow button
+    QPoint menuPos = m_timelineOverflowMenuButton->mapToGlobal(
+        QPoint(m_timelineOverflowMenuButton->width(), m_timelineOverflowMenuButton->height()));
+    menu.exec(menuPos);
+}
+
+void Launcher::onTimelineSelectModeChanged(bool active)
+{
+    if (active) {
+        showTimelineSelectModeHeader(m_timelineList->selectionCount());
+    } else {
+        hideTimelineSelectModeHeader();
+    }
+}
+
+void Launcher::onTimelineBatchSelectionChanged(int count)
+{
+    if (m_timelineList->isSelectMode()) {
+        showTimelineSelectModeHeader(count);
+    }
+}
+
+void Launcher::onTimelineLongPressed(const QModelIndex& index, const QPoint& globalPos)
+{
+    Q_UNUSED(globalPos)
+    
+    if (!index.isValid()) return;
+    
+    QString bundlePath = index.data(TimelineModel::BundlePathRole).toString();
+    if (!bundlePath.isEmpty()) {
+        // Enter batch select mode with this notebook as the first selection
+        m_timelineList->enterSelectMode(bundlePath);
+    }
 }
 
 #ifdef Q_OS_ANDROID

@@ -221,6 +221,16 @@ void StarredView::setDarkMode(bool dark)
     }
 }
 
+bool StarredView::isSelectModeActive() const
+{
+    return m_listView->isSelectMode();
+}
+
+void StarredView::exitSelectMode()
+{
+    m_listView->exitSelectMode();
+}
+
 void StarredView::updateEmptyState()
 {
     bool isEmpty = m_model->isEmpty();

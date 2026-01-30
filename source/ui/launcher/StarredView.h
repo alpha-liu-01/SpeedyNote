@@ -47,6 +47,16 @@ public:
      * @brief Set dark mode for theming.
      */
     void setDarkMode(bool dark);
+    
+    /**
+     * @brief Check if batch select mode is active.
+     */
+    bool isSelectModeActive() const;
+    
+    /**
+     * @brief Exit batch select mode, clearing all selections.
+     */
+    void exitSelectMode();
 
 protected:
     void showEvent(QShowEvent* event) override;

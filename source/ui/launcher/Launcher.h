@@ -5,6 +5,7 @@
 #include <QStackedWidget>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QLabel>
 #include <QPropertyAnimation>
 #include <QFrame>
 
@@ -121,6 +122,15 @@ private:
     QString findImportedPdfPath(const QString& bundlePath);
 #endif
     
+    // === Timeline Select Mode (L-007) ===
+    void setupTimelineSelectModeHeader();
+    void showTimelineSelectModeHeader(int count);
+    void hideTimelineSelectModeHeader();
+    void showTimelineOverflowMenu();
+    void onTimelineSelectModeChanged(bool active);
+    void onTimelineBatchSelectionChanged(int count);
+    void onTimelineLongPressed(const QModelIndex& index, const QPoint& globalPos);
+    
     // === View Management ===
     enum class View {
         Timeline,
@@ -145,6 +155,12 @@ private:
     TimelineListView* m_timelineList = nullptr;
     TimelineModel* m_timelineModel = nullptr;
     TimelineDelegate* m_timelineDelegate = nullptr;  // For section headers only
+    
+    // Timeline select mode header (L-007)
+    QWidget* m_timelineSelectModeHeader = nullptr;
+    QLabel* m_timelineSelectionCountLabel = nullptr;
+    QPushButton* m_timelineBackButton = nullptr;
+    QPushButton* m_timelineOverflowMenuButton = nullptr;
     
     // Starred view
     StarredView* m_starredView = nullptr;

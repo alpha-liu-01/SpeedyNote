@@ -99,6 +99,16 @@ QVariant TimelineModel::data(const QModelIndex& index, int role) const
             
         case IsStarredRole:
             return item.notebook.isStarred;
+            
+        // Batch select mode roles (L-007)
+        case IsInSelectModeRole:
+            return m_selectMode;
+            
+        case IsSelectedInBatchRole:
+            if (!item.isHeader) {
+                return m_selectedBundlePaths.contains(item.notebook.bundlePath);
+            }
+            return false;
     }
     
     return QVariant();
@@ -115,6 +125,11 @@ QHash<int, QByteArray> TimelineModel::roleNames() const
     roles[IsPdfBasedRole] = "isPdfBased";
     roles[IsEdgelessRole] = "isEdgeless";
     roles[LastModifiedRole] = "lastModified";
+    
+    // Batch select mode roles (L-007)
+    roles[IsInSelectModeRole] = "isInSelectMode";
+    roles[IsSelectedInBatchRole] = "isSelectedInBatch";
+    
     roles[IsSectionHeaderRole] = "isSectionHeader";
     roles[SectionNameRole] = "sectionName";
     roles[LastAccessedRole] = "lastAccessed";
@@ -237,5 +252,49 @@ void TimelineModel::scheduleMidnightRefresh()
     }
     
     m_midnightTimer->start(static_cast<int>(msUntilMidnight));
+}
+
+// -----------------------------------------------------------------------------
+// Batch Select Mode (L-007)
+// -----------------------------------------------------------------------------
+
+void TimelineModel::setSelectMode(bool selectMode)
+{
+    if (m_selectMode == selectMode) {
+        return;
+    }
+    
+    m_selectMode = selectMode;
+    
+    // Clear selection when exiting select mode
+    if (!selectMode) {
+        m_selectedBundlePaths.clear();
+    }
+    
+    // Notify all items that select mode changed (affects visual appearance)
+    if (!m_items.isEmpty()) {
+        emit dataChanged(index(0), index(m_items.size() - 1), 
+                         {IsInSelectModeRole, IsSelectedInBatchRole});
+    }
+}
+
+void TimelineModel::setSelectedBundlePaths(const QSet<QString>& selectedPaths)
+{
+    if (m_selectedBundlePaths == selectedPaths) {
+        return;
+    }
+    
+    m_selectedBundlePaths = selectedPaths;
+    
+    // Notify all items that selection changed
+    if (!m_items.isEmpty()) {
+        emit dataChanged(index(0), index(m_items.size() - 1), 
+                         {IsSelectedInBatchRole});
+    }
+}
+
+bool TimelineModel::isSelected(const QString& bundlePath) const
+{
+    return m_selectedBundlePaths.contains(bundlePath);
 }
 
