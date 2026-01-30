@@ -138,6 +138,27 @@ public:
      */
     QStringList starredFolders() const;
     
+    /**
+     * @brief Get the most recently used folders (up to 5).
+     * 
+     * Returns folders ordered by most recent usage first.
+     * Used by FolderPickerDialog to show quick-access folders.
+     * 
+     * L-008: Part of the Folder Picker UI feature.
+     */
+    QStringList recentFolders() const;
+    
+    /**
+     * @brief Record that a folder was used (e.g., notebooks moved to it).
+     * @param folder The folder name that was used.
+     * 
+     * Moves the folder to the front of the recent list.
+     * Called automatically by moveNotebooksToFolder().
+     * 
+     * L-008: Part of the Folder Picker UI feature.
+     */
+    void recordFolderUsage(const QString& folder);
+    
     // === Bulk Operations (L-007) ===
     
     /**
@@ -283,11 +304,13 @@ private:
     QString m_thumbnailCachePath;     ///< Path to the thumbnail cache directory
     QList<NotebookInfo> m_notebooks;  ///< All tracked notebooks
     QStringList m_starredFolderOrder; ///< Ordered list of starred folder names
+    QStringList m_recentFolders;      ///< Recently used folders (L-008), max 5
     QTimer m_saveTimer;               ///< Timer for debounced auto-save
     
     static constexpr int SAVE_DEBOUNCE_MS = 1000;  ///< Debounce delay for auto-save
     static constexpr int LIBRARY_VERSION = 1;      ///< Current library file format version
     static constexpr qint64 MAX_CACHE_SIZE_BYTES = 200 * 1024 * 1024; ///< 200 MiB cache limit
+    static constexpr int MAX_RECENT_FOLDERS = 5;   ///< Max folders in recent list (L-008)
     
     /**
      * @brief Clean up old thumbnails if cache exceeds size limit.

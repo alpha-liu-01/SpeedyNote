@@ -88,11 +88,17 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     
     // Border (more visible if selected)
     if (selected) {
+        // For selection border: inset rect by 1px so the 2px stroke stays within bounds
+        // This prevents corner clipping where the stroke extends outside the item rect
+        QRect borderRect = cardRect.adjusted(1, 1, -1, -1);
+        QPainterPath borderPath;
+        borderPath.addRoundedRect(borderRect, CORNER_RADIUS - 1, CORNER_RADIUS - 1);
         painter->setPen(QPen(ThemeColors::selectionBorder(m_darkMode), 2));
+        painter->drawPath(borderPath);
     } else {
         painter->setPen(QPen(ThemeColors::cardBorder(m_darkMode), 1));
+        painter->drawPath(cardPath);
     }
-    painter->drawPath(cardPath);
     
     // === Thumbnail area ===
     QRect thumbRect(cardRect.left() + PADDING, cardRect.top() + PADDING,

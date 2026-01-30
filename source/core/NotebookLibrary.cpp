@@ -216,6 +216,39 @@ QStringList NotebookLibrary::starredFolders() const
     return m_starredFolderOrder;
 }
 
+QStringList NotebookLibrary::recentFolders() const
+{
+    // Filter to only include folders that still exist
+    QStringList result;
+    for (const QString& folder : m_recentFolders) {
+        if (m_starredFolderOrder.contains(folder)) {
+            result.append(folder);
+        }
+    }
+    return result;
+}
+
+void NotebookLibrary::recordFolderUsage(const QString& folder)
+{
+    if (folder.isEmpty()) {
+        return;  // Don't track "Unfiled"
+    }
+    
+    // Remove if already in list (will re-add at front)
+    m_recentFolders.removeAll(folder);
+    
+    // Add to front
+    m_recentFolders.prepend(folder);
+    
+    // Trim to max size
+    while (m_recentFolders.size() > MAX_RECENT_FOLDERS) {
+        m_recentFolders.removeLast();
+    }
+    
+    // Save (no need to emit libraryChanged - UI doesn't depend on this)
+    scheduleSave();
+}
+
 // -----------------------------------------------------------------------------
 // Bulk Operations (L-007)
 // -----------------------------------------------------------------------------
@@ -296,6 +329,10 @@ void NotebookLibrary::moveNotebooksToFolder(const QStringList& bundlePaths, cons
     }
     
     if (anyChanged) {
+        // Record folder usage for recent folders tracking (L-008)
+        if (!folder.isEmpty()) {
+            recordFolderUsage(folder);
+        }
         markDirty();
     }
 }
@@ -576,6 +613,13 @@ void NotebookLibrary::save()
     }
     root["starredFolders"] = foldersArray;
     
+    // Serialize recent folders (L-008)
+    QJsonArray recentFoldersArray;
+    for (const auto& folder : m_recentFolders) {
+        recentFoldersArray.append(folder);
+    }
+    root["recentFolders"] = recentFoldersArray;
+    
     // Write to file
     QFile file(m_libraryFilePath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -591,6 +635,7 @@ void NotebookLibrary::load()
 {
     m_notebooks.clear();
     m_starredFolderOrder.clear();
+    m_recentFolders.clear();
     
     QFile file(m_libraryFilePath);
     if (!file.exists()) {
@@ -625,6 +670,16 @@ void NotebookLibrary::load()
     QJsonArray foldersArray = root["starredFolders"].toArray();
     for (const auto& folderVal : foldersArray) {
         m_starredFolderOrder.append(folderVal.toString());
+    }
+    
+    // Load recent folders (L-008)
+    QJsonArray recentFoldersArray = root["recentFolders"].toArray();
+    for (const auto& folderVal : recentFoldersArray) {
+        QString folder = folderVal.toString();
+        // Only add if folder still exists
+        if (m_starredFolderOrder.contains(folder)) {
+            m_recentFolders.append(folder);
+        }
     }
     
     // Load notebooks, validating that paths still exist

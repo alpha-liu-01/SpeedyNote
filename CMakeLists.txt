@@ -592,6 +592,7 @@ set(UI_SOURCES
     source/ui/launcher/StarredView.cpp
     source/ui/launcher/SearchView.cpp
     source/ui/launcher/FloatingActionButton.cpp
+    source/ui/launcher/FolderPickerDialog.cpp
 )
 
 # PDF abstraction layer (platform-specific backend)

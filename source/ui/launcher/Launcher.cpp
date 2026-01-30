@@ -7,6 +7,7 @@
 #include "StarredView.h"
 #include "SearchView.h"
 #include "FloatingActionButton.h"
+#include "FolderPickerDialog.h"
 #include "../ThemeColors.h"
 #include "../../MainWindow.h"
 #include "../../core/NotebookLibrary.h"
@@ -726,6 +727,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     }
     
     QMenu menu(this);
+    ThemeColors::styleMenu(&menu, isDarkMode());
+    
     QAction* starAction = menu.addAction(isStarred ? tr("Unstar") : tr("Star"));
     connect(starAction, &QAction::triggered, this, [this, bundlePath]() {
         toggleNotebookStar(bundlePath);
@@ -736,6 +739,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     // Move to folder submenu (only show if starred)
     if (isStarred) {
         QMenu* folderMenu = menu.addMenu(tr("Move to Folder"));
+        ThemeColors::styleMenu(folderMenu, isDarkMode());
         
         // Unfiled option
         QAction* unfiledAction = folderMenu->addAction(tr("Unfiled"));
@@ -745,19 +749,30 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
         
         folderMenu->addSeparator();
         
-        // Existing folders
-        QStringList folders = lib->starredFolders();
-        for (const QString& folder : folders) {
-            QAction* folderAction = folderMenu->addAction(folder);
-            connect(folderAction, &QAction::triggered, this, [bundlePath, folder]() {
-                NotebookLibrary::instance()->setStarredFolder(bundlePath, folder);
-            });
+        // Recent folders (L-008: quick access to last used folders)
+        QStringList recentFolders = lib->recentFolders();
+        if (!recentFolders.isEmpty()) {
+            for (const QString& folder : recentFolders) {
+                // Show with clock icon to indicate recent
+                QAction* folderAction = folderMenu->addAction(QString("⏱  %1").arg(folder));
+                connect(folderAction, &QAction::triggered, this, [bundlePath, folder]() {
+                    NotebookLibrary::instance()->moveNotebooksToFolder({bundlePath}, folder);
+                });
+            }
+            folderMenu->addSeparator();
         }
         
-        folderMenu->addSeparator();
+        // More Folders... (opens FolderPickerDialog)
+        QAction* moreFoldersAction = folderMenu->addAction(tr("More Folders..."));
+        connect(moreFoldersAction, &QAction::triggered, this, [this, bundlePath]() {
+            QString folder = FolderPickerDialog::getFolder(this, tr("Move to Folder"));
+            if (!folder.isEmpty()) {
+                NotebookLibrary::instance()->moveNotebooksToFolder({bundlePath}, folder);
+            }
+        });
         
-        // Create new folder
-        QAction* newFolderAction = folderMenu->addAction(tr("New Folder..."));
+        // New Folder...
+        QAction* newFolderAction = folderMenu->addAction(tr("+ New Folder..."));
         connect(newFolderAction, &QAction::triggered, this, [this, bundlePath]() {
             bool ok;
             QString name = QInputDialog::getText(this, tr("New Folder"),
@@ -765,7 +780,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
                                                   QLineEdit::Normal, QString(), &ok);
             if (ok && !name.isEmpty()) {
                 NotebookLibrary::instance()->createStarredFolder(name);
-                NotebookLibrary::instance()->setStarredFolder(bundlePath, name);
+                NotebookLibrary::instance()->moveNotebooksToFolder({bundlePath}, name);
             }
         });
         
@@ -806,6 +821,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
 void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& globalPos)
 {
     QMenu menu(this);
+    ThemeColors::styleMenu(&menu, isDarkMode());
     
     // Rename action
     QAction* renameAction = menu.addAction(tr("Rename"));
@@ -1204,6 +1220,7 @@ void Launcher::hideTimelineSelectModeHeader()
 void Launcher::showTimelineOverflowMenu()
 {
     QMenu menu(this);
+    ThemeColors::styleMenu(&menu, isDarkMode());
     
     int selectedCount = m_timelineList->selectionCount();
     
@@ -1221,13 +1238,22 @@ void Launcher::showTimelineOverflowMenu()
     
     menu.addSeparator();
     
-    // Move to Folder... (L-008 will implement FolderPickerDialog)
+    // Move to Folder... (L-008: opens FolderPickerDialog)
     QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
     moveToFolderAction->setEnabled(selectedCount > 0);
     connect(moveToFolderAction, &QAction::triggered, this, [this]() {
-        // TODO (L-008): Open FolderPickerDialog for folder selection
         QStringList selected = m_timelineList->selectedBundlePaths();
-        qDebug() << "Move to folder:" << selected.size() << "notebooks (FolderPickerDialog not yet implemented)";
+        if (selected.isEmpty()) return;
+        
+        QString title = selected.size() == 1 
+            ? tr("Move to Folder") 
+            : tr("Move %1 notebooks to...").arg(selected.size());
+        
+        QString folder = FolderPickerDialog::getFolder(this, title);
+        if (!folder.isEmpty()) {
+            NotebookLibrary::instance()->moveNotebooksToFolder(selected, folder);
+            m_timelineList->exitSelectMode();
+        }
     });
     
     // Star Selected (Timeline uses Star instead of Unstar)

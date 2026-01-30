@@ -2,6 +2,7 @@
 #define THEMECOLORS_H
 
 #include <QColor>
+#include <QMenu>
 
 /**
  * @brief Unified color palette for consistent theming across the application.
@@ -96,6 +97,54 @@ inline QColor cardBorder(bool dark)     { return dark ? QColor(70, 70, 75) : QCo
 inline QColor chevron(bool dark)        { return dark ? QColor(150, 150, 150) : QColor(100, 100, 100); }
 inline QColor folderText(bool dark)     { return dark ? QColor(220, 220, 220) : QColor(50, 50, 50); }
 inline QColor folderSeparator(bool dark){ return dark ? QColor(70, 70, 75) : QColor(220, 220, 225); }
+
+// ============================================================================
+// Menu Styling Helper
+// ============================================================================
+
+/**
+ * @brief Style a QMenu with rounded corners and theme-appropriate colors.
+ * 
+ * This function sets up the menu with a frameless window and translucent
+ * background to prevent the native window manager from drawing a rectangular
+ * frame around the rounded corners.
+ * 
+ * Call this immediately after creating the menu, before adding actions.
+ */
+inline void styleMenu(QMenu* menu, bool dark) {
+    if (!menu) return;
+    
+    // Required for true rounded corners on Linux/X11
+    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint);
+    menu->setAttribute(Qt::WA_TranslucentBackground);
+    
+    QColor bgColor = background(dark);
+    QColor textClr = textPrimary(dark);
+    QColor hoverClr = itemHover(dark);
+    QColor borderClr = border(dark);
+    QColor disabledClr = textSecondary(dark);
+    
+    menu->setStyleSheet(QString(
+        "QMenu {"
+        "  background-color: %1;"
+        "  border: 1px solid %2;"
+        "  border-radius: 8px;"
+        "  padding: 4px;"
+        "}"
+        "QMenu::item {"
+        "  color: %3;"
+        "  padding: 8px 16px;"
+        "  border-radius: 4px;"
+        "}"
+        "QMenu::item:selected {"
+        "  background-color: %4;"
+        "}"
+        "QMenu::item:disabled {"
+        "  color: %5;"
+        "}"
+    ).arg(bgColor.name(), borderClr.name(), textClr.name(), 
+          hoverClr.name(), disabledClr.name()));
+}
 
 } // namespace ThemeColors
 

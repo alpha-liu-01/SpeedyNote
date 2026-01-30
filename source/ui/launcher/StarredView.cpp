@@ -3,6 +3,7 @@
 #include "StarredModel.h"
 #include "NotebookCardDelegate.h"
 #include "FolderHeaderDelegate.h"
+#include "FolderPickerDialog.h"
 #include "../ThemeColors.h"
 #include "../../core/NotebookLibrary.h"
 
@@ -339,6 +340,7 @@ void StarredView::hideSelectModeHeader()
 void StarredView::showOverflowMenu()
 {
     QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_darkMode);
     
     int selectedCount = m_listView->selectionCount();
     
@@ -356,21 +358,22 @@ void StarredView::showOverflowMenu()
     
     menu.addSeparator();
     
-    // Move to Folder... (L-008 will implement FolderPickerDialog)
+    // Move to Folder... (L-008: opens FolderPickerDialog)
     QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
     moveToFolderAction->setEnabled(selectedCount > 0);
     connect(moveToFolderAction, &QAction::triggered, this, [this]() {
-        // TODO (L-008): Open FolderPickerDialog for folder selection
-        // For now, just log the intent
         QStringList selected = m_listView->selectedBundlePaths();
-        qDebug() << "Move to folder:" << selected.size() << "notebooks (FolderPickerDialog not yet implemented)";
+        if (selected.isEmpty()) return;
         
-        // Example of how it will work once L-008 is implemented:
-        // QString folder = FolderPickerDialog::getFolder(this, tr("Move to Folder"));
-        // if (!folder.isEmpty()) {
-        //     NotebookLibrary::instance()->moveNotebooksToFolder(selected, folder);
-        //     m_listView->exitSelectMode();
-        // }
+        QString title = selected.size() == 1 
+            ? tr("Move to Folder") 
+            : tr("Move %1 notebooks to...").arg(selected.size());
+        
+        QString folder = FolderPickerDialog::getFolder(this, title);
+        if (!folder.isEmpty()) {
+            NotebookLibrary::instance()->moveNotebooksToFolder(selected, folder);
+            m_listView->exitSelectMode();
+        }
     });
     
     // Remove from Folder
