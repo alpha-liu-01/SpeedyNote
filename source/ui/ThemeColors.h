@@ -17,52 +17,52 @@
 namespace ThemeColors {
 
 // ============================================================================
-// Base Gray Palette
+// Base Gray Palette (matches launcher stylesheets)
 // ============================================================================
 
-// Dark mode grays (cool-tinted)
-inline QColor darkPrimary()     { return QColor(0x2a, 0x2e, 0x32); }  // #2a2e32 - backgrounds
-inline QColor darkSecondary()   { return QColor(0x3a, 0x3e, 0x42); }  // #3a3e42 - hover states
-inline QColor darkTertiary()    { return QColor(0x4d, 0x4d, 0x4d); }  // #4d4d4d - borders, separators
+// Dark mode grays - aligned with launcher_dark.qss
+inline QColor darkPrimary()     { return QColor(0x1e, 0x1e, 0x1e); }  // #1e1e1e - main background
+inline QColor darkSecondary()   { return QColor(0x2d, 0x2d, 0x2d); }  // #2d2d2d - card/input backgrounds
+inline QColor darkTertiary()    { return QColor(0x3a, 0x3a, 0x3a); }  // #3a3a3a - borders, separators
 
-// Light mode grays
-inline QColor lightPrimary()    { return QColor(0xF5, 0xF5, 0xF5); }  // #F5F5F5 - backgrounds
-inline QColor lightSecondary()  { return QColor(0xE8, 0xE8, 0xE8); }  // #E8E8E8 - hover states
-inline QColor lightTertiary()   { return QColor(0xD0, 0xD0, 0xD0); }  // #D0D0D0 - borders, separators
+// Light mode grays - aligned with launcher.qss
+inline QColor lightPrimary()    { return QColor(0xfa, 0xfa, 0xfa); }  // #fafafa - main background
+inline QColor lightSecondary()  { return QColor(0xf0, 0xf0, 0xf0); }  // #f0f0f0 - hover states
+inline QColor lightTertiary()   { return QColor(0xe0, 0xe0, 0xe0); }  // #e0e0e0 - borders, separators
 
 // ============================================================================
 // Convenience Functions (select by dark mode)
 // ============================================================================
 
-inline QColor background(bool dark)     { return dark ? darkPrimary() : QColor(Qt::white); }
-inline QColor backgroundAlt(bool dark)  { return dark ? darkPrimary() : lightPrimary(); }
-inline QColor hover(bool dark)          { return dark ? darkSecondary() : lightSecondary(); }
+inline QColor background(bool dark)     { return dark ? darkPrimary() : QColor(0xfa, 0xfa, 0xfa); }
+inline QColor backgroundAlt(bool dark)  { return dark ? darkSecondary() : QColor(Qt::white); }
+inline QColor hover(bool dark)          { return dark ? QColor(0x4a, 0x4a, 0x4a) : lightSecondary(); }
 inline QColor border(bool dark)         { return dark ? darkTertiary() : lightTertiary(); }
 inline QColor separator(bool dark)      { return dark ? darkTertiary() : lightTertiary(); }
 
 // ============================================================================
-// Text Colors
+// Text Colors (matches launcher stylesheets)
 // ============================================================================
 
-inline QColor textPrimary(bool dark)    { return dark ? QColor(240, 240, 240) : QColor(30, 30, 30); }
-inline QColor textSecondary(bool dark)  { return dark ? QColor(180, 180, 180) : QColor(100, 100, 100); }
-inline QColor textMuted(bool dark)      { return dark ? QColor(150, 150, 150) : QColor(120, 120, 120); }
-inline QColor textDisabled(bool dark)   { return dark ? QColor(100, 100, 100) : QColor(150, 150, 150); }
+inline QColor textPrimary(bool dark)    { return dark ? QColor(0xe0, 0xe0, 0xe0) : QColor(0x33, 0x33, 0x33); }
+inline QColor textSecondary(bool dark)  { return dark ? QColor(0x9e, 0x9e, 0x9e) : QColor(0x66, 0x66, 0x66); }
+inline QColor textMuted(bool dark)      { return dark ? QColor(0x75, 0x75, 0x75) : QColor(0x88, 0x88, 0x88); }
+inline QColor textDisabled(bool dark)   { return dark ? QColor(0x66, 0x66, 0x66) : QColor(0x99, 0x99, 0x99); }
 
 // ============================================================================
-// Selection & Accent Colors
+// Selection & Accent Colors (matches launcher stylesheets)
 // ============================================================================
 
 // Selection highlight (subtle blue tint)
-inline QColor selection(bool dark)      { return dark ? QColor(50, 80, 120) : QColor(220, 235, 250); }
-inline QColor selectionBorder(bool dark){ return dark ? QColor(138, 180, 248) : QColor(26, 115, 232); }
+inline QColor selection(bool dark)      { return dark ? QColor(0x26, 0x4f, 0x78) : QColor(0xb3, 0xd4, 0xfc); }
+inline QColor selectionBorder(bool dark){ return dark ? QColor(0x8a, 0xb4, 0xf8) : QColor(0x1a, 0x73, 0xe8); }
 
 // Hover state for interactive items (cards, list items)
-inline QColor itemHover(bool dark)      { return dark ? QColor(55, 55, 60) : QColor(248, 248, 252); }
-inline QColor itemBackground(bool dark) { return dark ? QColor(45, 45, 50) : QColor(255, 255, 255); }
+inline QColor itemHover(bool dark)      { return dark ? QColor(0x3a, 0x3a, 0x3a) : QColor(0xe8, 0xe8, 0xe8); }
+inline QColor itemBackground(bool dark) { return dark ? QColor(0x2d, 0x2d, 0x2d) : QColor(0xff, 0xff, 0xff); }
 
 // Pressed/active state
-inline QColor pressed(bool dark)        { return dark ? QColor(60, 60, 65) : QColor(235, 235, 240); }
+inline QColor pressed(bool dark)        { return dark ? QColor(0x55, 0x55, 0x55) : QColor(0xd8, 0xd8, 0xd8); }
 
 // ============================================================================
 // Semantic Colors
@@ -77,26 +77,26 @@ inline QColor typeEdgeless(bool dark)   { return dark ? QColor(100, 180, 100) : 
 inline QColor typePaged(bool dark)      { return dark ? QColor(100, 140, 200) : QColor(60, 100, 180); }
 
 // ============================================================================
-// Card-Specific Colors
+// Card-Specific Colors (aligned with launcher stylesheets)
 // ============================================================================
 
 // Card shadow (light mode only, use with alpha)
 inline QColor cardShadow()              { return QColor(0, 0, 0, 25); }
 
 // Thumbnail placeholder background
-inline QColor thumbnailBg(bool dark)    { return dark ? QColor(50, 50, 55) : QColor(235, 235, 240); }
-inline QColor thumbnailPlaceholder(bool dark) { return dark ? QColor(100, 100, 105) : QColor(180, 180, 185); }
+inline QColor thumbnailBg(bool dark)    { return dark ? QColor(0x25, 0x25, 0x25) : QColor(0xf0, 0xf0, 0xf0); }
+inline QColor thumbnailPlaceholder(bool dark) { return dark ? QColor(0x4a, 0x4a, 0x4a) : QColor(0xc0, 0xc0, 0xc0); }
 
-// Card border
-inline QColor cardBorder(bool dark)     { return dark ? QColor(70, 70, 75) : QColor(220, 220, 225); }
+// Card border - matches launcher stylesheet borders
+inline QColor cardBorder(bool dark)     { return dark ? QColor(0x3a, 0x3a, 0x3a) : QColor(0xe0, 0xe0, 0xe0); }
 
 // ============================================================================
-// Folder Header Colors
+// Folder Header Colors (aligned with launcher stylesheets)
 // ============================================================================
 
-inline QColor chevron(bool dark)        { return dark ? QColor(150, 150, 150) : QColor(100, 100, 100); }
-inline QColor folderText(bool dark)     { return dark ? QColor(220, 220, 220) : QColor(50, 50, 50); }
-inline QColor folderSeparator(bool dark){ return dark ? QColor(70, 70, 75) : QColor(220, 220, 225); }
+inline QColor chevron(bool dark)        { return dark ? QColor(0xb0, 0xb0, 0xb0) : QColor(0x66, 0x66, 0x66); }
+inline QColor folderText(bool dark)     { return dark ? QColor(0xe0, 0xe0, 0xe0) : QColor(0x33, 0x33, 0x33); }
+inline QColor folderSeparator(bool dark){ return dark ? QColor(0x3a, 0x3a, 0x3a) : QColor(0xe0, 0xe0, 0xe0); }
 
 // ============================================================================
 // Menu Styling Helper

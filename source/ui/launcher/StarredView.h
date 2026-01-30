@@ -57,6 +57,14 @@ public:
      * @brief Exit batch select mode, clearing all selections.
      */
     void exitSelectMode();
+    
+    /**
+     * @brief Scroll to a folder and expand it if collapsed.
+     * @param folderName The folder to scroll to.
+     * 
+     * L-009: Called when navigating from search results.
+     */
+    void scrollToFolder(const QString& folderName);
 
 protected:
     void showEvent(QShowEvent* event) override;

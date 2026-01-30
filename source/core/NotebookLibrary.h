@@ -229,6 +229,15 @@ public:
      */
     QList<NotebookInfo> search(const QString& query) const;
     
+    /**
+     * @brief Search starred folders by name.
+     * @param query Search query string.
+     * @return Matching folder names (case-insensitive substring match).
+     * 
+     * L-009: Enables folder search in SearchView.
+     */
+    QStringList searchStarredFolders(const QString& query) const;
+    
     // === Thumbnails ===
     
     /**

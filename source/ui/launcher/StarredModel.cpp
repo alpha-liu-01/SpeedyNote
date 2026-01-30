@@ -219,6 +219,17 @@ QString StarredModel::folderNameAt(const QModelIndex& index) const
     return QString();
 }
 
+int StarredModel::rowForFolder(const QString& folderName) const
+{
+    for (int i = 0; i < m_displayList.size(); ++i) {
+        const DisplayItem& item = m_displayList.at(i);
+        if (item.type == FolderHeaderItem && item.folderName == folderName) {
+            return i;
+        }
+    }
+    return -1;  // Not found
+}
+
 QString StarredModel::bundlePathAt(const QModelIndex& index) const
 {
     if (!index.isValid() || index.row() < 0 || index.row() >= m_displayList.size()) {

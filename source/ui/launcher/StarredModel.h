@@ -134,6 +134,15 @@ public:
     QString folderNameAt(const QModelIndex& index) const;
     
     /**
+     * @brief Find the row index of a folder header.
+     * @param folderName The folder name to find.
+     * @return The row index, or -1 if not found.
+     * 
+     * L-009: Used to scroll to a folder from search results.
+     */
+    int rowForFolder(const QString& folderName) const;
+    
+    /**
      * @brief Get the bundle path at a specific index (for notebook cards).
      * @param index The model index.
      * @return The bundle path, or empty string if not a notebook card.

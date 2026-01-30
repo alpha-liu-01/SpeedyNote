@@ -470,6 +470,12 @@ void Launcher::setupSearch()
     connect(m_searchView, &SearchView::notebookMenuRequested, this, [this](const QString& bundlePath) {
         showNotebookContextMenu(bundlePath, QCursor::pos());
     });
+    
+    // L-009: Folder clicked in search results → navigate to StarredView
+    connect(m_searchView, &SearchView::folderClicked, this, [this](const QString& folderName) {
+        switchToView(View::Starred);
+        m_starredView->scrollToFolder(folderName);
+    });
 }
 
 void Launcher::setupFAB()

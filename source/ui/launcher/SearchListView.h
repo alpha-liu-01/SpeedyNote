@@ -29,6 +29,13 @@ signals:
      * @brief Emitted when the 3-dot menu button or right-click on a notebook.
      */
     void notebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
+    
+    /**
+     * @brief Emitted when a folder search result is clicked/tapped.
+     * 
+     * L-009: Folder results navigate to StarredView.
+     */
+    void folderClicked(const QString& folderName);
 
 protected:
     void handleItemTap(const QModelIndex& index, const QPoint& pos) override;

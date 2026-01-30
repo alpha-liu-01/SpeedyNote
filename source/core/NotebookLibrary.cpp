@@ -470,6 +470,25 @@ QList<NotebookInfo> NotebookLibrary::search(const QString& query) const
     return results;
 }
 
+QStringList NotebookLibrary::searchStarredFolders(const QString& query) const
+{
+    if (query.isEmpty()) {
+        return {};
+    }
+    
+    QString lowerQuery = query.toLower();
+    QStringList results;
+    
+    // Case-insensitive substring match on folder names
+    for (const QString& folder : m_starredFolderOrder) {
+        if (folder.toLower().contains(lowerQuery)) {
+            results.append(folder);
+        }
+    }
+    
+    return results;
+}
+
 // === Thumbnails ===
 
 QString NotebookLibrary::thumbnailPathFor(const QString& bundlePath) const

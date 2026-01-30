@@ -232,6 +232,26 @@ void StarredView::exitSelectMode()
     m_listView->exitSelectMode();
 }
 
+void StarredView::scrollToFolder(const QString& folderName)
+{
+    if (folderName.isEmpty()) {
+        return;
+    }
+    
+    // Ensure folder is expanded so user can see its contents
+    if (m_model->isFolderCollapsed(folderName)) {
+        m_model->setFolderCollapsed(folderName, false);
+    }
+    
+    // Find the row for this folder
+    int row = m_model->rowForFolder(folderName);
+    if (row >= 0) {
+        QModelIndex folderIndex = m_model->index(row);
+        // Scroll to make the folder visible at the top
+        m_listView->scrollTo(folderIndex, QAbstractItemView::PositionAtTop);
+    }
+}
+
 void StarredView::updateEmptyState()
 {
     bool isEmpty = m_model->isEmpty();

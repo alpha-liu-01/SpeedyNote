@@ -6,6 +6,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QTimer>
+#include <QStyledItemDelegate>
 
 class SearchListView;
 class SearchModel;
@@ -61,6 +62,13 @@ signals:
      * or when a notebook card is right-clicked or long-pressed.
      */
     void notebookMenuRequested(const QString& bundlePath);
+    
+    /**
+     * @brief Emitted when a folder search result is clicked.
+     * 
+     * L-009: Navigate to StarredView and scroll to this folder.
+     */
+    void folderClicked(const QString& folderName);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -73,6 +81,7 @@ private slots:
     // Slots for list view signals
     void onNotebookClicked(const QString& bundlePath);
     void onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
+    void onFolderClicked(const QString& folderName);
 
 private:
     void setupUi();
@@ -94,6 +103,7 @@ private:
     SearchListView* m_listView = nullptr;
     SearchModel* m_model = nullptr;
     NotebookCardDelegate* m_delegate = nullptr;
+    QStyledItemDelegate* m_compositeDelegate = nullptr;  // L-009: Composite delegate for mixed results
     
     // Debounce timer
     QTimer* m_debounceTimer = nullptr;
