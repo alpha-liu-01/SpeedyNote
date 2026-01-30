@@ -1051,6 +1051,87 @@ The package can be shared with others or transferred to another device.</source>
     </message>
 </context>
 <context>
+    <name>FolderPickerDialog</name>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="17"/>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="51"/>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="228"/>
+        <source>Select Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="69"/>
+        <source>Search folders...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="103"/>
+        <source>+ New Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="109"/>
+        <source>Cancel</source>
+        <translation type="unfinished">取消</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="292"/>
+        <source>RECENT</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="303"/>
+        <source>ALL FOLDERS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="373"/>
+        <source>New Folder</source>
+        <translation type="unfinished">新建文件夹</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="374"/>
+        <source>Folder name:</source>
+        <translation type="unfinished">文件夹的名称：</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="391"/>
+        <source>Folder Exists</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="392"/>
+        <source>A folder named &quot;%1&quot; already exists.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="424"/>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="468"/>
+        <source>Delete Folder</source>
+        <translation type="unfinished">删除文件夹</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="429"/>
+        <source>Folder contains notebooks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="459"/>
+        <source>Cannot Delete</source>
+        <translation type="unfinished">无法删除</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="460"/>
+        <source>Folder &quot;%1&quot; contains notebooks. Remove notebooks from the folder first.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/FolderPickerDialog.cpp" line="469"/>
+        <source>Delete folder &quot;%1&quot;?</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>HighlighterSubToolbar</name>
     <message>
         <location filename="../../source/ui/subtoolbars/HighlighterSubToolbar.cpp" line="37"/>
@@ -1128,79 +1209,91 @@ The package can be shared with others or transferred to another device.</source>
 <context>
     <name>Launcher</name>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="148"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="150"/>
         <source>SpeedyNote</source>
         <translation type="unfinished">极疾记</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="230"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="232"/>
         <source>Return</source>
         <translation type="unfinished">返回</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="248"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="250"/>
         <source>Timeline</source>
         <translation type="unfinished">历史记录</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="255"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="257"/>
         <source>Starred</source>
         <translation type="unfinished">收藏夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="262"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="264"/>
         <source>Search</source>
         <translation type="unfinished">搜索</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="461"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="510"/>
         <source>Import Notebook Package</source>
         <translation type="unfinished">导入笔记本文件包</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="463"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="512"/>
         <source>SpeedyNote Package (*.snbx)</source>
         <translation type="unfinished">SpeedyNote Package (*.snbx)</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="685"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="747"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="774"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1255"/>
         <source>Move to Folder</source>
         <translation type="unfinished">移动到文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="688"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="751"/>
         <source>Unfiled</source>
         <translation type="unfinished">未分类</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="710"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="772"/>
+        <source>More Folders...</source>
+        <translation type="unfinished">更多文件夹...</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="781"/>
+        <source>+ New Folder...</source>
+        <translation type="unfinished">+ 新建文件夹...</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="784"/>
         <source>New Folder</source>
         <translation type="unfinished">新建文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="711"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="785"/>
         <source>Folder name:</source>
         <translation type="unfinished">文件夹的名称：</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="761"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="836"/>
         <source>Rename Folder</source>
         <translation type="unfinished">重命名文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="762"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="889"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="837"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="964"/>
         <source>New name:</source>
         <translation type="unfinished">新的名称：</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="781"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="785"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="856"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="860"/>
         <source>Delete Folder</source>
         <translation type="unfinished">删除文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="786"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="861"/>
         <source>Delete folder &quot;%1&quot;?
 
 Notebooks in this folder will become unfiled.</source>
@@ -1209,12 +1302,12 @@ Notebooks in this folder will become unfiled.</source>
 这个文件夹中的笔记本将会变得未分类。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="813"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="888"/>
         <source>Delete Notebook</source>
         <translation type="unfinished">删除笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="814"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="889"/>
         <source>Permanently delete &quot;%1&quot;?
 
 This action cannot be undone.</source>
@@ -1223,81 +1316,111 @@ This action cannot be undone.</source>
 无法撤销删除哦~。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="888"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="963"/>
         <source>Rename Notebook</source>
         <translation type="unfinished">重命名笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="907"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="955"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="982"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1030"/>
         <source>Rename Failed</source>
         <translation type="unfinished">重命名失败</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="908"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="983"/>
         <source>A notebook named &quot;%1&quot; already exists.</source>
         <translation type="unfinished">一个名为 &quot;%1&quot;的笔记本已经存在。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="956"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1031"/>
         <source>Could not rename the notebook.</source>
         <translation type="unfinished">无法重命名这个笔记本。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="988"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="996"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1063"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1071"/>
         <source>Duplicate Failed</source>
         <translation type="unfinished">克隆失败</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="989"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1064"/>
         <source>Source notebook not found.</source>
         <translation type="unfinished">没有找到源笔记本。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="997"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1072"/>
         <source>Could not create destination directory.</source>
         <translation type="unfinished">无法创建目标目录。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="729"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1027"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1193"/>
+        <source>1 selected</source>
+        <translation type="unfinished">已选中1个</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1195"/>
+        <source>%1 selected</source>
+        <translation type="unfinished">已选中%1个</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1234"/>
+        <source>Select All</source>
+        <translation type="unfinished">全选</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1239"/>
+        <source>Deselect All</source>
+        <translation type="unfinished">全不选</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1248"/>
+        <source>Move to Folder...</source>
+        <translation type="unfinished">移动到文件夹...</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1256"/>
+        <source>Move %1 notebooks to...</source>
+        <translation type="unfinished">把%1个笔记本移动到...</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1266"/>
+        <source>Star Selected</source>
+        <translation type="unfinished">给选中的加星</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="803"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1102"/>
         <source>Duplicate</source>
         <translation type="unfinished">克隆</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="676"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="738"/>
         <source>Unstar</source>
         <translation type="unfinished">取消星标</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="676"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="738"/>
         <source>Star</source>
         <translation type="unfinished">添加星标</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="707"/>
-        <source>New Folder...</source>
-        <translation type="unfinished">新建文件夹...</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="723"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="758"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="797"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="833"/>
         <source>Rename</source>
         <translation type="unfinished">重命名</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="737"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="811"/>
         <source>Show in File Manager</source>
         <translation type="unfinished">在文件管理器里展示</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="745"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="819"/>
         <source>Delete</source>
         <translation type="unfinished">删除</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1028"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1103"/>
         <source>Some files could not be copied.</source>
         <translation type="unfinished">有些文件无法复制。</translation>
     </message>
@@ -2132,21 +2255,31 @@ Please remove the password and try again.</source>
     </message>
 </context>
 <context>
-    <name>NotebookCard</name>
+    <name>NotebookCardDelegate</name>
     <message>
-        <location filename="../../source/ui/launcher/NotebookCard.cpp" line="229"/>
+        <location filename="../../source/ui/launcher/NotebookCardDelegate.cpp" line="260"/>
         <source>PDF</source>
         <translation type="unfinished">PDF</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/NotebookCard.cpp" line="231"/>
+        <location filename="../../source/ui/launcher/NotebookCardDelegate.cpp" line="262"/>
         <source>Edgeless</source>
         <translation type="unfinished">无边笔记</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/NotebookCard.cpp" line="233"/>
+        <location filename="../../source/ui/launcher/NotebookCardDelegate.cpp" line="264"/>
         <source>Paged</source>
         <translation type="unfinished">分页笔记</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/NotebookCardDelegate.cpp" line="301"/>
+        <source>Today %1</source>
+        <translation type="unfinished">今天的%1</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/NotebookCardDelegate.cpp" line="303"/>
+        <source>Yesterday %1</source>
+        <translation type="unfinished">昨天的%1</translation>
     </message>
 </context>
 <context>
@@ -2845,49 +2978,74 @@ https://www.libreoffice.org/download/download/</source>
     </message>
 </context>
 <context>
+    <name>SearchModel</name>
+    <message>
+        <location filename="../../source/ui/launcher/SearchModel.cpp" line="160"/>
+        <source>FOLDERS</source>
+        <translation type="unfinished">文件夹</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/SearchModel.cpp" line="177"/>
+        <source>NOTEBOOKS</source>
+        <translation type="unfinished">笔记本</translation>
+    </message>
+</context>
+<context>
     <name>SearchView</name>
     <message>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="41"/>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="234"/>
         <source>Search notebooks...</source>
         <translation type="unfinished">搜索笔记本...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="54"/>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="247"/>
         <source>Search</source>
         <translation type="unfinished">搜索</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="64"/>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="257"/>
         <source>Clear search</source>
         <translation type="unfinished">清除搜索</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="109"/>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="152"/>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="190"/>
-        <source>Type to search notebooks by name or PDF filename</source>
-        <translation type="unfinished">按照笔记本名称或者PDF名称搜索笔记本</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="199"/>
-        <source>No results found for &quot;%1&quot;</source>
-        <translation type="unfinished">没有找到含&quot;%1&quot;的结果</translation>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="310"/>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="348"/>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="386"/>
+        <source>Type to search notebooks and folders</source>
+        <translation type="unfinished">输入来搜索笔记本和文件夹</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="201"/>
-        <source>%n notebook(s) found</source>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="406"/>
+        <source>%n notebook(s)</source>
         <translation type="unfinished">
-            <numerusform>找到了%n个笔记本</numerusform>
+            <numerusform>%n个笔记本</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="409"/>
+        <source>%n folder(s)</source>
+        <translation type="unfinished">
+            <numerusform>%n个文件夹</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/SearchView.cpp" line="214"/>
-        <source>No notebooks match your search.
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="411"/>
+        <source> found</source>
+        <translation type="unfinished"> 已找到</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="418"/>
+        <source>No results match your search.
 
 Try a different search term.</source>
-        <translation type="unfinished">没有符合关键词的笔记本。
+        <translation type="unfinished">没有符合搜索关键词的结果。
 
-请更改搜索关键词。</translation>
+请换一个搜索关键词。</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/SearchView.cpp" line="401"/>
+        <source>No results found for &quot;%1&quot;</source>
+        <translation type="unfinished">没有找到含&quot;%1&quot;的结果</translation>
     </message>
 </context>
 <context>
@@ -3396,15 +3554,67 @@ Try a different search term.</source>
     </message>
 </context>
 <context>
+    <name>StarredModel</name>
+    <message>
+        <location filename="../../source/ui/launcher/StarredModel.cpp" line="302"/>
+        <source>Unfiled</source>
+        <translation type="unfinished">未归类</translation>
+    </message>
+</context>
+<context>
     <name>StarredView</name>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="122"/>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="184"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="328"/>
+        <source>1 selected</source>
+        <translation type="unfinished">已选中1个</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="330"/>
+        <source>%1 selected</source>
+        <translation type="unfinished">已选中%1个</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="368"/>
+        <source>Select All</source>
+        <translation type="unfinished">全选</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="373"/>
+        <source>Deselect All</source>
+        <translation type="unfinished">全不选</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="382"/>
+        <source>Move to Folder...</source>
+        <translation type="unfinished">移动到文件夹...</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="389"/>
+        <source>Move to Folder</source>
+        <translation type="unfinished">移动到文件夹</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="390"/>
+        <source>Move %1 notebooks to...</source>
+        <translation type="unfinished">把%1个笔记本移动到...</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="400"/>
+        <source>Remove from Folder</source>
+        <translation type="unfinished">从文件夹里移除</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="413"/>
+        <source>Unstar Selected</source>
+        <translation type="unfinished">给选中的取消星标</translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="480"/>
         <source>Unfiled</source>
         <translation type="unfinished">未归类</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="131"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="157"/>
         <source>No starred notebooks yet.
 
 Long-press a notebook in Timeline
@@ -3445,67 +3655,34 @@ and select &quot;Star&quot; to add it here.</source>
     </message>
 </context>
 <context>
-    <name>TimelineDelegate</name>
-    <message>
-        <location filename="../../source/ui/launcher/TimelineDelegate.cpp" line="287"/>
-        <source>PDF Annotation</source>
-        <translation type="unfinished">PDF注释</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/TimelineDelegate.cpp" line="289"/>
-        <source>Edgeless Canvas</source>
-        <translation type="unfinished">无边笔记</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/TimelineDelegate.cpp" line="291"/>
-        <source>Paged Notebook</source>
-        <translation type="unfinished">分页笔记</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/TimelineDelegate.cpp" line="298"/>
-        <source>Unknown date</source>
-        <translation type="unfinished">日期未知</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/TimelineDelegate.cpp" line="305"/>
-        <source>Today at %1</source>
-        <translation type="unfinished">在今天的%1</translation>
-    </message>
-    <message>
-        <location filename="../../source/ui/launcher/TimelineDelegate.cpp" line="307"/>
-        <source>Yesterday at %1</source>
-        <translation type="unfinished">在昨天的 %1</translation>
-    </message>
-</context>
-<context>
     <name>TimelineModel</name>
     <message>
-        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="141"/>
+        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="181"/>
         <source>Unknown</source>
         <translation type="unfinished">未知</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="149"/>
+        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="189"/>
         <source>Today</source>
         <translation type="unfinished">今天</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="154"/>
+        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="194"/>
         <source>Yesterday</source>
         <translation type="unfinished">昨天</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="159"/>
+        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="199"/>
         <source>This Week</source>
         <translation type="unfinished">这周</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="164"/>
+        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="204"/>
         <source>This Month</source>
         <translation type="unfinished">这个月</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="170"/>
+        <location filename="../../source/ui/launcher/TimelineModel.cpp" line="210"/>
         <source>Last Month</source>
         <translation type="unfinished">上个月</translation>
     </message>
