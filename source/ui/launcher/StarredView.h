@@ -9,7 +9,6 @@ class StarredListView;
 class StarredModel;
 class NotebookCardDelegate;
 class FolderHeaderDelegate;
-class QStackedWidget;
 
 /**
  * @brief iOS homescreen-style view for starred notebooks with folders.

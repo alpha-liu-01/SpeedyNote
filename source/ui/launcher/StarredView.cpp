@@ -243,7 +243,8 @@ void StarredView::setupSelectModeHeader()
     headerLayout->setSpacing(8);
     
     // Back button (←)
-    m_backButton = new QPushButton(this);
+    // Parent is m_selectModeHeader so it's properly contained in the header
+    m_backButton = new QPushButton(m_selectModeHeader);
     m_backButton->setObjectName("BackButton");
     m_backButton->setText("←");
     m_backButton->setFixedSize(40, 40);
@@ -261,7 +262,7 @@ void StarredView::setupSelectModeHeader()
     headerLayout->addWidget(m_backButton);
     
     // Selection count label
-    m_selectionCountLabel = new QLabel(this);
+    m_selectionCountLabel = new QLabel(m_selectModeHeader);
     m_selectionCountLabel->setObjectName("SelectionCountLabel");
     
     QFont countFont = m_selectionCountLabel->font();
@@ -272,7 +273,7 @@ void StarredView::setupSelectModeHeader()
     headerLayout->addWidget(m_selectionCountLabel, 1);  // Stretch
     
     // Overflow menu button (⋮)
-    m_overflowMenuButton = new QPushButton(this);
+    m_overflowMenuButton = new QPushButton(m_selectModeHeader);
     m_overflowMenuButton->setObjectName("OverflowMenuButton");
     m_overflowMenuButton->setText("⋮");
     m_overflowMenuButton->setFixedSize(40, 40);
