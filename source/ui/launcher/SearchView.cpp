@@ -32,6 +32,18 @@ public:
         , m_cardDelegate(cardDelegate)
         , m_listView(listView)
     {
+        // Pre-load and pre-scale folder icons for efficiency
+        QPixmap lightIcon(":/resources/icons/folder.png");
+        QPixmap darkIcon(":/resources/icons/folder_reversed.png");
+        
+        if (!lightIcon.isNull()) {
+            m_folderIconLight = lightIcon.scaled(FOLDER_ICON_SIZE, FOLDER_ICON_SIZE,
+                Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        if (!darkIcon.isNull()) {
+            m_folderIconDark = darkIcon.scaled(FOLDER_ICON_SIZE, FOLDER_ICON_SIZE,
+                Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
     }
     
     void setDarkMode(bool dark) { m_darkMode = dark; }
@@ -138,18 +150,13 @@ private:
         painter->setPen(QPen(ThemeColors::cardBorder(m_darkMode), 1));
         painter->drawPath(cardPath);
         
-        // === Folder icon (using resource image) ===
-        QString iconPath = m_darkMode 
-            ? ":/resources/icons/folder_reversed.png"
-            : ":/resources/icons/folder.png";
-        QPixmap folderIcon(iconPath);
+        // === Folder icon (using pre-scaled cached icon) ===
+        const QPixmap& folderIcon = m_darkMode ? m_folderIconDark : m_folderIconLight;
         
         if (!folderIcon.isNull()) {
-            // Scale icon to fit
-            int iconSize = 24;
-            QRect iconRect(rect.left() + 12, rect.center().y() - iconSize/2, iconSize, iconSize);
-            painter->drawPixmap(iconRect, folderIcon.scaled(iconSize, iconSize, 
-                Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            QRect iconRect(rect.left() + 12, rect.center().y() - FOLDER_ICON_SIZE/2, 
+                           FOLDER_ICON_SIZE, FOLDER_ICON_SIZE);
+            painter->drawPixmap(iconRect, folderIcon);
         }
         
         // === Folder name ===
@@ -181,9 +188,14 @@ private:
     QListView* m_listView;
     bool m_darkMode = false;
     
+    // Cached folder icons (avoid loading from resources on every paint)
+    QPixmap m_folderIconLight;
+    QPixmap m_folderIconDark;
+    
     static constexpr int SECTION_HEADER_HEIGHT = 32;
     static constexpr int FOLDER_ITEM_HEIGHT = 48;
     static constexpr int FOLDER_CORNER_RADIUS = 12;  // Match notebook card corner radius
+    static constexpr int FOLDER_ICON_SIZE = 24;
 };
 
 // ============================================================================
