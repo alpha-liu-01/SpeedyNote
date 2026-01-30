@@ -42,6 +42,7 @@ public:
         IsStarredRole,                           // bool: whether notebook is starred
         IsPdfBasedRole,                          // bool: whether notebook is PDF-based
         IsEdgelessRole,                          // bool: whether notebook is edgeless
+        LastModifiedRole,                        // QDateTime: last modification time
     };
 
     explicit SearchModel(QObject* parent = nullptr);

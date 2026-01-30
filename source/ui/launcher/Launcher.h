@@ -144,7 +144,7 @@ private:
     QWidget* m_timelineView = nullptr;
     TimelineListView* m_timelineList = nullptr;
     TimelineModel* m_timelineModel = nullptr;
-    TimelineDelegate* m_timelineDelegate = nullptr;
+    TimelineDelegate* m_timelineDelegate = nullptr;  // For section headers only
     
     // Starred view
     StarredView* m_starredView = nullptr;

@@ -44,6 +44,9 @@ QVariant SearchModel::data(const QModelIndex& index, int role) const
         case IsEdgelessRole:
             return info.isEdgeless;
             
+        case LastModifiedRole:
+            return info.lastModified;
+            
         default:
             return QVariant();
     }
@@ -59,6 +62,7 @@ QHash<int, QByteArray> SearchModel::roleNames() const
     roles[IsStarredRole] = "isStarred";
     roles[IsPdfBasedRole] = "isPdfBased";
     roles[IsEdgelessRole] = "isEdgeless";
+    roles[LastModifiedRole] = "lastModified";
     return roles;
 }
 

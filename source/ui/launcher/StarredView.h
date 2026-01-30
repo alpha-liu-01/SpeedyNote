@@ -57,18 +57,29 @@ signals:
     void notebookClicked(const QString& bundlePath);
     
     /**
+     * @brief Emitted when the 3-dot menu button on a notebook card is clicked,
+     * or when a notebook card is right-clicked or long-pressed.
+     * 
+     * This is the signal for showing the single-item context menu.
+     */
+    void notebookMenuRequested(const QString& bundlePath);
+    
+    /**
      * @brief Emitted when a notebook card is long-pressed.
+     * @deprecated Use notebookMenuRequested for context menu.
+     * This signal will be repurposed for batch select mode (L-007).
      */
     void notebookLongPressed(const QString& bundlePath);
     
     /**
-     * @brief Emitted when a folder header is long-pressed.
+     * @brief Emitted when a folder header is long-pressed or right-clicked.
      */
     void folderLongPressed(const QString& folderName);
 
 private slots:
     // Slots for list view signals
     void onNotebookClicked(const QString& bundlePath);
+    void onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
     void onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
     void onFolderClicked(const QString& folderName);
     void onFolderLongPressed(const QString& folderName, const QPoint& globalPos);

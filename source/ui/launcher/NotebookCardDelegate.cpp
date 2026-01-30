@@ -5,6 +5,8 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QFileInfo>
+#include <QDateTime>
+#include <QDate>
 
 NotebookCardDelegate::NotebookCardDelegate(QObject* parent)
     : QStyledItemDelegate(parent)
@@ -64,7 +66,7 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     // The rect from option is the cell rect - use it directly as card rect
     QRect cardRect = rect;
     
-    // === Background ===
+    // === Card Background ===
     QColor bgColor = backgroundColor(selected, hovered);
     
     // Draw card with shadow (light mode only)
@@ -90,7 +92,7 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     
     // === Thumbnail area ===
     QRect thumbRect(cardRect.left() + PADDING, cardRect.top() + PADDING,
-                    CARD_WIDTH - 2 * PADDING, THUMBNAIL_HEIGHT);
+                    cardRect.width() - 2 * PADDING, THUMBNAIL_HEIGHT);
     
     QString thumbnailPath = index.data(ThumbnailPathRole).toString();
     drawThumbnail(painter, thumbRect, thumbnailPath);
@@ -110,7 +112,7 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     
     // === Name label ===
     int textY = cardRect.top() + PADDING + THUMBNAIL_HEIGHT + 6;
-    int textWidth = CARD_WIDTH - 2 * PADDING;
+    int textWidth = cardRect.width() - 2 * PADDING;
     
     QFont nameFont = painter->font();
     nameFont.setPointSize(10);
@@ -130,8 +132,26 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     QRect nameRect(cardRect.left() + PADDING, textY, textWidth, 18);
     painter->drawText(nameRect, Qt::AlignLeft | Qt::AlignTop, elidedName);
     
+    // === Date/time (if available) ===
+    int dateY = textY + 18;
+    QDateTime lastModified = index.data(LastModifiedRole).toDateTime();
+    if (lastModified.isValid()) {
+        QFont dateFont = painter->font();
+        dateFont.setPointSize(8);
+        dateFont.setBold(false);
+        painter->setFont(dateFont);
+        
+        painter->setPen(ThemeColors::textSecondary(m_darkMode));
+        
+        QString dateStr = formatDateTime(lastModified);
+        QRect dateRect(cardRect.left() + PADDING, dateY, textWidth, 14);
+        painter->drawText(dateRect, Qt::AlignLeft | Qt::AlignTop, dateStr);
+        
+        dateY += 14;
+    }
+    
     // === Type indicator ===
-    int typeY = textY + 20;
+    int typeY = dateY + 2;
     
     QFont typeFont = painter->font();
     typeFont.setPointSize(8);
@@ -143,8 +163,14 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     
     painter->setPen(typeIndicatorColor(isPdf, isEdgeless));
     
-    QRect typeRect(cardRect.left() + PADDING, typeY, textWidth, 14);
+    // Reduce text width to make room for menu button
+    int typeTextWidth = textWidth - MENU_BUTTON_SIZE - MENU_BUTTON_MARGIN;
+    QRect typeRect(cardRect.left() + PADDING, typeY, typeTextWidth, 14);
     painter->drawText(typeRect, Qt::AlignLeft | Qt::AlignTop, typeIndicatorText(isPdf, isEdgeless));
+    
+    // === 3-dot menu button (bottom-right) ===
+    QRect menuRect = menuButtonRect(cardRect);
+    drawMenuButton(painter, menuRect, hovered);
 }
 
 void NotebookCardDelegate::drawThumbnail(QPainter* painter, const QRect& rect,
@@ -243,4 +269,64 @@ QColor NotebookCardDelegate::backgroundColor(bool selected, bool hovered) const
     } else {
         return ThemeColors::itemBackground(m_darkMode);
     }
+}
+
+QString NotebookCardDelegate::formatDateTime(const QDateTime& dateTime) const
+{
+    if (!dateTime.isValid()) {
+        return QString();
+    }
+    
+    QDate today = QDate::currentDate();
+    QDate date = dateTime.date();
+    QString timeStr = dateTime.time().toString("h:mm AP");
+    
+    if (date == today) {
+        return tr("Today %1").arg(timeStr);
+    } else if (date == today.addDays(-1)) {
+        return tr("Yesterday %1").arg(timeStr);
+    } else if (date.year() == today.year()) {
+        // Same year: "Jan 15, 2:30 PM"
+        return date.toString("MMM d") + ", " + timeStr;
+    } else {
+        // Different year: "Jan 15, 2024"
+        return date.toString("MMM d, yyyy");
+    }
+}
+
+QRect NotebookCardDelegate::menuButtonRect(const QRect& cardRect)
+{
+    // Position menu button at bottom-right of card
+    // Align center horizontally with star indicator
+    // Star: right edge at cardRect.right() - PADDING - 2, width = 18
+    // Star center: cardRect.right() - PADDING - 2 - 9 = cardRect.right() - PADDING - 11
+    int starCenterX = cardRect.right() - PADDING - 11;
+    int x = starCenterX - MENU_BUTTON_SIZE / 2;
+    int y = cardRect.bottom() - PADDING - MENU_BUTTON_SIZE + MENU_BUTTON_MARGIN;
+    return QRect(x, y, MENU_BUTTON_SIZE, MENU_BUTTON_SIZE);
+}
+
+void NotebookCardDelegate::drawMenuButton(QPainter* painter, const QRect& buttonRect, 
+                                           bool /*hovered*/) const
+{
+    // Note: We don't show hover effect here because delegates can't track
+    // per-element hover state. The whole card hover is not useful for this.
+    // The dots are always visible as a clickable affordance.
+    
+    // Draw three vertical dots (⋮)
+    QColor dotColor = ThemeColors::textSecondary(m_darkMode);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(dotColor);
+    
+    int dotSize = 3;
+    int dotSpacing = 5;
+    int centerX = buttonRect.center().x();
+    int centerY = buttonRect.center().y();
+    
+    // Top dot
+    painter->drawEllipse(QPoint(centerX, centerY - dotSpacing), dotSize / 2, dotSize / 2);
+    // Middle dot
+    painter->drawEllipse(QPoint(centerX, centerY), dotSize / 2, dotSize / 2);
+    // Bottom dot
+    painter->drawEllipse(QPoint(centerX, centerY + dotSpacing), dotSize / 2, dotSize / 2);
 }

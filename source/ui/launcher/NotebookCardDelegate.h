@@ -20,12 +20,16 @@ struct NotebookInfo;
  * - Thumbnail with C+D hybrid display (top-crop for tall, letterbox for short)
  * - Name label (elided if too long)
  * - Type indicator (PDF/Edgeless/Paged)
- * - Star indicator (if starred)
+ * - Star indicator (top-right, if starred)
+ * - 3-dot menu button (bottom-right) for single-item actions
  * - Hover and selected states
  * - Shadow in light mode
  * - Dark mode support
  * 
  * This delegate is shared between StarredView and SearchView.
+ * 
+ * The 3-dot menu button area can be queried via menuButtonRect() to allow
+ * list views to detect clicks on it and show a context menu.
  * 
  * Phase P.3 Performance Optimization: Part of Model/View refactor.
  */
@@ -51,6 +55,16 @@ public:
      * @brief Check if dark mode is enabled.
      */
     bool isDarkMode() const { return m_darkMode; }
+    
+    /**
+     * @brief Get the rectangle for the 3-dot menu button within a card.
+     * @param cardRect The bounding rectangle of the card.
+     * @return The rectangle where the menu button is painted.
+     * 
+     * List views should use this to detect clicks on the menu button area
+     * and show the single-item context menu instead of entering select mode.
+     */
+    static QRect menuButtonRect(const QRect& cardRect);
 
 public slots:
     /**
@@ -72,7 +86,7 @@ public slots:
 
 public:
     // Data roles used by this delegate
-    // These should match the roles defined in StarredModel and SearchModel
+    // These should match the roles defined in StarredModel, SearchModel, and TimelineModel
     enum DataRoles {
         NotebookInfoRole = Qt::UserRole + 100,  // QVariant containing NotebookInfo
         BundlePathRole,                          // QString: path to notebook bundle
@@ -81,6 +95,7 @@ public:
         IsStarredRole,                           // bool: whether notebook is starred
         IsPdfBasedRole,                          // bool: whether notebook is PDF-based
         IsEdgelessRole,                          // bool: whether notebook is edgeless
+        LastModifiedRole,                        // QDateTime: last modification time
     };
 
 private:
@@ -98,6 +113,11 @@ private:
                        const QString& thumbnailPath) const;
     
     /**
+     * @brief Draw the 3-dot menu button.
+     */
+    void drawMenuButton(QPainter* painter, const QRect& buttonRect, bool hovered) const;
+    
+    /**
      * @brief Get type indicator text (PDF, Edgeless, Paged).
      */
     QString typeIndicatorText(bool isPdf, bool isEdgeless) const;
@@ -112,18 +132,29 @@ private:
      */
     QColor backgroundColor(bool selected, bool hovered) const;
     
+    /**
+     * @brief Format date/time for display on card.
+     * @param dateTime The date/time to format.
+     * @return Formatted string like "Today 2:30 PM" or "Jan 15, 2:30 PM".
+     */
+    QString formatDateTime(const QDateTime& dateTime) const;
+    
     // Cached pixmaps for performance
     mutable QHash<QString, QPixmap> m_thumbnailCache;
     
     bool m_darkMode = false;
     
-    // Card dimensions (match original NotebookCard widget)
-    static constexpr int CARD_WIDTH = 120;
-    static constexpr int CARD_HEIGHT = 160;
+    // Card dimensions (wider to fit date/time, taller for extra line)
+    static constexpr int CARD_WIDTH = 140;
+    static constexpr int CARD_HEIGHT = 180;
     static constexpr int THUMBNAIL_HEIGHT = 100;
     static constexpr int PADDING = 8;
     static constexpr int CORNER_RADIUS = 12;
     static constexpr int THUMBNAIL_CORNER_RADIUS = 8;
+    
+    // Menu button dimensions
+    static constexpr int MENU_BUTTON_SIZE = 24;
+    static constexpr int MENU_BUTTON_MARGIN = 4;
 };
 
 #endif // NOTEBOOKCARDDELEGATE_H

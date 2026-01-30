@@ -62,6 +62,7 @@ public:
         IsStarredRole,
         IsPdfBasedRole,
         IsEdgelessRole,
+        LastModifiedRole,  // QDateTime: last modification time
         
         // FolderHeaderDelegate roles (Qt::UserRole + 200 range)
         FolderNameRole = Qt::UserRole + 200,

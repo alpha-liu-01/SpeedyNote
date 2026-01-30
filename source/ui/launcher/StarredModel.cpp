@@ -81,6 +81,12 @@ QVariant StarredModel::data(const QModelIndex& index, int role) const
             }
             return false;
             
+        case LastModifiedRole:
+            if (item.type == NotebookCardItem) {
+                return item.notebook.lastModified;
+            }
+            return QDateTime();
+            
         // === FolderHeaderDelegate roles ===
         case FolderNameRole:
             if (item.type == FolderHeaderItem) {
@@ -114,6 +120,7 @@ QHash<int, QByteArray> StarredModel::roleNames() const
     roles[IsStarredRole] = "isStarred";
     roles[IsPdfBasedRole] = "isPdfBased";
     roles[IsEdgelessRole] = "isEdgeless";
+    roles[LastModifiedRole] = "lastModified";
     
     // FolderHeaderDelegate roles
     roles[FolderNameRole] = "folderName";

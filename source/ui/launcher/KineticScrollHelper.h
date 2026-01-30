@@ -90,7 +90,7 @@ private:
     
     // Constants
     static constexpr int KINETIC_TICK_MS = 16;          // ~60 FPS
-    static constexpr qreal KINETIC_DECELERATION = 0.92; // Per-tick multiplier
+    static constexpr qreal KINETIC_DECELERATION = 0.93; // Per-tick multiplier
     static constexpr qreal KINETIC_MIN_VELOCITY = 0.5;  // Stop threshold (px/ms)
     static constexpr qreal KINETIC_MAX_VELOCITY = 3.0;  // Cap extreme velocities
     static constexpr qreal VELOCITY_SMOOTHING = 0.4;    // Exponential smoothing alpha

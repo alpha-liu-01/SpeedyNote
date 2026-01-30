@@ -123,6 +123,8 @@ void StarredView::setupUi()
     // Connect list view signals
     connect(m_listView, &StarredListView::notebookClicked,
             this, &StarredView::onNotebookClicked);
+    connect(m_listView, &StarredListView::notebookMenuRequested,
+            this, &StarredView::onNotebookMenuRequested);
     connect(m_listView, &StarredListView::notebookLongPressed,
             this, &StarredView::onNotebookLongPressed);
     connect(m_listView, &StarredListView::folderClicked,
@@ -212,9 +214,17 @@ void StarredView::onNotebookClicked(const QString& bundlePath)
     emit notebookClicked(bundlePath);
 }
 
+void StarredView::onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos)
+{
+    Q_UNUSED(globalPos)
+    // Emit signal for context menu (3-dot button, right-click, or long-press)
+    emit notebookMenuRequested(bundlePath);
+}
+
 void StarredView::onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos)
 {
     Q_UNUSED(globalPos)
+    // TODO (L-007): This will enter batch select mode instead of showing menu
     emit notebookLongPressed(bundlePath);
 }
 

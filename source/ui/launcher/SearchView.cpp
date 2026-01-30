@@ -93,8 +93,9 @@ void SearchView::setupUi()
     // Connect list view signals
     connect(m_listView, &SearchListView::notebookClicked,
             this, &SearchView::onNotebookClicked);
-    connect(m_listView, &SearchListView::notebookLongPressed,
-            this, &SearchView::onNotebookLongPressed);
+    connect(m_listView, &SearchListView::notebookMenuRequested,
+            this, &SearchView::onNotebookMenuRequested);
+    // Note: Long-press in SearchView shows context menu directly (no batch select)
     
     mainLayout->addWidget(m_listView, 1);
     
@@ -221,11 +222,13 @@ void SearchView::onNotebookClicked(const QString& bundlePath)
     emit notebookClicked(bundlePath);
 }
 
-void SearchView::onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos)
+void SearchView::onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos)
 {
     Q_UNUSED(globalPos)
-    emit notebookLongPressed(bundlePath);
+    // Emit signal for context menu (3-dot button, right-click, or long-press)
+    emit notebookMenuRequested(bundlePath);
 }
+
 
 void SearchView::keyPressEvent(QKeyEvent* event)
 {

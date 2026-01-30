@@ -1,22 +1,10 @@
 #include "StarredListView.h"
 #include "StarredModel.h"
-#include "KineticScrollHelper.h"
-
-#include <QMouseEvent>
-#include <QScrollBar>
+#include "NotebookCardDelegate.h"
 
 StarredListView::StarredListView(QWidget* parent)
-    : QListView(parent)
+    : KineticListView(parent)
 {
-    // Configure long-press timer
-    m_longPressTimer.setSingleShot(true);
-    m_longPressTimer.setInterval(LONG_PRESS_MS);
-    connect(&m_longPressTimer, &QTimer::timeout,
-            this, &StarredListView::onLongPressTimeout);
-    
-    // Setup kinetic scroll helper
-    m_kineticHelper = new KineticScrollHelper(verticalScrollBar(), this);
-    
     // Configure view for mixed content (folder headers + notebook cards grid)
     // Use IconMode for grid layout of notebook cards.
     // Folder headers return a wide sizeHint (viewport width) so they span their own row.
@@ -32,6 +20,11 @@ StarredListView::StarredListView(QWidget* parent)
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     setFrameShape(QFrame::NoFrame);
+    
+    // Disable Qt's native selection highlight - delegate handles selection drawing
+    // This prevents rectangular selection from showing around rounded cards
+    setStyleSheet("QListView::item:selected { background: transparent; }"
+                  "QListView::item:selected:active { background: transparent; }");
     
     // Enable mouse tracking for hover effects
     setMouseTracking(true);
@@ -69,187 +62,80 @@ QString StarredListView::bundlePathForIndex(const QModelIndex& index) const
     return index.data(StarredModel::BundlePathRole).toString();
 }
 
-void StarredListView::mousePressEvent(QMouseEvent* event)
+bool StarredListView::isOnMenuButton(const QModelIndex& index, const QPoint& pos) const
 {
-    if (event->button() == Qt::LeftButton) {
-        // Stop any ongoing kinetic scroll and start tracking
-        m_kineticHelper->startTracking();
-        
-        m_pressPos = event->pos();
-        m_pressedIndex = indexAt(event->pos());
-        m_longPressTriggered = false;
-        m_touchScrolling = false;
-        m_scrollStartValue = verticalScrollBar()->value();
-        
-        // For touch input, don't let base class handle press yet
-        // We'll decide on release whether it was a tap or scroll
-        if (KineticScrollHelper::isTouchInput(event)) {
-            // Only start long-press timer if we pressed on a valid item
-            if (m_pressedIndex.isValid()) {
-                m_longPressTimer.start();
-            }
-            event->accept();
-            return;
-        }
-        
-        // Only start long-press timer if we pressed on a valid item
-        if (m_pressedIndex.isValid()) {
-            m_longPressTimer.start();
-        }
+    if (!index.isValid() || isFolderHeader(index)) {
+        return false;  // Only notebook cards have menu buttons
     }
-    else if (event->button() == Qt::RightButton) {
-        // Right-click triggers context menu (same as long-press)
-        QModelIndex index = indexAt(event->pos());
-        if (index.isValid()) {
-            QPoint globalPos = viewport()->mapToGlobal(event->pos());
-            
-            if (isFolderHeader(index)) {
-                QString folderName = folderNameForIndex(index);
-                if (!folderName.isEmpty()) {
-                    emit folderLongPressed(folderName, globalPos);
-                }
+    
+    QRect itemRect = visualRect(index);
+    QRect menuRect = NotebookCardDelegate::menuButtonRect(itemRect);
+    
+    // Add some padding for easier clicking
+    constexpr int HIT_PADDING = 8;
+    menuRect.adjust(-HIT_PADDING, -HIT_PADDING, HIT_PADDING, HIT_PADDING);
+    
+    return menuRect.contains(pos);
+}
+
+void StarredListView::handleItemTap(const QModelIndex& index, const QPoint& pos)
+{
+    if (!index.isValid()) return;
+    
+    if (isFolderHeader(index)) {
+        // Folder header: toggle collapsed state
+        QString folderName = folderNameForIndex(index);
+        if (!folderName.isEmpty()) {
+            if (m_starredModel) {
+                m_starredModel->toggleFolder(folderName);
+            }
+            emit folderClicked(folderName);
+        }
+    } else {
+        // Notebook card: check if tap was on menu button
+        QString bundlePath = bundlePathForIndex(index);
+        if (!bundlePath.isEmpty()) {
+            if (isOnMenuButton(index, pos)) {
+                QPoint globalPos = viewport()->mapToGlobal(pos);
+                emit notebookMenuRequested(bundlePath, globalPos);
             } else {
-                QString bundlePath = bundlePathForIndex(index);
-                if (!bundlePath.isEmpty()) {
-                    emit notebookLongPressed(bundlePath, globalPos);
-                }
+                emit notebookClicked(bundlePath);
             }
         }
-        event->accept();
-        return;
     }
-    
-    // Call base class to handle normal click behavior (mouse only)
-    QListView::mousePressEvent(event);
 }
 
-void StarredListView::mouseReleaseEvent(QMouseEvent* event)
+void StarredListView::handleRightClick(const QModelIndex& index, const QPoint& globalPos)
 {
-    if (event->button() == Qt::LeftButton) {
-        m_longPressTimer.stop();
-        bool wasScrolling = m_touchScrolling;
-        m_touchScrolling = false;
-        
-        // If long-press was triggered, don't process as a click
-        if (m_longPressTriggered) {
-            m_longPressTriggered = false;
-            event->accept();
-            return;
+    if (!index.isValid()) return;
+    
+    if (isFolderHeader(index)) {
+        QString folderName = folderNameForIndex(index);
+        if (!folderName.isEmpty()) {
+            emit folderLongPressed(folderName, globalPos);
         }
-        
-        // Handle touch input specially
-        if (KineticScrollHelper::isTouchInput(event)) {
-            if (wasScrolling) {
-                // Start kinetic scroll if velocity is high enough
-                m_kineticHelper->finishTracking();
-                event->accept();
-                return;
-            }
-            
-            // It was a tap (no scroll) - handle based on item type
-            if (m_pressedIndex.isValid()) {
-                if (isFolderHeader(m_pressedIndex)) {
-                    QString folderName = folderNameForIndex(m_pressedIndex);
-                    if (!folderName.isEmpty()) {
-                        // Toggle folder collapsed state
-                        if (m_starredModel) {
-                            m_starredModel->toggleFolder(folderName);
-                        }
-                        emit folderClicked(folderName);
-                    }
-                } else {
-                    QString bundlePath = bundlePathForIndex(m_pressedIndex);
-                    if (!bundlePath.isEmpty()) {
-                        emit notebookClicked(bundlePath);
-                    }
-                }
-            }
-            event->accept();
-            return;
-        }
-        
-        // For mouse input, handle click on release
-        if (m_pressedIndex.isValid() && indexAt(event->pos()) == m_pressedIndex) {
-            if (isFolderHeader(m_pressedIndex)) {
-                QString folderName = folderNameForIndex(m_pressedIndex);
-                if (!folderName.isEmpty()) {
-                    // Toggle folder collapsed state
-                    if (m_starredModel) {
-                        m_starredModel->toggleFolder(folderName);
-                    }
-                    emit folderClicked(folderName);
-                }
-            } else {
-                QString bundlePath = bundlePathForIndex(m_pressedIndex);
-                if (!bundlePath.isEmpty()) {
-                    emit notebookClicked(bundlePath);
-                }
-            }
+    } else {
+        QString bundlePath = bundlePathForIndex(index);
+        if (!bundlePath.isEmpty()) {
+            emit notebookMenuRequested(bundlePath, globalPos);
         }
     }
-    
-    // Call base class to handle normal release behavior
-    QListView::mouseReleaseEvent(event);
 }
 
-void StarredListView::mouseMoveEvent(QMouseEvent* event)
+void StarredListView::handleLongPress(const QModelIndex& index, const QPoint& globalPos)
 {
-    if ((event->buttons() & Qt::LeftButton)) {
-        QPoint delta = event->pos() - m_pressPos;
-        
-        // Cancel long-press if moved beyond threshold
-        if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
-            if (m_longPressTimer.isActive()) {
-                m_longPressTimer.stop();
-            }
-            
-            // Start touch scrolling for touch input
-            if (KineticScrollHelper::isTouchInput(event) && !m_touchScrolling) {
-                m_touchScrolling = true;
-            }
+    if (!index.isValid()) return;
+    
+    if (isFolderHeader(index)) {
+        QString folderName = folderNameForIndex(index);
+        if (!folderName.isEmpty()) {
+            emit folderLongPressed(folderName, globalPos);
         }
-        
-        // Handle touch scrolling
-        if (m_touchScrolling && KineticScrollHelper::isTouchInput(event)) {
-            // Apply scroll
-            int newValue = m_scrollStartValue - delta.y();
-            int oldValue = verticalScrollBar()->value();
-            verticalScrollBar()->setValue(newValue);
-            
-            // Update velocity tracking
-            int scrollDelta = verticalScrollBar()->value() - oldValue;
-            m_kineticHelper->updateVelocity(scrollDelta);
-            
-            event->accept();
-            return;
+    } else {
+        QString bundlePath = bundlePathForIndex(index);
+        if (!bundlePath.isEmpty()) {
+            // Long-press emits notebookLongPressed for batch select mode (L-007)
+            emit notebookLongPressed(bundlePath, globalPos);
         }
     }
-    
-    // Call base class to handle normal move behavior
-    QListView::mouseMoveEvent(event);
-}
-
-void StarredListView::onLongPressTimeout()
-{
-    m_longPressTriggered = true;
-    
-    // Emit appropriate signal based on item type
-    if (m_pressedIndex.isValid()) {
-        QPoint globalPos = viewport()->mapToGlobal(m_pressPos);
-        
-        if (isFolderHeader(m_pressedIndex)) {
-            QString folderName = folderNameForIndex(m_pressedIndex);
-            if (!folderName.isEmpty()) {
-                emit folderLongPressed(folderName, globalPos);
-            }
-        } else {
-            QString bundlePath = bundlePathForIndex(m_pressedIndex);
-            if (!bundlePath.isEmpty()) {
-                emit notebookLongPressed(bundlePath, globalPos);
-            }
-        }
-    }
-    
-    // Clear selection state to prevent accidental clicks after menu closes
-    clearSelection();
 }

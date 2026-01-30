@@ -3,6 +3,7 @@
 #include "TimelineModel.h"
 #include "TimelineDelegate.h"
 #include "TimelineListView.h"
+#include "NotebookCardDelegate.h"
 #include "StarredView.h"
 #include "SearchView.h"
 #include "FloatingActionButton.h"
@@ -299,6 +300,74 @@ void Launcher::setupNavigation()
     });
 }
 
+// ============================================================================
+// CompositeTimelineDelegate - Local delegate for timeline (headers + cards)
+// ============================================================================
+
+/**
+ * @brief Composite delegate that handles both section headers and notebook cards.
+ * 
+ * Uses TimelineDelegate for section headers (Today, Yesterday, etc.) and
+ * NotebookCardDelegate for notebook cards in a grid layout.
+ * 
+ * For section headers, returns a wide sizeHint so they span the full viewport
+ * width, forcing them onto their own row in IconMode.
+ */
+class CompositeTimelineDelegate : public QStyledItemDelegate {
+public:
+    CompositeTimelineDelegate(NotebookCardDelegate* cardDelegate,
+                              TimelineDelegate* headerDelegate,
+                              QListView* listView,
+                              QObject* parent = nullptr)
+        : QStyledItemDelegate(parent)
+        , m_cardDelegate(cardDelegate)
+        , m_headerDelegate(headerDelegate)
+        , m_listView(listView)
+    {
+    }
+    
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override
+    {
+        bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
+        
+        if (isHeader) {
+            m_headerDelegate->paint(painter, option, index);
+        } else {
+            m_cardDelegate->paint(painter, option, index);
+        }
+    }
+    
+    QSize sizeHint(const QStyleOptionViewItem& option,
+                   const QModelIndex& index) const override
+    {
+        bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
+        
+        if (isHeader) {
+            // Section headers should span the full viewport width
+            // This forces them onto their own row in IconMode
+            QSize baseSize = m_headerDelegate->sizeHint(option, index);
+            int viewportWidth = m_listView ? m_listView->viewport()->width() : 600;
+            // Subtract spacing to account for IconMode margins
+            int headerWidth = qMax(viewportWidth - 24, baseSize.width());
+            return QSize(headerWidth, baseSize.height());
+        } else {
+            return m_cardDelegate->sizeHint(option, index);
+        }
+    }
+    
+    void setDarkMode(bool dark)
+    {
+        m_cardDelegate->setDarkMode(dark);
+        m_headerDelegate->setDarkMode(dark);
+    }
+
+private:
+    NotebookCardDelegate* m_cardDelegate;
+    TimelineDelegate* m_headerDelegate;
+    QListView* m_listView;
+};
+
 void Launcher::setupTimeline()
 {
     // Create layout for timeline view
@@ -306,86 +375,47 @@ void Launcher::setupTimeline()
     layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(0);
     
-    // Create model and delegate
+    // Create model
     m_timelineModel = new TimelineModel(this);
-    m_timelineDelegate = new TimelineDelegate(this);
     
-    // CR-P.1: Connect thumbnailUpdated to invalidate delegate's cache
+    // Create delegates
+    auto* cardDelegate = new NotebookCardDelegate(this);
+    m_timelineDelegate = new TimelineDelegate(this);  // Used for section headers only
+    
+    // CR-P.1: Connect thumbnailUpdated to invalidate card delegate's cache
     connect(NotebookLibrary::instance(), &NotebookLibrary::thumbnailUpdated,
-            m_timelineDelegate, &TimelineDelegate::invalidateThumbnail);
+            cardDelegate, &NotebookCardDelegate::invalidateThumbnail);
     
+    cardDelegate->setDarkMode(isDarkMode());
     m_timelineDelegate->setDarkMode(isDarkMode());
     
-    // Create list view (using custom TimelineListView for long-press support)
+    // Create list view (configured in constructor for IconMode grid layout)
     m_timelineList = new TimelineListView(m_timelineView);
     m_timelineList->setObjectName("TimelineList");
     m_timelineList->setModel(m_timelineModel);
-    m_timelineList->setItemDelegate(m_timelineDelegate);
     
-    // Configure list view for touch
-    m_timelineList->setViewMode(QListView::ListMode);
-    m_timelineList->setFlow(QListView::TopToBottom);
-    m_timelineList->setWrapping(false);
-    m_timelineList->setResizeMode(QListView::Adjust);
-    m_timelineList->setLayoutMode(QListView::SinglePass);
-    
-    // Selection
-    m_timelineList->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_timelineList->setSelectionBehavior(QAbstractItemView::SelectRows);
-    
-    // Scrolling
-    m_timelineList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    m_timelineList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    
-    // Appearance
-    m_timelineList->setFrameShape(QFrame::NoFrame);
-    m_timelineList->setSpacing(0);
-    m_timelineList->setUniformItemSizes(false);  // Headers and cards have different heights
-    
-    // Enable mouse tracking for hover effects
-    m_timelineList->setMouseTracking(true);
-    m_timelineList->viewport()->setMouseTracking(true);
-    m_timelineList->setAttribute(Qt::WA_Hover, true);
-    m_timelineList->viewport()->setAttribute(Qt::WA_Hover, true);
-    
-    // NOTE: Touch scrolling is handled by TimelineListView's manual kinetic scrolling
-    // (QScroller had issues with inertia reversal and tablet devices)
+    // Create composite delegate that handles both item types
+    auto* compositeDelegate = new CompositeTimelineDelegate(
+        cardDelegate, m_timelineDelegate, m_timelineList, this);
+    m_timelineList->setItemDelegate(compositeDelegate);
     
     // Connect click
     connect(m_timelineList, &QListView::clicked,
             this, &Launcher::onTimelineItemClicked);
     
-    // Context menu for right-click
-    m_timelineList->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_timelineList, &QListView::customContextMenuRequested,
-            this, [this](const QPoint& pos) {
-        QModelIndex index = m_timelineList->indexAt(pos);
-        if (!index.isValid()) return;
-        
-        // Ignore section headers
-        bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
-        if (isHeader) return;
-        
-        QString bundlePath = index.data(TimelineModel::BundlePathRole).toString();
-        if (!bundlePath.isEmpty()) {
-            showNotebookContextMenu(bundlePath, m_timelineList->viewport()->mapToGlobal(pos));
-        }
-    });
-    
-    // Context menu for long-press (touch devices)
-    connect(m_timelineList, &TimelineListView::longPressed,
+    // 3-dot menu button, right-click, or long-press shows context menu
+    // TimelineListView handles all input and emits menuRequested
+    connect(m_timelineList, &TimelineListView::menuRequested,
             this, [this](const QModelIndex& index, const QPoint& globalPos) {
         if (!index.isValid()) return;
-        
-        // Ignore section headers
-        bool isHeader = index.data(TimelineModel::IsSectionHeaderRole).toBool();
-        if (isHeader) return;
         
         QString bundlePath = index.data(TimelineModel::BundlePathRole).toString();
         if (!bundlePath.isEmpty()) {
             showNotebookContextMenu(bundlePath, globalPos);
         }
     });
+    
+    // TODO (L-007): longPressed will enter batch select mode
     
     layout->addWidget(m_timelineList);
 }
@@ -399,9 +429,13 @@ void Launcher::setupStarred()
         emit notebookSelected(bundlePath);
     });
     
-    connect(m_starredView, &StarredView::notebookLongPressed, this, [this](const QString& bundlePath) {
+    // 3-dot menu button, right-click, or long-press shows context menu
+    connect(m_starredView, &StarredView::notebookMenuRequested, this, [this](const QString& bundlePath) {
         showNotebookContextMenu(bundlePath, QCursor::pos());
     });
+    
+    // TODO (L-007): notebookLongPressed will enter batch select mode
+    // For now, it's handled by notebookMenuRequested
     
     connect(m_starredView, &StarredView::folderLongPressed, this, [this](const QString& folderName) {
         showFolderContextMenu(folderName, QCursor::pos());
@@ -417,7 +451,8 @@ void Launcher::setupSearch()
         emit notebookSelected(bundlePath);
     });
     
-    connect(m_searchView, &SearchView::notebookLongPressed, this, [this](const QString& bundlePath) {
+    // 3-dot menu button, right-click, or long-press shows context menu
+    connect(m_searchView, &SearchView::notebookMenuRequested, this, [this](const QString& bundlePath) {
         showNotebookContextMenu(bundlePath, QCursor::pos());
     });
 }

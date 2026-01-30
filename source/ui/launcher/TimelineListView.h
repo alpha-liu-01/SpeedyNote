@@ -1,33 +1,31 @@
 #ifndef TIMELINELISTVIEW_H
 #define TIMELINELISTVIEW_H
 
-#include <QListView>
-#include <QTimer>
-#include <QPoint>
-
-class KineticScrollHelper;
+#include "KineticListView.h"
 
 /**
- * @brief A QListView subclass with long-press support and manual kinetic scrolling.
+ * @brief List view for Timeline items with kinetic scrolling and long-press support.
  * 
- * This class extends QListView with:
- * 1. Long-press detection: Emits longPressed signal after LONG_PRESS_MS for context menus
- * 2. Manual kinetic scrolling: Replaces QScroller for reliable touch scrolling
- * 
- * The manual kinetic scrolling avoids known QScroller issues:
- * - Inertia scrolling reversing direction and accelerating
- * - Unreliable behavior on Linux/Wayland tablet devices
- * - Conflicts between scroll gestures and item tap detection
- * 
- * Based on the same pattern used in PagePanelListView and OutlinePanelTreeWidget.
+ * Inherits from KineticListView for kinetic scrolling and long-press detection.
+ * Handles:
+ * - Section headers (Today, Yesterday, etc.) - not clickable for menus
+ * - Notebook cards with 3-dot menu button detection
+ * - Long-press for future batch select mode (L-007)
  */
-class TimelineListView : public QListView {
+class TimelineListView : public KineticListView {
     Q_OBJECT
 
 public:
     explicit TimelineListView(QWidget* parent = nullptr);
     
 signals:
+    /**
+     * @brief Emitted when the 3-dot menu button on a notebook card is clicked.
+     * @param index The model index of the notebook.
+     * @param globalPos The global position for context menu placement.
+     */
+    void menuRequested(const QModelIndex& index, const QPoint& globalPos);
+    
     /**
      * @brief Emitted when user long-presses on an item.
      * @param index The model index of the long-pressed item.
@@ -36,31 +34,20 @@ signals:
     void longPressed(const QModelIndex& index, const QPoint& globalPos);
 
 protected:
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-
-private slots:
-    void onLongPressTimeout();
+    void handleItemTap(const QModelIndex& index, const QPoint& pos) override;
+    void handleRightClick(const QModelIndex& index, const QPoint& globalPos) override;
+    void handleLongPress(const QModelIndex& index, const QPoint& globalPos) override;
 
 private:
-    // Long-press detection
-    QTimer m_longPressTimer;
-    QPoint m_pressPos;              // Position where press started (viewport coords)
-    QModelIndex m_pressedIndex;     // Index that was pressed
-    bool m_longPressTriggered = false;
+    /**
+     * @brief Check if an index is a section header.
+     */
+    bool isSectionHeader(const QModelIndex& index) const;
     
-    // Touch scrolling state
-    bool m_touchScrolling = false;
-    int m_scrollStartValue = 0;
-    int m_lastScrollValue = 0;
-    
-    // Kinetic scrolling (uses shared helper)
-    KineticScrollHelper* m_kineticHelper = nullptr;
-    
-    // Constants
-    static constexpr int LONG_PRESS_MS = 500;           // Time to trigger long-press
-    static constexpr int LONG_PRESS_MOVE_THRESHOLD = 20; // Max movement in pixels
+    /**
+     * @brief Check if a point is within the menu button area of a notebook card.
+     */
+    bool isOnMenuButton(const QModelIndex& index, const QPoint& pos) const;
 };
 
 #endif // TIMELINELISTVIEW_H

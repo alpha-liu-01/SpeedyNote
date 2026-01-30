@@ -57,9 +57,10 @@ signals:
     void notebookClicked(const QString& bundlePath);
     
     /**
-     * @brief Emitted when a notebook card is long-pressed.
+     * @brief Emitted when the 3-dot menu button on a notebook card is clicked,
+     * or when a notebook card is right-clicked or long-pressed.
      */
-    void notebookLongPressed(const QString& bundlePath);
+    void notebookMenuRequested(const QString& bundlePath);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -71,7 +72,7 @@ private slots:
     
     // Slots for list view signals
     void onNotebookClicked(const QString& bundlePath);
-    void onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
+    void onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
 
 private:
     void setupUi();

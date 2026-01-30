@@ -73,6 +73,12 @@ QVariant TimelineModel::data(const QModelIndex& index, int role) const
         case BundlePathRole:
             return item.notebook.bundlePath;
             
+        case DisplayNameRole:
+            if (!item.isHeader) {
+                return item.notebook.displayName();
+            }
+            return QString();
+            
         case ThumbnailPathRole:
             if (!item.isHeader) {
                 return NotebookLibrary::instance()->thumbnailPathFor(item.notebook.bundlePath);
@@ -102,15 +108,16 @@ QHash<int, QByteArray> TimelineModel::roleNames() const
 {
     QHash<int, QByteArray> roles = QAbstractListModel::roleNames();
     roles[NotebookInfoRole] = "notebookInfo";
-    roles[IsSectionHeaderRole] = "isSectionHeader";
-    roles[SectionNameRole] = "sectionName";
     roles[BundlePathRole] = "bundlePath";
+    roles[DisplayNameRole] = "displayName";
     roles[ThumbnailPathRole] = "thumbnailPath";
-    roles[LastModifiedRole] = "lastModified";
-    roles[LastAccessedRole] = "lastAccessed";
+    roles[IsStarredRole] = "isStarred";
     roles[IsPdfBasedRole] = "isPdfBased";
     roles[IsEdgelessRole] = "isEdgeless";
-    roles[IsStarredRole] = "isStarred";
+    roles[LastModifiedRole] = "lastModified";
+    roles[IsSectionHeaderRole] = "isSectionHeader";
+    roles[SectionNameRole] = "sectionName";
+    roles[LastAccessedRole] = "lastAccessed";
     return roles;
 }
 

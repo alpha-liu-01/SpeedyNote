@@ -27,17 +27,27 @@ class TimelineModel : public QAbstractListModel {
     Q_OBJECT
 
 public:
+    /**
+     * @brief Data roles for TimelineModel.
+     * 
+     * Notebook card roles (100+) match NotebookCardDelegate::DataRoles for compatibility.
+     * Timeline-specific roles (300+) are unique to this model.
+     */
     enum Roles {
-        NotebookInfoRole = Qt::UserRole + 1,
-        IsSectionHeaderRole,
-        SectionNameRole,
+        // NotebookCardDelegate-compatible roles (Qt::UserRole + 100 range)
+        NotebookInfoRole = Qt::UserRole + 100,
         BundlePathRole,
+        DisplayNameRole,
         ThumbnailPathRole,
-        LastModifiedRole,
-        LastAccessedRole,
+        IsStarredRole,
         IsPdfBasedRole,
         IsEdgelessRole,
-        IsStarredRole
+        LastModifiedRole,  // QDateTime: last modification time (for card display)
+        
+        // Timeline-specific roles (Qt::UserRole + 300 range)
+        IsSectionHeaderRole = Qt::UserRole + 300,
+        SectionNameRole,
+        LastAccessedRole,
     };
 
     explicit TimelineModel(QObject* parent = nullptr);
