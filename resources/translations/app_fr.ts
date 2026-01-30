@@ -1226,7 +1226,7 @@ The package can be shared with others or transferred to another device.</source>
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="747"/>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="774"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1255"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1257"/>
         <source>Move to Folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1256,116 +1256,116 @@ The package can be shared with others or transferred to another device.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="836"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="838"/>
         <source>Rename Folder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="837"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="964"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="839"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="966"/>
         <source>New name:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="856"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="860"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="858"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="862"/>
         <source>Delete Folder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="861"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="863"/>
         <source>Delete folder &quot;%1&quot;?
 
 Notebooks in this folder will become unfiled.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="888"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="890"/>
         <source>Delete Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="889"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="891"/>
         <source>Permanently delete &quot;%1&quot;?
 
 This action cannot be undone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="963"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="965"/>
         <source>Rename Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="982"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1030"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="984"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1032"/>
         <source>Rename Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="983"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="985"/>
         <source>A notebook named &quot;%1&quot; already exists.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1031"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1033"/>
         <source>Could not rename the notebook.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1063"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1071"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1065"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1073"/>
         <source>Duplicate Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1064"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1066"/>
         <source>Source notebook not found.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1072"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1074"/>
         <source>Could not create destination directory.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1193"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1195"/>
         <source>1 selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1195"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1197"/>
         <source>%1 selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1234"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1236"/>
         <source>Select All</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1239"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1241"/>
         <source>Deselect All</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1248"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1250"/>
         <source>Move to Folder...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1256"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1258"/>
         <source>Move %1 notebooks to...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1266"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1268"/>
         <source>Star Selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="803"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1102"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1104"/>
         <source>Duplicate</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1381,22 +1381,22 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="797"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="833"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="835"/>
         <source>Rename</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="811"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="812"/>
         <source>Show in File Manager</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="819"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="821"/>
         <source>Delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1103"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1105"/>
         <source>Some files could not be copied.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1498,23 +1498,23 @@ This action cannot be undone.</source>
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="969"/>
-        <location filename="../../source/MainWindow.cpp" line="976"/>
-        <location filename="../../source/MainWindow.cpp" line="1026"/>
-        <location filename="../../source/MainWindow.cpp" line="1062"/>
-        <location filename="../../source/MainWindow.cpp" line="2627"/>
+        <location filename="../../source/MainWindow.cpp" line="944"/>
+        <location filename="../../source/MainWindow.cpp" line="951"/>
+        <location filename="../../source/MainWindow.cpp" line="1001"/>
+        <location filename="../../source/MainWindow.cpp" line="1037"/>
+        <location filename="../../source/MainWindow.cpp" line="2602"/>
         <source>Export Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1057"/>
-        <location filename="../../source/MainWindow.cpp" line="2619"/>
+        <location filename="../../source/MainWindow.cpp" line="1032"/>
+        <location filename="../../source/MainWindow.cpp" line="2594"/>
         <source>Export Complete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="289"/>
-        <location filename="../../source/MainWindow.cpp" line="933"/>
+        <location filename="../../source/MainWindow.cpp" line="908"/>
         <source>Untitled</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1525,19 +1525,19 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="444"/>
-        <location filename="../../source/MainWindow.cpp" line="5945"/>
+        <location filename="../../source/MainWindow.cpp" line="5926"/>
         <source>canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="444"/>
-        <location filename="../../source/MainWindow.cpp" line="5945"/>
+        <location filename="../../source/MainWindow.cpp" line="5926"/>
         <source>document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="447"/>
-        <location filename="../../source/MainWindow.cpp" line="5948"/>
+        <location filename="../../source/MainWindow.cpp" line="5929"/>
         <source>Save Changes?</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1548,37 +1548,37 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="468"/>
-        <location filename="../../source/MainWindow.cpp" line="2809"/>
-        <location filename="../../source/MainWindow.cpp" line="2890"/>
-        <location filename="../../source/MainWindow.cpp" line="5972"/>
-        <location filename="../../source/MainWindow.cpp" line="6259"/>
+        <location filename="../../source/MainWindow.cpp" line="2784"/>
+        <location filename="../../source/MainWindow.cpp" line="2865"/>
+        <location filename="../../source/MainWindow.cpp" line="5953"/>
+        <location filename="../../source/MainWindow.cpp" line="6240"/>
         <source>Save Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="469"/>
-        <location filename="../../source/MainWindow.cpp" line="2810"/>
-        <location filename="../../source/MainWindow.cpp" line="2891"/>
+        <location filename="../../source/MainWindow.cpp" line="2785"/>
+        <location filename="../../source/MainWindow.cpp" line="2866"/>
         <source>Failed to save document to:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2765"/>
-        <location filename="../../source/MainWindow.cpp" line="2788"/>
+        <location filename="../../source/MainWindow.cpp" line="2740"/>
+        <location filename="../../source/MainWindow.cpp" line="2763"/>
         <source>Save Canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2765"/>
-        <location filename="../../source/MainWindow.cpp" line="2788"/>
-        <location filename="../../source/MainWindow.cpp" line="2866"/>
-        <location filename="../../source/MainWindow.cpp" line="2873"/>
+        <location filename="../../source/MainWindow.cpp" line="2740"/>
+        <location filename="../../source/MainWindow.cpp" line="2763"/>
+        <location filename="../../source/MainWindow.cpp" line="2841"/>
+        <location filename="../../source/MainWindow.cpp" line="2848"/>
         <source>Save Document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2790"/>
+        <location filename="../../source/MainWindow.cpp" line="2765"/>
         <source>SpeedyNote Bundle (*.snb)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1588,44 +1588,29 @@ This action cannot be undone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="829"/>
-        <source>Zoom 50%</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../source/MainWindow.cpp" line="837"/>
-        <source>Zoom Reset</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../source/MainWindow.cpp" line="845"/>
-        <source>Zoom 200%</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <location filename="../../source/MainWindow.cpp" line="855"/>
+        <location filename="../../source/MainWindow.cpp" line="830"/>
         <source>Jump to Page...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="858"/>
+        <location filename="../../source/MainWindow.cpp" line="833"/>
         <source>Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2867"/>
-        <location filename="../../source/MainWindow.cpp" line="2874"/>
+        <location filename="../../source/MainWindow.cpp" line="2842"/>
+        <location filename="../../source/MainWindow.cpp" line="2849"/>
         <source>No document is open.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2995"/>
+        <location filename="../../source/MainWindow.cpp" line="2970"/>
         <source>SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2984"/>
-        <location filename="../../source/MainWindow.cpp" line="2998"/>
+        <location filename="../../source/MainWindow.cpp" line="2959"/>
+        <location filename="../../source/MainWindow.cpp" line="2973"/>
         <source>Open Document</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1635,44 +1620,44 @@ This action cannot be undone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="970"/>
-        <location filename="../../source/MainWindow.cpp" line="2533"/>
-        <location filename="../../source/MainWindow.cpp" line="2540"/>
+        <location filename="../../source/MainWindow.cpp" line="945"/>
+        <location filename="../../source/MainWindow.cpp" line="2508"/>
+        <location filename="../../source/MainWindow.cpp" line="2515"/>
         <source>No document is currently open.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="977"/>
+        <location filename="../../source/MainWindow.cpp" line="952"/>
         <source>Please save the document before exporting.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1032"/>
+        <location filename="../../source/MainWindow.cpp" line="1007"/>
         <source>Export Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1034"/>
+        <location filename="../../source/MainWindow.cpp" line="1009"/>
         <source>SpeedyNote Package (*.snbx)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1049"/>
+        <location filename="../../source/MainWindow.cpp" line="1024"/>
         <source>%1 bytes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1051"/>
+        <location filename="../../source/MainWindow.cpp" line="1026"/>
         <source>%1 KB</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1054"/>
+        <location filename="../../source/MainWindow.cpp" line="1029"/>
         <source>%1 MB</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1058"/>
+        <location filename="../../source/MainWindow.cpp" line="1033"/>
         <source>Notebook exported successfully.
 
 File: %1
@@ -1680,23 +1665,23 @@ Size: %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2525"/>
+        <location filename="../../source/MainWindow.cpp" line="2500"/>
         <source>Share as PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2527"/>
+        <location filename="../../source/MainWindow.cpp" line="2502"/>
         <source>Export to PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2547"/>
+        <location filename="../../source/MainWindow.cpp" line="2522"/>
         <source>PDF export is only available for paged documents.
 Edgeless canvas export is not yet supported.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2555"/>
+        <location filename="../../source/MainWindow.cpp" line="2530"/>
         <source>The document has unsaved changes.
 Please save the document before sharing as PDF.
 
@@ -1704,7 +1689,7 @@ Would you like to save now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2559"/>
+        <location filename="../../source/MainWindow.cpp" line="2534"/>
         <source>The document has unsaved changes.
 Please save the document before exporting to PDF.
 
@@ -1712,17 +1697,17 @@ Would you like to save now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2564"/>
+        <location filename="../../source/MainWindow.cpp" line="2539"/>
         <source>Save Document First</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2612"/>
+        <location filename="../../source/MainWindow.cpp" line="2587"/>
         <source>Share PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2620"/>
+        <location filename="../../source/MainWindow.cpp" line="2595"/>
         <source>PDF exported successfully!
 
 Pages exported: %1
@@ -1730,39 +1715,39 @@ File size: %2 KB</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2628"/>
+        <location filename="../../source/MainWindow.cpp" line="2603"/>
         <source>Failed to export PDF:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2754"/>
+        <location filename="../../source/MainWindow.cpp" line="2729"/>
         <source>Untitled Canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2754"/>
+        <location filename="../../source/MainWindow.cpp" line="2729"/>
         <source>Untitled Document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2776"/>
+        <location filename="../../source/MainWindow.cpp" line="2751"/>
         <source>Overwrite?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2777"/>
+        <location filename="../../source/MainWindow.cpp" line="2752"/>
         <source>A document named &apos;%1&apos; already exists.
 Do you want to replace it?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2977"/>
+        <location filename="../../source/MainWindow.cpp" line="2952"/>
         <source>No Documents</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2978"/>
+        <location filename="../../source/MainWindow.cpp" line="2953"/>
         <source>No saved documents found.
 
 Documents are saved to:
@@ -1770,66 +1755,66 @@ Documents are saved to:
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2985"/>
+        <location filename="../../source/MainWindow.cpp" line="2960"/>
         <source>Select a document:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3012"/>
-        <location filename="../../source/MainWindow.cpp" line="3471"/>
+        <location filename="../../source/MainWindow.cpp" line="2987"/>
+        <location filename="../../source/MainWindow.cpp" line="3446"/>
         <source>Load Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3013"/>
+        <location filename="../../source/MainWindow.cpp" line="2988"/>
         <source>Failed to load document from:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3176"/>
-        <location filename="../../source/MainWindow.cpp" line="3192"/>
+        <location filename="../../source/MainWindow.cpp" line="3151"/>
+        <location filename="../../source/MainWindow.cpp" line="3167"/>
         <source>Cannot Delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3177"/>
+        <location filename="../../source/MainWindow.cpp" line="3152"/>
         <source>Cannot delete the last remaining page.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3193"/>
+        <location filename="../../source/MainWindow.cpp" line="3168"/>
         <source>Cannot delete PDF pages. Use an external tool to modify the PDF.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3254"/>
+        <location filename="../../source/MainWindow.cpp" line="3229"/>
         <source>PDF Files (*.pdf);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3257"/>
+        <location filename="../../source/MainWindow.cpp" line="3232"/>
         <source>Open PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3276"/>
+        <location filename="../../source/MainWindow.cpp" line="3251"/>
         <source>PDF Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3277"/>
+        <location filename="../../source/MainWindow.cpp" line="3252"/>
         <source>Failed to open PDF file:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3457"/>
+        <location filename="../../source/MainWindow.cpp" line="3432"/>
         <source>Open SpeedyNote Bundle (.snb folder)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3472"/>
+        <location filename="../../source/MainWindow.cpp" line="3447"/>
         <source>Selected folder is not a valid SpeedyNote bundle.
 Missing document.json manifest.
 
@@ -1837,47 +1822,47 @@ Missing document.json manifest.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3522"/>
+        <location filename="../../source/MainWindow.cpp" line="3503"/>
         <source>Jump to Page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3522"/>
+        <location filename="../../source/MainWindow.cpp" line="3503"/>
         <source>Enter Page Number:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4695"/>
+        <location filename="../../source/MainWindow.cpp" line="4676"/>
         <source>No results found</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5363"/>
+        <location filename="../../source/MainWindow.cpp" line="5344"/>
         <source>New Edgeless Canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5368"/>
+        <location filename="../../source/MainWindow.cpp" line="5349"/>
         <source>New Paged Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5376"/>
+        <location filename="../../source/MainWindow.cpp" line="5357"/>
         <source>Open PDF...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5381"/>
+        <location filename="../../source/MainWindow.cpp" line="5362"/>
         <source>Open Notebook...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5949"/>
+        <location filename="../../source/MainWindow.cpp" line="5930"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5973"/>
+        <location filename="../../source/MainWindow.cpp" line="5954"/>
         <source>Failed to save document to:
 %1
 
@@ -1885,36 +1870,36 @@ Quit anyway?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6260"/>
+        <location filename="../../source/MainWindow.cpp" line="6241"/>
         <source>Failed to save document before closing.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6307"/>
+        <location filename="../../source/MainWindow.cpp" line="6288"/>
         <source>The file does not exist:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6338"/>
-        <location filename="../../source/MainWindow.cpp" line="6356"/>
+        <location filename="../../source/MainWindow.cpp" line="6319"/>
+        <location filename="../../source/MainWindow.cpp" line="6337"/>
         <source>Open Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6339"/>
+        <location filename="../../source/MainWindow.cpp" line="6320"/>
         <source>Failed to open file:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6357"/>
+        <location filename="../../source/MainWindow.cpp" line="6338"/>
         <source>Failed to create tab for:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6306"/>
+        <location filename="../../source/MainWindow.cpp" line="6287"/>
         <source>File Not Found</source>
         <translation type="unfinished"></translation>
     </message>

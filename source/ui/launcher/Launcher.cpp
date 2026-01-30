@@ -807,13 +807,15 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     
     menu.addSeparator();
     
-    // Show in file manager action
+    // Show in file manager action (not available on Android - sandboxed storage)
+#ifndef Q_OS_ANDROID
     QAction* showAction = menu.addAction(tr("Show in File Manager"));
     connect(showAction, &QAction::triggered, this, [this, bundlePath]() {
         showInFileManager(bundlePath);
     });
     
     menu.addSeparator();
+#endif
     
     // Delete action
     QAction* deleteAction = menu.addAction(tr("Delete"));

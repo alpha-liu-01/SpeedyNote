@@ -823,32 +823,7 @@ void MainWindow::setupUi() {
     m_exportPdfAction = overflowMenu->addAction(tr("Export to PDF..."));
     m_exportPdfAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.export_pdf"));
     connect(m_exportPdfAction, &QAction::triggered, this, &MainWindow::showPdfExportDialog);
-    
-    overflowMenu->addSeparator();
-    
-    QAction *zoom50Action = overflowMenu->addAction(tr("Zoom 50%"));
-    connect(zoom50Action, &QAction::triggered, this, [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->setZoomLevel(0.5);
-            // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
-        }
-    });
-    
-    QAction *zoomResetAction = overflowMenu->addAction(tr("Zoom Reset"));
-    connect(zoomResetAction, &QAction::triggered, this, [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->setZoomLevel(1.0);
-            // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
-        }
-    });
-    
-    QAction *zoom200Action = overflowMenu->addAction(tr("Zoom 200%"));
-    connect(zoom200Action, &QAction::triggered, this, [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->setZoomLevel(2.0);
-            // REMOVED MW7.2: updateDialDisplay removed - dial functionality deleted
-        }
-    });
+
     
     overflowMenu->addSeparator();
     
@@ -3513,14 +3488,20 @@ void MainWindow::toggleFullscreen() {
 }
 
 void MainWindow::showJumpToPageDialog() {
-    // Phase 3.1.8: Use currentViewport() instead of currentCanvas().
-    // This one doesn't work yet. 
     DocumentViewport* vp = currentViewport();
-    int currentPage = vp ? vp->currentPageIndex() + 1 : 1;
+    if (!vp || !vp->document()) return;
+    
+    // Edgeless documents have only one infinite canvas - no pages to jump to
+    if (vp->document()->isEdgeless()) {
+        return;
+    }
+    
+    int currentPage = vp->currentPageIndex() + 1;
+    int maxPage = vp->document()->pageCount();
     
     bool ok;
     int newPage = QInputDialog::getInt(this, tr("Jump to Page"), tr("Enter Page Number:"), 
-                                       currentPage, 1, 9999, 1, &ok);
+                                       currentPage, 1, maxPage, 1, &ok);
     if (ok) {
         // Convert 1-based user input to 0-based index for switchPage()
         switchPage(newPage - 1);
