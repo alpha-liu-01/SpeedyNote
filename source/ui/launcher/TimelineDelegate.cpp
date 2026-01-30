@@ -1,6 +1,7 @@
 #include "TimelineDelegate.h"
 #include "TimelineModel.h"
 #include "../../core/NotebookLibrary.h"
+#include "../ThemeColors.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -72,8 +73,8 @@ void TimelineDelegate::paintSectionHeader(QPainter* painter, const QRect& rect,
                                           const QString& title) const
 {
     // Colors
-    QColor textColor = m_darkMode ? QColor(180, 180, 180) : QColor(100, 100, 100);
-    QColor lineColor = m_darkMode ? QColor(60, 60, 60) : QColor(220, 220, 220);
+    QColor textColor = ThemeColors::textSecondary(m_darkMode);
+    QColor lineColor = ThemeColors::separator(m_darkMode);
     
     // Draw text
     QFont font = painter->font();
@@ -103,11 +104,11 @@ void TimelineDelegate::paintNotebookCard(QPainter* painter, const QRect& rect,
     // === Background ===
     QColor bgColor;
     if (option.state & QStyle::State_Selected) {
-        bgColor = m_darkMode ? QColor(50, 80, 120) : QColor(220, 235, 250);
+        bgColor = ThemeColors::selection(m_darkMode);
     } else if (option.state & QStyle::State_MouseOver) {
-        bgColor = m_darkMode ? QColor(55, 55, 60) : QColor(248, 248, 252);
+        bgColor = ThemeColors::itemHover(m_darkMode);
     } else {
-        bgColor = m_darkMode ? QColor(45, 45, 50) : QColor(255, 255, 255);
+        bgColor = ThemeColors::itemBackground(m_darkMode);
     }
     
     // Draw rounded rect with shadow
@@ -119,14 +120,13 @@ void TimelineDelegate::paintNotebookCard(QPainter* painter, const QRect& rect,
         QRect shadowRect = cardRect.translated(0, 2);
         QPainterPath shadowPath;
         shadowPath.addRoundedRect(shadowRect, CARD_CORNER_RADIUS, CARD_CORNER_RADIUS);
-        painter->fillPath(shadowPath, QColor(0, 0, 0, 20));
+        painter->fillPath(shadowPath, ThemeColors::cardShadow());
     }
     
     painter->fillPath(path, bgColor);
     
     // Border
-    QColor borderColor = m_darkMode ? QColor(70, 70, 75) : QColor(230, 230, 235);
-    painter->setPen(QPen(borderColor, 1));
+    painter->setPen(QPen(ThemeColors::cardBorder(m_darkMode), 1));
     painter->drawPath(path);
     
     // === Content layout ===
@@ -151,8 +151,7 @@ void TimelineDelegate::paintNotebookCard(QPainter* painter, const QRect& rect,
     nameFont.setBold(true);
     painter->setFont(nameFont);
     
-    QColor textColor = m_darkMode ? QColor(240, 240, 240) : QColor(30, 30, 30);
-    painter->setPen(textColor);
+    painter->setPen(ThemeColors::textPrimary(m_darkMode));
     
     QRect nameRect(textLeft, contentTop, textWidth, 20);
     QString elidedName = painter->fontMetrics().elidedText(name, Qt::ElideRight, nameRect.width());
@@ -167,8 +166,7 @@ void TimelineDelegate::paintNotebookCard(QPainter* painter, const QRect& rect,
     dateFont.setBold(false);
     painter->setFont(dateFont);
     
-    QColor dateColor = m_darkMode ? QColor(150, 150, 150) : QColor(120, 120, 120);
-    painter->setPen(dateColor);
+    painter->setPen(ThemeColors::textMuted(m_darkMode));
     
     QRect dateRect(textLeft, contentTop + 22, textWidth, 16);
     painter->drawText(dateRect, Qt::AlignLeft | Qt::AlignVCenter, dateText);
@@ -187,11 +185,11 @@ void TimelineDelegate::paintNotebookCard(QPainter* painter, const QRect& rect,
     
     QColor typeColor;
     if (isPdf) {
-        typeColor = m_darkMode ? QColor(200, 100, 100) : QColor(180, 60, 60);
+        typeColor = ThemeColors::typePdf(m_darkMode);
     } else if (isEdgeless) {
-        typeColor = m_darkMode ? QColor(100, 180, 100) : QColor(60, 140, 60);
+        typeColor = ThemeColors::typeEdgeless(m_darkMode);
     } else {
-        typeColor = m_darkMode ? QColor(100, 140, 200) : QColor(60, 100, 180);
+        typeColor = ThemeColors::typePaged(m_darkMode);
     }
     painter->setPen(typeColor);
     
@@ -201,8 +199,7 @@ void TimelineDelegate::paintNotebookCard(QPainter* painter, const QRect& rect,
     // Star indicator
     bool isStarred = index.data(TimelineModel::IsStarredRole).toBool();
     if (isStarred) {
-        QColor starColor = m_darkMode ? QColor(255, 200, 50) : QColor(230, 180, 30);
-        painter->setPen(starColor);
+        painter->setPen(ThemeColors::star(m_darkMode));
         
         QFont starFont = painter->font();
         starFont.setPointSize(12);
@@ -217,16 +214,13 @@ void TimelineDelegate::drawThumbnail(QPainter* painter, const QRect& rect,
                                      const QString& thumbnailPath) const
 {
     // Background (for letterboxing or missing thumbnail)
-    QColor bgColor = m_darkMode ? QColor(60, 60, 65) : QColor(240, 240, 245);
-    
     QPainterPath thumbPath;
     thumbPath.addRoundedRect(rect, THUMBNAIL_CORNER_RADIUS, THUMBNAIL_CORNER_RADIUS);
-    painter->fillPath(thumbPath, bgColor);
+    painter->fillPath(thumbPath, ThemeColors::thumbnailBg(m_darkMode));
     
     if (thumbnailPath.isEmpty() || !QFileInfo::exists(thumbnailPath)) {
         // Draw placeholder
-        QColor placeholderColor = m_darkMode ? QColor(100, 100, 105) : QColor(200, 200, 205);
-        painter->setPen(placeholderColor);
+        painter->setPen(ThemeColors::thumbnailPlaceholder(m_darkMode));
         
         QFont font = painter->font();
         font.setPointSize(20);

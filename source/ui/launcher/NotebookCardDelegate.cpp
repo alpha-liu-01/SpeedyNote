@@ -1,5 +1,6 @@
 #include "NotebookCardDelegate.h"
 #include "../../core/NotebookLibrary.h"
+#include "../ThemeColors.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -74,18 +75,16 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
         QRect shadowRect = cardRect.translated(0, 2);
         QPainterPath shadowPath;
         shadowPath.addRoundedRect(shadowRect, CORNER_RADIUS, CORNER_RADIUS);
-        painter->fillPath(shadowPath, QColor(0, 0, 0, 25));
+        painter->fillPath(shadowPath, ThemeColors::cardShadow());
     }
     
     painter->fillPath(cardPath, bgColor);
     
     // Border (more visible if selected)
     if (selected) {
-        QColor accentColor = m_darkMode ? QColor(138, 180, 248) : QColor(26, 115, 232);
-        painter->setPen(QPen(accentColor, 2));
+        painter->setPen(QPen(ThemeColors::selectionBorder(m_darkMode), 2));
     } else {
-        QColor borderColor = m_darkMode ? QColor(70, 70, 75) : QColor(220, 220, 225);
-        painter->setPen(QPen(borderColor, 1));
+        painter->setPen(QPen(ThemeColors::cardBorder(m_darkMode), 1));
     }
     painter->drawPath(cardPath);
     
@@ -99,8 +98,7 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     // === Star indicator (top-right of thumbnail) ===
     bool isStarred = index.data(IsStarredRole).toBool();
     if (isStarred) {
-        QColor starColor = m_darkMode ? QColor(255, 200, 50) : QColor(230, 180, 30);
-        painter->setPen(starColor);
+        painter->setPen(ThemeColors::star(m_darkMode));
         
         QFont starFont = painter->font();
         starFont.setPointSize(12);
@@ -119,8 +117,7 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     nameFont.setBold(true);
     painter->setFont(nameFont);
     
-    QColor textColor = m_darkMode ? QColor(240, 240, 240) : QColor(30, 30, 30);
-    painter->setPen(textColor);
+    painter->setPen(ThemeColors::textPrimary(m_darkMode));
     
     QString displayName = index.data(DisplayNameRole).toString();
     if (displayName.isEmpty()) {
@@ -154,16 +151,13 @@ void NotebookCardDelegate::drawThumbnail(QPainter* painter, const QRect& rect,
                                           const QString& thumbnailPath) const
 {
     // Background for thumbnail area
-    QColor bgColor = m_darkMode ? QColor(50, 50, 55) : QColor(235, 235, 240);
-    
     QPainterPath thumbPath;
     thumbPath.addRoundedRect(rect, THUMBNAIL_CORNER_RADIUS, THUMBNAIL_CORNER_RADIUS);
-    painter->fillPath(thumbPath, bgColor);
+    painter->fillPath(thumbPath, ThemeColors::thumbnailBg(m_darkMode));
     
     if (thumbnailPath.isEmpty() || !QFileInfo::exists(thumbnailPath)) {
         // Draw placeholder
-        QColor placeholderColor = m_darkMode ? QColor(100, 100, 105) : QColor(180, 180, 185);
-        painter->setPen(placeholderColor);
+        painter->setPen(ThemeColors::thumbnailPlaceholder(m_darkMode));
         
         QFont font = painter->font();
         font.setPointSize(28);
@@ -232,21 +226,21 @@ QString NotebookCardDelegate::typeIndicatorText(bool isPdf, bool isEdgeless) con
 QColor NotebookCardDelegate::typeIndicatorColor(bool isPdf, bool isEdgeless) const
 {
     if (isPdf) {
-        return m_darkMode ? QColor(200, 100, 100) : QColor(180, 60, 60);
+        return ThemeColors::typePdf(m_darkMode);
     } else if (isEdgeless) {
-        return m_darkMode ? QColor(100, 180, 100) : QColor(60, 140, 60);
+        return ThemeColors::typeEdgeless(m_darkMode);
     } else {
-        return m_darkMode ? QColor(100, 140, 200) : QColor(60, 100, 180);
+        return ThemeColors::typePaged(m_darkMode);
     }
 }
 
 QColor NotebookCardDelegate::backgroundColor(bool selected, bool hovered) const
 {
     if (selected) {
-        return m_darkMode ? QColor(50, 80, 120) : QColor(220, 235, 250);
+        return ThemeColors::selection(m_darkMode);
     } else if (hovered) {
-        return m_darkMode ? QColor(55, 55, 60) : QColor(250, 250, 255);
+        return ThemeColors::itemHover(m_darkMode);
     } else {
-        return m_darkMode ? QColor(45, 45, 50) : QColor(255, 255, 255);
+        return ThemeColors::itemBackground(m_darkMode);
     }
 }

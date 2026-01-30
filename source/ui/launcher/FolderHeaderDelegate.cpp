@@ -1,4 +1,5 @@
 #include "FolderHeaderDelegate.h"
+#include "../ThemeColors.h"
 
 #include <QPainter>
 
@@ -53,8 +54,7 @@ void FolderHeaderDelegate::paintFolderHeader(QPainter* painter, const QRect& rec
     // === Chevron (▶ or ▼) ===
     bool collapsed = index.data(IsCollapsedRole).toBool();
     
-    QColor chevronColor = m_darkMode ? QColor(150, 150, 150) : QColor(100, 100, 100);
-    painter->setPen(chevronColor);
+    painter->setPen(ThemeColors::chevron(m_darkMode));
     
     QFont chevronFont = painter->font();
     chevronFont.setPointSize(10);
@@ -70,8 +70,7 @@ void FolderHeaderDelegate::paintFolderHeader(QPainter* painter, const QRect& rec
         folderName = index.data(Qt::DisplayRole).toString();
     }
     
-    QColor textColor = m_darkMode ? QColor(220, 220, 220) : QColor(50, 50, 50);
-    painter->setPen(textColor);
+    painter->setPen(ThemeColors::folderText(m_darkMode));
     
     QFont nameFont = painter->font();
     nameFont.setPointSize(14);
@@ -83,17 +82,16 @@ void FolderHeaderDelegate::paintFolderHeader(QPainter* painter, const QRect& rec
     painter->drawText(nameRect, Qt::AlignVCenter | Qt::AlignLeft, folderName);
     
     // === Bottom separator line ===
-    QColor lineColor = m_darkMode ? QColor(70, 70, 75) : QColor(220, 220, 225);
-    painter->setPen(QPen(lineColor, 1));
+    painter->setPen(QPen(ThemeColors::folderSeparator(m_darkMode), 1));
     painter->drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom());
 }
 
 QColor FolderHeaderDelegate::backgroundColor(bool pressed, bool hovered) const
 {
     if (pressed) {
-        return m_darkMode ? QColor(60, 60, 65) : QColor(235, 235, 240);
+        return ThemeColors::pressed(m_darkMode);
     } else if (hovered) {
-        return m_darkMode ? QColor(55, 55, 60) : QColor(245, 245, 248);
+        return ThemeColors::itemHover(m_darkMode);
     }
     return Qt::transparent;
 }
