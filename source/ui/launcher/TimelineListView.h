@@ -3,8 +3,9 @@
 
 #include <QListView>
 #include <QTimer>
-#include <QElapsedTimer>
 #include <QPoint>
+
+class KineticScrollHelper;
 
 /**
  * @brief A QListView subclass with long-press support and manual kinetic scrolling.
@@ -41,13 +42,8 @@ protected:
 
 private slots:
     void onLongPressTimeout();
-    void onKineticScrollTick();
 
 private:
-    void startKineticScroll(qreal velocity);
-    void stopKineticScroll();
-    bool isTouchInput(QMouseEvent* event) const;
-    
     // Long-press detection
     QTimer m_longPressTimer;
     QPoint m_pressPos;              // Position where press started (viewport coords)
@@ -57,22 +53,14 @@ private:
     // Touch scrolling state
     bool m_touchScrolling = false;
     int m_scrollStartValue = 0;
+    int m_lastScrollValue = 0;
     
-    // Velocity tracking for kinetic scrolling
-    QElapsedTimer m_velocityTimer;
-    qreal m_lastVelocity = 0.0;
-    
-    // Kinetic scrolling animation
-    QTimer m_kineticTimer;
-    qreal m_kineticVelocity = 0.0;
+    // Kinetic scrolling (uses shared helper)
+    KineticScrollHelper* m_kineticHelper = nullptr;
     
     // Constants
     static constexpr int LONG_PRESS_MS = 500;           // Time to trigger long-press
     static constexpr int LONG_PRESS_MOVE_THRESHOLD = 20; // Max movement in pixels
-    static constexpr int KINETIC_TICK_MS = 16;          // ~60 FPS
-    static constexpr qreal KINETIC_DECELERATION = 0.92; // Per-tick multiplier
-    static constexpr qreal KINETIC_MIN_VELOCITY = 0.5;  // Stop threshold (px/ms)
-    static constexpr qreal KINETIC_MAX_VELOCITY = 3.0;  // Cap extreme velocities
 };
 
 #endif // TIMELINELISTVIEW_H

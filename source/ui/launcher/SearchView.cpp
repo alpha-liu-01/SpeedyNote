@@ -1,13 +1,12 @@
 #include "SearchView.h"
-#include "NotebookCard.h"
-#include "LauncherScrollArea.h"
+#include "SearchListView.h"
+#include "SearchModel.h"
+#include "NotebookCardDelegate.h"
 #include "../../core/NotebookLibrary.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
-#include <QScrollBar>
-#include <QApplication>
 
 SearchView::SearchView(QWidget* parent)
     : QWidget(parent)
@@ -35,7 +34,7 @@ void SearchView::setupUi()
     searchBarLayout->setContentsMargins(0, 0, 0, 0);
     searchBarLayout->setSpacing(8);
     
-    // Search input (styled like MarkdownNotesSidebar)
+    // Search input
     m_searchInput = new QLineEdit(m_searchBar);
     m_searchInput->setObjectName("SearchInput");
     m_searchInput->setPlaceholderText(tr("Search notebooks..."));
@@ -47,7 +46,7 @@ void SearchView::setupUi()
     connect(m_searchInput, &QLineEdit::returnPressed, 
             this, &SearchView::onSearchTriggered);
     
-    // Search button (36x36, zoom icon)
+    // Search button (zoom icon)
     m_searchButton = new QPushButton(m_searchBar);
     m_searchButton->setObjectName("SearchButton");
     m_searchButton->setFixedSize(SEARCH_BAR_HEIGHT, SEARCH_BAR_HEIGHT);
@@ -57,7 +56,7 @@ void SearchView::setupUi()
     connect(m_searchButton, &QPushButton::clicked, 
             this, &SearchView::onSearchTriggered);
     
-    // Clear button (36x36, ×)
+    // Clear button (×)
     m_clearButton = new QPushButton("×", m_searchBar);
     m_clearButton->setObjectName("ClearButton");
     m_clearButton->setFixedSize(SEARCH_BAR_HEIGHT, SEARCH_BAR_HEIGHT);
@@ -78,25 +77,26 @@ void SearchView::setupUi()
     m_statusLabel->setVisible(false);
     mainLayout->addWidget(m_statusLabel);
     
-    // === Results Scroll Area ===
-    // Use LauncherScrollArea for reliable manual touch scrolling
-    // (QScroller has known issues with inertia reversal and tablet devices)
-    m_scrollArea = new LauncherScrollArea(this);
-    m_scrollArea->setObjectName("SearchScrollArea");
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // === Results List View (Model/View) ===
+    m_model = new SearchModel(this);
+    m_delegate = new NotebookCardDelegate(this);
     
-    m_scrollContent = new QWidget();
-    m_scrollContent->setObjectName("SearchScrollContent");
+    m_listView = new SearchListView(this);
+    m_listView->setObjectName("SearchListView");
+    m_listView->setModel(m_model);
+    m_listView->setItemDelegate(m_delegate);
     
-    m_gridLayout = new QGridLayout(m_scrollContent);
-    m_gridLayout->setContentsMargins(0, 0, 0, 0);
-    m_gridLayout->setSpacing(GRID_SPACING);
-    m_gridLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    // Connect thumbnail updates
+    connect(NotebookLibrary::instance(), &NotebookLibrary::thumbnailUpdated,
+            m_delegate, &NotebookCardDelegate::invalidateThumbnail);
     
-    m_scrollArea->setWidget(m_scrollContent);
-    mainLayout->addWidget(m_scrollArea, 1);
+    // Connect list view signals
+    connect(m_listView, &SearchListView::notebookClicked,
+            this, &SearchView::onNotebookClicked);
+    connect(m_listView, &SearchListView::notebookLongPressed,
+            this, &SearchView::onNotebookLongPressed);
+    
+    mainLayout->addWidget(m_listView, 1);
     
     // === Empty State Label ===
     m_emptyLabel = new QLabel(this);
@@ -115,9 +115,11 @@ void SearchView::setDarkMode(bool dark)
         m_darkMode = dark;
         updateSearchIcon();
         
-        // Update existing cards
-        for (NotebookCard* card : m_resultCards) {
-            card->setDarkMode(dark);
+        // Update delegate
+        if (m_delegate) {
+            m_delegate->setDarkMode(dark);
+            // Trigger repaint of visible items
+            m_listView->viewport()->update();
         }
     }
 }
@@ -137,7 +139,7 @@ void SearchView::clearSearch()
     m_lastQuery.clear();
     m_clearButton->setVisible(false);
     m_statusLabel->setVisible(false);
-    clearResults();
+    m_model->clear();
     showEmptyState(tr("Type to search notebooks by name or PDF filename"));
 }
 
@@ -174,7 +176,7 @@ void SearchView::performSearch()
     m_lastQuery = query;
     
     if (query.isEmpty()) {
-        clearResults();
+        m_model->clear();
         m_statusLabel->setVisible(false);
         showEmptyState(tr("Type to search notebooks by name or PDF filename"));
         return;
@@ -192,60 +194,37 @@ void SearchView::performSearch()
     m_statusLabel->setVisible(true);
     
     // Display results
-    displayResults(results);
-}
-
-void SearchView::displayResults(const QList<NotebookInfo>& results)
-{
-    clearResults();
-    
     if (results.isEmpty()) {
+        m_model->clear();
         showEmptyState(tr("No notebooks match your search.\n\nTry a different search term."));
-        return;
+    } else {
+        m_model->setResults(results);
+        showResults();
     }
-    
-    // Hide empty label, show scroll area
-    m_emptyLabel->hide();
-    m_scrollArea->show();
-    
-    int row = 0, col = 0;
-    for (const NotebookInfo& info : results) {
-        NotebookCard* card = new NotebookCard(info, m_scrollContent);
-        card->setDarkMode(m_darkMode);
-        
-        connect(card, &NotebookCard::clicked, this, [this, info]() {
-            emit notebookClicked(info.bundlePath);
-        });
-        
-        connect(card, &NotebookCard::longPressed, this, [this, info]() {
-            emit notebookLongPressed(info.bundlePath);
-        });
-        
-        m_gridLayout->addWidget(card, row, col);
-        m_resultCards.append(card);
-        
-        col++;
-        if (col >= GRID_COLUMNS) {
-            col = 0;
-            row++;
-        }
-    }
-}
-
-void SearchView::clearResults()
-{
-    for (NotebookCard* card : m_resultCards) {
-        m_gridLayout->removeWidget(card);
-        card->deleteLater();
-    }
-    m_resultCards.clear();
 }
 
 void SearchView::showEmptyState(const QString& message)
 {
-    m_scrollArea->hide();
+    m_listView->hide();
     m_emptyLabel->setText(message);
     m_emptyLabel->show();
+}
+
+void SearchView::showResults()
+{
+    m_emptyLabel->hide();
+    m_listView->show();
+}
+
+void SearchView::onNotebookClicked(const QString& bundlePath)
+{
+    emit notebookClicked(bundlePath);
+}
+
+void SearchView::onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos)
+{
+    Q_UNUSED(globalPos)
+    emit notebookLongPressed(bundlePath);
 }
 
 void SearchView::keyPressEvent(QKeyEvent* event)
@@ -259,4 +238,3 @@ void SearchView::keyPressEvent(QKeyEvent* event)
     }
     QWidget::keyPressEvent(event);
 }
-

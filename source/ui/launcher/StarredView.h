@@ -2,12 +2,12 @@
 #define STARREDVIEW_H
 
 #include <QWidget>
-#include <QVBoxLayout>
-#include <QMap>
+#include <QLabel>
 
-class NotebookCard;
-class FolderHeader;
-class LauncherScrollArea;
+class StarredListView;
+class StarredModel;
+class NotebookCardDelegate;
+class FolderHeaderDelegate;
 
 /**
  * @brief iOS homescreen-style view for starred notebooks with folders.
@@ -17,17 +17,18 @@ class LauncherScrollArea;
  * 
  * Features:
  * - Collapsible folder sections
- * - Grid layout of NotebookCards within each folder
+ * - Virtualized list of folder headers and notebook cards (Model/View)
  * - Long-press folder header for context menu (rename/delete)
- * - Touch-friendly scrolling
+ * - Touch-friendly scrolling with kinetic momentum
  * - Dark mode support
+ * - Smart reload (skips rebuild if only metadata changed)
  * 
  * Folder structure (per Q&A):
  * - Single-level folders (no nesting)
  * - Each notebook in one folder or "unfiled"
  * - Drag-and-drop reordering (future task)
  * 
- * Phase P.3.5: Part of the new Launcher implementation.
+ * Phase P.3: Refactored to use Model/View for virtualization and performance.
  */
 class StarredView : public QWidget {
     Q_OBJECT
@@ -37,6 +38,7 @@ public:
     
     /**
      * @brief Reload data from NotebookLibrary.
+     * Uses smart reload - skips rebuild if only metadata changed.
      */
     void reload();
     
@@ -44,6 +46,9 @@ public:
      * @brief Set dark mode for theming.
      */
     void setDarkMode(bool dark);
+
+protected:
+    void showEvent(QShowEvent* event) override;
 
 signals:
     /**
@@ -61,83 +66,31 @@ signals:
      */
     void folderLongPressed(const QString& folderName);
 
+private slots:
+    // Slots for list view signals
+    void onNotebookClicked(const QString& bundlePath);
+    void onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
+    void onFolderClicked(const QString& folderName);
+    void onFolderLongPressed(const QString& folderName, const QPoint& globalPos);
+
 private:
     void setupUi();
-    void buildContent();
-    void clearContent();
+    void updateEmptyState();
     
-    QWidget* createFolderSection(const QString& folderName, 
-                                 const QList<struct NotebookInfo>& notebooks);
-    QWidget* createNotebookGrid(const QList<struct NotebookInfo>& notebooks);
+    // Model/View components
+    StarredListView* m_listView = nullptr;
+    StarredModel* m_model = nullptr;
+    NotebookCardDelegate* m_cardDelegate = nullptr;
+    FolderHeaderDelegate* m_folderDelegate = nullptr;
     
-    void onFolderToggled(const QString& folderName, bool collapsed);
-    void onNotebookClicked(const QString& bundlePath);
-    void onNotebookLongPressed(const QString& bundlePath);
-    
-    LauncherScrollArea* m_scrollArea = nullptr;
-    QWidget* m_scrollContent = nullptr;
-    QVBoxLayout* m_contentLayout = nullptr;
-    
-    // Track collapsed state per folder
-    QMap<QString, bool> m_collapsedFolders;
-    
-    // Track folder section widgets for collapse/expand
-    QMap<QString, QWidget*> m_folderGrids;
+    // Empty state
+    QLabel* m_emptyLabel = nullptr;
     
     bool m_darkMode = false;
+    bool m_needsReload = false;  // Deferred reload flag for when view becomes visible
     
     // Layout constants
-    static constexpr int SECTION_SPACING = 16;
-    static constexpr int GRID_SPACING = 12;
     static constexpr int CONTENT_MARGIN = 16;
 };
 
-/**
- * @brief Header widget for a folder section.
- * 
- * Displays folder name with expand/collapse chevron.
- * Long-press triggers context menu signal.
- */
-class FolderHeader : public QWidget {
-    Q_OBJECT
-
-public:
-    explicit FolderHeader(const QString& folderName, QWidget* parent = nullptr);
-    
-    QString folderName() const { return m_folderName; }
-    
-    void setCollapsed(bool collapsed);
-    bool isCollapsed() const { return m_collapsed; }
-    
-    void setDarkMode(bool dark);
-
-signals:
-    void clicked();
-    void longPressed();
-
-protected:
-    void paintEvent(QPaintEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void enterEvent(QEnterEvent* event) override;
-    void leaveEvent(QEvent* event) override;
-
-private:
-    QString m_folderName;
-    bool m_collapsed = false;
-    bool m_darkMode = false;
-    bool m_hovered = false;
-    bool m_pressed = false;
-    
-    QTimer* m_longPressTimer = nullptr;
-    QPoint m_pressPos;
-    bool m_longPressTriggered = false;
-    
-    static constexpr int HEADER_HEIGHT = 44;
-    static constexpr int LONG_PRESS_MS = 500;
-    static constexpr int LONG_PRESS_MOVE_THRESHOLD = 10;
-};
-
 #endif // STARREDVIEW_H
-

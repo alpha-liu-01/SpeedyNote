@@ -4,13 +4,12 @@
 #include <QWidget>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QGridLayout>
 #include <QLabel>
 #include <QTimer>
-#include <QList>
 
-class NotebookCard;
-class LauncherScrollArea;
+class SearchListView;
+class SearchModel;
+class NotebookCardDelegate;
 struct NotebookInfo;
 
 /**
@@ -21,14 +20,14 @@ struct NotebookInfo;
  * Features:
  * - Search input with clear button
  * - Real-time search with 300ms debounce
- * - Grid of NotebookCard results
+ * - Virtualized grid of notebook cards (Model/View)
  * - "No results" message
  * - Keyboard-friendly: Enter to search, Escape to clear
- * - Touch-friendly scrolling
+ * - Touch-friendly scrolling with kinetic momentum
  * 
  * Search scope (per Q&A): Notebook names + PDF filenames
  * 
- * Phase P.3.6: Part of the new Launcher implementation.
+ * Phase P.3: Refactored to use Model/View for virtualization and performance.
  */
 class SearchView : public QWidget {
     Q_OBJECT
@@ -69,12 +68,15 @@ private slots:
     void onSearchTextChanged(const QString& text);
     void onSearchTriggered();
     void performSearch();
+    
+    // Slots for list view signals
+    void onNotebookClicked(const QString& bundlePath);
+    void onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
 
 private:
     void setupUi();
-    void displayResults(const QList<NotebookInfo>& results);
-    void clearResults();
     void showEmptyState(const QString& message);
+    void showResults();
     void updateSearchIcon();
     
     // Search bar
@@ -83,15 +85,14 @@ private:
     QPushButton* m_searchButton = nullptr;
     QPushButton* m_clearButton = nullptr;
     
-    // Results area
-    LauncherScrollArea* m_scrollArea = nullptr;
-    QWidget* m_scrollContent = nullptr;
-    QGridLayout* m_gridLayout = nullptr;
+    // Status and empty labels
     QLabel* m_statusLabel = nullptr;
     QLabel* m_emptyLabel = nullptr;
     
-    // Result cards
-    QList<NotebookCard*> m_resultCards;
+    // Model/View components (virtualized rendering)
+    SearchListView* m_listView = nullptr;
+    SearchModel* m_model = nullptr;
+    NotebookCardDelegate* m_delegate = nullptr;
     
     // Debounce timer
     QTimer* m_debounceTimer = nullptr;
@@ -101,10 +102,8 @@ private:
     
     // Constants
     static constexpr int DEBOUNCE_MS = 300;
-    static constexpr int GRID_COLUMNS = 4;
     static constexpr int GRID_SPACING = 12;
     static constexpr int SEARCH_BAR_HEIGHT = 44;
 };
 
 #endif // SEARCHVIEW_H
-

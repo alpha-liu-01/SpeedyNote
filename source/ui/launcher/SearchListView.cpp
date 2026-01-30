@@ -1,23 +1,50 @@
-#include "TimelineListView.h"
+#include "SearchListView.h"
+#include "SearchModel.h"
 #include "KineticScrollHelper.h"
 
 #include <QMouseEvent>
 #include <QScrollBar>
 
-TimelineListView::TimelineListView(QWidget* parent)
+SearchListView::SearchListView(QWidget* parent)
     : QListView(parent)
 {
     // Configure long-press timer
     m_longPressTimer.setSingleShot(true);
     m_longPressTimer.setInterval(LONG_PRESS_MS);
     connect(&m_longPressTimer, &QTimer::timeout,
-            this, &TimelineListView::onLongPressTimeout);
+            this, &SearchListView::onLongPressTimeout);
     
     // Setup kinetic scroll helper
     m_kineticHelper = new KineticScrollHelper(verticalScrollBar(), this);
+    
+    // Configure view for grid-like display
+    setViewMode(QListView::IconMode);
+    setFlow(QListView::LeftToRight);
+    setWrapping(true);
+    setResizeMode(QListView::Adjust);
+    setSpacing(12);  // Match GRID_SPACING from original SearchView
+    setUniformItemSizes(true);
+    
+    // Visual settings
+    setSelectionMode(QAbstractItemView::SingleSelection);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    setFrameShape(QFrame::NoFrame);
+    
+    // Enable mouse tracking for hover effects
+    setMouseTracking(true);
+    viewport()->setMouseTracking(true);
 }
 
-void TimelineListView::mousePressEvent(QMouseEvent* event)
+QString SearchListView::bundlePathForIndex(const QModelIndex& index) const
+{
+    if (!index.isValid()) {
+        return QString();
+    }
+    return index.data(SearchModel::BundlePathRole).toString();
+}
+
+void SearchListView::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         // Stop any ongoing kinetic scroll and start tracking
@@ -28,7 +55,6 @@ void TimelineListView::mousePressEvent(QMouseEvent* event)
         m_longPressTriggered = false;
         m_touchScrolling = false;
         m_scrollStartValue = verticalScrollBar()->value();
-        m_lastScrollValue = m_scrollStartValue;
         
         // For touch input, don't let base class handle press yet
         // We'll decide on release whether it was a tap or scroll
@@ -50,8 +76,11 @@ void TimelineListView::mousePressEvent(QMouseEvent* event)
         // Right-click triggers context menu (same as long-press)
         QModelIndex index = indexAt(event->pos());
         if (index.isValid()) {
-            QPoint globalPos = viewport()->mapToGlobal(event->pos());
-            emit longPressed(index, globalPos);
+            QString bundlePath = bundlePathForIndex(index);
+            if (!bundlePath.isEmpty()) {
+                QPoint globalPos = viewport()->mapToGlobal(event->pos());
+                emit notebookLongPressed(bundlePath, globalPos);
+            }
         }
         event->accept();
         return;
@@ -61,7 +90,7 @@ void TimelineListView::mousePressEvent(QMouseEvent* event)
     QListView::mousePressEvent(event);
 }
 
-void TimelineListView::mouseReleaseEvent(QMouseEvent* event)
+void SearchListView::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         m_longPressTimer.stop();
@@ -84,20 +113,31 @@ void TimelineListView::mouseReleaseEvent(QMouseEvent* event)
                 return;
             }
             
-            // It was a tap (no scroll) - emit clicked signal for the pressed index
+            // It was a tap (no scroll) - emit notebookClicked signal
             if (m_pressedIndex.isValid()) {
-                emit clicked(m_pressedIndex);
+                QString bundlePath = bundlePathForIndex(m_pressedIndex);
+                if (!bundlePath.isEmpty()) {
+                    emit notebookClicked(bundlePath);
+                }
             }
             event->accept();
             return;
         }
+        
+        // For mouse input, emit notebookClicked on release
+        if (m_pressedIndex.isValid() && indexAt(event->pos()) == m_pressedIndex) {
+            QString bundlePath = bundlePathForIndex(m_pressedIndex);
+            if (!bundlePath.isEmpty()) {
+                emit notebookClicked(bundlePath);
+            }
+        }
     }
     
-    // Call base class to handle normal release behavior (mouse only)
+    // Call base class to handle normal release behavior
     QListView::mouseReleaseEvent(event);
 }
 
-void TimelineListView::mouseMoveEvent(QMouseEvent* event)
+void SearchListView::mouseMoveEvent(QMouseEvent* event)
 {
     if ((event->buttons() & Qt::LeftButton)) {
         QPoint delta = event->pos() - m_pressPos;
@@ -124,7 +164,6 @@ void TimelineListView::mouseMoveEvent(QMouseEvent* event)
             // Update velocity tracking
             int scrollDelta = verticalScrollBar()->value() - oldValue;
             m_kineticHelper->updateVelocity(scrollDelta);
-            m_lastScrollValue = verticalScrollBar()->value();
             
             event->accept();
             return;
@@ -135,14 +174,17 @@ void TimelineListView::mouseMoveEvent(QMouseEvent* event)
     QListView::mouseMoveEvent(event);
 }
 
-void TimelineListView::onLongPressTimeout()
+void SearchListView::onLongPressTimeout()
 {
     m_longPressTriggered = true;
     
-    // Emit signal with the pressed index and global position
+    // Emit signal with the pressed index's bundle path and global position
     if (m_pressedIndex.isValid()) {
-        QPoint globalPos = viewport()->mapToGlobal(m_pressPos);
-        emit longPressed(m_pressedIndex, globalPos);
+        QString bundlePath = bundlePathForIndex(m_pressedIndex);
+        if (!bundlePath.isEmpty()) {
+            QPoint globalPos = viewport()->mapToGlobal(m_pressPos);
+            emit notebookLongPressed(bundlePath, globalPos);
+        }
     }
     
     // Clear selection state to prevent accidental clicks after menu closes

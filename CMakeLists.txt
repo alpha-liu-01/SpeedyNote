@@ -581,8 +581,13 @@ set(UI_SOURCES
     source/ui/launcher/TimelineModel.cpp
     source/ui/launcher/TimelineDelegate.cpp
     source/ui/launcher/TimelineListView.cpp
-    source/ui/launcher/LauncherScrollArea.cpp
-    source/ui/launcher/NotebookCard.cpp
+    source/ui/launcher/KineticScrollHelper.cpp
+    source/ui/launcher/NotebookCardDelegate.cpp
+    source/ui/launcher/FolderHeaderDelegate.cpp
+    source/ui/launcher/SearchModel.cpp
+    source/ui/launcher/StarredModel.cpp
+    source/ui/launcher/SearchListView.cpp
+    source/ui/launcher/StarredListView.cpp
     source/ui/launcher/StarredView.cpp
     source/ui/launcher/SearchView.cpp
     source/ui/launcher/FloatingActionButton.cpp
