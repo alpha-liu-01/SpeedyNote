@@ -71,7 +71,10 @@ QVariant TimelineModel::data(const QModelIndex& index, int role) const
             return QVariant();
             
         case BundlePathRole:
-            return item.notebook.bundlePath;
+            if (!item.isHeader) {
+                return item.notebook.bundlePath;
+            }
+            return QString();
             
         case DisplayNameRole:
             if (!item.isHeader) {
@@ -86,19 +89,34 @@ QVariant TimelineModel::data(const QModelIndex& index, int role) const
             return QString();
             
         case LastModifiedRole:
-            return item.notebook.lastModified;
+            if (!item.isHeader) {
+                return item.notebook.lastModified;
+            }
+            return QVariant();
             
         case LastAccessedRole:
-            return item.notebook.lastAccessed;
+            if (!item.isHeader) {
+                return item.notebook.lastAccessed;
+            }
+            return QVariant();
             
         case IsPdfBasedRole:
-            return item.notebook.isPdfBased;
+            if (!item.isHeader) {
+                return item.notebook.isPdfBased;
+            }
+            return false;
             
         case IsEdgelessRole:
-            return item.notebook.isEdgeless;
+            if (!item.isHeader) {
+                return item.notebook.isEdgeless;
+            }
+            return false;
             
         case IsStarredRole:
-            return item.notebook.isStarred;
+            if (!item.isHeader) {
+                return item.notebook.isStarred;
+            }
+            return false;
             
         // Batch select mode roles (L-007)
         case IsInSelectModeRole:
