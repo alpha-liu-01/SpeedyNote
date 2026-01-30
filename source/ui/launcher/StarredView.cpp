@@ -1,15 +1,14 @@
 #include "StarredView.h"
 #include "NotebookCard.h"
+#include "LauncherScrollArea.h"
 #include "../../core/NotebookLibrary.h"
 
-#include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QPainter>
 #include <QPainterPath>
 #include <QMouseEvent>
-#include <QScroller>
 #include <QScrollBar>
 #include <QTimer>
 #include <QLabel>
@@ -38,8 +37,9 @@ void StarredView::setupUi()
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
     
-    // Scroll area
-    m_scrollArea = new QScrollArea(this);
+    // Scroll area - use LauncherScrollArea for reliable manual touch scrolling
+    // (QScroller has known issues with inertia reversal and tablet devices)
+    m_scrollArea = new LauncherScrollArea(this);
     m_scrollArea->setObjectName("StarredScrollArea");
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
@@ -57,19 +57,6 @@ void StarredView::setupUi()
     
     m_scrollArea->setWidget(m_scrollContent);
     mainLayout->addWidget(m_scrollArea);
-    
-    setupTouchScrolling();
-}
-
-void StarredView::setupTouchScrolling()
-{
-    QScroller::grabGesture(m_scrollArea->viewport(), QScroller::TouchGesture);
-    QScroller* scroller = QScroller::scroller(m_scrollArea->viewport());
-    QScrollerProperties props = scroller->scrollerProperties();
-    props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-    props.setScrollMetric(QScrollerProperties::OvershootScrollDistanceFactor, 0.2);
-    props.setScrollMetric(QScrollerProperties::DragStartDistance, 0.002);
-    scroller->setScrollerProperties(props);
 }
 
 void StarredView::reload()

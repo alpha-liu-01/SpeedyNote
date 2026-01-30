@@ -1,11 +1,11 @@
 #include "SearchView.h"
 #include "NotebookCard.h"
+#include "LauncherScrollArea.h"
 #include "../../core/NotebookLibrary.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
-#include <QScroller>
 #include <QScrollBar>
 #include <QApplication>
 
@@ -79,7 +79,9 @@ void SearchView::setupUi()
     mainLayout->addWidget(m_statusLabel);
     
     // === Results Scroll Area ===
-    m_scrollArea = new QScrollArea(this);
+    // Use LauncherScrollArea for reliable manual touch scrolling
+    // (QScroller has known issues with inertia reversal and tablet devices)
+    m_scrollArea = new LauncherScrollArea(this);
     m_scrollArea->setObjectName("SearchScrollArea");
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
@@ -96,8 +98,6 @@ void SearchView::setupUi()
     m_scrollArea->setWidget(m_scrollContent);
     mainLayout->addWidget(m_scrollArea, 1);
     
-    setupTouchScrolling();
-    
     // === Empty State Label ===
     m_emptyLabel = new QLabel(this);
     m_emptyLabel->setObjectName("EmptyLabel");
@@ -107,17 +107,6 @@ void SearchView::setupUi()
     
     // Initial state: show hint
     showEmptyState(tr("Type to search notebooks by name or PDF filename"));
-}
-
-void SearchView::setupTouchScrolling()
-{
-    QScroller::grabGesture(m_scrollArea->viewport(), QScroller::TouchGesture);
-    QScroller* scroller = QScroller::scroller(m_scrollArea->viewport());
-    QScrollerProperties props = scroller->scrollerProperties();
-    props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-    props.setScrollMetric(QScrollerProperties::OvershootScrollDistanceFactor, 0.2);
-    props.setScrollMetric(QScrollerProperties::DragStartDistance, 0.002);
-    scroller->setScrollerProperties(props);
 }
 
 void SearchView::setDarkMode(bool dark)

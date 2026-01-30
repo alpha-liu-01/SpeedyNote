@@ -581,6 +581,7 @@ set(UI_SOURCES
     source/ui/launcher/TimelineModel.cpp
     source/ui/launcher/TimelineDelegate.cpp
     source/ui/launcher/TimelineListView.cpp
+    source/ui/launcher/LauncherScrollArea.cpp
     source/ui/launcher/NotebookCard.cpp
     source/ui/launcher/StarredView.cpp
     source/ui/launcher/SearchView.cpp

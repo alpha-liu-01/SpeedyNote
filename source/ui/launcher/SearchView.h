@@ -4,13 +4,13 @@
 #include <QWidget>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QScrollArea>
 #include <QGridLayout>
 #include <QLabel>
 #include <QTimer>
 #include <QList>
 
 class NotebookCard;
+class LauncherScrollArea;
 struct NotebookInfo;
 
 /**
@@ -72,7 +72,6 @@ private slots:
 
 private:
     void setupUi();
-    void setupTouchScrolling();
     void displayResults(const QList<NotebookInfo>& results);
     void clearResults();
     void showEmptyState(const QString& message);
@@ -85,7 +84,7 @@ private:
     QPushButton* m_clearButton = nullptr;
     
     // Results area
-    QScrollArea* m_scrollArea = nullptr;
+    LauncherScrollArea* m_scrollArea = nullptr;
     QWidget* m_scrollContent = nullptr;
     QGridLayout* m_gridLayout = nullptr;
     QLabel* m_statusLabel = nullptr;

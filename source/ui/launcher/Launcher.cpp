@@ -20,7 +20,6 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QApplication>
-#include <QScroller>
 #include <QScrollBar>
 #include <QMenu>
 #include <QMessageBox>
@@ -349,14 +348,8 @@ void Launcher::setupTimeline()
     m_timelineList->setAttribute(Qt::WA_Hover, true);
     m_timelineList->viewport()->setAttribute(Qt::WA_Hover, true);
     
-    // Touch scrolling with QScroller
-    QScroller::grabGesture(m_timelineList->viewport(), QScroller::TouchGesture);
-    QScroller* scroller = QScroller::scroller(m_timelineList->viewport());
-    QScrollerProperties props = scroller->scrollerProperties();
-    props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-    props.setScrollMetric(QScrollerProperties::OvershootScrollDistanceFactor, 0.2);
-    props.setScrollMetric(QScrollerProperties::DragStartDistance, 0.002);  // Start drag sooner
-    scroller->setScrollerProperties(props);
+    // NOTE: Touch scrolling is handled by TimelineListView's manual kinetic scrolling
+    // (QScroller had issues with inertia reversal and tablet devices)
     
     // Connect click
     connect(m_timelineList, &QListView::clicked,

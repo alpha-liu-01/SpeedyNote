@@ -2,12 +2,12 @@
 #define STARREDVIEW_H
 
 #include <QWidget>
-#include <QScrollArea>
 #include <QVBoxLayout>
 #include <QMap>
 
 class NotebookCard;
 class FolderHeader;
+class LauncherScrollArea;
 
 /**
  * @brief iOS homescreen-style view for starred notebooks with folders.
@@ -63,7 +63,6 @@ signals:
 
 private:
     void setupUi();
-    void setupTouchScrolling();
     void buildContent();
     void clearContent();
     
@@ -75,7 +74,7 @@ private:
     void onNotebookClicked(const QString& bundlePath);
     void onNotebookLongPressed(const QString& bundlePath);
     
-    QScrollArea* m_scrollArea = nullptr;
+    LauncherScrollArea* m_scrollArea = nullptr;
     QWidget* m_scrollContent = nullptr;
     QVBoxLayout* m_contentLayout = nullptr;
     
