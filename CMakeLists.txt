@@ -640,6 +640,13 @@ set(SHARING_SOURCES
     thirdparty/miniz/miniz.c
 )
 
+# Batch operations module (CLI and bulk export/import)
+# See docs/private/BATCH_OPERATIONS.md for design documentation
+set(BATCH_SOURCES
+    source/batch/BatchOperations.cpp
+    source/batch/BundleDiscovery.cpp
+)
+
 # Android-specific utilities and UI
 set(ANDROID_PLATFORM_SOURCES "")
 if(ANDROID)
@@ -675,6 +682,7 @@ set(APP_SOURCES
         ${PDF_SOURCES}
     ${CONTROLLER_SOURCES}
     ${SHARING_SOURCES}
+    ${BATCH_SOURCES}
     ${ANDROID_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
         ${QMARKDOWNTEXTEDIT_SOURCES}

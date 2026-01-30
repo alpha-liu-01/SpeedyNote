@@ -557,98 +557,106 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
     float widthPt = pageSize.width() * SN_TO_PDF_SCALE;
     float heightPt = pageSize.height() * SN_TO_PDF_SCALE;
     
-    // Import the source PDF page as an XObject
-    pdf_obj* bgXObject = importPageAsXObject(pdfPageNum);
-    if (!bgXObject) {
-        qWarning() << "[MuPdfExporter] Failed to import PDF page as XObject, falling back to blank";
-        return renderBlankPage(pageIndex);
+    // For annotations-only mode, skip PDF background entirely but keep page dimensions
+    // This renders only strokes/images on a blank white page
+    pdf_obj* bgXObject = nullptr;
+    if (!m_options.annotationsOnly) {
+        // Import the source PDF page as an XObject
+        bgXObject = importPageAsXObject(pdfPageNum);
+        if (!bgXObject) {
+            qWarning() << "[MuPdfExporter] Failed to import PDF page as XObject, falling back to blank";
+            return renderBlankPage(pageIndex);
+        }
     }
     
     // Build combined content stream: background XObject + layers + objects
     fz_buffer* combinedContent = nullptr;
     pdf_obj* resources = nullptr;
     
-    // Get source page properties for rotation handling
-    int srcRotation = getSourcePageRotation(m_ctx, m_sourcePdf, pdfPageNum);
-    fz_rect srcBBox = getSourcePageBBox(m_ctx, m_sourcePdf, pdfPageNum);
-    
     fz_try(m_ctx) {
         // Create content buffer
         combinedContent = fz_new_buffer(m_ctx, 1024);
         
-        // Save graphics state, draw background XObject, restore
-        // The XObject is referenced as /BGForm in the Resources dictionary
-        fz_append_string(m_ctx, combinedContent, "q\n");
-        
-        // Apply transformation matrix for rotated pages
-        // The XObject content is stored "unrotated", but the page had a /Rotate entry
-        // We need to apply the rotation when drawing the XObject
-        //
-        // PDF transformation matrix: [a b c d e f]
-        // Represents: x' = ax + cy + e, y' = bx + dy + f
-        //
-        // For rotation around origin:
-        //   0°:   [1 0 0 1 0 0]       (identity)
-        //   90°:  [0 1 -1 0 w 0]      (rotate + translate)
-        //   180°: [-1 0 0 -1 w h]
-        //   270°: [0 -1 1 0 0 h]
-        //
-        // Where w and h are the page dimensions
-        
-        if (srcRotation != 0) {
-            char matrixCmd[128];
-            float bboxW = srcBBox.x1 - srcBBox.x0;
-            float bboxH = srcBBox.y1 - srcBBox.y0;
-            
-            switch (srcRotation) {
-                case 90:
-                    // Rotate 90° CW: [0 1 -1 0 bboxH 0]
-                    snprintf(matrixCmd, sizeof(matrixCmd), 
-                             "0 1 -1 0 %.4f 0 cm\n", bboxH);
-                    break;
-                case 180:
-                    // Rotate 180°: [-1 0 0 -1 bboxW bboxH]
-                    snprintf(matrixCmd, sizeof(matrixCmd), 
-                             "-1 0 0 -1 %.4f %.4f cm\n", bboxW, bboxH);
-                    break;
-                case 270:
-                    // Rotate 270° CW (90° CCW): [0 -1 1 0 0 bboxW]
-                    snprintf(matrixCmd, sizeof(matrixCmd), 
-                             "0 -1 1 0 0 %.4f cm\n", bboxW);
-                    break;
-                default:
-                    matrixCmd[0] = '\0';
-                    break;
-            }
-            
-            if (matrixCmd[0] != '\0') {
-                fz_append_string(m_ctx, combinedContent, matrixCmd);
-                #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "[MuPdfExporter] Applied rotation" << srcRotation 
-                         << "to page" << pageIndex;
-                #endif
-            }
-        }
-        
-        // Handle CropBox offset if it doesn't start at origin
-        if (srcBBox.x0 != 0 || srcBBox.y0 != 0) {
-            char translateCmd[64];
-            snprintf(translateCmd, sizeof(translateCmd), 
-                     "1 0 0 1 %.4f %.4f cm\n", -srcBBox.x0, -srcBBox.y0);
-            fz_append_string(m_ctx, combinedContent, translateCmd);
-        }
-        
-        // Draw the background XObject
-        fz_append_string(m_ctx, combinedContent, "/BGForm Do\n");
-        fz_append_string(m_ctx, combinedContent, "Q\n");
-        
-        // Create Resources dictionary with XObject reference
+        // Create Resources dictionary
         resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
         
-        // Create XObject subdictionary with background form
-        pdf_obj* xobjectDict = pdf_new_dict(m_ctx, m_outputDoc, 4);
-        pdf_dict_put(m_ctx, xobjectDict, pdf_new_name(m_ctx, "BGForm"), bgXObject);
-        pdf_dict_put(m_ctx, resources, PDF_NAME(XObject), xobjectDict);
+        // Draw background XObject if present (not in annotations-only mode)
+        if (bgXObject) {
+            // Get source page properties for rotation handling
+            // Only needed when drawing the background XObject
+            int srcRotation = getSourcePageRotation(m_ctx, m_sourcePdf, pdfPageNum);
+            fz_rect srcBBox = getSourcePageBBox(m_ctx, m_sourcePdf, pdfPageNum);
+            // Save graphics state, draw background XObject, restore
+            // The XObject is referenced as /BGForm in the Resources dictionary
+            fz_append_string(m_ctx, combinedContent, "q\n");
+            
+            // Apply transformation matrix for rotated pages
+            // The XObject content is stored "unrotated", but the page had a /Rotate entry
+            // We need to apply the rotation when drawing the XObject
+            //
+            // PDF transformation matrix: [a b c d e f]
+            // Represents: x' = ax + cy + e, y' = bx + dy + f
+            //
+            // For rotation around origin:
+            //   0°:   [1 0 0 1 0 0]       (identity)
+            //   90°:  [0 1 -1 0 w 0]      (rotate + translate)
+            //   180°: [-1 0 0 -1 w h]
+            //   270°: [0 -1 1 0 0 h]
+            //
+            // Where w and h are the page dimensions
+            
+            if (srcRotation != 0) {
+                char matrixCmd[128];
+                float bboxW = srcBBox.x1 - srcBBox.x0;
+                float bboxH = srcBBox.y1 - srcBBox.y0;
+                
+                switch (srcRotation) {
+                    case 90:
+                        // Rotate 90° CW: [0 1 -1 0 bboxH 0]
+                        snprintf(matrixCmd, sizeof(matrixCmd), 
+                                 "0 1 -1 0 %.4f 0 cm\n", bboxH);
+                        break;
+                    case 180:
+                        // Rotate 180°: [-1 0 0 -1 bboxW bboxH]
+                        snprintf(matrixCmd, sizeof(matrixCmd), 
+                                 "-1 0 0 -1 %.4f %.4f cm\n", bboxW, bboxH);
+                        break;
+                    case 270:
+                        // Rotate 270° CW (90° CCW): [0 -1 1 0 0 bboxW]
+                        snprintf(matrixCmd, sizeof(matrixCmd), 
+                                 "0 -1 1 0 0 %.4f cm\n", bboxW);
+                        break;
+                    default:
+                        matrixCmd[0] = '\0';
+                        break;
+                }
+                
+                if (matrixCmd[0] != '\0') {
+                    fz_append_string(m_ctx, combinedContent, matrixCmd);
+                    #ifdef SPEEDYNOTE_DEBUG
+                    qDebug() << "[MuPdfExporter] Applied rotation" << srcRotation 
+                             << "to page" << pageIndex;
+                    #endif
+                }
+            }
+            
+            // Handle CropBox offset if it doesn't start at origin
+            if (srcBBox.x0 != 0 || srcBBox.y0 != 0) {
+                char translateCmd[64];
+                snprintf(translateCmd, sizeof(translateCmd), 
+                         "1 0 0 1 %.4f %.4f cm\n", -srcBBox.x0, -srcBBox.y0);
+                fz_append_string(m_ctx, combinedContent, translateCmd);
+            }
+            
+            // Draw the background XObject
+            fz_append_string(m_ctx, combinedContent, "/BGForm Do\n");
+            fz_append_string(m_ctx, combinedContent, "Q\n");
+            
+            // Create XObject subdictionary with background form
+            pdf_obj* xobjectDict = pdf_new_dict(m_ctx, m_outputDoc, 4);
+            pdf_dict_put(m_ctx, xobjectDict, pdf_new_name(m_ctx, "BGForm"), bgXObject);
+            pdf_dict_put(m_ctx, resources, PDF_NAME(XObject), xobjectDict);
+        }
         
         // Render content with proper layer affinity ordering:
         // 1. Objects with affinity -1 (below all strokes)
@@ -876,13 +884,18 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
     float heightPt = pageSize.height() * SN_TO_PDF_SCALE;
     
     // Build background content stream (color, grid, lines)
-    fz_buffer* backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt);
+    // Skip background in annotations-only mode
+    fz_buffer* backgroundContent = nullptr;
+    if (!m_options.annotationsOnly) {
+        backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt);
+    }
     
     // Check if page has images to add
     bool hasImages = !page->objects.empty();
     
-    // Check for custom background image
-    bool hasCustomBackground = (page->backgroundType == Page::BackgroundType::Custom && 
+    // Check for custom background image (also skip in annotations-only mode)
+    bool hasCustomBackground = !m_options.annotationsOnly &&
+                               (page->backgroundType == Page::BackgroundType::Custom && 
                                 !page->customBackground.isNull());
     
     // Check if page has strokes

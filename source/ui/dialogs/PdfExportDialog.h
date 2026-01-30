@@ -83,6 +83,12 @@ public:
      * @brief Check if "all pages" is selected.
      */
     bool isAllPages() const;
+    
+    /**
+     * @brief Check if "annotations only" is selected.
+     * @return true if strokes should be exported on blank background (no PDF/grid/lines)
+     */
+    bool annotationsOnly() const;
 
 private slots:
     void onBrowseClicked();
@@ -115,6 +121,9 @@ private:
     QRadioButton* m_dpiCustomRadio = nullptr;
     QSpinBox* m_dpiSpinBox = nullptr;
     QButtonGroup* m_dpiGroup = nullptr;
+    
+    // Options section
+    class QCheckBox* m_annotationsOnlyCheckbox = nullptr;
     
     // Action buttons
     QPushButton* m_cancelBtn = nullptr;

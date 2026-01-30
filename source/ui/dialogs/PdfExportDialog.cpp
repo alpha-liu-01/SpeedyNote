@@ -12,6 +12,7 @@
 #include <QRadioButton>
 #include <QSpinBox>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -218,6 +219,19 @@ void PdfExportDialog::setupUI()
     
     mainLayout->addWidget(qualityGroup);
     
+    // ===== Options Section =====
+    QGroupBox* optionsGroup = new QGroupBox(tr("Options"));
+    QVBoxLayout* optionsLayout = new QVBoxLayout(optionsGroup);
+    optionsLayout->setSpacing(8);
+    
+    m_annotationsOnlyCheckbox = new QCheckBox(tr("Annotations only (blank background)"));
+    m_annotationsOnlyCheckbox->setToolTip(
+        tr("Export strokes and images only, without the original PDF content or page backgrounds (grid, lines).\n"
+           "Useful for extracting your handwritten notes as a separate layer."));
+    optionsLayout->addWidget(m_annotationsOnlyCheckbox);
+    
+    mainLayout->addWidget(optionsGroup);
+    
     // ===== Spacer =====
     mainLayout->addStretch();
     
@@ -421,6 +435,11 @@ int PdfExportDialog::dpi() const
 bool PdfExportDialog::isAllPages() const
 {
     return m_allPagesRadio->isChecked();
+}
+
+bool PdfExportDialog::annotationsOnly() const
+{
+    return m_annotationsOnlyCheckbox && m_annotationsOnlyCheckbox->isChecked();
 }
 
 QString PdfExportDialog::generateDefaultFilename() const

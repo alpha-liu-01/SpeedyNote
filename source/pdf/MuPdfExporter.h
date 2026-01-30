@@ -37,6 +37,7 @@ struct PdfExportOptions {
     int dpi = 300;                  ///< Target DPI for rasterized content
     bool preserveMetadata = true;   ///< Copy metadata from source PDF
     bool preserveOutline = true;    ///< Copy outline/bookmarks from source PDF
+    bool annotationsOnly = false;   ///< Export strokes only on blank background (no PDF/grid/lines)
 };
 
 /**

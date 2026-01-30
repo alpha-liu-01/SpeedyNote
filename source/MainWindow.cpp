@@ -2561,6 +2561,7 @@ void MainWindow::showPdfExportDialog()
         options.dpi = dialog.dpi();
         options.preserveMetadata = true;
         options.preserveOutline = true;
+        options.annotationsOnly = dialog.annotationsOnly();
         
         // Create exporter and export
         MuPdfExporter exporter;
