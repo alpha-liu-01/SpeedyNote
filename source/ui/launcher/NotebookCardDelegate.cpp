@@ -63,6 +63,10 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     bool selected = option.state & QStyle::State_Selected;
     bool hovered = option.state & QStyle::State_MouseOver;
     
+    // Check batch select mode state
+    bool inSelectMode = index.data(IsInSelectModeRole).toBool();
+    bool selectedInBatch = index.data(IsSelectedInBatchRole).toBool();
+    
     // The rect from option is the cell rect - use it directly as card rect
     QRect cardRect = rect;
     
@@ -168,9 +172,15 @@ void NotebookCardDelegate::paintNotebookCard(QPainter* painter, const QRect& rec
     QRect typeRect(cardRect.left() + PADDING, typeY, typeTextWidth, 14);
     painter->drawText(typeRect, Qt::AlignLeft | Qt::AlignTop, typeIndicatorText(isPdf, isEdgeless));
     
-    // === 3-dot menu button (bottom-right) ===
-    QRect menuRect = menuButtonRect(cardRect);
-    drawMenuButton(painter, menuRect, hovered);
+    // === 3-dot menu button OR selection indicator ===
+    if (inSelectMode) {
+        // In select mode: draw selection indicator (top-left), hide menu button
+        drawSelectionIndicator(painter, cardRect, selectedInBatch);
+    } else {
+        // Normal mode: draw 3-dot menu button (bottom-right)
+        QRect menuRect = menuButtonRect(cardRect);
+        drawMenuButton(painter, menuRect, hovered);
+    }
 }
 
 void NotebookCardDelegate::drawThumbnail(QPainter* painter, const QRect& rect,
@@ -329,4 +339,48 @@ void NotebookCardDelegate::drawMenuButton(QPainter* painter, const QRect& button
     painter->drawEllipse(QPoint(centerX, centerY), dotSize / 2, dotSize / 2);
     // Bottom dot
     painter->drawEllipse(QPoint(centerX, centerY + dotSpacing), dotSize / 2, dotSize / 2);
+}
+
+void NotebookCardDelegate::drawSelectionIndicator(QPainter* painter, const QRect& cardRect,
+                                                   bool isSelected) const
+{
+    // Position in top-left corner of card
+    QRect indicatorRect(
+        cardRect.left() + SELECTION_INDICATOR_MARGIN,
+        cardRect.top() + SELECTION_INDICATOR_MARGIN,
+        SELECTION_INDICATOR_SIZE,
+        SELECTION_INDICATOR_SIZE
+    );
+    
+    // Colors
+    QColor fillColor = isSelected 
+        ? ThemeColors::selectionBorder(m_darkMode)  // Blue when selected
+        : ThemeColors::itemBackground(m_darkMode);   // Card background when not
+    QColor borderColor = isSelected
+        ? ThemeColors::selectionBorder(m_darkMode)
+        : ThemeColors::textSecondary(m_darkMode);
+    
+    // Draw circle background
+    painter->setPen(QPen(borderColor, 2));
+    painter->setBrush(fillColor);
+    painter->drawEllipse(indicatorRect);
+    
+    // Draw checkmark if selected
+    if (isSelected) {
+        painter->setPen(QPen(Qt::white, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter->setBrush(Qt::NoBrush);
+        
+        // Checkmark path within the circle
+        int cx = indicatorRect.center().x();
+        int cy = indicatorRect.center().y();
+        int size = SELECTION_INDICATOR_SIZE / 3;
+        
+        // Draw checkmark: short line down-left, then long line down-right
+        QPoint p1(cx - size, cy);           // Start (left)
+        QPoint p2(cx - size/3, cy + size);  // Bottom of short stroke
+        QPoint p3(cx + size, cy - size/2);  // End (top-right)
+        
+        painter->drawLine(p1, p2);
+        painter->drawLine(p2, p3);
+    }
 }

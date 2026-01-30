@@ -3,11 +3,13 @@
 
 #include <QWidget>
 #include <QLabel>
+#include <QPushButton>
 
 class StarredListView;
 class StarredModel;
 class NotebookCardDelegate;
 class FolderHeaderDelegate;
+class QStackedWidget;
 
 /**
  * @brief iOS homescreen-style view for starred notebooks with folders.
@@ -83,10 +85,35 @@ private slots:
     void onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
     void onFolderClicked(const QString& folderName);
     void onFolderLongPressed(const QString& folderName, const QPoint& globalPos);
+    
+    // Slots for select mode (L-007)
+    void onSelectModeChanged(bool active);
+    void onBatchSelectionChanged(int count);
 
 private:
     void setupUi();
+    void setupSelectModeHeader();
     void updateEmptyState();
+    
+    // -------------------------------------------------------------------------
+    // Batch Select Mode (L-007)
+    // -------------------------------------------------------------------------
+    
+    /**
+     * @brief Show the select mode header with the given count.
+     * @param count Number of selected items.
+     */
+    void showSelectModeHeader(int count);
+    
+    /**
+     * @brief Hide the select mode header and show normal view.
+     */
+    void hideSelectModeHeader();
+    
+    /**
+     * @brief Show the overflow menu with batch actions.
+     */
+    void showOverflowMenu();
     
     // Model/View components
     StarredListView* m_listView = nullptr;
@@ -97,11 +124,18 @@ private:
     // Empty state
     QLabel* m_emptyLabel = nullptr;
     
+    // Select mode header (L-007)
+    QWidget* m_selectModeHeader = nullptr;      // Header bar for select mode
+    QLabel* m_selectionCountLabel = nullptr;    // Shows "X selected"
+    QPushButton* m_backButton = nullptr;        // ← back arrow to exit
+    QPushButton* m_overflowMenuButton = nullptr; // ⋮ overflow menu
+    
     bool m_darkMode = false;
     bool m_needsReload = false;  // Deferred reload flag for when view becomes visible
     
     // Layout constants
     static constexpr int CONTENT_MARGIN = 16;
+    static constexpr int HEADER_HEIGHT = 48;
 };
 
 #endif // STARREDVIEW_H

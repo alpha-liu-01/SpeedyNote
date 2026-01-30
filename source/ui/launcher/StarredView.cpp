@@ -3,10 +3,13 @@
 #include "StarredModel.h"
 #include "NotebookCardDelegate.h"
 #include "FolderHeaderDelegate.h"
+#include "../ThemeColors.h"
 #include "../../core/NotebookLibrary.h"
 
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QShowEvent>
+#include <QMenu>
 
 // ============================================================================
 // CompositeStarredDelegate - Local delegate that dispatches to folder/card delegates
@@ -97,6 +100,11 @@ void StarredView::setupUi()
                                    CONTENT_MARGIN, CONTENT_MARGIN);
     mainLayout->setSpacing(0);
     
+    // === Select Mode Header (L-007) ===
+    setupSelectModeHeader();
+    mainLayout->addWidget(m_selectModeHeader);
+    m_selectModeHeader->setVisible(false);  // Hidden by default
+    
     // === Model ===
     m_model = new StarredModel(this);
     
@@ -131,6 +139,12 @@ void StarredView::setupUi()
             this, &StarredView::onFolderClicked);
     connect(m_listView, &StarredListView::folderLongPressed,
             this, &StarredView::onFolderLongPressed);
+    
+    // Connect select mode signals (L-007)
+    connect(m_listView, &StarredListView::selectModeChanged,
+            this, &StarredView::onSelectModeChanged);
+    connect(m_listView, &StarredListView::batchSelectionChanged,
+            this, &StarredView::onBatchSelectionChanged);
     
     mainLayout->addWidget(m_listView, 1);
     
@@ -197,6 +211,11 @@ void StarredView::setDarkMode(bool dark)
         pal.setColor(QPalette::WindowText, dark ? QColor(150, 150, 150) : QColor(120, 120, 120));
         m_emptyLabel->setPalette(pal);
         
+        // Update select mode header colors if visible
+        if (m_selectModeHeader->isVisible()) {
+            showSelectModeHeader(m_listView->selectionCount());
+        }
+        
         // Trigger repaint of visible items
         m_listView->viewport()->update();
     }
@@ -207,6 +226,186 @@ void StarredView::updateEmptyState()
     bool isEmpty = m_model->isEmpty();
     m_listView->setVisible(!isEmpty);
     m_emptyLabel->setVisible(isEmpty);
+}
+
+// -----------------------------------------------------------------------------
+// Batch Select Mode (L-007)
+// -----------------------------------------------------------------------------
+
+void StarredView::setupSelectModeHeader()
+{
+    m_selectModeHeader = new QWidget(this);
+    m_selectModeHeader->setFixedHeight(HEADER_HEIGHT);
+    m_selectModeHeader->setObjectName("SelectModeHeader");
+    
+    auto* headerLayout = new QHBoxLayout(m_selectModeHeader);
+    headerLayout->setContentsMargins(0, 0, 8, 8);
+    headerLayout->setSpacing(8);
+    
+    // Back button (←)
+    m_backButton = new QPushButton(this);
+    m_backButton->setObjectName("BackButton");
+    m_backButton->setText("←");
+    m_backButton->setFixedSize(40, 40);
+    m_backButton->setFlat(true);
+    m_backButton->setCursor(Qt::PointingHandCursor);
+    
+    QFont backFont = m_backButton->font();
+    backFont.setPointSize(18);
+    m_backButton->setFont(backFont);
+    
+    connect(m_backButton, &QPushButton::clicked, this, [this]() {
+        m_listView->exitSelectMode();
+    });
+    
+    headerLayout->addWidget(m_backButton);
+    
+    // Selection count label
+    m_selectionCountLabel = new QLabel(this);
+    m_selectionCountLabel->setObjectName("SelectionCountLabel");
+    
+    QFont countFont = m_selectionCountLabel->font();
+    countFont.setPointSize(14);
+    countFont.setBold(true);
+    m_selectionCountLabel->setFont(countFont);
+    
+    headerLayout->addWidget(m_selectionCountLabel, 1);  // Stretch
+    
+    // Overflow menu button (⋮)
+    m_overflowMenuButton = new QPushButton(this);
+    m_overflowMenuButton->setObjectName("OverflowMenuButton");
+    m_overflowMenuButton->setText("⋮");
+    m_overflowMenuButton->setFixedSize(40, 40);
+    m_overflowMenuButton->setFlat(true);
+    m_overflowMenuButton->setCursor(Qt::PointingHandCursor);
+    
+    QFont menuFont = m_overflowMenuButton->font();
+    menuFont.setPointSize(20);
+    menuFont.setBold(true);
+    m_overflowMenuButton->setFont(menuFont);
+    
+    connect(m_overflowMenuButton, &QPushButton::clicked, this, &StarredView::showOverflowMenu);
+    
+    headerLayout->addWidget(m_overflowMenuButton);
+}
+
+void StarredView::showSelectModeHeader(int count)
+{
+    // Update count label
+    if (count == 1) {
+        m_selectionCountLabel->setText(tr("1 selected"));
+    } else {
+        m_selectionCountLabel->setText(tr("%1 selected").arg(count));
+    }
+    
+    // Update colors based on dark mode
+    QColor textColor = ThemeColors::textPrimary(m_darkMode);
+    
+    QString buttonStyle = QString(
+        "QPushButton { color: %1; border: none; background: transparent; }"
+        "QPushButton:hover { background: %2; border-radius: 20px; }"
+        "QPushButton:pressed { background: %3; border-radius: 20px; }"
+    ).arg(textColor.name(),
+          ThemeColors::itemHover(m_darkMode).name(),
+          ThemeColors::pressed(m_darkMode).name());
+    
+    m_backButton->setStyleSheet(buttonStyle);
+    m_overflowMenuButton->setStyleSheet(buttonStyle);
+    
+    QPalette labelPal = m_selectionCountLabel->palette();
+    labelPal.setColor(QPalette::WindowText, textColor);
+    m_selectionCountLabel->setPalette(labelPal);
+    
+    // Show header
+    m_selectModeHeader->setVisible(true);
+}
+
+void StarredView::hideSelectModeHeader()
+{
+    m_selectModeHeader->setVisible(false);
+}
+
+void StarredView::showOverflowMenu()
+{
+    QMenu menu(this);
+    
+    int selectedCount = m_listView->selectionCount();
+    
+    // Select All / Deselect All
+    QAction* selectAllAction = menu.addAction(tr("Select All"));
+    connect(selectAllAction, &QAction::triggered, this, [this]() {
+        m_listView->selectAll();
+    });
+    
+    QAction* deselectAllAction = menu.addAction(tr("Deselect All"));
+    deselectAllAction->setEnabled(selectedCount > 0);
+    connect(deselectAllAction, &QAction::triggered, this, [this]() {
+        m_listView->deselectAll();
+    });
+    
+    menu.addSeparator();
+    
+    // Move to Folder... (L-008 will implement FolderPickerDialog)
+    QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
+    moveToFolderAction->setEnabled(selectedCount > 0);
+    connect(moveToFolderAction, &QAction::triggered, this, [this]() {
+        // TODO (L-008): Open FolderPickerDialog for folder selection
+        // For now, just log the intent
+        QStringList selected = m_listView->selectedBundlePaths();
+        qDebug() << "Move to folder:" << selected.size() << "notebooks (FolderPickerDialog not yet implemented)";
+        
+        // Example of how it will work once L-008 is implemented:
+        // QString folder = FolderPickerDialog::getFolder(this, tr("Move to Folder"));
+        // if (!folder.isEmpty()) {
+        //     NotebookLibrary::instance()->moveNotebooksToFolder(selected, folder);
+        //     m_listView->exitSelectMode();
+        // }
+    });
+    
+    // Remove from Folder
+    QAction* removeFromFolderAction = menu.addAction(tr("Remove from Folder"));
+    removeFromFolderAction->setEnabled(selectedCount > 0);
+    connect(removeFromFolderAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            NotebookLibrary::instance()->removeNotebooksFromFolder(selected);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    menu.addSeparator();
+    
+    // Unstar Selected
+    QAction* unstarAction = menu.addAction(tr("Unstar Selected"));
+    unstarAction->setEnabled(selectedCount > 0);
+    connect(unstarAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            NotebookLibrary::instance()->unstarNotebooks(selected);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    // Show menu below the overflow button
+    QPoint pos = m_overflowMenuButton->mapToGlobal(
+        QPoint(m_overflowMenuButton->width(), m_overflowMenuButton->height()));
+    menu.exec(pos);
+}
+
+void StarredView::onSelectModeChanged(bool active)
+{
+    if (active) {
+        showSelectModeHeader(m_listView->selectionCount());
+    } else {
+        hideSelectModeHeader();
+    }
+}
+
+void StarredView::onBatchSelectionChanged(int count)
+{
+    if (m_listView->isSelectMode()) {
+        showSelectModeHeader(count);
+    }
 }
 
 void StarredView::onNotebookClicked(const QString& bundlePath)
@@ -224,7 +423,11 @@ void StarredView::onNotebookMenuRequested(const QString& bundlePath, const QPoin
 void StarredView::onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos)
 {
     Q_UNUSED(globalPos)
-    // TODO (L-007): This will enter batch select mode instead of showing menu
+    
+    // Enter batch select mode with this notebook as the first selection
+    m_listView->enterSelectMode(bundlePath);
+    
+    // Also emit for any external handlers that might want to know
     emit notebookLongPressed(bundlePath);
 }
 

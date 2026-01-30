@@ -138,6 +138,46 @@ public:
      */
     QStringList starredFolders() const;
     
+    // === Bulk Operations (L-007) ===
+    
+    /**
+     * @brief Star multiple notebooks at once.
+     * @param bundlePaths List of notebook bundle paths to star.
+     * 
+     * More efficient than calling setStarred() multiple times because
+     * it only emits libraryChanged() once at the end.
+     */
+    void starNotebooks(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Unstar multiple notebooks at once.
+     * @param bundlePaths List of notebook bundle paths to unstar.
+     * 
+     * More efficient than calling setStarred() multiple times because
+     * it only emits libraryChanged() once at the end.
+     */
+    void unstarNotebooks(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Move multiple notebooks to a folder.
+     * @param bundlePaths List of notebook bundle paths to move.
+     * @param folder Target folder name. If the notebooks are not starred,
+     *               they will be starred first.
+     * 
+     * More efficient than calling setStarredFolder() multiple times because
+     * it only emits libraryChanged() once at the end.
+     */
+    void moveNotebooksToFolder(const QStringList& bundlePaths, const QString& folder);
+    
+    /**
+     * @brief Remove multiple notebooks from their folders (move to Unfiled).
+     * @param bundlePaths List of notebook bundle paths to remove from folders.
+     * 
+     * The notebooks remain starred, just moved to the Unfiled section.
+     * More efficient than calling setStarredFolder() multiple times.
+     */
+    void removeNotebooksFromFolder(const QStringList& bundlePaths);
+    
     /**
      * @brief Create a new starred folder.
      * @param name Folder name (must be unique).

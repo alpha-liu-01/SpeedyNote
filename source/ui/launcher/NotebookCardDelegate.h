@@ -88,6 +88,7 @@ public:
     // Data roles used by this delegate
     // These should match the roles defined in StarredModel, SearchModel, and TimelineModel
     enum DataRoles {
+        // Notebook data roles (Qt::UserRole + 100 range)
         NotebookInfoRole = Qt::UserRole + 100,  // QVariant containing NotebookInfo
         BundlePathRole,                          // QString: path to notebook bundle
         DisplayNameRole,                         // QString: notebook display name
@@ -96,6 +97,10 @@ public:
         IsPdfBasedRole,                          // bool: whether notebook is PDF-based
         IsEdgelessRole,                          // bool: whether notebook is edgeless
         LastModifiedRole,                        // QDateTime: last modification time
+        
+        // Batch select mode roles (Qt::UserRole + 200 range)
+        IsInSelectModeRole = Qt::UserRole + 200, // bool: whether view is in select mode
+        IsSelectedInBatchRole,                    // bool: whether this item is selected in batch
     };
 
 private:
@@ -114,8 +119,20 @@ private:
     
     /**
      * @brief Draw the 3-dot menu button.
+     * Only drawn when NOT in select mode.
      */
     void drawMenuButton(QPainter* painter, const QRect& buttonRect, bool hovered) const;
+    
+    /**
+     * @brief Draw selection indicator (checkmark overlay) in top-left.
+     * @param painter The painter.
+     * @param cardRect The card bounding rectangle.
+     * @param isSelected Whether this item is selected in batch mode.
+     * 
+     * Draws a circular checkmark indicator in the top-left corner.
+     * Shows empty circle when not selected, filled circle with checkmark when selected.
+     */
+    void drawSelectionIndicator(QPainter* painter, const QRect& cardRect, bool isSelected) const;
     
     /**
      * @brief Get type indicator text (PDF, Edgeless, Paged).
@@ -155,6 +172,10 @@ private:
     // Menu button dimensions
     static constexpr int MENU_BUTTON_SIZE = 24;
     static constexpr int MENU_BUTTON_MARGIN = 4;
+    
+    // Selection indicator dimensions (for batch select mode)
+    static constexpr int SELECTION_INDICATOR_SIZE = 22;
+    static constexpr int SELECTION_INDICATOR_MARGIN = 6;
 };
 
 #endif // NOTEBOOKCARDDELEGATE_H

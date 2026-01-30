@@ -4,6 +4,7 @@
 #include <QAbstractListModel>
 #include <QList>
 #include <QMap>
+#include <QSet>
 #include "../../core/NotebookLibrary.h"
 
 /**
@@ -64,8 +65,12 @@ public:
         IsEdgelessRole,
         LastModifiedRole,  // QDateTime: last modification time
         
-        // FolderHeaderDelegate roles (Qt::UserRole + 200 range)
-        FolderNameRole = Qt::UserRole + 200,
+        // Batch select mode roles (Qt::UserRole + 200 range, L-007)
+        IsInSelectModeRole = Qt::UserRole + 200,
+        IsSelectedInBatchRole,
+        
+        // FolderHeaderDelegate roles (Qt::UserRole + 250 range)
+        FolderNameRole = Qt::UserRole + 250,
         IsCollapsedRole,
     };
 
@@ -141,6 +146,38 @@ public:
      * @return The NotebookInfo, or invalid one if not a notebook card.
      */
     NotebookInfo notebookAt(const QModelIndex& index) const;
+    
+    // -------------------------------------------------------------------------
+    // Batch Select Mode (L-007)
+    // -------------------------------------------------------------------------
+    
+    /**
+     * @brief Set whether the view is in select mode.
+     * @param selectMode True if in select mode.
+     * 
+     * When this changes, all items are notified via dataChanged so they
+     * can update their visual appearance (show/hide selection indicators).
+     */
+    void setSelectMode(bool selectMode);
+    
+    /**
+     * @brief Check if the view is in select mode.
+     */
+    bool isSelectMode() const { return m_selectMode; }
+    
+    /**
+     * @brief Set the selected bundle paths.
+     * @param selectedPaths Set of bundle paths that are selected.
+     * 
+     * When this changes, affected items are notified via dataChanged.
+     */
+    void setSelectedBundlePaths(const QSet<QString>& selectedPaths);
+    
+    /**
+     * @brief Check if a bundle path is selected.
+     * @param bundlePath The bundle path to check.
+     */
+    bool isSelected(const QString& bundlePath) const;
 
 signals:
     /**
@@ -188,6 +225,10 @@ private:
     
     // Content signature for smart reload
     QString m_contentSignature;
+    
+    // Batch select mode state (L-007)
+    bool m_selectMode = false;
+    QSet<QString> m_selectedBundlePaths;
 };
 
 #endif // STARREDMODEL_H

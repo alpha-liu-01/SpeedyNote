@@ -45,9 +45,9 @@ public:
 
 public:
     // Data roles used by this delegate
-    // These should match the roles defined in StarredModel
+    // These MUST match the roles defined in StarredModel
     enum DataRoles {
-        FolderNameRole = Qt::UserRole + 200,  // QString: folder display name
+        FolderNameRole = Qt::UserRole + 250,  // QString: folder display name
         IsCollapsedRole,                       // bool: whether folder is collapsed
     };
 

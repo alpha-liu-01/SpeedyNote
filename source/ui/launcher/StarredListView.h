@@ -3,6 +3,8 @@
 
 #include "KineticListView.h"
 
+#include <QSet>
+
 class StarredModel;
 
 /**
@@ -12,7 +14,7 @@ class StarredModel;
  * Handles:
  * - Folder headers (expand/collapse on click, context menu on long-press)
  * - Notebook cards with 3-dot menu button detection
- * - Long-press for future batch select mode (L-007)
+ * - Batch select mode (L-007) for bulk operations
  * 
  * Works with StarredModel, NotebookCardDelegate, and FolderHeaderDelegate.
  */
@@ -28,19 +30,80 @@ public:
      */
     void setStarredModel(StarredModel* model);
     
+    // -------------------------------------------------------------------------
+    // Batch Select Mode (L-007)
+    // -------------------------------------------------------------------------
+    
+    /**
+     * @brief Check if batch select mode is active.
+     */
+    bool isSelectMode() const { return m_selectMode; }
+    
+    /**
+     * @brief Enter batch select mode with the first item already selected.
+     * @param firstSelection Bundle path of the first selected notebook.
+     * 
+     * Called when user long-presses a notebook card. Enters select mode
+     * and marks that notebook as selected.
+     */
+    void enterSelectMode(const QString& firstSelection);
+    
+    /**
+     * @brief Exit batch select mode, clearing all selections.
+     */
+    void exitSelectMode();
+    
+    /**
+     * @brief Toggle selection state of a notebook.
+     * @param bundlePath The bundle path of the notebook to toggle.
+     * 
+     * If not in select mode, does nothing.
+     */
+    void toggleSelection(const QString& bundlePath);
+    
+    /**
+     * @brief Select all visible notebook cards (not folder headers).
+     */
+    void selectAll();
+    
+    /**
+     * @brief Deselect all notebooks.
+     */
+    void deselectAll();
+    
+    /**
+     * @brief Get list of selected notebook bundle paths.
+     */
+    QStringList selectedBundlePaths() const;
+    
+    /**
+     * @brief Get the number of selected notebooks.
+     */
+    int selectionCount() const { return m_selectedBundlePaths.size(); }
+    
+    /**
+     * @brief Check if a specific notebook is selected.
+     * @param bundlePath The bundle path to check.
+     * 
+     * Used by delegates to determine if they should draw selection indicator.
+     */
+    bool isSelected(const QString& bundlePath) const;
+    
 signals:
     /**
      * @brief Emitted when a notebook card is clicked/tapped (not on menu button).
+     * Only emitted when NOT in select mode.
      */
     void notebookClicked(const QString& bundlePath);
     
     /**
      * @brief Emitted when the 3-dot menu button or right-click on a notebook card.
+     * Only emitted when NOT in select mode.
      */
     void notebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
     
     /**
-     * @brief Emitted when a notebook card is long-pressed.
+     * @brief Emitted when a notebook card is long-pressed (enters select mode).
      */
     void notebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
     
@@ -53,6 +116,18 @@ signals:
      * @brief Emitted when a folder header is long-pressed or right-clicked.
      */
     void folderLongPressed(const QString& folderName, const QPoint& globalPos);
+    
+    /**
+     * @brief Emitted when select mode is entered or exited.
+     * @param active True if select mode is now active.
+     */
+    void selectModeChanged(bool active);
+    
+    /**
+     * @brief Emitted when the selection changes (items added/removed).
+     * @param count The new number of selected items.
+     */
+    void batchSelectionChanged(int count);
 
 protected:
     void handleItemTap(const QModelIndex& index, const QPoint& pos) override;
@@ -66,6 +141,10 @@ private:
     bool isOnMenuButton(const QModelIndex& index, const QPoint& pos) const;
     
     StarredModel* m_starredModel = nullptr;
+    
+    // Batch select mode state (L-007)
+    bool m_selectMode = false;
+    QSet<QString> m_selectedBundlePaths;
 };
 
 #endif // STARREDLISTVIEW_H

@@ -37,6 +37,122 @@ void StarredListView::setStarredModel(StarredModel* model)
     setModel(model);
 }
 
+// -----------------------------------------------------------------------------
+// Batch Select Mode (L-007)
+// -----------------------------------------------------------------------------
+
+void StarredListView::enterSelectMode(const QString& firstSelection)
+{
+    if (m_selectMode) {
+        return;  // Already in select mode
+    }
+    
+    m_selectMode = true;
+    m_selectedBundlePaths.clear();
+    
+    // Add the first selection
+    if (!firstSelection.isEmpty()) {
+        m_selectedBundlePaths.insert(firstSelection);
+    }
+    
+    // Sync with model for delegate painting
+    if (m_starredModel) {
+        m_starredModel->setSelectMode(true);
+        m_starredModel->setSelectedBundlePaths(m_selectedBundlePaths);
+    }
+    
+    emit selectModeChanged(true);
+    emit batchSelectionChanged(m_selectedBundlePaths.size());
+}
+
+void StarredListView::exitSelectMode()
+{
+    if (!m_selectMode) {
+        return;  // Not in select mode
+    }
+    
+    m_selectMode = false;
+    m_selectedBundlePaths.clear();
+    
+    // Sync with model for delegate painting
+    if (m_starredModel) {
+        m_starredModel->setSelectMode(false);
+    }
+    
+    emit selectModeChanged(false);
+    emit batchSelectionChanged(0);
+}
+
+void StarredListView::toggleSelection(const QString& bundlePath)
+{
+    if (!m_selectMode || bundlePath.isEmpty()) {
+        return;
+    }
+    
+    if (m_selectedBundlePaths.contains(bundlePath)) {
+        m_selectedBundlePaths.remove(bundlePath);
+    } else {
+        m_selectedBundlePaths.insert(bundlePath);
+    }
+    
+    // Sync with model for delegate painting
+    if (m_starredModel) {
+        m_starredModel->setSelectedBundlePaths(m_selectedBundlePaths);
+    }
+    
+    emit batchSelectionChanged(m_selectedBundlePaths.size());
+}
+
+void StarredListView::selectAll()
+{
+    if (!m_selectMode || !m_starredModel) {
+        return;
+    }
+    
+    // Iterate through all items and select notebook cards (not folder headers)
+    int rowCount = m_starredModel->rowCount();
+    for (int i = 0; i < rowCount; ++i) {
+        QModelIndex index = m_starredModel->index(i, 0);
+        if (!isFolderHeader(index)) {
+            QString bundlePath = bundlePathForIndex(index);
+            if (!bundlePath.isEmpty()) {
+                m_selectedBundlePaths.insert(bundlePath);
+            }
+        }
+    }
+    
+    // Sync with model for delegate painting
+    m_starredModel->setSelectedBundlePaths(m_selectedBundlePaths);
+    
+    emit batchSelectionChanged(m_selectedBundlePaths.size());
+}
+
+void StarredListView::deselectAll()
+{
+    if (!m_selectMode) {
+        return;
+    }
+    
+    m_selectedBundlePaths.clear();
+    
+    // Sync with model for delegate painting
+    if (m_starredModel) {
+        m_starredModel->setSelectedBundlePaths(m_selectedBundlePaths);
+    }
+    
+    emit batchSelectionChanged(0);
+}
+
+QStringList StarredListView::selectedBundlePaths() const
+{
+    return QStringList(m_selectedBundlePaths.begin(), m_selectedBundlePaths.end());
+}
+
+bool StarredListView::isSelected(const QString& bundlePath) const
+{
+    return m_selectedBundlePaths.contains(bundlePath);
+}
+
 bool StarredListView::isFolderHeader(const QModelIndex& index) const
 {
     if (!index.isValid()) {
@@ -83,7 +199,7 @@ void StarredListView::handleItemTap(const QModelIndex& index, const QPoint& pos)
     if (!index.isValid()) return;
     
     if (isFolderHeader(index)) {
-        // Folder header: toggle collapsed state
+        // Folder header: toggle collapsed state (same in normal and select mode)
         QString folderName = folderNameForIndex(index);
         if (!folderName.isEmpty()) {
             if (m_starredModel) {
@@ -92,14 +208,20 @@ void StarredListView::handleItemTap(const QModelIndex& index, const QPoint& pos)
             emit folderClicked(folderName);
         }
     } else {
-        // Notebook card: check if tap was on menu button
+        // Notebook card
         QString bundlePath = bundlePathForIndex(index);
         if (!bundlePath.isEmpty()) {
-            if (isOnMenuButton(index, pos)) {
-                QPoint globalPos = viewport()->mapToGlobal(pos);
-                emit notebookMenuRequested(bundlePath, globalPos);
+            if (m_selectMode) {
+                // In select mode: tap toggles selection
+                toggleSelection(bundlePath);
             } else {
-                emit notebookClicked(bundlePath);
+                // Normal mode: check if tap was on menu button
+                if (isOnMenuButton(index, pos)) {
+                    QPoint globalPos = viewport()->mapToGlobal(pos);
+                    emit notebookMenuRequested(bundlePath, globalPos);
+                } else {
+                    emit notebookClicked(bundlePath);
+                }
             }
         }
     }
@@ -108,6 +230,12 @@ void StarredListView::handleItemTap(const QModelIndex& index, const QPoint& pos)
 void StarredListView::handleRightClick(const QModelIndex& index, const QPoint& globalPos)
 {
     if (!index.isValid()) return;
+    
+    // In select mode, right-click does nothing (3-dot menu is hidden)
+    // Bulk actions are accessed via the header overflow menu
+    if (m_selectMode) {
+        return;
+    }
     
     if (isFolderHeader(index)) {
         QString folderName = folderNameForIndex(index);
@@ -127,6 +255,7 @@ void StarredListView::handleLongPress(const QModelIndex& index, const QPoint& gl
     if (!index.isValid()) return;
     
     if (isFolderHeader(index)) {
+        // Folder header: context menu (same in normal and select mode)
         QString folderName = folderNameForIndex(index);
         if (!folderName.isEmpty()) {
             emit folderLongPressed(folderName, globalPos);
@@ -134,8 +263,13 @@ void StarredListView::handleLongPress(const QModelIndex& index, const QPoint& gl
     } else {
         QString bundlePath = bundlePathForIndex(index);
         if (!bundlePath.isEmpty()) {
-            // Long-press emits notebookLongPressed for batch select mode (L-007)
-            emit notebookLongPressed(bundlePath, globalPos);
+            if (m_selectMode) {
+                // Already in select mode: long-press toggles selection
+                toggleSelection(bundlePath);
+            } else {
+                // Not in select mode: emit signal to enter select mode
+                emit notebookLongPressed(bundlePath, globalPos);
+            }
         }
     }
 }

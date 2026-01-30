@@ -87,6 +87,16 @@ QVariant StarredModel::data(const QModelIndex& index, int role) const
             }
             return QDateTime();
             
+        // === Batch select mode roles (L-007) ===
+        case IsInSelectModeRole:
+            return m_selectMode;
+            
+        case IsSelectedInBatchRole:
+            if (item.type == NotebookCardItem) {
+                return m_selectedBundlePaths.contains(item.notebook.bundlePath);
+            }
+            return false;
+            
         // === FolderHeaderDelegate roles ===
         case FolderNameRole:
             if (item.type == FolderHeaderItem) {
@@ -121,6 +131,10 @@ QHash<int, QByteArray> StarredModel::roleNames() const
     roles[IsPdfBasedRole] = "isPdfBased";
     roles[IsEdgelessRole] = "isEdgeless";
     roles[LastModifiedRole] = "lastModified";
+    
+    // Batch select mode roles (L-007)
+    roles[IsInSelectModeRole] = "isInSelectMode";
+    roles[IsSelectedInBatchRole] = "isSelectedInBatch";
     
     // FolderHeaderDelegate roles
     roles[FolderNameRole] = "folderName";
@@ -340,4 +354,48 @@ QString StarredModel::computeContentSignature() const
     }
     
     return parts.join(";");
+}
+
+// -----------------------------------------------------------------------------
+// Batch Select Mode (L-007)
+// -----------------------------------------------------------------------------
+
+void StarredModel::setSelectMode(bool selectMode)
+{
+    if (m_selectMode == selectMode) {
+        return;
+    }
+    
+    m_selectMode = selectMode;
+    
+    // Clear selection when exiting select mode
+    if (!selectMode) {
+        m_selectedBundlePaths.clear();
+    }
+    
+    // Notify all items that select mode changed (affects visual appearance)
+    if (!m_displayList.isEmpty()) {
+        emit dataChanged(index(0), index(m_displayList.size() - 1), 
+                         {IsInSelectModeRole, IsSelectedInBatchRole});
+    }
+}
+
+void StarredModel::setSelectedBundlePaths(const QSet<QString>& selectedPaths)
+{
+    if (m_selectedBundlePaths == selectedPaths) {
+        return;
+    }
+    
+    m_selectedBundlePaths = selectedPaths;
+    
+    // Notify all items that selection changed
+    if (!m_displayList.isEmpty()) {
+        emit dataChanged(index(0), index(m_displayList.size() - 1), 
+                         {IsSelectedInBatchRole});
+    }
+}
+
+bool StarredModel::isSelected(const QString& bundlePath) const
+{
+    return m_selectedBundlePaths.contains(bundlePath);
 }
