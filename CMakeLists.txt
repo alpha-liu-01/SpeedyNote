@@ -352,9 +352,9 @@ elseif(UNIX)
     endif()
     
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus)
     endif()
     find_package(PkgConfig REQUIRED)
     
@@ -554,6 +554,7 @@ set(UI_SOURCES
     source/ui/widgets/ActionBarButton.cpp
     source/ui/widgets/PageWheelPicker.cpp
     source/ui/widgets/UndoDeleteButton.cpp
+    source/ui/widgets/ExportProgressWidget.cpp
     source/ui/widgets/LayerItemWidget.cpp
     source/ui/widgets/LayerPanelPillButton.cpp
     source/ui/widgets/PdfSearchBar.cpp
@@ -636,7 +637,6 @@ endif()
 set(SHARING_SOURCES
     source/sharing/NotebookExporter.cpp
     source/sharing/NotebookImporter.cpp
-    source/sharing/ExportDialog.cpp
     thirdparty/miniz/miniz.c
 )
 
@@ -645,6 +645,7 @@ set(SHARING_SOURCES
 set(BATCH_SOURCES
     source/batch/BatchOperations.cpp
     source/batch/BundleDiscovery.cpp
+    source/batch/ExportQueueManager.cpp
 )
 
 # CLI module (Desktop only - headless batch operations)
@@ -656,6 +657,7 @@ if(NOT ANDROID)
         source/cli/CliProgress.cpp
         source/cli/CliHandler.cpp
         source/cli/CliSignal.cpp
+        source/ui/dialogs/BatchImportDialog.cpp  # Desktop-only batch import dialog
     )
 endif()
 
@@ -664,9 +666,15 @@ set(ANDROID_PLATFORM_SOURCES "")
 if(ANDROID)
     set(ANDROID_PLATFORM_SOURCES
         source/android/PdfPickerAndroid.cpp
+        source/android/AndroidShareHelper.cpp
         source/ui/dialogs/SaveDocumentDialog.cpp  # BUG-A002: Touch-friendly save dialog
     )
 endif()
+
+# Cross-platform utilities (Step 3.11: System notifications)
+set(PLATFORM_SOURCES
+    source/platform/SystemNotification.cpp
+)
 
 # Desktop-only sources (tests require Qt::Test, debug builds only)
 set(DESKTOP_ONLY_SOURCES "")
@@ -685,7 +693,9 @@ set(APP_SOURCES
         source/MainWindow.cpp
     source/ControlPanelDialog.cpp
     source/ui/dialogs/KeyCaptureDialog.cpp
-    source/ui/dialogs/PdfExportDialog.cpp
+    source/ui/dialogs/BatchPdfExportDialog.cpp
+    source/ui/dialogs/BatchSnbxExportDialog.cpp
+    source/ui/dialogs/ExportResultsDialog.cpp
     source/text/MarkdownNoteEntry.cpp
     source/ui/MarkdownNotesSidebar.cpp
         ${CORE_SOURCES}
@@ -696,6 +706,7 @@ set(APP_SOURCES
     ${SHARING_SOURCES}
     ${BATCH_SOURCES}
     ${CLI_SOURCES}
+    ${PLATFORM_SOURCES}
     ${ANDROID_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
@@ -806,6 +817,7 @@ elseif(ANDROID)
 elseif(UNIX)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::DBus  # Step 3.11: System notifications via org.freedesktop.Notifications
     )
     # On musl (Alpine), we use MuPDF exclusively; on glibc, we use Poppler + MuPDF for export
     if(USE_MUSL_MUPDF)

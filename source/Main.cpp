@@ -12,6 +12,7 @@
 
 #include "MainWindow.h"
 #include "ui/launcher/Launcher.h"
+#include "platform/SystemNotification.h"
 
 // CLI support (Desktop only)
 #ifndef Q_OS_ANDROID
@@ -492,6 +493,18 @@ int main(int argc, char* argv[])
 
     QTranslator translator;
     loadTranslations(app, translator);
+
+    // ========== Initialize System Notifications ==========
+    // Step 3.11: Initialize notification system for export/import completion
+    // On Android: Creates notification channel (required for Android 8.0+)
+    // On Linux: Initializes DBus connection for desktop notifications
+    SystemNotification::initialize();
+    
+    // Request notification permission on Android 13+
+    // This shows the permission dialog if not already granted
+    if (!SystemNotification::hasPermission()) {
+        SystemNotification::requestPermission();
+    }
 
     // ========== Parse Command Line Arguments ==========
     QString inputFile;

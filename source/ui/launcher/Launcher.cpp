@@ -9,9 +9,19 @@
 #include "FloatingActionButton.h"
 #include "FolderPickerDialog.h"
 #include "../ThemeColors.h"
+#include "../dialogs/BatchPdfExportDialog.h"
+#include "../dialogs/BatchSnbxExportDialog.h"
+#include "../dialogs/ExportResultsDialog.h"
+#ifndef Q_OS_ANDROID
+#include "../dialogs/BatchImportDialog.h"
+#endif
+#include "../widgets/ExportProgressWidget.h"
 #include "../../MainWindow.h"
 #include "../../core/NotebookLibrary.h"
 #include "../../core/Document.h"
+#include "../../batch/ExportQueueManager.h"
+#include "../../android/AndroidShareHelper.h"
+#include "../../platform/SystemNotification.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -39,6 +49,12 @@
 #include <QJsonParseError>
 #include <QStandardPaths>
 #include <QEventLoop>
+#ifndef Q_OS_ANDROID
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#endif
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
@@ -53,22 +69,48 @@
 
 namespace {
     // Static variables for async package picker result
-    static QString s_pickedPackagePath;
+    static QStringList s_pickedPackagePaths;  // Supports multi-file selection
     static bool s_packagePickerCancelled = false;
     static QEventLoop* s_packagePickerLoop = nullptr;
 }
 
-// JNI callback: Called from Java when a package file is successfully picked and copied
+// JNI callback: Called from Java when a single package file is picked and copied
 extern "C" JNIEXPORT void JNICALL
 Java_org_speedynote_app_ImportHelper_onPackageFilePicked(JNIEnv *env, jclass /*clazz*/, jstring localPath)
 {
     const char* pathChars = env->GetStringUTFChars(localPath, nullptr);
-    s_pickedPackagePath = QString::fromUtf8(pathChars);
+    s_pickedPackagePaths.clear();
+    s_pickedPackagePaths.append(QString::fromUtf8(pathChars));
     env->ReleaseStringUTFChars(localPath, pathChars);
     
     s_packagePickerCancelled = false;
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "JNI callback: Package picked -" << s_pickedPackagePath;
+    qDebug() << "JNI callback: Package picked -" << s_pickedPackagePaths;
+#endif
+    
+    if (s_packagePickerLoop) {
+        s_packagePickerLoop->quit();
+    }
+}
+
+// JNI callback: Called from Java when multiple package files are picked and copied
+extern "C" JNIEXPORT void JNICALL
+Java_org_speedynote_app_ImportHelper_onPackageFilesPicked(JNIEnv *env, jclass /*clazz*/, jobjectArray localPaths)
+{
+    s_pickedPackagePaths.clear();
+    
+    int count = env->GetArrayLength(localPaths);
+    for (int i = 0; i < count; i++) {
+        jstring jPath = (jstring)env->GetObjectArrayElement(localPaths, i);
+        const char* pathChars = env->GetStringUTFChars(jPath, nullptr);
+        s_pickedPackagePaths.append(QString::fromUtf8(pathChars));
+        env->ReleaseStringUTFChars(jPath, pathChars);
+        env->DeleteLocalRef(jPath);
+    }
+    
+    s_packagePickerCancelled = false;
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "JNI callback: Multiple packages picked -" << s_pickedPackagePaths.size() << "files";
 #endif
     
     if (s_packagePickerLoop) {
@@ -80,7 +122,7 @@ Java_org_speedynote_app_ImportHelper_onPackageFilePicked(JNIEnv *env, jclass /*c
 extern "C" JNIEXPORT void JNICALL
 Java_org_speedynote_app_ImportHelper_onPackagePickCancelled(JNIEnv * /*env*/, jclass /*clazz*/)
 {
-    s_pickedPackagePath.clear();
+    s_pickedPackagePaths.clear();
     s_packagePickerCancelled = true;
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "JNI callback: Package pick cancelled";
@@ -91,11 +133,12 @@ Java_org_speedynote_app_ImportHelper_onPackagePickCancelled(JNIEnv * /*env*/, jc
     }
 }
 
-// Helper function to pick a .snbx package file on Android via SAF
-static QString pickSnbxFileAndroid()
+// Helper function to pick .snbx package file(s) on Android via SAF
+// Supports multi-file selection (Phase 3: Batch Import)
+static QStringList pickSnbxFilesAndroid()
 {
     // Reset state
-    s_pickedPackagePath.clear();
+    s_pickedPackagePaths.clear();
     s_packagePickerCancelled = false;
     
     // Get the destination directory for imported packages
@@ -109,18 +152,19 @@ static QString pickSnbxFileAndroid()
         QString filePath = importsDir.absoluteFilePath(entry);
         QFile::remove(filePath);
 #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pickSnbxFileAndroid: Cleaned up old import:" << filePath;
+        qDebug() << "pickSnbxFilesAndroid: Cleaned up old import:" << filePath;
 #endif
     }
     
     // Get the Activity
     QJniObject activity = QNativeInterface::QAndroidApplication::context();
     if (!activity.isValid()) {
-        qWarning() << "pickSnbxFileAndroid: Failed to get Android context";
-        return QString();
+        qWarning() << "pickSnbxFilesAndroid: Failed to get Android context";
+        return QStringList();
     }
     
     // Call ImportHelper.pickPackageFile(activity, destDir)
+    // Java side now enables EXTRA_ALLOW_MULTIPLE for multi-file selection
     QJniObject::callStaticMethod<void>(
         "org/speedynote/app/ImportHelper",
         "pickPackageFile",
@@ -135,11 +179,11 @@ static QString pickSnbxFileAndroid()
     loop.exec();
     s_packagePickerLoop = nullptr;
     
-    if (s_packagePickerCancelled || s_pickedPackagePath.isEmpty()) {
-        return QString();
+    if (s_packagePickerCancelled || s_pickedPackagePaths.isEmpty()) {
+        return QStringList();
     }
     
-    return s_pickedPackagePath;
+    return s_pickedPackagePaths;
 }
 
 #endif // Q_OS_ANDROID
@@ -153,6 +197,11 @@ Launcher::Launcher(QWidget* parent)
     // with room for window chrome and taskbar
     setMinimumSize(560, 480);
     setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    
+#ifndef Q_OS_ANDROID
+    // Enable drag-drop for desktop notebook import (Step 3.10)
+    setAcceptDrops(true);
+#endif
     
     setupUi();
     applyStyle();
@@ -207,6 +256,9 @@ void Launcher::setupUi()
     
     // FAB
     setupFAB();
+    
+    // Export progress widget (Phase 3)
+    setupExportProgress();
     
     // Fade animation
     m_fadeAnimation = new QPropertyAnimation(this, "fadeOpacity", this);
@@ -455,6 +507,12 @@ void Launcher::setupStarred()
     connect(m_starredView, &StarredView::folderLongPressed, this, [this](const QString& folderName) {
         showFolderContextMenu(folderName, QCursor::pos());
     });
+    
+    // Export signals (Phase 3: Batch Operations)
+    connect(m_starredView, &StarredView::exportToPdfRequested, 
+            this, &Launcher::showPdfExportDialog);
+    connect(m_starredView, &StarredView::exportToSnbxRequested, 
+            this, &Launcher::showSnbxExportDialog);
 }
 
 void Launcher::setupSearch()
@@ -496,23 +554,22 @@ void Launcher::setupFAB()
     connect(m_fab, &FloatingActionButton::openPdf, this, &Launcher::openPdfRequested);
     connect(m_fab, &FloatingActionButton::openNotebook, this, &Launcher::openNotebookRequested);
     
-    // Import package - platform-specific handling
+    // Import package - platform-specific handling (Phase 3: Batch Import)
     connect(m_fab, &FloatingActionButton::importPackage, this, [this]() {
 #ifdef Q_OS_ANDROID
-        // Use ImportHelper to pick .snbx file via SAF
-        QString packagePath = pickSnbxFileAndroid();
-        if (!packagePath.isEmpty()) {
-            emit notebookSelected(packagePath);  // DocumentManager handles .snbx extraction
+        // Android: Use ImportHelper to pick .snbx file(s) via SAF
+        // Supports multi-file selection (Phase 3: Batch Import)
+        QStringList packagePaths = pickSnbxFilesAndroid();
+        if (!packagePaths.isEmpty()) {
+            performBatchImport(packagePaths);
         }
 #else
-        // Desktop: Use QFileDialog
-        QString packagePath = QFileDialog::getOpenFileName(this,
-            tr("Import Notebook Package"),
-            QDir::homePath(),
-            tr("SpeedyNote Package (*.snbx)"));
+        // Desktop: Show BatchImportDialog for full batch import experience
+        QString destDir;
+        QStringList files = BatchImportDialog::getImportFiles(this, &destDir);
         
-        if (!packagePath.isEmpty()) {
-            emit notebookSelected(packagePath);  // DocumentManager handles .snbx extraction
+        if (!files.isEmpty() && !destDir.isEmpty()) {
+            performBatchImport(files, destDir);
         }
 #endif
     });
@@ -664,6 +721,110 @@ void Launcher::showEvent(QShowEvent* event)
     }
 }
 
+// =============================================================================
+// Drag-Drop Import (Desktop only - Step 3.10)
+// =============================================================================
+
+#ifndef Q_OS_ANDROID
+
+void Launcher::dragEnterEvent(QDragEnterEvent* event)
+{
+    // Accept drag if it contains file URLs
+    if (event->mimeData()->hasUrls()) {
+        // Check if any of the URLs are .snbx files
+        bool hasSnbxFiles = false;
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile()) {
+                QString filePath = url.toLocalFile();
+                if (filePath.endsWith(".snbx", Qt::CaseInsensitive)) {
+                    hasSnbxFiles = true;
+                    break;
+                }
+            }
+        }
+        
+        if (hasSnbxFiles) {
+            event->acceptProposedAction();
+            return;
+        }
+    }
+    
+    event->ignore();
+}
+
+void Launcher::dragMoveEvent(QDragMoveEvent* event)
+{
+    // Accept the move only if we have valid .snbx files (consistent with dragEnterEvent)
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile() && url.toLocalFile().endsWith(".snbx", Qt::CaseInsensitive)) {
+                event->acceptProposedAction();
+                return;
+            }
+        }
+    }
+    event->ignore();
+}
+
+void Launcher::dropEvent(QDropEvent* event)
+{
+    if (!event->mimeData()->hasUrls()) {
+        event->ignore();
+        return;
+    }
+    
+    // Collect all .snbx files from the drop
+    QStringList snbxFiles;
+    const QList<QUrl> urls = event->mimeData()->urls();
+    
+    for (const QUrl& url : urls) {
+        if (url.isLocalFile()) {
+            QString filePath = url.toLocalFile();
+            if (filePath.endsWith(".snbx", Qt::CaseInsensitive)) {
+                // Verify file exists
+                if (QFile::exists(filePath)) {
+                    snbxFiles.append(filePath);
+                }
+            }
+        }
+    }
+    
+    if (snbxFiles.isEmpty()) {
+        event->ignore();
+        return;
+    }
+    
+    event->acceptProposedAction();
+    
+    // Show confirmation dialog for multiple files
+    if (snbxFiles.size() > 1) {
+        QString message = tr("Import %1 notebooks?").arg(snbxFiles.size());
+        QMessageBox::StandardButton reply = QMessageBox::question(
+            this,
+            tr("Import Notebooks"),
+            message,
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::Yes
+        );
+        
+        if (reply != QMessageBox::Yes) {
+            return;
+        }
+    }
+    
+    // Determine destination directory (default to Documents/SpeedyNote)
+    QString destDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) 
+                      + "/SpeedyNote";
+    QDir().mkpath(destDir);
+    
+    // Perform the import
+    performBatchImport(snbxFiles, destDir);
+}
+
+#endif // !Q_OS_ANDROID
+
 void Launcher::onTimelineItemClicked(const QModelIndex& index)
 {
     // Ignore clicks on section headers
@@ -803,6 +964,22 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     QAction* duplicateAction = menu.addAction(tr("Duplicate"));
     connect(duplicateAction, &QAction::triggered, this, [this, bundlePath]() {
         duplicateNotebook(bundlePath);
+    });
+    
+    menu.addSeparator();
+    
+    // Export submenu (Phase 3: Batch Operations)
+    QMenu* exportMenu = menu.addMenu(tr("Export"));
+    ThemeColors::styleMenu(exportMenu, isDarkMode());
+    
+    QAction* exportPdfAction = exportMenu->addAction(tr("To PDF..."));
+    connect(exportPdfAction, &QAction::triggered, this, [this, bundlePath]() {
+        showPdfExportDialog({bundlePath});
+    });
+    
+    QAction* exportSnbxAction = exportMenu->addAction(tr("To SNBX..."));
+    connect(exportSnbxAction, &QAction::triggered, this, [this, bundlePath]() {
+        showSnbxExportDialog({bundlePath});
     });
     
     menu.addSeparator();
@@ -1246,6 +1423,31 @@ void Launcher::showTimelineOverflowMenu()
     
     menu.addSeparator();
     
+    // Export submenu (Phase 3: Batch Operations)
+    QMenu* exportMenu = menu.addMenu(tr("Export"));
+    ThemeColors::styleMenu(exportMenu, isDarkMode());
+    exportMenu->setEnabled(selectedCount > 0);
+    
+    QAction* exportPdfAction = exportMenu->addAction(tr("To PDF..."));
+    connect(exportPdfAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_timelineList->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            showPdfExportDialog(selected);
+            m_timelineList->exitSelectMode();
+        }
+    });
+    
+    QAction* exportSnbxAction = exportMenu->addAction(tr("To SNBX..."));
+    connect(exportSnbxAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_timelineList->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            showSnbxExportDialog(selected);
+            m_timelineList->exitSelectMode();
+        }
+    });
+    
+    menu.addSeparator();
+    
     // Move to Folder... (L-008: opens FolderPickerDialog)
     QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
     moveToFolderAction->setEnabled(selectedCount > 0);
@@ -1307,6 +1509,310 @@ void Launcher::onTimelineLongPressed(const QModelIndex& index, const QPoint& glo
     if (!bundlePath.isEmpty()) {
         // Enter batch select mode with this notebook as the first selection
         m_timelineList->enterSelectMode(bundlePath);
+    }
+}
+
+// =============================================================================
+// Batch Export Helpers (Phase 3)
+// =============================================================================
+
+void Launcher::showPdfExportDialog(const QStringList& bundlePaths)
+{
+    if (bundlePaths.isEmpty()) return;
+    
+    BatchPdfExportDialog dialog(bundlePaths, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        // Get valid bundles (excludes edgeless notebooks)
+        QStringList validBundles = dialog.validBundles();
+        if (!validBundles.isEmpty()) {
+            BatchOps::ExportPdfOptions options;
+            options.outputPath = dialog.outputDirectory();
+            options.dpi = dialog.dpi();
+            options.pageRange = dialog.pageRange();
+            options.annotationsOnly = dialog.annotationsOnly();
+            options.preserveMetadata = dialog.includeMetadata();
+            options.preserveOutline = dialog.includeOutline();
+            
+            ExportQueueManager::instance()->enqueuePdfExport(validBundles, options);
+        }
+    }
+}
+
+void Launcher::showSnbxExportDialog(const QStringList& bundlePaths)
+{
+    if (bundlePaths.isEmpty()) return;
+    
+    BatchSnbxExportDialog dialog(bundlePaths, this);
+    if (dialog.exec() == QDialog::Accepted) {
+        BatchOps::ExportSnbxOptions options;
+        options.outputPath = dialog.outputDirectory();
+        options.includePdf = dialog.includePdf();
+        
+        ExportQueueManager::instance()->enqueueSnbxExport(bundlePaths, options);
+    }
+}
+
+// =============================================================================
+// Export Progress Widget Integration (Phase 3)
+// =============================================================================
+
+void Launcher::setupExportProgress()
+{
+    // Create progress widget on central widget so it overlays content
+    m_exportProgressWidget = new ExportProgressWidget(m_centralWidget);
+    m_exportProgressWidget->setDarkMode(isDarkMode());
+    m_exportProgressWidget->hide();
+    
+    // Connect to ExportQueueManager signals
+    ExportQueueManager* mgr = ExportQueueManager::instance();
+    
+    connect(mgr, &ExportQueueManager::progressChanged,
+            this, &Launcher::onExportProgress);
+    
+    connect(mgr, &ExportQueueManager::jobComplete,
+            this, &Launcher::onExportJobComplete);
+    
+    // Connect widget's Details button
+    connect(m_exportProgressWidget, &ExportProgressWidget::detailsRequested,
+            this, &Launcher::onExportDetailsRequested);
+}
+
+void Launcher::onExportProgress(const QString& currentFile, int current, int total, int queuedJobs)
+{
+    // Extract just the filename for display
+    QString displayName = QFileInfo(currentFile).fileName();
+    if (displayName.endsWith(".snb")) {
+        displayName.chop(4);  // Remove .snb extension
+    }
+    
+    m_exportProgressWidget->showProgress(displayName, current, total, queuedJobs);
+}
+
+void Launcher::onExportJobComplete(const BatchOps::BatchResult& result, const QString& outputDir)
+{
+    // Store for "Details" dialog
+    m_lastExportResult = result;
+    m_lastExportOutputDir = outputDir;
+    
+    // Count results and collect successful output paths
+    int successCount = 0;
+    int failCount = 0;
+    int skipCount = 0;
+    QStringList successfulOutputs;
+    
+    for (const auto& r : result.results) {
+        switch (r.status) {
+            case BatchOps::FileStatus::Success:
+                successCount++;
+                if (!r.outputPath.isEmpty()) {
+                    successfulOutputs.append(r.outputPath);
+                }
+                break;
+            case BatchOps::FileStatus::Skipped:
+                skipCount++;
+                break;
+            case BatchOps::FileStatus::Error:
+                failCount++;
+                break;
+        }
+    }
+    
+    m_exportProgressWidget->showComplete(successCount, failCount, skipCount);
+    
+    // Show system notification (especially useful when app is backgrounded)
+    // Check if notifications are available and app is not in foreground
+    if (SystemNotification::isAvailable()) {
+        QString title;
+        QString message;
+        bool success = (failCount == 0);
+        
+        if (failCount == 0 && skipCount == 0) {
+            title = tr("Export Complete");
+            message = tr("%n notebook(s) exported successfully", "", successCount);
+        } else if (failCount > 0) {
+            title = tr("Export Completed with Errors");
+            message = tr("%1 succeeded, %2 failed").arg(successCount).arg(failCount);
+            if (skipCount > 0) {
+                message += tr(", %1 skipped").arg(skipCount);
+            }
+        } else {
+            title = tr("Export Complete");
+            message = tr("%1 exported, %2 skipped").arg(successCount).arg(skipCount);
+        }
+        
+        SystemNotification::showExportNotification(title, message, success);
+    }
+    
+#ifdef Q_OS_ANDROID
+    // On Android, trigger share sheet with exported files
+    if (!successfulOutputs.isEmpty() && AndroidShareHelper::isAvailable()) {
+        // Determine MIME type from first output file
+        QString firstOutput = successfulOutputs.first();
+        QString mimeType = "application/octet-stream";  // Default
+        QString chooserTitle = tr("Share Files");
+        
+        if (firstOutput.endsWith(".pdf", Qt::CaseInsensitive)) {
+            mimeType = "application/pdf";
+            chooserTitle = successfulOutputs.size() == 1 
+                ? tr("Share PDF") 
+                : tr("Share %1 PDFs").arg(successfulOutputs.size());
+        } else if (firstOutput.endsWith(".snbx", Qt::CaseInsensitive)) {
+            mimeType = "application/octet-stream";
+            chooserTitle = successfulOutputs.size() == 1 
+                ? tr("Share Notebook") 
+                : tr("Share %1 Notebooks").arg(successfulOutputs.size());
+        }
+        
+        AndroidShareHelper::shareMultipleFiles(successfulOutputs, mimeType, chooserTitle);
+    }
+#else
+    Q_UNUSED(successfulOutputs)
+#endif
+}
+
+void Launcher::onExportDetailsRequested()
+{
+    ExportResultsDialog dialog(m_lastExportResult, m_lastExportOutputDir, this);
+    dialog.setDarkMode(isDarkMode());
+    
+    // Connect retry signal to re-export failed files
+    connect(&dialog, &ExportResultsDialog::retryRequested, this, [this](const QStringList& failedPaths) {
+        // Determine if the last export was PDF or SNBX based on output files
+        // For now, we assume the user will manually retry through the UI
+        // A more robust solution would store the export type with the result
+        
+        // Show the appropriate export dialog pre-populated with failed paths
+        // For simplicity, just show PDF dialog (most common case)
+        if (!failedPaths.isEmpty()) {
+            showPdfExportDialog(failedPaths);
+        }
+    });
+    
+    dialog.exec();
+    
+    // Dismiss the progress widget after dialog is closed
+    if (m_exportProgressWidget) {
+        m_exportProgressWidget->dismiss(true);
+    }
+}
+
+// =============================================================================
+// Batch Import (Phase 3)
+// =============================================================================
+
+void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& destDir)
+{
+    if (snbxFiles.isEmpty()) {
+        return;
+    }
+    
+    // Determine destination directory
+    QString importDestDir = destDir;
+    if (importDestDir.isEmpty()) {
+#ifdef Q_OS_ANDROID
+        // Android: Use app data location for imports
+        importDestDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
+#else
+        // Desktop: Use Documents/SpeedyNote as default
+        importDestDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/SpeedyNote";
+#endif
+    }
+    QDir().mkpath(importDestDir);
+    
+    // Setup import options
+    BatchOps::ImportOptions options;
+    options.destDir = importDestDir;
+    options.addToLibrary = true;  // Always add to library so they appear in timeline
+    options.overwrite = false;    // Don't overwrite existing
+    
+    // Show progress for imports
+    int total = snbxFiles.size();
+    int current = 0;
+    
+    // Progress callback (with null check for safety)
+    auto progressCallback = [this, &current, total](int cur, int tot, const QString& file, const QString& /*status*/) {
+        Q_UNUSED(tot)
+        current = cur;
+        if (m_exportProgressWidget) {
+            QString displayName = QFileInfo(file).completeBaseName();
+            m_exportProgressWidget->showProgress(displayName, cur, total, 0);
+        }
+    };
+    
+    // Show initial progress
+    if (m_exportProgressWidget) {
+        if (total == 1) {
+            QString displayName = QFileInfo(snbxFiles.first()).completeBaseName();
+            m_exportProgressWidget->showProgress(displayName, 1, 1, 0);
+        } else {
+            m_exportProgressWidget->showProgress(tr("Importing..."), 0, total, 0);
+        }
+    }
+    
+    // Run import (synchronous for now - imports are typically fast)
+    // For very large imports, this could be moved to a background thread
+    BatchOps::BatchResult result = BatchOps::importSnbxBatch(snbxFiles, options, progressCallback);
+    
+#ifdef Q_OS_ANDROID
+    // Clean up source .snbx files from temp /imports directory after import
+    // These were copied from content:// URIs and are no longer needed
+    QString importsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/imports";
+    for (const QString& snbxFile : snbxFiles) {
+        if (snbxFile.startsWith(importsDir)) {
+            QFile::remove(snbxFile);
+        }
+    }
+#endif
+    
+    // Store result for details dialog
+    m_lastExportResult = result;
+    m_lastExportOutputDir = importDestDir;
+    
+    // Show completion
+    if (m_exportProgressWidget) {
+        m_exportProgressWidget->showComplete(result.successCount, result.errorCount, result.skippedCount);
+    }
+    
+    // Show system notification for import completion
+    if (SystemNotification::isAvailable()) {
+        QString title;
+        QString message;
+        bool success = (result.errorCount == 0);
+        
+        if (result.errorCount == 0 && result.skippedCount == 0) {
+            title = tr("Import Complete");
+            message = tr("%n notebook(s) imported successfully", "", result.successCount);
+        } else if (result.errorCount > 0) {
+            title = tr("Import Completed with Errors");
+            message = tr("%1 succeeded, %2 failed").arg(result.successCount).arg(result.errorCount);
+            if (result.skippedCount > 0) {
+                message += tr(", %1 skipped").arg(result.skippedCount);
+            }
+        } else {
+            title = tr("Import Complete");
+            message = tr("%1 imported, %2 skipped").arg(result.successCount).arg(result.skippedCount);
+        }
+        
+        SystemNotification::showImportNotification(title, message, success);
+    }
+    
+    // Refresh views to show newly imported notebooks
+    if (result.successCount > 0) {
+        // Force reload of timeline and starred views
+        if (m_timelineModel) {
+            m_timelineModel->reload();
+        }
+        if (m_starredView) {
+            m_starredView->reload();
+        }
+        
+        // If only one notebook was imported, open it directly
+        if (snbxFiles.size() == 1 && result.successCount == 1 && !result.results.isEmpty()) {
+            QString importedPath = result.results.first().outputPath;
+            if (!importedPath.isEmpty() && QDir(importedPath).exists()) {
+                emit notebookSelected(importedPath);
+            }
+        }
     }
 }
 

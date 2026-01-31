@@ -378,6 +378,32 @@ void StarredView::showOverflowMenu()
     
     menu.addSeparator();
     
+    // Export submenu (Phase 3: Batch Operations)
+    // Emits signals to Launcher which handles the dialogs
+    QMenu* exportMenu = menu.addMenu(tr("Export"));
+    ThemeColors::styleMenu(exportMenu, m_darkMode);
+    exportMenu->setEnabled(selectedCount > 0);
+    
+    QAction* exportPdfAction = exportMenu->addAction(tr("To PDF..."));
+    connect(exportPdfAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            emit exportToPdfRequested(selected);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    QAction* exportSnbxAction = exportMenu->addAction(tr("To SNBX..."));
+    connect(exportSnbxAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            emit exportToSnbxRequested(selected);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    menu.addSeparator();
+    
     // Move to Folder... (L-008: opens FolderPickerDialog)
     QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
     moveToFolderAction->setEnabled(selectedCount > 0);

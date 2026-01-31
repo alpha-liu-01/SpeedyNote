@@ -29,11 +29,11 @@
 #include "core/NotebookLibrary.h" // Phase P.4.6: For saving thumbnails
 #include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
 #include "sharing/NotebookExporter.h" // Phase 1: Export notebooks as .snbx
-#include "sharing/ExportDialog.h"     // Phase 1: Export dialog UI
 #include "ui/widgets/PdfSearchBar.h"  // PDF text search bar
 #include "pdf/PdfSearchEngine.h"      // PDF text search engine
-#include "ui/dialogs/PdfExportDialog.h"  // Phase 8: PDF export dialog
-#include "pdf/MuPdfExporter.h"           // Phase 8: PDF export engine
+#include "ui/dialogs/BatchPdfExportDialog.h"   // Phase 3: Unified PDF export dialog
+#include "ui/dialogs/BatchSnbxExportDialog.h"  // Phase 3: Unified SNBX export dialog
+#include "pdf/MuPdfExporter.h"                 // Phase 8: PDF export engine
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
 #include <QVBoxLayout>
@@ -937,7 +937,7 @@ void MainWindow::setupUi() {
         toggleFullscreen();
     });
     connect(m_navigationBar, &NavigationBar::shareClicked, this, [this]() {
-        // Phase 1: Export notebook as .snbx package
+        // Phase 3: Export notebook as .snbx package using unified dialog
         DocumentViewport* vp = currentViewport();
         Document* doc = vp ? vp->document() : nullptr;
         if (!doc) {
@@ -947,78 +947,61 @@ void MainWindow::setupUi() {
         }
         
         // Ensure document is saved before exporting
-        if (doc->bundlePath().isEmpty()) {
+        QString bundlePath = doc->bundlePath();
+        if (bundlePath.isEmpty()) {
             QMessageBox::warning(this, tr("Export Failed"),
                 tr("Please save the document before exporting."));
             return;
         }
         
-        // Show export dialog
-        ExportDialog dialog(doc, this);
+        // Show unified SNBX export dialog with current notebook
+        BatchSnbxExportDialog dialog(QStringList{bundlePath}, this);
         if (dialog.exec() != QDialog::Accepted) {
             return;
         }
         
-#ifdef Q_OS_ANDROID
-        // Android: Export to cache, then share via share sheet
-        QString cachePath = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-        QString exportDir = cachePath + "/exports";
-        QDir exportDirObj(exportDir);
+        // Single-file export: use direct export for immediate feedback
+        // (ExportQueueManager is for batch exports from Launcher)
+        QString outputDir = dialog.outputDirectory();
+        QString outputPath = outputDir + "/" + doc->name + ".snbx";
         
-        // Clean up old exports to prevent disk space leaks
-        // (User may cancel share sheet or export multiple times)
-        if (exportDirObj.exists()) {
-            QStringList oldFiles = exportDirObj.entryList(QStringList() << "*.snbx", QDir::Files);
-            for (const QString& oldFile : oldFiles) {
-                exportDirObj.remove(oldFile);
+        // Auto-rename if file exists (with safety limit to prevent infinite loop)
+        if (QFile::exists(outputPath)) {
+            int counter = 1;
+            QString baseName = doc->name;
+            const int maxAttempts = 1000;  // Safety limit
+            while (QFile::exists(outputPath) && counter <= maxAttempts) {
+                outputPath = outputDir + "/" + baseName + QString(" (%1).snbx").arg(counter++);
             }
-        } else {
-            exportDirObj.mkpath(".");
+            if (counter > maxAttempts) {
+                QMessageBox::warning(this, tr("Export Failed"),
+                    tr("Could not find a unique filename. Please choose a different location."));
+                return;
+            }
         }
-        
-        // Sanitize filename for Android
-        QString safeName = doc->name;
-        safeName.replace(QRegularExpression("[\\\\/:*?\"<>|]"), "_");
-        QString exportPath = exportDir + "/" + safeName + ".snbx";
         
         NotebookExporter::ExportOptions options;
         options.includePdf = dialog.includePdf();
-        options.destPath = exportPath;
+        options.destPath = outputPath;
         
+        QApplication::setOverrideCursor(Qt::WaitCursor);
         auto result = NotebookExporter::exportPackage(doc, options);
+        QApplication::restoreOverrideCursor();
+        
         if (result.success) {
-            // Call ShareHelper.shareFile via JNI
+#ifdef Q_OS_ANDROID
+            // Android: Share the exported file via share sheet
             QJniObject activity = QNativeInterface::QAndroidApplication::context();
             QJniObject::callStaticMethod<void>(
                 "org/speedynote/app/ShareHelper",
                 "shareFile",
                 "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)V",
                 activity.object<jobject>(),
-                QJniObject::fromString(exportPath).object<jstring>(),
+                QJniObject::fromString(outputPath).object<jstring>(),
                 QJniObject::fromString("application/octet-stream").object<jstring>()
             );
-        } else {
-            QMessageBox::warning(this, tr("Export Failed"), result.errorMessage);
-        }
 #else
-        // Desktop: Show save dialog
-        QString defaultPath = QDir::homePath() + "/" + doc->name + ".snbx";
-        QString destPath = QFileDialog::getSaveFileName(this,
-            tr("Export Notebook"),
-            defaultPath,
-            tr("SpeedyNote Package (*.snbx)"));
-        
-        if (destPath.isEmpty()) {
-            return;  // User cancelled
-        }
-        
-        NotebookExporter::ExportOptions options;
-        options.includePdf = dialog.includePdf();
-        options.destPath = destPath;
-        
-        auto result = NotebookExporter::exportPackage(doc, options);
-        if (result.success) {
-            // Show success message with file size
+            // Desktop: Show success message
             QString sizeStr;
             if (result.fileSize < 1024) {
                 sizeStr = tr("%1 bytes").arg(result.fileSize);
@@ -1028,15 +1011,14 @@ void MainWindow::setupUi() {
                 double sizeMB = static_cast<double>(result.fileSize) / (1024.0 * 1024.0);
                 sizeStr = tr("%1 MB").arg(sizeMB, 0, 'f', 1);
             }
-            
             QMessageBox::information(this, tr("Export Complete"),
                 tr("Notebook exported successfully.\n\nFile: %1\nSize: %2")
-                    .arg(QFileInfo(destPath).fileName())
+                    .arg(QFileInfo(outputPath).fileName())
                     .arg(sizeStr));
+#endif
         } else {
             QMessageBox::warning(this, tr("Export Failed"), result.errorMessage);
         }
-#endif
     });
     connect(m_navigationBar, &NavigationBar::rightSidebarToggled, this, [this](bool checked) {
         // Toggle markdown notes sidebar
@@ -2516,7 +2498,16 @@ void MainWindow::showPdfExportDialog()
         return;
     }
     
+    // Get bundle path - document must be saved
+    QString bundlePath = doc->bundlePath();
+    if (bundlePath.isEmpty()) {
+        QMessageBox::warning(this, dialogTitle,
+                             tr("Please save the document before exporting."));
+        return;
+    }
+    
     // Check if document is paged (PDF export only makes sense for paged documents)
+    // Note: BatchPdfExportDialog also detects edgeless, but we check here for better UX
     if (doc->isEdgeless()) {
         QMessageBox::warning(this, dialogTitle,
                              tr("PDF export is only available for paged documents.\n"
@@ -2551,25 +2542,50 @@ void MainWindow::showPdfExportDialog()
         }
     }
     
-    // Show the export dialog
-    PdfExportDialog dialog(doc, this);
+    // Show the unified PDF export dialog with current notebook
+    BatchPdfExportDialog dialog(QStringList{bundlePath}, this);
     if (dialog.exec() == QDialog::Accepted) {
-        // Get export options from dialog
+        // Get valid bundles (dialog filters out edgeless)
+        QStringList validBundles = dialog.validBundles();
+        if (validBundles.isEmpty()) {
+            // This shouldn't happen since we checked isEdgeless above,
+            // but handle it gracefully
+            return;
+        }
+        
+        // Single-file export: use direct export for immediate feedback
+        // (ExportQueueManager is for batch exports from Launcher)
+        QString outputDir = dialog.outputDirectory();
+        QString outputPath = outputDir + "/" + doc->name + ".pdf";
+        
+        // Auto-rename if file exists (with safety limit to prevent infinite loop)
+        if (QFile::exists(outputPath)) {
+            int counter = 1;
+            QString baseName = doc->name;
+            const int maxAttempts = 1000;  // Safety limit
+            while (QFile::exists(outputPath) && counter <= maxAttempts) {
+                outputPath = outputDir + "/" + baseName + QString(" (%1).pdf").arg(counter++);
+            }
+            if (counter > maxAttempts) {
+                QMessageBox::warning(this, dialogTitle,
+                    tr("Could not find a unique filename. Please choose a different location."));
+                return;
+            }
+        }
+        
+        // Build PDF export options
         PdfExportOptions options;
-        options.outputPath = dialog.outputPath();
+        options.outputPath = outputPath;
         options.pageRange = dialog.pageRange();
         options.dpi = dialog.dpi();
-        options.preserveMetadata = true;
-        options.preserveOutline = true;
+        options.preserveMetadata = dialog.includeMetadata();
+        options.preserveOutline = dialog.includeOutline();
         options.annotationsOnly = dialog.annotationsOnly();
         
         // Create exporter and export
         MuPdfExporter exporter;
         exporter.setDocument(doc);
         
-        // Blocking export with wait cursor
-        // Note: Progress dialog was considered (Phase 9) but deemed unnecessary
-        // due to excellent export performance (even 3000-page PDFs export quickly)
         QApplication::setOverrideCursor(Qt::WaitCursor);
         PdfExportResult result = exporter.exportPdf(options);
         QApplication::restoreOverrideCursor();
@@ -2583,13 +2599,10 @@ void MainWindow::showPdfExportDialog()
                 "shareFileWithTitle",
                 "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
                 activity.object<jobject>(),
-                QJniObject::fromString(options.outputPath).object<jstring>(),
+                QJniObject::fromString(outputPath).object<jstring>(),
                 QJniObject::fromString("application/pdf").object<jstring>(),
                 QJniObject::fromString(tr("Share PDF")).object<jstring>()
             );
-            // Note: The exported file is in the cache directory.
-            // Old PDFs are cleaned up before each new export (in PdfExportDialog::outputPath).
-            // The share intent copies the file, so cleanup is safe.
 #else
             // Desktop: Show success message
             QMessageBox::information(this, tr("Export Complete"),

@@ -15,6 +15,9 @@
     
     <!-- Internet for update checks (optional) -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    
+    <!-- Notifications for export/import completion (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
     <!-- Hardware features -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="true"/>

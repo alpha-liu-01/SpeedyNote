@@ -8,6 +8,7 @@ import android.util.Log;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.util.ArrayList;
 
 /**
  * Helper class for sharing files on Android.
@@ -133,6 +134,95 @@ public class ShareHelper {
             e.printStackTrace();
         } catch (Exception e) {
             Log.e(TAG, "shareFileWithTitle: Error sharing file: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Share multiple files using Android's native share sheet.
+     * Uses ACTION_SEND_MULTIPLE for 2+ files, ACTION_SEND for single file.
+     * Called from C++ via JNI.
+     * 
+     * @param activity The current Activity
+     * @param filePaths Array of absolute paths to files to share
+     * @param mimeType MIME type of the files (e.g., "application/pdf")
+     * @param chooserTitle Title for the share sheet chooser dialog
+     */
+    public static void shareMultipleFiles(Activity activity, String[] filePaths, 
+                                          String mimeType, String chooserTitle) {
+        if (activity == null) {
+            Log.e(TAG, "shareMultipleFiles: Activity is null");
+            return;
+        }
+        
+        if (filePaths == null || filePaths.length == 0) {
+            Log.e(TAG, "shareMultipleFiles: No files to share");
+            return;
+        }
+        
+        // If only one file, use the simpler single-file share
+        if (filePaths.length == 1) {
+            shareFileWithTitle(activity, filePaths[0], mimeType, chooserTitle);
+            return;
+        }
+        
+        try {
+            // Build list of content:// URIs for all files
+            ArrayList<Uri> uris = new ArrayList<>();
+            
+            for (String filePath : filePaths) {
+                if (filePath == null || filePath.isEmpty()) {
+                    Log.w(TAG, "shareMultipleFiles: Skipping null/empty path");
+                    continue;
+                }
+                
+                File file = new File(filePath);
+                if (!file.exists()) {
+                    Log.w(TAG, "shareMultipleFiles: File does not exist, skipping: " + filePath);
+                    continue;
+                }
+                
+                Uri uri = FileProvider.getUriForFile(activity, FILE_PROVIDER_AUTHORITY, file);
+                uris.add(uri);
+                Log.d(TAG, "shareMultipleFiles: Added " + filePath + " as " + uri.toString());
+            }
+            
+            if (uris.isEmpty()) {
+                Log.e(TAG, "shareMultipleFiles: No valid files to share");
+                return;
+            }
+            
+            // If only one valid file after filtering, use single-file share
+            if (uris.size() == 1) {
+                Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                shareIntent.setType(mimeType);
+                shareIntent.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                
+                String title = (chooserTitle != null && !chooserTitle.isEmpty()) 
+                               ? chooserTitle 
+                               : "Share File";
+                activity.startActivity(Intent.createChooser(shareIntent, title));
+            } else {
+                // Multiple files: use ACTION_SEND_MULTIPLE
+                Intent shareIntent = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                shareIntent.setType(mimeType);
+                shareIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                
+                String title = (chooserTitle != null && !chooserTitle.isEmpty()) 
+                               ? chooserTitle 
+                               : "Share Files";
+                activity.startActivity(Intent.createChooser(shareIntent, title));
+            }
+            
+            Log.d(TAG, "shareMultipleFiles: Share sheet launched with " + uris.size() + " files");
+            
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "shareMultipleFiles: FileProvider error: " + e.getMessage());
+            e.printStackTrace();
+        } catch (Exception e) {
+            Log.e(TAG, "shareMultipleFiles: Error sharing files: " + e.getMessage());
             e.printStackTrace();
         }
     }

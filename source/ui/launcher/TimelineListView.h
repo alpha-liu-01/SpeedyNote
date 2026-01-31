@@ -57,7 +57,7 @@ public:
     /**
      * @brief Select all visible notebook cards (not section headers).
      */
-    void selectAll();
+    void selectAll() override;
     
     /**
      * @brief Deselect all notebooks.

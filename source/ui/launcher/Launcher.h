@@ -9,6 +9,8 @@
 #include <QPropertyAnimation>
 #include <QFrame>
 
+#include "../../batch/BatchOperations.h"  // For BatchOps::BatchResult
+
 class LauncherNavButton;
 class TimelineModel;
 class TimelineDelegate;
@@ -16,6 +18,7 @@ class TimelineListView;
 class StarredView;
 class SearchView;
 class FloatingActionButton;
+class ExportProgressWidget;
 
 /**
  * @brief The main launcher window for SpeedyNote.
@@ -98,6 +101,13 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    
+#ifndef Q_OS_ANDROID
+    // Drag-drop support for desktop (Step 3.10)
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+#endif
 
 private:
     void setupUi();
@@ -130,6 +140,19 @@ private:
     void onTimelineSelectModeChanged(bool active);
     void onTimelineBatchSelectionChanged(int count);
     void onTimelineLongPressed(const QModelIndex& index, const QPoint& globalPos);
+    
+    // === Batch Export Helpers (Phase 3) ===
+    void showPdfExportDialog(const QStringList& bundlePaths);
+    void showSnbxExportDialog(const QStringList& bundlePaths);
+    
+    // === Export Progress (Phase 3) ===
+    void setupExportProgress();
+    void onExportProgress(const QString& currentFile, int current, int total, int queuedJobs);
+    void onExportJobComplete(const BatchOps::BatchResult& result, const QString& outputDir);
+    void onExportDetailsRequested();
+    
+    // === Batch Import (Phase 3) ===
+    void performBatchImport(const QStringList& snbxFiles, const QString& destDir = QString());
     
     // === View Management ===
     enum class View {
@@ -170,6 +193,11 @@ private:
     
     // FAB (Floating Action Button)
     FloatingActionButton* m_fab = nullptr;
+    
+    // Export progress widget (Phase 3)
+    ExportProgressWidget* m_exportProgressWidget = nullptr;
+    BatchOps::BatchResult m_lastExportResult;  // Stored for "Details" dialog
+    QString m_lastExportOutputDir;
     
     // Animation
     QPropertyAnimation* m_fadeAnimation = nullptr;

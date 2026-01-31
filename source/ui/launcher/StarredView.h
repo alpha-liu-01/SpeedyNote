@@ -94,6 +94,18 @@ signals:
      * @brief Emitted when a folder header is long-pressed or right-clicked.
      */
     void folderLongPressed(const QString& folderName);
+    
+    /**
+     * @brief Emitted when user requests PDF export from batch select mode.
+     * @param bundlePaths Paths to notebooks to export.
+     */
+    void exportToPdfRequested(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Emitted when user requests SNBX export from batch select mode.
+     * @param bundlePaths Paths to notebooks to export.
+     */
+    void exportToSnbxRequested(const QStringList& bundlePaths);
 
 private slots:
     // Slots for list view signals

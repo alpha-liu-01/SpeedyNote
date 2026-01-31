@@ -28,7 +28,8 @@ namespace BatchOps {
 
 QString generateOutputPath(const QString& inputPath,
                            const QString& outputDir,
-                           const QString& extension)
+                           const QString& extension,
+                           bool autoRename = true)
 {
     // Extract bundle name from input path
     QFileInfo inputInfo(inputPath);
@@ -51,7 +52,23 @@ QString generateOutputPath(const QString& inputPath,
         ext = '.' + ext;
     }
     
-    return outDir + bundleName + ext;
+    // Generate base path
+    QString basePath = outDir + bundleName + ext;
+    
+    // If not auto-renaming or file doesn't exist, return the base path
+    if (!autoRename || !QFile::exists(basePath)) {
+        return basePath;
+    }
+    
+    // File exists and auto-rename enabled - find a unique name by appending (1), (2), etc.
+    int counter = 1;
+    QString uniquePath;
+    do {
+        uniquePath = outDir + bundleName + QString(" (%1)").arg(counter) + ext;
+        counter++;
+    } while (QFile::exists(uniquePath));
+    
+    return uniquePath;
 }
 
 bool isSingleFileOutput(const QString& outputPath, const QString& extension)
@@ -164,22 +181,15 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         }
         
         // Determine output path
+        // When overwrite is false, auto-rename to avoid conflicts (e.g., "file (1).snbx")
+        // When overwrite is true, use original filename and overwrite existing
         QString outputPath;
         if (singleFileMode) {
             outputPath = options.outputPath;
         } else {
-            outputPath = generateOutputPath(bundlePath, outputDir, ".snbx");
+            outputPath = generateOutputPath(bundlePath, outputDir, ".snbx", !options.overwrite);
         }
         fr.outputPath = outputPath;
-        
-        // Check if output exists
-        if (QFile::exists(outputPath) && !options.overwrite) {
-            fr.status = FileStatus::Skipped;
-            fr.message = QObject::tr("Output file already exists");
-            result.results.append(fr);
-            result.skippedCount++;
-            continue;
-        }
         
         // Dry run - just report what would happen
         if (options.dryRun) {
@@ -332,22 +342,15 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
         }
         
         // Determine output path
+        // When overwrite is false, auto-rename to avoid conflicts (e.g., "file (1).pdf")
+        // When overwrite is true, use original filename and overwrite existing
         QString outputPath;
         if (singleFileMode) {
             outputPath = options.outputPath;
         } else {
-            outputPath = generateOutputPath(bundlePath, outputDir, ".pdf");
+            outputPath = generateOutputPath(bundlePath, outputDir, ".pdf", !options.overwrite);
         }
         fr.outputPath = outputPath;
-        
-        // Check if output exists
-        if (QFile::exists(outputPath) && !options.overwrite) {
-            fr.status = FileStatus::Skipped;
-            fr.message = QObject::tr("Output file already exists");
-            result.results.append(fr);
-            result.skippedCount++;
-            continue;
-        }
         
         // Validate bundle before loading
         if (!isValidBundle(bundlePath)) {
@@ -566,7 +569,8 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
             continue;
         }
         
-        // Derive expected output path for overwrite checking
+        // Derive expected output path for dry-run and overwrite check
+        // Note: NotebookImporter handles auto-rename internally, so we just estimate here
         QString expectedBundleName = deriveExpectedBundleName(snbxPath);
         QString expectedOutputPath = options.destDir;
         if (!expectedOutputPath.endsWith('/') && !expectedOutputPath.endsWith('\\')) {
@@ -574,15 +578,6 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         }
         expectedOutputPath += expectedBundleName;
         fr.outputPath = expectedOutputPath;
-        
-        // Check if output already exists (based on expected name)
-        if (QDir(expectedOutputPath).exists() && !options.overwrite) {
-            fr.status = FileStatus::Skipped;
-            fr.message = QObject::tr("Notebook already exists: %1").arg(expectedBundleName);
-            result.results.append(fr);
-            result.skippedCount++;
-            continue;
-        }
         
         // Dry run - just report what would happen
         if (options.dryRun) {
@@ -594,6 +589,7 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         }
         
         // If overwrite is enabled and target exists, remove it first
+        // When overwrite is false, NotebookImporter handles auto-rename internally
         if (QDir(expectedOutputPath).exists() && options.overwrite) {
             QDir existingDir(expectedOutputPath);
             if (!existingDir.removeRecursively()) {
