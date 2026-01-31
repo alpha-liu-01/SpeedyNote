@@ -10,7 +10,7 @@
 // - Future extensibility for other backends if needed
 // - Easier testing with mock providers
 //
-// As of v1.2.0, SpeedyNote uses MuPDF exclusively on all platforms for
+// As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms for
 // consistent rendering and to eliminate symbol conflicts.
 //
 // Design: Uses simple data structs instead of passing backend-specific types.

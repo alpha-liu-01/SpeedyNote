@@ -3,7 +3,7 @@
 // ============================================================================
 // This file contains the factory methods for PdfProvider.
 // 
-// As of v1.2.0, SpeedyNote uses MuPDF exclusively on all platforms:
+// As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms:
 //   - Eliminates symbol conflicts between MuPDF and Poppler/OpenJPEG
 //   - Consistent rendering across all platforms
 //   - Faster rendering performance

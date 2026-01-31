@@ -168,152 +168,152 @@
         <translation type="unfinished">页面</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="171"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="172"/>
         <source>All pages</source>
         <translation type="unfinished">全部页面</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="178"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="179"/>
         <source>Page range:</source>
         <translation type="unfinished">页面范围:</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="182"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="183"/>
         <source>e.g., 1-10, 15, 20-30</source>
         <translation type="unfinished">举例: 1-10, 15, 20-30</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="192"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="193"/>
         <source>Page range applies to all notebooks</source>
         <translation type="unfinished">页面范围适用于所有的笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="206"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="209"/>
         <source>Quality</source>
         <translation type="unfinished">质量</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="212"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="215"/>
         <source>96 DPI (Screen)</source>
         <translation type="unfinished">96 DPI （1x屏幕）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="213"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="216"/>
         <source>Smallest file size, for on-screen viewing</source>
         <translation type="unfinished">尺寸最小，适合小屏浏览</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="217"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="220"/>
         <source>150 DPI (Standard)</source>
         <translation type="unfinished">150 DPI （标准）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="218"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="221"/>
         <source>Good balance between quality and file size</source>
         <translation type="unfinished">质量和文件大小的平衡</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="223"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="226"/>
         <source>300 DPI (Print)</source>
         <translation type="unfinished">300 DPI（打印级质量）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="224"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="227"/>
         <source>High quality for printing</source>
         <translation type="unfinished">给打印用的高质量</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="231"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="234"/>
         <source>Custom:</source>
         <translation type="unfinished">自定义：</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="238"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="241"/>
         <source> DPI</source>
         <translation type="unfinished"> DPI</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="252"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="255"/>
         <source>Options</source>
         <translation type="unfinished">选项</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="256"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="259"/>
         <source>Annotations only (blank background)</source>
         <translation type="unfinished">仅注释（空白背景）</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="258"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="261"/>
         <source>Export strokes and images only, without original PDF content or page backgrounds.</source>
         <translation type="unfinished">仅导出笔画和插入的图片，而不带原本的PDF或者是页面预设的背景。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="261"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="264"/>
         <source>Include PDF metadata</source>
         <translation type="unfinished">包含PDF数据</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="262"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="265"/>
         <source>Preserve title, author, and other metadata from source PDFs.</source>
         <translation type="unfinished">保留标题、作者和源PDF中的其它数据。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="266"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="269"/>
         <source>Include bookmarks/outline</source>
         <translation type="unfinished">保留书签、大纲</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="267"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="270"/>
         <source>Preserve PDF bookmarks and outline from source PDFs.</source>
         <translation type="unfinished">从源PDF中保留PDF书签和大纲。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="281"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="284"/>
         <source>Cancel</source>
         <translation type="unfinished">取消</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="288"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="291"/>
         <source>Share</source>
         <translation type="unfinished">分享</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="290"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="293"/>
         <source>Export</source>
         <translation type="unfinished">导出</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="380"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="383"/>
         <source>Share Notebook as PDF</source>
         <translation type="unfinished">把笔记本保存分享为PDF</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="382"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="385"/>
         <source>Share %1 Notebooks as PDF</source>
         <translation type="unfinished">以PDF格式分享%1个笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="386"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="389"/>
         <source>Export Notebook to PDF</source>
         <translation type="unfinished">把笔记本导出为PDF格式</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="388"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="391"/>
         <source>Export %1 Notebooks to PDF</source>
         <translation type="unfinished">把%1个笔记本导出为PDF格式</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="404"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="407"/>
         <source>⚠ 1 edgeless notebook will be skipped (edgeless notebooks cannot be exported to PDF).</source>
         <translation type="unfinished">⚠1个无边笔记将会被跳过（无边笔记无法保存为PDF）。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="407"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="410"/>
         <source>⚠ %1 edgeless notebooks will be skipped (edgeless notebooks cannot be exported to PDF).</source>
         <translation type="unfinished">⚠%1个无边笔记将会被跳过（无边笔记无法保存为PDF）。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="426"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="429"/>
         <source>Select Output Folder</source>
         <translation type="unfinished">选择输出文件夹</translation>
     </message>
@@ -820,7 +820,7 @@ NOTE: On Android, imported notebooks are automatically added to the library.
     <message>
         <location filename="../../source/cli/CliProgress.cpp" line="137"/>
         <source>Skipped</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">跳过了</translation>
     </message>
     <message>
         <location filename="../../source/cli/CliProgress.cpp" line="143"/>
@@ -1457,8 +1457,8 @@ Continue?</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1556"/>
-        <source>Version 1.2.0</source>
-        <translation type="unfinished">1.2.0 版本</translation>
+        <source>Version 1.2.1</source>
+        <translation type="unfinished">1.2.1 版本</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1573"/>
@@ -1782,47 +1782,47 @@ Error output:
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2154"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2187"/>
         <source>No document loaded</source>
         <translation type="unfinished">没有加载文档</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5992"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6026"/>
         <source>Insert Image</source>
         <translation type="unfinished">插入图片</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5994"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6028"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished">图片  (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;全部文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6659"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6693"/>
         <source>Add Position Link</source>
         <translation type="unfinished">添加位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6660"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6694"/>
         <source>Add URL Link</source>
         <translation type="unfinished">添加URL链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6661"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6695"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished">添加Markdown笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6671"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6705"/>
         <source>Add URL</source>
         <translation type="unfinished">添加URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6671"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6705"/>
         <source>Enter URL:</source>
         <translation type="unfinished">输入URL：</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6822"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6856"/>
         <source>Untitled Note</source>
         <translation type="unfinished">无标题笔记</translation>
     </message>
@@ -2643,8 +2643,8 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="155"/>
-        <source>SpeedyNote 1.2.0</source>
-        <translation type="unfinished">极疾记 1.2.0</translation>
+        <source>SpeedyNote 1.2.1</source>
+        <translation type="unfinished">极疾记 1.2.1</translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="830"/>
@@ -3832,7 +3832,7 @@ https://www.libreoffice.org/download/download/</source>
     <message>
         <location filename="../../source/batch/BatchOperations.cpp" line="560"/>
         <source>Importing...</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">导入中...</translation>
     </message>
     <message>
         <location filename="../../source/batch/BatchOperations.cpp" line="566"/>

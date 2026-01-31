@@ -16,7 +16,7 @@
 namespace Cli {
 
 // Application version (matches CMakeLists.txt project VERSION)
-static const char* APP_VERSION = "1.2.0";
+static const char* APP_VERSION = "1.2.1";
 
 // =============================================================================
 // CLI Detection

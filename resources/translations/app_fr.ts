@@ -168,152 +168,152 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="171"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="172"/>
         <source>All pages</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="178"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="179"/>
         <source>Page range:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="182"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="183"/>
         <source>e.g., 1-10, 15, 20-30</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="192"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="193"/>
         <source>Page range applies to all notebooks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="206"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="209"/>
         <source>Quality</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="212"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="215"/>
         <source>96 DPI (Screen)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="213"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="216"/>
         <source>Smallest file size, for on-screen viewing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="217"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="220"/>
         <source>150 DPI (Standard)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="218"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="221"/>
         <source>Good balance between quality and file size</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="223"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="226"/>
         <source>300 DPI (Print)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="224"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="227"/>
         <source>High quality for printing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="231"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="234"/>
         <source>Custom:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="238"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="241"/>
         <source> DPI</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="252"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="255"/>
         <source>Options</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="256"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="259"/>
         <source>Annotations only (blank background)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="258"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="261"/>
         <source>Export strokes and images only, without original PDF content or page backgrounds.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="261"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="264"/>
         <source>Include PDF metadata</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="262"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="265"/>
         <source>Preserve title, author, and other metadata from source PDFs.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="266"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="269"/>
         <source>Include bookmarks/outline</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="267"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="270"/>
         <source>Preserve PDF bookmarks and outline from source PDFs.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="281"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="284"/>
         <source>Cancel</source>
         <translation type="unfinished">Annuler</translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="288"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="291"/>
         <source>Share</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="290"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="293"/>
         <source>Export</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="380"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="383"/>
         <source>Share Notebook as PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="382"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="385"/>
         <source>Share %1 Notebooks as PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="386"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="389"/>
         <source>Export Notebook to PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="388"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="391"/>
         <source>Export %1 Notebooks to PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="404"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="407"/>
         <source>⚠ 1 edgeless notebook will be skipped (edgeless notebooks cannot be exported to PDF).</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="407"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="410"/>
         <source>⚠ %1 edgeless notebooks will be skipped (edgeless notebooks cannot be exported to PDF).</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="426"/>
+        <location filename="../../source/ui/dialogs/BatchPdfExportDialog.cpp" line="429"/>
         <source>Select Output Folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1375,7 +1375,7 @@ Continue?</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1556"/>
-        <source>Version 1.2.0</source>
+        <source>Version 1.2.1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1763,47 +1763,47 @@ Error output:
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2154"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2187"/>
         <source>No document loaded</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5992"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6026"/>
         <source>Insert Image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="5994"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6028"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6659"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6693"/>
         <source>Add Position Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6660"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6694"/>
         <source>Add URL Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6661"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6695"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6671"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6705"/>
         <source>Add URL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6671"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6705"/>
         <source>Enter URL:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6822"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6856"/>
         <source>Untitled Note</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2566,7 +2566,7 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="155"/>
-        <source>SpeedyNote 1.2.0</source>
+        <source>SpeedyNote 1.2.1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

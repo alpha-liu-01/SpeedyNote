@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="1.2.0"
+PKGVER="1.2.1"
 PKGREL="1"
 PKGARCH=$(uname -m)
 MAINTAINER="SpeedyNote Team"
@@ -163,7 +163,7 @@ check_project_directory() {
 #   - Ubuntu 24.04 (GitHub Actions): No libmupdf shared library available, uses static linking
 #   - Debian 13+ (Trixie): Has libmupdf25.1, can use dynamic linking
 #   - For local arm64 Debian builds with dynamic linking, manually add libmupdf25.1 to deps
-# As of v1.2.0, SpeedyNote uses MuPDF exclusively (Poppler removed)
+# As of v1.2.1, SpeedyNote uses MuPDF exclusively (Poppler removed)
 get_dependencies() {
     local format=$1
     case $format in
@@ -188,7 +188,7 @@ get_dependencies() {
 }
 
 # Function to get build dependencies for each distribution
-# As of v1.2.0, SpeedyNote uses MuPDF exclusively (Poppler removed)
+# As of v1.2.1, SpeedyNote uses MuPDF exclusively (Poppler removed)
 get_build_dependencies() {
     local format=$1
     case $format in

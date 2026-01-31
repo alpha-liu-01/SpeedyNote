@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.2.0 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.2.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -335,7 +335,7 @@ elseif(UNIX)
     message(STATUS "🐧 Configuring for Linux")
     
     # -------------------------------------------------------------------------
-    # As of v1.2.0, SpeedyNote uses MuPDF exclusively on all platforms.
+    # As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms.
     # This eliminates symbol conflicts between MuPDF and Poppler/OpenJPEG.
     # -------------------------------------------------------------------------
     
@@ -579,7 +579,7 @@ set(UI_SOURCES
 )
 
 # PDF abstraction layer
-# As of v1.2.0, SpeedyNote uses MuPDF exclusively on all platforms:
+# As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms:
 # - Eliminates symbol conflicts between MuPDF and Poppler/OpenJPEG
 # - Consistent rendering across all platforms
 # - Faster rendering performance
