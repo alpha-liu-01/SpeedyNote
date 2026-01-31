@@ -1,4 +1,4 @@
-﻿# 📝 SpeedyNote
+# 📝 SpeedyNote
 
 <div align="center">
 
@@ -179,6 +179,157 @@ cd SpeedyNote
 | `.snbx` | Compressed bundle (ZIP) | Sharing, backup |
 
 **Note:** The legacy `.spn` format from v0.x is not supported.
+
+---
+
+## 💻 Command Line Interface (Desktop)
+
+SpeedyNote includes a powerful CLI for batch operations on Windows and Linux. Perfect for scripting, automation, and syncing notes between devices.
+
+### Quick Start
+
+```bash
+# Export all notebooks to PDF
+speedynote export-pdf ~/Notes/ -o ~/PDFs/
+
+# Backup notebooks to .snbx packages
+speedynote export-snbx ~/Notes/ -o ~/Backup/
+
+# Import .snbx packages
+speedynote import ~/Downloads/*.snbx -d ~/Notes/
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `export-pdf` | Export notebooks to PDF format |
+| `export-snbx` | Export notebooks to .snbx packages |
+| `import` | Import .snbx packages as notebooks |
+
+### Export to PDF
+
+```bash
+speedynote export-pdf [OPTIONS] <input>... -o <output>
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output` | Output file (single) or directory (batch) |
+| `--dpi <N>` | Export resolution (default: 150) |
+| `--pages <RANGE>` | Page range, e.g., "1-10,15,20-25" |
+| `--no-metadata` | Don't preserve PDF metadata |
+| `--no-outline` | Don't preserve PDF bookmarks |
+| `--annotations-only` | Export strokes only (blank background) |
+| `--overwrite` | Overwrite existing files |
+| `--recursive` | Search directories recursively |
+| `--dry-run` | Preview without creating files |
+
+**Examples:**
+```bash
+# Single notebook to PDF
+speedynote export-pdf ~/Notes/Lecture.snb -o ~/Desktop/lecture.pdf
+
+# All notebooks at 300 DPI
+speedynote export-pdf ~/Notes/ -o ~/PDFs/ --dpi 300
+
+# Export only annotations (no background)
+speedynote export-pdf ~/Notes/*.snb -o ~/PDFs/ --annotations-only
+
+# Preview what would be exported
+speedynote export-pdf ~/Notes/ -o ~/PDFs/ --dry-run
+```
+
+### Export to SNBX
+
+```bash
+speedynote export-snbx [OPTIONS] <input>... -o <output>
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output` | Output file (single) or directory (batch) |
+| `--no-pdf` | Don't embed source PDF (smaller files) |
+| `--overwrite` | Overwrite existing files |
+| `--recursive` | Search directories recursively |
+| `--dry-run` | Preview without creating files |
+
+**Examples:**
+```bash
+# Backup with embedded PDFs
+speedynote export-snbx ~/Notes/ -o ~/Backup/
+
+# Backup without PDFs (smaller)
+speedynote export-snbx ~/Notes/ -o ~/Backup/ --no-pdf
+
+# Single notebook
+speedynote export-snbx ~/Notes/Project.snb -o ~/Desktop/project.snbx
+```
+
+### Import SNBX Packages
+
+```bash
+speedynote import [OPTIONS] <input>... -d <dest>
+```
+
+| Option | Description |
+|--------|-------------|
+| `-d, --dest` | Destination directory for notebooks |
+| `--overwrite` | Overwrite existing notebooks |
+| `--recursive` | Search directories recursively |
+| `--dry-run` | Preview without importing |
+
+**Examples:**
+```bash
+# Import packages
+speedynote import ~/Downloads/*.snbx -d ~/Notes/
+
+# Import from a directory
+speedynote import ~/Backup/ -d ~/Notes/ --recursive
+```
+
+### Common Options
+
+These options work with all commands:
+
+| Option | Description |
+|--------|-------------|
+| `--verbose` | Show detailed progress |
+| `--json` | Output results as JSON (for scripting) |
+| `--fail-fast` | Stop on first error |
+| `-h, --help` | Show help for command |
+| `-v, --version` | Show version |
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | All operations succeeded |
+| 1 | Some files failed or were skipped |
+| 2 | All files failed |
+| 3 | Invalid arguments |
+| 5 | Cancelled (Ctrl+C) |
+
+### Scripting Example
+
+```bash
+#!/bin/bash
+# Sync notes from tablet to PC via SSH
+
+TABLET="user@tablet:/storage/emulated/0/Notes"
+LOCAL="$HOME/Notes"
+BACKUP="$HOME/Backup"
+
+# Pull new .snbx files from tablet
+rsync -av "$TABLET/*.snbx" "$BACKUP/incoming/"
+
+# Import to local library
+speedynote import "$BACKUP/incoming/" -d "$LOCAL" --json | \
+  jq '.status == "success"' && rm "$BACKUP/incoming/"*.snbx
+
+# Export updated notes as PDF for reference
+speedynote export-pdf "$LOCAL" -o "$HOME/PDFs/" --dpi 150
+```
 
 ---
 

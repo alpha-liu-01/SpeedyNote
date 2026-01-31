@@ -647,6 +647,18 @@ set(BATCH_SOURCES
     source/batch/BundleDiscovery.cpp
 )
 
+# CLI module (Desktop only - headless batch operations)
+# Android uses launcher UI for batch operations instead
+set(CLI_SOURCES "")
+if(NOT ANDROID)
+    set(CLI_SOURCES
+        source/cli/CliParser.cpp
+        source/cli/CliProgress.cpp
+        source/cli/CliHandler.cpp
+        source/cli/CliSignal.cpp
+    )
+endif()
+
 # Android-specific utilities and UI
 set(ANDROID_PLATFORM_SOURCES "")
 if(ANDROID)
@@ -683,6 +695,7 @@ set(APP_SOURCES
     ${CONTROLLER_SOURCES}
     ${SHARING_SOURCES}
     ${BATCH_SOURCES}
+    ${CLI_SOURCES}
     ${ANDROID_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
         ${QMARKDOWNTEXTEDIT_SOURCES}

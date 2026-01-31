@@ -13,6 +13,12 @@
 #include "MainWindow.h"
 #include "ui/launcher/Launcher.h"
 
+// CLI support (Desktop only)
+#ifndef Q_OS_ANDROID
+#include <QGuiApplication>
+#include "cli/CliParser.h"
+#endif
+
 // Platform-specific includes
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -447,6 +453,22 @@ int main(int argc, char* argv[])
     enableDebugConsole();
 #endif
 
+    // ========== CLI Mode Detection (Desktop Only) ==========
+    // Check for CLI commands before creating QApplication to avoid full GUI overhead.
+    // CLI mode uses QGuiApplication (not QCoreApplication) because:
+    // - PDF export needs to render ImageObjects which use QPixmap
+    // - QPixmap requires a GUI application context (platform plugin)
+    // - QGuiApplication is lightweight and doesn't create any windows
+#ifndef Q_OS_ANDROID
+    if (Cli::isCliMode(argc, argv)) {
+        QGuiApplication app(argc, argv);
+        app.setOrganizationName("SpeedyNote");
+        app.setApplicationName("App");
+        return Cli::run(app, argc, argv);
+    }
+#endif
+
+    // ========== GUI Mode ==========
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
