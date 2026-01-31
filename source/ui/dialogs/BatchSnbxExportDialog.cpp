@@ -132,7 +132,7 @@ void BatchSnbxExportDialog::setupUi()
     QLabel* shareNote = new QLabel(
         tr("The exported packages will be shared using Android's share sheet."));
     shareNote->setWordWrap(true);
-    shareNote->setStyleSheet("color: palette(mid); font-size: 13px; padding: 8px;");
+    shareNote->setStyleSheet("color: palette(placeholderText); font-size: 13px; padding: 8px;");
     mainLayout->addWidget(shareNote);
 #endif
     
@@ -201,9 +201,9 @@ void BatchSnbxExportDialog::setupUi()
             border-color: #1f6dad;
         }
         QPushButton:disabled {
-            background: palette(mid);
+            background: palette(midlight);
             border-color: palette(mid);
-            color: palette(dark);
+            color: palette(placeholderText);
         }
     )");
     connect(m_exportButton, &QPushButton::clicked, this, [this]() {

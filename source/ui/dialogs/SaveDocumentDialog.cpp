@@ -135,9 +135,9 @@ void SaveDocumentDialog::setupUI()
             border-color: #1e8449;
         }
         QPushButton:disabled {
-            background: palette(mid);
+            background: palette(midlight);
             border-color: palette(mid);
-            color: palette(dark);
+            color: palette(placeholderText);
         }
     )");
     connect(m_saveBtn, &QPushButton::clicked, this, &QDialog::accept);
