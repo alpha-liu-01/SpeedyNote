@@ -458,15 +458,32 @@ QVector<PdfLink> MuPdfProvider::links(int pageIndex) const
             if (link->uri) {
                 QString uri = QString::fromUtf8(link->uri);
                 
-                if (uri.startsWith("#page=")) {
-                    // Internal page link
-                    pdfLink.type = PdfLinkType::Goto;
-                    pdfLink.targetPage = uri.mid(6).toInt() - 1; // Convert to 0-based
-                } else if (uri.startsWith("http://") || uri.startsWith("https://")) {
+                if (uri.startsWith("http://") || uri.startsWith("https://") ||
+                    uri.startsWith("mailto:") || uri.startsWith("file://")) {
+                    // External link
                     pdfLink.type = PdfLinkType::Uri;
                     pdfLink.uri = uri;
+                } else if (uri.startsWith("#")) {
+                    // Internal link - MuPDF uses "#<page_number>" format (1-based)
+                    // or "#<named_destination>"
+                    QString fragment = uri.mid(1);
+                    bool ok = false;
+                    int pageNum = fragment.toInt(&ok);
+                    if (ok && pageNum > 0) {
+                        // Direct page number link (1-based, convert to 0-based)
+                        pdfLink.type = PdfLinkType::Goto;
+                        pdfLink.targetPage = pageNum - 1;
+                    } else {
+                        // Named destination - try to resolve
+                        float xp, yp;
+                        fz_location loc = fz_resolve_link(m_ctx, m_doc, link->uri, &xp, &yp);
+                        if (loc.page >= 0) {
+                            pdfLink.type = PdfLinkType::Goto;
+                            pdfLink.targetPage = loc.page;
+                        }
+                    }
                 } else {
-                    // Try to resolve as destination name
+                    // Other format - try to resolve as destination name
                     float xp, yp;
                     fz_location loc = fz_resolve_link(m_ctx, m_doc, link->uri, &xp, &yp);
                     if (loc.page >= 0) {
