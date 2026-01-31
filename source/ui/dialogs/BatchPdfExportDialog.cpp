@@ -52,7 +52,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
 #ifdef Q_OS_ANDROID
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #else
-    setMinimumSize(520, 500);
+    setMinimumSize(520, 700);
     setMaximumSize(600, 750);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #endif
