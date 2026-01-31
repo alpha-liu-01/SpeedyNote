@@ -288,27 +288,15 @@ ldd NoteApp.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
     }
 }
 
-# ✅ Also copy any versioned libpoppler DLLs that might have been missed
-$popplerDlls = Get-ChildItem -Path "$sourceDir\libpoppler-*.dll" -ErrorAction SilentlyContinue | 
-    Where-Object { $_.Name -match '^libpoppler-\d+\.dll$' }
-foreach ($popplerDll in $popplerDlls) {
-    if (-not (Test-Path $popplerDll.Name)) {
-        Copy-Item -Path $popplerDll.FullName -Destination $popplerDll.Name -Force
-        $copiedCount++
-        Write-Host "  Also copied: $($popplerDll.Name)" -ForegroundColor Gray
-    }
-}
-
 Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
-Write-Host "   Note: MuPDF for PDF export is dynamically linked (libmupdf.dll)" -ForegroundColor Gray
+Write-Host "   Note: MuPDF is dynamically linked (libmupdf.dll)" -ForegroundColor Gray
 
-# ✅ Copy Poppler data files (fonts, etc.)
-Copy-Item -Path "$toolchainPath\share\poppler" -Destination "..\build\share\poppler" -Recurse -Force
+# Poppler removed - SpeedyNote uses MuPDF exclusively for PDF rendering and export
 
 Write-Host ""
 Write-Host "✅ Build complete!" -ForegroundColor Green
-Write-Host "   PDF rendering: Poppler" -ForegroundColor Cyan
-Write-Host "   PDF export: MuPDF (statically linked)" -ForegroundColor Cyan
+Write-Host "   PDF rendering: MuPDF" -ForegroundColor Cyan
+Write-Host "   PDF export: MuPDF" -ForegroundColor Cyan
 Write-Host ""
 
 # ✅ Clean up build artifacts (not needed for packaging)
