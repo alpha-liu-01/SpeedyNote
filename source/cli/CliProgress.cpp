@@ -330,7 +330,8 @@ QString ConsoleProgress::jsonEscape(const QString& str)
             default:
                 if (c.unicode() < 32) {
                     // Control character - escape as \uXXXX
-                    result += QStringLiteral("\\u%1").arg(c.unicode(), 4, 16, QLatin1Char('0'));
+                    // Cast to uint for cross-platform QString::arg() compatibility
+                    result += QStringLiteral("\\u%1").arg(static_cast<uint>(c.unicode()), 4, 16, QLatin1Char('0'));
                 } else {
                     result += c;
                 }
