@@ -109,6 +109,11 @@ void StarredView::setupUi()
     // === Model ===
     m_model = new StarredModel(this);
     
+    // Connect model reload signal to update empty state visibility
+    // This ensures m_listView becomes visible when items are added to an empty model
+    // (e.g., user stars a notebook while on Timeline view)
+    connect(m_model, &StarredModel::dataReloaded, this, &StarredView::updateEmptyState);
+    
     // === List View (create first so delegate can reference it) ===
     m_listView = new StarredListView(this);
     m_listView->setObjectName("StarredListView");
