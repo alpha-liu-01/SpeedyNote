@@ -29,8 +29,6 @@ pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-cmake mingw-w6
 # Qt6
 pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw-w64-clang-x86_64-qt6-declarative mingw-w64-clang-x86_64-qt6-translations
 
-# PDF viewing (Poppler)
-pacman -S mingw-w64-clang-x86_64-poppler mingw-w64-clang-x86_64-poppler-qt6
 
 # PDF export (MuPDF and dependencies) - OPTIONAL
 pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-harfbuzz mingw-w64-clang-x86_64-freetype mingw-w64-clang-x86_64-libjpeg-turbo mingw-w64-clang-x86_64-openjpeg2 mingw-w64-clang-x86_64-gumbo-parser mingw-w64-clang-x86_64-mujs

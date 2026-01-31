@@ -20,10 +20,8 @@ sudo apt install build-essential cmake pkg-config
 # Qt6
 sudo apt install qt6-base-dev qt6-tools-dev libqt6concurrent6 libqt6xml6 libqt6network6
 
-# PDF viewing (Poppler)
-sudo apt install libpoppler-qt6-dev
 
-# PDF export (MuPDF and dependencies)
+# PDF (MuPDF and dependencies)
 sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev
 
 ```
@@ -34,8 +32,7 @@ sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libope
 |-----------|----------|---------|
 | **Build tools** | `build-essential cmake pkg-config` | Compilation |
 | **Qt6** | `qt6-base-dev qt6-tools-dev` | UI framework |
-| **Poppler** | `libpoppler-qt6-dev` | PDF viewing |
-| **MuPDF** | `libmupdf-dev` | PDF export |
+| **MuPDF** | `libmupdf-dev` | PDF viewing and export |
 | **MuPDF deps** | `libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev` | MuPDF dependencies |
 | **SDL2** | `libsdl2-dev` | Game controller support (optional) |
 
@@ -95,14 +92,6 @@ This installs:
 sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev
 ```
 
-#### Poppler not found
-
-**Error:** `Package 'poppler-qt6' not found`
-
-**Fix:** Install Poppler Qt6 bindings:
-```bash
-sudo apt install libpoppler-qt6-dev
-```
 
 #### Qt6 not found
 
@@ -125,17 +114,17 @@ The build system automatically detects ARM64 and applies appropriate optimizatio
 
 Package names differ slightly:
 ```bash
-sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel poppler-qt6-devel mupdf-devel harfbuzz-devel freetype-devel libjpeg-turbo-devel openjpeg2-devel gumbo-parser-devel mujs-devel
+sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel mupdf-devel harfbuzz-devel freetype-devel libjpeg-turbo-devel openjpeg2-devel gumbo-parser-devel mujs-devel
 ```
 
 #### Arch Linux
 
 ```bash
-sudo pacman -S cmake qt6-base qt6-tools poppler-qt6 mupdf harfbuzz freetype2 libjpeg-turbo openjpeg2 gumbo-parser mujs
+sudo pacman -S cmake qt6-base qt6-tools mupdf harfbuzz freetype2 libjpeg-turbo openjpeg2 gumbo-parser mujs
 ```
 #### Alpine Linux and postmarketOS
 
-Note that the Alpine Linux version doesn't rely on Poppler. mupdf handles both PDF rendering and export. 
+
 
 ```bash
 sudo apk add build-base cmake abuild qt6-qtbase-dev qt6-qttools-dev qt6-qtdeclarative-dev mupdf-dev

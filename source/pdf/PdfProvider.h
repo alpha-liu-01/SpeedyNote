@@ -6,9 +6,12 @@
 // Part of the new SpeedyNote document architecture (Phase 1.2.1)
 //
 // This abstraction layer enables:
-// - Swapping PDF backends (Poppler, MuPDF, Android PDFRenderer, etc.)
-// - Platform-specific implementations
+// - Swapping PDF backends (currently MuPDF on all platforms)
+// - Future extensibility for other backends if needed
 // - Easier testing with mock providers
+//
+// As of v1.2.0, SpeedyNote uses MuPDF exclusively on all platforms for
+// consistent rendering and to eliminate symbol conflicts.
 //
 // Design: Uses simple data structs instead of passing backend-specific types.
 // This ensures any implementation can provide the same interface.
@@ -97,8 +100,8 @@ struct PdfOutlineItem {
 /**
  * @brief Abstract interface for PDF document operations.
  * 
- * Implementations wrap specific PDF libraries (Poppler, MuPDF, etc.)
- * to provide a unified interface for SpeedyNote.
+ * Currently implemented by MuPdfProvider which uses MuPDF
+ * for all PDF operations across all platforms.
  */
 class PdfProvider {
 public:
