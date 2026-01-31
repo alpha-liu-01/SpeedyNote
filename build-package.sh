@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="1.2.0"
+PKGVER="1.2.1"
 PKGREL="1"
 PKGARCH=$(uname -m)
 MAINTAINER="SpeedyNote Team"
@@ -163,52 +163,54 @@ check_project_directory() {
 #   - Ubuntu 24.04 (GitHub Actions): No libmupdf shared library available, uses static linking
 #   - Debian 13+ (Trixie): Has libmupdf25.1, can use dynamic linking
 #   - For local arm64 Debian builds with dynamic linking, manually add libmupdf25.1 to deps
+# As of v1.2.1, SpeedyNote uses MuPDF exclusively (Poppler removed)
 get_dependencies() {
     local format=$1
     case $format in
         deb)
             # No libmupdf dependency - Ubuntu uses static linking (no shared lib available)
             # For Debian 13+ arm64 builds with dynamic linking, add: libmupdf25.1
-            echo "libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, libpoppler-qt6-3t64 | libpoppler-qt6-3"
+            echo "libqt6core6t64 | libqt6core6, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6"
             ;;
         rpm)
             # mupdf-libs provides libmupdf.so for dynamic linking
-            echo "qt6-qtbase, poppler-qt6, mupdf-libs"
+            echo "qt6-qtbase, mupdf-libs"
             ;;
         arch)
             # mupdf provides libmupdf.so
-            echo "qt6-base, poppler-qt6, mupdf"
+            echo "qt6-base, mupdf"
             ;;
         apk)
             # mupdf provides libmupdf.so
-            echo "qt6-qtbase, poppler-qt6, mupdf"
+            echo "qt6-qtbase, mupdf"
             ;;
     esac
 }
 
 # Function to get build dependencies for each distribution
+# As of v1.2.1, SpeedyNote uses MuPDF exclusively (Poppler removed)
 get_build_dependencies() {
     local format=$1
     case $format in
         deb)
-            # MuPDF for PDF export (static linking, needs dev packages for build)
+            # MuPDF for PDF rendering and export (static linking, needs dev packages for build)
             # jbig2dec, gumbo, mujs are MuPDF's optional dependencies that it was compiled with
-            echo "cmake, make, pkg-config, qt6-base-dev, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, qt6-tools-dev, libpoppler-qt6-dev, libsdl2-dev, libasound2-dev, libmupdf-dev, libharfbuzz-dev, libfreetype-dev, libjpeg-dev, libopenjp2-7-dev, libjbig2dec0-dev, libgumbo-dev, libmujs-dev"
+            echo "cmake, make, pkg-config, qt6-base-dev, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, qt6-tools-dev, libsdl2-dev, libasound2-dev, libmupdf-dev, libharfbuzz-dev, libfreetype-dev, libjpeg-dev, libopenjp2-7-dev, libjbig2dec0-dev, libgumbo-dev, libmujs-dev"
             ;;
         rpm)
-            # MuPDF for PDF export (static linking, needs devel packages for build)
+            # MuPDF for PDF rendering and export (static linking, needs devel packages for build)
             # jbig2dec, gumbo-parser, mujs are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-qtbase-devel, qt6-qttools-devel, poppler-qt6-devel, SDL2-devel, alsa-lib-devel, mupdf-devel, harfbuzz-devel, freetype-devel, libjpeg-turbo-devel, openjpeg2-devel, jbig2dec-devel, gumbo-parser-devel, mujs-devel"
+            echo "cmake, make, pkgconf, qt6-qtbase-devel, qt6-qttools-devel, SDL2-devel, alsa-lib-devel, mupdf-devel, harfbuzz-devel, freetype-devel, libjpeg-turbo-devel, openjpeg2-devel, jbig2dec-devel, gumbo-parser-devel, mujs-devel"
             ;;
         arch)
-            # MuPDF for PDF export (static linking)
+            # MuPDF for PDF rendering and export (static linking)
             # jbig2dec, gumbo-parser, mujs are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-base, qt6-tools, poppler-qt6, sdl2-compat, alsa-lib, mupdf, harfbuzz, freetype2, libjpeg-turbo, openjpeg2, jbig2dec, gumbo-parser, mujs"
+            echo "cmake, make, pkgconf, qt6-base, qt6-tools, sdl2-compat, alsa-lib, mupdf, harfbuzz, freetype2, libjpeg-turbo, openjpeg2, jbig2dec, gumbo-parser, mujs"
             ;;
         apk)
-            # MuPDF for PDF export (static linking, needs dev packages for build)
+            # MuPDF for PDF rendering and export (static linking, needs dev packages for build)
             # jbig2dec, gumbo, mujs are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, poppler-qt6, poppler-qt5-dev, sdl2-dev, alsa-lib-dev, mupdf-dev, harfbuzz-dev, freetype-dev, libjpeg-turbo-dev, openjpeg-dev, jbig2dec-dev, gumbo-dev, mujs-dev"
+            echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, sdl2-dev, alsa-lib-dev, mupdf-dev, harfbuzz-dev, freetype-dev, libjpeg-turbo-dev, openjpeg-dev, jbig2dec-dev, gumbo-dev, mujs-dev"
             ;;
     esac
 }

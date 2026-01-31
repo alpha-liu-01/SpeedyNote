@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.2.0 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.2.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -74,7 +74,7 @@ if(WIN32)
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
     endif()
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
+    # Poppler removed - using MuPDF exclusively for PDF rendering
     
     if(ENABLE_CONTROLLER_SUPPORT)
         find_package(SDL2 REQUIRED CONFIG)
@@ -210,12 +210,7 @@ elseif(APPLE)
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
     endif()
     find_package(PkgConfig REQUIRED)
-    
-    # Poppler (manual config - no .pc file on macOS)
-    set(POPPLER_PREFIX "/opt/poppler-qt6")
-    include_directories("${POPPLER_PREFIX}/include/poppler/qt6")
-    link_directories("${POPPLER_PREFIX}/lib")
-    set(POPPLER_LIBRARIES "poppler-qt6")
+    # Poppler removed - using MuPDF exclusively for PDF rendering
     
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/sdl2")
@@ -223,7 +218,7 @@ elseif(APPLE)
         add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
     
-    # MuPDF for PDF export (via Homebrew)
+    # MuPDF for PDF rendering and export (via Homebrew)
     set(MUPDF_INCLUDE_DIR "${HOMEBREW_PREFIX}/include")
     set(MUPDF_LIBRARY_MAIN "${HOMEBREW_PREFIX}/lib/libmupdf.a")
     set(MUPDF_LIBRARY_THIRD "${HOMEBREW_PREFIX}/lib/libmupdf-third.a")
@@ -340,16 +335,9 @@ elseif(UNIX)
     message(STATUS "🐧 Configuring for Linux")
     
     # -------------------------------------------------------------------------
-    # Detect musl libc (Alpine Linux, postmarketOS, etc.)
-    # On musl, we use MuPDF for all PDF operations to avoid symbol collision
-    # between MuPDF and Poppler/OpenJPEG shared libraries.
+    # As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms.
+    # This eliminates symbol conflicts between MuPDF and Poppler/OpenJPEG.
     # -------------------------------------------------------------------------
-    set(USE_MUSL_MUPDF OFF)
-    if(EXISTS "/lib/ld-musl-aarch64.so.1" OR EXISTS "/lib/ld-musl-x86_64.so.1" OR
-       EXISTS "/lib/libc.musl-aarch64.so.1" OR EXISTS "/lib/libc.musl-x86_64.so.1")
-        set(USE_MUSL_MUPDF ON)
-        message(STATUS "🏔️  Detected musl libc (Alpine/postmarketOS) - will use MuPDF for all PDF operations")
-    endif()
     
     if(ENABLE_DEBUG_OUTPUT)
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Test)
@@ -357,13 +345,7 @@ elseif(UNIX)
         find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus)
     endif()
     find_package(PkgConfig REQUIRED)
-    
-    # Poppler is only required on glibc systems; on musl we use MuPDF exclusively
-    if(NOT USE_MUSL_MUPDF)
-        pkg_check_modules(POPPLER REQUIRED IMPORTED_TARGET poppler-qt6)
-    else()
-        message(STATUS "   Skipping Poppler (using MuPDF for PDF rendering on musl)")
-    endif()
+    # Poppler removed - using MuPDF exclusively for PDF rendering
 
     if(ENABLE_CONTROLLER_SUPPORT)
         pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
@@ -596,32 +578,20 @@ set(UI_SOURCES
     source/ui/launcher/FolderPickerDialog.cpp
 )
 
-# PDF abstraction layer (platform-specific backend)
-# - Android: MuPDF (smaller, bundled)
-# - Alpine/musl: MuPDF (avoids Poppler/OpenJPEG symbol collision)
-# - Desktop glibc: Poppler (feature-rich)
-if(ANDROID OR USE_MUSL_MUPDF)
-    set(PDF_SOURCES
-        source/pdf/PdfProviderFactory.cpp
-        source/pdf/MuPdfProvider.cpp
-        source/pdf/PdfRelinkDialog.cpp
-        source/pdf/PdfMismatchDialog.cpp
-        source/pdf/PdfSearchEngine.cpp
-        source/pdf/MuPdfExporter.cpp
-    )
-    if(USE_MUSL_MUPDF)
-        message(STATUS "   PDF provider: MuPDF (musl libc)")
-    endif()
-else()
-    set(PDF_SOURCES
-        source/pdf/PdfProviderFactory.cpp
-        source/pdf/PopplerPdfProvider.cpp
-        source/pdf/PdfRelinkDialog.cpp
-        source/pdf/PdfMismatchDialog.cpp
-        source/pdf/PdfSearchEngine.cpp
-        source/pdf/MuPdfExporter.cpp
-    )
-endif()
+# PDF abstraction layer
+# As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms:
+# - Eliminates symbol conflicts between MuPDF and Poppler/OpenJPEG
+# - Consistent rendering across all platforms
+# - Faster rendering performance
+set(PDF_SOURCES
+    source/pdf/PdfProviderFactory.cpp
+    source/pdf/MuPdfProvider.cpp
+    source/pdf/PdfRelinkDialog.cpp
+    source/pdf/PdfMismatchDialog.cpp
+    source/pdf/PdfSearchEngine.cpp
+    source/pdf/MuPdfExporter.cpp
+)
+message(STATUS "   PDF provider: MuPDF (all platforms)")
 
 # Controller support (optional)
 set(CONTROLLER_SOURCES "")
@@ -772,7 +742,6 @@ endif()
 if(WIN32)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
-            PkgConfig::POPPLER
     )
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)
@@ -781,19 +750,18 @@ if(WIN32)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
     endif()
     
-    # Add MuPDF for PDF export (dynamic linking)
+    # MuPDF for PDF rendering and export
     if(MUPDF_FOUND)
         list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
         message(STATUS "MuPDF: Will link dynamically with: ${MUPDF_LIBRARIES}")
     else()
-        message(STATUS "MuPDF: NOT linking (MUPDF_FOUND=${MUPDF_FOUND})")
+        message(FATAL_ERROR "MuPDF is required for PDF support")
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
 elseif(APPLE)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
-            ${POPPLER_LIBRARIES}
     )
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)
@@ -801,9 +769,11 @@ elseif(APPLE)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
     endif()
-    # Add MuPDF for PDF export
+    # MuPDF for PDF rendering and export
     if(MUPDF_FOUND)
         list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+    else()
+        message(FATAL_ERROR "MuPDF is required for PDF support")
     endif()
     target_link_libraries(NoteApp ${PLATFORM_LIBS})
 
@@ -819,21 +789,12 @@ elseif(UNIX)
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
             Qt6::DBus  # Step 3.11: System notifications via org.freedesktop.Notifications
     )
-    # On musl (Alpine), we use MuPDF exclusively; on glibc, we use Poppler + MuPDF for export
-    if(USE_MUSL_MUPDF)
-        # MuPDF handles all PDF operations on musl - no Poppler needed
-        if(MUPDF_FOUND)
-            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
-            message(STATUS "Linking MuPDF for PDF rendering and export (musl)")
-        else()
-            message(WARNING "MuPDF not found - PDF support will be unavailable on musl")
-        endif()
+    # MuPDF for PDF rendering and export (all Linux distributions)
+    if(MUPDF_FOUND)
+        list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
+        message(STATUS "Linking MuPDF for PDF rendering and export")
     else()
-        # glibc: Use Poppler for rendering, MuPDF for export
-        list(APPEND PLATFORM_LIBS PkgConfig::POPPLER)
-        if(MUPDF_FOUND)
-            list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
-        endif()
+        message(FATAL_ERROR "MuPDF is required for PDF support")
     endif()
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)

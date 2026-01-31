@@ -91,7 +91,7 @@ void BatchImportDialog::setupUi()
         tr("Add .snbx notebook packages to import. You can add individual files "
            "or scan a folder for notebooks."));
     descLabel->setWordWrap(true);
-    descLabel->setStyleSheet("color: palette(mid); font-size: 13px;");
+    descLabel->setStyleSheet("color: palette(placeholderText); font-size: 13px;");
     mainLayout->addWidget(descLabel);
     
     // ===== File List =====
@@ -101,7 +101,7 @@ void BatchImportDialog::setupUi()
     
     // File count label
     m_fileCountLabel = new QLabel(tr("No files selected"));
-    m_fileCountLabel->setStyleSheet("color: palette(mid); font-size: 12px;");
+    m_fileCountLabel->setStyleSheet("color: palette(placeholderText); font-size: 12px;");
     filesLayout->addWidget(m_fileCountLabel);
     
     // File list widget

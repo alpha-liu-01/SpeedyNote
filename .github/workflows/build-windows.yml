@@ -3,7 +3,7 @@ name: Build SpeedyNote Windows Installer
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags (e.g., v1.2.0, v2.0.0-beta)
+      - 'v*'  # Trigger on version tags (e.g., v1.2.1, v2.0.0-beta)
 
 jobs:
   build-windows:
@@ -29,8 +29,6 @@ jobs:
             mingw-w64-clang-x86_64-qt6-base
             mingw-w64-clang-x86_64-qt6-tools
             mingw-w64-clang-x86_64-qt6-translations
-            mingw-w64-clang-x86_64-poppler
-            mingw-w64-clang-x86_64-poppler-qt6
             mingw-w64-clang-x86_64-SDL2
             mingw-w64-clang-x86_64-mupdf
             mingw-w64-clang-x86_64-ntldd
@@ -168,15 +166,16 @@ jobs:
           } else {
             Write-Host "ntldd not found, using fallback DLL list..." -ForegroundColor Yellow
             
-            # Fallback: copy common DLLs by pattern
+            # Fallback: copy common DLLs by pattern (MuPDF and general dependencies)
             $dllPatterns = @(
-              "libpoppler-*.dll", "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll",
+              "libmupdf*.dll", "libmujs*.dll",
+              "libdeflate.dll", "libiconv-2.dll", "libnettle-8.dll",
               "libexpat-1.dll", "libicuin*.dll", "libicuuc*.dll", "libicudt*.dll",
               "libfreetype-6.dll", "libfontconfig-1.dll", "libglib-2.0-0.dll",
               "libintl-8.dll", "libpng16-16.dll", "libjpeg-8.dll", "libtiff-*.dll",
               "libopenjp2-*.dll", "liblcms2-2.dll", "libcrypto-3*.dll", "libssl-3*.dll",
               "libzstd.dll", "zlib1.dll", "libbz2-1.dll", "liblzma-5.dll",
-              "libpoppler-qt6-*.dll", "SDL2.dll", "libharfbuzz-0.dll", "libgraphite2.dll",
+              "SDL2.dll", "libharfbuzz-0.dll", "libgraphite2.dll",
               "libbrotlidec.dll", "libbrotlicommon.dll", "libpcre2-16-0.dll",
               "libgobject-2.0-0.dll", "libc++.dll", "libunwind.dll", "libwinpthread-1.dll"
             )
@@ -192,28 +191,7 @@ jobs:
             }
           }
           
-          # Ensure versioned Poppler DLLs are copied
-          $popplerDlls = Get-ChildItem -Path "$sourceDir\libpoppler-*.dll" -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Name -match '^libpoppler-\d+\.dll$' }
-          foreach ($popplerDll in $popplerDlls) {
-            if (-not (Test-Path $popplerDll.Name)) {
-              Copy-Item -Path $popplerDll.FullName -Destination $popplerDll.Name -Force
-              $copiedCount++
-              Write-Host "  Also copied: $($popplerDll.Name)" -ForegroundColor Gray
-            }
-          }
-          
           Write-Host "Copied $copiedCount DLL(s)" -ForegroundColor Green
-          
-          # Copy Poppler data files
-          $shareSource = "$toolchainPath\share\poppler"
-          if (Test-Path $shareSource) {
-            New-Item -ItemType Directory -Path "share" -Force | Out-Null
-            Copy-Item -Path $shareSource -Destination "share" -Recurse -Force
-            Write-Host "Copied Poppler data files" -ForegroundColor Green
-          }
-          Write-Host "::endgroup::"
-          
           Write-Host "::endgroup::"
           
           Write-Host "::group::Clean up build artifacts" -ForegroundColor Cyan

@@ -3,7 +3,7 @@ name: Build SpeedyNote Linux Packages
 on:
   push:
     tags:
-      - 'v*'  # Trigger on version tags (e.g., v1.2.0, v2.0.0-beta)
+      - 'v*'  # Trigger on version tags (e.g., v1.2.1, v2.0.0-beta)
 
 jobs:
   build-deb:
@@ -23,7 +23,6 @@ jobs:
             pkg-config \
             qt6-base-dev \
             qt6-tools-dev \
-            libpoppler-qt6-dev \
             libsdl2-dev \
             libasound2-dev \
             libmupdf-dev \
@@ -66,7 +65,6 @@ jobs:
             pkgconf \
             qt6-qtbase-devel \
             qt6-qttools-devel \
-            poppler-qt6-devel \
             SDL2-devel \
             alsa-lib-devel \
             mupdf-devel \
@@ -105,7 +103,7 @@ jobs:
   #       run: |
   #         sudo apt-get update
   #         sudo apt-get install -y cmake make pkg-config qt6-base-dev qt6-tools-dev \
-  #           libpoppler-qt6-dev libsdl2-dev libasound2-dev libmupdf-dev \
+  #           libsdl2-dev libasound2-dev libmupdf-dev \
   #           libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev \
   #           dpkg-dev devscripts
   #     - name: Build and create DEB package

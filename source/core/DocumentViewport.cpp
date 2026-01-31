@@ -23,7 +23,8 @@
 #include <QKeyEvent>
 #include <QTouchEvent>
 #include <QtMath>     // For qPow
-#include <QtConcurrent>  // For async PDF rendering
+#include <QtConcurrent>   // For async PDF rendering
+#include <QThreadStorage> // For thread-local PDF provider caching
 #include <cmath>      // For std::floor, std::ceil
 #include <algorithm>  // For std::remove_if
 #include <limits>
@@ -58,6 +59,38 @@ static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF 
 
 // Note: eventMatchesAction() helper was removed - all keyboard shortcuts
 // are now handled by MainWindow's QShortcut system for focus-independent operation.
+
+// ===== Thread-Local PDF Provider Cache =====
+// 
+// Each thread in the QThreadPool keeps its own cached PdfProvider to avoid
+// re-opening and parsing the PDF file for every page render. This significantly
+// improves scrolling performance for large PDFs.
+//
+// Cache entry: stores the PDF path and the provider instance.
+// When the path changes (different document), the old provider is released
+// and a new one is created for the new document.
+
+struct ThreadPdfCache {
+    QString pdfPath;
+    std::unique_ptr<PdfProvider> provider;
+    
+    PdfProvider* getOrCreate(const QString& path) {
+        if (pdfPath != path || !provider || !provider->isValid()) {
+            // Different file or invalid provider - create new one
+            pdfPath = path;
+            provider = PdfProvider::create(path);
+        }
+        return provider.get();
+    }
+    
+    void clear() {
+        pdfPath.clear();
+        provider.reset();
+    }
+};
+
+// Thread-local storage: each worker thread in QThreadPool gets its own cache
+static QThreadStorage<ThreadPdfCache> s_threadPdfCache;
 
 // ===== Constructor & Destructor =====
 
@@ -840,7 +873,7 @@ void DocumentViewport::scrollToPositionOnPage(int pageIndex, QPointF normalizedP
     //
     // Normalized coordinates: 0-1 range where:
     //   X: 0 = left edge, 1 = right edge
-    //   Y: 0 = top edge, 1 = bottom edge (ALREADY converted from PDF coords by PopplerPdfProvider)
+    //   Y: 0 = top edge, 1 = bottom edge (ALREADY converted from PDF coords by MuPdfProvider)
     //   Values < 0 mean "not specified"
     
     if (!m_document || m_document->pageCount() == 0) return;
@@ -3514,14 +3547,15 @@ void DocumentViewport::doAsyncPdfPreload()
         // NOTE: QImage is explicitly documented as thread-safe for read operations
         // and can be safely passed between threads.
         QFuture<QImage> future = QtConcurrent::run([pdfPageNum, dpi, pdfPath]() -> QImage {
-            // Create thread-local PDF provider (each thread loads its own copy)
-            // Uses factory method to get platform-appropriate backend (Poppler/MuPDF)
-            auto threadPdf = PdfProvider::create(pdfPath);
+            // Use thread-local cached PDF provider to avoid re-opening the PDF
+            // for every page render. Each thread pool worker caches its own provider.
+            ThreadPdfCache& cache = s_threadPdfCache.localData();
+            PdfProvider* threadPdf = cache.getOrCreate(pdfPath);
             if (!threadPdf || !threadPdf->isValid()) {
                 return QImage();  // Return null image on failure
             }
             
-            // Render page using thread-local provider
+            // Render page using cached provider
             // This is the expensive operation (50-200ms) that we're offloading
             return threadPdf->renderPageToImage(pdfPageNum, dpi);
         });

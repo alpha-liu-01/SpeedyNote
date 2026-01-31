@@ -58,8 +58,9 @@ MuPdfProvider::MuPdfProvider(const QString& pdfPath)
         qWarning() << "MuPdfProvider: Failed to get page count";
         m_pageCount = 0;
     }
-    
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "MuPdfProvider: Loaded" << pdfPath << "with" << m_pageCount << "pages";
+    #endif
 }
 
 MuPdfProvider::~MuPdfProvider()

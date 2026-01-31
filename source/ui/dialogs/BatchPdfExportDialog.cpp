@@ -53,7 +53,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #else
     setMinimumSize(520, 500);
-    setMaximumSize(700, 650);
+    setMaximumSize(600, 750);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #endif
     
@@ -159,7 +159,7 @@ void BatchPdfExportDialog::setupUi()
     QLabel* shareNote = new QLabel(
         tr("Exported PDFs will be shared using Android's share sheet."));
     shareNote->setWordWrap(true);
-    shareNote->setStyleSheet("color: palette(mid); font-size: 13px; padding: 8px;");
+    shareNote->setStyleSheet("color: palette(placeholderText); font-size: 13px; padding: 8px;");
     mainLayout->addWidget(shareNote);
 #endif
     
@@ -167,6 +167,7 @@ void BatchPdfExportDialog::setupUi()
     QGroupBox* pagesGroup = new QGroupBox(tr("Pages"));
     QVBoxLayout* pagesLayout = new QVBoxLayout(pagesGroup);
     pagesLayout->setSpacing(8);
+    pagesLayout->setContentsMargins(12, 16, 12, 12);  // Extra top margin for group title
     
     m_allPagesRadio = new QRadioButton(tr("All pages"));
     m_allPagesRadio->setChecked(true);
@@ -190,8 +191,10 @@ void BatchPdfExportDialog::setupUi()
     
     // Note about page range applying to all
     QLabel* rangeNote = new QLabel(tr("Page range applies to all notebooks"));
-    rangeNote->setStyleSheet("color: palette(mid); font-size: 12px;");
+    rangeNote->setStyleSheet("color: palette(placeholderText); font-size: 12px;");
+    rangeNote->setWordWrap(true);
     pagesLayout->addWidget(rangeNote);
+    pagesLayout->addStretch(0);  // Ensure content doesn't get compressed
     
     connect(m_allPagesRadio, &QRadioButton::toggled, this, [this](bool checked) {
         onPageRangeToggled(!checked);
@@ -310,9 +313,9 @@ void BatchPdfExportDialog::setupUi()
             border-color: #2471a3;
         }
         QPushButton:disabled {
-            background: palette(mid);
+            background: palette(midlight);
             border-color: palette(mid);
-            color: palette(dark);
+            color: palette(placeholderText);
         }
     )");
     connect(m_exportButton, &QPushButton::clicked, this, [this]() {
