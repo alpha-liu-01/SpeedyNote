@@ -230,6 +230,10 @@ void setupParser(QCommandLineParser& parser, Command cmd)
                 QCoreApplication::translate("CLI", "Overwrite existing notebooks")));
             
             parser.addOption(QCommandLineOption(
+                QStringLiteral("add-to-library"),
+                QCoreApplication::translate("CLI", "Add imported notebooks to the launcher timeline")));
+            
+            parser.addOption(QCommandLineOption(
                 QStringLiteral("recursive"),
                 QCoreApplication::translate("CLI", "Search input directories recursively")));
             

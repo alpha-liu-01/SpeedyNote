@@ -124,6 +124,7 @@ struct ImportOptions {
     QString destDir;                ///< Destination directory for .snb bundles
     bool overwrite = false;         ///< Overwrite existing bundles with same name
     bool dryRun = false;            ///< Preview only, don't extract files
+    bool addToLibrary = false;      ///< Register imported notebooks in NotebookLibrary
 };
 
 // =============================================================================

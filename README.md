@@ -275,6 +275,7 @@ speedynote import [OPTIONS] <input>... -d <dest>
 | Option | Description |
 |--------|-------------|
 | `-d, --dest` | Destination directory for notebooks |
+| `--add-to-library` | Add imported notebooks to the launcher timeline |
 | `--overwrite` | Overwrite existing notebooks |
 | `--recursive` | Search directories recursively |
 | `--dry-run` | Preview without importing |
@@ -284,9 +285,14 @@ speedynote import [OPTIONS] <input>... -d <dest>
 # Import packages
 speedynote import ~/Downloads/*.snbx -d ~/Notes/
 
+# Import and add to library (shows in launcher)
+speedynote import ~/Downloads/*.snbx -d ~/Notes/ --add-to-library
+
 # Import from a directory
-speedynote import ~/Backup/ -d ~/Notes/ --recursive
+speedynote import ~/Backup/ -d ~/Notes/ --recursive --add-to-library
 ```
+
+> **Note:** On Android, imported notebooks are automatically added to the library. On desktop, use `--add-to-library` to make them appear in the launcher timeline.
 
 ### Common Options
 

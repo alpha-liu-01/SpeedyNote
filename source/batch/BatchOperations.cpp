@@ -2,6 +2,7 @@
 #include "BundleDiscovery.h"
 
 #include "../core/Document.h"
+#include "../core/NotebookLibrary.h"
 #include "../sharing/NotebookExporter.h"
 #include "../sharing/NotebookImporter.h"
 #include "../pdf/MuPdfExporter.h"
@@ -636,6 +637,11 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         while (it.hasNext()) {
             it.next();
             bundleSize += it.fileInfo().size();
+        }
+        
+        // Register in NotebookLibrary if requested
+        if (options.addToLibrary) {
+            NotebookLibrary::instance()->addToRecent(finalPath);
         }
         
         fr.status = FileStatus::Success;

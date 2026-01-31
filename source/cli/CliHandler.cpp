@@ -2,6 +2,7 @@
 #include "CliProgress.h"
 #include "CliSignal.h"
 #include "../batch/BundleDiscovery.h"
+#include "../core/NotebookLibrary.h"
 
 #include <QCoreApplication>
 #include <QFileInfo>
@@ -305,6 +306,7 @@ int handleImport(const QCommandLineParser& parser)
     options.destDir = destDir;
     options.overwrite = parser.isSet(QStringLiteral("overwrite"));
     options.dryRun = parser.isSet(QStringLiteral("dry-run"));
+    options.addToLibrary = parser.isSet(QStringLiteral("add-to-library"));
     
     // Fail-fast support
     bool failFast = parser.isSet(QStringLiteral("fail-fast"));
@@ -333,6 +335,12 @@ int handleImport(const QCommandLineParser& parser)
     
     // Report summary
     progress.reportSummary(result, options.dryRun);
+    
+    // If we added notebooks to library, save it immediately
+    // (CLI exits before the debounced save timer would fire)
+    if (options.addToLibrary && result.successCount > 0 && !options.dryRun) {
+        NotebookLibrary::instance()->save();
+    }
     
     // Check if cancelled by Ctrl+C
     if (wasCancelled()) {
