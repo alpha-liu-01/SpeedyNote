@@ -73,8 +73,13 @@ void PageWheelPicker::setPageCount(int count)
         m_pageCount = count;
         
         // Clamp current page if necessary
+        // Block signals to prevent triggering navigation when just updating for a different document
         if (m_currentPage >= m_pageCount) {
-            setCurrentPage(m_pageCount - 1);
+            const int clampedPage = m_pageCount - 1;
+            m_currentPage = clampedPage;
+            m_lastEmittedPage = clampedPage;
+            m_scrollOffset = static_cast<qreal>(clampedPage);
+            // Don't emit currentPageChanged - this is just internal state sync
         }
         
         update();
