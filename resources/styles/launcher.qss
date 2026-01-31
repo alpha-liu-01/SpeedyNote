@@ -141,6 +141,28 @@ Launcher {
     background: transparent;
 }
 
+/* Starred list view (Model/View virtualized) */
+#StarredListView {
+    background: transparent;
+    border: none;
+}
+
+#StarredListView::item {
+    background: transparent;
+    border: none;
+}
+
+/* Search list view (Model/View virtualized) */
+#SearchListView {
+    background: transparent;
+    border: none;
+}
+
+#SearchListView::item {
+    background: transparent;
+    border: none;
+}
+
 /* Folder headers use FolderHeader custom painting */
 
 /* ==========================================================================

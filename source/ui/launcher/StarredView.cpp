@@ -1,19 +1,85 @@
 #include "StarredView.h"
-#include "NotebookCard.h"
+#include "StarredListView.h"
+#include "StarredModel.h"
+#include "NotebookCardDelegate.h"
+#include "FolderHeaderDelegate.h"
+#include "FolderPickerDialog.h"
+#include "../ThemeColors.h"
 #include "../../core/NotebookLibrary.h"
 
-#include <QScrollArea>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGridLayout>
-#include <QPainter>
-#include <QPainterPath>
-#include <QMouseEvent>
-#include <QScroller>
-#include <QScrollBar>
-#include <QTimer>
-#include <QLabel>
-#include <QApplication>
+#include <QShowEvent>
+#include <QMenu>
+
+// ============================================================================
+// CompositeStarredDelegate - Local delegate that dispatches to folder/card delegates
+// ============================================================================
+
+/**
+ * @brief Composite delegate that handles both folder headers and notebook cards.
+ * 
+ * QListView only supports a single item delegate. This composite delegate
+ * checks the ItemTypeRole and dispatches painting/sizeHint to the appropriate
+ * specialized delegate (FolderHeaderDelegate or NotebookCardDelegate).
+ * 
+ * For folder headers, returns a wide sizeHint so they span the full viewport
+ * width, forcing them onto their own row in IconMode.
+ */
+class CompositeStarredDelegate : public QStyledItemDelegate {
+public:
+    CompositeStarredDelegate(NotebookCardDelegate* cardDelegate,
+                             FolderHeaderDelegate* folderDelegate,
+                             QListView* listView,
+                             QObject* parent = nullptr)
+        : QStyledItemDelegate(parent)
+        , m_cardDelegate(cardDelegate)
+        , m_folderDelegate(folderDelegate)
+        , m_listView(listView)
+    {
+    }
+    
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override
+    {
+        int itemType = index.data(StarredModel::ItemTypeRole).toInt();
+        
+        if (itemType == StarredModel::FolderHeaderItem) {
+            m_folderDelegate->paint(painter, option, index);
+        } else {
+            m_cardDelegate->paint(painter, option, index);
+        }
+    }
+    
+    QSize sizeHint(const QStyleOptionViewItem& option,
+                   const QModelIndex& index) const override
+    {
+        int itemType = index.data(StarredModel::ItemTypeRole).toInt();
+        
+        if (itemType == StarredModel::FolderHeaderItem) {
+            // Folder headers should span the full viewport width
+            // This forces them onto their own row in IconMode
+            QSize baseSize = m_folderDelegate->sizeHint(option, index);
+            int viewportWidth = m_listView ? m_listView->viewport()->width() : 600;
+            // Subtract spacing to account for IconMode margins
+            int headerWidth = qMax(viewportWidth - 24, baseSize.width());
+            return QSize(headerWidth, baseSize.height());
+        } else {
+            return m_cardDelegate->sizeHint(option, index);
+        }
+    }
+    
+    void setDarkMode(bool dark)
+    {
+        m_cardDelegate->setDarkMode(dark);
+        m_folderDelegate->setDarkMode(dark);
+    }
+
+private:
+    NotebookCardDelegate* m_cardDelegate;
+    FolderHeaderDelegate* m_folderDelegate;
+    QListView* m_listView;
+};
 
 // ============================================================================
 // StarredView
@@ -24,10 +90,6 @@ StarredView::StarredView(QWidget* parent)
 {
     setupUi();
     
-    // Connect to library changes
-    connect(NotebookLibrary::instance(), &NotebookLibrary::libraryChanged,
-            this, &StarredView::reload);
-    
     // Initial load
     reload();
 }
@@ -35,352 +97,413 @@ StarredView::StarredView(QWidget* parent)
 void StarredView::setupUi()
 {
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setContentsMargins(CONTENT_MARGIN, CONTENT_MARGIN, 
+                                   CONTENT_MARGIN, CONTENT_MARGIN);
     mainLayout->setSpacing(0);
     
-    // Scroll area
-    m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setObjectName("StarredScrollArea");
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // === Select Mode Header (L-007) ===
+    setupSelectModeHeader();
+    mainLayout->addWidget(m_selectModeHeader);
+    m_selectModeHeader->setVisible(false);  // Hidden by default
     
-    // Scroll content
-    m_scrollContent = new QWidget();
-    m_scrollContent->setObjectName("StarredScrollContent");
+    // === Model ===
+    m_model = new StarredModel(this);
     
-    m_contentLayout = new QVBoxLayout(m_scrollContent);
-    m_contentLayout->setContentsMargins(CONTENT_MARGIN, CONTENT_MARGIN, 
-                                        CONTENT_MARGIN, CONTENT_MARGIN);
-    m_contentLayout->setSpacing(SECTION_SPACING);
-    m_contentLayout->setAlignment(Qt::AlignTop);
+    // === List View (create first so delegate can reference it) ===
+    m_listView = new StarredListView(this);
+    m_listView->setObjectName("StarredListView");
     
-    m_scrollArea->setWidget(m_scrollContent);
-    mainLayout->addWidget(m_scrollArea);
+    // === Delegates ===
+    m_cardDelegate = new NotebookCardDelegate(this);
+    m_folderDelegate = new FolderHeaderDelegate(this);
     
-    setupTouchScrolling();
-}
-
-void StarredView::setupTouchScrolling()
-{
-    QScroller::grabGesture(m_scrollArea->viewport(), QScroller::TouchGesture);
-    QScroller* scroller = QScroller::scroller(m_scrollArea->viewport());
-    QScrollerProperties props = scroller->scrollerProperties();
-    props.setScrollMetric(QScrollerProperties::OvershootDragResistanceFactor, 0.5);
-    props.setScrollMetric(QScrollerProperties::OvershootScrollDistanceFactor, 0.2);
-    props.setScrollMetric(QScrollerProperties::DragStartDistance, 0.002);
-    scroller->setScrollerProperties(props);
+    // Create composite delegate that handles both item types
+    // Pass listView so folder headers can span viewport width
+    auto* compositeDelegate = new CompositeStarredDelegate(
+        m_cardDelegate, m_folderDelegate, m_listView, this);
+    
+    m_listView->setStarredModel(m_model);
+    m_listView->setItemDelegate(compositeDelegate);
+    
+    // Connect thumbnail updates
+    connect(NotebookLibrary::instance(), &NotebookLibrary::thumbnailUpdated,
+            m_cardDelegate, &NotebookCardDelegate::invalidateThumbnail);
+    
+    // Connect list view signals
+    connect(m_listView, &StarredListView::notebookClicked,
+            this, &StarredView::onNotebookClicked);
+    connect(m_listView, &StarredListView::notebookMenuRequested,
+            this, &StarredView::onNotebookMenuRequested);
+    connect(m_listView, &StarredListView::notebookLongPressed,
+            this, &StarredView::onNotebookLongPressed);
+    connect(m_listView, &StarredListView::folderClicked,
+            this, &StarredView::onFolderClicked);
+    connect(m_listView, &StarredListView::folderLongPressed,
+            this, &StarredView::onFolderLongPressed);
+    
+    // Connect select mode signals (L-007)
+    connect(m_listView, &StarredListView::selectModeChanged,
+            this, &StarredView::onSelectModeChanged);
+    connect(m_listView, &StarredListView::batchSelectionChanged,
+            this, &StarredView::onBatchSelectionChanged);
+    
+    mainLayout->addWidget(m_listView, 1);
+    
+    // === Empty State Label ===
+    m_emptyLabel = new QLabel(this);
+    m_emptyLabel->setObjectName("EmptyLabel");
+    m_emptyLabel->setAlignment(Qt::AlignCenter);
+    m_emptyLabel->setWordWrap(true);
+    m_emptyLabel->setText(tr("No starred notebooks yet.\n\nLong-press a notebook in Timeline\nand select \"Star\" to add it here."));
+    
+    QFont font = m_emptyLabel->font();
+    font.setPointSize(12);
+    m_emptyLabel->setFont(font);
+    
+    mainLayout->addWidget(m_emptyLabel, 1);
+    
+    // Initial state
+    updateEmptyState();
 }
 
 void StarredView::reload()
 {
-    clearContent();
-    buildContent();
+    // ANDROID FIX: Only reload if visible to avoid visual artifacts
+    // When NotebookLibrary::libraryChanged is emitted (e.g., when opening a notebook
+    // updates lastAccessed time), rebuilding the entire view causes visual artifacts.
+    // 
+    // If not visible, defer the reload until the view becomes visible via showEvent.
+    if (!isVisible()) {
+        m_needsReload = true;
+        return;
+    }
+    
+    m_needsReload = false;
+    
+    // Model handles smart reload (checks content signature internally)
+    m_model->reload();
+    
+    updateEmptyState();
 }
 
-void StarredView::clearContent()
+void StarredView::showEvent(QShowEvent* event)
 {
-    // Remove all widgets from layout
-    while (m_contentLayout->count() > 0) {
-        QLayoutItem* item = m_contentLayout->takeAt(0);
-        if (item->widget()) {
-            item->widget()->deleteLater();
-        }
-        delete item;
+    QWidget::showEvent(event);
+    
+    // Perform deferred reload if needed
+    if (m_needsReload) {
+        m_needsReload = false;
+        m_model->reload();
+        updateEmptyState();
     }
-    m_folderGrids.clear();
-}
-
-void StarredView::buildContent()
-{
-    NotebookLibrary* lib = NotebookLibrary::instance();
-    QList<NotebookInfo> starred = lib->starredNotebooks();
-    QStringList folders = lib->starredFolders();
-    
-    // Group notebooks by folder
-    QMap<QString, QList<NotebookInfo>> folderContents;
-    QList<NotebookInfo> unfiled;
-    
-    for (const NotebookInfo& info : starred) {
-        if (info.starredFolder.isEmpty()) {
-            unfiled.append(info);
-        } else {
-            folderContents[info.starredFolder].append(info);
-        }
-    }
-    
-    // Add folder sections in order
-    for (const QString& folderName : folders) {
-        if (folderContents.contains(folderName)) {
-            QWidget* section = createFolderSection(folderName, folderContents[folderName]);
-            m_contentLayout->addWidget(section);
-        }
-    }
-    
-    // Add "Unfiled" section if there are unfiled notebooks
-    if (!unfiled.isEmpty()) {
-        QWidget* section = createFolderSection(tr("Unfiled"), unfiled);
-        m_contentLayout->addWidget(section);
-    }
-    
-    // Add stretch at bottom
-    m_contentLayout->addStretch();
-    
-    // Show empty state if no starred notebooks
-    if (starred.isEmpty()) {
-        QLabel* emptyLabel = new QLabel(tr("No starred notebooks yet.\n\nLong-press a notebook in Timeline\nand select \"Star\" to add it here."));
-        emptyLabel->setObjectName("EmptyLabel");
-        emptyLabel->setAlignment(Qt::AlignCenter);
-        emptyLabel->setWordWrap(true);
-        
-        QFont font = emptyLabel->font();
-        font.setPointSize(12);
-        emptyLabel->setFont(font);
-        
-        QPalette pal = emptyLabel->palette();
-        pal.setColor(QPalette::WindowText, m_darkMode ? QColor(150, 150, 150) : QColor(120, 120, 120));
-        emptyLabel->setPalette(pal);
-        
-        m_contentLayout->insertWidget(0, emptyLabel, 1);
-    }
-}
-
-QWidget* StarredView::createFolderSection(const QString& folderName, 
-                                          const QList<NotebookInfo>& notebooks)
-{
-    QWidget* section = new QWidget();
-    section->setObjectName("FolderSection");
-    
-    auto* sectionLayout = new QVBoxLayout(section);
-    sectionLayout->setContentsMargins(0, 0, 0, 0);
-    sectionLayout->setSpacing(8);
-    
-    // Folder header
-    FolderHeader* header = new FolderHeader(folderName, section);
-    header->setDarkMode(m_darkMode);
-    
-    // Restore collapsed state
-    bool collapsed = m_collapsedFolders.value(folderName, false);
-    header->setCollapsed(collapsed);
-    
-    sectionLayout->addWidget(header);
-    
-    // Grid of notebooks
-    QWidget* grid = createNotebookGrid(notebooks);
-    grid->setVisible(!collapsed);
-    m_folderGrids[folderName] = grid;
-    sectionLayout->addWidget(grid);
-    
-    // Connect header
-    connect(header, &FolderHeader::clicked, this, [this, folderName, header, grid]() {
-        bool newCollapsed = !header->isCollapsed();
-        header->setCollapsed(newCollapsed);
-        grid->setVisible(!newCollapsed);
-        m_collapsedFolders[folderName] = newCollapsed;
-    });
-    
-    connect(header, &FolderHeader::longPressed, this, [this, folderName]() {
-        // Don't emit for "Unfiled" pseudo-folder
-        if (folderName != tr("Unfiled")) {
-            emit folderLongPressed(folderName);
-        }
-    });
-    
-    return section;
-}
-
-QWidget* StarredView::createNotebookGrid(const QList<NotebookInfo>& notebooks)
-{
-    QWidget* gridWidget = new QWidget();
-    gridWidget->setObjectName("NotebookGrid");
-    
-    // Use flow layout for responsive grid
-    // For simplicity, using QGridLayout with fixed columns
-    // Could be replaced with FlowLayout for true responsiveness
-    auto* gridLayout = new QGridLayout(gridWidget);
-    gridLayout->setContentsMargins(0, 0, 0, 0);
-    gridLayout->setSpacing(GRID_SPACING);
-    gridLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    
-    // Calculate columns based on available width (estimate)
-    const int cardWidth = 120 + GRID_SPACING;
-    const int estimatedWidth = 600;  // Will be adjusted on resize
-    const int columns = qMax(3, estimatedWidth / cardWidth);
-    
-    int row = 0, col = 0;
-    for (const NotebookInfo& info : notebooks) {
-        NotebookCard* card = new NotebookCard(info, gridWidget);
-        card->setDarkMode(m_darkMode);
-        
-        connect(card, &NotebookCard::clicked, this, [this, info]() {
-            emit notebookClicked(info.bundlePath);
-        });
-        
-        connect(card, &NotebookCard::longPressed, this, [this, info]() {
-            emit notebookLongPressed(info.bundlePath);
-        });
-        
-        gridLayout->addWidget(card, row, col);
-        
-        col++;
-        if (col >= columns) {
-            col = 0;
-            row++;
-        }
-    }
-    
-    return gridWidget;
 }
 
 void StarredView::setDarkMode(bool dark)
 {
     if (m_darkMode != dark) {
         m_darkMode = dark;
-        // Reload to apply dark mode to all children
-        reload();
+        
+        // Update delegates
+        m_cardDelegate->setDarkMode(dark);
+        m_folderDelegate->setDarkMode(dark);
+        
+        // Update empty label color
+        QPalette pal = m_emptyLabel->palette();
+        pal.setColor(QPalette::WindowText, dark ? QColor(150, 150, 150) : QColor(120, 120, 120));
+        m_emptyLabel->setPalette(pal);
+        
+        // Update select mode header colors if visible
+        if (m_selectModeHeader->isVisible()) {
+            showSelectModeHeader(m_listView->selectionCount());
+        }
+        
+        // Trigger repaint of visible items
+        m_listView->viewport()->update();
     }
 }
 
-// ============================================================================
-// FolderHeader
-// ============================================================================
-
-FolderHeader::FolderHeader(const QString& folderName, QWidget* parent)
-    : QWidget(parent)
-    , m_folderName(folderName)
+bool StarredView::isSelectModeActive() const
 {
-    setFixedHeight(HEADER_HEIGHT);
-    setCursor(Qt::PointingHandCursor);
-    setAttribute(Qt::WA_Hover, true);
-    setMouseTracking(true);
+    return m_listView->isSelectMode();
+}
+
+void StarredView::exitSelectMode()
+{
+    m_listView->exitSelectMode();
+}
+
+void StarredView::scrollToFolder(const QString& folderName)
+{
+    if (folderName.isEmpty()) {
+        return;
+    }
     
-    // Long-press timer
-    m_longPressTimer = new QTimer(this);
-    m_longPressTimer->setSingleShot(true);
-    m_longPressTimer->setInterval(LONG_PRESS_MS);
-    connect(m_longPressTimer, &QTimer::timeout, this, [this]() {
-        m_longPressTriggered = true;
-        m_pressed = false;
-        update();
-        emit longPressed();
+    // Ensure folder is expanded so user can see its contents
+    if (m_model->isFolderCollapsed(folderName)) {
+        m_model->setFolderCollapsed(folderName, false);
+    }
+    
+    // Find the row for this folder
+    int row = m_model->rowForFolder(folderName);
+    if (row >= 0) {
+        QModelIndex folderIndex = m_model->index(row);
+        // Scroll to make the folder visible at the top
+        m_listView->scrollTo(folderIndex, QAbstractItemView::PositionAtTop);
+    }
+}
+
+void StarredView::updateEmptyState()
+{
+    bool isEmpty = m_model->isEmpty();
+    m_listView->setVisible(!isEmpty);
+    m_emptyLabel->setVisible(isEmpty);
+}
+
+// -----------------------------------------------------------------------------
+// Batch Select Mode (L-007)
+// -----------------------------------------------------------------------------
+
+void StarredView::setupSelectModeHeader()
+{
+    m_selectModeHeader = new QWidget(this);
+    m_selectModeHeader->setFixedHeight(HEADER_HEIGHT);
+    m_selectModeHeader->setObjectName("SelectModeHeader");
+    
+    auto* headerLayout = new QHBoxLayout(m_selectModeHeader);
+    headerLayout->setContentsMargins(0, 0, 8, 8);
+    headerLayout->setSpacing(8);
+    
+    // Back button (←)
+    // Parent is m_selectModeHeader so it's properly contained in the header
+    m_backButton = new QPushButton(m_selectModeHeader);
+    m_backButton->setObjectName("BackButton");
+    m_backButton->setText("←");
+    m_backButton->setFixedSize(40, 40);
+    m_backButton->setFlat(true);
+    m_backButton->setCursor(Qt::PointingHandCursor);
+    
+    QFont backFont = m_backButton->font();
+    backFont.setPointSize(18);
+    m_backButton->setFont(backFont);
+    
+    connect(m_backButton, &QPushButton::clicked, this, [this]() {
+        m_listView->exitSelectMode();
     });
+    
+    headerLayout->addWidget(m_backButton);
+    
+    // Selection count label
+    m_selectionCountLabel = new QLabel(m_selectModeHeader);
+    m_selectionCountLabel->setObjectName("SelectionCountLabel");
+    
+    QFont countFont = m_selectionCountLabel->font();
+    countFont.setPointSize(14);
+    countFont.setBold(true);
+    m_selectionCountLabel->setFont(countFont);
+    
+    headerLayout->addWidget(m_selectionCountLabel, 1);  // Stretch
+    
+    // Overflow menu button (⋮)
+    m_overflowMenuButton = new QPushButton(m_selectModeHeader);
+    m_overflowMenuButton->setObjectName("OverflowMenuButton");
+    m_overflowMenuButton->setText("⋮");
+    m_overflowMenuButton->setFixedSize(40, 40);
+    m_overflowMenuButton->setFlat(true);
+    m_overflowMenuButton->setCursor(Qt::PointingHandCursor);
+    
+    QFont menuFont = m_overflowMenuButton->font();
+    menuFont.setPointSize(20);
+    menuFont.setBold(true);
+    m_overflowMenuButton->setFont(menuFont);
+    
+    connect(m_overflowMenuButton, &QPushButton::clicked, this, &StarredView::showOverflowMenu);
+    
+    headerLayout->addWidget(m_overflowMenuButton);
 }
 
-void FolderHeader::setCollapsed(bool collapsed)
+void StarredView::showSelectModeHeader(int count)
 {
-    if (m_collapsed != collapsed) {
-        m_collapsed = collapsed;
-        update();
+    // Update count label
+    if (count == 1) {
+        m_selectionCountLabel->setText(tr("1 selected"));
+    } else {
+        m_selectionCountLabel->setText(tr("%1 selected").arg(count));
     }
+    
+    // Update colors based on dark mode
+    QColor textColor = ThemeColors::textPrimary(m_darkMode);
+    
+    QString buttonStyle = QString(
+        "QPushButton { color: %1; border: none; background: transparent; }"
+        "QPushButton:hover { background: %2; border-radius: 20px; }"
+        "QPushButton:pressed { background: %3; border-radius: 20px; }"
+    ).arg(textColor.name(),
+          ThemeColors::itemHover(m_darkMode).name(),
+          ThemeColors::pressed(m_darkMode).name());
+    
+    m_backButton->setStyleSheet(buttonStyle);
+    m_overflowMenuButton->setStyleSheet(buttonStyle);
+    
+    QPalette labelPal = m_selectionCountLabel->palette();
+    labelPal.setColor(QPalette::WindowText, textColor);
+    m_selectionCountLabel->setPalette(labelPal);
+    
+    // Show header
+    m_selectModeHeader->setVisible(true);
 }
 
-void FolderHeader::setDarkMode(bool dark)
+void StarredView::hideSelectModeHeader()
 {
-    if (m_darkMode != dark) {
-        m_darkMode = dark;
-        update();
-    }
+    m_selectModeHeader->setVisible(false);
 }
 
-void FolderHeader::paintEvent(QPaintEvent* event)
+void StarredView::showOverflowMenu()
 {
-    Q_UNUSED(event)
+    QMenu menu(this);
+    ThemeColors::styleMenu(&menu, m_darkMode);
     
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
+    int selectedCount = m_listView->selectionCount();
     
-    QRect rect = this->rect();
+    // Select All / Deselect All
+    QAction* selectAllAction = menu.addAction(tr("Select All"));
+    connect(selectAllAction, &QAction::triggered, this, [this]() {
+        m_listView->selectAll();
+    });
     
-    // Background on hover/press
-    if (m_pressed) {
-        QColor bgColor = m_darkMode ? QColor(60, 60, 65) : QColor(235, 235, 240);
-        painter.fillRect(rect, bgColor);
-    } else if (m_hovered) {
-        QColor bgColor = m_darkMode ? QColor(55, 55, 60) : QColor(245, 245, 248);
-        painter.fillRect(rect, bgColor);
-    }
+    QAction* deselectAllAction = menu.addAction(tr("Deselect All"));
+    deselectAllAction->setEnabled(selectedCount > 0);
+    connect(deselectAllAction, &QAction::triggered, this, [this]() {
+        m_listView->deselectAll();
+    });
     
-    // Chevron (▶ or ▼)
-    QColor chevronColor = m_darkMode ? QColor(150, 150, 150) : QColor(100, 100, 100);
-    painter.setPen(chevronColor);
+    menu.addSeparator();
     
-    QFont chevronFont = painter.font();
-    chevronFont.setPointSize(10);
-    painter.setFont(chevronFont);
+    // Export submenu (Phase 3: Batch Operations)
+    // Emits signals to Launcher which handles the dialogs
+    QMenu* exportMenu = menu.addMenu(tr("Export"));
+    ThemeColors::styleMenu(exportMenu, m_darkMode);
+    exportMenu->setEnabled(selectedCount > 0);
     
-    QString chevron = m_collapsed ? "▶" : "▼";
-    QRect chevronRect(8, 0, 20, rect.height());
-    painter.drawText(chevronRect, Qt::AlignVCenter | Qt::AlignLeft, chevron);
-    
-    // Folder name
-    QColor textColor = m_darkMode ? QColor(220, 220, 220) : QColor(50, 50, 50);
-    painter.setPen(textColor);
-    
-    QFont nameFont = painter.font();
-    nameFont.setPointSize(14);
-    nameFont.setBold(true);
-    painter.setFont(nameFont);
-    
-    QRect nameRect(32, 0, rect.width() - 40, rect.height());
-    painter.drawText(nameRect, Qt::AlignVCenter | Qt::AlignLeft, m_folderName);
-    
-    // Bottom separator line
-    QColor lineColor = m_darkMode ? QColor(70, 70, 75) : QColor(220, 220, 225);
-    painter.setPen(QPen(lineColor, 1));
-    painter.drawLine(0, rect.bottom(), rect.width(), rect.bottom());
-}
-
-void FolderHeader::mousePressEvent(QMouseEvent* event)
-{
-    if (event->button() == Qt::LeftButton) {
-        m_pressed = true;
-        m_pressPos = event->pos();
-        m_longPressTriggered = false;
-        m_longPressTimer->start();
-        update();
-    }
-    QWidget::mousePressEvent(event);
-}
-
-void FolderHeader::mouseReleaseEvent(QMouseEvent* event)
-{
-    if (event->button() == Qt::LeftButton) {
-        m_longPressTimer->stop();
-        
-        if (m_pressed && !m_longPressTriggered && rect().contains(event->pos())) {
-            emit clicked();
+    QAction* exportPdfAction = exportMenu->addAction(tr("To PDF..."));
+    connect(exportPdfAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            emit exportToPdfRequested(selected);
+            m_listView->exitSelectMode();
         }
-        
-        m_pressed = false;
-        update();
-    }
-    QWidget::mouseReleaseEvent(event);
-}
-
-void FolderHeader::mouseMoveEvent(QMouseEvent* event)
-{
-    if (m_longPressTimer->isActive()) {
-        QPoint delta = event->pos() - m_pressPos;
-        if (delta.manhattanLength() > LONG_PRESS_MOVE_THRESHOLD) {
-            m_longPressTimer->stop();
+    });
+    
+    QAction* exportSnbxAction = exportMenu->addAction(tr("To SNBX..."));
+    connect(exportSnbxAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            emit exportToSnbxRequested(selected);
+            m_listView->exitSelectMode();
         }
+    });
+    
+    menu.addSeparator();
+    
+    // Move to Folder... (L-008: opens FolderPickerDialog)
+    QAction* moveToFolderAction = menu.addAction(tr("Move to Folder..."));
+    moveToFolderAction->setEnabled(selectedCount > 0);
+    connect(moveToFolderAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (selected.isEmpty()) return;
+        
+        QString title = selected.size() == 1 
+            ? tr("Move to Folder") 
+            : tr("Move %1 notebooks to...").arg(selected.size());
+        
+        QString folder = FolderPickerDialog::getFolder(this, title);
+        if (!folder.isEmpty()) {
+            NotebookLibrary::instance()->moveNotebooksToFolder(selected, folder);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    // Remove from Folder
+    QAction* removeFromFolderAction = menu.addAction(tr("Remove from Folder"));
+    removeFromFolderAction->setEnabled(selectedCount > 0);
+    connect(removeFromFolderAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            NotebookLibrary::instance()->removeNotebooksFromFolder(selected);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    menu.addSeparator();
+    
+    // Unstar Selected
+    QAction* unstarAction = menu.addAction(tr("Unstar Selected"));
+    unstarAction->setEnabled(selectedCount > 0);
+    connect(unstarAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            NotebookLibrary::instance()->unstarNotebooks(selected);
+            m_listView->exitSelectMode();
+        }
+    });
+    
+    // Show menu below the overflow button
+    QPoint pos = m_overflowMenuButton->mapToGlobal(
+        QPoint(m_overflowMenuButton->width(), m_overflowMenuButton->height()));
+    menu.exec(pos);
+}
+
+void StarredView::onSelectModeChanged(bool active)
+{
+    if (active) {
+        showSelectModeHeader(m_listView->selectionCount());
+    } else {
+        hideSelectModeHeader();
     }
-    QWidget::mouseMoveEvent(event);
 }
 
-void FolderHeader::enterEvent(QEnterEvent* event)
+void StarredView::onBatchSelectionChanged(int count)
 {
-    m_hovered = true;
-    update();
-    QWidget::enterEvent(event);
+    if (m_listView->isSelectMode()) {
+        showSelectModeHeader(count);
+    }
 }
 
-void FolderHeader::leaveEvent(QEvent* event)
+void StarredView::onNotebookClicked(const QString& bundlePath)
 {
-    m_hovered = false;
-    m_pressed = false;
-    m_longPressTimer->stop();
-    update();
-    QWidget::leaveEvent(event);
+    emit notebookClicked(bundlePath);
 }
 
+void StarredView::onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos)
+{
+    Q_UNUSED(globalPos)
+    // Emit signal for context menu (3-dot button, right-click, or long-press)
+    emit notebookMenuRequested(bundlePath);
+}
+
+void StarredView::onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos)
+{
+    Q_UNUSED(globalPos)
+    
+    // Enter batch select mode with this notebook as the first selection
+    m_listView->enterSelectMode(bundlePath);
+    
+    // Also emit for any external handlers that might want to know
+    emit notebookLongPressed(bundlePath);
+}
+
+void StarredView::onFolderClicked(const QString& folderName)
+{
+    Q_UNUSED(folderName)
+    // Folder toggle is handled by StarredListView + StarredModel
+    // This slot is for any additional handling if needed
+}
+
+void StarredView::onFolderLongPressed(const QString& folderName, const QPoint& globalPos)
+{
+    Q_UNUSED(globalPos)
+    
+    // Don't emit for "Unfiled" pseudo-folder
+    if (folderName != tr("Unfiled")) {
+        emit folderLongPressed(folderName);
+    }
+}

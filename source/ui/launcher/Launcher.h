@@ -5,8 +5,11 @@
 #include <QStackedWidget>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QLabel>
 #include <QPropertyAnimation>
 #include <QFrame>
+
+#include "../../batch/BatchOperations.h"  // For BatchOps::BatchResult
 
 class LauncherNavButton;
 class TimelineModel;
@@ -15,6 +18,7 @@ class TimelineListView;
 class StarredView;
 class SearchView;
 class FloatingActionButton;
+class ExportProgressWidget;
 
 /**
  * @brief The main launcher window for SpeedyNote.
@@ -97,6 +101,13 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    
+#ifndef Q_OS_ANDROID
+    // Drag-drop support for desktop (Step 3.10)
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+#endif
 
 private:
     void setupUi();
@@ -121,6 +132,28 @@ private:
     QString findImportedPdfPath(const QString& bundlePath);
 #endif
     
+    // === Timeline Select Mode (L-007) ===
+    void setupTimelineSelectModeHeader();
+    void showTimelineSelectModeHeader(int count);
+    void hideTimelineSelectModeHeader();
+    void showTimelineOverflowMenu();
+    void onTimelineSelectModeChanged(bool active);
+    void onTimelineBatchSelectionChanged(int count);
+    void onTimelineLongPressed(const QModelIndex& index, const QPoint& globalPos);
+    
+    // === Batch Export Helpers (Phase 3) ===
+    void showPdfExportDialog(const QStringList& bundlePaths);
+    void showSnbxExportDialog(const QStringList& bundlePaths);
+    
+    // === Export Progress (Phase 3) ===
+    void setupExportProgress();
+    void onExportProgress(const QString& currentFile, int current, int total, int queuedJobs);
+    void onExportJobComplete(const BatchOps::BatchResult& result, const QString& outputDir);
+    void onExportDetailsRequested();
+    
+    // === Batch Import (Phase 3) ===
+    void performBatchImport(const QStringList& snbxFiles, const QString& destDir = QString());
+    
     // === View Management ===
     enum class View {
         Timeline,
@@ -144,7 +177,13 @@ private:
     QWidget* m_timelineView = nullptr;
     TimelineListView* m_timelineList = nullptr;
     TimelineModel* m_timelineModel = nullptr;
-    TimelineDelegate* m_timelineDelegate = nullptr;
+    TimelineDelegate* m_timelineDelegate = nullptr;  // For section headers only
+    
+    // Timeline select mode header (L-007)
+    QWidget* m_timelineSelectModeHeader = nullptr;
+    QLabel* m_timelineSelectionCountLabel = nullptr;
+    QPushButton* m_timelineBackButton = nullptr;
+    QPushButton* m_timelineOverflowMenuButton = nullptr;
     
     // Starred view
     StarredView* m_starredView = nullptr;
@@ -154,6 +193,11 @@ private:
     
     // FAB (Floating Action Button)
     FloatingActionButton* m_fab = nullptr;
+    
+    // Export progress widget (Phase 3)
+    ExportProgressWidget* m_exportProgressWidget = nullptr;
+    BatchOps::BatchResult m_lastExportResult;  // Stored for "Details" dialog
+    QString m_lastExportOutputDir;
     
     // Animation
     QPropertyAnimation* m_fadeAnimation = nullptr;

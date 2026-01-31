@@ -12,6 +12,13 @@
 
 #include "MainWindow.h"
 #include "ui/launcher/Launcher.h"
+#include "platform/SystemNotification.h"
+
+// CLI support (Desktop only)
+#ifndef Q_OS_ANDROID
+#include <QGuiApplication>
+#include "cli/CliParser.h"
+#endif
 
 // Platform-specific includes
 #ifdef Q_OS_WIN
@@ -447,6 +454,22 @@ int main(int argc, char* argv[])
     enableDebugConsole();
 #endif
 
+    // ========== CLI Mode Detection (Desktop Only) ==========
+    // Check for CLI commands before creating QApplication to avoid full GUI overhead.
+    // CLI mode uses QGuiApplication (not QCoreApplication) because:
+    // - PDF export needs to render ImageObjects which use QPixmap
+    // - QPixmap requires a GUI application context (platform plugin)
+    // - QGuiApplication is lightweight and doesn't create any windows
+#ifndef Q_OS_ANDROID
+    if (Cli::isCliMode(argc, argv)) {
+        QGuiApplication app(argc, argv);
+        app.setOrganizationName("SpeedyNote");
+        app.setApplicationName("App");
+        return Cli::run(app, argc, argv);
+    }
+#endif
+
+    // ========== GUI Mode ==========
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
@@ -470,6 +493,18 @@ int main(int argc, char* argv[])
 
     QTranslator translator;
     loadTranslations(app, translator);
+
+    // ========== Initialize System Notifications ==========
+    // Step 3.11: Initialize notification system for export/import completion
+    // On Android: Creates notification channel (required for Android 8.0+)
+    // On Linux: Initializes DBus connection for desktop notifications
+    SystemNotification::initialize();
+    
+    // Request notification permission on Android 13+
+    // This shows the permission dialog if not already granted
+    if (!SystemNotification::hasPermission()) {
+        SystemNotification::requestPermission();
+    }
 
     // ========== Parse Command Line Arguments ==========
     QString inputFile;

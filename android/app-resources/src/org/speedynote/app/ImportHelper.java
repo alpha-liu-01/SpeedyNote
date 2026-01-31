@@ -13,6 +13,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import android.content.ClipData;
 
 /**
  * Helper class for picking and importing .snbx package files on Android.
@@ -35,14 +37,15 @@ public class ImportHelper {
     
     // Native callbacks to C++
     private static native void onPackageFilePicked(String localPath);
+    private static native void onPackageFilesPicked(String[] localPaths);  // Multi-file
     private static native void onPackagePickCancelled();
     
     /**
-     * Opens the system file picker to select a .snbx package.
+     * Opens the system file picker to select one or more .snbx packages.
      * Called from C++ via JNI.
      * 
      * @param activity The current Activity
-     * @param destDir Directory to copy the .snbx file to (for extraction)
+     * @param destDir Directory to copy the .snbx file(s) to (for extraction)
      */
     public static void pickPackageFile(Activity activity, String destDir) {
         sActivity = activity;
@@ -55,16 +58,21 @@ public class ImportHelper {
         // Android doesn't have a registered MIME type for .snbx
         intent.setType("*/*");
         
+        // Enable multi-file selection (Phase 3: Batch Import)
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        
         // These flags grant read permission that persists until the Activity result is processed
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         
-        Log.d(TAG, "Opening file picker for .snbx packages, destDir=" + destDir);
+        Log.d(TAG, "Opening file picker for .snbx packages (multi-select), destDir=" + destDir);
         activity.startActivityForResult(intent, REQUEST_CODE_PICK_SNBX);
     }
     
     /**
      * Called from SpeedyNoteActivity's onActivityResult.
      * Must be called from the UI thread.
+     * 
+     * Handles both single-file and multi-file selection results.
      * 
      * @return true if this was our request and we handled it, false otherwise
      */
@@ -80,32 +88,71 @@ public class ImportHelper {
             return true;
         }
         
-        Uri uri = data.getData();
-        if (uri == null) {
-            Log.e(TAG, "No URI in result");
+        // Collect all URIs (multi-select or single-select)
+        ArrayList<Uri> uris = new ArrayList<>();
+        
+        // Check for multi-file selection first
+        ClipData clipData = data.getClipData();
+        if (clipData != null) {
+            // Multiple files selected
+            for (int i = 0; i < clipData.getItemCount(); i++) {
+                Uri uri = clipData.getItemAt(i).getUri();
+                if (uri != null) {
+                    uris.add(uri);
+                }
+            }
+            Log.d(TAG, "Multi-select: " + uris.size() + " files");
+        } else {
+            // Single file selected
+            Uri uri = data.getData();
+            if (uri != null) {
+                uris.add(uri);
+                Log.d(TAG, "Single-select: 1 file");
+            }
+        }
+        
+        if (uris.isEmpty()) {
+            Log.e(TAG, "No URIs in result");
             onPackagePickCancelled();
             clearStaticReferences();
             return true;
         }
         
-        Log.d(TAG, "Got URI: " + uri.toString());
+        // Copy all files to local storage
+        ArrayList<String> localPaths = new ArrayList<>();
         
-        // Validate that the file looks like a .snbx package
-        String filename = getFileName(sActivity, uri);
-        if (filename == null || !filename.toLowerCase().endsWith(".snbx")) {
-            Log.w(TAG, "Selected file is not a .snbx package: " + filename);
-            // Still try to import - user might have renamed it
+        for (Uri uri : uris) {
+            Log.d(TAG, "Processing URI: " + uri.toString());
+            
+            // Validate that the file looks like a .snbx package
+            String filename = getFileName(sActivity, uri);
+            if (filename == null || !filename.toLowerCase().endsWith(".snbx")) {
+                Log.w(TAG, "Selected file is not a .snbx package: " + filename + ", skipping");
+                continue;  // Skip non-.snbx files
+            }
+            
+            // Copy file to local storage while permission is still valid
+            String localPath = copyUriToLocal(sActivity, uri, sPendingDestDir);
+            
+            if (localPath != null) {
+                Log.d(TAG, "Successfully copied to: " + localPath);
+                localPaths.add(localPath);
+            } else {
+                Log.e(TAG, "Failed to copy package file: " + filename);
+            }
         }
         
-        // Copy file to local storage while permission is still valid
-        String localPath = copyUriToLocal(sActivity, uri, sPendingDestDir);
-        
-        if (localPath != null) {
-            Log.d(TAG, "Successfully copied to: " + localPath);
-            onPackageFilePicked(localPath);
-        } else {
-            Log.e(TAG, "Failed to copy package file");
+        // Call appropriate callback based on result count
+        if (localPaths.isEmpty()) {
+            Log.e(TAG, "No .snbx files were successfully copied");
             onPackagePickCancelled();
+        } else if (localPaths.size() == 1) {
+            // Single file - use original callback for compatibility
+            onPackageFilePicked(localPaths.get(0));
+        } else {
+            // Multiple files - use new batch callback
+            String[] pathArray = localPaths.toArray(new String[0]);
+            onPackageFilesPicked(pathArray);
         }
         
         clearStaticReferences();

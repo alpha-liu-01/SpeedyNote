@@ -2,12 +2,13 @@
 #define STARREDVIEW_H
 
 #include <QWidget>
-#include <QScrollArea>
-#include <QVBoxLayout>
-#include <QMap>
+#include <QLabel>
+#include <QPushButton>
 
-class NotebookCard;
-class FolderHeader;
+class StarredListView;
+class StarredModel;
+class NotebookCardDelegate;
+class FolderHeaderDelegate;
 
 /**
  * @brief iOS homescreen-style view for starred notebooks with folders.
@@ -17,17 +18,18 @@ class FolderHeader;
  * 
  * Features:
  * - Collapsible folder sections
- * - Grid layout of NotebookCards within each folder
+ * - Virtualized list of folder headers and notebook cards (Model/View)
  * - Long-press folder header for context menu (rename/delete)
- * - Touch-friendly scrolling
+ * - Touch-friendly scrolling with kinetic momentum
  * - Dark mode support
+ * - Smart reload (skips rebuild if only metadata changed)
  * 
  * Folder structure (per Q&A):
  * - Single-level folders (no nesting)
  * - Each notebook in one folder or "unfiled"
  * - Drag-and-drop reordering (future task)
  * 
- * Phase P.3.5: Part of the new Launcher implementation.
+ * Phase P.3: Refactored to use Model/View for virtualization and performance.
  */
 class StarredView : public QWidget {
     Q_OBJECT
@@ -37,6 +39,7 @@ public:
     
     /**
      * @brief Reload data from NotebookLibrary.
+     * Uses smart reload - skips rebuild if only metadata changed.
      */
     void reload();
     
@@ -44,6 +47,27 @@ public:
      * @brief Set dark mode for theming.
      */
     void setDarkMode(bool dark);
+    
+    /**
+     * @brief Check if batch select mode is active.
+     */
+    bool isSelectModeActive() const;
+    
+    /**
+     * @brief Exit batch select mode, clearing all selections.
+     */
+    void exitSelectMode();
+    
+    /**
+     * @brief Scroll to a folder and expand it if collapsed.
+     * @param folderName The folder to scroll to.
+     * 
+     * L-009: Called when navigating from search results.
+     */
+    void scrollToFolder(const QString& folderName);
+
+protected:
+    void showEvent(QShowEvent* event) override;
 
 signals:
     /**
@@ -52,93 +76,95 @@ signals:
     void notebookClicked(const QString& bundlePath);
     
     /**
+     * @brief Emitted when the 3-dot menu button on a notebook card is clicked,
+     * or when a notebook card is right-clicked or long-pressed.
+     * 
+     * This is the signal for showing the single-item context menu.
+     */
+    void notebookMenuRequested(const QString& bundlePath);
+    
+    /**
      * @brief Emitted when a notebook card is long-pressed.
+     * @deprecated Use notebookMenuRequested for context menu.
+     * This signal will be repurposed for batch select mode (L-007).
      */
     void notebookLongPressed(const QString& bundlePath);
     
     /**
-     * @brief Emitted when a folder header is long-pressed.
+     * @brief Emitted when a folder header is long-pressed or right-clicked.
      */
     void folderLongPressed(const QString& folderName);
+    
+    /**
+     * @brief Emitted when user requests PDF export from batch select mode.
+     * @param bundlePaths Paths to notebooks to export.
+     */
+    void exportToPdfRequested(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Emitted when user requests SNBX export from batch select mode.
+     * @param bundlePaths Paths to notebooks to export.
+     */
+    void exportToSnbxRequested(const QStringList& bundlePaths);
+
+private slots:
+    // Slots for list view signals
+    void onNotebookClicked(const QString& bundlePath);
+    void onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
+    void onNotebookLongPressed(const QString& bundlePath, const QPoint& globalPos);
+    void onFolderClicked(const QString& folderName);
+    void onFolderLongPressed(const QString& folderName, const QPoint& globalPos);
+    
+    // Slots for select mode (L-007)
+    void onSelectModeChanged(bool active);
+    void onBatchSelectionChanged(int count);
 
 private:
     void setupUi();
-    void setupTouchScrolling();
-    void buildContent();
-    void clearContent();
+    void setupSelectModeHeader();
+    void updateEmptyState();
     
-    QWidget* createFolderSection(const QString& folderName, 
-                                 const QList<struct NotebookInfo>& notebooks);
-    QWidget* createNotebookGrid(const QList<struct NotebookInfo>& notebooks);
+    // -------------------------------------------------------------------------
+    // Batch Select Mode (L-007)
+    // -------------------------------------------------------------------------
     
-    void onFolderToggled(const QString& folderName, bool collapsed);
-    void onNotebookClicked(const QString& bundlePath);
-    void onNotebookLongPressed(const QString& bundlePath);
+    /**
+     * @brief Show the select mode header with the given count.
+     * @param count Number of selected items.
+     */
+    void showSelectModeHeader(int count);
     
-    QScrollArea* m_scrollArea = nullptr;
-    QWidget* m_scrollContent = nullptr;
-    QVBoxLayout* m_contentLayout = nullptr;
+    /**
+     * @brief Hide the select mode header and show normal view.
+     */
+    void hideSelectModeHeader();
     
-    // Track collapsed state per folder
-    QMap<QString, bool> m_collapsedFolders;
+    /**
+     * @brief Show the overflow menu with batch actions.
+     */
+    void showOverflowMenu();
     
-    // Track folder section widgets for collapse/expand
-    QMap<QString, QWidget*> m_folderGrids;
+    // Model/View components
+    StarredListView* m_listView = nullptr;
+    StarredModel* m_model = nullptr;
+    NotebookCardDelegate* m_cardDelegate = nullptr;
+    FolderHeaderDelegate* m_folderDelegate = nullptr;
+    
+    // Empty state
+    QLabel* m_emptyLabel = nullptr;
+    
+    // Select mode header (L-007)
+    QWidget* m_selectModeHeader = nullptr;      // Header bar for select mode
+    QLabel* m_selectionCountLabel = nullptr;    // Shows "X selected"
+    QPushButton* m_backButton = nullptr;        // ← back arrow to exit
+    QPushButton* m_overflowMenuButton = nullptr; // ⋮ overflow menu
     
     bool m_darkMode = false;
+    bool m_needsReload = false;  // Deferred reload flag for when view becomes visible
     
     // Layout constants
-    static constexpr int SECTION_SPACING = 16;
-    static constexpr int GRID_SPACING = 12;
     static constexpr int CONTENT_MARGIN = 16;
-};
-
-/**
- * @brief Header widget for a folder section.
- * 
- * Displays folder name with expand/collapse chevron.
- * Long-press triggers context menu signal.
- */
-class FolderHeader : public QWidget {
-    Q_OBJECT
-
-public:
-    explicit FolderHeader(const QString& folderName, QWidget* parent = nullptr);
-    
-    QString folderName() const { return m_folderName; }
-    
-    void setCollapsed(bool collapsed);
-    bool isCollapsed() const { return m_collapsed; }
-    
-    void setDarkMode(bool dark);
-
-signals:
-    void clicked();
-    void longPressed();
-
-protected:
-    void paintEvent(QPaintEvent* event) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void enterEvent(QEnterEvent* event) override;
-    void leaveEvent(QEvent* event) override;
-
-private:
-    QString m_folderName;
-    bool m_collapsed = false;
-    bool m_darkMode = false;
-    bool m_hovered = false;
-    bool m_pressed = false;
-    
-    QTimer* m_longPressTimer = nullptr;
-    QPoint m_pressPos;
-    bool m_longPressTriggered = false;
-    
-    static constexpr int HEADER_HEIGHT = 44;
-    static constexpr int LONG_PRESS_MS = 500;
-    static constexpr int LONG_PRESS_MOVE_THRESHOLD = 10;
+    static constexpr int HEADER_HEIGHT = 48;
 };
 
 #endif // STARREDVIEW_H
-

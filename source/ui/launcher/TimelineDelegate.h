@@ -2,30 +2,18 @@
 #define TIMELINEDELEGATE_H
 
 #include <QStyledItemDelegate>
-#include <QPixmap>
-#include <QHash>
 
 /**
- * @brief Custom delegate for rendering Timeline items in the Launcher.
+ * @brief Custom delegate for rendering Timeline section headers.
  * 
- * Renders two types of items:
+ * This delegate only handles section headers (Today, Yesterday, etc.)
+ * with bold text and an underline. Notebook cards are rendered by
+ * NotebookCardDelegate via the CompositeTimelineDelegate.
  * 
- * 1. **Section Headers** - Time period labels (Today, Yesterday, etc.)
- *    - Bold text with underline
- *    - Full width
- *    - Smaller height than cards
- * 
- * 2. **Notebook Cards** - Clickable notebook entries
- *    - Thumbnail on left (with letterbox/crop as needed)
- *    - Name, date, and type indicators on right
- *    - Star indicator if starred
- *    - Rounded corners with subtle shadow
- *    - Hover effect
- * 
- * Thumbnail display (per Q&A):
- * - Pages taller than card: top-align crop (keep top, crop bottom)
- * - Pages shorter than card: letterbox (show full, add bars)
- * - Standard aspect ratios: no cropping, no bars
+ * Section headers:
+ * - Bold text with underline
+ * - Full width (spans entire viewport in IconMode)
+ * - Smaller height than cards
  * 
  * Phase P.3.3: Part of the new Launcher implementation.
  */
@@ -51,24 +39,6 @@ public:
      * @brief Check if dark mode is enabled.
      */
     bool isDarkMode() const { return m_darkMode; }
-    
-public slots:
-    /**
-     * @brief Invalidate cached thumbnail for a notebook.
-     * @param bundlePath The notebook whose thumbnail was updated.
-     * 
-     * CR-P.1: Called when NotebookLibrary::thumbnailUpdated is emitted
-     * to ensure the delegate reloads the updated thumbnail.
-     */
-    void invalidateThumbnail(const QString& bundlePath);
-    
-    /**
-     * @brief Clear the entire thumbnail cache.
-     * 
-     * Useful when the launcher becomes visible again after being hidden,
-     * to ensure fresh thumbnails are loaded.
-     */
-    void clearThumbnailCache();
 
 private:
     /**
@@ -77,43 +47,11 @@ private:
     void paintSectionHeader(QPainter* painter, const QRect& rect,
                            const QString& title) const;
     
-    /**
-     * @brief Paint a notebook card item.
-     */
-    void paintNotebookCard(QPainter* painter, const QRect& rect,
-                          const QStyleOptionViewItem& option,
-                          const QModelIndex& index) const;
-    
-    /**
-     * @brief Draw thumbnail with proper cropping/letterboxing.
-     */
-    void drawThumbnail(QPainter* painter, const QRect& rect,
-                      const QString& thumbnailPath) const;
-    
-    /**
-     * @brief Get a type indicator string (PDF, Edgeless, Paged).
-     */
-    QString typeIndicatorText(bool isPdf, bool isEdgeless) const;
-    
-    /**
-     * @brief Format a datetime for display.
-     */
-    QString formatDateTime(const QDateTime& dt) const;
-    
-    // Cached pixmaps for performance
-    mutable QHash<QString, QPixmap> m_thumbnailCache;
-    
     bool m_darkMode = false;
     
     // Layout constants
-    static constexpr int CARD_HEIGHT = 80;
     static constexpr int HEADER_HEIGHT = 32;
-    static constexpr int THUMBNAIL_WIDTH = 60;
-    static constexpr int CARD_MARGIN = 8;
-    static constexpr int CARD_PADDING = 12;
-    static constexpr int CARD_CORNER_RADIUS = 8;
-    static constexpr int THUMBNAIL_CORNER_RADIUS = 4;
+    static constexpr int HEADER_PADDING = 8;
 };
 
 #endif // TIMELINEDELEGATE_H
-

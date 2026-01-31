@@ -139,6 +139,67 @@ public:
     QStringList starredFolders() const;
     
     /**
+     * @brief Get the most recently used folders (up to 5).
+     * 
+     * Returns folders ordered by most recent usage first.
+     * Used by FolderPickerDialog to show quick-access folders.
+     * 
+     * L-008: Part of the Folder Picker UI feature.
+     */
+    QStringList recentFolders() const;
+    
+    /**
+     * @brief Record that a folder was used (e.g., notebooks moved to it).
+     * @param folder The folder name that was used.
+     * 
+     * Moves the folder to the front of the recent list.
+     * Called automatically by moveNotebooksToFolder().
+     * 
+     * L-008: Part of the Folder Picker UI feature.
+     */
+    void recordFolderUsage(const QString& folder);
+    
+    // === Bulk Operations (L-007) ===
+    
+    /**
+     * @brief Star multiple notebooks at once.
+     * @param bundlePaths List of notebook bundle paths to star.
+     * 
+     * More efficient than calling setStarred() multiple times because
+     * it only emits libraryChanged() once at the end.
+     */
+    void starNotebooks(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Unstar multiple notebooks at once.
+     * @param bundlePaths List of notebook bundle paths to unstar.
+     * 
+     * More efficient than calling setStarred() multiple times because
+     * it only emits libraryChanged() once at the end.
+     */
+    void unstarNotebooks(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Move multiple notebooks to a folder.
+     * @param bundlePaths List of notebook bundle paths to move.
+     * @param folder Target folder name. If the notebooks are not starred,
+     *               they will be starred first.
+     * 
+     * More efficient than calling setStarredFolder() multiple times because
+     * it only emits libraryChanged() once at the end.
+     */
+    void moveNotebooksToFolder(const QStringList& bundlePaths, const QString& folder);
+    
+    /**
+     * @brief Remove multiple notebooks from their folders (move to Unfiled).
+     * @param bundlePaths List of notebook bundle paths to remove from folders.
+     * 
+     * The notebooks remain starred, just moved to the Unfiled section.
+     * More efficient than calling setStarredFolder() multiple times.
+     */
+    void removeNotebooksFromFolder(const QStringList& bundlePaths);
+    
+    /**
      * @brief Create a new starred folder.
      * @param name Folder name (must be unique).
      */
@@ -167,6 +228,15 @@ public:
      * @return Matching notebooks sorted by relevance.
      */
     QList<NotebookInfo> search(const QString& query) const;
+    
+    /**
+     * @brief Search starred folders by name.
+     * @param query Search query string.
+     * @return Matching folder names (case-insensitive substring match).
+     * 
+     * L-009: Enables folder search in SearchView.
+     */
+    QStringList searchStarredFolders(const QString& query) const;
     
     // === Thumbnails ===
     
@@ -243,11 +313,13 @@ private:
     QString m_thumbnailCachePath;     ///< Path to the thumbnail cache directory
     QList<NotebookInfo> m_notebooks;  ///< All tracked notebooks
     QStringList m_starredFolderOrder; ///< Ordered list of starred folder names
+    QStringList m_recentFolders;      ///< Recently used folders (L-008), max 5
     QTimer m_saveTimer;               ///< Timer for debounced auto-save
     
     static constexpr int SAVE_DEBOUNCE_MS = 1000;  ///< Debounce delay for auto-save
     static constexpr int LIBRARY_VERSION = 1;      ///< Current library file format version
     static constexpr qint64 MAX_CACHE_SIZE_BYTES = 200 * 1024 * 1024; ///< 200 MiB cache limit
+    static constexpr int MAX_RECENT_FOLDERS = 5;   ///< Max folders in recent list (L-008)
     
     /**
      * @brief Clean up old thumbnails if cache exceeds size limit.

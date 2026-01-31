@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.1.6 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -352,9 +352,9 @@ elseif(UNIX)
     endif()
     
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus)
     endif()
     find_package(PkgConfig REQUIRED)
     
@@ -554,6 +554,7 @@ set(UI_SOURCES
     source/ui/widgets/ActionBarButton.cpp
     source/ui/widgets/PageWheelPicker.cpp
     source/ui/widgets/UndoDeleteButton.cpp
+    source/ui/widgets/ExportProgressWidget.cpp
     source/ui/widgets/LayerItemWidget.cpp
     source/ui/widgets/LayerPanelPillButton.cpp
     source/ui/widgets/PdfSearchBar.cpp
@@ -581,10 +582,18 @@ set(UI_SOURCES
     source/ui/launcher/TimelineModel.cpp
     source/ui/launcher/TimelineDelegate.cpp
     source/ui/launcher/TimelineListView.cpp
-    source/ui/launcher/NotebookCard.cpp
+    source/ui/launcher/KineticScrollHelper.cpp
+    source/ui/launcher/KineticListView.cpp
+    source/ui/launcher/NotebookCardDelegate.cpp
+    source/ui/launcher/FolderHeaderDelegate.cpp
+    source/ui/launcher/SearchModel.cpp
+    source/ui/launcher/StarredModel.cpp
+    source/ui/launcher/SearchListView.cpp
+    source/ui/launcher/StarredListView.cpp
     source/ui/launcher/StarredView.cpp
     source/ui/launcher/SearchView.cpp
     source/ui/launcher/FloatingActionButton.cpp
+    source/ui/launcher/FolderPickerDialog.cpp
 )
 
 # PDF abstraction layer (platform-specific backend)
@@ -628,18 +637,44 @@ endif()
 set(SHARING_SOURCES
     source/sharing/NotebookExporter.cpp
     source/sharing/NotebookImporter.cpp
-    source/sharing/ExportDialog.cpp
     thirdparty/miniz/miniz.c
 )
+
+# Batch operations module (CLI and bulk export/import)
+# See docs/private/BATCH_OPERATIONS.md for design documentation
+set(BATCH_SOURCES
+    source/batch/BatchOperations.cpp
+    source/batch/BundleDiscovery.cpp
+    source/batch/ExportQueueManager.cpp
+)
+
+# CLI module (Desktop only - headless batch operations)
+# Android uses launcher UI for batch operations instead
+set(CLI_SOURCES "")
+if(NOT ANDROID)
+    set(CLI_SOURCES
+        source/cli/CliParser.cpp
+        source/cli/CliProgress.cpp
+        source/cli/CliHandler.cpp
+        source/cli/CliSignal.cpp
+        source/ui/dialogs/BatchImportDialog.cpp  # Desktop-only batch import dialog
+    )
+endif()
 
 # Android-specific utilities and UI
 set(ANDROID_PLATFORM_SOURCES "")
 if(ANDROID)
     set(ANDROID_PLATFORM_SOURCES
         source/android/PdfPickerAndroid.cpp
+        source/android/AndroidShareHelper.cpp
         source/ui/dialogs/SaveDocumentDialog.cpp  # BUG-A002: Touch-friendly save dialog
     )
 endif()
+
+# Cross-platform utilities (Step 3.11: System notifications)
+set(PLATFORM_SOURCES
+    source/platform/SystemNotification.cpp
+)
 
 # Desktop-only sources (tests require Qt::Test, debug builds only)
 set(DESKTOP_ONLY_SOURCES "")
@@ -658,7 +693,9 @@ set(APP_SOURCES
         source/MainWindow.cpp
     source/ControlPanelDialog.cpp
     source/ui/dialogs/KeyCaptureDialog.cpp
-    source/ui/dialogs/PdfExportDialog.cpp
+    source/ui/dialogs/BatchPdfExportDialog.cpp
+    source/ui/dialogs/BatchSnbxExportDialog.cpp
+    source/ui/dialogs/ExportResultsDialog.cpp
     source/text/MarkdownNoteEntry.cpp
     source/ui/MarkdownNotesSidebar.cpp
         ${CORE_SOURCES}
@@ -667,6 +704,9 @@ set(APP_SOURCES
         ${PDF_SOURCES}
     ${CONTROLLER_SOURCES}
     ${SHARING_SOURCES}
+    ${BATCH_SOURCES}
+    ${CLI_SOURCES}
+    ${PLATFORM_SOURCES}
     ${ANDROID_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
@@ -777,6 +817,7 @@ elseif(ANDROID)
 elseif(UNIX)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::DBus  # Step 3.11: System notifications via org.freedesktop.Notifications
     )
     # On musl (Alpine), we use MuPDF exclusively; on glibc, we use Poppler + MuPDF for export
     if(USE_MUSL_MUPDF)

@@ -216,6 +216,148 @@ QStringList NotebookLibrary::starredFolders() const
     return m_starredFolderOrder;
 }
 
+QStringList NotebookLibrary::recentFolders() const
+{
+    // Filter to only include folders that still exist
+    QStringList result;
+    for (const QString& folder : m_recentFolders) {
+        if (m_starredFolderOrder.contains(folder)) {
+            result.append(folder);
+        }
+    }
+    return result;
+}
+
+void NotebookLibrary::recordFolderUsage(const QString& folder)
+{
+    if (folder.isEmpty()) {
+        return;  // Don't track "Unfiled"
+    }
+    
+    // Remove if already in list (will re-add at front)
+    m_recentFolders.removeAll(folder);
+    
+    // Add to front
+    m_recentFolders.prepend(folder);
+    
+    // Trim to max size
+    while (m_recentFolders.size() > MAX_RECENT_FOLDERS) {
+        m_recentFolders.removeLast();
+    }
+    
+    // Save (no need to emit libraryChanged - UI doesn't depend on this)
+    scheduleSave();
+}
+
+// -----------------------------------------------------------------------------
+// Bulk Operations (L-007)
+// -----------------------------------------------------------------------------
+
+void NotebookLibrary::starNotebooks(const QStringList& bundlePaths)
+{
+    if (bundlePaths.isEmpty()) {
+        return;
+    }
+    
+    bool anyChanged = false;
+    
+    for (const QString& path : bundlePaths) {
+        NotebookInfo* nb = findNotebook(path);
+        if (nb && !nb->isStarred) {
+            nb->isStarred = true;
+            anyChanged = true;
+        }
+    }
+    
+    if (anyChanged) {
+        markDirty();
+    }
+}
+
+void NotebookLibrary::unstarNotebooks(const QStringList& bundlePaths)
+{
+    if (bundlePaths.isEmpty()) {
+        return;
+    }
+    
+    bool anyChanged = false;
+    
+    for (const QString& path : bundlePaths) {
+        NotebookInfo* nb = findNotebook(path);
+        if (nb && nb->isStarred) {
+            nb->isStarred = false;
+            nb->starredFolder.clear();  // Clear folder assignment when unstarring
+            anyChanged = true;
+        }
+    }
+    
+    if (anyChanged) {
+        markDirty();
+    }
+}
+
+void NotebookLibrary::moveNotebooksToFolder(const QStringList& bundlePaths, const QString& folder)
+{
+    if (bundlePaths.isEmpty()) {
+        return;
+    }
+    
+    // Validate folder exists (unless unfiled)
+    if (!folder.isEmpty() && !m_starredFolderOrder.contains(folder)) {
+        qWarning() << "NotebookLibrary: Folder" << folder << "does not exist";
+        return;
+    }
+    
+    bool anyChanged = false;
+    
+    for (const QString& path : bundlePaths) {
+        NotebookInfo* nb = findNotebook(path);
+        if (!nb) {
+            continue;
+        }
+        
+        // Auto-star if assigning to a folder
+        if (!folder.isEmpty() && !nb->isStarred) {
+            nb->isStarred = true;
+            anyChanged = true;
+        }
+        
+        if (nb->starredFolder != folder) {
+            nb->starredFolder = folder;
+            anyChanged = true;
+        }
+    }
+    
+    if (anyChanged) {
+        // Record folder usage for recent folders tracking (L-008)
+        if (!folder.isEmpty()) {
+            recordFolderUsage(folder);
+        }
+        markDirty();
+    }
+}
+
+void NotebookLibrary::removeNotebooksFromFolder(const QStringList& bundlePaths)
+{
+    if (bundlePaths.isEmpty()) {
+        return;
+    }
+    
+    bool anyChanged = false;
+    
+    for (const QString& path : bundlePaths) {
+        NotebookInfo* nb = findNotebook(path);
+        if (nb && !nb->starredFolder.isEmpty()) {
+            nb->starredFolder.clear();  // Move to unfiled
+            anyChanged = true;
+        }
+    }
+    
+    if (anyChanged) {
+        markDirty();
+    }
+}
+
 void NotebookLibrary::createStarredFolder(const QString& name)
 {
     if (name.isEmpty()) {
@@ -323,6 +465,25 @@ QList<NotebookInfo> NotebookLibrary::search(const QString& query) const
     results.reserve(scored.size());
     for (const auto& pair : scored) {
         results.append(pair.second);
+    }
+    
+    return results;
+}
+
+QStringList NotebookLibrary::searchStarredFolders(const QString& query) const
+{
+    if (query.isEmpty()) {
+        return {};
+    }
+    
+    QString lowerQuery = query.toLower();
+    QStringList results;
+    
+    // Case-insensitive substring match on folder names
+    for (const QString& folder : m_starredFolderOrder) {
+        if (folder.toLower().contains(lowerQuery)) {
+            results.append(folder);
+        }
     }
     
     return results;
@@ -471,6 +632,13 @@ void NotebookLibrary::save()
     }
     root["starredFolders"] = foldersArray;
     
+    // Serialize recent folders (L-008)
+    QJsonArray recentFoldersArray;
+    for (const auto& folder : m_recentFolders) {
+        recentFoldersArray.append(folder);
+    }
+    root["recentFolders"] = recentFoldersArray;
+    
     // Write to file
     QFile file(m_libraryFilePath);
     if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -486,6 +654,7 @@ void NotebookLibrary::load()
 {
     m_notebooks.clear();
     m_starredFolderOrder.clear();
+    m_recentFolders.clear();
     
     QFile file(m_libraryFilePath);
     if (!file.exists()) {
@@ -520,6 +689,16 @@ void NotebookLibrary::load()
     QJsonArray foldersArray = root["starredFolders"].toArray();
     for (const auto& folderVal : foldersArray) {
         m_starredFolderOrder.append(folderVal.toString());
+    }
+    
+    // Load recent folders (L-008)
+    QJsonArray recentFoldersArray = root["recentFolders"].toArray();
+    for (const auto& folderVal : recentFoldersArray) {
+        QString folder = folderVal.toString();
+        // Only add if folder still exists
+        if (m_starredFolderOrder.contains(folder)) {
+            m_recentFolders.append(folder);
+        }
     }
     
     // Load notebooks, validating that paths still exist

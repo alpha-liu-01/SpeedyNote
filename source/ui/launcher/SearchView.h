@@ -4,13 +4,13 @@
 #include <QWidget>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QScrollArea>
-#include <QGridLayout>
 #include <QLabel>
 #include <QTimer>
-#include <QList>
+#include <QStyledItemDelegate>
 
-class NotebookCard;
+class SearchListView;
+class SearchModel;
+class NotebookCardDelegate;
 struct NotebookInfo;
 
 /**
@@ -21,14 +21,14 @@ struct NotebookInfo;
  * Features:
  * - Search input with clear button
  * - Real-time search with 300ms debounce
- * - Grid of NotebookCard results
+ * - Virtualized grid of notebook cards (Model/View)
  * - "No results" message
  * - Keyboard-friendly: Enter to search, Escape to clear
- * - Touch-friendly scrolling
+ * - Touch-friendly scrolling with kinetic momentum
  * 
  * Search scope (per Q&A): Notebook names + PDF filenames
  * 
- * Phase P.3.6: Part of the new Launcher implementation.
+ * Phase P.3: Refactored to use Model/View for virtualization and performance.
  */
 class SearchView : public QWidget {
     Q_OBJECT
@@ -58,9 +58,17 @@ signals:
     void notebookClicked(const QString& bundlePath);
     
     /**
-     * @brief Emitted when a notebook card is long-pressed.
+     * @brief Emitted when the 3-dot menu button on a notebook card is clicked,
+     * or when a notebook card is right-clicked or long-pressed.
      */
-    void notebookLongPressed(const QString& bundlePath);
+    void notebookMenuRequested(const QString& bundlePath);
+    
+    /**
+     * @brief Emitted when a folder search result is clicked.
+     * 
+     * L-009: Navigate to StarredView and scroll to this folder.
+     */
+    void folderClicked(const QString& folderName);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -69,13 +77,16 @@ private slots:
     void onSearchTextChanged(const QString& text);
     void onSearchTriggered();
     void performSearch();
+    
+    // Slots for list view signals
+    void onNotebookClicked(const QString& bundlePath);
+    void onNotebookMenuRequested(const QString& bundlePath, const QPoint& globalPos);
+    void onFolderClicked(const QString& folderName);
 
 private:
     void setupUi();
-    void setupTouchScrolling();
-    void displayResults(const QList<NotebookInfo>& results);
-    void clearResults();
     void showEmptyState(const QString& message);
+    void showResults();
     void updateSearchIcon();
     
     // Search bar
@@ -84,15 +95,15 @@ private:
     QPushButton* m_searchButton = nullptr;
     QPushButton* m_clearButton = nullptr;
     
-    // Results area
-    QScrollArea* m_scrollArea = nullptr;
-    QWidget* m_scrollContent = nullptr;
-    QGridLayout* m_gridLayout = nullptr;
+    // Status and empty labels
     QLabel* m_statusLabel = nullptr;
     QLabel* m_emptyLabel = nullptr;
     
-    // Result cards
-    QList<NotebookCard*> m_resultCards;
+    // Model/View components (virtualized rendering)
+    SearchListView* m_listView = nullptr;
+    SearchModel* m_model = nullptr;
+    NotebookCardDelegate* m_delegate = nullptr;
+    QStyledItemDelegate* m_compositeDelegate = nullptr;  // L-009: Composite delegate for mixed results
     
     // Debounce timer
     QTimer* m_debounceTimer = nullptr;
@@ -102,10 +113,8 @@ private:
     
     // Constants
     static constexpr int DEBOUNCE_MS = 300;
-    static constexpr int GRID_COLUMNS = 4;
     static constexpr int GRID_SPACING = 12;
     static constexpr int SEARCH_BAR_HEIGHT = 44;
 };
 
 #endif // SEARCHVIEW_H
-
