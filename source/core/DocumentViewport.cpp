@@ -9340,11 +9340,20 @@ void DocumentViewport::activatePdfLink(const PdfLink& link)
 {
     switch (link.type) {
         case PdfLinkType::Goto:
-            if (link.targetPage >= 0 && link.targetPage < m_document->pageCount()) {
-                #ifdef SPEEDYNOTE_DEBUG
-                qDebug() << "PDF link: navigating to page" << link.targetPage;
-                #endif
-                scrollToPage(link.targetPage);
+            {
+                // link.targetPage is a PDF page index, not notebook page index
+                // When pages are inserted between PDF pages, these differ
+                int notebookPageIndex = m_document->notebookPageIndexForPdfPage(link.targetPage);
+                if (notebookPageIndex >= 0) {
+                    #ifdef SPEEDYNOTE_DEBUG
+                    qDebug() << "PDF link: navigating to PDF page" << link.targetPage 
+                             << "(notebook page" << notebookPageIndex << ")";
+                    #endif
+                    scrollToPage(notebookPageIndex);
+                } else {
+                    qWarning() << "PDF link: target PDF page" << link.targetPage 
+                               << "not found in notebook";
+                }
             }
             break;
         case PdfLinkType::Uri:

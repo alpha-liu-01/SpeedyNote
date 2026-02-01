@@ -246,6 +246,38 @@ QSizeF Document::pdfPageSize(int pageIndex) const
     return m_pdfProvider->pageSize(pageIndex);
 }
 
+int Document::notebookPageIndexForPdfPage(int pdfPageIndex) const
+{
+    // Use m_pagePdfIndex which maps UUID → PDF page index
+    // We need to find the UUID with matching PDF page, then use pageIndexByUuid() for O(1) lookup
+    for (const auto& [uuid, pdfIdx] : m_pagePdfIndex) {
+        if (pdfIdx == pdfPageIndex) {
+            // Found the UUID, use cached lookup for O(1) instead of indexOf() O(n)
+            return pageIndexByUuid(uuid);
+        }
+    }
+    return -1;  // Not found (PDF page not in notebook, or non-PDF document)
+}
+
+int Document::pdfPageIndexForNotebookPage(int notebookPageIndex) const
+{
+    // Bounds check
+    if (notebookPageIndex < 0 || notebookPageIndex >= m_pageOrder.size()) {
+        return -1;
+    }
+    
+    // Get the UUID at this notebook page index
+    QString uuid = m_pageOrder[notebookPageIndex];
+    
+    // Look up the PDF page index for this UUID
+    auto it = m_pagePdfIndex.find(uuid);
+    if (it != m_pagePdfIndex.end()) {
+        return it->second;
+    }
+    
+    return -1;  // Not a PDF page (blank or custom background)
+}
+
 QString Document::pdfTitle() const
 {
     if (!isPdfLoaded()) {
@@ -302,7 +334,10 @@ Page* Document::page(int index)
         return nullptr;
     }
     
-    return m_loadedPages[uuid].get();
+    // Use find() instead of [] to avoid inserting nullptr if something went wrong
+    // (defensive programming - loadPageFromDisk should have inserted it)
+    it = m_loadedPages.find(uuid);
+    return it != m_loadedPages.end() ? it->second.get() : nullptr;
 }
 
 const Page* Document::page(int index) const
@@ -325,7 +360,10 @@ const Page* Document::page(int index) const
         return nullptr;
     }
     
-    return m_loadedPages.at(uuid).get();
+    // Use find() instead of at() to avoid potential std::out_of_range exception
+    // (defensive programming - loadPageFromDisk should have inserted it)
+    it = m_loadedPages.find(uuid);
+    return it != m_loadedPages.end() ? it->second.get() : nullptr;
 }
 
 // ===== Paged Mode Lazy Loading Accessors (Phase O1.7) =====
@@ -345,10 +383,10 @@ QVector<int> Document::loadedPageIndices() const
     QVector<int> result;
     result.reserve(static_cast<int>(m_loadedPages.size()));
     
-    // Iterate through loaded pages and find their indices in m_pageOrder
-    // This is O(loaded * pageCount) but loaded is typically < 10
+    // Iterate through loaded pages and use cached UUID→index lookup
+    // This is O(loaded) after cache is built (vs O(loaded * pageCount) before)
     for (const auto& [uuid, page] : m_loadedPages) {
-        int idx = m_pageOrder.indexOf(uuid);
+        int idx = pageIndexByUuid(uuid);  // O(1) cached lookup
         if (idx >= 0) {
             result.append(idx);
         }
