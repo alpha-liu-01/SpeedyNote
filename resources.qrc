@@ -1,28 +1,9 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
 <qresource prefix="/">
-    <file>resources/icons/yellow.png</file>
-    <file>resources/icons/blue.png</file>
-    <file>resources/icons/red.png</file>
-    <file>resources/icons/pen_light_red.png</file>
-    <file>resources/icons/pen_light_yellow.png</file>
-    <file>resources/icons/pen_light_green.png</file>
-    <file>resources/icons/pen_light_blue.png</file>
-    <file>resources/icons/pen_light_white.png</file>
-    <file>resources/icons/pen_light_black.png</file>
-    <file>resources/icons/pen_dark_red.png</file>
-    <file>resources/icons/pen_dark_yellow.png</file>
-    <file>resources/icons/pen_dark_green.png</file>
-    <file>resources/icons/pen_dark_blue.png</file>
-    <file>resources/icons/pen_dark_white.png</file>
-    <file>resources/icons/pen_dark_black.png</file>
+
     <file>resources/icons/background.png</file>
     <file>resources/icons/background_reversed.png</file>
-    <file>resources/icons/benchmark.png</file>
-    <file>resources/icons/benchmark_reversed.png</file>
-    <file>resources/icons/black.png</file>
-    <file>resources/icons/white.png</file>
-    <file>resources/icons/green.png</file>
     <file>resources/icons/pen.png</file>
     <file>resources/icons/pen_reversed.png</file>
     <file>resources/icons/marker.png</file>
@@ -31,12 +12,8 @@
     <file>resources/icons/eraser_reversed.png</file>
     <file>resources/icons/save_reversed.png</file>
     <file>resources/icons/save.png</file>
-    <file>resources/icons/saveannotated.png</file>
-    <file>resources/icons/saveannotated_reversed.png</file>
     <file>resources/icons/pdf.png</file>
     <file>resources/icons/pdf_reversed.png</file>
-    <file>resources/icons/pdfdelete.png</file>
-    <file>resources/icons/pdfdelete_reversed.png</file>
     <file>resources/icons/folder.png</file>
     <file>resources/icons/folder_reversed.png</file>
     <file>resources/icons/ibeam.png</file>
@@ -75,8 +52,6 @@
     <file>resources/icons/dial_reversed.png</file>
     <file>resources/icons/fastforward.png</file>
     <file>resources/icons/fastforward_reversed.png</file>
-    <file>resources/icons/color.png</file>
-    <file>resources/icons/color_reversed.png</file>
     <file>resources/icons/copy.png</file>
     <file>resources/icons/copy_reversed.png</file>
     <file>resources/icons/preset.png</file>
