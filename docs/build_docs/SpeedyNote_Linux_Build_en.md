@@ -23,20 +23,17 @@ sudo apt install qt6-base-dev qt6-tools-dev libqt6concurrent6 libqt6xml6 libqt6n
 
 # PDF (MuPDF and dependencies)
 sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev
-
 ```
 
 #### Dependency Summary
 
-| Component | Packages | Purpose |
-|-----------|----------|---------|
-| **Build tools** | `build-essential cmake pkg-config` | Compilation |
-| **Qt6** | `qt6-base-dev qt6-tools-dev` | UI framework |
-| **MuPDF** | `libmupdf-dev` | PDF viewing and export |
-| **MuPDF deps** | `libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev` | MuPDF dependencies |
-| **SDL2** | `libsdl2-dev` | Game controller support (optional) |
-
-> **Note:** If MuPDF or its dependencies are not installed, PDF export will be disabled. The app will still function normally for viewing and annotating PDFs.
+| Component       | Packages                                                                                | Purpose                            |
+| --------------- | --------------------------------------------------------------------------------------- | ---------------------------------- |
+| **Build tools** | `build-essential cmake pkg-config`                                                      | Compilation                        |
+| **Qt6**         | `qt6-base-dev qt6-tools-dev`                                                            | UI framework                       |
+| **MuPDF**       | `libmupdf-dev`                                                                          | PDF viewing and export             |
+| **MuPDF deps**  | `libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev` | MuPDF dependencies                 |
+| **SDL2**        | `libsdl2-dev`                                                                           | Game controller support (optional) |
 
 ---
 
@@ -56,12 +53,13 @@ cd build && ./NoteApp
 
 #### Build Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `ENABLE_CONTROLLER_SUPPORT` | OFF | Enable SDL2 game controller support |
-| `ENABLE_DEBUG_OUTPUT` | OFF | Enable verbose debug output |
+| Option                      | Default | Description                               |
+| --------------------------- | ------- | ----------------------------------------- |
+| `ENABLE_CONTROLLER_SUPPORT` | OFF     | Enable SDL2 game controller support (TBD) |
+| `ENABLE_DEBUG_OUTPUT`       | OFF     | Enable verbose debug output               |
 
 Example with options:
+
 ```bash
 cmake .. -DENABLE_CONTROLLER_SUPPORT=ON -DENABLE_DEBUG_OUTPUT=ON
 ```
@@ -71,13 +69,9 @@ cmake .. -DENABLE_CONTROLLER_SUPPORT=ON -DENABLE_DEBUG_OUTPUT=ON
 ### Install (Optional)
 
 ```bash
-sudo make install
+./build-package.sh
+sudo dpkg -i speedynote.deb
 ```
-
-This installs:
-- `NoteApp` binary to `/usr/local/bin/`
-- Translations to `/usr/local/share/speedynote/translations/`
-- Icon to `/usr/local/share/icons/hicolor/256x256/apps/`
 
 ---
 
@@ -88,16 +82,17 @@ This installs:
 **Message:** `⚠️ MuPDF not found - PDF export will be disabled`
 
 **Fix:** Install MuPDF and its dependencies:
+
 ```bash
 sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev
 ```
-
 
 #### Qt6 not found
 
 **Error:** `Could not find a package configuration file provided by "Qt6"`
 
 **Fix:** Install Qt6 development packages:
+
 ```bash
 sudo apt install qt6-base-dev qt6-tools-dev
 ```
@@ -113,6 +108,7 @@ The build system automatically detects ARM64 and applies appropriate optimizatio
 #### Fedora / RHEL-based
 
 Package names differ slightly:
+
 ```bash
 sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel mupdf-devel harfbuzz-devel freetype-devel libjpeg-turbo-devel openjpeg2-devel gumbo-parser-devel mujs-devel
 ```
@@ -122,9 +118,8 @@ sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel mupdf-devel ha
 ```bash
 sudo pacman -S cmake qt6-base qt6-tools mupdf harfbuzz freetype2 libjpeg-turbo openjpeg2 gumbo-parser mujs
 ```
+
 #### Alpine Linux and postmarketOS
-
-
 
 ```bash
 sudo apk add build-base cmake abuild qt6-qtbase-dev qt6-qttools-dev qt6-qtdeclarative-dev mupdf-dev
@@ -139,4 +134,3 @@ sudo apk add build-base cmake abuild qt6-qtbase-dev qt6-qttools-dev qt6-qtdeclar
 - [Windows Build Guide](SpeedyNote_Windows_Build_en.md)
 - [macOS Build Guide](SpeedyNote_Darwin_Build_en.md)
 - [Android Build Guide](ANDROID_BUILD_GUIDE.md)
-
