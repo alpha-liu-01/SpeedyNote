@@ -25,8 +25,7 @@
 ```bash
 pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-pkgconf
 pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw-w64-clang-x86_64-qt6-declarative mingw-w64-clang-x86_64-qt6-translations
-pacman -S mingw-w64-clang-x86_64-poppler mingw-w64-clang-x86_64-poppler-qt6
-pacman -S mingw-w64-clang-x86_64-SDL2
+pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-libmupdf
 ```
 
 **对于 ARM64 设备：** 将上述命令中的 `x86_64` 替换为 `aarch64`，并在下方路径中使用 `clangarm64` 代替 `clang64`。 
@@ -38,6 +37,7 @@ pacman -S mingw-w64-clang-x86_64-SDL2
 ```cmd
 C:\msys64\clang64\bin
 ```
+
 arm64机器的改动同理。
 
 然后重启计算机

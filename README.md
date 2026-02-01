@@ -20,24 +20,26 @@
 
 ## Why SpeedyNote?
 
-| The Problem | SpeedyNote's Solution |
-|-------------|----------------------|
-| 💸 OneNote doesn't support PDF annotation | ✅ Full PDF support with fast rendering |
-| 🐌 Xournal++ is painfully slow on large PDFs | ✅ 360Hz input on a Celeron N4000 (1.1GHz) |
-| 💰 GoodNotes/Notability cost $10+ and require iPad | ✅ Free & open source, runs on $50 tablets |
-| 📱 Most note apps are mobile-only or desktop-only | ✅ Same experience on Windows, Linux, macOS & Android |
+| The Problem                                        | SpeedyNote's Solution                                |
+| -------------------------------------------------- | ---------------------------------------------------- |
+| 💸 OneNote doesn't support PDF annotation          | ✅ Full PDF support with fast rendering               |
+| 🐌 Xournal++ is painfully slow on large PDFs       | ✅ 360Hz input on a Celeron N4000 (1.1GHz)            |
+| 💰 GoodNotes/Notability cost $10+ and require iPad | ✅ Free & open source, runs on $50 tablets            |
+| 📱 Most note apps are mobile-only or desktop-only  | ✅ Same experience on Windows, Linux, macOS & Android |
 
 ---
 
 ## ✨ Features
 
 ### 🚀 Performance First
+
 - **360Hz stylus polling** on low-end hardware (tested: Celeron N4000 @ 1.1GHz)
 - **Instant PDF loading** - large documents open in seconds, not minutes
 - **Small memory footprint** - native C++ with no Electron bloat
 - **ARM64 native builds** - optimized for Snapdragon laptops and Rockchip Chromebooks
 
 ### 🖊️ Professional Drawing Tools
+
 - **Pressure-sensitive inking** with Pen, Marker, and Highlighter tools
 - **Vector-based strokes** - zoom infinitely without pixelation
 - **Multi-layer editing** (SAI2-style) - add, delete, reorder, merge layers
@@ -45,22 +47,24 @@
 - **Touch gestures** - two-finger pan, pinch-to-zoom, palm rejection
 
 ### 📄 Document Modes
+
 - **Paged Notebooks** - traditional page-by-page notes (`.snb)
 - **Edgeless Canvas** - infinite whiteboard with lazy-loading tiles (`.snb)
 - **PDF Backgrounds** - annotate PDFs with clickable internal links
 - **Sharing** - `.snbx` note bundles allows easy cross-platform note sharing. 
 
 ### 🎯 Tablet-First UX
+
 - **Action bars** - context-sensitive buttons appear when you need them
 - **Subtoolbars** - quick access to tool settings without menu diving
 - **Page panel** - thumbnail navigation with drag-to-reorder
 - **PDF outline** - click TOC entries to jump to sections
 
 ### 🔗 Advanced Features
+
 - **Link objects** - create clickable links to markdown notes, URLs, or positions
 - **Markdown notes** - attach rich text notes to any page or position
 - **Multi-tab editing** - work on multiple documents simultaneously
-- **Auto-save** - never lose work with automatic backup
 
 ---
 
@@ -68,16 +72,16 @@
 
 <!-- TODO: Replace with actual screenshots -->
 
-| PDF Annotation | Layer Panel | Page Thumbnails |
-|----------------|-------------|-----------------|
+| PDF Annotation                          | Layer Panel                                | Page Thumbnails                           |
+| --------------------------------------- | ------------------------------------------ | ----------------------------------------- |
 | ![PDF](https://i.imgur.com/xgmYhfK.png) | ![Layers](https://i.imgur.com/NelpAMv.png) | ![Pages](https://i.imgur.com/A93UeAT.png) |
 
-| Edgeless Canvas | Action Bar | Subtoolbar |
-|-----------------|------------|------------|
+| Edgeless Canvas                              | Action Bar                                 | Subtoolbar                                     |
+| -------------------------------------------- | ------------------------------------------ | ---------------------------------------------- |
 | ![Edgeless](https://i.imgur.com/wHLeyIj.png) | ![Action](https://i.imgur.com/wHLeyIj.png) | ![Subtoolbar](https://i.imgur.com/VSvZaxA.png) |
 
-| Link Objects | Markdown Support | Android |
-|-----------------|------------|------------|
+| Link Objects                                    | Markdown Support                             | Android                                     |
+| ----------------------------------------------- | -------------------------------------------- | ------------------------------------------- |
 | ![LinkObjects](https://i.imgur.com/QkEw57Y.png) | ![Markdown](https://i.imgur.com/yKVJw5E.png) | ![Android](https://i.imgur.com/rfAJMNF.png) |
 
 ---
@@ -86,12 +90,12 @@
 
 ### System Requirements
 
-| Platform | Minimum | Recommended |
-|----------|---------|-------------|
-| **Windows** | Windows 10 1809 | Windows 11 |
-| **macOS** | macOS 12 (to be tested) | macOS 15+ |
-| **Linux** | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
-| **Android** | Android 8.0 (API 26) | Android 13+ |
+| Platform    | Minimum                  | Recommended      |
+| ----------- | ------------------------ | ---------------- |
+| **Windows** | Windows 10 1809          | Windows 11       |
+| **macOS**   | macOS 12 (to be tested)  | macOS 15+        |
+| **Linux**   | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
+| **Android** | Android 8.0 (API 26)     | Android 13+      |
 
 **Hardware:** Any x86_64 or ARM64 CPU. Tested on Intel Core i5 470UM (2010), Celeron N4000, Snapdragon 7c Gen 2, Rockchip RK3399
 
@@ -101,13 +105,13 @@
 
 Download the latest release from **[GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases)** or the official website.
 
-| Platform | Package |
-|----------|---------|
-| Windows | `.exe` installer |
-| macOS | `.dmg` disk image (to be offered) |
-| Debian/Ubuntu | `.deb` package |
-| Fedora/RHEL | `.rpm` package |
-| Arch Linux | `.pkg.tar.zst` package |
+| Platform      | Package                           |
+| ------------- | --------------------------------- |
+| Windows       | `.exe` installer                  |
+| macOS         | `.dmg` disk image (to be offered) |
+| Debian/Ubuntu | `.deb` package                    |
+| Fedora/RHEL   | `.rpm` package                    |
+| Arch Linux    | `.pkg.tar.zst` package            |
 
 #### Android
 
@@ -136,13 +140,13 @@ sudo apt update && sudo apt install speedynote
 
 ### Prerequisites
 
-| Platform | Requirements |
-|----------|--------------|
-| All | CMake 3.16+, C++17 compiler |
-| Windows | MSYS2 with clang64/clangarm64 toolchain |
-| macOS | Xcode Command Line Tools, Homebrew |
-| Linux | Qt 6.4+ dev packages, Poppler-Qt6 |
-| Android | Docker (see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)) |
+| Platform | Requirements                                                                 |
+| -------- | ---------------------------------------------------------------------------- |
+| All      | CMake 3.16+, C++17 compiler                                                  |
+| Windows  | MSYS2 with clang64/clangarm64 toolchain                                      |
+| macOS    | Xcode Command Line Tools, Homebrew                                           |
+| Linux    | Qt 6.4+ dev packages, Poppler-Qt6                                            |
+| Android  | Docker (see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)) |
 
 ### Quick Build
 
@@ -155,7 +159,7 @@ cd SpeedyNote
 ./compile.ps1
 
 # macOS
-./compile-mac.sh
+./compile-mac.sh  # Not updated yet. 
 
 # Linux
 ./compile.sh
@@ -165,18 +169,17 @@ cd SpeedyNote
 ### Detailed Build Guides
 
 - [Windows Build Guide](./docs/build_docs/SpeedyNote_Windows_Build_en.md)
-- [macOS Build Guide](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)
+- [macOS Build Guide](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)  # Not working yet
 - [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
-
 
 ---
 
 ## 📁 File Formats
 
-| Format | Description | Use Case |
-|--------|-------------|----------|
-| `.snb` | Bundle folder with tiles | Edgeless canvas, large projects |
-| `.snbx` | Compressed bundle (ZIP) | Sharing, backup |
+| Format  | Description              | Use Case                        |
+| ------- | ------------------------ | ------------------------------- |
+| `.snb`  | Bundle folder with tiles | Edgeless canvas, large projects |
+| `.snbx` | Compressed bundle (ZIP)  | Sharing, backup                 |
 
 **Note:** The legacy `.spn` format from v0.x is not supported.
 
@@ -201,11 +204,11 @@ speedynote import ~/Downloads/*.snbx -d ~/Notes/
 
 ### Commands
 
-| Command | Description |
-|---------|-------------|
-| `export-pdf` | Export notebooks to PDF format |
+| Command       | Description                        |
+| ------------- | ---------------------------------- |
+| `export-pdf`  | Export notebooks to PDF format     |
 | `export-snbx` | Export notebooks to .snbx packages |
-| `import` | Import .snbx packages as notebooks |
+| `import`      | Import .snbx packages as notebooks |
 
 ### Export to PDF
 
@@ -213,19 +216,20 @@ speedynote import ~/Downloads/*.snbx -d ~/Notes/
 speedynote export-pdf [OPTIONS] <input>... -o <output>
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-o, --output` | Output file (single) or directory (batch) |
-| `--dpi <N>` | Export resolution (default: 150) |
-| `--pages <RANGE>` | Page range, e.g., "1-10,15,20-25" |
-| `--no-metadata` | Don't preserve PDF metadata |
-| `--no-outline` | Don't preserve PDF bookmarks |
-| `--annotations-only` | Export strokes only (blank background) |
-| `--overwrite` | Overwrite existing files |
-| `--recursive` | Search directories recursively |
-| `--dry-run` | Preview without creating files |
+| Option               | Description                               |
+| -------------------- | ----------------------------------------- |
+| `-o, --output`       | Output file (single) or directory (batch) |
+| `--dpi <N>`          | Export resolution (default: 150)          |
+| `--pages <RANGE>`    | Page range, e.g., "1-10,15,20-25"         |
+| `--no-metadata`      | Don't preserve PDF metadata               |
+| `--no-outline`       | Don't preserve PDF bookmarks              |
+| `--annotations-only` | Export strokes only (blank background)    |
+| `--overwrite`        | Overwrite existing files                  |
+| `--recursive`        | Search directories recursively            |
+| `--dry-run`          | Preview without creating files            |
 
 **Examples:**
+
 ```bash
 # Single notebook to PDF
 speedynote export-pdf ~/Notes/Lecture.snb -o ~/Desktop/lecture.pdf
@@ -246,15 +250,16 @@ speedynote export-pdf ~/Notes/ -o ~/PDFs/ --dry-run
 speedynote export-snbx [OPTIONS] <input>... -o <output>
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option         | Description                               |
+| -------------- | ----------------------------------------- |
 | `-o, --output` | Output file (single) or directory (batch) |
-| `--no-pdf` | Don't embed source PDF (smaller files) |
-| `--overwrite` | Overwrite existing files |
-| `--recursive` | Search directories recursively |
-| `--dry-run` | Preview without creating files |
+| `--no-pdf`     | Don't embed source PDF (smaller files)    |
+| `--overwrite`  | Overwrite existing files                  |
+| `--recursive`  | Search directories recursively            |
+| `--dry-run`    | Preview without creating files            |
 
 **Examples:**
+
 ```bash
 # Backup with embedded PDFs
 speedynote export-snbx ~/Notes/ -o ~/Backup/
@@ -272,15 +277,16 @@ speedynote export-snbx ~/Notes/Project.snb -o ~/Desktop/project.snbx
 speedynote import [OPTIONS] <input>... -d <dest>
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-d, --dest` | Destination directory for notebooks |
+| Option             | Description                                     |
+| ------------------ | ----------------------------------------------- |
+| `-d, --dest`       | Destination directory for notebooks             |
 | `--add-to-library` | Add imported notebooks to the launcher timeline |
-| `--overwrite` | Overwrite existing notebooks |
-| `--recursive` | Search directories recursively |
-| `--dry-run` | Preview without importing |
+| `--overwrite`      | Overwrite existing notebooks                    |
+| `--recursive`      | Search directories recursively                  |
+| `--dry-run`        | Preview without importing                       |
 
 **Examples:**
+
 ```bash
 # Import packages
 speedynote import ~/Downloads/*.snbx -d ~/Notes/
@@ -298,23 +304,23 @@ speedynote import ~/Backup/ -d ~/Notes/ --recursive --add-to-library
 
 These options work with all commands:
 
-| Option | Description |
-|--------|-------------|
-| `--verbose` | Show detailed progress |
-| `--json` | Output results as JSON (for scripting) |
-| `--fail-fast` | Stop on first error |
-| `-h, --help` | Show help for command |
-| `-v, --version` | Show version |
+| Option          | Description                            |
+| --------------- | -------------------------------------- |
+| `--verbose`     | Show detailed progress                 |
+| `--json`        | Output results as JSON (for scripting) |
+| `--fail-fast`   | Stop on first error                    |
+| `-h, --help`    | Show help for command                  |
+| `-v, --version` | Show version                           |
 
 ### Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| 0 | All operations succeeded |
-| 1 | Some files failed or were skipped |
-| 2 | All files failed |
-| 3 | Invalid arguments |
-| 5 | Cancelled (Ctrl+C) |
+| Code | Meaning                           |
+| ---- | --------------------------------- |
+| 0    | All operations succeeded          |
+| 1    | Some files failed or were skipped |
+| 2    | All files failed                  |
+| 3    | Invalid arguments                 |
+| 5    | Cancelled (Ctrl+C)                |
 
 ### Scripting Example
 
@@ -376,13 +382,12 @@ See [LICENSE](./LICENSE) for details.
 
 ### Third-Party Libraries
 
-| Library | License | Usage |
-|---------|---------|-------|
-| Qt 6 | LGPL v3 | UI framework |
-| Poppler | GPL v2/v3 | PDF rendering (desktop) |
-| MuPDF | AGPL v3 | PDF rendering (Android) |
-| QMarkdownTextEdit | MIT | Markdown editor |
-| miniz | MIT | ZIP compression |
+| Library           | License | Usage                |
+| ----------------- | ------- | -------------------- |
+| Qt 6              | LGPL v3 | UI framework         |
+| MuPDF             | AGPL v3 | PDF rendering/export |
+| QMarkdownTextEdit | MIT     | Markdown editor      |
+| miniz             | MIT     | ZIP compression      |
 
 ---
 

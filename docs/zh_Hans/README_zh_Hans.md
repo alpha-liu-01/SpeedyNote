@@ -20,24 +20,26 @@
 
 ## 为什么选择 SpeedyNote？
 
-| 问题 | SpeedyNote 的解决方案 |
-|-------------|----------------------|
-| 💸 OneNote 不支持 PDF 注释 | ✅ 完整 PDF 支持，快速渲染 |
-| 🐌 Xournal++ 页数一多，速度像蜗牛爬 | ✅ 在 赛扬 N4000 (1.1GHz) 上实现 360Hz 输入 |
-| 💰 GoodNotes/Notability 每年收费好几百元且需要 iPad | ✅ 免费开源，在200元寨板上运行 |
-| 📱 大多数笔记应用仅限移动端或仅限桌面端 | ✅ Windows、Linux、macOS 和 Android 统一体验 |
+| 问题                                       | SpeedyNote 的解决方案                     |
+| ---------------------------------------- | ------------------------------------ |
+| 💸 OneNote 不支持 PDF 注释                    | ✅ 完整 PDF 支持，快速渲染                     |
+| 🐌 Xournal++ 页数一多，速度像蜗牛爬                 | ✅ 在 赛扬 N4000 (1.1GHz) 上实现 360Hz 输入   |
+| 💰 GoodNotes/Notability 每年收费好几百元且需要 iPad | ✅ 免费开源，在200元寨板上运行                    |
+| 📱 大多数笔记应用仅限移动端或仅限桌面端                    | ✅ Windows、Linux、macOS 和 Android 统一体验 |
 
 ---
 
 ## ✨ 功能特性
 
 ### 🚀 性能优先
+
 - **360Hz 手写笔轮询** 在低端硬件上（测试于 Celeron N4000 @ 1.1GHz）
 - **即时 PDF 加载** - 大型文档可在数秒内打开，完全不需要数分钟
 - **小内存占用** - 原生 C++ 编写，绝对不是套壳浏览器
 - **ARM64 原生构建** - 针对骁龙笔记本和瑞芯微Chromebook 优化
 
 ### 🖊️ 专业绘图工具
+
 - **压感墨水** 支持笔、记号笔和文字标画工具
 - **矢量笔画** - 不论缩放比例永远抗锯齿
 - **多图层编辑**（SAI2 风格）- 添加、删除、重新排序、合并图层
@@ -45,22 +47,24 @@
 - **触控手势** - 双指平移、捏合缩放、手掌防误触
 
 ### 📄 文档模式
+
 - **分页笔记本** - 传统逐页笔记（`.snb`）
 - **无边画布** - 无限白板，支持懒加载图块（`.snb`）
 - **PDF 背景** - 在 PDF 上注释，支持可点击内部链接
 - **分享** - `.snbx` 笔记包支持跨平台笔记分享
 
 ### 🎯 平板优先用户体验
+
 - **操作栏** - 需要时显示上下文相关按钮
 - **子工具栏** - 无需深入菜单即可快速访问工具设置
 - **页面面板** - 缩略图导航，支持拖拽重新排序
 - **PDF 大纲** - 点击目录条目跳转到章节
 
 ### 🔗 高级功能
+
 - **链接对象** - 创建可点击链接指向 Markdown 笔记、URL 或位置
 - **Markdown 笔记** - 在任何页面或位置附加富文本笔记
 - **多标签页编辑** - 同时处理多个文档
-- **自动保存** - 自动备份，永不丢失工作内容
 
 ---
 
@@ -68,16 +72,16 @@
 
 <!-- TODO: Replace with actual screenshots -->
 
-| PDF 注释 | 图层面板 | 页面缩略图 |
-|----------------|-------------|-----------------|
+| PDF 注释                                  | 图层面板                                       | 页面缩略图                                     |
+| --------------------------------------- | ------------------------------------------ | ----------------------------------------- |
 | ![PDF](https://i.imgur.com/xgmYhfK.png) | ![Layers](https://i.imgur.com/NelpAMv.png) | ![Pages](https://i.imgur.com/A93UeAT.png) |
 
-| 无边画布 | 操作栏 | 子工具栏 |
-|-----------------|------------|------------|
+| 无边画布                                         | 操作栏                                        | 子工具栏                                           |
+| -------------------------------------------- | ------------------------------------------ | ---------------------------------------------- |
 | ![Edgeless](https://i.imgur.com/wHLeyIj.png) | ![Action](https://i.imgur.com/wHLeyIj.png) | ![Subtoolbar](https://i.imgur.com/VSvZaxA.png) |
 
-| 链接对象 | Markdown 支持 | Android |
-|-----------------|------------|------------|
+| 链接对象                                            | Markdown 支持                                  | Android                                     |
+| ----------------------------------------------- | -------------------------------------------- | ------------------------------------------- |
 | ![LinkObjects](https://i.imgur.com/QkEw57Y.png) | ![Markdown](https://i.imgur.com/yKVJw5E.png) | ![Android](https://i.imgur.com/rfAJMNF.png) |
 
 ---
@@ -86,12 +90,12 @@
 
 ### 系统要求
 
-| 平台 | 最低要求 | 推荐配置 |
-|----------|---------|-------------|
-| **Windows** | Windows 10 1809 | Windows 11 |
-| **macOS** | macOS 12（待测试） | macOS 15+ |
-| **Linux** | Ubuntu 22.04 / Fedora 38 | 任何支持 Qt 6.4+ 的系统 |
-| **Android** | Android 8.0 (API 26) | Android 13+ |
+| 平台          | 最低要求                     | 推荐配置             |
+| ----------- | ------------------------ | ---------------- |
+| **Windows** | Windows 10 1809          | Windows 11       |
+| **macOS**   | macOS 12（待测试）            | macOS 15+        |
+| **Linux**   | Ubuntu 22.04 / Fedora 38 | 任何支持 Qt 6.4+ 的系统 |
+| **Android** | Android 8.0 (API 26)     | Android 13+      |
 
 **硬件：** 任何 x86_64 或 ARM64 CPU。已在 Intel Core i5 470UM（2010）、赛扬 N4000、高通骁龙 7c Gen 2、瑞芯微 RK3399 上测试
 
@@ -101,13 +105,13 @@
 
 从 **[GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases)** 或官方网站下载最新版本。
 
-| 平台 | 包格式 |
-|----------|---------|
-| Windows | `.exe` 安装程序 |
-| macOS | `.dmg` 磁盘映像（即将提供） |
-| Debian/Ubuntu | `.deb` 包 |
-| Fedora/RHEL | `.rpm` 包 |
-| Arch Linux | `.pkg.tar.zst` 包 |
+| 平台            | 包格式               |
+| ------------- | ----------------- |
+| Windows       | `.exe` 安装程序       |
+| macOS         | `.dmg` 磁盘映像（即将提供） |
+| Debian/Ubuntu | `.deb` 包          |
+| Fedora/RHEL   | `.rpm` 包          |
+| Arch Linux    | `.pkg.tar.zst` 包  |
 
 #### Android
 
@@ -136,12 +140,12 @@ sudo apt update && sudo apt install speedynote
 
 ### 先决条件
 
-| 平台 | 要求 |
-|----------|--------------|
-| 全部 | CMake 3.16+、C++17 编译器 |
-| Windows | MSYS2 及 clang64/clangarm64 工具链 |
-| macOS | Xcode 命令行工具、Homebrew |
-| Linux | Qt 6.4+ 开发包、Poppler-Qt6 |
+| 平台      | 要求                                                              |
+| ------- | --------------------------------------------------------------- |
+| 全部      | CMake 3.16+、C++17 编译器                                           |
+| Windows | MSYS2 及 clang64/clangarm64 工具链                                  |
+| macOS   | Xcode 命令行工具、Homebrew                                            |
+| Linux   | Qt 6.4+ 开发包、Poppler-Qt6                                         |
 | Android | Docker（详见 [Android 构建指南](../build_docs/ANDROID_BUILD_GUIDE.md)） |
 
 ### 快速构建
@@ -154,7 +158,7 @@ cd SpeedyNote
 # Windows (MSYS2 clang64 shell)
 ./compile.ps1
 
-# macOS
+# macOS （暂时无法使用）
 ./compile-mac.sh
 
 # Linux
@@ -165,18 +169,17 @@ cd SpeedyNote
 ### 详细构建指南
 
 - [Windows 构建指南](./docs/build_docs/SpeedyNote_Windows_Build_en.md)
-- [macOS 构建指南](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)
+- [macOS 构建指南](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)  # 暂时无效
 - [Android 构建指南](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
-
 
 ---
 
 ## 📁 文件格式
 
-| 格式 | 描述 | 使用场景 |
-|--------|-------------|----------|
-| `.snb` | 包含图块的包文件夹 | 无边画布、大型项目 |
-| `.snbx` | 压缩包（ZIP） | 分享、备份 |
+| 格式      | 描述        | 使用场景      |
+| ------- | --------- | --------- |
+| `.snb`  | 包含图块的包文件夹 | 无边画布、大型项目 |
+| `.snbx` | 压缩包（ZIP）  | 分享、备份     |
 
 **注意：** 不支持 v0.x 的遗留 `.spn` 格式。
 
@@ -219,13 +222,12 @@ SpeedyNote 采用 **GNU General Public License v3.0** 许可证。
 
 ### 第三方库
 
-| 库 | 许可证 | 使用用途 |
-|---------|---------|-------|
-| Qt 6 | LGPL v3 | UI 框架 |
-| Poppler | GPL v2/v3 | PDF 渲染（桌面端） |
-| MuPDF | AGPL v3 | PDF 渲染（Android） |
-| QMarkdownTextEdit | MIT | Markdown 编辑器 |
-| miniz | MIT | ZIP 压缩 |
+| 库                 | 许可证     | 使用用途         |
+| ----------------- | ------- | ------------ |
+| Qt 6              | LGPL v3 | UI 框架        |
+| MuPDF             | AGPL v3 | PDF 渲染、导出    |
+| QMarkdownTextEdit | MIT     | Markdown 编辑器 |
+| miniz             | MIT     | ZIP 压缩       |
 
 ---
 
