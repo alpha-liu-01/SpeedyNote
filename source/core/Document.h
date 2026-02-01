@@ -829,6 +829,39 @@ public:
     QSizeF pdfPageSize(int pageIndex) const;
     
     /**
+     * @brief Find the notebook page index for a given PDF page.
+     * @param pdfPageIndex 0-based PDF page index.
+     * @return Notebook page index (position in page order), or -1 if not found.
+     * 
+     * This is useful for PDF text search: the search engine operates in PDF page space,
+     * but navigation requires notebook page indices. When pages are inserted between
+     * PDF pages, the notebook page index differs from the PDF page index.
+     * 
+     * Example:
+     * - PDF has pages 0, 1, 2, 3
+     * - User inserts a blank page after page 1
+     * - Notebook pages: [pdf 0], [pdf 1], [blank], [pdf 2], [pdf 3]
+     * - notebookPageIndexForPdfPage(2) returns 3 (not 2)
+     */
+    int notebookPageIndexForPdfPage(int pdfPageIndex) const;
+    
+    /**
+     * @brief Get the PDF page index for a given notebook page.
+     * @param notebookPageIndex 0-based notebook page index (position in page order).
+     * @return PDF page index, or -1 if the page is not a PDF page.
+     * 
+     * This is the reverse of notebookPageIndexForPdfPage(). Used for outline
+     * highlighting: when the user scrolls to a notebook page, we need to find
+     * which PDF page it corresponds to for highlighting the correct outline item.
+     * 
+     * Example:
+     * - Notebook pages: [pdf 0], [pdf 1], [blank], [pdf 2], [pdf 3]
+     * - pdfPageIndexForNotebookPage(3) returns 2
+     * - pdfPageIndexForNotebookPage(2) returns -1 (blank page, not PDF)
+     */
+    int pdfPageIndexForNotebookPage(int notebookPageIndex) const;
+    
+    /**
      * @brief Get the PDF title metadata.
      * @return Title string, or empty if not available.
      */

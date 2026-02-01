@@ -1318,17 +1318,13 @@ void Launcher::setupTimelineSelectModeHeader()
     headerLayout->setContentsMargins(0, 0, 8, 8);
     headerLayout->setSpacing(8);
     
-    // Back button (←)
+    // Back button (uses recent.png icon - arrow pointing left)
     m_timelineBackButton = new QPushButton(m_timelineSelectModeHeader);
     m_timelineBackButton->setObjectName("TimelineBackButton");
-    m_timelineBackButton->setText("←");
     m_timelineBackButton->setFixedSize(40, 40);
     m_timelineBackButton->setFlat(true);
     m_timelineBackButton->setCursor(Qt::PointingHandCursor);
-    
-    QFont backFont = m_timelineBackButton->font();
-    backFont.setPointSize(18);
-    m_timelineBackButton->setFont(backFont);
+    m_timelineBackButton->setIconSize(QSize(24, 24));
     
     connect(m_timelineBackButton, &QPushButton::clicked, this, [this]() {
         m_timelineList->exitSelectMode();
@@ -1347,22 +1343,21 @@ void Launcher::setupTimelineSelectModeHeader()
     
     headerLayout->addWidget(m_timelineSelectionCountLabel, 1);  // Stretch
     
-    // Overflow menu button (⋮)
+    // Overflow menu button (uses menu.png icon - three dots)
     m_timelineOverflowMenuButton = new QPushButton(m_timelineSelectModeHeader);
     m_timelineOverflowMenuButton->setObjectName("TimelineOverflowMenuButton");
-    m_timelineOverflowMenuButton->setText("⋮");
     m_timelineOverflowMenuButton->setFixedSize(40, 40);
     m_timelineOverflowMenuButton->setFlat(true);
     m_timelineOverflowMenuButton->setCursor(Qt::PointingHandCursor);
-    
-    QFont menuFont = m_timelineOverflowMenuButton->font();
-    menuFont.setPointSize(18);
-    m_timelineOverflowMenuButton->setFont(menuFont);
+    m_timelineOverflowMenuButton->setIconSize(QSize(24, 24));
     
     connect(m_timelineOverflowMenuButton, &QPushButton::clicked, 
             this, &Launcher::showTimelineOverflowMenu);
     
     headerLayout->addWidget(m_timelineOverflowMenuButton);
+    
+    // Set initial icons based on current theme
+    updateTimelineHeaderButtonIcons();
 }
 
 void Launcher::showTimelineSelectModeHeader(int count)
@@ -1374,27 +1369,45 @@ void Launcher::showTimelineSelectModeHeader(int count)
         m_timelineSelectionCountLabel->setText(tr("%1 selected").arg(count));
     }
     
-    // Update colors based on dark mode
-    bool dark = isDarkMode();
-    QColor textColor = ThemeColors::textPrimary(dark);
+    // Update icons for current theme
+    updateTimelineHeaderButtonIcons();
     
+    // Update button styles (hover/press effects)
+    bool dark = isDarkMode();
     QString buttonStyle = QString(
-        "QPushButton { color: %1; border: none; background: transparent; }"
-        "QPushButton:hover { background: %2; border-radius: 20px; }"
-        "QPushButton:pressed { background: %3; border-radius: 20px; }"
-    ).arg(textColor.name(),
-          ThemeColors::itemHover(dark).name(),
+        "QPushButton { border: none; background: transparent; }"
+        "QPushButton:hover { background: %1; border-radius: 20px; }"
+        "QPushButton:pressed { background: %2; border-radius: 20px; }"
+    ).arg(ThemeColors::itemHover(dark).name(),
           ThemeColors::pressed(dark).name());
     
     m_timelineBackButton->setStyleSheet(buttonStyle);
     m_timelineOverflowMenuButton->setStyleSheet(buttonStyle);
     
+    // Update label color
     QPalette labelPal = m_timelineSelectionCountLabel->palette();
-    labelPal.setColor(QPalette::WindowText, textColor);
+    labelPal.setColor(QPalette::WindowText, ThemeColors::textPrimary(dark));
     m_timelineSelectionCountLabel->setPalette(labelPal);
     
     // Show header
     m_timelineSelectModeHeader->setVisible(true);
+}
+
+void Launcher::updateTimelineHeaderButtonIcons()
+{
+    bool dark = isDarkMode();
+    
+    // Update back button icon based on theme
+    QString backIconPath = dark 
+        ? ":/resources/icons/recent_reversed.png" 
+        : ":/resources/icons/recent.png";
+    m_timelineBackButton->setIcon(QIcon(backIconPath));
+    
+    // Update overflow menu button icon based on theme
+    QString menuIconPath = dark 
+        ? ":/resources/icons/menu_reversed.png" 
+        : ":/resources/icons/menu.png";
+    m_timelineOverflowMenuButton->setIcon(QIcon(menuIconPath));
 }
 
 void Launcher::hideTimelineSelectModeHeader()

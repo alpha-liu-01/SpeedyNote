@@ -137,6 +137,7 @@ private:
     void showTimelineSelectModeHeader(int count);
     void hideTimelineSelectModeHeader();
     void showTimelineOverflowMenu();
+    void updateTimelineHeaderButtonIcons();
     void onTimelineSelectModeChanged(bool active);
     void onTimelineBatchSelectionChanged(int count);
     void onTimelineLongPressed(const QModelIndex& index, const QPoint& globalPos);

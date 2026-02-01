@@ -2057,11 +2057,30 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         OutlinePanel* outlinePanel = m_leftSidebar->outlinePanel();
         if (outlinePanel) {
             // Connect viewport's currentPageChanged to outline highlighting
+            // Note: Outline stores PDF page indices, so we convert notebook page → PDF page
             m_outlinePageConn = connect(viewport, &DocumentViewport::currentPageChanged,
-                                        outlinePanel, &OutlinePanel::highlightPage);
+                                        this, [outlinePanel, viewport]() {
+                Document* doc = viewport->document();
+                if (!doc) return;
+                
+                int notebookPage = viewport->currentPageIndex();
+                int pdfPage = doc->pdfPageIndexForNotebookPage(notebookPage);
+                
+                // Only highlight if current page is a PDF page
+                // For inserted blank pages, keep the previous highlight
+                if (pdfPage >= 0) {
+                    outlinePanel->highlightPage(pdfPage);
+                }
+            });
             
             // Sync current page state immediately
-            outlinePanel->highlightPage(viewport->currentPageIndex());
+            Document* doc = viewport->document();
+            if (doc) {
+                int pdfPage = doc->pdfPageIndexForNotebookPage(viewport->currentPageIndex());
+                if (pdfPage >= 0) {
+                    outlinePanel->highlightPage(pdfPage);
+                }
+            }
         }
     }
     
@@ -4653,13 +4672,28 @@ void MainWindow::onSearchMatchFound(const PdfSearchMatch& match,
         return;
     }
     
-    // Update search state
+    Document* doc = vp->document();
+    if (!doc) {
+        return;
+    }
+    
+    // Update search state (keep PDF page index for search engine compatibility)
     m_searchState->currentPageIndex = match.pageIndex;
     m_searchState->currentMatchIndex = match.matchIndex;
     m_searchState->currentPageMatches = pageMatches;
     
-    // Navigate to the page with the match
-    vp->scrollToPage(match.pageIndex);
+    // Convert PDF page index to notebook page index for navigation/highlighting
+    // When pages are inserted between PDF pages, these indices differ
+    int notebookPageIndex = doc->notebookPageIndexForPdfPage(match.pageIndex);
+    if (notebookPageIndex < 0) {
+        // PDF page not found in notebook (shouldn't happen, but be safe)
+        qWarning() << "[MainWindow] Search match on PDF page" << match.pageIndex 
+                   << "but no corresponding notebook page found";
+        return;
+    }
+    
+    // Navigate to the notebook page with the match
+    vp->scrollToPage(notebookPageIndex);
     
     // Update viewport highlights
     // Find the index of current match within pageMatches
@@ -4671,13 +4705,15 @@ void MainWindow::onSearchMatchFound(const PdfSearchMatch& match,
         }
     }
     
-    vp->setSearchMatches(pageMatches, currentIdx, match.pageIndex);
+    // Pass notebook page index for correct overlay rendering comparison
+    vp->setSearchMatches(pageMatches, currentIdx, notebookPageIndex);
     
     // Clear any previous "not found" status
     m_pdfSearchBar->clearStatus();
     
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "[MainWindow] Search match found on page" << match.pageIndex 
+    qDebug() << "[MainWindow] Search match found on PDF page" << match.pageIndex 
+             << "(notebook page" << notebookPageIndex << ")"
              << "match" << match.matchIndex << "of" << pageMatches.size();
 #endif
 }
@@ -4990,16 +5026,29 @@ void MainWindow::setupOutlinePanelConnections()
     }
     
     // Navigation: OutlinePanel → DocumentViewport
+    // Note: pageIndex from outline is a PDF page index, not notebook page index
+    // When pages are inserted between PDF pages, these differ
     connect(outlinePanel, &OutlinePanel::navigationRequested,
-            this, [this](int pageIndex, QPointF position) {
+            this, [this](int pdfPageIndex, QPointF position) {
         if (DocumentViewport* vp = currentViewport()) {
+            Document* doc = vp->document();
+            if (!doc) return;
+            
+            // Convert PDF page index to notebook page index
+            int notebookPageIndex = doc->notebookPageIndexForPdfPage(pdfPageIndex);
+            if (notebookPageIndex < 0) {
+                qWarning() << "Outline navigation: PDF page" << pdfPageIndex 
+                           << "not found in notebook";
+                return;
+            }
+            
             // Position values of -1 mean "not specified"
             if (position.x() >= 0 || position.y() >= 0) {
                 // Scroll to exact position within the page (PDF provides normalized coords)
-                vp->scrollToPositionOnPage(pageIndex, position);
+                vp->scrollToPositionOnPage(notebookPageIndex, position);
             } else {
                 // No position specified - just scroll to the page top
-                vp->scrollToPage(pageIndex);
+                vp->scrollToPage(notebookPageIndex);
             }
         }
     });

@@ -217,6 +217,9 @@ void StarredView::setDarkMode(bool dark)
         pal.setColor(QPalette::WindowText, dark ? QColor(150, 150, 150) : QColor(120, 120, 120));
         m_emptyLabel->setPalette(pal);
         
+        // Update header button icons (always, so they're ready when shown)
+        updateHeaderButtonIcons();
+        
         // Update select mode header colors if visible
         if (m_selectModeHeader->isVisible()) {
             showSelectModeHeader(m_listView->selectionCount());
@@ -278,18 +281,14 @@ void StarredView::setupSelectModeHeader()
     headerLayout->setContentsMargins(0, 0, 8, 8);
     headerLayout->setSpacing(8);
     
-    // Back button (←)
+    // Back button (uses recent.png icon - arrow pointing left)
     // Parent is m_selectModeHeader so it's properly contained in the header
     m_backButton = new QPushButton(m_selectModeHeader);
     m_backButton->setObjectName("BackButton");
-    m_backButton->setText("←");
     m_backButton->setFixedSize(40, 40);
     m_backButton->setFlat(true);
     m_backButton->setCursor(Qt::PointingHandCursor);
-    
-    QFont backFont = m_backButton->font();
-    backFont.setPointSize(18);
-    m_backButton->setFont(backFont);
+    m_backButton->setIconSize(QSize(24, 24));
     
     connect(m_backButton, &QPushButton::clicked, this, [this]() {
         m_listView->exitSelectMode();
@@ -308,22 +307,20 @@ void StarredView::setupSelectModeHeader()
     
     headerLayout->addWidget(m_selectionCountLabel, 1);  // Stretch
     
-    // Overflow menu button (⋮)
+    // Overflow menu button (uses menu.png icon - three dots)
     m_overflowMenuButton = new QPushButton(m_selectModeHeader);
     m_overflowMenuButton->setObjectName("OverflowMenuButton");
-    m_overflowMenuButton->setText("⋮");
     m_overflowMenuButton->setFixedSize(40, 40);
     m_overflowMenuButton->setFlat(true);
     m_overflowMenuButton->setCursor(Qt::PointingHandCursor);
-    
-    QFont menuFont = m_overflowMenuButton->font();
-    menuFont.setPointSize(20);
-    menuFont.setBold(true);
-    m_overflowMenuButton->setFont(menuFont);
+    m_overflowMenuButton->setIconSize(QSize(24, 24));
     
     connect(m_overflowMenuButton, &QPushButton::clicked, this, &StarredView::showOverflowMenu);
     
     headerLayout->addWidget(m_overflowMenuButton);
+    
+    // Set initial icons based on current theme
+    updateHeaderButtonIcons();
 }
 
 void StarredView::showSelectModeHeader(int count)
@@ -335,26 +332,42 @@ void StarredView::showSelectModeHeader(int count)
         m_selectionCountLabel->setText(tr("%1 selected").arg(count));
     }
     
-    // Update colors based on dark mode
-    QColor textColor = ThemeColors::textPrimary(m_darkMode);
+    // Update icons for current theme
+    updateHeaderButtonIcons();
     
+    // Update button styles (hover/press effects)
     QString buttonStyle = QString(
-        "QPushButton { color: %1; border: none; background: transparent; }"
-        "QPushButton:hover { background: %2; border-radius: 20px; }"
-        "QPushButton:pressed { background: %3; border-radius: 20px; }"
-    ).arg(textColor.name(),
-          ThemeColors::itemHover(m_darkMode).name(),
+        "QPushButton { border: none; background: transparent; }"
+        "QPushButton:hover { background: %1; border-radius: 20px; }"
+        "QPushButton:pressed { background: %2; border-radius: 20px; }"
+    ).arg(ThemeColors::itemHover(m_darkMode).name(),
           ThemeColors::pressed(m_darkMode).name());
     
     m_backButton->setStyleSheet(buttonStyle);
     m_overflowMenuButton->setStyleSheet(buttonStyle);
     
+    // Update label color
     QPalette labelPal = m_selectionCountLabel->palette();
-    labelPal.setColor(QPalette::WindowText, textColor);
+    labelPal.setColor(QPalette::WindowText, ThemeColors::textPrimary(m_darkMode));
     m_selectionCountLabel->setPalette(labelPal);
     
     // Show header
     m_selectModeHeader->setVisible(true);
+}
+
+void StarredView::updateHeaderButtonIcons()
+{
+    // Update back button icon based on theme
+    QString backIconPath = m_darkMode 
+        ? ":/resources/icons/recent_reversed.png" 
+        : ":/resources/icons/recent.png";
+    m_backButton->setIcon(QIcon(backIconPath));
+    
+    // Update overflow menu button icon based on theme
+    QString menuIconPath = m_darkMode 
+        ? ":/resources/icons/menu_reversed.png" 
+        : ":/resources/icons/menu.png";
+    m_overflowMenuButton->setIcon(QIcon(menuIconPath));
 }
 
 void StarredView::hideSelectModeHeader()
