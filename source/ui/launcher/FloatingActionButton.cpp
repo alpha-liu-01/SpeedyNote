@@ -239,26 +239,39 @@ void FloatingActionButton::updateActionButtonPositions()
 
 void FloatingActionButton::updateMainButtonIcon()
 {
-    // Draw rotated + sign
-    QPixmap pixmap(MAIN_BUTTON_SIZE, MAIN_BUTTON_SIZE);
-    pixmap.fill(Qt::transparent);
+    // Get device pixel ratio for high-DPI support
+    qreal dpr = devicePixelRatioF();
     
-    QPainter painter(&pixmap);
+    // Load the appropriate icon based on theme
+    // The main button has a blue background, so always use the reversed (white) icon
+    QString iconPath = ":/resources/icons/addtab_reversed.png";
+    QPixmap sourcePixmap(iconPath);
+    
+    // Scale the source icon at high resolution for crisp rendering
+    constexpr int iconSize = 28;  // Logical size
+    int scaledIconSize = qRound(iconSize * dpr);
+    QPixmap scaledIcon = sourcePixmap.scaled(scaledIconSize, scaledIconSize, 
+        Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    scaledIcon.setDevicePixelRatio(dpr);
+    
+    // Create output pixmap at high-DPI resolution
+    int scaledButtonSize = qRound(MAIN_BUTTON_SIZE * dpr);
+    QPixmap rotatedPixmap(scaledButtonSize, scaledButtonSize);
+    rotatedPixmap.setDevicePixelRatio(dpr);
+    rotatedPixmap.fill(Qt::transparent);
+    
+    QPainter painter(&rotatedPixmap);
     painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
     
-    // Translate to center and rotate
-    painter.translate(MAIN_BUTTON_SIZE / 2, MAIN_BUTTON_SIZE / 2);
+    // Work in logical coordinates (QPainter handles DPR automatically)
+    painter.translate(MAIN_BUTTON_SIZE / 2.0, MAIN_BUTTON_SIZE / 2.0);
     painter.rotate(m_rotation);
-    
-    // Draw + sign
-    painter.setPen(QPen(Qt::white, 3, Qt::SolidLine, Qt::RoundCap));
-    int armLength = 12;
-    painter.drawLine(-armLength, 0, armLength, 0);
-    painter.drawLine(0, -armLength, 0, armLength);
+    painter.drawPixmap(-iconSize / 2, -iconSize / 2, scaledIcon);
     
     painter.end();
     
-    m_mainButton->setIcon(QIcon(pixmap));
+    m_mainButton->setIcon(QIcon(rotatedPixmap));
     m_mainButton->setIconSize(QSize(MAIN_BUTTON_SIZE, MAIN_BUTTON_SIZE));
 }
 

@@ -2154,7 +2154,7 @@ Error output:
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="908"/>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="935"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1459"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1472"/>
         <source>Move to Folder</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2185,19 +2185,19 @@ Error output:
     </message>
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="972"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1427"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1440"/>
         <source>Export</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="975"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1431"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1444"/>
         <source>To PDF...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/ui/launcher/Launcher.cpp" line="980"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1440"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1453"/>
         <source>To SNBX...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2275,48 +2275,48 @@ This action cannot be undone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1372"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1367"/>
         <source>1 selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1374"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1369"/>
         <source>%1 selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1413"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1426"/>
         <source>Select All</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1418"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1431"/>
         <source>Deselect All</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1452"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1465"/>
         <source>Move to Folder...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1460"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1473"/>
         <source>Move %1 notebooks to...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1470"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1483"/>
         <source>Star Selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1630"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1639"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1643"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1652"/>
         <source>Export Complete</source>
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1631"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1644"/>
         <source>%n notebook(s) exported successfully</source>
         <translation type="unfinished">
             <numerusform></numerusform>
@@ -2324,65 +2324,65 @@ This action cannot be undone.</source>
         </translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1633"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1646"/>
         <source>Export Completed with Errors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1634"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1787"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1647"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1800"/>
         <source>%1 succeeded, %2 failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1636"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1789"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1649"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1802"/>
         <source>, %1 skipped</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1640"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1653"/>
         <source>%1 exported, %2 skipped</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1652"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1665"/>
         <source>Share Files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1657"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1670"/>
         <source>Share PDF</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1658"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1671"/>
         <source>Share %1 PDFs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1662"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1675"/>
         <source>Share Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1663"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1676"/>
         <source>Share %1 Notebooks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1748"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1761"/>
         <source>Importing...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1783"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1792"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1796"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1805"/>
         <source>Import Complete</source>
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1784"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1797"/>
         <source>%n notebook(s) imported successfully</source>
         <translation type="unfinished">
             <numerusform></numerusform>
@@ -2390,12 +2390,12 @@ This action cannot be undone.</source>
         </translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1786"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1799"/>
         <source>Import Completed with Errors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1793"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1806"/>
         <source>%1 imported, %2 skipped</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4477,67 +4477,67 @@ Try a different search term.</source>
 <context>
     <name>StarredView</name>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="333"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="330"/>
         <source>1 selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="335"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="332"/>
         <source>%1 selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="373"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="386"/>
         <source>Select All</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="378"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="391"/>
         <source>Deselect All</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="388"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="401"/>
         <source>Export</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="392"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="405"/>
         <source>To PDF...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="401"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="414"/>
         <source>To SNBX...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="413"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="426"/>
         <source>Move to Folder...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="420"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="433"/>
         <source>Move to Folder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="421"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="434"/>
         <source>Move %1 notebooks to...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="431"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="444"/>
         <source>Remove from Folder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="444"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="457"/>
         <source>Unstar Selected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/StarredView.cpp" line="511"/>
+        <location filename="../../source/ui/launcher/StarredView.cpp" line="524"/>
         <source>Unfiled</source>
         <translation type="unfinished"></translation>
     </message>

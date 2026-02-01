@@ -144,6 +144,11 @@ private:
      */
     void showOverflowMenu();
     
+    /**
+     * @brief Update header button icons based on current dark mode.
+     */
+    void updateHeaderButtonIcons();
+    
     // Model/View components
     StarredListView* m_listView = nullptr;
     StarredModel* m_model = nullptr;
@@ -156,8 +161,8 @@ private:
     // Select mode header (L-007)
     QWidget* m_selectModeHeader = nullptr;      // Header bar for select mode
     QLabel* m_selectionCountLabel = nullptr;    // Shows "X selected"
-    QPushButton* m_backButton = nullptr;        // ← back arrow to exit
-    QPushButton* m_overflowMenuButton = nullptr; // ⋮ overflow menu
+    QPushButton* m_backButton = nullptr;        // Back arrow to exit (recent.png icon)
+    QPushButton* m_overflowMenuButton = nullptr; // Overflow menu (menu.png icon)
     
     bool m_darkMode = false;
     bool m_needsReload = false;  // Deferred reload flag for when view becomes visible
