@@ -530,7 +530,8 @@ bundle_qt_frameworks() {
     
     if [[ -f "$macdeployqt" ]]; then
         echo -e "${CYAN}  → Running macdeployqt...${NC}"
-        "$macdeployqt" "$app_path" -verbose=0 2>&1 | grep -v "ERROR: Cannot resolve rpath" || true
+        # Filter out misleading "ERROR:" messages from macdeployqt (they're actually debug info about rpaths)
+        "$macdeployqt" "$app_path" -verbose=0 2>&1 | grep -v -E "^ERROR:|using QList" || true
         echo -e "${GREEN}  ✓ Qt frameworks bundled${NC}"
     else
         echo -e "${YELLOW}  ⚠ macdeployqt not found, skipping Qt framework bundling${NC}"
