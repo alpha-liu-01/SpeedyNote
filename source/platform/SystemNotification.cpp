@@ -151,9 +151,9 @@ bool initialize()
 #elif defined(Q_OS_LINUX)
     s_initialized = initDBus();
 #else
-    // Windows/macOS: placeholder
+    // Windows/macOS: System notifications not implemented
+    // Mark as initialized but isAvailable() will return false
     s_initialized = true;
-    qDebug() << "SystemNotification: Platform notifications not fully implemented";
 #endif
     
     return s_initialized;
@@ -215,8 +215,8 @@ void requestPermission()
     
     qDebug() << "SystemNotification: Permission request initiated";
 #else
-    // Desktop platforms don't need permission request
-    qDebug() << "SystemNotification: Permission request not needed on this platform";
+    // Desktop Linux uses DBus (no permission needed)
+    // Windows/macOS: notifications not implemented, silently ignore
 #endif
 }
 
@@ -256,6 +256,11 @@ void show(Type type, const QString& title, const QString& message, bool success)
     // Ensure initialized
     if (!s_initialized) {
         initialize();
+    }
+    
+    // Early return if notifications not available (Windows/macOS)
+    if (!isAvailable()) {
+        return;
     }
     
 #ifdef Q_OS_ANDROID
@@ -320,12 +325,8 @@ void show(Type type, const QString& title, const QString& message, bool success)
             break;
     }
     
-#else
-    // Windows/macOS: Log for now (can be extended)
-    Q_UNUSED(type);
-    qDebug() << "SystemNotification:" << (success ? "[SUCCESS]" : "[ERROR]")
-             << title << "-" << message;
 #endif
+    // Note: Windows/macOS return early via isAvailable() check above
 }
 
 void dismissExportNotification()
