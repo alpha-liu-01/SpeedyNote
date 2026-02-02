@@ -409,11 +409,13 @@ bundle_dependencies() {
     collect_dependencies "$executable" "$deps_file" "$processed_file"
     
     # Also scan any libraries already in Frameworks (from macdeployqt)
-    for lib in "${frameworks_dir}"/*.dylib "${frameworks_dir}"/*.framework/Versions/*/lib*.dylib 2>/dev/null; do
+    shopt -s nullglob
+    for lib in "${frameworks_dir}"/*.dylib "${frameworks_dir}"/*.framework/Versions/*/lib*.dylib; do
         if [[ -f "$lib" ]]; then
             collect_dependencies "$lib" "$deps_file" "$processed_file"
         fi
     done
+    shopt -u nullglob
     
     # Count and display
     local dep_count=$(wc -l < "$deps_file" | tr -d ' ')
