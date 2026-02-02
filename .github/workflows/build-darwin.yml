@@ -17,13 +17,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ARM64 (Apple Silicon) - macos-14 is M1
+          # ARM64 (Apple Silicon) - macos-latest is now ARM64
           - arch: arm64
-            runner: macos-14
+            runner: macos-latest
             artifact_suffix: arm64
-          # x86_64 (Intel) - macos-13 is Intel
+          # x86_64 (Intel) - macos-15-intel for Intel builds
           - arch: x86_64
-            runner: macos-13
+            runner: macos-15-intel
             artifact_suffix: x86_64
 
     steps:
