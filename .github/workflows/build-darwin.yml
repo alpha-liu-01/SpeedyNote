@@ -1,4 +1,4 @@
-name: Build SpeedyNote DMG Packages
+name: Build SpeedyNote macOS
 
 on:
   push:
@@ -6,38 +6,105 @@ on:
   pull_request:
     branches: ['main']
   release:
-    types: [ created ]
+    types: [created]
+  workflow_dispatch:  # Allow manual trigger
+
+# Required for release uploads
+permissions:
+  contents: write
 
 jobs:
-  build-dmg:
-    name: Build macOS DMG
-    runs-on: macos-latest
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        arch: [x86_64, arm64]
+        include:
+          # ARM64 (Apple Silicon) - macos-latest is now ARM64
+          - arch: arm64
+            runner: macos-latest
+            artifact_suffix: arm64
+          # x86_64 (Intel) - macos-15-intel for Intel builds
+          - arch: x86_64
+            runner: macos-15-intel
+            artifact_suffix: x86_64
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Homebrew
+      - name: Install dependencies
         run: |
+          echo "Installing dependencies for ${{ matrix.arch }}..."
+          
+          # Update Homebrew
+          brew update
+          
+          # Install required packages
+          # Qt6 for GUI framework
           brew install qt@6
-          brew install poppler
-          brew install sdl2
-          brew install create-dmg
+          
+          # MuPDF for PDF rendering and export (no Poppler needed)
+          brew install mupdf
+          
+          # Build tools
+          brew install cmake pkg-config
+          
+          # MuPDF dependencies (some may already be installed)
+          brew install harfbuzz freetype jpeg-turbo openjpeg jbig2dec gumbo-parser || true
+          brew install brotli zlib || true
+          
+          echo "Dependencies installed successfully"
 
-      - name: Build
-        shell: bash
+      - name: Setup Qt environment
         run: |
-          ./build_poppler_qt6.sh
-          ./compile-mac.sh << EOF
-          y
-          2
-          1
-          EOF
+          # Detect Homebrew prefix based on architecture
+          if [[ "${{ matrix.arch }}" == "arm64" ]]; then
+            HOMEBREW_PREFIX="/opt/homebrew"
+          else
+            HOMEBREW_PREFIX="/usr/local"
+          fi
+          
+          # Add Qt to PATH for lrelease
+          echo "${HOMEBREW_PREFIX}/opt/qt@6/bin" >> $GITHUB_PATH
+          echo "PKG_CONFIG_PATH=${HOMEBREW_PREFIX}/lib/pkgconfig:${HOMEBREW_PREFIX}/opt/qt@6/lib/pkgconfig" >> $GITHUB_ENV
+          echo "HOMEBREW_PREFIX=${HOMEBREW_PREFIX}" >> $GITHUB_ENV
 
-      - name: Upload DMG package
+      - name: Build SpeedyNote
+        run: |
+          echo "Building SpeedyNote for ${{ matrix.arch }}..."
+          
+          # Make script executable
+          chmod +x compile-mac.sh
+          
+          # Run build with auto-DMG, skip CLI installation
+          ./compile-mac.sh -d --no-cli
+
+      - name: List build artifacts
+        run: |
+          echo "=== Build artifacts ==="
+          ls -la *.dmg 2>/dev/null || echo "No DMG files found"
+          ls -la SpeedyNote.app 2>/dev/null || echo "No app bundle found"
+          
+          # Show DMG info
+          if ls *.dmg 1>/dev/null 2>&1; then
+            for dmg in *.dmg; do
+              echo "DMG: $dmg ($(du -h "$dmg" | cut -f1))"
+            done
+          fi
+
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: speedynote-dmg-package-${{ matrix.arch }}
+          name: SpeedyNote-macOS-${{ matrix.artifact_suffix }}
           path: "*.dmg"
+          if-no-files-found: error
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "*.dmg"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
