@@ -9,6 +9,10 @@ on:
     types: [created]
   workflow_dispatch:  # Allow manual trigger
 
+# Required for release uploads
+permissions:
+  contents: write
+
 jobs:
   build-macos:
     name: Build macOS (${{ matrix.arch }})
