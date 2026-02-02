@@ -147,6 +147,7 @@ check_and_install_dependencies() {
     
     # Required packages for MuPDF-only build
     local required_packages=(
+        "gcc"
         "qt@6"
         "mupdf"
         "cmake"
