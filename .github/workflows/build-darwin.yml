@@ -2,11 +2,8 @@ name: Build SpeedyNote macOS
 
 on:
   push:
-    branches: ['main']
-  pull_request:
-    branches: ['main']
-  release:
-    types: [created]
+    tags:
+      - 'v*'  # Trigger on version tags (e.g., v1.2.1, v2.0.0-beta)
   workflow_dispatch:  # Allow manual trigger
 
 # Required for release uploads
