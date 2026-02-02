@@ -23,6 +23,8 @@ MIN_MACOS_VERSION="12.0"
 PACKAGE_ONLY=false
 FORCE_REBUILD=false
 AUTO_DMG=false
+INSTALL_CLI=false
+SKIP_CLI=false
 
 # ============================================================================
 # Usage and Argument Parsing
@@ -35,12 +37,14 @@ show_usage() {
     echo "  -p, --package-only   Skip build if executable exists, go straight to packaging"
     echo "  -f, --force          Force rebuild even if executable exists"
     echo "  -d, --dmg            Automatically create DMG without prompting"
+    echo "  -c, --cli            Install 'speedynote' CLI command without prompting"
+    echo "  --no-cli             Skip CLI installation prompt"
     echo "  -h, --help           Show this help message"
     echo
     echo "Examples:"
-    echo "  $0                   # Full build + package"
+    echo "  $0                   # Full build + package (interactive)"
     echo "  $0 -p                # Package only (skip build if NoteApp exists)"
-    echo "  $0 -p -d             # Package only + auto-create DMG"
+    echo "  $0 -p -d -c          # Package + DMG + CLI (no prompts)"
     echo "  $0 -f                # Force full rebuild"
 }
 
@@ -57,6 +61,14 @@ parse_arguments() {
                 ;;
             -d|--dmg)
                 AUTO_DMG=true
+                shift
+                ;;
+            -c|--cli)
+                INSTALL_CLI=true
+                shift
+                ;;
+            --no-cli)
+                SKIP_CLI=true
                 shift
                 ;;
             -h|--help)
@@ -450,24 +462,43 @@ fix_library_paths() {
     local executable="${app_path}/Contents/MacOS/NoteApp"
     local frameworks_dir="${app_path}/Contents/Frameworks"
     
-    # Get all original paths from the executable that need to be fixed
     echo -e "${CYAN}  → Analyzing library references...${NC}"
     
-    # Fix executable - find all Homebrew references and fix them
-    echo -e "${CYAN}  → Fixing executable...${NC}"
+    # Build a list of all bundled library names for quick lookup
+    local bundled_libs=""
+    for lib in "${frameworks_dir}"/*.dylib; do
+        if [[ -f "$lib" ]]; then
+            bundled_libs="$bundled_libs $(basename "$lib")"
+        fi
+    done
     
-    # Get all non-system dependencies from executable
+    # Fix executable
+    echo -e "${CYAN}  → Fixing executable...${NC}"
     local exe_deps=$(otool -L "$executable" 2>/dev/null | tail -n +2 | awk '{print $1}')
     
     for dep in $exe_deps; do
-        # Skip system and already-fixed paths
-        if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]] || [[ "$dep" == "@"* ]]; then
+        local libname=$(basename "$dep")
+        
+        # Skip system libraries
+        if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]]; then
             continue
         fi
         
-        local libname=$(basename "$dep")
+        # Skip already properly fixed paths
+        if [[ "$dep" == "@executable_path/../Frameworks/"* ]]; then
+            continue
+        fi
         
-        # Check if we have this library bundled
+        # Fix @rpath references if the library is bundled
+        if [[ "$dep" == "@rpath/"* ]]; then
+            if [[ -f "${frameworks_dir}/${libname}" ]]; then
+                install_name_tool -change "$dep" \
+                    "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
+            fi
+            continue
+        fi
+        
+        # Fix absolute Homebrew paths
         if [[ -f "${frameworks_dir}/${libname}" ]]; then
             install_name_tool -change "$dep" \
                 "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
@@ -487,14 +518,37 @@ fix_library_paths() {
             local lib_deps=$(otool -L "$lib" 2>/dev/null | tail -n +2 | awk '{print $1}')
             
             for dep in $lib_deps; do
-                # Skip system and already-fixed paths
-                if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]] || [[ "$dep" == "@"* ]]; then
+                local dep_name=$(basename "$dep")
+                
+                # Skip system libraries
+                if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]]; then
                     continue
                 fi
                 
-                local dep_name=$(basename "$dep")
+                # Skip already properly fixed paths
+                if [[ "$dep" == "@executable_path/../Frameworks/"* ]]; then
+                    continue
+                fi
                 
-                # Check if we have this dependency bundled
+                # Fix @rpath references - this is the key fix!
+                if [[ "$dep" == "@rpath/"* ]]; then
+                    if [[ -f "${frameworks_dir}/${dep_name}" ]]; then
+                        install_name_tool -change "$dep" \
+                            "@executable_path/../Frameworks/${dep_name}" "$lib" 2>/dev/null || true
+                    fi
+                    continue
+                fi
+                
+                # Fix @loader_path references
+                if [[ "$dep" == "@loader_path/"* ]]; then
+                    if [[ -f "${frameworks_dir}/${dep_name}" ]]; then
+                        install_name_tool -change "$dep" \
+                            "@executable_path/../Frameworks/${dep_name}" "$lib" 2>/dev/null || true
+                    fi
+                    continue
+                fi
+                
+                # Fix absolute Homebrew paths
                 if [[ -f "${frameworks_dir}/${dep_name}" ]]; then
                     install_name_tool -change "$dep" \
                         "@executable_path/../Frameworks/${dep_name}" "$lib" 2>/dev/null || true
@@ -503,12 +557,24 @@ fix_library_paths() {
         fi
     done
     
-    # Remove all rpaths that point to Homebrew locations
+    # Remove all rpaths from executable that point to external locations
     echo -e "${CYAN}  → Removing external rpaths...${NC}"
     local rpaths=$(otool -l "$executable" 2>/dev/null | grep -A2 LC_RPATH | grep "path " | awk '{print $2}')
     for rpath in $rpaths; do
-        if [[ "$rpath" == /usr/local/* ]] || [[ "$rpath" == /opt/homebrew/* ]] || [[ "$rpath" == *Documents* ]]; then
+        if [[ "$rpath" == /usr/local/* ]] || [[ "$rpath" == /opt/homebrew/* ]] || [[ "$rpath" == *Documents* ]] || [[ "$rpath" == *Cellar* ]]; then
             install_name_tool -delete_rpath "$rpath" "$executable" 2>/dev/null || true
+        fi
+    done
+    
+    # Also remove rpaths from bundled libraries
+    for lib in "${frameworks_dir}"/*.dylib; do
+        if [[ -f "$lib" ]]; then
+            local lib_rpaths=$(otool -l "$lib" 2>/dev/null | grep -A2 LC_RPATH | grep "path " | awk '{print $2}')
+            for rpath in $lib_rpaths; do
+                if [[ "$rpath" == /usr/local/* ]] || [[ "$rpath" == /opt/homebrew/* ]] || [[ "$rpath" == *Cellar* ]] || [[ "$rpath" == "../lib" ]]; then
+                    install_name_tool -delete_rpath "$rpath" "$lib" 2>/dev/null || true
+                fi
+            done
         fi
     done
     
@@ -663,6 +729,92 @@ verify_bundle() {
 }
 
 # ============================================================================
+# CLI Command Installation
+# ============================================================================
+
+install_cli_command() {
+    local app_executable
+    local cli_path="/usr/local/bin/speedynote"
+    
+    # Skip if --no-cli flag was provided
+    if [[ "$SKIP_CLI" == "true" ]]; then
+        return
+    fi
+    
+    # Determine the full path to the executable
+    if [[ -d "/Applications/${APP_BUNDLE}" ]]; then
+        app_executable="/Applications/${APP_BUNDLE}/Contents/MacOS/NoteApp"
+    else
+        app_executable="$(pwd)/${APP_BUNDLE}/Contents/MacOS/NoteApp"
+    fi
+    
+    echo
+    
+    # Auto-install if --cli flag was provided
+    if [[ "$INSTALL_CLI" == "true" ]]; then
+        echo -e "${CYAN}Installing CLI command (--cli flag)...${NC}"
+    else
+        echo -e "${CYAN}Would you like to install the 'speedynote' CLI command? (y/n)${NC}"
+        echo -e "${CYAN}  This creates a wrapper in /usr/local/bin for terminal access${NC}"
+        read -r response
+        
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}  Skipping CLI installation${NC}"
+            return
+        fi
+    fi
+    
+    echo -e "${YELLOW}Installing CLI command...${NC}"
+    
+    # Create /usr/local/bin if it doesn't exist
+    if [[ ! -d "/usr/local/bin" ]]; then
+        echo -e "${CYAN}  → Creating /usr/local/bin...${NC}"
+        sudo mkdir -p /usr/local/bin
+    fi
+    
+    # Remove existing symlink or file
+    if [[ -L "$cli_path" ]] || [[ -f "$cli_path" ]]; then
+        echo -e "${CYAN}  → Removing existing speedynote command...${NC}"
+        sudo rm -f "$cli_path"
+    fi
+    
+    # Create a shell wrapper script (more reliable than symlink for .app bundles)
+    echo -e "${CYAN}  → Creating speedynote wrapper script...${NC}"
+    
+    # Create the wrapper script
+    local wrapper_content="#!/bin/bash
+# SpeedyNote CLI wrapper
+# Enables 'speedynote' command from terminal
+
+APP_PATH=\"${app_executable}\"
+
+# Check if app exists at expected location
+if [[ ! -f \"\$APP_PATH\" ]]; then
+    # Try Applications folder
+    if [[ -f \"/Applications/SpeedyNote.app/Contents/MacOS/NoteApp\" ]]; then
+        APP_PATH=\"/Applications/SpeedyNote.app/Contents/MacOS/NoteApp\"
+    else
+        echo \"Error: SpeedyNote not found. Please reinstall the application.\" >&2
+        exit 1
+    fi
+fi
+
+exec \"\$APP_PATH\" \"\$@\"
+"
+    
+    # Write the wrapper script
+    echo "$wrapper_content" | sudo tee "$cli_path" > /dev/null
+    sudo chmod +x "$cli_path"
+    
+    if [[ -x "$cli_path" ]]; then
+        echo -e "${GREEN}  ✓ CLI command installed: ${cli_path}${NC}"
+        echo -e "${CYAN}    Usage: speedynote --help${NC}"
+    else
+        echo -e "${RED}  ✗ Failed to install CLI command${NC}"
+    fi
+}
+
+# ============================================================================
 # Main Execution
 # ============================================================================
 
@@ -725,7 +877,10 @@ main() {
     # Step 9: Verify bundle
     verify_bundle "${APP_BUNDLE}"
     
-    # Step 10: DMG creation
+    # Step 10: Install CLI command
+    install_cli_command
+    
+    # Step 11: DMG creation
     echo
     if [[ "$AUTO_DMG" == "true" ]]; then
         create_dmg
@@ -745,6 +900,12 @@ main() {
     echo -e "${CYAN}To run SpeedyNote:${NC}"
     echo -e "  ${YELLOW}open ${APP_BUNDLE}${NC}"
     echo -e "  ${YELLOW}or: ./${APP_BUNDLE}/Contents/MacOS/NoteApp${NC}"
+    if [[ -L "/usr/local/bin/speedynote" ]] || [[ -f "/usr/local/bin/speedynote" ]]; then
+        echo
+        echo -e "${CYAN}CLI commands available:${NC}"
+        echo -e "  ${YELLOW}speedynote --help${NC}"
+        echo -e "  ${YELLOW}speedynote export-pdf <notebook.snb> -o output.pdf${NC}"
+    fi
     echo
 }
 
