@@ -213,16 +213,38 @@ elseif(APPLE)
     # macOS uses MuPDF exclusively for PDF rendering and export (no Poppler, no SDL2)
     
     # MuPDF for PDF rendering and export (via Homebrew)
-    set(MUPDF_INCLUDE_DIR "${HOMEBREW_PREFIX}/include")
-    set(MUPDF_LIBRARY_MAIN "${HOMEBREW_PREFIX}/lib/libmupdf.a")
-    set(MUPDF_LIBRARY_THIRD "${HOMEBREW_PREFIX}/lib/libmupdf-third.a")
+    # Homebrew may install MuPDF in different locations depending on version/linking
+    set(MUPDF_FOUND FALSE)
+    set(MUPDF_SEARCH_PATHS
+        "${HOMEBREW_PREFIX}/opt/mupdf"      # Homebrew keg-only location (most common)
+        "${HOMEBREW_PREFIX}"                 # Direct Homebrew prefix
+        "${HOMEBREW_PREFIX}/opt/mupdf-tools" # Alternative package name
+    )
     
-    if(EXISTS "${MUPDF_LIBRARY_MAIN}")
-        message(STATUS "✅ MuPDF found for PDF export")
+    foreach(MUPDF_PATH ${MUPDF_SEARCH_PATHS})
+        # Check for static library first (preferred for bundling)
+        if(EXISTS "${MUPDF_PATH}/lib/libmupdf.a")
+            set(MUPDF_INCLUDE_DIR "${MUPDF_PATH}/include")
+            set(MUPDF_LIBRARY_MAIN "${MUPDF_PATH}/lib/libmupdf.a")
+            set(MUPDF_LIBRARY_THIRD "${MUPDF_PATH}/lib/libmupdf-third.a")
+            message(STATUS "✅ MuPDF found (static): ${MUPDF_PATH}")
+            set(MUPDF_FOUND TRUE)
+            break()
+        # Check for shared library as fallback
+        elseif(EXISTS "${MUPDF_PATH}/lib/libmupdf.dylib")
+            set(MUPDF_INCLUDE_DIR "${MUPDF_PATH}/include")
+            set(MUPDF_LIBRARY_MAIN "${MUPDF_PATH}/lib/libmupdf.dylib")
+            set(MUPDF_LIBRARY_THIRD "")  # Shared builds don't have -third
+            message(STATUS "✅ MuPDF found (shared): ${MUPDF_PATH}")
+            set(MUPDF_FOUND TRUE)
+            break()
+        endif()
+    endforeach()
+    
+    if(MUPDF_FOUND)
         add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
-        set(MUPDF_FOUND TRUE)
         
-        # MuPDF static libs require these system libraries via pkg-config
+        # MuPDF requires these system libraries via pkg-config
         pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
         pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
         pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
@@ -233,13 +255,16 @@ elseif(APPLE)
         pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
         pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
         
-        find_library(MUJS_LIBRARY NAMES mujs PATHS "${HOMEBREW_PREFIX}/lib")
+        # Search for mujs in multiple locations
+        find_library(MUJS_LIBRARY NAMES mujs 
+            PATHS "${HOMEBREW_PREFIX}/lib" "${HOMEBREW_PREFIX}/opt/mujs/lib"
+            NO_DEFAULT_PATH)
         
         # Start with main library
         set(MUPDF_LIBRARIES ${MUPDF_LIBRARY_MAIN})
         
         # libmupdf-third.a is optional - Homebrew may bundle deps into main lib
-        if(EXISTS "${MUPDF_LIBRARY_THIRD}")
+        if(MUPDF_LIBRARY_THIRD AND EXISTS "${MUPDF_LIBRARY_THIRD}")
             list(APPEND MUPDF_LIBRARIES ${MUPDF_LIBRARY_THIRD})
             message(STATUS "   Found mupdf-third: ${MUPDF_LIBRARY_THIRD}")
         endif()
@@ -272,8 +297,12 @@ elseif(APPLE)
         endif()
     else()
         message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+        message(STATUS "   Searched in:")
+        foreach(MUPDF_PATH ${MUPDF_SEARCH_PATHS})
+            message(STATUS "     - ${MUPDF_PATH}/lib/libmupdf.a")
+            message(STATUS "     - ${MUPDF_PATH}/lib/libmupdf.dylib")
+        endforeach()
         message(STATUS "   Install with: brew install mupdf")
-        set(MUPDF_FOUND FALSE)
     endif()
 
     # Add MuPDF include directory if found
