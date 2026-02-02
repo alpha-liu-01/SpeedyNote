@@ -277,14 +277,13 @@ create_app_bundle() {
         </dict>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>SpeedyNote Package</string>
+            <string>SpeedyNote Bundle Export</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
             <string>Owner</string>
             <key>CFBundleTypeExtensions</key>
             <array>
-                <string>spn</string>
                 <string>snbx</string>
             </array>
         </dict>
