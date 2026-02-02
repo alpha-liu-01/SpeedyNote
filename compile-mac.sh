@@ -19,6 +19,59 @@ PKGNAME="SpeedyNote"
 APP_BUNDLE="${PKGNAME}.app"
 MIN_MACOS_VERSION="12.0"
 
+# Command line options
+PACKAGE_ONLY=false
+FORCE_REBUILD=false
+AUTO_DMG=false
+
+# ============================================================================
+# Usage and Argument Parsing
+# ============================================================================
+
+show_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo
+    echo "Options:"
+    echo "  -p, --package-only   Skip build if executable exists, go straight to packaging"
+    echo "  -f, --force          Force rebuild even if executable exists"
+    echo "  -d, --dmg            Automatically create DMG without prompting"
+    echo "  -h, --help           Show this help message"
+    echo
+    echo "Examples:"
+    echo "  $0                   # Full build + package"
+    echo "  $0 -p                # Package only (skip build if NoteApp exists)"
+    echo "  $0 -p -d             # Package only + auto-create DMG"
+    echo "  $0 -f                # Force full rebuild"
+}
+
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -p|--package-only)
+                PACKAGE_ONLY=true
+                shift
+                ;;
+            -f|--force)
+                FORCE_REBUILD=true
+                shift
+                ;;
+            -d|--dmg)
+                AUTO_DMG=true
+                shift
+                ;;
+            -h|--help)
+                show_usage
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Unknown option: $1${NC}"
+                show_usage
+                exit 1
+                ;;
+        esac
+    done
+}
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -299,29 +352,41 @@ EOF
 # Recursive Dependency Bundling
 # ============================================================================
 
-# Get all dependencies of a binary/library recursively
-get_dependencies_recursive() {
+# Collect all non-system dependencies recursively
+collect_dependencies() {
     local binary="$1"
-    local prefix=$(get_homebrew_prefix)
-    local processed_file="$2"
+    local deps_file="$2"
+    local processed_file="$3"
     
-    # Get direct dependencies
-    otool -L "$binary" 2>/dev/null | tail -n +2 | awk '{print $1}' | while read -r dep; do
-        # Skip system libraries and already processed
-        if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]] || [[ "$dep" == "@"* ]]; then
+    # Skip if already processed
+    if grep -qFx "$binary" "$processed_file" 2>/dev/null; then
+        return
+    fi
+    echo "$binary" >> "$processed_file"
+    
+    # Get direct dependencies using otool
+    local deps=$(otool -L "$binary" 2>/dev/null | tail -n +2 | awk '{print $1}')
+    
+    for dep in $deps; do
+        # Skip system libraries
+        if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]]; then
             continue
         fi
         
-        # Only process Homebrew libraries
-        if [[ "$dep" == "${prefix}"/* ]] || [[ "$dep" == /opt/homebrew/* ]] || [[ "$dep" == /usr/local/* ]]; then
-            # Check if already processed
-            if ! grep -q "^${dep}$" "$processed_file" 2>/dev/null; then
-                echo "$dep" >> "$processed_file"
-                echo "$dep"
-                
-                # Recursively get dependencies of this dependency
-                if [[ -f "$dep" ]]; then
-                    get_dependencies_recursive "$dep" "$processed_file"
+        # Skip already-fixed paths
+        if [[ "$dep" == "@executable_path"* ]] || [[ "$dep" == "@loader_path"* ]] || [[ "$dep" == "@rpath"* ]]; then
+            continue
+        fi
+        
+        # Only process Homebrew/Cellar libraries
+        if [[ "$dep" == /usr/local/* ]] || [[ "$dep" == /opt/homebrew/* ]]; then
+            # Check if file exists
+            if [[ -f "$dep" ]]; then
+                # Add to deps file if not already there
+                if ! grep -qFx "$dep" "$deps_file" 2>/dev/null; then
+                    echo "$dep" >> "$deps_file"
+                    # Recursively process this dependency
+                    collect_dependencies "$dep" "$deps_file" "$processed_file"
                 fi
             fi
         fi
@@ -332,39 +397,46 @@ bundle_dependencies() {
     local app_path="$1"
     local executable="${app_path}/Contents/MacOS/NoteApp"
     local frameworks_dir="${app_path}/Contents/Frameworks"
-    local prefix=$(get_homebrew_prefix)
     
     echo -e "${YELLOW}Bundling dependencies recursively...${NC}"
     
-    # Create temp file to track processed dependencies
+    # Create temp files
+    local deps_file=$(mktemp)
     local processed_file=$(mktemp)
     
-    # Get all dependencies recursively
+    # Collect all dependencies recursively
     echo -e "${CYAN}  → Scanning dependencies...${NC}"
-    local all_deps=$(get_dependencies_recursive "$executable" "$processed_file")
+    collect_dependencies "$executable" "$deps_file" "$processed_file"
     
-    # Count unique dependencies
-    local dep_count=$(echo "$all_deps" | sort -u | grep -v "^$" | wc -l | tr -d ' ')
+    # Also scan any libraries already in Frameworks (from macdeployqt)
+    for lib in "${frameworks_dir}"/*.dylib "${frameworks_dir}"/*.framework/Versions/*/lib*.dylib 2>/dev/null; do
+        if [[ -f "$lib" ]]; then
+            collect_dependencies "$lib" "$deps_file" "$processed_file"
+        fi
+    done
+    
+    # Count and display
+    local dep_count=$(wc -l < "$deps_file" | tr -d ' ')
     echo -e "${CYAN}  → Found ${dep_count} dependencies to bundle${NC}"
     
     # Copy each dependency
     local copied=0
-    echo "$all_deps" | sort -u | while read -r dep; do
+    while IFS= read -r dep; do
         if [[ -n "$dep" ]] && [[ -f "$dep" ]]; then
             local libname=$(basename "$dep")
             
-            # Skip if already copied
+            # Skip if already exists
             if [[ ! -f "${frameworks_dir}/${libname}" ]]; then
                 cp "$dep" "${frameworks_dir}/"
-                ((copied++)) || true
+                copied=$((copied + 1))
                 echo -e "${CYAN}    → ${libname}${NC}"
             fi
         fi
-    done
+    done < "$deps_file"
     
-    rm -f "$processed_file"
+    rm -f "$deps_file" "$processed_file"
     
-    echo -e "${GREEN}  ✓ Dependencies copied${NC}"
+    echo -e "${GREEN}  ✓ Copied ${copied} libraries${NC}"
     
     # Fix library paths
     echo -e "${YELLOW}Fixing library paths...${NC}"
@@ -375,31 +447,32 @@ fix_library_paths() {
     local app_path="$1"
     local executable="${app_path}/Contents/MacOS/NoteApp"
     local frameworks_dir="${app_path}/Contents/Frameworks"
-    local prefix=$(get_homebrew_prefix)
     
-    # Fix executable
+    # Get all original paths from the executable that need to be fixed
+    echo -e "${CYAN}  → Analyzing library references...${NC}"
+    
+    # Fix executable - find all Homebrew references and fix them
     echo -e "${CYAN}  → Fixing executable...${NC}"
-    for lib in "${frameworks_dir}"/*.dylib; do
-        if [[ -f "$lib" ]]; then
-            local libname=$(basename "$lib")
-            
-            # Update references in executable
-            install_name_tool -change "${prefix}/lib/${libname}" \
-                "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
-            install_name_tool -change "${prefix}/opt/qt@6/lib/${libname}" \
-                "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
-            install_name_tool -change "/opt/homebrew/lib/${libname}" \
-                "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
-            install_name_tool -change "/opt/homebrew/opt/qt@6/lib/${libname}" \
-                "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
-            install_name_tool -change "/usr/local/lib/${libname}" \
-                "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
-            install_name_tool -change "/usr/local/opt/qt@6/lib/${libname}" \
+    
+    # Get all non-system dependencies from executable
+    local exe_deps=$(otool -L "$executable" 2>/dev/null | tail -n +2 | awk '{print $1}')
+    
+    for dep in $exe_deps; do
+        # Skip system and already-fixed paths
+        if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]] || [[ "$dep" == "@"* ]]; then
+            continue
+        fi
+        
+        local libname=$(basename "$dep")
+        
+        # Check if we have this library bundled
+        if [[ -f "${frameworks_dir}/${libname}" ]]; then
+            install_name_tool -change "$dep" \
                 "@executable_path/../Frameworks/${libname}" "$executable" 2>/dev/null || true
         fi
     done
     
-    # Fix each library
+    # Fix each bundled library
     echo -e "${CYAN}  → Fixing bundled libraries...${NC}"
     for lib in "${frameworks_dir}"/*.dylib; do
         if [[ -f "$lib" ]]; then
@@ -408,36 +481,34 @@ fix_library_paths() {
             # Set library's own ID
             install_name_tool -id "@executable_path/../Frameworks/${libname}" "$lib" 2>/dev/null || true
             
-            # Fix references to other bundled libraries
-            for other_lib in "${frameworks_dir}"/*.dylib; do
-                if [[ -f "$other_lib" ]]; then
-                    local other_name=$(basename "$other_lib")
-                    
-                    install_name_tool -change "${prefix}/lib/${other_name}" \
-                        "@executable_path/../Frameworks/${other_name}" "$lib" 2>/dev/null || true
-                    install_name_tool -change "${prefix}/opt/qt@6/lib/${other_name}" \
-                        "@executable_path/../Frameworks/${other_name}" "$lib" 2>/dev/null || true
-                    install_name_tool -change "/opt/homebrew/lib/${other_name}" \
-                        "@executable_path/../Frameworks/${other_name}" "$lib" 2>/dev/null || true
-                    install_name_tool -change "/opt/homebrew/opt/qt@6/lib/${other_name}" \
-                        "@executable_path/../Frameworks/${other_name}" "$lib" 2>/dev/null || true
-                    install_name_tool -change "/usr/local/lib/${other_name}" \
-                        "@executable_path/../Frameworks/${other_name}" "$lib" 2>/dev/null || true
-                    install_name_tool -change "/usr/local/opt/qt@6/lib/${other_name}" \
-                        "@executable_path/../Frameworks/${other_name}" "$lib" 2>/dev/null || true
+            # Get this library's dependencies
+            local lib_deps=$(otool -L "$lib" 2>/dev/null | tail -n +2 | awk '{print $1}')
+            
+            for dep in $lib_deps; do
+                # Skip system and already-fixed paths
+                if [[ "$dep" == /System/* ]] || [[ "$dep" == /usr/lib/* ]] || [[ "$dep" == "@"* ]]; then
+                    continue
+                fi
+                
+                local dep_name=$(basename "$dep")
+                
+                # Check if we have this dependency bundled
+                if [[ -f "${frameworks_dir}/${dep_name}" ]]; then
+                    install_name_tool -change "$dep" \
+                        "@executable_path/../Frameworks/${dep_name}" "$lib" 2>/dev/null || true
                 fi
             done
         fi
     done
     
-    # Remove rpaths that point to Homebrew
+    # Remove all rpaths that point to Homebrew locations
     echo -e "${CYAN}  → Removing external rpaths...${NC}"
-    install_name_tool -delete_rpath "${prefix}/lib" "$executable" 2>/dev/null || true
-    install_name_tool -delete_rpath "${prefix}/opt/qt@6/lib" "$executable" 2>/dev/null || true
-    install_name_tool -delete_rpath "/opt/homebrew/lib" "$executable" 2>/dev/null || true
-    install_name_tool -delete_rpath "/opt/homebrew/opt/qt@6/lib" "$executable" 2>/dev/null || true
-    install_name_tool -delete_rpath "/usr/local/lib" "$executable" 2>/dev/null || true
-    install_name_tool -delete_rpath "/usr/local/opt/qt@6/lib" "$executable" 2>/dev/null || true
+    local rpaths=$(otool -l "$executable" 2>/dev/null | grep -A2 LC_RPATH | grep "path " | awk '{print $2}')
+    for rpath in $rpaths; do
+        if [[ "$rpath" == /usr/local/* ]] || [[ "$rpath" == /opt/homebrew/* ]] || [[ "$rpath" == *Documents* ]]; then
+            install_name_tool -delete_rpath "$rpath" "$executable" 2>/dev/null || true
+        fi
+    done
     
     echo -e "${GREEN}  ✓ Library paths fixed${NC}"
 }
@@ -537,18 +608,51 @@ EOF
 verify_bundle() {
     local app_path="$1"
     local executable="${app_path}/Contents/MacOS/NoteApp"
+    local frameworks_dir="${app_path}/Contents/Frameworks"
     
     echo -e "${YELLOW}Verifying bundle...${NC}"
     
-    # Check for unresolved dependencies
-    local unresolved=$(otool -L "$executable" 2>/dev/null | grep -E "^\s+(/opt/homebrew|/usr/local)" | grep -v "@executable_path" || true)
+    local has_issues=false
     
-    if [[ -n "$unresolved" ]]; then
-        echo -e "${YELLOW}  ⚠ Some dependencies may not be bundled:${NC}"
-        echo "$unresolved" | sed 's/^/    /'
-    else
-        echo -e "${GREEN}  ✓ All dependencies appear to be bundled${NC}"
+    # Check executable for unresolved dependencies
+    echo -e "${CYAN}  → Checking executable...${NC}"
+    local exe_unresolved=$(otool -L "$executable" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -E "^(/opt/homebrew|/usr/local|/Users)" || true)
+    
+    if [[ -n "$exe_unresolved" ]]; then
+        echo -e "${YELLOW}  ⚠ Executable has unbundled dependencies:${NC}"
+        echo "$exe_unresolved" | while read -r dep; do
+            echo -e "${RED}      $dep${NC}"
+        done
+        has_issues=true
     fi
+    
+    # Check each bundled library
+    echo -e "${CYAN}  → Checking bundled libraries...${NC}"
+    for lib in "${frameworks_dir}"/*.dylib; do
+        if [[ -f "$lib" ]]; then
+            local libname=$(basename "$lib")
+            local lib_unresolved=$(otool -L "$lib" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -E "^(/opt/homebrew|/usr/local|/Users)" || true)
+            
+            if [[ -n "$lib_unresolved" ]]; then
+                echo -e "${YELLOW}      ${libname} has unbundled deps:${NC}"
+                echo "$lib_unresolved" | while read -r dep; do
+                    echo -e "${RED}        $(basename $dep)${NC}"
+                done
+                has_issues=true
+            fi
+        fi
+    done
+    
+    if [[ "$has_issues" == "false" ]]; then
+        echo -e "${GREEN}  ✓ All dependencies appear to be properly bundled${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ Some dependencies need attention (app may still work)${NC}"
+    fi
+    
+    # Count bundled libraries
+    local lib_count=$(ls -1 "${frameworks_dir}"/*.dylib 2>/dev/null | wc -l | tr -d ' ')
+    local framework_count=$(ls -1d "${frameworks_dir}"/*.framework 2>/dev/null | wc -l | tr -d ' ')
+    echo -e "${CYAN}  Bundled: ${lib_count} dylibs, ${framework_count} frameworks${NC}"
     
     # Show bundle size
     local bundle_size=$(du -sh "$app_path" | awk '{print $1}')
@@ -560,6 +664,9 @@ verify_bundle() {
 # ============================================================================
 
 main() {
+    # Parse command line arguments
+    parse_arguments "$@"
+    
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
     echo -e "${BLUE}   SpeedyNote macOS Build Script${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════${NC}"
@@ -582,8 +689,26 @@ main() {
     # Step 4: Set up environment
     setup_environment
     
-    # Step 5: Build project
-    build_project
+    # Step 5: Build project (or skip if executable exists and --package-only)
+    local skip_build=false
+    
+    if [[ -f "build/NoteApp" ]] && [[ "$PACKAGE_ONLY" == "true" ]] && [[ "$FORCE_REBUILD" == "false" ]]; then
+        echo -e "${GREEN}✓ Executable found: build/NoteApp${NC}"
+        echo -e "${CYAN}  Skipping build (--package-only mode)${NC}"
+        skip_build=true
+    elif [[ -f "build/NoteApp" ]] && [[ "$PACKAGE_ONLY" == "false" ]] && [[ "$FORCE_REBUILD" == "false" ]]; then
+        echo -e "${YELLOW}Executable already exists: build/NoteApp${NC}"
+        echo -e "${CYAN}Would you like to rebuild? (y/n)${NC}"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo -e "${CYAN}  Skipping build, using existing executable${NC}"
+            skip_build=true
+        fi
+    fi
+    
+    if [[ "$skip_build" == "false" ]]; then
+        build_project
+    fi
     
     # Step 6: Create app bundle
     create_app_bundle
@@ -597,12 +722,16 @@ main() {
     # Step 9: Verify bundle
     verify_bundle "${APP_BUNDLE}"
     
-    # Step 10: Ask about DMG creation
+    # Step 10: DMG creation
     echo
-    echo -e "${CYAN}Would you like to create a distributable DMG? (y/n)${NC}"
-    read -r response
-    if [[ "$response" =~ ^[Yy]$ ]]; then
+    if [[ "$AUTO_DMG" == "true" ]]; then
         create_dmg
+    else
+        echo -e "${CYAN}Would you like to create a distributable DMG? (y/n)${NC}"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            create_dmg
+        fi
     fi
     
     echo
