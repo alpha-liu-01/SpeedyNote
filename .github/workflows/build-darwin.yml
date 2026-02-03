@@ -78,6 +78,17 @@ jobs:
           # Run build with auto-DMG, skip CLI installation
           ./compile-mac.sh -d --no-cli
 
+      - name: Verify code signature
+        run: |
+          echo "=== Verifying code signature ==="
+          if [[ -d "SpeedyNote.app" ]]; then
+            echo "Checking SpeedyNote.app..."
+            codesign --verify --deep --strict --verbose=2 SpeedyNote.app 2>&1 || true
+            echo ""
+            echo "Signature info:"
+            codesign -dvv SpeedyNote.app 2>&1 | head -20 || true
+          fi
+
       - name: List build artifacts
         run: |
           echo "=== Build artifacts ==="
@@ -99,7 +110,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload to Release
-        if: github.event_name == 'release'
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: "*.dmg"

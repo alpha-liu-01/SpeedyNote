@@ -606,6 +606,84 @@ bundle_qt_frameworks() {
     fi
 }
 
+# Ad-hoc code sign the app bundle (required for ARM64 Macs)
+codesign_app() {
+    local app_path="$1"
+    local frameworks_dir="${app_path}/Contents/Frameworks"
+    local plugins_dir="${app_path}/Contents/PlugIns"
+    
+    echo -e "${YELLOW}Code signing app bundle (ad-hoc)...${NC}"
+    echo -e "${CYAN}  Note: Required for Apple Silicon Macs${NC}"
+    
+    # Step 1: Sign all dylibs in Frameworks
+    echo -e "${CYAN}  → Signing dylibs...${NC}"
+    local dylib_count=0
+    for dylib in "${frameworks_dir}"/*.dylib; do
+        if [[ -f "$dylib" ]]; then
+            codesign --force --sign - --timestamp=none "$dylib" 2>/dev/null
+            ((dylib_count++)) || true
+        fi
+    done
+    echo -e "${CYAN}    Signed ${dylib_count} dylibs${NC}"
+    
+    # Step 2: Sign Qt frameworks (must sign the actual binary inside)
+    echo -e "${CYAN}  → Signing Qt frameworks...${NC}"
+    local framework_count=0
+    for framework in "${frameworks_dir}"/*.framework; do
+        if [[ -d "$framework" ]]; then
+            local fw_name=$(basename "$framework" .framework)
+            local fw_binary="${framework}/Versions/A/${fw_name}"
+            
+            # Sign the framework binary first
+            if [[ -f "$fw_binary" ]]; then
+                codesign --force --sign - --timestamp=none "$fw_binary" 2>/dev/null || true
+            fi
+            
+            # Then sign the framework bundle
+            codesign --force --sign - --timestamp=none "$framework" 2>/dev/null || true
+            ((framework_count++)) || true
+        fi
+    done
+    echo -e "${CYAN}    Signed ${framework_count} frameworks${NC}"
+    
+    # Step 3: Sign plugins
+    if [[ -d "$plugins_dir" ]]; then
+        echo -e "${CYAN}  → Signing plugins...${NC}"
+        local plugin_count=0
+        
+        # Sign individual plugin dylibs
+        while IFS= read -r -d '' plugin; do
+            codesign --force --sign - --timestamp=none "$plugin" 2>/dev/null || true
+            ((plugin_count++)) || true
+        done < <(find "$plugins_dir" -name "*.dylib" -print0 2>/dev/null)
+        
+        # Sign plugin bundles
+        while IFS= read -r -d '' plugin_bundle; do
+            codesign --force --sign - --timestamp=none "$plugin_bundle" 2>/dev/null || true
+        done < <(find "$plugins_dir" -name "*.bundle" -o -name "*.plugin" -print0 2>/dev/null)
+        
+        echo -e "${CYAN}    Signed ${plugin_count} plugins${NC}"
+    fi
+    
+    # Step 4: Sign the main executable
+    echo -e "${CYAN}  → Signing main executable...${NC}"
+    codesign --force --sign - --timestamp=none "${app_path}/Contents/MacOS/NoteApp"
+    
+    # Step 5: Sign the entire app bundle (this re-signs everything with proper structure)
+    echo -e "${CYAN}  → Signing app bundle...${NC}"
+    codesign --force --deep --sign - --timestamp=none "$app_path"
+    
+    # Verify signature
+    echo -e "${CYAN}  → Verifying signature...${NC}"
+    if codesign --verify --deep --strict "$app_path" 2>/dev/null; then
+        echo -e "${GREEN}  ✓ App signed and verified successfully${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ Signature verification had warnings${NC}"
+        # Show what failed
+        codesign --verify --deep --strict --verbose=2 "$app_path" 2>&1 | head -20 || true
+    fi
+}
+
 # ============================================================================
 # DMG Creation
 # ============================================================================
@@ -631,20 +709,33 @@ create_dmg() {
     ln -s /Applications dmg_temp/Applications
     
     # Create README
-    cat > dmg_temp/README.txt << EOF
-SpeedyNote for macOS (${arch})
-==============================
-
-Version: ${version}
-Architecture: ${arch}
+    cat > dmg_temp/README.txt << 'EOF'
+SpeedyNote for macOS
+====================
 
 Installation:
 1. Drag SpeedyNote.app to the Applications folder
 2. Double-click to launch
 
-Note: If you see a security warning on first launch:
-- Go to System Settings > Privacy & Security
-- Click "Open Anyway" for SpeedyNote
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+IMPORTANT: Gatekeeper Security Warning
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If you see "SpeedyNote is damaged and can't be opened"
+or a security warning, this is because the app is not
+signed with an Apple Developer certificate (it's open
+source software).
+
+FIX OPTION 1 - Terminal Command (Recommended):
+  Open Terminal and run:
+  xattr -cr /Applications/SpeedyNote.app
+
+FIX OPTION 2 - System Settings:
+  1. Go to System Settings > Privacy & Security
+  2. Scroll down to find the blocked app message
+  3. Click "Open Anyway"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 For more information:
 https://github.com/alpha-liu-01/SpeedyNote
@@ -875,13 +966,16 @@ main() {
     # Step 8: Bundle additional dependencies (MuPDF and its deps)
     bundle_dependencies "${APP_BUNDLE}"
     
-    # Step 9: Verify bundle
+    # Step 9: Code sign the app (ad-hoc signing for Gatekeeper)
+    codesign_app "${APP_BUNDLE}"
+    
+    # Step 10: Verify bundle
     verify_bundle "${APP_BUNDLE}"
     
-    # Step 10: Install CLI command
+    # Step 11: Install CLI command
     install_cli_command
     
-    # Step 11: DMG creation
+    # Step 12: DMG creation
     echo
     if [[ "$AUTO_DMG" == "true" ]]; then
         create_dmg
