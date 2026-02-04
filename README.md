@@ -93,9 +93,9 @@
 | Platform    | Minimum                  | Recommended      |
 | ----------- | ------------------------ | ---------------- |
 | **Windows** | Windows 10 1809          | Windows 11       |
-| **macOS**   | macOS 12 (to be tested)  | macOS 15+        |
+| **macOS**   | macOS 13                 | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
-| **Android** | Android 8.0 (API 26)     | Android 13+      |
+| **Android** | Android 9 (API 28)       | Android 13+      |
 
 **Hardware:** Any x86_64 or ARM64 CPU. Tested on Intel Core i5 470UM (2010), Celeron N4000, Snapdragon 7c Gen 2, Rockchip RK3399
 
@@ -108,10 +108,10 @@ Download the latest release from **[GitHub Releases](https://github.com/alpha-li
 | Platform      | Package                           |
 | ------------- | --------------------------------- |
 | Windows       | `.exe` installer                  |
-| macOS         | `.dmg` disk image (to be offered) |
+| macOS         | `.dmg` disk image |
 | Debian/Ubuntu | `.deb` package                    |
 | Fedora/RHEL   | `.rpm` package                    |
-| Arch Linux    | `.pkg.tar.zst` package            |
+| Arch Linux    | `yay -S speedynote`               |
 
 #### Android
 
@@ -159,7 +159,7 @@ cd SpeedyNote
 ./compile.ps1
 
 # macOS
-./compile-mac.sh  # Not updated yet. 
+./compile-mac.sh
 
 # Linux
 ./compile.sh
@@ -407,6 +407,6 @@ If SpeedyNote helps you, consider:
 
 **Made with ❤️ for students who deserve better tools**
 
-*SpeedyNote v1.0*
+*SpeedyNote v1.x*
 
 </div>
