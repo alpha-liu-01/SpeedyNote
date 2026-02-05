@@ -93,9 +93,9 @@
 | 平台          | 最低要求                     | 推荐配置             |
 | ----------- | ------------------------ | ---------------- |
 | **Windows** | Windows 10 1809          | Windows 11       |
-| **macOS**   | macOS 12（待测试）            | macOS 15+        |
+| **macOS**   | macOS 13                | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | 任何支持 Qt 6.4+ 的系统 |
-| **Android** | Android 8.0 (API 26)     | Android 13+      |
+| **Android** | Android 9 (API 28)     | Android 13+      |
 
 **硬件：** 任何 x86_64 或 ARM64 CPU。已在 Intel Core i5 470UM（2010）、赛扬 N4000、高通骁龙 7c Gen 2、瑞芯微 RK3399 上测试
 
@@ -108,10 +108,10 @@
 | 平台            | 包格式               |
 | ------------- | ----------------- |
 | Windows       | `.exe` 安装程序       |
-| macOS         | `.dmg` 磁盘映像（即将提供） |
+| macOS         | `.dmg` 磁盘映像       |
 | Debian/Ubuntu | `.deb` 包          |
 | Fedora/RHEL   | `.rpm` 包          |
-| Arch Linux    | `.pkg.tar.zst` 包  |
+| Arch Linux    |  AUR `yay -S speedynote`  |
 
 #### Android
 
@@ -158,7 +158,7 @@ cd SpeedyNote
 # Windows (MSYS2 clang64 shell)
 ./compile.ps1
 
-# macOS （暂时无法使用）
+# macOS
 ./compile-mac.sh
 
 # Linux

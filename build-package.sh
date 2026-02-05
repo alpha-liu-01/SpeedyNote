@@ -195,22 +195,22 @@ get_build_dependencies() {
         deb)
             # MuPDF for PDF rendering and export (static linking, needs dev packages for build)
             # jbig2dec, gumbo, mujs are MuPDF's optional dependencies that it was compiled with
-            echo "cmake, make, pkg-config, qt6-base-dev, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, qt6-tools-dev, libsdl2-dev, libasound2-dev, libmupdf-dev, libharfbuzz-dev, libfreetype-dev, libjpeg-dev, libopenjp2-7-dev, libjbig2dec0-dev, libgumbo-dev, libmujs-dev"
+            echo "cmake, make, pkg-config, qt6-base-dev, libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, qt6-tools-dev, libmupdf-dev, libharfbuzz-dev, libfreetype-dev, libjpeg-dev, libopenjp2-7-dev, libjbig2dec0-dev, libgumbo-dev, libmujs-dev"
             ;;
         rpm)
             # MuPDF for PDF rendering and export (static linking, needs devel packages for build)
             # jbig2dec, gumbo-parser, mujs are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-qtbase-devel, qt6-qttools-devel, SDL2-devel, alsa-lib-devel, mupdf-devel, harfbuzz-devel, freetype-devel, libjpeg-turbo-devel, openjpeg2-devel, jbig2dec-devel, gumbo-parser-devel, mujs-devel"
+            echo "cmake, make, pkgconf, qt6-qtbase-devel, qt6-qttools-devel, mupdf-devel, harfbuzz-devel, freetype-devel, libjpeg-turbo-devel, openjpeg2-devel, jbig2dec-devel, gumbo-parser-devel, mujs-devel"
             ;;
         arch)
             # MuPDF for PDF rendering and export (static linking)
             # jbig2dec, gumbo-parser, mujs are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-base, qt6-tools, sdl2-compat, alsa-lib, mupdf, harfbuzz, freetype2, libjpeg-turbo, openjpeg2, jbig2dec, gumbo-parser, mujs"
+            echo "cmake, make, pkgconf, qt6-base, qt6-tools, mupdf, harfbuzz, freetype2, libjpeg-turbo, openjpeg2, jbig2dec, gumbo-parser, mujs"
             ;;
         apk)
             # MuPDF for PDF rendering and export (static linking, needs dev packages for build)
             # jbig2dec, gumbo, mujs are MuPDF's optional dependencies
-            echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, sdl2-dev, alsa-lib-dev, mupdf-dev, harfbuzz-dev, freetype-dev, libjpeg-turbo-dev, openjpeg-dev, jbig2dec-dev, gumbo-dev, mujs-dev"
+            echo "cmake, make, pkgconf, qt6-qtbase-dev, qt6-qttools-dev, mupdf-dev, harfbuzz-dev, freetype-dev, libjpeg-turbo-dev, openjpeg-dev, jbig2dec-dev, gumbo-dev, mujs-dev"
             ;;
     esac
 }
@@ -590,7 +590,7 @@ pkgrel=$PKGREL
 pkgdesc="$DESCRIPTION"
 arch=("$PKGARCH")
 url="$URL"
-license=('MIT')
+license=('GPL-3.0-or-later')
 depends=($(get_dependencies arch | tr ',' ' '))
 makedepends=($(get_build_dependencies arch | tr ',' ' '))
 source=("\${pkgname}-\${pkgver}.tar.gz")
@@ -696,7 +696,7 @@ pkgrel=$PKGREL
 pkgdesc="$DESCRIPTION"
 url="$URL"
 arch="all"
-license="MIT"
+license="GPL-3.0-or-later"
 depends="$(get_dependencies apk)"
 makedepends="$(get_build_dependencies apk)"
 source="\$pkgname-\$pkgver.tar.gz"
