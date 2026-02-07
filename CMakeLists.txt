@@ -728,6 +728,11 @@ if(ANDROID)
     )
 else()
     add_executable(NoteApp ${APP_SOURCES})
+    # On Linux, output as 'speedynote' to match .desktop Exec= line and cmake --install
+    # (Windows uses NoteApp.exe, macOS uses NoteApp in app bundle — unchanged)
+    if(UNIX AND NOT APPLE)
+        set_target_properties(NoteApp PROPERTIES OUTPUT_NAME speedynote)
+    endif()
 endif()
 
 # ============================================================================
@@ -849,7 +854,10 @@ elseif(UNIX AND NOT ANDROID)
     if(RESOURCE_QM_FILES)
         install(FILES ${RESOURCE_QM_FILES} DESTINATION share/speedynote/translations)
     endif()
+    # Desktop integration files
+    install(FILES data/org.speedynote.app.desktop
+            DESTINATION share/applications)
     install(FILES resources/icons/mainicon.png
             DESTINATION share/icons/hicolor/256x256/apps
-            RENAME com.github.alpha_liu_01.SpeedyNote.png)
+            RENAME org.speedynote.app.png)
 endif()
