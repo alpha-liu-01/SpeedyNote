@@ -1,0 +1,7 @@
+{
+    "linter": {
+        "exceptions": [
+            "finish-args-home-filesystem-access"
+        ]
+    }
+}
