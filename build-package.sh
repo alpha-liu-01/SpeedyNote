@@ -334,34 +334,14 @@ build_project() {
     
     make -j"$JOBS"
     
-    if [[ ! -f "NoteApp" ]]; then
-        echo -e "${RED}Build failed: NoteApp executable not found${NC}"
+    if [[ ! -f "speedynote" ]]; then
+        echo -e "${RED}Build failed: speedynote executable not found${NC}"
         exit 1
     fi
     
     cd ..
     echo -e "${GREEN}Build successful!${NC}"
 }
-
-# Function to create desktop file with PDF MIME type association
-create_desktop_file() {
-    local desktop_file="$1"
-    cat > "$desktop_file" << EOF
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=SpeedyNote
-Comment=$DESCRIPTION
-Exec=speedynote %F
-Icon=speedynote
-Terminal=false
-StartupNotify=true
-Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;
-MimeType=application/pdf;
-EOF
-}
-
 
 # Function to create DEB package
 create_deb_package() {
@@ -422,7 +402,7 @@ EOF
     chmod 755 "$PKG_DIR/DEBIAN/postrm"
     
     # Install files
-    cp build/NoteApp "$PKG_DIR/usr/bin/speedynote"
+    cp build/speedynote "$PKG_DIR/usr/bin/speedynote"
     cp resources/icons/mainicon.png "$PKG_DIR/usr/share/pixmaps/speedynote.png"
     cp README.md "$PKG_DIR/usr/share/doc/$PKGNAME/"
     
@@ -432,8 +412,8 @@ EOF
         cp resources/translations/*.qm "$PKG_DIR/usr/share/speedynote/translations/" 2>/dev/null || true
     fi
     
-    # Create desktop file with PDF association
-    create_desktop_file "$PKG_DIR/usr/share/applications/speedynote.desktop"
+    # Install desktop file from committed source
+    cp data/org.speedynote.app.desktop "$PKG_DIR/usr/share/applications/org.speedynote.app.desktop"
     
     # Build package
     dpkg-deb --build "$PKG_DIR" "${PKGNAME}_${PKGVER}-${PKGREL}_$(dpkg --print-architecture).deb"
@@ -497,7 +477,7 @@ mkdir -p %{buildroot}/usr/share/applications
 mkdir -p %{buildroot}/usr/share/pixmaps
 mkdir -p %{buildroot}/usr/share/doc/%{name}
 
-install -m755 %{_vpath_builddir}/NoteApp %{buildroot}/usr/bin/speedynote
+install -m755 %{_vpath_builddir}/speedynote %{buildroot}/usr/bin/speedynote
 install -m644 resources/icons/mainicon.png %{buildroot}/usr/share/pixmaps/speedynote.png
 install -m644 README.md %{buildroot}/usr/share/doc/%{name}/
 
@@ -507,22 +487,8 @@ if [ -d "resources/translations" ]; then
     cp resources/translations/*.qm %{buildroot}/usr/share/speedynote/translations/ 2>/dev/null || true
 fi
 
-# File manager integrations removed - using launcher instead
-
-cat > %{buildroot}/usr/share/applications/speedynote.desktop << EOFDESKTOP
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=SpeedyNote
-Comment=$DESCRIPTION
-Exec=speedynote %F
-Icon=speedynote
-Terminal=false
-StartupNotify=true
-Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;
-MimeType=application/pdf;
-EOFDESKTOP
+# Install committed desktop file
+install -Dm644 data/org.speedynote.app.desktop %{buildroot}/usr/share/applications/org.speedynote.app.desktop
 
 %post
 /usr/bin/update-desktop-database -q /usr/share/applications || :
@@ -532,7 +498,7 @@ EOFDESKTOP
 
 %files
 /usr/bin/speedynote
-/usr/share/applications/speedynote.desktop
+/usr/share/applications/org.speedynote.app.desktop
 /usr/share/pixmaps/speedynote.png
 /usr/share/doc/%{name}/README.md
 /usr/share/speedynote/translations/
@@ -607,7 +573,7 @@ build() {
 
 package() {
     cd "\$srcdir/\${pkgname}-\${pkgver}"
-    install -Dm755 "build/NoteApp" "\$pkgdir/usr/bin/speedynote"
+    install -Dm755 "build/speedynote" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/speedynote.png"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
     
@@ -621,20 +587,8 @@ package() {
         done
     fi
     
-    install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=SpeedyNote
-Comment=$DESCRIPTION
-Exec=speedynote %F
-Icon=speedynote
-Terminal=false
-StartupNotify=true
-Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;
-MimeType=application/pdf;
-EOFDESKTOP
+    # Install committed desktop file
+    install -Dm644 "data/org.speedynote.app.desktop" "\$pkgdir/usr/share/applications/org.speedynote.app.desktop"
 }
 
 post_install() {
@@ -712,7 +666,7 @@ build() {
 }
 
 package() {
-    install -Dm755 "build/NoteApp" "\$pkgdir/usr/bin/speedynote"
+    install -Dm755 "build/speedynote" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/speedynote.png"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
     
@@ -726,20 +680,8 @@ package() {
         done
     fi
     
-    install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=SpeedyNote
-Comment=$DESCRIPTION
-Exec=speedynote %F
-Icon=speedynote
-Terminal=false
-StartupNotify=true
-Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;
-MimeType=application/pdf;
-EOFDESKTOP
+    # Install committed desktop file
+    install -Dm644 "data/org.speedynote.app.desktop" "\$pkgdir/usr/share/applications/org.speedynote.app.desktop"
 }
 EOF
     

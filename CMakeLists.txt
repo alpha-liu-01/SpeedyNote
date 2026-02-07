@@ -377,7 +377,10 @@ elseif(UNIX)
 
     # MuPDF for PDF export (prefer dynamic linking)
     # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
-    set(MUPDF_INCLUDE_DIR "/usr/include")
+    # MUPDF_INCLUDE_DIR can be overridden via -D (e.g. for Flatpak where headers are in /app/include)
+    if(NOT MUPDF_INCLUDE_DIR)
+        set(MUPDF_INCLUDE_DIR "/usr/include")
+    endif()
     
     # First try to find dynamic library (libmupdf.so)
     find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
@@ -728,6 +731,11 @@ if(ANDROID)
     )
 else()
     add_executable(NoteApp ${APP_SOURCES})
+    # On Linux, output as 'speedynote' to match .desktop Exec= line and cmake --install
+    # (Windows uses NoteApp.exe, macOS uses NoteApp in app bundle — unchanged)
+    if(UNIX AND NOT APPLE)
+        set_target_properties(NoteApp PROPERTIES OUTPUT_NAME speedynote)
+    endif()
 endif()
 
 # ============================================================================
@@ -849,7 +857,12 @@ elseif(UNIX AND NOT ANDROID)
     if(RESOURCE_QM_FILES)
         install(FILES ${RESOURCE_QM_FILES} DESTINATION share/speedynote/translations)
     endif()
-    install(FILES resources/icons/mainicon.png
-            DESTINATION share/icons/hicolor/256x256/apps
-            RENAME com.github.alpha_liu_01.SpeedyNote.png)
+    # Desktop integration files
+    install(FILES data/org.speedynote.app.desktop
+            DESTINATION share/applications)
+    install(FILES data/org.speedynote.app.metainfo.xml
+            DESTINATION share/metainfo)
+    install(FILES resources/icons/mainicon.svg
+            DESTINATION share/icons/hicolor/scalable/apps
+            RENAME org.speedynote.app.svg)
 endif()

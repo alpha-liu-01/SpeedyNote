@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SpeedyNote
+GenericName=Note-Taking Application
+Comment=A fast note-taking application with PDF annotation, PDF export, and stylus support
+Exec=speedynote %F
+Icon=org.speedynote.app
+Terminal=false
+StartupNotify=true
+Categories=Office;Education;
+Keywords=notes;pdf;annotation;writing;stylus;tablet;
+MimeType=application/pdf;

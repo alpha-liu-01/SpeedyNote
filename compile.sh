@@ -98,8 +98,8 @@ build_project() {
     echo -e "${YELLOW}Compiling with $(nproc) parallel jobs...${NC}"
     make -j$(nproc)
     
-    if [[ ! -f "NoteApp" ]]; then
-        echo -e "${RED}Build failed: NoteApp executable not found${NC}"
+    if [[ ! -f "speedynote" ]]; then
+        echo -e "${RED}Build failed: speedynote executable not found${NC}"
         exit 1
     fi
     

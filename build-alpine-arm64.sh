@@ -47,13 +47,13 @@ check_build_directory() {
         exit 1
     fi
     
-    if [[ ! -f "build/NoteApp" ]]; then
-        echo -e "${RED}Error: NoteApp executable not found in build directory${NC}"
+    if [[ ! -f "build/speedynote" ]]; then
+        echo -e "${RED}Error: speedynote executable not found in build directory${NC}"
         echo "Please compile SpeedyNote first using cmake and make"
         exit 1
     fi
     
-    echo -e "${GREEN}Found pre-built NoteApp executable${NC}"
+    echo -e "${GREEN}Found pre-built speedynote executable${NC}"
 }
 
 # Function to check packaging dependencies
@@ -161,10 +161,11 @@ create_apk_package() {
     # Create a minimal tarball with just the necessary files and pre-built binary
     mkdir -p alpine-pkg/speedynote-src
     cp -r resources/ alpine-pkg/speedynote-src/
+    cp -r data/ alpine-pkg/speedynote-src/
     cp README.md alpine-pkg/speedynote-src/
     cp CMakeLists.txt alpine-pkg/speedynote-src/
     mkdir -p alpine-pkg/speedynote-src/prebuilt
-    cp build/NoteApp alpine-pkg/speedynote-src/prebuilt/
+    cp build/speedynote alpine-pkg/speedynote-src/prebuilt/
 
     
     # Create tarball from alpine-pkg directory
@@ -195,7 +196,7 @@ build() {
 }
 
 package() {
-    install -Dm755 "prebuilt/NoteApp" "\$pkgdir/usr/bin/speedynote"
+    install -Dm755 "prebuilt/speedynote" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/speedynote.png"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
     
@@ -210,22 +211,8 @@ package() {
     fi
     
     
-    # Create desktop file
-    install -Dm644 /dev/stdin "\$pkgdir/usr/share/applications/speedynote.desktop" << EOFDESKTOP
-[Desktop Entry]
-Version=1.2.1
-Type=Application
-Name=SpeedyNote
-Comment=$DESCRIPTION
-Exec=speedynote %F
-Icon=speedynote
-Terminal=false
-StartupNotify=true
-Categories=Office;Education;
-Keywords=notes;pdf;annotation;writing;package;
-MimeType=application/pdf;application/x-speedynote-package;
-EOFDESKTOP
-
+    # Install committed desktop file
+    install -Dm644 "data/org.speedynote.app.desktop" "\$pkgdir/usr/share/applications/org.speedynote.app.desktop"
 }
 EOF
     
