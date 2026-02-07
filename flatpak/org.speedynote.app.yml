@@ -20,9 +20,6 @@ finish-args:
   # and notebook storage. This is the minimum viable permission for full
   # functionality including the CLI tools.
   - --filesystem=home
-  # Read host fontconfig so CJK font preferences (e.g. prefer Simplified
-  # Chinese over Japanese glyphs) carry into the sandbox.
-  - --filesystem=xdg-config/fontconfig:ro
   # Desktop notifications for export/import completion
   - --talk-name=org.freedesktop.Notifications
 
