@@ -377,7 +377,10 @@ elseif(UNIX)
 
     # MuPDF for PDF export (prefer dynamic linking)
     # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
-    set(MUPDF_INCLUDE_DIR "/usr/include")
+    # MUPDF_INCLUDE_DIR can be overridden via -D (e.g. for Flatpak where headers are in /app/include)
+    if(NOT MUPDF_INCLUDE_DIR)
+        set(MUPDF_INCLUDE_DIR "/usr/include")
+    endif()
     
     # First try to find dynamic library (libmupdf.so)
     find_library(MUPDF_LIBRARY_DYNAMIC NAMES libmupdf.so mupdf
@@ -862,7 +865,4 @@ elseif(UNIX AND NOT ANDROID)
     install(FILES resources/icons/mainicon.svg
             DESTINATION share/icons/hicolor/scalable/apps
             RENAME org.speedynote.app.svg)
-    install(FILES resources/icons/mainicon.png
-            DESTINATION share/icons/hicolor/256x256/apps
-            RENAME org.speedynote.app.png)
 endif()

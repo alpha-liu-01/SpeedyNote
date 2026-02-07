@@ -1,0 +1,82 @@
+# SpeedyNote Flatpak Manifest
+# Build locally:  flatpak-builder --force-clean build-dir flatpak/org.speedynote.app.yml
+# Install locally: flatpak-builder --user --install --force-clean build-dir flatpak/org.speedynote.app.yml
+# Run:             flatpak run org.speedynote.app
+
+app-id: org.speedynote.app
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+command: speedynote
+
+finish-args:
+  # Display (Wayland preferred, X11 fallback)
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU rendering
+  - --device=dri
+  # User files: needed for CLI (arbitrary paths), PDF files outside bundles,
+  # and notebook storage. This is the minimum viable permission for full
+  # functionality including the CLI tools.
+  - --filesystem=home
+  # Read host fontconfig so CJK font preferences (e.g. prefer Simplified
+  # Chinese over Japanese glyphs) carry into the sandbox.
+  - --filesystem=xdg-config/fontconfig:ro
+  # Desktop notifications for export/import completion
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  # =========================================================================
+  # MuPDF - PDF rendering and export library
+  # =========================================================================
+  # Built as a shared library with all dependencies bundled.
+  # SpeedyNote uses MuPDF exclusively for all PDF operations.
+  - name: mupdf
+    buildsystem: simple
+    build-commands:
+      - |-
+        make \
+          HAVE_X11=no \
+          HAVE_GLUT=no \
+          HAVE_CURL=no \
+          HAVE_OBJCOPY=no \
+          USE_SYSTEM_FREETYPE=no \
+          USE_SYSTEM_HARFBUZZ=no \
+          USE_SYSTEM_LIBJPEG=no \
+          USE_SYSTEM_ZLIB=no \
+          USE_SYSTEM_OPENJPEG=no \
+          USE_SYSTEM_JBIG2DEC=no \
+          USE_SYSTEM_LCMS2=no \
+          USE_SYSTEM_MUJS=no \
+          USE_SYSTEM_GUMBO=no \
+          USE_SYSTEM_LEPTONICA=no \
+          USE_SYSTEM_TESSERACT=no \
+          shared=yes \
+          build=release \
+          libs \
+          -j${FLATPAK_BUILDER_N_JOBS}
+      - install -d /app/lib /app/include
+      - cp -a build/shared-release/libmupdf.so* /app/lib/
+      - cp -r include/mupdf /app/include/
+    sources:
+      - type: archive
+        url: https://mupdf.com/downloads/archive/mupdf-1.25.1-source.tar.gz
+        sha256: 81aa1361252418cc45347b4ac075532096957a7ab772e20e046f3bb418d7263c
+
+  # =========================================================================
+  # SpeedyNote - main application
+  # =========================================================================
+  - name: speedynote
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DMUPDF_INCLUDE_DIR=/app/include
+    sources:
+      # For local testing: use the project directory
+      - type: dir
+        path: ..
+      # For Flathub submission: replace the above with a release tarball:
+      # - type: archive
+      #   url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.1.tar.gz
+      #   sha256: FIXME

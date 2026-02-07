@@ -70,3 +70,6 @@ private_scripts/
 plans.txt
 /android/signing/
 packaging/
+.flatpak-builder/
+build-dir/
+
