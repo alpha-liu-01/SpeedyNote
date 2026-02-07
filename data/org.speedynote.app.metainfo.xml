@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>org.speedynote.app</id>
+
+  <name>SpeedyNote</name>
+  <summary>A blazing-fast note-taking app with PDF annotation for stylus users</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+
+  <developer id="org.speedynote">
+    <name>SpeedyNote Team</name>
+  </developer>
+
+  <description>
+    <p>
+      SpeedyNote is a fast, open-source note-taking application designed for
+      stylus users who need iPad-quality annotation on budget hardware. Built
+      with native C++ and Qt, it delivers 360Hz stylus input on hardware as
+      modest as an Intel Celeron N4000 at 1.1GHz — with no Electron bloat.
+    </p>
+    <p>
+      Annotate PDFs with pressure-sensitive inking tools including pen, marker,
+      and highlighter, all rendered as vector strokes that zoom infinitely
+      without pixelation. Organize your work with multi-layer editing, paged
+      notebooks, or infinite edgeless canvases with lazy-loading tiles.
+    </p>
+    <p>Key features include:</p>
+    <ul>
+      <li>Instant PDF loading with clickable internal links and outline navigation</li>
+      <li>Multi-layer editing with add, delete, reorder, and merge operations</li>
+      <li>Touch gestures: two-finger pan, pinch-to-zoom, and palm rejection</li>
+      <li>Cross-platform note sharing via .snbx notebook packages</li>
+      <li>Powerful command-line interface for batch PDF export and notebook management</li>
+      <li>Multi-tab editing to work on multiple documents simultaneously</li>
+      <li>Auto-save so you never lose work</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">org.speedynote.app.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <image>https://i.imgur.com/mTpp0xk.png</image>
+      <caption>SpeedyNote pressure-sensitive stylus tools</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://i.imgur.com/dzSVHki.png</image>
+      <caption>SpeedyNote PDF Annotations</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://i.imgur.com/V2D8rPl.png</image>
+      <caption>SpeedyNote CLI support</caption>
+    </screenshot>
+  </screenshots>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#9a9bba</color>
+    <color type="primary" scheme_preference="dark">#454666</color>
+  </branding>
+
+  <url type="homepage">https://www.speedynote.org</url>
+  <url type="bugtracker">https://github.com/alpha-liu-01/SpeedyNote/issues</url>
+  <url type="vcs-browser">https://github.com/alpha-liu-01/SpeedyNote</url>
+  <url type="donation">https://buymeacoffee.com/alphaliu01</url>
+
+  <provides>
+    <binary>speedynote</binary>
+  </provides>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="1.2.1" date="2026-01-31">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Fixed tab switching causing jump to last page</li>
+          <li>Fixed PDF internal links broken on some versions</li>
+          <li>Fixed PDF text search highlight misalignment with inserted pages</li>
+          <li>Fixed starred view staying empty on first use</li>
+          <li>Migrated exclusively to MuPDF for all PDF operations, resolving library conflicts with Poppler</li>
+          <li>Fixed minor UI misalignments</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.2.0" date="2026-01-31">
+      <description>
+        <p>Major update with PDF text search, batch export to PDF and .snbx, command-line interface, and system notifications.</p>
+      </description>
+    </release>
+    <release version="1.1.6" date="2026-01-27">
+      <description>
+        <p>Bug fixes and stability improvements.</p>
+      </description>
+    </release>
+  </releases>
+
+</component>

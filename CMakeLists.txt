@@ -857,6 +857,11 @@ elseif(UNIX AND NOT ANDROID)
     # Desktop integration files
     install(FILES data/org.speedynote.app.desktop
             DESTINATION share/applications)
+    install(FILES data/org.speedynote.app.metainfo.xml
+            DESTINATION share/metainfo)
+    install(FILES resources/icons/mainicon.svg
+            DESTINATION share/icons/hicolor/scalable/apps
+            RENAME org.speedynote.app.svg)
     install(FILES resources/icons/mainicon.png
             DESTINATION share/icons/hicolor/256x256/apps
             RENAME org.speedynote.app.png)
