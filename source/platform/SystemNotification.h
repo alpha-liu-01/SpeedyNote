@@ -9,7 +9,7 @@
  * 
  * Provides a unified interface for showing system notifications on:
  * - Android: Uses NotificationManager via JNI
- * - Linux: Uses DBus org.freedesktop.Notifications
+ * - Linux: Uses XDG Desktop Portal (org.freedesktop.portal.Notification)
  * - Windows/macOS: Placeholder (can be extended)
  * 
  * Primary use case: Notify user when export/import completes while app is backgrounded.

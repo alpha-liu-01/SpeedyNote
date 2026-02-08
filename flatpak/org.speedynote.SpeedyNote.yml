@@ -1,11 +1,11 @@
 # SpeedyNote Flatpak Manifest
-# Build locally:  flatpak-builder --force-clean build-dir flatpak/org.speedynote.app.yml
-# Install locally: flatpak-builder --user --install --force-clean build-dir flatpak/org.speedynote.app.yml
-# Run:             flatpak run org.speedynote.app
+# Build locally:  flatpak-builder --force-clean build-dir flatpak/org.speedynote.SpeedyNote.yml
+# Install locally: flatpak-builder --user --install --force-clean build-dir flatpak/org.speedynote.SpeedyNote.yml
+# Run:             flatpak run org.speedynote.SpeedyNote
 
-app-id: org.speedynote.app
+app-id: org.speedynote.SpeedyNote
 runtime: org.kde.Platform
-runtime-version: '6.9'
+runtime-version: '6.10'
 sdk: org.kde.Sdk
 command: speedynote
 
@@ -16,18 +16,16 @@ finish-args:
   - --share=ipc
   # GPU rendering
   - --device=dri
-  # User files: needed for CLI (arbitrary paths), PDF files outside bundles,
-  # and notebook storage. This is the minimum viable permission for full
-  # functionality including the CLI tools.
-  - --filesystem=home
-  # Desktop notifications for export/import completion
-  - --talk-name=org.freedesktop.Notifications
+  # Access ~/Documents for notebook storage and PDF files.
+  # Other locations are accessible via the file chooser portal.
+  - --filesystem=xdg-documents
 
 modules:
   # =========================================================================
   # MuPDF - PDF rendering and export library
   # =========================================================================
-  # Built as a shared library with all dependencies bundled.
+  # Built as a shared library. Uses runtime-provided libraries where available;
+  # bundles only libraries not present in the KDE runtime.
   # SpeedyNote uses MuPDF exclusively for all PDF operations.
   - name: mupdf
     buildsystem: simple
@@ -38,13 +36,13 @@ modules:
           HAVE_GLUT=no \
           HAVE_CURL=no \
           HAVE_OBJCOPY=no \
-          USE_SYSTEM_FREETYPE=no \
-          USE_SYSTEM_HARFBUZZ=no \
-          USE_SYSTEM_LIBJPEG=no \
-          USE_SYSTEM_ZLIB=no \
-          USE_SYSTEM_OPENJPEG=no \
+          USE_SYSTEM_FREETYPE=yes \
+          USE_SYSTEM_HARFBUZZ=yes \
+          USE_SYSTEM_LIBJPEG=yes \
+          USE_SYSTEM_ZLIB=yes \
+          USE_SYSTEM_OPENJPEG=yes \
           USE_SYSTEM_JBIG2DEC=no \
-          USE_SYSTEM_LCMS2=no \
+          USE_SYSTEM_LCMS2=yes \
           USE_SYSTEM_MUJS=no \
           USE_SYSTEM_GUMBO=no \
           USE_SYSTEM_LEPTONICA=no \
@@ -71,8 +69,8 @@ modules:
       - -DMUPDF_INCLUDE_DIR=/app/include
     sources:
       - type: archive
-        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.1-8.tar.gz
-        sha256: e92b5c7a9581c8bebfe7834a3ecfe136c10cc97f91a5b51c2593111f2e8682b1
+        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.1-9.tar.gz
+        sha256: FIXME_AFTER_TAG
       # For local testing, replace the above with:
       # - type: dir
       #   path: ..

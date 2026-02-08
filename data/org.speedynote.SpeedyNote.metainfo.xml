@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: CC0-1.0 -->
 <component type="desktop-application">
-  <id>org.speedynote.app</id>
+  <id>org.speedynote.SpeedyNote</id>
 
   <name>SpeedyNote</name>
   <summary>A blazing-fast note-taking app with PDF annotation for stylus users</summary>
@@ -38,7 +38,7 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">org.speedynote.app.desktop</launchable>
+  <launchable type="desktop-id">org.speedynote.SpeedyNote.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">

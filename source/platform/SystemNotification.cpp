@@ -27,14 +27,16 @@ static bool s_initialized = false;
 
 #ifdef Q_OS_LINUX
 #ifndef Q_OS_ANDROID
-// Desktop Linux DBus notification support
-static bool s_dbusAvailable = false;
-// Track notification IDs per type for proper dismiss functionality
-static uint32_t s_exportNotificationId = 0;
-static uint32_t s_importNotificationId = 0;
-static uint32_t s_generalNotificationId = 0;
+// Desktop Linux: XDG Desktop Portal notification support
+// Uses org.freedesktop.portal.Notification (works in Flatpak and on modern desktops)
+static bool s_portalAvailable = false;
 
-static bool initDBus()
+// String IDs for portal notifications (portal uses string IDs, not uint32)
+static const QString PORTAL_ID_EXPORT = QStringLiteral("speedynote-export");
+static const QString PORTAL_ID_IMPORT = QStringLiteral("speedynote-import");
+static const QString PORTAL_ID_GENERAL = QStringLiteral("speedynote-general");
+
+static bool initPortal()
 {
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) {
@@ -42,84 +44,64 @@ static bool initDBus()
         return false;
     }
     
-    // Check if notification service is available
-    QDBusInterface iface("org.freedesktop.Notifications",
-                         "/org/freedesktop/Notifications",
-                         "org.freedesktop.Notifications",
+    // Check if the XDG Desktop Portal is available
+    QDBusInterface iface("org.freedesktop.portal.Desktop",
+                         "/org/freedesktop/portal/desktop",
+                         "org.freedesktop.portal.Notification",
                          bus);
     
     if (!iface.isValid()) {
-        qDebug() << "SystemNotification: org.freedesktop.Notifications not available";
+        qDebug() << "SystemNotification: XDG Desktop Portal notifications not available";
         return false;
     }
     
-    s_dbusAvailable = true;
-    qDebug() << "SystemNotification: DBus notifications initialized";
+    s_portalAvailable = true;
+    qDebug() << "SystemNotification: Portal notifications initialized";
     return true;
 }
 
-static uint32_t showDBusNotification(const QString& title, const QString& message, 
-                                      const QString& icon, uint32_t replaceId = 0)
+static void showPortalNotification(const QString& id, const QString& title,
+                                    const QString& message, const QString& priority)
 {
-    if (!s_dbusAvailable) {
-        return 0;
-    }
-    
-    QDBusConnection bus = QDBusConnection::sessionBus();
-    QDBusInterface iface("org.freedesktop.Notifications",
-                         "/org/freedesktop/Notifications",
-                         "org.freedesktop.Notifications",
-                         bus);
-    
-    if (!iface.isValid()) {
-        return 0;
-    }
-    
-    // Notification parameters:
-    // - app_name: Application name
-    // - replaces_id: ID of notification to replace (0 for new)
-    // - app_icon: Icon name or path
-    // - summary: Title
-    // - body: Message
-    // - actions: Array of action strings (empty)
-    // - hints: Dictionary of hints (empty)
-    // - expire_timeout: Timeout in ms (-1 for default)
-    
-    QVariantMap hints;
-    hints["urgency"] = QVariant::fromValue(static_cast<uchar>(1)); // Normal urgency
-    
-    QDBusReply<uint> reply = iface.call(
-        "Notify",
-        "SpeedyNote",           // app_name
-        replaceId,              // replaces_id
-        icon,                   // app_icon
-        title,                  // summary
-        message,                // body
-        QStringList(),          // actions
-        hints,                  // hints
-        5000                    // expire_timeout (5 seconds)
-    );
-    
-    if (reply.isValid()) {
-        return reply.value();
-    }
-    return 0;
-}
-
-static void closeDBusNotification(uint32_t id)
-{
-    if (!s_dbusAvailable || id == 0) {
+    if (!s_portalAvailable) {
         return;
     }
     
     QDBusConnection bus = QDBusConnection::sessionBus();
-    QDBusInterface iface("org.freedesktop.Notifications",
-                         "/org/freedesktop/Notifications",
-                         "org.freedesktop.Notifications",
+    QDBusInterface iface("org.freedesktop.portal.Desktop",
+                         "/org/freedesktop/portal/desktop",
+                         "org.freedesktop.portal.Notification",
+                         bus);
+    
+    if (!iface.isValid()) {
+        return;
+    }
+    
+    // Build notification dict: a{sv} with title, body, priority
+    QVariantMap notification;
+    notification["title"] = title;
+    notification["body"] = message;
+    notification["priority"] = priority; // "low", "normal", "high", "urgent"
+    
+    // AddNotification(id: s, notification: a{sv})
+    // Using the same string ID automatically replaces any previous notification of that type
+    iface.call("AddNotification", id, notification);
+}
+
+static void removePortalNotification(const QString& id)
+{
+    if (!s_portalAvailable) {
+        return;
+    }
+    
+    QDBusConnection bus = QDBusConnection::sessionBus();
+    QDBusInterface iface("org.freedesktop.portal.Desktop",
+                         "/org/freedesktop/portal/desktop",
+                         "org.freedesktop.portal.Notification",
                          bus);
     
     if (iface.isValid()) {
-        iface.call("CloseNotification", id);
+        iface.call("RemoveNotification", id);
     }
 }
 #endif // not Q_OS_ANDROID
@@ -149,7 +131,7 @@ bool initialize()
         qDebug() << "SystemNotification: Android notification channel created";
     }
 #elif defined(Q_OS_LINUX)
-    s_initialized = initDBus();
+    s_initialized = initPortal();
 #else
     // Windows/macOS: System notifications not implemented
     // Mark as initialized but isAvailable() will return false
@@ -164,7 +146,7 @@ bool isAvailable()
 #ifdef Q_OS_ANDROID
     return true;
 #elif defined(Q_OS_LINUX)
-    return s_dbusAvailable;
+    return s_portalAvailable;
 #else
     // Windows/macOS: not yet implemented
     return false;
@@ -215,7 +197,7 @@ void requestPermission()
     
     qDebug() << "SystemNotification: Permission request initiated";
 #else
-    // Desktop Linux uses DBus (no permission needed)
+    // Desktop Linux uses XDG portal (no permission needed)
     // Windows/macOS: notifications not implemented, silently ignore
 #endif
 }
@@ -302,28 +284,23 @@ void show(Type type, const QString& title, const QString& message, bool success)
     );
     
 #elif defined(Q_OS_LINUX)
-    // Desktop Linux: Use DBus notifications
-    QString icon;
-    if (success) {
-        // Use standard FreeDesktop icon names
-        icon = "dialog-information";
-    } else {
-        icon = "dialog-error";
-    }
+    // Desktop Linux: Use XDG Desktop Portal notifications
+    QString priority = success ? "normal" : "urgent";
     
-    // Store notification ID per type for proper dismiss
-    uint32_t notifId = showDBusNotification(title, message, icon);
+    QString portalId;
     switch (type) {
         case Type::Export:
-            s_exportNotificationId = notifId;
+            portalId = PORTAL_ID_EXPORT;
             break;
         case Type::Import:
-            s_importNotificationId = notifId;
+            portalId = PORTAL_ID_IMPORT;
             break;
         default:
-            s_generalNotificationId = notifId;
+            portalId = PORTAL_ID_GENERAL;
             break;
     }
+    
+    showPortalNotification(portalId, title, message, priority);
     
 #endif
     // Note: Windows/macOS return early via isAvailable() check above
@@ -343,8 +320,7 @@ void dismissExportNotification()
         );
     }
 #elif defined(Q_OS_LINUX)
-    closeDBusNotification(s_exportNotificationId);
-    s_exportNotificationId = 0;
+    removePortalNotification(PORTAL_ID_EXPORT);
 #endif
 }
 
@@ -362,8 +338,7 @@ void dismissImportNotification()
         );
     }
 #elif defined(Q_OS_LINUX)
-    closeDBusNotification(s_importNotificationId);
-    s_importNotificationId = 0;
+    removePortalNotification(PORTAL_ID_IMPORT);
 #endif
 }
 
