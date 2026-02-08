@@ -70,10 +70,9 @@ modules:
       - -DCMAKE_BUILD_TYPE=Release
       - -DMUPDF_INCLUDE_DIR=/app/include
     sources:
-      # For local testing: use the project directory
-      - type: dir
-        path: ..
-      # For Flathub submission: replace the above with a release tarball:
-      # - type: archive
-      #   url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.1.tar.gz
-      #   sha256: FIXME
+      - type: archive
+        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.1-8.tar.gz
+        sha256: e92b5c7a9581c8bebfe7834a3ecfe136c10cc97f91a5b51c2593111f2e8682b1
+      # For local testing, replace the above with:
+      # - type: dir
+      #   path: ..

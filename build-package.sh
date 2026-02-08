@@ -181,8 +181,8 @@ get_dependencies() {
             echo "qt6-base, mupdf"
             ;;
         apk)
-            # mupdf provides libmupdf.so
-            echo "qt6-qtbase, mupdf"
+            # Space-separated (Alpine APKBUILD format, no commas)
+            echo "qt6-qtbase qt6-qttools mupdf-libs"
             ;;
     esac
 }
@@ -278,6 +278,45 @@ check_packaging_dependencies() {
     fi
     
     echo -e "${GREEN}All packaging dependencies are available for $format!${NC}"
+    return 0
+}
+
+# Function to check and setup abuild signing keys (Alpine only)
+check_abuild_keys() {
+    echo -e "${YELLOW}Checking abuild signing key setup...${NC}"
+    
+    # Check if private key is configured
+    if [[ ! -f "$HOME/.abuild/abuild.conf" ]] || ! grep -q "PACKAGER_PRIVKEY" "$HOME/.abuild/abuild.conf" 2>/dev/null; then
+        echo -e "${YELLOW}No abuild signing key configured. Generating one...${NC}"
+        abuild-keygen -a -n
+    fi
+    
+    # Get the private key path from config
+    PRIVKEY=$(grep "PACKAGER_PRIVKEY" "$HOME/.abuild/abuild.conf" 2>/dev/null | cut -d'"' -f2)
+    if [[ -z "$PRIVKEY" ]] || [[ ! -f "$PRIVKEY" ]]; then
+        echo -e "${RED}Error: Could not find private key${NC}"
+        echo "Please run: abuild-keygen -a"
+        return 1
+    fi
+    
+    # Check if the corresponding public key is installed in /etc/apk/keys
+    PUBKEY="${PRIVKEY}.pub"
+    PUBKEY_NAME=$(basename "$PUBKEY")
+    
+    if [[ ! -f "/etc/apk/keys/$PUBKEY_NAME" ]]; then
+        echo -e "${YELLOW}Public key not installed in /etc/apk/keys/${NC}"
+        echo -e "${CYAN}Attempting to install public key (requires sudo)...${NC}"
+        if sudo cp "$PUBKEY" "/etc/apk/keys/"; then
+            echo -e "${GREEN}Public key installed successfully!${NC}"
+        else
+            echo -e "${RED}Could not install public key automatically.${NC}"
+            echo -e "${YELLOW}Please run manually: sudo cp $PUBKEY /etc/apk/keys/${NC}"
+            echo -e "${YELLOW}Continuing anyway - package will be built but index may fail...${NC}"
+        fi
+    else
+        echo -e "${GREEN}Signing key is properly configured!${NC}"
+    fi
+    
     return 0
 }
 
@@ -617,31 +656,38 @@ EOF
 }
 
 # Function to create Alpine package
+# Uses pre-built binary (proven approach from build-alpine-arm64.sh)
 create_apk_package() {
     echo -e "${YELLOW}Creating Alpine package...${NC}"
     
-    # Create Alpine package structure
-    mkdir -p alpine-pkg
+    # Detect Alpine architecture (same as uname -m: x86_64, aarch64, etc.)
+    local apk_arch=$(uname -m)
+    echo -e "${CYAN}Target architecture: ${apk_arch}${NC}"
+    
+    # Verify pre-built binary exists
+    if [[ ! -f "build/speedynote" ]]; then
+        echo -e "${RED}Error: speedynote executable not found in build directory${NC}"
+        echo "Please compile SpeedyNote first (build step should have run)"
+        exit 1
+    fi
+    
+    # Clean and create Alpine package structure
+    rm -rf alpine-pkg
+    mkdir -p alpine-pkg/speedynote-src/prebuilt
+    
+    # Create source tarball with pre-built binary and needed resources
+    cp -r resources/ alpine-pkg/speedynote-src/
+    cp -r data/ alpine-pkg/speedynote-src/
+    cp README.md alpine-pkg/speedynote-src/
+    cp CMakeLists.txt alpine-pkg/speedynote-src/
+    cp build/speedynote alpine-pkg/speedynote-src/prebuilt/
+    
     cd alpine-pkg
+    tar -czf "${PKGNAME}-${PKGVER}.tar.gz" speedynote-src/
+    rm -rf speedynote-src
     
-    # Create source tarball first to calculate checksum
-    cd ..
-    tar -czf "alpine-pkg/${PKGNAME}-${PKGVER}.tar.gz" \
-        --exclude=build \
-        --exclude=.git* \
-        --exclude=alpine-pkg \
-        --exclude="*.rpm" \
-        --exclude="*.deb" \
-        --exclude="*.pkg.tar.zst" \
-        --exclude="*.apk" \
-        .
-    
-    cd alpine-pkg
-    
-    # Calculate checksum
-    CHECKSUM=$(sha256sum "${PKGNAME}-${PKGVER}.tar.gz" | cut -d' ' -f1)
-    
-    # Create APKBUILD
+    # Create APKBUILD (pre-built binary — skip build step)
+    echo -e "${YELLOW}Creating APKBUILD...${NC}"
     cat > APKBUILD << EOF
 # Maintainer: $MAINTAINER
 pkgname=$PKGNAME
@@ -649,24 +695,21 @@ pkgver=$PKGVER
 pkgrel=$PKGREL
 pkgdesc="$DESCRIPTION"
 url="$URL"
-arch="all"
+arch="$apk_arch"
 license="GPL-3.0-or-later"
 depends="$(get_dependencies apk)"
-makedepends="$(get_build_dependencies apk)"
+options="!check"
 source="\$pkgname-\$pkgver.tar.gz"
-builddir="\$srcdir"
+builddir="\$srcdir/speedynote-src"
 install="\$pkgname.post-install"
-sha256sums="$CHECKSUM"
 
 build() {
-    cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
-    # Limit parallelism to avoid OOM on systems with many cores but limited RAM
-    local jobs=\$(( (\$(nproc) + 1) / 2 ))
-    cmake --build build --parallel \$jobs
+    # Skip build — using pre-built binary
+    return 0
 }
 
 package() {
-    install -Dm755 "build/speedynote" "\$pkgdir/usr/bin/speedynote"
+    install -Dm755 "prebuilt/speedynote" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/speedynote.png"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
     
@@ -685,21 +728,56 @@ package() {
 }
 EOF
     
+    # Generate checksums using abuild
+    echo -e "${YELLOW}Generating checksums with abuild...${NC}"
+    abuild checksum
+    
     # Create post-install script
     cat > "${PKGNAME}.post-install" << 'EOF'
 #!/bin/sh
 
-# Update desktop database
+# Update desktop and MIME databases
 update-desktop-database -q /usr/share/applications 2>/dev/null || true
+update-mime-database /usr/share/mime 2>/dev/null || true
 
 exit 0
 EOF
     
-    # Build package (source tarball already created above)
-    abuild -r
+    # Build package
+    # -K: keep going on errors, -r: clean build, -d: skip dependency check
+    echo -e "${YELLOW}Building Alpine package...${NC}"
+    set +e
+    abuild -K -r -d 2>&1 | tee /tmp/abuild_output.log
+    ABUILD_RESULT=${PIPESTATUS[0]}
+    set -e
     
     cd ..
-    echo -e "${GREEN}Alpine package created in ~/packages/alpine-pkg/${PKGNAME}/ for .apk file"
+    
+    # Find the created package
+    APK_FILE=$(find ~/packages -name "${PKGNAME}-${PKGVER}-*.apk" -newer alpine-pkg/APKBUILD 2>/dev/null | head -1)
+    
+    if [[ -n "$APK_FILE" ]] && [[ -f "$APK_FILE" ]]; then
+        echo -e "${GREEN}Alpine package created successfully!${NC}"
+        echo -e "${GREEN}Package location: $APK_FILE${NC}"
+        echo -e "${GREEN}Package size: $(du -h "$APK_FILE" | cut -f1)${NC}"
+        
+        # Warn about UNTRUSTED signature if index creation failed
+        if [[ $ABUILD_RESULT -ne 0 ]]; then
+            if grep -q "UNTRUSTED signature" /tmp/abuild_output.log 2>/dev/null; then
+                echo
+                echo -e "${YELLOW}Note: Repository index creation failed due to untrusted signature.${NC}"
+                echo -e "${YELLOW}The .apk package itself was created successfully!${NC}"
+                echo -e "${YELLOW}To fix this for future builds, run:${NC}"
+                echo -e "${CYAN}  sudo cp ~/.abuild/*.rsa.pub /etc/apk/keys/${NC}"
+            fi
+        fi
+    else
+        echo -e "${RED}Error: Package creation failed${NC}"
+        echo -e "${YELLOW}Check the build log above for details${NC}"
+        exit 1
+    fi
+    
+    rm -f /tmp/abuild_output.log
 }
 
 # Function to clean up
@@ -741,7 +819,13 @@ show_package_info() {
                 fi
                 ;;
             apk)
-                echo -e "Alpine: Check ~/packages/alpine-pkg/${PKGNAME}/ for .apk file"
+                APK_PKG=$(find ~/packages -name "${PKGNAME}-${PKGVER}-*.apk" 2>/dev/null | head -1)
+                if [[ -n "$APK_PKG" ]] && [[ -f "$APK_PKG" ]]; then
+                    echo -e "Alpine: $APK_PKG ($(du -h "$APK_PKG" | cut -f1))"
+                    echo -e "  Install with: sudo apk add --allow-untrusted $APK_PKG"
+                else
+                    echo -e "Alpine: Check ~/packages/ for .apk file"
+                fi
                 ;;
         esac
     done
@@ -773,9 +857,14 @@ main() {
         exit 1
     fi
     
-    # Step 3: Build project (only needed for DEB which uses pre-built binary)
-    # RPM, Arch, and Alpine all build from source in their respective build systems
-    if [[ " ${PACKAGE_FORMATS[*]} " =~ " deb " ]]; then
+    # Step 2b: Check abuild signing keys (Alpine only)
+    if [[ " ${PACKAGE_FORMATS[*]} " =~ " apk " ]]; then
+        check_abuild_keys
+    fi
+    
+    # Step 3: Build project (needed for DEB and APK which use pre-built binary)
+    # RPM and Arch build from source in their respective build systems
+    if [[ " ${PACKAGE_FORMATS[*]} " =~ " deb " ]] || [[ " ${PACKAGE_FORMATS[*]} " =~ " apk " ]]; then
         build_project
     else
         echo -e "${YELLOW}Skipping pre-build (target formats build from source)${NC}"

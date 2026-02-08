@@ -36,6 +36,7 @@
 *.apk
 *.dmg
 *.aab
+*.flatpak
 
 # Compressed files
 *.7z
