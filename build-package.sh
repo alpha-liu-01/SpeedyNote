@@ -17,10 +17,10 @@ PKGNAME="speedynote"
 PKGVER="1.2.1"
 PKGREL="1"
 PKGARCH=$(uname -m)
-MAINTAINER="SpeedyNote Team"
+MAINTAINER="SpeedyNote Team <info@speedynote.org>"
 DESCRIPTION="A fast note-taking application with PDF annotation, PDF export, and controller input"
 URL="https://github.com/alpha-liu-01/SpeedyNote"
-LICENSE="MIT"
+LICENSE="GPL-3.0-or-later"
 
 # Default values
 PACKAGE_FORMATS=()
