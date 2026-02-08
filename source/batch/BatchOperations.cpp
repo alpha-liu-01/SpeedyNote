@@ -390,6 +390,13 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
             continue;
         }
         
+        // Release the PdfProvider before exporting. loadBundle() eagerly creates
+        // a MuPdfProvider (with its own fz_context) for PDF-attached documents.
+        // MuPdfExporter opens the PDF independently, so having two MuPDF contexts
+        // simultaneously is unnecessary and causes failures in the Flatpak shared
+        // library build. The exporter only needs the document metadata and pdfPath().
+        doc->unloadPdf();
+        
         // Create MuPdfExporter and configure options
         MuPdfExporter exporter;
         exporter.setDocument(doc.get());
