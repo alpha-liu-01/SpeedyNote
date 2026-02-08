@@ -858,11 +858,11 @@ elseif(UNIX AND NOT ANDROID)
         install(FILES ${RESOURCE_QM_FILES} DESTINATION share/speedynote/translations)
     endif()
     # Desktop integration files
-    install(FILES data/org.speedynote.app.desktop
+    install(FILES data/org.speedynote.SpeedyNote.desktop
             DESTINATION share/applications)
-    install(FILES data/org.speedynote.app.metainfo.xml
+    install(FILES data/org.speedynote.SpeedyNote.metainfo.xml
             DESTINATION share/metainfo)
     install(FILES resources/icons/mainicon.svg
             DESTINATION share/icons/hicolor/scalable/apps
-            RENAME org.speedynote.app.svg)
+            RENAME org.speedynote.SpeedyNote.svg)
 endif()
