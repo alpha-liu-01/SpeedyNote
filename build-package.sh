@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="1.2.1"
+PKGVER="1.2.2"
 PKGREL="1"
 PKGARCH=$(uname -m)
 MAINTAINER="SpeedyNote Team <info@speedynote.org>"
@@ -545,7 +545,6 @@ install -Dm644 data/org.speedynote.SpeedyNote.desktop %{buildroot}/usr/share/app
 /usr/bin/speedynote
 /usr/share/applications/org.speedynote.SpeedyNote.desktop
 /usr/share/icons/hicolor/scalable/apps/org.speedynote.SpeedyNote.svg
-/usr/share/pixmaps/org.speedynote.SpeedyNote.png
 /usr/share/doc/%{name}/README.md
 /usr/share/speedynote/translations/
 
