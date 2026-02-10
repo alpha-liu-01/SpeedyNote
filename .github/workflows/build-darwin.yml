@@ -48,6 +48,9 @@ jobs:
           # Build tools
           brew install cmake pkg-config
           
+          # SVG to PNG conversion for app icon
+          brew install librsvg
+          
           # MuPDF dependencies (some may already be installed)
           brew install harfbuzz freetype jpeg-turbo openjpeg jbig2dec gumbo-parser || true
           brew install brotli zlib || true

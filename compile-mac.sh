@@ -272,17 +272,32 @@ create_app_bundle() {
         rm -rf "$iconset_dir"
         mkdir -p "$iconset_dir"
         
-        # Generate all required icon sizes
-        sips -z 16 16     resources/icons/mainicon.svg --out "$iconset_dir/icon_16x16.png" >/dev/null 2>&1
-        sips -z 32 32     resources/icons/mainicon.svg --out "$iconset_dir/icon_16x16@2x.png" >/dev/null 2>&1
-        sips -z 32 32     resources/icons/mainicon.svg --out "$iconset_dir/icon_32x32.png" >/dev/null 2>&1
-        sips -z 64 64     resources/icons/mainicon.svg --out "$iconset_dir/icon_32x32@2x.png" >/dev/null 2>&1
-        sips -z 128 128   resources/icons/mainicon.svg --out "$iconset_dir/icon_128x128.png" >/dev/null 2>&1
-        sips -z 256 256   resources/icons/mainicon.svg --out "$iconset_dir/icon_128x128@2x.png" >/dev/null 2>&1
-        sips -z 256 256   resources/icons/mainicon.svg --out "$iconset_dir/icon_256x256.png" >/dev/null 2>&1
-        sips -z 512 512   resources/icons/mainicon.svg --out "$iconset_dir/icon_256x256@2x.png" >/dev/null 2>&1
-        sips -z 512 512   resources/icons/mainicon.svg --out "$iconset_dir/icon_512x512.png" >/dev/null 2>&1
-        sips -z 1024 1024 resources/icons/mainicon.svg --out "$iconset_dir/icon_512x512@2x.png" >/dev/null 2>&1
+        # macOS sips does NOT support SVG input — we need rsvg-convert (from librsvg)
+        # to render SVG to PNG first, then sips can resize the raster images.
+        # Install: brew install librsvg
+        if command -v rsvg-convert &>/dev/null; then
+            # Render SVG to a high-res 1024x1024 master PNG
+            local master_png="${iconset_dir}/_master_1024.png"
+            rsvg-convert -w 1024 -h 1024 resources/icons/mainicon.svg -o "$master_png"
+            
+            # Generate all required icon sizes from the master PNG using sips
+            sips -z 16 16     "$master_png" --out "$iconset_dir/icon_16x16.png"     >/dev/null 2>&1
+            sips -z 32 32     "$master_png" --out "$iconset_dir/icon_16x16@2x.png"  >/dev/null 2>&1
+            sips -z 32 32     "$master_png" --out "$iconset_dir/icon_32x32.png"     >/dev/null 2>&1
+            sips -z 64 64     "$master_png" --out "$iconset_dir/icon_32x32@2x.png"  >/dev/null 2>&1
+            sips -z 128 128   "$master_png" --out "$iconset_dir/icon_128x128.png"   >/dev/null 2>&1
+            sips -z 256 256   "$master_png" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null 2>&1
+            sips -z 256 256   "$master_png" --out "$iconset_dir/icon_256x256.png"   >/dev/null 2>&1
+            sips -z 512 512   "$master_png" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null 2>&1
+            sips -z 512 512   "$master_png" --out "$iconset_dir/icon_512x512.png"   >/dev/null 2>&1
+            cp "$master_png"               "$iconset_dir/icon_512x512@2x.png"
+            
+            # Clean up master
+            rm -f "$master_png"
+        else
+            echo -e "${YELLOW}    ⚠ rsvg-convert not found (brew install librsvg)${NC}"
+            echo -e "${YELLOW}      Cannot convert SVG to icns — skipping icon${NC}"
+        fi
         
         iconutil -c icns "$iconset_dir" -o "${APP_BUNDLE}/Contents/Resources/AppIcon.icns" 2>/dev/null || true
         rm -rf "$iconset_dir"
@@ -290,6 +305,7 @@ create_app_bundle() {
         if [[ -f "${APP_BUNDLE}/Contents/Resources/AppIcon.icns" ]]; then
             echo -e "${GREEN}    ✓ Icon created${NC}"
         else
+            echo -e "${YELLOW}    ⚠ Icon creation failed — copying SVG as fallback${NC}"
             cp "resources/icons/mainicon.svg" "${APP_BUNDLE}/Contents/Resources/"
         fi
     fi
