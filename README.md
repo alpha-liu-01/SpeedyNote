@@ -12,6 +12,8 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-brightgreen)]()
 [![Qt](https://img.shields.io/badge/Qt-6.x-41CD52?logo=qt)]()
 
+[![Get it on Flathub](https://flathub.org/assets/badges/flathub-badge-i-en.png)](https://flathub.org/en/apps/org.speedynote.SpeedyNote)
+
 [English](#-features) • [中文](./docs/zh_Hans/README_zh_Hans.md)
 
 </div>

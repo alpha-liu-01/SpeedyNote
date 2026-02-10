@@ -2,12 +2,12 @@
 # SpeedyNote Android Build Environment
 # =============================================================================
 # This Dockerfile creates a reproducible environment for building SpeedyNote
-# for Android arm64-v8a.
+# for Android arm64-v8a and armeabi-v7a (32-bit).
 #
 # Contents:
 #   - Ubuntu 22.04 LTS base
 #   - Android SDK (API 35) + NDK r27
-#   - Qt 6.9.3 for Android arm64-v8a
+#   - Qt 6.9.3 for Android arm64-v8a + armv7 (32-bit)
 #   - Qt 6.9.3 host tools (Linux x86_64)
 #   - CMake, Ninja, OpenJDK 17
 #
@@ -69,6 +69,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV QT_VERSION=6.9.3
 ENV QT_ROOT=/opt/qt
 ENV QT_ANDROID=${QT_ROOT}/${QT_VERSION}/android_arm64_v8a
+ENV QT_ANDROID_ARMV7=${QT_ROOT}/${QT_VERSION}/android_armv7
 # Note: aqtinstall uses "linux_gcc_64" as arch name but installs to "gcc_64"
 ENV QT_HOST=${QT_ROOT}/${QT_VERSION}/gcc_64
 
@@ -118,6 +119,11 @@ RUN /opt/aqt-venv/bin/aqt install-qt linux android ${QT_VERSION} android_arm64_v
     -O ${QT_ROOT} \
     --modules qtimageformats
 
+# Install Qt for Android (armeabi-v7a / 32-bit ARM)
+RUN /opt/aqt-venv/bin/aqt install-qt linux android ${QT_VERSION} android_armv7 \
+    -O ${QT_ROOT} \
+    --modules qtimageformats
+
 # Install Qt host tools (needed for moc, uic, rcc, etc.)
 # Note: For Qt 6.x, architecture is "linux_gcc_64" not "gcc_64"
 RUN /opt/aqt-venv/bin/aqt install-qt linux desktop ${QT_VERSION} linux_gcc_64 \
@@ -130,7 +136,8 @@ RUN /opt/aqt-venv/bin/aqt install-qt linux desktop ${QT_VERSION} linux_gcc_64 \
 RUN echo "=== Verifying installation ===" && \
     echo "Android SDK: $(ls ${ANDROID_SDK_ROOT}/platforms/)" && \
     echo "Android NDK: $(ls ${ANDROID_SDK_ROOT}/ndk/)" && \
-    echo "Qt Android: $(ls ${QT_ANDROID}/bin/ | head -5)" && \
+    echo "Qt Android arm64: $(ls ${QT_ANDROID}/bin/ | head -5)" && \
+    echo "Qt Android armv7: $(ls ${QT_ANDROID_ARMV7}/bin/ | head -5)" && \
     echo "Qt Host: $(${QT_HOST}/bin/qmake --version)" && \
     echo "CMake: $(cmake --version | head -1)" && \
     echo "Java: $(java --version | head -1)"

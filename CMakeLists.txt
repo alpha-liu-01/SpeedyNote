@@ -331,14 +331,16 @@ elseif(ANDROID)
     
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
     
-    # MuPDF paths (cross-compiled separately)
+    # MuPDF paths (cross-compiled separately, per-ABI)
+    # ANDROID_ABI is set by the NDK toolchain (arm64-v8a, armeabi-v7a, etc.)
+    # Libraries are ABI-specific; headers are shared across all ABIs.
     if(NOT MUPDF_INCLUDE_DIR)
         set(MUPDF_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/android/mupdf-build/include")
     endif()
     if(NOT MUPDF_LIBRARIES)
         set(MUPDF_LIBRARIES
-            "${CMAKE_SOURCE_DIR}/android/mupdf-build/lib/libmupdf.a"
-            "${CMAKE_SOURCE_DIR}/android/mupdf-build/lib/libmupdf-third.a")
+            "${CMAKE_SOURCE_DIR}/android/mupdf-build/${ANDROID_ABI}/lib/libmupdf.a"
+            "${CMAKE_SOURCE_DIR}/android/mupdf-build/${ANDROID_ABI}/lib/libmupdf-third.a")
     endif()
     
     include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
