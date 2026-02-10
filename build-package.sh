@@ -545,6 +545,7 @@ install -Dm644 data/org.speedynote.SpeedyNote.desktop %{buildroot}/usr/share/app
 /usr/bin/speedynote
 /usr/share/applications/org.speedynote.SpeedyNote.desktop
 /usr/share/icons/hicolor/scalable/apps/org.speedynote.SpeedyNote.svg
+/usr/share/pixmaps/org.speedynote.SpeedyNote.svg
 /usr/share/doc/%{name}/README.md
 /usr/share/speedynote/translations/
 
