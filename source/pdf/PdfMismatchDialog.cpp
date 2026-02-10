@@ -14,7 +14,7 @@ PdfMismatchDialog::PdfMismatchDialog(const QString& originalName,
     , m_selectedPath(selectedPath)
 {
     setWindowTitle(tr("Different PDF Detected"));
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     // Set reasonable size

@@ -152,7 +152,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.2.1"));
+    setWindowTitle(tr("SpeedyNote 1.2.2"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -208,7 +208,7 @@ MainWindow::MainWindow(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     
     // QString iconPath = QCoreApplication::applicationDirPath() + "/icon.ico";
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
 
     // ✅ Get screen size & adjust window size

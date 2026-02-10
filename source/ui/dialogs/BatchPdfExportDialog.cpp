@@ -39,7 +39,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
 #else
     setWindowTitle(tr("Export to PDF"));
 #endif
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     // Detect dark mode

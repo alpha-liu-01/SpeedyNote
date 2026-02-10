@@ -196,7 +196,7 @@ Launcher::Launcher(QWidget* parent)
     // This supports screens as small as 1024x640 @ 125% DPI (= 820x512 logical)
     // with room for window chrome and taskbar
     setMinimumSize(560, 480);
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
 #ifndef Q_OS_ANDROID
     // Enable drag-drop for desktop notebook import (Step 3.10)

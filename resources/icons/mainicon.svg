@@ -6,14 +6,17 @@
    fill="none"
    version="1.1"
    id="svg58"
-   sodipodi:docname="speedynote.svg"
+   sodipodi:docname="mainicon.svg"
    inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:dc="http://purl.org/dc/elements/1.1/">
   <sodipodi:namedview
-     id="namedview60"
+     id="namedview35"
      pagecolor="#ffffff"
      bordercolor="#000000"
      borderopacity="0.25"
@@ -22,9 +25,9 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      showgrid="false"
-     inkscape:zoom="4.5188541"
-     inkscape:cx="222.06957"
-     inkscape:cy="324.86112"
+     inkscape:zoom="1.5976562"
+     inkscape:cx="257.5648"
+     inkscape:cy="256.00001"
      inkscape:window-width="1920"
      inkscape:window-height="1008"
      inkscape:window-x="0"
@@ -71,9 +74,9 @@
     </filter>
     <filter
        id="pen-shadow"
-       x="-0.24"
+       x="-0.23852495"
        y="-0.038918919"
-       width="1.5466667"
+       width="1.5433068"
        height="1.0994595">
       <feGaussianBlur
          in="SourceAlpha"
@@ -122,52 +125,60 @@
   </g>
   <g
      fill="#ECEFF1"
-     id="g46">
+     id="g46"
+     style="opacity:0.69;fill:#cccccc"
+     transform="matrix(1,0,0,1.2260256,0,-26.010325)">
     <rect
        x="116"
        y="140"
        width="280"
        height="16"
        rx="8"
-       id="rect34" />
+       id="rect34"
+       style="fill:#cccccc" />
     <rect
        x="116"
        y="180"
        width="280"
        height="16"
        rx="8"
-       id="rect36" />
+       id="rect36"
+       style="fill:#cccccc" />
     <rect
        x="116"
        y="220"
        width="200"
        height="16"
        rx="8"
-       id="rect38" />
+       id="rect38"
+       style="fill:#cccccc" />
     <rect
        x="116"
        y="260"
        width="280"
        height="16"
        rx="8"
-       id="rect40" />
+       id="rect40"
+       style="fill:#cccccc" />
     <rect
        x="116"
        y="300"
        width="260"
        height="16"
        rx="8"
-       id="rect42" />
+       id="rect42"
+       style="fill:#cccccc" />
     <rect
        x="116"
        y="340"
        width="180"
        height="16"
        rx="8"
-       id="rect44" />
+       id="rect44"
+       style="fill:#cccccc" />
   </g>
   <path
-     d="m 358.38893,157.31767 c -93.2628,0 -155.43801,39.94628 -93.2628,79.89256 62.1752,39.94628 62.1752,79.89257 -62.17521,119.83885"
+     d="m 358.07597,170.46192 c -93.2628,0 -155.43801,39.94628 -93.2628,79.89256 62.1752,39.94628 62.1752,79.89257 -62.17521,119.83885"
      stroke="#00bcd4"
      stroke-width="24"
      stroke-linecap="round"
@@ -176,7 +187,7 @@
      id="path48" />
   <g
      filter="url(#pen-shadow)"
-     transform="rotate(-45,532.16216,-64.184287)"
+     transform="rotate(-45,547.20831,-58.837146)"
      id="g56">
     <rect
        x="-15"
@@ -198,4 +209,23 @@
        fill="#00bcd4"
        id="circle54" />
   </g>
+  <text
+     xml:space="preserve"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:39.3099px;font-family:FreeMono;-inkscape-font-specification:FreeMono;white-space:pre;inline-size:96.2265;display:inline;opacity:0.69;fill:#800000"
+     x="107.65771"
+     y="91.383865"
+     id="text276"
+     transform="matrix(1.6531628,0,0,1.6033913,-67.285044,-21.34072)"><tspan
+       x="107.65771"
+       y="91.383865"
+     id="tspan534">PDF</tspan></text>
+  <metadata
+     id="metadata222">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:title>SpeedyNote App Icon v3</dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
 </svg>

@@ -19,7 +19,7 @@ SaveDocumentDialog::SaveDocumentDialog(const QString& title,
     , m_defaultName(defaultName)
 {
     setWindowTitle(title);
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     // Mobile-friendly size

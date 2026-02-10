@@ -23,7 +23,7 @@ PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
     , m_storedSize(storedSize)
 {
     setWindowTitle(tr("PDF File Missing"));
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     // Set reasonable size
