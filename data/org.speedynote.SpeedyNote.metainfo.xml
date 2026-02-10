@@ -4,7 +4,7 @@
   <id>org.speedynote.SpeedyNote</id>
 
   <name>SpeedyNote</name>
-  <summary>A blazing-fast note-taking app with PDF annotation for stylus users</summary>
+  <summary>Fast stylus note-taking app</summary>
 
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-only</project_license>
@@ -78,6 +78,20 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+
+
+
+  <release version="1.2.2" date="2026-02-10">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>New batch delete feature in the launcher</li>
+          <li>Improved the viewport scrolling performance on low-end devices</li>
+          <li>Optimized the stroke creation delay on low-end devices</li>
+          <li>Changed to a new .SVG icon on all platforms</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.1" date="2026-01-31">
       <description>
         <p>Bug fixes and improvements:</p>
