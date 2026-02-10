@@ -44,6 +44,28 @@
 #ifdef Q_OS_ANDROID
 #include <QJniObject>       // BUG-A008: JNI for eraser tool type detection
 #include <QJniEnvironment>  // BUG-A008: For cached JNI method calls
+
+// File-scope JNI cache for eraser detection (BUG-A008).
+// Initialized once via initEraserJni(), called during stylus hover
+// so the expensive FindClass/GetStaticMethodID doesn't hit pen-down latency.
+static jclass s_eraserActivityClass = nullptr;
+static jmethodID s_eraserIsEraserMethod = nullptr;
+static bool s_eraserJniInitialized = false;
+
+static void initEraserJni()
+{
+    if (s_eraserJniInitialized) return;
+    s_eraserJniInitialized = true;
+    
+    QJniEnvironment env;
+    jclass localClass = env->FindClass("org/speedynote/app/SpeedyNoteActivity");
+    if (localClass) {
+        s_eraserActivityClass = static_cast<jclass>(env->NewGlobalRef(localClass));
+        s_eraserIsEraserMethod = env->GetStaticMethodID(
+            s_eraserActivityClass, "isEraserToolActive", "()Z");
+        env->DeleteLocalRef(localClass);
+    }
+}
 #endif
 #include <QFileDialog>    // For insertImageFromDialog (Phase C.0.5)
 #include <QDesktopServices>  // For opening URLs (Phase C.4.3)
@@ -110,6 +132,11 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     
     // Set focus policy for keyboard shortcuts
     setFocusPolicy(Qt::StrongFocus);
+    
+    // This widget is a drawing canvas, not a text input field.
+    // Explicitly disable input method so that setFocus() on Android doesn't
+    // ping the InputMethodManager (which adds ~50-100ms latency on slow devices).
+    setAttribute(Qt::WA_InputMethodEnabled, false);
     
     // Performance: we paint the entire widget ourselves (background + pages), so tell Qt
     // not to auto-erase before paintEvent. This eliminates a redundant full-screen fill
@@ -2691,6 +2718,11 @@ void DocumentViewport::hideEvent(QHideEvent* event)
         m_touchHandler->reset();
     }
     
+    // Release stroke cache when hidden (reclaim memory while not visible)
+    if (!m_currentStrokeCache.isNull()) {
+        m_currentStrokeCache = QPixmap();
+    }
+    
     QWidget::hideEvent(event);
 }
 
@@ -2802,6 +2834,12 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
     // handlePointerEvent() returns early if m_pointerActive is false,
     // so we handle hover tracking separately here.
     if (event->type() == QEvent::TabletMove && !m_pointerActive) {
+#ifdef Q_OS_ANDROID
+        // Pre-warm JNI eraser detection during hover (before first press).
+        // FindClass + GetStaticMethodID are expensive (~20-50ms on slow devices);
+        // doing it here moves the cost to hover time, not pen-down latency.
+        initEraserJni();
+#endif
         QPointF newPos = event->position();
         
         // Check if stylus is within widget bounds
@@ -3977,25 +4015,15 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     // BUG-A008: Qt on Android doesn't properly translate Android's TOOL_TYPE_ERASER
     // to QPointingDevice::PointerType::Eraser. Query Android directly via JNI.
     // 
-    // Performance: Cache the JNI class/method to avoid repeated lookups at 240Hz.
-    // The static variables are initialized once on first call.
+    // Performance: JNI class/method lookup is pre-warmed during stylus hover
+    // (see initEraserJni()). Only the cheap CallStaticBooleanMethod runs here.
     if (!pe.isEraser) {
-        static jclass activityClass = nullptr;
-        static jmethodID isEraserMethod = nullptr;
+        initEraserJni();  // No-op after first call
         
-        if (!activityClass) {
+        if (s_eraserActivityClass && s_eraserIsEraserMethod) {
             QJniEnvironment env;
-            jclass localClass = env->FindClass("org/speedynote/app/SpeedyNoteActivity");
-            if (localClass) {
-                activityClass = static_cast<jclass>(env->NewGlobalRef(localClass));
-                isEraserMethod = env->GetStaticMethodID(activityClass, "isEraserToolActive", "()Z");
-                env->DeleteLocalRef(localClass);
-            }
-        }
-        
-        if (activityClass && isEraserMethod) {
-            QJniEnvironment env;
-            pe.isEraser = static_cast<bool>(env->CallStaticBooleanMethod(activityClass, isEraserMethod));
+            pe.isEraser = static_cast<bool>(
+                env->CallStaticBooleanMethod(s_eraserActivityClass, s_eraserIsEraserMethod));
         }
     }
 #endif
@@ -4470,10 +4498,11 @@ void DocumentViewport::finishStroke()
     m_isDrawing = false;
     m_lastRenderedPointIndex = 0;  // Reset incremental rendering state
     
-    // MEMORY FIX: Release the incremental stroke cache
-    // This cache is viewport-sized (~33MB at 4K) and should be freed after stroke completes.
-    // It will be lazily reallocated on the next stroke start.
-    m_currentStrokeCache = QPixmap();
+    // Keep m_currentStrokeCache allocated for reuse by the next stroke.
+    // resetCurrentStrokeCache() will clear it with fill(Qt::transparent).
+    // This avoids a costly 4MB+ dealloc+realloc cycle on every stroke start,
+    // which matters on bandwidth-limited devices (Cortex-A9, etc.).
+    // The cache is released on resize or when the widget is hidden.
     
     emit documentModified();
 }
@@ -4563,7 +4592,7 @@ void DocumentViewport::finishStrokeEdgeless()
     m_currentStroke = VectorStroke();
     m_isDrawing = false;
     m_lastRenderedPointIndex = 0;
-    m_currentStrokeCache = QPixmap();
+    // Keep m_currentStrokeCache for reuse (see finishStroke() comment)
     
     // Trigger repaint
     update();
@@ -10201,8 +10230,16 @@ void DocumentViewport::resetCurrentStrokeCache()
     QSize physicalSize(static_cast<int>(width() * dpr), 
                        static_cast<int>(height() * dpr));
     
-    m_currentStrokeCache = QPixmap(physicalSize);
-    m_currentStrokeCache.setDevicePixelRatio(dpr);
+    // Reuse existing pixmap if size and DPR match (avoids expensive reallocation).
+    // At 1280x800 this is a 4MB alloc+free cycle; at 4K it's ~33MB.
+    // On memory-bandwidth-limited devices (e.g. Cortex-A9), avoiding the
+    // reallocation saves significant time at stroke start.
+    if (m_currentStrokeCache.isNull()
+        || m_currentStrokeCache.size() != physicalSize
+        || !qFuzzyCompare(m_currentStrokeCache.devicePixelRatio(), dpr)) {
+        m_currentStrokeCache = QPixmap(physicalSize);
+        m_currentStrokeCache.setDevicePixelRatio(dpr);
+    }
     m_currentStrokeCache.fill(Qt::transparent);
     m_lastRenderedPointIndex = 0;
     
