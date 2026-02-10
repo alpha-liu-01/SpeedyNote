@@ -70,7 +70,5 @@ modules:
     sources:
       - type: archive
         url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.1-9.tar.gz
-        sha256: FIXME_AFTER_TAG
-      # For local testing, replace the above with:
-      # - type: dir
-      #   path: ..
+        sha256: e4ae3fa5e2c9eb14e1e7d6fa55603451a882012c17f8c10c9699a264823345eb
+
