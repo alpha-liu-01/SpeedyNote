@@ -111,12 +111,13 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Set focus policy for keyboard shortcuts
     setFocusPolicy(Qt::StrongFocus);
     
-    // Set background color (will be painted over by pages)
-    // CUSTOMIZABLE: Viewport background color (theme setting, visible in gaps between pages)
-    setAutoFillBackground(true);
-    QPalette pal = palette();
-    pal.setColor(QPalette::Window, m_backgroundColor);  // Uses cached background color
-    setPalette(pal);
+    // Performance: we paint the entire widget ourselves (background + pages), so tell Qt
+    // not to auto-erase before paintEvent. This eliminates a redundant full-screen fill
+    // per frame, which matters on Android where each pixel write goes through an extra
+    // buffer copy to the Surface.
+    setAttribute(Qt::WA_OpaquePaintEvent, true);
+    setAttribute(Qt::WA_NoSystemBackground, true);
+    setAutoFillBackground(false);
     
     // Benchmark display timer - triggers repaint to update paint rate counter
     // Note: Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
@@ -2064,11 +2065,12 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     }
     
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    // Note: Antialiasing is deferred until after gesture fast paths.
+    // Gesture paths only blit cached pixmaps and don't need it.
     
     // ========== FAST PATH: Viewport Gesture (Zoom or Pan) ==========
     // During viewport gestures, draw transformed cached frame instead of re-rendering.
-    // This provides 60+ FPS during rapid zoom/pan operations.
+    // This provides smooth FPS during rapid zoom/pan operations.
     if (m_gesture.isActive() && !m_gesture.cachedFrame.isNull() 
         && m_gesture.startZoom > 0) {  // Guard against division by zero
         
@@ -2167,6 +2169,10 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         // Skip normal rendering during drag/resize
         return;
     }
+    
+    // Enable antialiasing for normal (non-gesture) rendering.
+    // Deferred to here so gesture fast paths above skip the overhead.
+    painter.setRenderHint(QPainter::Antialiasing, true);
     
     // ========== OPTIMIZATION: Dirty Region Rendering ==========
     // Only repaint what's needed. During stroke drawing, the dirty region is small.
