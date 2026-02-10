@@ -106,6 +106,15 @@ signals:
      * @param bundlePaths Paths to notebooks to export.
      */
     void exportToSnbxRequested(const QStringList& bundlePaths);
+    
+    /**
+     * @brief Emitted when user requests deletion from batch select mode (L-010).
+     * @param bundlePaths Paths to notebooks to delete.
+     * 
+     * Connected to Launcher::deleteNotebooks() which handles confirmation,
+     * closing open documents, library cleanup, and disk deletion.
+     */
+    void deleteNotebooksRequested(const QStringList& bundlePaths);
 
 private slots:
     // Slots for list view signals
