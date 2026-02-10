@@ -31,7 +31,7 @@ BatchImportDialog::BatchImportDialog(QWidget* parent)
     : QDialog(parent)
 {
     setWindowTitle(tr("Import Notebooks"));
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     setupUi();

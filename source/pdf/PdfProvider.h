@@ -3,14 +3,14 @@
 // ============================================================================
 // PdfProvider - Abstract interface for PDF operations
 // ============================================================================
-// Part of the new SpeedyNote document architecture (Phase 1.2.1)
+// Part of the new SpeedyNote document architecture (Phase 1.2.2)
 //
 // This abstraction layer enables:
 // - Swapping PDF backends (currently MuPDF on all platforms)
 // - Future extensibility for other backends if needed
 // - Easier testing with mock providers
 //
-// As of v1.2.1, SpeedyNote uses MuPDF exclusively on all platforms for
+// As of v1.2.2, SpeedyNote uses MuPDF exclusively on all platforms for
 // consistent rendering and to eliminate symbol conflicts.
 //
 // Design: Uses simple data structs instead of passing backend-specific types.

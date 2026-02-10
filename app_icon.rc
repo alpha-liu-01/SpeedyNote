@@ -1,8 +1,10 @@
 // Windows resource file for application icon
 #include <windows.h>
 
-// Application icon (ID 1 is the main application icon)
-1 ICON "resources/icons/mainicon.ico"
+// Application icon
+// NOTE: mainicon.ico removed — regenerate from mainicon.svg if Windows icon is needed:
+//   magick convert -background none resources/icons/mainicon.svg -define icon:auto-resize=256,128,64,48,32,16 resources/icons/mainicon.ico
+// Then uncomment: 1 ICON "resources/icons/mainicon.ico"
 
 // Version information
 1 VERSIONINFO
@@ -20,12 +22,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "SpeedyNote"
             VALUE "FileDescription", "SpeedyNote - Fast Digital Note Taking Application"
-            VALUE "FileVersion", "1.2.1.0"
+            VALUE "FileVersion", "1.2.2.0"
             VALUE "InternalName", "NoteApp"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "NoteApp.exe"
             VALUE "ProductName", "SpeedyNote"
-            VALUE "ProductVersion", "1.2.1.0"
+            VALUE "ProductVersion", "1.2.2.0"
         END
     END
     BLOCK "VarFileInfo"

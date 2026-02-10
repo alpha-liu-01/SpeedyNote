@@ -267,22 +267,22 @@ create_app_bundle() {
     
     # Create macOS icon (.icns)
     echo -e "${CYAN}  → Creating macOS icon...${NC}"
-    if [[ -f "resources/icons/mainicon.png" ]]; then
+    if [[ -f "resources/icons/mainicon.svg" ]]; then
         local iconset_dir="SpeedyNote.iconset"
         rm -rf "$iconset_dir"
         mkdir -p "$iconset_dir"
         
         # Generate all required icon sizes
-        sips -z 16 16     resources/icons/mainicon.png --out "$iconset_dir/icon_16x16.png" >/dev/null 2>&1
-        sips -z 32 32     resources/icons/mainicon.png --out "$iconset_dir/icon_16x16@2x.png" >/dev/null 2>&1
-        sips -z 32 32     resources/icons/mainicon.png --out "$iconset_dir/icon_32x32.png" >/dev/null 2>&1
-        sips -z 64 64     resources/icons/mainicon.png --out "$iconset_dir/icon_32x32@2x.png" >/dev/null 2>&1
-        sips -z 128 128   resources/icons/mainicon.png --out "$iconset_dir/icon_128x128.png" >/dev/null 2>&1
-        sips -z 256 256   resources/icons/mainicon.png --out "$iconset_dir/icon_128x128@2x.png" >/dev/null 2>&1
-        sips -z 256 256   resources/icons/mainicon.png --out "$iconset_dir/icon_256x256.png" >/dev/null 2>&1
-        sips -z 512 512   resources/icons/mainicon.png --out "$iconset_dir/icon_256x256@2x.png" >/dev/null 2>&1
-        sips -z 512 512   resources/icons/mainicon.png --out "$iconset_dir/icon_512x512.png" >/dev/null 2>&1
-        sips -z 1024 1024 resources/icons/mainicon.png --out "$iconset_dir/icon_512x512@2x.png" >/dev/null 2>&1
+        sips -z 16 16     resources/icons/mainicon.svg --out "$iconset_dir/icon_16x16.png" >/dev/null 2>&1
+        sips -z 32 32     resources/icons/mainicon.svg --out "$iconset_dir/icon_16x16@2x.png" >/dev/null 2>&1
+        sips -z 32 32     resources/icons/mainicon.svg --out "$iconset_dir/icon_32x32.png" >/dev/null 2>&1
+        sips -z 64 64     resources/icons/mainicon.svg --out "$iconset_dir/icon_32x32@2x.png" >/dev/null 2>&1
+        sips -z 128 128   resources/icons/mainicon.svg --out "$iconset_dir/icon_128x128.png" >/dev/null 2>&1
+        sips -z 256 256   resources/icons/mainicon.svg --out "$iconset_dir/icon_128x128@2x.png" >/dev/null 2>&1
+        sips -z 256 256   resources/icons/mainicon.svg --out "$iconset_dir/icon_256x256.png" >/dev/null 2>&1
+        sips -z 512 512   resources/icons/mainicon.svg --out "$iconset_dir/icon_256x256@2x.png" >/dev/null 2>&1
+        sips -z 512 512   resources/icons/mainicon.svg --out "$iconset_dir/icon_512x512.png" >/dev/null 2>&1
+        sips -z 1024 1024 resources/icons/mainicon.svg --out "$iconset_dir/icon_512x512@2x.png" >/dev/null 2>&1
         
         iconutil -c icns "$iconset_dir" -o "${APP_BUNDLE}/Contents/Resources/AppIcon.icns" 2>/dev/null || true
         rm -rf "$iconset_dir"
@@ -290,7 +290,7 @@ create_app_bundle() {
         if [[ -f "${APP_BUNDLE}/Contents/Resources/AppIcon.icns" ]]; then
             echo -e "${GREEN}    ✓ Icon created${NC}"
         else
-            cp "resources/icons/mainicon.png" "${APP_BUNDLE}/Contents/Resources/"
+            cp "resources/icons/mainicon.svg" "${APP_BUNDLE}/Contents/Resources/"
         fi
     fi
     

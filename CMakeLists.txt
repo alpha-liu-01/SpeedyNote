@@ -848,7 +848,7 @@ if(APPLE)
     if(RESOURCE_QM_FILES)
         install(FILES ${RESOURCE_QM_FILES} DESTINATION share/speedynote/translations)
     endif()
-    install(FILES resources/icons/mainicon.png DESTINATION share/speedynote/icons)
+    install(FILES resources/icons/mainicon.svg DESTINATION share/speedynote/icons)
 
 elseif(UNIX AND NOT ANDROID)
     install(TARGETS NoteApp DESTINATION bin)

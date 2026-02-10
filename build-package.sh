@@ -447,7 +447,7 @@ EOF
     # Install icons (name must match Icon= in .desktop file: org.speedynote.SpeedyNote)
     mkdir -p "$PKG_DIR/usr/share/icons/hicolor/scalable/apps"
     cp resources/icons/mainicon.svg "$PKG_DIR/usr/share/icons/hicolor/scalable/apps/org.speedynote.SpeedyNote.svg"
-    cp resources/icons/mainicon.png "$PKG_DIR/usr/share/pixmaps/org.speedynote.SpeedyNote.png"
+    cp resources/icons/mainicon.svg "$PKG_DIR/usr/share/pixmaps/org.speedynote.SpeedyNote.svg"
     
     # Install translation files
     mkdir -p "$PKG_DIR/usr/share/speedynote/translations"
@@ -523,7 +523,7 @@ mkdir -p %{buildroot}/usr/share/doc/%{name}
 
 install -m755 %{_vpath_builddir}/speedynote %{buildroot}/usr/bin/speedynote
 install -m644 resources/icons/mainicon.svg %{buildroot}/usr/share/icons/hicolor/scalable/apps/org.speedynote.SpeedyNote.svg
-install -m644 resources/icons/mainicon.png %{buildroot}/usr/share/pixmaps/org.speedynote.SpeedyNote.png
+install -m644 resources/icons/mainicon.svg %{buildroot}/usr/share/pixmaps/org.speedynote.SpeedyNote.svg
 install -m644 README.md %{buildroot}/usr/share/doc/%{name}/
 
 # Install translation files
@@ -621,7 +621,7 @@ package() {
     cd "\$srcdir/\${pkgname}-\${pkgver}"
     install -Dm755 "build/speedynote" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.svg" "\$pkgdir/usr/share/icons/hicolor/scalable/apps/org.speedynote.SpeedyNote.svg"
-    install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/org.speedynote.SpeedyNote.png"
+    install -Dm644 "resources/icons/mainicon.svg" "\$pkgdir/usr/share/pixmaps/org.speedynote.SpeedyNote.svg"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
     
     # Install translation files
@@ -719,7 +719,7 @@ build() {
 package() {
     install -Dm755 "prebuilt/speedynote" "\$pkgdir/usr/bin/speedynote"
     install -Dm644 "resources/icons/mainicon.svg" "\$pkgdir/usr/share/icons/hicolor/scalable/apps/org.speedynote.SpeedyNote.svg"
-    install -Dm644 "resources/icons/mainicon.png" "\$pkgdir/usr/share/pixmaps/org.speedynote.SpeedyNote.png"
+    install -Dm644 "resources/icons/mainicon.svg" "\$pkgdir/usr/share/pixmaps/org.speedynote.SpeedyNote.svg"
     install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
     
     # Install translation files

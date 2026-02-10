@@ -196,7 +196,7 @@ Launcher::Launcher(QWidget* parent)
     // This supports screens as small as 1024x640 @ 125% DPI (= 820x512 logical)
     // with room for window chrome and taskbar
     setMinimumSize(560, 480);
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
 #ifndef Q_OS_ANDROID
     // Enable drag-drop for desktop notebook import (Step 3.10)
@@ -513,6 +513,16 @@ void Launcher::setupStarred()
             this, &Launcher::showPdfExportDialog);
     connect(m_starredView, &StarredView::exportToSnbxRequested, 
             this, &Launcher::showSnbxExportDialog);
+    
+    // Delete signal (L-010: Batch Delete)
+    // Use lambda so we can conditionally exit select mode based on whether
+    // the user confirmed the deletion dialog.
+    connect(m_starredView, &StarredView::deleteNotebooksRequested,
+            this, [this](const QStringList& paths) {
+        if (deleteNotebooks(paths)) {
+            m_starredView->exitSelectMode();
+        }
+    });
 }
 
 void Launcher::setupSearch()
@@ -997,7 +1007,7 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     // Delete action
     QAction* deleteAction = menu.addAction(tr("Delete"));
     connect(deleteAction, &QAction::triggered, this, [this, bundlePath]() {
-        deleteNotebook(bundlePath);
+        deleteNotebooks({bundlePath});
     });
     
     menu.exec(globalPos);
@@ -1050,37 +1060,76 @@ void Launcher::showFolderContextMenu(const QString& folderName, const QPoint& gl
     menu.exec(globalPos);
 }
 
-void Launcher::deleteNotebook(const QString& bundlePath)
+bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
 {
-    // Extract display name for confirmation
-    QString displayName = bundlePath;
-    int lastSlash = bundlePath.lastIndexOf('/');
-    if (lastSlash >= 0) {
-        displayName = bundlePath.mid(lastSlash + 1);
-        if (displayName.endsWith(".snb", Qt::CaseInsensitive)) {
-            displayName.chop(4);
+    if (bundlePaths.isEmpty())
+        return false;
+    
+    // --- Build display names for the confirmation dialog ---
+    QStringList displayNames;
+    displayNames.reserve(bundlePaths.size());
+    for (const QString& path : bundlePaths) {
+        QString name = path;
+        int lastSlash = path.lastIndexOf('/');
+        if (lastSlash >= 0) {
+            name = path.mid(lastSlash + 1);
+            if (name.endsWith(".snb", Qt::CaseInsensitive))
+                name.chop(4);
         }
+        displayNames.append(name);
     }
     
-    QMessageBox::StandardButton reply = QMessageBox::warning(
-        this,
-        tr("Delete Notebook"),
-        tr("Permanently delete \"%1\"?\n\nThis action cannot be undone.").arg(displayName),
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No
-    );
+    // --- Confirmation dialog (adapts to single vs. batch) ---
+    QMessageBox::StandardButton reply;
+    if (bundlePaths.size() == 1) {
+        // Single notebook — same wording as the original deleteNotebook()
+        reply = QMessageBox::warning(
+            this,
+            tr("Delete Notebook"),
+            tr("Permanently delete \"%1\"?\n\nThis action cannot be undone.").arg(displayNames.first()),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No
+        );
+    } else {
+        // Batch — show count and a (possibly truncated) name list
+        const int maxShown = 10;
+        QString nameList;
+        for (int i = 0; i < qMin(displayNames.size(), maxShown); ++i) {
+            nameList += QString::fromUtf8("  • ") + displayNames[i] + '\n';
+        }
+        if (displayNames.size() > maxShown) {
+            nameList += tr("  ... and %1 more\n").arg(displayNames.size() - maxShown);
+        }
+        
+        reply = QMessageBox::warning(
+            this,
+            tr("Delete Notebooks"),
+            tr("Permanently delete %1 notebooks?\n\n%2\nThis action cannot be undone.")
+                .arg(bundlePaths.size())
+                .arg(nameList),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No
+        );
+    }
     
-    if (reply == QMessageBox::Yes) {
+    if (reply != QMessageBox::Yes)
+        return false;
+    
+    // --- Perform deletion for each notebook ---
+    // Block libraryChanged signals during the batch to avoid N intermediate
+    // model reloads.  We do a single explicit reload at the end instead.
+    NotebookLibrary* lib = NotebookLibrary::instance();
+    const QSignalBlocker blocker(lib);
+    
+    MainWindow* mainWindow = MainWindow::findExistingMainWindow();
+    
+    for (const QString& bundlePath : bundlePaths) {
         // BUG-TAB-002 FIX: If this notebook is open in MainWindow, close it first
         // This prevents undefined behavior (editing deleted files, save failures)
         // Use discardChanges=true because we're deleting - saving is pointless
         QString docId = Document::peekBundleId(bundlePath);
-        if (!docId.isEmpty()) {
-            MainWindow* mainWindow = MainWindow::findExistingMainWindow();
-            if (mainWindow) {
-                // Close without saving - user already confirmed permanent delete
-                mainWindow->closeDocumentById(docId, true);  // discardChanges=true
-            }
+        if (!docId.isEmpty() && mainWindow) {
+            mainWindow->closeDocumentById(docId, true);  // discardChanges=true
         }
         
 #ifdef Q_OS_ANDROID
@@ -1090,7 +1139,7 @@ void Launcher::deleteNotebook(const QString& bundlePath)
 #endif
         
         // Remove from library
-        NotebookLibrary::instance()->removeFromRecent(bundlePath);
+        lib->removeFromRecent(bundlePath);
         
         // Delete from disk
         QDir bundleDir(bundlePath);
@@ -1103,11 +1152,17 @@ void Launcher::deleteNotebook(const QString& bundlePath)
         if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
             QFile::remove(pdfToDelete);
 #ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "Launcher::deleteNotebook: Also deleted imported PDF:" << pdfToDelete;
+            qDebug() << "Launcher::deleteNotebooks: Also deleted imported PDF:" << pdfToDelete;
 #endif
         }
 #endif
     }
+    
+    // blocker goes out of scope here, re-enabling signals on NotebookLibrary.
+    // Now do a single refresh of both views (L-010).
+    m_timelineModel->reload();
+    m_starredView->reload();
+    return true;
 }
 
 void Launcher::toggleNotebookStar(const QString& bundlePath)
@@ -1486,6 +1541,18 @@ void Launcher::showTimelineOverflowMenu()
         QStringList selected = m_timelineList->selectedBundlePaths();
         if (!selected.isEmpty()) {
             NotebookLibrary::instance()->starNotebooks(selected);
+            m_timelineList->exitSelectMode();
+        }
+    });
+    
+    menu.addSeparator();
+    
+    // Delete Selected (L-010: Batch Delete)
+    QAction* deleteAction = menu.addAction(tr("Delete Selected"));
+    deleteAction->setEnabled(selectedCount > 0);
+    connect(deleteAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_timelineList->selectedBundlePaths();
+        if (!selected.isEmpty() && deleteNotebooks(selected)) {
             m_timelineList->exitSelectMode();
         }
     });

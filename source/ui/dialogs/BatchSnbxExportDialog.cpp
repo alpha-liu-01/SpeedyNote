@@ -31,7 +31,7 @@ BatchSnbxExportDialog::BatchSnbxExportDialog(const QStringList& bundlePaths, QWi
 #else
     setWindowTitle(tr("Export Notebook Package"));
 #endif
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     // Detect dark mode

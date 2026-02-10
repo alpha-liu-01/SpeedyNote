@@ -464,6 +464,20 @@ void StarredView::showOverflowMenu()
         }
     });
     
+    menu.addSeparator();
+    
+    // Delete Selected (L-010: Batch Delete)
+    // Note: exitSelectMode is NOT called here. The Launcher slot handles it
+    // conditionally — only exiting if the user confirms the deletion dialog.
+    QAction* deleteAction = menu.addAction(tr("Delete Selected"));
+    deleteAction->setEnabled(selectedCount > 0);
+    connect(deleteAction, &QAction::triggered, this, [this]() {
+        QStringList selected = m_listView->selectedBundlePaths();
+        if (!selected.isEmpty()) {
+            emit deleteNotebooksRequested(selected);
+        }
+    });
+    
     // Show menu below the overflow button
     QPoint pos = m_overflowMenuButton->mapToGlobal(
         QPoint(m_overflowMenuButton->width(), m_overflowMenuButton->height()));

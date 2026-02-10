@@ -1524,10 +1524,10 @@ void ControlPanelDialog::createAboutTab() {
     
     // Application icon
     QLabel *iconLabel = new QLabel(aboutTab);
-    QPixmap iconPixmap(":/resources/icons/mainicon.png");
+    QPixmap iconPixmap(":/resources/icons/mainicon.svg");
     if (iconPixmap.isNull()) {
         // Fallback to file system path if resource doesn't work
-        iconPixmap.load("resources/icons/mainicon.png");
+        iconPixmap.load("resources/icons/mainicon.svg");
     }
     
     if (!iconPixmap.isNull()) {
@@ -1553,7 +1553,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(5);
     
     // Version
-    QLabel *versionLabel = new QLabel(tr("Version 1.2.1"), aboutTab);
+    QLabel *versionLabel = new QLabel(tr("Version 1.2.2"), aboutTab);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 14px; color: #7f8c8d;");
     layout->addWidget(versionLabel);

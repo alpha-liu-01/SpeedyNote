@@ -29,7 +29,7 @@ ExportResultsDialog::ExportResultsDialog(const BatchOps::BatchResult& result,
     , m_outputDir(outputDir)
 {
     setWindowTitle(tr("Export Results"));
-    setWindowIcon(QIcon(":/resources/icons/mainicon.png"));
+    setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
     // Detect dark mode

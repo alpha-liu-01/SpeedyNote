@@ -123,7 +123,7 @@ private:
     void onTimelineItemClicked(const QModelIndex& index);
     void showNotebookContextMenu(const QString& bundlePath, const QPoint& globalPos);
     void showFolderContextMenu(const QString& folderName, const QPoint& globalPos);
-    void deleteNotebook(const QString& bundlePath);
+    bool deleteNotebooks(const QStringList& bundlePaths);
     void toggleNotebookStar(const QString& bundlePath);
     void renameNotebook(const QString& bundlePath);
     void duplicateNotebook(const QString& bundlePath);
