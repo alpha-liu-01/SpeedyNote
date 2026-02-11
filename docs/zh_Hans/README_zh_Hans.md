@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://i.imgur.com/Q7HPQwK.png" width="200" alt="SpeedyNote Logo">
+<img src="https://i.imgur.com/tesbk4U.png" width="200" alt="SpeedyNote Logo">
 
 **一款运行超级快，用起来超级高效的笔记应用，专为手写笔用户打造**
 
