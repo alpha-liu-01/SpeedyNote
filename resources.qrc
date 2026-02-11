@@ -61,6 +61,7 @@
     <file>resources/icons/tabs.png</file>
     <file>resources/icons/tabs_reversed.png</file>
     <file>resources/icons/mainicon.svg</file>
+    <file>resources/icons/mainicon.ico</file>
     <file>resources/icons/settings.png</file>
     <file>resources/icons/settings_reversed.png</file>
     <file>resources/icons/menu.png</file>
