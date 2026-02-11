@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://i.imgur.com/Q7HPQwK.png" width="200" alt="SpeedyNote Logo">
+<img src="https://i.imgur.com/tesbk4U.png" width="200" alt="SpeedyNote Logo">
 
 **A blazing-fast, cross-platform note-taking app for stylus users**
 
