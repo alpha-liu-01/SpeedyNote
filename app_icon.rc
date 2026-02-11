@@ -4,12 +4,12 @@
 // Application icon
 // NOTE: mainicon.ico removed — regenerate from mainicon.svg if Windows icon is needed:
 //   magick convert -background none resources/icons/mainicon.svg -define icon:auto-resize=256,128,64,48,32,16 resources/icons/mainicon.ico
-// Then uncomment: 1 ICON "resources/icons/mainicon.ico"
+1 ICON "resources/icons/mainicon.ico"
 
 // Version information
 1 VERSIONINFO
-FILEVERSION 1,1,6,0
-PRODUCTVERSION 1,1,6,0
+FILEVERSION 1,2,2,0
+PRODUCTVERSION 1,2,2,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L

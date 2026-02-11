@@ -29,6 +29,7 @@ jobs:
             mingw-w64-clang-x86_64-pkg-config
             mingw-w64-clang-x86_64-qt6-base
             mingw-w64-clang-x86_64-qt6-tools
+            mingw-w64-clang-x86_64-qt6-svg
             mingw-w64-clang-x86_64-qt6-translations
             mingw-w64-clang-x86_64-SDL2
             mingw-w64-clang-x86_64-mupdf
