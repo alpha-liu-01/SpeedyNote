@@ -2,7 +2,7 @@
 // DocumentViewportTests - Unit and Visual Tests for DocumentViewport
 // ============================================================================
 // Part of the new SpeedyNote document architecture (Phase 1.3.11)
-// Run with: NoteApp --test-viewport
+// Run with: speedynote --test-viewport
 // ============================================================================
 
 #pragma once

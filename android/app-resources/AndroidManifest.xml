@@ -77,7 +77,7 @@
 
             <meta-data
                 android:name="android.app.lib_name"
-                android:value="NoteApp"/>
+                android:value="speedynote"/>
         </activity>
 
         <!-- File provider for sharing files -->

@@ -14,7 +14,7 @@
  * Visual test widget for toolbar buttons.
  * Displays all button types for manual verification of appearance and behavior.
  * 
- * Launch with: NoteApp --test-buttons-visual
+ * Launch with: speedynote --test-buttons-visual
  */
 class ToolbarButtonTestWidget : public QWidget {
     Q_OBJECT

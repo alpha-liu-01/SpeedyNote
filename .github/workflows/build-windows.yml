@@ -108,7 +108,7 @@ jobs:
           Write-Host "::endgroup::"
           
           Write-Host "::group::Deploy Qt runtime" -ForegroundColor Cyan
-          & windeployqt6 NoteApp.exe
+          & windeployqt6 speedynote.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "::endgroup::"
           
@@ -135,7 +135,7 @@ jobs:
             Write-Host "Using ntldd for automatic dependency detection..." -ForegroundColor Gray
             
             # Get all dependencies recursively
-            $ntlddOutput = & $ntlddExe -R "NoteApp.exe" 2>$null
+            $ntlddOutput = & $ntlddExe -R "speedynote.exe" 2>$null
             
             $dllsToCopy = @{}
             foreach ($line in $ntlddOutput) {
@@ -200,7 +200,7 @@ jobs:
           # Remove build artifacts not needed for packaging
           $cleanupItems = @(
             ".qt",                    # Qt internal cache
-            "NoteApp_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
+            "speedynote_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
             "CMakeFiles",             # CMake internal files
             "CMakeCache.txt",         # CMake cache
             "cmake_install.cmake",    # CMake install script
@@ -227,7 +227,7 @@ jobs:
           Write-Host "::endgroup::"
           
           Write-Host "Build completed successfully!" -ForegroundColor Green
-          Get-Item NoteApp.exe | Format-List Name,Length,LastWriteTime
+          Get-Item speedynote.exe | Format-List Name,Length,LastWriteTime
           
           Set-Location ..
         shell: pwsh
@@ -237,8 +237,8 @@ jobs:
           Write-Host "Creating Windows installer with Inno Setup..." -ForegroundColor Cyan
           
           # Verify build directory exists
-          if (-not (Test-Path "build\NoteApp.exe")) {
-            Write-Host "Error: NoteApp.exe not found in build directory" -ForegroundColor Red
+          if (-not (Test-Path "build\speedynote.exe")) {
+            Write-Host "Error: speedynote.exe not found in build directory" -ForegroundColor Red
             exit 1
           }
           

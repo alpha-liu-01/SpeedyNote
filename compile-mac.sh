@@ -43,7 +43,7 @@ show_usage() {
     echo
     echo "Examples:"
     echo "  $0                   # Full build + package (interactive)"
-    echo "  $0 -p                # Package only (skip build if NoteApp exists)"
+    echo "  $0 -p                # Package only (skip build if speedynote exists)"
     echo "  $0 -p -d -c          # Package + DMG + CLI (no prompts)"
     echo "  $0 -f                # Force full rebuild"
 }
@@ -228,8 +228,8 @@ build_project() {
     echo -e "${YELLOW}Compiling with ${cpu_count} parallel jobs...${NC}"
     make -j${cpu_count}
     
-    if [[ ! -f "NoteApp" ]]; then
-        echo -e "${RED}Build failed: NoteApp executable not found${NC}"
+    if [[ ! -f "speedynote" ]]; then
+        echo -e "${RED}Build failed: speedynote executable not found${NC}"
         exit 1
     fi
     
@@ -263,7 +263,7 @@ create_app_bundle() {
     mkdir -p "${APP_BUNDLE}/Contents/Frameworks"
     
     # Copy executable
-    cp build/NoteApp "${APP_BUNDLE}/Contents/MacOS/"
+    cp build/speedynote "${APP_BUNDLE}/Contents/MacOS/"
     
     # Create macOS icon (.icns)
     echo -e "${CYAN}  → Creating macOS icon...${NC}"
@@ -324,7 +324,7 @@ create_app_bundle() {
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>NoteApp</string>
+    <string>speedynote</string>
     <key>CFBundleIdentifier</key>
     <string>com.github.alpha-liu-01.SpeedyNote</string>
     <key>CFBundleName</key>
@@ -424,7 +424,7 @@ collect_dependencies() {
 
 bundle_dependencies() {
     local app_path="$1"
-    local executable="${app_path}/Contents/MacOS/NoteApp"
+    local executable="${app_path}/Contents/MacOS/speedynote"
     local frameworks_dir="${app_path}/Contents/Frameworks"
     
     echo -e "${YELLOW}Bundling dependencies recursively...${NC}"
@@ -476,7 +476,7 @@ bundle_dependencies() {
 
 fix_library_paths() {
     local app_path="$1"
-    local executable="${app_path}/Contents/MacOS/NoteApp"
+    local executable="${app_path}/Contents/MacOS/speedynote"
     local frameworks_dir="${app_path}/Contents/Frameworks"
     
     echo -e "${CYAN}  → Analyzing library references...${NC}"
@@ -683,7 +683,7 @@ codesign_app() {
     
     # Step 4: Sign the main executable
     echo -e "${CYAN}  → Signing main executable...${NC}"
-    codesign --force --sign - --timestamp=none "${app_path}/Contents/MacOS/NoteApp"
+    codesign --force --sign - --timestamp=none "${app_path}/Contents/MacOS/speedynote"
     
     # Step 5: Sign the entire app bundle (this re-signs everything with proper structure)
     echo -e "${CYAN}  → Signing app bundle...${NC}"
@@ -784,7 +784,7 @@ EOF
 
 verify_bundle() {
     local app_path="$1"
-    local executable="${app_path}/Contents/MacOS/NoteApp"
+    local executable="${app_path}/Contents/MacOS/speedynote"
     local frameworks_dir="${app_path}/Contents/Frameworks"
     
     echo -e "${YELLOW}Verifying bundle...${NC}"
@@ -851,9 +851,9 @@ install_cli_command() {
     
     # Determine the full path to the executable
     if [[ -d "/Applications/${APP_BUNDLE}" ]]; then
-        app_executable="/Applications/${APP_BUNDLE}/Contents/MacOS/NoteApp"
+        app_executable="/Applications/${APP_BUNDLE}/Contents/MacOS/speedynote"
     else
-        app_executable="$(pwd)/${APP_BUNDLE}/Contents/MacOS/NoteApp"
+        app_executable="$(pwd)/${APP_BUNDLE}/Contents/MacOS/speedynote"
     fi
     
     echo
@@ -899,8 +899,8 @@ APP_PATH=\"${app_executable}\"
 # Check if app exists at expected location
 if [[ ! -f \"\$APP_PATH\" ]]; then
     # Try Applications folder
-    if [[ -f \"/Applications/SpeedyNote.app/Contents/MacOS/NoteApp\" ]]; then
-        APP_PATH=\"/Applications/SpeedyNote.app/Contents/MacOS/NoteApp\"
+    if [[ -f \"/Applications/SpeedyNote.app/Contents/MacOS/speedynote\" ]]; then
+        APP_PATH=\"/Applications/SpeedyNote.app/Contents/MacOS/speedynote\"
     else
         echo \"Error: SpeedyNote not found. Please reinstall the application.\" >&2
         exit 1
@@ -955,12 +955,12 @@ main() {
     # Step 5: Build project (or skip if executable exists and --package-only)
     local skip_build=false
     
-    if [[ -f "build/NoteApp" ]] && [[ "$PACKAGE_ONLY" == "true" ]] && [[ "$FORCE_REBUILD" == "false" ]]; then
-        echo -e "${GREEN}✓ Executable found: build/NoteApp${NC}"
+    if [[ -f "build/speedynote" ]] && [[ "$PACKAGE_ONLY" == "true" ]] && [[ "$FORCE_REBUILD" == "false" ]]; then
+        echo -e "${GREEN}✓ Executable found: build/speedynote${NC}"
         echo -e "${CYAN}  Skipping build (--package-only mode)${NC}"
         skip_build=true
-    elif [[ -f "build/NoteApp" ]] && [[ "$PACKAGE_ONLY" == "false" ]] && [[ "$FORCE_REBUILD" == "false" ]]; then
-        echo -e "${YELLOW}Executable already exists: build/NoteApp${NC}"
+    elif [[ -f "build/speedynote" ]] && [[ "$PACKAGE_ONLY" == "false" ]] && [[ "$FORCE_REBUILD" == "false" ]]; then
+        echo -e "${YELLOW}Executable already exists: build/speedynote${NC}"
         echo -e "${CYAN}Would you like to rebuild? (y/n)${NC}"
         read -r response
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
@@ -1010,7 +1010,7 @@ main() {
     echo
     echo -e "${CYAN}To run SpeedyNote:${NC}"
     echo -e "  ${YELLOW}open ${APP_BUNDLE}${NC}"
-    echo -e "  ${YELLOW}or: ./${APP_BUNDLE}/Contents/MacOS/NoteApp${NC}"
+    echo -e "  ${YELLOW}or: ./${APP_BUNDLE}/Contents/MacOS/speedynote${NC}"
     if [[ -L "/usr/local/bin/speedynote" ]] || [[ -f "/usr/local/bin/speedynote" ]]; then
         echo
         echo -e "${CYAN}CLI commands available:${NC}"

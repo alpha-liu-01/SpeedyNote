@@ -48,7 +48,7 @@ cd SpeedyNote
 ./compile.sh
 
 # Run
-cd build && ./NoteApp
+cd build && ./speedynote
 ```
 
 #### Build Options

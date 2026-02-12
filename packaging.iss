@@ -58,8 +58,8 @@ fr.AddToPathTask=Ajouter SpeedyNote au PATH (active la commande 'speedynote' dan
 Source: ".\build\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
 [Icons]
-Name: "{group}\SpeedyNote"; Filename: "{app}\NoteApp.exe"; WorkingDir: "{app}"
-Name: "{commondesktop}\SpeedyNote"; Filename: "{app}\NoteApp.exe"; WorkingDir: "{app}"; IconFilename: "{app}\NoteApp.exe"; Tasks: desktopicon
+Name: "{group}\SpeedyNote"; Filename: "{app}\speedynote.exe"; WorkingDir: "{app}"
+Name: "{commondesktop}\SpeedyNote"; Filename: "{app}\speedynote.exe"; WorkingDir: "{app}"; IconFilename: "{app}\speedynote.exe"; Tasks: desktopicon
 Name: "{group}\Uninstall SpeedyNote"; Filename: "{uninstallexe}"
 
 [Tasks]
@@ -84,21 +84,21 @@ Root: HKLM; Subkey: "SOFTWARE\SpeedyNote\Capabilities\FileAssociations"; ValueNa
 ; =============================================================================
 
 ; Application registration (uninsdeletekey on root removes entire tree)
-Root: HKCR; Subkey: "Applications\NoteApp.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "SpeedyNote"; Tasks: pdfassociation; Flags: uninsdeletekey
-Root: HKCR; Subkey: "Applications\NoteApp.exe\DefaultIcon"; ValueType: string; ValueData: "{app}\NoteApp.exe,0"; Tasks: pdfassociation
-Root: HKCR; Subkey: "Applications\NoteApp.exe\shell\open"; ValueType: string; ValueName: "FriendlyName"; ValueData: "Open with SpeedyNote"; Tasks: pdfassociation
-Root: HKCR; Subkey: "Applications\NoteApp.exe\shell\open\command"; ValueType: string; ValueData: """{app}\NoteApp.exe"" ""%1"""; Tasks: pdfassociation
+Root: HKCR; Subkey: "Applications\speedynote.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "SpeedyNote"; Tasks: pdfassociation; Flags: uninsdeletekey
+Root: HKCR; Subkey: "Applications\speedynote.exe\DefaultIcon"; ValueType: string; ValueData: "{app}\speedynote.exe,0"; Tasks: pdfassociation
+Root: HKCR; Subkey: "Applications\speedynote.exe\shell\open"; ValueType: string; ValueName: "FriendlyName"; ValueData: "Open with SpeedyNote"; Tasks: pdfassociation
+Root: HKCR; Subkey: "Applications\speedynote.exe\shell\open\command"; ValueType: string; ValueData: """{app}\speedynote.exe"" ""%1"""; Tasks: pdfassociation
 
 ; PDF OpenWith entries (uninsdeletekey/uninsdeletevalue for shared keys)
-Root: HKCR; Subkey: ".pdf\OpenWithList\NoteApp.exe"; Tasks: pdfassociation; Flags: uninsdeletekey
+Root: HKCR; Subkey: ".pdf\OpenWithList\speedynote.exe"; Tasks: pdfassociation; Flags: uninsdeletekey
 Root: HKCR; Subkey: ".pdf\OpenWithProgids"; ValueType: string; ValueName: "SpeedyNote.PDF"; ValueData: ""; Tasks: pdfassociation; Flags: uninsdeletevalue
 
 ; SpeedyNote.PDF ProgID (uninsdeletekey on root removes entire tree)
 Root: HKCR; Subkey: "SpeedyNote.PDF"; ValueType: string; ValueData: "PDF Document (SpeedyNote)"; Tasks: pdfassociation; Flags: uninsdeletekey
 Root: HKCR; Subkey: "SpeedyNote.PDF"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "PDF Document for SpeedyNote"; Tasks: pdfassociation
-Root: HKCR; Subkey: "SpeedyNote.PDF\DefaultIcon"; ValueType: string; ValueData: "{app}\NoteApp.exe,0"; Tasks: pdfassociation
+Root: HKCR; Subkey: "SpeedyNote.PDF\DefaultIcon"; ValueType: string; ValueData: "{app}\speedynote.exe,0"; Tasks: pdfassociation
 Root: HKCR; Subkey: "SpeedyNote.PDF\shell\open"; ValueType: string; ValueName: "FriendlyName"; ValueData: "Open with SpeedyNote"; Tasks: pdfassociation
-Root: HKCR; Subkey: "SpeedyNote.PDF\shell\open\command"; ValueType: string; ValueData: """{app}\NoteApp.exe"" ""%1"""; Tasks: pdfassociation
+Root: HKCR; Subkey: "SpeedyNote.PDF\shell\open\command"; ValueType: string; ValueData: """{app}\speedynote.exe"" ""%1"""; Tasks: pdfassociation
 
 ; Windows Registered Applications (uninsdeletevalue for shared key, uninsdeletekey for our tree)
 Root: HKLM; Subkey: "SOFTWARE\RegisteredApplications"; ValueType: string; ValueName: "SpeedyNote"; ValueData: "SOFTWARE\SpeedyNote\Capabilities"; Tasks: pdfassociation; Flags: uninsdeletevalue
@@ -112,7 +112,7 @@ Root: HKLM; Subkey: "SOFTWARE\SpeedyNote\Capabilities\FileAssociations"; ValueTy
 Type: files; Name: "{app}\speedynote.cmd"
 
 [Run]
-Filename: "{app}\NoteApp.exe"; Description: "{cm:LaunchProgram,SpeedyNote}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\speedynote.exe"; Description: "{cm:LaunchProgram,SpeedyNote}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 // =============================================================================
@@ -221,7 +221,7 @@ var
   CmdContent: string;
 begin
   CmdPath := ExpandConstant('{app}\speedynote.cmd');
-  CmdContent := '@echo off' + #13#10 + '"%~dp0NoteApp.exe" %*';
+  CmdContent := '@echo off' + #13#10 + '"%~dp0speedynote.exe" %*';
   SaveStringToFile(CmdPath, CmdContent, False);
 end;
 
