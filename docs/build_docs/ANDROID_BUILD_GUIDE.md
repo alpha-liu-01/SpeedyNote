@@ -438,7 +438,7 @@ export QT_HOST=/opt/qt/6.9.3/gcc_64
 **Fix:** The build script should sign automatically. If not, manually sign:
 ```bash
 ${QT_HOST}/bin/androiddeployqt \
-    --input android-NoteApp-deployment-settings.json \
+    --input android-speedynote-deployment-settings.json \
     --output android-build \
     --sign \
     --storepass android \

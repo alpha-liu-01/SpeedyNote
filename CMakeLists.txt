@@ -718,26 +718,21 @@ set(APP_SOURCES
 # Build Target
 # ============================================================================
 if(ANDROID)
-    qt_add_executable(NoteApp ${APP_SOURCES})
+    qt_add_executable(speedynote ${APP_SOURCES})
     
-    set_target_properties(NoteApp PROPERTIES
+    set_target_properties(speedynote PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android/app-resources"
         QT_ANDROID_TARGET_SDK_VERSION 35
         QT_ANDROID_MIN_SDK_VERSION 26
     )
     
-    target_include_directories(NoteApp PRIVATE
+    target_include_directories(speedynote PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/source
         ${MUPDF_INCLUDE_DIR}
     )
 else()
-    add_executable(NoteApp ${APP_SOURCES})
-    # On Linux, output as 'speedynote' to match .desktop Exec= line and cmake --install
-    # (Windows uses NoteApp.exe, macOS uses NoteApp in app bundle — unchanged)
-    if(UNIX AND NOT APPLE)
-        set_target_properties(NoteApp PROPERTIES OUTPUT_NAME speedynote)
-    endif()
+    add_executable(speedynote ${APP_SOURCES})
 endif()
 
 # ============================================================================
@@ -790,7 +785,7 @@ if(WIN32)
     else()
         message(FATAL_ERROR "MuPDF is required for PDF support")
     endif()
-    target_link_libraries(NoteApp ${PLATFORM_LIBS})
+    target_link_libraries(speedynote ${PLATFORM_LIBS})
 
 elseif(APPLE)
     set(PLATFORM_LIBS
@@ -806,10 +801,10 @@ elseif(APPLE)
     else()
         message(FATAL_ERROR "MuPDF is required for PDF support on macOS. Install with: brew install mupdf")
     endif()
-    target_link_libraries(NoteApp ${PLATFORM_LIBS})
+    target_link_libraries(speedynote ${PLATFORM_LIBS})
 
 elseif(ANDROID)
-    target_link_libraries(NoteApp PRIVATE
+    target_link_libraries(speedynote PRIVATE
         Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
         ${MUPDF_LIBRARIES}
         log z
@@ -833,14 +828,14 @@ elseif(UNIX)
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
     endif()
-    target_link_libraries(NoteApp ${PLATFORM_LIBS})
+    target_link_libraries(speedynote ${PLATFORM_LIBS})
 endif()
 
 # ============================================================================
 # Install Targets
 # ============================================================================
 if(APPLE)
-    install(TARGETS NoteApp DESTINATION bin)
+    install(TARGETS speedynote DESTINATION bin)
     if(QM_FILES)
         install(FILES ${QM_FILES} DESTINATION share/speedynote/translations)
     endif()
@@ -851,7 +846,7 @@ if(APPLE)
     install(FILES resources/icons/mainicon.svg DESTINATION share/speedynote/icons)
 
 elseif(UNIX AND NOT ANDROID)
-    install(TARGETS NoteApp DESTINATION bin)
+    install(TARGETS speedynote DESTINATION bin)
     if(QM_FILES)
         install(FILES ${QM_FILES} DESTINATION share/speedynote/translations)
     endif()

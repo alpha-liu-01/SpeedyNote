@@ -54,10 +54,10 @@ $toolchainPath = "$msys2Root\$toolchain"
 
 # Clean and recreate build folder
 if (Test-Path ".\build" -PathType Container) {
-    # Kill any running NoteApp instances that might lock files
-    $noteAppProcesses = Get-Process -Name "NoteApp" -ErrorAction SilentlyContinue
+    # Kill any running speedynote instances that might lock files
+    $noteAppProcesses = Get-Process -Name "speedynote" -ErrorAction SilentlyContinue
     if ($noteAppProcesses) {
-        Write-Host "Stopping running NoteApp instances..." -ForegroundColor Yellow
+        Write-Host "Stopping running speedynote instances..." -ForegroundColor Yellow
         $noteAppProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 500
     }
@@ -169,7 +169,7 @@ if ($arm64) {
 & "$toolchainPath\bin\cmake.exe" --build . --config Release --parallel $jobs
 
 # ✅ Deploy Qt runtime
-& "$toolchainPath\bin\windeployqt6.exe" "NoteApp.exe"
+& "$toolchainPath\bin\windeployqt6.exe" "speedynote.exe"
 
 # ✅ Copy required DLLs automatically using ntldd (recursive dependency detection)
 Write-Host "Detecting and copying required DLLs..." -ForegroundColor Cyan
@@ -201,7 +201,7 @@ if (Test-Path $ntlddExe) {
     Write-Host "Using ntldd for automatic dependency detection..." -ForegroundColor Gray
     
     # Get all dependencies recursively using ntldd
-    $ntlddOutput = & $ntlddExe -R "NoteApp.exe" 2>$null
+    $ntlddOutput = & $ntlddExe -R "speedynote.exe" 2>$null
     
     # Debug: Show how many lines ntldd returned
     $ntlddLineCount = ($ntlddOutput | Measure-Object).Count
@@ -263,7 +263,7 @@ if (Test-Path $ntlddExe) {
     if (Test-Path $bashExe) {
         $lddScript = @"
 export PATH="/$toolchain/bin:`$PATH"
-ldd NoteApp.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
+ldd speedynote.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
 "@
         $lddOutput = & $bashExe -lc $lddScript 2>$null
         
@@ -303,7 +303,7 @@ Write-Host ""
 Write-Host "Cleaning up build artifacts..." -ForegroundColor Gray
 $cleanupItems = @(
     ".qt",                    # Qt internal cache
-    "NoteApp_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
+    "speedynote_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
     "CMakeFiles",             # CMake internal files
     "CMakeCache.txt",         # CMake cache
     "cmake_install.cmake",    # CMake install script
@@ -337,5 +337,5 @@ cd ../
 # ✅ Run the application (unless -norun flag is set)
 if (-not $norun) {
     Write-Host "Launching application..." -ForegroundColor Cyan
-    & .\build\NoteApp.exe
+    & .\build\speedynote.exe
 }

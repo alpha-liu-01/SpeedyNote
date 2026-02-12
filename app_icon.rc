@@ -23,9 +23,9 @@ BEGIN
             VALUE "CompanyName", "SpeedyNote"
             VALUE "FileDescription", "SpeedyNote - Fast Digital Note Taking Application"
             VALUE "FileVersion", "1.2.2.0"
-            VALUE "InternalName", "NoteApp"
+            VALUE "InternalName", "speedynote"
             VALUE "LegalCopyright", "Copyright (C) 2026"
-            VALUE "OriginalFilename", "NoteApp.exe"
+            VALUE "OriginalFilename", "speedynote.exe"
             VALUE "ProductName", "SpeedyNote"
             VALUE "ProductVersion", "1.2.2.0"
         END

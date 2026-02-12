@@ -45,7 +45,7 @@ cd SpeedyNote
 ./compile.sh
 
 # 运行
-cd build && ./NoteApp
+cd build && ./speedynote
 ```
 
 #### 构建选项

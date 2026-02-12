@@ -9,7 +9,7 @@
 
 /**
  * Unit tests for ToolbarButton classes.
- * Run with: NoteApp --test-buttons
+ * Run with: speedynote --test-buttons
  */
 class ToolbarButtonTests : public QObject {
     Q_OBJECT
