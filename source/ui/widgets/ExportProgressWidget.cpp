@@ -4,6 +4,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QTimer>
@@ -202,23 +203,12 @@ void ExportProgressWidget::showComplete(int successCount, int failCount, int ski
     m_lastSkip = skipCount;
     
     // Update icon
-    if (failCount > 0) {
-        m_iconLabel->setText("⚠");  // Warning if any failures
-    } else {
-        m_iconLabel->setText("✓");  // Checkmark if all good
-    }
-    QFont iconFont = m_iconLabel->font();
-    iconFont.setPointSize(18);
-    m_iconLabel->setFont(iconFont);
-    
-    // Set icon color
-    QColor iconColor;
-    if (failCount > 0) {
-        iconColor = QColor(0xe6, 0x7e, 0x22);  // Orange warning
-    } else {
-        iconColor = QColor(0x27, 0xae, 0x60);  // Green success
-    }
-    m_iconLabel->setStyleSheet(QString("color: %1;").arg(iconColor.name()));
+    QString iconName = (failCount > 0) ? QStringLiteral("warning") : QStringLiteral("check");
+    QString iconPath = m_darkMode
+        ? QStringLiteral(":/resources/icons/%1_reversed.png").arg(iconName)
+        : QStringLiteral(":/resources/icons/%1.png").arg(iconName);
+    m_iconLabel->setPixmap(QPixmap(iconPath).scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    m_iconLabel->setStyleSheet(QString());  // Clear any prior text color styling
     
     // Update status
     m_statusLabel->setText(tr("Export complete"));
@@ -276,11 +266,11 @@ void ExportProgressWidget::showError(const QString& message)
     stopDismissTimer();
     
     // Update icon
-    m_iconLabel->setText("✗");
-    QFont iconFont = m_iconLabel->font();
-    iconFont.setPointSize(18);
-    m_iconLabel->setFont(iconFont);
-    m_iconLabel->setStyleSheet("color: #e74c3c;");  // Red error
+    QString iconPath = m_darkMode
+        ? QStringLiteral(":/resources/icons/cross_reversed.png")
+        : QStringLiteral(":/resources/icons/cross.png");
+    m_iconLabel->setPixmap(QPixmap(iconPath).scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    m_iconLabel->setStyleSheet(QString());  // Clear any prior text color styling
     
     // Update status
     m_statusLabel->setText(tr("Export failed"));
@@ -332,6 +322,20 @@ void ExportProgressWidget::setDarkMode(bool dark)
     
     m_statusLabel->setStyleSheet(QString("color: %1;").arg(textPrimary.name()));
     m_detailLabel->setStyleSheet(QString("color: %1;").arg(textSecondary.name()));
+    
+    // Update icon pixmap for current state (theme-dependent)
+    if (m_state == State::Complete) {
+        QString iconName = (m_lastFail > 0) ? QStringLiteral("warning") : QStringLiteral("check");
+        QString iconPath = dark
+            ? QStringLiteral(":/resources/icons/%1_reversed.png").arg(iconName)
+            : QStringLiteral(":/resources/icons/%1.png").arg(iconName);
+        m_iconLabel->setPixmap(QPixmap(iconPath).scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else if (m_state == State::Error) {
+        QString iconPath = dark
+            ? QStringLiteral(":/resources/icons/cross_reversed.png")
+            : QStringLiteral(":/resources/icons/cross.png");
+        m_iconLabel->setPixmap(QPixmap(iconPath).scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
     
     // Update button style
     QColor buttonBg = ThemeColors::backgroundAlt(dark);

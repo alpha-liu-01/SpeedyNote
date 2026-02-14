@@ -58,6 +58,9 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
 
     createThemeTab();
     createLanguageTab();
+#ifdef Q_OS_LINUX
+    createStylusTab();
+#endif
     createCacheTab();
     createAboutTab();
     
@@ -1790,7 +1793,67 @@ void ControlPanelDialog::createLanguageTab() {
     tabWidget->addTab(languageTab, tr("Language"));
 }
 
+
+// ===== Stylus Tab (Linux Only) =====
+
+#ifdef Q_OS_LINUX
+void ControlPanelDialog::createStylusTab() {
+    stylusTab = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(stylusTab);
+    
+    // Palm rejection section
+    QLabel *palmRejectionSectionLabel = new QLabel(tr("Palm Rejection"), stylusTab);
+    palmRejectionSectionLabel->setStyleSheet("font-weight: bold; font-size: 14px;");
+    layout->addWidget(palmRejectionSectionLabel);
+    
+    palmRejectionCheckbox = new QCheckBox(tr("Disable touch gestures when stylus is active"), stylusTab);
+    palmRejectionCheckbox->setChecked(mainWindowRef->isPalmRejectionEnabled());
+    layout->addWidget(palmRejectionCheckbox);
+    
+    // Delay spinbox row
+    QHBoxLayout *palmDelayLayout = new QHBoxLayout();
+    QLabel *palmDelayLabel = new QLabel(tr("Restore delay:"), stylusTab);
+    palmRejectionDelaySpinBox = new QSpinBox(stylusTab);
+    palmRejectionDelaySpinBox->setRange(0, 5000);
+    palmRejectionDelaySpinBox->setSingleStep(100);
+    palmRejectionDelaySpinBox->setSuffix(" ms");
+    palmRejectionDelaySpinBox->setValue(mainWindowRef->getPalmRejectionDelay());
+    palmRejectionDelaySpinBox->setEnabled(palmRejectionCheckbox->isChecked());
+    palmDelayLayout->addWidget(palmDelayLabel);
+    palmDelayLayout->addWidget(palmRejectionDelaySpinBox);
+    palmDelayLayout->addStretch();
+    layout->addLayout(palmDelayLayout);
+    
+    QLabel *palmRejectionNote = new QLabel(
+        tr("When enabled, touch gestures are temporarily disabled while the stylus is "
+           "hovering or touching the screen. After the stylus leaves, touch gestures are "
+           "restored after the specified delay.\n\n"
+           "This helps prevent accidental palm touches while writing. "
+           "Only affects Y-Axis Only and Full touch gesture modes."), stylusTab);
+    palmRejectionNote->setWordWrap(true);
+    palmRejectionNote->setStyleSheet("color: gray; font-size: 10px;");
+    layout->addWidget(palmRejectionNote);
+    
+    // Connect checkbox to enable/disable delay spinbox
+    connect(palmRejectionCheckbox, &QCheckBox::toggled, palmRejectionDelaySpinBox, &QSpinBox::setEnabled);
+    
+    // Apply settings immediately when changed
+    connect(palmRejectionCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
+        mainWindowRef->setPalmRejectionEnabled(checked);
+    });
+    
+    connect(palmRejectionDelaySpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
+        mainWindowRef->setPalmRejectionDelay(value);
+    });
+    
+    layout->addStretch();
+    tabWidget->addTab(stylusTab, tr("Stylus"));
+}
+#endif
+
 /*
+// ===== Compatibility Tab =====
+
 void ControlPanelDialog::createCompatibilityTab() {
     compatibilityTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(compatibilityTab);

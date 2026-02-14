@@ -89,6 +89,24 @@ using ProgressCallback = std::function<void(int current, int total,
                                             const QString& currentFile,
                                             const QString& status)>;
 
+/**
+ * @brief Result callback signature.
+ * 
+ * Called after each file is processed with the result. This enables
+ * progressive output (printing results as files complete) rather than
+ * waiting until the entire batch finishes.
+ * 
+ * Return true to continue processing the next file, or false to stop
+ * early (e.g., for fail-fast behavior on error).
+ * 
+ * @param current Current file index (1-based)
+ * @param total Total number of files to process
+ * @param result The completed file result
+ * @return true to continue, false to stop processing remaining files
+ */
+using ResultCallback = std::function<bool(int current, int total,
+                                         const FileResult& result)>;
+
 // =============================================================================
 // Export Options
 // =============================================================================
@@ -150,7 +168,8 @@ struct ImportOptions {
 BatchResult exportSnbxBatch(const QStringList& bundlePaths,
                             const ExportSnbxOptions& options,
                             ProgressCallback progress = nullptr,
-                            std::atomic<bool>* cancelled = nullptr);
+                            std::atomic<bool>* cancelled = nullptr,
+                            ResultCallback resultCb = nullptr);
 
 /**
  * @brief Export multiple notebooks to PDF.
@@ -171,7 +190,8 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
 BatchResult exportPdfBatch(const QStringList& bundlePaths,
                            const ExportPdfOptions& options,
                            ProgressCallback progress = nullptr,
-                           std::atomic<bool>* cancelled = nullptr);
+                           std::atomic<bool>* cancelled = nullptr,
+                           ResultCallback resultCb = nullptr);
 
 /**
  * @brief Import multiple SNBX packages.
@@ -188,7 +208,8 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
 BatchResult importSnbxBatch(const QStringList& snbxPaths,
                             const ImportOptions& options,
                             ProgressCallback progress = nullptr,
-                            std::atomic<bool>* cancelled = nullptr);
+                            std::atomic<bool>* cancelled = nullptr,
+                            ResultCallback resultCb = nullptr);
 
 // =============================================================================
 // Utility Functions

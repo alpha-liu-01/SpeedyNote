@@ -231,14 +231,12 @@ void ExportResultsDialog::populateResults()
     
     for (const BatchOps::FileResult& fileResult : m_result.results) {
         QString displayName = extractDisplayName(fileResult.inputPath);
-        QString statusIcon;
+        QString statusIconName;
         QString statusText;
-        QColor statusColor;
         
         switch (fileResult.status) {
             case BatchOps::FileStatus::Success:
-                statusIcon = "✓";
-                statusColor = QColor(0x27, 0xae, 0x60);  // Green
+                statusIconName = QStringLiteral("check");
                 if (fileResult.outputSize > 0) {
                     statusText = tr("Exported (%1)").arg(formatFileSize(fileResult.outputSize));
                 } else {
@@ -247,31 +245,33 @@ void ExportResultsDialog::populateResults()
                 break;
                 
             case BatchOps::FileStatus::Skipped:
-                statusIcon = "⚠";
-                statusColor = QColor(0xe6, 0x7e, 0x22);  // Orange
+                statusIconName = QStringLiteral("warning");
                 statusText = fileResult.message.isEmpty() 
                     ? tr("Skipped") 
                     : fileResult.message;
                 break;
                 
             case BatchOps::FileStatus::Error:
-                statusIcon = "✗";
-                statusColor = QColor(0xe7, 0x4c, 0x3c);  // Red
+                statusIconName = QStringLiteral("cross");
                 statusText = fileResult.message.isEmpty() 
                     ? tr("Failed") 
                     : fileResult.message;
                 break;
         }
         
+        QString iconPath = m_darkMode
+            ? QStringLiteral(":/resources/icons/%1_reversed.png").arg(statusIconName)
+            : QStringLiteral(":/resources/icons/%1.png").arg(statusIconName);
+        
         // Create list item with rich text
         // Use proper line height for 2-line display
         QString itemText = QString(
             "<div style='line-height: 1.5;'>"
-            "<span style='color: %1; font-size: 12px;'>%2</span> "
-            "<span style='font-weight: bold; font-size: 11px;'>%3</span><br/>"
-            "<span style='color: %4; font-size: 9px;'>%5</span>"
+            "<img src='%1' width='12' height='12' /> "
+            "<span style='font-weight: bold; font-size: 11px;'>%2</span><br/>"
+            "<span style='color: %3; font-size: 9px;'>%4</span>"
             "</div>"
-        ).arg(statusColor.name(), statusIcon, displayName,
+        ).arg(iconPath, displayName,
               ThemeColors::textSecondary(m_darkMode).name(), statusText);
         
         QListWidgetItem* item = new QListWidgetItem();
@@ -301,21 +301,33 @@ void ExportResultsDialog::updateSummary()
 {
     QStringList parts;
     
+    auto iconPath = [this](const QString& name) -> QString {
+        return m_darkMode
+            ? QStringLiteral(":/resources/icons/%1_reversed.png").arg(name)
+            : QStringLiteral(":/resources/icons/%1.png").arg(name);
+    };
+    
     // Success count (green)
     if (m_result.successCount > 0) {
-        parts << QString("<span style='color: #27ae60;'>✓ %1 exported</span>")
+        parts << QString("<img src='%1' width='12' height='12' /> "
+                         "<span style='color: #27ae60;'>%2 exported</span>")
+                 .arg(iconPath(QStringLiteral("check")))
                  .arg(m_result.successCount);
     }
     
     // Skip count (orange)
     if (m_result.skippedCount > 0) {
-        parts << QString("<span style='color: #e67e22;'>⚠ %1 skipped</span>")
+        parts << QString("<img src='%1' width='12' height='12' /> "
+                         "<span style='color: #e67e22;'>%2 skipped</span>")
+                 .arg(iconPath(QStringLiteral("warning")))
                  .arg(m_result.skippedCount);
     }
     
     // Error count (red)
     if (m_result.errorCount > 0) {
-        parts << QString("<span style='color: #e74c3c;'>✗ %1 failed</span>")
+        parts << QString("<img src='%1' width='12' height='12' /> "
+                         "<span style='color: #e74c3c;'>%2 failed</span>")
+                 .arg(iconPath(QStringLiteral("cross")))
                  .arg(m_result.errorCount);
     }
     

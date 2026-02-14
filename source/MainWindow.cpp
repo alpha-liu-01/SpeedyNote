@@ -281,7 +281,14 @@ MainWindow::MainWindow(QWidget *parent)
         
         // TG.6: Apply touch gesture mode to new viewport
         if (vp) {
-            vp->setTouchGestureMode(touchGestureMode);
+            TouchGestureMode effectiveMode = touchGestureMode;
+#ifdef Q_OS_LINUX
+            // If palm rejection is currently active, keep touch disabled on new viewport
+            if (m_palmRejectionActive && effectiveMode != TouchGestureMode::Disabled) {
+                effectiveMode = TouchGestureMode::Disabled;
+            }
+#endif
+            vp->setTouchGestureMode(effectiveMode);
         }
         
         // Phase C.1.6: Update NavigationBar with current document's filename
@@ -508,6 +515,22 @@ MainWindow::MainWindow(QWidget *parent)
 
     // toggleFullscreen(); // ✅ Toggle fullscreen to adjust layout
 
+#ifdef Q_OS_LINUX
+    // Palm rejection: install application-wide event filter to catch tablet proximity events.
+    // This intercepts TabletEnterProximity/TabletLeaveProximity before any widget processes them.
+    m_palmRejectionTimer = new QTimer(this);
+    m_palmRejectionTimer->setSingleShot(true);
+    connect(m_palmRejectionTimer, &QTimer::timeout, this, [this]() {
+        if (m_palmRejectionActive) {
+            m_palmRejectionActive = false;
+            // Restore user's configured touch gesture mode
+            if (DocumentViewport* vp = currentViewport()) {
+                vp->setTouchGestureMode(touchGestureMode);
+            }
+        }
+    });
+    qApp->installEventFilter(this);
+#endif
     
     loadUserSettings();
 
@@ -916,6 +939,15 @@ void MainWindow::setupUi() {
             m_leftSidebar->setVisible(checked);
             // Phase P.4: Update action bar visibility when sidebar visibility changes
             updatePagePanelActionBarVisibility();
+            
+            // Force layout update so canvas container resizes before we
+            // recalculate action bar position (same pattern as right sidebar)
+            if (centralWidget() && centralWidget()->layout()) {
+                centralWidget()->layout()->invalidate();
+                centralWidget()->layout()->activate();
+            }
+            QApplication::processEvents();
+            updateActionBarPosition();
         }
     });
     connect(m_navigationBar, &NavigationBar::saveClicked, this, &MainWindow::saveDocument);
@@ -1271,6 +1303,16 @@ void MainWindow::setupManagedShortcuts()
             bool newState = !m_leftSidebar->isVisible();
             m_leftSidebar->setVisible(newState);
             m_navigationBar->setLeftSidebarChecked(newState);
+            updatePagePanelActionBarVisibility();
+            
+            // Force layout update so canvas container resizes before we
+            // recalculate action bar position
+            if (centralWidget() && centralWidget()->layout()) {
+                centralWidget()->layout()->invalidate();
+                centralWidget()->layout()->activate();
+            }
+            QApplication::processEvents();
+            updateActionBarPosition();
         }
     });
     createShortcut("view.right_sidebar", [this]() {
@@ -3557,6 +3599,19 @@ void MainWindow::goToNextPage() {
 
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
+#ifdef Q_OS_LINUX
+    // Palm rejection: catch tablet proximity events at application level.
+    // These fire once when stylus enters/leaves the tablet's detection range.
+    if (event->type() == QEvent::TabletEnterProximity) {
+        onStylusProximityEnter();
+        return false;  // Don't consume - let DocumentViewport handle it too
+    }
+    if (event->type() == QEvent::TabletLeaveProximity) {
+        onStylusProximityLeave();
+        return false;  // Don't consume
+    }
+#endif
+
     static bool dragging = false;
     static QPoint lastMousePos;
     static QTimer *longPressTimer = nullptr;
@@ -3916,10 +3971,32 @@ TouchGestureMode MainWindow::getTouchGestureMode() const {
 void MainWindow::setTouchGestureMode(TouchGestureMode mode) {
     touchGestureMode = mode;
     
+#ifdef Q_OS_LINUX
+    // If user explicitly sets Disabled, palm rejection override is no longer needed.
+    // If user changes to a non-Disabled mode while palm rejection is active (stylus in
+    // proximity), save the preference but keep viewport at Disabled - the restore timer
+    // will apply the new preference when the stylus leaves.
+    if (m_palmRejectionActive) {
+        if (mode == TouchGestureMode::Disabled) {
+            // User disabled touch manually - clear palm rejection state entirely
+            m_palmRejectionTimer->stop();
+            m_palmRejectionActive = false;
+        }
+        // For non-Disabled modes: save preference (done below), but skip viewport
+        // update to keep palm rejection override in effect.
+    }
+#endif
+    
     // TG.6: Apply touch gesture mode to current DocumentViewport
     if (DocumentViewport* vp = currentViewport()) {
+#ifdef Q_OS_LINUX
+        // Don't override palm rejection - viewport stays Disabled until stylus leaves
+        if (m_palmRejectionActive) {
+            vp->setTouchGestureMode(TouchGestureMode::Disabled);
+        } else
+#endif
         vp->setTouchGestureMode(mode);
-        }
+    }
     
     // Sync toolbar button state (prevents button from being out of sync after settings load)
     if (m_toolbar) {
@@ -3956,9 +4033,75 @@ void MainWindow::loadUserSettings() {
     touchGestureMode = static_cast<TouchGestureMode>(savedMode);
     setTouchGestureMode(touchGestureMode);
     
+#ifdef Q_OS_LINUX
+    // Load palm rejection settings (Linux only)
+    m_palmRejectionEnabled = settings.value("palmRejection/enabled", false).toBool();
+    m_palmRejectionDelayMs = settings.value("palmRejection/delayMs", 500).toInt();
+#endif
+    
     // Load theme settings
     loadThemeSettings();
 }
+
+// ==================== Palm Rejection (Linux Only) ====================
+
+#ifdef Q_OS_LINUX
+bool MainWindow::isPalmRejectionEnabled() const {
+    return m_palmRejectionEnabled;
+}
+
+void MainWindow::setPalmRejectionEnabled(bool enabled) {
+    m_palmRejectionEnabled = enabled;
+    
+    // If disabling while palm rejection is actively suppressing touch, restore immediately
+    if (!enabled && m_palmRejectionActive) {
+        m_palmRejectionTimer->stop();
+        m_palmRejectionActive = false;
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setTouchGestureMode(touchGestureMode);
+        }
+    }
+    
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("palmRejection/enabled", enabled);
+}
+
+int MainWindow::getPalmRejectionDelay() const {
+    return m_palmRejectionDelayMs;
+}
+
+void MainWindow::setPalmRejectionDelay(int delayMs) {
+    m_palmRejectionDelayMs = delayMs;
+    
+    QSettings settings("SpeedyNote", "App");
+    settings.setValue("palmRejection/delayMs", delayMs);
+}
+
+void MainWindow::onStylusProximityEnter() {
+    if (!m_palmRejectionEnabled) return;
+    
+    // Only affect active touch gesture modes (YAxisOnly and Full)
+    if (touchGestureMode == TouchGestureMode::Disabled) return;
+    
+    // Cancel any pending restore (stylus came back before delay elapsed)
+    m_palmRejectionTimer->stop();
+    m_palmRejectionActive = true;
+    
+    // Directly disable touch on current viewport without changing the user's setting.
+    // touchGestureMode remains unchanged so toolbar/settings stay correct.
+    if (DocumentViewport* vp = currentViewport()) {
+        vp->setTouchGestureMode(TouchGestureMode::Disabled);
+    }
+}
+
+void MainWindow::onStylusProximityLeave() {
+    if (!m_palmRejectionEnabled || !m_palmRejectionActive) return;
+    
+    // Start delay timer - touch gestures will be restored when it fires.
+    // This delay prevents accidental palm touches immediately after lifting the stylus.
+    m_palmRejectionTimer->start(m_palmRejectionDelayMs);
+}
+#endif
 
 void MainWindow::wheelEvent(QWheelEvent *event) {
     // MW2.2: Forward to base class - dial wheel handling removed

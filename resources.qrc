@@ -26,6 +26,10 @@
     <file>resources/icons/addtab_reversed.png</file>
     <file>resources/icons/cross.png</file>
     <file>resources/icons/cross_reversed.png</file>
+    <file>resources/icons/check.png</file>
+    <file>resources/icons/check_reversed.png</file>
+    <file>resources/icons/warning.png</file>
+    <file>resources/icons/warning_reversed.png</file>
     <file>resources/icons/up_arrow.png</file>
     <file>resources/icons/up_arrow_reversed.png</file>
     <file>resources/icons/down_arrow.png</file>

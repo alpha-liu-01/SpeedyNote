@@ -18,7 +18,6 @@
 #include "../batch/BatchOperations.h"
 
 #include <QTextStream>
-#include <QElapsedTimer>
 
 namespace Cli {
 
@@ -29,13 +28,15 @@ namespace Cli {
  * Can be used as a callback for BatchOps functions and for
  * reporting individual file results and final summaries.
  * 
- * Usage:
+ * Usage with result callback (progressive output):
  * @code
  *   ConsoleProgress progress(OutputMode::Simple);
- *   auto result = BatchOps::exportPdfBatch(bundles, options, progress.callback());
- *   for (const auto& fileResult : result.results) {
- *       progress.reportFile(fileResult);
- *   }
+ *   auto onResult = [&](int cur, int tot, const BatchOps::FileResult& fr) -> bool {
+ *       progress.reportFile(cur, tot, fr);
+ *       return true;
+ *   };
+ *   auto result = BatchOps::exportPdfBatch(bundles, options,
+ *       progress.callback(), cancelled, onResult);
  *   progress.reportSummary(result, options.dryRun);
  * @endcode
  */
@@ -61,6 +62,7 @@ public:
      * @brief Report completion of a file operation.
      * 
      * Called after each file is processed to display the result.
+     * Uses the index/total from the last progress callback invocation.
      * Output format depends on the mode:
      * - Simple: `[1/10] MyNote.snb... OK` (status on same line)
      * - Verbose: Multi-line with details
@@ -69,6 +71,19 @@ public:
      * @param result The file operation result
      */
     void reportFile(const BatchOps::FileResult& result);
+    
+    /**
+     * @brief Report completion of a file operation with explicit index.
+     * 
+     * Overload that accepts the current index and total count directly,
+     * rather than relying on values from the last progress callback.
+     * Used by the result callback path for progressive output.
+     * 
+     * @param index Current file index (1-based)
+     * @param total Total number of files
+     * @param result The file operation result
+     */
+    void reportFile(int index, int total, const BatchOps::FileResult& result);
     
     /**
      * @brief Report final batch summary.
