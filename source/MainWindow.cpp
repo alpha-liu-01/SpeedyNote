@@ -916,6 +916,15 @@ void MainWindow::setupUi() {
             m_leftSidebar->setVisible(checked);
             // Phase P.4: Update action bar visibility when sidebar visibility changes
             updatePagePanelActionBarVisibility();
+            
+            // Force layout update so canvas container resizes before we
+            // recalculate action bar position (same pattern as right sidebar)
+            if (centralWidget() && centralWidget()->layout()) {
+                centralWidget()->layout()->invalidate();
+                centralWidget()->layout()->activate();
+            }
+            QApplication::processEvents();
+            updateActionBarPosition();
         }
     });
     connect(m_navigationBar, &NavigationBar::saveClicked, this, &MainWindow::saveDocument);
@@ -1271,6 +1280,16 @@ void MainWindow::setupManagedShortcuts()
             bool newState = !m_leftSidebar->isVisible();
             m_leftSidebar->setVisible(newState);
             m_navigationBar->setLeftSidebarChecked(newState);
+            updatePagePanelActionBarVisibility();
+            
+            // Force layout update so canvas container resizes before we
+            // recalculate action bar position
+            if (centralWidget() && centralWidget()->layout()) {
+                centralWidget()->layout()->invalidate();
+                centralWidget()->layout()->activate();
+            }
+            QApplication::processEvents();
+            updateActionBarPosition();
         }
     });
     createShortcut("view.right_sidebar", [this]() {
