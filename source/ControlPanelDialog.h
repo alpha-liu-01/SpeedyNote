@@ -134,6 +134,14 @@ private:
     void createControllerMappingTab();
     void updateControllerStatus();
 #endif
+
+#ifdef Q_OS_LINUX
+    // === Stylus tab (Linux only) ===
+    QWidget *stylusTab;
+    QCheckBox *palmRejectionCheckbox;
+    QSpinBox *palmRejectionDelaySpinBox;
+    void createStylusTab();
+#endif
 };
 
 #endif // CONTROLPANELDIALOG_H

@@ -404,12 +404,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         } else if (activePoints.size() == 2) {
             // TG.4: Two fingers touch simultaneously - start pinch directly
             // This is common on Android where both fingers can arrive in same event
-            if (m_mode == TouchGestureMode::YAxisOnly) {
-                // Y-axis only mode: ignore pinch, just accept the event
-        event->accept();
-        return true;
-    }
-    
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
@@ -477,26 +471,24 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         // Guard: need position data for both fingers
         if (m_activeTouchPoints == 2 && !m_pinchActive && !m_panActive && activePoints.size() >= 2) {
             // Coming from 3+ fingers, start pinch
-            if (m_mode != TouchGestureMode::YAxisOnly) {
-                const auto& p1 = *activePoints[0];
-                const auto& p2 = *activePoints[1];
-                
-                QPointF pos1 = p1.position();
-                QPointF pos2 = p2.position();
-                QPointF centroid = (pos1 + pos2) / 2.0;
-                qreal distance = QLineF(pos1, pos2).length();
-        
-        if (distance < 1.0) {
-            distance = 1.0;
-        }
-        
-                m_pinchActive = true;
-                m_pinchStartDistance = distance;
-                m_initialDistance = distance;   // For zoom threshold calculation
-                m_zoomActivated = false;        // Zoom starts inactive (dead zone)
-                m_smoothedScale = 1.0;          // Reset smoothed scale
-                m_viewport->beginZoomGesture(centroid);
+            const auto& p1 = *activePoints[0];
+            const auto& p2 = *activePoints[1];
+            
+            QPointF pos1 = p1.position();
+            QPointF pos2 = p2.position();
+            QPointF centroid = (pos1 + pos2) / 2.0;
+            qreal distance = QLineF(pos1, pos2).length();
+            
+            if (distance < 1.0) {
+                distance = 1.0;
             }
+            
+            m_pinchActive = true;
+            m_pinchStartDistance = distance;
+            m_initialDistance = distance;   // For zoom threshold calculation
+            m_zoomActivated = false;        // Zoom starts inactive (dead zone)
+            m_smoothedScale = 1.0;          // Reset smoothed scale
+            m_viewport->beginZoomGesture(centroid);
             
             event->accept();
             return true;
@@ -580,12 +572,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
                      << "trackedIds:" << m_trackedTouchIds.size()
                      << "viewportGestureActive:" << m_viewport->isGestureActive();
 #endif
-            // Y-axis only mode: disable pinch-to-zoom
-            if (m_mode == TouchGestureMode::YAxisOnly) {
-                event->accept();
-                return true;  // Consume but ignore
-            }
-            
             // Stop any running inertia first
             if (m_inertiaTimer->isActive()) {
                 m_inertiaTimer->stop();

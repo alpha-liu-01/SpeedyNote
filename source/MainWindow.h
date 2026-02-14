@@ -113,6 +113,14 @@ public:
     void setTouchGestureMode(TouchGestureMode mode);
     void cycleTouchGestureMode(); // Cycle through: Disabled -> YAxisOnly -> Full -> Disabled
 
+#ifdef Q_OS_LINUX
+    // Palm rejection (Linux only - Windows/macOS/Android have built-in palm rejection)
+    bool isPalmRejectionEnabled() const;
+    void setPalmRejectionEnabled(bool enabled);
+    int getPalmRejectionDelay() const;
+    void setPalmRejectionDelay(int delayMs);
+#endif
+
     // Theme settings
     QColor customAccentColor;
     bool useCustomAccentColor = false;
@@ -640,6 +648,18 @@ private:
     // Keyboard Shortcut Hub: Managed shortcuts
     QHash<QString, QShortcut*> m_managedShortcuts;
     void setupManagedShortcuts();  // Initialize shortcuts from ShortcutManager
+
+#ifdef Q_OS_LINUX
+    // Palm rejection state (Linux only)
+    // Temporarily disables touch gestures while the stylus is in proximity.
+    // Restores the user's configured mode after a delay when the stylus leaves.
+    bool m_palmRejectionEnabled = false;
+    int m_palmRejectionDelayMs = 500;
+    QTimer* m_palmRejectionTimer = nullptr;
+    bool m_palmRejectionActive = false;  ///< Whether currently suppressing touch gestures
+    void onStylusProximityEnter();
+    void onStylusProximityLeave();
+#endif
 };
 
 #endif // MAINWINDOW_H
