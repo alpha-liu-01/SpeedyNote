@@ -9,6 +9,7 @@
 #include <QColorDialog>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QIcon>
 #include <QHBoxLayout>
 #include <QEvent>
 
@@ -141,21 +142,25 @@ void ObjectSelectSubToolbar::createWidgets()
     popupLayout->addWidget(m_descriptionEdit);
     
     // Confirm button (checkmark)
-    m_confirmButton = new QPushButton("✓", m_descriptionPopup);
+    m_confirmButton = new QPushButton(m_descriptionPopup);
+    m_confirmButton->setIcon(QIcon(QStringLiteral(":/resources/icons/check_reversed.png")));
+    m_confirmButton->setIconSize(QSize(14, 14));
     m_confirmButton->setFixedSize(28, 28);
     m_confirmButton->setToolTip(tr("Confirm"));
     m_confirmButton->setStyleSheet(
-        "QPushButton { border-radius: 4px; background: #4CAF50; font-weight: bold; }"
+        "QPushButton { border-radius: 4px; background: #4CAF50; }"
         "QPushButton:hover { background: #45a049; }"
     );
     popupLayout->addWidget(m_confirmButton);
     
     // Cancel button (X)
-    m_cancelButton = new QPushButton("✕", m_descriptionPopup);
+    m_cancelButton = new QPushButton(m_descriptionPopup);
+    m_cancelButton->setIcon(QIcon(QStringLiteral(":/resources/icons/cross_reversed.png")));
+    m_cancelButton->setIconSize(QSize(14, 14));
     m_cancelButton->setFixedSize(28, 28);
     m_cancelButton->setToolTip(tr("Cancel"));
     m_cancelButton->setStyleSheet(
-        "QPushButton { border-radius: 4px; background: #f44336; font-weight: bold; }"
+        "QPushButton { border-radius: 4px; background: #f44336; }"
         "QPushButton:hover { background: #da190b; }"
     );
     popupLayout->addWidget(m_cancelButton);
