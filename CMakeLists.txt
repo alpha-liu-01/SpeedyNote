@@ -720,6 +720,10 @@ set(APP_SOURCES
 if(ANDROID)
     qt_add_executable(speedynote ${APP_SOURCES})
     
+    # Acknowledge Qt 6.9+ policy: Android path properties with generator expressions
+    # must evaluate to valid JSON strings. Setting NEW silences the QTP0002 warning.
+    qt_policy(SET QTP0002 NEW)
+    
     set_target_properties(speedynote PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android/app-resources"
         QT_ANDROID_TARGET_SDK_VERSION 35
