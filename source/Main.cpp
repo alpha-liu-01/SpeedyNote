@@ -450,16 +450,17 @@ static int runTests(const QString& testType)
 
 int main(int argc, char* argv[])
 {
-#ifdef Q_OS_WIN
-    enableDebugConsole();
-#endif
-
     // ========== CLI Mode Detection (Desktop Only) ==========
     // Check for CLI commands before creating QApplication to avoid full GUI overhead.
     // CLI mode uses QGuiApplication (not QCoreApplication) because:
     // - PDF export needs to render ImageObjects which use QPixmap
     // - QPixmap requires a GUI application context (platform plugin)
     // - QGuiApplication is lightweight and doesn't create any windows
+    //
+    // IMPORTANT: This must happen BEFORE enableDebugConsole() on Windows.
+    // In release builds, enableDebugConsole() calls FreeConsole() to hide the
+    // console window in GUI mode, but that would also disconnect stdout/stderr
+    // for CLI mode, causing all terminal output to be silently lost.
 #ifndef Q_OS_ANDROID
     if (Cli::isCliMode(argc, argv)) {
         QGuiApplication app(argc, argv);
@@ -467,6 +468,10 @@ int main(int argc, char* argv[])
         app.setApplicationName("App");
         return Cli::run(app, argc, argv);
     }
+#endif
+
+#ifdef Q_OS_WIN
+    enableDebugConsole();
 #endif
 
     // ========== GUI Mode ==========

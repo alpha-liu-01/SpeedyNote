@@ -1,5 +1,5 @@
-#ifndef CLIPARSR_H
-#define CLIPARSR_H
+#ifndef CLIPARSER_H
+#define CLIPARSER_H
 
 /**
  * @file CliParser.h
@@ -152,4 +152,4 @@ int run(QCoreApplication& app, int argc, char* argv[]);
 
 } // namespace Cli
 
-#endif // CLIPARSR_H
+#endif // CLIPARSER_H

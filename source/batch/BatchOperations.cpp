@@ -104,7 +104,8 @@ bool isSingleFileOutput(const QString& outputPath, const QString& extension)
 BatchResult exportSnbxBatch(const QStringList& bundlePaths,
                             const ExportSnbxOptions& options,
                             ProgressCallback progress,
-                            std::atomic<bool>* cancelled)
+                            std::atomic<bool>* cancelled,
+                            ResultCallback resultCb)
 {
     BatchResult result;
     QElapsedTimer timer;
@@ -160,8 +161,18 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         }
     }
     
+    // Helper: append result and notify caller via callback.
+    // Returns false if caller requested early stop (e.g., fail-fast).
+    bool stopped = false;
+    auto emitResult = [&](int index, const FileResult& fr) {
+        result.results.append(fr);
+        if (resultCb && !resultCb(index + 1, total, fr)) {
+            stopped = true;
+        }
+    };
+    
     // Process each bundle
-    for (int i = 0; i < total; ++i) {
+    for (int i = 0; i < total && !stopped; ++i) {
         const QString& bundlePath = bundlePaths.at(i);
         FileResult fr;
         fr.inputPath = bundlePath;
@@ -170,8 +181,8 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         if (cancelled && cancelled->load()) {
             fr.status = FileStatus::Skipped;
             fr.message = QObject::tr("Cancelled");
-            result.results.append(fr);
             result.skippedCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -195,8 +206,8 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         if (options.dryRun) {
             fr.status = FileStatus::Success;
             fr.message = QObject::tr("Would export to: %1").arg(outputPath);
-            result.results.append(fr);
             result.successCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -204,8 +215,8 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         if (!isValidBundle(bundlePath)) {
             fr.status = FileStatus::Error;
             fr.message = QObject::tr("Not a valid SpeedyNote bundle");
-            result.results.append(fr);
             result.errorCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -214,8 +225,8 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         if (!doc) {
             fr.status = FileStatus::Error;
             fr.message = QObject::tr("Failed to load document");
-            result.results.append(fr);
             result.errorCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -240,7 +251,7 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
             result.errorCount++;
         }
         
-        result.results.append(fr);
+        emitResult(i, fr);
         
         // Document is automatically destroyed here (unique_ptr goes out of scope)
     }
@@ -265,7 +276,8 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
 BatchResult exportPdfBatch(const QStringList& bundlePaths,
                            const ExportPdfOptions& options,
                            ProgressCallback progress,
-                           std::atomic<bool>* cancelled)
+                           std::atomic<bool>* cancelled,
+                           ResultCallback resultCb)
 {
     BatchResult result;
     QElapsedTimer timer;
@@ -321,8 +333,18 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
         }
     }
     
+    // Helper: append result and notify caller via callback.
+    // Returns false if caller requested early stop (e.g., fail-fast).
+    bool stopped = false;
+    auto emitResult = [&](int index, const FileResult& fr) {
+        result.results.append(fr);
+        if (resultCb && !resultCb(index + 1, total, fr)) {
+            stopped = true;
+        }
+    };
+    
     // Process each bundle
-    for (int i = 0; i < total; ++i) {
+    for (int i = 0; i < total && !stopped; ++i) {
         const QString& bundlePath = bundlePaths.at(i);
         FileResult fr;
         fr.inputPath = bundlePath;
@@ -331,8 +353,8 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
         if (cancelled && cancelled->load()) {
             fr.status = FileStatus::Skipped;
             fr.message = QObject::tr("Cancelled");
-            result.results.append(fr);
             result.skippedCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -356,8 +378,8 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
         if (!isValidBundle(bundlePath)) {
             fr.status = FileStatus::Error;
             fr.message = QObject::tr("Not a valid SpeedyNote bundle");
-            result.results.append(fr);
             result.errorCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -366,8 +388,8 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
         if (!doc) {
             fr.status = FileStatus::Error;
             fr.message = QObject::tr("Failed to load document");
-            result.results.append(fr);
             result.errorCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -375,8 +397,8 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
         if (doc->isEdgeless()) {
             fr.status = FileStatus::Skipped;
             fr.message = QObject::tr("Edgeless notebooks cannot be exported to PDF");
-            result.results.append(fr);
             result.skippedCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -385,8 +407,8 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
             fr.status = FileStatus::Success;
             fr.message = QObject::tr("Would export to: %1").arg(outputPath);
             fr.pagesProcessed = doc->pageCount();
-            result.results.append(fr);
             result.successCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -424,7 +446,7 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
             result.errorCount++;
         }
         
-        result.results.append(fr);
+        emitResult(i, fr);
         
         // Document is automatically destroyed here (unique_ptr goes out of scope)
     }
@@ -499,7 +521,8 @@ static QString ensureSnbExtension(const QString& bundlePath)
 BatchResult importSnbxBatch(const QStringList& snbxPaths,
                             const ImportOptions& options,
                             ProgressCallback progress,
-                            std::atomic<bool>* cancelled)
+                            std::atomic<bool>* cancelled,
+                            ResultCallback resultCb)
 {
     BatchResult result;
     QElapsedTimer timer;
@@ -547,8 +570,18 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         }
     }
     
+    // Helper: append result and notify caller via callback.
+    // Returns false if caller requested early stop (e.g., fail-fast).
+    bool stopped = false;
+    auto emitResult = [&](int index, const FileResult& fr) {
+        result.results.append(fr);
+        if (resultCb && !resultCb(index + 1, total, fr)) {
+            stopped = true;
+        }
+    };
+    
     // Process each .snbx file
-    for (int i = 0; i < total; ++i) {
+    for (int i = 0; i < total && !stopped; ++i) {
         const QString& snbxPath = snbxPaths.at(i);
         FileResult fr;
         fr.inputPath = snbxPath;
@@ -557,8 +590,8 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         if (cancelled && cancelled->load()) {
             fr.status = FileStatus::Skipped;
             fr.message = QObject::tr("Cancelled");
-            result.results.append(fr);
             result.skippedCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -571,8 +604,8 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         if (!QFile::exists(snbxPath)) {
             fr.status = FileStatus::Error;
             fr.message = QObject::tr("File not found");
-            result.results.append(fr);
             result.errorCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -590,8 +623,8 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         if (options.dryRun) {
             fr.status = FileStatus::Success;
             fr.message = QObject::tr("Would import to: %1").arg(expectedOutputPath);
-            result.results.append(fr);
             result.successCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -602,8 +635,8 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
             if (!existingDir.removeRecursively()) {
                 fr.status = FileStatus::Error;
                 fr.message = QObject::tr("Failed to remove existing notebook for overwrite");
-                result.results.append(fr);
                 result.errorCount++;
+                emitResult(i, fr);
                 continue;
             }
         }
@@ -615,8 +648,8 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         if (!importResult.success) {
             fr.status = FileStatus::Error;
             fr.message = importResult.errorMessage;
-            result.results.append(fr);
             result.errorCount++;
+            emitResult(i, fr);
             continue;
         }
         
@@ -625,9 +658,7 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         if (!finalPath.endsWith(".snb", Qt::CaseInsensitive)) {
             QString renamedPath = ensureSnbExtension(finalPath);
             if (renamedPath.isEmpty()) {
-                // Rename failed, but import succeeded - report warning
-                fr.status = FileStatus::Success;
-                fr.outputPath = finalPath;
+                // Rename failed, but import succeeded - add a note
                 fr.message = QObject::tr("Imported but could not add .snb extension");
             } else {
                 finalPath = renamedPath;
@@ -653,7 +684,7 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
         result.successCount++;
         result.totalOutputSize += bundleSize;
         
-        result.results.append(fr);
+        emitResult(i, fr);
     }
     
     result.elapsedMs = timer.elapsed();

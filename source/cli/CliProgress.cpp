@@ -70,6 +70,13 @@ void ConsoleProgress::reportFile(const BatchOps::FileResult& result)
     }
 }
 
+void ConsoleProgress::reportFile(int index, int total, const BatchOps::FileResult& result)
+{
+    m_currentIndex = index;
+    m_totalCount = total;
+    reportFile(result);
+}
+
 void ConsoleProgress::reportFileSimple(const BatchOps::FileResult& result)
 {
     // Format: [1/10] MyNote.snb... OK

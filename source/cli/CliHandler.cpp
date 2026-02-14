@@ -130,24 +130,22 @@ int handleExportPdf(const QCommandLineParser& parser)
     // Get global cancellation flag (set by Ctrl+C signal handler)
     std::atomic<bool>* cancelled = getCancellationFlag();
     
-    // Execute batch operation
-    BatchOps::BatchResult result = BatchOps::exportPdfBatch(
-        bundles, options, progress.callback(), cancelled);
-    
-    // Report individual file results
-    for (int i = 0; i < result.results.size(); ++i) {
-        const auto& fileResult = result.results[i];
-        progress.reportFile(fileResult);
-        
-        // Check for fail-fast after each file
+    // Result callback: prints each file result progressively as it completes,
+    // with correct [current/total] counter. Returns false to stop on error
+    // when --fail-fast is set.
+    auto onResult = [&](int current, int total, const BatchOps::FileResult& fileResult) -> bool {
+        progress.reportFile(current, total, fileResult);
         if (failFast && fileResult.status == BatchOps::FileStatus::Error) {
-            if (i < result.results.size() - 1) {
-                progress.reportWarning(QCoreApplication::translate("CLI",
-                    "Stopping due to --fail-fast flag."));
-            }
-            break;
+            progress.reportWarning(QCoreApplication::translate("CLI",
+                "Stopping due to --fail-fast flag."));
+            return false;
         }
-    }
+        return true;
+    };
+    
+    // Execute batch operation with progressive result reporting
+    BatchOps::BatchResult result = BatchOps::exportPdfBatch(
+        bundles, options, progress.callback(), cancelled, onResult);
     
     // Report summary
     progress.reportSummary(result, options.dryRun);
@@ -225,24 +223,22 @@ int handleExportSnbx(const QCommandLineParser& parser)
     // Get global cancellation flag (set by Ctrl+C signal handler)
     std::atomic<bool>* cancelled = getCancellationFlag();
     
-    // Execute batch operation
-    BatchOps::BatchResult result = BatchOps::exportSnbxBatch(
-        bundles, options, progress.callback(), cancelled);
-    
-    // Report individual file results
-    for (int i = 0; i < result.results.size(); ++i) {
-        const auto& fileResult = result.results[i];
-        progress.reportFile(fileResult);
-        
-        // Check for fail-fast after each file
+    // Result callback: prints each file result progressively as it completes,
+    // with correct [current/total] counter. Returns false to stop on error
+    // when --fail-fast is set.
+    auto onResult = [&](int current, int total, const BatchOps::FileResult& fileResult) -> bool {
+        progress.reportFile(current, total, fileResult);
         if (failFast && fileResult.status == BatchOps::FileStatus::Error) {
-            if (i < result.results.size() - 1) {
-                progress.reportWarning(QCoreApplication::translate("CLI",
-                    "Stopping due to --fail-fast flag."));
-            }
-            break;
+            progress.reportWarning(QCoreApplication::translate("CLI",
+                "Stopping due to --fail-fast flag."));
+            return false;
         }
-    }
+        return true;
+    };
+    
+    // Execute batch operation with progressive result reporting
+    BatchOps::BatchResult result = BatchOps::exportSnbxBatch(
+        bundles, options, progress.callback(), cancelled, onResult);
     
     // Report summary
     progress.reportSummary(result, options.dryRun);
@@ -314,24 +310,22 @@ int handleImport(const QCommandLineParser& parser)
     // Get global cancellation flag (set by Ctrl+C signal handler)
     std::atomic<bool>* cancelled = getCancellationFlag();
     
-    // Execute batch operation
-    BatchOps::BatchResult result = BatchOps::importSnbxBatch(
-        packages, options, progress.callback(), cancelled);
-    
-    // Report individual file results
-    for (int i = 0; i < result.results.size(); ++i) {
-        const auto& fileResult = result.results[i];
-        progress.reportFile(fileResult);
-        
-        // Check for fail-fast after each file
+    // Result callback: prints each file result progressively as it completes,
+    // with correct [current/total] counter. Returns false to stop on error
+    // when --fail-fast is set.
+    auto onResult = [&](int current, int total, const BatchOps::FileResult& fileResult) -> bool {
+        progress.reportFile(current, total, fileResult);
         if (failFast && fileResult.status == BatchOps::FileStatus::Error) {
-            if (i < result.results.size() - 1) {
-                progress.reportWarning(QCoreApplication::translate("CLI",
-                    "Stopping due to --fail-fast flag."));
-            }
-            break;
+            progress.reportWarning(QCoreApplication::translate("CLI",
+                "Stopping due to --fail-fast flag."));
+            return false;
         }
-    }
+        return true;
+    };
+    
+    // Execute batch operation with progressive result reporting
+    BatchOps::BatchResult result = BatchOps::importSnbxBatch(
+        packages, options, progress.callback(), cancelled, onResult);
     
     // Report summary
     progress.reportSummary(result, options.dryRun);
