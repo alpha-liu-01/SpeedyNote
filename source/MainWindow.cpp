@@ -36,6 +36,7 @@
 #include "pdf/MuPdfExporter.h"                 // Phase 8: PDF export engine
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
+#include <cmath>       // For std::floor in renderEdgelessThumbnail
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScreen>
@@ -344,22 +345,26 @@ MainWindow::MainWindow(QWidget *parent)
                 // Phase P.4.6: Save page-0 thumbnail to NotebookLibrary before closing
                 // Only for paged documents that have been saved (have a bundle path)
                 QString bundlePath = m_documentManager->documentPath(doc);
-                if (!bundlePath.isEmpty() && !doc->isEdgeless() && doc->pageCount() > 0) {
-                    // Try to get cached thumbnail from PagePanel first
+                if (!bundlePath.isEmpty()) {
                     QPixmap thumbnail;
-                    if (m_pagePanel && m_pagePanel->document() == doc) {
-                        thumbnail = m_pagePanel->thumbnailForPage(0);
-                    }
-                    
-                    // If no cached thumbnail, render one synchronously
-                    if (thumbnail.isNull()) {
-                        // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
-                        // accessing Document::page() directly. Background renders also call
-                        // Document::page() which modifies m_loadedPages without synchronization.
-                        if (m_pagePanel) {
-                            m_pagePanel->cancelPendingRenders();
+                    if (doc->isEdgeless()) {
+                        // Render edgeless thumbnail from last-viewed position
+                        thumbnail = renderEdgelessThumbnail(doc);
+                    } else if (doc->pageCount() > 0) {
+                        // Try to get cached thumbnail from PagePanel first
+                        if (m_pagePanel && m_pagePanel->document() == doc) {
+                            thumbnail = m_pagePanel->thumbnailForPage(0);
                         }
-                        thumbnail = renderPage0Thumbnail(doc);
+                        // If no cached thumbnail, render one synchronously
+                        if (thumbnail.isNull()) {
+                            // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                            // accessing Document::page() directly. Background renders also call
+                            // Document::page() which modifies m_loadedPages without synchronization.
+                            if (m_pagePanel) {
+                                m_pagePanel->cancelPendingRenders();
+                            }
+                            thumbnail = renderPage0Thumbnail(doc);
+                        }
                     }
                     
                     // Save to NotebookLibrary
@@ -2862,16 +2867,21 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     }
     
     // Phase P.4.6: Save thumbnail to NotebookLibrary
-    if (!isEdgeless && doc->pageCount() > 0) {
-        QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
-        if (thumbnail.isNull()) {
-            // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
-            // accessing Document::page() directly. Background renders also call
-            // Document::page() which modifies m_loadedPages without synchronization.
-            if (m_pagePanel) {
-                m_pagePanel->cancelPendingRenders();
+    {
+        QPixmap thumbnail;
+        if (isEdgeless) {
+            thumbnail = renderEdgelessThumbnail(doc);
+        } else if (doc->pageCount() > 0) {
+            thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
+            if (thumbnail.isNull()) {
+                // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                // accessing Document::page() directly. Background renders also call
+                // Document::page() which modifies m_loadedPages without synchronization.
+                if (m_pagePanel) {
+                    m_pagePanel->cancelPendingRenders();
+                }
+                thumbnail = renderPage0Thumbnail(doc);
             }
-            thumbnail = renderPage0Thumbnail(doc);
         }
         if (!thumbnail.isNull()) {
             NotebookLibrary::instance()->saveThumbnail(filePath, thumbnail);
@@ -2949,16 +2959,21 @@ void MainWindow::saveDocument()
         }
         
         // Phase P.4.6: Save thumbnail to NotebookLibrary
-        if (!isEdgeless && doc->pageCount() > 0) {
-            QPixmap thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
-            if (thumbnail.isNull()) {
-                // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
-                // accessing Document::page() directly. Background renders also call
-                // Document::page() which modifies m_loadedPages without synchronization.
-                if (m_pagePanel) {
-                    m_pagePanel->cancelPendingRenders();
+        {
+            QPixmap thumbnail;
+            if (isEdgeless) {
+                thumbnail = renderEdgelessThumbnail(doc);
+            } else if (doc->pageCount() > 0) {
+                thumbnail = m_pagePanel ? m_pagePanel->thumbnailForPage(0) : QPixmap();
+                if (thumbnail.isNull()) {
+                    // THREAD SAFETY FIX: Cancel any background thumbnail rendering before
+                    // accessing Document::page() directly. Background renders also call
+                    // Document::page() which modifies m_loadedPages without synchronization.
+                    if (m_pagePanel) {
+                        m_pagePanel->cancelPendingRenders();
+                    }
+                    thumbnail = renderPage0Thumbnail(doc);
                 }
-                thumbnail = renderPage0Thumbnail(doc);
             }
             if (!thumbnail.isNull()) {
                 NotebookLibrary::instance()->saveThumbnail(existingPath, thumbnail);
@@ -5434,6 +5449,196 @@ QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
     
     // Render inserted objects
     page->renderObjects(painter, 1.0);
+    
+    painter.end();
+    return thumbnail;
+}
+
+QPixmap MainWindow::renderEdgelessThumbnail(Document* doc)
+{
+    if (!doc || !doc->isEdgeless()) {
+        return QPixmap();
+    }
+    
+    // Target thumbnail size (same as paged thumbnails)
+    static constexpr int THUMBNAIL_WIDTH = 180;
+    static constexpr int THUMBNAIL_HEIGHT = 180;  // Square for edgeless (no page aspect ratio)
+    static constexpr qreal MAX_DPR = 2.0;
+    
+    qreal dpr = qMin(devicePixelRatioF(), MAX_DPR);
+    int physicalWidth = static_cast<int>(THUMBNAIL_WIDTH * dpr);
+    int physicalHeight = static_cast<int>(THUMBNAIL_HEIGHT * dpr);
+    
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+    
+    // Determine the center point for the thumbnail viewport.
+    // Primary: last_position (where the user was last looking).
+    // Fallback: center of the first indexed tile if last_position has no nearby tiles.
+    QPointF center = doc->edgelessLastPosition();
+    
+    // Define a virtual viewport: 1 tile centered on the position.
+    // A single tile keeps content legible at small thumbnail sizes.
+    qreal viewExtent = tileSize * 1.0;
+    QRectF viewRect(center.x() - viewExtent / 2.0, center.y() - viewExtent / 2.0,
+                    viewExtent, viewExtent);
+    
+    // Find tiles that intersect this viewport (with margin for strokes at edges).
+    // tilesInRect() returns ALL coordinate positions in the range, even empty ones,
+    // so we filter to keep only coordinates where an actual tile exists.
+    static constexpr int STROKE_MARGIN = 100;
+    QRectF marginRect = viewRect.adjusted(-STROKE_MARGIN, -STROKE_MARGIN,
+                                          STROKE_MARGIN, STROKE_MARGIN);
+    QVector<Document::TileCoord> allTiles;
+    {
+        QVector<Document::TileCoord> candidates = doc->tilesInRect(marginRect);
+        for (const auto& coord : candidates) {
+            if (doc->getTile(coord.first, coord.second)) {
+                allTiles.append(coord);
+            }
+        }
+    }
+    
+    // Fallback: if no tiles with content near last_position, try the first loaded tile
+    if (allTiles.isEmpty()) {
+        QVector<Document::TileCoord> allCoords = doc->allTileCoords();
+        if (!allCoords.isEmpty()) {
+            // Use first tile and re-center viewport on it
+            auto firstCoord = allCoords.first();
+            center = QPointF(firstCoord.first * tileSize + tileSize / 2.0,
+                             firstCoord.second * tileSize + tileSize / 2.0);
+            viewRect = QRectF(center.x() - viewExtent / 2.0, center.y() - viewExtent / 2.0,
+                              viewExtent, viewExtent);
+            marginRect = viewRect.adjusted(-STROKE_MARGIN, -STROKE_MARGIN,
+                                           STROKE_MARGIN, STROKE_MARGIN);
+            QVector<Document::TileCoord> fallbackCandidates = doc->tilesInRect(marginRect);
+            for (const auto& coord : fallbackCandidates) {
+                if (doc->getTile(coord.first, coord.second)) {
+                    allTiles.append(coord);
+                }
+            }
+        }
+    }
+    
+    // Create the thumbnail pixmap
+    QPixmap thumbnail(physicalWidth, physicalHeight);
+    thumbnail.setDevicePixelRatio(dpr);
+    thumbnail.fill(doc->defaultBackgroundColor);
+    
+    QPainter painter(&thumbnail);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    
+    // Calculate scale: map viewExtent doc units to THUMBNAIL_WIDTH logical pixels
+    qreal scale = static_cast<qreal>(THUMBNAIL_WIDTH) / viewExtent;
+    
+    // Transform: translate so viewRect.topLeft maps to (0,0), then scale
+    painter.scale(scale, scale);
+    painter.translate(-viewRect.left(), -viewRect.top());
+    
+    // Pre-calculate visible tile range for background pass
+    int minVisibleTx = static_cast<int>(std::floor(viewRect.left() / tileSize));
+    int maxVisibleTx = static_cast<int>(std::floor(viewRect.right() / tileSize));
+    int minVisibleTy = static_cast<int>(std::floor(viewRect.top() / tileSize));
+    int maxVisibleTy = static_cast<int>(std::floor(viewRect.bottom() / tileSize));
+    
+    // ===== PASS 1: Render backgrounds for visible tiles =====
+    // Render all tile positions in the view, even empty ones (they get default background)
+    for (int tx = minVisibleTx; tx <= maxVisibleTx; ++tx) {
+        for (int ty = minVisibleTy; ty <= maxVisibleTy; ++ty) {
+            QRectF tileRect(tx * tileSize, ty * tileSize, tileSize, tileSize);
+            Page* tile = doc->getTile(tx, ty);
+            
+            if (tile) {
+                Page::renderBackgroundPattern(
+                    painter, tileRect,
+                    tile->backgroundColor, tile->backgroundType,
+                    tile->gridColor, tile->gridSpacing, tile->lineSpacing,
+                    1.0  // No zoom compensation needed for static thumbnail
+                );
+            } else {
+                Page::renderBackgroundPattern(
+                    painter, tileRect,
+                    doc->defaultBackgroundColor, doc->defaultBackgroundType,
+                    doc->defaultGridColor, doc->defaultGridSpacing, doc->defaultLineSpacing,
+                    1.0
+                );
+            }
+        }
+    }
+    
+    // If no tiles with content exist, we're done (thumbnail shows just the background)
+    if (allTiles.isEmpty()) {
+        painter.end();
+        return thumbnail;
+    }
+    
+    // ===== PASS 2: Render objects with default affinity (-1) =====
+    // These render below all stroke layers
+    const auto& layers = doc->edgelessLayers();
+    auto renderObjectsWithAffinity = [&](int affinity) {
+        // Check if the tied layer is visible (affinity K ties to Layer K+1)
+        int tiedLayerIndex = affinity + 1;
+        if (tiedLayerIndex >= 0 && tiedLayerIndex < static_cast<int>(layers.size())) {
+            if (!layers[tiedLayerIndex].visible) return;
+        }
+        
+        for (const auto& coord : allTiles) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            
+            auto it = tile->objectsByAffinity.find(affinity);
+            if (it == tile->objectsByAffinity.end() || it->second.empty()) continue;
+            
+            QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+            
+            // Sort by z-order
+            std::vector<InsertedObject*> objs = it->second;
+            std::sort(objs.begin(), objs.end(),
+                      [](InsertedObject* a, InsertedObject* b) {
+                          return a->zOrder < b->zOrder;
+                      });
+            
+            for (InsertedObject* obj : objs) {
+                if (!obj->visible) continue;
+                painter.save();
+                painter.translate(tileOrigin);
+                obj->render(painter, 1.0);
+                painter.restore();
+            }
+        }
+    };
+    
+    renderObjectsWithAffinity(-1);
+    
+    // ===== PASS 3: Interleaved layer strokes and objects =====
+    int maxLayerCount = 0;
+    for (const auto& coord : allTiles) {
+        Page* tile = doc->getTile(coord.first, coord.second);
+        if (tile) {
+            maxLayerCount = qMax(maxLayerCount, tile->layerCount());
+        }
+    }
+    
+    for (int layerIdx = 0; layerIdx < maxLayerCount; ++layerIdx) {
+        // PASS 3a: Render this layer's strokes from all tiles
+        for (const auto& coord : allTiles) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            if (layerIdx >= tile->layerCount()) continue;
+            
+            VectorLayer* layer = tile->layer(layerIdx);
+            if (!layer || !layer->visible) continue;
+            
+            QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+            painter.save();
+            painter.translate(tileOrigin);
+            layer->render(painter);
+            painter.restore();
+        }
+        
+        // PASS 3b: Render objects with affinity = layerIdx
+        renderObjectsWithAffinity(layerIdx);
+    }
     
     painter.end();
     return thumbnail;

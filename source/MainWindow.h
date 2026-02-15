@@ -391,6 +391,17 @@ private:
     QPixmap renderPage0Thumbnail(Document* doc);
     
     /**
+     * @brief Render a thumbnail for an edgeless (infinite canvas) document.
+     * @param doc The edgeless document to render.
+     * @return The rendered thumbnail, or null pixmap on failure.
+     * 
+     * Renders tiles near the document's last_position (the area the user
+     * was last viewing). Falls back to the first indexed tile if no tiles
+     * exist near last_position, or a default background if the canvas is empty.
+     */
+    QPixmap renderEdgelessThumbnail(Document* doc);
+    
+    /**
      * @brief Phase P.4.4: Toggle the launcher visibility.
      * 
      * If launcher is visible, hides it and brings MainWindow to front.
