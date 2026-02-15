@@ -79,9 +79,23 @@
 
   <releases>
 
-
-
-  <release version="1.2.3" date="2026-02-10">
+    <release version="1.2.3" date="2026-02-15">
+      <description>
+        <p>New features:</p>
+        <ul>
+          <li>New palm rejection feature.</li>
+        </ul>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Fixed the problem that the strokes became stepped or could not be generated at all at very high zoom levels.</li>
+          <li>Fixed the eraser performance issues at high zoom levels.</li>
+          <li>Fixed the problem that the edgeless canvases could not show a thumbnail on the launcher.</li>
+          <li>Fixed the problem that the clipboard action bar was misaligned after folding the left sidebar in some cases.</li>
+          <li>Replaced the text icons on the object insertion subtoolbar description input popup with actual icons for UI consistency.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="1.2.2" date="2026-02-10">
       <description>
         <p>Bug fixes and improvements:</p>
         <ul>

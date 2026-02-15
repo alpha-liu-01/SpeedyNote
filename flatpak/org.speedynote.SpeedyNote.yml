@@ -69,6 +69,6 @@ modules:
       - -DMUPDF_INCLUDE_DIR=/app/include
     sources:
       - type: archive
-        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.3-2.tar.gz
-        sha256: 9dbebd93585cc2a625c18db189e26727835bf3f2c678cbd55e008bf75ebc0901
+        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.3.tar.gz
+        sha256: 6f5ae28770e4be678f951ecfb2787eb4768df3553a0c3fe817affd56d2d5da61
 
