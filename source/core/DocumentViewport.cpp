@@ -4400,13 +4400,15 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
         QPointF docPt = viewportToDocument(pe.viewportPos);
         
         // Point decimation (same logic as addPointToStroke but for document coords)
+        // Zoom-aware: threshold is constant in screen pixels, not document space.
         if (!m_currentStroke.points.isEmpty()) {
             const QPointF& lastPos = m_currentStroke.points.last().pos;
             qreal dx = docPt.x() - lastPos.x();
             qreal dy = docPt.y() - lastPos.y();
             qreal distSq = dx * dx + dy * dy;
             
-            if (distSq < MIN_DISTANCE_SQ) {
+            qreal docThreshold = MIN_SCREEN_DISTANCE / m_zoomLevel;
+            if (distSq < docThreshold * docThreshold) {
                 // Point too close - but update pressure if higher (only for pen, not marker)
                 if (!useFixedPressure && pe.pressure > m_currentStroke.points.last().pressure) {
                     m_currentStroke.points.last().pressure = pe.pressure;
@@ -4561,9 +4563,8 @@ void DocumentViewport::finishStrokeEdgeless()
         }
         localStroke.updateBoundingBox();
         
-        // Add to tile's layer
+        // Add to tile's layer (addStroke handles cache update incrementally)
         layer->addStroke(localStroke);
-        layer->invalidateStrokeCache();
         
         // Mark tile as dirty for persistence (Phase E5)
         m_document->markTileDirty(seg.coord);
@@ -4655,9 +4656,8 @@ QVector<QPair<Document::TileCoord, VectorStroke>> DocumentViewport::addStrokeToE
         }
         localStroke.updateBoundingBox();
         
-        // Add to tile's layer
+        // Add to tile's layer (addStroke handles cache update incrementally)
         layer->addStroke(localStroke);
-        layer->invalidateStrokeCache();
         
         // Mark tile as dirty for persistence
         m_document->markTileDirty(seg.coord);
@@ -4739,7 +4739,6 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
             localStroke.updateBoundingBox();
             
             layer->addStroke(localStroke);
-            layer->invalidateStrokeCache();
             m_document->markTileDirty(startTile);
             
             // Push to undo stack
@@ -4800,7 +4799,6 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 localStroke.updateBoundingBox();
                 
                 layer->addStroke(localStroke);
-                layer->invalidateStrokeCache();
                 m_document->markTileDirty(seg.coord);
                 
                 addedStrokes.append({seg.coord, localStroke});
@@ -4830,7 +4828,6 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
         if (!layer) return;
         
         layer->addStroke(stroke);
-        layer->invalidateStrokeCache();
         
         // Mark page dirty for lazy save (BUG FIX: was missing)
         m_document->markPageDirty(m_straightLinePageIndex);
@@ -8806,8 +8803,6 @@ void DocumentViewport::applySelectionTransform()
             undoAction.addedStrokes.append(transformedStroke);
         }
         
-        layer->invalidateStrokeCache();
-        
         // Mark page dirty for lazy save (BUG FIX: was missing)
         m_document->markPageDirty(m_lassoSelection.sourcePageIndex);
         
@@ -9085,8 +9080,6 @@ void DocumentViewport::pasteSelection()
             layer->addStroke(pastedStroke);
             undoAction.addedStrokes.append(pastedStroke);
         }
-        
-        layer->invalidateStrokeCache();
         
         // Mark page dirty for lazy save (BUG FIX: was missing)
         m_document->markPageDirty(pageIndex);
@@ -10177,6 +10170,8 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
     // At 360Hz, consecutive points are often <1 pixel apart.
     // Skip points that are too close to reduce memory and rendering work.
     // This typically reduces point count by 50-70% with no visible quality loss.
+    // The threshold is zoom-aware: MIN_SCREEN_DISTANCE screen pixels mapped to
+    // document space, so decimation granularity stays constant on screen.
     
     if (!m_currentStroke.points.isEmpty()) {
         const QPointF& lastPos = m_currentStroke.points.last().pos;
@@ -10184,7 +10179,8 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
         qreal dy = pagePos.y() - lastPos.y();
         qreal distSq = dx * dx + dy * dy;
         
-        if (distSq < MIN_DISTANCE_SQ) {
+        qreal docThreshold = MIN_SCREEN_DISTANCE / m_zoomLevel;
+        if (distSq < docThreshold * docThreshold) {
             // Point too close - but update pressure if higher (preserve pressure peaks)
             if (pressure > m_currentStroke.points.last().pressure) {
                 m_currentStroke.points.last().pressure = pressure;
@@ -10250,11 +10246,12 @@ void DocumentViewport::resetCurrentStrokeCache()
 
 void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
 {
-    // ========== OPTIMIZATION: Incremental Stroke Rendering ==========
-    // Instead of re-rendering the entire current stroke every frame,
-    // we accumulate rendered segments in m_currentStrokeCache and only
-    // render NEW segments to the cache. This reduces CPU load significantly
-    // when drawing long strokes at high poll rates (360Hz).
+    // ========== In-Progress Stroke Rendering ==========
+    // Renders the current stroke to m_currentStrokeCache using the same
+    // VectorLayer::renderStroke() path as finalized strokes, giving it
+    // Catmull-Rom smoothed curves. The cache is re-rendered when new
+    // points arrive (tracked via m_lastRenderedPointIndex) and reused
+    // for repaints where no new points were added.
     
     const int n = m_currentStroke.points.size();
     if (n < 1) return;
@@ -10279,23 +10276,21 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         // Must re-render all points since transform changed
     }
     
-    // ========== FIX: Semi-Transparent Stroke Rendering ==========
-    // For strokes with alpha < 255 (e.g., marker at 50% opacity), we must draw
+    // ========== Semi-Transparent Stroke Rendering ==========
+    // For strokes with alpha < 255 (e.g., marker at 50% opacity), we draw
     // with FULL OPACITY to the cache, then blit with the desired opacity.
-    // Otherwise, overlapping segments at joints would compound the alpha,
-    // making in-progress strokes appear darker than finished strokes.
+    // This prevents alpha compounding at segment joints / cap overlaps.
     
     int strokeAlpha = m_currentStroke.color.alpha();
     bool hasSemiTransparency = (strokeAlpha < 255);
     
-    // Create the drawing color - use full opacity for cache, apply alpha on blit
-    QColor drawColor = m_currentStroke.color;
-    if (hasSemiTransparency) {
-        drawColor.setAlpha(255);  // Draw opaque to cache
-    }
-    
-    // Render new segments to the cache (if any)
+    // Re-render the full stroke to cache when new points arrive.
+    // Uses VectorLayer::renderStroke() for Catmull-Rom smoothed curves,
+    // giving the in-progress stroke the same visual quality as finalized strokes.
+    // Performance: a single stroke with ~100-300 points renders in <1ms.
     if (n > m_lastRenderedPointIndex && n >= 2) {
+        m_currentStrokeCache.fill(Qt::transparent);
+        
         QPainter cachePainter(&m_currentStrokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
         
@@ -10310,32 +10305,16 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
             cachePainter.translate(pagePosition(m_activeDrawingPage));
         }
         
-        // Use line-based rendering for incremental updates (fast)
-        // RoundCap ensures segments connect smoothly at joints
-        QPen pen(drawColor, 1.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-        
-        // Start from the last rendered point (or 1 if starting fresh)
-        int startIdx = qMax(1, m_lastRenderedPointIndex);
-        
-        // Render each new segment
-        for (int i = startIdx; i < n; ++i) {
-            const auto& p0 = m_currentStroke.points[i - 1];
-            const auto& p1 = m_currentStroke.points[i];
-            
-            qreal avgPressure = (p0.pressure + p1.pressure) / 2.0;
-            qreal width = qMax(m_currentStroke.baseThickness * avgPressure, 1.0);
-            
-            pen.setWidthF(width);
-            cachePainter.setPen(pen);
-            cachePainter.drawLine(p0.pos, p1.pos);
-        }
-        
-        // Draw start cap if this is the first render
-        if (m_lastRenderedPointIndex == 0 && n >= 1) {
-            qreal startRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[0].pressure, 1.0) / 2.0;
-            cachePainter.setPen(Qt::NoPen);
-            cachePainter.setBrush(drawColor);
-            cachePainter.drawEllipse(m_currentStroke.points[0].pos, startRadius, startRadius);
+        // Render using the same path as finalized strokes (Catmull-Rom smoothing).
+        // For semi-transparent strokes, create a copy with full opacity (alpha
+        // is applied during the blit step below). For opaque strokes, render
+        // directly to avoid copying the stroke's point vector.
+        if (hasSemiTransparency) {
+            VectorStroke drawStroke = m_currentStroke;
+            drawStroke.color.setAlpha(255);
+            VectorLayer::renderStroke(cachePainter, drawStroke);
+        } else {
+            VectorLayer::renderStroke(cachePainter, m_currentStroke);
         }
         
         m_lastRenderedPointIndex = n;
@@ -10419,7 +10398,7 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
         layer->removeStroke(id);
     }
     
-    // Stroke cache is automatically invalidated by removeStroke()
+    // Stroke cache is incrementally patched by removeStroke()
     
     // Mark page dirty for lazy save (BUG FIX: was missing)
     if (!removedStrokes.isEmpty()) {
@@ -10821,7 +10800,6 @@ void DocumentViewport::undoEdgeless()
             VectorLayer* layer = tile->layer(action.layerIndex);
             if (layer) {
                 layer->removeStroke(seg.stroke.id);
-                layer->invalidateStrokeCache();
             }
             m_document->markTileDirty(seg.tileCoord);
             m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
@@ -10838,7 +10816,6 @@ void DocumentViewport::undoEdgeless()
             VectorLayer* layer = tile->layer(action.layerIndex);
             if (layer) {
                 layer->addStroke(seg.stroke);
-                layer->invalidateStrokeCache();
             }
             m_document->markTileDirty(seg.tileCoord);
         }
@@ -11038,7 +11015,6 @@ void DocumentViewport::redoEdgeless()
             VectorLayer* layer = tile->layer(action.layerIndex);
             if (layer) {
                 layer->removeStroke(seg.stroke.id);
-                layer->invalidateStrokeCache();
             }
             m_document->markTileDirty(seg.tileCoord);
             m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
@@ -11055,7 +11031,6 @@ void DocumentViewport::redoEdgeless()
             VectorLayer* layer = tile->layer(action.layerIndex);
             if (layer) {
                 layer->addStroke(seg.stroke);
-                layer->invalidateStrokeCache();
             }
             m_document->markTileDirty(seg.tileCoord);
         }

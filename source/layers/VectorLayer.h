@@ -60,10 +60,14 @@ public:
     /**
      * @brief Add a stroke to this layer.
      * @param stroke The stroke to add.
+     * 
+     * If the stroke cache is valid, the new stroke is marked for incremental
+     * rendering (painted on top of the existing cache) instead of triggering
+     * a full cache rebuild. This makes pen-up O(1) instead of O(n) at any zoom.
      */
     void addStroke(const VectorStroke& stroke) {
         m_strokes.append(stroke);
-        invalidateStrokeCache();  // Cache needs rebuild
+        markStrokePending();
     }
     
     /**
@@ -72,19 +76,25 @@ public:
      */
     void addStroke(VectorStroke&& stroke) {
         m_strokes.append(std::move(stroke));
-        invalidateStrokeCache();  // Cache needs rebuild
+        markStrokePending();
     }
     
     /**
      * @brief Remove a stroke by its ID.
      * @param strokeId The UUID of the stroke to remove.
      * @return True if stroke was found and removed.
+     * 
+     * If the stroke cache is valid, the removed stroke's region is patched
+     * incrementally (clear + re-render overlapping strokes) instead of
+     * rebuilding the entire cache. This makes eraser O(k) where k is the
+     * number of strokes overlapping the erased one, instead of O(n) for all.
      */
     bool removeStroke(const QString& strokeId) {
         for (int i = m_strokes.size() - 1; i >= 0; --i) {
             if (m_strokes[i].id == strokeId) {
+                QRectF removedBounds = m_strokes[i].boundingBox;
                 m_strokes.removeAt(i);
-                invalidateStrokeCache();  // Cache needs rebuild
+                patchCacheAfterRemoval(removedBounds);
                 return true;
             }
         }
@@ -182,6 +192,10 @@ public:
      * - QPainter rendering (VectorLayer::renderStroke)
      * - PDF export (MuPdfExporter - converts to MuPDF paths)
      * 
+     * The stored stroke points are first smoothed with Catmull-Rom interpolation
+     * (see catmullRomSubdivide) to produce a dense, smooth point sequence. This
+     * eliminates the visible polyline edges that would otherwise appear at high zoom.
+     * 
      * The polygon represents the variable-width stroke outline:
      * - Left edge goes forward along the stroke
      * - Right edge goes backward
@@ -203,12 +217,18 @@ public:
             return result;
         }
         
-        const int n = stroke.points.size();
+        // Smooth the stroke points with Catmull-Rom interpolation.
+        // This inserts intermediate points along a smooth curve between each
+        // pair of stored points, eliminating the visible polyline edges that
+        // appear when zoomed in. For 2-point strokes (straight lines),
+        // catmullRomSubdivide returns them unchanged.
+        const QVector<StrokePoint>& pts = catmullRomSubdivide(stroke.points);
+        const int n = pts.size();
         
         // Pre-calculate half-widths for each point
         QVector<qreal> halfWidths(n);
         for (int i = 0; i < n; ++i) {
-            qreal width = stroke.baseThickness * stroke.points[i].pressure;
+            qreal width = stroke.baseThickness * pts[i].pressure;
             halfWidths[i] = qMax(width, 1.0) / 2.0;
         }
         
@@ -218,20 +238,20 @@ public:
         QVector<QPointF> rightEdge(n);
         
         for (int i = 0; i < n; ++i) {
-            const QPointF& pos = stroke.points[i].pos;
+            const QPointF& pos = pts[i].pos;
             qreal hw = halfWidths[i];
             
             // Calculate perpendicular direction
             QPointF tangent;
             if (i == 0) {
                 // First point: use direction to next point
-                tangent = stroke.points[1].pos - pos;
+                tangent = pts[1].pos - pos;
             } else if (i == n - 1) {
                 // Last point: use direction from previous point
-                tangent = pos - stroke.points[n - 2].pos;
+                tangent = pos - pts[n - 2].pos;
             } else {
                 // Middle points: average of incoming and outgoing directions
-                tangent = stroke.points[i + 1].pos - stroke.points[i - 1].pos;
+                tangent = pts[i + 1].pos - pts[i - 1].pos;
             }
             
             // Normalize tangent
@@ -262,10 +282,12 @@ public:
         }
         
         // Set up round cap information
+        // Use first/last smoothed points (which equal the original stroke endpoints,
+        // since Catmull-Rom passes through its control points)
         result.hasRoundCaps = true;
-        result.startCapCenter = stroke.points[0].pos;
+        result.startCapCenter = pts.first().pos;
         result.startCapRadius = halfWidths[0];
-        result.endCapCenter = stroke.points[n - 1].pos;
+        result.endCapCenter = pts.last().pos;
         result.endCapRadius = halfWidths[n - 1];
         
         return result;
@@ -447,22 +469,35 @@ public:
      * @param dpr Device pixel ratio for high DPI support.
      * 
      * Cache is built at size * zoom * dpr for sharp rendering at current zoom.
-     * If cache is invalid, wrong size, or wrong zoom, rebuilds it.
+     * If the cache is valid but has pending strokes (from addStroke), those are
+     * rendered incrementally without rebuilding the entire cache.
+     * If cache is invalid, wrong size, or wrong zoom, rebuilds from scratch.
      */
     void ensureStrokeCacheValid(const QSizeF& size, qreal zoom, qreal dpr) {
         // Calculate physical size at this zoom level
         QSize physicalSize(static_cast<int>(size.width() * zoom * dpr), 
                            static_cast<int>(size.height() * zoom * dpr));
         
-        // Check if cache is valid for current parameters
-        if (!m_strokeCacheDirty && 
+        // Fast path: cache is valid and has pending strokes to append
+        if (m_pendingStrokeStart >= 0 && !m_strokeCacheDirty &&
+            m_strokeCache.size() == physicalSize &&
+            qFuzzyCompare(m_cacheZoom, zoom) &&
+            qFuzzyCompare(m_cacheDpr, dpr)) {
+            appendPendingStrokes();
+            return;
+        }
+        
+        // Check if cache is fully valid (no pending, no dirty)
+        if (!m_strokeCacheDirty && m_pendingStrokeStart < 0 &&
             m_strokeCache.size() == physicalSize &&
             qFuzzyCompare(m_cacheZoom, zoom) &&
             qFuzzyCompare(m_cacheDpr, dpr)) {
             return;  // Cache is valid
         }
         
-            rebuildStrokeCache(size, zoom, dpr);
+        // Full rebuild needed (dirty, size changed, or zoom changed)
+        m_pendingStrokeStart = -1;
+        rebuildStrokeCache(size, zoom, dpr);
     }
     
     // Backward-compatible overload (assumes zoom = 1.0)
@@ -485,10 +520,14 @@ public:
     }
     
     /**
-     * @brief Invalidate stroke cache (call when strokes change).
+     * @brief Invalidate stroke cache (call when strokes change destructively).
      * Note: This only marks the cache dirty, it does NOT free memory.
+     * Used by removeStroke() and clear(). addStroke() uses incremental updates instead.
      */
-    void invalidateStrokeCache() { m_strokeCacheDirty = true; }
+    void invalidateStrokeCache() {
+        m_strokeCacheDirty = true;
+        m_pendingStrokeStart = -1;  // Incremental update no longer possible
+    }
     
     /**
      * @brief Release stroke cache memory completely.
@@ -498,6 +537,7 @@ public:
     void releaseStrokeCache() {
         m_strokeCache = QPixmap();  // Actually free the pixmap memory
         m_strokeCacheDirty = true;
+        m_pendingStrokeStart = -1;
         m_cacheZoom = 0;
         m_cacheDpr = 0;
     }
@@ -519,6 +559,7 @@ public:
      * set to zoom * dpr. This means Qt sees the cache as having logical size = size.
      * If the painter is pre-scaled by zoom, the result is that each cache pixel maps
      * to exactly one physical screen pixel, giving sharp rendering at any zoom level.
+     * New strokes are rendered incrementally to the existing cache (no full rebuild).
      */
     void renderWithZoomCache(QPainter& painter, const QSizeF& size, qreal zoom, qreal dpr) {
         if (!visible || m_strokes.isEmpty()) {
@@ -526,11 +567,11 @@ public:
         }
         
         ensureStrokeCacheValid(size, zoom, dpr);
-            
-            if (!m_strokeCache.isNull()) {
+        
+        if (!m_strokeCache.isNull()) {
             // Draw the pre-zoomed cache at (0,0) - it's already at the right size
             // The cache was built at size * zoom * dpr, with devicePixelRatio = zoom * dpr
-                painter.drawPixmap(0, 0, m_strokeCache);
+            painter.drawPixmap(0, 0, m_strokeCache);
         } else {
             // Fallback to direct rendering (shouldn't happen)
             painter.save();
@@ -572,11 +613,162 @@ public:
 private:
     QVector<VectorStroke> m_strokes;  ///< All strokes in this layer
     
-    // Stroke cache for performance (Task 1.3.7 + Zoom-Aware)
+    // ===== Curve Smoothing =====
+    
+    /// Number of interpolated points to insert between each pair of stored points.
+    /// Higher values produce smoother curves at high zoom, at the cost of more
+    /// polygon vertices (which are cached, so the per-frame cost is zero).
+    /// 4 subdivisions keeps segments under ~4 screen pixels at 10x zoom.
+    static constexpr int CURVE_SUBDIVISIONS = 4;
+    
+    /**
+     * @brief Subdivide stroke points using uniform Catmull-Rom interpolation.
+     * @param points The original (decimated) stroke points.
+     * @return A denser point sequence following a smooth curve through the originals.
+     * 
+     * Interpolates both position and pressure. Endpoint tangents are computed
+     * by duplicating the first/last control point (zero-acceleration boundary).
+     * Interpolated pressure is clamped to [0.1, 1.0] to prevent overshoot.
+     */
+    static QVector<StrokePoint> catmullRomSubdivide(const QVector<StrokePoint>& points) {
+        const int n = points.size();
+        if (n < 3) return points;  // Straight lines don't benefit from smoothing
+        
+        QVector<StrokePoint> result;
+        result.reserve((n - 1) * CURVE_SUBDIVISIONS + 1);
+        
+        for (int i = 0; i < n - 1; ++i) {
+            // Four control points: P0, P1, P2, P3
+            // Clamp at boundaries (duplicate endpoint)
+            const StrokePoint& p0 = points[qMax(0, i - 1)];
+            const StrokePoint& p1 = points[i];
+            const StrokePoint& p2 = points[i + 1];
+            const StrokePoint& p3 = points[qMin(n - 1, i + 2)];
+            
+            // Include start point of the first segment
+            if (i == 0) {
+                result.append(p1);
+            }
+            
+            // Interpolate CURVE_SUBDIVISIONS points between p1 and p2
+            for (int s = 1; s <= CURVE_SUBDIVISIONS; ++s) {
+                qreal t = static_cast<qreal>(s) / CURVE_SUBDIVISIONS;
+                qreal t2 = t * t;
+                qreal t3 = t2 * t;
+                
+                // Uniform Catmull-Rom: q(t) = 0.5 * [ (2·P1) + (-P0+P2)·t
+                //   + (2·P0 - 5·P1 + 4·P2 - P3)·t² + (-P0 + 3·P1 - 3·P2 + P3)·t³ ]
+                qreal x = 0.5 * (2.0 * p1.pos.x()
+                    + (-p0.pos.x() + p2.pos.x()) * t
+                    + (2.0 * p0.pos.x() - 5.0 * p1.pos.x() + 4.0 * p2.pos.x() - p3.pos.x()) * t2
+                    + (-p0.pos.x() + 3.0 * p1.pos.x() - 3.0 * p2.pos.x() + p3.pos.x()) * t3);
+                qreal y = 0.5 * (2.0 * p1.pos.y()
+                    + (-p0.pos.y() + p2.pos.y()) * t
+                    + (2.0 * p0.pos.y() - 5.0 * p1.pos.y() + 4.0 * p2.pos.y() - p3.pos.y()) * t2
+                    + (-p0.pos.y() + 3.0 * p1.pos.y() - 3.0 * p2.pos.y() + p3.pos.y()) * t3);
+                qreal pr = 0.5 * (2.0 * p1.pressure
+                    + (-p0.pressure + p2.pressure) * t
+                    + (2.0 * p0.pressure - 5.0 * p1.pressure + 4.0 * p2.pressure - p3.pressure) * t2
+                    + (-p0.pressure + 3.0 * p1.pressure - 3.0 * p2.pressure + p3.pressure) * t3);
+                
+                StrokePoint pt;
+                pt.pos = QPointF(x, y);
+                pt.pressure = qBound(0.1, pr, 1.0);
+                result.append(pt);
+            }
+        }
+        
+        return result;
+    }
+    
+    // Stroke cache for performance (Task 1.3.7 + Zoom-Aware + Incremental)
     mutable QPixmap m_strokeCache;          ///< Cached rendered strokes at current zoom
-    mutable bool m_strokeCacheDirty = true; ///< Whether cache needs rebuild
+    mutable bool m_strokeCacheDirty = true; ///< Whether cache needs full rebuild
     mutable qreal m_cacheZoom = 1.0;        ///< Zoom level cache was built at
     mutable qreal m_cacheDpr = 1.0;         ///< DPI ratio cache was built at
+    
+    /// Index of first stroke pending incremental render, or -1 if none.
+    /// When addStroke() is called and the cache is valid, the stroke index is
+    /// recorded here. On next ensureStrokeCacheValid(), only these new strokes
+    /// are painted to the existing cache — no allocation, no full re-render.
+    mutable int m_pendingStrokeStart = -1;
+    
+    /**
+     * @brief Mark the last added stroke for incremental cache rendering.
+     * 
+     * If the cache is currently valid, records the stroke index so it can be
+     * painted incrementally. If the cache is already dirty (needs full rebuild),
+     * stays dirty — the new stroke will be included in the next full rebuild.
+     */
+    void markStrokePending() {
+        if (!m_strokeCacheDirty && !m_strokeCache.isNull()) {
+            // Cache is valid — mark for incremental update
+            if (m_pendingStrokeStart < 0) {
+                m_pendingStrokeStart = m_strokes.size() - 1;
+            }
+            // If m_pendingStrokeStart is already set (multiple adds between paints),
+            // keep the earlier index so all new strokes get rendered.
+        } else {
+            // Cache is dirty anyway — full rebuild will include this stroke
+            m_strokeCacheDirty = true;
+        }
+    }
+    
+    /**
+     * @brief Render pending strokes incrementally to the existing cache.
+     * 
+     * Called by ensureStrokeCacheValid() when the cache is valid but has
+     * new strokes to append. Renders only the new strokes (O(k) where k
+     * is the number of new strokes, typically 1) instead of all n strokes.
+     */
+    void appendPendingStrokes() const {
+        if (m_pendingStrokeStart < 0 || m_strokeCache.isNull()) return;
+        
+        QPainter cachePainter(&m_strokeCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        for (int i = m_pendingStrokeStart; i < m_strokes.size(); ++i) {
+            renderStroke(cachePainter, m_strokes[i]);
+        }
+        
+        m_pendingStrokeStart = -1;
+    }
+    
+    /**
+     * @brief Patch the stroke cache after removing a stroke.
+     * @param removedBounds Bounding box of the removed stroke (in page/tile coords).
+     * 
+     * If the cache is valid, clears the removed stroke's bounding box region
+     * and re-renders only the strokes that overlap that region. This is O(k)
+     * where k is the number of overlapping strokes, not O(n) for all strokes.
+     * Falls back to full invalidation if the cache is already dirty.
+     */
+    void patchCacheAfterRemoval(const QRectF& removedBounds) {
+        // Cannot patch if cache is not in a usable state
+        if (m_strokeCacheDirty || m_strokeCache.isNull() ||
+            removedBounds.isEmpty() || m_pendingStrokeStart >= 0) {
+            invalidateStrokeCache();
+            return;
+        }
+        
+        QPainter cachePainter(&m_strokeCache);
+        
+        // Step 1: Clear the removed stroke's bounding box
+        cachePainter.setCompositionMode(QPainter::CompositionMode_Clear);
+        cachePainter.fillRect(removedBounds, Qt::transparent);
+        
+        // Step 2: Re-render overlapping strokes within the cleared region.
+        // Clip to the cleared rect so we don't double-paint outside it.
+        cachePainter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        cachePainter.setClipRect(removedBounds);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        for (const auto& stroke : m_strokes) {
+            if (stroke.boundingBox.intersects(removedBounds)) {
+                renderStroke(cachePainter, stroke);
+            }
+        }
+    }
     
     /**
      * @brief Rebuild stroke cache at given size and zoom.

@@ -2269,8 +2269,10 @@ private:
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
     bool m_isDrawing = false;                 ///< True while actively drawing a stroke
     
-    /// Point decimation threshold - skip points closer than 1.5 pixels (performance tuning, not user-facing)
-    static constexpr qreal MIN_DISTANCE_SQ = 1.5 * 1.5;
+    /// Point decimation threshold in screen pixels (performance tuning, not user-facing).
+    /// The actual document-space threshold is MIN_SCREEN_DISTANCE / m_zoomLevel,
+    /// so the decimation granularity is constant in screen space regardless of zoom.
+    static constexpr qreal MIN_SCREEN_DISTANCE = 1.5;
     
     // ===== Incremental Stroke Rendering (Task 2.3) =====
     QPixmap m_currentStrokeCache;             ///< Cache for in-progress stroke segments
@@ -2936,11 +2938,12 @@ private:
     void resetCurrentStrokeCache();
     
     /**
-     * @brief Render the in-progress stroke incrementally.
+     * @brief Render the in-progress stroke to the viewport.
      * @param painter The QPainter to render to (viewport painter, unmodified transform).
      * 
-     * Only renders NEW segments since last call, accumulating in m_currentStrokeCache.
-     * This is much faster than re-rendering the entire stroke each frame.
+     * Uses VectorLayer::renderStroke() with Catmull-Rom smoothing for visual
+     * consistency with finalized strokes. The cache is re-rendered only when
+     * new points arrive; repaints without new points reuse the existing cache.
      */
     void renderCurrentStrokeIncremental(QPainter& painter);
     
