@@ -31,7 +31,6 @@ QTabBar::tab {
     background-color: {{TAB_BG}};
     color: {{TAB_TEXT}};
     padding: 8px 16px;
-    padding-left: 8px;
     border: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
@@ -54,11 +53,10 @@ QTabBar::tab:hover:!selected {
 
 QTabBar::close-button {
     image: url(:/resources/icons/{{CLOSE_ICON}});
-    subcontrol-position: left;
     width: 16px;
     height: 16px;
-    padding: 2px;
-    border-radius: 10px;  /* (16 + 2*2) / 2 = 10 for circular button */
+    padding: 1px;
+    border-radius: 9px;  /* (16 + 1*2) / 2 = 9 for circular button */
 }
 
 QTabBar::close-button:hover {
