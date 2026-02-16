@@ -69,9 +69,9 @@ if(WIN32)
 
     # Find dependencies
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     endif()
     find_package(PkgConfig REQUIRED)
     # Poppler removed - using MuPDF exclusively for PDF rendering
@@ -189,7 +189,7 @@ elseif(APPLE)
     # =========================================================================
     message(STATUS "🍎 Configuring for macOS")
     
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
     
     # Homebrew paths
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
@@ -205,9 +205,9 @@ elseif(APPLE)
     
     # Find dependencies
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Test)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     endif()
     find_package(PkgConfig REQUIRED)
     # macOS uses MuPDF exclusively for PDF rendering and export (no Poppler, no SDL2)
@@ -329,7 +329,7 @@ elseif(ANDROID)
     # =========================================================================
     message(STATUS "🤖 Configuring for Android")
     
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     
     # MuPDF paths (cross-compiled separately, per-ABI)
     # ANDROID_ABI is set by the NDK toolchain (arm64-v8a, armeabi-v7a, etc.)
@@ -365,9 +365,9 @@ elseif(UNIX)
     # -------------------------------------------------------------------------
     
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Test)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Svg Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus)
+        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Svg)
     endif()
     find_package(PkgConfig REQUIRED)
     # Poppler removed - using MuPDF exclusively for PDF rendering
@@ -773,7 +773,7 @@ endif()
 # ============================================================================
 if(WIN32)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
     )
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)
@@ -793,7 +793,7 @@ if(WIN32)
 
 elseif(APPLE)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
     )
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt6::Test)
@@ -809,14 +809,14 @@ elseif(APPLE)
 
 elseif(ANDROID)
     target_link_libraries(speedynote PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
         ${MUPDF_LIBRARIES}
         log z
     )
 
 elseif(UNIX)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network
+            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
             Qt6::DBus  # Step 3.11: System notifications via org.freedesktop.Notifications
     )
     # MuPDF for PDF rendering and export (all Linux distributions)

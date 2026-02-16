@@ -32,6 +32,8 @@
 #include <QUrl>
 #include <QDir>
 #include <QFileInfo>
+#include <QSvgRenderer>
+#include <QPainter>
 
 // Android keyboard fix (BUG-A001)
 #ifdef Q_OS_ANDROID
@@ -1525,17 +1527,20 @@ void ControlPanelDialog::createAboutTab() {
     // Add some spacing at the top
     layout->addSpacing(20);
     
-    // Application icon
+    // Application icon — render SVG explicitly via QSvgRenderer so it works
+    // both as a raw executable and inside a .app bundle (QPixmap relies on
+    // the SVG image-format plugin which macdeployqt may not bundle).
     QLabel *iconLabel = new QLabel(aboutTab);
-    QPixmap iconPixmap(":/resources/icons/mainicon.svg");
-    if (iconPixmap.isNull()) {
-        // Fallback to file system path if resource doesn't work
-        iconPixmap.load("resources/icons/mainicon.svg");
-    }
-    
-    if (!iconPixmap.isNull()) {
-        // Scale the icon to a reasonable size (e.g., 128x128)
-        iconPixmap = iconPixmap.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QSvgRenderer svgRenderer(QString(":/resources/icons/mainicon.svg"));
+    if (svgRenderer.isValid()) {
+        const int iconSize = 128;
+        const qreal dpr = iconLabel->devicePixelRatioF();
+        QPixmap iconPixmap(QSize(iconSize, iconSize) * dpr);
+        iconPixmap.setDevicePixelRatio(dpr);
+        iconPixmap.fill(Qt::transparent);
+        QPainter painter(&iconPixmap);
+        svgRenderer.render(&painter);
+        painter.end();
         iconLabel->setPixmap(iconPixmap);
     } else {
         // Fallback text if icon can't be loaded
