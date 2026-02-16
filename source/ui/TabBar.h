@@ -11,7 +11,11 @@
  * Handles:
  * - Tab bar configuration (expanding, movable, closable, scroll buttons)
  * - Theme-aware styling via QSS
- * - Close button positioning (left side)
+ * - Close button on each tab (right side)
+ * 
+ * On macOS, Fusion style is applied to the tab bar so that QSS properties
+ * (image, size, colors) work for the close button.  The native QMacStyle
+ * ignores QSS for QTabBar::close-button.
  * 
  * Usage:
  *   TabBar *tabBar = new TabBar(parent);
@@ -28,8 +32,7 @@ public:
      * 
      * Configures the tab bar with:
      * - Non-expanding tabs (fit content width)
-     * - Movable tabs (drag to reorder)
-     * - Close buttons on each tab (positioned on left)
+     * - Close buttons on each tab
      * - Scroll buttons for overflow
      * - Text elision for long titles
      */
@@ -48,17 +51,6 @@ public:
      * - Theme-appropriate icons (close, scroll arrows)
      */
     void updateTheme(bool darkMode, const QColor &accentColor);
-
-private:
-    /**
-     * @brief Apply initial stylesheet for close button positioning
-     * 
-     * This must be applied before any tabs are created to ensure
-     * consistent close button placement on all tabs (including first).
-     * Full theming is applied later via updateTheme().
-     */
-    void applyInitialStyle();
 };
 
 #endif // TABBAR_H
-
