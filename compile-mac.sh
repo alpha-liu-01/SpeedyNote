@@ -152,6 +152,7 @@ check_and_install_dependencies() {
         "mupdf"
         "cmake"
         "pkg-config"
+        "librsvg"
     )
     
     for pkg in "${required_packages[@]}"; do
