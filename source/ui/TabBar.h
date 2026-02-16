@@ -51,6 +51,15 @@ public:
      * - Theme-appropriate icons (close, scroll arrows)
      */
     void updateTheme(bool darkMode, const QColor &accentColor);
+
+protected:
+    /**
+     * @brief Adjust close button positions after Qt's tab layout pass.
+     * 
+     * On macOS, Fusion + QStyleSheetStyle places close buttons flush at
+     * the tab edge.  This override nudges them inward for proper spacing.
+     */
+    void tabLayoutChange() override;
 };
 
 #endif // TABBAR_H

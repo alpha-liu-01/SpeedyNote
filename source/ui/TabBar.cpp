@@ -28,6 +28,22 @@ TabBar::TabBar(QWidget *parent)
     setElideMode(Qt::ElideRight);  // Truncate long titles with "..."
 }
 
+void TabBar::tabLayoutChange()
+{
+    QTabBar::tabLayoutChange();
+
+#ifdef Q_OS_MACOS
+    // Fusion + QStyleSheetStyle positions close buttons flush at the tab edge.
+    // Nudge each close button inward after Qt finishes its layout pass.
+    static constexpr int kCloseButtonInset = 6;
+    for (int i = 0; i < count(); ++i) {
+        QWidget *btn = tabButton(i, QTabBar::RightSide);
+        if (btn)
+            btn->move(btn->x() - kCloseButtonInset, btn->y());
+    }
+#endif
+}
+
 void TabBar::updateTheme(bool darkMode, const QColor &accentColor)
 {
     // Use system window color for selected tab (follows KDE/system theme)
