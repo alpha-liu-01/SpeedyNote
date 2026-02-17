@@ -30,6 +30,12 @@ set(CMAKE_AUTOUIC ON)
 # Platform Detection and Configuration
 # ============================================================================
 
+# iOS detection: Qt's iOS toolchain sets CMAKE_SYSTEM_NAME to "iOS".
+# Define IOS early so it can be tested before APPLE (which is true for both macOS and iOS).
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(IOS TRUE)
+endif()
+
 if(WIN32)
     # =========================================================================
     # Windows Configuration
@@ -182,6 +188,37 @@ if(WIN32)
     # Windows resources
     enable_language(RC)
     set(WIN_RESOURCES app_icon.rc)
+
+elseif(IOS)
+    # =========================================================================
+    # iPadOS Configuration
+    # =========================================================================
+    message(STATUS "📱 Configuring for iPadOS")
+    
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iPadOS version")
+    
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
+    
+    # MuPDF paths (cross-compiled separately via ios/build-mupdf.sh)
+    # Libraries and headers are under ios/mupdf-build/.
+    if(NOT MUPDF_INCLUDE_DIR)
+        set(MUPDF_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/ios/mupdf-build/include")
+    endif()
+    if(NOT MUPDF_LIBRARIES)
+        set(MUPDF_LIBRARIES
+            "${CMAKE_SOURCE_DIR}/ios/mupdf-build/lib/libmupdf.a"
+            "${CMAKE_SOURCE_DIR}/ios/mupdf-build/lib/libmupdf-third.a")
+    endif()
+    
+    include_directories(${CMAKE_CURRENT_BINARY_DIR} ${MUPDF_INCLUDE_DIR})
+    
+    # MuPDF is always available on iOS (cross-compiled in Phase 2)
+    add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+    message(STATUS "✅ MuPDF PDF export enabled for iPadOS")
+    
+    # No controller support on iOS
+    set(ENABLE_CONTROLLER_SUPPORT OFF)
+    set(WIN_RESOURCES "")
 
 elseif(APPLE)
     # =========================================================================
@@ -647,9 +684,9 @@ set(BATCH_SOURCES
 )
 
 # CLI module (Desktop only - headless batch operations)
-# Android uses launcher UI for batch operations instead
+# Mobile platforms (Android/iOS) use launcher UI for batch operations instead
 set(CLI_SOURCES "")
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT IOS)
     set(CLI_SOURCES
         source/cli/CliParser.cpp
         source/cli/CliProgress.cpp
@@ -669,6 +706,24 @@ if(ANDROID)
     )
 endif()
 
+# iOS-specific utilities and UI (Objective-C++ .mm files)
+set(IOS_PLATFORM_SOURCES "")
+if(IOS)
+    set(IOS_PLATFORM_SOURCES
+        source/ios/PdfPickerIOS.mm
+        source/ios/IOSShareHelper.mm
+        source/ios/IOSPlatformHelper.mm
+        source/ui/dialogs/SaveDocumentDialog.cpp  # Reuse Android's touch-friendly save dialog
+    )
+    # Enable Objective-C++ compilation for .mm files
+    set_source_files_properties(
+        source/ios/PdfPickerIOS.mm
+        source/ios/IOSShareHelper.mm
+        source/ios/IOSPlatformHelper.mm
+        PROPERTIES LANGUAGE OBJCXX
+    )
+endif()
+
 # Cross-platform utilities (Step 3.11: System notifications)
 set(PLATFORM_SOURCES
     source/platform/SystemNotification.cpp
@@ -676,7 +731,7 @@ set(PLATFORM_SOURCES
 
 # Desktop-only sources (tests require Qt::Test, debug builds only)
 set(DESKTOP_ONLY_SOURCES "")
-if(NOT ANDROID AND ENABLE_DEBUG_OUTPUT)
+if(NOT ANDROID AND NOT IOS AND ENABLE_DEBUG_OUTPUT)
     set(DESKTOP_ONLY_SOURCES
         source/ui/ToolbarButtonTests.cpp
         source/ui/ToolbarButtonTestWidget.cpp
@@ -706,6 +761,7 @@ set(APP_SOURCES
     ${CLI_SOURCES}
     ${PLATFORM_SOURCES}
     ${ANDROID_PLATFORM_SOURCES}
+    ${IOS_PLATFORM_SOURCES}
     ${DESKTOP_ONLY_SOURCES}
         ${QMARKDOWNTEXTEDIT_SOURCES}
     ${QMARKDOWNTEXTEDIT_MOC_SOURCES}
@@ -735,6 +791,28 @@ if(ANDROID)
         ${CMAKE_SOURCE_DIR}/source
         ${MUPDF_INCLUDE_DIR}
     )
+
+elseif(IOS)
+    # Enable Objective-C++ language for .mm files
+    enable_language(OBJCXX)
+    
+    qt_add_executable(speedynote ${APP_SOURCES})
+    
+    set_target_properties(speedynote PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/ios/Info.plist"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.speedynote.speedynote"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2"
+    )
+    
+    target_include_directories(speedynote PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/source
+        ${MUPDF_INCLUDE_DIR}
+    )
+
 else()
     add_executable(speedynote ${APP_SOURCES})
 endif()
@@ -791,6 +869,16 @@ if(WIN32)
     endif()
     target_link_libraries(speedynote ${PLATFORM_LIBS})
 
+elseif(IOS)
+    target_link_libraries(speedynote PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
+        ${MUPDF_LIBRARIES}
+        z
+        "-framework UIKit"
+        "-framework Foundation"
+        "-framework CoreGraphics"
+    )
+
 elseif(APPLE)
     set(PLATFORM_LIBS
             Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
@@ -838,7 +926,10 @@ endif()
 # ============================================================================
 # Install Targets
 # ============================================================================
-if(APPLE)
+if(IOS)
+    # iOS: No install targets — packaging is handled by ios/build-deb.sh and ios/build-speedynote.sh
+
+elseif(APPLE)
     install(TARGETS speedynote DESTINATION bin)
     if(QM_FILES)
         install(FILES ${QM_FILES} DESTINATION share/speedynote/translations)
