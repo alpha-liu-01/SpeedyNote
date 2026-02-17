@@ -95,7 +95,13 @@
 
 #include "android/PdfPickerAndroid.h"
 
-#endif // Q_OS_ANDROID
+#elif defined(Q_OS_IOS)
+#include "ui/dialogs/SaveDocumentDialog.h"
+#include "ios/PdfPickerIOS.h"
+#include "ios/IOSShareHelper.h"
+#include "ios/IOSPlatformHelper.h"
+
+#endif // Q_OS_ANDROID / Q_OS_IOS
 // #include "HandwritingLineEdit.h"
 #include "ControlPanelDialog.h"  // Phase CP.1: Re-enabled with cleaned up tabs
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
@@ -1038,7 +1044,7 @@ void MainWindow::setupUi() {
                 QJniObject::fromString("application/octet-stream").object<jstring>()
             );
 #elif defined(Q_OS_IOS)
-            // TODO Phase 4: iOS share sheet
+            IOSShareHelper::shareFile(outputPath, "application/octet-stream", tr("Share Notebook Package"));
 #else
             // Desktop: Show success message
             QString sizeStr;
@@ -2672,7 +2678,7 @@ void MainWindow::showPdfExportDialog()
                 QJniObject::fromString(tr("Share PDF")).object<jstring>()
             );
 #elif defined(Q_OS_IOS)
-            // TODO Phase 4: iOS share sheet
+            IOSShareHelper::shareFile(outputPath, "application/pdf", tr("Share PDF"));
 #else
             // Desktop: Show success message
             QMessageBox::information(this, tr("Export Complete"),
@@ -3320,8 +3326,10 @@ void MainWindow::openPdfDocument(const QString &filePath)
             return;
         }
 #elif defined(Q_OS_IOS)
-        // TODO Phase 4: iOS PDF picker
-        return;
+        pdfPath = PdfPickerIOS::pickPdfFile();
+        if (pdfPath.isEmpty()) {
+            return;
+        }
 #else
         QString filter = tr("PDF Files (*.pdf);;All Files (*)");
         pdfPath = QFileDialog::getOpenFileName(
@@ -3808,8 +3816,7 @@ bool MainWindow::isDarkMode() {
         "()Z"
     );
 #elif defined(Q_OS_IOS)
-    // TODO Phase 4: iOS dark mode detection
-    return false;
+    return IOSPlatformHelper::isDarkMode();
 #else
     // On Linux and other platforms, use palette-based detection
     QColor bg = palette().color(QPalette::Window);

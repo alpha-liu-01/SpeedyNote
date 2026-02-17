@@ -198,8 +198,7 @@ void PdfRelinkDialog::onRelinkPdf()
         // See source/android/PdfPickerAndroid.cpp for implementation
         selectedPdf = PdfPickerAndroid::pickPdfFile();
 #elif defined(Q_OS_IOS)
-        // TODO Phase 4: iOS PDF picker
-        selectedPdf = QString();
+        selectedPdf = PdfPickerIOS::pickPdfFile();
 #else
         // Desktop: Use native file dialog
         selectedPdf = QFileDialog::getOpenFileName(

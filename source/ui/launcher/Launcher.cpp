@@ -60,6 +60,8 @@
 #include <QJniObject>
 #include <QCoreApplication>
 #include <jni.h>
+#elif defined(Q_OS_IOS)
+#include "ios/IOSShareHelper.h"
 #endif
 
 // ============================================================================
@@ -574,7 +576,8 @@ void Launcher::setupFAB()
             performBatchImport(packagePaths);
         }
 #elif defined(Q_OS_IOS)
-        // TODO Phase 4: iOS .snbx import picker
+        // TODO Phase 4: iOS .snbx import via UIDocumentPickerViewController
+        qDebug() << "Launcher: iOS .snbx import picker not yet implemented";
 #else
         // Desktop: Show BatchImportDialog for full batch import experience
         QString destDir;
@@ -1748,8 +1751,25 @@ void Launcher::onExportJobComplete(const BatchOps::BatchResult& result, const QS
         AndroidShareHelper::shareMultipleFiles(successfulOutputs, mimeType, chooserTitle);
     }
 #elif defined(Q_OS_IOS)
-    // TODO Phase 4: iOS share sheet
-    Q_UNUSED(successfulOutputs)
+    if (!successfulOutputs.isEmpty() && IOSShareHelper::isAvailable()) {
+        QString firstOutput = successfulOutputs.first();
+        QString mimeType = "application/octet-stream";
+        QString title = tr("Share Files");
+
+        if (firstOutput.endsWith(".pdf", Qt::CaseInsensitive)) {
+            mimeType = "application/pdf";
+            title = successfulOutputs.size() == 1
+                ? tr("Share PDF")
+                : tr("Share %1 PDFs").arg(successfulOutputs.size());
+        } else if (firstOutput.endsWith(".snbx", Qt::CaseInsensitive)) {
+            mimeType = "application/octet-stream";
+            title = successfulOutputs.size() == 1
+                ? tr("Share Notebook")
+                : tr("Share %1 Notebooks").arg(successfulOutputs.size());
+        }
+
+        IOSShareHelper::shareMultipleFiles(successfulOutputs, mimeType, title);
+    }
 #else
     Q_UNUSED(successfulOutputs)
 #endif

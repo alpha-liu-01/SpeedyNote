@@ -34,11 +34,13 @@
 #define SPEEDYNOTE_SDL_QUIT() ((void)0)
 #endif
 
-// Android helpers
+// Platform helpers
 #ifdef Q_OS_ANDROID
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
+#elif defined(Q_OS_IOS)
+#include "ios/IOSPlatformHelper.h"
 
 static void logAndroidPaths()
 {
@@ -495,7 +497,9 @@ int main(int argc, char* argv[])
     applyAndroidPalette(app);
     applyAndroidFonts(app);
 #elif defined(Q_OS_IOS)
-    // TODO Phase 4: iOS dark mode detection, palette, and fonts
+    // TODO Phase 4: Implement dark mode detection, palette, fonts in IOSPlatformHelper
+    IOSPlatformHelper::applyPalette(app);
+    IOSPlatformHelper::applyFonts(app);
 #endif
 
     QTranslator translator;
