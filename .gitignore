@@ -74,4 +74,6 @@ packaging/
 .flatpak-builder/
 build-dir/
 repo/
+ios/mupdf-build/
+ios/test-ios-qt/
 
