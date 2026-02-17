@@ -26,7 +26,7 @@ BatchSnbxExportDialog::BatchSnbxExportDialog(const QStringList& bundlePaths, QWi
     : QDialog(parent)
     , m_bundlePaths(bundlePaths)
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     setWindowTitle(tr("Share Notebook Package"));
 #else
     setWindowTitle(tr("Export Notebook Package"));
@@ -38,7 +38,7 @@ BatchSnbxExportDialog::BatchSnbxExportDialog(const QStringList& bundlePaths, QWi
     m_darkMode = palette().color(QPalette::Window).lightness() < 128;
     
     // Dialog size - simpler dialog, smaller size
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #else
     setMinimumSize(420, 280);
@@ -60,7 +60,7 @@ BatchSnbxExportDialog::BatchSnbxExportDialog(const QStringList& bundlePaths, QWi
         m_includePdfCheckbox->setChecked(lastIncludePdf);
     }
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     if (!lastOutputDir.isEmpty() && QDir(lastOutputDir).exists()) {
         m_outputEdit->setText(lastOutputDir);
     } else {
@@ -70,7 +70,7 @@ BatchSnbxExportDialog::BatchSnbxExportDialog(const QStringList& bundlePaths, QWi
     
     validateAndUpdateExportButton();
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Center the dialog
     if (parent) {
         move(parent->geometry().center() - rect().center());
@@ -107,7 +107,7 @@ void BatchSnbxExportDialog::setupUi()
     mainLayout->addWidget(m_descLabel);
     
     // ===== Output Directory (Desktop only) =====
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QGroupBox* outputGroup = new QGroupBox(tr("Output Folder"));
     QHBoxLayout* outputLayout = new QHBoxLayout(outputGroup);
     outputLayout->setSpacing(8);
@@ -174,7 +174,7 @@ void BatchSnbxExportDialog::setupUi()
     connect(m_cancelButton, &QPushButton::clicked, this, &QDialog::reject);
     buttonLayout->addWidget(m_cancelButton);
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     m_exportButton = new QPushButton(tr("Share"));
 #else
     m_exportButton = new QPushButton(tr("Export"));
@@ -211,7 +211,7 @@ void BatchSnbxExportDialog::setupUi()
         QSettings settings;
         settings.beginGroup("BatchSnbxExport");
         settings.setValue("includePdf", includePdf());
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
         settings.setValue("outputDirectory", outputDirectory());
 #endif
         settings.endGroup();
@@ -227,7 +227,7 @@ void BatchSnbxExportDialog::updateTitle()
 {
     int count = m_bundlePaths.size();
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     if (count == 1) {
         m_titleLabel->setText(tr("Share Notebook Package"));
         m_descLabel->setText(tr("Share the notebook as a .snbx package that can be imported on another device."));
@@ -252,7 +252,7 @@ void BatchSnbxExportDialog::updateTitle()
 
 void BatchSnbxExportDialog::onBrowseClicked()
 {
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QString currentDir = m_outputEdit->text();
     if (currentDir.isEmpty() || !QDir(currentDir).exists()) {
         currentDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -280,7 +280,7 @@ void BatchSnbxExportDialog::validateAndUpdateExportButton()
         valid = false;
     }
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Desktop: must have output directory
     QString dir = m_outputEdit->text().trimmed();
     if (dir.isEmpty()) {
@@ -297,7 +297,7 @@ void BatchSnbxExportDialog::validateAndUpdateExportButton()
 
 QString BatchSnbxExportDialog::outputDirectory() const
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // On Android, return cache directory for temporary export
     QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     

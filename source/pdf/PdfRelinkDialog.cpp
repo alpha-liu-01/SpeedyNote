@@ -11,6 +11,8 @@
 
 #ifdef Q_OS_ANDROID
 #include "../android/PdfPickerAndroid.h"
+#elif defined(Q_OS_IOS)
+#include "../ios/PdfPickerIOS.h"
 #endif
 
 PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
@@ -180,9 +182,9 @@ void PdfRelinkDialog::onRelinkPdf()
         startDir = QDir::homePath();
     }
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // Track copied PDFs for cleanup if user chooses "Choose Different"
-    // On Android, picked files are copied to /pdfs/ directory, and if rejected
+    // On Android/iOS, picked files are copied to /pdfs/ directory, and if rejected
     // (hash mismatch + "Choose Different"), we should clean them up
     QString androidPdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
 #endif
@@ -195,6 +197,9 @@ void PdfRelinkDialog::onRelinkPdf()
         // Use shared Android PDF picker (handles SAF permissions properly)
         // See source/android/PdfPickerAndroid.cpp for implementation
         selectedPdf = PdfPickerAndroid::pickPdfFile();
+#elif defined(Q_OS_IOS)
+        // TODO Phase 4: iOS PDF picker
+        selectedPdf = QString();
 #else
         // Desktop: Use native file dialog
         selectedPdf = QFileDialog::getOpenFileName(
@@ -230,7 +235,7 @@ void PdfRelinkDialog::onRelinkPdf()
         // (loop continues) or "Cancel" (we should exit)
         // Check if we should exit entirely
         if (result == Cancel) {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
             // Clean up the rejected PDF copy (it's in our sandbox, safe to delete)
             if (selectedPdf.startsWith(androidPdfsDir)) {
                 QFile::remove(selectedPdf);
@@ -241,7 +246,7 @@ void PdfRelinkDialog::onRelinkPdf()
         }
         
         // User chose "Choose Different" - clean up rejected file and loop
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         // Clean up the rejected PDF copy before picking a new one
         if (selectedPdf.startsWith(androidPdfsDir)) {
             QFile::remove(selectedPdf);

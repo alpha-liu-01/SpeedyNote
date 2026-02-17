@@ -35,8 +35,8 @@
 #include <QSvgRenderer>
 #include <QPainter>
 
-// Android keyboard fix (BUG-A001)
-#ifdef Q_OS_ANDROID
+// Android/iOS keyboard fix (BUG-A001)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 #include <QGuiApplication>
 #include <QInputMethod>
 #endif
@@ -106,14 +106,14 @@ void ControlPanelDialog::switchToKeyboardShortcutsTab()
 
 void ControlPanelDialog::done(int result)
 {
-#ifdef Q_OS_ANDROID
-    // BUG-A001 Fix: Defer dialog close to let Android keyboard operations complete.
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // BUG-A001 Fix: Defer dialog close to let Android/iOS keyboard operations complete.
     // Qt 6.7.x has a bug where closing a dialog with text inputs causes a crash
     // in QtInputDelegate.resetSoftwareKeyboard() - the async lambda accesses 
     // QtEditText.m_optionsChanged after the widget is destroyed.
     // 
     // Solution: Hide keyboard, clear focus, then defer the actual close by 150ms
-    // to give the Android UI thread time to complete keyboard operations.
+    // to give the Android/iOS UI thread time to complete keyboard operations.
     
     // Prevent re-entry if already deferring
     static bool isDeferring = false;

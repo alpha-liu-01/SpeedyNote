@@ -27,7 +27,7 @@ void FloatingActionButton::setupUi()
 {
     // Calculate total size needed
     // 5 buttons on desktop, 4 on Android (Open Notebook hidden)
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     int numActionButtons = 4;  // Open Notebook hidden on Android
 #else
     int numActionButtons = 5;
@@ -70,7 +70,7 @@ void FloatingActionButton::setupUi()
     m_actionButtons << m_edgelessBtn << m_pagedBtn << m_pdfBtn << m_openBtn << m_importBtn;
     
     // Hide "Open Notebook" on Android - users should use Import Package instead
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     m_openBtn->setVisible(false);
     m_actionButtons.removeOne(m_openBtn);
 #endif

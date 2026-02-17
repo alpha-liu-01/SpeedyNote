@@ -15,7 +15,7 @@
 #include "platform/SystemNotification.h"
 
 // CLI support (Desktop only)
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QGuiApplication>
 #include "cli/CliParser.h"
 #endif
@@ -211,7 +211,7 @@ static void applyAndroidFonts(QApplication& app)
 #endif
 
 // Test includes (desktop debug builds only)
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
 #include "core/DocumentViewportTests.h"
@@ -416,7 +416,7 @@ static void connectLauncherSignals(Launcher* launcher)
 // Test Runners (Desktop Debug Builds Only)
 // ============================================================================
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 static int runTests(const QString& testType)
 {
 #ifdef Q_OS_WIN
@@ -461,7 +461,7 @@ int main(int argc, char* argv[])
     // In release builds, enableDebugConsole() calls FreeConsole() to hide the
     // console window in GUI mode, but that would also disconnect stdout/stderr
     // for CLI mode, causing all terminal output to be silently lost.
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     if (Cli::isCliMode(argc, argv)) {
         QGuiApplication app(argc, argv);
         app.setOrganizationName("SpeedyNote");
@@ -494,6 +494,8 @@ int main(int argc, char* argv[])
     logAndroidPaths();
     applyAndroidPalette(app);
     applyAndroidFonts(app);
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: iOS dark mode detection, palette, and fonts
 #endif
 
     QTranslator translator;
@@ -515,7 +517,7 @@ int main(int argc, char* argv[])
     QString inputFile;
     bool createNewPackage = false;
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
     QString testToRun;
     bool runButtonVisualTest = false;
     bool runViewportTests = false;
@@ -528,7 +530,7 @@ int main(int argc, char* argv[])
             createNewPackage = true;
             inputFile = QString::fromLocal8Bit(argv[++i]);
         }
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
         else if (arg == "--test-page") {
             testToRun = "page";
         } else if (arg == "--test-document") {
@@ -550,7 +552,7 @@ int main(int argc, char* argv[])
         }
     }
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
     // Handle test commands
     if (!testToRun.isEmpty()) {
         return runTests(testToRun);

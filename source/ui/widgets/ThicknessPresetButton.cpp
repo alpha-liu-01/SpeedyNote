@@ -12,8 +12,8 @@
 #include <QPushButton>
 #include <QDialogButtonBox>
 
-// Android keyboard fix (BUG-A001)
-#ifdef Q_OS_ANDROID
+// Android/iOS keyboard fix (BUG-A001)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 #include <QGuiApplication>
 #include <QInputMethod>
 #include <QTimer>
@@ -100,7 +100,7 @@ void ThicknessEditDialog::onSpinBoxChanged(double value)
 
 void ThicknessEditDialog::done(int result)
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // BUG-A001 Fix: Defer dialog close. See ControlPanelDialog.cpp for full explanation.
     static bool isDeferring = false;
     if (isDeferring) {

@@ -12,7 +12,7 @@
 #include "../dialogs/BatchPdfExportDialog.h"
 #include "../dialogs/BatchSnbxExportDialog.h"
 #include "../dialogs/ExportResultsDialog.h"
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include "../dialogs/BatchImportDialog.h"
 #endif
 #include "../widgets/ExportProgressWidget.h"
@@ -49,7 +49,7 @@
 #include <QJsonParseError>
 #include <QStandardPaths>
 #include <QEventLoop>
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -198,7 +198,7 @@ Launcher::Launcher(QWidget* parent)
     setMinimumSize(560, 480);
     setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Enable drag-drop for desktop notebook import (Step 3.10)
     setAcceptDrops(true);
 #endif
@@ -573,6 +573,8 @@ void Launcher::setupFAB()
         if (!packagePaths.isEmpty()) {
             performBatchImport(packagePaths);
         }
+#elif defined(Q_OS_IOS)
+        // TODO Phase 4: iOS .snbx import picker
 #else
         // Desktop: Show BatchImportDialog for full batch import experience
         QString destDir;
@@ -735,7 +737,7 @@ void Launcher::showEvent(QShowEvent* event)
 // Drag-Drop Import (Desktop only - Step 3.10)
 // =============================================================================
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 
 void Launcher::dragEnterEvent(QDragEnterEvent* event)
 {
@@ -833,7 +835,7 @@ void Launcher::dropEvent(QDropEvent* event)
     performBatchImport(snbxFiles, destDir);
 }
 
-#endif // !Q_OS_ANDROID
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
 
 void Launcher::onTimelineItemClicked(const QModelIndex& index)
 {
@@ -994,8 +996,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     
     menu.addSeparator();
     
-    // Show in file manager action (not available on Android - sandboxed storage)
-#ifndef Q_OS_ANDROID
+    // Show in file manager action (not available on Android/iOS - sandboxed storage)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QAction* showAction = menu.addAction(tr("Show in File Manager"));
     connect(showAction, &QAction::triggered, this, [this, bundlePath]() {
         showInFileManager(bundlePath);
@@ -1132,7 +1134,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             mainWindow->closeDocumentById(docId, true);  // discardChanges=true
         }
         
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
         // If so, delete the PDF too to prevent storage leaks
         QString pdfToDelete = findImportedPdfPath(bundlePath);
@@ -1147,7 +1149,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             bundleDir.removeRecursively();
         }
         
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         // Delete imported PDF if found
         if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
             QFile::remove(pdfToDelete);
@@ -1745,6 +1747,9 @@ void Launcher::onExportJobComplete(const BatchOps::BatchResult& result, const QS
         
         AndroidShareHelper::shareMultipleFiles(successfulOutputs, mimeType, chooserTitle);
     }
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: iOS share sheet
+    Q_UNUSED(successfulOutputs)
 #else
     Q_UNUSED(successfulOutputs)
 #endif
@@ -1789,8 +1794,8 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     // Determine destination directory
     QString importDestDir = destDir;
     if (importDestDir.isEmpty()) {
-#ifdef Q_OS_ANDROID
-        // Android: Use app data location for imports
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+        // Android/iOS: Use app data location for imports
         importDestDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
 #else
         // Desktop: Use Documents/SpeedyNote as default
@@ -1833,7 +1838,7 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     // For very large imports, this could be moved to a background thread
     BatchOps::BatchResult result = BatchOps::importSnbxBatch(snbxFiles, options, progressCallback);
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // Clean up source .snbx files from temp /imports directory after import
     // These were copied from content:// URIs and are no longer needed
     QString importsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/imports";
@@ -1896,7 +1901,7 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     }
 }
 
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 QString Launcher::findImportedPdfPath(const QString& bundlePath)
 {
     // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox.

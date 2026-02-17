@@ -1,6 +1,6 @@
 #include "BatchImportDialog.h"
 
-#ifndef Q_OS_ANDROID  // Desktop only
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)  // Desktop only
 
 #include "../ThemeColors.h"
 
@@ -422,4 +422,4 @@ QStringList BatchImportDialog::getImportFiles(QWidget* parent, QString* destDir)
     return QStringList();
 }
 
-#endif // !Q_OS_ANDROID
+#endif // !Q_OS_ANDROID && !Q_OS_IOS

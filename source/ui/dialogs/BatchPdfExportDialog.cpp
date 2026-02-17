@@ -34,7 +34,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     : QDialog(parent)
     , m_bundlePaths(bundlePaths)
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     setWindowTitle(tr("Share as PDF"));
 #else
     setWindowTitle(tr("Export to PDF"));
@@ -49,7 +49,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     filterEdgelessNotebooks();
     
     // Dialog size
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #else
     setMinimumSize(520, 700);
@@ -85,7 +85,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     if (m_includeMetadataCheckbox) m_includeMetadataCheckbox->setChecked(lastIncludeMetadata);
     if (m_includeOutlineCheckbox) m_includeOutlineCheckbox->setChecked(lastIncludeOutline);
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     if (!lastOutputDir.isEmpty() && QDir(lastOutputDir).exists()) {
         m_outputEdit->setText(lastOutputDir);
     } else {
@@ -95,7 +95,7 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     
     validateAndUpdateExportButton();
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Center the dialog
     if (parent) {
         move(parent->geometry().center() - rect().center());
@@ -134,7 +134,7 @@ void BatchPdfExportDialog::setupUi()
     mainLayout->addWidget(m_warningLabel);
     
     // ===== Output Directory (Desktop only) =====
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QGroupBox* outputGroup = new QGroupBox(tr("Output Folder"));
     QHBoxLayout* outputLayout = new QHBoxLayout(outputGroup);
     outputLayout->setSpacing(8);
@@ -287,7 +287,7 @@ void BatchPdfExportDialog::setupUi()
     connect(m_cancelButton, &QPushButton::clicked, this, &QDialog::reject);
     buttonLayout->addWidget(m_cancelButton);
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     m_exportButton = new QPushButton(tr("Share"));
 #else
     m_exportButton = new QPushButton(tr("Export"));
@@ -326,7 +326,7 @@ void BatchPdfExportDialog::setupUi()
         settings.setValue("annotationsOnly", annotationsOnly());
         settings.setValue("includeMetadata", includeMetadata());
         settings.setValue("includeOutline", includeOutline());
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
         settings.setValue("outputDirectory", outputDirectory());
 #endif
         settings.endGroup();
@@ -378,7 +378,7 @@ void BatchPdfExportDialog::updateTitle()
 {
     int count = m_validBundles.size();
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     if (count == 1) {
         m_titleLabel->setText(tr("Share Notebook as PDF"));
     } else {
@@ -418,7 +418,7 @@ void BatchPdfExportDialog::updateWarningLabel()
 
 void BatchPdfExportDialog::onBrowseClicked()
 {
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QString currentDir = m_outputEdit->text();
     if (currentDir.isEmpty() || !QDir(currentDir).exists()) {
         currentDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -465,7 +465,7 @@ void BatchPdfExportDialog::validateAndUpdateExportButton()
         valid = false;
     }
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Desktop: must have output directory
     QString dir = m_outputEdit->text().trimmed();
     if (dir.isEmpty()) {
@@ -490,7 +490,7 @@ void BatchPdfExportDialog::validateAndUpdateExportButton()
 
 QString BatchPdfExportDialog::outputDirectory() const
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // On Android, return cache directory for temporary export
     QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     

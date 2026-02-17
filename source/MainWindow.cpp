@@ -113,7 +113,7 @@
 #endif
 
 // Static member definition for single instance
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 QSharedMemory *MainWindow::sharedMemory = nullptr;
 #endif
 // Phase 3.1: LauncherWindow disconnected - will be re-linked later
@@ -162,8 +162,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupLinuxSignalHandlers();
 #endif
 
-#ifdef Q_OS_ANDROID
-    // On Android, auto-save all modified documents when app goes to background
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // On Android/iOS, auto-save all modified documents when app goes to background
     // This is critical because the app may be killed without closeEvent()
     // when user swipes from recents. Without this:
     // 1. Unsaved changes would be lost
@@ -1037,6 +1037,8 @@ void MainWindow::setupUi() {
                 QJniObject::fromString(outputPath).object<jstring>(),
                 QJniObject::fromString("application/octet-stream").object<jstring>()
             );
+#elif defined(Q_OS_IOS)
+            // TODO Phase 4: iOS share sheet
 #else
             // Desktop: Show success message
             QString sizeStr;
@@ -2544,7 +2546,7 @@ void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
 
 void MainWindow::showPdfExportDialog()
 {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     QString dialogTitle = tr("Share as PDF");
 #else
     QString dialogTitle = tr("Export to PDF");
@@ -2583,7 +2585,7 @@ void MainWindow::showPdfExportDialog()
     
     // Check for unsaved changes - require saving first
     if (doc->modified) {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         QString savePrompt = tr("The document has unsaved changes.\n"
                                 "Please save the document before sharing as PDF.\n\n"
                                 "Would you like to save now?");
@@ -2669,6 +2671,8 @@ void MainWindow::showPdfExportDialog()
                 QJniObject::fromString("application/pdf").object<jstring>(),
                 QJniObject::fromString(tr("Share PDF")).object<jstring>()
             );
+#elif defined(Q_OS_IOS)
+            // TODO Phase 4: iOS share sheet
 #else
             // Desktop: Show success message
             QMessageBox::information(this, tr("Export Complete"),
@@ -2811,8 +2815,8 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     
     QString filePath;
     
-#ifdef Q_OS_ANDROID
-    // Android: Save to app-private storage using touch-friendly dialog
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // Android/iOS: Save to app-private storage using touch-friendly dialog
     QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
     QDir().mkpath(notebooksDir);
     
@@ -3021,8 +3025,8 @@ void MainWindow::loadDocument()
     
     QString filePath;
     
-#ifdef Q_OS_ANDROID
-    // BUG-A002 Fix: On Android, show list of saved documents from app-private storage.
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // BUG-A002 Fix: On Android/iOS, show list of saved documents from app-private storage.
     // QFileDialog returns content:// URIs which don't work for .snb bundles (directories).
     QString notebooksDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
     QDir dir(notebooksDir);
@@ -3315,6 +3319,9 @@ void MainWindow::openPdfDocument(const QString &filePath)
             // User cancelled or error
             return;
         }
+#elif defined(Q_OS_IOS)
+        // TODO Phase 4: iOS PDF picker
+        return;
 #else
         QString filter = tr("PDF Files (*.pdf);;All Files (*)");
         pdfPath = QFileDialog::getOpenFileName(
@@ -3510,8 +3517,8 @@ void MainWindow::loadFolderDocument()
     // TODO: Replace with unified file picker when .snb becomes a single file.
     // ==========================================================================
     
-#ifdef Q_OS_ANDROID
-    // On Android, just use the regular loadDocument() which shows a list dialog
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // On Android/iOS, just use the regular loadDocument() which shows a list dialog
     loadDocument();
     return;
 #endif
@@ -3800,6 +3807,9 @@ bool MainWindow::isDarkMode() {
         "isDarkMode",
         "()Z"
     );
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: iOS dark mode detection
+    return false;
 #else
     // On Linux and other platforms, use palette-based detection
     QColor bg = palette().color(QPalette::Window);
@@ -6399,8 +6409,8 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
 bool MainWindow::isInstanceRunning()
 {
-#ifdef Q_OS_ANDROID
-    // Android handles app lifecycle differently - always return false
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // Android/iOS handle app lifecycle differently - always return false
     return false;
 #else
     if (!sharedMemory) {
@@ -6600,7 +6610,7 @@ void MainWindow::onNewConnection()
 // Static cleanup method for signal handlers and emergency cleanup
 void MainWindow::cleanupSharedResources()
 {
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Minimal cleanup to avoid Qt conflicts
     if (sharedMemory) {
         if (sharedMemory->isAttached()) {

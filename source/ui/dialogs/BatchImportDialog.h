@@ -20,7 +20,7 @@
  * @see docs/private/BATCH_OPERATIONS.md
  */
 
-#ifndef Q_OS_ANDROID  // Desktop only
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)  // Desktop only
 
 #include <QDialog>
 #include <QStringList>
@@ -126,6 +126,6 @@ private:
     static constexpr int DIALOG_MIN_HEIGHT = 450;
 };
 
-#endif // !Q_OS_ANDROID
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
 
 #endif // BATCHIMPORTDIALOG_H
