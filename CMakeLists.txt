@@ -805,7 +805,25 @@ elseif(IOS)
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.speedynote.speedynote"
+        XCODE_ATTRIBUTE_MARKETING_VERSION "${PROJECT_VERSION}"
+        XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION "${PROJECT_VERSION}"
+        # Code signing for device deployment (free or paid Apple ID)
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
     )
+
+    # Development team ID — pass via -DDEVELOPMENT_TEAM=XXXXXXXXXX at configure time.
+    # Find yours: Xcode > Settings > Accounts > select your Apple ID > see Team ID,
+    # or run: security find-identity -v -p codesigning
+    if(DEVELOPMENT_TEAM)
+        set_target_properties(speedynote PROPERTIES
+            XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${DEVELOPMENT_TEAM}"
+        )
+        message(STATUS "iOS signing: Team ${DEVELOPMENT_TEAM} (automatic)")
+    else()
+        message(STATUS "iOS signing: No DEVELOPMENT_TEAM set — simulator only, or set team in Xcode")
+    endif()
     
     target_include_directories(speedynote PRIVATE
         ${CMAKE_SOURCE_DIR}

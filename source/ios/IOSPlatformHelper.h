@@ -12,6 +12,8 @@
  * @see source/Main.cpp (Android equivalents: isAndroidDarkMode, applyAndroidPalette, etc.)
  */
 
+#include <QtGlobal>
+
 class QApplication;
 
 namespace IOSPlatformHelper {

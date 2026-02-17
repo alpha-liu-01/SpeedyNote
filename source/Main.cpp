@@ -39,8 +39,13 @@
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
-#elif defined(Q_OS_IOS)
+#endif
+
+#ifdef Q_OS_IOS
 #include "ios/IOSPlatformHelper.h"
+#endif
+
+#ifdef Q_OS_ANDROID
 
 static void logAndroidPaths()
 {

@@ -1343,6 +1343,7 @@ void Launcher::duplicateNotebook(const QString& bundlePath)
     }
 }
 
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 void Launcher::showInFileManager(const QString& bundlePath)
 {
     // Open the containing folder and select the notebook
@@ -1361,6 +1362,7 @@ void Launcher::showInFileManager(const QString& bundlePath)
     QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
 #endif
 }
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
 
 // =============================================================================
 // Timeline Select Mode (L-007)

@@ -109,7 +109,7 @@
 #endif
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 
-#include "DocumentConverter.h" // Added for PowerPoint conversion
+// #include "DocumentConverter.h" // Added for PowerPoint conversion
 
 // Linux-specific includes for signal handling
 #ifdef Q_OS_LINUX

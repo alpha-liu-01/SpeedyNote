@@ -127,7 +127,9 @@ private:
     void toggleNotebookStar(const QString& bundlePath);
     void renameNotebook(const QString& bundlePath);
     void duplicateNotebook(const QString& bundlePath);
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     void showInFileManager(const QString& bundlePath);
+#endif
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     QString findImportedPdfPath(const QString& bundlePath);
 #endif
