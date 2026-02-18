@@ -2,8 +2,6 @@
 <RCC version="1.0">
 <qresource prefix="/">
 
-    <file>resources/icons/background.png</file>
-    <file>resources/icons/background_reversed.png</file>
     <file>resources/icons/pen.png</file>
     <file>resources/icons/pen_reversed.png</file>
     <file>resources/icons/marker.png</file>
