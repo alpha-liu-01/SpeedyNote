@@ -34,7 +34,7 @@ public:
     
     /**
      * @brief Set the icons for both modes by base name (enables dark mode switching).
-     * @param mode0BaseName Base name for mode 0 icon (e.g., "background" loads background.png or background_reversed.png)
+     * @param mode0BaseName Base name for mode 0 icon (e.g., "objectinsert" loads objectinsert.png or objectinsert_reversed.png)
      * @param mode1BaseName Base name for mode 1 icon.
      */
     void setModeIconNames(const QString& mode0BaseName, const QString& mode1BaseName);
