@@ -1539,7 +1539,7 @@ void ControlPanelDialog::createAboutTab() {
         iconPixmap.setDevicePixelRatio(dpr);
         iconPixmap.fill(Qt::transparent);
         QPainter painter(&iconPixmap);
-        svgRenderer.render(&painter);
+        svgRenderer.render(&painter, QRectF(0, 0, iconSize, iconSize));
         painter.end();
         iconLabel->setPixmap(iconPixmap);
     } else {
@@ -1561,7 +1561,7 @@ void ControlPanelDialog::createAboutTab() {
     layout->addSpacing(5);
     
     // Version
-    QLabel *versionLabel = new QLabel(tr("Version 1.2.3"), aboutTab);
+    QLabel *versionLabel = new QLabel(tr("Version 1.2.4"), aboutTab);
     versionLabel->setAlignment(Qt::AlignCenter);
     versionLabel->setStyleSheet("font-size: 14px; color: #7f8c8d;");
     layout->addWidget(versionLabel);

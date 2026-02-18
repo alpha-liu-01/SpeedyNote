@@ -8794,6 +8794,10 @@ void DocumentViewport::applySelectionTransform()
             }
         }
         
+        // Invalidate cache: removals above bypass removeStroke() (direct vector
+        // manipulation for undo tracking), so the cache must be explicitly dirtied.
+        layer->invalidateStrokeCache();
+        
         // Add transformed strokes with new IDs
         for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
             VectorStroke transformedStroke = stroke;

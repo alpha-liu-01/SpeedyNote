@@ -30,7 +30,7 @@ QTabBar {
 QTabBar::tab {
     background-color: {{TAB_BG}};
     color: {{TAB_TEXT}};
-    padding: 8px 16px;
+    padding: 8px 8px;
     border: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
@@ -67,10 +67,15 @@ QTabBar::close-button:hover {
    Scroll Buttons (for tab overflow)
    ========================================================================== */
 
+QTabBar::scroller {
+    width: 64px;
+}
+
 QTabBar QToolButton {
     background-color: {{TAB_BAR_BG}};
     border: none;
     padding: 4px;
+    min-width: 24px;
 }
 
 QTabBar QToolButton:hover {

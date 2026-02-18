@@ -170,7 +170,7 @@ private:
     // Select mode header (L-007)
     QWidget* m_selectModeHeader = nullptr;      // Header bar for select mode
     QLabel* m_selectionCountLabel = nullptr;    // Shows "X selected"
-    QPushButton* m_backButton = nullptr;        // Back arrow to exit (recent.png icon)
+    QPushButton* m_backButton = nullptr;        // Back arrow to exit (left_arrow.png icon)
     QPushButton* m_overflowMenuButton = nullptr; // Overflow menu (menu.png icon)
     
     bool m_darkMode = false;
