@@ -79,6 +79,16 @@
 
   <releases>
 
+    <release version="1.2.4" date="2026-02-17">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Fixed the problem that lasso tool didn't clear the originally selected strokes.</li>
+          <li>Fixed some stylesheet issues.</li>
+          <li>Updated some icons.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.3" date="2026-02-15">
       <description>
         <p>New features:</p>
