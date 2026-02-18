@@ -39,6 +39,34 @@
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
+#include <QDialog>
+#include <QEvent>
+
+/**
+ * @brief Event filter that maximizes QDialog windows on Android.
+ * 
+ * On some OEM Android skins (notably Samsung One UI), Qt's QDialog windows
+ * are placed behind the main activity window, making them invisible while
+ * still blocking input (modal). This makes the app appear frozen.
+ * 
+ * The fix: maximize all dialogs so they fill the screen, which is standard
+ * Android UX and completely avoids the z-ordering issue. This is installed
+ * as an application-level event filter so it covers ALL dialogs automatically
+ * (QColorDialog, custom QDialog subclasses, etc.).
+ */
+class AndroidDialogFilter : public QObject {
+public:
+    using QObject::QObject;
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override {
+        if (event->type() == QEvent::Show) {
+            if (auto* dialog = qobject_cast<QDialog*>(obj)) {
+                dialog->setWindowState(dialog->windowState() | Qt::WindowMaximized);
+            }
+        }
+        return QObject::eventFilter(obj, event);
+    }
+};
 
 static void logAndroidPaths()
 {
@@ -494,6 +522,7 @@ int main(int argc, char* argv[])
     logAndroidPaths();
     applyAndroidPalette(app);
     applyAndroidFonts(app);
+    app.installEventFilter(new AndroidDialogFilter(&app));
 #endif
 
     QTranslator translator;
