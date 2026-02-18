@@ -9448,8 +9448,9 @@ void DocumentViewport::setAutoHighlightEnabled(bool enabled)
     
     m_autoHighlightEnabled = enabled;
     emit autoHighlightEnabledChanged(enabled);
-    
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Auto-highlight mode:" << (enabled ? "ON" : "OFF");
+    #endif
 }
 
 void DocumentViewport::setHighlighterColor(const QColor& color)
