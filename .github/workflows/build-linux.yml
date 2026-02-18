@@ -67,6 +67,7 @@ jobs:
             pkgconf \
             qt6-qtbase-devel \
             qt6-qttools-devel \
+            qt6-qtsvg-devel \
             SDL2-devel \
             alsa-lib-devel \
             mupdf-devel \
