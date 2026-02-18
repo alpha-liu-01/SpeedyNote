@@ -289,7 +289,7 @@ void FolderPickerDialog::populateFolders()
     
     // Add Recent section if there are recent folders
     if (!m_recentFolders.isEmpty()) {
-        m_folderList->addItem(createSectionHeader(tr("RECENT")));
+        m_folderList->addItem(createSectionHeader(tr("left_arrow")));
         for (const QString& folder : m_recentFolders) {
             m_folderList->addItem(createFolderItem(folder));
         }

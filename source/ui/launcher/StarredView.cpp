@@ -281,7 +281,7 @@ void StarredView::setupSelectModeHeader()
     headerLayout->setContentsMargins(0, 0, 8, 8);
     headerLayout->setSpacing(8);
     
-    // Back button (uses recent.png icon - arrow pointing left)
+    // Back button (uses left_arrow.png icon - arrow pointing left)
     // Parent is m_selectModeHeader so it's properly contained in the header
     m_backButton = new QPushButton(m_selectModeHeader);
     m_backButton->setObjectName("BackButton");
@@ -359,8 +359,8 @@ void StarredView::updateHeaderButtonIcons()
 {
     // Update back button icon based on theme
     QString backIconPath = m_darkMode 
-        ? ":/resources/icons/recent_reversed.png" 
-        : ":/resources/icons/recent.png";
+        ? ":/resources/icons/left_arrow_reversed.png" 
+        : ":/resources/icons/left_arrow.png";
     m_backButton->setIcon(QIcon(backIconPath));
     
     // Update overflow menu button icon based on theme

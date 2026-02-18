@@ -1539,7 +1539,7 @@ void ControlPanelDialog::createAboutTab() {
         iconPixmap.setDevicePixelRatio(dpr);
         iconPixmap.fill(Qt::transparent);
         QPainter painter(&iconPixmap);
-        svgRenderer.render(&painter);
+        svgRenderer.render(&painter, QRectF(0, 0, iconSize, iconSize));
         painter.end();
         iconLabel->setPixmap(iconPixmap);
     } else {
