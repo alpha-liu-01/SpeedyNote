@@ -30,7 +30,7 @@ QTabBar {
 QTabBar::tab {
     background-color: {{TAB_BG}};
     color: {{TAB_TEXT}};
-    padding: 8px 16px;
+    padding: 8px 4px 8px 8px;
     border: none;
     border-top-left-radius: 6px;
     border-top-right-radius: 6px;
@@ -55,8 +55,8 @@ QTabBar::close-button {
     image: url(:/resources/icons/{{CLOSE_ICON}});
     width: 16px;
     height: 16px;
-    padding: 1px;
-    border-radius: 9px;  /* (16 + 1*2) / 2 = 9 for circular button */
+    padding: 2px;
+    border-radius: 10px;  /* (16 + 2*2) / 2 = 10 for circular button */
 }
 
 QTabBar::close-button:hover {
@@ -67,10 +67,15 @@ QTabBar::close-button:hover {
    Scroll Buttons (for tab overflow)
    ========================================================================== */
 
+QTabBar::scroller {
+    width: 64px;
+}
+
 QTabBar QToolButton {
     background-color: {{TAB_BAR_BG}};
     border: none;
     padding: 4px;
+    min-width: 24px;
 }
 
 QTabBar QToolButton:hover {

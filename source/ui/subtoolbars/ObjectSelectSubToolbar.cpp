@@ -62,7 +62,7 @@ void ObjectSelectSubToolbar::createWidgets()
     // Create insert mode toggle (Image ↔ Link)
     m_insertModeToggle = new ModeToggleButton(this);
     // Use icon base names for dark mode switching support
-    m_insertModeToggle->setModeIconNames("background", "linkicon");  // Mode 0: Image, Mode 1: Link
+    m_insertModeToggle->setModeIconNames("objectinsert", "linkicon");  // Mode 0: Image, Mode 1: Link
     m_insertModeToggle->setDarkMode(dark);
     m_insertModeToggle->setModeToolTips(
         tr("Image insert mode (click to switch to Link)"),

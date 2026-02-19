@@ -9,23 +9,23 @@
 
 ---
 
-### Dependencies
+### 依赖
 
-Install the required packages:
+安装这些软件包:
 
 ```bash
 # Build essentials
 sudo apt install build-essential cmake pkg-config
 
 # Qt6
-sudo apt install qt6-base-dev qt6-tools-dev libqt6concurrent6 libqt6xml6 libqt6network6
+sudo apt install qt6-base-dev qt6-tools-dev qt6-svg-dev libqt6concurrent6 libqt6xml6 libqt6network6
 
 
 # PDF (MuPDF and dependencies)
 sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev
 ```
 
-#### Dependency Summary
+#### 依赖总结
 
 | Component      | Packages                                                                                | Purpose   |
 | -------------- | --------------------------------------------------------------------------------------- | --------- |
@@ -55,7 +55,7 @@ cd build && ./speedynote
 | `ENABLE_CONTROLLER_SUPPORT` | OFF     | 启用SDL2手柄支持（可能不一定提供了） |
 | `ENABLE_DEBUG_OUTPUT`       | OFF     | 启用debug prints       |
 
-Example with options:
+举例:
 
 ```bash
 cmake .. -DENABLE_CONTROLLER_SUPPORT=ON -DENABLE_DEBUG_OUTPUT=ON
@@ -107,19 +107,19 @@ sudo apt install qt6-base-dev qt6-tools-dev
 包名不太一样而已:
 
 ```bash
-sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel mupdf-devel harfbuzz-devel freetype-devel libjpeg-turbo-devel openjpeg2-devel gumbo-parser-devel mujs-devel
+sudo dnf install cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel qt6-qtsvg-devel mupdf-devel harfbuzz-devel freetype-devel libjpeg-turbo-devel openjpeg2-devel gumbo-parser-devel mujs-devel
 ```
 
 #### Arch Linux
 
 ```bash
-sudo pacman -S cmake qt6-base qt6-tools mupdf harfbuzz freetype2 libjpeg-turbo openjpeg2 gumbo-parser mujs
+sudo pacman -S cmake qt6-base qt6-tools qt6-svg mupdf harfbuzz freetype2 libjpeg-turbo openjpeg2 gumbo-parser mujs
 ```
 
 #### Alpine Linux 和 postmarketOS
 
 ```bash
-sudo apk add build-base cmake abuild qt6-qtbase-dev qt6-qttools-dev qt6-qtdeclarative-dev mupdf-dev
+sudo apk add build-base cmake abuild qt6-qtbase-dev qt6-qttools-dev qt6-qtsvg-dev qt6-qtdeclarative-dev mupdf-dev
 ./compile.sh
 ./build-alpine-arm64.sh
 ```

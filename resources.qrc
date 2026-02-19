@@ -2,8 +2,6 @@
 <RCC version="1.0">
 <qresource prefix="/">
 
-    <file>resources/icons/background.png</file>
-    <file>resources/icons/background_reversed.png</file>
     <file>resources/icons/pen.png</file>
     <file>resources/icons/pen_reversed.png</file>
     <file>resources/icons/marker.png</file>
@@ -80,8 +78,6 @@
     <file>resources/icons/export_reversed.png</file>
     <file>resources/icons/rope.png</file>
     <file>resources/icons/rope_reversed.png</file>
-    <file>resources/icons/recent.png</file>
-    <file>resources/icons/recent_reversed.png</file>
     <file>resources/icons/layer.png</file>
     <file>resources/icons/layer_reversed.png</file>
     <file>resources/icons/hand.png</file>

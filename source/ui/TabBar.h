@@ -17,6 +17,10 @@
  * (image, size, colors) work for the close button.  The native QMacStyle
  * ignores QSS for QTabBar::close-button.
  * 
+ * On Android, the QTabBar::close-button QSS pseudo-element is not applied
+ * to the internal close button widget. Custom QToolButtons are created
+ * programmatically and set via setTabButton() to replace the defaults.
+ * 
  * Usage:
  *   TabBar *tabBar = new TabBar(parent);
  *   tabBar->updateTheme(isDarkMode, accentColor);
@@ -60,6 +64,18 @@ protected:
      * the tab edge.  This override nudges them inward for proper spacing.
      */
     void tabLayoutChange() override;
+    
+    /**
+     * @brief Replace close button when a new tab is inserted (Android).
+     */
+    void tabInserted(int index) override;
+
+private:
+#ifdef Q_OS_ANDROID
+    void installCloseButton(int index);
+    void updateCloseButtonIcons();
+    bool m_darkMode = false;
+#endif
 };
 
 #endif // TABBAR_H

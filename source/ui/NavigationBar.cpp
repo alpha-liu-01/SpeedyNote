@@ -24,7 +24,7 @@ void NavigationBar::setupUi()
     
     // === Left side buttons ===
     m_launcherButton = new ActionButton(this);
-    m_launcherButton->setThemedIcon("recent");  // Back to launcher/recent
+    m_launcherButton->setThemedIcon("left_arrow");  // Back to launcher/recent
     m_launcherButton->setToolTip(tr("Back to Launcher"));
     mainLayout->addWidget(m_launcherButton);
     
