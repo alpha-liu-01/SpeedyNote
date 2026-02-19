@@ -2,10 +2,10 @@
 # ============================================================================
 # SpeedyNote iOS Device Build Script
 # ============================================================================
-# Configures and builds SpeedyNote for a real iPad using Qt 6.7.3.
+# Configures and builds SpeedyNote for a real iPad using Qt 6.9.3.
 #
 # Prerequisites:
-#   - Qt 6.7.3 for iOS installed at ~/Qt/6.7.3/ios/
+#   - Qt 6.9.3 for iOS installed at ~/Qt/6.9.3/ios/
 #   - Xcode 15+ with an Apple ID configured (free or paid)
 #   - MuPDF cross-compiled for device: run  ios/build-mupdf.sh  (no flags)
 #   - Your Development Team ID (see below)
@@ -30,7 +30,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/ios/build-device"
-QT_CMAKE="${HOME}/Qt/6.7.3/ios/bin/qt-cmake"
+QT_CMAKE="${HOME}/Qt/6.9.3/ios/bin/qt-cmake"
 MUPDF_DIR="${PROJECT_ROOT}/ios/mupdf-build"
 
 # ---------- Argument parsing ----------
@@ -82,7 +82,7 @@ echo "Team ID: ${TEAM_ID}"
 echo ""
 
 if [ ! -f "${QT_CMAKE}" ]; then
-    echo "ERROR: Qt 6.7.3 for iOS not found at ${QT_CMAKE}"
+    echo "ERROR: Qt 6.9.3 for iOS not found at ${QT_CMAKE}"
     echo "Install it via aqtinstall or the Qt Online Installer."
     exit 1
 fi

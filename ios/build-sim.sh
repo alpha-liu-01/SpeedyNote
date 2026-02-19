@@ -2,10 +2,10 @@
 # ============================================================================
 # SpeedyNote iOS Simulator Build Script
 # ============================================================================
-# Configures and builds SpeedyNote for the iOS Simulator using Qt 6.7.3.
+# Configures and builds SpeedyNote for the iOS Simulator using Qt 6.9.3.
 #
 # Prerequisites:
-#   - Qt 6.7.3 for iOS installed at ~/Qt/6.7.3/ios/
+#   - Qt 6.9.3 for iOS installed at ~/Qt/6.9.3/ios/
 #   - Xcode 15+ with iOS Simulator runtime
 #   - MuPDF cross-compiled (run ios/build-mupdf.sh first)
 #
@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/ios/build-sim"
-QT_CMAKE="${HOME}/Qt/6.7.3/ios/bin/qt-cmake"
+QT_CMAKE="${HOME}/Qt/6.9.3/ios/bin/qt-cmake"
 MUPDF_DIR="${PROJECT_ROOT}/ios/mupdf-build-sim"
 
 # ---------- Argument parsing ----------
@@ -47,7 +47,7 @@ echo "=== SpeedyNote iOS Simulator Build ==="
 echo ""
 
 if [ ! -f "${QT_CMAKE}" ]; then
-    echo "ERROR: Qt 6.7.3 for iOS not found at ${QT_CMAKE}"
+    echo "ERROR: Qt 6.9.3 for iOS not found at ${QT_CMAKE}"
     echo "Install it via aqtinstall or the Qt Online Installer."
     echo "See docs/private/IPADOS_PHASE1_QT_SETUP.md for instructions."
     exit 1
