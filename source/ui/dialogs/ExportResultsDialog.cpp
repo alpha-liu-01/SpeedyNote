@@ -157,7 +157,7 @@ void ExportResultsDialog::setupUi()
             this, &ExportResultsDialog::onRetryClicked);
     buttonLayout->addWidget(m_retryButton);
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Show in Folder button (desktop only)
     m_showFolderButton = new QPushButton(tr("Show in Folder"));
     m_showFolderButton->setMinimumHeight(40);
@@ -220,7 +220,7 @@ void ExportResultsDialog::setupUi()
           ThemeColors::textDisabled(m_darkMode).name());
     
     m_retryButton->setStyleSheet(buttonStyle);
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     m_showFolderButton->setStyleSheet(buttonStyle);
 #endif
 }
@@ -384,7 +384,7 @@ void ExportResultsDialog::onRetryClicked()
 
 void ExportResultsDialog::onShowFolderClicked()
 {
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     if (!m_outputDir.isEmpty() && QDir(m_outputDir).exists()) {
         QDesktopServices::openUrl(QUrl::fromLocalFile(m_outputDir));
     }

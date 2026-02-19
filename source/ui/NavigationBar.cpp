@@ -64,7 +64,7 @@ void NavigationBar::setupUi()
     
     m_shareButton = new ActionButton(this);
     m_shareButton->setThemedIcon("export");
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     m_shareButton->setToolTip(tr("Share Notebook"));
 #else
     m_shareButton->setToolTip(tr("Export Notebook"));

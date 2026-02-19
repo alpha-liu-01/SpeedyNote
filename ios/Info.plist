@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- ================================================================ -->
+    <!-- Bundle Identity                                                  -->
+    <!-- ================================================================ -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>SpeedyNote</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>SpeedyNote</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+
+    <!-- ================================================================ -->
+    <!-- Device and OS Requirements                                       -->
+    <!-- ================================================================ -->
+    <!-- iPad only (2 = iPad). No iPhone support. -->
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>2</integer>
+    </array>
+    <key>MinimumOSVersion</key>
+    <string>15.0</string>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
+
+    <!-- ================================================================ -->
+    <!-- Orientation Support                                              -->
+    <!-- ================================================================ -->
+    <!-- Support all orientations — note-taking works in any rotation -->
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+
+    <!-- ================================================================ -->
+    <!-- Launch and UI Configuration                                      -->
+    <!-- ================================================================ -->
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIStatusBarHidden</key>
+    <true/>
+    <!-- Full screen layout (no status bar inset) -->
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <false/>
+    <!-- Opt in to full-screen on iPads without home button -->
+    <key>UIRequiresFullScreen</key>
+    <true/>
+
+    <!-- ================================================================ -->
+    <!-- File Sharing and Document Access                                 -->
+    <!-- ================================================================ -->
+    <!-- Expose Documents/ folder in Files.app and iTunes file sharing -->
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <!-- Allow Files.app to open documents in-place (not just copy) -->
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
+
+    <!-- ================================================================ -->
+    <!-- Document Types                                                   -->
+    <!-- ================================================================ -->
+    <!-- Register file types the app can open from Files.app / AirDrop.   -->
+    <!--                                                                  -->
+    <!-- NOTE: .snb is a directory bundle (loose folder), not a file.     -->
+    <!-- It lives in app-private storage and is NOT registered here.      -->
+    <!-- The portable interchange format is .snbx (a ZIP archive).        -->
+    <!-- ================================================================ -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <!-- SpeedyNote Package (.snbx) — ZIP archive for import/export -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SpeedyNote Package</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>org.speedynote.snbx</string>
+            </array>
+        </dict>
+        <!-- PDF Documents -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>PDF Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.adobe.pdf</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- ================================================================ -->
+    <!-- Exported UTI Declarations                                        -->
+    <!-- ================================================================ -->
+    <!-- Declare .snbx as a custom file type so iOS recognizes it.        -->
+    <!-- Without this, .snbx files would be treated as generic binary.    -->
+    <!-- ================================================================ -->
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>org.speedynote.snbx</string>
+            <key>UTTypeDescription</key>
+            <string>SpeedyNote Package</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+                <string>public.archive</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>snbx</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/x-speedynote-package</string>
+            </dict>
+        </dict>
+    </array>
+
+    <!-- ================================================================ -->
+    <!-- Apple Pencil                                                     -->
+    <!-- ================================================================ -->
+    <!-- Prefer Apple Pencil input over finger drawing.                   -->
+    <!-- This tells iPadOS that the app is a pencil-first app.            -->
+    <key>UIPencilInteractionAllowed</key>
+    <true/>
+</dict>
+</plist>

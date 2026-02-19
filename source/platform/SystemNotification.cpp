@@ -130,6 +130,9 @@ bool initialize()
         s_initialized = true;
         qDebug() << "SystemNotification: Android notification channel created";
     }
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: iOS UNUserNotificationCenter initialization
+    s_initialized = true;
 #elif defined(Q_OS_LINUX)
     s_initialized = initPortal();
 #else
@@ -145,6 +148,9 @@ bool isAvailable()
 {
 #ifdef Q_OS_ANDROID
     return true;
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Check UNUserNotificationCenter availability
+    return false;
 #elif defined(Q_OS_LINUX)
     return s_portalAvailable;
 #else
@@ -169,6 +175,9 @@ bool hasPermission()
     );
     
     return result;
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Check iOS notification permission via UNUserNotificationCenter
+    return false;
 #else
     // Desktop platforms generally always allow notifications
     return isAvailable();
@@ -196,6 +205,8 @@ void requestPermission()
     );
     
     qDebug() << "SystemNotification: Permission request initiated";
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Request iOS notification permission via UNUserNotificationCenter
 #else
     // Desktop Linux uses XDG portal (no permission needed)
     // Windows/macOS: notifications not implemented, silently ignore
@@ -218,6 +229,9 @@ bool shouldShowRationale()
     );
     
     return result;
+#elif defined(Q_OS_IOS)
+    // iOS does not have a "show rationale" concept like Android
+    return false;
 #else
     return false;
 #endif
@@ -283,6 +297,13 @@ void show(Type type, const QString& title, const QString& message, bool success)
         static_cast<jint>(notificationId)
     );
     
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Show iOS notification via UNUserNotificationCenter
+    Q_UNUSED(type);
+    Q_UNUSED(title);
+    Q_UNUSED(message);
+    Q_UNUSED(success);
+    
 #elif defined(Q_OS_LINUX)
     // Desktop Linux: Use XDG Desktop Portal notifications
     QString priority = success ? "normal" : "urgent";
@@ -319,6 +340,8 @@ void dismissExportNotification()
             static_cast<jint>(NOTIFICATION_ID_EXPORT)
         );
     }
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Dismiss iOS export notification
 #elif defined(Q_OS_LINUX)
     removePortalNotification(PORTAL_ID_EXPORT);
 #endif
@@ -337,6 +360,8 @@ void dismissImportNotification()
             static_cast<jint>(NOTIFICATION_ID_IMPORT)
         );
     }
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Dismiss iOS import notification
 #elif defined(Q_OS_LINUX)
     removePortalNotification(PORTAL_ID_IMPORT);
 #endif

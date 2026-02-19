@@ -23,7 +23,7 @@
 #include <memory>     // For std::unique_ptr
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
 #include <QLocalServer>
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QSharedMemory>
 #endif
 // Phase C.1.5: QTabWidget removed - using QTabBar + QStackedWidget
@@ -272,7 +272,7 @@ public:
     // Phase 3.1: sharedLauncher disconnected - will be re-linked later
     // static LauncherWindow *sharedLauncher;
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     static QSharedMemory *sharedMemory;
 #endif
     

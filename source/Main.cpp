@@ -15,7 +15,7 @@
 #include "platform/SystemNotification.h"
 
 // CLI support (Desktop only)
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QGuiApplication>
 #include "cli/CliParser.h"
 #endif
@@ -34,39 +34,18 @@
 #define SPEEDYNOTE_SDL_QUIT() ((void)0)
 #endif
 
-// Android helpers
+// Platform helpers
 #ifdef Q_OS_ANDROID
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
-#include <QDialog>
-#include <QEvent>
+#endif
 
-/**
- * @brief Event filter that maximizes QDialog windows on Android.
- * 
- * On some OEM Android skins (notably Samsung One UI), Qt's QDialog windows
- * are placed behind the main activity window, making them invisible while
- * still blocking input (modal). This makes the app appear frozen.
- * 
- * The fix: maximize all dialogs so they fill the screen, which is standard
- * Android UX and completely avoids the z-ordering issue. This is installed
- * as an application-level event filter so it covers ALL dialogs automatically
- * (QColorDialog, custom QDialog subclasses, etc.).
- */
-class AndroidDialogFilter : public QObject {
-public:
-    using QObject::QObject;
-protected:
-    bool eventFilter(QObject* obj, QEvent* event) override {
-        if (event->type() == QEvent::Show) {
-            if (auto* dialog = qobject_cast<QDialog*>(obj)) {
-                dialog->setWindowState(dialog->windowState() | Qt::WindowMaximized);
-            }
-        }
-        return QObject::eventFilter(obj, event);
-    }
-};
+#ifdef Q_OS_IOS
+#include "ios/IOSPlatformHelper.h"
+#endif
+
+#ifdef Q_OS_ANDROID
 
 static void logAndroidPaths()
 {
@@ -239,7 +218,7 @@ static void applyAndroidFonts(QApplication& app)
 #endif
 
 // Test includes (desktop debug builds only)
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
 #include "core/DocumentViewportTests.h"
@@ -444,7 +423,7 @@ static void connectLauncherSignals(Launcher* launcher)
 // Test Runners (Desktop Debug Builds Only)
 // ============================================================================
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 static int runTests(const QString& testType)
 {
 #ifdef Q_OS_WIN
@@ -489,7 +468,7 @@ int main(int argc, char* argv[])
     // In release builds, enableDebugConsole() calls FreeConsole() to hide the
     // console window in GUI mode, but that would also disconnect stdout/stderr
     // for CLI mode, causing all terminal output to be silently lost.
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     if (Cli::isCliMode(argc, argv)) {
         QGuiApplication app(argc, argv);
         app.setOrganizationName("SpeedyNote");
@@ -522,7 +501,10 @@ int main(int argc, char* argv[])
     logAndroidPaths();
     applyAndroidPalette(app);
     applyAndroidFonts(app);
-    app.installEventFilter(new AndroidDialogFilter(&app));
+#elif defined(Q_OS_IOS)
+    // TODO Phase 4: Implement dark mode detection, palette, fonts in IOSPlatformHelper
+    IOSPlatformHelper::applyPalette(app);
+    IOSPlatformHelper::applyFonts(app);
 #endif
 
     QTranslator translator;
@@ -544,7 +526,7 @@ int main(int argc, char* argv[])
     QString inputFile;
     bool createNewPackage = false;
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
     QString testToRun;
     bool runButtonVisualTest = false;
     bool runViewportTests = false;
@@ -557,7 +539,7 @@ int main(int argc, char* argv[])
             createNewPackage = true;
             inputFile = QString::fromLocal8Bit(argv[++i]);
         }
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
         else if (arg == "--test-page") {
             testToRun = "page";
         } else if (arg == "--test-document") {
@@ -579,7 +561,7 @@ int main(int argc, char* argv[])
         }
     }
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
     // Handle test commands
     if (!testToRun.isEmpty()) {
         return runTests(testToRun);

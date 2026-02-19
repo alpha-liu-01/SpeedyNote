@@ -169,7 +169,7 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     // Touch gesture handler (encapsulates pan/zoom/tap logic)
     m_touchHandler = new TouchGestureHandler(this, this);
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // Handle app suspend/resume (screen lock, home button, etc.)
     // Resets touch state when app returns to foreground to fix gesture reliability
     connect(qApp, &QGuiApplication::applicationStateChanged,
@@ -2757,7 +2757,7 @@ void DocumentViewport::showEvent(QShowEvent* event)
     QWidget::showEvent(event);
 }
 
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 void DocumentViewport::onApplicationStateChanged(Qt::ApplicationState state)
 {
 #ifdef SPEEDYNOTE_DEBUG
