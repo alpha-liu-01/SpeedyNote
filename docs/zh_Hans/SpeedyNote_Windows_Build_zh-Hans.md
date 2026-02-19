@@ -24,7 +24,7 @@
 
 ```bash
 pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-pkgconf
-pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw-w64-clang-x86_64-qt6-declarative mingw-w64-clang-x86_64-qt6-translations
+pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw-w64-clang-x86_64-qt6-declarative mingw-w64-clang-x86_64-qt6-translations mingw-w64-clang-x86_64-qt6-svg
 pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-libmupdf mingw-w64-clang-x86_64-harfbuzz mingw-w64-clang-x86_64-freetype mingw-w64-clang-x86_64-libjpeg-turbo mingw-w64-clang-x86_64-openjpeg2 mingw-w64-clang-x86_64-gumbo-parser mingw-w64-clang-x86_64-mujs
 ```
 

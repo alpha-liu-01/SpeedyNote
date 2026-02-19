@@ -11,6 +11,13 @@
 #include <QStyleFactory>
 #endif
 
+// Android: QTabBar::close-button QSS pseudo-element is not applied to the
+// internal close button widget. We replace it with a custom QToolButton.
+#ifdef Q_OS_ANDROID
+#include <QToolButton>
+#include <QIcon>
+#endif
+
 TabBar::TabBar(QWidget *parent)
     : QTabBar(parent)
 {
@@ -41,6 +48,14 @@ void TabBar::tabLayoutChange()
         if (btn)
             btn->move(btn->x() - kCloseButtonInset, btn->y());
     }
+#endif
+}
+
+void TabBar::tabInserted(int index)
+{
+    QTabBar::tabInserted(index);
+#ifdef Q_OS_ANDROID
+    installCloseButton(index);
 #endif
 }
 
@@ -80,4 +95,63 @@ void TabBar::updateTheme(bool darkMode, const QColor &accentColor)
         hoverColor      // Hover background
     );
     setStyleSheet(tabStylesheet);
+
+#ifdef Q_OS_ANDROID
+    m_darkMode = darkMode;
+    updateCloseButtonIcons();
+#endif
 }
+
+#ifdef Q_OS_ANDROID
+static QString closeButtonStyle(bool darkMode)
+{
+    QString hoverBg = darkMode
+        ? QStringLiteral("rgba(255, 255, 255, 50)")
+        : QStringLiteral("rgba(0, 0, 0, 30)");
+    return QStringLiteral(
+        "QToolButton { border: none; border-radius: 9px; padding: 0px;"
+        "              background: transparent; }"
+        "QToolButton:hover { background-color: %1; }").arg(hoverBg);
+}
+
+static QIcon closeButtonIcon(bool darkMode)
+{
+    return QIcon(darkMode ? QStringLiteral(":/resources/icons/cross_reversed.png")
+                          : QStringLiteral(":/resources/icons/cross.png"));
+}
+
+void TabBar::installCloseButton(int index)
+{
+    auto* btn = new QToolButton(this);
+    btn->setIcon(closeButtonIcon(m_darkMode));
+    btn->setIconSize(QSize(18, 18));
+    btn->setFixedSize(18, 18);
+    btn->setAutoRaise(true);
+    btn->setCursor(Qt::ArrowCursor);
+    btn->setStyleSheet(closeButtonStyle(m_darkMode));
+    
+    connect(btn, &QToolButton::clicked, this, [this, btn]() {
+        for (int i = 0; i < count(); ++i) {
+            if (tabButton(i, QTabBar::RightSide) == btn) {
+                emit tabCloseRequested(i);
+                return;
+            }
+        }
+    });
+    
+    setTabButton(index, QTabBar::RightSide, btn);
+}
+
+void TabBar::updateCloseButtonIcons()
+{
+    QIcon icon = closeButtonIcon(m_darkMode);
+    QString style = closeButtonStyle(m_darkMode);
+    
+    for (int i = 0; i < count(); ++i) {
+        if (auto* btn = qobject_cast<QToolButton*>(tabButton(i, QTabBar::RightSide))) {
+            btn->setIcon(icon);
+            btn->setStyleSheet(style);
+        }
+    }
+}
+#endif

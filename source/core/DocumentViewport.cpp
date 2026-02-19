@@ -8794,6 +8794,10 @@ void DocumentViewport::applySelectionTransform()
             }
         }
         
+        // Invalidate cache: removals above bypass removeStroke() (direct vector
+        // manipulation for undo tracking), so the cache must be explicitly dirtied.
+        layer->invalidateStrokeCache();
+        
         // Add transformed strokes with new IDs
         for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
             VectorStroke transformedStroke = stroke;
@@ -9444,8 +9448,9 @@ void DocumentViewport::setAutoHighlightEnabled(bool enabled)
     
     m_autoHighlightEnabled = enabled;
     emit autoHighlightEnabledChanged(enabled);
-    
+    #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Auto-highlight mode:" << (enabled ? "ON" : "OFF");
+    #endif
 }
 
 void DocumentViewport::setHighlighterColor(const QColor& color)

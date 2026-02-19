@@ -282,7 +282,7 @@ void Launcher::setupNavigation()
     
     // Return button (only visible if MainWindow exists)
     m_returnBtn = new LauncherNavButton(m_navSidebar);
-    m_returnBtn->setIconName("recent");  // TODO: Replace with actual icon name
+    m_returnBtn->setIconName("left_arrow");  // TODO: Replace with actual icon name
     m_returnBtn->setText(tr("Return"));
     m_returnBtn->setCheckable(false);
     navLayout->addWidget(m_returnBtn);
@@ -1380,7 +1380,7 @@ void Launcher::setupTimelineSelectModeHeader()
     headerLayout->setContentsMargins(0, 0, 8, 8);
     headerLayout->setSpacing(8);
     
-    // Back button (uses recent.png icon - arrow pointing left)
+    // Back button (uses left_arrow.png icon - arrow pointing left)
     m_timelineBackButton = new QPushButton(m_timelineSelectModeHeader);
     m_timelineBackButton->setObjectName("TimelineBackButton");
     m_timelineBackButton->setFixedSize(40, 40);
@@ -1461,8 +1461,8 @@ void Launcher::updateTimelineHeaderButtonIcons()
     
     // Update back button icon based on theme
     QString backIconPath = dark 
-        ? ":/resources/icons/recent_reversed.png" 
-        : ":/resources/icons/recent.png";
+        ? ":/resources/icons/left_arrow_reversed.png" 
+        : ":/resources/icons/left_arrow.png";
     m_timelineBackButton->setIcon(QIcon(backIconPath));
     
     // Update overflow menu button icon based on theme
