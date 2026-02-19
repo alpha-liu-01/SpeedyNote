@@ -3326,10 +3326,15 @@ void MainWindow::openPdfDocument(const QString &filePath)
             return;
         }
 #elif defined(Q_OS_IOS)
-        pdfPath = PdfPickerIOS::pickPdfFile();
-        if (pdfPath.isEmpty()) {
-            return;
-        }
+        // Async: UIDocumentPickerViewController is a remote VC whose result
+        // is delivered via XPC — cannot be received in a nested QEventLoop.
+        // Re-call openPdfDocument(path) once the user has picked a file.
+        PdfPickerIOS::pickPdfFile([this](const QString& picked) {
+            if (!picked.isEmpty()) {
+                openPdfDocument(picked);
+            }
+        });
+        return;
 #else
         QString filter = tr("PDF Files (*.pdf);;All Files (*)");
         pdfPath = QFileDialog::getOpenFileName(

@@ -711,6 +711,7 @@ set(IOS_PLATFORM_SOURCES "")
 if(IOS)
     set(IOS_PLATFORM_SOURCES
         source/ios/PdfPickerIOS.mm
+        source/ios/SnbxPickerIOS.mm
         source/ios/IOSShareHelper.mm
         source/ios/IOSPlatformHelper.mm
         source/ui/dialogs/SaveDocumentDialog.cpp  # Reuse Android's touch-friendly save dialog
@@ -718,6 +719,7 @@ if(IOS)
     # Enable Objective-C++ compilation for .mm files
     set_source_files_properties(
         source/ios/PdfPickerIOS.mm
+        source/ios/SnbxPickerIOS.mm
         source/ios/IOSShareHelper.mm
         source/ios/IOSPlatformHelper.mm
         PROPERTIES LANGUAGE OBJCXX
@@ -895,6 +897,7 @@ elseif(IOS)
         "-framework UIKit"
         "-framework Foundation"
         "-framework CoreGraphics"
+        "-framework UniformTypeIdentifiers"
     )
 
 elseif(APPLE)

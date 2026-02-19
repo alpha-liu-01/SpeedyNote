@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <functional>
 
 #ifdef Q_OS_IOS
 
@@ -9,11 +10,13 @@
  *
  * Uses UIDocumentPickerViewController to let the user pick a PDF file.
  * The selected file is copied to app-private storage and the local path
- * is returned.
+ * is returned via a completion callback.
  *
- * This utility is shared between:
- * - MainWindow (opening PDF documents)
- * - PdfRelinkDialog (relinking missing PDFs)
+ * IMPORTANT: This is fully asynchronous — the function returns immediately
+ * and the completion callback fires later on the main thread. This is
+ * required because UIDocumentPickerViewController is a remote view controller
+ * whose result is delivered via XPC, which cannot be processed by a nested
+ * QEventLoop.
  *
  * Thread-safety: Must be called from the main thread only.
  * Only one picker can be active at a time.
@@ -22,24 +25,22 @@
 namespace PdfPickerIOS {
 
 /**
- * Opens the iOS document picker for PDFs and waits for the result.
+ * Opens the iOS document picker for PDFs.
  *
- * @return Local file path of the copied PDF, or empty string if cancelled.
+ * @param completion Called on the main thread with the local file path,
+ *                   or an empty string if the user cancelled.
  *
- * The returned path is in app-private storage:
- *   <AppData>/pdfs/filename.pdf
- *
- * This function blocks until the user picks a file or cancels.
+ * The copied PDF lives in: <AppData>/pdfs/filename.pdf
  */
-QString pickPdfFile();
+void pickPdfFile(std::function<void(const QString&)> completion);
 
 /**
- * Opens the iOS document picker for PDFs with a custom destination directory.
+ * Opens the iOS document picker for PDFs with a custom destination.
  *
  * @param destDir Directory to copy the PDF to (will be created if needed)
- * @return Local file path of the copied PDF, or empty string if cancelled.
+ * @param completion Called on the main thread with the local path or empty string.
  */
-QString pickPdfFile(const QString& destDir);
+void pickPdfFile(const QString& destDir, std::function<void(const QString&)> completion);
 
 } // namespace PdfPickerIOS
 

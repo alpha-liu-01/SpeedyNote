@@ -63,6 +63,11 @@ public:
      */
     void setFadeOpacity(qreal opacity);
 
+    /**
+     * @brief Import .snbx package files (used by iOS QFileOpenEvent handler).
+     */
+    void importFiles(const QStringList& snbxFiles);
+
 signals:
     /**
      * @brief Emitted when a notebook is selected from the list.

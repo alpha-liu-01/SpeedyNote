@@ -62,6 +62,7 @@
 #include <jni.h>
 #elif defined(Q_OS_IOS)
 #include "ios/IOSShareHelper.h"
+#include "ios/SnbxPickerIOS.h"
 #endif
 
 // ============================================================================
@@ -576,8 +577,11 @@ void Launcher::setupFAB()
             performBatchImport(packagePaths);
         }
 #elif defined(Q_OS_IOS)
-        // TODO Phase 4: iOS .snbx import via UIDocumentPickerViewController
-        qDebug() << "Launcher: iOS .snbx import picker not yet implemented";
+        SnbxPickerIOS::pickSnbxFiles([this](const QStringList& packagePaths) {
+            if (!packagePaths.isEmpty()) {
+                performBatchImport(packagePaths);
+            }
+        });
 #else
         // Desktop: Show BatchImportDialog for full batch import experience
         QString destDir;
@@ -1807,6 +1811,11 @@ void Launcher::onExportDetailsRequested()
 // Batch Import (Phase 3)
 // =============================================================================
 
+void Launcher::importFiles(const QStringList& snbxFiles)
+{
+    performBatchImport(snbxFiles);
+}
+
 void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& destDir)
 {
     if (snbxFiles.isEmpty()) {
@@ -1861,11 +1870,11 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     BatchOps::BatchResult result = BatchOps::importSnbxBatch(snbxFiles, options, progressCallback);
     
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    // Clean up source .snbx files from temp /imports directory after import
-    // These were copied from content:// URIs and are no longer needed
+    // Clean up source .snbx files from temp directories after import
     QString importsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/imports";
+    QString inboxDir  = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/Inbox";
     for (const QString& snbxFile : snbxFiles) {
-        if (snbxFile.startsWith(importsDir)) {
+        if (snbxFile.startsWith(importsDir) || snbxFile.startsWith(inboxDir)) {
             QFile::remove(snbxFile);
         }
     }

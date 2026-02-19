@@ -452,6 +452,156 @@ static int runTests(const QString& testType)
 #endif
 
 // ============================================================================
+// macOS: QFileOpenEvent handler (works on macOS, NOT on iOS)
+// ============================================================================
+#if defined(Q_OS_MACOS)
+#include <QFileOpenEvent>
+#include <QFileInfo>
+#include <QDir>
+
+class FileOpenEventFilter : public QObject
+{
+public:
+    using QObject::QObject;
+
+    void setLauncher(Launcher *l) { m_launcher = l; }
+    void setMainWindow(MainWindow *w) { m_mainWindow = w; }
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override
+    {
+        if (event->type() != QEvent::FileOpen)
+            return QObject::eventFilter(obj, event);
+
+        auto *foe = static_cast<QFileOpenEvent *>(event);
+        QString path = foe->file();
+        if (path.isEmpty())
+            return true;
+
+        fprintf(stderr, "[FileOpen] received: %s\n", qPrintable(path));
+
+        QFileInfo fi(path);
+        QString ext = fi.suffix().toLower();
+
+        if (ext == "snbx") {
+            if (m_launcher) {
+                m_launcher->importFiles(QStringList{path});
+            }
+        } else if (ext == "pdf" || (fi.isDir() && path.endsWith(".snb"))) {
+            MainWindow *w = m_mainWindow
+                ? m_mainWindow
+                : MainWindow::findExistingMainWindow();
+            if (w) {
+                w->openFileInNewTab(path);
+            }
+        }
+        return true;
+    }
+
+private:
+    Launcher *m_launcher = nullptr;
+    MainWindow *m_mainWindow = nullptr;
+};
+#endif // Q_OS_MACOS
+
+// ============================================================================
+// iOS: Inbox directory watcher
+// ============================================================================
+// Qt's iOS plugin does NOT deliver QFileOpenEvent. Instead it tries
+// QPlatformServices::openDocument() which is unimplemented. However iOS
+// correctly copies incoming files to Documents/Inbox/. We watch that
+// directory and process new arrivals.
+#if defined(Q_OS_IOS)
+#include <QFileSystemWatcher>
+#include <QTimer>
+#include <QFileInfo>
+#include <QDir>
+
+class IOSInboxWatcher : public QObject
+{
+public:
+    explicit IOSInboxWatcher(QObject *parent = nullptr)
+        : QObject(parent)
+    {
+        m_inboxPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                      + QStringLiteral("/Inbox");
+        QDir().mkpath(m_inboxPath);
+
+        m_watcher.addPath(m_inboxPath);
+        connect(&m_watcher, &QFileSystemWatcher::directoryChanged,
+                this, &IOSInboxWatcher::onDirectoryChanged);
+
+        // Process anything already sitting in Inbox at launch
+        QTimer::singleShot(800, this, &IOSInboxWatcher::processInbox);
+    }
+
+    void setLauncher(Launcher *l) { m_launcher = l; }
+    void setMainWindow(MainWindow *w) { m_mainWindow = w; }
+
+private:
+    void onDirectoryChanged(const QString &)
+    {
+        // Small delay: iOS may still be writing the file
+        QTimer::singleShot(400, this, &IOSInboxWatcher::processInbox);
+    }
+
+    void processInbox()
+    {
+        QDir inbox(m_inboxPath);
+        const QFileInfoList entries = inbox.entryInfoList(
+            QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+
+        QStringList snbxFiles;
+
+        for (const QFileInfo &fi : entries) {
+            QString ext = fi.suffix().toLower();
+            QString path = fi.absoluteFilePath();
+
+            fprintf(stderr, "[InboxWatcher] found: %s\n", qPrintable(path));
+
+            if (ext == "snbx") {
+                snbxFiles.append(path);
+            } else if (ext == "pdf") {
+                MainWindow *w = m_mainWindow
+                    ? m_mainWindow
+                    : MainWindow::findExistingMainWindow();
+                if (w) {
+                    w->openFileInNewTab(path);
+                }
+                QFile::remove(path);
+            } else if (fi.isDir() && path.endsWith(QStringLiteral(".snb"))) {
+                MainWindow *w = m_mainWindow
+                    ? m_mainWindow
+                    : MainWindow::findExistingMainWindow();
+                if (w) {
+                    w->openFileInNewTab(path);
+                }
+            }
+        }
+
+        if (!snbxFiles.isEmpty() && m_launcher) {
+            m_launcher->importFiles(snbxFiles);
+            // importFiles → performBatchImport will handle the actual import;
+            // clean up source .snbx from Inbox after import
+            for (const QString &f : snbxFiles) {
+                QFile::remove(f);
+            }
+        }
+
+        // Re-add the path in case QFileSystemWatcher dropped it
+        if (!m_watcher.directories().contains(m_inboxPath)) {
+            m_watcher.addPath(m_inboxPath);
+        }
+    }
+
+    QFileSystemWatcher m_watcher;
+    QString m_inboxPath;
+    Launcher *m_launcher = nullptr;
+    MainWindow *m_mainWindow = nullptr;
+};
+#endif // Q_OS_IOS
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -599,6 +749,17 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    // ========== macOS File Open Handler ==========
+#if defined(Q_OS_MACOS)
+    FileOpenEventFilter fileOpenFilter;
+    app.installEventFilter(&fileOpenFilter);
+#endif
+
+    // ========== iOS Inbox Watcher ==========
+#if defined(Q_OS_IOS)
+    IOSInboxWatcher inboxWatcher;
+#endif
+
     // ========== Launch Application ==========
     int exitCode = 0;
 
@@ -608,6 +769,11 @@ int main(int argc, char* argv[])
         w->setAttribute(Qt::WA_DeleteOnClose);
         w->show();
         w->openFileInNewTab(inputFile);
+#if defined(Q_OS_MACOS)
+        fileOpenFilter.setMainWindow(w);
+#elif defined(Q_OS_IOS)
+        inboxWatcher.setMainWindow(w);
+#endif
         exitCode = app.exec();
     } else {
         // No file - show Launcher
@@ -615,6 +781,11 @@ int main(int argc, char* argv[])
         launcher->setAttribute(Qt::WA_DeleteOnClose);
         connectLauncherSignals(launcher);
         launcher->show();
+#if defined(Q_OS_MACOS)
+        fileOpenFilter.setLauncher(launcher);
+#elif defined(Q_OS_IOS)
+        inboxWatcher.setLauncher(launcher);
+#endif
         exitCode = app.exec();
     }
 
