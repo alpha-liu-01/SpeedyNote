@@ -165,8 +165,8 @@ Document* DocumentManager::loadDocument(const QString& path)
     // Handle .snbx packages - extract and load the contained notebook
     if (suffix == "snbx") {
         // Determine extraction destination
-#ifdef Q_OS_ANDROID
-        // On Android, extract to app-private notebooks directory
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+        // On Android/iOS, extract to app-private notebooks directory
         QString destDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
 #else
         // On desktop, extract next to the .snbx file
@@ -190,10 +190,10 @@ Document* DocumentManager::loadDocument(const QString& path)
         }
 #endif
         
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         // Clean up the source .snbx file from /imports/ directory
         // This prevents disk space leaks from accumulated imports
-        // Note: Only do this on Android where we control the import copy location
+        // Note: Only do this on Android/iOS where we control the import copy location
         QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QString importsDir = appDataDir + "/imports";
         if (path.startsWith(importsDir)) {
@@ -287,7 +287,7 @@ void DocumentManager::closeDocument(Document* doc)
         return;
     }
     
-    int index = m_documents.indexOf(doc);
+    qsizetype index = m_documents.indexOf(doc);
     if (index < 0) {
         qWarning() << "DocumentManager::closeDocument: Document not found";
         return;
@@ -339,12 +339,12 @@ Document* DocumentManager::documentAt(int index) const
 
 int DocumentManager::documentCount() const
 {
-    return m_documents.size();
+    return static_cast<int>(m_documents.size());
 }
 
 int DocumentManager::indexOf(Document* doc) const
 {
-    return m_documents.indexOf(doc);
+    return static_cast<int>(m_documents.indexOf(doc));
 }
 
 // ============================================================================

@@ -45,7 +45,7 @@ struct NotebookInfo {
             return name;
         }
         // Extract folder name from path
-        int lastSlash = bundlePath.lastIndexOf('/');
+        qsizetype lastSlash = bundlePath.lastIndexOf('/');
         if (lastSlash >= 0 && lastSlash < bundlePath.length() - 1) {
             QString folderName = bundlePath.mid(lastSlash + 1);
             // Remove .snb extension if present

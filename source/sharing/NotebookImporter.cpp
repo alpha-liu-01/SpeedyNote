@@ -78,7 +78,7 @@ NotebookImporter::ImportResult NotebookImporter::importPackage(
         
         // Look for a .snb folder (ends with .snb/)
         if (entryName.contains(".snb/")) {
-            int snbIndex = entryName.indexOf(".snb/");
+            qsizetype snbIndex = entryName.indexOf(".snb/");
             snbFolderName = entryName.left(snbIndex + 4);  // Include ".snb"
             break;
         }

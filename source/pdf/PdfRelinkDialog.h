@@ -44,6 +44,9 @@ private slots:
 private:
     void setupUI();
     bool verifyAndConfirmPdf(const QString& selectedPath);
+#ifdef Q_OS_IOS
+    void handlePickedPdf(const QString& selectedPdf);
+#endif
     
     Result result = Cancel;
     QString originalPdfPath;

@@ -63,6 +63,11 @@ public:
      */
     void setFadeOpacity(qreal opacity);
 
+    /**
+     * @brief Import .snbx package files (used by iOS QFileOpenEvent handler).
+     */
+    void importFiles(const QStringList& snbxFiles);
+
 signals:
     /**
      * @brief Emitted when a notebook is selected from the list.
@@ -102,7 +107,7 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
     void showEvent(QShowEvent* event) override;
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Drag-drop support for desktop (Step 3.10)
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
@@ -127,8 +132,10 @@ private:
     void toggleNotebookStar(const QString& bundlePath);
     void renameNotebook(const QString& bundlePath);
     void duplicateNotebook(const QString& bundlePath);
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     void showInFileManager(const QString& bundlePath);
-#ifdef Q_OS_ANDROID
+#endif
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     QString findImportedPdfPath(const QString& bundlePath);
 #endif
     

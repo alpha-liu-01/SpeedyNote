@@ -306,7 +306,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     }
     
     // Use tracked ID count for true finger count
-    m_activeTouchPoints = m_trackedTouchIds.size();
+    m_activeTouchPoints = static_cast<int>(m_trackedTouchIds.size());
     
     // BUG-A005 v7: If stale removal during pinch dropped us to 1 finger,
     // now we're confident the second finger is truly gone (500ms passed).

@@ -68,7 +68,7 @@ MarkdownNote MarkdownNote::loadFromFile(const QString& filePath)
     // Content here...
     
     if (fileContent.startsWith(QLatin1String("---\n"))) {
-        int endMarker = fileContent.indexOf(QLatin1String("\n---\n"), 4);
+        qsizetype endMarker = fileContent.indexOf(QLatin1String("\n---\n"), 4);
         if (endMarker != -1) {
             // Extract front matter section
             QString frontMatter = fileContent.mid(4, endMarker - 4);

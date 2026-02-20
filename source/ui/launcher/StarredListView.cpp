@@ -62,7 +62,7 @@ void StarredListView::enterSelectMode(const QString& firstSelection)
     }
     
     emit selectModeChanged(true);
-    emit batchSelectionChanged(m_selectedBundlePaths.size());
+    emit batchSelectionChanged(static_cast<int>(m_selectedBundlePaths.size()));
 }
 
 void StarredListView::exitSelectMode()
@@ -100,7 +100,7 @@ void StarredListView::toggleSelection(const QString& bundlePath)
         m_starredModel->setSelectedBundlePaths(m_selectedBundlePaths);
     }
     
-    emit batchSelectionChanged(m_selectedBundlePaths.size());
+    emit batchSelectionChanged(static_cast<int>(m_selectedBundlePaths.size()));
 }
 
 void StarredListView::selectAll()
@@ -124,7 +124,7 @@ void StarredListView::selectAll()
     // Sync with model for delegate painting
     m_starredModel->setSelectedBundlePaths(m_selectedBundlePaths);
     
-    emit batchSelectionChanged(m_selectedBundlePaths.size());
+    emit batchSelectionChanged(static_cast<int>(m_selectedBundlePaths.size()));
 }
 
 void StarredListView::deselectAll()

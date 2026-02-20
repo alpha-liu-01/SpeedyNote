@@ -12,7 +12,7 @@
 #include "../dialogs/BatchPdfExportDialog.h"
 #include "../dialogs/BatchSnbxExportDialog.h"
 #include "../dialogs/ExportResultsDialog.h"
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include "../dialogs/BatchImportDialog.h"
 #endif
 #include "../widgets/ExportProgressWidget.h"
@@ -49,7 +49,8 @@
 #include <QJsonParseError>
 #include <QStandardPaths>
 #include <QEventLoop>
-#ifndef Q_OS_ANDROID
+#include <QTimer>
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -60,6 +61,10 @@
 #include <QJniObject>
 #include <QCoreApplication>
 #include <jni.h>
+#elif defined(Q_OS_IOS)
+#include "ios/IOSShareHelper.h"
+#include "ios/SnbxPickerIOS.h"
+#include "ios/IOSPlatformHelper.h"
 #endif
 
 // ============================================================================
@@ -198,7 +203,7 @@ Launcher::Launcher(QWidget* parent)
     setMinimumSize(560, 480);
     setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     // Enable drag-drop for desktop notebook import (Step 3.10)
     setAcceptDrops(true);
 #endif
@@ -573,6 +578,12 @@ void Launcher::setupFAB()
         if (!packagePaths.isEmpty()) {
             performBatchImport(packagePaths);
         }
+#elif defined(Q_OS_IOS)
+        SnbxPickerIOS::pickSnbxFiles([this](const QStringList& packagePaths) {
+            if (!packagePaths.isEmpty()) {
+                performBatchImport(packagePaths);
+            }
+        });
 #else
         // Desktop: Show BatchImportDialog for full batch import experience
         QString destDir;
@@ -729,13 +740,17 @@ void Launcher::showEvent(QShowEvent* event)
     if (m_timelineModel) {
         m_timelineModel->refreshIfDateChanged();
     }
+
+#ifdef Q_OS_IOS
+    QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
 }
 
 // =============================================================================
 // Drag-Drop Import (Desktop only - Step 3.10)
 // =============================================================================
 
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 
 void Launcher::dragEnterEvent(QDragEnterEvent* event)
 {
@@ -833,7 +848,7 @@ void Launcher::dropEvent(QDropEvent* event)
     performBatchImport(snbxFiles, destDir);
 }
 
-#endif // !Q_OS_ANDROID
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
 
 void Launcher::onTimelineItemClicked(const QModelIndex& index)
 {
@@ -994,8 +1009,8 @@ void Launcher::showNotebookContextMenu(const QString& bundlePath, const QPoint& 
     
     menu.addSeparator();
     
-    // Show in file manager action (not available on Android - sandboxed storage)
-#ifndef Q_OS_ANDROID
+    // Show in file manager action (not available on Android/iOS - sandboxed storage)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     QAction* showAction = menu.addAction(tr("Show in File Manager"));
     connect(showAction, &QAction::triggered, this, [this, bundlePath]() {
         showInFileManager(bundlePath);
@@ -1070,7 +1085,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
     displayNames.reserve(bundlePaths.size());
     for (const QString& path : bundlePaths) {
         QString name = path;
-        int lastSlash = path.lastIndexOf('/');
+        qsizetype lastSlash = path.lastIndexOf('/');
         if (lastSlash >= 0) {
             name = path.mid(lastSlash + 1);
             if (name.endsWith(".snb", Qt::CaseInsensitive))
@@ -1132,7 +1147,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             mainWindow->closeDocumentById(docId, true);  // discardChanges=true
         }
         
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox
         // If so, delete the PDF too to prevent storage leaks
         QString pdfToDelete = findImportedPdfPath(bundlePath);
@@ -1147,7 +1162,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
             bundleDir.removeRecursively();
         }
         
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
         // Delete imported PDF if found
         if (!pdfToDelete.isEmpty() && QFile::exists(pdfToDelete)) {
             QFile::remove(pdfToDelete);
@@ -1185,7 +1200,7 @@ void Launcher::renameNotebook(const QString& bundlePath)
 {
     // Extract current display name
     QString currentName;
-    int lastSlash = bundlePath.lastIndexOf('/');
+    qsizetype lastSlash = bundlePath.lastIndexOf('/');
     if (lastSlash >= 0) {
         currentName = bundlePath.mid(lastSlash + 1);
         if (currentName.endsWith(".snb", Qt::CaseInsensitive)) {
@@ -1270,7 +1285,7 @@ void Launcher::duplicateNotebook(const QString& bundlePath)
 {
     // Extract current name
     QString currentName;
-    int lastSlash = bundlePath.lastIndexOf('/');
+    qsizetype lastSlash = bundlePath.lastIndexOf('/');
     if (lastSlash >= 0) {
         currentName = bundlePath.mid(lastSlash + 1);
         if (currentName.endsWith(".snb", Qt::CaseInsensitive)) {
@@ -1338,6 +1353,7 @@ void Launcher::duplicateNotebook(const QString& bundlePath)
     }
 }
 
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 void Launcher::showInFileManager(const QString& bundlePath)
 {
     // Open the containing folder and select the notebook
@@ -1356,6 +1372,7 @@ void Launcher::showInFileManager(const QString& bundlePath)
     QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
 #endif
 }
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
 
 // =============================================================================
 // Timeline Select Mode (L-007)
@@ -1745,6 +1762,26 @@ void Launcher::onExportJobComplete(const BatchOps::BatchResult& result, const QS
         
         AndroidShareHelper::shareMultipleFiles(successfulOutputs, mimeType, chooserTitle);
     }
+#elif defined(Q_OS_IOS)
+    if (!successfulOutputs.isEmpty() && IOSShareHelper::isAvailable()) {
+        QString firstOutput = successfulOutputs.first();
+        QString mimeType = "application/octet-stream";
+        QString title = tr("Share Files");
+
+        if (firstOutput.endsWith(".pdf", Qt::CaseInsensitive)) {
+            mimeType = "application/pdf";
+            title = successfulOutputs.size() == 1
+                ? tr("Share PDF")
+                : tr("Share %1 PDFs").arg(successfulOutputs.size());
+        } else if (firstOutput.endsWith(".snbx", Qt::CaseInsensitive)) {
+            mimeType = "application/octet-stream";
+            title = successfulOutputs.size() == 1
+                ? tr("Share Notebook")
+                : tr("Share %1 Notebooks").arg(successfulOutputs.size());
+        }
+
+        IOSShareHelper::shareMultipleFiles(successfulOutputs, mimeType, title);
+    }
 #else
     Q_UNUSED(successfulOutputs)
 #endif
@@ -1780,6 +1817,11 @@ void Launcher::onExportDetailsRequested()
 // Batch Import (Phase 3)
 // =============================================================================
 
+void Launcher::importFiles(const QStringList& snbxFiles)
+{
+    performBatchImport(snbxFiles);
+}
+
 void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& destDir)
 {
     if (snbxFiles.isEmpty()) {
@@ -1789,8 +1831,8 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     // Determine destination directory
     QString importDestDir = destDir;
     if (importDestDir.isEmpty()) {
-#ifdef Q_OS_ANDROID
-        // Android: Use app data location for imports
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+        // Android/iOS: Use app data location for imports
         importDestDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notebooks";
 #else
         // Desktop: Use Documents/SpeedyNote as default
@@ -1806,7 +1848,7 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     options.overwrite = false;    // Don't overwrite existing
     
     // Show progress for imports
-    int total = snbxFiles.size();
+    int total = static_cast<int>(snbxFiles.size());
     int current = 0;
     
     // Progress callback (with null check for safety)
@@ -1833,12 +1875,12 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     // For very large imports, this could be moved to a background thread
     BatchOps::BatchResult result = BatchOps::importSnbxBatch(snbxFiles, options, progressCallback);
     
-#ifdef Q_OS_ANDROID
-    // Clean up source .snbx files from temp /imports directory after import
-    // These were copied from content:// URIs and are no longer needed
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // Clean up source .snbx files from temp directories after import
     QString importsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/imports";
+    QString inboxDir  = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/Inbox";
     for (const QString& snbxFile : snbxFiles) {
-        if (snbxFile.startsWith(importsDir)) {
+        if (snbxFile.startsWith(importsDir) || snbxFile.startsWith(inboxDir)) {
             QFile::remove(snbxFile);
         }
     }
@@ -1896,7 +1938,7 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     }
 }
 
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 QString Launcher::findImportedPdfPath(const QString& bundlePath)
 {
     // BUG-A003 Storage Cleanup: Check if this document has an imported PDF in sandbox.

@@ -1,4 +1,4 @@
-﻿# Prerequisites
+# Prerequisites
 *.d
 
 # Compiled Object files
@@ -74,4 +74,11 @@ packaging/
 .flatpak-builder/
 build-dir/
 repo/
-
+ios/mupdf-src/
+ios/mupdf-build/
+ios/mupdf-build-sim/
+ios/test-ios-qt/
+ios/build-device/
+ios/build-sim/
+ios/dist/
+ios/Assets.xcassets/

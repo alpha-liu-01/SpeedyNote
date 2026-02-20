@@ -15,7 +15,7 @@
 #include "platform/SystemNotification.h"
 
 // CLI support (Desktop only)
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QGuiApplication>
 #include "cli/CliParser.h"
 #endif
@@ -34,39 +34,18 @@
 #define SPEEDYNOTE_SDL_QUIT() ((void)0)
 #endif
 
-// Android helpers
+// Platform helpers
 #ifdef Q_OS_ANDROID
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
-#include <QDialog>
-#include <QEvent>
+#endif
 
-/**
- * @brief Event filter that maximizes QDialog windows on Android.
- * 
- * On some OEM Android skins (notably Samsung One UI), Qt's QDialog windows
- * are placed behind the main activity window, making them invisible while
- * still blocking input (modal). This makes the app appear frozen.
- * 
- * The fix: maximize all dialogs so they fill the screen, which is standard
- * Android UX and completely avoids the z-ordering issue. This is installed
- * as an application-level event filter so it covers ALL dialogs automatically
- * (QColorDialog, custom QDialog subclasses, etc.).
- */
-class AndroidDialogFilter : public QObject {
-public:
-    using QObject::QObject;
-protected:
-    bool eventFilter(QObject* obj, QEvent* event) override {
-        if (event->type() == QEvent::Show) {
-            if (auto* dialog = qobject_cast<QDialog*>(obj)) {
-                dialog->setWindowState(dialog->windowState() | Qt::WindowMaximized);
-            }
-        }
-        return QObject::eventFilter(obj, event);
-    }
-};
+#ifdef Q_OS_IOS
+#include "ios/IOSPlatformHelper.h"
+#endif
+
+#ifdef Q_OS_ANDROID
 
 static void logAndroidPaths()
 {
@@ -239,7 +218,7 @@ static void applyAndroidFonts(QApplication& app)
 #endif
 
 // Test includes (desktop debug builds only)
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
 #include "core/DocumentViewportTests.h"
@@ -444,7 +423,7 @@ static void connectLauncherSignals(Launcher* launcher)
 // Test Runners (Desktop Debug Builds Only)
 // ============================================================================
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 static int runTests(const QString& testType)
 {
 #ifdef Q_OS_WIN
@@ -473,6 +452,212 @@ static int runTests(const QString& testType)
 #endif
 
 // ============================================================================
+// macOS: QFileOpenEvent handler (works on macOS, NOT on iOS)
+// ============================================================================
+#if defined(Q_OS_MACOS)
+#include <QFileOpenEvent>
+#include <QFileInfo>
+#include <QDir>
+
+class FileOpenEventFilter : public QObject
+{
+public:
+    using QObject::QObject;
+
+    void setLauncher(Launcher *l) { m_launcher = l; }
+    void setMainWindow(MainWindow *w) { m_mainWindow = w; }
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override
+    {
+        if (event->type() != QEvent::FileOpen)
+            return QObject::eventFilter(obj, event);
+
+        auto *foe = static_cast<QFileOpenEvent *>(event);
+        QString path = foe->file();
+        if (path.isEmpty())
+            return true;
+        #ifdef SPEEDYNOTE_DEBUG
+        fprintf(stderr, "[FileOpen] received: %s\n", qPrintable(path));
+        #endif
+
+        QFileInfo fi(path);
+        QString ext = fi.suffix().toLower();
+
+        if (ext == "snbx") {
+            if (m_launcher) {
+                m_launcher->importFiles(QStringList{path});
+            }
+        } else if (ext == "pdf" || (fi.isDir() && path.endsWith(".snb"))) {
+            MainWindow *w = m_mainWindow
+                ? m_mainWindow
+                : MainWindow::findExistingMainWindow();
+            if (w) {
+                w->openFileInNewTab(path);
+            }
+        }
+        return true;
+    }
+
+private:
+    Launcher *m_launcher = nullptr;
+    MainWindow *m_mainWindow = nullptr;
+};
+#endif // Q_OS_MACOS
+
+// ============================================================================
+// iOS: Inbox directory watcher
+// ============================================================================
+// Qt's iOS plugin does NOT deliver QFileOpenEvent. Instead it tries
+// QPlatformServices::openDocument() which is unimplemented. However iOS
+// correctly copies incoming files to Documents/Inbox/. We watch that
+// directory and process new arrivals.
+#if defined(Q_OS_IOS)
+#include <QFileSystemWatcher>
+#include <QTimer>
+#include <QFileInfo>
+#include <QDir>
+#include <QPointer>
+
+class IOSInboxWatcher : public QObject
+{
+public:
+    explicit IOSInboxWatcher(QObject *parent = nullptr)
+        : QObject(parent)
+    {
+        m_inboxPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                      + QStringLiteral("/Inbox");
+        QDir().mkpath(m_inboxPath);
+
+        m_watcher.addPath(m_inboxPath);
+        connect(&m_watcher, &QFileSystemWatcher::directoryChanged,
+                this, &IOSInboxWatcher::onDirectoryChanged);
+
+        // Process anything already sitting in Inbox at launch
+        QTimer::singleShot(800, this, &IOSInboxWatcher::processInbox);
+    }
+
+    void setLauncher(Launcher *l) { m_launcher = l; }
+    void setMainWindow(MainWindow *w) { m_mainWindow = w; }
+
+private:
+    void onDirectoryChanged(const QString &)
+    {
+        if (m_processing)
+            return;
+        QTimer::singleShot(400, this, &IOSInboxWatcher::processInbox);
+    }
+
+    QString copyPdfToPermanentStorage(const QString &inboxPath)
+    {
+        QString pdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                          + QStringLiteral("/pdfs");
+        QDir().mkpath(pdfsDir);
+
+        QFileInfo fi(inboxPath);
+        QString destPath = pdfsDir + "/" + fi.fileName();
+
+        if (QFile::exists(destPath)) {
+            QString baseName = fi.completeBaseName();
+            QString ext = fi.suffix();
+            int counter = 1;
+            do {
+                destPath = pdfsDir + "/" + baseName
+                           + QString("_%1.").arg(counter++) + ext;
+            } while (QFile::exists(destPath));
+        }
+
+        if (QFile::copy(inboxPath, destPath)) {
+            #ifdef SPEEDYNOTE_DEBUG
+            fprintf(stderr, "[InboxWatcher] copied PDF to %s\n", qPrintable(destPath));
+            #endif
+            return destPath;
+        }
+        #ifdef SPEEDYNOTE_DEBUG
+        fprintf(stderr, "[InboxWatcher] failed to copy PDF to %s\n", qPrintable(destPath));
+        #endif
+        return QString();
+    }
+
+    MainWindow* getOrCreateMainWindow()
+    {
+        MainWindow *w = m_mainWindow
+            ? m_mainWindow.data()
+            : MainWindow::findExistingMainWindow();
+        if (w)
+            return w;
+
+        w = new MainWindow();
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        if (m_launcher) {
+            w->preserveWindowState(m_launcher, false);
+            m_launcher->hideWithAnimation();
+        }
+        w->show();
+        m_mainWindow = w;
+        return w;
+    }
+
+    void processInbox()
+    {
+        if (m_processing)
+            return;
+        m_processing = true;
+
+        QDir inbox(m_inboxPath);
+        const QFileInfoList entries = inbox.entryInfoList(
+            QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+
+        QStringList snbxFiles;
+
+        for (const QFileInfo &fi : entries) {
+            QString ext = fi.suffix().toLower();
+            QString path = fi.absoluteFilePath();
+
+            #ifdef SPEEDYNOTE_DEBUG
+            fprintf(stderr, "[InboxWatcher] found: %s\n", qPrintable(path));
+            #endif
+
+            if (ext == "snbx") {
+                snbxFiles.append(path);
+            } else if (ext == "pdf") {
+                QString permanentPath = copyPdfToPermanentStorage(path);
+                if (!permanentPath.isEmpty()) {
+                    MainWindow *w = getOrCreateMainWindow();
+                    if (w)
+                        w->openFileInNewTab(permanentPath);
+                }
+                QFile::remove(path);
+            } else if (fi.isDir() && path.endsWith(QStringLiteral(".snb"))) {
+                MainWindow *w = getOrCreateMainWindow();
+                if (w)
+                    w->openFileInNewTab(path);
+            }
+        }
+
+        // performBatchImport handles Inbox cleanup internally, no need to
+        // remove snbx files here (it would be a harmless double-delete).
+        if (!snbxFiles.isEmpty() && m_launcher) {
+            m_launcher->importFiles(snbxFiles);
+        }
+
+        // Re-add the path in case QFileSystemWatcher dropped it
+        if (!m_watcher.directories().contains(m_inboxPath)) {
+            m_watcher.addPath(m_inboxPath);
+        }
+
+        m_processing = false;
+    }
+
+    QFileSystemWatcher m_watcher;
+    QString m_inboxPath;
+    QPointer<Launcher> m_launcher;
+    QPointer<MainWindow> m_mainWindow;
+    bool m_processing = false;
+};
+#endif // Q_OS_IOS
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -489,7 +674,7 @@ int main(int argc, char* argv[])
     // In release builds, enableDebugConsole() calls FreeConsole() to hide the
     // console window in GUI mode, but that would also disconnect stdout/stderr
     // for CLI mode, causing all terminal output to be silently lost.
-#ifndef Q_OS_ANDROID
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
     if (Cli::isCliMode(argc, argv)) {
         QGuiApplication app(argc, argv);
         app.setOrganizationName("SpeedyNote");
@@ -522,7 +707,9 @@ int main(int argc, char* argv[])
     logAndroidPaths();
     applyAndroidPalette(app);
     applyAndroidFonts(app);
-    app.installEventFilter(new AndroidDialogFilter(&app));
+#elif defined(Q_OS_IOS)
+    IOSPlatformHelper::applyPalette(app);
+    IOSPlatformHelper::applyFonts(app);
 #endif
 
     QTranslator translator;
@@ -544,7 +731,7 @@ int main(int argc, char* argv[])
     QString inputFile;
     bool createNewPackage = false;
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
     QString testToRun;
     bool runButtonVisualTest = false;
     bool runViewportTests = false;
@@ -557,7 +744,7 @@ int main(int argc, char* argv[])
             createNewPackage = true;
             inputFile = QString::fromLocal8Bit(argv[++i]);
         }
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
         else if (arg == "--test-page") {
             testToRun = "page";
         } else if (arg == "--test-document") {
@@ -579,7 +766,7 @@ int main(int argc, char* argv[])
         }
     }
 
-#if !defined(Q_OS_ANDROID) && defined(SPEEDYNOTE_DEBUG)
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
     // Handle test commands
     if (!testToRun.isEmpty()) {
         return runTests(testToRun);
@@ -617,6 +804,17 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    // ========== macOS File Open Handler ==========
+#if defined(Q_OS_MACOS)
+    FileOpenEventFilter fileOpenFilter;
+    app.installEventFilter(&fileOpenFilter);
+#endif
+
+    // ========== iOS Inbox Watcher ==========
+#if defined(Q_OS_IOS)
+    IOSInboxWatcher inboxWatcher;
+#endif
+
     // ========== Launch Application ==========
     int exitCode = 0;
 
@@ -626,6 +824,12 @@ int main(int argc, char* argv[])
         w->setAttribute(Qt::WA_DeleteOnClose);
         w->show();
         w->openFileInNewTab(inputFile);
+#if defined(Q_OS_MACOS)
+        fileOpenFilter.setMainWindow(w);
+#elif defined(Q_OS_IOS)
+        inboxWatcher.setMainWindow(w);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
         exitCode = app.exec();
     } else {
         // No file - show Launcher
@@ -633,6 +837,12 @@ int main(int argc, char* argv[])
         launcher->setAttribute(Qt::WA_DeleteOnClose);
         connectLauncherSignals(launcher);
         launcher->show();
+#if defined(Q_OS_MACOS)
+        fileOpenFilter.setLauncher(launcher);
+#elif defined(Q_OS_IOS)
+        inboxWatcher.setLauncher(launcher);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
         exitCode = app.exec();
     }
 

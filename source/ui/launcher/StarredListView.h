@@ -79,7 +79,7 @@ public:
     /**
      * @brief Get the number of selected notebooks.
      */
-    int selectionCount() const { return m_selectedBundlePaths.size(); }
+    int selectionCount() const { return static_cast<int>(m_selectedBundlePaths.size()); }
     
     /**
      * @brief Check if a specific notebook is selected.

@@ -896,7 +896,7 @@ public:
      * Phase O1.7: Returns m_pageOrder.size() in lazy loading mode.
      */
     int pageCount() const { 
-        return m_pageOrder.size(); 
+        return static_cast<int>(m_pageOrder.size()); 
     }
     
     /**

@@ -111,7 +111,7 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
     QElapsedTimer timer;
     timer.start();
     
-    const int total = bundlePaths.size();
+    const int total = static_cast<int>(bundlePaths.size());
     
     // Validate inputs
     if (bundlePaths.isEmpty()) {
@@ -283,7 +283,7 @@ BatchResult exportPdfBatch(const QStringList& bundlePaths,
     QElapsedTimer timer;
     timer.start();
     
-    const int total = bundlePaths.size();
+    const int total = static_cast<int>(bundlePaths.size());
     
     // Validate inputs
     if (bundlePaths.isEmpty()) {
@@ -528,7 +528,7 @@ BatchResult importSnbxBatch(const QStringList& snbxPaths,
     QElapsedTimer timer;
     timer.start();
     
-    const int total = snbxPaths.size();
+    const int total = static_cast<int>(snbxPaths.size());
     
     // Validate inputs
     if (snbxPaths.isEmpty()) {

@@ -125,17 +125,17 @@ public:
     /**
      * @brief Get the total count of input bundles.
      */
-    int totalBundleCount() const { return m_bundlePaths.size(); }
+    int totalBundleCount() const { return static_cast<int>(m_bundlePaths.size()); }
     
     /**
      * @brief Get the count of exportable bundles.
      */
-    int validBundleCount() const { return m_validBundles.size(); }
+    int validBundleCount() const { return static_cast<int>(m_validBundles.size()); }
     
     /**
      * @brief Get the count of skipped bundles.
      */
-    int skippedBundleCount() const { return m_skippedBundles.size(); }
+    int skippedBundleCount() const { return static_cast<int>(m_skippedBundles.size()); }
 
 private slots:
     void onBrowseClicked();

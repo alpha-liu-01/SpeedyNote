@@ -90,7 +90,7 @@ public:
      * number of strokes overlapping the erased one, instead of O(n) for all.
      */
     bool removeStroke(const QString& strokeId) {
-        for (int i = m_strokes.size() - 1; i >= 0; --i) {
+        for (int i = static_cast<int>(m_strokes.size()) - 1; i >= 0; --i) {
             if (m_strokes[i].id == strokeId) {
                 QRectF removedBounds = m_strokes[i].boundingBox;
                 m_strokes.removeAt(i);
@@ -116,7 +116,7 @@ public:
     /**
      * @brief Get the number of strokes in this layer.
      */
-    int strokeCount() const { return m_strokes.size(); }
+    int strokeCount() const { return static_cast<int>(m_strokes.size()); }
     
     /**
      * @brief Check if layer has any strokes.
@@ -223,7 +223,7 @@ public:
         // appear when zoomed in. For 2-point strokes (straight lines),
         // catmullRomSubdivide returns them unchanged.
         const QVector<StrokePoint>& pts = catmullRomSubdivide(stroke.points);
-        const int n = pts.size();
+        const int n = static_cast<int>(pts.size());
         
         // Pre-calculate half-widths for each point
         QVector<qreal> halfWidths(n);
@@ -631,7 +631,7 @@ private:
      * Interpolated pressure is clamped to [0.1, 1.0] to prevent overshoot.
      */
     static QVector<StrokePoint> catmullRomSubdivide(const QVector<StrokePoint>& points) {
-        const int n = points.size();
+        const int n = static_cast<int>(points.size());
         if (n < 3) return points;  // Straight lines don't benefit from smoothing
         
         QVector<StrokePoint> result;
@@ -704,7 +704,7 @@ private:
         if (!m_strokeCacheDirty && !m_strokeCache.isNull()) {
             // Cache is valid — mark for incremental update
             if (m_pendingStrokeStart < 0) {
-                m_pendingStrokeStart = m_strokes.size() - 1;
+                m_pendingStrokeStart = static_cast<int>(m_strokes.size()) - 1;
             }
             // If m_pendingStrokeStart is already set (multiple adds between paints),
             // keep the earlier index so all new strokes get rendered.

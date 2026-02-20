@@ -130,7 +130,7 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
     }
     
     // Process each page
-    int total = pageIndices.size();
+    int total = static_cast<int>(pageIndices.size());
     for (int i = 0; i < total; ++i) {
         if (m_cancelled.load()) {
             result.errorMessage = tr("Export cancelled");

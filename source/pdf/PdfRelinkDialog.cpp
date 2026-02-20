@@ -11,6 +11,8 @@
 
 #ifdef Q_OS_ANDROID
 #include "../android/PdfPickerAndroid.h"
+#elif defined(Q_OS_IOS)
+#include "../ios/PdfPickerIOS.h"
 #endif
 
 PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
@@ -180,13 +182,22 @@ void PdfRelinkDialog::onRelinkPdf()
         startDir = QDir::homePath();
     }
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     // Track copied PDFs for cleanup if user chooses "Choose Different"
-    // On Android, picked files are copied to /pdfs/ directory, and if rejected
+    // On Android/iOS, picked files are copied to /pdfs/ directory, and if rejected
     // (hash mismatch + "Choose Different"), we should clean them up
     QString androidPdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
 #endif
     
+#if defined(Q_OS_IOS)
+    // iOS: UIDocumentPickerViewController is async (remote VC, XPC result).
+    // Present picker and handle the result in handlePickedPdf().
+    PdfPickerIOS::pickPdfFile([this](const QString& selectedPdf) {
+        handlePickedPdf(selectedPdf);
+    });
+    return;
+#endif
+
     // Loop to allow "Choose Different" from mismatch dialog
     while (true) {
         QString selectedPdf;
@@ -230,7 +241,7 @@ void PdfRelinkDialog::onRelinkPdf()
         // (loop continues) or "Cancel" (we should exit)
         // Check if we should exit entirely
         if (result == Cancel) {
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID)
             // Clean up the rejected PDF copy (it's in our sandbox, safe to delete)
             if (selectedPdf.startsWith(androidPdfsDir)) {
                 QFile::remove(selectedPdf);
@@ -241,7 +252,7 @@ void PdfRelinkDialog::onRelinkPdf()
         }
         
         // User chose "Choose Different" - clean up rejected file and loop
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID)
         // Clean up the rejected PDF copy before picking a new one
         if (selectedPdf.startsWith(androidPdfsDir)) {
             QFile::remove(selectedPdf);
@@ -252,6 +263,51 @@ void PdfRelinkDialog::onRelinkPdf()
         startDir = pdfInfo.absolutePath();
     }
 }
+
+#ifdef Q_OS_IOS
+void PdfRelinkDialog::handlePickedPdf(const QString& selectedPdf)
+{
+    QString pdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/pdfs";
+
+    if (selectedPdf.isEmpty()) {
+        return;
+    }
+
+    QFileInfo pdfInfo(selectedPdf);
+    if (!pdfInfo.exists() || !pdfInfo.isFile()) {
+        QMessageBox::warning(this, tr("Invalid File"),
+            tr("The selected file is not a valid PDF file."));
+        // Re-present the picker
+        PdfPickerIOS::pickPdfFile([this](const QString& path) {
+            handlePickedPdf(path);
+        });
+        return;
+    }
+
+    if (verifyAndConfirmPdf(selectedPdf)) {
+        newPdfPath = selectedPdf;
+        result = RelinkPdf;
+        accept();
+        return;
+    }
+
+    if (result == Cancel) {
+        if (selectedPdf.startsWith(pdfsDir)) {
+            QFile::remove(selectedPdf);
+        }
+        reject();
+        return;
+    }
+
+    // User chose "Choose Different" — clean up and re-pick
+    if (selectedPdf.startsWith(pdfsDir)) {
+        QFile::remove(selectedPdf);
+    }
+    PdfPickerIOS::pickPdfFile([this](const QString& path) {
+        handlePickedPdf(path);
+    });
+}
+#endif
 
 bool PdfRelinkDialog::verifyAndConfirmPdf(const QString& selectedPath)
 {
