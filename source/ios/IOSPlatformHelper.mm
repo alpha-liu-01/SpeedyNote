@@ -124,36 +124,34 @@ void applyFonts(QApplication& app)
     app.setFont(font);
 }
 
-static void removeRecognizersRecursive(UIView *view, Class targetClass)
-{
-    for (UIGestureRecognizer *gr in [view.gestureRecognizers copy]) {
-        if ([gr isKindOfClass:targetClass]) {
-            [view removeGestureRecognizer:gr];
-            fprintf(stderr, "[IOSPlatformHelper] removed %s from %s\n",
-                    class_getName(targetClass),
-                    class_getName([view class]));
-        }
-    }
-    for (UIView *sub in view.subviews) {
-        removeRecognizersRecursive(sub, targetClass);
-    }
-}
+static bool s_swizzled = false;
 
 void disableEditMenuOverlay()
 {
-    Class tapRecognizerClass = NSClassFromString(@"QIOSTapRecognizer");
-    if (!tapRecognizerClass) {
+    if (s_swizzled)
+        return;
+
+    Class cls = NSClassFromString(@"QIOSTapRecognizer");
+    if (!cls) {
         fprintf(stderr, "[IOSPlatformHelper] QIOSTapRecognizer class not found, skipping\n");
         return;
     }
 
-    for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes) {
-        if (![scene isKindOfClass:[UIWindowScene class]])
-            continue;
-        for (UIWindow *window in scene.windows) {
-            removeRecognizersRecursive(window, tapRecognizerClass);
-        }
+    // Swizzle touchesEnded:withEvent: to a no-op. This is permanent —
+    // no matter how many times Qt re-adds the recognizer to new views,
+    // its dangerous async block (which captures a stale QPlatformWindow*)
+    // will never be dispatched.
+    SEL sel = @selector(touchesEnded:withEvent:);
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) {
+        fprintf(stderr, "[IOSPlatformHelper] touchesEnded:withEvent: not found on QIOSTapRecognizer\n");
+        return;
     }
+
+    IMP noop = imp_implementationWithBlock(^(id, NSSet<UITouch *> *, UIEvent *) {});
+    method_setImplementation(m, noop);
+    s_swizzled = true;
+    fprintf(stderr, "[IOSPlatformHelper] swizzled QIOSTapRecognizer touchesEnded:withEvent: to no-op\n");
 }
 
 } // namespace IOSPlatformHelper

@@ -49,6 +49,7 @@
 #include <QJsonParseError>
 #include <QStandardPaths>
 #include <QEventLoop>
+#include <QTimer>
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -63,6 +64,7 @@
 #elif defined(Q_OS_IOS)
 #include "ios/IOSShareHelper.h"
 #include "ios/SnbxPickerIOS.h"
+#include "ios/IOSPlatformHelper.h"
 #endif
 
 // ============================================================================
@@ -738,6 +740,10 @@ void Launcher::showEvent(QShowEvent* event)
     if (m_timelineModel) {
         m_timelineModel->refreshIfDateChanged();
     }
+
+#ifdef Q_OS_IOS
+    QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
 }
 
 // =============================================================================

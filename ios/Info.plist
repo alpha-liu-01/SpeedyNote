@@ -33,7 +33,7 @@
         <integer>2</integer>
     </array>
     <key>MinimumOSVersion</key>
-    <string>15.0</string>
+    <string>16.0</string>
     <key>UIRequiredDeviceCapabilities</key>
     <array>
         <string>arm64</string>

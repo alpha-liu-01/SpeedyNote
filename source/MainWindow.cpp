@@ -5816,6 +5816,13 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     updatePdfSearchBarPosition();
 }
 
+void MainWindow::showEvent(QShowEvent *event) {
+    QMainWindow::showEvent(event);
+#ifdef Q_OS_IOS
+    QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
+}
+
 
 void MainWindow::keyPressEvent(QKeyEvent *event) {
     // Phase 3.1.8: Ctrl tracking for trackpad zoom stubbed
@@ -6544,6 +6551,9 @@ bool MainWindow::sendToExistingInstance(const QString &filePath)
 
 void MainWindow::setupSingleInstanceServer()
 {
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    return;
+#else
     localServer = new QLocalServer(this);
     
     // Remove any existing server (in case of improper shutdown)
@@ -6557,6 +6567,7 @@ void MainWindow::setupSingleInstanceServer()
     
     // Connect to handle new connections
     connect(localServer, &QLocalServer::newConnection, this, &MainWindow::onNewConnection);
+#endif
 }
 
 void MainWindow::onNewConnection()
