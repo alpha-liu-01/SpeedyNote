@@ -545,6 +545,33 @@ private:
         QTimer::singleShot(400, this, &IOSInboxWatcher::processInbox);
     }
 
+    QString copyPdfToPermanentStorage(const QString &inboxPath)
+    {
+        QString pdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                          + QStringLiteral("/pdfs");
+        QDir().mkpath(pdfsDir);
+
+        QFileInfo fi(inboxPath);
+        QString destPath = pdfsDir + "/" + fi.fileName();
+
+        if (QFile::exists(destPath)) {
+            QString baseName = fi.completeBaseName();
+            QString ext = fi.suffix();
+            int counter = 1;
+            do {
+                destPath = pdfsDir + "/" + baseName
+                           + QString("_%1.").arg(counter++) + ext;
+            } while (QFile::exists(destPath));
+        }
+
+        if (QFile::copy(inboxPath, destPath)) {
+            fprintf(stderr, "[InboxWatcher] copied PDF to %s\n", qPrintable(destPath));
+            return destPath;
+        }
+        fprintf(stderr, "[InboxWatcher] failed to copy PDF to %s\n", qPrintable(destPath));
+        return QString();
+    }
+
     MainWindow* getOrCreateMainWindow()
     {
         MainWindow *w = m_mainWindow
@@ -581,8 +608,11 @@ private:
             if (ext == "snbx") {
                 snbxFiles.append(path);
             } else if (ext == "pdf") {
-                MainWindow *w = getOrCreateMainWindow();
-                w->openFileInNewTab(path);
+                QString permanentPath = copyPdfToPermanentStorage(path);
+                if (!permanentPath.isEmpty()) {
+                    MainWindow *w = getOrCreateMainWindow();
+                    w->openFileInNewTab(permanentPath);
+                }
                 QFile::remove(path);
             } else if (fi.isDir() && path.endsWith(QStringLiteral(".snb"))) {
                 MainWindow *w = getOrCreateMainWindow();

@@ -6,18 +6,20 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
-#include <QDebug>
 
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 // ============================================================================
-// Delegate for UIDocumentPickerViewController (.snbx multi-select)
+// Dedicated picker window — isolates the UIDocumentPickerViewController from
+// Qt's UIView hierarchy so that Qt does not intercept touch events destined
+// for the remote view controller.
 // ============================================================================
 
 @interface SNSnbxPickerDelegate : NSObject <UIDocumentPickerDelegate>
 @property (nonatomic, copy) NSString *destDir;
 @property (nonatomic, copy) void (^completionBlock)(NSArray<NSString *> *localPaths);
+@property (nonatomic, strong) UIWindow *pickerWindow;
 @end
 
 @implementation SNSnbxPickerDelegate
@@ -66,19 +68,28 @@
             fprintf(stderr, "[SnbxPickerIOS] imported: %s\n", destPath.UTF8String);
             [results addObject:destPath];
         } else {
-            fprintf(stderr, "[SnbxPickerIOS] move failed for %s: %s\n",
+            fprintf(stderr, "[SnbxPickerIOS] copy failed for %s: %s\n",
                     fileName.UTF8String, error.localizedDescription.UTF8String);
         }
     }
 
-    if (self.completionBlock) self.completionBlock(results);
+    [self finish:results];
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
     Q_UNUSED(controller);
     fprintf(stderr, "[SnbxPickerIOS] delegate: cancelled\n");
-    if (self.completionBlock) self.completionBlock(@[]);
+    [self finish:@[]];
+}
+
+- (void)finish:(NSArray<NSString *> *)paths
+{
+    self.pickerWindow.hidden = YES;
+    self.pickerWindow = nil;
+
+    if (self.completionBlock)
+        self.completionBlock(paths);
 }
 
 - (void)dealloc
@@ -97,23 +108,15 @@ namespace {
     static SNSnbxPickerDelegate *s_delegate = nil;
 }
 
-static UIViewController *topmostViewController()
+static UIWindowScene *activeWindowScene()
 {
-    UIWindowScene *scene = nil;
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
         if (s.activationState == UISceneActivationStateForegroundActive &&
             [s isKindOfClass:[UIWindowScene class]]) {
-            scene = (UIWindowScene *)s;
-            break;
+            return (UIWindowScene *)s;
         }
     }
-    if (!scene) return nil;
-
-    UIViewController *vc = scene.windows.firstObject.rootViewController;
-    while (vc.presentedViewController) {
-        vc = vc.presentedViewController;
-    }
-    return vc;
+    return nil;
 }
 
 namespace SnbxPickerIOS {
@@ -135,6 +138,21 @@ void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&
     s_active = true;
     QDir().mkpath(destDir);
 
+    UIWindowScene *scene = activeWindowScene();
+    if (!scene) {
+        fprintf(stderr, "[SnbxPickerIOS] ERROR: no active window scene\n");
+        s_active = false;
+        if (completion) completion({});
+        return;
+    }
+
+    // Dedicated UIWindow above Qt's windows — Qt cannot intercept touches here
+    UIWindow *pickerWindow = [[UIWindow alloc] initWithWindowScene:scene];
+    pickerWindow.windowLevel = UIWindowLevelAlert + 1;
+    pickerWindow.rootViewController = [[UIViewController alloc] init];
+    pickerWindow.rootViewController.view.backgroundColor = [UIColor clearColor];
+    [pickerWindow makeKeyAndVisible];
+
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
         initForOpeningContentTypes:@[UTTypeItem]];
     picker.allowsMultipleSelection = YES;
@@ -142,6 +160,7 @@ void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&
 
     s_delegate = [[SNSnbxPickerDelegate alloc] init];
     s_delegate.destDir = destDir.toNSString();
+    s_delegate.pickerWindow = pickerWindow;
 
     auto shared = std::make_shared<std::function<void(const QStringList&)>>(std::move(completion));
     s_delegate.completionBlock = ^(NSArray<NSString *> *localPaths) {
@@ -156,18 +175,9 @@ void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&
 
     picker.delegate = s_delegate;
 
-    UIViewController *vc = topmostViewController();
-    if (!vc) {
-        fprintf(stderr, "[SnbxPickerIOS] ERROR: no topmost VC\n");
-        s_delegate = nil;
-        s_active = false;
-        if (*shared) (*shared)({});
-        return;
-    }
-
-    fprintf(stderr, "[SnbxPickerIOS] presenting picker from %s (delegate=%p)\n",
-            NSStringFromClass([vc class]).UTF8String, (void *)s_delegate);
-    [vc presentViewController:picker animated:YES completion:^{
+    fprintf(stderr, "[SnbxPickerIOS] presenting picker from dedicated window (delegate=%p)\n",
+            (void *)s_delegate);
+    [pickerWindow.rootViewController presentViewController:picker animated:YES completion:^{
         fprintf(stderr, "[SnbxPickerIOS] presentation complete\n");
     }];
 }

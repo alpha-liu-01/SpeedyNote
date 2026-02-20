@@ -17,8 +17,10 @@
 |-----|-------------|--------|
 | **BUG-I001** | QFileOpenEvent not delivered on iOS | ✅ Fixed (Inbox directory watcher) |
 | **BUG-I001b** | Inbox PDF not opened when only Launcher visible | ✅ Fixed (auto-create MainWindow) |
-| **BUG-I002** | UIDocumentPickerViewController file selection unresponsive | 🟠 Deprioritized (workaround via Inbox) |
+| **BUG-I001c** | Inbox PDF stored with temporary path, lost on relaunch | ✅ Fixed (copy to pdfs/ first) |
+| **BUG-I002** | UIDocumentPickerViewController file selection unresponsive | ✅ Fixed (dedicated UIWindow) |
 | **BUG-I003** | Crash in QIOSTapRecognizer / showEditMenu | ✅ Fixed (remove gesture recognizer at runtime) |
+| **BUG-I003b** | Crash in processTouchEvent on notebook deletion | 🟡 Qt bug (low priority) |
 | **BUG-I004** | PDF export files not created / share sheet no-op | 🟡 Investigating |
 
 ---
@@ -93,6 +95,68 @@ Added `getOrCreateMainWindow()` helper to `IOSInboxWatcher` that mirrors the pat
 
 ---
 
+### BUG-I001c: Inbox PDF Stored With Temporary Path, Lost on Relaunch
+**Status:** 🟢 Fixed  
+**Priority:** High  
+**Category:** File Import  
+**Root Cause:** The InboxWatcher passed the `Documents/Inbox/` path directly to `openFileInNewTab()`. SpeedyNote saved a reference to this temporary path. The Inbox file was then deleted (by the watcher's cleanup and/or iOS itself). On relaunch, the PDF was not found.
+
+**Symptom:**
+```
+loadBundle: PDF not found at absolute path: "/.../Documents/Inbox/The Cosmic Perspective..." 
+or relative path: "../../../../../../Documents/Inbox/The Cosmic Perspective..."
+```
+SNBX export also failed to include the PDF because the source file was already gone.
+
+**Fix:**  
+Added `copyPdfToPermanentStorage()` to `IOSInboxWatcher`. Before opening a PDF from Inbox:
+1. Copies it to `AppData/pdfs/` (the same permanent directory used by `PdfPickerIOS`)
+2. Handles filename collisions with a counter suffix
+3. Passes the permanent path to `openFileInNewTab()`
+4. Only then deletes the Inbox copy
+
+**Affected files:**
+- `source/Main.cpp` — `IOSInboxWatcher::copyPdfToPermanentStorage()`
+
+---
+
+### BUG-I002: UIDocumentPickerViewController File Selection Fixed
+**Status:** 🟢 Fixed  
+**Priority:** Critical  
+**Category:** File Import (Native Picker)  
+**Root Cause:** Qt's `QIOSViewController` intercepts all touch events on its UIView hierarchy. When the `UIDocumentPickerViewController` (a remote view controller) was presented from Qt's root view controller, Qt's touch handling prevented file selection gestures from reaching the picker's remote UI.
+
+**Symptom:**  
+- **PDF picker (single-select):** Tapping a PDF file did nothing.
+- **SNBX picker (multi-select):** Checkmarks appeared but "Open" button was unresponsive.
+- Cancel always worked (it's in the navigation bar, outside the remote content area).
+
+**Fix:**  
+Rewrote both `PdfPickerIOS.mm` and `SnbxPickerIOS.mm` to present the document picker from a **dedicated UIWindow** completely independent of Qt's view hierarchy:
+
+1. Create a new `UIWindow` at `UIWindowLevelAlert + 1` (above all Qt windows)
+2. Set a minimal root `UIViewController` with a clear background
+3. Make it key and visible
+4. Present the `UIDocumentPickerViewController` from this root VC
+5. In delegate callbacks, hide and release the dedicated window, then invoke the completion
+
+This ensures Qt has zero involvement in the picker's touch event chain. The delegate (`SNPdfPickerDelegate` / `SNSnbxPickerDelegate`) holds a strong reference to the window to keep it alive.
+
+**Verification:**  
+File picker now works correctly for files in user-accessible locations:
+- "On My iPad" root folder — PDF and SNBX selection works
+- iCloud Drive — expected to work on real devices
+- Third-party file providers (Google Drive, etc.) — expected to work
+
+**Note on simulator limitations:**  
+Files in other apps' sandboxes (e.g., `preview/inbox/*.pdf`) may appear in the picker on the simulator but cannot be selected. This is expected iOS sandboxing behavior — the document picker can only grant access to files the user legitimately owns. On a real iPad, these phantom entries from other apps' sandboxes would not be visible. The simulator exposes the macOS file system in misleading ways.
+
+**Affected files:**
+- `source/ios/PdfPickerIOS.mm` — dedicated UIWindow for PDF picker
+- `source/ios/SnbxPickerIOS.mm` — dedicated UIWindow for SNBX picker
+
+---
+
 ### BUG-I003: Crash in QIOSTapRecognizer / showEditMenu
 **Status:** 🟢 Fixed (workaround)  
 **Priority:** Medium  
@@ -140,41 +204,32 @@ This eliminates both the crash and the unwanted edit menu popup on tap.
 
 ---
 
-## Open / Deprioritized Bugs
+## Open Bugs
 
-### BUG-I002: UIDocumentPickerViewController File Selection Unresponsive
-**Status:** 🟠 Deprioritized  
-**Priority:** Low (workaround available)  
-**Category:** File Import (Native Picker)  
-**Affected:** PDF import (single-select), SNBX import (multi-select)
+### BUG-I003b: Crash in processTouchEvent on Notebook Deletion
+**Status:** 🟡 Qt bug (low priority)  
+**Priority:** Low  
+**Category:** UI / Touch Handling  
+**Crash Type:** EXC_BAD_ACCESS (SIGSEGV) at address 0x2f
 
 **Symptom:**  
-The native iOS file picker (`UIDocumentPickerViewController`) presents correctly, but:
-- **PDF picker (single-select):** Tapping a PDF file does nothing. No delegate callback fires. No error.
-- **SNBX picker (multi-select):** Multi-select checkmark UI appears, but tapping the "Open" button does nothing. No delegate callback fires.
-- Cancelling the picker DOES fire the `documentPickerWasCancelled:` delegate.
+Deleting a notebook from the Launcher causes a crash. The notebook IS successfully deleted. The crash happens in Qt's touch event processing after the widget/window is destroyed.
+
+**Crash Stack (Thread 0, main thread):**
+```
+0  QHashPrivate::Span<...SynthesizedMouseData>::hasNode() + 20
+1  QHashPrivate::iterator<...SynthesizedMouseData>::isUnused() + 78
+2  QHashPrivate::iterator<...SynthesizedMouseData>::operator++() + 100
+3  QHash<QWindow*, ...SynthesizedMouseData>::const_iterator::operator++() + 25
+4  QGuiApplicationPrivate::processTouchEvent() + 1293
+```
 
 **Analysis:**  
-`UIDocumentPickerViewController` is a remote view controller that runs in a separate process (`DocumentManagerUICore.Service`). File selection results are delivered via XPC.
+Qt maintains an internal `QHash<QWindow*, SynthesizedMouseData>` for touch-to-mouse synthesis. When a `QWindow` is destroyed (from deleting the notebook), the hash entry becomes stale. On the next touch event, Qt iterates the hash and dereferences the freed `QWindow*` pointer.
 
-Early attempts used `QEventLoop` to block the main thread until the delegate fired — this caused XPC results to never arrive. The code was refactored to a fully asynchronous `std::function` callback pattern, which fixed the cancel delegate. However, file selection (the "positive" result path) still does not trigger `documentPicker:didPickDocumentsAtURLs:`.
+This is a **Qt framework bug** — the hash should clean up entries when windows are destroyed. Different from BUG-I003 (which was in the text input overlay), this is in the core touch event processing.
 
-This may be related to:
-- Qt's touch event interception interfering with the remote view controller's selection gestures
-- The picker's view hierarchy being presented from a Qt-managed `UIViewController`
-- Simulator-specific limitations with the document picker's remote UI
-
-**Workaround:**  
-The Inbox watcher (BUG-I001) provides a complete alternative import path. On iPad, the natural UX for importing files is:
-- **"Open With"** from the Files app (long-press file → Share → SpeedyNote)
-- **Drag-and-drop** from Split View / Slide Over
-- **AirDrop** from another device
-
-All of these go through the Inbox mechanism and work correctly. The in-app file picker is a convenience shortcut; if it can't be fixed, the import buttons could show a brief instruction instead.
-
-**Affected files:**
-- `source/ios/PdfPickerIOS.mm`
-- `source/ios/SnbxPickerIOS.mm`
+**Mitigation:** Low priority since the delete operation succeeds. The crash only occurs after the action is complete.
 
 ---
 
