@@ -947,6 +947,18 @@ public:
      */
     QSizeF pageSizeAt(int index) const;
     
+    /**
+     * @brief Update a page's size and sync the layout metadata.
+     * @param index 0-based page index.
+     * @param size New page size.
+     *
+     * Sets both Page::size and the internal metadata used by pageSizeAt()
+     * and the viewport layout engine.  Must be called instead of writing
+     * to page->size directly whenever the metadata cache must stay in sync
+     * (e.g. applying user-configured defaults to the first page).
+     */
+    void setPageSize(int index, const QSizeF& size);
+    
     // ===== UUID→Index Lookup (Phase C.0.2) =====
     
     /**

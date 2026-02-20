@@ -421,6 +421,26 @@ QSizeF Document::pageSizeAt(int index) const
     return p ? p->size : QSizeF();
 }
 
+void Document::setPageSize(int index, const QSizeF& size)
+{
+    if (index < 0 || index >= m_pageOrder.size()) {
+        return;
+    }
+    
+    // Update the layout metadata so pageSizeAt() returns the new size
+    QString uuid = m_pageOrder[index];
+    m_pageMetadata[uuid] = size;
+    
+    // Update the actual page object if it is loaded in memory
+    Page* p = page(index);
+    if (p) {
+        p->size = size;
+        m_dirtyPages.insert(uuid);
+    }
+    
+    markModified();
+}
+
 bool Document::loadPageFromDisk(int index) const
 {
     if (m_bundlePath.isEmpty()) {

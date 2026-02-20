@@ -2846,7 +2846,12 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     }
 #else
     // Desktop: Use standard file dialog
-    QString defaultPath = QDir::homePath() + "/" + defaultName + ".snb";
+    QSettings saveSettings("SpeedyNote", "App");
+    QString lastSaveDir = saveSettings.value("FileDialogs/lastSaveDirectory").toString();
+    if (lastSaveDir.isEmpty() || !QDir(lastSaveDir).exists()) {
+        lastSaveDir = QDir::homePath();
+    }
+    QString defaultPath = lastSaveDir + "/" + defaultName + ".snb";
     
     filePath = QFileDialog::getSaveFileName(
         this,
@@ -2858,6 +2863,8 @@ bool MainWindow::saveNewDocumentWithDialog(Document* doc)
     if (filePath.isEmpty()) {
         return false; // User cancelled
     }
+    
+    saveSettings.setValue("FileDialogs/lastSaveDirectory", QFileInfo(filePath).absolutePath());
 #endif
     
     // Ensure .snb extension
@@ -3067,11 +3074,17 @@ void MainWindow::loadDocument()
 #else
     // Open file dialog for file selection
     // Phase O1.7.6: Unified .snb bundle format
+    QSettings openSettings("SpeedyNote", "App");
+    QString lastOpenDir = openSettings.value("FileDialogs/lastOpenDirectory").toString();
+    if (lastOpenDir.isEmpty() || !QDir(lastOpenDir).exists()) {
+        lastOpenDir = QDir::homePath();
+    }
+    
     QString filter = tr("SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)");
     filePath = QFileDialog::getOpenFileName(
         this,
         tr("Open Document"),
-        QDir::homePath(),
+        lastOpenDir,
         filter
     );
     
@@ -3079,6 +3092,8 @@ void MainWindow::loadDocument()
         // User cancelled
         return;
     }
+    
+    openSettings.setValue("FileDialogs/lastOpenDirectory", QFileInfo(filePath).absolutePath());
 #endif
     
     // Use DocumentManager to load the document (handles ownership, PDF reloading, etc.)
@@ -3336,11 +3351,17 @@ void MainWindow::openPdfDocument(const QString &filePath)
         });
         return;
 #else
+        QSettings pdfSettings("SpeedyNote", "App");
+        QString lastPdfDir = pdfSettings.value("FileDialogs/lastOpenDirectory").toString();
+        if (lastPdfDir.isEmpty() || !QDir(lastPdfDir).exists()) {
+            lastPdfDir = QDir::homePath();
+        }
+        
         QString filter = tr("PDF Files (*.pdf);;All Files (*)");
         pdfPath = QFileDialog::getOpenFileName(
             this,
             tr("Open PDF"),
-            QDir::homePath(),
+            lastPdfDir,
             filter
         );
 
@@ -3348,6 +3369,8 @@ void MainWindow::openPdfDocument(const QString &filePath)
             // User cancelled
             return;
         }
+        
+        pdfSettings.setValue("FileDialogs/lastOpenDirectory", QFileInfo(pdfPath).absolutePath());
 #endif
     }
     
@@ -3430,11 +3453,13 @@ void MainWindow::addNewTab() {
         doc->defaultGridSpacing = defaultGridSpacing;
         doc->defaultLineSpacing = defaultLineSpacing;
         
-        // Also apply to the first page (already created by Document::createNew)
+        // Also apply to the first page (already created by Document::createNew).
+        // Use setPageSize() so both the Page object AND the layout metadata
+        // (used by pageSizeAt() / viewport layout) are updated together.
         if (doc->pageCount() > 0) {
+            doc->setPageSize(0, defaultPageSize);
             Page* firstPage = doc->page(0);
             if (firstPage) {
-                firstPage->size = defaultPageSize;
                 firstPage->backgroundType = defaultStyle;
                 firstPage->backgroundColor = defaultBgColor;
                 firstPage->gridColor = defaultGridColor;
@@ -3537,10 +3562,16 @@ void MainWindow::loadFolderDocument()
 #endif
     
     // Show directory dialog to select .snb bundle folder
+    QSettings bundleSettings("SpeedyNote", "App");
+    QString lastBundleDir = bundleSettings.value("FileDialogs/lastOpenDirectory").toString();
+    if (lastBundleDir.isEmpty() || !QDir(lastBundleDir).exists()) {
+        lastBundleDir = QDir::homePath();
+    }
+    
     QString bundlePath = QFileDialog::getExistingDirectory(
         this,
         tr("Open SpeedyNote Bundle (.snb folder)"),
-        QDir::homePath(),
+        lastBundleDir,
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
     );
     
@@ -3548,6 +3579,8 @@ void MainWindow::loadFolderDocument()
         // User cancelled
         return;
     }
+    
+    bundleSettings.setValue("FileDialogs/lastOpenDirectory", QFileInfo(bundlePath).absolutePath());
     
     // Validate that it's a .snb bundle (has document.json)
     // This validation is specific to directory-based bundles

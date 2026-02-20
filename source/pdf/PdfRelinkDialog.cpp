@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 #include <QDir>
 #include <QFile>
+#include <QSettings>
 #include <QStandardPaths>
 
 #ifdef Q_OS_ANDROID
@@ -177,9 +178,13 @@ void PdfRelinkDialog::onRelinkPdf()
     QFileInfo originalInfo(originalPdfPath);
     QString startDir = originalInfo.absolutePath();
     
-    // If original directory doesn't exist, use home directory
+    // If original directory doesn't exist, try the last-used open directory
     if (!QDir(startDir).exists()) {
-        startDir = QDir::homePath();
+        QSettings settings("SpeedyNote", "App");
+        startDir = settings.value("FileDialogs/lastOpenDirectory").toString();
+        if (startDir.isEmpty() || !QDir(startDir).exists()) {
+            startDir = QDir::homePath();
+        }
     }
     
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
