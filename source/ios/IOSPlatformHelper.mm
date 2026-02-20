@@ -103,22 +103,25 @@ void applyFonts(QApplication& app)
 {
     QString locale = QLocale::system().name();
 
-    QFont font(".AppleSystemUIFont", 14);
+    UIFont *sysFont = [UIFont systemFontOfSize:14];
+    QString sysFontName = QString::fromNSString(sysFont.familyName);
+
+    QFont font(sysFontName, 14);
     font.setStyleHint(QFont::SansSerif);
 
     if (locale.startsWith("zh_CN") || locale.startsWith("zh_Hans")) {
-        font.setFamilies({".AppleSystemUIFont", "PingFang SC",
+        font.setFamilies({sysFontName, "PingFang SC",
                           "Heiti SC", "STHeitiSC-Light"});
     } else if (locale.startsWith("zh_TW") || locale.startsWith("zh_HK") || locale.startsWith("zh_Hant")) {
-        font.setFamilies({".AppleSystemUIFont", "PingFang TC",
+        font.setFamilies({sysFontName, "PingFang TC",
                           "Heiti TC", "STHeitiTC-Light"});
     } else if (locale.startsWith("ja")) {
-        font.setFamilies({".AppleSystemUIFont", "Hiragino Sans",
+        font.setFamilies({sysFontName, "Hiragino Sans",
                           "Hiragino Kaku Gothic ProN"});
     } else if (locale.startsWith("ko")) {
-        font.setFamilies({".AppleSystemUIFont", "Apple SD Gothic Neo"});
+        font.setFamilies({sysFontName, "Apple SD Gothic Neo"});
     } else {
-        font.setFamilies({".AppleSystemUIFont", "PingFang SC"});
+        font.setFamilies({sysFontName, "PingFang SC"});
     }
 
     app.setFont(font);
@@ -133,7 +136,9 @@ void disableEditMenuOverlay()
 
     Class cls = NSClassFromString(@"QIOSTapRecognizer");
     if (!cls) {
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[IOSPlatformHelper] QIOSTapRecognizer class not found, skipping\n");
+        #endif
         return;
     }
 
@@ -144,14 +149,18 @@ void disableEditMenuOverlay()
     SEL sel = @selector(touchesEnded:withEvent:);
     Method m = class_getInstanceMethod(cls, sel);
     if (!m) {
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[IOSPlatformHelper] touchesEnded:withEvent: not found on QIOSTapRecognizer\n");
+        #endif
         return;
     }
 
     IMP noop = imp_implementationWithBlock(^(id, NSSet<UITouch *> *, UIEvent *) {});
     method_setImplementation(m, noop);
     s_swizzled = true;
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[IOSPlatformHelper] swizzled QIOSTapRecognizer touchesEnded:withEvent: to no-op\n");
+    #endif
 }
 
 } // namespace IOSPlatformHelper

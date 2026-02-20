@@ -38,7 +38,9 @@
         NSString *fileName = url.lastPathComponent;
 
         if (![fileName.pathExtension.lowercaseString isEqualToString:@"snbx"]) {
+            #ifdef SPEEDYNOTE_DEBUG
             fprintf(stderr, "[SnbxPickerIOS] skipping non-.snbx: %s\n", fileName.UTF8String);
+            #endif
             continue;
         }
 
@@ -65,11 +67,15 @@
         }
 
         if (ok) {
+            #ifdef SPEEDYNOTE_DEBUG
             fprintf(stderr, "[SnbxPickerIOS] imported: %s\n", destPath.UTF8String);
+            #endif
             [results addObject:destPath];
         } else {
+            #ifdef SPEEDYNOTE_DEBUG
             fprintf(stderr, "[SnbxPickerIOS] copy failed for %s: %s\n",
                     fileName.UTF8String, error.localizedDescription.UTF8String);
+            #endif
         }
     }
 
@@ -79,7 +85,9 @@
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
     Q_UNUSED(controller);
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[SnbxPickerIOS] delegate: cancelled\n");
+    #endif
     [self finish:@[]];
 }
 
@@ -102,7 +110,9 @@
         self.pickerWindow.windowScene = nil;
         self.pickerWindow = nil;
     }
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[SnbxPickerIOS] delegate: dealloc\n");
+    #endif
 }
 #pragma clang diagnostic pop
 
@@ -138,7 +148,9 @@ void pickSnbxFiles(std::function<void(const QStringList&)> completion)
 
 void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&)> completion)
 {
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[SnbxPickerIOS] pickSnbxFiles called (active=%d)\n", s_active);
+    #endif
 
     if (s_active) {
         if (completion) completion({});
@@ -149,7 +161,9 @@ void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&
 
     UIWindowScene *scene = activeWindowScene();
     if (!scene) {
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[SnbxPickerIOS] ERROR: no active window scene\n");
+        #endif
         s_active = false;
         if (completion) completion({});
         return;
@@ -188,10 +202,14 @@ void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&
 
     picker.delegate = s_delegate;
 
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[SnbxPickerIOS] presenting picker from dedicated window (delegate=%p)\n",
             (void *)s_delegate);
+    #endif
     [pickerWindow.rootViewController presentViewController:picker animated:YES completion:^{
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[SnbxPickerIOS] presentation complete\n");
+        #endif
     }];
 }
 

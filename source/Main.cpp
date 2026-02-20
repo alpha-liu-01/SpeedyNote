@@ -477,8 +477,9 @@ protected:
         QString path = foe->file();
         if (path.isEmpty())
             return true;
-
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[FileOpen] received: %s\n", qPrintable(path));
+        #endif
 
         QFileInfo fi(path);
         QString ext = fi.suffix().toLower();
@@ -567,10 +568,14 @@ private:
         }
 
         if (QFile::copy(inboxPath, destPath)) {
+            #ifdef SPEEDYNOTE_DEBUG
             fprintf(stderr, "[InboxWatcher] copied PDF to %s\n", qPrintable(destPath));
+            #endif
             return destPath;
         }
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[InboxWatcher] failed to copy PDF to %s\n", qPrintable(destPath));
+        #endif
         return QString();
     }
 
@@ -609,7 +614,9 @@ private:
             QString ext = fi.suffix().toLower();
             QString path = fi.absoluteFilePath();
 
+            #ifdef SPEEDYNOTE_DEBUG
             fprintf(stderr, "[InboxWatcher] found: %s\n", qPrintable(path));
+            #endif
 
             if (ext == "snbx") {
                 snbxFiles.append(path);

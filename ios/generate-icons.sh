@@ -2,8 +2,9 @@
 # ============================================================================
 # SpeedyNote iOS App Icon Generator
 # ============================================================================
-# Renders resources/icons/mainicon.svg into the Asset Catalog PNGs required
-# by Xcode for iPad.  Uses rsvg-convert (brew install librsvg).
+# Renders resources/icons/mainicon.svg into the single 1024x1024 PNG used by
+# the Asset Catalog.  Modern iOS (14+) auto-generates all other sizes from
+# this single universal icon.  Uses rsvg-convert (brew install librsvg).
 #
 # Usage:
 #   cd <SpeedyNote root>
@@ -29,26 +30,9 @@ fi
 
 mkdir -p "${OUTDIR}"
 
-# iPad icon sizes: name  pixel-size
-ICONS=(
-    "icon-20.png        20"
-    "icon-20@2x.png     40"
-    "icon-29.png        29"
-    "icon-29@2x.png     58"
-    "icon-40.png        40"
-    "icon-40@2x.png     80"
-    "icon-76.png        76"
-    "icon-76@2x.png    152"
-    "icon-83.5@2x.png  167"
-    "icon-1024.png    1024"
-)
-
-echo "=== Generating iPad app icons from mainicon.svg ==="
-for entry in "${ICONS[@]}"; do
-    read -r name size <<< "${entry}"
-    echo "  ${name}  (${size}x${size})"
-    rsvg-convert -w "${size}" -h "${size}" "${SVG}" -o "${OUTDIR}/${name}"
-done
+echo "=== Generating iPad app icon from mainicon.svg ==="
+echo "  icon-1024.png  (1024x1024)"
+rsvg-convert -w 1024 -h 1024 "${SVG}" -o "${OUTDIR}/icon-1024.png"
 
 echo ""
-echo "=== Done — icons written to ${OUTDIR} ==="
+echo "=== Done — icon written to ${OUTDIR} ==="
