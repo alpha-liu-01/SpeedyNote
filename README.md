@@ -1,4 +1,4 @@
-# 📝 SpeedyNote
+# SpeedyNote
 
 <div align="center">
 
@@ -9,12 +9,12 @@
 *Built for students who need iPad-quality annotation on budget hardware*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-brightgreen)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iPadOS-brightgreen)]()
 [![Qt](https://img.shields.io/badge/Qt-6.x-41CD52?logo=qt)]()
 
 [![Get it on Flathub](https://flathub.org/assets/badges/flathub-badge-i-en.png)](https://flathub.org/en/apps/org.speedynote.SpeedyNote)
 
-[English](#-features) • [中文](./docs/zh_Hans/README_zh_Hans.md)
+[English](#features) • [中文](./docs/zh_Hans/README_zh_Hans.md)
 
 </div>
 
@@ -22,25 +22,25 @@
 
 ## Why SpeedyNote?
 
-| The Problem                                        | SpeedyNote's Solution                                |
-| -------------------------------------------------- | ---------------------------------------------------- |
-| 💸 OneNote doesn't support PDF annotation          | ✅ Full PDF support with fast rendering               |
-| 🐌 Xournal++ is painfully slow on large PDFs       | ✅ 360Hz input on a Celeron N4000 (1.1GHz)            |
-| 💰 GoodNotes/Notability cost $10+ and require iPad | ✅ Free & open source, runs on $50 tablets            |
-| 📱 Most note apps are mobile-only or desktop-only  | ✅ Same experience on Windows, Linux, macOS & Android |
+| The Problem                                        | SpeedyNote's Solution                                         |
+| -------------------------------------------------- | ------------------------------------------------------------- |
+| OneNote doesn't support PDF annotation             | Full PDF support with fast rendering                          |
+| Xournal++ is painfully slow on large PDFs          | 360Hz input on a Celeron N4000 (1.1GHz)                       |
+| GoodNotes/Notability cost $10+ and require iPad    | Free & open source, runs on $50 tablets                       |
+| Most note apps are mobile-only or desktop-only     | Same experience on Windows, Linux, macOS, Android & iPadOS    |
 
 ---
 
-## ✨ Features
+## Features
 
-### 🚀 Performance First
+### Performance First
 
 - **360Hz stylus polling** on low-end hardware (tested: Celeron N4000 @ 1.1GHz)
 - **Instant PDF loading** - large documents open in seconds, not minutes
 - **Small memory footprint** - native C++ with no Electron bloat
 - **ARM64 native builds** - optimized for Snapdragon laptops and Rockchip Chromebooks
 
-### 🖊️ Professional Drawing Tools
+### Professional Drawing Tools
 
 - **Pressure-sensitive inking** with Pen, Marker, and Highlighter tools
 - **Vector-based strokes** - zoom infinitely without pixelation
@@ -48,21 +48,21 @@
 - **Stroke eraser** with full undo/redo support
 - **Touch gestures** - two-finger pan, pinch-to-zoom, palm rejection
 
-### 📄 Document Modes
+### Document Modes
 
 - **Paged Notebooks** - traditional page-by-page notes (`.snb)
 - **Edgeless Canvas** - infinite whiteboard with lazy-loading tiles (`.snb)
 - **PDF Backgrounds** - annotate PDFs with clickable internal links
 - **Sharing** - `.snbx` note bundles allows easy cross-platform note sharing. 
 
-### 🎯 Tablet-First UX
+### Tablet-First UX
 
 - **Action bars** - context-sensitive buttons appear when you need them
 - **Subtoolbars** - quick access to tool settings without menu diving
 - **Page panel** - thumbnail navigation with drag-to-reorder
 - **PDF outline** - click TOC entries to jump to sections
 
-### 🔗 Advanced Features
+### Advanced Features
 
 - **Link objects** - create clickable links to markdown notes, URLs, or positions
 - **Markdown notes** - attach rich text notes to any page or position
@@ -70,7 +70,7 @@
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 <!-- TODO: Replace with actual screenshots -->
 
@@ -88,7 +88,7 @@
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### System Requirements
 
@@ -98,10 +98,11 @@
 | **macOS**   | macOS 13                 | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | Any with Qt 6.4+ |
 | **Android** | Android 9 (API 28)       | Android 13+      |
+| **iPadOS**  | iPadOS 16.0              | iPadOS 17+       |
 
-**Hardware:** Any x86_64 or ARM64 CPU. Tested on Intel Core i5 470UM (2010), Celeron N4000, Snapdragon 7c Gen 2, Rockchip RK3399
+**Hardware:** Any x86_64 or ARM64 CPU. Tested on Intel Core i5 470UM (2010), Celeron N4000, Snapdragon 7c Gen 2, Rockchip RK3399, Apple M4
 
-### 💾 Installation
+### Installation
 
 #### Windows / macOS / Linux
 
@@ -120,7 +121,15 @@ Download the latest release from **[GitHub Releases](https://github.com/alpha-li
 **Option 1: Google Play Store** (coming soon), supports development  
 **Option 2: Build from source** - Free, see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
 
->  The Play Store version is a convenience fee. The source code is always free under GPL v3.
+> The Play Store version is a convenience fee. The source code is always free under GPL v3.
+
+#### iPadOS
+
+**Option 1: Sileo** (jailbroken iPads) - Add the SpeedyNote APT repository and install via Sileo  
+**Option 2: TrollStore** - Download the `.ipa` from [GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases) and install via TrollStore  
+**Option 3: Build from source** - See [iPadOS Build Guide](./docs/build_docs/IOS_BUILD_GUIDE.md)
+
+> iPadOS builds require a jailbroken device or TrollStore. App Store distribution is not available at this time.
 
 #### Linux APT Repository (Debian/Ubuntu)
 
@@ -138,7 +147,7 @@ sudo apt update && sudo apt install speedynote
 
 ---
 
-## 🛠️ Building From Source
+## Building From Source
 
 ### Prerequisites
 
@@ -149,6 +158,7 @@ sudo apt update && sudo apt install speedynote
 | macOS    | Xcode Command Line Tools, Homebrew                                           |
 | Linux    | Qt 6.4+ dev packages, Poppler-Qt6                                            |
 | Android  | Docker (see [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)) |
+| iPadOS   | macOS, Xcode 15+, Qt 6.9.3 for iOS (see [iPadOS Build Guide](./docs/build_docs/IOS_BUILD_GUIDE.md)) |
 
 ### Quick Build
 
@@ -171,12 +181,13 @@ cd SpeedyNote
 ### Detailed Build Guides
 
 - [Windows Build Guide](./docs/build_docs/SpeedyNote_Windows_Build_en.md)
-- [macOS Build Guide](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)  # Not working yet
+- [macOS Build Guide](./docs/build_docs/SpeedyNote_Darwin_Build_en.md)
 - [Android Build Guide](./docs/build_docs/ANDROID_BUILD_GUIDE.md)
+- [iPadOS Build Guide](./docs/build_docs/IOS_BUILD_GUIDE.md)
 
 ---
 
-## 📁 File Formats
+## File Formats
 
 | Format  | Description              | Use Case                        |
 | ------- | ------------------------ | ------------------------------- |
@@ -187,7 +198,7 @@ cd SpeedyNote
 
 ---
 
-## 💻 Command Line Interface (Desktop)
+## Command Line Interface (Desktop)
 
 SpeedyNote includes a powerful CLI for batch operations on Windows and Linux. Perfect for scripting, automation, and syncing notes between devices.
 
@@ -347,38 +358,38 @@ speedynote export-pdf "$LOCAL" -o "$HOME/PDFs/" --dpi 150
 
 ---
 
-## 🌍 Supported Languages
+## Supported Languages
 
 SpeedyNote supports multiple languages:
 
-- 🇺🇸 English
-- 🇨🇳 简体中文 (Simplified Chinese)
-- 🇪🇸 Español (Spanish) (partial)
-- 🇫🇷 Français (French) (partial)
+- English
+- 简体中文 (Simplified Chinese)
+- Español (Spanish) (partial)
+- Français (French) (partial)
 
 > Contributions for additional translations are welcome!
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to:
 
-- 🐛 Report bugs via [GitHub Issues](https://github.com/alpha-liu-01/SpeedyNote/issues)
-- 💡 Suggest features
-- 🌍 Add translations
-- 🔧 Submit pull requests
+- Report bugs via [GitHub Issues](https://github.com/alpha-liu-01/SpeedyNote/issues)
+- Suggest features
+- Add translations
+- Submit pull requests
 
 ---
 
-## 📜 License
+## License
 
 SpeedyNote is licensed under the **GNU General Public License v3.0**.
 
-- ✅ Free to use, modify, and distribute
-- ✅ Source code always available
-- ✅ Commercial use allowed (Play Store version)
-- 📋 Derivative works must also be GPL v3
+- Free to use, modify, and distribute
+- Source code always available
+- Commercial use allowed (Play Store version)
+- Derivative works must also be GPL v3
 
 See [LICENSE](./LICENSE) for details.
 
@@ -393,21 +404,21 @@ See [LICENSE](./LICENSE) for details.
 
 ---
 
-## 💖 Support the Project
+## Support the Project
 
 If SpeedyNote helps you, consider:
 
-- ☕ [Buy me a coffee](https://buymeacoffee.com/alphaliu01)
-- ⭐ Starring this repository
-- 📱 Purchasing the Android version on Google Play
-- 🐛 Reporting bugs and suggesting improvements
-- 🌍 Contributing translations
+- [Buy me a coffee](https://buymeacoffee.com/alphaliu01)
+- Starring this repository
+- Purchasing the Android version on Google Play
+- Reporting bugs and suggesting improvements
+- Contributing translations
 
 ---
 
 <div align="center">
 
-**Made with ❤️ for students who deserve better tools**
+**Made for students who deserve better tools**
 
 *SpeedyNote v1.x*
 

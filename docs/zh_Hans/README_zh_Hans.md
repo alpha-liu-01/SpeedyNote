@@ -1,20 +1,20 @@
-# 📝 SpeedyNote
+# SpeedyNote
 
 <div align="center">
 
 <img src="https://i.imgur.com/tesbk4U.png" width="200" alt="SpeedyNote Logo">
 
-**一款运行超级快，用起来超级高效的笔记应用，专为手写笔用户打造**
+**一款运行快速、高效的笔记应用，专为手写笔用户打造**
 
-*专为需要在低成本硬件上获得远超 iPad 级别笔记体验的人群打造*
+*专为需要在低成本硬件上获得接近 iPad 级别笔记体验的用户打造*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20Android-brightgreen)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iPadOS-brightgreen)]()
 [![Qt](https://img.shields.io/badge/Qt-6.x-41CD52?logo=qt)]()
 
 [![Get it on Flathub](https://flathub.org/assets/badges/flathub-badge-i-en.png)](https://flathub.org/zh-Hans/apps/org.speedynote.SpeedyNote)
 
-[English](../../README.md) • [中文](.zh_Hans/README_zh_Hans.md)
+[English](../../README.md) • [中文](./README_zh_Hans.md)
 
 </div>
 
@@ -24,23 +24,23 @@
 
 | 问题                                       | SpeedyNote 的解决方案                     |
 | ---------------------------------------- | ------------------------------------ |
-| 💸 OneNote 不支持 PDF 注释                    | ✅ 完整 PDF 支持，快速渲染                     |
-| 🐌 Xournal++ 页数一多，速度像蜗牛爬                 | ✅ 在 赛扬 N4000 (1.1GHz) 上实现 360Hz 输入   |
-| 💰 GoodNotes/Notability 每年收费好几百元且需要 iPad | ✅ 免费开源，在200元寨板上运行                    |
-| 📱 大多数笔记应用仅限移动端或仅限桌面端                    | ✅ Windows、Linux、macOS 和 Android 统一体验 |
+| OneNote 不支持 PDF 注释                    | 完整 PDF 支持，快速渲染                     |
+| Xournal++ 在大文档上性能不足                 | 在 Celeron N4000 (1.1GHz) 等低端硬件上实现 360Hz 输入   |
+| GoodNotes/Notability 需要付费且依赖 iPad     | 免费开源，可在低成本设备上运行                    |
+| 大多数笔记应用仅限移动端或仅限桌面端        | 在 Windows、Linux、macOS、Android 和 iPadOS 上保持一致体验 |
 
 ---
 
-## ✨ 功能特性
+## 功能特性
 
-### 🚀 性能优先
+### 性能优先
 
 - **360Hz 手写笔轮询** 在低端硬件上（测试于 Celeron N4000 @ 1.1GHz）
 - **即时 PDF 加载** - 大型文档可在数秒内打开，完全不需要数分钟
 - **小内存占用** - 原生 C++ 编写，绝对不是套壳浏览器
 - **ARM64 原生构建** - 针对骁龙笔记本和瑞芯微Chromebook 优化
 
-### 🖊️ 专业绘图工具
+### 专业绘图工具
 
 - **压感墨水** 支持笔、记号笔和文字标画工具
 - **矢量笔画** - 不论缩放比例永远抗锯齿
@@ -48,21 +48,21 @@
 - **笔画橡皮擦** 支持完整撤销/重做
 - **触控手势** - 双指平移、捏合缩放、手掌防误触
 
-### 📄 文档模式
+### 文档模式
 
 - **分页笔记本** - 传统逐页笔记（`.snb`）
 - **无边画布** - 无限白板，支持懒加载图块（`.snb`）
 - **PDF 背景** - 在 PDF 上注释，支持可点击内部链接
 - **分享** - `.snbx` 笔记包支持跨平台笔记分享
 
-### 🎯 平板优先用户体验
+### 平板优先用户体验
 
 - **操作栏** - 需要时显示上下文相关按钮
 - **子工具栏** - 无需深入菜单即可快速访问工具设置
 - **页面面板** - 缩略图导航，支持拖拽重新排序
 - **PDF 大纲** - 点击目录条目跳转到章节
 
-### 🔗 高级功能
+### 高级功能
 
 - **链接对象** - 创建可点击链接指向 Markdown 笔记、URL 或位置
 - **Markdown 笔记** - 在任何页面或位置附加富文本笔记
@@ -70,7 +70,7 @@
 
 ---
 
-## 📸 截图
+## 截图
 
 <!-- TODO: Replace with actual screenshots -->
 
@@ -88,7 +88,7 @@
 
 ---
 
-## 🚀 入门指南
+## 入门指南
 
 ### 系统要求
 
@@ -97,11 +97,12 @@
 | **Windows** | Windows 10 1809          | Windows 11       |
 | **macOS**   | macOS 13                | macOS 15+        |
 | **Linux**   | Ubuntu 22.04 / Fedora 38 | 任何支持 Qt 6.4+ 的系统 |
-| **Android** | Android 9 (API 28)     | Android 13+      |
+| **Android** | Android 9 (API 28)       | Android 13+      |
+| **iPadOS**  | iPadOS 16.0              | iPadOS 17+       |
 
 **硬件：** 任何 x86_64 或 ARM64 CPU。已在 Intel Core i5 470UM（2010）、赛扬 N4000、高通骁龙 7c Gen 2、瑞芯微 RK3399 上测试
 
-### 💾 安装
+### 安装
 
 #### Windows / macOS / Linux
 
@@ -117,10 +118,18 @@
 
 #### Android
 
-**选项 1：Google Play Store**（即将推出），支持开发  
+**选项 1：Google Play Store**（即将推出）  
 **选项 2：从源码构建** - 免费，详见 [Android 构建指南](../build_docs/ANDROID_BUILD_GUIDE.md)
 
 > Play Store 版本为便利性收费。源码始终在 GPL v3 下免费。
+
+#### iPadOS
+
+**选项 1：Sileo**（越狱 iPad） - 添加 SpeedyNote APT 源并通过 Sileo 安装  
+**选项 2：TrollStore** - 从 [GitHub Releases](https://github.com/alpha-liu-01/SpeedyNote/releases) 下载 `.ipa` 并使用 TrollStore 安装  
+**选项 3：从源码构建** - 详见 [iPadOS 构建指南](../build_docs/IOS_BUILD_GUIDE.md)
+
+> iPadOS 构建通常需要越狱设备或使用 TrollStore。App Store 分发目前不可用。
 
 #### Linux APT 仓库（Debian/Ubuntu）
 
@@ -138,7 +147,7 @@ sudo apt update && sudo apt install speedynote
 
 ---
 
-## 🛠️ 从源码构建
+## 从源码构建
 
 ### 先决条件
 
@@ -149,6 +158,7 @@ sudo apt update && sudo apt install speedynote
 | macOS   | Xcode 命令行工具、Homebrew                                            |
 | Linux   | Qt 6.4+ 开发包、Poppler-Qt6                                         |
 | Android | Docker（详见 [Android 构建指南](../build_docs/ANDROID_BUILD_GUIDE.md)） |
+| iPadOS  | macOS、Xcode 15+、Qt 6.9.3 for iOS（详见 [iPadOS 构建指南](../build_docs/IOS_BUILD_GUIDE.md)） |
 
 ### 快速构建
 
@@ -176,7 +186,7 @@ cd SpeedyNote
 
 ---
 
-## 📁 文件格式
+## 文件格式
 
 | 格式      | 描述        | 使用场景      |
 | ------- | --------- | --------- |
@@ -187,31 +197,31 @@ cd SpeedyNote
 
 ---
 
-## 🌍 支持语言
+## 支持语言
 
 SpeedyNote 支持多种语言：
 
-- 🇺🇸 英语
-- 🇨🇳 简体中文
-- 🇪🇸 西班牙语（部分）
-- 🇫🇷 法语（部分）
+- 英语  
+- 简体中文  
+- Español（部分）  
+- Français（部分）
 
 > 欢迎为更多翻译做出贡献！
 
 ---
 
-## 🤝 贡献
+## 贡献
 
 欢迎贡献！请随时：
 
-- 🐛 通过 [GitHub Issues](https://github.com/alpha-liu-01/SpeedyNote/issues) 报告错误
-- 💡 建议功能
-- 🌍 添加翻译
-- 🔧 提交拉取请求
+- 通过 [GitHub Issues](https://github.com/alpha-liu-01/SpeedyNote/issues) 报告错误
+- 建议功能
+- 添加翻译
+- 提交拉取请求
 
 ---
 
-## 📜 许可证
+## 许可证
 
 SpeedyNote 采用 **GNU General Public License v3.0** 许可证。
 
@@ -233,21 +243,21 @@ SpeedyNote 采用 **GNU General Public License v3.0** 许可证。
 
 ---
 
-## 💖 支持项目
+## 支持项目
 
 如果 SpeedyNote 对您有帮助，请考虑：
 
-- ☕ [请我喝杯咖啡](https://buymeacoffee.com/alphaliu01)
-- ⭐ 为此仓库加星
-- 📱 在 Google Play 上购买 Android 版本
-- 🐛 报告错误并建议改进
-- 🌍 贡献翻译
+- [请我喝杯咖啡](https://buymeacoffee.com/alphaliu01)
+- 为此仓库加星
+- 在 Google Play 上购买 Android 版本
+- 报告错误并建议改进
+- 贡献翻译
 
 ---
 
 <div align="center">
 
-**用 ❤️ 为值得更好工具的学生打造**
+**为值得更好工具的学生打造**
 
 *SpeedyNote v1.0*
 
