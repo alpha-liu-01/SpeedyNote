@@ -16,8 +16,9 @@
 | Bug | Description | Status |
 |-----|-------------|--------|
 | **BUG-I001** | QFileOpenEvent not delivered on iOS | ✅ Fixed (Inbox directory watcher) |
-| **BUG-I002** | UIDocumentPickerViewController file selection unresponsive | 🔴 Open |
-| **BUG-I003** | Crash in QIOSTapRecognizer / showEditMenu after file drop | 🟡 Investigating |
+| **BUG-I001b** | Inbox PDF not opened when only Launcher visible | ✅ Fixed (auto-create MainWindow) |
+| **BUG-I002** | UIDocumentPickerViewController file selection unresponsive | 🟠 Deprioritized (workaround via Inbox) |
+| **BUG-I003** | Crash in QIOSTapRecognizer / showEditMenu | ✅ Fixed (remove gesture recognizer at runtime) |
 | **BUG-I004** | PDF export files not created / share sheet no-op | 🟡 Investigating |
 
 ---
@@ -53,6 +54,8 @@ Replaced the `QFileOpenEvent`-based `FileOpenEventFilter` (which only works on m
 
 The macOS `FileOpenEventFilter` is preserved for macOS builds where `QFileOpenEvent` works correctly.
 
+This is **production-essential** — `Documents/Inbox/` is the standard iOS mechanism for receiving files via "Open With", AirDrop, drag-and-drop from Split View, Mail attachments, and other apps' share sheets.
+
 **Affected files:**
 - `source/Main.cpp` — `IOSInboxWatcher` class, wiring in `main()`
 - `source/ui/launcher/Launcher.cpp` — Inbox path added to cleanup in `performBatchImport()`
@@ -62,11 +65,86 @@ Dragging `.snbx` into the simulator now imports the notebook correctly. PDF docu
 
 ---
 
-## Open Bugs
+### BUG-I001b: Inbox PDF Not Opened When Only Launcher Is Visible
+**Status:** 🟢 Fixed  
+**Priority:** High  
+**Category:** File Import  
+**Root Cause:** `IOSInboxWatcher::processInbox()` found the PDF in Inbox but could not open it because no `MainWindow` existed yet (only the Launcher was showing). The code checked `m_mainWindow` (null) and `MainWindow::findExistingMainWindow()` (returns nullptr), then silently deleted the PDF from Inbox.
+
+**Symptom:**  
+Opening a PDF from the Files app into SpeedyNote (via "Open With") showed the Launcher but no PDF document tab. Console showed:
+```
+This plugin does not support QPlatformServices::openDocument() for 'file:///...Documents/Inbox/document.pdf'.
+[InboxWatcher] found: /...Documents/Inbox/document.pdf
+```
+The InboxWatcher detected the file but discarded it because there was no MainWindow to open it in.
+
+**Fix:**  
+Added `getOrCreateMainWindow()` helper to `IOSInboxWatcher` that mirrors the pattern from `connectLauncherSignals()`. When a PDF or `.snb` arrives in Inbox and no MainWindow exists:
+1. Creates a new `MainWindow`
+2. Calls `preserveWindowState()` to inherit geometry from the Launcher
+3. Hides the Launcher with animation
+4. Opens the file in the new MainWindow
+
+**Note on "Preview opens instead when dragging":** This is a simulator limitation, not an app bug. Dragging a file from macOS Finder to the iOS Simulator goes through macOS's drag-and-drop system, which routes to the macOS default handler (Preview for PDFs). On a real iPad, "Open With" from Files.app and drag-and-drop from Split View both work through iOS's proper file routing, which does respect the app's `CFBundleDocumentTypes` in Info.plist (both `.snbx` and `.pdf` are registered).
+
+**Affected files:**
+- `source/Main.cpp` — `IOSInboxWatcher::getOrCreateMainWindow()`
+
+---
+
+### BUG-I003: Crash in QIOSTapRecognizer / showEditMenu
+**Status:** 🟢 Fixed (workaround)  
+**Priority:** Medium  
+**Category:** UI / Text Input  
+**Crash Type:** EXC_BAD_ACCESS (SIGSEGV) at address 0x18  
+**Root Cause:** Qt bug — use-after-free in `qiostextinputoverlay.mm`
+
+**Symptom:**  
+The app crashes during normal interaction, typically after a window transition (file import, picker dismissal, etc.). Observed twice with identical crash stacks. The crash is NOT immediate — it happens seconds to minutes after the triggering event.
+
+**Crash Stack (Thread 0, main thread):**
+```
+0  QPlatformWindow::window() const + 12
+1  showEditMenu(UIView*, QPoint) + 105          (qiostextinputoverlay.mm:139)
+2  [QIOSTapRecognizer touchesEnded:withEvent:]   (qiostextinputoverlay.mm:982)
+3  _dispatch_call_block_and_release
+```
+
+**Analysis:**  
+Qt's iOS text input overlay installs a `QIOSTapRecognizer` (a `UIGestureRecognizer` subclass) on the root UIView. When the user taps the screen, the recognizer's `touchesEnded:withEvent:` dispatches a block asynchronously via `dispatch_async` to show the iOS edit menu (copy/paste). 
+
+The bug: the block captures a `UIView*` / `QPlatformWindow*` reference. If the associated window is destroyed between the touch event and the block execution (which is common during window transitions like Launcher → MainWindow, or after dismissing a modal `UIDocumentPickerViewController`), the block dereferences a stale pointer (`0x10 + 0x8 = 0x18`), causing SIGSEGV.
+
+This is a **Qt framework bug** — the asynchronous block should check for window validity before accessing `QPlatformWindow::window()`.
+
+**Confirmed by:**
+- Two separate crash reports with identical stacks, both KERN_INVALID_ADDRESS at 0x18
+- Both triggered by window transitions (file drop import, picker cancellation)
+- `rax = 0x10` in both cases (null-like QPlatformWindow pointer)
+
+**Fix (workaround):**  
+Since SpeedyNote is a stylus drawing app and does not need the iOS copy/paste edit menu, the `QIOSTapRecognizer` is removed entirely at runtime:
+
+- `IOSPlatformHelper::disableEditMenuOverlay()` uses Objective-C runtime introspection to find the `QIOSTapRecognizer` class via `NSClassFromString`
+- Recursively traverses all UIViews in all UIWindowScenes
+- Removes any gesture recognizers matching the class
+- Called via `QTimer::singleShot(0, ...)` after the first widget is shown, so Qt has finished setting up its UIViews
+
+This eliminates both the crash and the unwanted edit menu popup on tap.
+
+**Affected files:**
+- `source/ios/IOSPlatformHelper.h` — declared `disableEditMenuOverlay()`
+- `source/ios/IOSPlatformHelper.mm` — implemented with ObjC runtime introspection
+- `source/Main.cpp` — called after widget show in both code paths
+
+---
+
+## Open / Deprioritized Bugs
 
 ### BUG-I002: UIDocumentPickerViewController File Selection Unresponsive
-**Status:** 🔴 Open  
-**Priority:** High  
+**Status:** 🟠 Deprioritized  
+**Priority:** Low (workaround available)  
 **Category:** File Import (Native Picker)  
 **Affected:** PDF import (single-select), SNBX import (multi-select)
 
@@ -87,45 +165,16 @@ This may be related to:
 - Simulator-specific limitations with the document picker's remote UI
 
 **Workaround:**  
-Use the Inbox watcher (BUG-I001 fix) — users can import files by dragging them into the app or using iOS "Open With" / Files app sharing, bypassing the in-app picker entirely.
+The Inbox watcher (BUG-I001) provides a complete alternative import path. On iPad, the natural UX for importing files is:
+- **"Open With"** from the Files app (long-press file → Share → SpeedyNote)
+- **Drag-and-drop** from Split View / Slide Over
+- **AirDrop** from another device
+
+All of these go through the Inbox mechanism and work correctly. The in-app file picker is a convenience shortcut; if it can't be fixed, the import buttons could show a brief instruction instead.
 
 **Affected files:**
 - `source/ios/PdfPickerIOS.mm`
 - `source/ios/SnbxPickerIOS.mm`
-
----
-
-### BUG-I003: Crash in QIOSTapRecognizer / showEditMenu After File Drop
-**Status:** 🟡 Investigating  
-**Priority:** Medium  
-**Category:** UI / Text Input  
-**Crash Type:** EXC_BAD_ACCESS (SIGSEGV) at address 0x18
-
-**Symptom:**  
-After dragging a file into the simulator (which triggers the Inbox import), the app crashes ~2.5 minutes after launch. The crash is NOT immediate — it happens during normal interaction after the import.
-
-**Crash Stack (Thread 0, main thread):**
-```
-0  QPlatformWindow::window() const + 12
-1  showEditMenu(UIView*, QPoint) + 105          (qiostextinputoverlay.mm:139)
-2  [QIOSTapRecognizer touchesEnded:withEvent:]   (qiostextinputoverlay.mm:982)
-3  _dispatch_call_block_and_release
-...
-```
-
-**Analysis:**  
-`QPlatformWindow::window()` dereferences `this + 0x8` (offset 0x18 from a null-like base pointer of 0x10, stored in `rax`). This means a `QPlatformWindow*` that was once valid has been destroyed, but the `QIOSTapRecognizer` still holds a stale reference.
-
-The tap recognizer's `touchesEnded:withEvent:` dispatches a block asynchronously (via `dispatch_async` on the main queue) that calls `showEditMenu()`. By the time the block executes, the window it references may have been destroyed.
-
-This is likely a **Qt bug in the iOS text input overlay** — the asynchronous block captures a view/window reference that becomes invalid. This could be triggered by:
-- Window destruction during or shortly after the file import flow
-- A race between the Inbox watcher's import processing and Qt's internal window management
-
-**Possible mitigations:**
-- File a Qt bug report for `qiostextinputoverlay.mm` use-after-free
-- Investigate if SpeedyNote's import flow destroys/recreates windows in a way that races with the tap recognizer
-- As a workaround, consider adding a null check guard via Qt source patch if reproducible
 
 ---
 

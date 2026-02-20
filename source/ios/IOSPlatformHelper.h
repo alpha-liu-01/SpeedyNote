@@ -43,4 +43,17 @@ void applyPalette(QApplication& app);
  */
 void applyFonts(QApplication& app);
 
+/**
+ * @brief Remove Qt's QIOSTapRecognizer to prevent a use-after-free crash.
+ *
+ * Qt's iOS text input overlay installs a QIOSTapRecognizer on the root
+ * UIView. This recognizer dispatches blocks asynchronously to show the
+ * edit menu (copy/paste). If the window is destroyed before the block
+ * runs, QPlatformWindow::window() dereferences a stale pointer (SIGSEGV).
+ *
+ * SpeedyNote is a stylus drawing app and does not need the iOS edit menu.
+ * Call this after the first QWidget::show() so Qt has created its UIView.
+ */
+void disableEditMenuOverlay();
+
 } // namespace IOSPlatformHelper

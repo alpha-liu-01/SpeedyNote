@@ -545,6 +545,25 @@ private:
         QTimer::singleShot(400, this, &IOSInboxWatcher::processInbox);
     }
 
+    MainWindow* getOrCreateMainWindow()
+    {
+        MainWindow *w = m_mainWindow
+            ? m_mainWindow
+            : MainWindow::findExistingMainWindow();
+        if (w)
+            return w;
+
+        w = new MainWindow();
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        if (m_launcher) {
+            w->preserveWindowState(m_launcher, false);
+            m_launcher->hideWithAnimation();
+        }
+        w->show();
+        m_mainWindow = w;
+        return w;
+    }
+
     void processInbox()
     {
         QDir inbox(m_inboxPath);
@@ -562,27 +581,17 @@ private:
             if (ext == "snbx") {
                 snbxFiles.append(path);
             } else if (ext == "pdf") {
-                MainWindow *w = m_mainWindow
-                    ? m_mainWindow
-                    : MainWindow::findExistingMainWindow();
-                if (w) {
-                    w->openFileInNewTab(path);
-                }
+                MainWindow *w = getOrCreateMainWindow();
+                w->openFileInNewTab(path);
                 QFile::remove(path);
             } else if (fi.isDir() && path.endsWith(QStringLiteral(".snb"))) {
-                MainWindow *w = m_mainWindow
-                    ? m_mainWindow
-                    : MainWindow::findExistingMainWindow();
-                if (w) {
-                    w->openFileInNewTab(path);
-                }
+                MainWindow *w = getOrCreateMainWindow();
+                w->openFileInNewTab(path);
             }
         }
 
         if (!snbxFiles.isEmpty() && m_launcher) {
             m_launcher->importFiles(snbxFiles);
-            // importFiles → performBatchImport will handle the actual import;
-            // clean up source .snbx from Inbox after import
             for (const QString &f : snbxFiles) {
                 QFile::remove(f);
             }
@@ -773,6 +782,7 @@ int main(int argc, char* argv[])
         fileOpenFilter.setMainWindow(w);
 #elif defined(Q_OS_IOS)
         inboxWatcher.setMainWindow(w);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
         exitCode = app.exec();
     } else {
@@ -785,6 +795,7 @@ int main(int argc, char* argv[])
         fileOpenFilter.setLauncher(launcher);
 #elif defined(Q_OS_IOS)
         inboxWatcher.setLauncher(launcher);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
         exitCode = app.exec();
     }

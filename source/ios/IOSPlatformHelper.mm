@@ -5,8 +5,8 @@
 #include <QApplication>
 #include <QDebug>
 
-// TODO Phase 4: Add UIKit integration for dark mode and system appearance
-// #import <UIKit/UIKit.h>
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 namespace IOSPlatformHelper {
 
@@ -32,6 +32,38 @@ void applyFonts(QApplication& app)
     // TODO Phase 4: Set San Francisco system font with appropriate sizing
     // Mirror the logic in applyAndroidFonts() from Main.cpp
     qDebug() << "IOSPlatformHelper::applyFonts: Not yet implemented (stub)";
+}
+
+static void removeRecognizersRecursive(UIView *view, Class targetClass)
+{
+    for (UIGestureRecognizer *gr in [view.gestureRecognizers copy]) {
+        if ([gr isKindOfClass:targetClass]) {
+            [view removeGestureRecognizer:gr];
+            fprintf(stderr, "[IOSPlatformHelper] removed %s from %s\n",
+                    class_getName(targetClass),
+                    class_getName([view class]));
+        }
+    }
+    for (UIView *sub in view.subviews) {
+        removeRecognizersRecursive(sub, targetClass);
+    }
+}
+
+void disableEditMenuOverlay()
+{
+    Class tapRecognizerClass = NSClassFromString(@"QIOSTapRecognizer");
+    if (!tapRecognizerClass) {
+        fprintf(stderr, "[IOSPlatformHelper] QIOSTapRecognizer class not found, skipping\n");
+        return;
+    }
+
+    for (UIWindowScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]])
+            continue;
+        for (UIWindow *window in scene.windows) {
+            removeRecognizersRecursive(window, tapRecognizerClass);
+        }
+    }
 }
 
 } // namespace IOSPlatformHelper
