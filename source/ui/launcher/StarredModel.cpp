@@ -16,7 +16,7 @@ int StarredModel::rowCount(const QModelIndex& parent) const
     if (parent.isValid()) {
         return 0;  // Flat list, no children
     }
-    return m_displayList.size();
+    return static_cast<int>(m_displayList.size());
 }
 
 QVariant StarredModel::data(const QModelIndex& index, int role) const
@@ -386,7 +386,7 @@ void StarredModel::setSelectMode(bool selectMode)
     
     // Notify all items that select mode changed (affects visual appearance)
     if (!m_displayList.isEmpty()) {
-        emit dataChanged(index(0), index(m_displayList.size() - 1), 
+        emit dataChanged(index(0), index(static_cast<int>(m_displayList.size()) - 1), 
                          {IsInSelectModeRole, IsSelectedInBatchRole});
     }
 }
@@ -401,7 +401,7 @@ void StarredModel::setSelectedBundlePaths(const QSet<QString>& selectedPaths)
     
     // Notify all items that selection changed
     if (!m_displayList.isEmpty()) {
-        emit dataChanged(index(0), index(m_displayList.size() - 1), 
+        emit dataChanged(index(0), index(static_cast<int>(m_displayList.size()) - 1), 
                          {IsSelectedInBatchRole});
     }
 }

@@ -376,7 +376,7 @@ void BatchPdfExportDialog::filterEdgelessNotebooks()
 
 void BatchPdfExportDialog::updateTitle()
 {
-    int count = m_validBundles.size();
+    int count = static_cast<int>(m_validBundles.size());
     
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     if (count == 1) {
@@ -395,7 +395,7 @@ void BatchPdfExportDialog::updateTitle()
 
 void BatchPdfExportDialog::updateWarningLabel()
 {
-    int skipped = m_skippedBundles.size();
+    int skipped = static_cast<int>(m_skippedBundles.size());
     
     if (skipped == 0) {
         m_warningLabel->setVisible(false);

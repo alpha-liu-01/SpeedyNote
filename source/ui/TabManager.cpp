@@ -151,7 +151,7 @@ void TabManager::switchToPrevTab()
     }
     
     int current = m_tabBar->currentIndex();
-    int prev = (current - 1 + m_viewports.size()) % m_viewports.size();  // Wrap around to last
+    int prev = (current - 1 + static_cast<int>(m_viewports.size())) % static_cast<int>(m_viewports.size());  // Wrap around to last
     m_tabBar->setCurrentIndex(prev);
 }
 
@@ -191,7 +191,7 @@ int TabManager::currentIndex() const
 
 int TabManager::tabCount() const
 {
-    return m_viewports.size();
+    return static_cast<int>(m_viewports.size());
 }
 
 // ============================================================================

@@ -39,7 +39,7 @@ int TimelineModel::rowCount(const QModelIndex& parent) const
     if (parent.isValid()) {
         return 0;
     }
-    return m_items.size();
+    return static_cast<int>(m_items.size());
 }
 
 QVariant TimelineModel::data(const QModelIndex& index, int role) const
@@ -291,7 +291,7 @@ void TimelineModel::setSelectMode(bool selectMode)
     
     // Notify all items that select mode changed (affects visual appearance)
     if (!m_items.isEmpty()) {
-        emit dataChanged(index(0), index(m_items.size() - 1), 
+        emit dataChanged(index(0), index(static_cast<int>(m_items.size()) - 1), 
                          {IsInSelectModeRole, IsSelectedInBatchRole});
     }
 }
@@ -306,7 +306,7 @@ void TimelineModel::setSelectedBundlePaths(const QSet<QString>& selectedPaths)
     
     // Notify all items that selection changed
     if (!m_items.isEmpty()) {
-        emit dataChanged(index(0), index(m_items.size() - 1), 
+        emit dataChanged(index(0), index(static_cast<int>(m_items.size()) - 1), 
                          {IsSelectedInBatchRole});
     }
 }

@@ -773,7 +773,7 @@ bool Document::removePage(int index)
 
 bool Document::movePage(int from, int to)
 {
-    int count = m_pageOrder.size();
+    int count = static_cast<int>(m_pageOrder.size());
     
     // Validate indices
     if (from < 0 || from >= count || to < 0 || to >= count) {

@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.16) # Qt requires CMake 3.16
+cmake_minimum_required(VERSION 3.16) # Qt requires CMake 3.16
 project(qmarkdowntextedit LANGUAGES CXX VERSION 1.0.0)
 
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
@@ -55,6 +55,13 @@ add_library(qmarkdowntextedit ${QMARKDOWNTEXTEDIT_SOURCES})
 set_target_properties(qmarkdowntextedit PROPERTIES
     PUBLIC_HEADER "${QMARKDOWNTEXTEDIT_HEADERS}"
 )
+
+# Suppress qsizetype narrowing warnings in this third-party library.
+# These are benign (text will never exceed 2 billion characters), and we
+# should not modify upstream source files.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    target_compile_options(qmarkdowntextedit PRIVATE -Wno-shorten-64-to-32)
+endif()
 
 target_link_libraries(qmarkdowntextedit PUBLIC
     Qt${QT_VERSION_MAJOR}::Widgets

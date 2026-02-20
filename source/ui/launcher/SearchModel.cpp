@@ -10,7 +10,7 @@ int SearchModel::rowCount(const QModelIndex& parent) const
     if (parent.isValid()) {
         return 0;  // Flat list, no children
     }
-    return m_displayList.size();
+    return static_cast<int>(m_displayList.size());
 }
 
 QVariant SearchModel::data(const QModelIndex& index, int role) const

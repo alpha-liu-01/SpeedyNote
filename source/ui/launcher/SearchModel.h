@@ -91,17 +91,17 @@ public:
     /**
      * @brief Get the total number of results (folders + notebooks).
      */
-    int resultCount() const { return m_folders.size() + m_notebooks.size(); }
+    int resultCount() const { return static_cast<int>(m_folders.size() + m_notebooks.size()); }
     
     /**
      * @brief Get the number of folder results.
      */
-    int folderCount() const { return m_folders.size(); }
+    int folderCount() const { return static_cast<int>(m_folders.size()); }
     
     /**
      * @brief Get the number of notebook results.
      */
-    int notebookCount() const { return m_notebooks.size(); }
+    int notebookCount() const { return static_cast<int>(m_notebooks.size()); }
     
     /**
      * @brief Check if the model has any results.

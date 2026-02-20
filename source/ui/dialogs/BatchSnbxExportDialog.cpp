@@ -225,7 +225,7 @@ void BatchSnbxExportDialog::setupUi()
 
 void BatchSnbxExportDialog::updateTitle()
 {
-    int count = m_bundlePaths.size();
+    int count = static_cast<int>(m_bundlePaths.size());
     
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     if (count == 1) {

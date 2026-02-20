@@ -62,7 +62,7 @@ void TimelineListView::enterSelectMode(const QString& firstSelection)
     }
     
     emit selectModeChanged(true);
-    emit batchSelectionChanged(m_selectedBundlePaths.size());
+    emit batchSelectionChanged(static_cast<int>(m_selectedBundlePaths.size()));
 }
 
 void TimelineListView::exitSelectMode()
@@ -100,7 +100,7 @@ void TimelineListView::toggleSelection(const QString& bundlePath)
         m_timelineModel->setSelectedBundlePaths(m_selectedBundlePaths);
     }
     
-    emit batchSelectionChanged(m_selectedBundlePaths.size());
+    emit batchSelectionChanged(static_cast<int>(m_selectedBundlePaths.size()));
 }
 
 void TimelineListView::selectAll()
@@ -124,7 +124,7 @@ void TimelineListView::selectAll()
     // Sync with model for delegate painting
     m_timelineModel->setSelectedBundlePaths(m_selectedBundlePaths);
     
-    emit batchSelectionChanged(m_selectedBundlePaths.size());
+    emit batchSelectionChanged(static_cast<int>(m_selectedBundlePaths.size()));
 }
 
 void TimelineListView::deselectAll()

@@ -89,6 +89,9 @@
         self.completionBlock(localPath);
 }
 
+// ARC manages [super dealloc] automatically; suppress the false-positive warning.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
 - (void)dealloc
 {
     if (self.pickerWindow) {
@@ -98,6 +101,7 @@
     }
     fprintf(stderr, "[PdfPickerIOS] delegate: dealloc\n");
 }
+#pragma clang diagnostic pop
 
 @end
 

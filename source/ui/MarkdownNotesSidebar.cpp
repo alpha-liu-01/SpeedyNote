@@ -435,7 +435,7 @@ void MarkdownNotesSidebar::displaySearchResults(const QList<NoteDisplayData>& re
     if (results.isEmpty()) {
         searchStatusLabel->setText(tr("No results found for \"%1\"").arg(lastSearchQuery));
     } else {
-        searchStatusLabel->setText(tr("%n result(s) found", "", results.size()));
+        searchStatusLabel->setText(tr("%n result(s) found", "", static_cast<int>(results.size())));
     }
     searchStatusLabel->setVisible(true);
     
