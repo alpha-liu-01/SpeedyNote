@@ -3430,11 +3430,13 @@ void MainWindow::addNewTab() {
         doc->defaultGridSpacing = defaultGridSpacing;
         doc->defaultLineSpacing = defaultLineSpacing;
         
-        // Also apply to the first page (already created by Document::createNew)
+        // Also apply to the first page (already created by Document::createNew).
+        // Use setPageSize() so both the Page object AND the layout metadata
+        // (used by pageSizeAt() / viewport layout) are updated together.
         if (doc->pageCount() > 0) {
+            doc->setPageSize(0, defaultPageSize);
             Page* firstPage = doc->page(0);
             if (firstPage) {
-                firstPage->size = defaultPageSize;
                 firstPage->backgroundType = defaultStyle;
                 firstPage->backgroundColor = defaultBgColor;
                 firstPage->gridColor = defaultGridColor;
