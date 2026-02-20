@@ -43,9 +43,9 @@ static void presentShareSheet(UIActivityViewController *avc)
         avc.popoverPresentationController.permittedArrowDirections = 0;
     }
 
-    // Tear down the dedicated window after the share sheet is dismissed.
     avc.completionWithItemsHandler = ^(UIActivityType, BOOL, NSArray *, NSError *) {
         shareWindow.hidden = YES;
+        shareWindow.windowScene = nil;
     };
 
     [hostVC presentViewController:avc animated:YES completion:nil];

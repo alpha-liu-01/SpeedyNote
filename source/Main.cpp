@@ -516,6 +516,7 @@ private:
 #include <QTimer>
 #include <QFileInfo>
 #include <QDir>
+#include <QPointer>
 
 class IOSInboxWatcher : public QObject
 {
@@ -541,7 +542,8 @@ public:
 private:
     void onDirectoryChanged(const QString &)
     {
-        // Small delay: iOS may still be writing the file
+        if (m_processing)
+            return;
         QTimer::singleShot(400, this, &IOSInboxWatcher::processInbox);
     }
 
@@ -575,7 +577,7 @@ private:
     MainWindow* getOrCreateMainWindow()
     {
         MainWindow *w = m_mainWindow
-            ? m_mainWindow
+            ? m_mainWindow.data()
             : MainWindow::findExistingMainWindow();
         if (w)
             return w;
@@ -593,6 +595,10 @@ private:
 
     void processInbox()
     {
+        if (m_processing)
+            return;
+        m_processing = true;
+
         QDir inbox(m_inboxPath);
         const QFileInfoList entries = inbox.entryInfoList(
             QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
@@ -611,32 +617,36 @@ private:
                 QString permanentPath = copyPdfToPermanentStorage(path);
                 if (!permanentPath.isEmpty()) {
                     MainWindow *w = getOrCreateMainWindow();
-                    w->openFileInNewTab(permanentPath);
+                    if (w)
+                        w->openFileInNewTab(permanentPath);
                 }
                 QFile::remove(path);
             } else if (fi.isDir() && path.endsWith(QStringLiteral(".snb"))) {
                 MainWindow *w = getOrCreateMainWindow();
-                w->openFileInNewTab(path);
+                if (w)
+                    w->openFileInNewTab(path);
             }
         }
 
+        // performBatchImport handles Inbox cleanup internally, no need to
+        // remove snbx files here (it would be a harmless double-delete).
         if (!snbxFiles.isEmpty() && m_launcher) {
             m_launcher->importFiles(snbxFiles);
-            for (const QString &f : snbxFiles) {
-                QFile::remove(f);
-            }
         }
 
         // Re-add the path in case QFileSystemWatcher dropped it
         if (!m_watcher.directories().contains(m_inboxPath)) {
             m_watcher.addPath(m_inboxPath);
         }
+
+        m_processing = false;
     }
 
     QFileSystemWatcher m_watcher;
     QString m_inboxPath;
-    Launcher *m_launcher = nullptr;
-    MainWindow *m_mainWindow = nullptr;
+    QPointer<Launcher> m_launcher;
+    QPointer<MainWindow> m_mainWindow;
+    bool m_processing = false;
 };
 #endif // Q_OS_IOS
 

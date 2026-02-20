@@ -91,6 +91,11 @@
 
 - (void)dealloc
 {
+    if (self.pickerWindow) {
+        self.pickerWindow.hidden = YES;
+        self.pickerWindow.windowScene = nil;
+        self.pickerWindow = nil;
+    }
     fprintf(stderr, "[PdfPickerIOS] delegate: dealloc\n");
 }
 

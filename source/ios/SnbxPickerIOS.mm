@@ -94,6 +94,11 @@
 
 - (void)dealloc
 {
+    if (self.pickerWindow) {
+        self.pickerWindow.hidden = YES;
+        self.pickerWindow.windowScene = nil;
+        self.pickerWindow = nil;
+    }
     fprintf(stderr, "[SnbxPickerIOS] delegate: dealloc\n");
 }
 
@@ -153,8 +158,12 @@ void pickSnbxFiles(const QString& destDir, std::function<void(const QStringList&
     pickerWindow.rootViewController.view.backgroundColor = [UIColor clearColor];
     [pickerWindow makeKeyAndVisible];
 
+    UTType *snbxType = [UTType typeWithIdentifier:@"org.speedynote.snbx"];
+    if (!snbxType)
+        snbxType = UTTypeItem;
+
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
-        initForOpeningContentTypes:@[UTTypeItem]];
+        initForOpeningContentTypes:@[snbxType]];
     picker.allowsMultipleSelection = YES;
     picker.modalPresentationStyle = UIModalPresentationFormSheet;
 
