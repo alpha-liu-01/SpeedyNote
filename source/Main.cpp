@@ -701,7 +701,6 @@ int main(int argc, char* argv[])
     applyAndroidPalette(app);
     applyAndroidFonts(app);
 #elif defined(Q_OS_IOS)
-    // TODO Phase 4: Implement dark mode detection, palette, fonts in IOSPlatformHelper
     IOSPlatformHelper::applyPalette(app);
     IOSPlatformHelper::applyFonts(app);
 #endif
