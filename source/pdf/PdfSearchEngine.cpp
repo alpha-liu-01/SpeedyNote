@@ -64,7 +64,7 @@ void PdfSearchEngine::clearCache()
 int PdfSearchEngine::cacheSize() const
 {
     QMutexLocker lock(&m_cacheMutex);
-    return m_cache.size();
+    return static_cast<int>(m_cache.size());
 }
 
 bool PdfSearchEngine::isPageCached(int pageIndex) const
@@ -164,7 +164,7 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchPage(int pageIndex,
     int matchIndex = 0;
     
     while (searchPos < pageText.length()) {
-        int foundPos = pageText.indexOf(text, searchPos, cs);
+        int foundPos = static_cast<int>(pageText.indexOf(text, searchPos, cs));
         if (foundPos < 0) {
             break;
         }
@@ -177,7 +177,7 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchPage(int pageIndex,
                     continue;
                 }
             }
-            int endPos = foundPos + text.length();
+            int endPos = foundPos + static_cast<int>(text.length());
             if (endPos < pageText.length()) {
                 QChar after = pageText[endPos];
                 if (after.isLetterOrNumber() || after == '_') {
@@ -288,7 +288,7 @@ void PdfSearchEngine::doSearch(int startPage, int startMatchIndex, int direction
                     }
                 } else {
                     // Backward: find match before startMatchIndex
-                    for (int i = pageMatches.size() - 1; i >= 0; --i) {
+                    for (int i = static_cast<int>(pageMatches.size()) - 1; i >= 0; --i) {
                         if (startMatchIndex < 0 || pageMatches[i].matchIndex < startMatchIndex) {
                             foundIdx = i;
                             break;
@@ -296,7 +296,7 @@ void PdfSearchEngine::doSearch(int startPage, int startMatchIndex, int direction
                     }
                 }
             } else {
-                foundIdx = (direction > 0) ? 0 : pageMatches.size() - 1;
+                foundIdx = (direction > 0) ? 0 : static_cast<int>(pageMatches.size()) - 1;
             }
             
             if (foundIdx >= 0) {
@@ -325,7 +325,7 @@ void PdfSearchEngine::doSearch(int startPage, int startMatchIndex, int direction
         if (currentPage == startPage && pagesSearched > 0) {
             QVector<PdfSearchMatch> startPageMatches = getCachedOrSearch(startPage);
             if (!startPageMatches.isEmpty()) {
-                int foundIdx = (direction > 0) ? 0 : startPageMatches.size() - 1;
+                int foundIdx = (direction > 0) ? 0 : static_cast<int>(startPageMatches.size()) - 1;
                 QMutexLocker lock(&m_resultMutex);
                 m_foundMatch = startPageMatches[foundIdx];
                 m_foundPageMatches = startPageMatches;

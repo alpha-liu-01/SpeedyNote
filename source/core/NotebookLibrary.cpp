@@ -376,7 +376,7 @@ void NotebookLibrary::createStarredFolder(const QString& name)
 
 void NotebookLibrary::deleteStarredFolder(const QString& name)
 {
-    int index = m_starredFolderOrder.indexOf(name);
+    qsizetype index = m_starredFolderOrder.indexOf(name);
     if (index < 0) {
         return; // Folder doesn't exist
     }
@@ -394,13 +394,13 @@ void NotebookLibrary::deleteStarredFolder(const QString& name)
 
 void NotebookLibrary::reorderStarredFolder(const QString& name, int newIndex)
 {
-    int currentIndex = m_starredFolderOrder.indexOf(name);
+    qsizetype currentIndex = m_starredFolderOrder.indexOf(name);
     if (currentIndex < 0) {
         return; // Folder doesn't exist
     }
     
     // Clamp newIndex to valid range
-    newIndex = qBound(0, newIndex, m_starredFolderOrder.size() - 1);
+    newIndex = qBound(0, newIndex, static_cast<int>(m_starredFolderOrder.size()) - 1);
     
     if (currentIndex == newIndex) {
         return; // No change

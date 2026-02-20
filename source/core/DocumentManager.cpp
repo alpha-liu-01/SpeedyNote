@@ -287,7 +287,7 @@ void DocumentManager::closeDocument(Document* doc)
         return;
     }
     
-    int index = m_documents.indexOf(doc);
+    qsizetype index = m_documents.indexOf(doc);
     if (index < 0) {
         qWarning() << "DocumentManager::closeDocument: Document not found";
         return;
@@ -339,12 +339,12 @@ Document* DocumentManager::documentAt(int index) const
 
 int DocumentManager::documentCount() const
 {
-    return m_documents.size();
+    return static_cast<int>(m_documents.size());
 }
 
 int DocumentManager::indexOf(Document* doc) const
 {
-    return m_documents.indexOf(doc);
+    return static_cast<int>(m_documents.indexOf(doc));
 }
 
 // ============================================================================

@@ -1,4 +1,4 @@
-﻿# Prerequisites
+# Prerequisites
 *.d
 
 # Compiled Object files
@@ -80,3 +80,5 @@ ios/mupdf-build-sim/
 ios/test-ios-qt/
 ios/build-device/
 ios/build-sim/
+ios/dist/
+ios/Assets.xcassets/

@@ -39,7 +39,7 @@ MUPDF_VERSION="1.24.10"
 MUPDF_URL="https://mupdf.com/downloads/archive/mupdf-${MUPDF_VERSION}-source.tar.gz"
 
 # iOS deployment target (must match CMakeLists.txt)
-IOS_DEPLOYMENT_TARGET="15.0"
+IOS_DEPLOYMENT_TARGET="16.0"
 
 # =============================================================================
 # Parse arguments

@@ -477,8 +477,9 @@ protected:
         QString path = foe->file();
         if (path.isEmpty())
             return true;
-
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[FileOpen] received: %s\n", qPrintable(path));
+        #endif
 
         QFileInfo fi(path);
         QString ext = fi.suffix().toLower();
@@ -516,6 +517,7 @@ private:
 #include <QTimer>
 #include <QFileInfo>
 #include <QDir>
+#include <QPointer>
 
 class IOSInboxWatcher : public QObject
 {
@@ -541,12 +543,67 @@ public:
 private:
     void onDirectoryChanged(const QString &)
     {
-        // Small delay: iOS may still be writing the file
+        if (m_processing)
+            return;
         QTimer::singleShot(400, this, &IOSInboxWatcher::processInbox);
+    }
+
+    QString copyPdfToPermanentStorage(const QString &inboxPath)
+    {
+        QString pdfsDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                          + QStringLiteral("/pdfs");
+        QDir().mkpath(pdfsDir);
+
+        QFileInfo fi(inboxPath);
+        QString destPath = pdfsDir + "/" + fi.fileName();
+
+        if (QFile::exists(destPath)) {
+            QString baseName = fi.completeBaseName();
+            QString ext = fi.suffix();
+            int counter = 1;
+            do {
+                destPath = pdfsDir + "/" + baseName
+                           + QString("_%1.").arg(counter++) + ext;
+            } while (QFile::exists(destPath));
+        }
+
+        if (QFile::copy(inboxPath, destPath)) {
+            #ifdef SPEEDYNOTE_DEBUG
+            fprintf(stderr, "[InboxWatcher] copied PDF to %s\n", qPrintable(destPath));
+            #endif
+            return destPath;
+        }
+        #ifdef SPEEDYNOTE_DEBUG
+        fprintf(stderr, "[InboxWatcher] failed to copy PDF to %s\n", qPrintable(destPath));
+        #endif
+        return QString();
+    }
+
+    MainWindow* getOrCreateMainWindow()
+    {
+        MainWindow *w = m_mainWindow
+            ? m_mainWindow.data()
+            : MainWindow::findExistingMainWindow();
+        if (w)
+            return w;
+
+        w = new MainWindow();
+        w->setAttribute(Qt::WA_DeleteOnClose);
+        if (m_launcher) {
+            w->preserveWindowState(m_launcher, false);
+            m_launcher->hideWithAnimation();
+        }
+        w->show();
+        m_mainWindow = w;
+        return w;
     }
 
     void processInbox()
     {
+        if (m_processing)
+            return;
+        m_processing = true;
+
         QDir inbox(m_inboxPath);
         const QFileInfoList entries = inbox.entryInfoList(
             QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
@@ -557,47 +614,46 @@ private:
             QString ext = fi.suffix().toLower();
             QString path = fi.absoluteFilePath();
 
+            #ifdef SPEEDYNOTE_DEBUG
             fprintf(stderr, "[InboxWatcher] found: %s\n", qPrintable(path));
+            #endif
 
             if (ext == "snbx") {
                 snbxFiles.append(path);
             } else if (ext == "pdf") {
-                MainWindow *w = m_mainWindow
-                    ? m_mainWindow
-                    : MainWindow::findExistingMainWindow();
-                if (w) {
-                    w->openFileInNewTab(path);
+                QString permanentPath = copyPdfToPermanentStorage(path);
+                if (!permanentPath.isEmpty()) {
+                    MainWindow *w = getOrCreateMainWindow();
+                    if (w)
+                        w->openFileInNewTab(permanentPath);
                 }
                 QFile::remove(path);
             } else if (fi.isDir() && path.endsWith(QStringLiteral(".snb"))) {
-                MainWindow *w = m_mainWindow
-                    ? m_mainWindow
-                    : MainWindow::findExistingMainWindow();
-                if (w) {
+                MainWindow *w = getOrCreateMainWindow();
+                if (w)
                     w->openFileInNewTab(path);
-                }
             }
         }
 
+        // performBatchImport handles Inbox cleanup internally, no need to
+        // remove snbx files here (it would be a harmless double-delete).
         if (!snbxFiles.isEmpty() && m_launcher) {
             m_launcher->importFiles(snbxFiles);
-            // importFiles → performBatchImport will handle the actual import;
-            // clean up source .snbx from Inbox after import
-            for (const QString &f : snbxFiles) {
-                QFile::remove(f);
-            }
         }
 
         // Re-add the path in case QFileSystemWatcher dropped it
         if (!m_watcher.directories().contains(m_inboxPath)) {
             m_watcher.addPath(m_inboxPath);
         }
+
+        m_processing = false;
     }
 
     QFileSystemWatcher m_watcher;
     QString m_inboxPath;
-    Launcher *m_launcher = nullptr;
-    MainWindow *m_mainWindow = nullptr;
+    QPointer<Launcher> m_launcher;
+    QPointer<MainWindow> m_mainWindow;
+    bool m_processing = false;
 };
 #endif // Q_OS_IOS
 
@@ -652,7 +708,6 @@ int main(int argc, char* argv[])
     applyAndroidPalette(app);
     applyAndroidFonts(app);
 #elif defined(Q_OS_IOS)
-    // TODO Phase 4: Implement dark mode detection, palette, fonts in IOSPlatformHelper
     IOSPlatformHelper::applyPalette(app);
     IOSPlatformHelper::applyFonts(app);
 #endif
@@ -773,6 +828,7 @@ int main(int argc, char* argv[])
         fileOpenFilter.setMainWindow(w);
 #elif defined(Q_OS_IOS)
         inboxWatcher.setMainWindow(w);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
         exitCode = app.exec();
     } else {
@@ -785,6 +841,7 @@ int main(int argc, char* argv[])
         fileOpenFilter.setLauncher(launcher);
 #elif defined(Q_OS_IOS)
         inboxWatcher.setLauncher(launcher);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
         exitCode = app.exec();
     }

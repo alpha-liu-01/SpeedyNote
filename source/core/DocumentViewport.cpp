@@ -3659,7 +3659,7 @@ void DocumentViewport::updatePdfCacheCapacity()
 {
     // Calculate visible page count
     QVector<int> visible = visiblePages();
-    int visibleCount = visible.size();
+    int visibleCount = static_cast<int>(visible.size());
     
     // Buffer: 3 pages for 1-column (1 above + 2 below or vice versa)
     //         6 pages for 2-column (1 row above + 1 row below = 4, plus margin)
@@ -4914,7 +4914,7 @@ void DocumentViewport::renderLassoPathIncremental(QPainter& painter)
             m_lassoPathLength += segLen;
         }
         
-        m_lastRenderedLassoIdx = m_lassoPath.size() - 1;
+        m_lastRenderedLassoIdx = static_cast<int>(m_lassoPath.size()) - 1;
     }
     
     // Blit cache to painter
@@ -5610,7 +5610,7 @@ void DocumentViewport::clearObjectClipboard()
 
 void DocumentViewport::deselectObjectById(const QString& objectId)
 {
-    for (int i = m_selectedObjects.size() - 1; i >= 0; --i) {
+    for (int i = static_cast<int>(m_selectedObjects.size()) - 1; i >= 0; --i) {
         if (m_selectedObjects[i] && m_selectedObjects[i]->id == objectId) {
             m_selectedObjects.removeAt(i);
             emit objectSelectionChanged();
@@ -8727,7 +8727,7 @@ void DocumentViewport::applySelectionTransform()
             
             // Find and remove strokes that match our selection by ID
             QVector<VectorStroke>& layerStrokes = layer->strokes();
-            for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+            for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
                 for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                     if (layerStrokes[i].id == selectedStroke.id) {
                         // Store for undo (tile-local coords)
@@ -8784,7 +8784,7 @@ void DocumentViewport::applySelectionTransform()
         
         // Remove original strokes by ID (and track for undo)
         QVector<VectorStroke>& layerStrokes = layer->strokes();
-        for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+        for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
             for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                 if (layerStrokes[i].id == selectedStroke.id) {
                     undoAction.removedStrokes.append(layerStrokes[i]);
@@ -9121,7 +9121,7 @@ void DocumentViewport::deleteSelection()
             QVector<VectorStroke>& layerStrokes = layer->strokes();
             bool modified = false;
             
-            for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+            for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
                 for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                     if (layerStrokes[i].id == selectedStroke.id) {
                         // Store for undo (tile-local coords)
@@ -9166,7 +9166,7 @@ void DocumentViewport::deleteSelection()
         
         // Remove strokes by ID
         QVector<VectorStroke>& layerStrokes = layer->strokes();
-        for (int i = layerStrokes.size() - 1; i >= 0; --i) {
+        for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
             for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                 if (layerStrokes[i].id == selectedStroke.id) {
                     undoAction.strokes.append(layerStrokes[i]);
@@ -9779,10 +9779,10 @@ void DocumentViewport::updateSelectedTextAndRects()
         
         // Determine character range for this box
         int startChar = (boxIdx == fromBox) ? fromChar : 0;
-        int endChar = (boxIdx == toBox) ? toChar : (box.text.length() - 1);
+        int endChar = (boxIdx == toBox) ? toChar : static_cast<int>(box.text.length() - 1);
         
         // Clamp to valid range (now safe since we checked for empty text)
-        int maxCharIdx = box.text.length() - 1;
+        int maxCharIdx = static_cast<int>(box.text.length()) - 1;
         startChar = qBound(0, startChar, maxCharIdx);
         endChar = qBound(0, endChar, maxCharIdx);
         
@@ -9903,7 +9903,7 @@ void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
             m_textSelection.startBoxIndex = boxIdx;
             m_textSelection.startCharIndex = 0;
             m_textSelection.endBoxIndex = boxIdx;
-            m_textSelection.endCharIndex = box.text.length() - 1;
+            m_textSelection.endCharIndex = static_cast<int>(box.text.length()) - 1;
             
             updateSelectedTextAndRects();
             finalizeTextSelection();
@@ -9957,7 +9957,7 @@ void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
     
     const PdfTextBox& lastBox = m_textBoxCache[lastBoxOnLine];
     // Safety: handle empty text boxes
-    m_textSelection.endCharIndex = lastBox.text.isEmpty() ? 0 : (lastBox.text.length() - 1);
+    m_textSelection.endCharIndex = lastBox.text.isEmpty() ? 0 : static_cast<int>(lastBox.text.length() - 1);
     
     updateSelectedTextAndRects();
     finalizeTextSelection();
@@ -10258,7 +10258,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     // points arrive (tracked via m_lastRenderedPointIndex) and reused
     // for repaints where no new points were added.
     
-    const int n = m_currentStroke.points.size();
+    const int n = static_cast<int>(m_currentStroke.points.size());
     if (n < 1) return;
     
     // For paged mode, require valid drawing page

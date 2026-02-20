@@ -70,7 +70,7 @@ public:
     /**
      * @brief Get the number of bundles to export.
      */
-    int bundleCount() const { return m_bundlePaths.size(); }
+    int bundleCount() const { return static_cast<int>(m_bundlePaths.size()); }
 
 private slots:
     void onBrowseClicked();

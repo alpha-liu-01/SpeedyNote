@@ -105,7 +105,7 @@ void ExportQueueManager::enqueueSnbxExport(const QStringList& bundles,
 int ExportQueueManager::queuedJobCount() const
 {
     QMutexLocker locker(&m_queueMutex);
-    return m_queue.size();
+    return static_cast<int>(m_queue.size());
 }
 
 bool ExportQueueManager::isExporting() const

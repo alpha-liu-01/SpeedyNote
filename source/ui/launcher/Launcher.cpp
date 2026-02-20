@@ -49,6 +49,7 @@
 #include <QJsonParseError>
 #include <QStandardPaths>
 #include <QEventLoop>
+#include <QTimer>
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -63,6 +64,7 @@
 #elif defined(Q_OS_IOS)
 #include "ios/IOSShareHelper.h"
 #include "ios/SnbxPickerIOS.h"
+#include "ios/IOSPlatformHelper.h"
 #endif
 
 // ============================================================================
@@ -738,6 +740,10 @@ void Launcher::showEvent(QShowEvent* event)
     if (m_timelineModel) {
         m_timelineModel->refreshIfDateChanged();
     }
+
+#ifdef Q_OS_IOS
+    QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
 }
 
 // =============================================================================
@@ -1079,7 +1085,7 @@ bool Launcher::deleteNotebooks(const QStringList& bundlePaths)
     displayNames.reserve(bundlePaths.size());
     for (const QString& path : bundlePaths) {
         QString name = path;
-        int lastSlash = path.lastIndexOf('/');
+        qsizetype lastSlash = path.lastIndexOf('/');
         if (lastSlash >= 0) {
             name = path.mid(lastSlash + 1);
             if (name.endsWith(".snb", Qt::CaseInsensitive))
@@ -1194,7 +1200,7 @@ void Launcher::renameNotebook(const QString& bundlePath)
 {
     // Extract current display name
     QString currentName;
-    int lastSlash = bundlePath.lastIndexOf('/');
+    qsizetype lastSlash = bundlePath.lastIndexOf('/');
     if (lastSlash >= 0) {
         currentName = bundlePath.mid(lastSlash + 1);
         if (currentName.endsWith(".snb", Qt::CaseInsensitive)) {
@@ -1279,7 +1285,7 @@ void Launcher::duplicateNotebook(const QString& bundlePath)
 {
     // Extract current name
     QString currentName;
-    int lastSlash = bundlePath.lastIndexOf('/');
+    qsizetype lastSlash = bundlePath.lastIndexOf('/');
     if (lastSlash >= 0) {
         currentName = bundlePath.mid(lastSlash + 1);
         if (currentName.endsWith(".snb", Qt::CaseInsensitive)) {
@@ -1842,7 +1848,7 @@ void Launcher::performBatchImport(const QStringList& snbxFiles, const QString& d
     options.overwrite = false;    // Don't overwrite existing
     
     // Show progress for imports
-    int total = snbxFiles.size();
+    int total = static_cast<int>(snbxFiles.size());
     int current = 0;
     
     // Progress callback (with null check for safety)

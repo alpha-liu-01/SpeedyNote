@@ -392,8 +392,8 @@ void SearchView::performSearch()
     QStringList folders = lib->searchStarredFolders(query);
     QList<NotebookInfo> notebooks = lib->search(query);
     
-    int folderCount = folders.size();
-    int notebookCount = notebooks.size();
+    int folderCount = static_cast<int>(folders.size());
+    int notebookCount = static_cast<int>(notebooks.size());
     int totalCount = folderCount + notebookCount;
     
     // Update status with both counts

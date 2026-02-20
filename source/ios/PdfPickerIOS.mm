@@ -6,18 +6,20 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
-#include <QDebug>
 
 #import <UIKit/UIKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 // ============================================================================
-// Delegate for UIDocumentPickerViewController
+// Dedicated picker window — isolates the UIDocumentPickerViewController from
+// Qt's UIView hierarchy so that Qt does not intercept touch events destined
+// for the remote view controller.
 // ============================================================================
 
 @interface SNPdfPickerDelegate : NSObject <UIDocumentPickerDelegate>
 @property (nonatomic, copy) NSString *destDir;
 @property (nonatomic, copy) void (^completionBlock)(NSString *localPath);
+@property (nonatomic, strong) UIWindow *pickerWindow;
 @end
 
 @implementation SNPdfPickerDelegate
@@ -30,12 +32,14 @@
             (unsigned long)urls.count);
 
     if (urls.count == 0) {
-        if (self.completionBlock) self.completionBlock(nil);
+        [self finish:nil];
         return;
     }
 
     NSURL *url = urls.firstObject;
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[PdfPickerIOS] picked URL: %s\n", url.absoluteString.UTF8String);
+    #endif
 
     BOOL accessed = [url startAccessingSecurityScopedResource];
     NSString *fileName = url.lastPathComponent;
@@ -62,26 +66,52 @@
     }
 
     if (ok) {
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[PdfPickerIOS] copied to %s\n", destPath.UTF8String);
-        if (self.completionBlock) self.completionBlock(destPath);
+        #endif
+        [self finish:destPath];
     } else {
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[PdfPickerIOS] copy failed: %s\n",
                 error.localizedDescription.UTF8String);
-        if (self.completionBlock) self.completionBlock(nil);
+        #endif        
+        [self finish:nil];
     }
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
     Q_UNUSED(controller);
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[PdfPickerIOS] delegate: cancelled\n");
-    if (self.completionBlock) self.completionBlock(nil);
+    #endif
+    [self finish:nil];
 }
 
+- (void)finish:(NSString *)localPath
+{
+    self.pickerWindow.hidden = YES;
+    self.pickerWindow = nil;
+
+    if (self.completionBlock)
+        self.completionBlock(localPath);
+}
+
+// ARC manages [super dealloc] automatically; suppress the false-positive warning.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wobjc-missing-super-calls"
 - (void)dealloc
 {
+    if (self.pickerWindow) {
+        self.pickerWindow.hidden = YES;
+        self.pickerWindow.windowScene = nil;
+        self.pickerWindow = nil;
+    }
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[PdfPickerIOS] delegate: dealloc\n");
+    #endif
 }
+#pragma clang diagnostic pop
 
 @end
 
@@ -91,27 +121,18 @@
 
 namespace {
     static bool s_pickerActive = false;
-    // Strong reference keeps the delegate alive (picker.delegate is weak).
     static SNPdfPickerDelegate *s_delegate = nil;
 }
 
-static UIViewController *topmostViewController()
+static UIWindowScene *activeWindowScene()
 {
-    UIWindowScene *scene = nil;
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
         if (s.activationState == UISceneActivationStateForegroundActive &&
             [s isKindOfClass:[UIWindowScene class]]) {
-            scene = (UIWindowScene *)s;
-            break;
+            return (UIWindowScene *)s;
         }
     }
-    if (!scene) return nil;
-
-    UIViewController *vc = scene.windows.firstObject.rootViewController;
-    while (vc.presentedViewController) {
-        vc = vc.presentedViewController;
-    }
-    return vc;
+    return nil;
 }
 
 namespace PdfPickerIOS {
@@ -124,7 +145,9 @@ void pickPdfFile(std::function<void(const QString&)> completion)
 
 void pickPdfFile(const QString& destDir, std::function<void(const QString&)> completion)
 {
+    #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[PdfPickerIOS] pickPdfFile called (active=%d)\n", s_pickerActive);
+    #endif
 
     if (s_pickerActive) {
         if (completion) completion(QString());
@@ -133,6 +156,23 @@ void pickPdfFile(const QString& destDir, std::function<void(const QString&)> com
     s_pickerActive = true;
     QDir().mkpath(destDir);
 
+    UIWindowScene *scene = activeWindowScene();
+    if (!scene) {
+        #ifdef SPEEDYNOTE_DEBUG
+        fprintf(stderr, "[PdfPickerIOS] ERROR: no active window scene\n");
+        #endif
+        s_pickerActive = false;
+        if (completion) completion(QString());
+        return;
+    }
+
+    // Dedicated UIWindow above Qt's windows — Qt cannot intercept touches here
+    UIWindow *pickerWindow = [[UIWindow alloc] initWithWindowScene:scene];
+    pickerWindow.windowLevel = UIWindowLevelAlert + 1;
+    pickerWindow.rootViewController = [[UIViewController alloc] init];
+    pickerWindow.rootViewController.view.backgroundColor = [UIColor clearColor];
+    [pickerWindow makeKeyAndVisible];
+
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
         initForOpeningContentTypes:@[UTTypePDF]];
     picker.allowsMultipleSelection = NO;
@@ -140,6 +180,7 @@ void pickPdfFile(const QString& destDir, std::function<void(const QString&)> com
 
     s_delegate = [[SNPdfPickerDelegate alloc] init];
     s_delegate.destDir = destDir.toNSString();
+    s_delegate.pickerWindow = pickerWindow;
 
     auto shared = std::make_shared<std::function<void(const QString&)>>(std::move(completion));
     s_delegate.completionBlock = ^(NSString *localPath) {
@@ -151,19 +192,14 @@ void pickPdfFile(const QString& destDir, std::function<void(const QString&)> com
 
     picker.delegate = s_delegate;
 
-    UIViewController *vc = topmostViewController();
-    if (!vc) {
-        fprintf(stderr, "[PdfPickerIOS] ERROR: no topmost VC\n");
-        s_delegate = nil;
-        s_pickerActive = false;
-        if (*shared) (*shared)(QString());
-        return;
-    }
-
-    fprintf(stderr, "[PdfPickerIOS] presenting picker from %s (delegate=%p)\n",
-            NSStringFromClass([vc class]).UTF8String, (void *)s_delegate);
-    [vc presentViewController:picker animated:YES completion:^{
+    #ifdef SPEEDYNOTE_DEBUG
+    fprintf(stderr, "[PdfPickerIOS] presenting picker from dedicated window (delegate=%p)\n",
+            (void *)s_delegate);
+    #endif
+    [pickerWindow.rootViewController presentViewController:picker animated:YES completion:^{
+        #ifdef SPEEDYNOTE_DEBUG
         fprintf(stderr, "[PdfPickerIOS] presentation complete\n");
+        #endif
     }];
 }
 
