@@ -22,6 +22,8 @@
 #include <QWheelEvent>
 #include <QKeyEvent>
 #include <QTouchEvent>
+#include <QNativeGestureEvent>  // macOS trackpad pinch-to-zoom
+#include <QInputDevice>         // Distinguish touchpad vs touchscreen
 #include <QtMath>     // For qPow
 #include <QtConcurrent>   // For async PDF rendering
 #include <QThreadStorage> // For thread-local PDF provider caching
@@ -3328,6 +3330,19 @@ bool DocumentViewport::event(QEvent* event)
         event->type() == QEvent::TouchEnd ||
         event->type() == QEvent::TouchCancel) {
         
+        QTouchEvent* touchEvent = static_cast<QTouchEvent*>(event);
+        
+        // Skip touchpad events — only handle real touchscreen input.
+        // On macOS, trackpad gestures are delivered as both raw QTouchEvents AND
+        // synthesized QWheelEvent (for scroll) / QNativeGestureEvent (for pinch).
+        // Intercepting the raw touch events here would conflict with the OS-level
+        // gesture processing.  Letting them fall through keeps 2-finger scroll
+        // working normally, while pinch-to-zoom is handled via NativeGesture below.
+        if (touchEvent->device() &&
+            touchEvent->device()->type() == QInputDevice::DeviceType::TouchPad) {
+            return QWidget::event(event);
+        }
+        
         // Touch cooldown: reject all touch events briefly after becoming visible
         // This prevents crashes from stale touch state after sleep/wake on Android
         if (m_touchCooldownActive) {
@@ -3347,8 +3362,6 @@ bool DocumentViewport::event(QEvent* event)
             }
         }
         
-        QTouchEvent* touchEvent = static_cast<QTouchEvent*>(event);
-        
         // Check if the touch started on a child widget (like MissingPdfBanner)
         // If so, let Qt's normal event propagation handle it instead of intercepting
         if (event->type() == QEvent::TouchBegin && !touchEvent->points().isEmpty()) {
@@ -3365,6 +3378,33 @@ bool DocumentViewport::event(QEvent* event)
         }
         
         if (m_touchHandler && m_touchHandler->handleTouchEvent(touchEvent)) {
+            return true;
+        }
+    }
+    
+    // Handle native gesture events (macOS trackpad pinch-to-zoom).
+    // On macOS the trackpad delivers pinch as QNativeGestureEvent with
+    // Qt::ZoomNativeGesture, bypassing the touch handler entirely.
+    // This works regardless of the TouchGestureMode setting, so trackpad
+    // pinch-to-zoom is always available.
+    if (event->type() == QEvent::NativeGesture) {
+        auto* nge = static_cast<QNativeGestureEvent*>(event);
+        
+        if (nge->gestureType() == Qt::ZoomNativeGesture) {
+            // value() is the incremental scale delta (e.g. 0.02 = 2% zoom in)
+            qreal scaleFactor = 1.0 + nge->value();
+            if (!qFuzzyCompare(scaleFactor, 1.0)) {
+                updateZoomGesture(scaleFactor, nge->position());
+            }
+            event->accept();
+            return true;
+        }
+        
+        if (nge->gestureType() == Qt::EndNativeGesture) {
+            if (m_gesture.activeType == ViewportGestureState::Zoom) {
+                endZoomGesture();
+            }
+            event->accept();
             return true;
         }
     }
