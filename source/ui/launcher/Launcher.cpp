@@ -345,12 +345,11 @@ void Launcher::setupNavigation()
             } else if (isFullScreen()) {
                 mainWindow->showFullScreen();
             } else {
-                QRect geo = normalGeometry();
-                if (geo.isValid() && !geo.isEmpty()) {
-                    mainWindow->move(geo.topLeft());
-                    mainWindow->resize(geo.size());
-                }
+                const QPoint srcPos  = pos();
+                const QSize  srcSize = size();
                 mainWindow->show();
+                mainWindow->move(srcPos);
+                mainWindow->resize(srcSize);
             }
             mainWindow->raise();
             mainWindow->activateWindow();

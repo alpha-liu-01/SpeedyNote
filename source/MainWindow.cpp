@@ -976,8 +976,7 @@ void MainWindow::setupUi() {
             m_tabBar->setVisible(!m_tabBar->isVisible());
         }
     });
-    connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this](bool checked) {
-        Q_UNUSED(checked);
+    connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this]() {
         toggleFullscreen();
     });
     connect(m_navigationBar, &NavigationBar::shareClicked, this, [this]() {
@@ -5733,7 +5732,8 @@ void MainWindow::toggleLauncher() {
         // Read Launcher state BEFORE we reset it below.
         const bool launcherMaximized  = launcher->isMaximized();
         const bool launcherFullScreen = launcher->isFullScreen();
-        const QRect launcherNormalGeo = launcher->normalGeometry();
+        const QPoint launcherPos  = launcher->pos();
+        const QSize  launcherSize = launcher->size();
         
         // Show MainWindow in the Launcher's window state.
         // Reset stale native state on the hidden MainWindow (same reasoning
@@ -5749,11 +5749,14 @@ void MainWindow::toggleLauncher() {
         } else if (launcherFullScreen) {
             showFullScreen();
         } else {
-            if (launcherNormalGeo.isValid() && !launcherNormalGeo.isEmpty()) {
-                move(launcherNormalGeo.topLeft());
-                resize(launcherNormalGeo.size());
-            }
             showNormal();
+            // Set geometry AFTER show so our move()/resize() has the final
+            // word.  On Windows, ShowWindow(SW_SHOWNORMAL) can adjust the
+            // position using stale placement data; applying geometry after
+            // the show overrides that.  The window is at opacity 0, so the
+            // brief intermediate position is invisible.
+            move(launcherPos);
+            resize(launcherSize);
         }
         raise();
         activateWindow();
@@ -5780,19 +5783,19 @@ void MainWindow::toggleLauncher() {
         launcher->setWindowOpacity(1.0);  // Reset for next time
         
         // Fade MainWindow in
-        QPropertyAnimation* fadeIn = new QPropertyAnimation(this, "windowOpacity");
+        auto* fadeIn = new QPropertyAnimation(this, "windowOpacity");
         fadeIn->setDuration(fadeDuration);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
         fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
-        fadeIn->start();
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
         
     } else {
         // ========== MAINWINDOW → LAUNCHER ==========
         const bool srcMaximized  = isMaximized();
         const bool srcFullScreen = isFullScreen();
-        const QRect srcNormalGeo = normalGeometry();
+        const QPoint srcPos  = pos();
+        const QSize  srcSize = size();
         
         // Show Launcher in MainWindow's window state.
         // Reset stale fullscreen/maximized state at BOTH the QWidget and
@@ -5811,11 +5814,9 @@ void MainWindow::toggleLauncher() {
         } else if (srcFullScreen) {
             launcher->showFullScreen();
         } else {
-            if (srcNormalGeo.isValid() && !srcNormalGeo.isEmpty()) {
-                launcher->move(srcNormalGeo.topLeft());
-                launcher->resize(srcNormalGeo.size());
-            }
             launcher->show();
+            launcher->move(srcPos);
+            launcher->resize(srcSize);
         }
         launcher->raise();
         launcher->activateWindow();
@@ -5825,13 +5826,12 @@ void MainWindow::toggleLauncher() {
         setWindowOpacity(1.0);  // Reset for next time
         
         // Fade launcher in
-        QPropertyAnimation* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
+        auto* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
         fadeIn->setDuration(fadeDuration);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
         fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
-        fadeIn->start();
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
     }
 }
 
@@ -6963,14 +6963,12 @@ void MainWindow::bringToFront()
     }
     
     if (wasHidden) {
-        // Fade in animation
-        QPropertyAnimation* fadeIn = new QPropertyAnimation(this, "windowOpacity");
+        auto* fadeIn = new QPropertyAnimation(this, "windowOpacity");
         fadeIn->setDuration(150);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
         fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
-        fadeIn->start();
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
     }
 }
 
