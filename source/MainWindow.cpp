@@ -63,6 +63,7 @@
 #include <QDebug>
 #include <QInputMethod>
 #include <QPropertyAnimation>  // Phase P.4.5: Smooth window transitions
+#include <QWindow>             // For windowHandle()->setWindowState() in transitions
 #include <QInputMethodEvent>
 #include <QSet>
 #include <QWheelEvent>
@@ -159,7 +160,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.2.4"));
+    setWindowTitle(tr("SpeedyNote 1.2.5"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -975,8 +976,7 @@ void MainWindow::setupUi() {
             m_tabBar->setVisible(!m_tabBar->isVisible());
         }
     });
-    connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this](bool checked) {
-        Q_UNUSED(checked);
+    connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this]() {
         toggleFullscreen();
     });
     connect(m_navigationBar, &NavigationBar::shareClicked, this, [this]() {
@@ -3623,10 +3623,14 @@ int MainWindow::tabCount() const {
 
 
 void MainWindow::toggleFullscreen() {
-    if (isFullScreen()) {
-        showNormal();  // Exit fullscreen mode
+    bool goingFullscreen = !isFullScreen();
+    if (goingFullscreen) {
+        showFullScreen();
     } else {
-        showFullScreen();  // Enter fullscreen mode
+        showNormal();
+    }
+    if (m_navigationBar) {
+        m_navigationBar->setFullscreenChecked(goingFullscreen);
     }
 }
 
@@ -5725,60 +5729,94 @@ void MainWindow::toggleLauncher() {
     
     if (launcher->isVisible()) {
         // ========== LAUNCHER → MAINWINDOW ==========
-        // Copy window geometry from launcher to this window BEFORE showing
-        if (launcher->isMaximized()) {
-            // Set geometry first, then show maximized
-            setGeometry(launcher->geometry());
-        } else if (launcher->isFullScreen()) {
-            setGeometry(launcher->geometry());
-        } else {
-            setGeometry(launcher->geometry());
-        }
+        // Read Launcher state BEFORE we reset it below.
+        const bool launcherMaximized  = launcher->isMaximized();
+        const bool launcherFullScreen = launcher->isFullScreen();
+        const QPoint launcherPos  = launcher->pos();
+        const QSize  launcherSize = launcher->size();
         
-        // Start MainWindow at opacity 0, show it, then fade in
+        // Show MainWindow in the Launcher's window state.
+        // Reset stale native state on the hidden MainWindow (same reasoning
+        // as the Launcher reset in the other branch — QWidget skips the
+        // platform update for hidden widgets, but QWindow does not).
+        setWindowState(Qt::WindowNoState);
+        if (QWindow* win = windowHandle()) {
+            win->setWindowState(Qt::WindowNoState);
+        }
         setWindowOpacity(0.0);
-        if (launcher->isMaximized()) {
+        if (launcherMaximized) {
             showMaximized();
-        } else if (launcher->isFullScreen()) {
+        } else if (launcherFullScreen) {
             showFullScreen();
         } else {
             showNormal();
+            // Set geometry AFTER show so our move()/resize() has the final
+            // word.  On Windows, ShowWindow(SW_SHOWNORMAL) can adjust the
+            // position using stale placement data; applying geometry after
+            // the show overrides that.  The window is at opacity 0, so the
+            // brief intermediate position is invisible.
+            move(launcherPos);
+            resize(launcherSize);
         }
         raise();
         activateWindow();
         
-        // Hide launcher immediately (no flicker since MainWindow is now on top)
+        // Sync fullscreen button with the actual window state
+        if (m_navigationBar) {
+            m_navigationBar->setFullscreenChecked(isFullScreen());
+        }
+        
+        // Restore Launcher to normal windowed state BEFORE hiding.
+        // On Windows, hide() preserves the native window's fullscreen styling
+        // (no decorations, full-screen geometry).  Qt's setWindowState() on a
+        // *hidden* widget only updates the internal state variable — it skips
+        // the platform-level update because isVisible() is false.  That means
+        // a later showNormal() finds the native window still carrying stale
+        // fullscreen styles, producing a frameless or full-screen window.
+        // Transitioning while visible (behind MainWindow, opacity 0) forces the
+        // window manager to properly restore the window frame.
+        launcher->setWindowOpacity(0.0);
+        if (launcher->windowState() != Qt::WindowNoState) {
+            launcher->setWindowState(Qt::WindowNoState);
+        }
         launcher->hide();
         launcher->setWindowOpacity(1.0);  // Reset for next time
         
         // Fade MainWindow in
-        QPropertyAnimation* fadeIn = new QPropertyAnimation(this, "windowOpacity");
+        auto* fadeIn = new QPropertyAnimation(this, "windowOpacity");
         fadeIn->setDuration(fadeDuration);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
         fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
-        fadeIn->start();
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
         
     } else {
         // ========== MAINWINDOW → LAUNCHER ==========
-        // Copy window geometry from this window to launcher BEFORE showing
-        if (isMaximized()) {
-            launcher->setGeometry(geometry());
-        } else if (isFullScreen()) {
-            launcher->setGeometry(geometry());
-        } else {
-            launcher->setGeometry(geometry());
-        }
+        const bool srcMaximized  = isMaximized();
+        const bool srcFullScreen = isFullScreen();
+        const QPoint srcPos  = pos();
+        const QSize  srcSize = size();
         
-        // Start launcher at opacity 0, show it, then fade in
+        // Show Launcher in MainWindow's window state.
+        // Reset stale fullscreen/maximized state at BOTH the QWidget and
+        // QWindow level.  QWidget::setWindowState() on a hidden widget only
+        // updates the internal flag — it skips the platform update because
+        // isVisible() is false.  QWindow::setWindowState() has no such guard,
+        // so calling it on windowHandle() forces the native window to restore
+        // normal styling (decorations, geometry) even while hidden.
+        launcher->setWindowState(Qt::WindowNoState);
+        if (QWindow* win = launcher->windowHandle()) {
+            win->setWindowState(Qt::WindowNoState);
+        }
         launcher->setWindowOpacity(0.0);
-        if (isMaximized()) {
+        if (srcMaximized) {
             launcher->showMaximized();
-        } else if (isFullScreen()) {
+        } else if (srcFullScreen) {
             launcher->showFullScreen();
         } else {
-            launcher->showNormal();
+            launcher->show();
+            launcher->move(srcPos);
+            launcher->resize(srcSize);
         }
         launcher->raise();
         launcher->activateWindow();
@@ -5788,13 +5826,12 @@ void MainWindow::toggleLauncher() {
         setWindowOpacity(1.0);  // Reset for next time
         
         // Fade launcher in
-        QPropertyAnimation* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
+        auto* fadeIn = new QPropertyAnimation(launcher, "windowOpacity");
         fadeIn->setDuration(fadeDuration);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
         fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
-        fadeIn->start();
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
     }
 }
 
@@ -6921,15 +6958,17 @@ void MainWindow::bringToFront()
     raise();
     activateWindow();
     
+    if (m_navigationBar) {
+        m_navigationBar->setFullscreenChecked(isFullScreen());
+    }
+    
     if (wasHidden) {
-        // Fade in animation
-        QPropertyAnimation* fadeIn = new QPropertyAnimation(this, "windowOpacity");
+        auto* fadeIn = new QPropertyAnimation(this, "windowOpacity");
         fadeIn->setDuration(150);
         fadeIn->setStartValue(0.0);
         fadeIn->setEndValue(1.0);
         fadeIn->setEasingCurve(QEasingCurve::OutCubic);
-        connect(fadeIn, &QPropertyAnimation::finished, fadeIn, &QObject::deleteLater);
-        fadeIn->start();
+        fadeIn->start(QAbstractAnimation::DeleteWhenStopped);
     }
 }
 

@@ -267,8 +267,8 @@ open ios/build-device/SpeedyNote.xcodeproj
 **在越狱设备上安装：**
 
 ```bash
-scp ios/dist/SpeedyNote_1.2.4_iphoneos-arm64.deb root@<ipad-ip>:/tmp/
-ssh root@<ipad-ip> 'dpkg -i /tmp/SpeedyNote_1.2.4_iphoneos-arm64.deb'
+scp ios/dist/SpeedyNote_1.2.5_iphoneos-arm64.deb root@<ipad-ip>:/tmp/
+ssh root@<ipad-ip> 'dpkg -i /tmp/SpeedyNote_1.2.5_iphoneos-arm64.deb'
 ```
 
 或将 `.deb` 放到 APT 仓库以供 Sileo 安装。

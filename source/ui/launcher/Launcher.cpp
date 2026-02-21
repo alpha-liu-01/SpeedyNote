@@ -50,6 +50,7 @@
 #include <QStandardPaths>
 #include <QEventLoop>
 #include <QTimer>
+#include <QWindow>  // For windowHandle()->setWindowState() in transitions
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -330,15 +331,25 @@ void Launcher::setupNavigation()
         // Find and show the existing MainWindow before hiding the Launcher
         MainWindow* mainWindow = MainWindow::findExistingMainWindow();
         if (mainWindow) {
-            // Transfer window geometry for seamless transition
-            mainWindow->move(pos());
-            mainWindow->resize(size());
+            // Clear any stale fullscreen/maximized state on the MainWindow.
+            // QWidget::setWindowState() on a hidden widget only sets the
+            // internal flag; QWindow::setWindowState() also updates the
+            // native window, ensuring decorations are properly restored.
+            mainWindow->setWindowState(Qt::WindowNoState);
+            if (QWindow* win = mainWindow->windowHandle()) {
+                win->setWindowState(Qt::WindowNoState);
+            }
+            
             if (isMaximized()) {
                 mainWindow->showMaximized();
             } else if (isFullScreen()) {
                 mainWindow->showFullScreen();
             } else {
-                mainWindow->showNormal();
+                const QPoint srcPos  = pos();
+                const QSize  srcSize = size();
+                mainWindow->show();
+                mainWindow->move(srcPos);
+                mainWindow->resize(srcSize);
             }
             mainWindow->raise();
             mainWindow->activateWindow();
@@ -686,6 +697,16 @@ void Launcher::hideWithAnimation()
     
     // CR-P.3: Qt::SingleShotConnection auto-disconnects after first emit
     connect(m_fadeAnimation, &QPropertyAnimation::finished, this, [this]() {
+        // Restore to normal windowed state while still visible (opacity 0).
+        // setWindowState on the QWidget level works here because the widget
+        // is still visible (at opacity 0).  We also update the QWindow level
+        // as a safety net in case the WM skips the update for transparent windows.
+        if (windowState() != Qt::WindowNoState) {
+            setWindowState(Qt::WindowNoState);
+            if (QWindow* win = windowHandle()) {
+                win->setWindowState(Qt::WindowNoState);
+            }
+        }
         hide();
     }, Qt::SingleShotConnection);
     

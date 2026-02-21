@@ -184,16 +184,19 @@ void NavigationBar::updateTheme(bool darkMode, const QColor &accentColor)
 
 void NavigationBar::setLeftSidebarChecked(bool checked)
 {
+    const QSignalBlocker blocker(m_leftSidebarButton);
     m_leftSidebarButton->setChecked(checked);
 }
 
 void NavigationBar::setRightSidebarChecked(bool checked)
 {
+    const QSignalBlocker blocker(m_rightSidebarButton);
     m_rightSidebarButton->setChecked(checked);
 }
 
 void NavigationBar::setFullscreenChecked(bool checked)
 {
+    const QSignalBlocker blocker(m_fullscreenButton);
     m_fullscreenButton->setChecked(checked);
 }
 
