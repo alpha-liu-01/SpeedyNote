@@ -79,6 +79,17 @@
 
   <releases>
 
+    <release version="1.2.5" date="2026-02-20">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Fixed the problem that the size of the first page of a notebook did not match the settings.</li>
+          <li>Fixed the file dialogs so that they preserve the last used directory.</li>
+          <li>Fixed the problem that switching between the mainwindow and the launcher made the launcher window disappear.</li>
+          <li>Fixed the problem that the launcher window shifted down every time the user switched between the mainwindow and the launcher.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.4" date="2026-02-17">
       <description>
         <p>Bug fixes and improvements:</p>

@@ -267,8 +267,8 @@ Output: `ios/dist/SpeedyNote_<version>_iphoneos-arm64.deb`
 **To install on a jailbroken iPad:**
 
 ```bash
-scp ios/dist/SpeedyNote_1.2.4_iphoneos-arm64.deb root@<ipad-ip>:/tmp/
-ssh root@<ipad-ip> 'dpkg -i /tmp/SpeedyNote_1.2.4_iphoneos-arm64.deb'
+scp ios/dist/SpeedyNote_1.2.5_iphoneos-arm64.deb root@<ipad-ip>:/tmp/
+ssh root@<ipad-ip> 'dpkg -i /tmp/SpeedyNote_1.2.5_iphoneos-arm64.deb'
 ```
 
 Or host the `.deb` on an APT repository for installation via Sileo.
