@@ -194,6 +194,7 @@ void NavigationBar::setRightSidebarChecked(bool checked)
 
 void NavigationBar::setFullscreenChecked(bool checked)
 {
+    const QSignalBlocker blocker(m_fullscreenButton);
     m_fullscreenButton->setChecked(checked);
 }
 
