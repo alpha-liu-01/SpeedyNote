@@ -6,6 +6,10 @@ on:
       - 'v*'  # Trigger on version tags (e.g., v1.2.1, v2.0.0-beta)
   workflow_dispatch:  # Allow manual trigger  
 
+# Required for release uploads
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     name: Build Windows x86_64
@@ -269,3 +273,11 @@ jobs:
         with:
           name: speedynote-windows-installer-x86_64
           path: "Output/*.exe"
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: "Output/*.exe"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

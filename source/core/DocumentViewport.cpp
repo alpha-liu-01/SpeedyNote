@@ -675,6 +675,13 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
+    // Clear object selection when switching away from ObjectSelect tool
+    if (previousTool == ToolType::ObjectSelect && tool != ToolType::ObjectSelect) {
+        if (!m_selectedObjects.isEmpty()) {
+            deselectAllObjects();
+        }
+    }
+    
     // Phase A: Clear text selection when switching away from Highlighter
     if (previousTool == ToolType::Highlighter && tool != ToolType::Highlighter) {
         bool hadTextSelection = m_textSelection.isValid();
