@@ -3868,11 +3868,19 @@ void DocumentViewport::preloadStrokeCaches()
     int preloadStart = qMax(0, first - 1);
     int preloadEnd = qMin(pageCount - 1, last + 1);
     
-    // MEMORY OPTIMIZATION: Keep caches/pages for visible ±2 pages, evict everything else
-    // This prevents unbounded memory growth when scrolling through large documents
-    static constexpr int PAGE_BUFFER = 2;
-    int keepStart = qMax(0, first - PAGE_BUFFER);
-    int keepEnd = qMin(pageCount - 1, last + PAGE_BUFFER);
+    // MEMORY OPTIMIZATION: Keep caches/pages for visible ± buffer pages, evict the rest.
+    // At high zoom * dpr each page cache is large (capped at MAX_STROKE_CACHE_DIM),
+    // so the buffer shrinks to limit total memory while remaining safe for panning.
+    qreal effectiveScale = m_zoomLevel * devicePixelRatioF();
+    int pageBuffer;
+    if (effectiveScale <= 2.0)
+        pageBuffer = 2;
+    else if (effectiveScale <= 4.0)
+        pageBuffer = 1;
+    else
+        pageBuffer = 0;
+    int keepStart = qMax(0, first - pageBuffer);
+    int keepEnd = qMin(pageCount - 1, last + pageBuffer);
     
     // Phase O1.7.5: Evict pages far from visible area (lazy loading mode)
     // Only evict if lazy loading is enabled (bundle format)
@@ -3948,13 +3956,24 @@ void DocumentViewport::evictDistantTiles()
     
     QRectF viewRect = visibleRect();
     
-    // Keep tiles within 2 tiles of viewport, evict the rest
-    constexpr int KEEP_MARGIN = 2;
+    // Dynamic margin: at high zoom * dpr, each tile cache is large (up to
+    // MAX_STROKE_CACHE_DIM^2 * 4 bytes) but the viewport covers a tiny
+    // fraction of a tile. Reduce the margin to limit total memory.
+    // At low effective scale the caches are small, so a generous margin
+    // is affordable and ensures smooth panning without disk-load stutters.
+    qreal effectiveScale = m_zoomLevel * devicePixelRatioF();
+    int keepMargin;
+    if (effectiveScale <= 2.0)
+        keepMargin = 2;
+    else if (effectiveScale <= 4.0)
+        keepMargin = 1;
+    else
+        keepMargin = 0;
     int tileSize = Document::EDGELESS_TILE_SIZE;
     
     QRectF keepRect = viewRect.adjusted(
-        -KEEP_MARGIN * tileSize, -KEEP_MARGIN * tileSize,
-        KEEP_MARGIN * tileSize, KEEP_MARGIN * tileSize);
+        -keepMargin * tileSize, -keepMargin * tileSize,
+        keepMargin * tileSize, keepMargin * tileSize);
     
     // Get all loaded tiles and check which to evict
     QVector<Document::TileCoord> loadedTiles = m_document->allLoadedTileCoords();

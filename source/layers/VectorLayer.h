@@ -468,19 +468,21 @@ public:
      * @param zoom Current zoom level (1.0 = 100%).
      * @param dpr Device pixel ratio for high DPI support.
      * 
-     * Cache is built at size * zoom * dpr for sharp rendering at current zoom.
+     * Cache is built at size * zoom * dpr for sharp rendering at current zoom,
+     * capped to MAX_STROKE_CACHE_DIM per dimension using integer-divisor scaling
+     * to prevent extreme memory usage at high zoom levels.
      * If the cache is valid but has pending strokes (from addStroke), those are
      * rendered incrementally without rebuilding the entire cache.
      * If cache is invalid, wrong size, or wrong zoom, rebuilds from scratch.
      */
     void ensureStrokeCacheValid(const QSizeF& size, qreal zoom, qreal dpr) {
-        // Calculate physical size at this zoom level
-        QSize physicalSize(static_cast<int>(size.width() * zoom * dpr), 
-                           static_cast<int>(size.height() * zoom * dpr));
+        int divisor = computeCacheDivisor(size, zoom, dpr);
+        QSize physicalSize = cappedPhysicalSize(size, zoom, dpr, divisor);
         
         // Fast path: cache is valid and has pending strokes to append
         if (m_pendingStrokeStart >= 0 && !m_strokeCacheDirty &&
             m_strokeCache.size() == physicalSize &&
+            m_cacheDivisor == divisor &&
             qFuzzyCompare(m_cacheZoom, zoom) &&
             qFuzzyCompare(m_cacheDpr, dpr)) {
             appendPendingStrokes();
@@ -490,6 +492,7 @@ public:
         // Check if cache is fully valid (no pending, no dirty)
         if (!m_strokeCacheDirty && m_pendingStrokeStart < 0 &&
             m_strokeCache.size() == physicalSize &&
+            m_cacheDivisor == divisor &&
             qFuzzyCompare(m_cacheZoom, zoom) &&
             qFuzzyCompare(m_cacheDpr, dpr)) {
             return;  // Cache is valid
@@ -540,6 +543,7 @@ public:
         m_pendingStrokeStart = -1;
         m_cacheZoom = 0;
         m_cacheDpr = 0;
+        m_cacheDivisor = 1;
     }
     
     /**
@@ -681,11 +685,14 @@ private:
         return result;
     }
     
+    static constexpr int MAX_STROKE_CACHE_DIM = 4096;
+
     // Stroke cache for performance (Task 1.3.7 + Zoom-Aware + Incremental)
     mutable QPixmap m_strokeCache;          ///< Cached rendered strokes at current zoom
     mutable bool m_strokeCacheDirty = true; ///< Whether cache needs full rebuild
     mutable qreal m_cacheZoom = 1.0;        ///< Zoom level cache was built at
     mutable qreal m_cacheDpr = 1.0;         ///< DPI ratio cache was built at
+    mutable int m_cacheDivisor = 1;         ///< Integer divisor applied for resolution cap
     
     /// Index of first stroke pending incremental render, or -1 if none.
     /// When addStroke() is called and the cache is valid, the stroke index is
@@ -776,32 +783,31 @@ private:
      * @param zoom Zoom level to render at.
      * @param dpr Device pixel ratio.
      * 
-     * Creates a cache pixmap at size * zoom * dpr physical pixels.
-     * Strokes are rendered pre-scaled by zoom for sharp display.
+     * Creates a cache pixmap capped to MAX_STROKE_CACHE_DIM per dimension.
+     * When the full-resolution size exceeds the cap, an integer divisor N is
+     * applied so each cache pixel maps to exactly NxN sub-pixels, avoiding
+     * fractional-pixel aliasing.
      */
     void rebuildStrokeCache(const QSizeF& size, qreal zoom, qreal dpr) const {
-        // Physical size includes both zoom and DPI scaling
-        QSize physicalSize(static_cast<int>(size.width() * zoom * dpr), 
-                           static_cast<int>(size.height() * zoom * dpr));
+        int divisor = computeCacheDivisor(size, zoom, dpr);
+        QSize physicalSize = cappedPhysicalSize(size, zoom, dpr, divisor);
+        qreal effectiveZoomDpr = zoom * dpr / divisor;
         
         m_strokeCache = QPixmap(physicalSize);
-        // Set device pixel ratio to zoom * dpr so Qt draws at logical page size
-        m_strokeCache.setDevicePixelRatio(zoom * dpr);
+        m_strokeCache.setDevicePixelRatio(effectiveZoomDpr);
         m_strokeCache.fill(Qt::transparent);
         
         if (m_strokes.isEmpty()) {
             m_strokeCacheDirty = false;
             m_cacheZoom = zoom;
             m_cacheDpr = dpr;
+            m_cacheDivisor = divisor;
             return;
         }
         
         QPainter cachePainter(&m_strokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
         
-        // Strokes are in page coordinates - with devicePixelRatio set to zoom * dpr,
-        // Qt automatically scales the drawing to fill the physical pixmap.
-        // This gives us zoom-level resolution without manual coordinate scaling.
         for (const auto& stroke : m_strokes) {
             renderStroke(cachePainter, stroke);
         }
@@ -809,5 +815,19 @@ private:
         m_strokeCacheDirty = false;
         m_cacheZoom = zoom;
         m_cacheDpr = dpr;
+        m_cacheDivisor = divisor;
+    }
+    
+    static int computeCacheDivisor(const QSizeF& size, qreal zoom, qreal dpr) {
+        int desiredMax = static_cast<int>(
+            qMax(size.width(), size.height()) * zoom * dpr);
+        if (desiredMax <= MAX_STROKE_CACHE_DIM) return 1;
+        return (desiredMax + MAX_STROKE_CACHE_DIM - 1) / MAX_STROKE_CACHE_DIM;
+    }
+    
+    static QSize cappedPhysicalSize(const QSizeF& size, qreal zoom, qreal dpr,
+                                    int divisor) {
+        return QSize(static_cast<int>(size.width()  * zoom * dpr / divisor),
+                     static_cast<int>(size.height() * zoom * dpr / divisor));
     }
 };
