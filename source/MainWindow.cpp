@@ -3876,9 +3876,21 @@ QColor MainWindow::getAccentColor() const {
         return customAccentColor;
     }
     
-    // Return system accent color
     QPalette palette = QGuiApplication::palette();
-    return palette.highlight().color();
+    QColor systemHighlight = palette.highlight().color();
+    
+#if defined(Q_OS_ANDROID) || (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+    // Qt's generic fallback Highlight is #0078d7 (Windows 10's blue), used when
+    // the platform provides no real accent color (lightweight Linux DEs, Android).
+    // Replace with SpeedyNote's own light/dark defaults.
+    static const QColor qtFallbackBlue(0, 120, 215);
+    if (systemHighlight == qtFallbackBlue) {
+        QColor bg = palette.color(QPalette::Window);
+        return (bg.lightness() < 128) ? QColor("#316882") : QColor("#cffff5");
+    }
+#endif
+    
+    return systemHighlight;
 }
 
 void MainWindow::setCustomAccentColor(const QColor &color) {

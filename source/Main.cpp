@@ -170,7 +170,8 @@ static void applyAndroidPalette(QApplication& app)
         
         QColor lightGray(240, 240, 240);
         QColor gray(160, 160, 160);
-        QColor blue(0, 120, 215);
+        QColor linkBlue(0, 120, 215);
+        QColor accent("#cffff5");  // SpeedyNote light mint accent
         
         lightPalette.setColor(QPalette::Window, QColor(240, 240, 240));
         lightPalette.setColor(QPalette::WindowText, Qt::black);
@@ -187,10 +188,10 @@ static void applyAndroidPalette(QApplication& app)
         lightPalette.setColor(QPalette::Mid, QColor(200, 200, 200));
         lightPalette.setColor(QPalette::Shadow, QColor(105, 105, 105));
         lightPalette.setColor(QPalette::BrightText, Qt::red);
-        lightPalette.setColor(QPalette::Link, blue);
-        lightPalette.setColor(QPalette::LinkVisited, QColor(blue).darker());
-        lightPalette.setColor(QPalette::Highlight, blue);
-        lightPalette.setColor(QPalette::HighlightedText, Qt::white);
+        lightPalette.setColor(QPalette::Link, linkBlue);
+        lightPalette.setColor(QPalette::LinkVisited, QColor(linkBlue).darker());
+        lightPalette.setColor(QPalette::Highlight, accent);
+        lightPalette.setColor(QPalette::HighlightedText, Qt::black);
         lightPalette.setColor(QPalette::PlaceholderText, gray);
         
         lightPalette.setColor(QPalette::Disabled, QPalette::WindowText, gray);
