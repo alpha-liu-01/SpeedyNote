@@ -78,7 +78,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
-
+    
+    <release version="1.2.6" date="2026-02-24">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Fixed the problem that a selected inserted object stayed selected after switching to another tool.</li>
+          <li>Fixed the high RAM usage in high zoom levels.</li>
+          <li>Adjusted the default color palette for a nicer appearance and higher contrast.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.5" date="2026-02-20">
       <description>
         <p>Bug fixes and improvements:</p>

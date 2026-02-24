@@ -39,6 +39,44 @@
 #include <QDebug>
 #include <QPalette>
 #include <QJniObject>
+#include <QDialog>
+#include <QEvent>
+#include <QTimer>
+#include <QPointer>
+
+/**
+ * @brief Event filter that maximizes QDialog windows on Android.
+ * 
+ * On some OEM Android skins (notably Samsung One UI), Qt's QDialog windows
+ * are placed behind the main activity window, making them invisible while
+ * still blocking input (modal). This makes the app appear frozen.
+ * 
+ * The fix: maximize all dialogs so they fill the screen (standard Android UX),
+ * then raise + activate them. The deferred raise handles OEM skins that
+ * process the show event asynchronously and override the initial z-order.
+ */
+class AndroidDialogFilter : public QObject {
+public:
+    using QObject::QObject;
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override {
+        if (event->type() == QEvent::Show) {
+            if (auto* dialog = qobject_cast<QDialog*>(obj)) {
+                dialog->setWindowState(dialog->windowState() | Qt::WindowMaximized);
+                dialog->raise();
+                dialog->activateWindow();
+                QPointer<QDialog> guard(dialog);
+                QTimer::singleShot(50, dialog, [guard]() {
+                    if (guard) {
+                        guard->raise();
+                        guard->activateWindow();
+                    }
+                });
+            }
+        }
+        return QObject::eventFilter(obj, event);
+    }
+};
 #endif
 
 #ifdef Q_OS_IOS
@@ -132,7 +170,8 @@ static void applyAndroidPalette(QApplication& app)
         
         QColor lightGray(240, 240, 240);
         QColor gray(160, 160, 160);
-        QColor blue(0, 120, 215);
+        QColor linkBlue(0, 120, 215);
+        QColor accent("#cffff5");  // SpeedyNote light mint accent
         
         lightPalette.setColor(QPalette::Window, QColor(240, 240, 240));
         lightPalette.setColor(QPalette::WindowText, Qt::black);
@@ -149,10 +188,10 @@ static void applyAndroidPalette(QApplication& app)
         lightPalette.setColor(QPalette::Mid, QColor(200, 200, 200));
         lightPalette.setColor(QPalette::Shadow, QColor(105, 105, 105));
         lightPalette.setColor(QPalette::BrightText, Qt::red);
-        lightPalette.setColor(QPalette::Link, blue);
-        lightPalette.setColor(QPalette::LinkVisited, QColor(blue).darker());
-        lightPalette.setColor(QPalette::Highlight, blue);
-        lightPalette.setColor(QPalette::HighlightedText, Qt::white);
+        lightPalette.setColor(QPalette::Link, linkBlue);
+        lightPalette.setColor(QPalette::LinkVisited, QColor(linkBlue).darker());
+        lightPalette.setColor(QPalette::Highlight, accent);
+        lightPalette.setColor(QPalette::HighlightedText, Qt::black);
         lightPalette.setColor(QPalette::PlaceholderText, gray);
         
         lightPalette.setColor(QPalette::Disabled, QPalette::WindowText, gray);
@@ -707,6 +746,7 @@ int main(int argc, char* argv[])
     logAndroidPaths();
     applyAndroidPalette(app);
     applyAndroidFonts(app);
+    app.installEventFilter(new AndroidDialogFilter(&app));
 #elif defined(Q_OS_IOS)
     IOSPlatformHelper::applyPalette(app);
     IOSPlatformHelper::applyFonts(app);
