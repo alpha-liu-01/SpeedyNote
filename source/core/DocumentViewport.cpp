@@ -23,7 +23,7 @@
 #include <QKeyEvent>
 #include <QTouchEvent>
 #include <QNativeGestureEvent>  // macOS trackpad pinch-to-zoom
-#include <QInputDevice>         // Distinguish touchpad vs touchscreen
+#include "../compat/qt_compat.h"  // Qt5/Qt6 input device shims
 #include <QtMath>     // For qPow
 #include <QtConcurrent>   // For async PDF rendering
 #include <QThreadStorage> // For thread-local PDF provider caching
@@ -2481,7 +2481,7 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
     } else {
         // Track position for eraser cursor even when not pressing (hover)
         QPointF oldPos = m_lastPointerPos;
-        m_lastPointerPos = event->position();
+        m_lastPointerPos = SN_MOUSE_POS(event);
         
         // Request repaint if eraser tool is active (to update cursor)
         // Use elliptical regions to match circular eraser cursor
@@ -2562,7 +2562,7 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         qreal zoomFactor = qPow(1.1, zoomDelta);  // 10% per step
         
         // Use deferred zoom gesture API (will capture frame on first call)
-        updateZoomGesture(zoomFactor, event->position());
+        updateZoomGesture(zoomFactor, SN_WHEEL_POS(event));
         
         event->accept();
         return;
@@ -2795,7 +2795,11 @@ void DocumentViewport::onApplicationStateChanged(Qt::ApplicationState state)
 }
 #endif
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void DocumentViewport::enterEvent(QEnterEvent* event)
+#else
+void DocumentViewport::enterEvent(QEvent* event)
+#endif
 {
     m_pointerInViewport = true;
     QWidget::enterEvent(event);
@@ -2849,7 +2853,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         // doing it here moves the cost to hover time, not pen-down latency.
         initEraserJni();
 #endif
-        QPointF newPos = event->position();
+        QPointF newPos = SN_EVENT_POS(event);
         
         // Check if stylus is within widget bounds
         // Unlike mouse, tablet doesn't trigger leaveEvent when stylus moves outside
@@ -2864,7 +2868,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         
         // Check if eraser tool is active or this is hardware eraser
         bool isEraserHover = (m_currentTool == ToolType::Eraser) ||
-                             (event->pointerType() == QPointingDevice::PointerType::Eraser);
+                             SN_IS_ERASER_TABLET(event);
         
         if (isEraserHover) {
             QPointF oldPos = m_lastPointerPos;
@@ -3346,7 +3350,7 @@ bool DocumentViewport::event(QEvent* event)
         // gesture processing.  Letting them fall through keeps 2-finger scroll
         // working normally, while pinch-to-zoom is handled via NativeGesture below.
         if (touchEvent->device() &&
-            touchEvent->device()->type() == QInputDevice::DeviceType::TouchPad) {
+            touchEvent->device()->type() == SN_TOUCHPAD_DEVICE_TYPE) {
             return QWidget::event(event);
         }
         
@@ -3371,8 +3375,8 @@ bool DocumentViewport::event(QEvent* event)
         
         // Check if the touch started on a child widget (like MissingPdfBanner)
         // If so, let Qt's normal event propagation handle it instead of intercepting
-        if (event->type() == QEvent::TouchBegin && !touchEvent->points().isEmpty()) {
-            QPointF touchPos = touchEvent->points().first().position();
+        if (event->type() == QEvent::TouchBegin && !SN_TOUCH_POINTS(touchEvent).isEmpty()) {
+            QPointF touchPos = SN_TP_POS(SN_TOUCH_POINTS(touchEvent).first());
             QWidget* childWidget = childAt(touchPos.toPoint());
             
             // If touch is on a child widget (not directly on DocumentViewport),
@@ -3401,7 +3405,7 @@ bool DocumentViewport::event(QEvent* event)
             // value() is the incremental scale delta (e.g. 0.02 = 2% zoom in)
             qreal scaleFactor = 1.0 + nge->value();
             if (!qFuzzyCompare(scaleFactor, 1.0)) {
-                updateZoomGesture(scaleFactor, nge->position());
+                updateZoomGesture(scaleFactor, SN_NGE_POS(nge));
             }
             event->accept();
             return true;
@@ -4030,7 +4034,7 @@ PointerEvent DocumentViewport::mouseToPointerEvent(QMouseEvent* event, PointerEv
     PointerEvent pe;
     pe.type = type;
     pe.source = PointerEvent::Mouse;
-    pe.viewportPos = event->position();
+    pe.viewportPos = SN_MOUSE_POS(event);
     pe.pageHit = viewportToPage(pe.viewportPos);
     
     // Mouse has no pressure sensitivity
@@ -4054,7 +4058,7 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     PointerEvent pe;
     pe.type = type;
     pe.source = PointerEvent::Stylus;
-    pe.viewportPos = event->position();
+    pe.viewportPos = SN_EVENT_POS(event);
     pe.pageHit = viewportToPage(pe.viewportPos);
     
     // Tablet pressure and tilt
@@ -4066,15 +4070,17 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     // Check for eraser - either eraser end of stylus or eraser button
     // Qt6: pointerType() returns the type of pointing device
     // Also check deviceType() as a fallback - some drivers report eraser via device type
-    pe.isEraser = (event->pointerType() == QPointingDevice::PointerType::Eraser);
-    
+    pe.isEraser = SN_IS_ERASER_TABLET(event);
+
     // Alternative detection: some tablets report eraser via deviceType() instead of pointerType()
-    if (!pe.isEraser && event->deviceType() == QInputDevice::DeviceType::Stylus) {
-        // Check if this might be an eraser based on the pointing device
+    if (!pe.isEraser && SN_IS_STYLUS_TABLET(event)) {
+#ifdef SN_HAS_POINTING_DEVICE
+        // Qt6 only: check device name for eraser identification
         const QPointingDevice* device = event->pointingDevice();
         if (device && device->name().contains("eraser", Qt::CaseInsensitive)) {
             pe.isEraser = true;
         }
+#endif
     }
     
 #ifdef Q_OS_ANDROID

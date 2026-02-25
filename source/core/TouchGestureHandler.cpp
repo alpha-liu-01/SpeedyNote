@@ -1,6 +1,7 @@
 #include "TouchGestureHandler.h"
 #include "DocumentViewport.h"
 #include <QTouchEvent>
+#include "../compat/qt_compat.h"  // SN_TouchPoint, SN_TOUCH_POINTS, SN_TP_* shims
 #include <QLineF>
 #include <QDateTime>
 #include <QDebug>
@@ -198,7 +199,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         return false;  // Don't consume event
     }
     
-    const auto& points = event->points();
+    const auto& points = SN_TOUCH_POINTS(event);
     
     // ===== Track touch point IDs across events (Android fix) =====
     // On Android, touch events may not include all active points in every event.
@@ -260,17 +261,17 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     for (const auto& pt : points) {
         int id = pt.id();
         
-        if (pt.state() == QEventPoint::Pressed) {
+        if (pt.state() == SN_TP_PRESSED) {
             m_trackedTouchIds.insert(id);
-            m_lastTouchPositions.insert(id, pt.position());
+            m_lastTouchPositions.insert(id, SN_TP_POS(pt));
             m_touchIdLastSeenTime.insert(id, currentTime);
-        } else if (pt.state() == QEventPoint::Released) {
+        } else if (pt.state() == SN_TP_RELEASED) {
             m_trackedTouchIds.remove(id);
             m_lastTouchPositions.remove(id);
             m_touchIdLastSeenTime.remove(id);
         } else {
             // Updated or Stationary - cache latest position and update timestamp
-            m_lastTouchPositions.insert(id, pt.position());
+            m_lastTouchPositions.insert(id, SN_TP_POS(pt));
             m_touchIdLastSeenTime.insert(id, currentTime);
         }
     }
@@ -318,10 +319,10 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     // Also build activePoints list for accessing current event's point data
     // (still needed for position calculations)
-    QVector<const QEventPoint*> activePoints;
+    QVector<const SN_TouchPoint*> activePoints;
     activePoints.reserve(points.size());
     for (const auto& pt : points) {
-        if (pt.state() != QEventPoint::Released) {
+        if (pt.state() != SN_TP_RELEASED) {
             activePoints.append(&pt);
         }
     }
@@ -388,7 +389,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         if (activePoints.size() == 1) {
             // TG.2.1: Single finger touch - start pan
             const auto& point = *activePoints.first();
-            m_lastPos = point.position();
+            m_lastPos = SN_TP_POS(point);
             m_panActive = true;
             m_pinchActive = false;  // Ensure clean state
             
@@ -407,8 +408,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
+            QPointF pos1 = SN_TP_POS(p1);
+            QPointF pos2 = SN_TP_POS(p2);
             QPointF centroid = (pos1 + pos2) / 2.0;
             qreal distance = QLineF(pos1, pos2).length();
             
@@ -474,8 +475,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
+            QPointF pos1 = SN_TP_POS(p1);
+            QPointF pos2 = SN_TP_POS(p2);
             QPointF centroid = (pos1 + pos2) / 2.0;
             qreal distance = QLineF(pos1, pos2).length();
             
@@ -504,7 +505,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             
             // Start pan with remaining finger
             const auto& point = *activePoints.first();
-            m_lastPos = point.position();
+            m_lastPos = SN_TP_POS(point);
             m_panActive = true;
             
             m_velocitySamples.clear();
@@ -527,7 +528,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
 #endif
         if (m_panActive && m_activeTouchPoints == 1 && !activePoints.isEmpty()) {
             const auto& point = *activePoints.first();
-            QPointF currentPos = point.position();
+            QPointF currentPos = SN_TP_POS(point);
             QPointF delta = currentPos - m_lastPos;
             
             // Track velocity for inertia (pixels per ms, negated for correct direction)
@@ -587,8 +588,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
+            QPointF pos1 = SN_TP_POS(p1);
+            QPointF pos2 = SN_TP_POS(p2);
             QPointF centroid = (pos1 + pos2) / 2.0;
             qreal distance = QLineF(pos1, pos2).length();
             
@@ -622,11 +623,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             // Get positions from current event (prefer fresh data)
             for (const auto* pt : activePoints) {
                 if (!havePos1) {
-                    pos1 = pt->position();
+                    pos1 = SN_TP_POS_PTR(pt);
                     pos1Id = pt->id();
                     havePos1 = true;
                 } else if (!havePos2) {
-                    pos2 = pt->position();
+                    pos2 = SN_TP_POS_PTR(pt);
                     havePos2 = true;
                     break;
                 }

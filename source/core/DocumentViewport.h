@@ -1749,7 +1749,11 @@ protected:
     void hideEvent(QHideEvent* event) override;     ///< Clear gesture state when hidden
     void showEvent(QShowEvent* event) override;     ///< Start touch cooldown after becoming visible
     void tabletEvent(QTabletEvent* event) override;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     void enterEvent(QEnterEvent* event) override;   ///< Track pointer entering viewport
+#else
+    void enterEvent(QEvent* event) override;        ///< Track pointer entering viewport
+#endif
     void leaveEvent(QEvent* event) override;        ///< Track pointer leaving viewport
     bool event(QEvent* event) override;  ///< Forwards touch events to handler
     

@@ -573,9 +573,17 @@ public:
         ensureStrokeCacheValid(size, zoom, dpr);
         
         if (!m_strokeCache.isNull()) {
-            // Draw the pre-zoomed cache at (0,0) - it's already at the right size
-            // The cache was built at size * zoom * dpr, with devicePixelRatio = zoom * dpr
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+            // Qt5: cache DPR may be clamped to 1.0 (when zoom*dpr < 1.0),
+            // so its logical size differs from the page size. Draw to an
+            // explicit page-sized target rect for correct mapping.
+            // When DPR >= 1.0 this produces the same result as drawPixmap(0,0).
+            painter.drawPixmap(QRectF(0, 0, size.width(), size.height()),
+                               m_strokeCache,
+                               QRectF(0, 0, m_strokeCache.width(), m_strokeCache.height()));
+#else
             painter.drawPixmap(0, 0, m_strokeCache);
+#endif
         } else {
             // Fallback to direct rendering (shouldn't happen)
             painter.save();
@@ -694,6 +702,21 @@ private:
     mutable qreal m_cacheDpr = 1.0;         ///< DPI ratio cache was built at
     mutable int m_cacheDivisor = 1;         ///< Integer divisor applied for resolution cap
     
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    // Qt5: when zoom*dpr < 1.0 the cache DPR is clamped to 1.0, so the
+    // painter's logical canvas is smaller than the page. Apply a manual
+    // scale transform so strokes (in page coordinates) map correctly to
+    // cache pixels and rasterize with proper anti-aliasing at the target
+    // resolution. When rawScale >= 1.0 this is a no-op.
+    static void applyCachePainterScale(QPainter& p, qreal rawScale) {
+        if (rawScale < 1.0) {
+            p.scale(rawScale, rawScale);
+        }
+    }
+#else
+    static void applyCachePainterScale(QPainter&, qreal) {}
+#endif
+    
     /// Index of first stroke pending incremental render, or -1 if none.
     /// When addStroke() is called and the cache is valid, the stroke index is
     /// recorded here. On next ensureStrokeCacheValid(), only these new strokes
@@ -733,6 +756,7 @@ private:
         
         QPainter cachePainter(&m_strokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        applyCachePainterScale(cachePainter, m_cacheZoom * m_cacheDpr / m_cacheDivisor);
         
         for (int i = m_pendingStrokeStart; i < m_strokes.size(); ++i) {
             renderStroke(cachePainter, m_strokes[i]);
@@ -759,6 +783,7 @@ private:
         }
         
         QPainter cachePainter(&m_strokeCache);
+        applyCachePainterScale(cachePainter, m_cacheZoom * m_cacheDpr / m_cacheDivisor);
         
         // Step 1: Clear the removed stroke's bounding box
         cachePainter.setCompositionMode(QPainter::CompositionMode_Clear);
@@ -791,10 +816,21 @@ private:
     void rebuildStrokeCache(const QSizeF& size, qreal zoom, qreal dpr) const {
         int divisor = computeCacheDivisor(size, zoom, dpr);
         QSize physicalSize = cappedPhysicalSize(size, zoom, dpr, divisor);
-        qreal effectiveZoomDpr = zoom * dpr / divisor;
+        qreal rawScale = zoom * dpr / divisor;
+        
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        // Qt5: QPixmap::setDevicePixelRatio() breaks with values < 1.0.
+        // Use DPR = max(1.0, rawScale) and compensate with a painter scale()
+        // so strokes rasterize at the correct zoomed-out resolution with
+        // proper anti-aliasing (instead of rendering at page resolution and
+        // then downscaling the whole pixmap, which causes aliasing).
+        qreal cacheDpr = qMax(1.0, rawScale);
+#else
+        qreal cacheDpr = rawScale;
+#endif
         
         m_strokeCache = QPixmap(physicalSize);
-        m_strokeCache.setDevicePixelRatio(effectiveZoomDpr);
+        m_strokeCache.setDevicePixelRatio(cacheDpr);
         m_strokeCache.fill(Qt::transparent);
         
         if (m_strokes.isEmpty()) {
@@ -807,6 +843,7 @@ private:
         
         QPainter cachePainter(&m_strokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        applyCachePainterScale(cachePainter, rawScale);
         
         for (const auto& stroke : m_strokes) {
             renderStroke(cachePainter, stroke);

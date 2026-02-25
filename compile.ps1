@@ -2,9 +2,17 @@ param(
     [switch]$arm64,      # Build for ARM64 Windows (Snapdragon)
     [switch]$old,        # Build for older x86_64 CPUs (SSE3/SSSE3)
     [switch]$legacy,     # Alias for -old
+    [switch]$qt5,        # Build with Qt5 instead of Qt6
+    [switch]$win32,      # Build for 32-bit x86 Windows (requires -qt5)
     [switch]$debug,      # Enable verbose debug output (qDebug)
     [switch]$norun       # Don't run the application after building (for CI/remote builds)
 )
+
+# ✅ Validate flags
+if ($win32 -and -not $qt5) {
+    Write-Host "❌ -win32 requires -qt5 (Qt6 does not support 32-bit Windows)" -ForegroundColor Red
+    exit 1
+}
 
 # ✅ Determine architecture and set appropriate toolchain
 if ($arm64) {
@@ -12,6 +20,11 @@ if ($arm64) {
     $archName = "ARM64"
     $archColor = "Magenta"
     Write-Host "🚀 Building for ARM64 Windows (Snapdragon)" -ForegroundColor $archColor
+} elseif ($win32) {
+    $toolchain = "mingw32"
+    $archName = "x86 (32-bit)"
+    $archColor = "Yellow"
+    Write-Host "🚀 Building for 32-bit x86 Windows (Qt5)" -ForegroundColor $archColor
 } else {
     $toolchain = "clang64"
     $archName = "x86_64"
@@ -19,38 +32,84 @@ if ($arm64) {
     Write-Host "🚀 Building for x86_64 Windows" -ForegroundColor $archColor
 }
 
-# ✅ Detect MSYS2 installation path
-# Check if MSYS2 path is set by environment variable (GitHub Actions)
-$possiblePaths = @()
-if ($env:MSYS) {
-    $possiblePaths += $env:MSYS
+if ($qt5) {
+    Write-Host "   Qt version: Qt5" -ForegroundColor Gray
+} else {
+    Write-Host "   Qt version: Qt6" -ForegroundColor Gray
 }
-$possiblePaths += @(
-    "C:\msys64",
-    "$env:RUNNER_TEMP\..\msys64",
-    "D:\a\_temp\msys64",
-    "$env:SystemDrive\msys64"
-)
 
-$msys2Root = $null
-foreach ($path in $possiblePaths) {
-    if (Test-Path "$path\$toolchain\bin") {
-        $msys2Root = $path
-        Write-Host "✅ Found MSYS2 at: $msys2Root" -ForegroundColor Green
-        break
+if ($win32) {
+    # ✅ Standalone Qt 5.15.2 SDK (MSYS2 does not offer 32-bit packages)
+    $qtSdkPath = "C:\Qt\5.15.2\mingw81_32"
+    $mingwToolsPath = "C:\Qt\Tools\mingw810_32"
+
+    if (-not (Test-Path "$qtSdkPath\bin")) {
+        Write-Host "❌ Qt 5.15.2 mingw81_32 not found at: $qtSdkPath" -ForegroundColor Red
+        Write-Host "   Install Qt 5.15.2 with the MinGW 8.1 32-bit component via Qt Maintenance Tool" -ForegroundColor Yellow
+        exit 1
     }
-}
+    if (-not (Test-Path "$mingwToolsPath\bin\gcc.exe")) {
+        Write-Host "❌ MinGW 8.1 32-bit tools not found at: $mingwToolsPath" -ForegroundColor Red
+        Write-Host "   Install MinGW 8.1 32-bit from Qt Maintenance Tool (Developer and Designer Tools)" -ForegroundColor Yellow
+        exit 1
+    }
 
-if (-not $msys2Root) {
-    Write-Host "❌ Could not find MSYS2 installation with $toolchain toolchain. Checked:" -ForegroundColor Red
+    Write-Host "✅ Found Qt 5.15.2 at: $qtSdkPath" -ForegroundColor Green
+    Write-Host "✅ Found MinGW 8.1 at: $mingwToolsPath" -ForegroundColor Green
+
+    $toolchainPath = $mingwToolsPath
+    $qtBinPath = "$qtSdkPath\bin"
+
+    # Find cmake (Qt Tools bundle or system PATH)
+    $cmakeExe = $null
+    foreach ($p in @("C:\Qt\Tools\CMake_64\bin\cmake.exe", "C:\Qt\Tools\cmake\bin\cmake.exe")) {
+        if (Test-Path $p) { $cmakeExe = $p; break }
+    }
+    if (-not $cmakeExe) {
+        $cmakeCmd = Get-Command cmake.exe -ErrorAction SilentlyContinue
+        if ($cmakeCmd) { $cmakeExe = $cmakeCmd.Source }
+    }
+    if (-not $cmakeExe) {
+        Write-Host "❌ cmake not found. Install CMake or add Qt Tools CMake to PATH." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "   CMake: $cmakeExe" -ForegroundColor Gray
+} else {
+    # ✅ Detect MSYS2 installation path
+    # Check if MSYS2 path is set by environment variable (GitHub Actions)
+    $possiblePaths = @()
+    if ($env:MSYS) {
+        $possiblePaths += $env:MSYS
+    }
+    $possiblePaths += @(
+        "C:\msys64",
+        "$env:RUNNER_TEMP\..\msys64",
+        "D:\a\_temp\msys64",
+        "$env:SystemDrive\msys64"
+    )
+
+    $msys2Root = $null
     foreach ($path in $possiblePaths) {
-        Write-Host "  - $path\$toolchain\bin" -ForegroundColor Yellow
+        if (Test-Path "$path\$toolchain\bin") {
+            $msys2Root = $path
+            Write-Host "✅ Found MSYS2 at: $msys2Root" -ForegroundColor Green
+            break
+        }
     }
-    Write-Host "Please ensure MSYS2 is installed with the $toolchain environment" -ForegroundColor Red
-    exit 1
-}
 
-$toolchainPath = "$msys2Root\$toolchain"
+    if (-not $msys2Root) {
+        Write-Host "❌ Could not find MSYS2 installation with $toolchain toolchain. Checked:" -ForegroundColor Red
+        foreach ($path in $possiblePaths) {
+            Write-Host "  - $path\$toolchain\bin" -ForegroundColor Yellow
+        }
+        Write-Host "Please ensure MSYS2 is installed with the $toolchain environment" -ForegroundColor Red
+        exit 1
+    }
+
+    $toolchainPath = "$msys2Root\$toolchain"
+    $qtBinPath = "$toolchainPath\bin"
+    $cmakeExe = "$toolchainPath\bin\cmake.exe"
+}
 
 # Clean and recreate build folder
 if (Test-Path ".\build" -PathType Container) {
@@ -98,10 +157,16 @@ if (Test-Path ".\build" -PathType Container) {
 
 # ✅ Compile .ts → .qm files
 $lreleaseExe = $null
-if (Test-Path "$toolchainPath\bin\lrelease-qt6.exe") {
-    $lreleaseExe = "$toolchainPath\bin\lrelease-qt6.exe"
-} elseif (Test-Path "$toolchainPath\bin\lrelease.exe") {
-    $lreleaseExe = "$toolchainPath\bin\lrelease.exe"
+if ($qt5) {
+    if (Test-Path "$qtBinPath\lrelease.exe") {
+        $lreleaseExe = "$qtBinPath\lrelease.exe"
+    }
+} else {
+    if (Test-Path "$qtBinPath\lrelease-qt6.exe") {
+        $lreleaseExe = "$qtBinPath\lrelease-qt6.exe"
+    } elseif (Test-Path "$qtBinPath\lrelease.exe") {
+        $lreleaseExe = "$qtBinPath\lrelease.exe"
+    }
 }
 
 if ($lreleaseExe) {
@@ -109,29 +174,55 @@ if ($lreleaseExe) {
     & $lreleaseExe ./resources/translations/app_zh.ts ./resources/translations/app_fr.ts ./resources/translations/app_es.ts
     Copy-Item -Path ".\resources\translations\*.qm" -Destination ".\build" -Force
 } else {
-    Write-Host "⚠️  Warning: Neither lrelease-qt6.exe nor lrelease.exe found in $toolchainPath\bin" -ForegroundColor Yellow
-    Write-Host "   Skipping translation compilation. Install mingw-w64-$toolchain-qt6-tools if needed." -ForegroundColor Yellow
+    $qtVer = if ($qt5) { "qt5" } else { "qt6" }
+    Write-Host "⚠️  Warning: lrelease not found in $qtBinPath" -ForegroundColor Yellow
+    Write-Host "   Skipping translation compilation. Install $qtVer-tools if needed." -ForegroundColor Yellow
 }
 
 cd .\build
 
 # ✅ Set PATH to use the selected toolchain (critical for DLLs and compiler detection)
-$env:PATH = "$toolchainPath\bin;$env:PATH"
+if ($win32) {
+    $env:PATH = "$qtBinPath;$toolchainPath\bin;$env:PATH"
+} else {
+    $env:PATH = "$toolchainPath\bin;$env:PATH"
+}
+
+# ✅ Detect compiler (Clang preferred, GCC fallback for mingw32)
+if (Test-Path "$toolchainPath\bin\clang.exe") {
+    $cCompiler = "$toolchainPath/bin/clang.exe"
+    $cxxCompiler = "$toolchainPath/bin/clang++.exe"
+    Write-Host "   Compiler: Clang" -ForegroundColor Gray
+} else {
+    $cCompiler = "$toolchainPath/bin/gcc.exe"
+    $cxxCompiler = "$toolchainPath/bin/g++.exe"
+    Write-Host "   Compiler: GCC" -ForegroundColor Gray
+}
 
 # ✅ Prepare CMake configuration
 $cmakeArgs = @(
     "-G", "MinGW Makefiles",
-    "-DCMAKE_C_COMPILER=$toolchainPath/bin/clang.exe",
-    "-DCMAKE_CXX_COMPILER=$toolchainPath/bin/clang++.exe",
+    "-DCMAKE_C_COMPILER=$cCompiler",
+    "-DCMAKE_CXX_COMPILER=$cxxCompiler",
     "-DCMAKE_MAKE_PROGRAM=$toolchainPath/bin/mingw32-make.exe",
     "-DCMAKE_BUILD_TYPE=Release"
 )
+
+if ($qt5) {
+    $cmakeArgs += "-DUSE_QT5=ON"
+}
+if ($win32) {
+    $qtPathCmake = $qtSdkPath -replace '\\', '/'
+    $cmakeArgs += "-DQT_PATH=$qtPathCmake"
+}
 
 # Architecture-specific configuration
 if ($arm64) {
     # ARM64 build - set processor type
     $cmakeArgs += "-DCMAKE_SYSTEM_PROCESSOR=arm64"
     Write-Host "Target: ARM64 (Cortex-A75/Snapdragon optimized)" -ForegroundColor $archColor
+} elseif ($win32) {
+    Write-Host "Target: x86 (32-bit) Windows" -ForegroundColor $archColor
 } else {
     # x86_64 build - determine CPU architecture target
     $cpuArch = "modern"
@@ -153,7 +244,7 @@ if ($debug) {
 }
 
 # ✅ Configure and build
-& "$toolchainPath\bin\cmake.exe" @cmakeArgs ..
+& $cmakeExe @cmakeArgs ..
 
 # Determine number of parallel jobs based on architecture
 # ARM64 devices often have limited memory/thermal headroom, so use half the cores
@@ -163,19 +254,83 @@ if ($arm64) {
     Write-Host "Using $jobs parallel jobs (ARM64: half of $cpuCount cores)" -ForegroundColor Gray
 } else {
     $jobs = $cpuCount
-    Write-Host "Using $jobs parallel jobs (x64: all $cpuCount cores)" -ForegroundColor Gray
+    Write-Host "Using $jobs parallel jobs ($archName`: all $cpuCount cores)" -ForegroundColor Gray
 }
 
-& "$toolchainPath\bin\cmake.exe" --build . --config Release --parallel $jobs
+& $cmakeExe --build . --config Release --parallel $jobs
 
 # ✅ Deploy Qt runtime
-& "$toolchainPath\bin\windeployqt6.exe" "speedynote.exe"
+if ($qt5) {
+    & "$qtBinPath\windeployqt.exe" "speedynote.exe"
+} else {
+    & "$qtBinPath\windeployqt6.exe" "speedynote.exe"
+}
 
+$copiedCount = 0
+if ($win32) {
+    # ✅ Standalone Qt SDK: windeployqt handles Qt DLLs; detect remaining deps recursively
+    Write-Host "Detecting and copying required DLLs (recursive)..." -ForegroundColor Cyan
+
+    $objdumpExe = "$toolchainPath\bin\objdump.exe"
+    if (-not (Test-Path $objdumpExe)) {
+        Write-Host "❌ objdump not found at $objdumpExe" -ForegroundColor Red
+        exit 1
+    }
+
+    $win32SearchPaths = @("$qtSdkPath\bin", "$toolchainPath\bin")
+    $win32SystemPrefixes = @("C:\Windows", "C:\WINDOWS", "$env:SystemRoot", "$env:windir") |
+        Where-Object { $_ } | ForEach-Object { $_.ToLower() }
+    $win32Visited = @{}
+
+    function Resolve-Win32Deps {
+        param([string]$BinaryPath)
+
+        $imports = & $objdumpExe -p $BinaryPath 2>$null |
+            Select-String "DLL Name:\s+(\S+)" |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+
+        foreach ($dllName in $imports) {
+            $lowerName = $dllName.ToLower()
+            if ($win32Visited.ContainsKey($lowerName)) { continue }
+            $win32Visited[$lowerName] = $true
+
+            # Already in build dir (e.g. copied by windeployqt)
+            if (Test-Path ".\$dllName") {
+                Resolve-Win32Deps -BinaryPath ".\$dllName"
+                continue
+            }
+
+            # Search in Qt SDK and MinGW toolchain
+            $srcPath = $null
+            foreach ($dir in $win32SearchPaths) {
+                $candidate = "$dir\$dllName"
+                if (Test-Path $candidate) { $srcPath = $candidate; break }
+            }
+            if (-not $srcPath) { continue }
+
+            # Skip Windows system DLLs
+            $lowerSrc = $srcPath.ToLower()
+            $isSystem = $false
+            foreach ($sp in $win32SystemPrefixes) {
+                if ($lowerSrc.StartsWith($sp)) { $isSystem = $true; break }
+            }
+            if ($isSystem) { continue }
+
+            Copy-Item -Path $srcPath -Destination ".\$dllName" -Force
+            $script:copiedCount++
+            Write-Host "   Copied $dllName" -ForegroundColor Gray
+
+            Resolve-Win32Deps -BinaryPath ".\$dllName"
+        }
+    }
+
+    Resolve-Win32Deps -BinaryPath ".\speedynote.exe"
+    Write-Host "✅ Copied $copiedCount DLL(s) from Qt SDK / MinGW toolchain" -ForegroundColor Green
+} else {
 # ✅ Copy required DLLs automatically using ntldd (recursive dependency detection)
 Write-Host "Detecting and copying required DLLs..." -ForegroundColor Cyan
 
 $sourceDir = "$toolchainPath\bin"
-$copiedCount = 0
 $ntlddExe = "$toolchainPath\bin\ntldd.exe"
 
 # Windows system directories to exclude (DLLs from these are provided by Windows)
@@ -290,6 +445,7 @@ ldd speedynote.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
 
 Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
 Write-Host "   Note: MuPDF is dynamically linked (libmupdf.dll)" -ForegroundColor Gray
+} # end MSYS2 DLL detection
 
 # Poppler removed - SpeedyNote uses MuPDF exclusively for PDF rendering and export
 

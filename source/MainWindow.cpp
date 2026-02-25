@@ -70,7 +70,7 @@
 #include <QTimer>
 #include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
 #include "core/ShortcutManager.h"  // Keyboard shortcut hub
-#include <QInputDevice>  // MW5.8: For keyboard detection
+#include "compat/qt_compat.h"  // Qt5/Qt6 input device shims
 #include <QColorDialog>  // Phase 3.1.8: For custom color picker
 #include <QProcess>
 #include <QLocalSocket>  // For single-instance server communication
@@ -4197,9 +4197,8 @@ void MainWindow::wheelEvent(QWheelEvent *event) {
 // ==================== MW5.8: Pan Slider Management ====================
 
 bool MainWindow::hasPhysicalKeyboard() {
-    // Check if any keyboard device is connected using Qt 6.4+ API
-    // On desktop systems, this typically returns true
-    // On tablets without attached keyboards, this may return false
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Qt6: enumerate input devices and look for a keyboard
     const auto devices = QInputDevice::devices();
     for (const QInputDevice *device : devices) {
         if (device->type() == QInputDevice::DeviceType::Keyboard) {
@@ -4207,6 +4206,11 @@ bool MainWindow::hasPhysicalKeyboard() {
         }
     }
     return false;
+#else
+    // Qt5: QInputDevice does not exist; assume a physical keyboard is present
+    // (desktop / Win32 target always has a keyboard)
+    return true;
+#endif
 }
 
 void MainWindow::showScrollbars() {
@@ -6385,7 +6389,11 @@ void MainWindow::reconnectControllerSignals() {
 #endif // SPEEDYNOTE_CONTROLLER_SUPPORT
 
 #ifdef Q_OS_WIN
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result) {
+#else
+bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *result) {
+#endif
     // Detect Windows theme changes at runtime
     if (eventType == "windows_generic_MSG") {
         MSG *msg = static_cast<MSG *>(message);

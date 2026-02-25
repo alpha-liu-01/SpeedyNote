@@ -145,7 +145,11 @@ void UndoDeleteButton::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void UndoDeleteButton::enterEvent(QEnterEvent* event)
+#else
+void UndoDeleteButton::enterEvent(QEvent* event)
+#endif
 {
     m_hovered = true;
     update();

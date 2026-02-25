@@ -169,7 +169,11 @@ void ActionBarButton::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void ActionBarButton::enterEvent(QEnterEvent* event)
+#else
+void ActionBarButton::enterEvent(QEvent* event)
+#endif
 {
     if (m_enabled) {
         m_hovered = true;

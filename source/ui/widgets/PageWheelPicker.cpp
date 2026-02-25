@@ -187,7 +187,11 @@ void PageWheelPicker::mousePressEvent(QMouseEvent* event)
         m_snapAnimation->stop();
         
         m_dragging = true;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         m_lastPos = event->position();
+#else
+        m_lastPos = event->localPos();
+#endif
         m_velocity = 0.0;
         m_velocityTimer.start();
     }
@@ -197,7 +201,11 @@ void PageWheelPicker::mousePressEvent(QMouseEvent* event)
 void PageWheelPicker::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_dragging) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         const QPointF currentPos = event->position();
+#else
+        const QPointF currentPos = event->localPos();
+#endif
         const qreal deltaY = currentPos.y() - m_lastPos.y();
         
         // Convert pixels to page offset (negative because drag down = previous pages)

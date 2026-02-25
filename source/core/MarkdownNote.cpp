@@ -12,6 +12,9 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QTextStream>
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#  include <QTextCodec>
+#endif
 
 // ===== File I/O =====
 
@@ -24,7 +27,11 @@ bool MarkdownNote::saveToFile(const QString& filePath) const
     }
     
     QTextStream out(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     out.setEncoding(QStringConverter::Utf8);
+#else
+    out.setCodec("UTF-8");
+#endif
     
     // Write YAML front matter
     // Escape quotes in title for valid YAML
@@ -56,7 +63,11 @@ MarkdownNote MarkdownNote::loadFromFile(const QString& filePath)
     note.id = info.baseName();
     
     QTextStream in(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     in.setEncoding(QStringConverter::Utf8);
+#else
+    in.setCodec("UTF-8");
+#endif
     QString fileContent = in.readAll();
     
     // Parse YAML front matter

@@ -292,7 +292,11 @@ void PagePanelListView::dragMoveEvent(QDragMoveEvent* event)
     QListView::dragMoveEvent(event);
     
     // Auto-scroll when dragging near edges
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     int y = event->position().toPoint().y();
+#else
+    int y = event->pos().y();
+#endif
     int viewHeight = viewport()->height();
     
     if (y < AUTO_SCROLL_MARGIN) {

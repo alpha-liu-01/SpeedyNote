@@ -288,7 +288,17 @@ static void applyWindowsFonts(QApplication& app)
 {
     QFont font("Segoe UI", 9);
     font.setStyleHint(QFont::SansSerif);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     font.setHintingPreference(QFont::PreferFullHinting);
+#else
+    // Qt5 uses the GDI font engine which snaps glyphs to integer pixel
+    // boundaries. This causes inconsistent character spacing because
+    // accumulated rounding errors make some gaps wider and others narrower.
+    // PreferNoHinting disables the integer-snapping, letting glyphs position
+    // at fractional coordinates for uniform spacing.
+    // Qt6 defaults to DirectWrite which handles fractional advances correctly.
+    font.setHintingPreference(QFont::PreferNoHinting);
+#endif
     font.setFamilies({"Segoe UI", "Dengxian", "Microsoft YaHei", "SimHei"});
     app.setFont(font);
 }
@@ -369,7 +379,11 @@ static void loadTranslations(QApplication& app, QTranslator& translator)
     // Load Qt's base translations (for standard dialogs: Save, Cancel, etc.)
     // This must be loaded before the app translator so app translations take priority
     static QTranslator qtBaseTranslator;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     QString qtTranslationsPath = QLibraryInfo::path(QLibraryInfo::TranslationsPath);
+#else
+    QString qtTranslationsPath = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+#endif
     if (qtBaseTranslator.load("qtbase_" + langCode, qtTranslationsPath)) {
         app.installTranslator(&qtBaseTranslator);
     }
@@ -731,6 +745,15 @@ int main(int argc, char* argv[])
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
     SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
+#endif
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    QApplication::setHighDpiScaleFactorRoundingPolicy(
+        Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+#endif
 #endif
 
     QApplication app(argc, argv);

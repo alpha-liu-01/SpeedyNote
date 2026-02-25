@@ -21,3 +21,13 @@ enum class ToolType {
     Lasso,      ///< Selection tool - select and manipulate strokes (Phase 2B)
     ObjectSelect///< Object selection tool - select and manipulate inserted objects (Phase O2)
 };
+
+// Qt5 does not auto-generate qHash for enum class types used as QHash keys.
+// Qt6 provides it automatically via QHashPrivate::Stores enum specialization.
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include <QtCore/qhashfunctions.h>
+inline uint qHash(ToolType key, uint seed = 0) noexcept
+{
+    return qHash(static_cast<int>(key), seed);
+}
+#endif
