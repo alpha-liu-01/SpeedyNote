@@ -83,3 +83,4 @@ ios/build-sim/
 ios/dist/
 ios/Assets.xcassets/
 .aur-work/
+win32/
