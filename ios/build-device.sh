@@ -186,8 +186,15 @@ fi
 # Ad-hoc mode: fake-sign with ldid and strip debug symbols
 if [ -z "${TEAM_ID}" ]; then
     echo ""
-    echo "--- Fake-signing with ldid ---"
-    ldid -S "${APP_PATH}/speedynote"
+    echo "--- Fake-signing with ldid (with entitlements) ---"
+    ENTITLEMENTS="${PROJECT_ROOT}/ios/entitlements.plist"
+    if [ -f "${ENTITLEMENTS}" ]; then
+        ldid -S"${ENTITLEMENTS}" "${APP_PATH}/speedynote"
+        echo "Signed with entitlements: ${ENTITLEMENTS}"
+    else
+        ldid -S "${APP_PATH}/speedynote"
+        echo "WARNING: entitlements.plist not found, signed without entitlements"
+    fi
     echo "Signed: ${APP_PATH}/speedynote"
 
     echo ""

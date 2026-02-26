@@ -620,15 +620,8 @@ private:
             } while (QFile::exists(destPath));
         }
 
-        if (QFile::copy(inboxPath, destPath)) {
-            #ifdef SPEEDYNOTE_DEBUG
-            fprintf(stderr, "[InboxWatcher] copied PDF to %s\n", qPrintable(destPath));
-            #endif
+        if (QFile::copy(inboxPath, destPath))
             return destPath;
-        }
-        #ifdef SPEEDYNOTE_DEBUG
-        fprintf(stderr, "[InboxWatcher] failed to copy PDF to %s\n", qPrintable(destPath));
-        #endif
         return QString();
     }
 
@@ -666,10 +659,6 @@ private:
         for (const QFileInfo &fi : entries) {
             QString ext = fi.suffix().toLower();
             QString path = fi.absoluteFilePath();
-
-            #ifdef SPEEDYNOTE_DEBUG
-            fprintf(stderr, "[InboxWatcher] found: %s\n", qPrintable(path));
-            #endif
 
             if (ext == "snbx") {
                 snbxFiles.append(path);
@@ -773,6 +762,7 @@ int main(int argc, char* argv[])
 #elif defined(Q_OS_IOS)
     IOSPlatformHelper::applyPalette(app);
     IOSPlatformHelper::applyFonts(app);
+    IOSPlatformHelper::installKeyboardFilter(app);
 #endif
 
     QTranslator translator;

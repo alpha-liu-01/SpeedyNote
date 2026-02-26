@@ -3,9 +3,14 @@
 #ifdef Q_OS_IOS
 
 #include <QApplication>
+#include <QEvent>
 #include <QFont>
+#include <QLineEdit>
 #include <QLocale>
 #include <QPalette>
+#include <QPlainTextEdit>
+#include <QTextEdit>
+#include <QWidget>
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -161,6 +166,49 @@ void disableEditMenuOverlay()
     #ifdef SPEEDYNOTE_DEBUG
     fprintf(stderr, "[IOSPlatformHelper] swizzled QIOSTapRecognizer touchesEnded:withEvent: to no-op\n");
     #endif
+}
+
+// ============================================================================
+// Keyboard filter — prevent the virtual keyboard from appearing on non-text
+// widgets.  Qt's iOS plugin creates a UITextInput responder for every focused
+// QWidget, so iOS shows the keyboard on every tap.  We intercept FocusIn and
+// mark non-text widgets as not needing input methods.
+// ============================================================================
+
+class IOSKeyboardFilter : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override
+    {
+        if (event->type() == QEvent::FocusIn) {
+            if (auto *w = qobject_cast<QWidget *>(obj)) {
+                if (!isTextInputWidget(w))
+                    w->setAttribute(Qt::WA_InputMethodEnabled, false);
+            }
+        }
+        return false;
+    }
+
+private:
+    static bool isTextInputWidget(QWidget *w)
+    {
+        return qobject_cast<QLineEdit *>(w) ||
+               qobject_cast<QTextEdit *>(w) ||
+               qobject_cast<QPlainTextEdit *>(w);
+    }
+};
+
+void installKeyboardFilter(QApplication& app)
+{
+    static IOSKeyboardFilter *filter = nullptr;
+    if (!filter) {
+        filter = new IOSKeyboardFilter(&app);
+        app.installEventFilter(filter);
+        fprintf(stderr, "[IOSPlatformHelper] keyboard filter installed\n");
+    }
 }
 
 } // namespace IOSPlatformHelper
