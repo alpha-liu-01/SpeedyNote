@@ -22,6 +22,9 @@
 | **BUG-I003** | Crash in QIOSTapRecognizer / showEditMenu | ✅ Fixed (remove gesture recognizer at runtime) |
 | **BUG-I003b** | Crash in processTouchEvent on notebook deletion | 🟡 Qt bug (low priority) |
 | **BUG-I004** | PDF export files not created / share sheet no-op | 🟡 Investigating |
+| **BUG-I005** | File picker fails on real jailbroken device | ✅ Fixed (entitlements plist) |
+| **BUG-I006** | Virtual keyboard pops up on all UI components | ✅ Fixed (FocusIn event filter) |
+| **BUG-I007** | Pinch-to-zoom unreliable | ✅ Fixed (native touch tracking + per-finger TouchBegin) |
 
 ---
 
@@ -201,6 +204,130 @@ This eliminates both the crash and the unwanted edit menu popup on tap.
 - `source/ios/IOSPlatformHelper.h` — declared `disableEditMenuOverlay()`
 - `source/ios/IOSPlatformHelper.mm` — implemented with ObjC runtime introspection
 - `source/Main.cpp` — called after widget show in both code paths
+
+---
+
+### BUG-I005: File Picker Fails on Real Jailbroken Device
+**Status:** Fixed  
+**Priority:** Critical  
+**Category:** File Import (Native Picker)  
+**Platform:** Real device only (works on Simulator)
+
+**Symptom:**  
+The `UIDocumentPickerViewController` opens but selecting a file does nothing. Tapping a PDF or SNBX file has no effect. "Open in SpeedyNote" from other apps also fails. The same code works perfectly on the iOS Simulator.
+
+**Root Cause:**  
+The `UIDocumentPickerViewController` relies on XPC communication with file provider extensions. On a real device, XPC services verify the calling app's entitlements. Ad-hoc signing with bare `ldid -S` strips all entitlements, leaving the app without:
+
+1. `application-identifier` -- required for XPC to identify the caller and grant file access
+2. `platform-application` -- required for system-level trust on jailbroken/TrollStore devices
+
+Without these, the file provider extension refuses to communicate with the app, so file selection callbacks are never triggered.
+
+**Fix:**  
+Created `ios/entitlements.plist` with the required entitlements and updated `ios/build-device.sh` to sign with them:
+
+```bash
+ldid -S"${ENTITLEMENTS}" "${APP_PATH}/speedynote"
+```
+
+**Affected files:**
+- `ios/entitlements.plist` -- new file with `platform-application` and `application-identifier`
+- `ios/build-device.sh` -- updated ad-hoc signing step to use entitlements plist
+
+---
+
+### BUG-I006: Virtual Keyboard Pops Up on All UI Components
+**Status:** Fixed  
+**Priority:** Medium  
+**Category:** UI / Input  
+**Platform:** Real device only (not visible on Simulator)
+
+**Symptom:**  
+Pressing almost any UI component (buttons, toolbars, canvas, etc.) causes the iOS virtual keyboard to pop up. The keyboard should only appear for actual text input fields.
+
+**Root Cause:**  
+Qt's iOS platform plugin creates a `UITextInput`-conforming responder for every focused `QWidget`. When any widget receives focus, iOS sees a text input responder and shows the virtual keyboard -- even for buttons, sliders, and the drawing canvas.
+
+**Fix:**  
+Installed an application-level `QEvent::FocusIn` event filter (`IOSKeyboardFilter`) that intercepts focus events before the keyboard appears. For each focused widget, it checks whether the widget is a text input type (`QLineEdit`, `QTextEdit`, or `QPlainTextEdit`). If not, it sets `Qt::WA_InputMethodEnabled` to `false`, preventing iOS from showing the keyboard.
+
+**Affected files:**
+- `source/ios/IOSPlatformHelper.h` -- declared `installKeyboardFilter()`
+- `source/ios/IOSPlatformHelper.mm` -- `IOSKeyboardFilter` class and installation
+- `source/Main.cpp` -- called during iOS app initialization
+
+---
+
+### BUG-I007: Pinch-to-Zoom Unreliable
+**Status:** Fixed  
+**Priority:** High  
+**Category:** Touch Input / Gestures  
+**Platform:** iPad (real device)
+
+**Description:**  
+Two-finger pinch-to-zoom gestures only trigger sporadically. The gesture stays in single-finger pan mode even when two fingers are clearly on the screen. Zoom-in (spreading fingers apart) is slightly more reliable than zoom-out (pinching together). Stale touch inputs are common. Behavior is nearly identical to the pre-fix Android version (BUG-A005).
+
+**Root Cause (two issues):**
+
+**1. Native touch tracker not receiving events:**  
+The initial fix attempted to use a `UIGestureRecognizer` subclass attached to the key window's root view. This recognizer was not reliably receiving touch events because Qt's iOS view hierarchy and its own gesture recognizers can interfere with event delivery to additional recognizers attached to ancestor views.
+
+**2. iOS sends per-finger `TouchBegin` events:**  
+Unlike Android (where additional fingers arrive as `QEvent::TouchUpdate`), Qt on iOS sends a separate `QEvent::TouchBegin` for each new finger. The gesture handler's "nuclear reset" on every `TouchBegin` was designed for Android's model where `TouchBegin` means a genuinely new gesture. On iOS, the second finger's `TouchBegin` triggered the nuclear reset, which:
+- Cleared all tracked touch IDs (forgetting the first finger)
+- Ended the active pan gesture
+- Restarted as a single-finger pan with only the second finger
+
+The pinch transition never occurred because the handler only ever saw one finger at a time.
+
+**Fix (two layers):**
+
+**Layer 1: `sendEvent:` swizzle (replaces gesture recognizer)**  
+Replaced the `UIGestureRecognizer` with a method swizzle on `UIApplication.sendEvent:`. This is the iOS equivalent of Android's `Activity.dispatchTouchEvent()` -- it intercepts every touch event at the application level, before any view, gesture recognizer, or Qt code processes it. This guarantees accurate native finger count and position data.
+
+The swizzle:
+- Filters for `UIEventTypeTouches` events
+- Iterates `[event allTouches]` to count active touches (phase = Began/Moved/Stationary)
+- Records positions of the first two active touches in screen coordinates
+- Stores a timestamp for freshness verification
+- Forwards to the original `sendEvent:` implementation
+
+Since the swizzle operates on `UIApplication` (not a view), it can be installed at app startup before any window exists.
+
+**Layer 2: iOS per-finger `TouchBegin` interception**  
+Added an iOS-specific check before the nuclear reset in `TouchGestureHandler::handleTouchEvent()`. When a `TouchBegin` arrives while a gesture is already active (`m_panActive` or `m_pinchActive`), the code queries the native touch count:
+- If native reports 2+ fingers with fresh data (< 100ms), this `TouchBegin` is a second finger joining, not a new gesture
+- The new touch ID is added to tracking without clearing existing IDs
+- The handler transitions directly to a 2-finger gesture using native positions via `handleTwoFingerGestureNative()`
+- The nuclear reset is skipped entirely
+
+If native reports 0-1 fingers, the `TouchBegin` is treated as a genuinely new gesture and the nuclear reset proceeds as before.
+
+**Coordinate conversion:**  
+Native positions from `locationInView:nil` are in screen points (logical pixels), which map directly to Qt's coordinate system via `QWidget::mapFromGlobal()`. No device-pixel-ratio conversion is needed (unlike Android where native positions are in physical pixels).
+
+**Files added:**
+- `source/ios/IOSTouchTracker.h` -- C++ header declaring native touch query functions
+- `source/ios/IOSTouchTracker.mm` -- `sendEvent:` swizzle implementation and C++ bridge
+
+**Files modified:**
+- `source/core/TouchGestureHandler.h` -- extended `handleTwoFingerGestureNative()` to iOS
+- `source/core/TouchGestureHandler.cpp` -- iOS per-finger `TouchBegin` handling, extended all native verification blocks from `#ifdef Q_OS_ANDROID` to `#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)`
+- `source/Main.cpp` -- `IOSTouchTracker::install()` called at app initialization
+- `CMakeLists.txt` -- added `IOSTouchTracker.mm` to iOS platform sources
+
+**Desktop/Android impact:** None. All iOS-specific code is wrapped in `#ifdef Q_OS_IOS`. The shared verification logic in `TouchGestureHandler` was already present for Android; iOS was added alongside it.
+
+**Relation to BUG-A005:**  
+This is the iOS counterpart of Android's BUG-A005 (Pinch-to-Zoom Unreliable). Both platforms suffer from Qt's touch event layer losing track of fingers, but the specific failure modes differ:
+
+| Aspect | Android | iOS |
+|--------|---------|-----|
+| Native tracking | JNI via `SpeedyNoteActivity.dispatchTouchEvent()` | `sendEvent:` swizzle on `UIApplication` |
+| Second finger delivery | `TouchUpdate` with partial point data | Separate `TouchBegin` per finger |
+| Core fix | Position caching + stale ID detection | Skip nuclear reset when second finger joins |
+| Coordinate format | Physical pixels (needs DPR conversion) | Screen points (direct `mapFromGlobal`) |
 
 ---
 

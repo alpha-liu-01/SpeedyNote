@@ -776,6 +776,7 @@ if(IOS)
         source/ios/SnbxPickerIOS.mm
         source/ios/IOSShareHelper.mm
         source/ios/IOSPlatformHelper.mm
+        source/ios/IOSTouchTracker.mm
         source/ui/dialogs/SaveDocumentDialog.cpp  # Reuse Android's touch-friendly save dialog
     )
     # Enable Objective-C++ compilation for .mm files
@@ -784,6 +785,7 @@ if(IOS)
         source/ios/SnbxPickerIOS.mm
         source/ios/IOSShareHelper.mm
         source/ios/IOSPlatformHelper.mm
+        source/ios/IOSTouchTracker.mm
         PROPERTIES LANGUAGE OBJCXX
     )
 endif()

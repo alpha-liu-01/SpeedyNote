@@ -81,6 +81,7 @@ protected:
 
 #ifdef Q_OS_IOS
 #include "ios/IOSPlatformHelper.h"
+#include "ios/IOSTouchTracker.h"
 #endif
 
 #ifdef Q_OS_ANDROID
@@ -763,6 +764,7 @@ int main(int argc, char* argv[])
     IOSPlatformHelper::applyPalette(app);
     IOSPlatformHelper::applyFonts(app);
     IOSPlatformHelper::installKeyboardFilter(app);
+    IOSTouchTracker::install();
 #endif
 
     QTranslator translator;
