@@ -1892,6 +1892,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_pagePanelContentConn);
         m_pagePanelContentConn = {};
     }
+    if (m_pagePanelPageModConn) {
+        disconnect(m_pagePanelPageModConn);
+        m_pagePanelPageModConn = {};
+    }
     if (m_pagePanelActionBarConn) {
         disconnect(m_pagePanelActionBarConn);
         m_pagePanelActionBarConn = {};
@@ -2150,13 +2154,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         
         // Connect documentModified to invalidate current page's thumbnail
         // This ensures thumbnails update when user draws/erases/pastes
-        m_pagePanelContentConn = connect(viewport, &DocumentViewport::documentModified, 
+        m_pagePanelContentConn = connect(viewport, &DocumentViewport::documentModified,
                                          this, [this, viewport]() {
-            if (m_pagePanel && viewport) {
-                // Invalidate the current page's thumbnail (most likely the one being edited)
+            if (m_pagePanel && viewport && !viewport->hasSelectedObjects()) {
                 m_pagePanel->invalidateThumbnail(viewport->currentPageIndex());
             }
         });
+
+        m_pagePanelPageModConn = connect(viewport, &DocumentViewport::pageModified,
+                                         m_pagePanel, &PagePanel::invalidateThumbnail);
         
         // Sync current page state immediately
         m_pagePanel->onCurrentPageChanged(viewport->currentPageIndex());

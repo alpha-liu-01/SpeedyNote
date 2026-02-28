@@ -33,112 +33,75 @@ enum class TouchGestureMode {
 #include "../pdf/PdfSearchEngine.h"
 #include <QStack>
 #include <QMap>
+#include <QSet>
 
 // ============================================================================
-// PageUndoAction - Represents a single undoable action (Task 2.5)
+// UndoAction - Unified undo action for both paged and edgeless modes
 // ============================================================================
 
 /**
- * @brief Represents a single undoable action for per-page undo/redo.
- * 
- * Named PageUndoAction to avoid conflict with VectorCanvas::UndoAction
- * (which will be removed in Phase 5).
+ * @brief Represents a single undoable action, used in both paged and edgeless modes.
+ *
+ * In paged mode each stroke has exactly one segment (its page). In edgeless mode
+ * a stroke may span multiple tiles, producing multiple segments.  The undo/redo
+ * loop iterates segments identically regardless of mode.
+ *
+ * Memory bound: MAX_UNDO actions × ~20KB avg = ~2MB max
  */
-struct PageUndoAction {
-    enum Type { 
-        // ===== Stroke types (existing) =====
-        AddStroke,          ///< A stroke was added (undo = remove it)
-        RemoveStroke,       ///< A single stroke was removed (undo = add it back)
-        RemoveMultiple,     ///< Multiple strokes removed at once (undo = add all back)
-        TransformSelection, ///< Lasso transform: removed originals, added transformed (undo = reverse)
-        
-        // ===== Object types (Phase O2.7) =====
-        ObjectInsert,       ///< An object was inserted (undo = remove it)
-        ObjectDelete,       ///< An object was deleted (undo = restore it)
-        ObjectMove,         ///< An object was moved (undo = move back)
-        ObjectAffinityChange, ///< Object layer affinity changed (undo = restore old affinity)
-        
-        // ===== Object resize (Phase O3.1.5) =====
-        ObjectResize        ///< An object was resized (undo = restore old pos+size)
+struct UndoAction {
+    enum Type {
+        // ===== Stroke types =====
+        AddStroke,
+        RemoveStroke,
+        RemoveMultiple,
+        TransformSelection,
+
+        // ===== Object types =====
+        ObjectInsert,
+        ObjectDelete,
+        ObjectMove,
+        ObjectAffinityChange,
+        ObjectResize
     };
-    
-    Type type;
-    int pageIndex;                      ///< The page this action occurred on
-    int layerIndex = 0;                 ///< Which layer was affected (for TransformSelection)
-    
-    // ===== Stroke fields (existing) =====
-    VectorStroke stroke;                ///< For AddStroke and RemoveStroke
-    QVector<VectorStroke> strokes;      ///< For RemoveMultiple
-    QVector<VectorStroke> removedStrokes;  ///< For TransformSelection: original strokes removed
-    QVector<VectorStroke> addedStrokes;    ///< For TransformSelection: new strokes added
-    
-    // ===== Object fields (Phase O2.7) =====
-    QJsonObject objectData;             ///< Serialized object for ObjectInsert/ObjectDelete restore
-    QString objectId;                   ///< Object ID for lookup (ObjectMove, ObjectAffinityChange, ObjectResize)
-    QPointF objectOldPosition;          ///< For ObjectMove/ObjectResize: position before
-    QPointF objectNewPosition;          ///< For ObjectMove/ObjectResize: position after
-    int objectOldAffinity = -1;         ///< For ObjectAffinityChange: affinity before change
-    int objectNewAffinity = -1;         ///< For ObjectAffinityChange: affinity after change
-    
-    // ===== Object resize fields (Phase O3.1.5) =====
-    QSizeF objectOldSize;               ///< For ObjectResize: size before resize
-    QSizeF objectNewSize;               ///< For ObjectResize: size after resize
-    
-    // ===== Object rotation fields (Phase O3.1.8.3) =====
-    qreal objectOldRotation = 0.0;      ///< For ObjectResize: rotation before (degrees)
-    qreal objectNewRotation = 0.0;      ///< For ObjectResize: rotation after (degrees)
-};
 
-// ============================================================================
-// EdgelessUndoAction - Undo action for edgeless mode (Phase E6)
-// ============================================================================
+    Type type = AddStroke;
+    int layerIndex = 0;
 
-/**
- * @brief Represents an undoable action in edgeless mode.
- * 
- * Unlike paged mode, edgeless strokes can span multiple tiles. This struct
- * stores all affected segments so the entire action can be undone atomically.
- * 
- * Memory bound: MAX_UNDO_EDGELESS actions × ~20KB avg = ~2MB max
- */
-struct EdgelessUndoAction {
-    PageUndoAction::Type type = PageUndoAction::AddStroke;  ///< Action type
-    int layerIndex = 0;                 ///< Which layer was affected
-    
     /**
-     * @brief A stroke segment with its tile coordinate.
-     * 
-     * When a stroke spans tiles, it's split into segments. Each segment
-     * is stored with its tile coordinate for correct undo/redo application.
+     * @brief A stroke segment residing in a single container (page or tile).
+     *
+     * pageIndex is used in paged mode; tileCoord is used in edgeless mode.
      */
     struct StrokeSegment {
-        Document::TileCoord tileCoord;  ///< Tile containing this segment
-        VectorStroke stroke;            ///< The stroke data (in tile-local coords)
+        int pageIndex = -1;
+        Document::TileCoord tileCoord = {0, 0};
+        VectorStroke stroke;
     };
-    QVector<StrokeSegment> segments;    ///< For AddStroke/RemoveStroke: the stroke segments
-    
-    // For TransformSelection: compound action with both removed and added strokes
-    QVector<StrokeSegment> removedSegments;  ///< Original strokes that were removed
-    QVector<StrokeSegment> addedSegments;    ///< New strokes that were added
-    
-    // ===== Object fields (Phase O2.7) =====
-    Document::TileCoord objectTileCoord;  ///< Tile containing the object
-    QJsonObject objectData;               ///< Serialized object for ObjectInsert/ObjectDelete restore
-    QString objectId;                     ///< Object ID for lookup
-    QPointF objectOldPosition;            ///< For ObjectMove/ObjectResize: position before (tile-local)
-    QPointF objectNewPosition;            ///< For ObjectMove/ObjectResize: position after (tile-local)
-    Document::TileCoord objectOldTile;    ///< For ObjectMove across tiles: original tile
-    Document::TileCoord objectNewTile;    ///< For ObjectMove across tiles: destination tile
-    int objectOldAffinity = -1;           ///< For ObjectAffinityChange: affinity before change
-    int objectNewAffinity = -1;           ///< For ObjectAffinityChange: affinity after change
-    
-    // ===== Object resize fields (Phase O3.1.5) =====
-    QSizeF objectOldSize;                 ///< For ObjectResize: size before resize
-    QSizeF objectNewSize;                 ///< For ObjectResize: size after resize
-    
-    // ===== Object rotation fields (Phase O3.1.8.3) =====
-    qreal objectOldRotation = 0.0;        ///< For ObjectResize: rotation before (degrees)
-    qreal objectNewRotation = 0.0;        ///< For ObjectResize: rotation after (degrees)
+
+    // Single-stroke actions
+    QVector<StrokeSegment> segments;
+
+    // TransformSelection compound actions
+    QVector<StrokeSegment> removedSegments;
+    QVector<StrokeSegment> addedSegments;
+
+    // ===== Object fields =====
+    int objectPageIndex = -1;                      ///< Container page (paged mode)
+    Document::TileCoord objectTileCoord = {0, 0};  ///< Container tile (edgeless mode)
+    QJsonObject objectData;
+    QString objectId;
+    QPointF objectOldPosition;
+    QPointF objectNewPosition;
+    int objectOldPageIndex = -1;                   ///< Cross-page move: source page
+    int objectNewPageIndex = -1;                   ///< Cross-page move: destination page
+    Document::TileCoord objectOldTile = {0, 0};    ///< Cross-tile move: source tile
+    Document::TileCoord objectNewTile = {0, 0};    ///< Cross-tile move: destination tile
+    int objectOldAffinity = -1;
+    int objectNewAffinity = -1;
+    QSizeF objectOldSize;
+    QSizeF objectNewSize;
+    qreal objectOldRotation = 0.0;
+    qreal objectNewRotation = 0.0;
 };
 
 #include <QWidget>
@@ -554,95 +517,42 @@ public:
     // ===== Undo/Redo (Task 2.5) =====
     
     /**
-     * @brief Undo the last action on the current page.
+     * @brief Undo the last action (global stack, both paged and edgeless).
      */
     void undo();
     
     /**
-     * @brief Redo the last undone action on the current page.
+     * @brief Redo the last undone action (global stack, both paged and edgeless).
      */
     void redo();
     
-    /**
-     * @brief Check if undo is available for the current page.
-     */
     bool canUndo() const;
-    
-    /**
-     * @brief Check if redo is available for the current page.
-     */
     bool canRedo() const;
     
     /**
-     * @brief Clear undo/redo stacks for pages >= pageIndex.
+     * @brief Remove undo/redo entries that reference pages >= pageIndex.
      * 
      * Used when inserting/deleting pages to prevent stale undo history
-     * from being applied to wrong pages. Preserves undo for pages before
-     * the affected index.
+     * from being applied to wrong pages.
      * 
      * @param pageIndex First page index to clear (inclusive)
      */
     void clearUndoStacksFrom(int pageIndex);
     
-    // ===== Object Undo Helpers (Phase O2.7) =====
+    // ===== Object Undo Helpers =====
     
-    /**
-     * @brief Push an undo action for object insertion.
-     * @param obj The inserted object (will be serialized to JSON).
-     * @param pageIndex Page index (paged mode) or -1 for edgeless.
-     * @param tileCoord Tile coordinate (edgeless mode only).
-     * 
-     * Undo will remove the object; redo will re-add it.
-     */
     void pushObjectInsertUndo(InsertedObject* obj, int pageIndex = -1,
                               Document::TileCoord tileCoord = {0, 0});
-    
-    /**
-     * @brief Push an undo action for object deletion.
-     * @param obj The deleted object (will be serialized to JSON).
-     * @param pageIndex Page index (paged mode) or -1 for edgeless.
-     * @param tileCoord Tile coordinate (edgeless mode only).
-     * 
-     * Undo will restore the object; redo will re-delete it.
-     */
     void pushObjectDeleteUndo(InsertedObject* obj, int pageIndex = -1,
                               Document::TileCoord tileCoord = {0, 0});
-    
-    /**
-     * @brief Push an undo action for object move.
-     * @param obj The moved object.
-     * @param oldPos Position before move.
-     * @param pageIndex Page index (paged mode) or -1 for edgeless.
-     * @param oldTile Original tile (edgeless cross-tile move).
-     * @param newTile New tile (edgeless cross-tile move).
-     * 
-     * Undo will restore old position; redo will apply new position.
-     */
     void pushObjectMoveUndo(InsertedObject* obj, const QPointF& oldPos,
                             int pageIndex = -1,
                             Document::TileCoord oldTile = {0, 0},
-                            Document::TileCoord newTile = {0, 0});
-    
-    /**
-     * @brief Push an undo action for object resize/rotate (Phase O3.1.5, O3.1.8.3).
-     * @param obj The object that was resized/rotated.
-     * @param oldPos Position before resize.
-     * @param oldSize Size before resize.
-     * @param oldRotation Rotation before rotate (degrees).
-     * 
-     * Undo will restore old position+size+rotation; redo will apply new values.
-     * Extended in O3.1.8.3 to include rotation.
-     */
+                            Document::TileCoord newTile = {0, 0},
+                            int oldPageIndex = -1,
+                            int newPageIndex = -1);
     void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos, 
                               const QSizeF& oldSize, qreal oldRotation = 0.0);
-    
-    /**
-     * @brief Push an undo action for object affinity change (Phase O3.5.3).
-     * @param obj The object that had its affinity changed.
-     * @param oldAffinity The affinity value before the change.
-     * 
-     * Undo will restore old affinity; redo will apply new affinity.
-     */
     void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
     
     // ===== Affinity Helpers (Phase O3.5.3) =====
@@ -1594,6 +1504,11 @@ signals:
     void documentModified();
     
     /**
+     * @brief Emitted when a specific page's content changes (for targeted thumbnail refresh).
+     */
+    void pageModified(int pageIndex);
+
+    /**
      * @brief Emitted when the list of LinkObjects may have changed.
      * 
      * This is more targeted than documentModified() and should be used by
@@ -2055,6 +1970,7 @@ private:
      * Cleared when drag ends or is cancelled.
      */
     QMap<QString, QPointF> m_objectOriginalPositions;
+    QSet<int> m_pendingThumbnailPages;
     
     /**
      * @brief Internal clipboard for copied objects.
@@ -2237,8 +2153,8 @@ private:
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)
     int m_pdfCacheCapacity = 6;  // Default for single column (visible + ±2 buffer)
-    /// CUSTOMIZABLE: Max undo actions per page - higher = more RAM (range: 10-200)
-    static const int MAX_UNDO_PER_PAGE = 50;
+    /// CUSTOMIZABLE: Max undo actions - higher = more RAM (range: 10-200)
+    static const int MAX_UNDO_ACTIONS = 100;
     
     // =========================================================================
     // END CUSTOMIZABLE VALUES
@@ -2284,14 +2200,10 @@ private:
     qreal m_cacheZoom = 1.0;                  ///< Zoom level when cache was built
     QPointF m_cachePan;                       ///< Pan offset when cache was built
     
-    // ===== Undo/Redo State (Task 2.5) =====
-    QMap<int, QStack<PageUndoAction>> m_undoStacks;  ///< Per-page undo stacks
-    QMap<int, QStack<PageUndoAction>> m_redoStacks;  ///< Per-page redo stacks
-    
-    // ===== Edgeless Undo/Redo State (Phase E6) =====
-    QStack<EdgelessUndoAction> m_edgelessUndoStack;  ///< Global undo stack for edgeless mode
-    QStack<EdgelessUndoAction> m_edgelessRedoStack;  ///< Global redo stack for edgeless mode
-    static constexpr int MAX_UNDO_EDGELESS = 100;    ///< Max edgeless undo actions (~2MB)
+    // ===== Undo/Redo State (unified) =====
+    QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
+    QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
+    static constexpr int MAX_UNDO = 100;  ///< Max undo actions
     
     // ===== Edgeless Position History (Phase 4) =====
     QStack<QPointF> m_edgelessPositionHistory;       ///< Stack of previous viewport positions
@@ -2619,6 +2531,16 @@ private:
      * @return Number of objects that were relocated to different tiles.
      */
     int relocateObjectsToCorrectTiles();
+    
+    /**
+     * @brief Relocate selected objects to their correct pages after drag.
+     *
+     * For each selected object, checks if its position puts it on a different page.
+     * If so, extracts from old page and adds to new page with adjusted position.
+     * Returns a list of (objectId, oldPageIndex, newPageIndex) for undo tracking.
+     */
+    struct PageRelocation { QString objectId; int oldPage; int newPage; QPointF oldPos; QPointF newPos; };
+    QVector<PageRelocation> relocateObjectsToCorrectPages();
     
     /**
      * @brief Render object selection visual feedback.
@@ -2977,70 +2899,27 @@ private:
      */
     void drawEraserCursor(QPainter& painter);
     
-    // ===== Undo/Redo Helpers (Task 2.5) =====
+    // ===== Undo/Redo Helpers (unified) =====
     
     /**
-     * @brief Push an undo action for a single stroke.
-     * @param pageIndex The page where the action occurred.
-     * @param type The action type.
-     * @param stroke The affected stroke.
+     * @brief Push a complete undo action to the global stack.
      */
-    void pushUndoAction(int pageIndex, PageUndoAction::Type type, const VectorStroke& stroke);
+    void pushUndoAction(const UndoAction& action);
     
     /**
-     * @brief Push an undo action for multiple strokes.
-     * @param pageIndex The page where the action occurred.
-     * @param type The action type (should be RemoveMultiple).
-     * @param strokes The affected strokes.
+     * @brief Convenience: push a single-stroke undo on a given page (paged mode).
      */
-    void pushUndoAction(int pageIndex, PageUndoAction::Type type, const QVector<VectorStroke>& strokes);
+    void pushPageStrokeUndo(int pageIndex, UndoAction::Type type, const VectorStroke& stroke);
     
     /**
-     * @brief Push a complete undo action (for complex operations like TransformSelection).
-     * @param pageIndex The page index.
-     * @param action The complete action with all fields populated.
+     * @brief Convenience: push a multi-stroke undo on a given page (paged mode).
      */
-    void pushUndoAction(int pageIndex, const PageUndoAction& action);
+    void pushPageStrokesUndo(int pageIndex, UndoAction::Type type, const QVector<VectorStroke>& strokes);
     
     /**
-     * @brief Clear the redo stack for a page (called when new actions occur).
-     * @param pageIndex The page whose redo stack to clear.
+     * @brief Trim undo stack to MAX_UNDO_ACTIONS if exceeded.
      */
-    void clearRedoStack(int pageIndex);
-    
-    /**
-     * @brief Trim undo stack to MAX_UNDO_PER_PAGE if exceeded.
-     * @param pageIndex The page whose undo stack to trim.
-     */
-    void trimUndoStack(int pageIndex);
-    
-    // ===== Edgeless Undo/Redo Helpers (Phase E6) =====
-    
-    /**
-     * @brief Push an undo action for edgeless mode.
-     * @param action The action containing all affected stroke segments.
-     */
-    void pushEdgelessUndoAction(const EdgelessUndoAction& action);
-    
-    /**
-     * @brief Undo the last action in edgeless mode.
-     */
-    void undoEdgeless();
-    
-    /**
-     * @brief Redo the last undone action in edgeless mode.
-     */
-    void redoEdgeless();
-    
-    /**
-     * @brief Clear the edgeless redo stack (called when new actions occur).
-     */
-    void clearEdgelessRedoStack();
-    
-    /**
-     * @brief Trim edgeless undo stack to MAX_UNDO_EDGELESS if exceeded.
-     */
-    void trimEdgelessUndoStack();
+    void trimUndoStack();
     
     // ===== Edgeless Tile Splitting Helpers =====
     
