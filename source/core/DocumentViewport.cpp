@@ -228,16 +228,13 @@ DocumentViewport::~DocumentViewport()
         m_touchHandler->setMode(TouchGestureMode::Disabled);
     }
     
+    // Wait for and clean up any active async PDF watchers.
+    // Must happen before clearing caches or m_document pointer, since the
+    // finished-signal handlers access m_activePdfWatchers and m_pdfCacheMutex.
+    cancelAndWaitForBackgroundThreads();
+    
     // Clear gesture cached frame (releases memory)
     m_gesture.reset();
-    
-    // Wait for and clean up any active async PDF watchers
-    for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
-        watcher->cancel();
-        watcher->waitForFinished();
-        delete watcher;
-    }
-    m_activePdfWatchers.clear();
     
     // ========== MEMORY FIX: Explicit cache cleanup ==========
     // While these should be cleaned up automatically by member destructors,
@@ -3579,11 +3576,10 @@ void DocumentViewport::doAsyncPdfPreload()
         connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, pdfPageNum, dpi]() {
             // BUG-A006 FIX: Check if watcher was cancelled (e.g., by invalidatePdfCache)
             // This happens when document/page changes while render is in progress
-            bool wasActive = m_activePdfWatchers.removeOne(watcher);
+            m_activePdfWatchers.removeOne(watcher);
             watcher->deleteLater();
             
-            if (!wasActive || watcher->isCanceled()) {
-                // Watcher was removed by invalidatePdfCache - discard stale result
+            if (watcher->isCanceled()) {
                 return;
             }
             
@@ -3661,6 +3657,18 @@ void DocumentViewport::doAsyncPdfPreload()
     */
 }
 
+void DocumentViewport::cancelAndWaitForBackgroundThreads()
+{
+    if (m_pdfPreloadTimer)
+        m_pdfPreloadTimer->stop();
+    for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
+        watcher->cancel();
+        watcher->waitForFinished();
+        delete watcher;
+    }
+    m_activePdfWatchers.clear();
+}
+
 void DocumentViewport::invalidatePdfCache()
 {
     // Cancel pending async preloads
@@ -3668,15 +3676,12 @@ void DocumentViewport::invalidatePdfCache()
         m_pdfPreloadTimer->stop();
     }
     
-    // BUG-A006 FIX: Cancel active background PDF render threads
-    // Without this, background threads can continue accessing stale PDF files
-    // after document change, causing SIGBUS crashes on Android (memory alignment errors)
+    // Cancel active background PDF render threads but don't wait (non-blocking).
+    // Watchers remain in m_activePdfWatchers so the destructor or
+    // cancelAndWaitForBackgroundThreads() can properly wait for them.
     for (QFutureWatcher<QImage>* watcher : m_activePdfWatchers) {
         watcher->cancel();
-        // Don't waitForFinished() here - it would block the UI thread
-        // The watcher will clean itself up when finished via deleteLater()
     }
-    m_activePdfWatchers.clear();
     
     // Thread-safe cache clear
     QMutexLocker locker(&m_pdfCacheMutex);

@@ -393,10 +393,15 @@ MainWindow::MainWindow(QWidget *parent)
                     m_pagePanel->setDocument(nullptr);
                 }
                 
-                // MEMORY FIX: Clear viewport's document pointer BEFORE deleting Document
-                // This triggers cleanup of PDF cache, undo stacks, and other document-related
-                // data structures while the document is still valid. Also prevents any
-                // dangling pointer access during viewport destruction.
+                // THREAD SAFETY: Cancel and wait for all background PDF render threads
+                // before destroying the Document. The finished-signal handlers capture
+                // the viewport pointer and access its members, so they must complete
+                // before we clear the document.
+                vp->cancelAndWaitForBackgroundThreads();
+                
+                // Clear viewport's document pointer BEFORE deleting Document.
+                // This triggers cleanup of undo stacks and other document-related
+                // data structures while the document is still valid.
                 vp->setDocument(nullptr);
                 
                 m_documentManager->closeDocument(doc);
