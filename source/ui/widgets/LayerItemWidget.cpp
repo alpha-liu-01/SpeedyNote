@@ -269,7 +269,11 @@ void LayerItemWidget::mouseDoubleClickEvent(QMouseEvent* event)
     QWidget::mouseDoubleClickEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void LayerItemWidget::enterEvent(QEnterEvent* event)
+#else
+void LayerItemWidget::enterEvent(QEvent* event)
+#endif
 {
     m_hovered = true;
     update();

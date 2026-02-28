@@ -23,7 +23,7 @@
 #include <QKeyEvent>
 #include <QTouchEvent>
 #include <QNativeGestureEvent>  // macOS trackpad pinch-to-zoom
-#include <QInputDevice>         // Distinguish touchpad vs touchscreen
+#include "../compat/qt_compat.h"  // Qt5/Qt6 input device shims
 #include <QtMath>     // For qPow
 #include <QtConcurrent>   // For async PDF rendering
 #include <QThreadStorage> // For thread-local PDF provider caching
@@ -270,10 +270,8 @@ DocumentViewport::~DocumentViewport()
     m_linkCache.squeeze();
     
     // Clear undo/redo stacks (can hold stroke data)
-    m_undoStacks.clear();
-    m_redoStacks.clear();
-    m_edgelessUndoStack.clear();
-    m_edgelessRedoStack.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
     
     // Clear page layout cache
     m_pageYCache.clear();
@@ -309,10 +307,8 @@ void DocumentViewport::setDocument(Document* doc)
     // Clear undo/redo stacks (actions refer to old document)
     bool hadUndo = canUndo();
     bool hadRedo = canRedo();
-    m_undoStacks.clear();
-    m_redoStacks.clear();
-    m_edgelessUndoStack.clear();
-    m_edgelessRedoStack.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
     
     m_document = doc;
     
@@ -2481,7 +2477,7 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
     } else {
         // Track position for eraser cursor even when not pressing (hover)
         QPointF oldPos = m_lastPointerPos;
-        m_lastPointerPos = event->position();
+        m_lastPointerPos = SN_MOUSE_POS(event);
         
         // Request repaint if eraser tool is active (to update cursor)
         // Use elliptical regions to match circular eraser cursor
@@ -2562,7 +2558,7 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         qreal zoomFactor = qPow(1.1, zoomDelta);  // 10% per step
         
         // Use deferred zoom gesture API (will capture frame on first call)
-        updateZoomGesture(zoomFactor, event->position());
+        updateZoomGesture(zoomFactor, SN_WHEEL_POS(event));
         
         event->accept();
         return;
@@ -2795,7 +2791,11 @@ void DocumentViewport::onApplicationStateChanged(Qt::ApplicationState state)
 }
 #endif
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void DocumentViewport::enterEvent(QEnterEvent* event)
+#else
+void DocumentViewport::enterEvent(QEvent* event)
+#endif
 {
     m_pointerInViewport = true;
     QWidget::enterEvent(event);
@@ -2849,7 +2849,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         // doing it here moves the cost to hover time, not pen-down latency.
         initEraserJni();
 #endif
-        QPointF newPos = event->position();
+        QPointF newPos = SN_EVENT_POS(event);
         
         // Check if stylus is within widget bounds
         // Unlike mouse, tablet doesn't trigger leaveEvent when stylus moves outside
@@ -2864,7 +2864,7 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         
         // Check if eraser tool is active or this is hardware eraser
         bool isEraserHover = (m_currentTool == ToolType::Eraser) ||
-                             (event->pointerType() == QPointingDevice::PointerType::Eraser);
+                             SN_IS_ERASER_TABLET(event);
         
         if (isEraserHover) {
             QPointF oldPos = m_lastPointerPos;
@@ -3346,7 +3346,7 @@ bool DocumentViewport::event(QEvent* event)
         // gesture processing.  Letting them fall through keeps 2-finger scroll
         // working normally, while pinch-to-zoom is handled via NativeGesture below.
         if (touchEvent->device() &&
-            touchEvent->device()->type() == QInputDevice::DeviceType::TouchPad) {
+            touchEvent->device()->type() == SN_TOUCHPAD_DEVICE_TYPE) {
             return QWidget::event(event);
         }
         
@@ -3371,8 +3371,8 @@ bool DocumentViewport::event(QEvent* event)
         
         // Check if the touch started on a child widget (like MissingPdfBanner)
         // If so, let Qt's normal event propagation handle it instead of intercepting
-        if (event->type() == QEvent::TouchBegin && !touchEvent->points().isEmpty()) {
-            QPointF touchPos = touchEvent->points().first().position();
+        if (event->type() == QEvent::TouchBegin && !SN_TOUCH_POINTS(touchEvent).isEmpty()) {
+            QPointF touchPos = SN_TP_POS(SN_TOUCH_POINTS(touchEvent).first());
             QWidget* childWidget = childAt(touchPos.toPoint());
             
             // If touch is on a child widget (not directly on DocumentViewport),
@@ -3401,7 +3401,7 @@ bool DocumentViewport::event(QEvent* event)
             // value() is the incremental scale delta (e.g. 0.02 = 2% zoom in)
             qreal scaleFactor = 1.0 + nge->value();
             if (!qFuzzyCompare(scaleFactor, 1.0)) {
-                updateZoomGesture(scaleFactor, nge->position());
+                updateZoomGesture(scaleFactor, SN_NGE_POS(nge));
             }
             event->accept();
             return true;
@@ -4030,7 +4030,7 @@ PointerEvent DocumentViewport::mouseToPointerEvent(QMouseEvent* event, PointerEv
     PointerEvent pe;
     pe.type = type;
     pe.source = PointerEvent::Mouse;
-    pe.viewportPos = event->position();
+    pe.viewportPos = SN_MOUSE_POS(event);
     pe.pageHit = viewportToPage(pe.viewportPos);
     
     // Mouse has no pressure sensitivity
@@ -4054,7 +4054,7 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     PointerEvent pe;
     pe.type = type;
     pe.source = PointerEvent::Stylus;
-    pe.viewportPos = event->position();
+    pe.viewportPos = SN_EVENT_POS(event);
     pe.pageHit = viewportToPage(pe.viewportPos);
     
     // Tablet pressure and tilt
@@ -4066,15 +4066,17 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     // Check for eraser - either eraser end of stylus or eraser button
     // Qt6: pointerType() returns the type of pointing device
     // Also check deviceType() as a fallback - some drivers report eraser via device type
-    pe.isEraser = (event->pointerType() == QPointingDevice::PointerType::Eraser);
-    
+    pe.isEraser = SN_IS_ERASER_TABLET(event);
+
     // Alternative detection: some tablets report eraser via deviceType() instead of pointerType()
-    if (!pe.isEraser && event->deviceType() == QInputDevice::DeviceType::Stylus) {
-        // Check if this might be an eraser based on the pointing device
+    if (!pe.isEraser && SN_IS_STYLUS_TABLET(event)) {
+#ifdef SN_HAS_POINTING_DEVICE
+        // Qt6 only: check device name for eraser identification
         const QPointingDevice* device = event->pointingDevice();
         if (device && device->name().contains("eraser", Qt::CaseInsensitive)) {
             pe.isEraser = true;
         }
+#endif
     }
     
 #ifdef Q_OS_ANDROID
@@ -4557,7 +4559,7 @@ void DocumentViewport::finishStroke()
             m_document->markPageDirty(m_activeDrawingPage);
             
             // Push to undo stack
-            pushUndoAction(m_activeDrawingPage, PageUndoAction::AddStroke, m_currentStroke);
+            pushPageStrokeUndo(m_activeDrawingPage, UndoAction::AddStroke, m_currentStroke);
         }
     }
     
@@ -4643,16 +4645,17 @@ void DocumentViewport::finishStrokeEdgeless()
 #endif
     }
     
-    // ========== PUSH TO EDGELESS UNDO STACK (Phase E6) ==========
-    // All segments from this stroke = one atomic undo action
     if (!addedStrokes.isEmpty()) {
-        EdgelessUndoAction undoAction;
-        undoAction.type = PageUndoAction::AddStroke;
+        UndoAction undoAction;
+        undoAction.type = UndoAction::AddStroke;
         undoAction.layerIndex = m_edgelessActiveLayerIndex;
         for (const auto& pair : addedStrokes) {
-            undoAction.segments.append({pair.first, pair.second});
+            UndoAction::StrokeSegment seg;
+            seg.tileCoord = pair.first;
+            seg.stroke = pair.second;
+            undoAction.segments.append(seg);
         }
-        pushEdgelessUndoAction(undoAction);
+        pushUndoAction(undoAction);
     }
     
     // Clear stroke state
@@ -4807,12 +4810,16 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
             layer->addStroke(localStroke);
             m_document->markTileDirty(startTile);
             
-            // Push to undo stack
-            EdgelessUndoAction undoAction;
-            undoAction.type = PageUndoAction::AddStroke;
-            undoAction.layerIndex = m_edgelessActiveLayerIndex;
-            undoAction.segments.append({startTile, localStroke});
-            pushEdgelessUndoAction(undoAction);
+            {
+                UndoAction undoAction;
+                undoAction.type = UndoAction::AddStroke;
+                undoAction.layerIndex = m_edgelessActiveLayerIndex;
+                UndoAction::StrokeSegment seg;
+                seg.tileCoord = startTile;
+                seg.stroke = localStroke;
+                undoAction.segments.append(seg);
+                pushUndoAction(undoAction);
+            }
         } else {
             // Line crosses tile boundaries - sample points along the line
             // and split at tile boundaries (same algorithm as freehand strokes)
@@ -4870,15 +4877,17 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 addedStrokes.append({seg.coord, localStroke});
             }
             
-            // Push to undo stack (all segments as one atomic action)
             if (!addedStrokes.isEmpty()) {
-                EdgelessUndoAction undoAction;
-                undoAction.type = PageUndoAction::AddStroke;
+                UndoAction undoAction;
+                undoAction.type = UndoAction::AddStroke;
                 undoAction.layerIndex = m_edgelessActiveLayerIndex;
                 for (const auto& pair : addedStrokes) {
-                    undoAction.segments.append({pair.first, pair.second});
+                    UndoAction::StrokeSegment seg;
+                    seg.tileCoord = pair.first;
+                    seg.stroke = pair.second;
+                    undoAction.segments.append(seg);
                 }
-                pushEdgelessUndoAction(undoAction);
+                pushUndoAction(undoAction);
             }
         }
     } else {
@@ -4899,7 +4908,7 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
         m_document->markPageDirty(m_straightLinePageIndex);
         
         // Push to undo stack (same pattern as finishStroke)
-        pushUndoAction(m_straightLinePageIndex, PageUndoAction::AddStroke, stroke);
+        pushPageStrokeUndo(m_straightLinePageIndex, UndoAction::AddStroke, stroke);
     }
     
     emit documentModified();
@@ -5354,9 +5363,9 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     // Mark tile dirty - use cached tile coord for efficiency
                     m_document->markTileDirty(m_dragObjectTileCoord);
                 } else {
-                    // Use cached page index for efficiency
                     int pageIdx = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
                     m_document->markPageDirty(pageIdx);
+                    m_pendingThumbnailPages.insert(pageIdx);
                 }
             }
             
@@ -5418,47 +5427,60 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                         }
                     }
                 } else {
-                    // Paged mode: use cached page index for efficiency
+                    // Paged mode: relocate objects that crossed page boundaries
+                    relocateObjectsToCorrectPages();
                     int pageIdx = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
                     m_document->markPageDirty(pageIdx);
                 }
             }
             
-            // O2.7/BF.8: Create undo entry for each moved object
+            // Create undo entry for each moved object
             for (InsertedObject* obj : m_selectedObjects) {
                 if (!obj) continue;
-                
                 auto it = m_objectOriginalPositions.find(obj->id);
                 if (it == m_objectOriginalPositions.end()) continue;
-                
                 QPointF oldPos = it.value();
-                
-                // Only create undo if position actually changed
-                if (oldPos != obj->position) {
-                    // For edgeless mode, we need to track tile changes
-                    Document::TileCoord oldTile = {0, 0};
-                    Document::TileCoord newTile = {0, 0};
-                    
-                    if (m_document->isEdgeless()) {
-                        // PERF: For single selection, use cached tile coord
-                        if (m_selectedObjects.size() == 1) {
-                            newTile = m_dragObjectTileCoord;
-                        } else {
-                            // Multi-selection: need to search for object's tile
-                            for (const auto& coord : m_document->allLoadedTileCoords()) {
-                                Page* tile = m_document->getTile(coord.first, coord.second);
-                                if (tile && tile->objectById(obj->id)) {
-                                    newTile = coord;
-                                    break;
-                                }
+
+                Document::TileCoord oldTile = {0, 0};
+                Document::TileCoord newTile = {0, 0};
+                int oldPageIdx = -1;
+                int newPageIdx = -1;
+
+                if (m_document->isEdgeless()) {
+                    if (m_selectedObjects.size() == 1) {
+                        newTile = m_dragObjectTileCoord;
+                    } else {
+                        for (const auto& coord : m_document->allLoadedTileCoords()) {
+                            Page* tile = m_document->getTile(coord.first, coord.second);
+                            if (tile && tile->objectById(obj->id)) {
+                                newTile = coord;
+                                break;
                             }
                         }
-                        // Old tile is same as new if no relocation happened
-                        // (tracking across tiles would require storing tile info in m_objectOriginalPositions)
-                        oldTile = newTile;
                     }
-                    
-                    pushObjectMoveUndo(obj, oldPos, m_currentPageIndex, oldTile, newTile);
+                    oldTile = newTile;
+                } else {
+                    // Find which page currently holds this object (may have been relocated)
+                    int srcPage = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
+                    oldPageIdx = srcPage;
+                    newPageIdx = srcPage;
+                    for (int p = 0; p < m_document->pageCount(); ++p) {
+                        Page* pg = m_document->page(p);
+                        if (pg && pg->objectById(obj->id)) {
+                            newPageIdx = p;
+                            break;
+                        }
+                    }
+                }
+
+                if (oldPos != obj->position || oldPageIdx != newPageIdx) {
+                    pushObjectMoveUndo(obj, oldPos, m_currentPageIndex, oldTile, newTile,
+                                       oldPageIdx, newPageIdx);
+                    if (!m_document->isEdgeless()) {
+                        m_pendingThumbnailPages.insert(oldPageIdx >= 0 ? oldPageIdx : m_currentPageIndex);
+                        if (newPageIdx >= 0 && newPageIdx != oldPageIdx)
+                            m_pendingThumbnailPages.insert(newPageIdx);
+                    }
                 }
             }
         }
@@ -5467,6 +5489,9 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         m_objectOriginalPositions.clear();
         m_isDraggingObjects = false;
         
+        if (moved)
+            emit documentModified();
+
         // Phase O4.1: Clear background snapshot and object cache, trigger full re-render
         m_objectDragBackgroundSnapshot = QPixmap();
         m_dragObjectRenderedCache = QPixmap();
@@ -5483,6 +5508,9 @@ void DocumentViewport::clearObjectSelection()
     m_hoveredObject = nullptr;
     m_isDraggingObjects = false;
     if (hadSelection) {
+        for (int p : m_pendingThumbnailPages)
+            emit pageModified(p);
+        m_pendingThumbnailPages.clear();
         emit objectSelectionChanged();
     }
     update();
@@ -5585,6 +5613,74 @@ int DocumentViewport::relocateObjectsToCorrectTiles()
     return relocatedCount;
 }
 
+QVector<DocumentViewport::PageRelocation> DocumentViewport::relocateObjectsToCorrectPages()
+{
+    QVector<PageRelocation> result;
+    if (!m_document || m_document->isEdgeless() || m_selectedObjects.isEmpty())
+        return result;
+
+    int pageCount = m_document->pageCount();
+
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+
+        // Find which page currently owns this object
+        int currentPage = -1;
+        for (int p = 0; p < pageCount; ++p) {
+            Page* page = m_document->page(p);
+            if (page && page->objectById(obj->id)) {
+                currentPage = p;
+                break;
+            }
+        }
+        if (currentPage < 0) continue;
+
+        QPointF pageOrigin = pagePosition(currentPage);
+        QPointF docCenter = pageOrigin + obj->position + QPointF(obj->size.width() / 2.0,
+                                                                  obj->size.height() / 2.0);
+        int targetPage = pageAtPoint(docCenter);
+        if (targetPage < 0) {
+            // In a page gap -- snap to nearest page
+            qreal minDist = std::numeric_limits<qreal>::max();
+            for (int p = 0; p < pageCount; ++p) {
+                QRectF pr = pageRect(p);
+                qreal dist = qAbs(docCenter.y() - pr.center().y());
+                if (dist < minDist) { minDist = dist; targetPage = p; }
+            }
+            if (targetPage < 0) targetPage = currentPage;
+        }
+
+        if (targetPage == currentPage) continue;
+
+        QPointF oldPos = obj->position;
+        QPointF targetOrigin = pagePosition(targetPage);
+        QPointF newPos = (pageOrigin + obj->position) - targetOrigin;
+
+        Page* oldPage = m_document->page(currentPage);
+        Page* newPage = m_document->page(targetPage);
+        if (!oldPage || !newPage) continue;
+
+        auto extracted = oldPage->extractObject(obj->id);
+        if (!extracted) continue;
+        extracted->position = newPos;
+        InsertedObject* newPtr = extracted.get();
+        newPage->addObject(std::move(extracted));
+
+        // Update the pointer in m_selectedObjects (old unique_ptr moved,
+        // but Page::addObject takes ownership of a new unique_ptr;
+        // the raw pointer is still valid because extractObject returns
+        // ownership and addObject takes it, keeping the same heap address).
+        Q_UNUSED(newPtr);
+
+        m_document->markPageDirty(currentPage);
+        m_document->markPageDirty(targetPage);
+
+        result.append({obj->id, currentPage, targetPage, oldPos, newPos});
+    }
+
+    return result;
+}
+
 void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
 {
     if (!obj) return;
@@ -5643,8 +5739,11 @@ void DocumentViewport::deselectObject(InsertedObject* obj)
 void DocumentViewport::deselectAllObjects()
 {
     if (m_selectedObjects.isEmpty()) return;
-    
+
     m_selectedObjects.clear();
+    for (int p : m_pendingThumbnailPages)
+        emit pageModified(p);
+    m_pendingThumbnailPages.clear();
     emit objectSelectionChanged();
     update();
 }
@@ -8772,32 +8871,27 @@ void DocumentViewport::applySelectionTransform()
     
     QTransform transform = buildSelectionTransform();
     
+    UndoAction undoAction;
+    undoAction.type = UndoAction::TransformSelection;
+    undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
+
     if (m_document->isEdgeless()) {
         // ========== EDGELESS MODE ==========
-        // More complex: strokes may span multiple tiles after transform
-        // Strategy: remove all original strokes, then add transformed strokes
-        // using the same tile-splitting logic as regular stroke creation
-        
-        EdgelessUndoAction undoAction;
-        undoAction.type = PageUndoAction::TransformSelection;
-        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
-        
-        // First, collect and remove original strokes from their source tiles
         auto tiles = m_document->allLoadedTileCoords();
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (!tile || m_lassoSelection.sourceLayerIndex >= tile->layerCount()) continue;
-            
             VectorLayer* layer = tile->layer(m_lassoSelection.sourceLayerIndex);
             if (!layer) continue;
-            
-            // Find and remove strokes that match our selection by ID
+
             QVector<VectorStroke>& layerStrokes = layer->strokes();
             for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
                 for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                     if (layerStrokes[i].id == selectedStroke.id) {
-                        // Store for undo (tile-local coords)
-                        undoAction.removedSegments.append({coord, layerStrokes[i]});
+                        UndoAction::StrokeSegment seg;
+                        seg.tileCoord = coord;
+                        seg.stroke = layerStrokes[i];
+                        undoAction.removedSegments.append(seg);
                         layerStrokes.removeAt(i);
                         layer->invalidateStrokeCache();
                         m_document->markTileDirty(coord);
@@ -8806,82 +8900,107 @@ void DocumentViewport::applySelectionTransform()
                 }
             }
         }
-        
-        // Now add transformed strokes back using the same tile-splitting logic
-        // as finishStrokeEdgeless() to handle strokes crossing tile boundaries
+
         for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
             VectorStroke transformedStroke = stroke;
             transformStrokePoints(transformedStroke, transform);
-            // Note: addStrokeToEdgelessTiles() generates new IDs for each segment
-            
-            // Use the shared helper that properly splits strokes at tile boundaries
-            // It returns the added stroke segments for undo tracking
             auto addedSegments = addStrokeToEdgelessTiles(transformedStroke, m_lassoSelection.sourceLayerIndex);
-            for (const auto& seg : addedSegments) {
-                undoAction.addedSegments.append({seg.first, seg.second});
+            for (const auto& s : addedSegments) {
+                UndoAction::StrokeSegment seg;
+                seg.tileCoord = s.first;
+                seg.stroke = s.second;
+                undoAction.addedSegments.append(seg);
             }
         }
-        
-        // Push to edgeless undo stack
-        if (!undoAction.removedSegments.isEmpty() || !undoAction.addedSegments.isEmpty()) {
-            pushEdgelessUndoAction(undoAction);
-        }
-        
     } else {
-        // ========== PAGED MODE ==========
-        // Simpler: all strokes are on the same page/layer
-        
-        if (m_lassoSelection.sourcePageIndex < 0 || 
-            m_lassoSelection.sourcePageIndex >= m_document->pageCount()) {
-            return;
-        }
-        
-        Page* page = m_document->page(m_lassoSelection.sourcePageIndex);
+        // ========== PAGED MODE (with cross-page relocation) ==========
+        int srcPage = m_lassoSelection.sourcePageIndex;
+        if (srcPage < 0 || srcPage >= m_document->pageCount()) return;
+
+        Page* page = m_document->page(srcPage);
         if (!page) return;
-        
         VectorLayer* layer = page->layer(m_lassoSelection.sourceLayerIndex);
         if (!layer) return;
-        
-        // Prepare undo action
-        PageUndoAction undoAction;
-        undoAction.type = PageUndoAction::TransformSelection;
-        undoAction.pageIndex = m_lassoSelection.sourcePageIndex;
-        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
-        
-        // Remove original strokes by ID (and track for undo)
+
+        // Remove original strokes from source page
         QVector<VectorStroke>& layerStrokes = layer->strokes();
         for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
             for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                 if (layerStrokes[i].id == selectedStroke.id) {
-                    undoAction.removedStrokes.append(layerStrokes[i]);
+                    UndoAction::StrokeSegment seg;
+                    seg.pageIndex = srcPage;
+                    seg.stroke = layerStrokes[i];
+                    undoAction.removedSegments.append(seg);
                     layerStrokes.removeAt(i);
                     break;
                 }
             }
         }
-        
-        // Invalidate cache: removals above bypass removeStroke() (direct vector
-        // manipulation for undo tracking), so the cache must be explicitly dirtied.
         layer->invalidateStrokeCache();
-        
-        // Add transformed strokes with new IDs
+
+        // Add transformed strokes -- each may land on a different page
+        QPointF srcOrigin = pagePosition(srcPage);
         for (const VectorStroke& stroke : m_lassoSelection.selectedStrokes) {
             VectorStroke transformedStroke = stroke;
             transformStrokePoints(transformedStroke, transform);
             transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            layer->addStroke(transformedStroke);
-            undoAction.addedStrokes.append(transformedStroke);
+            transformedStroke.updateBoundingBox();
+
+            // Determine destination page by stroke centre in document coords
+            QPointF docCenter = srcOrigin + transformedStroke.boundingBox.center();
+            int destPage = pageAtPoint(docCenter);
+            if (destPage < 0) {
+                // Landed in page gap -- snap to nearest page
+                qreal minDist = std::numeric_limits<qreal>::max();
+                for (int p = 0; p < m_document->pageCount(); ++p) {
+                    QRectF pr = pageRect(p);
+                    qreal dist = qAbs(docCenter.y() - pr.center().y());
+                    if (dist < minDist) { minDist = dist; destPage = p; }
+                }
+                if (destPage < 0) destPage = srcPage;
+            }
+
+            // If destination differs, translate stroke points to destination-local coords
+            if (destPage != srcPage) {
+                QPointF dstOrigin = pagePosition(destPage);
+                QPointF offset = srcOrigin - dstOrigin;
+                for (auto& pt : transformedStroke.points)
+                    pt.pos += offset;
+                transformedStroke.updateBoundingBox();
+            }
+
+            Page* dstPageObj = m_document->page(destPage);
+            if (!dstPageObj) continue;
+            while (dstPageObj->layerCount() <= m_lassoSelection.sourceLayerIndex)
+                dstPageObj->addLayer(QString("Layer %1").arg(dstPageObj->layerCount() + 1));
+            VectorLayer* dstLayer = dstPageObj->layer(m_lassoSelection.sourceLayerIndex);
+            if (!dstLayer) continue;
+            dstLayer->addStroke(transformedStroke);
+            dstLayer->invalidateStrokeCache();
+            m_document->markPageDirty(destPage);
+
+            UndoAction::StrokeSegment seg;
+            seg.pageIndex = destPage;
+            seg.stroke = transformedStroke;
+            undoAction.addedSegments.append(seg);
         }
-        
-        // Mark page dirty for lazy save (BUG FIX: was missing)
-        m_document->markPageDirty(m_lassoSelection.sourcePageIndex);
-        
-        // Push to paged undo stack
-        pushUndoAction(m_lassoSelection.sourcePageIndex, undoAction);
+
+        m_document->markPageDirty(srcPage);
+    }
+
+    if (!undoAction.removedSegments.isEmpty() || !undoAction.addedSegments.isEmpty()) {
+        pushUndoAction(undoAction);
     }
     
     clearLassoSelection();
     emit documentModified();
+
+    if (!m_document->isEdgeless()) {
+        QSet<int> pages;
+        for (const auto& s : undoAction.removedSegments) if (s.pageIndex >= 0) pages.insert(s.pageIndex);
+        for (const auto& s : undoAction.addedSegments) if (s.pageIndex >= 0) pages.insert(s.pageIndex);
+        for (int p : pages) emit pageModified(p);
+    }
 }
 
 void DocumentViewport::cancelSelectionTransform()
@@ -9081,81 +9200,57 @@ void DocumentViewport::pasteSelection()
     QPointF offset = docCenter - clipboardCenter;
     
     if (m_document->isEdgeless()) {
-        // ========== EDGELESS MODE ==========
-        // Add strokes to appropriate tiles, splitting at tile boundaries
-        // Uses the same logic as finishStrokeEdgeless() for consistency
-        
-        EdgelessUndoAction undoAction;
-        undoAction.type = PageUndoAction::AddStroke;
+        UndoAction undoAction;
+        undoAction.type = UndoAction::AddStroke;
         undoAction.layerIndex = m_edgelessActiveLayerIndex;
-        
+
         for (const VectorStroke& stroke : m_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
-            
-            // Apply paste offset (stroke is now in document coordinates)
-            for (StrokePoint& pt : pastedStroke.points) {
+            for (StrokePoint& pt : pastedStroke.points)
                 pt.pos += offset;
-            }
             pastedStroke.updateBoundingBox();
-            // Note: addStrokeToEdgelessTiles() generates new IDs for each segment
-            
-            // Use the shared helper that properly splits strokes at tile boundaries
+
             auto addedSegments = addStrokeToEdgelessTiles(pastedStroke, m_edgelessActiveLayerIndex);
             for (const auto& seg : addedSegments) {
-                undoAction.segments.append({seg.first, seg.second});
+                UndoAction::StrokeSegment s;
+                s.tileCoord = seg.first;
+                s.stroke = seg.second;
+                undoAction.segments.append(s);
             }
         }
-        
-        // Push to edgeless undo stack
-        if (!undoAction.segments.isEmpty()) {
-            pushEdgelessUndoAction(undoAction);
-        }
-        
+        if (!undoAction.segments.isEmpty())
+            pushUndoAction(undoAction);
     } else {
-        // ========== PAGED MODE ==========
-        // Paste to current page's active layer
-        
         int pageIndex = currentPageIndex();
-        if (pageIndex < 0 || pageIndex >= m_document->pageCount()) {
-            return;
-        }
-        
+        if (pageIndex < 0 || pageIndex >= m_document->pageCount()) return;
         Page* page = m_document->page(pageIndex);
         if (!page) return;
-        
         VectorLayer* layer = page->activeLayer();
         if (!layer) return;
-        
-        // Prepare undo action
-        PageUndoAction undoAction;
-        undoAction.type = PageUndoAction::AddStroke;  // Will add multiple strokes
-        undoAction.pageIndex = pageIndex;
+
+        UndoAction undoAction;
+        undoAction.type = UndoAction::AddStroke;
         undoAction.layerIndex = page->activeLayerIndex;
-        
-        // Adjust offset for paged mode (use page-local coordinates)
+
         QPointF pageOrigin = pagePosition(pageIndex);
         QPointF pageCenter = docCenter - pageOrigin;
         offset = pageCenter - clipboardCenter;
-        
+
         for (const VectorStroke& stroke : m_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
-            
-            // Apply paste offset
-            for (StrokePoint& pt : pastedStroke.points) {
+            for (StrokePoint& pt : pastedStroke.points)
                 pt.pos += offset;
-            }
             pastedStroke.updateBoundingBox();
             pastedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            
             layer->addStroke(pastedStroke);
-            undoAction.addedStrokes.append(pastedStroke);
+
+            UndoAction::StrokeSegment seg;
+            seg.pageIndex = pageIndex;
+            seg.stroke = pastedStroke;
+            undoAction.segments.append(seg);
         }
-        
-        // Mark page dirty for lazy save (BUG FIX: was missing)
         m_document->markPageDirty(pageIndex);
-        
-        // Push to paged undo stack (use addedStrokes for multiple strokes)
-        pushUndoAction(pageIndex, undoAction);
+        pushUndoAction(undoAction);
     }
     
     update();
@@ -9168,92 +9263,66 @@ void DocumentViewport::deleteSelection()
         return;
     }
     
+    UndoAction undoAction;
+    undoAction.type = UndoAction::RemoveMultiple;
+    undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
+
     if (m_document->isEdgeless()) {
-        // ========== EDGELESS MODE ==========
-        // Remove strokes from their tiles by ID
-        
-        EdgelessUndoAction undoAction;
-        undoAction.type = PageUndoAction::RemoveMultiple;
-        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
-        
         auto tiles = m_document->allLoadedTileCoords();
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (!tile || m_lassoSelection.sourceLayerIndex >= tile->layerCount()) continue;
-            
             VectorLayer* layer = tile->layer(m_lassoSelection.sourceLayerIndex);
             if (!layer) continue;
-            
+
             QVector<VectorStroke>& layerStrokes = layer->strokes();
             bool modified = false;
-            
             for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
                 for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                     if (layerStrokes[i].id == selectedStroke.id) {
-                        // Store for undo (tile-local coords)
-                        undoAction.segments.append({coord, layerStrokes[i]});
+                        UndoAction::StrokeSegment seg;
+                        seg.tileCoord = coord;
+                        seg.stroke = layerStrokes[i];
+                        undoAction.segments.append(seg);
                         layerStrokes.removeAt(i);
                         modified = true;
                         break;
                     }
                 }
             }
-            
             if (modified) {
                 layer->invalidateStrokeCache();
                 m_document->markTileDirty(coord);
             }
         }
-        
-        // Push to edgeless undo stack
-        if (!undoAction.segments.isEmpty()) {
-            pushEdgelessUndoAction(undoAction);
-        }
-        
     } else {
-        // ========== PAGED MODE ==========
-        
-        if (m_lassoSelection.sourcePageIndex < 0 || 
-            m_lassoSelection.sourcePageIndex >= m_document->pageCount()) {
-            return;
-        }
-        
-        Page* page = m_document->page(m_lassoSelection.sourcePageIndex);
+        int srcPage = m_lassoSelection.sourcePageIndex;
+        if (srcPage < 0 || srcPage >= m_document->pageCount()) return;
+        Page* page = m_document->page(srcPage);
         if (!page) return;
-        
         VectorLayer* layer = page->layer(m_lassoSelection.sourceLayerIndex);
         if (!layer) return;
-        
-        // Prepare undo action
-        PageUndoAction undoAction;
-        undoAction.type = PageUndoAction::RemoveMultiple;
-        undoAction.pageIndex = m_lassoSelection.sourcePageIndex;
-        undoAction.layerIndex = m_lassoSelection.sourceLayerIndex;
-        
-        // Remove strokes by ID
+
         QVector<VectorStroke>& layerStrokes = layer->strokes();
         for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
             for (const VectorStroke& selectedStroke : m_lassoSelection.selectedStrokes) {
                 if (layerStrokes[i].id == selectedStroke.id) {
-                    undoAction.strokes.append(layerStrokes[i]);
+                    UndoAction::StrokeSegment seg;
+                    seg.pageIndex = srcPage;
+                    seg.stroke = layerStrokes[i];
+                    undoAction.segments.append(seg);
                     layerStrokes.removeAt(i);
                     break;
                 }
             }
         }
-        
         layer->invalidateStrokeCache();
-        
-        // Mark page dirty for lazy save (BUG FIX: was missing)
-        if (!undoAction.strokes.isEmpty()) {
-            m_document->markPageDirty(m_lassoSelection.sourcePageIndex);
-        }
-        
-        // Push to paged undo stack
-        if (!undoAction.strokes.isEmpty()) {
-            pushUndoAction(m_lassoSelection.sourcePageIndex, undoAction);
-        }
+        if (!undoAction.segments.isEmpty())
+            m_document->markPageDirty(srcPage);
     }
+
+    if (!undoAction.segments.isEmpty())
+        pushUndoAction(undoAction);
     
     clearLassoSelection();
     update();
@@ -10184,7 +10253,7 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
         layer->addStroke(stroke);
         
         // Push individual undo action (each stroke can be undone separately)
-        pushUndoAction(pageIndex, PageUndoAction::AddStroke, stroke);
+        pushPageStrokeUndo(pageIndex, UndoAction::AddStroke, stroke);
         
         createdIds.append(stroke.id);
     }
@@ -10478,9 +10547,9 @@ void DocumentViewport::eraseAt(const PointerEvent& pe)
     
     // Push undo action
     if (removedStrokes.size() == 1) {
-        pushUndoAction(pe.pageHit.pageIndex, PageUndoAction::RemoveStroke, removedStrokes[0]);
+        pushPageStrokeUndo(pe.pageHit.pageIndex, UndoAction::RemoveStroke, removedStrokes[0]);
     } else if (removedStrokes.size() > 1) {
-        pushUndoAction(pe.pageHit.pageIndex, PageUndoAction::RemoveMultiple, removedStrokes);
+        pushPageStrokesUndo(pe.pageHit.pageIndex, UndoAction::RemoveMultiple, removedStrokes);
     }
     
     emit documentModified();
@@ -10515,62 +10584,46 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     Document::TileCoord centerTile = m_document->tileCoordForPoint(docPt);
     int tileSize = Document::EDGELESS_TILE_SIZE;
     
-    // Collect all erased strokes for undo (Phase E6)
-    EdgelessUndoAction undoAction;
-    undoAction.type = PageUndoAction::RemoveStroke;
+    UndoAction undoAction;
+    undoAction.type = UndoAction::RemoveStroke;
     undoAction.layerIndex = m_edgelessActiveLayerIndex;
-    
-    // Check center tile + 8 neighbors (3x3 grid)
-    // This catches strokes that span tile boundaries
+
     for (int dx = -1; dx <= 1; ++dx) {
         for (int dy = -1; dy <= 1; ++dy) {
             int tx = centerTile.first + dx;
             int ty = centerTile.second + dy;
-            
+
             Page* tile = m_document->getTile(tx, ty);
-            if (!tile) continue;  // Empty tile
-            
-            // Get the active layer (use edgeless active layer index)
+            if (!tile) continue;
             if (m_edgelessActiveLayerIndex >= tile->layerCount()) continue;
             VectorLayer* layer = tile->layer(m_edgelessActiveLayerIndex);
             if (!layer || layer->locked) continue;
-            
-            // Convert document point to tile-local coordinates
+
             QPointF tileOrigin(tx * tileSize, ty * tileSize);
             QPointF localPt = docPt - tileOrigin;
-            
-            // Find strokes at eraser position
             QVector<QString> hitIds = layer->strokesAtPoint(localPt, m_eraserSize);
-            
             if (hitIds.isEmpty()) continue;
-            
-            // Collect strokes for undo BEFORE removing (Phase E6)
+
             for (const QString& id : hitIds) {
-                // Find the stroke by ID and copy it for undo
                 for (const VectorStroke& stroke : layer->strokes()) {
                     if (stroke.id == id) {
-                        undoAction.segments.append({{tx, ty}, stroke});
+                        UndoAction::StrokeSegment seg;
+                        seg.tileCoord = {tx, ty};
+                        seg.stroke = stroke;
+                        undoAction.segments.append(seg);
                         break;
                     }
                 }
             }
-            
-            // Remove strokes
-            for (const QString& id : hitIds) {
+            for (const QString& id : hitIds)
                 layer->removeStroke(id);
-            }
-            
-            // Mark tile as dirty for persistence (before potential removal)
             m_document->markTileDirty({tx, ty});
-            
-            // Remove tile if now empty (saves memory, tile file deleted on next save)
             m_document->removeTileIfEmpty(tx, ty);
         }
     }
-    
-    // Push undo action if any strokes were erased
+
     if (!undoAction.segments.isEmpty()) {
-        pushEdgelessUndoAction(undoAction);
+        pushUndoAction(undoAction);
         emit documentModified();
         
         // Dirty region update - use elliptical region to match circular eraser
@@ -10614,91 +10667,75 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
     painter.drawEllipse(m_lastPointerPos, screenRadius, screenRadius);
 }
 
-// ===== Undo/Redo System (Task 2.5) =====
+// ===== Undo/Redo System (unified) =====
 
-void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, const VectorStroke& stroke)
+void DocumentViewport::pushUndoAction(const UndoAction& action)
 {
-    PageUndoAction action;
+    m_undoStack.push(action);
+    trimUndoStack();
+    m_redoStack.clear();
+    emit undoAvailableChanged(canUndo());
+    emit redoAvailableChanged(false);
+}
+
+void DocumentViewport::pushPageStrokeUndo(int pageIndex, UndoAction::Type type, const VectorStroke& stroke)
+{
+    UndoAction action;
     action.type = type;
-    action.pageIndex = pageIndex;
-    action.stroke = stroke;
-    
-    m_undoStacks[pageIndex].push(action);
-    trimUndoStack(pageIndex);
-    clearRedoStack(pageIndex);
-    emit undoAvailableChanged(canUndo());
+    UndoAction::StrokeSegment seg;
+    seg.pageIndex = pageIndex;
+    seg.stroke = stroke;
+    action.segments.append(seg);
+    pushUndoAction(action);
+    if (!m_document->isEdgeless())
+        emit pageModified(pageIndex);
 }
 
-void DocumentViewport::pushUndoAction(int pageIndex, PageUndoAction::Type type, const QVector<VectorStroke>& strokes)
+void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type, const QVector<VectorStroke>& strokes)
 {
-    PageUndoAction action;
+    UndoAction action;
     action.type = type;
-    action.pageIndex = pageIndex;
-    action.strokes = strokes;
-    
-    m_undoStacks[pageIndex].push(action);
-    trimUndoStack(pageIndex);
-    clearRedoStack(pageIndex);
-    emit undoAvailableChanged(canUndo());
-}
-
-void DocumentViewport::pushUndoAction(int pageIndex, const PageUndoAction& action)
-{
-    // For complete actions (TransformSelection, etc.)
-    PageUndoAction fullAction = action;
-    fullAction.pageIndex = pageIndex;  // Ensure page index is set
-    
-    m_undoStacks[pageIndex].push(fullAction);
-    trimUndoStack(pageIndex);
-    clearRedoStack(pageIndex);
-    emit undoAvailableChanged(canUndo());
-}
-
-void DocumentViewport::clearRedoStack(int pageIndex)
-{
-    if (m_redoStacks.contains(pageIndex)) {
-        bool hadRedo = !m_redoStacks[pageIndex].isEmpty();
-        m_redoStacks[pageIndex].clear();
-        if (hadRedo) {
-            emit redoAvailableChanged(false);
-        }
+    for (const auto& s : strokes) {
+        UndoAction::StrokeSegment seg;
+        seg.pageIndex = pageIndex;
+        seg.stroke = s;
+        action.segments.append(seg);
     }
+    pushUndoAction(action);
+    if (!m_document->isEdgeless())
+        emit pageModified(pageIndex);
 }
 
 void DocumentViewport::clearUndoStacksFrom(int pageIndex)
 {
-    // Clear undo/redo stacks for all pages >= pageIndex
-    // Used when inserting/deleting pages to prevent stale undo from applying to wrong pages
-    // Preserves undo for pages before the affected index (user's "done" work)
-    
     bool hadUndo = canUndo();
     bool hadRedo = canRedo();
     
-    // Clear undo stacks for affected pages
-    for (auto it = m_undoStacks.begin(); it != m_undoStacks.end(); ) {
-        if (it.key() >= pageIndex) {
-            it = m_undoStacks.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    auto referencesPage = [pageIndex](const UndoAction& a) {
+        for (const auto& seg : a.segments)
+            if (seg.pageIndex >= pageIndex) return true;
+        for (const auto& seg : a.removedSegments)
+            if (seg.pageIndex >= pageIndex) return true;
+        for (const auto& seg : a.addedSegments)
+            if (seg.pageIndex >= pageIndex) return true;
+        if (a.objectPageIndex >= pageIndex) return true;
+        if (a.objectOldPageIndex >= pageIndex) return true;
+        if (a.objectNewPageIndex >= pageIndex) return true;
+        return false;
+    };
     
-    // Clear redo stacks for affected pages
-    for (auto it = m_redoStacks.begin(); it != m_redoStacks.end(); ) {
-        if (it.key() >= pageIndex) {
-            it = m_redoStacks.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    QStack<UndoAction> kept;
+    for (const auto& a : m_undoStack)
+        if (!referencesPage(a)) kept.push(a);
+    m_undoStack = kept;
     
-    // Emit signals if availability changed
-    if (hadUndo && !canUndo()) {
-        emit undoAvailableChanged(false);
-    }
-    if (hadRedo && !canRedo()) {
-        emit redoAvailableChanged(false);
-    }
+    QStack<UndoAction> keptRedo;
+    for (const auto& a : m_redoStack)
+        if (!referencesPage(a)) keptRedo.push(a);
+    m_redoStack = keptRedo;
+    
+    if (hadUndo && !canUndo()) emit undoAvailableChanged(false);
+    if (hadRedo && !canRedo()) emit redoAvailableChanged(false);
 }
 
 // ============================================================================
@@ -10711,476 +10748,15 @@ void DocumentViewport::setEdgelessActiveLayerIndex(int layerIndex)
     m_edgelessActiveLayerIndex = layerIndex;
 }
 
-void DocumentViewport::trimUndoStack(int pageIndex)
+void DocumentViewport::trimUndoStack()
 {
-    // Limit stack size to prevent unbounded memory growth
-    // QStack inherits from QVector, so we can use remove() for O(n) trimming
-    // This only runs when stack exceeds limit (rare - once every MAX_UNDO_PER_PAGE actions)
-    QStack<PageUndoAction>& stack = m_undoStacks[pageIndex];
-    
-    while (stack.size() > MAX_UNDO_PER_PAGE) {
-        // Remove oldest entry (at the bottom of the stack = index 0)
-        // QStack inherits QVector's remove() method
-        stack.remove(0);
+    while (m_undoStack.size() > MAX_UNDO_ACTIONS) {
+        m_undoStack.remove(0);
     }
 }
 
-// ===== Edgeless Undo/Redo (Phase E6) =====
-
-void DocumentViewport::pushEdgelessUndoAction(const EdgelessUndoAction& action)
-{
-    m_edgelessUndoStack.push(action);
-    trimEdgelessUndoStack();
-    clearEdgelessRedoStack();
-    emit undoAvailableChanged(canUndo());
-}
-
-void DocumentViewport::undoEdgeless()
-{
-    if (m_edgelessUndoStack.isEmpty() || !m_document) return;
-    
-    EdgelessUndoAction action = m_edgelessUndoStack.pop();
-    
-    // Check if this is an object action (Phase O2.7)
-    bool isObjectAction = (action.type == PageUndoAction::ObjectInsert ||
-                           action.type == PageUndoAction::ObjectDelete ||
-                           action.type == PageUndoAction::ObjectMove ||
-                           action.type == PageUndoAction::ObjectAffinityChange);
-    
-    if (isObjectAction) {
-        // Object actions (Phase O2.7.3)
-        switch (action.type) {
-            case PageUndoAction::ObjectInsert:
-                // Undo insert = remove the object (BF.6)
-                {
-                    deselectObjectById(action.objectId);
-                    Page* tile = m_document->getTile(action.objectTileCoord.first, 
-                                                     action.objectTileCoord.second);
-                    if (tile) {
-                        tile->removeObject(action.objectId);
-                        m_document->markTileDirty(action.objectTileCoord);
-                        m_document->removeTileIfEmpty(action.objectTileCoord.first,
-                                                      action.objectTileCoord.second);
-                    }
-                    m_document->recalculateMaxObjectExtent();
-                }
-                break;
-                
-            case PageUndoAction::ObjectDelete:
-                // Undo delete = restore the object to the tile
-                {
-                    Page* tile = m_document->getOrCreateTile(action.objectTileCoord.first,
-                                                             action.objectTileCoord.second);
-                    if (tile) {
-                        auto obj = InsertedObject::fromJson(action.objectData);
-                        if (obj) {
-                            // Phase O2.C: Load any external assets (type-agnostic)
-                            obj->loadAssets(m_document->bundlePath());
-                            m_document->updateMaxObjectExtent(obj.get());
-                            tile->addObject(std::move(obj));
-                            m_document->markTileDirty(action.objectTileCoord);
-                        }
-                    }
-                }
-                break;
-                
-            case PageUndoAction::ObjectMove:
-                // Undo move = restore old position (may involve cross-tile move)
-                {
-                    if (action.objectOldTile != action.objectNewTile) {
-                        // Cross-tile move: move object back from new tile to old tile
-                        Page* newTile = m_document->getTile(action.objectNewTile.first,
-                                                            action.objectNewTile.second);
-                        if (newTile) {
-                            std::unique_ptr<InsertedObject> obj = newTile->extractObject(action.objectId);
-                            if (obj) {
-                                obj->position = action.objectOldPosition;
-                                Page* oldTile = m_document->getOrCreateTile(action.objectOldTile.first,
-                                                                            action.objectOldTile.second);
-                                if (oldTile) {
-                                    oldTile->addObject(std::move(obj));
-                                    m_document->markTileDirty(action.objectOldTile);
-                                }
-                                m_document->markTileDirty(action.objectNewTile);
-                                m_document->removeTileIfEmpty(action.objectNewTile.first,
-                                                              action.objectNewTile.second);
-                            }
-                        }
-                    } else {
-                        // Same-tile move: just restore position
-                        Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                         action.objectTileCoord.second);
-                        if (tile) {
-                            InsertedObject* obj = tile->objectById(action.objectId);
-                            if (obj) {
-                                obj->position = action.objectOldPosition;
-                            }
-                            m_document->markTileDirty(action.objectTileCoord);
-                        }
-                    }
-                }
-                break;
-                
-            case PageUndoAction::ObjectAffinityChange:
-                // Undo affinity change = restore old affinity
-                {
-                    Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                     action.objectTileCoord.second);
-                    if (tile) {
-                        tile->updateObjectAffinity(action.objectId, action.objectOldAffinity);
-                        m_document->markTileDirty(action.objectTileCoord);
-                    }
-                }
-                break;
-                
-            // -----------------------------------------------------------------
-            // ObjectResize (Phase O3.1.5, O3.1.8.3): Undo resize/rotate
-            // Restores old position, size, and rotation.
-            // -----------------------------------------------------------------
-            case PageUndoAction::ObjectResize:
-                {
-                    Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                     action.objectTileCoord.second);
-                    if (tile) {
-                        InsertedObject* obj = tile->objectById(action.objectId);
-                        if (obj) {
-                            obj->position = action.objectOldPosition;
-                            obj->size = action.objectOldSize;
-                            obj->rotation = action.objectOldRotation;  // O3.1.8.3
-                            #ifdef SPEEDYNOTE_DEBUG
-                            qDebug() << "Undo ObjectResize (edgeless): obj" << action.objectId
-                                     << "pos" << obj->position << "size" << obj->size 
-                                     << "rot" << obj->rotation;
-                            #endif
-                        }
-                        m_document->markTileDirty(action.objectTileCoord);
-                    }
-                }
-                break;
-                
-            default:
-                break;
-        }
-    } else if (action.type == PageUndoAction::TransformSelection) {
-        // Handle TransformSelection specially (compound action)
-        // Step 1: Remove the added strokes (undo the add)
-        for (const auto& seg : action.addedSegments) {
-            Page* tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
-            if (!tile) continue;
-            
-            VectorLayer* layer = tile->layer(action.layerIndex);
-            if (layer) {
-                layer->removeStroke(seg.stroke.id);
-            }
-            m_document->markTileDirty(seg.tileCoord);
-            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-        }
-        
-        // Step 2: Add back the removed strokes (undo the remove)
-        for (const auto& seg : action.removedSegments) {
-            Page* tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
-            if (!tile) continue;
-            
-            while (tile->layerCount() <= action.layerIndex) {
-                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-            }
-            VectorLayer* layer = tile->layer(action.layerIndex);
-            if (layer) {
-                layer->addStroke(seg.stroke);
-            }
-            m_document->markTileDirty(seg.tileCoord);
-        }
-    } else {
-        // Apply undo to each segment (may span multiple tiles)
-        for (const auto& seg : action.segments) {
-            Page* tile = nullptr;
-            
-            if (action.type == PageUndoAction::AddStroke) {
-                // Undoing an add = remove the stroke (tile might not exist if already removed)
-                tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
-            } else {
-                // Undoing a remove = add the stroke back (may need to recreate tile)
-                tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
-            }
-            
-            if (!tile) continue;
-            
-            // Ensure layer exists
-            while (tile->layerCount() <= action.layerIndex) {
-                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-            }
-            VectorLayer* layer = tile->layer(action.layerIndex);
-            if (!layer) continue;
-            
-            switch (action.type) {
-                case PageUndoAction::AddStroke:
-                    // Undo add = remove the stroke
-                    layer->removeStroke(seg.stroke.id);
-                    // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
-                    m_document->markTileDirty(seg.tileCoord);
-                    // Check if tile is now empty
-                    m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-                    break;
-                    
-                case PageUndoAction::RemoveStroke:
-                case PageUndoAction::RemoveMultiple:
-                    // Undo remove = add the stroke back
-                    layer->addStroke(seg.stroke);
-                    m_document->markTileDirty(seg.tileCoord);
-                    break;
-                    
-                default:
-                    break;
-            }
-        }
-    }
-    
-    // Push to redo stack
-    m_edgelessRedoStack.push(action);
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
-    emit documentModified();
-    
-    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
-    if (action.type == PageUndoAction::ObjectInsert ||
-        action.type == PageUndoAction::ObjectDelete) {
-        emit linkObjectListMayHaveChanged();
-    }
-    
-    update();
-}
-
-void DocumentViewport::redoEdgeless()
-{
-    if (m_edgelessRedoStack.isEmpty() || !m_document) return;
-    
-    EdgelessUndoAction action = m_edgelessRedoStack.pop();
-    
-    // Check if this is an object action (Phase O2.7)
-    bool isObjectAction = (action.type == PageUndoAction::ObjectInsert ||
-                           action.type == PageUndoAction::ObjectDelete ||
-                           action.type == PageUndoAction::ObjectMove ||
-                           action.type == PageUndoAction::ObjectAffinityChange);
-    
-    if (isObjectAction) {
-        // Object actions (Phase O2.7.3)
-        switch (action.type) {
-            case PageUndoAction::ObjectInsert:
-                // Redo insert = re-add the object from JSON
-                {
-                    Page* tile = m_document->getOrCreateTile(action.objectTileCoord.first,
-                                                             action.objectTileCoord.second);
-                    if (tile) {
-                        auto obj = InsertedObject::fromJson(action.objectData);
-                        if (obj) {
-                            // Phase O2.C: Load any external assets (type-agnostic)
-                            obj->loadAssets(m_document->bundlePath());
-                            m_document->updateMaxObjectExtent(obj.get());
-                            tile->addObject(std::move(obj));
-                            m_document->markTileDirty(action.objectTileCoord);
-                        }
-                    }
-                }
-                break;
-                
-            case PageUndoAction::ObjectDelete:
-                // Redo delete = remove the object again
-                {
-                    Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                     action.objectTileCoord.second);
-                    if (tile) {
-                        tile->removeObject(action.objectId);
-                        m_document->markTileDirty(action.objectTileCoord);
-                        m_document->removeTileIfEmpty(action.objectTileCoord.first,
-                                                      action.objectTileCoord.second);
-                    }
-                    m_document->recalculateMaxObjectExtent();
-                }
-                break;
-                
-            case PageUndoAction::ObjectMove:
-                // Redo move = apply new position (may involve cross-tile move)
-                {
-                    if (action.objectOldTile != action.objectNewTile) {
-                        // Cross-tile move: move object from old tile to new tile
-                        Page* oldTile = m_document->getTile(action.objectOldTile.first,
-                                                            action.objectOldTile.second);
-                        if (oldTile) {
-                            std::unique_ptr<InsertedObject> obj = oldTile->extractObject(action.objectId);
-                            if (obj) {
-                                obj->position = action.objectNewPosition;
-                                Page* newTile = m_document->getOrCreateTile(action.objectNewTile.first,
-                                                                            action.objectNewTile.second);
-                                if (newTile) {
-                                    newTile->addObject(std::move(obj));
-                                    m_document->markTileDirty(action.objectNewTile);
-                                }
-                                m_document->markTileDirty(action.objectOldTile);
-                                m_document->removeTileIfEmpty(action.objectOldTile.first,
-                                                              action.objectOldTile.second);
-                            }
-                        }
-                    } else {
-                        // Same-tile move: just apply new position
-                        Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                         action.objectTileCoord.second);
-                        if (tile) {
-                            InsertedObject* obj = tile->objectById(action.objectId);
-                            if (obj) {
-                                obj->position = action.objectNewPosition;
-                            }
-                            m_document->markTileDirty(action.objectTileCoord);
-                        }
-                    }
-                }
-                break;
-                
-            case PageUndoAction::ObjectAffinityChange:
-                // Redo affinity change = apply new affinity
-                {
-                    Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                     action.objectTileCoord.second);
-                    if (tile) {
-                        tile->updateObjectAffinity(action.objectId, action.objectNewAffinity);
-                        m_document->markTileDirty(action.objectTileCoord);
-                    }
-                }
-                break;
-                
-            // -----------------------------------------------------------------
-            // ObjectResize (Phase O3.1.5, O3.1.8.3): Redo resize/rotate
-            // Applies new position, size, and rotation.
-            // -----------------------------------------------------------------
-            case PageUndoAction::ObjectResize:
-                {
-                    Page* tile = m_document->getTile(action.objectTileCoord.first,
-                                                     action.objectTileCoord.second);
-                    if (tile) {
-                        InsertedObject* obj = tile->objectById(action.objectId);
-                        if (obj) {
-                            obj->position = action.objectNewPosition;
-                            obj->size = action.objectNewSize;
-                            obj->rotation = action.objectNewRotation;  // O3.1.8.3
-                            #ifdef SPEEDYNOTE_DEBUG
-                            qDebug() << "Redo ObjectResize (edgeless): obj" << action.objectId
-                                     << "pos" << obj->position << "size" << obj->size
-                                     << "rot" << obj->rotation;
-                            #endif
-                        }
-                        m_document->markTileDirty(action.objectTileCoord);
-                    }
-                }
-                break;
-                
-            default:
-                break;
-        }
-    } else if (action.type == PageUndoAction::TransformSelection) {
-        // Handle TransformSelection specially (compound action)
-        // Step 1: Remove the original strokes again (redo the remove)
-        for (const auto& seg : action.removedSegments) {
-            Page* tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
-            if (!tile) continue;
-            
-            VectorLayer* layer = tile->layer(action.layerIndex);
-            if (layer) {
-                layer->removeStroke(seg.stroke.id);
-            }
-            m_document->markTileDirty(seg.tileCoord);
-            m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-        }
-        
-        // Step 2: Add the transformed strokes again (redo the add)
-        for (const auto& seg : action.addedSegments) {
-            Page* tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
-            if (!tile) continue;
-            
-            while (tile->layerCount() <= action.layerIndex) {
-                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-            }
-            VectorLayer* layer = tile->layer(action.layerIndex);
-            if (layer) {
-                layer->addStroke(seg.stroke);
-            }
-            m_document->markTileDirty(seg.tileCoord);
-        }
-    } else {
-        // Apply redo to each segment
-        for (const auto& seg : action.segments) {
-            Page* tile = nullptr;
-            
-            if (action.type == PageUndoAction::AddStroke) {
-                // Redoing an add = add the stroke back (may need to recreate tile)
-                tile = m_document->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second);
-            } else {
-                // Redoing a remove = remove the stroke (tile might not exist if already removed)
-                tile = m_document->getTile(seg.tileCoord.first, seg.tileCoord.second);
-            }
-            
-            if (!tile) continue;
-            
-            // Ensure layer exists
-            while (tile->layerCount() <= action.layerIndex) {
-                tile->addLayer(QString("Layer %1").arg(tile->layerCount() + 1));
-            }
-            VectorLayer* layer = tile->layer(action.layerIndex);
-            if (!layer) continue;
-            
-            switch (action.type) {
-                case PageUndoAction::AddStroke:
-                    // Redo add = add the stroke again
-                    layer->addStroke(seg.stroke);
-                    m_document->markTileDirty(seg.tileCoord);
-                    break;
-                    
-                case PageUndoAction::RemoveStroke:
-                case PageUndoAction::RemoveMultiple:
-                    // Redo remove = remove the stroke again
-                    layer->removeStroke(seg.stroke.id);
-                    // Mark dirty BEFORE potential removal (removeTileIfEmpty clears dirty flag)
-                    m_document->markTileDirty(seg.tileCoord);
-                    // Check if tile is now empty
-                    m_document->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
-                    break;
-                    
-                default:
-                    break;
-            }
-        }
-    }
-    
-    // Push to undo stack
-    m_edgelessUndoStack.push(action);
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
-    emit documentModified();
-    
-    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
-    if (action.type == PageUndoAction::ObjectInsert ||
-        action.type == PageUndoAction::ObjectDelete) {
-        emit linkObjectListMayHaveChanged();
-    }
-    
-    update();
-}
-
-void DocumentViewport::clearEdgelessRedoStack()
-{
-    if (!m_edgelessRedoStack.isEmpty()) {
-        m_edgelessRedoStack.clear();
-        emit redoAvailableChanged(canRedo());
-    }
-}
-
-void DocumentViewport::trimEdgelessUndoStack()
-{
-    while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
-        // Remove oldest entry (at the bottom of the stack = index 0)
-        m_edgelessUndoStack.remove(0);
-    }
-}
+// (undoEdgeless/redoEdgeless/clearEdgelessRedoStack/trimEdgelessUndoStack removed --
+//  all undo/redo is now handled by the unified undo() and redo() below)
 
 QVector<DocumentViewport::TileSegment> DocumentViewport::splitStrokeIntoTileSegments(
     const QVector<StrokePoint>& points) const
@@ -11232,515 +10808,508 @@ QVector<DocumentViewport::TileSegment> DocumentViewport::splitStrokeIntoTileSegm
     return segments;
 }
 
+// ============================================================================
+// Unified undo/redo helpers
+// ============================================================================
+
+static Page* getContainer(Document* doc, const UndoAction::StrokeSegment& seg, bool create)
+{
+    if (doc->isEdgeless()) {
+        return create
+            ? doc->getOrCreateTile(seg.tileCoord.first, seg.tileCoord.second)
+            : doc->getTile(seg.tileCoord.first, seg.tileCoord.second);
+    }
+    return doc->page(seg.pageIndex);
+}
+
+static void markSegDirty(Document* doc, const UndoAction::StrokeSegment& seg)
+{
+    if (doc->isEdgeless())
+        doc->markTileDirty(seg.tileCoord);
+    else
+        doc->markPageDirty(seg.pageIndex);
+}
+
+static void tryRemoveEmptyTile(Document* doc, const UndoAction::StrokeSegment& seg)
+{
+    if (doc->isEdgeless())
+        doc->removeTileIfEmpty(seg.tileCoord.first, seg.tileCoord.second);
+}
+
+static Page* getObjContainer(Document* doc, const UndoAction& a, bool create)
+{
+    if (doc->isEdgeless()) {
+        return create
+            ? doc->getOrCreateTile(a.objectTileCoord.first, a.objectTileCoord.second)
+            : doc->getTile(a.objectTileCoord.first, a.objectTileCoord.second);
+    }
+    return doc->page(a.objectPageIndex);
+}
+
+static void markObjDirty(Document* doc, const UndoAction& a)
+{
+    if (doc->isEdgeless())
+        doc->markTileDirty(a.objectTileCoord);
+    else
+        doc->markPageDirty(a.objectPageIndex);
+}
+
+static QSet<int> collectAffectedPages(const UndoAction& action)
+{
+    QSet<int> pages;
+    for (const auto& s : action.segments) if (s.pageIndex >= 0) pages.insert(s.pageIndex);
+    for (const auto& s : action.removedSegments) if (s.pageIndex >= 0) pages.insert(s.pageIndex);
+    for (const auto& s : action.addedSegments) if (s.pageIndex >= 0) pages.insert(s.pageIndex);
+    if (action.objectPageIndex >= 0) pages.insert(action.objectPageIndex);
+    if (action.objectOldPageIndex >= 0) pages.insert(action.objectOldPageIndex);
+    if (action.objectNewPageIndex >= 0) pages.insert(action.objectNewPageIndex);
+    return pages;
+}
+
 void DocumentViewport::undo()
 {
-    // Edgeless mode uses global undo stack
-    if (m_document && m_document->isEdgeless()) {
-        undoEdgeless();
-        return;
-    }
-    
-    // Paged mode: per-page undo
-    int pageIdx = m_currentPageIndex;
-    
-    if (!m_undoStacks.contains(pageIdx) || m_undoStacks[pageIdx].isEmpty()) {
-        return;
-    }
-    
-    Page* page = m_document ? m_document->page(pageIdx) : nullptr;
-    if (!page) return;
-    
-    PageUndoAction action = m_undoStacks[pageIdx].pop();
-    
-    // Check if this is a stroke action (needs layer) or object action (works on page)
-    bool isStrokeAction = (action.type == PageUndoAction::AddStroke ||
-                           action.type == PageUndoAction::RemoveStroke ||
-                           action.type == PageUndoAction::RemoveMultiple ||
-                           action.type == PageUndoAction::TransformSelection);
-    
-    if (isStrokeAction) {
-        // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
-        VectorLayer* layer = nullptr;
-        if (action.type == PageUndoAction::TransformSelection || 
-            action.type == PageUndoAction::RemoveMultiple) {
-            layer = page->layer(action.layerIndex);
-        } else {
-            layer = page->activeLayer();
-        }
-        if (!layer) return;
-        
+    if (m_undoStack.isEmpty() || !m_document) return;
+
+    UndoAction action = m_undoStack.pop();
+
+    bool isObjectAction = (action.type == UndoAction::ObjectInsert ||
+                           action.type == UndoAction::ObjectDelete ||
+                           action.type == UndoAction::ObjectMove ||
+                           action.type == UndoAction::ObjectAffinityChange ||
+                           action.type == UndoAction::ObjectResize);
+
+    if (isObjectAction) {
         switch (action.type) {
-            case PageUndoAction::AddStroke:
-                // Undo adding = remove the stroke(s)
-                if (!action.addedStrokes.isEmpty()) {
-                    // Multiple strokes (paste or transform)
-                    for (const auto& s : action.addedStrokes) {
-                        layer->removeStroke(s.id);
-                    }
-                } else {
-                    // Single stroke
-                    layer->removeStroke(action.stroke.id);
-                }
-                break;
-                
-            case PageUndoAction::RemoveStroke:
-                // Undo removing = add the stroke back
-                layer->addStroke(action.stroke);
-                break;
-                
-            case PageUndoAction::RemoveMultiple:
-                // Undo removing multiple = add all strokes back
-                for (const auto& s : action.strokes) {
-                    layer->addStroke(s);
-                }
-                break;
-                
-            case PageUndoAction::TransformSelection:
-                // Undo transform: remove added strokes, restore removed strokes
-                for (const auto& s : action.addedStrokes) {
-                    layer->removeStroke(s.id);
-                }
-                for (const auto& s : action.removedStrokes) {
-                    layer->addStroke(s);
-                }
-                break;
-                
-            default:
-                break;  // Handled below
-        }
-        
-        layer->invalidateStrokeCache();
-    } else {
-        // Object actions (Phase O2.7)
-        switch (action.type) {
-            case PageUndoAction::ObjectInsert:
-                // Undo insert = remove the object (BF.6)
+            case UndoAction::ObjectInsert: {
                 deselectObjectById(action.objectId);
-                page->removeObject(action.objectId);
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    c->removeObject(action.objectId);
+                    markObjDirty(m_document, action);
+                    if (m_document->isEdgeless())
+                        m_document->removeTileIfEmpty(action.objectTileCoord.first,
+                                                      action.objectTileCoord.second);
+                }
                 m_document->recalculateMaxObjectExtent();
                 break;
-                
-            case PageUndoAction::ObjectDelete:
-                // Undo delete = restore the object from JSON
-                {
+            }
+            case UndoAction::ObjectDelete: {
+                Page* c = getObjContainer(m_document, action, true);
+                if (c) {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
-                        // Phase O2.C: Load any external assets (type-agnostic)
                         obj->loadAssets(m_document->bundlePath());
                         m_document->updateMaxObjectExtent(obj.get());
-                        page->addObject(std::move(obj));
+                        c->addObject(std::move(obj));
+                        markObjDirty(m_document, action);
                     }
                 }
                 break;
-                
-            case PageUndoAction::ObjectMove:
-                // Undo move = restore old position
-                {
-                    InsertedObject* obj = page->objectById(action.objectId);
-                    if (obj) {
-                        obj->position = action.objectOldPosition;
+            }
+            case UndoAction::ObjectMove: {
+                bool crossContainer = m_document->isEdgeless()
+                    ? (action.objectOldTile != action.objectNewTile)
+                    : (action.objectOldPageIndex != action.objectNewPageIndex
+                       && action.objectOldPageIndex >= 0 && action.objectNewPageIndex >= 0);
+                if (crossContainer) {
+                    Page* newC = m_document->isEdgeless()
+                        ? m_document->getTile(action.objectNewTile.first, action.objectNewTile.second)
+                        : m_document->page(action.objectNewPageIndex);
+                    if (newC) {
+                        auto obj = newC->extractObject(action.objectId);
+                        if (obj) {
+                            obj->position = action.objectOldPosition;
+                            Page* oldC = m_document->isEdgeless()
+                                ? m_document->getOrCreateTile(action.objectOldTile.first, action.objectOldTile.second)
+                                : m_document->page(action.objectOldPageIndex);
+                            if (oldC) {
+                                oldC->addObject(std::move(obj));
+                                if (m_document->isEdgeless())
+                                    m_document->markTileDirty(action.objectOldTile);
+                                else
+                                    m_document->markPageDirty(action.objectOldPageIndex);
+                            }
+                            if (m_document->isEdgeless()) {
+                                m_document->markTileDirty(action.objectNewTile);
+                                m_document->removeTileIfEmpty(action.objectNewTile.first,
+                                                              action.objectNewTile.second);
+                            } else {
+                                m_document->markPageDirty(action.objectNewPageIndex);
+                            }
+                        }
+                    }
+                } else {
+                    Page* c = getObjContainer(m_document, action, false);
+                    if (c) {
+                        InsertedObject* obj = c->objectById(action.objectId);
+                        if (obj) obj->position = action.objectOldPosition;
+                        markObjDirty(m_document, action);
                     }
                 }
                 break;
-                
-            case PageUndoAction::ObjectAffinityChange:
-                // Undo affinity change = restore old affinity
-                page->updateObjectAffinity(action.objectId, action.objectOldAffinity);
+            }
+            case UndoAction::ObjectAffinityChange: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    c->updateObjectAffinity(action.objectId, action.objectOldAffinity);
+                    markObjDirty(m_document, action);
+                }
                 break;
-                
-            // -----------------------------------------------------------------
-            // ObjectResize (Phase O3.1.5, O3.1.8.3): Undo resize/rotate
-            // Restores old position, size, and rotation.
-            // -----------------------------------------------------------------
-            case PageUndoAction::ObjectResize:
-                {
-                    InsertedObject* obj = page->objectById(action.objectId);
+            }
+            case UndoAction::ObjectResize: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    InsertedObject* obj = c->objectById(action.objectId);
                     if (obj) {
                         obj->position = action.objectOldPosition;
                         obj->size = action.objectOldSize;
-                        obj->rotation = action.objectOldRotation;  // O3.1.8.3
-                        #ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "Undo ObjectResize (paged): obj" << action.objectId
-                                 << "pos" << obj->position << "size" << obj->size
-                                 << "rot" << obj->rotation;
-                        #endif
+                        obj->rotation = action.objectOldRotation;
                     }
+                    markObjDirty(m_document, action);
                 }
                 break;
-                
-            default:
-                break;
+            }
+            default: break;
+        }
+    } else if (action.type == UndoAction::TransformSelection) {
+        // Remove added strokes
+        for (const auto& seg : action.addedSegments) {
+            Page* c = getContainer(m_document, seg, false);
+            if (!c) continue;
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (layer) layer->removeStroke(seg.stroke.id);
+            markSegDirty(m_document, seg);
+            tryRemoveEmptyTile(m_document, seg);
+        }
+        // Restore removed strokes
+        for (const auto& seg : action.removedSegments) {
+            Page* c = getContainer(m_document, seg, true);
+            if (!c) continue;
+            while (c->layerCount() <= action.layerIndex)
+                c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (layer) layer->addStroke(seg.stroke);
+            markSegDirty(m_document, seg);
+        }
+    } else {
+        for (const auto& seg : action.segments) {
+            Page* c = getContainer(m_document, seg,
+                                   action.type != UndoAction::AddStroke);
+            if (!c) continue;
+            while (c->layerCount() <= action.layerIndex)
+                c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (!layer) continue;
+
+            switch (action.type) {
+                case UndoAction::AddStroke:
+                    layer->removeStroke(seg.stroke.id);
+                    markSegDirty(m_document, seg);
+                    tryRemoveEmptyTile(m_document, seg);
+                    break;
+                case UndoAction::RemoveStroke:
+                case UndoAction::RemoveMultiple:
+                    layer->addStroke(seg.stroke);
+                    markSegDirty(m_document, seg);
+                    break;
+                default: break;
+            }
         }
     }
-    
-    // Mark page dirty for lazy save (BUG FIX: was missing)
-    m_document->markPageDirty(pageIdx);
-    
-    // Push to redo stack
-    m_redoStacks[pageIdx].push(action);
-    
+
+    // Auto-navigate if the action's page differs from current view (paged mode)
+    if (!m_document->isEdgeless()) {
+        int actionPage = -1;
+        if (!action.segments.isEmpty())
+            actionPage = action.segments.first().pageIndex;
+        else if (!action.removedSegments.isEmpty())
+            actionPage = action.removedSegments.first().pageIndex;
+        else if (action.objectPageIndex >= 0)
+            actionPage = action.objectPageIndex;
+        else if (action.objectOldPageIndex >= 0)
+            actionPage = action.objectOldPageIndex;
+        if (actionPage >= 0 && !visiblePages().contains(actionPage))
+            scrollToPage(actionPage);
+    }
+
+    m_redoStack.push(action);
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    
-    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
-    if (action.type == PageUndoAction::ObjectInsert ||
-        action.type == PageUndoAction::ObjectDelete) {
+    if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
-    }
-    
+    if (!m_document->isEdgeless())
+        for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
 }
 
 void DocumentViewport::redo()
 {
-    // Edgeless mode uses global redo stack
-    if (m_document && m_document->isEdgeless()) {
-        redoEdgeless();
-        return;
-    }
-    
-    // Paged mode: per-page redo
-    int pageIdx = m_currentPageIndex;
-    
-    if (!m_redoStacks.contains(pageIdx) || m_redoStacks[pageIdx].isEmpty()) {
-        return;
-    }
-    
-    Page* page = m_document ? m_document->page(pageIdx) : nullptr;
-    if (!page) return;
-    
-    PageUndoAction action = m_redoStacks[pageIdx].pop();
-    
-    // Check if this is a stroke action (needs layer) or object action (works on page)
-    bool isStrokeAction = (action.type == PageUndoAction::AddStroke ||
-                           action.type == PageUndoAction::RemoveStroke ||
-                           action.type == PageUndoAction::RemoveMultiple ||
-                           action.type == PageUndoAction::TransformSelection);
-    
-    if (isStrokeAction) {
-        // Get the correct layer (use action.layerIndex for lasso actions, otherwise active layer)
-        VectorLayer* layer = nullptr;
-        if (action.type == PageUndoAction::TransformSelection || 
-            action.type == PageUndoAction::RemoveMultiple) {
-            layer = page->layer(action.layerIndex);
-        } else {
-            layer = page->activeLayer();
-        }
-        if (!layer) return;
-        
+    if (m_redoStack.isEmpty() || !m_document) return;
+
+    UndoAction action = m_redoStack.pop();
+
+    bool isObjectAction = (action.type == UndoAction::ObjectInsert ||
+                           action.type == UndoAction::ObjectDelete ||
+                           action.type == UndoAction::ObjectMove ||
+                           action.type == UndoAction::ObjectAffinityChange ||
+                           action.type == UndoAction::ObjectResize);
+
+    if (isObjectAction) {
         switch (action.type) {
-            case PageUndoAction::AddStroke:
-                // Redo adding = add the stroke(s) again
-                if (!action.addedStrokes.isEmpty()) {
-                    // Multiple strokes (paste or transform)
-                    for (const auto& s : action.addedStrokes) {
-                        layer->addStroke(s);
-                    }
-                } else {
-                    // Single stroke
-                    layer->addStroke(action.stroke);
-                }
-                break;
-                
-            case PageUndoAction::RemoveStroke:
-                // Redo removing = remove the stroke again
-                layer->removeStroke(action.stroke.id);
-                break;
-                
-            case PageUndoAction::RemoveMultiple:
-                // Redo removing multiple = remove all strokes again
-                for (const auto& s : action.strokes) {
-                    layer->removeStroke(s.id);
-                }
-                break;
-                
-            case PageUndoAction::TransformSelection:
-                // Redo transform: remove original strokes, add transformed strokes
-                for (const auto& s : action.removedStrokes) {
-                    layer->removeStroke(s.id);
-                }
-                for (const auto& s : action.addedStrokes) {
-                    layer->addStroke(s);
-                }
-                break;
-                
-            default:
-                break;  // Handled below
-        }
-        
-        layer->invalidateStrokeCache();
-    } else {
-        // Object actions (Phase O2.7)
-        switch (action.type) {
-            case PageUndoAction::ObjectInsert:
-                // Redo insert = re-add the object from JSON
-                {
+            case UndoAction::ObjectInsert: {
+                Page* c = getObjContainer(m_document, action, true);
+                if (c) {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
-                        qDebug() << "redo ObjectInsert: restored position =" << obj->position
-                                 << "size =" << obj->size;
-                        // Phase O2.C: Load any external assets (type-agnostic)
                         obj->loadAssets(m_document->bundlePath());
                         m_document->updateMaxObjectExtent(obj.get());
-                        InsertedObject* rawPtr = obj.get();
-                        page->addObject(std::move(obj));
-                        qDebug() << "redo ObjectInsert: AFTER addObject, rawPtr->position =" << rawPtr->position;
+                        c->addObject(std::move(obj));
+                        markObjDirty(m_document, action);
                     }
                 }
                 break;
-                
-            case PageUndoAction::ObjectDelete:
-                // Redo delete = remove the object again
-                page->removeObject(action.objectId);
+            }
+            case UndoAction::ObjectDelete: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    c->removeObject(action.objectId);
+                    markObjDirty(m_document, action);
+                    if (m_document->isEdgeless())
+                        m_document->removeTileIfEmpty(action.objectTileCoord.first,
+                                                      action.objectTileCoord.second);
+                }
                 m_document->recalculateMaxObjectExtent();
                 break;
-                
-            case PageUndoAction::ObjectMove:
-                // Redo move = apply new position
-                {
-                    InsertedObject* obj = page->objectById(action.objectId);
-                    if (obj) {
-                        obj->position = action.objectNewPosition;
+            }
+            case UndoAction::ObjectMove: {
+                bool crossContainer = m_document->isEdgeless()
+                    ? (action.objectOldTile != action.objectNewTile)
+                    : (action.objectOldPageIndex != action.objectNewPageIndex
+                       && action.objectOldPageIndex >= 0 && action.objectNewPageIndex >= 0);
+                if (crossContainer) {
+                    Page* oldC = m_document->isEdgeless()
+                        ? m_document->getTile(action.objectOldTile.first, action.objectOldTile.second)
+                        : m_document->page(action.objectOldPageIndex);
+                    if (oldC) {
+                        auto obj = oldC->extractObject(action.objectId);
+                        if (obj) {
+                            obj->position = action.objectNewPosition;
+                            Page* newC = m_document->isEdgeless()
+                                ? m_document->getOrCreateTile(action.objectNewTile.first, action.objectNewTile.second)
+                                : m_document->page(action.objectNewPageIndex);
+                            if (newC) {
+                                newC->addObject(std::move(obj));
+                                if (m_document->isEdgeless())
+                                    m_document->markTileDirty(action.objectNewTile);
+                                else
+                                    m_document->markPageDirty(action.objectNewPageIndex);
+                            }
+                            if (m_document->isEdgeless()) {
+                                m_document->markTileDirty(action.objectOldTile);
+                                m_document->removeTileIfEmpty(action.objectOldTile.first,
+                                                              action.objectOldTile.second);
+                            } else {
+                                m_document->markPageDirty(action.objectOldPageIndex);
+                            }
+                        }
+                    }
+                } else {
+                    Page* c = getObjContainer(m_document, action, false);
+                    if (c) {
+                        InsertedObject* obj = c->objectById(action.objectId);
+                        if (obj) obj->position = action.objectNewPosition;
+                        markObjDirty(m_document, action);
                     }
                 }
                 break;
-                
-            case PageUndoAction::ObjectAffinityChange:
-                // Redo affinity change = apply new affinity
-                page->updateObjectAffinity(action.objectId, action.objectNewAffinity);
+            }
+            case UndoAction::ObjectAffinityChange: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    c->updateObjectAffinity(action.objectId, action.objectNewAffinity);
+                    markObjDirty(m_document, action);
+                }
                 break;
-                
-            // -----------------------------------------------------------------
-            // ObjectResize (Phase O3.1.5, O3.1.8.3): Redo resize/rotate
-            // Applies new position, size, and rotation.
-            // -----------------------------------------------------------------
-            case PageUndoAction::ObjectResize:
-                {
-                    InsertedObject* obj = page->objectById(action.objectId);
+            }
+            case UndoAction::ObjectResize: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    InsertedObject* obj = c->objectById(action.objectId);
                     if (obj) {
                         obj->position = action.objectNewPosition;
                         obj->size = action.objectNewSize;
-                        obj->rotation = action.objectNewRotation;  // O3.1.8.3
-                        #ifdef SPEEDYNOTE_DEBUG
-                        qDebug() << "Redo ObjectResize (paged): obj" << action.objectId
-                                 << "pos" << obj->position << "size" << obj->size
-                                 << "rot" << obj->rotation;
-                        #endif
+                        obj->rotation = action.objectNewRotation;
                     }
+                    markObjDirty(m_document, action);
                 }
                 break;
-                
-            default:
-                break;
+            }
+            default: break;
+        }
+    } else if (action.type == UndoAction::TransformSelection) {
+        // Remove original strokes (redo the remove)
+        for (const auto& seg : action.removedSegments) {
+            Page* c = getContainer(m_document, seg, false);
+            if (!c) continue;
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (layer) layer->removeStroke(seg.stroke.id);
+            markSegDirty(m_document, seg);
+            tryRemoveEmptyTile(m_document, seg);
+        }
+        // Add transformed strokes (redo the add)
+        for (const auto& seg : action.addedSegments) {
+            Page* c = getContainer(m_document, seg, true);
+            if (!c) continue;
+            while (c->layerCount() <= action.layerIndex)
+                c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (layer) layer->addStroke(seg.stroke);
+            markSegDirty(m_document, seg);
+        }
+    } else {
+        for (const auto& seg : action.segments) {
+            Page* c = getContainer(m_document, seg,
+                                   action.type == UndoAction::AddStroke);
+            if (!c) continue;
+            while (c->layerCount() <= action.layerIndex)
+                c->addLayer(QString("Layer %1").arg(c->layerCount() + 1));
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (!layer) continue;
+
+            switch (action.type) {
+                case UndoAction::AddStroke:
+                    layer->addStroke(seg.stroke);
+                    markSegDirty(m_document, seg);
+                    break;
+                case UndoAction::RemoveStroke:
+                case UndoAction::RemoveMultiple:
+                    layer->removeStroke(seg.stroke.id);
+                    markSegDirty(m_document, seg);
+                    tryRemoveEmptyTile(m_document, seg);
+                    break;
+                default: break;
+            }
         }
     }
-    
-    // Mark page dirty for lazy save (BUG FIX: was missing)
-    m_document->markPageDirty(pageIdx);
-    
-    // Push back to undo stack
-    m_undoStacks[pageIdx].push(action);
-    
+
+    // Auto-navigate if the action's page differs from current view (paged mode)
+    if (!m_document->isEdgeless()) {
+        int actionPage = -1;
+        if (!action.segments.isEmpty())
+            actionPage = action.segments.first().pageIndex;
+        else if (!action.addedSegments.isEmpty())
+            actionPage = action.addedSegments.first().pageIndex;
+        else if (action.objectPageIndex >= 0)
+            actionPage = action.objectPageIndex;
+        else if (action.objectNewPageIndex >= 0)
+            actionPage = action.objectNewPageIndex;
+        if (actionPage >= 0 && !visiblePages().contains(actionPage))
+            scrollToPage(actionPage);
+    }
+
+    m_undoStack.push(action);
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    
-    // M.7.3: Notify if objects were added/removed (for sidebar refresh)
-    if (action.type == PageUndoAction::ObjectInsert ||
-        action.type == PageUndoAction::ObjectDelete) {
+    if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
-    }
-    
+    if (!m_document->isEdgeless())
+        for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
 }
 
 bool DocumentViewport::canUndo() const
 {
-    // Edgeless mode uses global undo stack
-    if (m_document && m_document->isEdgeless()) {
-        return !m_edgelessUndoStack.isEmpty();
-    }
-    // Paged mode: per-page undo
-    return m_undoStacks.contains(m_currentPageIndex) && 
-           !m_undoStacks[m_currentPageIndex].isEmpty();
+    return !m_undoStack.isEmpty();
 }
 
 bool DocumentViewport::canRedo() const
 {
-    // Edgeless mode uses global redo stack
-    if (m_document && m_document->isEdgeless()) {
-        return !m_edgelessRedoStack.isEmpty();
-    }
-    // Paged mode: per-page redo
-    return m_redoStacks.contains(m_currentPageIndex) && 
-           !m_redoStacks[m_currentPageIndex].isEmpty();
+    return !m_redoStack.isEmpty();
 }
 
-// ===== Object Undo Helpers (Phase O2.7) =====
+// ===== Object Undo Helpers (unified) =====
 
 void DocumentViewport::pushObjectInsertUndo(InsertedObject* obj, int pageIndex,
                                             Document::TileCoord tileCoord)
 {
     if (!obj) return;
-    
-    #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "pushObjectInsertUndo: obj->position =" << obj->position
-             << "obj->size =" << obj->size
-             << "obj->zOrder =" << obj->zOrder
-             << "obj->layerAffinity =" << obj->layerAffinity;
-    #endif
+
+    UndoAction action;
+    action.type = UndoAction::ObjectInsert;
+    action.objectData = obj->toJson();
+    action.objectId = obj->id;
     if (m_document && m_document->isEdgeless()) {
-        // Edgeless mode: use global stack
-        EdgelessUndoAction action;
-        action.type = PageUndoAction::ObjectInsert;
         action.objectTileCoord = tileCoord;
-        action.objectData = obj->toJson();
-        action.objectId = obj->id;
-        
-        m_edgelessUndoStack.push(action);
-        m_edgelessRedoStack.clear();
-        
-        // Enforce max stack size
-        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
-            m_edgelessUndoStack.removeFirst();
-        }
     } else {
-        // Paged mode: use per-page stack
-        int idx = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
-        
-        PageUndoAction action;
-        action.type = PageUndoAction::ObjectInsert;
-        action.pageIndex = idx;
-        action.objectData = obj->toJson();
-        action.objectId = obj->id;
-        
-        m_undoStacks[idx].push(action);
-        m_redoStacks[idx].clear();
+        action.objectPageIndex = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
     }
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
+    pushUndoAction(action);
 }
 
 void DocumentViewport::pushObjectDeleteUndo(InsertedObject* obj, int pageIndex,
                                             Document::TileCoord tileCoord)
 {
     if (!obj) return;
-    
+
+    UndoAction action;
+    action.type = UndoAction::ObjectDelete;
+    action.objectData = obj->toJson();
+    action.objectId = obj->id;
     if (m_document && m_document->isEdgeless()) {
-        // Edgeless mode: use global stack
-        EdgelessUndoAction action;
-        action.type = PageUndoAction::ObjectDelete;
         action.objectTileCoord = tileCoord;
-        action.objectData = obj->toJson();
-        action.objectId = obj->id;
-        
-        m_edgelessUndoStack.push(action);
-        m_edgelessRedoStack.clear();
-        
-        // Enforce max stack size
-        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
-            m_edgelessUndoStack.removeFirst();
-        }
     } else {
-        // Paged mode: use per-page stack
-        int idx = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
-        
-        PageUndoAction action;
-        action.type = PageUndoAction::ObjectDelete;
-        action.pageIndex = idx;
-        action.objectData = obj->toJson();
-        action.objectId = obj->id;
-        
-        m_undoStacks[idx].push(action);
-        m_redoStacks[idx].clear();
+        action.objectPageIndex = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
     }
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
+    pushUndoAction(action);
 }
 
 void DocumentViewport::pushObjectMoveUndo(InsertedObject* obj, const QPointF& oldPos,
                                           int pageIndex,
                                           Document::TileCoord oldTile,
-                                          Document::TileCoord newTile)
+                                          Document::TileCoord newTile,
+                                          int oldPageIndex,
+                                          int newPageIndex)
 {
     if (!obj) return;
-    
-    #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "pushObjectMoveUndo: obj" << obj->id << "oldPos =" << oldPos 
-             << "newPos =" << obj->position;
-    #endif
+
+    UndoAction action;
+    action.type = UndoAction::ObjectMove;
+    action.objectId = obj->id;
+    action.objectOldPosition = oldPos;
+    action.objectNewPosition = obj->position;
     if (m_document && m_document->isEdgeless()) {
-        // Edgeless mode: use global stack
-        EdgelessUndoAction action;
-        action.type = PageUndoAction::ObjectMove;
-        action.objectId = obj->id;
-        action.objectOldPosition = oldPos;
-        action.objectNewPosition = obj->position;
         action.objectOldTile = oldTile;
         action.objectNewTile = newTile;
-        action.objectTileCoord = newTile;  // Current location
-        
-        m_edgelessUndoStack.push(action);
-        m_edgelessRedoStack.clear();
-        
-        // Enforce max stack size
-        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
-            m_edgelessUndoStack.removeFirst();
-        }
+        action.objectTileCoord = newTile;
     } else {
-        // Paged mode: use per-page stack
         int idx = (pageIndex >= 0) ? pageIndex : m_currentPageIndex;
-        
-        PageUndoAction action;
-        action.type = PageUndoAction::ObjectMove;
-        action.pageIndex = idx;
-        action.objectId = obj->id;
-        action.objectOldPosition = oldPos;
-        action.objectNewPosition = obj->position;
-        
-        m_undoStacks[idx].push(action);
-        m_redoStacks[idx].clear();
+        action.objectPageIndex = idx;
+        action.objectOldPageIndex = (oldPageIndex >= 0) ? oldPageIndex : idx;
+        action.objectNewPageIndex = (newPageIndex >= 0) ? newPageIndex : idx;
     }
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
+    pushUndoAction(action);
 }
 
-// -----------------------------------------------------------------------------
-// pushObjectResizeUndo - Phase O3.1.5, extended O3.1.8.3
-// Records object resize/rotate for undo/redo. Stores position, size, and rotation
-// since resizing from corners can change position, and rotation is a transform.
-// -----------------------------------------------------------------------------
-void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj, 
-                                            const QPointF& oldPos, 
+void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
+                                            const QPointF& oldPos,
                                             const QSizeF& oldSize,
                                             qreal oldRotation)
 {
     if (!obj) return;
-    
-    #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "pushObjectResizeUndo: obj" << obj->id 
-             << "oldPos =" << oldPos << "newPos =" << obj->position
-             << "oldSize =" << oldSize << "newSize =" << obj->size
-             << "oldRot =" << oldRotation << "newRot =" << obj->rotation;
-    #endif
+
+    UndoAction action;
+    action.type = UndoAction::ObjectResize;
+    action.objectId = obj->id;
+    action.objectData = obj->toJson();
+    action.objectOldPosition = oldPos;
+    action.objectNewPosition = obj->position;
+    action.objectOldSize = oldSize;
+    action.objectNewSize = obj->size;
+    action.objectOldRotation = oldRotation;
+    action.objectNewRotation = obj->rotation;
     if (m_document && m_document->isEdgeless()) {
-        // ===== Edgeless mode: use global stack =====
-        EdgelessUndoAction action;
-        action.type = PageUndoAction::ObjectResize;
-        action.objectId = obj->id;
-        action.objectData = obj->toJson();  // Full snapshot for safety
-        action.objectOldPosition = oldPos;
-        action.objectNewPosition = obj->position;
-        action.objectOldSize = oldSize;
-        action.objectNewSize = obj->size;
-        action.objectOldRotation = oldRotation;        // Phase O3.1.8.3
-        action.objectNewRotation = obj->rotation;      // Phase O3.1.8.3
-        
-        // Find which tile contains this object
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (tile && tile->objectById(obj->id)) {
@@ -11748,58 +11317,22 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
                 break;
             }
         }
-        
-        m_edgelessUndoStack.push(action);
-        m_edgelessRedoStack.clear();
-        
-        // Enforce max stack size
-        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
-            m_edgelessUndoStack.removeFirst();
-        }
     } else {
-        // ===== Paged mode: use per-page stack =====
-        PageUndoAction action;
-        action.type = PageUndoAction::ObjectResize;
-        action.pageIndex = m_currentPageIndex;
-        action.objectId = obj->id;
-        action.objectData = obj->toJson();  // Full snapshot for safety
-        action.objectOldPosition = oldPos;
-        action.objectNewPosition = obj->position;
-        action.objectOldSize = oldSize;
-        action.objectNewSize = obj->size;
-        action.objectOldRotation = oldRotation;        // Phase O3.1.8.3
-        action.objectNewRotation = obj->rotation;      // Phase O3.1.8.3
-        
-        m_undoStacks[m_currentPageIndex].push(action);
-        m_redoStacks[m_currentPageIndex].clear();
+        action.objectPageIndex = m_currentPageIndex;
     }
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
+    pushUndoAction(action);
 }
 
-// -----------------------------------------------------------------------------
-// pushObjectAffinityUndo - Phase O3.5.3
-// Records object affinity change for undo/redo.
-// -----------------------------------------------------------------------------
 void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity)
 {
     if (!obj) return;
-    
-    #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "pushObjectAffinityUndo: obj" << obj->id 
-             << "oldAffinity =" << oldAffinity 
-             << "newAffinity =" << obj->getLayerAffinity();
-    #endif
+
+    UndoAction action;
+    action.type = UndoAction::ObjectAffinityChange;
+    action.objectId = obj->id;
+    action.objectOldAffinity = oldAffinity;
+    action.objectNewAffinity = obj->getLayerAffinity();
     if (m_document && m_document->isEdgeless()) {
-        // ===== Edgeless mode: use global stack =====
-        EdgelessUndoAction action;
-        action.type = PageUndoAction::ObjectAffinityChange;
-        action.objectId = obj->id;
-        action.objectOldAffinity = oldAffinity;
-        action.objectNewAffinity = obj->getLayerAffinity();
-        
-        // Find which tile contains this object
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (tile && tile->objectById(obj->id)) {
@@ -11807,29 +11340,10 @@ void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffini
                 break;
             }
         }
-        
-        m_edgelessUndoStack.push(action);
-        m_edgelessRedoStack.clear();
-        
-        // Enforce max stack size
-        while (m_edgelessUndoStack.size() > MAX_UNDO_EDGELESS) {
-            m_edgelessUndoStack.removeFirst();
-        }
     } else {
-        // ===== Paged mode: use per-page stack =====
-        PageUndoAction action;
-        action.type = PageUndoAction::ObjectAffinityChange;
-        action.pageIndex = m_currentPageIndex;
-        action.objectId = obj->id;
-        action.objectOldAffinity = oldAffinity;
-        action.objectNewAffinity = obj->getLayerAffinity();
-        
-        m_undoStacks[m_currentPageIndex].push(action);
-        m_redoStacks[m_currentPageIndex].clear();
+        action.objectPageIndex = m_currentPageIndex;
     }
-    
-    emit undoAvailableChanged(canUndo());
-    emit redoAvailableChanged(canRedo());
+    pushUndoAction(action);
 }
 
 // -----------------------------------------------------------------------------

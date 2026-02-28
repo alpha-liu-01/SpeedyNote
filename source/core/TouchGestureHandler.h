@@ -168,16 +168,18 @@ private:
      */
     void on3FingerTap();
     
-#ifdef Q_OS_ANDROID
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
     /**
-     * @brief Handle 2-finger gesture using native Android positions.
+     * @brief Handle 2-finger gesture using native platform positions.
      * 
-     * Called when Qt's touch tracking seems corrupted but native Android
-     * reports 2 fingers. Uses JNI-provided positions to ensure pinch works.
+     * Called when Qt's touch tracking seems corrupted but native platform
+     * reports 2 fingers. Uses platform-provided positions to ensure pinch works.
+     * Android: positions via JNI from SpeedyNoteActivity.
+     * iOS: positions via IOSTouchTracker gesture recognizer.
      * 
      * @param event The touch event (for accepting)
-     * @param pos1 Native position of first finger
-     * @param pos2 Native position of second finger
+     * @param pos1 Native position of first finger (widget-local coords)
+     * @param pos2 Native position of second finger (widget-local coords)
      * @return true (always handles the event)
      */
     bool handleTwoFingerGestureNative(QTouchEvent* event, QPointF pos1, QPointF pos2);

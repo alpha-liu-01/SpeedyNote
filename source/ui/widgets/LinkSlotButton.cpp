@@ -230,7 +230,11 @@ void LinkSlotButton::timerEvent(QTimerEvent* event)
     QWidget::timerEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void LinkSlotButton::enterEvent(QEnterEvent* event)
+#else
+void LinkSlotButton::enterEvent(QEvent* event)
+#endif
 {
     m_hovered = true;
     update();

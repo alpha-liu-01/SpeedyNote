@@ -20,6 +20,18 @@ else()
 endif()
 
 # ============================================================================
+# Qt Version Selection
+# ============================================================================
+option(USE_QT5 "Build with Qt5 instead of Qt6 (for 32-bit Windows, HarmonyOS, etc.)" OFF)
+if(USE_QT5)
+    set(QT_VERSION_MAJOR 5)
+    message(STATUS "Qt version: Qt5")
+else()
+    set(QT_VERSION_MAJOR 6)
+    message(STATUS "Qt version: Qt6")
+endif()
+
+# ============================================================================
 # Qt Automatic Features (must be set before finding Qt)
 # ============================================================================
 set(CMAKE_AUTOMOC ON)
@@ -53,6 +65,15 @@ if(WIN32)
         endif()
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-aarch64")
         message(STATUS "Detected ARM64 Windows - using clangarm64 toolchain")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
+            set(QT_PATH "C:/Qt/5.15.2/mingw81_32" CACHE PATH "Path to Qt installation")
+        endif()
+        if(NOT DEFINED SDL2_ROOT OR SDL2_ROOT STREQUAL "")
+            set(SDL2_ROOT "${QT_PATH}" CACHE PATH "Path to SDL2")
+        endif()
+        set(MSYS2_PACKAGE_PREFIX "mingw-w64-i686")
+        message(STATUS "Detected x86 (32-bit) Windows - using standalone Qt5 SDK")
     else()
         if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
             set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation")
@@ -75,11 +96,15 @@ if(WIN32)
 
     # Find dependencies
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg Test)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     endif()
-    find_package(PkgConfig REQUIRED)
+    if(USE_QT5)
+        find_package(PkgConfig QUIET)
+    else()
+        find_package(PkgConfig REQUIRED)
+    endif()
     # Poppler removed - using MuPDF exclusively for PDF rendering
     
     if(ENABLE_CONTROLLER_SUPPORT)
@@ -89,81 +114,102 @@ if(WIN32)
         add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
     endif()
 
-    # MuPDF for PDF export via MSYS2
-    # Try dynamic linking first (libmupdf.dll.a), fallback to static (libmupdf.a)
-    set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
-    
-    # First check for dynamic library (import lib for DLL)
-    if(EXISTS "${QT_PATH}/lib/libmupdf.dll.a")
-        set(MUPDF_LIBRARY "${QT_PATH}/lib/libmupdf.dll.a")
-        message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY}")
-        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
-        set(MUPDF_FOUND TRUE)
-        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY})
-        
-        # mujs may also be dynamically linked
-        if(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
-            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.dll.a")
-            message(STATUS "   Found mujs (dynamic)")
+    # MuPDF for PDF export
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        # -----------------------------------------------------------------
+        # 32-bit Windows: cross-compiled MuPDF from win32/mupdf-build/
+        # Built by private_scripts/build-mupdf-win32.sh (all deps bundled)
+        # -----------------------------------------------------------------
+        set(MUPDF_WIN32_DIR "${CMAKE_SOURCE_DIR}/win32/mupdf-build")
+        if(NOT MUPDF_INCLUDE_DIR)
+            set(MUPDF_INCLUDE_DIR "${MUPDF_WIN32_DIR}/include")
         endif()
-        message(STATUS "   Note: Requires libmupdf.dll at runtime (copied by ntldd)")
-        
-    # Fallback to static library
-    elseif(EXISTS "${QT_PATH}/lib/libmupdf.a")
-        set(MUPDF_LIBRARY "${QT_PATH}/lib/libmupdf.a")
-        message(STATUS "✅ MuPDF found for PDF export (static): ${MUPDF_LIBRARY}")
-        add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
-        set(MUPDF_FOUND TRUE)
-        set(MUPDF_LIBRARIES ${MUPDF_LIBRARY})
-        
-        # Static linking requires additional dependencies
-        if(EXISTS "${QT_PATH}/lib/libmupdf-third.a")
-            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmupdf-third.a")
-            message(STATUS "   Found mupdf-third")
+        if(EXISTS "${MUPDF_WIN32_DIR}/lib/libmupdf.a")
+            message(STATUS "✅ MuPDF found for PDF export (static, win32)")
+            add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+            set(MUPDF_FOUND TRUE)
+            set(MUPDF_LIBRARIES
+                "${MUPDF_WIN32_DIR}/lib/libmupdf.a"
+                "${MUPDF_WIN32_DIR}/lib/libmupdf-third.a")
+        else()
+            message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+            message(STATUS "   Build with: ./private_scripts/build-mupdf-win32.sh (in MSYS2)")
+            set(MUPDF_FOUND FALSE)
         endif()
-        
-        # Find mujs (static)
-        if(EXISTS "${QT_PATH}/lib/libmujs.a")
-            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.a")
-            message(STATUS "   Found mujs (static)")
-        elseif(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
-            list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.dll.a")
-            message(STATUS "   Found mujs (dynamic)")
-        endif()
-        
-        # Static MuPDF needs these dependencies via pkg-config
-        pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
-        pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
-        pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
-        pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
-        pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
-        pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
-        pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
-        pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
-        pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
-        
-        list(APPEND MUPDF_LIBRARIES
-            PkgConfig::HARFBUZZ PkgConfig::FREETYPE PkgConfig::LIBJPEG
-            PkgConfig::LIBOPENJP2 PkgConfig::ZLIB)
-        if(JBIG2DEC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
-        endif()
-        if(GUMBO_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
-        endif()
-        if(BROTLIDEC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
-        endif()
-        if(BROTLIENC_FOUND)
-            list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
-        endif()
-        message(STATUS "   Note: Statically linked (no libmupdf.dll needed)")
     else()
-        message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
-        message(STATUS "   Checked: ${QT_PATH}/lib/libmupdf.dll.a (dynamic)")
-        message(STATUS "   Checked: ${QT_PATH}/lib/libmupdf.a (static)")
-        message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
-        set(MUPDF_FOUND FALSE)
+        # -----------------------------------------------------------------
+        # 64-bit Windows: MuPDF via MSYS2 packages
+        # Try dynamic linking first (libmupdf.dll.a), fallback to static
+        # -----------------------------------------------------------------
+        set(MUPDF_INCLUDE_DIR "${QT_PATH}/include")
+
+        if(EXISTS "${QT_PATH}/lib/libmupdf.dll.a")
+            set(MUPDF_LIBRARY "${QT_PATH}/lib/libmupdf.dll.a")
+            message(STATUS "✅ MuPDF found for PDF export (dynamic): ${MUPDF_LIBRARY}")
+            add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+            set(MUPDF_FOUND TRUE)
+            set(MUPDF_LIBRARIES ${MUPDF_LIBRARY})
+
+            if(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
+                list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.dll.a")
+                message(STATUS "   Found mujs (dynamic)")
+            endif()
+            message(STATUS "   Note: Requires libmupdf.dll at runtime (copied by ntldd)")
+
+        elseif(EXISTS "${QT_PATH}/lib/libmupdf.a")
+            set(MUPDF_LIBRARY "${QT_PATH}/lib/libmupdf.a")
+            message(STATUS "✅ MuPDF found for PDF export (static): ${MUPDF_LIBRARY}")
+            add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
+            set(MUPDF_FOUND TRUE)
+            set(MUPDF_LIBRARIES ${MUPDF_LIBRARY})
+
+            if(EXISTS "${QT_PATH}/lib/libmupdf-third.a")
+                list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmupdf-third.a")
+                message(STATUS "   Found mupdf-third")
+            endif()
+
+            if(EXISTS "${QT_PATH}/lib/libmujs.a")
+                list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.a")
+                message(STATUS "   Found mujs (static)")
+            elseif(EXISTS "${QT_PATH}/lib/libmujs.dll.a")
+                list(APPEND MUPDF_LIBRARIES "${QT_PATH}/lib/libmujs.dll.a")
+                message(STATUS "   Found mujs (dynamic)")
+            endif()
+
+            # Static MuPDF needs these dependencies via pkg-config
+            pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+            pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+            pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
+            pkg_check_modules(LIBOPENJP2 REQUIRED IMPORTED_TARGET libopenjp2)
+            pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib)
+            pkg_check_modules(JBIG2DEC QUIET IMPORTED_TARGET jbig2dec)
+            pkg_check_modules(GUMBO QUIET IMPORTED_TARGET gumbo)
+            pkg_check_modules(BROTLIDEC QUIET IMPORTED_TARGET libbrotlidec)
+            pkg_check_modules(BROTLIENC QUIET IMPORTED_TARGET libbrotlienc)
+
+            list(APPEND MUPDF_LIBRARIES
+                PkgConfig::HARFBUZZ PkgConfig::FREETYPE PkgConfig::LIBJPEG
+                PkgConfig::LIBOPENJP2 PkgConfig::ZLIB)
+            if(JBIG2DEC_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::JBIG2DEC)
+            endif()
+            if(GUMBO_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::GUMBO)
+            endif()
+            if(BROTLIDEC_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIDEC)
+            endif()
+            if(BROTLIENC_FOUND)
+                list(APPEND MUPDF_LIBRARIES PkgConfig::BROTLIENC)
+            endif()
+            message(STATUS "   Note: Statically linked (no libmupdf.dll needed)")
+        else()
+            message(STATUS "⚠️ MuPDF not found - PDF export will be disabled")
+            message(STATUS "   Checked: ${QT_PATH}/lib/libmupdf.dll.a (dynamic)")
+            message(STATUS "   Checked: ${QT_PATH}/lib/libmupdf.a (static)")
+            message(STATUS "   Install with: pacman -S ${MSYS2_PACKAGE_PREFIX}-mupdf")
+            set(MUPDF_FOUND FALSE)
+        endif()
     endif()
     
     message(STATUS "   MuPDF libraries: ${MUPDF_LIBRARIES}")
@@ -180,6 +226,10 @@ if(WIN32)
             -O3 -ffast-math -ftree-vectorize -fvectorize -flto=thin
             -fomit-frame-pointer -funroll-loops -DNDEBUG)
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto=thin")
+    elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        message(STATUS "🚀 Optimizing for x86 (32-bit) Windows (Core Duo / Atom+)")
+        add_compile_options(-march=prescott -mtune=generic -mfpmath=sse
+            -O3 -ffast-math -DNDEBUG)
     else()
         message(STATUS "🚀 Optimizing for x86_64 Windows (Nehalem+)")
         add_compile_options(-march=nehalem -msse4.2 -O3 -ffast-math -DNDEBUG)
@@ -197,7 +247,7 @@ elseif(IOS)
     
     set(CMAKE_OSX_DEPLOYMENT_TARGET "16.0" CACHE STRING "Minimum iPadOS version")
     
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     
     # MuPDF paths (cross-compiled separately via ios/build-mupdf.sh)
     # Libraries and headers are under ios/mupdf-build/.
@@ -237,14 +287,18 @@ elseif(APPLE)
         message(STATUS "Detected Intel Mac - using ${HOMEBREW_PREFIX}")
     endif()
     
-    set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@6")
+    if(USE_QT5)
+        set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@5")
+    else()
+        set(CMAKE_PREFIX_PATH "${HOMEBREW_PREFIX}/opt/qt@6")
+    endif()
     include_directories(${CMAKE_CURRENT_BINARY_DIR} "${HOMEBREW_PREFIX}/include")
     
     # Find dependencies
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg Test)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     endif()
     find_package(PkgConfig REQUIRED)
     # macOS uses MuPDF exclusively for PDF rendering and export (no Poppler, no SDL2)
@@ -366,7 +420,7 @@ elseif(ANDROID)
     # =========================================================================
     message(STATUS "🤖 Configuring for Android")
     
-    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     
     # MuPDF paths (cross-compiled separately, per-ABI)
     # ANDROID_ABI is set by the NDK toolchain (arm64-v8a, armeabi-v7a, etc.)
@@ -402,9 +456,9 @@ elseif(UNIX)
     # -------------------------------------------------------------------------
     
     if(ENABLE_DEBUG_OUTPUT)
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Svg Test)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Svg Test)
     else()
-        find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Svg)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network DBus Svg)
     endif()
     find_package(PkgConfig REQUIRED)
     # Poppler removed - using MuPDF exclusively for PDF rendering
@@ -539,14 +593,23 @@ set(QMARKDOWNTEXTEDIT_SOURCES
         markdown/qplaintexteditsearchwidget.cpp
 )
 
-qt6_wrap_cpp(QMARKDOWNTEXTEDIT_MOC_SOURCES markdown/linenumberarea.h)
-qt6_wrap_ui(QMARKDOWNTEXTEDIT_UI_HEADERS markdown/qplaintexteditsearchwidget.ui)
+if(USE_QT5)
+    qt5_wrap_cpp(QMARKDOWNTEXTEDIT_MOC_SOURCES markdown/linenumberarea.h)
+    qt5_wrap_ui(QMARKDOWNTEXTEDIT_UI_HEADERS markdown/qplaintexteditsearchwidget.ui)
+else()
+    qt6_wrap_cpp(QMARKDOWNTEXTEDIT_MOC_SOURCES markdown/linenumberarea.h)
+    qt6_wrap_ui(QMARKDOWNTEXTEDIT_UI_HEADERS markdown/qplaintexteditsearchwidget.ui)
+endif()
 
 # ============================================================================
 # Resources
 # ============================================================================
 set(RESOURCES resources.qrc markdown/media.qrc)
-qt6_add_resources(QRCC_FILES ${RESOURCES})
+if(USE_QT5)
+    qt5_add_resources(QRCC_FILES ${RESOURCES})
+else()
+    qt6_add_resources(QRCC_FILES ${RESOURCES})
+endif()
 
 # ============================================================================
 # Source Files
@@ -714,6 +777,7 @@ if(IOS)
         source/ios/SnbxPickerIOS.mm
         source/ios/IOSShareHelper.mm
         source/ios/IOSPlatformHelper.mm
+        source/ios/IOSTouchTracker.mm
         source/ui/dialogs/SaveDocumentDialog.cpp  # Reuse Android's touch-friendly save dialog
     )
     # Enable Objective-C++ compilation for .mm files
@@ -722,6 +786,7 @@ if(IOS)
         source/ios/SnbxPickerIOS.mm
         source/ios/IOSShareHelper.mm
         source/ios/IOSPlatformHelper.mm
+        source/ios/IOSTouchTracker.mm
         PROPERTIES LANGUAGE OBJCXX
     )
 endif()
@@ -776,11 +841,12 @@ set(APP_SOURCES
 # Build Target
 # ============================================================================
 if(ANDROID)
-    qt_add_executable(speedynote ${APP_SOURCES})
-    
-    # Acknowledge Qt 6.9+ policy: Android path properties with generator expressions
-    # must evaluate to valid JSON strings. Setting NEW silences the QTP0002 warning.
-    qt_policy(SET QTP0002 NEW)
+    if(USE_QT5)
+        add_executable(speedynote ${APP_SOURCES})
+    else()
+        qt_add_executable(speedynote ${APP_SOURCES})
+        qt_policy(SET QTP0002 NEW)
+    endif()
     
     set_target_properties(speedynote PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android/app-resources"
@@ -798,7 +864,11 @@ elseif(IOS)
     # Enable Objective-C++ language for .mm files
     enable_language(OBJCXX)
     
-    qt_add_executable(speedynote ${APP_SOURCES})
+    if(USE_QT5)
+        add_executable(speedynote ${APP_SOURCES})
+    else()
+        qt_add_executable(speedynote ${APP_SOURCES})
+    endif()
     
     set_target_properties(speedynote PROPERTIES
         MACOSX_BUNDLE TRUE
@@ -852,11 +922,7 @@ endif()
 # Translation Compilation (.ts -> .qm)
 # ============================================================================
 if(WIN32)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|ARM64|aarch64|AARCH64")
-        find_program(LRELEASE_EXECUTABLE lrelease PATHS "C:/msys64/clangarm64/bin")
-    else()
-        find_program(LRELEASE_EXECUTABLE lrelease PATHS "C:/msys64/clang64/bin")
-    endif()
+    find_program(LRELEASE_EXECUTABLE lrelease PATHS "${QT_PATH}/bin")
 else()
     find_program(LRELEASE_EXECUTABLE lrelease PATHS "${QT_PATH}/bin" NO_DEFAULT_PATH)
 endif()
@@ -882,10 +948,10 @@ endif()
 # ============================================================================
 if(WIN32)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
+            Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
     )
     if(ENABLE_DEBUG_OUTPUT)
-        list(APPEND PLATFORM_LIBS Qt6::Test)
+        list(APPEND PLATFORM_LIBS Qt${QT_VERSION_MAJOR}::Test)
     endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS SDL2::SDL2)
@@ -895,6 +961,8 @@ if(WIN32)
     if(MUPDF_FOUND)
         list(APPEND PLATFORM_LIBS ${MUPDF_LIBRARIES})
         message(STATUS "MuPDF: Will link dynamically with: ${MUPDF_LIBRARIES}")
+    elseif(USE_QT5)
+        message(WARNING "MuPDF not found - PDF features will be unavailable (Qt5 build)")
     else()
         message(FATAL_ERROR "MuPDF is required for PDF support")
     endif()
@@ -902,7 +970,7 @@ if(WIN32)
 
 elseif(IOS)
     target_link_libraries(speedynote PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
+        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
         ${MUPDF_LIBRARIES}
         z
         "-framework UIKit"
@@ -913,10 +981,10 @@ elseif(IOS)
 
 elseif(APPLE)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
+            Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
     )
     if(ENABLE_DEBUG_OUTPUT)
-        list(APPEND PLATFORM_LIBS Qt6::Test)
+        list(APPEND PLATFORM_LIBS Qt${QT_VERSION_MAJOR}::Test)
     endif()
     # MuPDF for PDF rendering and export (macOS uses MuPDF exclusively)
     if(MUPDF_FOUND)
@@ -929,15 +997,15 @@ elseif(APPLE)
 
 elseif(ANDROID)
     target_link_libraries(speedynote PRIVATE
-        Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
+        Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
         ${MUPDF_LIBRARIES}
         log z
     )
 
 elseif(UNIX)
     set(PLATFORM_LIBS
-            Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Xml Qt6::Network Qt6::Svg
-            Qt6::DBus  # Step 3.11: System notifications via org.freedesktop.Notifications
+            Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Concurrent Qt${QT_VERSION_MAJOR}::Xml Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Svg
+            Qt${QT_VERSION_MAJOR}::DBus  # Step 3.11: System notifications via org.freedesktop.Notifications
     )
     # MuPDF for PDF rendering and export (all Linux distributions)
     if(MUPDF_FOUND)
@@ -947,7 +1015,7 @@ elseif(UNIX)
         message(FATAL_ERROR "MuPDF is required for PDF support")
     endif()
     if(ENABLE_DEBUG_OUTPUT)
-        list(APPEND PLATFORM_LIBS Qt6::Test)
+        list(APPEND PLATFORM_LIBS Qt${QT_VERSION_MAJOR}::Test)
     endif()
     if(ENABLE_CONTROLLER_SUPPORT)
         list(APPEND PLATFORM_LIBS PkgConfig::SDL2)

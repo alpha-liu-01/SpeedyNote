@@ -196,7 +196,11 @@ void LauncherNavButton::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void LauncherNavButton::enterEvent(QEnterEvent* event)
+#else
+void LauncherNavButton::enterEvent(QEvent* event)
+#endif
 {
     m_hovered = true;
     update();

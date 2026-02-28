@@ -1,6 +1,7 @@
 #include "TouchGestureHandler.h"
 #include "DocumentViewport.h"
 #include <QTouchEvent>
+#include "../compat/qt_compat.h"  // SN_TouchPoint, SN_TOUCH_POINTS, SN_TP_* shims
 #include <QLineF>
 #include <QDateTime>
 #include <QDebug>
@@ -87,6 +88,29 @@ bool getNativeTouchPositions(QPointF& pos1, QPointF& pos2)
 
 }  // anonymous namespace
 #endif  // Q_OS_ANDROID
+
+#ifdef Q_OS_IOS
+#include "../ios/IOSTouchTracker.h"
+
+namespace {
+
+int getNativeTouchCount()
+{
+    return IOSTouchTracker::getNativeTouchCount();
+}
+
+qint64 getTimeSinceLastNativeTouch()
+{
+    return IOSTouchTracker::getTimeSinceLastTouch();
+}
+
+bool getNativeTouchPositions(QPointF& pos1, QPointF& pos2)
+{
+    return IOSTouchTracker::getNativeTouchPositions(pos1, pos2);
+}
+
+}  // anonymous namespace
+#endif  // Q_OS_IOS
 
 // ===== Constructor =====
 
@@ -198,7 +222,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         return false;  // Don't consume event
     }
     
-    const auto& points = event->points();
+    const auto& points = SN_TOUCH_POINTS(event);
     
     // ===== Track touch point IDs across events (Android fix) =====
     // On Android, touch events may not include all active points in every event.
@@ -213,6 +237,40 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     // corrupt the ID tracking state. On TouchBegin, we reset tracking to ensure
     // a clean start for the new gesture sequence.
     if (event->type() == QEvent::TouchBegin) {
+#ifdef Q_OS_IOS
+        // iOS sends a separate TouchBegin for each new finger. When a second
+        // finger arrives while a pan is active, the nuclear reset below would
+        // destroy the existing gesture and forget the first finger — making
+        // pinch-to-zoom nearly impossible.
+        //
+        // Detect this case using native touch count: if we already have an
+        // active gesture and native reports 2+ fingers, this TouchBegin is
+        // a second finger joining, not a brand-new gesture. Skip the reset
+        // and transition directly to a 2-finger gesture using native positions.
+        if (m_panActive || m_pinchActive) {
+            int nativeCount = getNativeTouchCount();
+            qint64 timeSinceNative = getTimeSinceLastNativeTouch();
+            if (nativeCount >= 2 && timeSinceNative >= 0 && timeSinceNative < 100) {
+                // Add the new point to our tracking (don't clear existing IDs)
+                qint64 now = QDateTime::currentMSecsSinceEpoch();
+                for (const auto& pt : points) {
+                    if (pt.state() == SN_TP_PRESSED) {
+                        m_trackedTouchIds.insert(pt.id());
+                        m_lastTouchPositions.insert(pt.id(), SN_TP_POS(pt));
+                        m_touchIdLastSeenTime.insert(pt.id(), now);
+                    }
+                }
+                m_activeTouchPoints = static_cast<int>(m_trackedTouchIds.size());
+
+                QPointF nativePos1, nativePos2;
+                if (getNativeTouchPositions(nativePos1, nativePos2)) {
+                    QPointF localPos1 = m_viewport->mapFromGlobal(nativePos1);
+                    QPointF localPos2 = m_viewport->mapFromGlobal(nativePos2);
+                    return handleTwoFingerGestureNative(event, localPos1, localPos2);
+                }
+            }
+        }
+#endif
         // NUCLEAR RESET - forget everything from before
         // This prevents stale state from previous (possibly corrupted) sequence
         m_trackedTouchIds.clear();
@@ -240,17 +298,6 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         if (m_viewport->isZoomGestureActive()) {
             m_viewport->endZoomGesture();
         }
-        
-#ifdef Q_OS_ANDROID
-        // Debug: Log native touch count at gesture start for diagnostics
-        int nativeCount = getNativeTouchCount();
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "[TouchGestureHandler] TouchBegin NUCLEAR RESET"
-                 << "nativeCount:" << nativeCount;
-#else
-        Q_UNUSED(nativeCount);
-#endif
-#endif
     }
     
     // BUG-A005 v6/v7: Track when each ID was last seen
@@ -260,17 +307,17 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     for (const auto& pt : points) {
         int id = pt.id();
         
-        if (pt.state() == QEventPoint::Pressed) {
+        if (pt.state() == SN_TP_PRESSED) {
             m_trackedTouchIds.insert(id);
-            m_lastTouchPositions.insert(id, pt.position());
+            m_lastTouchPositions.insert(id, SN_TP_POS(pt));
             m_touchIdLastSeenTime.insert(id, currentTime);
-        } else if (pt.state() == QEventPoint::Released) {
+        } else if (pt.state() == SN_TP_RELEASED) {
             m_trackedTouchIds.remove(id);
             m_lastTouchPositions.remove(id);
             m_touchIdLastSeenTime.remove(id);
         } else {
             // Updated or Stationary - cache latest position and update timestamp
-            m_lastTouchPositions.insert(id, pt.position());
+            m_lastTouchPositions.insert(id, SN_TP_POS(pt));
             m_touchIdLastSeenTime.insert(id, currentTime);
         }
     }
@@ -318,18 +365,18 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     // Also build activePoints list for accessing current event's point data
     // (still needed for position calculations)
-    QVector<const QEventPoint*> activePoints;
+    QVector<const SN_TouchPoint*> activePoints;
     activePoints.reserve(points.size());
     for (const auto& pt : points) {
-        if (pt.state() != QEventPoint::Released) {
+        if (pt.state() != SN_TP_RELEASED) {
             activePoints.append(&pt);
         }
     }
     
-#ifdef Q_OS_ANDROID
-    // ===== Verify Qt touch count with native Android =====
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+    // ===== Verify Qt touch count with native platform =====
     // After sleep/wake, Qt's touch tracking can become corrupted.
-    // If native Android says we have 2 fingers but Qt only reports 1,
+    // If the native platform says we have 2 fingers but Qt only reports 1,
     // use native positions to ensure the pinch gesture works.
     int nativeCount = getNativeTouchCount();
     qint64 timeSinceNative = getTimeSinceLastNativeTouch();
@@ -340,30 +387,26 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         
         // If native says 2+ fingers but Qt only has 0-1, Qt lost a touch point
         if (nativeCount >= 2 && qtActivePoints < 2) {
-            // Get native positions (in screen/activity coordinates, physical pixels)
             QPointF nativePos1, nativePos2;
             if (getNativeTouchPositions(nativePos1, nativePos2)) {
-                // Convert from screen coordinates to widget-local coordinates
-                // Native positions are in PHYSICAL pixels relative to the screen
-                // mapToGlobal returns LOGICAL pixels
-                // We need widget-local LOGICAL pixels
+#ifdef Q_OS_ANDROID
+                // Android: native positions are in PHYSICAL pixels
                 QPointF widgetGlobalPos = m_viewport->mapToGlobal(QPointF(0, 0));
                 qreal dpr = m_viewport->devicePixelRatio();
-                
-                // Convert: divide by DPR first (physical→logical), then subtract widget offset
-                // Order matters! mapToGlobal returns logical coords, so we must convert
-                // native to logical before subtracting.
                 QPointF localPos1 = nativePos1 / dpr - widgetGlobalPos;
                 QPointF localPos2 = nativePos2 / dpr - widgetGlobalPos;
+#else
+                // iOS: native positions are in screen points (logical pixels)
+                QPointF localPos1 = m_viewport->mapFromGlobal(nativePos1);
+                QPointF localPos2 = m_viewport->mapFromGlobal(nativePos2);
+#endif
     
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "[TouchGestureHandler] MISMATCH: native=" << nativeCount
                          << "qt=" << qtActivePoints
                          << "nativePos1:" << nativePos1 << "nativePos2:" << nativePos2
-                         << "localPos1:" << localPos1 << "localPos2:" << localPos2
-                         << "widgetGlobal:" << widgetGlobalPos << "dpr:" << dpr;
+                         << "localPos1:" << localPos1 << "localPos2:" << localPos2;
 #endif
-                // Force 2-finger gesture with converted positions
                 return handleTwoFingerGestureNative(event, localPos1, localPos2);
             }
         }
@@ -388,7 +431,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
         if (activePoints.size() == 1) {
             // TG.2.1: Single finger touch - start pan
             const auto& point = *activePoints.first();
-            m_lastPos = point.position();
+            m_lastPos = SN_TP_POS(point);
             m_panActive = true;
             m_pinchActive = false;  // Ensure clean state
             
@@ -407,8 +450,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
+            QPointF pos1 = SN_TP_POS(p1);
+            QPointF pos2 = SN_TP_POS(p2);
             QPointF centroid = (pos1 + pos2) / 2.0;
             qreal distance = QLineF(pos1, pos2).length();
             
@@ -474,8 +517,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
+            QPointF pos1 = SN_TP_POS(p1);
+            QPointF pos2 = SN_TP_POS(p2);
             QPointF centroid = (pos1 + pos2) / 2.0;
             qreal distance = QLineF(pos1, pos2).length();
             
@@ -504,7 +547,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             
             // Start pan with remaining finger
             const auto& point = *activePoints.first();
-            m_lastPos = point.position();
+            m_lastPos = SN_TP_POS(point);
             m_panActive = true;
             
             m_velocitySamples.clear();
@@ -527,7 +570,7 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
 #endif
         if (m_panActive && m_activeTouchPoints == 1 && !activePoints.isEmpty()) {
             const auto& point = *activePoints.first();
-            QPointF currentPos = point.position();
+            QPointF currentPos = SN_TP_POS(point);
             QPointF delta = currentPos - m_lastPos;
             
             // Track velocity for inertia (pixels per ms, negated for correct direction)
@@ -587,8 +630,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             const auto& p1 = *activePoints[0];
             const auto& p2 = *activePoints[1];
             
-            QPointF pos1 = p1.position();
-            QPointF pos2 = p2.position();
+            QPointF pos1 = SN_TP_POS(p1);
+            QPointF pos2 = SN_TP_POS(p2);
             QPointF centroid = (pos1 + pos2) / 2.0;
             qreal distance = QLineF(pos1, pos2).length();
             
@@ -622,11 +665,11 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
             // Get positions from current event (prefer fresh data)
             for (const auto* pt : activePoints) {
                 if (!havePos1) {
-                    pos1 = pt->position();
+                    pos1 = SN_TP_POS_PTR(pt);
                     pos1Id = pt->id();
                     havePos1 = true;
                 } else if (!havePos2) {
-                    pos2 = pt->position();
+                    pos2 = SN_TP_POS_PTR(pt);
                     havePos2 = true;
                     break;
                 }
@@ -718,8 +761,8 @@ bool TouchGestureHandler::handleTouchEvent(QTouchEvent* event)
     
     // ===== TouchEnd / TouchCancel =====
     if (event->type() == QEvent::TouchEnd || event->type() == QEvent::TouchCancel) {
-#ifdef Q_OS_ANDROID
-        // Verify with native Android before ending gesture
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+        // Verify with native platform before ending gesture
         // Qt may send spurious TouchEnd when native still has fingers down
         if (event->type() == QEvent::TouchEnd) {
             int nativeCount = getNativeTouchCount();
@@ -873,8 +916,8 @@ void TouchGestureHandler::onInertiaFrame()
     m_viewport->updatePanGesture(panDelta);
 }
 
-#ifdef Q_OS_ANDROID
-// ===== Native Android Two-Finger Gesture Handler =====
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+// ===== Native Platform Two-Finger Gesture Handler =====
 
 bool TouchGestureHandler::handleTwoFingerGestureNative(QTouchEvent* event,
                                                         QPointF pos1, QPointF pos2)
@@ -940,4 +983,4 @@ bool TouchGestureHandler::handleTwoFingerGestureNative(QTouchEvent* event,
     event->accept();
     return true;
 }
-#endif  // Q_OS_ANDROID
+#endif  // Q_OS_ANDROID || Q_OS_IOS

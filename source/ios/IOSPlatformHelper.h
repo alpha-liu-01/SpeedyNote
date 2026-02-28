@@ -15,6 +15,7 @@
 #include <QtGlobal>
 
 class QApplication;
+class QObject;
 
 namespace IOSPlatformHelper {
 
@@ -55,5 +56,18 @@ void applyFonts(QApplication& app);
  * Call this after the first QWidget::show() so Qt has created its UIView.
  */
 void disableEditMenuOverlay();
+
+/**
+ * @brief Install an event filter that prevents the virtual keyboard from
+ *        appearing on non-text widgets.
+ *
+ * Qt's iOS plugin shows the keyboard whenever any QWidget receives focus,
+ * because it creates a UITextInput-conforming responder for every widget.
+ * This filter intercepts FocusIn events and disables input methods on
+ * widgets that are not text editors (QLineEdit, QTextEdit, QPlainTextEdit).
+ *
+ * @param app The QApplication to install the filter on.
+ */
+void installKeyboardFilter(QApplication& app);
 
 } // namespace IOSPlatformHelper

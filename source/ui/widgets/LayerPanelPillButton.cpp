@@ -134,7 +134,11 @@ void LayerPanelPillButton::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void LayerPanelPillButton::enterEvent(QEnterEvent* event)
+#else
+void LayerPanelPillButton::enterEvent(QEvent* event)
+#endif
 {
     if (m_enabled) {
         m_hovered = true;

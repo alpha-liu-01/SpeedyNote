@@ -289,7 +289,11 @@ protected:
     // REMOVED: tabletEvent removed - tablet event handling deleted
 
 #ifdef Q_OS_WIN
-    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override; // Handle Windows theme changes
+#  if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
+#  else
+    bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
+#  endif
 #endif
     void closeEvent(QCloseEvent *event) override; // ✅ Add auto-save on program close
     
@@ -611,6 +615,7 @@ private:
     // Page Panel: Task 5.2: PagePanel page change connection
     QMetaObject::Connection m_pagePanelPageConn;
     QMetaObject::Connection m_pagePanelContentConn;  // For documentModified → thumbnail invalidation
+    QMetaObject::Connection m_pagePanelPageModConn;  // For pageModified → targeted thumbnail invalidation
     QMetaObject::Connection m_pagePanelActionBarConn;  // For currentPageChanged → action bar sync
     QMetaObject::Connection m_documentModifiedConn;    // BUG FIX: documentModified → mark doc/tab modified
     QMetaObject::Connection m_markdownNotesPageConn;  // Phase M.3: For page change → notes reload

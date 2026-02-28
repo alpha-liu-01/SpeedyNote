@@ -1,4 +1,5 @@
 #include "MissingPdfBanner.h"
+#include "../../compat/qt_compat.h"
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QStyle>
@@ -116,11 +117,11 @@ void MissingPdfBanner::hideAnimated()
     m_animation->setStartValue(m_slideOffset);
     m_animation->setEndValue(-BANNER_HEIGHT);
     
-    connect(m_animation, &QPropertyAnimation::finished, this, [this]() {
+    SN_CONNECT_ONCE(m_animation, &QPropertyAnimation::finished, this, [this]() {
         if (m_slideOffset <= -BANNER_HEIGHT) {
             hide();
         }
-    }, Qt::SingleShotConnection);
+    });
     
     m_animation->start();
 }

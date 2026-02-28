@@ -134,7 +134,11 @@ void ColorPresetButton::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void ColorPresetButton::enterEvent(QEnterEvent* event)
+#else
+void ColorPresetButton::enterEvent(QEvent* event)
+#endif
 {
     m_hovered = true;
     update();

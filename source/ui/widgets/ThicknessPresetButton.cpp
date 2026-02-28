@@ -1,5 +1,6 @@
 #include "ThicknessPresetButton.h"
 
+#include <cmath>
 #include <QPainter>
 #include <QMouseEvent>
 #include <QPalette>
@@ -270,7 +271,11 @@ void ThicknessPresetButton::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void ThicknessPresetButton::enterEvent(QEnterEvent* event)
+#else
+void ThicknessPresetButton::enterEvent(QEvent* event)
+#endif
 {
     m_hovered = true;
     update();

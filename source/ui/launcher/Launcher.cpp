@@ -1,4 +1,5 @@
 #include "Launcher.h"
+#include "../../compat/qt_compat.h"
 #include "LauncherNavButton.h"
 #include "TimelineModel.h"
 #include "TimelineDelegate.h"
@@ -696,7 +697,7 @@ void Launcher::hideWithAnimation()
     m_fadeAnimation->setEndValue(0.0);
     
     // CR-P.3: Qt::SingleShotConnection auto-disconnects after first emit
-    connect(m_fadeAnimation, &QPropertyAnimation::finished, this, [this]() {
+    SN_CONNECT_ONCE(m_fadeAnimation, &QPropertyAnimation::finished, this, [this]() {
         // Restore to normal windowed state while still visible (opacity 0).
         // setWindowState on the QWidget level works here because the widget
         // is still visible (at opacity 0).  We also update the QWindow level
@@ -708,7 +709,7 @@ void Launcher::hideWithAnimation()
             }
         }
         hide();
-    }, Qt::SingleShotConnection);
+    });
     
     m_fadeAnimation->start();
 }

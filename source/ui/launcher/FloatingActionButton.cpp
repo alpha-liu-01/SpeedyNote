@@ -1,4 +1,5 @@
 #include "FloatingActionButton.h"
+#include "../../compat/qt_compat.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -179,14 +180,13 @@ void FloatingActionButton::setExpanded(bool expanded)
     
     // Hide buttons after collapse animation
     if (!expanded) {
-        connect(m_animGroup, &QParallelAnimationGroup::finished, this, [this]() {
+        SN_CONNECT_ONCE(m_animGroup, &QParallelAnimationGroup::finished, this, [this]() {
             if (!m_expanded) {
                 for (QPushButton* btn : m_actionButtons) {
                     btn->setVisible(false);
                 }
             }
-            disconnect(m_animGroup, &QParallelAnimationGroup::finished, this, nullptr);
-        }, Qt::SingleShotConnection);
+        });
     }
     
     m_animGroup->start();

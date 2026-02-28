@@ -12,6 +12,39 @@
 #include <QMutexLocker>
 
 // ============================================================================
+// BUG-Q003: Shared lock context for MuPDF thread safety (Qt5/Win32)
+// ============================================================================
+// MuPDF routes OpenJPEG/HarfBuzz/FreeType allocations through plain global
+// variables (opj_secret, fz_hb_secret, ftmemory.user), protected by
+// fz_ft_lock() which dispatches through fz_locks_context.  When contexts are
+// created without custom locks (NULL → fz_locks_default → no-ops), concurrent
+// threads race on the globals.
+//
+// Providing a real fz_locks_context shared across ALL provider instances lets
+// MuPDF's own fine-grained locking work correctly: only the critical sections
+// are serialised, while the rest of each render runs in parallel.
+// ============================================================================
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+static QMutex s_mupdfLocks[FZ_LOCK_MAX];
+
+static void sn_mupdf_lock(void * /*user*/, int lock)
+{
+    s_mupdfLocks[lock].lock();
+}
+
+static void sn_mupdf_unlock(void * /*user*/, int lock)
+{
+    s_mupdfLocks[lock].unlock();
+}
+
+static fz_locks_context s_mupdfLocksCtx = {
+    nullptr,
+    sn_mupdf_lock,
+    sn_mupdf_unlock
+};
+#endif
+
+// ============================================================================
 // Construction / Destruction
 // ============================================================================
 
@@ -19,7 +52,11 @@ MuPdfProvider::MuPdfProvider(const QString& pdfPath)
     : m_path(pdfPath)
 {
     // Create MuPDF context
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    m_ctx = fz_new_context(nullptr, &s_mupdfLocksCtx, FZ_STORE_DEFAULT);
+#else
     m_ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
+#endif
     if (!m_ctx) {
         qWarning() << "MuPdfProvider: Failed to create MuPDF context";
         return;

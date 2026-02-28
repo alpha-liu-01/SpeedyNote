@@ -3,6 +3,7 @@
 
 #include <QDate>
 #include <QDateTime>
+#include <QLocale>
 #include <QTime>
 
 TimelineModel::TimelineModel(QObject* parent)

@@ -28,8 +28,6 @@
     didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     Q_UNUSED(controller);
-    fprintf(stderr, "[PdfPickerIOS] delegate: didPickDocumentsAtURLs (count=%lu)\n",
-            (unsigned long)urls.count);
 
     if (urls.count == 0) {
         [self finish:nil];
@@ -37,9 +35,6 @@
     }
 
     NSURL *url = urls.firstObject;
-    #ifdef SPEEDYNOTE_DEBUG
-    fprintf(stderr, "[PdfPickerIOS] picked URL: %s\n", url.absoluteString.UTF8String);
-    #endif
 
     BOOL accessed = [url startAccessingSecurityScopedResource];
     NSString *fileName = url.lastPathComponent;
@@ -66,15 +61,8 @@
     }
 
     if (ok) {
-        #ifdef SPEEDYNOTE_DEBUG
-        fprintf(stderr, "[PdfPickerIOS] copied to %s\n", destPath.UTF8String);
-        #endif
         [self finish:destPath];
     } else {
-        #ifdef SPEEDYNOTE_DEBUG
-        fprintf(stderr, "[PdfPickerIOS] copy failed: %s\n",
-                error.localizedDescription.UTF8String);
-        #endif        
         [self finish:nil];
     }
 }
@@ -82,9 +70,6 @@
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
 {
     Q_UNUSED(controller);
-    #ifdef SPEEDYNOTE_DEBUG
-    fprintf(stderr, "[PdfPickerIOS] delegate: cancelled\n");
-    #endif
     [self finish:nil];
 }
 
@@ -107,9 +92,6 @@
         self.pickerWindow.windowScene = nil;
         self.pickerWindow = nil;
     }
-    #ifdef SPEEDYNOTE_DEBUG
-    fprintf(stderr, "[PdfPickerIOS] delegate: dealloc\n");
-    #endif
 }
 #pragma clang diagnostic pop
 
@@ -145,10 +127,6 @@ void pickPdfFile(std::function<void(const QString&)> completion)
 
 void pickPdfFile(const QString& destDir, std::function<void(const QString&)> completion)
 {
-    #ifdef SPEEDYNOTE_DEBUG
-    fprintf(stderr, "[PdfPickerIOS] pickPdfFile called (active=%d)\n", s_pickerActive);
-    #endif
-
     if (s_pickerActive) {
         if (completion) completion(QString());
         return;
@@ -158,9 +136,6 @@ void pickPdfFile(const QString& destDir, std::function<void(const QString&)> com
 
     UIWindowScene *scene = activeWindowScene();
     if (!scene) {
-        #ifdef SPEEDYNOTE_DEBUG
-        fprintf(stderr, "[PdfPickerIOS] ERROR: no active window scene\n");
-        #endif
         s_pickerActive = false;
         if (completion) completion(QString());
         return;
@@ -192,15 +167,7 @@ void pickPdfFile(const QString& destDir, std::function<void(const QString&)> com
 
     picker.delegate = s_delegate;
 
-    #ifdef SPEEDYNOTE_DEBUG
-    fprintf(stderr, "[PdfPickerIOS] presenting picker from dedicated window (delegate=%p)\n",
-            (void *)s_delegate);
-    #endif
-    [pickerWindow.rootViewController presentViewController:picker animated:YES completion:^{
-        #ifdef SPEEDYNOTE_DEBUG
-        fprintf(stderr, "[PdfPickerIOS] presentation complete\n");
-        #endif
-    }];
+    [pickerWindow.rootViewController presentViewController:picker animated:YES completion:nil];
 }
 
 } // namespace PdfPickerIOS
