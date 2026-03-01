@@ -53,7 +53,7 @@ private:
  * - Selected: Diagonal line with white border (dark mode) or black border (light mode)
  * - Pressed: Darken/lighten effect
  * 
- * Size: 36×36 logical pixels, fully round (18px border radius)
+ * Size: 28×28 logical pixels, round
  */
 class ThicknessPresetButton : public QWidget {
     Q_OBJECT
@@ -168,9 +168,10 @@ private:
     bool m_hovered = false;
     QColor m_lineColor = Qt::black;
     
-    static constexpr int BUTTON_SIZE = 36;
-    static constexpr int BORDER_WIDTH_NORMAL = 2;
-    static constexpr int BORDER_WIDTH_SELECTED = 3;
+    static constexpr int BUTTON_SIZE = 24;
+    static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
+    static constexpr int BORDER_WIDTH_NORMAL = 1;
+    static constexpr int BORDER_WIDTH_SELECTED = 2;
     static constexpr qreal MIN_DISPLAY_WIDTH = 1.0;
     static constexpr qreal MAX_DISPLAY_WIDTH = 12.0;
 };

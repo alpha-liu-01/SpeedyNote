@@ -198,45 +198,34 @@ QSize ThicknessPresetButton::minimumSizeHint() const
 void ThicknessPresetButton::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event);
-    
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    
-    const qreal radius = BUTTON_SIZE / 2.0;
-    const QPointF center(radius, radius);
-    
-    // Determine border width based on selection state
-    const int borderWidth = m_selected ? BORDER_WIDTH_SELECTED : BORDER_WIDTH_NORMAL;
-    
-    // Draw background circle (for contrast)
-    const QColor bgColor = isDarkMode() ? QColor(50, 50, 50) : QColor(245, 245, 245);
+
+    // Background rounded rect (blends with parent ExpandableToolButton)
+    const QColor bgColor = isDarkMode() ? Qt::black : Qt::white;
     painter.setPen(Qt::NoPen);
     painter.setBrush(bgColor);
-    painter.drawEllipse(rect());
-    
-    // Draw border circle
-    QPen borderPen(borderColor());
-    borderPen.setWidth(borderWidth);
-    painter.setPen(borderPen);
-    painter.setBrush(Qt::NoBrush);
-    
-    const qreal borderOffset = borderWidth / 2.0;
-    painter.drawEllipse(QRectF(borderOffset, borderOffset, 
-                               BUTTON_SIZE - borderWidth, 
-                               BUTTON_SIZE - borderWidth));
-    
-    // Draw diagonal line preview
-    // Line goes from bottom-left to top-right (like handwriting direction)
-    // Use larger inset to keep line well inside the circular boundary
-    const qreal inset = borderWidth + 8.0;  // Shorter line that fits nicely in the round icon
-    const QPointF lineStart(inset, BUTTON_SIZE - inset);
-    const QPointF lineEnd(BUTTON_SIZE - inset, inset);
-    
-    QPen linePen(adjustedLineColor());
-    linePen.setWidthF(displayLineWidth());
-    linePen.setCapStyle(Qt::RoundCap);
-    painter.setPen(linePen);
-    painter.drawLine(lineStart, lineEnd);
+    painter.drawRoundedRect(QRectF(rect()), BORDER_RADIUS, BORDER_RADIUS);
+
+    // Border (only when selected)
+    if (m_selected) {
+        const qreal bw = BORDER_WIDTH_SELECTED / 2.0;
+        QRectF outerRect = QRectF(rect()).adjusted(bw, bw, -bw, -bw);
+        QPen borderPen(borderColor());
+        borderPen.setWidthF(BORDER_WIDTH_SELECTED);
+        painter.setPen(borderPen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(outerRect, BORDER_RADIUS, BORDER_RADIUS);
+    }
+
+    // Centered dot preview (diameter represents thickness)
+    const qreal dotDiameter = displayLineWidth();
+    const QPointF center(BUTTON_SIZE / 2.0, BUTTON_SIZE / 2.0);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(adjustedLineColor());
+    painter.drawEllipse(center, dotDiameter / 2.0, dotDiameter / 2.0);
 }
 
 void ThicknessPresetButton::mousePressEvent(QMouseEvent* event)
@@ -307,11 +296,9 @@ bool ThicknessPresetButton::isDarkMode() const
 QColor ThicknessPresetButton::borderColor() const
 {
     if (m_selected) {
-        // Selected: high contrast border (white in dark mode, black in light mode)
-        return isDarkMode() ? Qt::white : Qt::black;
+        return m_lineColor;
     } else {
-        // Unselected: subtle neutral border
-        return isDarkMode() ? QColor(100, 100, 100) : QColor(180, 180, 180);
+        return Qt::transparent;
     }
 }
 

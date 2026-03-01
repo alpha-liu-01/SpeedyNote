@@ -668,9 +668,10 @@ set(UI_SOURCES
     source/ui/widgets/LayerItemWidget.cpp
     source/ui/widgets/LayerPanelPillButton.cpp
     source/ui/widgets/PdfSearchBar.cpp
+    source/ui/widgets/ExpandableToolButton.cpp
     # Subtoolbars
     source/ui/subtoolbars/SubToolbar.cpp
-    source/ui/subtoolbars/SubToolbarContainer.cpp
+    
     source/ui/subtoolbars/PenSubToolbar.cpp
     source/ui/subtoolbars/MarkerSubToolbar.cpp
     source/ui/subtoolbars/EraserSubToolbar.cpp

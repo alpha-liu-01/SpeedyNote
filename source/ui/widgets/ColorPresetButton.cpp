@@ -3,8 +3,6 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QMouseEvent>
-#include <QPalette>
-#include <QApplication>
 
 // ============================================================================
 // ColorPresetButton
@@ -62,44 +60,29 @@ QSize ColorPresetButton::minimumSizeHint() const
 void ColorPresetButton::paintEvent(QPaintEvent* event)
 {
     Q_UNUSED(event);
-    
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    
-    const qreal radius = BUTTON_SIZE / 2.0;
-    const QPointF center(radius, radius);
-    
-    // Determine border width based on selection state
-    const int borderWidth = m_selected ? BORDER_WIDTH_SELECTED : BORDER_WIDTH_NORMAL;
-    
-    // Draw border circle
-    QPen borderPen(borderColor());
-    borderPen.setWidth(borderWidth);
-    painter.setPen(borderPen);
-    painter.setBrush(Qt::NoBrush);
-    
-    const qreal borderOffset = borderWidth / 2.0;
-    painter.drawEllipse(QRectF(borderOffset, borderOffset, 
-                               BUTTON_SIZE - borderWidth, 
-                               BUTTON_SIZE - borderWidth));
-    
-    // Draw filled color circle (slightly inset from border)
-    const qreal fillInset = borderWidth + 1.0;
-    const qreal fillRadius = radius - fillInset;
-    
+
+    // Border (only when selected)
+    if (m_selected) {
+        const qreal bw = BORDER_WIDTH_SELECTED / 2.0;
+        QRectF outerRect = QRectF(rect()).adjusted(bw, bw, -bw, -bw);
+        QPen borderPen(borderColor());
+        borderPen.setWidthF(BORDER_WIDTH_SELECTED);
+        painter.setPen(borderPen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(outerRect, BORDER_RADIUS, BORDER_RADIUS);
+    }
+
+    // Color fill (inset more when selected to leave room for border)
+    const qreal fillInset = m_selected ? (BORDER_WIDTH_SELECTED + 1.0) : 1.0;
+    QRectF fillRect = QRectF(rect()).adjusted(fillInset, fillInset, -fillInset, -fillInset);
+    const qreal fillRadius = fillRect.width() / 2.0;
+
     painter.setPen(Qt::NoPen);
     painter.setBrush(adjustedFillColor());
-    painter.drawEllipse(center, fillRadius, fillRadius);
-    
-    // Optional: Draw subtle inner shadow for depth
-    if (!m_pressed) {
-        QRadialGradient shadowGradient(center, fillRadius);
-        shadowGradient.setColorAt(0.0, Qt::transparent);
-        shadowGradient.setColorAt(0.85, Qt::transparent);
-        shadowGradient.setColorAt(1.0, QColor(0, 0, 0, 30));
-        painter.setBrush(shadowGradient);
-        painter.drawEllipse(center, fillRadius, fillRadius);
-    }
+    painter.drawRoundedRect(fillRect, fillRadius, fillRadius);
 }
 
 void ColorPresetButton::mousePressEvent(QMouseEvent* event)
@@ -153,28 +136,12 @@ void ColorPresetButton::leaveEvent(QEvent* event)
     QWidget::leaveEvent(event);
 }
 
-bool ColorPresetButton::isDarkMode() const
-{
-    // Detect dark mode by checking the window background luminance
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    
-    // Calculate relative luminance (simplified)
-    const qreal luminance = 0.299 * windowColor.redF() 
-                          + 0.587 * windowColor.greenF() 
-                          + 0.114 * windowColor.blueF();
-    
-    return luminance < 0.5;
-}
-
 QColor ColorPresetButton::borderColor() const
 {
     if (m_selected) {
-        // Selected: high contrast border (white in dark mode, black in light mode)
-        return isDarkMode() ? Qt::white : Qt::black;
+        return m_color;
     } else {
-        // Unselected: subtle neutral border
-        return isDarkMode() ? QColor(100, 100, 100) : QColor(180, 180, 180);
+        return Qt::transparent;
     }
 }
 

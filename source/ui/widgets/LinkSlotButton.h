@@ -32,7 +32,7 @@ Q_DECLARE_METATYPE(LinkSlotState)
  * - Empty slot: Do nothing
  * - Filled slot: Emit deleteRequested()
  * 
- * Size: 36×36 logical pixels, fully round (18px border radius)
+ * Size: 28×28 logical pixels, round
  * 
  * Supports dark/light mode icon switching via setDarkMode().
  */
@@ -144,11 +144,6 @@ protected:
 
 private:
     /**
-     * @brief Check if the application is in dark mode based on palette.
-     */
-    bool isDarkMode() const;
-    
-    /**
      * @brief Get the border color based on selection state and theme.
      */
     QColor borderColor() const;
@@ -196,11 +191,12 @@ private:
     QString m_iconBaseNames[4];
     bool m_hasCustomIcons = false;
     
-    static constexpr int BUTTON_SIZE = 36;
-    static constexpr int ICON_SIZE = 20;
+    static constexpr int BUTTON_SIZE = 24;
+    static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
+    static constexpr int ICON_SIZE = 16;
     static constexpr int LONG_PRESS_MS = 500;
-    static constexpr int BORDER_WIDTH_NORMAL = 2;
-    static constexpr int BORDER_WIDTH_SELECTED = 3;
+    static constexpr int BORDER_WIDTH_NORMAL = 1;
+    static constexpr int BORDER_WIDTH_SELECTED = 2;
 };
 
 #endif // LINKSLOTBUTTON_H

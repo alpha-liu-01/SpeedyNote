@@ -41,19 +41,11 @@
 #include "ui/Toolbar.h"
 #include "ui/sidebars/LeftSidebarContainer.h"  // Phase S3: Left sidebar container
 
-// Phase D: Subtoolbar includes
-class SubToolbarContainer;
-class PenSubToolbar;
-
 // PDF Search
 class PdfSearchBar;
 class PdfSearchEngine;
 struct PdfSearchMatch;
 struct PdfSearchState;
-class MarkerSubToolbar;
-class HighlighterSubToolbar;
-class ObjectSelectSubToolbar;
-class EraserSubToolbar;
 
 // Action Bar includes
 class ActionBarContainer;
@@ -483,14 +475,7 @@ private:
     // Toolbar extraction: Toolbar (Phase B)
     Toolbar *m_toolbar = nullptr;
     
-    // Phase D: Subtoolbar system
-    SubToolbarContainer *m_subtoolbarContainer = nullptr;
-    PenSubToolbar *m_penSubToolbar = nullptr;
-    MarkerSubToolbar *m_markerSubToolbar = nullptr;
-    HighlighterSubToolbar *m_highlighterSubToolbar = nullptr;
-    ObjectSelectSubToolbar *m_objectSelectSubToolbar = nullptr;
-    EraserSubToolbar *m_eraserSubToolbar = nullptr;
-    QWidget *m_canvasContainer = nullptr;  // Stored for subtoolbar positioning
+    QWidget *m_canvasContainer = nullptr;
     int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
     QHash<int, int> m_sidebarTabStates;  // Per-document-tab sidebar tab index
     
@@ -629,9 +614,7 @@ private:
     // Update scrollbar positions based on container size
     void updateScrollbarPositions();
     
-    // Phase D: Subtoolbar setup and positioning
-    void setupSubToolbars();           // Create and connect subtoolbars
-    void updateSubToolbarPosition();   // Update position on viewport resize
+    void connectSubToolbarSignals();   // Wire subtoolbar signals to viewports
     
     // Action Bar setup and positioning
     void setupActionBars();            // Create and connect action bars

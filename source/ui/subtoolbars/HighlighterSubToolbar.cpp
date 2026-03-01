@@ -282,7 +282,8 @@ QColor HighlighterSubToolbar::currentColor() const
 
 void HighlighterSubToolbar::setDarkMode(bool darkMode)
 {
-    // Propagate dark mode to auto-highlight toggle
+    SubToolbar::setDarkMode(darkMode);
+
     if (m_autoHighlightToggle) {
         m_autoHighlightToggle->setDarkMode(darkMode);
     }

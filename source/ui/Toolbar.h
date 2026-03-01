@@ -8,72 +8,53 @@
 #include "../core/ToolType.h"
 
 class QPaintEvent;
+class ExpandableToolButton;
+class PenSubToolbar;
+class MarkerSubToolbar;
+class EraserSubToolbar;
+class HighlighterSubToolbar;
+class ObjectSelectSubToolbar;
 
 /**
- * Toolbar - Tab-specific tool selection and actions.
- * 
+ * Toolbar - Tab-specific tool selection and actions with inline subtoolbars.
+ *
  * Layout (center-aligned):
- * ┌────────────────────────────────────────────────────────────────────────────────┐
- * │      [Pen][Marker][Eraser][Shape][Lasso][ObjInsert][Text]  gap  [Undo][Redo] [Touch] │
- * └────────────────────────────────────────────────────────────────────────────────┘
- *        [------------ Tool Buttons (exclusive) ------------]      [Actions] [Mode]
- * 
- * Tool buttons are exclusive (only one active at a time).
- * Undo/Redo are instant actions.
- * Touch Gesture is a 3-state toggle.
+ * [Pen(+presets)][Marker(+presets)][Eraser(+presets)][Shape][Lasso][ObjInsert(+presets)][Text(+presets)]  gap  [Undo][Redo] [Touch]
+ *
+ * When a tool is selected its ExpandableToolButton expands to reveal
+ * inline preset buttons (colors, thicknesses, toggles).
  */
 class Toolbar : public QWidget {
     Q_OBJECT
 
 public:
     explicit Toolbar(QWidget *parent = nullptr);
-    
-    /**
-     * Set the currently active tool (for external sync).
-     * @param tool The tool type to select
-     */
+
     void setCurrentTool(ToolType tool);
-    
-    /**
-     * Set touch gesture mode (for external sync).
-     * @param mode 0 = off, 1 = y-axis only, 2 = full
-     */
     void setTouchGestureMode(int mode);
-    
-    /**
-     * Update theme colors.
-     * @param darkMode True for dark theme icons
-     */
     void updateTheme(bool darkMode);
-    
-    /**
-     * Enable/disable undo button.
-     */
     void setUndoEnabled(bool enabled);
-    
-    /**
-     * Enable/disable redo button.
-     */
     void setRedoEnabled(bool enabled);
-    
-    /**
-     * Set straight line mode (for external sync, e.g., from keyboard shortcut).
-     * @param enabled True to enable straight line mode
-     */
     void setStraightLineMode(bool enabled);
 
+    // Per-tab state management (replaces SubToolbarContainer duties)
+    void onTabChanged(int newTabIndex, int oldTabIndex);
+    void clearTabState(int tabIndex);
+
+    // Subtoolbar accessors for MainWindow signal wiring
+    PenSubToolbar* penSubToolbar() const { return m_penSubToolbar; }
+    MarkerSubToolbar* markerSubToolbar() const { return m_markerSubToolbar; }
+    EraserSubToolbar* eraserSubToolbar() const { return m_eraserSubToolbar; }
+    HighlighterSubToolbar* highlighterSubToolbar() const { return m_highlighterSubToolbar; }
+    ObjectSelectSubToolbar* objectSelectSubToolbar() const { return m_objectSelectSubToolbar; }
+
 signals:
-    // Tool selection
     void toolSelected(ToolType tool);
-    void straightLineToggled(bool enabled);  // Straight line mode toggle
-    void objectInsertClicked();  // Object insert tool
-    void textClicked();          // Text tool
-    
-    // Actions
+    void straightLineToggled(bool enabled);
+    void objectInsertClicked();
+    void textClicked();
     void undoClicked();
     void redoClicked();
-    
-    // Mode
     void touchGestureModeChanged(int mode);
 
 protected:
@@ -82,30 +63,45 @@ protected:
 private:
     void setupUi();
     void connectSignals();
-    
-    // Tool buttons (exclusive selection via QButtonGroup)
-    QButtonGroup *m_toolGroup;
-    ToolButton *m_penButton;
-    ToolButton *m_markerButton;
-    ToolButton *m_eraserButton;
+    void expandToolButton(ToolType tool);
+    void collapseAllToolButtons();
+
+    ExpandableToolButton* expandableForTool(ToolType tool) const;
+
+    // Expandable tool buttons (own subtoolbar content)
+    ExpandableToolButton *m_penExpandable;
+    ExpandableToolButton *m_markerExpandable;
+    ExpandableToolButton *m_eraserExpandable;
+    ExpandableToolButton *m_objectInsertExpandable;
+    ExpandableToolButton *m_textExpandable;
+
+    // Plain tool button (no subtoolbar)
     ToolButton *m_lassoButton;
-    ToolButton *m_objectInsertButton;
-    ToolButton *m_textButton;
-    
-    // Non-exclusive toggle (not part of tool group)
+
+    // Non-exclusive toggle
     ToggleButton *m_straightLineButton;
-    
+
     // Action buttons
     ActionButton *m_undoButton;
     ActionButton *m_redoButton;
-    
+
     // Tab-specific mode
     ThreeStateButton *m_touchGestureButton;
-    
+
+    // Tool group for exclusive selection
+    QButtonGroup *m_toolGroup;
+
+    // Subtoolbar instances (owned by this Toolbar, embedded in ExpandableToolButtons)
+    PenSubToolbar *m_penSubToolbar;
+    MarkerSubToolbar *m_markerSubToolbar;
+    EraserSubToolbar *m_eraserSubToolbar;
+    HighlighterSubToolbar *m_highlighterSubToolbar;
+    ObjectSelectSubToolbar *m_objectSelectSubToolbar;
+
     // State
     bool m_darkMode = false;
-    QColor m_borderColor;  // Bottom border color (unified gray)
+    QColor m_borderColor;
+    ToolType m_currentTool = ToolType::Pen;
 };
 
 #endif // TOOLBAR_H
-

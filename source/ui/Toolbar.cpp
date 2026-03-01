@@ -1,180 +1,232 @@
 #include "Toolbar.h"
+#include "widgets/ExpandableToolButton.h"
+#include "subtoolbars/PenSubToolbar.h"
+#include "subtoolbars/MarkerSubToolbar.h"
+#include "subtoolbars/EraserSubToolbar.h"
+#include "subtoolbars/HighlighterSubToolbar.h"
+#include "subtoolbars/ObjectSelectSubToolbar.h"
+
 #include <QHBoxLayout>
 #include <QGuiApplication>
 #include <QPalette>
 #include <QPainter>
-#include <QStyleOption>
 
 Toolbar::Toolbar(QWidget *parent)
     : QWidget(parent)
 {
     setupUi();
     connectSignals();
-    updateTheme(false);  // Default to light mode
+    updateTheme(false);
 }
 
 void Toolbar::setupUi()
 {
-    // Fixed height for toolbar
     setFixedHeight(44);
-    
+
     auto *mainLayout = new QHBoxLayout(this);
     mainLayout->setContentsMargins(4, 4, 4, 4);
     mainLayout->setSpacing(2);
-    
-    // Center the content
+
     mainLayout->addStretch(1);
-    
-    // === Tool button group (exclusive selection) ===
+
     m_toolGroup = new QButtonGroup(this);
     m_toolGroup->setExclusive(true);
-    
-    // Pen (Photoshop-style: B for Brush)
-    m_penButton = new ToolButton(this);
-    m_penButton->setThemedIcon("pen");
-    m_penButton->setToolTip(tr("Pen Tool (B)"));
-    m_penButton->setChecked(true);  // Default tool
-    m_toolGroup->addButton(m_penButton);
-    mainLayout->addWidget(m_penButton);
-    
-    // Marker
-    m_markerButton = new ToolButton(this);
-    m_markerButton->setThemedIcon("marker");
-    m_markerButton->setToolTip(tr("Marker Tool (M)"));
-    m_toolGroup->addButton(m_markerButton);
-    mainLayout->addWidget(m_markerButton);
-    
-    // Eraser
-    m_eraserButton = new ToolButton(this);
-    m_eraserButton->setThemedIcon("eraser");
-    m_eraserButton->setToolTip(tr("Eraser Tool (E)"));
-    m_toolGroup->addButton(m_eraserButton);
-    mainLayout->addWidget(m_eraserButton);
-    
-    // Straight Line Toggle (NOT in exclusive tool group - can be combined with any tool)
+
+    // --- Pen ---
+    m_penSubToolbar = new PenSubToolbar();
+    m_penExpandable = new ExpandableToolButton(this);
+    m_penExpandable->setThemedIcon("pen");
+    m_penExpandable->toolButton()->setToolTip(tr("Pen Tool (B)"));
+    m_penExpandable->setContentWidget(m_penSubToolbar);
+    m_penExpandable->toolButton()->setChecked(true);
+    m_penExpandable->setExpanded(true);
+    m_toolGroup->addButton(m_penExpandable->toolButton());
+    mainLayout->addWidget(m_penExpandable);
+
+    // --- Marker ---
+    m_markerSubToolbar = new MarkerSubToolbar();
+    m_markerExpandable = new ExpandableToolButton(this);
+    m_markerExpandable->setThemedIcon("marker");
+    m_markerExpandable->toolButton()->setToolTip(tr("Marker Tool (M)"));
+    m_markerExpandable->setContentWidget(m_markerSubToolbar);
+    m_toolGroup->addButton(m_markerExpandable->toolButton());
+    mainLayout->addWidget(m_markerExpandable);
+
+    // --- Eraser ---
+    m_eraserSubToolbar = new EraserSubToolbar();
+    m_eraserExpandable = new ExpandableToolButton(this);
+    m_eraserExpandable->setThemedIcon("eraser");
+    m_eraserExpandable->toolButton()->setToolTip(tr("Eraser Tool (E)"));
+    m_eraserExpandable->setContentWidget(m_eraserSubToolbar);
+    m_toolGroup->addButton(m_eraserExpandable->toolButton());
+    mainLayout->addWidget(m_eraserExpandable);
+
+    // --- Straight Line Toggle ---
     m_straightLineButton = new ToggleButton(this);
     m_straightLineButton->setThemedIcon("straightLine");
     m_straightLineButton->setToolTip(tr("Straight Line Mode (/)"));
-    // Note: NOT added to m_toolGroup - this is a modifier, not a tool
     mainLayout->addWidget(m_straightLineButton);
-    
-    // Lasso
+
+    // --- Lasso (no subtoolbar) ---
     m_lassoButton = new ToolButton(this);
     m_lassoButton->setThemedIcon("rope");
     m_lassoButton->setToolTip(tr("Lasso Selection Tool (L)"));
     m_toolGroup->addButton(m_lassoButton);
     mainLayout->addWidget(m_lassoButton);
-    
-    // Object Insert (Photoshop-style: V for Move/Select)
-    m_objectInsertButton = new ToolButton(this);
-    m_objectInsertButton->setThemedIcon("objectinsert");
-    m_objectInsertButton->setToolTip(tr("Object Select Tool (V)"));
-    m_toolGroup->addButton(m_objectInsertButton);
-    mainLayout->addWidget(m_objectInsertButton);
-    
-    // Text Highlighter (PDF text selection)
-    m_textButton = new ToolButton(this);
-    m_textButton->setThemedIcon("text");
-    m_textButton->setToolTip(tr("Text Highlighter Tool (T)"));
-    m_toolGroup->addButton(m_textButton);
-    mainLayout->addWidget(m_textButton);
-    
-    // === Gap before action buttons ===
+
+    // --- Object Select ---
+    m_objectSelectSubToolbar = new ObjectSelectSubToolbar();
+    m_objectInsertExpandable = new ExpandableToolButton(this);
+    m_objectInsertExpandable->setThemedIcon("objectinsert");
+    m_objectInsertExpandable->toolButton()->setToolTip(tr("Object Select Tool (V)"));
+    m_objectInsertExpandable->setContentWidget(m_objectSelectSubToolbar);
+    m_toolGroup->addButton(m_objectInsertExpandable->toolButton());
+    mainLayout->addWidget(m_objectInsertExpandable);
+
+    // --- Highlighter ---
+    m_highlighterSubToolbar = new HighlighterSubToolbar();
+    m_textExpandable = new ExpandableToolButton(this);
+    m_textExpandable->setThemedIcon("text");
+    m_textExpandable->toolButton()->setToolTip(tr("Text Highlighter Tool (T)"));
+    m_textExpandable->setContentWidget(m_highlighterSubToolbar);
+    m_toolGroup->addButton(m_textExpandable->toolButton());
+    mainLayout->addWidget(m_textExpandable);
+
     mainLayout->addSpacing(16);
-    
-    // === Action buttons ===
+
+    // --- Undo / Redo ---
     m_undoButton = new ActionButton(this);
     m_undoButton->setThemedIcon("undo");
     m_undoButton->setToolTip(tr("Undo (Ctrl+Z)"));
     mainLayout->addWidget(m_undoButton);
-    
+
     m_redoButton = new ActionButton(this);
     m_redoButton->setThemedIcon("redo");
     m_redoButton->setToolTip(tr("Redo (Ctrl+Shift+Z / Ctrl+Y)"));
     mainLayout->addWidget(m_redoButton);
-    
-    // === Gap before touch gesture ===
+
     mainLayout->addSpacing(8);
-    
-    // === Touch gesture mode ===
+
+    // --- Touch gesture mode ---
     m_touchGestureButton = new ThreeStateButton(this);
     m_touchGestureButton->setThemedIcon("hand");
     m_touchGestureButton->setToolTip(tr("Touch Gesture Mode\n0: Off\n1: Y-axis scroll only\n2: Full gestures"));
     mainLayout->addWidget(m_touchGestureButton);
-    
-    // Center the content
+
     mainLayout->addStretch(1);
+
+    // Wire contentSizeChanged from ObjectSelectSubToolbar to re-layout
+    connect(m_objectSelectSubToolbar, &ObjectSelectSubToolbar::contentSizeChanged, this, [this]() {
+        m_objectInsertExpandable->updateGeometry();
+        layout()->invalidate();
+        layout()->activate();
+    });
 }
 
 void Toolbar::connectSignals()
 {
-    // Tool buttons - emit toolSelected() for known tools
-    connect(m_penButton, &QPushButton::clicked, this, [this]() {
+    connect(m_penExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::Pen);
         emit toolSelected(ToolType::Pen);
     });
-    connect(m_markerButton, &QPushButton::clicked, this, [this]() {
+    connect(m_markerExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::Marker);
         emit toolSelected(ToolType::Marker);
     });
-    connect(m_eraserButton, &QPushButton::clicked, this, [this]() {
+    connect(m_eraserExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::Eraser);
         emit toolSelected(ToolType::Eraser);
     });
     connect(m_lassoButton, &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::Lasso);
         emit toolSelected(ToolType::Lasso);
     });
-    
-    // Text/Highlighter tool - now has ToolType
-    connect(m_textButton, &QPushButton::clicked, this, [this]() {
-        emit toolSelected(ToolType::Highlighter);
-    });
-    
-    // Straight Line toggle - emits straightLineToggled(bool)
-    connect(m_straightLineButton, &ToggleButton::toggled, 
-            this, &Toolbar::straightLineToggled);
-    
-    // Object Insert - selects ObjectSelect tool
-    connect(m_objectInsertButton, &QPushButton::clicked, this, [this]() {
+    connect(m_objectInsertExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::ObjectSelect);
         emit toolSelected(ToolType::ObjectSelect);
     });
-    
-    // Action buttons
+    connect(m_textExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::Highlighter);
+        emit toolSelected(ToolType::Highlighter);
+    });
+
+    connect(m_straightLineButton, &ToggleButton::toggled,
+            this, &Toolbar::straightLineToggled);
+
     connect(m_undoButton, &QPushButton::clicked,
             this, &Toolbar::undoClicked);
     connect(m_redoButton, &QPushButton::clicked,
             this, &Toolbar::redoClicked);
-    
-    // Touch gesture mode
+
     connect(m_touchGestureButton, &ThreeStateButton::stateChanged,
             this, &Toolbar::touchGestureModeChanged);
 }
 
+void Toolbar::expandToolButton(ToolType tool)
+{
+    if (m_currentTool == tool)
+        return;
+
+    // Sync shared state when switching between Marker/Highlighter
+    SubToolbar* newSub = nullptr;
+    ExpandableToolButton* newExp = expandableForTool(tool);
+
+    switch (tool) {
+        case ToolType::Pen:       newSub = m_penSubToolbar; break;
+        case ToolType::Marker:    newSub = m_markerSubToolbar; break;
+        case ToolType::Eraser:    newSub = m_eraserSubToolbar; break;
+        case ToolType::Highlighter: newSub = m_highlighterSubToolbar; break;
+        case ToolType::ObjectSelect: newSub = m_objectSelectSubToolbar; break;
+        default: break;
+    }
+
+    collapseAllToolButtons();
+
+    if (newSub) {
+        newSub->syncSharedState();
+    }
+    if (newExp) {
+        newExp->setExpanded(true);
+    }
+
+    m_currentTool = tool;
+}
+
+void Toolbar::collapseAllToolButtons()
+{
+    m_penExpandable->setExpanded(false);
+    m_markerExpandable->setExpanded(false);
+    m_eraserExpandable->setExpanded(false);
+    m_objectInsertExpandable->setExpanded(false);
+    m_textExpandable->setExpanded(false);
+}
+
+ExpandableToolButton* Toolbar::expandableForTool(ToolType tool) const
+{
+    switch (tool) {
+        case ToolType::Pen:          return m_penExpandable;
+        case ToolType::Marker:       return m_markerExpandable;
+        case ToolType::Eraser:       return m_eraserExpandable;
+        case ToolType::ObjectSelect: return m_objectInsertExpandable;
+        case ToolType::Highlighter:  return m_textExpandable;
+        default: return nullptr;
+    }
+}
+
 void Toolbar::setCurrentTool(ToolType tool)
 {
-    // Block signals to avoid triggering toolSelected during external sync
     m_toolGroup->blockSignals(true);
-    
-    switch (tool) {
-        case ToolType::Pen:
-            m_penButton->setChecked(true);
-            break;
-        case ToolType::Marker:
-            m_markerButton->setChecked(true);
-            break;
-        case ToolType::Eraser:
-            m_eraserButton->setChecked(true);
-            break;
-        case ToolType::Lasso:
-            m_lassoButton->setChecked(true);
-            break;
-        case ToolType::ObjectSelect:
-            // ObjectSelect maps to objectInsert button for now
-            m_objectInsertButton->setChecked(true);
-            break;
-        case ToolType::Highlighter:
-            m_textButton->setChecked(true);
-            break;
+
+    ExpandableToolButton* exp = expandableForTool(tool);
+    if (exp) {
+        exp->toolButton()->setChecked(true);
+    } else if (tool == ToolType::Lasso) {
+        m_lassoButton->setChecked(true);
     }
-    
+
     m_toolGroup->blockSignals(false);
+
+    expandToolButton(tool);
 }
 
 void Toolbar::setTouchGestureMode(int mode)
@@ -185,56 +237,51 @@ void Toolbar::setTouchGestureMode(int mode)
 void Toolbar::updateTheme(bool darkMode)
 {
     m_darkMode = darkMode;
-    
-    // Toolbar uses system window color (follows KDE/system theme)
+
     QPalette sysPalette = QGuiApplication::palette();
-    QString bgColor = sysPalette.color(QPalette::Window).name();
-    
-    // Use QPalette for reliable background (stylesheet can be unreliable for custom widgets)
     setAutoFillBackground(true);
     QPalette pal = palette();
     pal.setColor(QPalette::Window, sysPalette.color(QPalette::Window));
     setPalette(pal);
-    
-    // Store border color for paintEvent (unified gray: dark #4d4d4d, light #D0D0D0)
+
     m_borderColor = darkMode ? QColor(0x4d, 0x4d, 0x4d) : QColor(0xD0, 0xD0, 0xD0);
-    
-    // Apply button styles
+
     ButtonStyles::applyToWidget(this, darkMode);
-    
-    // Update all button icons for theme
-    m_penButton->setDarkMode(darkMode);
-    m_markerButton->setDarkMode(darkMode);
-    m_eraserButton->setDarkMode(darkMode);
+
+    // Update expandable tool buttons
+    m_penExpandable->setDarkMode(darkMode);
+    m_markerExpandable->setDarkMode(darkMode);
+    m_eraserExpandable->setDarkMode(darkMode);
+    m_objectInsertExpandable->setDarkMode(darkMode);
+    m_textExpandable->setDarkMode(darkMode);
+
+    // Update subtoolbars
+    m_penSubToolbar->setDarkMode(darkMode);
+    m_markerSubToolbar->setDarkMode(darkMode);
+    m_eraserSubToolbar->setDarkMode(darkMode);
+    m_highlighterSubToolbar->setDarkMode(darkMode);
+    m_objectSelectSubToolbar->setDarkMode(darkMode);
+
+    // Update plain buttons
     m_straightLineButton->setDarkMode(darkMode);
     m_lassoButton->setDarkMode(darkMode);
-    m_objectInsertButton->setDarkMode(darkMode);
-    m_textButton->setDarkMode(darkMode);
     m_undoButton->setDarkMode(darkMode);
     m_redoButton->setDarkMode(darkMode);
     m_touchGestureButton->setDarkMode(darkMode);
-    
-    // Trigger repaint for border
+
     update();
 }
 
 void Toolbar::paintEvent(QPaintEvent *event)
 {
-    // Let the base class handle the default painting (background via palette)
     QWidget::paintEvent(event);
-    
+
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, false);
-    
-    // Draw bottom border line
+
     painter.setPen(QPen(m_borderColor, 1));
     painter.drawLine(0, height() - 1, width(), height() - 1);
-    
-    // Draw subtle shadow gradient below the border (2 pixel gradient)
-    QColor shadowColor = m_darkMode ? QColor(0, 0, 0, 40) : QColor(0, 0, 0, 20);
-    painter.setPen(QPen(shadowColor, 1));
-    // The shadow will be drawn on the widgets below, but we can hint at depth
-    // by drawing a slightly darker line above the border
+
     QColor innerShadow = m_darkMode ? QColor(0, 0, 0, 30) : QColor(0, 0, 0, 15);
     painter.setPen(QPen(innerShadow, 1));
     painter.drawLine(0, height() - 2, width(), height() - 2);
@@ -252,9 +299,37 @@ void Toolbar::setRedoEnabled(bool enabled)
 
 void Toolbar::setStraightLineMode(bool enabled)
 {
-    // Block signals to avoid feedback loop when called from external sync
     m_straightLineButton->blockSignals(true);
     m_straightLineButton->setChecked(enabled);
     m_straightLineButton->blockSignals(false);
 }
 
+void Toolbar::onTabChanged(int newTabIndex, int oldTabIndex)
+{
+    // Save state for old tab across all subtoolbars
+    if (oldTabIndex >= 0) {
+        m_penSubToolbar->saveTabState(oldTabIndex);
+        m_markerSubToolbar->saveTabState(oldTabIndex);
+        m_highlighterSubToolbar->saveTabState(oldTabIndex);
+        m_eraserSubToolbar->saveTabState(oldTabIndex);
+        m_objectSelectSubToolbar->saveTabState(oldTabIndex);
+    }
+
+    // Restore state for new tab across all subtoolbars
+    if (newTabIndex >= 0) {
+        m_penSubToolbar->restoreTabState(newTabIndex);
+        m_markerSubToolbar->restoreTabState(newTabIndex);
+        m_highlighterSubToolbar->restoreTabState(newTabIndex);
+        m_eraserSubToolbar->restoreTabState(newTabIndex);
+        m_objectSelectSubToolbar->restoreTabState(newTabIndex);
+    }
+}
+
+void Toolbar::clearTabState(int tabIndex)
+{
+    m_penSubToolbar->clearTabState(tabIndex);
+    m_markerSubToolbar->clearTabState(tabIndex);
+    m_highlighterSubToolbar->clearTabState(tabIndex);
+    m_eraserSubToolbar->clearTabState(tabIndex);
+    m_objectSelectSubToolbar->clearTabState(tabIndex);
+}

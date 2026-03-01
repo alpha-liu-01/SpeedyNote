@@ -2,8 +2,6 @@
 
 #include <QPainter>
 #include <QMouseEvent>
-#include <QPalette>
-#include <QApplication>
 
 ModeToggleButton::ModeToggleButton(QWidget* parent)
     : QWidget(parent)
@@ -104,7 +102,7 @@ void ModeToggleButton::paintEvent(QPaintEvent* event)
     
     painter.setPen(Qt::NoPen);
     painter.setBrush(bgColor);
-    painter.drawEllipse(rect());
+    painter.drawRoundedRect(QRectF(rect()), BORDER_RADIUS, BORDER_RADIUS);
     
     // Draw current mode's icon centered
     const QIcon& currentIcon = m_icons[m_currentMode];
@@ -167,28 +165,9 @@ void ModeToggleButton::leaveEvent(QEvent* event)
     QWidget::leaveEvent(event);
 }
 
-bool ModeToggleButton::isDarkMode() const
-{
-    // Detect dark mode by checking the window background luminance
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    
-    // Calculate relative luminance (simplified)
-    const qreal luminance = 0.299 * windowColor.redF() 
-                          + 0.587 * windowColor.greenF() 
-                          + 0.114 * windowColor.blueF();
-    
-    return luminance < 0.5;
-}
-
 QColor ModeToggleButton::backgroundColor() const
 {
-    // Neutral background (same as unchecked SubToolbarToggle)
-    if (isDarkMode()) {
-        return QColor(60, 60, 60);
-    } else {
-        return QColor(220, 220, 220);
-    }
+    return m_darkMode ? Qt::black : Qt::white;
 }
 
 void ModeToggleButton::updateToolTip()
