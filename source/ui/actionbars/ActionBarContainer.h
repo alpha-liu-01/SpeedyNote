@@ -127,6 +127,16 @@ public:
     void setPagePanelVisible(bool visible);
     
     /**
+     * @brief Set whether the current document supports pages.
+     * @param supported True for paged documents, false for edgeless canvas.
+     * 
+     * When unsupported, the bar is hidden regardless of lock state.
+     * When returning to a supported document with the lock active,
+     * the bar reappears automatically.
+     */
+    void setPagePanelDocumentSupported(bool supported);
+    
+    /**
      * @brief Lock or unlock the Page Panel action bar.
      * @param locked True to keep the bar visible regardless of panel state.
      * 
@@ -221,6 +231,13 @@ private:
      * @brief Check if system clipboard has an image.
      */
     void checkClipboardForImage();
+    
+    /**
+     * @brief Re-evaluate and apply page panel effective visibility.
+     * 
+     * Centralizes the logic: effective = (panelActive || locked) && documentSupported.
+     */
+    void updatePagePanelEffectiveVisibility();
 
     QHash<QString, ActionBar*> m_actionBars;
     ActionBar* m_currentActionBar = nullptr;
@@ -233,6 +250,7 @@ private:
     bool m_pagePanelVisible = false;
     bool m_pagePanelLocked = false;
     bool m_pagePanelShouldBeVisible = false;
+    bool m_pagePanelDocumentSupported = false;
     
     // Context state (cached)
     bool m_hasLassoSelection = false;

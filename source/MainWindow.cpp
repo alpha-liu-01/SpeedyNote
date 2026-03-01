@@ -5093,31 +5093,30 @@ void MainWindow::updatePagePanelActionBarVisibility()
     if (!m_pagePanelActionBar || !m_actionBarContainer) {
         return;
     }
-    bool shouldShow = false;
     
-    // Condition 1: Left sidebar must be visible
-    // Condition 2: Pages tab must exist and be selected
-    // Condition 3: Must be a paged document (not edgeless)
-    if (m_leftSidebar && m_leftSidebar->isVisible() && m_leftSidebar->hasPagesTab()) {
-        int pagesTabIndex = m_leftSidebar->indexOf(m_leftSidebar->pagePanel());
-        if (m_leftSidebar->currentIndex() == pagesTabIndex) {
-            if (DocumentViewport* vp = currentViewport()) {
-                if (Document* doc = vp->document()) {
-                    if (!doc->isEdgeless()) {
-                        shouldShow = true;
-                    }
-                }
-            }
+    // Check if the current document supports pages (independent of UI state)
+    bool documentHasPages = false;
+    if (DocumentViewport* vp = currentViewport()) {
+        if (Document* doc = vp->document()) {
+            documentHasPages = !doc->isEdgeless();
         }
     }
+    m_actionBarContainer->setPagePanelDocumentSupported(documentHasPages);
     
-    m_actionBarContainer->setPagePanelVisible(shouldShow);
+    // Check if the page panel UI is active (sidebar visible + pages tab selected)
+    bool panelActive = false;
+    if (documentHasPages && m_leftSidebar && m_leftSidebar->isVisible()
+        && m_leftSidebar->hasPagesTab()) {
+        int pagesTabIndex = m_leftSidebar->indexOf(m_leftSidebar->pagePanel());
+        panelActive = (m_leftSidebar->currentIndex() == pagesTabIndex);
+    }
+    m_actionBarContainer->setPagePanelVisible(panelActive);
     
     // Update action bar position after visibility change to ensure correct placement
     updateActionBarPosition();
     
-    // Update action bar state when becoming visible
-    if (shouldShow) {
+    // Sync action bar state when bar will be shown
+    if (documentHasPages && (panelActive || m_pagePanelActionBar->isLocked())) {
         if (DocumentViewport* vp = currentViewport()) {
             if (Document* doc = vp->document()) {
                 m_pagePanelActionBar->setPageCount(doc->pageCount());

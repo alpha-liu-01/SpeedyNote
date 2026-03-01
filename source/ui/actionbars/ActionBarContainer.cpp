@@ -255,9 +255,32 @@ PagePanelActionBar* ActionBarContainer::pagePanelActionBar() const
 void ActionBarContainer::setPagePanelVisible(bool visible)
 {
     m_pagePanelShouldBeVisible = visible;
-    
-    // When locked, keep the bar visible even if the panel is hidden
-    bool effectiveVisible = visible || m_pagePanelLocked;
+    updatePagePanelEffectiveVisibility();
+}
+
+void ActionBarContainer::setPagePanelDocumentSupported(bool supported)
+{
+    if (m_pagePanelDocumentSupported == supported) {
+        return;
+    }
+    m_pagePanelDocumentSupported = supported;
+    updatePagePanelEffectiveVisibility();
+}
+
+void ActionBarContainer::setPagePanelLocked(bool locked)
+{
+    if (m_pagePanelLocked == locked) {
+        return;
+    }
+    m_pagePanelLocked = locked;
+    updatePagePanelEffectiveVisibility();
+}
+
+void ActionBarContainer::updatePagePanelEffectiveVisibility()
+{
+    // Lock can override panel-inactive, but NOT document-unsupported
+    bool effectiveVisible = (m_pagePanelShouldBeVisible || m_pagePanelLocked)
+                            && m_pagePanelDocumentSupported;
     
     if (m_pagePanelVisible == effectiveVisible) {
         return;
@@ -269,7 +292,6 @@ void ActionBarContainer::setPagePanelVisible(bool visible)
         m_pagePanelBar->setVisible(effectiveVisible);
     }
     
-    // Update layout for potential 2-column arrangement
     updateSize();
     updatePosition(m_viewportRect);
     
@@ -278,29 +300,6 @@ void ActionBarContainer::setPagePanelVisible(bool visible)
         raise();
     } else if (!m_pagePanelVisible && !m_currentActionBar) {
         hide();
-    }
-}
-
-void ActionBarContainer::setPagePanelLocked(bool locked)
-{
-    if (m_pagePanelLocked == locked) {
-        return;
-    }
-    
-    m_pagePanelLocked = locked;
-    
-    if (!locked && !m_pagePanelShouldBeVisible) {
-        // Unlocked while page panel is inactive: hide immediately
-        m_pagePanelVisible = false;
-        if (m_pagePanelBar) {
-            m_pagePanelBar->setVisible(false);
-        }
-        updateSize();
-        updatePosition(m_viewportRect);
-        
-        if (!m_currentActionBar) {
-            hide();
-        }
     }
 }
 
