@@ -93,7 +93,7 @@ The final fix keeps the cache at the correct pixel count (`pageSize * zoom * dpr
 **Status:** ✅ Fixed
 **Priority:** Medium
 **Category:** UI / Font Rendering
-**Affects:** Qt5 only (Qt6 uses DirectWrite which handles fractional advances correctly)
+**Affects:** Qt5 and Qt6 (also observed on Windows 10 1809 with Qt6/DirectWrite)
 
 **Symptom:**
 UI text rendered with Segoe UI has visibly inconsistent character spacing — some characters appear too close together while others have noticeably wider gaps. The irregularity is random across the text, not tied to specific character pairs.
@@ -106,14 +106,10 @@ The application explicitly set `QFont::PreferFullHinting`, which maximizes this 
 Qt6 switched to **DirectWrite** as the default Windows font engine, which supports fractional glyph positioning natively. `PreferFullHinting` on Qt6+DirectWrite doesn't cause the same spacing irregularity because advances are computed at sub-pixel precision.
 
 **Fix:**
-In `applyWindowsFonts()` (`source/Main.cpp`), use `QFont::PreferNoHinting` for Qt5 to disable integer-pixel glyph snapping. Qt6 retains `QFont::PreferFullHinting`.
+In `applyWindowsFonts()` (`source/Main.cpp`), use `QFont::PreferNoHinting` unconditionally to disable integer-pixel glyph snapping.
 
 ```cpp
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    font.setHintingPreference(QFont::PreferFullHinting);
-#else
-    font.setHintingPreference(QFont::PreferNoHinting);
-#endif
+font.setHintingPreference(QFont::PreferNoHinting);
 ```
 
 `PreferNoHinting` lets glyphs position at fractional pixel coordinates, producing uniform spacing. The visual tradeoff is very slightly softer text at small sizes (same approach used by Chrome and Firefox on Windows).

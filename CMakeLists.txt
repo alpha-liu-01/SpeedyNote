@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.2.6 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.3.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -668,9 +668,10 @@ set(UI_SOURCES
     source/ui/widgets/LayerItemWidget.cpp
     source/ui/widgets/LayerPanelPillButton.cpp
     source/ui/widgets/PdfSearchBar.cpp
+    source/ui/widgets/ExpandableToolButton.cpp
     # Subtoolbars
     source/ui/subtoolbars/SubToolbar.cpp
-    source/ui/subtoolbars/SubToolbarContainer.cpp
+    
     source/ui/subtoolbars/PenSubToolbar.cpp
     source/ui/subtoolbars/MarkerSubToolbar.cpp
     source/ui/subtoolbars/EraserSubToolbar.cpp

@@ -83,10 +83,16 @@ void ObjectSelectSubToolbar::createWidgets()
     
     // Add separator before LinkObject controls (create manually to track it)
     m_linkObjectSeparator = new QFrame(this);
-    m_linkObjectSeparator->setFrameShape(QFrame::HLine);
-    m_linkObjectSeparator->setFrameShadow(QFrame::Sunken);
-    m_linkObjectSeparator->setFixedHeight(2);
-    m_linkObjectSeparator->setVisible(false);  // Hidden by default
+    m_linkObjectSeparator->setFrameShape(QFrame::VLine);
+    m_linkObjectSeparator->setFrameShadow(QFrame::Plain);
+    m_linkObjectSeparator->setFixedWidth(2);
+    m_linkObjectSeparator->setFixedHeight(SEPARATOR_HEIGHT);
+    if (isDarkMode()) {
+        m_linkObjectSeparator->setStyleSheet("background-color: #4d4d4d; border: none;");
+    } else {
+        m_linkObjectSeparator->setStyleSheet("background-color: #D0D0D0; border: none;");
+    }
+    m_linkObjectSeparator->setVisible(false);
     addWidget(m_linkObjectSeparator);
     
     // Create color button for LinkObject color editing
@@ -366,27 +372,23 @@ void ObjectSelectSubToolbar::setActionModeState(DocumentViewport::ObjectActionMo
 
 void ObjectSelectSubToolbar::setDarkMode(bool darkMode)
 {
-    // Propagate dark mode to mode toggle buttons
+    SubToolbar::setDarkMode(darkMode);
+
     if (m_insertModeToggle) {
         m_insertModeToggle->setDarkMode(darkMode);
     }
     if (m_actionModeToggle) {
         m_actionModeToggle->setDarkMode(darkMode);
     }
-    
-    // Propagate dark mode to description toggle
     if (m_descriptionButton) {
         m_descriptionButton->setDarkMode(darkMode);
     }
-    
-    // Propagate dark mode to slot buttons
     for (int i = 0; i < NUM_SLOTS; ++i) {
         if (m_slotButtons[i]) {
             m_slotButtons[i]->setDarkMode(darkMode);
         }
     }
-    
-    // Color button doesn't need dark mode update (uses its own color)
+
 }
 
 void ObjectSelectSubToolbar::setLinkObjectControlsVisible(bool visible)

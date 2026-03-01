@@ -300,6 +300,13 @@ public:
     void setDocument(Document* doc);
     
     /**
+     * @brief Cancel all background PDF render threads and block until they complete.
+     * Must be called before the Document object is destroyed to prevent use-after-free
+     * in the finished-signal handlers that access this viewport.
+     */
+    void cancelAndWaitForBackgroundThreads();
+    
+    /**
      * @brief Get the currently displayed document.
      * @return Pointer to the document, or nullptr if none set.
      */

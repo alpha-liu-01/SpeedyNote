@@ -13,6 +13,13 @@ PagePanelActionBar::PagePanelActionBar(QWidget* parent)
 
 void PagePanelActionBar::setupUI()
 {
+    // === Lock Button ===
+    m_lockButton = new ActionBarButton(this);
+    m_lockButton->setIconName("lock");
+    m_lockButton->setToolTip(tr("Lock/Unlock Page Panel Action Bar"));
+    m_lockButton->setCheckable(true);
+    addButton(m_lockButton);
+    
     // === Navigation Section ===
     
     // Search button (PDF text search, Ctrl+F)
@@ -69,6 +76,13 @@ void PagePanelActionBar::setupUI()
 
 void PagePanelActionBar::setupConnections()
 {
+    // Lock toggle
+    connect(m_lockButton, &ActionBarButton::clicked, this, [this]() {
+        m_locked = !m_locked;
+        m_lockButton->setChecked(m_locked);
+        emit lockChanged(m_locked);
+    });
+    
     // Search signal
     connect(m_searchButton, &ActionBarButton::clicked,
             this, &PagePanelActionBar::searchClicked);
@@ -162,12 +176,20 @@ void PagePanelActionBar::updateButtonStates()
     // Note: Add/Insert and Layout toggle are always enabled, no state updates needed
 }
 
+bool PagePanelActionBar::isLocked() const
+{
+    return m_locked;
+}
+
 void PagePanelActionBar::setDarkMode(bool darkMode)
 {
     // Call base class implementation
     ActionBar::setDarkMode(darkMode);
     
     // Propagate to all child widgets
+    if (m_lockButton) {
+        m_lockButton->setDarkMode(darkMode);
+    }
     if (m_searchButton) {
         m_searchButton->setDarkMode(darkMode);
     }

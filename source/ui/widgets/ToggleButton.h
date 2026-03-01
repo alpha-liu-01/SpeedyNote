@@ -14,7 +14,7 @@
  * - Checked: Icon with accent/highlighted background
  * - Pressed: Darken/lighten effect
  * 
- * Size: 36×36 logical pixels, fully round (18px border radius)
+ * Size: 28×28 logical pixels, round
  * 
  * Supports dark/light mode icon switching via setDarkMode().
  */
@@ -90,11 +90,6 @@ protected:
 
 private:
     /**
-     * @brief Check if the application is in dark mode based on palette.
-     */
-    bool isDarkMode() const;
-    
-    /**
      * @brief Get the background color based on checked state.
      */
     QColor backgroundColor() const;
@@ -111,8 +106,9 @@ private:
     QIcon m_icon;
     QString m_iconBaseName;
     
-    static constexpr int BUTTON_SIZE = 36;
-    static constexpr int ICON_SIZE = 20;
+    static constexpr int BUTTON_SIZE = 24;
+    static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
+    static constexpr int ICON_SIZE = 16;
 };
 
 #endif // SUBTOOLBARTOGGLE_H

@@ -7,6 +7,7 @@
 
 ActionBar::ActionBar(QWidget* parent)
     : QWidget(parent)
+    , m_darkMode(isDarkMode())
 {
     // Set fixed width (same as SubToolbar)
     setFixedWidth(ACTIONBAR_WIDTH);
@@ -36,12 +37,9 @@ void ActionBar::addSeparator()
     separator->setFixedHeight(2);
     separator->setFixedWidth(ACTIONBAR_WIDTH - 2 * PADDING);
     
-    // Style the separator based on theme (unified gray: dark #4d4d4d, light #D0D0D0)
-    if (isDarkMode()) {
-        separator->setStyleSheet("background-color: #4d4d4d; border: none;");
-    } else {
-        separator->setStyleSheet("background-color: #D0D0D0; border: none;");
-    }
+    separator->setStyleSheet(m_darkMode
+        ? "background-color: #4d4d4d; border: none;"
+        : "background-color: #D0D0D0; border: none;");
     
     m_layout->addWidget(separator, 0, Qt::AlignHCenter);
 }
@@ -53,18 +51,8 @@ void ActionBar::addStretch()
 
 void ActionBar::setupStyle()
 {
-    // Set background and border via stylesheet
-    // Unified gray colors: dark #2a2e32/#4d4d4d, light #F5F5F5/#D0D0D0
-    QString bgColor;
-    QString borderColor;
-    
-    if (isDarkMode()) {
-        bgColor = "#2a2e32";
-        borderColor = "#4d4d4d";
-    } else {
-        bgColor = "#F5F5F5";
-        borderColor = "#D0D0D0";
-    }
+    QString bgColor = m_darkMode ? "#2a2e32" : "#F5F5F5";
+    QString borderColor = m_darkMode ? "#4d4d4d" : "#D0D0D0";
     
     setStyleSheet(QString(
         "ActionBar {"
@@ -74,11 +62,10 @@ void ActionBar::setupStyle()
         "}"
     ).arg(bgColor, borderColor).arg(BORDER_RADIUS));
     
-    // Add drop shadow for depth (same as SubToolbar)
     QGraphicsDropShadowEffect* shadow = new QGraphicsDropShadowEffect(this);
     shadow->setBlurRadius(8);
     shadow->setOffset(2, 2);
-    shadow->setColor(QColor(0, 0, 0, isDarkMode() ? 100 : 50));
+    shadow->setColor(QColor(0, 0, 0, m_darkMode ? 100 : 50));
     setGraphicsEffect(shadow);
 }
 
@@ -97,24 +84,17 @@ bool ActionBar::isDarkMode() const
 
 void ActionBar::setDarkMode(bool darkMode)
 {
-    Q_UNUSED(darkMode);
+    m_darkMode = darkMode;
     
-    // Update the action bar's own styling (background, border, shadow)
     setupStyle();
     
-    // Update separator styling (unified gray: dark #4d4d4d, light #D0D0D0)
-    // Find all QFrame children that are separators and update their style
     const auto frames = findChildren<QFrame*>();
     for (QFrame* frame : frames) {
         if (frame->frameShape() == QFrame::HLine) {
-            if (isDarkMode()) {
-                frame->setStyleSheet("background-color: #4d4d4d; border: none;");
-            } else {
-                frame->setStyleSheet("background-color: #D0D0D0; border: none;");
-            }
+            frame->setStyleSheet(m_darkMode
+                ? "background-color: #4d4d4d; border: none;"
+                : "background-color: #D0D0D0; border: none;");
         }
     }
-    
-    // Subclasses should override this to also propagate dark mode to their buttons
 }
 

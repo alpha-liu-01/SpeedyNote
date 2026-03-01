@@ -119,6 +119,8 @@
     <file>resources/icons/layer_uparrow_reversed.png</file>
     <file>resources/icons/layer_downarrow.png</file>
     <file>resources/icons/layer_downarrow_reversed.png</file>
+    <file>resources/icons/lock.png</file>
+    <file>resources/icons/lock_reversed.png</file>
     <file>resources/translations/app_zh.qm</file>
     <file>resources/translations/app_es.qm</file>
     <file>resources/translations/app_fr.qm</file>

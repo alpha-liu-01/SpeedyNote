@@ -119,14 +119,13 @@ void OutlineItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
         int dotsEnd = pageRect.left() - DOT_SPACING;
         
         if (dotsEnd > dotsStart + DOT_SPACING * 2) {
-            painter->setPen(dotColor);
-            
-            // Calculate dot positions
             int y = contentRect.center().y();
-            int dotSize = 2;
+            constexpr int dotSize = 2;
             
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(dotColor);
             for (int x = dotsStart; x < dotsEnd; x += DOT_SPACING + dotSize) {
-                painter->drawEllipse(QPoint(x, y), dotSize / 2, dotSize / 2);
+                painter->fillRect(x, y, dotSize, dotSize, dotColor);
             }
         }
 

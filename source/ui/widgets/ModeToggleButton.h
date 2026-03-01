@@ -14,7 +14,7 @@
  * - Insert mode: Image (0) ↔ Link (1)
  * - Action mode: Select (0) ↔ Create (1)
  * 
- * Size: 36×36 logical pixels, fully round (18px border radius)
+ * Size: 28×28 logical pixels, round
  * 
  * Supports dark/light mode icon switching via setDarkMode().
  */
@@ -94,11 +94,6 @@ protected:
 
 private:
     /**
-     * @brief Check if the application is in dark mode based on palette.
-     */
-    bool isDarkMode() const;
-    
-    /**
      * @brief Get the background color.
      */
     QColor backgroundColor() const;
@@ -121,8 +116,9 @@ private:
     QString m_iconBaseNames[2];
     QString m_toolTips[2];
     
-    static constexpr int BUTTON_SIZE = 36;
-    static constexpr int ICON_SIZE = 20;
+    static constexpr int BUTTON_SIZE = 24;
+    static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
+    static constexpr int ICON_SIZE = 16;
 };
 
 #endif // MODETOGGLEBUTTON_H

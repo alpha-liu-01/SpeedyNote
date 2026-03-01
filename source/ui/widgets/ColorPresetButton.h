@@ -16,7 +16,7 @@
  * - Selected: Color-filled circle with white border (dark mode) or black border (light mode)
  * - Pressed: Darken/lighten effect
  * 
- * Size: 36×36 logical pixels, fully round (18px border radius)
+ * Size: 28×28 logical pixels, round
  */
 class ColorPresetButton : public QWidget {
     Q_OBJECT
@@ -94,11 +94,6 @@ protected:
 
 private:
     /**
-     * @brief Check if the application is in dark mode based on palette.
-     */
-    bool isDarkMode() const;
-    
-    /**
      * @brief Get the border color based on selection state and theme.
      */
     QColor borderColor() const;
@@ -113,9 +108,10 @@ private:
     bool m_pressed = false;
     bool m_hovered = false;
     
-    static constexpr int BUTTON_SIZE = 36;
-    static constexpr int BORDER_WIDTH_NORMAL = 2;
-    static constexpr int BORDER_WIDTH_SELECTED = 3;
+    static constexpr int BUTTON_SIZE = 24;
+    static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
+    static constexpr int BORDER_WIDTH_NORMAL = 1;
+    static constexpr int BORDER_WIDTH_SELECTED = 2;
 };
 
 #endif // COLORPRESETBUTTON_H

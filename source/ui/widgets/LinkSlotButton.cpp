@@ -3,8 +3,6 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QTimerEvent>
-#include <QPalette>
-#include <QApplication>
 
 LinkSlotButton::LinkSlotButton(QWidget* parent)
     : QWidget(parent)
@@ -112,34 +110,29 @@ void LinkSlotButton::paintEvent(QPaintEvent* event)
     
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    
-    const qreal radius = BUTTON_SIZE / 2.0;
-    
-    // Determine border width based on selection state
-    const int borderWidth = m_selected ? BORDER_WIDTH_SELECTED : BORDER_WIDTH_NORMAL;
-    
-    // Draw background circle
+
+    // Background rounded rect
     QColor bgColor = backgroundColor();
     if (m_pressed && !m_longPressTriggered) {
         bgColor = bgColor.darker(120);
     } else if (m_hovered && !m_selected) {
         bgColor = bgColor.lighter(110);
     }
-    
+
     painter.setPen(Qt::NoPen);
     painter.setBrush(bgColor);
-    painter.drawEllipse(rect());
-    
-    // Draw border circle
-    QPen borderPen(borderColor());
-    borderPen.setWidth(borderWidth);
-    painter.setPen(borderPen);
-    painter.setBrush(Qt::NoBrush);
-    
-    const qreal borderOffset = borderWidth / 2.0;
-    painter.drawEllipse(QRectF(borderOffset, borderOffset,
-                               BUTTON_SIZE - borderWidth,
-                               BUTTON_SIZE - borderWidth));
+    painter.drawRoundedRect(QRectF(rect()), BORDER_RADIUS, BORDER_RADIUS);
+
+    // Border (only when selected)
+    if (m_selected) {
+        const qreal bw = BORDER_WIDTH_SELECTED / 2.0;
+        QRectF outerRect = QRectF(rect()).adjusted(bw, bw, -bw, -bw);
+        QPen borderPen(borderColor());
+        borderPen.setWidthF(BORDER_WIDTH_SELECTED);
+        painter.setPen(borderPen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawRoundedRect(outerRect, BORDER_RADIUS, BORDER_RADIUS);
+    }
     
     // Draw icon
     QIcon icon = currentIcon();
@@ -156,7 +149,7 @@ void LinkSlotButton::paintEvent(QPaintEvent* event)
         icon.paint(&painter, iconRect, Qt::AlignCenter, iconMode, QIcon::On);
     } else {
         // Draw fallback symbols if no icon is set
-        painter.setPen(isDarkMode() ? Qt::white : Qt::black);
+        painter.setPen(m_darkMode ? Qt::white : Qt::black);
         QFont font = painter.font();
         font.setPixelSize(16);
         font.setBold(true);
@@ -251,48 +244,18 @@ void LinkSlotButton::leaveEvent(QEvent* event)
     QWidget::leaveEvent(event);
 }
 
-bool LinkSlotButton::isDarkMode() const
-{
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    
-    const qreal luminance = 0.299 * windowColor.redF()
-                          + 0.587 * windowColor.greenF()
-                          + 0.114 * windowColor.blueF();
-    
-    return luminance < 0.5;
-}
-
 QColor LinkSlotButton::borderColor() const
 {
     if (m_selected) {
-        return isDarkMode() ? Qt::white : Qt::black;
+        return m_darkMode ? Qt::white : Qt::black;
     } else {
-        // For empty slots, use a dashed/inviting appearance via lighter border
-        if (m_state == LinkSlotState::Empty) {
-            return isDarkMode() ? QColor(80, 80, 80) : QColor(200, 200, 200);
-        }
-        return isDarkMode() ? QColor(100, 100, 100) : QColor(180, 180, 180);
+        return Qt::transparent;
     }
 }
 
 QColor LinkSlotButton::backgroundColor() const
 {
-    if (m_state == LinkSlotState::Empty) {
-        // Empty slots have a slightly different background to look "inviting"
-        if (isDarkMode()) {
-            return QColor(45, 45, 45);
-        } else {
-            return QColor(250, 250, 250);
-        }
-    } else {
-        // Filled slots
-        if (isDarkMode()) {
-            return QColor(55, 55, 55);
-        } else {
-            return QColor(240, 240, 240);
-        }
-    }
+    return m_darkMode ? Qt::black : Qt::white;
 }
 
 QIcon LinkSlotButton::currentIcon() const

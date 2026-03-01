@@ -1,8 +1,7 @@
 /*
  * SpeedyNote Toolbar Button Styles - Dark Mode
- * 
- * Same structure as buttons.qss but with colors optimized for dark backgrounds.
- * Uses white/light highlights instead of dark.
+ *
+ * Same structure as buttons.qss but with colors for dark backgrounds.
  */
 
 /* ==========================================================================
@@ -18,7 +17,7 @@ QPushButton#ToolButton {
     max-width: 36px;
     max-height: 36px;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     background: transparent;
     padding: 0px;
 }
@@ -27,7 +26,7 @@ QPushButton#ToolButton {
    Dark Mode Styles
    ========================================================================== */
 
-/* Action Button - Dark Mode */
+/* Action Button */
 QPushButton#ActionButton:hover {
     background: rgba(255, 255, 255, 50);
 }
@@ -36,41 +35,56 @@ QPushButton#ActionButton:pressed {
     background: rgba(0, 0, 0, 50);
 }
 
-/* Toggle Button - Dark Mode */
+/* Toggle Button */
 QPushButton#ToggleButton:hover {
     background: rgba(255, 255, 255, 50);
 }
 
 QPushButton#ToggleButton:checked {
-    background: rgba(255, 255, 255, 100);
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 20);
 }
 
 QPushButton#ToggleButton:checked:hover {
-    background: rgba(255, 255, 255, 120);
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 30);
 }
 
 QPushButton#ToggleButton:pressed {
     background: rgba(0, 0, 0, 50);
 }
 
-/* Tool Button - Dark Mode (same as Toggle) */
+/* Tool Button - Pure black when checked (standalone buttons like Lasso) */
 QPushButton#ToolButton:hover {
     background: rgba(255, 255, 255, 50);
 }
 
 QPushButton#ToolButton:checked {
-    background: rgba(255, 255, 255, 100);
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 20);
 }
 
 QPushButton#ToolButton:checked:hover {
-    background: rgba(255, 255, 255, 120);
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 30);
 }
 
 QPushButton#ToolButton:pressed {
     background: rgba(0, 0, 0, 50);
 }
 
-/* Three-State Button - Dark Mode */
+/* Tool Button inside ExpandableToolButton: parent paints the background */
+QPushButton#ToolButton[inExpandable="true"]:checked {
+    background: transparent;
+    border: none;
+}
+
+QPushButton#ToolButton[inExpandable="true"]:checked:hover {
+    background: transparent;
+    border: none;
+}
+
+/* Three-State Button */
 QPushButton#ThreeStateButton:hover {
     background: rgba(255, 255, 255, 50);
 }
@@ -79,12 +93,10 @@ QPushButton#ThreeStateButton:pressed {
     background: rgba(0, 0, 0, 50);
 }
 
-/* State 0: Default/Off (no special background) */
 QPushButton#ThreeStateButton[state="0"] {
     background: transparent;
 }
 
-/* State 1: Middle/Y-Axis Only (red shade - same for both themes) */
 QPushButton#ThreeStateButton[state="1"] {
     background: rgba(255, 100, 100, 120);
 }
@@ -93,12 +105,12 @@ QPushButton#ThreeStateButton[state="1"]:hover {
     background: rgba(255, 120, 120, 140);
 }
 
-/* State 2: Full/On */
 QPushButton#ThreeStateButton[state="2"] {
-    background: rgba(255, 255, 255, 100);
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 20);
 }
 
 QPushButton#ThreeStateButton[state="2"]:hover {
-    background: rgba(255, 255, 255, 120);
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 30);
 }
-

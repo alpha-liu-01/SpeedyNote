@@ -63,6 +63,23 @@ public:
     void setDarkMode(bool darkMode);
     
     /**
+     * @brief Make the button toggleable (checked/unchecked visual state).
+     * @param checkable True to enable toggle behavior.
+     */
+    void setCheckable(bool checkable);
+    
+    /**
+     * @brief Set the checked state (only meaningful if checkable).
+     * @param checked True for checked, false for unchecked.
+     */
+    void setChecked(bool checked);
+    
+    /**
+     * @brief Get the checked state.
+     */
+    bool isChecked() const;
+    
+    /**
      * @brief Check if the button is currently enabled.
      */
     bool isEnabled() const;
@@ -102,11 +119,6 @@ protected:
 
 private:
     /**
-     * @brief Check if the application is in dark mode based on palette.
-     */
-    bool isDarkMode() const;
-    
-    /**
      * @brief Get the background color based on state.
      */
     QColor backgroundColor() const;
@@ -121,6 +133,8 @@ private:
     QString m_text;         ///< Text to display instead of icon
     bool m_darkMode = false;
     bool m_enabled = true;
+    bool m_checkable = false;
+    bool m_checked = false;
     bool m_pressed = false;
     bool m_hovered = false;
     

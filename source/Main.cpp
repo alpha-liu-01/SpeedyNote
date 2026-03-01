@@ -289,17 +289,10 @@ static void applyWindowsFonts(QApplication& app)
 {
     QFont font("Segoe UI", 9);
     font.setStyleHint(QFont::SansSerif);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    font.setHintingPreference(QFont::PreferFullHinting);
-#else
-    // Qt5 uses the GDI font engine which snaps glyphs to integer pixel
-    // boundaries. This causes inconsistent character spacing because
-    // accumulated rounding errors make some gaps wider and others narrower.
-    // PreferNoHinting disables the integer-snapping, letting glyphs position
-    // at fractional coordinates for uniform spacing.
-    // Qt6 defaults to DirectWrite which handles fractional advances correctly.
+    // Full hinting snaps glyphs to integer pixel boundaries, causing
+    // inconsistent character spacing from accumulated rounding errors.
+    // Affects Qt5 (GDI engine) and Qt6 (DirectWrite) on older Windows versions.
     font.setHintingPreference(QFont::PreferNoHinting);
-#endif
     font.setFamilies({"Segoe UI", "Dengxian", "Microsoft YaHei", "SimHei"});
     app.setFont(font);
 }

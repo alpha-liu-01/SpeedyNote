@@ -2,8 +2,6 @@
 
 #include <QPainter>
 #include <QMouseEvent>
-#include <QPalette>
-#include <QApplication>
 
 SubToolbarToggle::SubToolbarToggle(QWidget* parent)
     : QWidget(parent)
@@ -96,7 +94,7 @@ void SubToolbarToggle::paintEvent(QPaintEvent* event)
     
     painter.setPen(Qt::NoPen);
     painter.setBrush(bgColor);
-    painter.drawEllipse(rect());
+    painter.drawRoundedRect(QRectF(rect()), BORDER_RADIUS, BORDER_RADIUS);
     
     // Draw icon centered
     if (!m_icon.isNull()) {
@@ -162,37 +160,12 @@ void SubToolbarToggle::leaveEvent(QEvent* event)
     QWidget::leaveEvent(event);
 }
 
-bool SubToolbarToggle::isDarkMode() const
-{
-    // Detect dark mode by checking the window background luminance
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    
-    // Calculate relative luminance (simplified)
-    const qreal luminance = 0.299 * windowColor.redF() 
-                          + 0.587 * windowColor.greenF() 
-                          + 0.114 * windowColor.blueF();
-    
-    return luminance < 0.5;
-}
-
 QColor SubToolbarToggle::backgroundColor() const
 {
     if (m_checked) {
-        // Checked: accent/highlighted background
-        // Use a noticeable but not garish accent color
-        if (isDarkMode()) {
-            return QColor(70, 130, 180);  // Steel blue - visible in dark mode
-        } else {
-            return QColor(100, 149, 237); // Cornflower blue - visible in light mode
-        }
+        return m_darkMode ? QColor(70, 130, 180) : QColor(100, 149, 237);
     } else {
-        // Unchecked: neutral background
-        if (isDarkMode()) {
-            return QColor(60, 60, 60);
-        } else {
-            return QColor(220, 220, 220);
-        }
+        return m_darkMode ? Qt::black : Qt::white;
     }
 }
 
