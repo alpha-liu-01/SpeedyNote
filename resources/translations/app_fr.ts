@@ -1402,7 +1402,7 @@ This helps prevent accidental palm touches while writing. Only affects Y-Axis On
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1564"/>
-        <source>Version 1.2.6</source>
+        <source>Version 1.3.0</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2622,24 +2622,24 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="162"/>
-        <source>SpeedyNote 1.2.6</source>
+        <source>SpeedyNote 1.3.0</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="467"/>
-        <location filename="../../source/MainWindow.cpp" line="6341"/>
+        <location filename="../../source/MainWindow.cpp" line="6340"/>
         <source>canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="467"/>
-        <location filename="../../source/MainWindow.cpp" line="6341"/>
+        <location filename="../../source/MainWindow.cpp" line="6340"/>
         <source>document</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="470"/>
-        <location filename="../../source/MainWindow.cpp" line="6344"/>
+        <location filename="../../source/MainWindow.cpp" line="6343"/>
         <source>Save Changes?</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2652,8 +2652,8 @@ This action cannot be undone.</source>
         <location filename="../../source/MainWindow.cpp" line="491"/>
         <location filename="../../source/MainWindow.cpp" line="2888"/>
         <location filename="../../source/MainWindow.cpp" line="2974"/>
-        <location filename="../../source/MainWindow.cpp" line="6368"/>
-        <location filename="../../source/MainWindow.cpp" line="6659"/>
+        <location filename="../../source/MainWindow.cpp" line="6367"/>
+        <location filename="../../source/MainWindow.cpp" line="6658"/>
         <source>Save Error</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2942,32 +2942,32 @@ Missing document.json manifest.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5750"/>
+        <location filename="../../source/MainWindow.cpp" line="5749"/>
         <source>New Edgeless Canvas</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5755"/>
+        <location filename="../../source/MainWindow.cpp" line="5754"/>
         <source>New Paged Notebook</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5763"/>
+        <location filename="../../source/MainWindow.cpp" line="5762"/>
         <source>Open PDF...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5768"/>
+        <location filename="../../source/MainWindow.cpp" line="5767"/>
         <source>Open Notebook...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6345"/>
+        <location filename="../../source/MainWindow.cpp" line="6344"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6369"/>
+        <location filename="../../source/MainWindow.cpp" line="6368"/>
         <source>Failed to save document to:
 %1
 
@@ -2975,36 +2975,36 @@ Quit anyway?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6660"/>
+        <location filename="../../source/MainWindow.cpp" line="6659"/>
         <source>Failed to save document before closing.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6707"/>
+        <location filename="../../source/MainWindow.cpp" line="6706"/>
         <source>The file does not exist:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6738"/>
-        <location filename="../../source/MainWindow.cpp" line="6756"/>
+        <location filename="../../source/MainWindow.cpp" line="6737"/>
+        <location filename="../../source/MainWindow.cpp" line="6755"/>
         <source>Open Error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6739"/>
+        <location filename="../../source/MainWindow.cpp" line="6738"/>
         <source>Failed to open file:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6757"/>
+        <location filename="../../source/MainWindow.cpp" line="6756"/>
         <source>Failed to create tab for:
 %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6706"/>
+        <location filename="../../source/MainWindow.cpp" line="6705"/>
         <source>File Not Found</source>
         <translation type="unfinished"></translation>
     </message>

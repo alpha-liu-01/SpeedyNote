@@ -79,6 +79,18 @@
 
   <releases>
     
+    <release version="1.3.0" date="2026-02-28">
+      <description>
+        <p>Bug fixes and improvements:</p>
+        <ul>
+          <li>Added a lock option to the page panel action bar.</li>
+          <li>Integrated the subtoolbars into the tool buttons.</li>
+          <li>Fixed the problem that a lasso-selected area could not be moved from one page to another.</li>
+          <li>Changed the undo stack of paged mode to a global stack.</li>
+          <li>Improved the frame rate of the outline panel.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.6" date="2026-02-24">
       <description>
         <p>Bug fixes and improvements:</p>
