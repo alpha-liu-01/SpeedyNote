@@ -36,6 +36,7 @@ void OutlinePanel::setupUi()
     m_tree->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tree->setExpandsOnDoubleClick(false);  // We handle expand via arrow only
     m_tree->setAnimated(true);
+    m_tree->setUniformRowHeights(true);
     
     // Enable mouse tracking for proper hover effects (mouse, stylus)
     m_tree->setMouseTracking(true);
