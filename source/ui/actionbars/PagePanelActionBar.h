@@ -15,6 +15,7 @@ class UndoDeleteButton;
  * when the Page Panel sidebar tab is active.
  * 
  * Layout (top to bottom):
+ * - [Lock]           - Pin/unpin this bar so it stays visible
  * - [Page Up]        - Navigate to previous page
  * - [Wheel Picker]   - iPhone-style page number scroll picker
  * - [Page Down]      - Navigate to next page
@@ -25,7 +26,9 @@ class UndoDeleteButton;
  * - [Delete Page]    - Delete current page (with undo support)
  * 
  * This action bar is always visible when the Page Panel tab is shown.
- * Unlike context-sensitive action bars, it doesn't depend on selection state.
+ * When the lock button is active, the bar persists even when the
+ * Page Panel tab is hidden. Unlike context-sensitive action bars,
+ * it doesn't depend on selection state.
  */
 class PagePanelActionBar : public ActionBar {
     Q_OBJECT
@@ -69,6 +72,11 @@ public:
      * @param darkMode True for dark mode, false for light mode.
      */
     void setDarkMode(bool darkMode) override;
+    
+    /**
+     * @brief Check if the lock is active.
+     */
+    bool isLocked() const;
     
     /**
      * @brief Reset the delete button to normal state.
@@ -145,6 +153,12 @@ signals:
      * The caller should toggle the PDF search bar.
      */
     void searchClicked();
+    
+    /**
+     * @brief Emitted when the lock state changes.
+     * @param locked True if the bar is now locked.
+     */
+    void lockChanged(bool locked);
 
 private slots:
     void onWheelPageChanged(int page);
@@ -153,6 +167,10 @@ private:
     void setupUI();
     void setupConnections();
 
+    // Lock button
+    ActionBarButton* m_lockButton = nullptr;
+    bool m_locked = false;
+    
     // Navigation buttons
     ActionBarButton* m_searchButton = nullptr;        // PDF search (Ctrl+F)
     ActionBarButton* m_pageUpButton = nullptr;

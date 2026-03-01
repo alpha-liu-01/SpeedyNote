@@ -17,13 +17,13 @@ class PagePanelActionBar;
  * positioning relative to the DocumentViewport.
  * 
  * Key differences from SubToolbarContainer:
- * - Positioned on the RIGHT side of viewport (symmetrical to subtoolbars)
+ * - Positioned on the LEFT side of viewport
  * - Visibility depends on selection state, not just tool
  * - Uses string keys for flexibility ("lasso", "objectSelect", etc.)
  * - Supports slide-in animation
  * 
  * Positioning:
- * - 24px from right edge of viewport
+ * - 24px from left edge of viewport
  * - Vertically centered based on current action bar's height
  * - Recalculates on viewport resize and action bar swap
  * 
@@ -122,8 +122,17 @@ public:
      * @param visible True to show, false to hide.
      * 
      * Call this when the Page Panel sidebar tab is shown/hidden.
+     * When the bar is locked, hiding is deferred until unlock.
      */
     void setPagePanelVisible(bool visible);
+    
+    /**
+     * @brief Lock or unlock the Page Panel action bar.
+     * @param locked True to keep the bar visible regardless of panel state.
+     * 
+     * When unlocked while the page panel is inactive, the bar hides immediately.
+     */
+    void setPagePanelLocked(bool locked);
 
 public slots:
     /**
@@ -199,7 +208,7 @@ private:
     void updateSize();
     
     /**
-     * @brief Animate showing the action bar (slide in from right).
+     * @brief Animate showing the action bar (slide in from left).
      */
     void animateShow();
     
@@ -219,9 +228,11 @@ private:
     ToolType m_currentTool = ToolType::Pen;
     QRect m_viewportRect;
     
-    // Page Panel action bar (2-column support)
+    // Page Panel action bar (2-column support + lock)
     PagePanelActionBar* m_pagePanelBar = nullptr;
     bool m_pagePanelVisible = false;
+    bool m_pagePanelLocked = false;
+    bool m_pagePanelShouldBeVisible = false;
     
     // Context state (cached)
     bool m_hasLassoSelection = false;
@@ -236,8 +247,8 @@ private:
     bool m_animationEnabled = true;
     bool m_isAnimating = false;
     
-    /// Offset from right edge of viewport
-    static constexpr int RIGHT_OFFSET = 24;
+    /// Offset from left edge of viewport
+    static constexpr int EDGE_OFFSET = 24;
     /// Gap between columns in 2-column layout
     static constexpr int COLUMN_GAP = 24;
     /// Animation duration in milliseconds

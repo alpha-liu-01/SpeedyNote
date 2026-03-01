@@ -2,8 +2,6 @@
 
 #include <QPainter>
 #include <QMouseEvent>
-#include <QPalette>
-#include <QApplication>
 
 ActionBarButton::ActionBarButton(QWidget* parent)
     : QWidget(parent)
@@ -54,6 +52,24 @@ void ActionBarButton::setDarkMode(bool darkMode)
         m_darkMode = darkMode;
         updateIcon();
     }
+}
+
+void ActionBarButton::setCheckable(bool checkable)
+{
+    m_checkable = checkable;
+}
+
+void ActionBarButton::setChecked(bool checked)
+{
+    if (m_checked != checked) {
+        m_checked = checked;
+        update();
+    }
+}
+
+bool ActionBarButton::isChecked() const
+{
+    return m_checked;
 }
 
 bool ActionBarButton::isEnabled() const
@@ -117,9 +133,9 @@ void ActionBarButton::paintEvent(QPaintEvent* event)
         // Draw text instead of icon
         QColor textColor;
         if (!m_enabled) {
-            textColor = isDarkMode() ? QColor(100, 100, 100) : QColor(150, 150, 150);
+            textColor = m_darkMode ? QColor(100, 100, 100) : QColor(150, 150, 150);
         } else {
-            textColor = isDarkMode() ? QColor(255, 255, 255) : QColor(40, 40, 40);
+            textColor = m_darkMode ? QColor(255, 255, 255) : QColor(40, 40, 40);
         }
         
         painter.setPen(textColor);
@@ -190,37 +206,17 @@ void ActionBarButton::leaveEvent(QEvent* event)
     QWidget::leaveEvent(event);
 }
 
-bool ActionBarButton::isDarkMode() const
-{
-    // Detect dark mode by checking the window background luminance
-    const QPalette& pal = QApplication::palette();
-    const QColor windowColor = pal.color(QPalette::Window);
-    
-    // Calculate relative luminance (simplified)
-    const qreal luminance = 0.299 * windowColor.redF() 
-                          + 0.587 * windowColor.greenF() 
-                          + 0.114 * windowColor.blueF();
-    
-    return luminance < 0.5;
-}
-
 QColor ActionBarButton::backgroundColor() const
 {
     if (!m_enabled) {
-        // Disabled: more muted colors
-        if (isDarkMode()) {
-            return QColor(45, 45, 45);
-        } else {
-            return QColor(200, 200, 200);
-        }
+        return m_darkMode ? QColor(45, 45, 45) : QColor(200, 200, 200);
     }
     
-    // Enabled: neutral background (same as unchecked SubToolbarToggle)
-    if (isDarkMode()) {
-        return QColor(60, 60, 60);
-    } else {
-        return QColor(220, 220, 220);
+    if (m_checkable && m_checked) {
+        return m_darkMode ? QColor(70, 130, 180) : QColor(100, 149, 237);
     }
+    
+    return m_darkMode ? QColor(60, 60, 60) : QColor(220, 220, 220);
 }
 
 void ActionBarButton::updateIcon()

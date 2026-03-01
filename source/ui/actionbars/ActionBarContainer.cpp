@@ -118,8 +118,8 @@ void ActionBarContainer::hideActionBar()
     // Hide container only if PagePanel is also not visible
     if (!m_pagePanelVisible) {
         if (m_animationEnabled && isVisible()) {
-        animateHide();
-    } else {
+            animateHide();
+        } else {
             hide();
         }
     }
@@ -161,23 +161,14 @@ void ActionBarContainer::updatePosition(const QRect& viewportRect)
     int contextBarHeight = contextBarShown ? m_currentActionBar->sizeHint().height() : 0;
     int maxBarHeight = qMax(pagePanelHeight, contextBarHeight);
     
-    // Calculate widths
+    // Calculate widths (needed for 2-column child positioning)
     int pagePanelWidth = pagePanelShown ? m_pagePanelBar->sizeHint().width() : 0;
-    int contextBarWidth = contextBarShown ? m_currentActionBar->sizeHint().width() : 0;
     
-    // Calculate total width
-    int totalWidth;
-    if (pagePanelShown && contextBarShown) {
-        // 2-column layout: pagePanelWidth + gap + contextBarWidth
-        totalWidth = pagePanelWidth + COLUMN_GAP + contextBarWidth;
-    } else {
-        totalWidth = qMax(pagePanelWidth, contextBarWidth);
-    }
-    
-    // Calculate container position (X: right-aligned, Y: vertically centered)
-    int containerX = viewportRect.right() - RIGHT_OFFSET - totalWidth;
-    int containerY = viewportRect.top() + (viewportRect.height() - maxBarHeight) / 2;
-    containerY = qMax(containerY, viewportRect.top() + RIGHT_OFFSET);
+    // Calculate container position (X: left-aligned, Y: vertically centered)
+    // Use m_viewportRect (validated above) rather than the raw parameter
+    int containerX = m_viewportRect.left() + EDGE_OFFSET;
+    int containerY = m_viewportRect.top() + (m_viewportRect.height() - maxBarHeight) / 2;
+    containerY = qMax(containerY, m_viewportRect.top() + EDGE_OFFSET);
     
     // Move container
     move(containerX, containerY);
@@ -246,6 +237,9 @@ void ActionBarContainer::setPagePanelActionBar(PagePanelActionBar* actionBar)
     if (m_pagePanelBar) {
         m_pagePanelBar->setParent(this);
         m_pagePanelBar->setVisible(m_pagePanelVisible);
+        
+        connect(m_pagePanelBar, &PagePanelActionBar::lockChanged,
+                this, &ActionBarContainer::setPagePanelLocked);
     }
     
     // Update layout
@@ -260,27 +254,53 @@ PagePanelActionBar* ActionBarContainer::pagePanelActionBar() const
 
 void ActionBarContainer::setPagePanelVisible(bool visible)
 {
-    if (m_pagePanelVisible == visible) {
+    m_pagePanelShouldBeVisible = visible;
+    
+    // When locked, keep the bar visible even if the panel is hidden
+    bool effectiveVisible = visible || m_pagePanelLocked;
+    
+    if (m_pagePanelVisible == effectiveVisible) {
         return;
     }
     
-    m_pagePanelVisible = visible;
+    m_pagePanelVisible = effectiveVisible;
     
     if (m_pagePanelBar) {
-        m_pagePanelBar->setVisible(visible);
+        m_pagePanelBar->setVisible(effectiveVisible);
     }
     
     // Update layout for potential 2-column arrangement
     updateSize();
     updatePosition(m_viewportRect);
     
-    // Show container if at least one bar should be visible
-    // BUG-AB-001 FIX: Use m_currentActionBar != nullptr instead of isVisible()
     if (m_pagePanelVisible || m_currentActionBar) {
         show();
         raise();
     } else if (!m_pagePanelVisible && !m_currentActionBar) {
         hide();
+    }
+}
+
+void ActionBarContainer::setPagePanelLocked(bool locked)
+{
+    if (m_pagePanelLocked == locked) {
+        return;
+    }
+    
+    m_pagePanelLocked = locked;
+    
+    if (!locked && !m_pagePanelShouldBeVisible) {
+        // Unlocked while page panel is inactive: hide immediately
+        m_pagePanelVisible = false;
+        if (m_pagePanelBar) {
+            m_pagePanelBar->setVisible(false);
+        }
+        updateSize();
+        updatePosition(m_viewportRect);
+        
+        if (!m_currentActionBar) {
+            hide();
+        }
     }
 }
 
@@ -482,34 +502,18 @@ void ActionBarContainer::animateShow()
         m_animation = nullptr;
     }
     
-    // Calculate total dimensions (same logic as updatePosition/updateSize)
-    int pagePanelWidth = hasPagePanel ? m_pagePanelBar->sizeHint().width() : 0;
+    // Calculate max bar height for vertical centering
     int pagePanelHeight = hasPagePanel ? m_pagePanelBar->sizeHint().height() : 0;
-    int contextBarWidth = hasContextBar ? m_currentActionBar->sizeHint().width() : 0;
     int contextBarHeight = hasContextBar ? m_currentActionBar->sizeHint().height() : 0;
+    int maxBarHeight = qMax(pagePanelHeight, contextBarHeight);
     
-    int totalWidth;
-    int maxBarHeight;
-    
-    if (hasPagePanel && hasContextBar) {
-        // 2-column layout
-        totalWidth = pagePanelWidth + COLUMN_GAP + contextBarWidth;
-        maxBarHeight = qMax(pagePanelHeight, contextBarHeight);
-    } else if (hasPagePanel) {
-        totalWidth = pagePanelWidth;
-        maxBarHeight = pagePanelHeight;
-    } else {
-        totalWidth = contextBarWidth;
-        maxBarHeight = contextBarHeight;
-    }
-    
-    // Final position (24px from right edge, vertically centered)
-    int finalX = m_viewportRect.right() - RIGHT_OFFSET - totalWidth;
+    // Final position (24px from left edge, vertically centered)
+    int finalX = m_viewportRect.left() + EDGE_OFFSET;
     int finalY = m_viewportRect.top() + (m_viewportRect.height() - maxBarHeight) / 2;
-    finalY = qMax(finalY, m_viewportRect.top() + RIGHT_OFFSET);
+    finalY = qMax(finalY, m_viewportRect.top() + EDGE_OFFSET);
     
-    // Start position: 50px to the right of final position
-    int startX = finalX + 50;
+    // Start position: 50px to the left of final position
+    int startX = finalX - 50;
     int startY = finalY;
     
     m_isAnimating = true;
@@ -559,8 +563,8 @@ void ActionBarContainer::animateHide()
     // Current position
     QPoint startPos = pos();
     
-    // End position: 50px to the right
-    QPoint endPos = startPos + QPoint(50, 0);
+    // End position: 50px to the left
+    QPoint endPos = startPos + QPoint(-50, 0);
     
     m_isAnimating = true;
     

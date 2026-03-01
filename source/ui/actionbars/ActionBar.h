@@ -83,6 +83,8 @@ protected:
      */
     QVBoxLayout* m_layout = nullptr;
     
+    bool m_darkMode = false;
+    
     /// Fixed width for all action bars (same as subtoolbar)
     static constexpr int ACTIONBAR_WIDTH = 44;
     
