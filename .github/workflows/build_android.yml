@@ -1,0 +1,39 @@
+name: Android Build
+
+on:
+  push:
+    tags:
+      - 'v*' 
+  workflow_dispatch: 
+
+jobs:
+  build-android:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker build -t speedynote-android-builder android/
+
+      - name: Build APK inside container
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            speedynote-android-builder \
+            bash -c "
+              ./android/build-mupdf.sh &&
+              ./android/build-speedynote.sh --apk
+            "
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpeedyNote-APK
+          path: android/SpeedyNote.apk
