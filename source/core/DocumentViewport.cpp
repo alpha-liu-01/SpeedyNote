@@ -965,7 +965,7 @@ void DocumentViewport::navigateToPosition(QString pageUuid, QPointF position)
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "navigateToPosition: Page not found for UUID" << pageUuid;
 #endif
-        // TODO: Show user message "Target page not found"
+        emit userWarning(tr("Target page not found."));
         return;
     }
     
@@ -1051,31 +1051,19 @@ void DocumentViewport::pushPositionHistory()
     
     // Don't push if we're already at this position (avoid duplicates)
     if (!m_edgelessPositionHistory.isEmpty()) {
-        QPointF lastPos = m_edgelessPositionHistory.top();
+        QPointF lastPos = m_edgelessPositionHistory.last();
         // Consider positions within 10 pixels as "same"
         if ((currentPos - lastPos).manhattanLength() < 10.0) {
             return;
         }
     }
     
-    // Trim history if at capacity - remove oldest (bottom) entry
-    // QStack doesn't have removeFirst(), so we pop all except oldest, discard oldest, repush
-    // O(n) but acceptable for small MAX_POSITION_HISTORY (20 items)
+    // Trim history if at capacity - discard oldest entry
     if (m_edgelessPositionHistory.size() >= MAX_POSITION_HISTORY) {
-        QStack<QPointF> temp;
-        // Move all except the bottom (oldest) to temp
-        while (m_edgelessPositionHistory.size() > 1) {
-            temp.push(m_edgelessPositionHistory.pop());
-        }
-        // Discard the oldest (now the only item left)
-        m_edgelessPositionHistory.pop();
-        // Restore the rest
-        while (!temp.isEmpty()) {
-            m_edgelessPositionHistory.push(temp.pop());
-        }
+        m_edgelessPositionHistory.removeFirst();
     }
     
-    m_edgelessPositionHistory.push(currentPos);
+    m_edgelessPositionHistory.append(currentPos);
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[PositionHistory] Pushed position:" << currentPos 
@@ -1122,7 +1110,7 @@ void DocumentViewport::goBackPosition()
         return;
     }
     
-    QPointF previousPos = m_edgelessPositionHistory.pop();
+    QPointF previousPos = m_edgelessPositionHistory.takeLast();
     
     // Calculate tile coordinates from document position
     int tileX = static_cast<int>(std::floor(previousPos.x() / Document::EDGELESS_TILE_SIZE));
@@ -1157,19 +1145,9 @@ void DocumentViewport::syncPositionToDocument()
     QPointF currentPos = currentCenterPosition();
     m_document->setEdgelessLastPosition(currentPos);
     
-    // Convert QStack to QVector for Document storage
-    // QStack stores items in LIFO order, so we need to reverse to get oldest-to-newest
-    QVector<QPointF> historyVec;
-    historyVec.reserve(m_edgelessPositionHistory.size());
-    
-    // Copy stack to temp, then pop into vector (gives us correct order)
-    QStack<QPointF> tempStack = m_edgelessPositionHistory;
-    while (!tempStack.isEmpty()) {
-        historyVec.append(tempStack.pop());  // O(1) append instead of O(n) prepend
-    }
-    // Reverse to get oldest-to-newest order
-    std::reverse(historyVec.begin(), historyVec.end());
-    
+    // QList is already in oldest-to-newest order
+    QVector<QPointF> historyVec(m_edgelessPositionHistory.cbegin(),
+                                m_edgelessPositionHistory.cend());
     m_document->setEdgelessPositionHistory(historyVec);
     
 #ifdef SPEEDYNOTE_DEBUG
@@ -1189,12 +1167,9 @@ bool DocumentViewport::applyRestoredEdgelessPosition()
         return false;  // Can't calculate pan offset without valid dimensions
     }
     
-    // Restore position history from Document
+    // Restore position history from Document (already in oldest-to-newest order)
     const QVector<QPointF>& savedHistory = m_document->edgelessPositionHistory();
-    m_edgelessPositionHistory.clear();
-    for (const QPointF& pos : savedHistory) {
-        m_edgelessPositionHistory.push(pos);
-    }
+    m_edgelessPositionHistory = QList<QPointF>(savedHistory.cbegin(), savedHistory.cend());
     
     // Calculate pan offset to center the saved position
     QPointF lastPos = m_document->edgelessLastPosition();
@@ -7044,7 +7019,7 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     QString notesDir = m_document->notesPath();
     if (notesDir.isEmpty()) {
         qWarning() << "createMarkdownNoteForSlot: Cannot create note - document not saved";
-        // TODO: Show user message via a signal
+        emit userWarning(tr("Cannot create note: please save the document first."));
         return;
     }
     
@@ -7063,6 +7038,7 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     QString filePath = notesDir + "/" + noteId + ".md";
     if (!note.saveToFile(filePath)) {
         qWarning() << "createMarkdownNoteForSlot: Failed to create note file:" << filePath;
+        emit userWarning(tr("Failed to create note file. Check disk space and permissions."));
         return;
     }
     
@@ -11076,6 +11052,10 @@ void DocumentViewport::redo()
                 break;
             }
             case UndoAction::ObjectDelete: {
+                deselectObjectById(action.objectId);
+                if (m_hoveredObject && m_hoveredObject->id == action.objectId) {
+                    m_hoveredObject = nullptr;
+                }
                 Page* c = getObjContainer(m_document, action, false);
                 if (c) {
                     c->removeObject(action.objectId);
