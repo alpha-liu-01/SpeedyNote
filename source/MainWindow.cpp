@@ -1917,6 +1917,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_markdownNoteOpenConn);
         m_markdownNoteOpenConn = {};
     }
+    if (m_userWarningConn) {
+        disconnect(m_userWarningConn);
+        m_userWarningConn = {};
+    }
     // M.7.3: Disconnect linkObjectList connection
     if (m_linkObjectListConn) {
         disconnect(m_linkObjectListConn);
@@ -2268,6 +2272,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             markdownNotesSidebar->setNoteEditMode(noteId, true);
         });
         
+        m_userWarningConn = connect(viewport, &DocumentViewport::userWarning,
+                this, [this](const QString& message) {
+            QMessageBox::warning(this, tr("Warning"), message);
+        });
+
         // M.7.3: Handle linkObjectListMayHaveChanged signal (objects add/remove, tile eviction)
         m_linkObjectListConn = connect(viewport, &DocumentViewport::linkObjectListMayHaveChanged,
                 this, [this]() {

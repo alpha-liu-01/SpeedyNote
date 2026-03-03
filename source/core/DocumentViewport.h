@@ -1648,7 +1648,13 @@ signals:
      * MainWindow connects this to open the markdown notes sidebar.
      */
     void requestOpenMarkdownNote(const QString& noteId, const QString& linkObjectId);
-    
+
+    /**
+     * @brief Emitted when an operation fails and the user should be notified.
+     * @param message A translatable, user-facing description of the failure.
+     */
+    void userWarning(const QString& message);
+
     /**
      * @brief Emitted when user clicks "Locate PDF" on the missing PDF banner.
      * 
@@ -2213,7 +2219,7 @@ private:
     static constexpr int MAX_UNDO = 100;  ///< Max undo actions
     
     // ===== Edgeless Position History (Phase 4) =====
-    QStack<QPointF> m_edgelessPositionHistory;       ///< Stack of previous viewport positions
+    QList<QPointF> m_edgelessPositionHistory;         ///< Previous viewport positions (oldest first)
     static constexpr int MAX_POSITION_HISTORY = 20;  ///< Max saved positions
     
     /**
