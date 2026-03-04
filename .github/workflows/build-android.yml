@@ -99,10 +99,14 @@ jobs:
       # -------------------------------------------------------------------------
       - name: Decode release keystore
         id: signing
-        if: startsWith(github.ref, 'refs/tags/') && secrets.ANDROID_SIGNING_KEY != ''
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
         run: |
-          echo "${{ secrets.ANDROID_SIGNING_KEY }}" | base64 --decode > /tmp/release.keystore
-          echo "available=true" >> $GITHUB_OUTPUT
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "$SIGNING_KEY" | base64 --decode > /tmp/release.keystore
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build SpeedyNote APKs (arm64 + arm32)
         run: |
