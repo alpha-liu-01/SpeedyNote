@@ -81,7 +81,7 @@ jobs:
             bash -c "./android/build-mupdf.sh"
 
       # -------------------------------------------------------------------------
-      # Release signing — only on version tag pushes.
+      # Release signing — whenever the secret is available.
       # The keystore is never stored in the repo; it lives in GitHub Secrets as a
       # base64-encoded blob.  Required secrets (Settings → Secrets → Actions):
       #
@@ -94,12 +94,10 @@ jobs:
       #   ANDROID_STORE_PASSWORD  Keystore password
       #   ANDROID_KEY_PASSWORD    Key password (may equal ANDROID_STORE_PASSWORD)
       #
-      # If these secrets are not set the workflow falls back to a debug-signed APK,
-      # which is useful for testing workflow_dispatch runs.
+      # If these secrets are not set the workflow falls back to a debug-signed APK.
       # -------------------------------------------------------------------------
       - name: Decode release keystore
         id: signing
-        if: startsWith(github.ref, 'refs/tags/')
         env:
           SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
         run: |
@@ -122,9 +120,6 @@ jobs:
           fi
 
           for ARCH in arm64 arm32; do
-            # Clean androiddeployqt output from previous arch to avoid contamination
-            rm -rf android/build-app/android-build
-
             docker run --rm \
               -v ${{ github.workspace }}:/workspace \
               ${KEYSTORE_MOUNT} \
@@ -134,7 +129,7 @@ jobs:
               -e RELEASE_STORE_PASS="${{ secrets.ANDROID_STORE_PASSWORD }}" \
               -e RELEASE_KEY_PASS="${{ secrets.ANDROID_KEY_PASSWORD }}" \
               ${{ steps.docker-tag.outputs.tag }} \
-              bash -c "./android/build-speedynote.sh --apk --${ARCH} ${SIGN_FLAG}"
+              bash -c "rm -rf android/build-app/android-build && ./android/build-speedynote.sh --apk --${ARCH} ${SIGN_FLAG}"
 
             mv android/SpeedyNote.apk "android/SpeedyNote-${ARCH}.apk"
           done
