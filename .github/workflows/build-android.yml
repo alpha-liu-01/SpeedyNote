@@ -106,8 +106,17 @@ jobs:
             echo "available=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Extract version from CMakeLists.txt
+        id: version
+        run: |
+          VERSION=$(grep -oP 'project\(SpeedyNote VERSION \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "App version: ${VERSION}"
+
       - name: Build SpeedyNote APKs (arm64 + arm32)
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
           # Decide signing mode
           if [[ "${{ steps.signing.outputs.available }}" == "true" ]]; then
             SIGN_FLAG="--release"
@@ -131,7 +140,7 @@ jobs:
               ${{ steps.docker-tag.outputs.tag }} \
               bash -c "rm -rf android/build-app/android-build && ./android/build-speedynote.sh --apk --${ARCH} ${SIGN_FLAG}"
 
-            mv android/SpeedyNote.apk "android/SpeedyNote-${ARCH}.apk"
+            mv android/SpeedyNote.apk "android/SpeedyNote-${VERSION}-${ARCH}.apk"
           done
 
       - name: Remove release keystore
@@ -144,17 +153,17 @@ jobs:
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SpeedyNote-APKs
+          name: SpeedyNote-${{ steps.version.outputs.version }}-APKs
           path: |
-            android/SpeedyNote-arm64.apk
-            android/SpeedyNote-arm32.apk
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm64.apk
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm32.apk
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            android/SpeedyNote-arm64.apk
-            android/SpeedyNote-arm32.apk
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm64.apk
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm32.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
