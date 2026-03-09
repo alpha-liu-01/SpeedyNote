@@ -14,7 +14,7 @@ env:
   REGISTRY: ghcr.io
   # Image is public (build environment only — no secrets inside)
   IMAGE_NAME: ${{ github.repository_owner }}/speedynote-android-builder
-  MUPDF_VERSION: 1.25.1
+  MUPDF_VERSION: 1.24.10
 
 jobs:
   build-android:
@@ -81,7 +81,7 @@ jobs:
             bash -c "./android/build-mupdf.sh"
 
       # -------------------------------------------------------------------------
-      # Release signing — only on version tag pushes.
+      # Release signing — whenever the secret is available.
       # The keystore is never stored in the repo; it lives in GitHub Secrets as a
       # base64-encoded blob.  Required secrets (Settings → Secrets → Actions):
       #
@@ -94,18 +94,29 @@ jobs:
       #   ANDROID_STORE_PASSWORD  Keystore password
       #   ANDROID_KEY_PASSWORD    Key password (may equal ANDROID_STORE_PASSWORD)
       #
-      # If these secrets are not set the workflow falls back to a debug-signed APK,
-      # which is useful for testing workflow_dispatch runs.
+      # If these secrets are not set the workflow falls back to a debug-signed APK.
       # -------------------------------------------------------------------------
       - name: Decode release keystore
         id: signing
-        if: startsWith(github.ref, 'refs/tags/') && secrets.ANDROID_SIGNING_KEY != ''
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
         run: |
-          echo "${{ secrets.ANDROID_SIGNING_KEY }}" | base64 --decode > /tmp/release.keystore
-          echo "available=true" >> $GITHUB_OUTPUT
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "$SIGNING_KEY" | base64 --decode > /tmp/release.keystore
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build SpeedyNote APK
+      - name: Extract version from CMakeLists.txt
+        id: version
         run: |
+          VERSION=$(grep -oP 'project\(SpeedyNote VERSION \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "App version: ${VERSION}"
+
+      - name: Build SpeedyNote APKs (arm64 + arm32)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
           # Decide signing mode
           if [[ "${{ steps.signing.outputs.available }}" == "true" ]]; then
             SIGN_FLAG="--release"
@@ -117,16 +128,20 @@ jobs:
             KEYSTORE_ENV=""
           fi
 
-          docker run --rm \
-            -v ${{ github.workspace }}:/workspace \
-            ${KEYSTORE_MOUNT} \
-            -w /workspace \
-            ${KEYSTORE_ENV} \
-            -e RELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
-            -e RELEASE_STORE_PASS="${{ secrets.ANDROID_STORE_PASSWORD }}" \
-            -e RELEASE_KEY_PASS="${{ secrets.ANDROID_KEY_PASSWORD }}" \
-            ${{ steps.docker-tag.outputs.tag }} \
-            bash -c "./android/build-speedynote.sh --apk ${SIGN_FLAG}"
+          for ARCH in arm64 arm32; do
+            docker run --rm \
+              -v ${{ github.workspace }}:/workspace \
+              ${KEYSTORE_MOUNT} \
+              -w /workspace \
+              ${KEYSTORE_ENV} \
+              -e RELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
+              -e RELEASE_STORE_PASS="${{ secrets.ANDROID_STORE_PASSWORD }}" \
+              -e RELEASE_KEY_PASS="${{ secrets.ANDROID_KEY_PASSWORD }}" \
+              ${{ steps.docker-tag.outputs.tag }} \
+              bash -c "rm -rf android/build-app/android-build && ./android/build-speedynote.sh --apk --${ARCH} ${SIGN_FLAG}"
+
+            mv android/SpeedyNote.apk "android/SpeedyNote-${VERSION}-${ARCH}.apk"
+          done
 
       - name: Remove release keystore
         if: always()
@@ -135,16 +150,20 @@ jobs:
       # -------------------------------------------------------------------------
       # Artifacts
       # -------------------------------------------------------------------------
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SpeedyNote-APK
-          path: android/SpeedyNote.apk
+          name: SpeedyNote-${{ steps.version.outputs.version }}-APKs
+          path: |
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm64.apk
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm32.apk
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: android/SpeedyNote.apk
+          files: |
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm64.apk
+            android/SpeedyNote-${{ steps.version.outputs.version }}-arm32.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

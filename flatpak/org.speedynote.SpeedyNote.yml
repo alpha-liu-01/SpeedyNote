@@ -1,7 +1,5 @@
 # SpeedyNote Flatpak Manifest
-# Build locally:  flatpak-builder --force-clean build-dir flatpak/org.speedynote.SpeedyNote.yml
-# Install locally: flatpak-builder --user --install --force-clean build-dir flatpak/org.speedynote.SpeedyNote.yml
-# Run:             flatpak run org.speedynote.SpeedyNote
+
 
 app-id: org.speedynote.SpeedyNote
 runtime: org.kde.Platform
@@ -19,7 +17,8 @@ finish-args:
   # Access ~/Documents for notebook storage and PDF files.
   # Other locations are accessible via the file chooser portal.
   - --filesystem=xdg-documents
-
+cleanup:
+  - /include
 modules:
   # =========================================================================
   # MuPDF - PDF rendering and export library
@@ -69,6 +68,6 @@ modules:
       - -DMUPDF_INCLUDE_DIR=/app/include
     sources:
       - type: archive
-        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.2.5.tar.gz
-        sha256: a567386aee2b44ca6204f1ec7966a0f5b9a3d04a6faa76806582a193b6bed110
+        url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.3.0.tar.gz
+        sha256: aa49782660b18a51b4df8ddabbcdb1d35263c3eeadead6006ce501de344d2604
 

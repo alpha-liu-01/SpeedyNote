@@ -70,6 +70,9 @@ SpeedyNote-Android-android-conan/
 private_scripts/
 plans.txt
 /android/signing/
+*.keystore
+*.jks
+*.b64
 packaging/
 .flatpak-builder/
 build-dir/
