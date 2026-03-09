@@ -1189,6 +1189,14 @@ public:
      * Invalidates layout cache and triggers repaint.
      */
     void notifyDocumentStructureChanged();
+
+    /**
+     * @brief Notify viewport that the PDF provider changed (relinked or cleared).
+     *
+     * Invalidates the PDF tile cache and triggers a repaint so the new
+     * (or absent) PDF content is rendered immediately.
+     */
+    void notifyPdfChanged();
     
     // ===== View State Setters (Slots) =====
     

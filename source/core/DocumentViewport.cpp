@@ -640,6 +640,12 @@ void DocumentViewport::notifyDocumentStructureChanged()
     emitScrollFractions();
 }
 
+void DocumentViewport::notifyPdfChanged()
+{
+    invalidatePdfCache();
+    update();
+}
+
 // ===== Tool State Management (Task 2.1) =====
 
 void DocumentViewport::setCurrentTool(ToolType tool)

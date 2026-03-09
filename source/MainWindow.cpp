@@ -2312,9 +2312,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         viewport->hideMissingPdfBanner();
     }
     
-    // Update Relink PDF menu action enabled state
+    // Update Link/Relink PDF menu action
     if (m_relinkPdfAction) {
-        m_relinkPdfAction->setEnabled(doc && doc->hasPdfReference());
+        m_relinkPdfAction->setEnabled(doc != nullptr);
+        if (doc && doc->hasPdfReference()) {
+            m_relinkPdfAction->setText(tr("Relink PDF..."));
+        } else {
+            m_relinkPdfAction->setText(tr("Link PDF..."));
+        }
     }
 }
 
@@ -2537,33 +2542,39 @@ void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
     if (!viewport) return;
     
     Document* doc = viewport->document();
-    if (!doc || !doc->hasPdfReference()) return;
+    if (!doc) return;
     
     // Open PdfRelinkDialog with hash verification
-    PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(), this);
+    PdfRelinkDialog dialog(doc->pdfPath(), doc->pdfHash(), doc->pdfSize(),
+                           doc->isPdfLoaded(), this);
     if (dialog.exec() == QDialog::Accepted) {
         PdfRelinkDialog::Result result = dialog.getResult();
         
         if (result == PdfRelinkDialog::RelinkPdf) {
             QString newPath = dialog.getNewPdfPath();
             if (!newPath.isEmpty() && doc->relinkPdf(newPath)) {
-                // Hide the banner
                 viewport->hideMissingPdfBanner();
-                
-                // Refresh viewport to show PDF backgrounds
-                viewport->update();
-                
-                // Refresh OutlinePanel - PDF may have outline now
-                updateOutlinePanelForDocument(doc);
-                
-                // Refresh PagePanel thumbnails to show PDF background
-                if (m_pagePanel) {
-                    m_pagePanel->invalidateAllThumbnails();
-                }
+                viewport->notifyPdfChanged();
             }
         } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
-            // User chose to continue without PDF - hide the banner
+            doc->clearPdfReference();
             viewport->hideMissingPdfBanner();
+            viewport->notifyPdfChanged();
+        }
+
+        if (result == PdfRelinkDialog::RelinkPdf ||
+            result == PdfRelinkDialog::ContinueWithoutPdf) {
+            updateOutlinePanelForDocument(doc);
+            if (m_pagePanel) {
+                m_pagePanel->invalidateAllThumbnails();
+            }
+            if (m_relinkPdfAction) {
+                if (doc->hasPdfReference()) {
+                    m_relinkPdfAction->setText(tr("Relink PDF..."));
+                } else {
+                    m_relinkPdfAction->setText(tr("Link PDF..."));
+                }
+            }
         }
         // Cancel: do nothing, banner remains visible
     }
