@@ -16,16 +16,24 @@
 #include "../ios/PdfPickerIOS.h"
 #endif
 
-PdfRelinkDialog::PdfRelinkDialog(const QString& missingPdfPath,
+PdfRelinkDialog::PdfRelinkDialog(const QString& pdfPath,
                                    const QString& storedHash,
                                    qint64 storedSize,
+                                   bool pdfIsLoaded,
                                    QWidget* parent)
     : QDialog(parent)
-    , originalPdfPath(missingPdfPath)
+    , originalPdfPath(pdfPath)
     , m_storedHash(storedHash)
     , m_storedSize(storedSize)
+    , m_pdfIsLoaded(pdfIsLoaded)
 {
-    setWindowTitle(tr("PDF File Missing"));
+    if (originalPdfPath.isEmpty()) {
+        setWindowTitle(tr("Link PDF"));
+    } else if (m_pdfIsLoaded) {
+        setWindowTitle(tr("Reconnect PDF"));
+    } else {
+        setWindowTitle(tr("PDF File Missing"));
+    }
     setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     setModal(true);
     
@@ -57,14 +65,32 @@ void PdfRelinkDialog::setupUI()
     QHBoxLayout *headerLayout = new QHBoxLayout();
     headerLayout->setSpacing(10);
     
+    bool noPdfReference = originalPdfPath.isEmpty();
+
     QLabel *iconLabel = new QLabel();
-    QPixmap icon = QApplication::style()->standardIcon(QStyle::SP_MessageBoxWarning).pixmap(48, 48);
+    QStyle::StandardPixmap iconType = (noPdfReference || m_pdfIsLoaded)
+        ? QStyle::SP_MessageBoxInformation
+        : QStyle::SP_MessageBoxWarning;
+    QPixmap icon = QApplication::style()->standardIcon(iconType).pixmap(48, 48);
     iconLabel->setPixmap(icon);
     iconLabel->setFixedSize(48, 48);
     iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     
-    QLabel *titleLabel = new QLabel(tr("PDF File Not Found"));
-    titleLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #d35400;");
+    QString titleText;
+    QString titleColor;
+    if (noPdfReference) {
+        titleText = tr("Link PDF File");
+        titleColor = "#2980b9";
+    } else if (m_pdfIsLoaded) {
+        titleText = tr("Reconnect PDF File");
+        titleColor = "#2980b9";
+    } else {
+        titleText = tr("PDF File Not Found");
+        titleColor = "#d35400";
+    }
+    QLabel *titleLabel = new QLabel(titleText);
+    titleLabel->setStyleSheet(
+        QString("font-size: 16px; font-weight: bold; color: %1;").arg(titleColor));
     titleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     
     headerLayout->addWidget(iconLabel);
@@ -77,12 +103,23 @@ void PdfRelinkDialog::setupUI()
     QFileInfo fileInfo(originalPdfPath);
     QString fileName = fileInfo.fileName();
     
-    QLabel *messageLabel = new QLabel(
-        tr("The PDF file linked to this notebook could not be found:\n\n"
-           "Missing file: %1\n\n"
-           "This may happen if the file was moved, renamed, or you're opening the notebook on a different computer.\n\n"
-           "What would you like to do?").arg(fileName)
-    );
+    QString messageText;
+    if (noPdfReference) {
+        messageText = tr("This notebook does not have a linked PDF file.\n\n"
+                         "You can select a PDF file to link to this notebook.");
+    } else if (m_pdfIsLoaded) {
+        messageText = tr("A PDF file is currently linked to this notebook:\n\n"
+                         "Current file: %1\n\n"
+                         "You can select a different PDF file to link to this notebook.\n\n"
+                         "What would you like to do?").arg(fileName);
+    } else {
+        messageText = tr("The PDF file linked to this notebook could not be found:\n\n"
+                         "Missing file: %1\n\n"
+                         "This may happen if the file was moved, renamed, or you're opening the notebook on a different computer.\n\n"
+                         "What would you like to do?").arg(fileName);
+    }
+    
+    QLabel *messageLabel = new QLabel(messageText);
     messageLabel->setWordWrap(true);
     messageLabel->setStyleSheet("font-size: 12px; color: #555;");
     messageLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
@@ -94,7 +131,15 @@ void PdfRelinkDialog::setupUI()
     buttonLayout->setSpacing(10);
     
     // Relink PDF button
-    QPushButton *relinkBtn = new QPushButton(tr("Locate PDF File..."));
+    QString relinkLabel;
+    if (noPdfReference) {
+        relinkLabel = tr("Choose PDF File...");
+    } else if (m_pdfIsLoaded) {
+        relinkLabel = tr("Choose New PDF File...");
+    } else {
+        relinkLabel = tr("Locate PDF File...");
+    }
+    QPushButton *relinkBtn = new QPushButton(relinkLabel);
     relinkBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_FileDialogDetailedView));
     relinkBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     relinkBtn->setMinimumHeight(40);
@@ -117,31 +162,36 @@ void PdfRelinkDialog::setupUI()
     )");
     connect(relinkBtn, &QPushButton::clicked, this, &PdfRelinkDialog::onRelinkPdf);
     
-    // Continue without PDF button
-    QPushButton *continueBtn = new QPushButton(tr("Continue Without PDF"));
-    continueBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DialogApplyButton));
-    continueBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    continueBtn->setMinimumHeight(40);
-    continueBtn->setStyleSheet(R"(
-        QPushButton {
-            text-align: left;
-            padding: 10px;
-            border: 1px solid palette(mid);
-            border-radius: 5px;
-            background: palette(button);
-        }
-        QPushButton:hover {
-            background: palette(light);
-            border-color: palette(dark);
-        }
-        QPushButton:pressed {
-            background: palette(midlight);
-        }
-    )");
-    connect(continueBtn, &QPushButton::clicked, this, &PdfRelinkDialog::onContinueWithoutPdf);
-    
     buttonLayout->addWidget(relinkBtn);
-    buttonLayout->addWidget(continueBtn);
+
+    // Continue without PDF / Unlink button (hidden when there's no PDF to unlink)
+    if (!noPdfReference) {
+        QString continueLabel = m_pdfIsLoaded
+            ? tr("Unlink PDF")
+            : tr("Continue Without PDF");
+        QPushButton *continueBtn = new QPushButton(continueLabel);
+        continueBtn->setIcon(QApplication::style()->standardIcon(QStyle::SP_DialogApplyButton));
+        continueBtn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        continueBtn->setMinimumHeight(40);
+        continueBtn->setStyleSheet(R"(
+            QPushButton {
+                text-align: left;
+                padding: 10px;
+                border: 1px solid palette(mid);
+                border-radius: 5px;
+                background: palette(button);
+            }
+            QPushButton:hover {
+                background: palette(light);
+                border-color: palette(dark);
+            }
+            QPushButton:pressed {
+                background: palette(midlight);
+            }
+        )");
+        connect(continueBtn, &QPushButton::clicked, this, &PdfRelinkDialog::onContinueWithoutPdf);
+        buttonLayout->addWidget(continueBtn);
+    }
     
     mainLayout->addLayout(buttonLayout);
     
@@ -175,11 +225,14 @@ void PdfRelinkDialog::setupUI()
 
 void PdfRelinkDialog::onRelinkPdf()
 {
-    QFileInfo originalInfo(originalPdfPath);
-    QString startDir = originalInfo.absolutePath();
+    QString startDir;
+    if (!originalPdfPath.isEmpty()) {
+        QFileInfo originalInfo(originalPdfPath);
+        startDir = originalInfo.absolutePath();
+    }
     
-    // If original directory doesn't exist, try the last-used open directory
-    if (!QDir(startDir).exists()) {
+    // If no original path or directory doesn't exist, try the last-used open directory
+    if (startDir.isEmpty() || !QDir(startDir).exists()) {
         QSettings settings("SpeedyNote", "App");
         startDir = settings.value("FileDialogs/lastOpenDirectory").toString();
         if (startDir.isEmpty() || !QDir(startDir).exists()) {
@@ -356,11 +409,17 @@ bool PdfRelinkDialog::verifyAndConfirmPdf(const QString& selectedPath)
 
 void PdfRelinkDialog::onContinueWithoutPdf()
 {
+    QString title = m_pdfIsLoaded ? tr("Unlink PDF") : tr("Continue Without PDF");
+    QString message = m_pdfIsLoaded
+        ? tr("Are you sure you want to unlink the current PDF file?\n\n"
+             "You can still use the notebook for taking notes, but PDF annotation features will not be available.\n\n"
+             "You can relink a PDF file later from the menu.")
+        : tr("Are you sure you want to continue without linking a PDF file?\n\n"
+             "You can still use the notebook for taking notes, but PDF annotation features will not be available.");
     QMessageBox::StandardButton reply = QMessageBox::question(
         this,
-        tr("Continue Without PDF"),
-        tr("Are you sure you want to continue without linking a PDF file?\n\n"
-           "You can still use the notebook for taking notes, but PDF annotation features will not be available."),
+        title,
+        message,
         QMessageBox::Yes | QMessageBox::No
     );
     

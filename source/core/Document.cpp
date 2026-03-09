@@ -209,8 +209,10 @@ void Document::clearPdfReference()
 {
     m_pdfProvider.reset();
     m_pdfPath.clear();
-    m_pdfRelativePath.clear();  // Phase SHARE: Clear relative path too
-    m_needsPdfRelink = false;   // No PDF = no need to relink
+    m_pdfRelativePath.clear();
+    m_pdfHash.clear();
+    m_pdfSize = 0;
+    m_needsPdfRelink = false;
     markModified();
 }
 

@@ -23,14 +23,17 @@ public:
 
     /**
      * @brief Construct the PDF relink dialog.
-     * @param missingPdfPath Path to the missing PDF file.
+     * @param pdfPath Path to the PDF file (missing or currently linked).
      * @param storedHash Stored hash for verification (empty = legacy, skip verification).
      * @param storedSize Stored file size for display (0 = unknown).
+     * @param pdfIsLoaded true if the PDF is currently loaded (reconnect mode),
+     *                    false if the PDF is missing (missing mode).
      * @param parent Parent widget.
      */
-    explicit PdfRelinkDialog(const QString& missingPdfPath,
+    explicit PdfRelinkDialog(const QString& pdfPath,
                              const QString& storedHash = QString(),
                              qint64 storedSize = 0,
+                             bool pdfIsLoaded = false,
                              QWidget* parent = nullptr);
     
     Result getResult() const { return result; }
@@ -53,6 +56,7 @@ private:
     QString newPdfPath;
     QString m_storedHash;
     qint64 m_storedSize = 0;
+    bool m_pdfIsLoaded = false;
 };
 
 #endif // PDFRELINKDIALOG_H 
