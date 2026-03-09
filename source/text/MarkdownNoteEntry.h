@@ -115,7 +115,6 @@ signals:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
-    void resizeEvent(QResizeEvent *event) override;
 
 private slots:
     void onTitleEdited();
@@ -129,6 +128,7 @@ private:
     void setupUI();
     void applyStyle();
     void updatePreview();
+    void adjustPreviewHeight();
     
     MarkdownNoteData noteData;
     QString m_linkObjectId;     ///< Phase M.3: Parent LinkObject ID (empty for legacy notes)
@@ -146,6 +146,7 @@ private:
     
     bool previewMode = true;
     bool isDarkMode = false;
+    bool m_adjustingHeight = false;
 };
 
 #endif // MARKDOWNNOTEENTRY_H

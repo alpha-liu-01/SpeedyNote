@@ -254,23 +254,36 @@ void MarkdownNoteEntry::applyStyle() {
 }
 
 void MarkdownNoteEntry::updatePreview() {
-    const int maxPreviewHeight = 200;
-
     if (noteData.content.isEmpty()) {
         previewBrowser->setHtml(
             QStringLiteral("<i style='color:gray'>") + tr("(empty note)") + QStringLiteral("</i>"));
     } else {
         previewBrowser->document()->setMarkdown(noteData.content);
     }
+    adjustPreviewHeight();
+}
+
+void MarkdownNoteEntry::adjustPreviewHeight() {
+    const int maxPreviewHeight = 200;
 
     int viewportWidth = previewBrowser->viewport()->width();
-    if (viewportWidth > 0) {
-        previewBrowser->document()->setTextWidth(viewportWidth);
+    if (viewportWidth <= 0) {
+        if (previewBrowser->isVisible()) {
+            QTimer::singleShot(0, this, &MarkdownNoteEntry::adjustPreviewHeight);
+        }
+        return;
     }
+
+    previewBrowser->document()->setTextWidth(viewportWidth);
     int docHeight = static_cast<int>(previewBrowser->document()->size().height())
-                    + previewBrowser->contentsMargins().top()
-                    + previewBrowser->contentsMargins().bottom() + 2;
-    previewBrowser->setFixedHeight(qBound(20, docHeight, maxPreviewHeight));
+                    + (previewBrowser->height() - previewBrowser->viewport()->height())
+                    + 2;
+    int target = qBound(20, docHeight, maxPreviewHeight);
+    if (previewBrowser->height() != target) {
+        m_adjustingHeight = true;
+        previewBrowser->setFixedHeight(target);
+        m_adjustingHeight = false;
+    }
 }
 
 void MarkdownNoteEntry::setNoteData(const MarkdownNoteData &data) {
@@ -339,12 +352,11 @@ void MarkdownNoteEntry::setPreviewMode(bool preview) {
     previewMode = preview;
     
     if (preview) {
-        // Save content before hiding editor
         noteData.content = editor->toPlainText();
-        updatePreview();
         editor->hide();
         previewBrowser->show();
         editButton->setVisible(true);
+        updatePreview();
     } else {
         // Show full editor
         previewBrowser->hide();
@@ -396,19 +408,20 @@ void MarkdownNoteEntry::onContentChanged() {
     emit contentChanged(noteData.id);
 }
 
-void MarkdownNoteEntry::resizeEvent(QResizeEvent *event) {
-    QFrame::resizeEvent(event);
-    if (previewMode && previewBrowser->isVisible()) {
-        updatePreview();
-    }
-}
-
 bool MarkdownNoteEntry::eventFilter(QObject *obj, QEvent *event) {
-    if (obj == previewBrowser && event->type() == QEvent::MouseButtonPress) {
-        auto *mouseEvent = static_cast<QMouseEvent *>(event);
-        if (mouseEvent->button() == Qt::MiddleButton) {
-            onPreviewClicked();
-            return true;
+    if (obj == previewBrowser) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto *mouseEvent = static_cast<QMouseEvent *>(event);
+            if (mouseEvent->button() == Qt::MiddleButton) {
+                onPreviewClicked();
+                return true;
+            }
+        }
+        if (event->type() == QEvent::Resize && !m_adjustingHeight) {
+            auto *re = static_cast<QResizeEvent *>(event);
+            if (re->size().width() != re->oldSize().width()) {
+                QTimer::singleShot(0, this, &MarkdownNoteEntry::adjustPreviewHeight);
+            }
         }
     }
     
