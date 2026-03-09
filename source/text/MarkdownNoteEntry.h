@@ -4,9 +4,9 @@
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QPushButton>
 #include <QLineEdit>
+#include <QTextBrowser>
 #include <QString>
 #include <QColor>
 #include <QFrame>
@@ -128,6 +128,7 @@ private:
     void setupUI();
     void applyStyle();
     void updatePreview();
+    void adjustPreviewHeight();
     
     MarkdownNoteData noteData;
     QString m_linkObjectId;     ///< Phase M.3: Parent LinkObject ID (empty for legacy notes)
@@ -136,14 +137,16 @@ private:
     QVBoxLayout *mainLayout;
     QHBoxLayout *headerLayout;
     QLineEdit *titleEdit;
+    QPushButton *editButton;
     QPushButton *deleteButton;
     QPushButton *highlightLinkButton;
     QFrame *colorIndicator;
-    QLabel *previewLabel;
+    QTextBrowser *previewBrowser;
     QMarkdownTextEdit *editor;
     
     bool previewMode = true;
     bool isDarkMode = false;
+    bool m_adjustingHeight = false;
 };
 
 #endif // MARKDOWNNOTEENTRY_H

@@ -45,6 +45,7 @@
 #endif
 #include <QGuiApplication>
 #include <QLineEdit>
+#include <QTextBrowser>
 #include <QTextEdit>
 #include <QPlainTextEdit>
 #include <QPointer>
@@ -1584,6 +1585,12 @@ void MainWindow::setupManagedShortcuts()
     // ===== Context-Dependent Edit Operations (delegated to viewport) =====
     // These behave differently based on current tool and selection
     createShortcut("edit.copy", [this]() {
+        if (auto *tb = qobject_cast<QTextBrowser *>(QApplication::focusWidget())) {
+            if (tb->textCursor().hasSelection()) {
+                tb->copy();
+                return;
+            }
+        }
         if (DocumentViewport* vp = currentViewport()) {
             vp->handleCopyAction();
         }
