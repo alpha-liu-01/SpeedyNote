@@ -3,7 +3,6 @@
 #include <QTextDocument>
 #include <QApplication>
 #include <QPalette>
-#include <QDebug>
 #include <QDesktopServices>
 #include <QMouseEvent>
 #include <QResizeEvent>
@@ -404,7 +403,9 @@ void MarkdownNoteEntry::onLinkObjectClicked() {
 
 void MarkdownNoteEntry::onContentChanged() {
     noteData.content = editor->toPlainText();
-    updatePreview();
+    if (previewMode) {
+        updatePreview();
+    }
     emit contentChanged(noteData.id);
 }
 
