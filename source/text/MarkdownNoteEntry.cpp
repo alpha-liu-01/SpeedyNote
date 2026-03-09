@@ -4,6 +4,9 @@
 #include <QApplication>
 #include <QPalette>
 #include <QDebug>
+#include <QDesktopServices>
+#include <QMouseEvent>
+#include <QResizeEvent>
 #include <QTimer>
 
 MarkdownNoteEntry::MarkdownNoteEntry(const MarkdownNoteData &data, QWidget *parent)
@@ -76,6 +79,18 @@ void MarkdownNoteEntry::setupUI() {
     titleEdit->deselect();
     connect(titleEdit, &QLineEdit::editingFinished, this, &MarkdownNoteEntry::onTitleEdited);
     
+    // Edit button (switches to edit mode)
+    editButton = new QPushButton(this);
+    editButton->setObjectName("NoteEditButton");
+    editButton->setFixedSize(24, 24);
+    editButton->setToolTip(tr("Edit note"));
+    editButton->setCursor(Qt::PointingHandCursor);
+    editButton->setIcon(QIcon(isDarkMode
+        ? QStringLiteral(":/resources/icons/edit_reversed.png")
+        : QStringLiteral(":/resources/icons/edit.png")));
+    editButton->setIconSize(QSize(16, 16));
+    connect(editButton, &QPushButton::clicked, this, &MarkdownNoteEntry::onPreviewClicked);
+
     // Jump to link button
     highlightLinkButton = new QPushButton("🔗", this);
     highlightLinkButton->setObjectName("NoteActionButton");
@@ -95,17 +110,24 @@ void MarkdownNoteEntry::setupUI() {
     
     headerLayout->addWidget(colorIndicator);
     headerLayout->addWidget(titleEdit);
+    headerLayout->addWidget(editButton);
     headerLayout->addWidget(highlightLinkButton);
     headerLayout->addWidget(deleteButton);
     
-    // Preview label (shows in preview mode)
-    previewLabel = new QLabel(this);
-    previewLabel->setObjectName("NotePreviewLabel");
-    previewLabel->setWordWrap(true);
-    previewLabel->setTextFormat(Qt::PlainText);
-    previewLabel->setMaximumHeight(60);
-    previewLabel->setCursor(Qt::PointingHandCursor);
-    previewLabel->installEventFilter(this);
+    // Rendered markdown preview (shows in preview mode)
+    previewBrowser = new QTextBrowser(this);
+    previewBrowser->setObjectName("NotePreviewBrowser");
+    previewBrowser->setReadOnly(true);
+    previewBrowser->setOpenExternalLinks(false);
+    previewBrowser->setOpenLinks(false);
+    connect(previewBrowser, &QTextBrowser::anchorClicked, this, [](const QUrl &url) {
+        QDesktopServices::openUrl(url);
+    });
+    previewBrowser->setFrameShape(QFrame::NoFrame);
+    previewBrowser->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    previewBrowser->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    previewBrowser->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    previewBrowser->installEventFilter(this);
     
     // Full editor (shows in edit mode)
     editor = new QMarkdownTextEdit(this);
@@ -119,7 +141,7 @@ void MarkdownNoteEntry::setupUI() {
     editor->installEventFilter(this);
     
     mainLayout->addLayout(headerLayout);
-    mainLayout->addWidget(previewLabel);
+    mainLayout->addWidget(previewBrowser);
     mainLayout->addWidget(editor);
 }
 
@@ -130,7 +152,6 @@ void MarkdownNoteEntry::applyStyle() {
     QString bgColor = isDarkMode ? "#2a2e32" : "#ffffff";
     QString borderColor = isDarkMode ? "#4d4d4d" : "#D0D0D0";
     QString textColor = isDarkMode ? "#e6e6e6" : "#1d2939";
-    QString previewColor = isDarkMode ? "#909090" : "#667085";
     QString deleteHoverBg = isDarkMode ? "#4d2828" : "#ffccc7";
     
     // Card styling with rounded corners
@@ -164,15 +185,32 @@ void MarkdownNoteEntry::applyStyle() {
         }
     )").arg(textColor, isDarkMode ? "#3a3e42" : "#F5F5F5"));
     
-    // Preview label
-    previewLabel->setStyleSheet(QString(R"(
-        QLabel {
+    // Edit button
+    editButton->setStyleSheet(QString(R"(
+        QPushButton {
+            background-color: transparent;
+            border: none;
+            border-radius: 12px;
+        }
+        QPushButton:hover {
+            background-color: %1;
+        }
+        QPushButton:pressed {
+            background-color: %2;
+        }
+    )").arg(isDarkMode ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.08)",
+            isDarkMode ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)"));
+
+    // Preview browser
+    previewBrowser->setStyleSheet(QString(R"(
+        QTextBrowser {
             color: %1;
             font-size: 13px;
             padding: 4px 8px;
             background: transparent;
+            border: none;
         }
-    )").arg(previewColor));
+    )").arg(textColor));
     
     // Jump button
     highlightLinkButton->setStyleSheet(QString(R"(
@@ -216,18 +254,23 @@ void MarkdownNoteEntry::applyStyle() {
 }
 
 void MarkdownNoteEntry::updatePreview() {
+    const int maxPreviewHeight = 200;
+
     if (noteData.content.isEmpty()) {
-        previewLabel->setText(tr("(empty note)"));
-        previewLabel->setStyleSheet("padding: 4px; color: gray; font-style: italic;");
+        previewBrowser->setHtml(
+            QStringLiteral("<i style='color:gray'>") + tr("(empty note)") + QStringLiteral("</i>"));
     } else {
-        // Show first 100 characters of content
-        QString preview = noteData.content.left(100);
-        if (noteData.content.length() > 100) {
-            preview += "...";
-        }
-        previewLabel->setText(preview);
-        previewLabel->setStyleSheet("padding: 4px;");
+        previewBrowser->document()->setMarkdown(noteData.content);
     }
+
+    int viewportWidth = previewBrowser->viewport()->width();
+    if (viewportWidth > 0) {
+        previewBrowser->document()->setTextWidth(viewportWidth);
+    }
+    int docHeight = static_cast<int>(previewBrowser->document()->size().height())
+                    + previewBrowser->contentsMargins().top()
+                    + previewBrowser->contentsMargins().bottom() + 2;
+    previewBrowser->setFixedHeight(qBound(20, docHeight, maxPreviewHeight));
 }
 
 void MarkdownNoteEntry::setNoteData(const MarkdownNoteData &data) {
@@ -300,10 +343,12 @@ void MarkdownNoteEntry::setPreviewMode(bool preview) {
         noteData.content = editor->toPlainText();
         updatePreview();
         editor->hide();
-        previewLabel->show();
+        previewBrowser->show();
+        editButton->setVisible(true);
     } else {
         // Show full editor
-        previewLabel->hide();
+        previewBrowser->hide();
+        editButton->setVisible(false);
         editor->show();
         editor->setFocus();
         emit editRequested(noteData.id);
@@ -351,10 +396,20 @@ void MarkdownNoteEntry::onContentChanged() {
     emit contentChanged(noteData.id);
 }
 
+void MarkdownNoteEntry::resizeEvent(QResizeEvent *event) {
+    QFrame::resizeEvent(event);
+    if (previewMode && previewBrowser->isVisible()) {
+        updatePreview();
+    }
+}
+
 bool MarkdownNoteEntry::eventFilter(QObject *obj, QEvent *event) {
-    if (obj == previewLabel && event->type() == QEvent::MouseButtonPress) {
-        onPreviewClicked();
-        return true;
+    if (obj == previewBrowser && event->type() == QEvent::MouseButtonPress) {
+        auto *mouseEvent = static_cast<QMouseEvent *>(event);
+        if (mouseEvent->button() == Qt::MiddleButton) {
+            onPreviewClicked();
+            return true;
+        }
     }
     
     // Handle editor focus out - return to preview mode when clicking elsewhere

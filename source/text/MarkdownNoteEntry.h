@@ -4,9 +4,9 @@
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QLabel>
 #include <QPushButton>
 #include <QLineEdit>
+#include <QTextBrowser>
 #include <QString>
 #include <QColor>
 #include <QFrame>
@@ -115,6 +115,7 @@ signals:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private slots:
     void onTitleEdited();
@@ -136,10 +137,11 @@ private:
     QVBoxLayout *mainLayout;
     QHBoxLayout *headerLayout;
     QLineEdit *titleEdit;
+    QPushButton *editButton;
     QPushButton *deleteButton;
     QPushButton *highlightLinkButton;
     QFrame *colorIndicator;
-    QLabel *previewLabel;
+    QTextBrowser *previewBrowser;
     QMarkdownTextEdit *editor;
     
     bool previewMode = true;
