@@ -10403,6 +10403,28 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         // Must re-render all points since transform changed
     }
     
+    // ========== Sub-Pixel Grid Alignment ==========
+    // The layer zoom cache rasterizes strokes in page-local coordinates where
+    // the page origin is always at physical pixel (0,0). This live cache
+    // rasterizes in viewport coordinates where the page origin lands at
+    // physical pixel (pagePos - pan) * zoom * dpr, which is generally
+    // fractional. The resulting anti-aliasing mismatch causes a visible
+    // sub-pixel shift on pen-up. Fix: snap the page/tile origin to the
+    // nearest integer physical pixel so both caches produce identical
+    // anti-aliasing for every polygon vertex.
+    QPointF snapOrigin;
+    if (isEdgeless) {
+        int tileSize = Document::EDGELESS_TILE_SIZE;
+        int tx = static_cast<int>(std::floor(m_currentStroke.points[0].pos.x() / tileSize));
+        int ty = static_cast<int>(std::floor(m_currentStroke.points[0].pos.y() / tileSize));
+        snapOrigin = QPointF(tx * tileSize, ty * tileSize);
+    } else {
+        snapOrigin = pagePosition(m_activeDrawingPage);
+    }
+    QPointF originPhysical = (snapOrigin - m_panOffset) * m_zoomLevel * dpr;
+    QPointF snapCorrection(std::round(originPhysical.x()) - originPhysical.x(),
+                           std::round(originPhysical.y()) - originPhysical.y());
+    
     // ========== Semi-Transparent Stroke Rendering ==========
     // For strokes with alpha < 255 (e.g., marker at 50% opacity), we draw
     // with FULL OPACITY to the cache, then blit with the desired opacity.
@@ -10420,6 +10442,9 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         
         QPainter cachePainter(&m_currentStrokeCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        
+        // Snap page/tile origin to integer physical pixel (see comment above)
+        cachePainter.translate(snapCorrection.x() / dpr, snapCorrection.y() / dpr);
         
         // Apply transform to convert coords to viewport coords
         // The cache is in viewport coordinates (widget pixels)
@@ -10459,8 +10484,11 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     
     // Draw end cap at current position (always needs updating as it moves)
     if (n >= 1) {
-        // Apply transform to draw end cap at correct position
         painter.save();
+        
+        // Apply same sub-pixel snap so the end cap aligns with the cached stroke body
+        painter.translate(snapCorrection.x() / dpr, snapCorrection.y() / dpr);
+        
         painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
         painter.scale(m_zoomLevel, m_zoomLevel);
         
