@@ -76,6 +76,7 @@
 #include <QLocalSocket>  // For single-instance server communication
 #include <QFileInfo>
 #include <QFile>
+#include <QMimeData>
 #include <QJsonDocument>  // Phase doc-1: JSON serialization
 #include <QThread>
 
@@ -214,8 +215,11 @@ MainWindow::MainWindow(QWidget *parent)
     // Enable IME support for multi-language input
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setFocusPolicy(Qt::StrongFocus);
-    
-    // QString iconPath = QCoreApplication::applicationDirPath() + "/icon.ico";
+
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+    setAcceptDrops(true);
+#endif
+
     setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
 
@@ -6394,6 +6398,71 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
     return QMainWindow::nativeEvent(eventType, message, result);
 }
 #endif
+
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+
+static bool isSupportedDropFile(const QString& path)
+{
+    if (path.endsWith(".pdf", Qt::CaseInsensitive)) return true;
+    if (path.endsWith(".snbx", Qt::CaseInsensitive)) return true;
+    if (path.endsWith(".snb", Qt::CaseInsensitive) && QFileInfo(path).isDir()) return true;
+    return false;
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile() && isSupportedDropFile(url.toLocalFile())) {
+                event->acceptProposedAction();
+                return;
+            }
+        }
+    }
+    event->ignore();
+}
+
+void MainWindow::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile() && isSupportedDropFile(url.toLocalFile())) {
+                event->acceptProposedAction();
+                return;
+            }
+        }
+    }
+    event->ignore();
+}
+
+void MainWindow::dropEvent(QDropEvent *event)
+{
+    if (!event->mimeData()->hasUrls()) {
+        event->ignore();
+        return;
+    }
+
+    bool accepted = false;
+    const QList<QUrl> urls = event->mimeData()->urls();
+
+    for (const QUrl& url : urls) {
+        if (!url.isLocalFile()) continue;
+        QString filePath = url.toLocalFile();
+        if (!isSupportedDropFile(filePath)) continue;
+
+        accepted = true;
+        openFileInNewTab(filePath);
+    }
+
+    if (accepted)
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
 
 void MainWindow::closeEvent(QCloseEvent *event) {
     // ========== UPDATE POSITIONS FOR ALL DOCUMENTS ==========

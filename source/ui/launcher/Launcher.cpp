@@ -775,39 +775,34 @@ void Launcher::showEvent(QShowEvent* event)
 
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 
+static bool isSupportedDropFile(const QString& path)
+{
+    if (path.endsWith(".pdf", Qt::CaseInsensitive)) return true;
+    if (path.endsWith(".snbx", Qt::CaseInsensitive)) return true;
+    if (path.endsWith(".snb", Qt::CaseInsensitive) && QFileInfo(path).isDir()) return true;
+    return false;
+}
+
 void Launcher::dragEnterEvent(QDragEnterEvent* event)
 {
-    // Accept drag if it contains file URLs
     if (event->mimeData()->hasUrls()) {
-        // Check if any of the URLs are .snbx files
-        bool hasSnbxFiles = false;
         const QList<QUrl> urls = event->mimeData()->urls();
         for (const QUrl& url : urls) {
-            if (url.isLocalFile()) {
-                QString filePath = url.toLocalFile();
-                if (filePath.endsWith(".snbx", Qt::CaseInsensitive)) {
-                    hasSnbxFiles = true;
-                    break;
-                }
+            if (url.isLocalFile() && isSupportedDropFile(url.toLocalFile())) {
+                event->acceptProposedAction();
+                return;
             }
         }
-        
-        if (hasSnbxFiles) {
-            event->acceptProposedAction();
-            return;
-        }
     }
-    
     event->ignore();
 }
 
 void Launcher::dragMoveEvent(QDragMoveEvent* event)
 {
-    // Accept the move only if we have valid .snbx files (consistent with dragEnterEvent)
     if (event->mimeData()->hasUrls()) {
         const QList<QUrl> urls = event->mimeData()->urls();
         for (const QUrl& url : urls) {
-            if (url.isLocalFile() && url.toLocalFile().endsWith(".snbx", Qt::CaseInsensitive)) {
+            if (url.isLocalFile() && isSupportedDropFile(url.toLocalFile())) {
                 event->acceptProposedAction();
                 return;
             }
@@ -822,53 +817,57 @@ void Launcher::dropEvent(QDropEvent* event)
         event->ignore();
         return;
     }
-    
-    // Collect all .snbx files from the drop
+
     QStringList snbxFiles;
+    QStringList directOpenFiles;  // .pdf and .snb — opened via notebookSelected
     const QList<QUrl> urls = event->mimeData()->urls();
-    
+
     for (const QUrl& url : urls) {
-        if (url.isLocalFile()) {
-            QString filePath = url.toLocalFile();
-            if (filePath.endsWith(".snbx", Qt::CaseInsensitive)) {
-                // Verify file exists
-                if (QFile::exists(filePath)) {
-                    snbxFiles.append(filePath);
-                }
-            }
+        if (!url.isLocalFile()) continue;
+        QString filePath = url.toLocalFile();
+
+        if (filePath.endsWith(".pdf", Qt::CaseInsensitive) && QFile::exists(filePath)) {
+            directOpenFiles.append(filePath);
+        } else if (filePath.endsWith(".snb", Qt::CaseInsensitive) && QFileInfo(filePath).isDir()) {
+            directOpenFiles.append(filePath);
+        } else if (filePath.endsWith(".snbx", Qt::CaseInsensitive) && QFile::exists(filePath)) {
+            snbxFiles.append(filePath);
         }
     }
-    
-    if (snbxFiles.isEmpty()) {
+
+    if (snbxFiles.isEmpty() && directOpenFiles.isEmpty()) {
         event->ignore();
         return;
     }
-    
+
     event->acceptProposedAction();
-    
-    // Show confirmation dialog for multiple files
-    if (snbxFiles.size() > 1) {
-        QString message = tr("Import %1 notebooks?").arg(snbxFiles.size());
-        QMessageBox::StandardButton reply = QMessageBox::question(
-            this,
-            tr("Import Notebooks"),
-            message,
-            QMessageBox::Yes | QMessageBox::No,
-            QMessageBox::Yes
-        );
-        
-        if (reply != QMessageBox::Yes) {
-            return;
-        }
+
+    // Open PDFs and .snb bundles directly (switch-to-existing or new tab)
+    for (const QString& path : directOpenFiles) {
+        emit notebookSelected(path);
     }
-    
-    // Determine destination directory (default to Documents/SpeedyNote)
-    QString destDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) 
-                      + "/SpeedyNote";
-    QDir().mkpath(destDir);
-    
-    // Perform the import
-    performBatchImport(snbxFiles, destDir);
+
+    // Import .snbx packages via the batch import flow
+    if (!snbxFiles.isEmpty()) {
+        if (snbxFiles.size() > 1) {
+            QString message = tr("Import %1 notebooks?").arg(snbxFiles.size());
+            QMessageBox::StandardButton reply = QMessageBox::question(
+                this,
+                tr("Import Notebooks"),
+                message,
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::Yes
+            );
+            if (reply != QMessageBox::Yes) {
+                return;
+            }
+        }
+
+        QString destDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                          + "/SpeedyNote";
+        QDir().mkpath(destDir);
+        performBatchImport(snbxFiles, destDir);
+    }
 }
 
 #endif // !Q_OS_ANDROID && !Q_OS_IOS
