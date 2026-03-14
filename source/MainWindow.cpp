@@ -76,6 +76,7 @@
 #include <QLocalSocket>  // For single-instance server communication
 #include <QFileInfo>
 #include <QFile>
+#include <QMimeData>
 #include <QJsonDocument>  // Phase doc-1: JSON serialization
 #include <QThread>
 
@@ -214,8 +215,11 @@ MainWindow::MainWindow(QWidget *parent)
     // Enable IME support for multi-language input
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setFocusPolicy(Qt::StrongFocus);
-    
-    // QString iconPath = QCoreApplication::applicationDirPath() + "/icon.ico";
+
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+    setAcceptDrops(true);
+#endif
+
     setWindowIcon(QIcon(":/resources/icons/mainicon.svg"));
     
 
@@ -3686,6 +3690,12 @@ int MainWindow::tabCount() const {
     return 0;
 }
 
+void MainWindow::switchToTabIndex(int index) {
+    if (m_tabBar && index >= 0 && index < m_tabBar->count()) {
+        m_tabBar->setCurrentIndex(index);
+    }
+}
+
 
 void MainWindow::toggleFullscreen() {
     bool goingFullscreen = !isFullScreen();
@@ -6395,6 +6405,103 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, long *r
 }
 #endif
 
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+
+static bool isSupportedDropFile(const QString& path)
+{
+    if (path.endsWith(".pdf", Qt::CaseInsensitive)) return true;
+    if (path.endsWith(".snbx", Qt::CaseInsensitive)) return true;
+    if (path.endsWith(".snb", Qt::CaseInsensitive) && QFileInfo(path).isDir()) return true;
+    return false;
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile() && isSupportedDropFile(url.toLocalFile())) {
+                event->acceptProposedAction();
+                return;
+            }
+        }
+    }
+    event->ignore();
+}
+
+void MainWindow::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (event->mimeData()->hasUrls()) {
+        const QList<QUrl> urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile() && isSupportedDropFile(url.toLocalFile())) {
+                event->acceptProposedAction();
+                return;
+            }
+        }
+    }
+    event->ignore();
+}
+
+void MainWindow::dropEvent(QDropEvent *event)
+{
+    if (!event->mimeData()->hasUrls()) {
+        event->ignore();
+        return;
+    }
+
+    bool accepted = false;
+    const QList<QUrl> urls = event->mimeData()->urls();
+
+    for (const QUrl& url : urls) {
+        if (!url.isLocalFile()) continue;
+        QString filePath = url.toLocalFile();
+        if (!isSupportedDropFile(filePath)) continue;
+
+        accepted = true;
+        openFileInNewTab(filePath);
+    }
+
+    if (accepted)
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+#endif // !Q_OS_ANDROID && !Q_OS_IOS
+
+void MainWindow::saveSessionTabs()
+{
+    QSettings settings("SpeedyNote", "App");
+
+    if (!m_tabManager || !m_documentManager || m_tabManager->tabCount() == 0) {
+        settings.remove("session/lastOpenTabs");
+        settings.remove("session/activeTabIndex");
+        return;
+    }
+
+    QStringList paths;
+    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+        Document* doc = m_tabManager->documentAt(i);
+        if (!doc) continue;
+
+        QString docPath = m_documentManager->documentPath(doc);
+        if (!docPath.isEmpty() && !m_documentManager->isUsingTempBundle(doc)) {
+            paths.append(QFileInfo(docPath).absoluteFilePath());
+        } else if (!doc->pdfPath().isEmpty()) {
+            paths.append(QFileInfo(doc->pdfPath()).absoluteFilePath());
+        }
+    }
+
+    if (paths.isEmpty()) {
+        settings.remove("session/lastOpenTabs");
+        settings.remove("session/activeTabIndex");
+    } else {
+        settings.setValue("session/lastOpenTabs", paths);
+        settings.setValue("session/activeTabIndex", m_tabManager->currentIndex());
+    }
+}
+
 void MainWindow::closeEvent(QCloseEvent *event) {
     // ========== UPDATE POSITIONS FOR ALL DOCUMENTS ==========
     // Before checking for unsaved changes, update positions for all documents
@@ -6478,6 +6585,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         // REMOVED MW7.4: Save bookmarks removed - bookmark implementation deleted
         // saveBookmarks();
     
+    // Save session tabs for restore on next launch
+    saveSessionTabs();
+
     // Flush NotebookLibrary to disk before exiting
     // This ensures any pending addToRecent() calls are persisted, even if
     // the debounced save timer hasn't fired yet. Critical for new documents

@@ -5,10 +5,13 @@
 #include <QApplication>
 #include <QTranslator>
 #include <QLocale>
+#include <QFileInfo>
+#include <QMessageBox>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QLibraryInfo>
 #include <QFont>
+#include <algorithm>
 
 #include "MainWindow.h"
 #include "ui/launcher/Launcher.h"
@@ -863,6 +866,32 @@ int main(int argc, char* argv[])
     IOSInboxWatcher inboxWatcher;
 #endif
 
+    // ========== Session Restore ==========
+    QSettings sessionSettings("SpeedyNote", "App");
+    QStringList sessionTabs = sessionSettings.value("session/lastOpenTabs").toStringList();
+    int sessionActiveIndex = sessionSettings.value("session/activeTabIndex", 0).toInt();
+
+    // Clear immediately so a crash during restore doesn't loop
+    sessionSettings.remove("session/lastOpenTabs");
+    sessionSettings.remove("session/activeTabIndex");
+    sessionSettings.sync();
+
+    // Filter out files that no longer exist
+    sessionTabs.erase(std::remove_if(sessionTabs.begin(), sessionTabs.end(),
+        [](const QString& p) { return !QFileInfo::exists(p); }), sessionTabs.end());
+
+    // If launching with a file argument, remove it from session list to avoid duplicate
+    bool inputFileWasInSession = false;
+    if (!inputFile.isEmpty() && !sessionTabs.isEmpty()) {
+        QString normalizedInput = QFileInfo(inputFile).absoluteFilePath();
+        int sizeBefore = sessionTabs.size();
+        sessionTabs.erase(std::remove_if(sessionTabs.begin(), sessionTabs.end(),
+            [&normalizedInput](const QString& p) {
+                return QFileInfo(p).absoluteFilePath() == normalizedInput;
+            }), sessionTabs.end());
+        inputFileWasInSession = (sessionTabs.size() < sizeBefore);
+    }
+
     // ========== Launch Application ==========
     int exitCode = 0;
 
@@ -872,6 +901,23 @@ int main(int argc, char* argv[])
         w->setAttribute(Qt::WA_DeleteOnClose);
         w->show();
         w->openFileInNewTab(inputFile);
+
+        if (!sessionTabs.isEmpty()) {
+            auto reply = QMessageBox::question(w,
+                QObject::tr("Restore Previous Session"),
+                QObject::tr("You had %1 other tab(s) open last time. Restore them?")
+                    .arg(sessionTabs.size()),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+            if (reply == QMessageBox::Yes) {
+                for (const QString& path : sessionTabs)
+                    w->openFileInNewTab(path);
+                int adjustedIndex = inputFileWasInSession
+                    ? sessionActiveIndex : sessionActiveIndex + 1;
+                if (adjustedIndex >= 0 && adjustedIndex < w->tabCount())
+                    w->switchToTabIndex(adjustedIndex);
+            }
+        }
+
 #if defined(Q_OS_MACOS)
         fileOpenFilter.setMainWindow(w);
 #elif defined(Q_OS_IOS)
@@ -879,8 +925,45 @@ int main(int argc, char* argv[])
         QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
         exitCode = app.exec();
+    } else if (!sessionTabs.isEmpty()) {
+        // No file, but previous session exists - ask to restore
+        auto reply = QMessageBox::question(nullptr,
+            QObject::tr("Restore Previous Session"),
+            QObject::tr("You had %1 tab(s) open last time. Restore them?")
+                .arg(sessionTabs.size()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+
+        if (reply == QMessageBox::Yes) {
+            auto* w = new MainWindow();
+            w->setAttribute(Qt::WA_DeleteOnClose);
+            w->show();
+            for (const QString& path : sessionTabs)
+                w->openFileInNewTab(path);
+            if (sessionActiveIndex >= 0 && sessionActiveIndex < w->tabCount())
+                w->switchToTabIndex(sessionActiveIndex);
+#if defined(Q_OS_MACOS)
+            fileOpenFilter.setMainWindow(w);
+#elif defined(Q_OS_IOS)
+            inboxWatcher.setMainWindow(w);
+            QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
+            exitCode = app.exec();
+        } else {
+            // User declined - show Launcher normally
+            auto* launcher = new Launcher();
+            launcher->setAttribute(Qt::WA_DeleteOnClose);
+            connectLauncherSignals(launcher);
+            launcher->show();
+#if defined(Q_OS_MACOS)
+            fileOpenFilter.setLauncher(launcher);
+#elif defined(Q_OS_IOS)
+            inboxWatcher.setLauncher(launcher);
+            QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
+            exitCode = app.exec();
+        }
     } else {
-        // No file - show Launcher
+        // No file, no session - show Launcher
         auto* launcher = new Launcher();
         launcher->setAttribute(Qt::WA_DeleteOnClose);
         connectLauncherSignals(launcher);

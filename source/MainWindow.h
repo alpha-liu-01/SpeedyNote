@@ -19,6 +19,11 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QCloseEvent>
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#endif
 #include <QShortcut>  // For m_managedShortcuts hash
 #include <memory>     // For std::unique_ptr
 // Note: ControlPanelDialog is included in MainWindow.cpp (Phase CP.1)
@@ -202,6 +207,8 @@ public:
     // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     int tabCount() const;  // Returns number of open tabs (used by Launcher for Escape handling)
+    void switchToTabIndex(int index);  // Switch to a specific tab by index
+    void saveSessionTabs();  // Persist open tab paths to QSettings for session restore
 
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls
@@ -289,8 +296,14 @@ protected:
     bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
 #  endif
 #endif
-    void closeEvent(QCloseEvent *event) override; // ✅ Add auto-save on program close
-    
+    void closeEvent(QCloseEvent *event) override;
+
+#if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
+#endif
+
     // IME support for multi-language input
     void inputMethodEvent(QInputMethodEvent *event) override;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
