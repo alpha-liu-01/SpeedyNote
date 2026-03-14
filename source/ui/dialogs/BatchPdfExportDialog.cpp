@@ -66,6 +66,8 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     settings.beginGroup("BatchPdfExport");
     int lastDpi = settings.value("dpi", DpiDraft).toInt();
     bool lastAnnotationsOnly = settings.value("annotationsOnly", false).toBool();
+    bool lastDarkModeBg = settings.value("darkModeBackground", false).toBool();
+    bool lastDarkenStrokes = settings.value("darkenStrokes", false).toBool();
     bool lastIncludeMetadata = settings.value("includeMetadata", true).toBool();
     bool lastIncludeOutline = settings.value("includeOutline", true).toBool();
     QString lastOutputDir = settings.value("outputDirectory").toString();
@@ -82,6 +84,8 @@ BatchPdfExportDialog::BatchPdfExportDialog(const QStringList& bundlePaths, QWidg
     }
     
     if (m_annotationsOnlyCheckbox) m_annotationsOnlyCheckbox->setChecked(lastAnnotationsOnly);
+    if (m_darkModeBgCheckbox) m_darkModeBgCheckbox->setChecked(lastDarkModeBg);
+    if (m_darkenStrokesCheckbox) m_darkenStrokesCheckbox->setChecked(lastDarkenStrokes);
     if (m_includeMetadataCheckbox) m_includeMetadataCheckbox->setChecked(lastIncludeMetadata);
     if (m_includeOutlineCheckbox) m_includeOutlineCheckbox->setChecked(lastIncludeOutline);
     
@@ -261,6 +265,18 @@ void BatchPdfExportDialog::setupUi()
         tr("Export strokes and images only, without original PDF content or page backgrounds."));
     optionsLayout->addWidget(m_annotationsOnlyCheckbox);
     
+    m_darkModeBgCheckbox = new QCheckBox(tr("Render PDF background in dark mode"));
+    m_darkModeBgCheckbox->setToolTip(
+        tr("Apply lightness inversion to the PDF background, producing a dark page similar "
+           "to the on-canvas dark mode appearance."));
+    optionsLayout->addWidget(m_darkModeBgCheckbox);
+    
+    m_darkenStrokesCheckbox = new QCheckBox(tr("Darken light-coloured strokes for printing"));
+    m_darkenStrokesCheckbox->setToolTip(
+        tr("Convert light-coloured strokes (used for dark mode contrast) to darker "
+           "equivalents so they remain visible on a white background when printed."));
+    optionsLayout->addWidget(m_darkenStrokesCheckbox);
+    
     m_includeMetadataCheckbox = new QCheckBox(tr("Include PDF metadata"));
     m_includeMetadataCheckbox->setToolTip(tr("Preserve title, author, and other metadata from source PDFs."));
     m_includeMetadataCheckbox->setChecked(true);
@@ -324,6 +340,8 @@ void BatchPdfExportDialog::setupUi()
         settings.beginGroup("BatchPdfExport");
         settings.setValue("dpi", dpi());
         settings.setValue("annotationsOnly", annotationsOnly());
+        settings.setValue("darkModeBackground", darkModeBackground());
+        settings.setValue("darkenStrokes", darkenStrokes());
         settings.setValue("includeMetadata", includeMetadata());
         settings.setValue("includeOutline", includeOutline());
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
@@ -536,6 +554,16 @@ bool BatchPdfExportDialog::isAllPages() const
 bool BatchPdfExportDialog::annotationsOnly() const
 {
     return m_annotationsOnlyCheckbox && m_annotationsOnlyCheckbox->isChecked();
+}
+
+bool BatchPdfExportDialog::darkModeBackground() const
+{
+    return m_darkModeBgCheckbox && m_darkModeBgCheckbox->isChecked();
+}
+
+bool BatchPdfExportDialog::darkenStrokes() const
+{
+    return m_darkenStrokesCheckbox && m_darkenStrokesCheckbox->isChecked();
 }
 
 bool BatchPdfExportDialog::includeMetadata() const

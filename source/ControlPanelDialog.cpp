@@ -177,10 +177,15 @@ void ControlPanelDialog::loadSettings()
         styleCombo->setCurrentIndex(comboIndex);
     }
     
-    selectedBgColor = QColor(settings.value("background/color", "#ffffff").toString());
+    // Dark-mode-aware fallback colours for background and grid
+    bool darkMode = palette().color(QPalette::Window).lightness() < 128;
+    QString defaultBg    = darkMode ? "#2b2b2b" : "#ffffff";
+    QString defaultGrid  = darkMode ? "#404040" : "#c8c8c8";
+    
+    selectedBgColor = QColor(settings.value("background/color", defaultBg).toString());
     bgColorButton->setStyleSheet(QString("background-color: %1").arg(selectedBgColor.name()));
     
-    selectedGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+    selectedGridColor = QColor(settings.value("background/gridColor", defaultGrid).toString());
     gridColorButton->setStyleSheet(QString("background-color: %1").arg(selectedGridColor.name()));
     
     gridSpacingSpin->setValue(settings.value("background/gridSpacing", 32).toInt());
@@ -193,6 +198,9 @@ void ControlPanelDialog::loadSettings()
         accentColorButton->setStyleSheet(QString("background-color: %1").arg(selectedAccentColor.name()));
         accentColorButton->setEnabled(useCustomAccentCheckbox->isChecked());
     }
+    
+    // Load PDF dark mode setting (defaults to true)
+    pdfDarkModeCheckbox->setChecked(settings.value("display/pdfDarkMode", true).toBool());
     
     // Load language settings
     bool useSystemLang = settings.value("useSystemLanguage", true).toBool();
@@ -244,6 +252,11 @@ void ControlPanelDialog::applyChanges()
     if (selectedAccentColor.isValid()) {
         mainWindowRef->setCustomAccentColor(selectedAccentColor);
     }
+    
+    // Apply PDF dark mode setting
+    bool pdfDarkMode = pdfDarkModeCheckbox->isChecked();
+    settings.setValue("display/pdfDarkMode", pdfDarkMode);
+    mainWindowRef->setPdfDarkModeEnabled(pdfDarkMode);
     
     // Apply language settings
     settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
@@ -1296,16 +1309,20 @@ void ControlPanelDialog::createThemeTab() {
     connect(useCustomAccentCheckbox, &QCheckBox::toggled, accentColorLabel, &QLabel::setEnabled);
     
 
-    /*
-    // Color palette preference
-    useBrighterPaletteCheckbox = new QCheckBox(tr("Use Brighter Color Palette"), themeTab);
-    layout->addWidget(useBrighterPaletteCheckbox);
+    layout->addSpacing(15);
     
-    QLabel *paletteNote = new QLabel(tr("When enabled, use brighter colors (good for dark PDF backgrounds). When disabled, use darker colors (good for light PDF backgrounds). This setting is independent of the UI theme."));
-    paletteNote->setWordWrap(true);
-    paletteNote->setStyleSheet("color: gray; font-size: 10px;");
-    layout->addWidget(paletteNote);
-    */
+    // PDF dark mode (lightness inversion)
+    pdfDarkModeCheckbox = new QCheckBox(tr("Invert PDF Lightness in Dark Mode"), themeTab);
+    layout->addWidget(pdfDarkModeCheckbox);
+    
+    QLabel *pdfDarkModeNote = new QLabel(tr("When enabled and dark mode is active, PDF page backgrounds are darkened "
+        "by inverting lightness (HSL). White pages become dark and dark text becomes "
+        "light, while colours keep their hue. Disable this if you prefer the original "
+        "PDF colours."), themeTab);
+    pdfDarkModeNote->setWordWrap(true);
+    pdfDarkModeNote->setStyleSheet("color: gray; font-size: 10px;");
+    layout->addWidget(pdfDarkModeNote);
+
     layout->addStretch();
     
     tabWidget->addTab(themeTab, tr("Theme"));

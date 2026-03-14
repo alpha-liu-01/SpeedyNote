@@ -1649,6 +1649,8 @@ void Launcher::showPdfExportDialog(const QStringList& bundlePaths)
             options.dpi = dialog.dpi();
             options.pageRange = dialog.pageRange();
             options.annotationsOnly = dialog.annotationsOnly();
+            options.darkModeBackground = dialog.darkModeBackground();
+            options.darkenStrokes = dialog.darkenStrokes();
             options.preserveMetadata = dialog.includeMetadata();
             options.preserveOutline = dialog.includeOutline();
             

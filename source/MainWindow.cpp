@@ -267,6 +267,8 @@ MainWindow::MainWindow(QWidget *parent)
         // Sync viewport dark mode with current theme
         if (vp) {
             vp->setDarkMode(isDarkMode());
+            QSettings s("SpeedyNote", "App");
+            vp->setPdfDarkModeEnabled(s.value("display/pdfDarkMode", true).toBool());
         }
         
         // Phase 5.1 Task 4: Update LayerPanel when tab changes
@@ -2711,6 +2713,8 @@ void MainWindow::showPdfExportDialog()
         options.preserveMetadata = dialog.includeMetadata();
         options.preserveOutline = dialog.includeOutline();
         options.annotationsOnly = dialog.annotationsOnly();
+        options.darkModeBackground = dialog.darkModeBackground();
+        options.darkenStrokes = dialog.darkenStrokes();
         
         // Create exporter and export
         MuPdfExporter exporter;
@@ -3492,12 +3496,13 @@ void MainWindow::addNewTab() {
         qreal pageHeight = settings.value("page/height", 1056).toReal();
         QSizeF defaultPageSize(pageWidth, pageHeight);
         
-        // Load background settings
+        // Load background settings (dark-mode-aware defaults)
         // Default: Grid with 32px spacing (32 divides evenly into 1024px tiles)
+        bool dark = isDarkMode();
         Page::BackgroundType defaultStyle = static_cast<Page::BackgroundType>(
             settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt());
-        QColor defaultBgColor = QColor(settings.value("background/color", "#ffffff").toString());
-        QColor defaultGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+        QColor defaultBgColor = QColor(settings.value("background/color", dark ? "#2b2b2b" : "#ffffff").toString());
+        QColor defaultGridColor = QColor(settings.value("background/gridColor", dark ? "#404040" : "#c8c8c8").toString());
         int defaultGridSpacing = settings.value("background/gridSpacing", 32).toInt();
         int defaultLineSpacing = settings.value("background/lineSpacing", 32).toInt();
         
@@ -3553,14 +3558,15 @@ void MainWindow::addNewEdgelessTab()
         return;
     }
     
-    // Apply default background settings from user preferences
+    // Apply default background settings from user preferences (dark-mode-aware defaults)
     // Default: Grid with 32px spacing (32 divides evenly into 1024px tiles)
     {
         QSettings settings("SpeedyNote", "App");
+        bool dark = isDarkMode();
         Page::BackgroundType defaultStyle = static_cast<Page::BackgroundType>(
             settings.value("background/type", static_cast<int>(Page::BackgroundType::Grid)).toInt());
-        QColor defaultBgColor = QColor(settings.value("background/color", "#ffffff").toString());
-        QColor defaultGridColor = QColor(settings.value("background/gridColor", "#c8c8c8").toString());
+        QColor defaultBgColor = QColor(settings.value("background/color", dark ? "#2b2b2b" : "#ffffff").toString());
+        QColor defaultGridColor = QColor(settings.value("background/gridColor", dark ? "#404040" : "#c8c8c8").toString());
         int defaultGridSpacing = settings.value("background/gridSpacing", 32).toInt();
         int defaultLineSpacing = settings.value("background/lineSpacing", 32).toInt();
         
@@ -3926,6 +3932,15 @@ QColor MainWindow::getDefaultPenColor() {
     return isDarkMode() ? Qt::white : Qt::black;
 }
 
+void MainWindow::setPdfDarkModeEnabled(bool enabled) {
+    if (m_tabManager) {
+        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+            if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
+                vp->setPdfDarkModeEnabled(enabled);
+            }
+        }
+    }
+}
 
 QColor MainWindow::getAccentColor() const {
     if (useCustomAccentColor && customAccentColor.isValid()) {
@@ -4050,9 +4065,12 @@ void MainWindow::updateTheme() {
     
     // Update all DocumentViewports
     if (m_tabManager) {
+        QSettings s("SpeedyNote", "App");
+        bool pdfDarkMode = s.value("display/pdfDarkMode", true).toBool();
         for (int i = 0; i < m_tabManager->tabCount(); ++i) {
             if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
                 vp->setDarkMode(darkMode);
+                vp->setPdfDarkModeEnabled(pdfDarkMode);
             }
         }
     }

@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "DocumentViewport.h"
+#include "DarkModeUtils.h"
 #include "TouchGestureHandler.h"
 // Note: ShortcutManager.h no longer needed here - all shortcuts handled by MainWindow
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
@@ -459,7 +460,25 @@ void DocumentViewport::setDarkMode(bool dark)
     pal.setColor(QPalette::Window, m_backgroundColor);
     setPalette(pal);
     
+    // PDF dark mode depends on overall dark mode — invalidate cache so pages
+    // are re-rendered with or without lightness inversion.
+    if (m_pdfDarkModeEnabled) {
+        invalidatePdfCache();
+    }
+
     // Trigger repaint
+    update();
+}
+
+void DocumentViewport::setPdfDarkModeEnabled(bool enabled)
+{
+    if (m_pdfDarkModeEnabled == enabled) {
+        return;
+    }
+    m_pdfDarkModeEnabled = enabled;
+
+    // Re-render cached PDF pages with/without inversion
+    invalidatePdfCache();
     update();
 }
 
@@ -3459,6 +3478,11 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
     if (pdfImage.isNull()) {
         return QPixmap();
     }
+
+    // Apply HSL lightness inversion for PDF dark mode
+    if (m_isDarkMode && m_pdfDarkModeEnabled) {
+        DarkModeUtils::invertImageLightness(pdfImage);
+    }
     
     QPixmap pixmap = QPixmap::fromImage(pdfImage);
     
@@ -3593,6 +3617,11 @@ void DocumentViewport::doAsyncPdfPreload()
                 return;
             }
             
+            // Apply HSL lightness inversion for PDF dark mode
+            if (m_isDarkMode && m_pdfDarkModeEnabled) {
+                DarkModeUtils::invertImageLightness(pdfImage);
+            }
+
             // SAFE: QPixmap::fromImage on main thread
             QPixmap pixmap = QPixmap::fromImage(pdfImage);
             

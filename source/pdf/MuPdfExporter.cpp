@@ -6,6 +6,7 @@
 
 #ifdef SPEEDYNOTE_MUPDF_EXPORT
 
+#include "../core/DarkModeUtils.h"
 #include "../core/Document.h"
 #include "../core/Page.h"
 #include "../layers/VectorLayer.h"
@@ -30,7 +31,8 @@
 static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
                                        fz_buffer* buf, pdf_obj* resources,
                                        const VectorLayer* layer, qreal pageHeightSn,
-                                       int& gsIndex, std::map<int, QString>& alphaToGsName);
+                                       int& gsIndex, std::map<int, QString>& alphaToGsName,
+                                       bool darkenStrokes = false);
 static int getSourcePageRotation(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
 static fz_rect getSourcePageBBox(fz_context* ctx, pdf_document* srcPdf, int pageIndex);
 static pdf_obj* writeOutlineRecursive(fz_context* ctx, pdf_document* outputDoc,
@@ -560,12 +562,19 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
     // For annotations-only mode, skip PDF background entirely but keep page dimensions
     // This renders only strokes/images on a blank white page
     pdf_obj* bgXObject = nullptr;
+    bool bgIsRasterDarkMode = false;  // true when background is a dark-mode raster image
     if (!m_options.annotationsOnly) {
-        // Import the source PDF page as an XObject
-        bgXObject = importPageAsXObject(pdfPageNum);
-        if (!bgXObject) {
-            qWarning() << "[MuPdfExporter] Failed to import PDF page as XObject, falling back to blank";
-            return renderBlankPage(pageIndex);
+        if (m_options.darkModeBackground) {
+            // Dark mode export: rasterize source page, invert lightness, embed as image XObject
+            bgIsRasterDarkMode = true;
+            // bgXObject will be set inside the fz_try block below (needs MuPDF calls)
+        } else {
+            // Normal: import the source PDF page as a vector XObject
+            bgXObject = importPageAsXObject(pdfPageNum);
+            if (!bgXObject) {
+                qWarning() << "[MuPdfExporter] Failed to import PDF page as XObject, falling back to blank";
+                return renderBlankPage(pageIndex);
+            }
         }
     }
     
@@ -580,6 +589,41 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         // Create Resources dictionary
         resources = pdf_new_dict(m_ctx, m_outputDoc, 4);
         
+        // Dark mode background: rasterize PDF page, invert, embed as image
+        if (bgIsRasterDarkMode && m_sourceDoc) {
+            QImage bgImage = m_document->renderPdfPageToImage(pdfPageNum, static_cast<qreal>(m_options.dpi));
+            if (!bgImage.isNull()) {
+                DarkModeUtils::invertImageLightness(bgImage);
+
+                QByteArray compressed = compressImage(bgImage, false,
+                    QSizeF(widthPt, heightPt), m_options.dpi);
+                if (!compressed.isEmpty()) {
+                    fz_buffer* imgBuf = fz_new_buffer_from_copied_data(m_ctx,
+                        reinterpret_cast<const unsigned char*>(compressed.constData()),
+                        compressed.size());
+                    fz_image* fzImg = fz_new_image_from_buffer(m_ctx, imgBuf);
+                    fz_drop_buffer(m_ctx, imgBuf);
+
+                    pdf_obj* imgXObj = pdf_add_image(m_ctx, m_outputDoc, fzImg);
+                    fz_drop_image(m_ctx, fzImg);
+
+                    pdf_obj* xobjectDict = pdf_dict_get(m_ctx, resources, PDF_NAME(XObject));
+                    if (!xobjectDict) {
+                        xobjectDict = pdf_new_dict(m_ctx, m_outputDoc, 4);
+                        pdf_dict_put(m_ctx, resources, PDF_NAME(XObject), xobjectDict);
+                    }
+                    pdf_dict_put(m_ctx, xobjectDict, pdf_new_name(m_ctx, "BGDark"), imgXObj);
+
+                    char cmd[128];
+                    fz_append_string(m_ctx, combinedContent, "q\n");
+                    snprintf(cmd, sizeof(cmd), "%.4f 0 0 %.4f 0 0 cm\n", widthPt, heightPt);
+                    fz_append_string(m_ctx, combinedContent, cmd);
+                    fz_append_string(m_ctx, combinedContent, "/BGDark Do\n");
+                    fz_append_string(m_ctx, combinedContent, "Q\n");
+                }
+            }
+        }
+
         // Draw background XObject if present (not in annotations-only mode)
         if (bgXObject) {
             // Get source page properties for rotation handling
@@ -704,8 +748,9 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         // 2. Interleave layers and objects
         for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
             // Render this layer's strokes (with transparency support)
-            appendLayerStrokesToBuffer(m_ctx, m_outputDoc, combinedContent, resources, 
-                                      page->vectorLayers[layerIdx].get(), pageHeightSn, gsIndex, alphaToGsName);
+            appendLayerStrokesToBuffer(m_ctx, m_outputDoc, combinedContent, resources,
+                                      page->vectorLayers[layerIdx].get(), pageHeightSn, gsIndex, alphaToGsName,
+                                      m_options.darkenStrokes);
             
             // Render objects with affinity = layerIdx (above this layer, below next)
             addObjectsWithAffinity(layerIdx);
@@ -780,12 +825,21 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
  * Note: Custom background images are handled separately as XObjects.
  */
 static fz_buffer* buildBackgroundContentStream(fz_context* ctx, const Page* page,
-                                                float widthPt, float heightPt)
+                                                float widthPt, float heightPt,
+                                                bool darkMode = false)
 {
     if (!ctx || !page) return nullptr;
     
+    // Resolve colours, applying lightness inversion for dark mode export
+    QColor bgColor = page->backgroundColor;
+    QColor gColor  = page->gridColor;
+    if (darkMode) {
+        bgColor = DarkModeUtils::invertColorLightness(bgColor);
+        gColor  = DarkModeUtils::invertColorLightness(gColor);
+    }
+    
     // Check if we need to render any background
-    bool needsColorFill = (page->backgroundColor != Qt::white);
+    bool needsColorFill = (bgColor != Qt::white);
     bool needsGrid = (page->backgroundType == Page::BackgroundType::Grid);
     bool needsLines = (page->backgroundType == Page::BackgroundType::Lines);
     
@@ -801,10 +855,9 @@ static fz_buffer* buildBackgroundContentStream(fz_context* ctx, const Page* page
         
         // 1. Fill background color (if not white)
         if (needsColorFill) {
-            // Set fill color (RGB, 0-1 range)
-            float r = page->backgroundColor.redF();
-            float g = page->backgroundColor.greenF();
-            float b = page->backgroundColor.blueF();
+            float r = bgColor.redF();
+            float g = bgColor.greenF();
+            float b = bgColor.blueF();
             
             snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f rg\n", r, g, b);
             fz_append_string(ctx, buf, cmd);
@@ -816,10 +869,9 @@ static fz_buffer* buildBackgroundContentStream(fz_context* ctx, const Page* page
         
         // 2. Draw grid or lines
         if (needsGrid || needsLines) {
-            // Set stroke color for grid/lines
-            float r = page->gridColor.redF();
-            float g = page->gridColor.greenF();
-            float b = page->gridColor.blueF();
+            float r = gColor.redF();
+            float g = gColor.greenF();
+            float b = gColor.blueF();
             
             snprintf(cmd, sizeof(cmd), "%.4f %.4f %.4f RG\n", r, g, b);
             fz_append_string(ctx, buf, cmd);
@@ -887,7 +939,7 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
     // Skip background in annotations-only mode
     fz_buffer* backgroundContent = nullptr;
     if (!m_options.annotationsOnly) {
-        backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt);
+        backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt, m_options.darkModeBackground);
     }
     
     // Check if page has images to add
@@ -1044,7 +1096,8 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
             for (int layerIdx = 0; layerIdx < numLayers; ++layerIdx) {
                 // Render this layer's strokes (with transparency support)
                 appendLayerStrokesToBuffer(m_ctx, m_outputDoc, finalContent, resources,
-                                          page->vectorLayers[layerIdx].get(), pageHeightSn, gsIndex, alphaToGsName);
+                                          page->vectorLayers[layerIdx].get(), pageHeightSn, gsIndex, alphaToGsName,
+                                          m_options.darkenStrokes);
                 
                 // Render objects with affinity = layerIdx (above this layer, below next)
                 addObjectsWithAffinity(layerIdx);
@@ -1343,7 +1396,8 @@ static QString getOrCreateExtGState(fz_context* ctx, pdf_document* outputDoc,
 static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
                                        fz_buffer* buf, pdf_obj* resources,
                                        const VectorLayer* layer, qreal pageHeightSn,
-                                       int& gsIndex, std::map<int, QString>& alphaToGsName)
+                                       int& gsIndex, std::map<int, QString>& alphaToGsName,
+                                       bool darkenStrokes)
 {
     if (!ctx || !buf || !layer) return;
     
@@ -1376,10 +1430,14 @@ static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
             }
         }
         
-        // Set fill color (RGB values 0-1)
-        float r = stroke.color.redF();
-        float g = stroke.color.greenF();
-        float b = stroke.color.blueF();
+        // Set fill color, optionally darkening light strokes for export
+        QColor strokeColor = stroke.color;
+        if (darkenStrokes) {
+            strokeColor = DarkModeUtils::darkenColorForExport(strokeColor);
+        }
+        float r = strokeColor.redF();
+        float g = strokeColor.greenF();
+        float b = strokeColor.blueF();
         
         char colorCmd[64];
         snprintf(colorCmd, sizeof(colorCmd), "%.4f %.4f %.4f rg\n", r, g, b);

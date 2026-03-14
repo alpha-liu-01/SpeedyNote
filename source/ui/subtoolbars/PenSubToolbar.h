@@ -103,6 +103,7 @@ private:
     // Default values
     static constexpr int NUM_PRESETS = 3;
     static const QColor DEFAULT_COLORS[NUM_PRESETS];
+    static const QColor DEFAULT_COLORS_DARK[NUM_PRESETS];
     static constexpr qreal DEFAULT_THICKNESSES[NUM_PRESETS] = {2.0, 5.0, 10.0};
     
     // QSettings keys
