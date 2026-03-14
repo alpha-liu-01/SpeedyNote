@@ -1895,6 +1895,27 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
             return;
     }
     
+    // Aspect ratio enforcement for locked ImageObjects
+    if (auto* img = dynamic_cast<ImageObject*>(obj)) {
+        if (img->maintainAspectRatio && img->originalAspectRatio > 0.0) {
+            bool isCorner = (m_objectResizeHandle == HandleHit::TopLeft ||
+                             m_objectResizeHandle == HandleHit::TopRight ||
+                             m_objectResizeHandle == HandleHit::BottomLeft ||
+                             m_objectResizeHandle == HandleHit::BottomRight);
+            bool isHorizontalEdge = (m_objectResizeHandle == HandleHit::Left ||
+                                     m_objectResizeHandle == HandleHit::Right);
+            if (isCorner) {
+                qreal uniform = (scaleX + scaleY) / 2.0;
+                scaleX = uniform;
+                scaleY = uniform;
+            } else if (isHorizontalEdge) {
+                scaleY = scaleX;
+            } else {
+                scaleX = scaleY;
+            }
+        }
+    }
+    
     // Clamp scale factors (prevent flip and ensure minimum size)
     const qreal MIN_SCALE = 0.1;
     const qreal MAX_SCALE = 10.0;
@@ -5338,8 +5359,11 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                                obj->rotation != m_resizeOriginalRotation);  // O3.1.8.3
         if (changed) {
             // Phase O3.1.5/O3.1.8.3: Create undo entry for resize/rotate
-            pushObjectResizeUndo(obj, m_resizeOriginalPosition, m_resizeOriginalSize, 
-                                 m_resizeOriginalRotation);
+            bool aspectLock = true;
+            if (auto* img = dynamic_cast<ImageObject*>(obj))
+                aspectLock = img->maintainAspectRatio;
+            pushObjectResizeUndo(obj, m_resizeOriginalPosition, m_resizeOriginalSize,
+                                 m_resizeOriginalRotation, aspectLock);
             
             // Mark dirty
             if (m_document) {
@@ -7426,6 +7450,49 @@ void DocumentViewport::decreaseSelectedAffinity()
         }
     }
     
+    emit documentModified();
+    update();
+}
+
+void DocumentViewport::toggleImageAspectRatioLock()
+{
+    if (!m_document || m_selectedObjects.size() != 1) return;
+    
+    InsertedObject* obj = m_selectedObjects.first();
+    if (!obj || obj->type() != "image") return;
+    
+    auto* img = dynamic_cast<ImageObject*>(obj);
+    if (!img) return;
+    
+    bool oldLock = img->maintainAspectRatio;
+    QPointF oldPos = img->position;
+    QSizeF oldSize = img->size;
+    
+    if (!oldLock) {
+        // Locking: adjust width to match original aspect ratio, keeping height
+        img->maintainAspectRatio = true;
+        if (img->originalAspectRatio > 0.0) {
+            QPointF oldCenter = img->center();
+            img->size.setWidth(img->size.height() * img->originalAspectRatio);
+            img->position.setX(oldCenter.x() - img->size.width() / 2.0);
+            img->position.setY(oldCenter.y() - img->size.height() / 2.0);
+        }
+    } else {
+        // Unlocking: just clear the flag, no size change
+        img->maintainAspectRatio = false;
+    }
+    
+    pushObjectResizeUndo(obj, oldPos, oldSize, obj->rotation, oldLock);
+    
+    if (m_document->isEdgeless()) {
+        Document::TileCoord tileCoord = {0, 0};
+        findPageContainingObject(obj, &tileCoord);
+        m_document->markTileDirty(tileCoord);
+    } else {
+        m_document->markPageDirty(m_currentPageIndex);
+    }
+    
+    emit objectSelectionChanged();
     emit documentModified();
     update();
 }
@@ -10425,6 +10492,10 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
     QPointF snapCorrection(std::round(originPhysical.x()) - originPhysical.x(),
                            std::round(originPhysical.y()) - originPhysical.y());
     
+    // Pre-compute the snap translate in logical pixels (reused by cache painter and end cap)
+    qreal snapTxLogical = snapCorrection.x() / dpr;
+    qreal snapTyLogical = snapCorrection.y() / dpr;
+    
     // ========== Semi-Transparent Stroke Rendering ==========
     // For strokes with alpha < 255 (e.g., marker at 50% opacity), we draw
     // with FULL OPACITY to the cache, then blit with the desired opacity.
@@ -10444,7 +10515,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
         
         // Snap page/tile origin to integer physical pixel (see comment above)
-        cachePainter.translate(snapCorrection.x() / dpr, snapCorrection.y() / dpr);
+        cachePainter.translate(snapTxLogical, snapTyLogical);
         
         // Apply transform to convert coords to viewport coords
         // The cache is in viewport coordinates (widget pixels)
@@ -10454,7 +10525,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         // For paged mode, translate to page position
         // For edgeless, stroke points are already in document coords - no extra translate
         if (!isEdgeless) {
-            cachePainter.translate(pagePosition(m_activeDrawingPage));
+            cachePainter.translate(snapOrigin);
         }
         
         // Render using the same path as finalized strokes (Catmull-Rom smoothing).
@@ -10487,7 +10558,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         painter.save();
         
         // Apply same sub-pixel snap so the end cap aligns with the cached stroke body
-        painter.translate(snapCorrection.x() / dpr, snapCorrection.y() / dpr);
+        painter.translate(snapTxLogical, snapTyLogical);
         
         painter.translate(-m_panOffset.x() * m_zoomLevel, -m_panOffset.y() * m_zoomLevel);
         painter.scale(m_zoomLevel, m_zoomLevel);
@@ -10495,7 +10566,7 @@ void DocumentViewport::renderCurrentStrokeIncremental(QPainter& painter)
         // For paged mode, translate to page position
         // For edgeless, stroke points are already in document coords
         if (!isEdgeless) {
-            painter.translate(pagePosition(m_activeDrawingPage));
+            painter.translate(snapOrigin);
         }
         
         qreal endRadius = qMax(m_currentStroke.baseThickness * m_currentStroke.points[n - 1].pressure, 1.0) / 2.0;
@@ -10979,6 +11050,10 @@ void DocumentViewport::undo()
                         obj->position = action.objectOldPosition;
                         obj->size = action.objectOldSize;
                         obj->rotation = action.objectOldRotation;
+                        if (obj->type() == "image") {
+                            if (auto* img = dynamic_cast<ImageObject*>(obj))
+                                img->maintainAspectRatio = action.objectOldAspectLock;
+                        }
                     }
                     markObjDirty(m_document, action);
                 }
@@ -11159,6 +11234,10 @@ void DocumentViewport::redo()
                         obj->position = action.objectNewPosition;
                         obj->size = action.objectNewSize;
                         obj->rotation = action.objectNewRotation;
+                        if (obj->type() == "image") {
+                            if (auto* img = dynamic_cast<ImageObject*>(obj))
+                                img->maintainAspectRatio = action.objectNewAspectLock;
+                        }
                     }
                     markObjDirty(m_document, action);
                 }
@@ -11314,7 +11393,8 @@ void DocumentViewport::pushObjectMoveUndo(InsertedObject* obj, const QPointF& ol
 void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
                                             const QPointF& oldPos,
                                             const QSizeF& oldSize,
-                                            qreal oldRotation)
+                                            qreal oldRotation,
+                                            bool oldAspectLock)
 {
     if (!obj) return;
 
@@ -11328,6 +11408,13 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
     action.objectNewSize = obj->size;
     action.objectOldRotation = oldRotation;
     action.objectNewRotation = obj->rotation;
+    action.objectOldAspectLock = oldAspectLock;
+    if (obj->type() == "image") {
+        if (auto* img = dynamic_cast<ImageObject*>(obj))
+            action.objectNewAspectLock = img->maintainAspectRatio;
+    } else {
+        action.objectNewAspectLock = oldAspectLock;
+    }
     if (m_document && m_document->isEdgeless()) {
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);

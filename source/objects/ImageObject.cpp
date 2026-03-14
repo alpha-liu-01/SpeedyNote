@@ -24,18 +24,24 @@ void ImageObject::render(QPainter& painter, qreal zoom) const
         size.height() * zoom
     );
     
-    // Apply rotation if needed
+    QRectF sourceRect(cachedPixmap.rect());
+
     if (rotation != 0.0) {
         painter.save();
         QPointF centerPoint = targetRect.center();
         painter.translate(centerPoint);
         painter.rotate(rotation);
         painter.translate(-centerPoint);
-        painter.drawPixmap(targetRect.toRect(), cachedPixmap);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.drawPixmap(targetRect, cachedPixmap, sourceRect);
         painter.restore();
     } else {
-        // Simple case: no rotation
-        painter.drawPixmap(targetRect.toRect(), cachedPixmap);
+        bool hadSmooth = painter.testRenderHint(QPainter::SmoothPixmapTransform);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.drawPixmap(targetRect, cachedPixmap, sourceRect);
+        if (!hadSmooth) {
+            painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        }
     }
 }
 

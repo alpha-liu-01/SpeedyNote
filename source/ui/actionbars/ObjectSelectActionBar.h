@@ -63,8 +63,20 @@ public:
      * When true, shows full action bar.
      */
     void setHasSelection(bool hasSelection);
+    
+    /**
+     * @brief Update image-specific state for the aspect ratio lock button.
+     * @param isImage True if a single ImageObject is selected.
+     * @param aspectLocked Current maintainAspectRatio state of the image.
+     */
+    void updateImageSelection(bool isImage, bool aspectLocked);
 
 signals:
+    /**
+     * @brief Emitted when the aspect ratio lock button is clicked.
+     */
+    void aspectRatioLockRequested();
+    
     /**
      * @brief Emitted when Copy button is clicked.
      */
@@ -127,12 +139,16 @@ private:
     ActionBarButton* m_increaseAffinityButton = nullptr;
     ActionBarButton* m_decreaseAffinityButton = nullptr;
     
+    // Aspect ratio lock (image-only)
+    ActionBarButton* m_aspectLockButton = nullptr;
+    
     // Cancel button (for paste-only mode)
     ActionBarButton* m_cancelButton = nullptr;
     
     // State tracking
     bool m_hasObjectInClipboard = false;
     bool m_hasSelection = false;
+    bool m_isImageSelected = false;
 };
 
 #endif // OBJECTSELECTACTIONBAR_H

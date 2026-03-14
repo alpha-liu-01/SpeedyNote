@@ -102,6 +102,8 @@ struct UndoAction {
     QSizeF objectNewSize;
     qreal objectOldRotation = 0.0;
     qreal objectNewRotation = 0.0;
+    bool objectOldAspectLock = true;
+    bool objectNewAspectLock = true;
 };
 
 #include <QWidget>
@@ -558,8 +560,9 @@ public:
                             Document::TileCoord newTile = {0, 0},
                             int oldPageIndex = -1,
                             int newPageIndex = -1);
-    void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos, 
-                              const QSizeF& oldSize, qreal oldRotation = 0.0);
+    void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos,
+                              const QSizeF& oldSize, qreal oldRotation = 0.0,
+                              bool oldAspectLock = true);
     void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
     
     // ===== Affinity Helpers (Phase O3.5.3) =====
@@ -958,6 +961,16 @@ public:
      * Minimum affinity is -1 (background, below all strokes).
      */
     void decreaseSelectedAffinity();
+    
+    /**
+     * @brief Toggle aspect ratio lock on the selected ImageObject.
+     * 
+     * Lock: adjusts width to match originalAspectRatio (keeping height),
+     * re-centers the object, and sets maintainAspectRatio = true.
+     * Unlock: sets maintainAspectRatio = false without changing size.
+     * Only operates on single-selected ImageObjects.
+     */
+    void toggleImageAspectRatioLock();
     
     /**
      * @brief Send selected objects to background (affinity = -1).
