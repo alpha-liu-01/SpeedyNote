@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "DarkModeUtils.h"
+#include "../compat/qt_compat.h"
 
 #include <algorithm>
 #include <cmath>
@@ -152,17 +153,17 @@ void invertImageLightness(QImage& image, const QVector<QRect>& imageRegions)
 
 QColor invertColorLightness(const QColor& color)
 {
-    float h, s, l, a;
+    SN_ColorFloat h, s, l, a;
     color.getHslF(&h, &s, &l, &a);
-    return QColor::fromHslF(h, s, 1.0f - l, a);
+    return QColor::fromHslF(h, s, SN_ColorFloat(1) - l, a);
 }
 
 QColor darkenColorForExport(const QColor& color)
 {
-    float h, s, l, a;
+    SN_ColorFloat h, s, l, a;
     color.getHslF(&h, &s, &l, &a);
-    if (l > 0.5f) {
-        l = 1.0f - l;
+    if (l > SN_ColorFloat(0.5)) {
+        l = SN_ColorFloat(1) - l;
     }
     return QColor::fromHslF(h, s, l, a);
 }

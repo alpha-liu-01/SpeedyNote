@@ -918,6 +918,11 @@ int main(int argc, char* argv[])
             }
         }
 
+        // Create a hidden Launcher so toggleLauncher() can find it
+        auto* launcher = new Launcher();
+        launcher->setAttribute(Qt::WA_DeleteOnClose);
+        connectLauncherSignals(launcher);
+
 #if defined(Q_OS_MACOS)
         fileOpenFilter.setMainWindow(w);
 #elif defined(Q_OS_IOS)
@@ -941,6 +946,12 @@ int main(int argc, char* argv[])
                 w->openFileInNewTab(path);
             if (sessionActiveIndex >= 0 && sessionActiveIndex < w->tabCount())
                 w->switchToTabIndex(sessionActiveIndex);
+
+            // Create a hidden Launcher so toggleLauncher() can find it
+            auto* launcher = new Launcher();
+            launcher->setAttribute(Qt::WA_DeleteOnClose);
+            connectLauncherSignals(launcher);
+
 #if defined(Q_OS_MACOS)
             fileOpenFilter.setMainWindow(w);
 #elif defined(Q_OS_IOS)

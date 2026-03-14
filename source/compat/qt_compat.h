@@ -82,6 +82,19 @@
 #endif
 
 // ============================================================================
+// QColor floating-point component type
+// ============================================================================
+// Qt6: QColor::getHslF / getRgbF take float*
+// Qt5: QColor::getHslF / getRgbF take qreal* (double*)
+// Use SN_ColorFloat for variables passed by pointer to these methods.
+// ============================================================================
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+using SN_ColorFloat = float;
+#else
+using SN_ColorFloat = qreal;
+#endif
+
+// ============================================================================
 // Single-shot signal connections
 // ============================================================================
 // Qt6: Qt::SingleShotConnection auto-disconnects after the first emit.
