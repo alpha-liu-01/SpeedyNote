@@ -136,6 +136,7 @@ public:
 
     QColor getDefaultPenColor();
     void setPdfDarkModeEnabled(bool enabled);
+    void setSkipImageMasking(bool skip);
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDLControllerManager *controllerManager = nullptr;

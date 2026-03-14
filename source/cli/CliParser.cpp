@@ -150,6 +150,10 @@ void setupParser(QCommandLineParser& parser, Command cmd)
                 QCoreApplication::translate("CLI", "Darken light-coloured strokes for printing")));
 
             parser.addOption(QCommandLineOption(
+                QStringLiteral("skip-image-masking"),
+                QCoreApplication::translate("CLI", "Bypass image-region detection and invert entire page")));
+
+            parser.addOption(QCommandLineOption(
                 QStringLiteral("overwrite"),
                 QCoreApplication::translate("CLI", "Overwrite existing output files")));
             
@@ -341,6 +345,7 @@ void showHelp(const QCommandLineParser& parser, Command cmd)
             "  --annotations-only      Export strokes only (blank background, no PDF/grid)\n"
             "  --dark-background      Apply dark mode lightness inversion to PDF backgrounds\n"
             "  --darken-strokes       Darken light-coloured strokes for printing\n"
+            "  --skip-image-masking   Bypass image detection, invert entire page\n"
             "  --no-metadata           Don't preserve PDF metadata\n"
             "  --no-outline            Don't preserve PDF bookmarks/outline\n"
             "\n"

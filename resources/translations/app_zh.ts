@@ -444,13 +444,13 @@ This makes the package larger but allows the recipient to view the original PDF.
     </message>
     <message>
         <location filename="../../source/cli/CliHandler.cpp" line="73"/>
-        <location filename="../../source/cli/CliHandler.cpp" line="184"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="185"/>
         <source>Output path required. Use -o or --output to specify destination.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliHandler.cpp" line="89"/>
-        <location filename="../../source/cli/CliHandler.cpp" line="200"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="201"/>
         <source>No valid notebooks found in the specified paths.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -461,40 +461,40 @@ Use a directory as output destination, e.g.: -o ~/PDFs/</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="141"/>
-        <location filename="../../source/cli/CliHandler.cpp" line="234"/>
-        <location filename="../../source/cli/CliHandler.cpp" line="321"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="142"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="235"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="322"/>
         <source>Stopping due to --fail-fast flag.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="176"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="177"/>
         <source>No input files specified. Use &apos;speedynote export-snbx --help&apos; for usage.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="208"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="209"/>
         <source>Cannot export %1 notebooks to a single SNBX file.
 Use a directory as output destination, e.g.: -o ~/Backup/</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="269"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="270"/>
         <source>No input files specified. Use &apos;speedynote import --help&apos; for usage.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="277"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="278"/>
         <source>Destination directory required. Use -d or --dest to specify.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="288"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="289"/>
         <source>Destination must be a directory, not a file.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliHandler.cpp" line="297"/>
+        <location filename="../../source/cli/CliHandler.cpp" line="298"/>
         <source>No valid .snbx packages found in the specified paths.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -505,13 +505,13 @@ Use a directory as output destination, e.g.: -o ~/Backup/</source>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="113"/>
-        <location filename="../../source/cli/CliParser.cpp" line="184"/>
+        <location filename="../../source/cli/CliParser.cpp" line="188"/>
         <source>Notebook paths (.snb folders) or directories</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="118"/>
-        <location filename="../../source/cli/CliParser.cpp" line="189"/>
+        <location filename="../../source/cli/CliParser.cpp" line="193"/>
         <source>Output file (single) or directory (batch)</source>
         <translation type="unfinished"></translation>
     </message>
@@ -548,82 +548,87 @@ Use a directory as output destination, e.g.: -o ~/Backup/</source>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="150"/>
         <source>Darken light-coloured strokes for printing</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">为打印效果，把浅色笔画加深</translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="154"/>
-        <location filename="../../source/cli/CliParser.cpp" line="198"/>
-        <source>Overwrite existing output files</source>
+        <source>Bypass image-region detection and invert entire page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="158"/>
         <location filename="../../source/cli/CliParser.cpp" line="202"/>
-        <location filename="../../source/cli/CliParser.cpp" line="246"/>
-        <source>Search input directories recursively</source>
+        <source>Overwrite existing output files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="162"/>
         <location filename="../../source/cli/CliParser.cpp" line="206"/>
-        <source>Find bundles without .snb extension</source>
+        <location filename="../../source/cli/CliParser.cpp" line="250"/>
+        <source>Search input directories recursively</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="166"/>
         <location filename="../../source/cli/CliParser.cpp" line="210"/>
-        <location filename="../../source/cli/CliParser.cpp" line="250"/>
-        <source>Stop on first error</source>
+        <source>Find bundles without .snb extension</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="170"/>
         <location filename="../../source/cli/CliParser.cpp" line="214"/>
         <location filename="../../source/cli/CliParser.cpp" line="254"/>
-        <source>Show detailed progress</source>
+        <source>Stop on first error</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="174"/>
         <location filename="../../source/cli/CliParser.cpp" line="218"/>
         <location filename="../../source/cli/CliParser.cpp" line="258"/>
-        <source>Output results as JSON</source>
+        <source>Show detailed progress</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/cli/CliParser.cpp" line="178"/>
         <location filename="../../source/cli/CliParser.cpp" line="222"/>
         <location filename="../../source/cli/CliParser.cpp" line="262"/>
+        <source>Output results as JSON</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/cli/CliParser.cpp" line="182"/>
+        <location filename="../../source/cli/CliParser.cpp" line="226"/>
+        <location filename="../../source/cli/CliParser.cpp" line="266"/>
         <source>Preview without creating files</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="194"/>
+        <location filename="../../source/cli/CliParser.cpp" line="198"/>
         <source>Don&apos;t embed source PDF in package</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="228"/>
+        <location filename="../../source/cli/CliParser.cpp" line="232"/>
         <source>SNBX package files or directories</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="233"/>
+        <location filename="../../source/cli/CliParser.cpp" line="237"/>
         <source>Destination directory for notebooks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="238"/>
+        <location filename="../../source/cli/CliParser.cpp" line="242"/>
         <source>Overwrite existing notebooks</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="242"/>
+        <location filename="../../source/cli/CliParser.cpp" line="246"/>
         <source>Add imported notebooks to the launcher timeline</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="281"/>
+        <location filename="../../source/cli/CliParser.cpp" line="285"/>
         <source>Usage: speedynote [command] [options] [files...]
 
 SpeedyNote - A fast note-taking application with PDF annotation support.
@@ -669,7 +674,7 @@ Run &apos;speedynote &lt;command&gt; --help&apos; for command-specific options.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="325"/>
+        <location filename="../../source/cli/CliParser.cpp" line="329"/>
         <source>Usage: speedynote export-pdf [OPTIONS] &lt;input&gt;... -o &lt;output&gt;
 
 Export notebooks to PDF format.
@@ -688,6 +693,7 @@ EXPORT OPTIONS:
   --annotations-only      Export strokes only (blank background, no PDF/grid)
   --dark-background      Apply dark mode lightness inversion to PDF backgrounds
   --darken-strokes       Darken light-coloured strokes for printing
+  --skip-image-masking   Bypass image detection, invert entire page
   --no-metadata           Don&apos;t preserve PDF metadata
   --no-outline            Don&apos;t preserve PDF bookmarks/outline
 
@@ -720,7 +726,7 @@ NOTE: Edgeless canvas notebooks are skipped (PDF export requires pages).
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="374"/>
+        <location filename="../../source/cli/CliParser.cpp" line="379"/>
         <source>Usage: speedynote export-snbx [OPTIONS] &lt;input&gt;... -o &lt;output&gt;
 
 Export notebooks to .snbx packages (portable backup format).
@@ -764,7 +770,7 @@ NOTE: .snbx packages can be imported on any device with SpeedyNote.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="416"/>
+        <location filename="../../source/cli/CliParser.cpp" line="421"/>
         <source>Usage: speedynote import [OPTIONS] &lt;input&gt;... -d &lt;dest&gt;
 
 Import .snbx packages as notebooks.
@@ -809,7 +815,7 @@ NOTE: On Android, imported notebooks are automatically added to the library.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/cli/CliParser.cpp" line="511"/>
+        <location filename="../../source/cli/CliParser.cpp" line="516"/>
         <location filename="../../source/cli/CliProgress.cpp" line="264"/>
         <source>Error: </source>
         <translation type="unfinished"></translation>
@@ -947,57 +953,57 @@ NOTE: On Android, imported notebooks are automatically added to the library.
         <translation type="unfinished">取消</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="870"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="875"/>
         <source>Background Style:</source>
         <translation type="unfinished">网格线类型：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="876"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="881"/>
         <source>None</source>
         <translation type="unfinished">无</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="877"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="882"/>
         <source>Grid</source>
         <translation type="unfinished">网格</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="878"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="883"/>
         <source>Lines</source>
         <translation type="unfinished">横线</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="886"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="891"/>
         <source>Background Color:</source>
         <translation type="unfinished">背景颜色：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1268"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1273"/>
         <source>Select Background Color</source>
         <translation type="unfinished">选择背景颜色</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1288"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1293"/>
         <source>Use Custom Accent Color</source>
         <translation type="unfinished">使用自定义主题色</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1291"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1296"/>
         <source>Accent Color:</source>
         <translation type="unfinished">主题色：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1302"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1307"/>
         <source>When enabled, use a custom accent color instead of the system accent color for the toolbar, dial, and tab selection.</source>
         <translation type="unfinished">启用此选项后，你可以使用一个不同于系统强调色的颜色当工具栏/旋钮/标签页的主题色。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1328"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1354"/>
         <source>Theme</source>
         <translation type="unfinished">主题</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1332"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1358"/>
         <source>Select Accent Color</source>
         <translation type="unfinished">选择主题色</translation>
     </message>
@@ -1008,187 +1014,187 @@ NOTE: On Android, imported notebooks are automatically added to the library.
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="100"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1043"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1048"/>
         <source>Shortcuts</source>
         <translation type="unfinished">快捷键</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="809"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="814"/>
         <source>Default Page &amp; Background Settings</source>
         <translation type="unfinished">页面设置</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="813"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="818"/>
         <source>These settings apply to newly created documents only. Background changes will also be applied to the current document.</source>
         <translation type="unfinished">这些设置仅适用于新建的文档。不过背景设置会立刻应用到当前文档。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="820"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="825"/>
         <source>Default Page Size</source>
         <translation type="unfinished">默认页面尺寸</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="826"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="831"/>
         <source>Paper Size:</source>
         <translation type="unfinished">页面尺寸:</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="834"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="839"/>
         <source>A3 (297 × 420 mm)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="835"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="840"/>
         <source>B4 (250 × 353 mm)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="836"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="841"/>
         <source>A4 (210 × 297 mm)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="837"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="842"/>
         <source>B5 (176 × 250 mm)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="838"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="843"/>
         <source>A5 (148 × 210 mm)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="840"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="845"/>
         <source>US Letter (8.5 × 11 in)</source>
         <translation type="unfinished">美国信件 (8.5 × 11 in)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="841"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="846"/>
         <source>US Legal (8.5 × 14 in)</source>
         <translation type="unfinished">美国法律 (8.5 × 14 in)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="842"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="847"/>
         <source>US Tabloid (11 × 17 in)</source>
         <translation type="unfinished">美国报纸 (11 × 17 in)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="851"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="856"/>
         <source>Dimensions:</source>
         <translation type="unfinished">尺寸：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="864"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="869"/>
         <source>Default Background</source>
         <translation type="unfinished">默认背景</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="900"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="905"/>
         <source>Grid/Line Color:</source>
         <translation type="unfinished">网格/横线的颜色:</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="916"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="921"/>
         <source>Grid Spacing:</source>
         <translation type="unfinished">网格间距：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="931"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="936"/>
         <source>Line Spacing:</source>
         <translation type="unfinished">横线间距：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="945"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="950"/>
         <source>Note: 32px spacing is recommended as it divides evenly into the 1024px tile size used by the edgeless canvas.</source>
         <translation type="unfinished">注意：推荐32px的间隔，因为可以被1024整除，对于1024见方的无边笔记图块来说最合适。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="960"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="965"/>
         <source>Page</source>
         <translation type="unfinished">页面</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="976"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="981"/>
         <source>Keyboard Shortcuts</source>
         <translation>键盘快捷键</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="980"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="985"/>
         <source>Double-click a shortcut to edit. Changes are saved automatically.</source>
         <translation type="unfinished">双击一个项目来编辑。变更会自动保存的。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="987"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="992"/>
         <source>Action</source>
         <translation type="unfinished">行动</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="987"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="992"/>
         <source>Shortcut</source>
         <translation type="unfinished">快捷键</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="987"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="992"/>
         <source>Default</source>
         <translation type="unfinished">默认值</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1008"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1013"/>
         <source>Edit</source>
         <translation type="unfinished">编辑</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1009"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1014"/>
         <source>Edit the selected shortcut</source>
         <translation type="unfinished">编辑选中的快捷键</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1013"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1018"/>
         <source>Reset</source>
         <translation type="unfinished">重置</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1014"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1019"/>
         <source>Reset the selected shortcut to default</source>
         <translation type="unfinished">把选中的快捷键恢复到默认</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1020"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1025"/>
         <source>Reset All to Defaults</source>
         <translation type="unfinished">全部恢复到默认</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1021"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1026"/>
         <source>Reset all shortcuts to their default values</source>
         <translation type="unfinished">把所有快捷键都设置为默认值</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1032"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1037"/>
         <source>Open Config Folder</source>
         <translation type="unfinished">打开配置文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1033"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1038"/>
         <source>Open the folder containing shortcuts.json</source>
         <translation type="unfinished">打开包含shortcuts.json的文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1119"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1124"/>
         <source>Conflict with: %1</source>
         <translation type="unfinished">和%1冲突</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1136"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1141"/>
         <source>Capture Shortcut for: %1</source>
         <translation type="unfinished">捕捉给%1的快捷键</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1154"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1159"/>
         <source>Shortcut Conflict</source>
         <translation type="unfinished">快捷键冲突</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1155"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1160"/>
         <source>The shortcut &apos;%1&apos; is already used by:
 %2
 
@@ -1199,38 +1205,38 @@ Do you want to use it anyway?</source>
 你确定你依然要使用这个快捷键吗？</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1183"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1192"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1188"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1197"/>
         <source>No Selection</source>
         <translation type="unfinished">没有选中</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1184"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1189"/>
         <source>Please select a shortcut to edit.</source>
         <translation type="unfinished">请选中一个快捷键来编辑。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1193"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1198"/>
         <source>Please select a shortcut to reset.</source>
         <translation type="unfinished">请选中一个快捷键来重置。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1203"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1208"/>
         <source>Already Default</source>
         <translation type="unfinished">已经是默认了</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1204"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1209"/>
         <source>This shortcut is already using the default value.</source>
         <translation type="unfinished">这个快捷键已经是默认了。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1219"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1224"/>
         <source>Reset All Shortcuts</source>
         <translation type="unfinished">重置所有快捷键</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1220"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1225"/>
         <source>Are you sure you want to reset all shortcuts to their default values?
 
 This cannot be undone.</source>
@@ -1239,122 +1245,132 @@ This cannot be undone.</source>
 可不能反悔哦。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1234"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1239"/>
         <source>Shortcuts Reset</source>
         <translation type="unfinished">快捷键重置</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1235"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1240"/>
         <source>All shortcuts have been reset to their default values.</source>
         <translation type="unfinished">所有快捷键都恢复到了默认值。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1262"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1267"/>
         <source>%1 × %2 px (at 96 DPI)</source>
         <translation type="unfinished">%1 × %2 px (若在 96 DPI)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1276"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1281"/>
         <source>Select Grid/Line Color</source>
         <translation type="unfinished">选择网格/横线的颜色</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1315"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1320"/>
         <source>Invert PDF Lightness in Dark Mode</source>
         <translation type="unfinished">在暗黑模式下把PDF渲染为黑色背景</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1318"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1323"/>
         <source>When enabled and dark mode is active, PDF page backgrounds are darkened by inverting lightness (HSL). White pages become dark and dark text becomes light, while colours keep their hue. Disable this if you prefer the original PDF colours.</source>
         <translation type="unfinished">在暗黑模式下启动此选项，PDF页面背景会变为深色背景。白底页变为黑底，黑色字体变白，但是颜色大体保持不变。如果你想要恢复PDF原本的颜色，请关闭此选项。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1419"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1334"/>
+        <source>Invert entire page including images</source>
+        <translation type="unfinished">连带图片一起反色</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1337"/>
+        <source>By default, embedded photos and figures are detected and excluded from inversion. Enable this to invert every pixel on the page. Useful for PDFs that consist mainly of black-and-white diagrams or graphs.</source>
+        <translation type="unfinished">默认状况下，程序会识别PDF中嵌入的图片和图表而使其保持原色。启动此选项后，程序会强制反色PDF中的所有内容。仅对主要由黑白两色构成或者少有图片的PDF适用。</translation>
+    </message>
+    <message>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1445"/>
         <source>Configure physical controller button mappings for your Joy-Con or other controller:</source>
         <translation type="unfinished">配置实体手柄按键来对应Joy-Con上的每一个按键：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1423"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1449"/>
         <source>Note: This maps your physical controller buttons to the logical Joy-Con functions used by the application. After setting up the physical mapping, you can configure what actions each logical button performs in the &apos;Button Mapping&apos; tab.</source>
         <translation type="unfinished">提示：因为实体手柄的按键在每个系统上的默认映射不同，你需要在这里让程序了解你手柄上的哪个按键对应Joy-Con上的哪个按键。执行完这一步以后你再去把Joy-Con上的每一个按键映射到诸功能上。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1430"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1456"/>
         <source>Configure Controller Mapping</source>
         <translation type="unfinished">配置手柄映射</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1436"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1462"/>
         <source>Reconnect Controller</source>
         <translation type="unfinished">重新连接手柄</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1443"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1469"/>
         <source>Current controller status:</source>
         <translation type="unfinished">当前手柄链接状态：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1489"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1515"/>
         <source>Controller manager is not available.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1494"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1520"/>
         <source>🔄 Reconnecting...</source>
         <translation type="unfinished">🔄 重新连接中...</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1511"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1537"/>
         <source>Reconnection Successful</source>
         <translation type="unfinished">重新连接成功</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1512"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1538"/>
         <source>Controller has been successfully reconnected!</source>
         <translation type="unfinished">手柄重连成功！</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1514"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1540"/>
         <source>Reconnection Failed</source>
         <translation type="unfinished">重连失败</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1515"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1541"/>
         <source>Failed to reconnect controller. Please ensure your controller is powered on and in pairing mode, then try again.</source>
         <translation type="unfinished">重新连接手柄失败。请确保您的手柄已经开启而且处于搜寻模式，然后再试一次。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1524"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1550"/>
         <source>✗ Controller manager not available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1530"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1556"/>
         <source>✓ Controller connected</source>
         <translation type="unfinished">✓ 手柄已连接</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1533"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1559"/>
         <source>✗ No controller detected</source>
         <translation type="unfinished">✗ 手柄未连接</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1573"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1599"/>
         <source>SpeedyNote</source>
         <translation type="unfinished">极疾记</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1606"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1632"/>
         <source>© 2026 SpeedyNote. All rights reserved.</source>
         <translation type="unfinished">© 2026 SpeedyNote 保留所有权利。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1633"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1659"/>
         <source>Cache Management</source>
         <translation type="unfinished">缓存管理</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1642"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1668"/>
         <source>SpeedyNote uses temporary folders to work with notebook files.
 These folders are normally cleaned up when you close a notebook,
 but crashes or force-close can leave orphaned files behind.</source>
@@ -1363,28 +1379,28 @@ but crashes or force-close can leave orphaned files behind.</source>
 但是崩溃或者强制关闭可能会把这些缓存撂在那。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1658"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1699"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1684"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1725"/>
         <source>Current cache size: %1</source>
         <translation type="unfinished">当前缓存占 %1 的磁盘空间</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1667"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1693"/>
         <source>Location: %1</source>
         <translation type="unfinished">位置：%1</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1676"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1702"/>
         <source>Clear Cache Now</source>
         <translation type="unfinished">立即清除缓存</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1684"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1710"/>
         <source>Clear Cache?</source>
         <translation type="unfinished">清除缓存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1685"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1711"/>
         <source>This will delete all temporary cache files.
 
 ⚠️ WARNING: Make sure all notebooks are closed before clearing cache, otherwise you may lose unsaved changes!
@@ -1397,118 +1413,118 @@ Continue?</source>
 继续吗？</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1702"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1728"/>
         <source>Cache Cleared</source>
         <translation type="unfinished">缓存已清除</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1703"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1729"/>
         <source>Cache cleanup is temporarily disabled during architecture migration.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1717"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1743"/>
         <source>⚠️ Only clear cache when all notebooks are closed</source>
         <translation type="unfinished">⚠️仅当所有笔记本关闭的时候清除缓存</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1727"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1753"/>
         <source>Cache</source>
         <translation type="unfinished">缓存</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1739"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1765"/>
         <source>Language Settings</source>
         <translation type="unfinished">语言设置</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1746"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1772"/>
         <source>Use System Language (Auto-detect)</source>
         <translation type="unfinished">使用系统语言（自动检测）</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1749"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1775"/>
         <source>When enabled, SpeedyNote will automatically detect and use your system&apos;s language setting.</source>
         <translation type="unfinished">启用该选项后，SpeedyNote会自动使用系统默认语言。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1755"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1781"/>
         <source>Manual Language Override:</source>
         <translation type="unfinished">手动语言覆盖：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1760"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1783"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1786"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1809"/>
         <source>English</source>
         <translation type="unfinished">English (英语)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1761"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1787"/>
         <source>Español (Spanish)</source>
         <translation type="unfinished">Español (西班牙语)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1762"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1788"/>
         <source>Français (French)</source>
         <translation type="unfinished">Français (法语)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1763"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1789"/>
         <source>中文 (Chinese Simplified)</source>
         <translation type="unfinished">中文</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1766"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1792"/>
         <source>Select a specific language to override the system setting. Changes take effect after restarting the application.</source>
         <translation type="unfinished">选择一个语言来代替系统默认语言。重启SpeedyNote后生效。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1772"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1798"/>
         <source>Current Language Status:</source>
         <translation type="unfinished">当前语言：</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1780"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1806"/>
         <source>Spanish</source>
         <translation type="unfinished">西班牙语</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1781"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1807"/>
         <source>French</source>
         <translation type="unfinished">法语</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1782"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1808"/>
         <source>Chinese Simplified</source>
         <translation type="unfinished">简体中文</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1785"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1811"/>
         <source>System Language: %1 (%2)</source>
         <translation type="unfinished">系统语言： %1 (%2)</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1815"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1841"/>
         <source>Language</source>
         <translation type="unfinished">语言</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1827"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1853"/>
         <source>Palm Rejection</source>
         <translation type="unfinished">防误触</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1831"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1857"/>
         <source>Disable touch gestures when stylus is active</source>
         <translation type="unfinished">使用手写笔时暂时禁用触摸手势</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1837"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1863"/>
         <source>Restore delay:</source>
         <translation type="unfinished">恢复延迟:</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1850"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1876"/>
         <source>When enabled, touch gestures are temporarily disabled while the stylus is hovering or touching the screen. After the stylus leaves, touch gestures are restored after the specified delay.
 
 This helps prevent accidental palm touches while writing. Only affects Y-Axis Only and Full touch gesture modes.</source>
@@ -1517,70 +1533,70 @@ This helps prevent accidental palm touches while writing. Only affects Y-Axis On
 这防止了在书写时手掌误触的问题。只有在触摸手势启用的时候有效。</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1872"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1898"/>
         <source>Stylus</source>
         <translation type="unfinished">手写笔</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1589"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1615"/>
         <source>A fast and intuitive note-taking application with PDF annotation support</source>
         <translation type="unfinished">一款超级快超级高效超级便捷的笔记App，还附带PDF注释的功能</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1581"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1607"/>
         <source>Version 1.3.0</source>
         <translation type="unfinished">1.3.0 版本</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1598"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1624"/>
         <source>Developed by GitHub @alpha-liu-01 and various contributors</source>
         <translation type="unfinished">由GitHub 用户 @alpha-liu-01 和诸贡献者合力开发</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1615"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1641"/>
         <source>Built with Qt %1</source>
         <translation type="unfinished">使用 Qt %1 开发</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1622"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1648"/>
         <source>About</source>
         <translation type="unfinished">关于</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1454"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1480"/>
         <source>Controller Mapping</source>
         <translation type="unfinished">手柄映射</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1459"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1482"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1485"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1508"/>
         <source>Error</source>
         <translation type="unfinished">错误</translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1459"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1482"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1485"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1508"/>
         <source>MainWindow reference not available.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1465"/>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1488"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1491"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1514"/>
         <source>Controller Not Available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1466"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1492"/>
         <source>Controller manager is not available. Please ensure a controller is connected and restart the application.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1471"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1497"/>
         <source>No Controller Detected</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ControlPanelDialog.cpp" line="1472"/>
+        <location filename="../../source/ControlPanelDialog.cpp" line="1498"/>
         <source>No controller is currently connected. Please connect your controller and restart the application.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1853,62 +1869,62 @@ Error output:
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="993"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1006"/>
         <source>Target page not found.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2243"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2256"/>
         <source>No document loaded</source>
         <translation type="unfinished">没有加载文档</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6269"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6288"/>
         <source>Insert Image</source>
         <translation type="unfinished">插入图片</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6271"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6290"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished">图片  (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;全部文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6936"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6955"/>
         <source>Add Position Link</source>
         <translation type="unfinished">添加位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6937"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6956"/>
         <source>Add URL Link</source>
         <translation type="unfinished">添加URL链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6938"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6957"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished">添加Markdown笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6948"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6967"/>
         <source>Add URL</source>
         <translation type="unfinished">添加URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6948"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6967"/>
         <source>Enter URL:</source>
         <translation type="unfinished">输入URL：</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7088"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7107"/>
         <source>Cannot create note: please save the document first.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7099"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7118"/>
         <source>Untitled Note</source>
         <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7107"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7126"/>
         <source>Failed to create note file. Check disk space and permissions.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2232,99 +2248,99 @@ Error output:
 <context>
     <name>Launcher</name>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="201"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="202"/>
         <source>SpeedyNote</source>
         <translation type="unfinished">极疾记</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="291"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="292"/>
         <source>Return</source>
         <translation type="unfinished">返回</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="309"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="310"/>
         <source>Timeline</source>
         <translation type="unfinished">历史记录</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="316"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="317"/>
         <source>Starred</source>
         <translation type="unfinished">收藏夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="323"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="324"/>
         <source>Search</source>
         <translation type="unfinished">搜索</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="955"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="982"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1566"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="956"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="983"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1567"/>
         <source>Move to Folder</source>
         <translation type="unfinished">移动到文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="959"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="960"/>
         <source>Unfiled</source>
         <translation type="unfinished">未分类</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="980"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="981"/>
         <source>More Folders...</source>
         <translation type="unfinished">更多文件夹...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="989"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="990"/>
         <source>+ New Folder...</source>
         <translation type="unfinished">+ 新建文件夹...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="992"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="993"/>
         <source>New Folder</source>
         <translation type="unfinished">新建文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="993"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="994"/>
         <source>Folder name:</source>
         <translation type="unfinished">文件夹的名称：</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1019"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1534"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1020"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1535"/>
         <source>Export</source>
         <translation type="unfinished">导出</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1022"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1538"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1023"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1539"/>
         <source>To PDF...</source>
         <translation type="unfinished">到PDF...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1027"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1547"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1028"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1548"/>
         <source>To SNBX...</source>
         <translation type="unfinished">到SNBX...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1062"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1063"/>
         <source>Rename Folder</source>
         <translation type="unfinished">重命名文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1063"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1235"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1064"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1236"/>
         <source>New name:</source>
         <translation type="unfinished">新的名称：</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1082"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1086"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1083"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1087"/>
         <source>Delete Folder</source>
         <translation type="unfinished">删除文件夹</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1087"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1088"/>
         <source>Delete folder &quot;%1&quot;?
 
 Notebooks in this folder will become unfiled.</source>
@@ -2333,12 +2349,12 @@ Notebooks in this folder will become unfiled.</source>
 这个文件夹中的笔记本将会变得未分类。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1125"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1126"/>
         <source>Delete Notebook</source>
         <translation type="unfinished">删除笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1126"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1127"/>
         <source>Permanently delete &quot;%1&quot;?
 
 This action cannot be undone.</source>
@@ -2347,19 +2363,19 @@ This action cannot be undone.</source>
 此操作不可撤销哦。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1138"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1139"/>
         <source>  ... and %1 more
 </source>
         <translation type="unfinished">  ... 和另外 %1 个
 </translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1143"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1144"/>
         <source>Delete Notebooks</source>
         <translation type="unfinished">删除笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1144"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1145"/>
         <source>Permanently delete %1 notebooks?
 
 %2
@@ -2370,219 +2386,219 @@ This action cannot be undone.</source>
 此操作不可撤销哦。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1234"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1235"/>
         <source>Rename Notebook</source>
         <translation type="unfinished">重命名笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1253"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1301"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1254"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1302"/>
         <source>Rename Failed</source>
         <translation type="unfinished">重命名失败</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1254"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1255"/>
         <source>A notebook named &quot;%1&quot; already exists.</source>
         <translation type="unfinished">一个名为 &quot;%1&quot;的笔记本已经存在。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1302"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1303"/>
         <source>Could not rename the notebook.</source>
         <translation type="unfinished">无法重命名这个笔记本。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1334"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1342"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1335"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1343"/>
         <source>Duplicate Failed</source>
         <translation type="unfinished">克隆失败</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1335"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1336"/>
         <source>Source notebook not found.</source>
         <translation type="unfinished">没有找到源笔记本。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1343"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1344"/>
         <source>Could not create destination directory.</source>
         <translation type="unfinished">无法创建目标目录。</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1461"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1462"/>
         <source>1 selected</source>
         <translation type="unfinished">已选中1个</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1463"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1464"/>
         <source>%1 selected</source>
         <translation type="unfinished">已选中%1个</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1520"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1521"/>
         <source>Select All</source>
         <translation type="unfinished">全选</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1525"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1526"/>
         <source>Deselect All</source>
         <translation type="unfinished">全不选</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1559"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1560"/>
         <source>Move to Folder...</source>
         <translation type="unfinished">移动到文件夹...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1567"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1568"/>
         <source>Move %1 notebooks to...</source>
         <translation type="unfinished">把%1个笔记本移动到...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1577"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1578"/>
         <source>Star Selected</source>
         <translation type="unfinished">给选中的加星</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1590"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1591"/>
         <source>Delete Selected</source>
         <translation type="unfinished">删除选中的内容</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1751"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1760"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1754"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1763"/>
         <source>Export Complete</source>
         <translation type="unfinished">导出成功</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1752"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1755"/>
         <source>%n notebook(s) exported successfully</source>
         <translation type="unfinished">
             <numerusform>%n个笔记本已成功导出</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1754"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1757"/>
         <source>Export Completed with Errors</source>
         <translation type="unfinished">导出结束，有错误</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1755"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1933"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1758"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1936"/>
         <source>%1 succeeded, %2 failed</source>
         <translation type="unfinished">%1个成功，%2个失败</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1757"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1935"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1760"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1938"/>
         <source>, %1 skipped</source>
         <translation type="unfinished">，%1个跳过</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1761"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1764"/>
         <source>%1 exported, %2 skipped</source>
         <translation type="unfinished">%1个导出，%2个跳过</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1773"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1793"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1776"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1796"/>
         <source>Share Files</source>
         <translation type="unfinished">分享文件</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1778"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1798"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1781"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1801"/>
         <source>Share PDF</source>
         <translation type="unfinished">分享PDF</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1779"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1799"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1782"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1802"/>
         <source>Share %1 PDFs</source>
         <translation type="unfinished">分享%1个PDF</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1783"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1803"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1786"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1806"/>
         <source>Share Notebook</source>
         <translation type="unfinished">分享笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1784"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1804"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1787"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1807"/>
         <source>Share %1 Notebooks</source>
         <translation type="unfinished">分享%1个笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1894"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1897"/>
         <source>Importing...</source>
         <translation type="unfinished">导入中...</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1929"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1938"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1932"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1941"/>
         <source>Import Complete</source>
         <translation type="unfinished">导入成功</translation>
     </message>
     <message numerus="yes">
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1930"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1933"/>
         <source>%n notebook(s) imported successfully</source>
         <translation type="unfinished">
             <numerusform>%n个笔记本导入成功</numerusform>
         </translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1932"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1935"/>
         <source>Import Completed with Errors</source>
         <translation type="unfinished">导入结束，有错误</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1939"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1942"/>
         <source>%1 imported, %2 skipped</source>
         <translation type="unfinished">导入了%1个，跳过了%2个</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1011"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1373"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1012"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1374"/>
         <source>Duplicate</source>
         <translation type="unfinished">克隆</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="850"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="851"/>
         <source>Import %1 notebooks?</source>
         <translation type="unfinished">导入%1个笔记本？</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="853"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="854"/>
         <source>Import Notebooks</source>
         <translation type="unfinished">导入笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="946"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="947"/>
         <source>Unstar</source>
         <translation type="unfinished">取消星标</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="946"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="947"/>
         <source>Star</source>
         <translation type="unfinished">添加星标</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1005"/>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1059"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1006"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1060"/>
         <source>Rename</source>
         <translation type="unfinished">重命名</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1036"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1037"/>
         <source>Show in File Manager</source>
         <translation type="unfinished">在文件管理器里展示</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1045"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1046"/>
         <source>Delete</source>
         <translation type="unfinished">删除</translation>
     </message>
     <message>
-        <location filename="../../source/ui/launcher/Launcher.cpp" line="1374"/>
+        <location filename="../../source/ui/launcher/Launcher.cpp" line="1375"/>
         <source>Some files could not be copied.</source>
         <translation type="unfinished">有些文件无法复制。</translation>
     </message>
@@ -2684,81 +2700,81 @@ This action cannot be undone.</source>
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="306"/>
-        <location filename="../../source/MainWindow.cpp" line="950"/>
+        <location filename="../../source/MainWindow.cpp" line="307"/>
+        <location filename="../../source/MainWindow.cpp" line="951"/>
         <source>Untitled</source>
         <translation type="unfinished">无标题</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="470"/>
-        <location filename="../../source/MainWindow.cpp" line="6417"/>
+        <location filename="../../source/MainWindow.cpp" line="471"/>
+        <location filename="../../source/MainWindow.cpp" line="6432"/>
         <source>canvas</source>
         <translation type="unfinished">画布</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="470"/>
-        <location filename="../../source/MainWindow.cpp" line="6417"/>
+        <location filename="../../source/MainWindow.cpp" line="471"/>
+        <location filename="../../source/MainWindow.cpp" line="6432"/>
         <source>document</source>
         <translation type="unfinished">文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="473"/>
-        <location filename="../../source/MainWindow.cpp" line="6420"/>
+        <location filename="../../source/MainWindow.cpp" line="474"/>
+        <location filename="../../source/MainWindow.cpp" line="6435"/>
         <source>Save Changes?</source>
         <translation type="unfinished">保存修改？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="474"/>
+        <location filename="../../source/MainWindow.cpp" line="475"/>
         <source>This %1 has unsaved changes. Do you want to save before closing?</source>
         <translation type="unfinished">这个%1有未保存的内容。你是否要在关闭前把它保存？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="494"/>
-        <location filename="../../source/MainWindow.cpp" line="2941"/>
-        <location filename="../../source/MainWindow.cpp" line="3027"/>
-        <location filename="../../source/MainWindow.cpp" line="6444"/>
-        <location filename="../../source/MainWindow.cpp" line="6735"/>
+        <location filename="../../source/MainWindow.cpp" line="495"/>
+        <location filename="../../source/MainWindow.cpp" line="2944"/>
+        <location filename="../../source/MainWindow.cpp" line="3030"/>
+        <location filename="../../source/MainWindow.cpp" line="6459"/>
+        <location filename="../../source/MainWindow.cpp" line="6750"/>
         <source>Save Error</source>
         <translation type="unfinished">保存失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="495"/>
-        <location filename="../../source/MainWindow.cpp" line="2942"/>
-        <location filename="../../source/MainWindow.cpp" line="3028"/>
+        <location filename="../../source/MainWindow.cpp" line="496"/>
+        <location filename="../../source/MainWindow.cpp" line="2945"/>
+        <location filename="../../source/MainWindow.cpp" line="3031"/>
         <source>Failed to save document to:
 %1</source>
         <translation type="unfinished">无法保存文档到：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1028"/>
-        <location filename="../../source/MainWindow.cpp" line="2703"/>
+        <location filename="../../source/MainWindow.cpp" line="1029"/>
+        <location filename="../../source/MainWindow.cpp" line="2704"/>
         <source>Could not find a unique filename. Please choose a different location.</source>
         <translation type="unfinished">找不到一个独一无二的文件名。请换一个地方存储。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2890"/>
-        <location filename="../../source/MainWindow.cpp" line="2918"/>
+        <location filename="../../source/MainWindow.cpp" line="2893"/>
+        <location filename="../../source/MainWindow.cpp" line="2921"/>
         <source>Save Canvas</source>
         <translation type="unfinished">保存画布</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2890"/>
-        <location filename="../../source/MainWindow.cpp" line="2918"/>
-        <location filename="../../source/MainWindow.cpp" line="3003"/>
-        <location filename="../../source/MainWindow.cpp" line="3010"/>
+        <location filename="../../source/MainWindow.cpp" line="2893"/>
+        <location filename="../../source/MainWindow.cpp" line="2921"/>
+        <location filename="../../source/MainWindow.cpp" line="3006"/>
+        <location filename="../../source/MainWindow.cpp" line="3013"/>
         <source>Save Document</source>
         <translation type="unfinished">保存文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2920"/>
+        <location filename="../../source/MainWindow.cpp" line="2923"/>
         <source>SpeedyNote Bundle (*.snb)</source>
         <translation type="unfinished">SpeedyNote 包 (*.snb)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="858"/>
-        <location filename="../../source/MainWindow.cpp" line="2343"/>
-        <location filename="../../source/MainWindow.cpp" line="2597"/>
+        <location filename="../../source/MainWindow.cpp" line="859"/>
+        <location filename="../../source/MainWindow.cpp" line="2344"/>
+        <location filename="../../source/MainWindow.cpp" line="2598"/>
         <source>Relink PDF...</source>
         <translation type="unfinished">重连PDF...</translation>
     </message>
@@ -2768,72 +2784,72 @@ This action cannot be undone.</source>
         <translation type="unfinished">极疾记 1.3.0</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="872"/>
+        <location filename="../../source/MainWindow.cpp" line="873"/>
         <source>Jump to Page...</source>
         <translation type="unfinished">跳到页...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="875"/>
+        <location filename="../../source/MainWindow.cpp" line="876"/>
         <source>Settings</source>
         <translation type="unfinished">设置</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3004"/>
-        <location filename="../../source/MainWindow.cpp" line="3011"/>
+        <location filename="../../source/MainWindow.cpp" line="3007"/>
+        <location filename="../../source/MainWindow.cpp" line="3014"/>
         <source>No document is open.</source>
         <translation type="unfinished">当前没有打开的文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3143"/>
+        <location filename="../../source/MainWindow.cpp" line="3146"/>
         <source>SpeedyNote Files (*.snb *.pdf);;SpeedyNote Bundle (*.snb);;PDF Documents (*.pdf);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3126"/>
-        <location filename="../../source/MainWindow.cpp" line="3146"/>
+        <location filename="../../source/MainWindow.cpp" line="3129"/>
+        <location filename="../../source/MainWindow.cpp" line="3149"/>
         <source>Open Document</source>
         <translation type="unfinished">打开文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="865"/>
+        <location filename="../../source/MainWindow.cpp" line="866"/>
         <source>Export to PDF...</source>
         <translation type="unfinished">导出到PDF...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="995"/>
-        <location filename="../../source/MainWindow.cpp" line="2622"/>
-        <location filename="../../source/MainWindow.cpp" line="2629"/>
+        <location filename="../../source/MainWindow.cpp" line="996"/>
+        <location filename="../../source/MainWindow.cpp" line="2623"/>
+        <location filename="../../source/MainWindow.cpp" line="2630"/>
         <source>No document is currently open.</source>
         <translation type="unfinished">当前没有已经打开的文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1003"/>
-        <location filename="../../source/MainWindow.cpp" line="2637"/>
+        <location filename="../../source/MainWindow.cpp" line="1004"/>
+        <location filename="../../source/MainWindow.cpp" line="2638"/>
         <source>Please save the document before exporting.</source>
         <translation type="unfinished">请在导出前保存文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1054"/>
+        <location filename="../../source/MainWindow.cpp" line="1055"/>
         <source>Share Notebook Package</source>
         <translation type="unfinished">分享打包的笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1059"/>
+        <location filename="../../source/MainWindow.cpp" line="1060"/>
         <source>%1 bytes</source>
         <translation type="unfinished">%1 字节</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1061"/>
+        <location filename="../../source/MainWindow.cpp" line="1062"/>
         <source>%1 KB</source>
         <translation type="unfinished">%1 KB</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1064"/>
+        <location filename="../../source/MainWindow.cpp" line="1065"/>
         <source>%1 MB</source>
         <translation type="unfinished">%1 MB</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1067"/>
+        <location filename="../../source/MainWindow.cpp" line="1068"/>
         <source>Notebook exported successfully.
 
 File: %1
@@ -2844,35 +2860,35 @@ Size: %2</source>
 体积：%2</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2308"/>
+        <location filename="../../source/MainWindow.cpp" line="2309"/>
         <source>Warning</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2345"/>
-        <location filename="../../source/MainWindow.cpp" line="2599"/>
+        <location filename="../../source/MainWindow.cpp" line="2346"/>
+        <location filename="../../source/MainWindow.cpp" line="2600"/>
         <source>Link PDF...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2614"/>
+        <location filename="../../source/MainWindow.cpp" line="2615"/>
         <source>Share as PDF</source>
         <translation type="unfinished">以PDF格式分享</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2616"/>
+        <location filename="../../source/MainWindow.cpp" line="2617"/>
         <source>Export to PDF</source>
         <translation type="unfinished">导出到PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2645"/>
+        <location filename="../../source/MainWindow.cpp" line="2646"/>
         <source>PDF export is only available for paged documents.
 Edgeless canvas export is not yet supported.</source>
         <translation type="unfinished">导出PDF仅适用于分页笔记。
 无边画布暂不支持导出。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2653"/>
+        <location filename="../../source/MainWindow.cpp" line="2654"/>
         <source>The document has unsaved changes.
 Please save the document before sharing as PDF.
 
@@ -2883,7 +2899,7 @@ Would you like to save now?</source>
 你现在就要保存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2657"/>
+        <location filename="../../source/MainWindow.cpp" line="2658"/>
         <source>The document has unsaved changes.
 Please save the document before exporting to PDF.
 
@@ -2894,18 +2910,18 @@ Would you like to save now?</source>
 你现在就要保存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2662"/>
+        <location filename="../../source/MainWindow.cpp" line="2663"/>
         <source>Save Document First</source>
         <translation type="unfinished">先保存文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2738"/>
         <location filename="../../source/MainWindow.cpp" line="2741"/>
+        <location filename="../../source/MainWindow.cpp" line="2744"/>
         <source>Share PDF</source>
         <translation type="unfinished">分享PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2745"/>
+        <location filename="../../source/MainWindow.cpp" line="2748"/>
         <source>PDF exported successfully!
 
 Pages exported: %1
@@ -2916,41 +2932,41 @@ File size: %2 KB</source>
 文件大小: %2 KB</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2753"/>
+        <location filename="../../source/MainWindow.cpp" line="2756"/>
         <source>Failed to export PDF:
 %1</source>
         <translation type="unfinished">导出PDF失败：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2879"/>
+        <location filename="../../source/MainWindow.cpp" line="2882"/>
         <source>Untitled Canvas</source>
         <translation type="unfinished">无标题画布</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2879"/>
+        <location filename="../../source/MainWindow.cpp" line="2882"/>
         <source>Untitled Document</source>
         <translation type="unfinished">无标题文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2901"/>
+        <location filename="../../source/MainWindow.cpp" line="2904"/>
         <source>Overwrite?</source>
         <translation type="unfinished">覆盖写入？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="2902"/>
+        <location filename="../../source/MainWindow.cpp" line="2905"/>
         <source>A document named &apos;%1&apos; already exists.
 Do you want to replace it?</source>
         <translation type="unfinished">一个名为&apos;%1&apos; 的文档已经存在。
 你确定你要把它取代吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3119"/>
+        <location filename="../../source/MainWindow.cpp" line="3122"/>
         <source>No Documents</source>
         <translation type="unfinished">没有文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3120"/>
+        <location filename="../../source/MainWindow.cpp" line="3123"/>
         <source>No saved documents found.
 
 Documents are saved to:
@@ -2961,68 +2977,68 @@ Documents are saved to:
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3127"/>
+        <location filename="../../source/MainWindow.cpp" line="3130"/>
         <source>Select a document:</source>
         <translation type="unfinished">选择一个文档：</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3162"/>
-        <location filename="../../source/MainWindow.cpp" line="3651"/>
+        <location filename="../../source/MainWindow.cpp" line="3165"/>
+        <location filename="../../source/MainWindow.cpp" line="3654"/>
         <source>Load Error</source>
         <translation type="unfinished">加载失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3163"/>
+        <location filename="../../source/MainWindow.cpp" line="3166"/>
         <source>Failed to load document from:
 %1</source>
         <translation type="unfinished">无法从：
 %1中读取文档</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3326"/>
-        <location filename="../../source/MainWindow.cpp" line="3342"/>
+        <location filename="../../source/MainWindow.cpp" line="3329"/>
+        <location filename="../../source/MainWindow.cpp" line="3345"/>
         <source>Cannot Delete</source>
         <translation type="unfinished">无法删除</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3327"/>
+        <location filename="../../source/MainWindow.cpp" line="3330"/>
         <source>Cannot delete the last remaining page.</source>
         <translation type="unfinished">无法删除仅剩的一页。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3343"/>
+        <location filename="../../source/MainWindow.cpp" line="3346"/>
         <source>Cannot delete PDF pages. Use an external tool to modify the PDF.</source>
         <translation type="unfinished">无法删除带PDF的页面。请使用外部工具来修改PDF。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3420"/>
+        <location filename="../../source/MainWindow.cpp" line="3423"/>
         <source>PDF Files (*.pdf);;All Files (*)</source>
         <translation type="unfinished">PDF 文件 (*.pdf);;所有文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3423"/>
+        <location filename="../../source/MainWindow.cpp" line="3426"/>
         <source>Open PDF</source>
         <translation type="unfinished">打开 PDF</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3444"/>
+        <location filename="../../source/MainWindow.cpp" line="3447"/>
         <source>PDF Error</source>
         <translation type="unfinished">PDF故障</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3445"/>
+        <location filename="../../source/MainWindow.cpp" line="3448"/>
         <source>Failed to open PDF file:
 %1</source>
         <translation type="unfinished">无法打开PDF文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3635"/>
+        <location filename="../../source/MainWindow.cpp" line="3638"/>
         <source>Open SpeedyNote Bundle (.snb folder)</source>
         <translation type="unfinished">打开SpeedyNote Bundle (.snb 文件夹)</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3652"/>
+        <location filename="../../source/MainWindow.cpp" line="3655"/>
         <source>Selected folder is not a valid SpeedyNote bundle.
 Missing document.json manifest.
 
@@ -3033,47 +3049,47 @@ document.json manifest 缺失。
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3712"/>
+        <location filename="../../source/MainWindow.cpp" line="3715"/>
         <source>Jump to Page</source>
         <translation type="unfinished">跳到页</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="3712"/>
+        <location filename="../../source/MainWindow.cpp" line="3715"/>
         <source>Enter Page Number:</source>
         <translation type="unfinished">输入页码：</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="4923"/>
+        <location filename="../../source/MainWindow.cpp" line="4938"/>
         <source>No results found</source>
         <translation type="unfinished">没有找到结果</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5826"/>
+        <location filename="../../source/MainWindow.cpp" line="5841"/>
         <source>New Edgeless Canvas</source>
         <translation type="unfinished">新的无边笔记</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5831"/>
+        <location filename="../../source/MainWindow.cpp" line="5846"/>
         <source>New Paged Notebook</source>
         <translation type="unfinished">新的分页笔记本</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5839"/>
+        <location filename="../../source/MainWindow.cpp" line="5854"/>
         <source>Open PDF...</source>
         <translation type="unfinished">打开PDF...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="5844"/>
+        <location filename="../../source/MainWindow.cpp" line="5859"/>
         <source>Open Notebook...</source>
         <translation type="unfinished">打开笔记本...</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6421"/>
+        <location filename="../../source/MainWindow.cpp" line="6436"/>
         <source>The %1 &quot;%2&quot; has unsaved changes. Do you want to save before quitting?</source>
         <translation type="unfinished">这个 %1 &quot;%2&quot;有未保存的变更。你要在退出之前保存吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6445"/>
+        <location filename="../../source/MainWindow.cpp" line="6460"/>
         <source>Failed to save document to:
 %1
 
@@ -3083,12 +3099,12 @@ Quit anyway?</source>
 仍要退出吗？</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6736"/>
+        <location filename="../../source/MainWindow.cpp" line="6751"/>
         <source>Failed to save document before closing.</source>
         <translation type="unfinished">无法在退出前保存文档。</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6783"/>
+        <location filename="../../source/MainWindow.cpp" line="6798"/>
         <source>The file does not exist:
 %1</source>
         <translation type="unfinished">这个文件不存在：
@@ -3096,52 +3112,52 @@ Quit anyway?</source>
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6814"/>
-        <location filename="../../source/MainWindow.cpp" line="6832"/>
+        <location filename="../../source/MainWindow.cpp" line="6829"/>
+        <location filename="../../source/MainWindow.cpp" line="6847"/>
         <source>Open Error</source>
         <translation type="unfinished">打开失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6815"/>
+        <location filename="../../source/MainWindow.cpp" line="6830"/>
         <source>Failed to open file:
 %1</source>
         <translation type="unfinished">无法打开文件：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6833"/>
+        <location filename="../../source/MainWindow.cpp" line="6848"/>
         <source>Failed to create tab for:
 %1</source>
         <translation type="unfinished">无法打开标签页给：
 %1</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="994"/>
-        <location filename="../../source/MainWindow.cpp" line="1002"/>
-        <location filename="../../source/MainWindow.cpp" line="1027"/>
-        <location filename="../../source/MainWindow.cpp" line="1072"/>
-        <location filename="../../source/MainWindow.cpp" line="2752"/>
+        <location filename="../../source/MainWindow.cpp" line="995"/>
+        <location filename="../../source/MainWindow.cpp" line="1003"/>
+        <location filename="../../source/MainWindow.cpp" line="1028"/>
+        <location filename="../../source/MainWindow.cpp" line="1073"/>
+        <location filename="../../source/MainWindow.cpp" line="2755"/>
         <source>Export Failed</source>
         <translation type="unfinished">导出失败</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="1066"/>
-        <location filename="../../source/MainWindow.cpp" line="2744"/>
+        <location filename="../../source/MainWindow.cpp" line="1067"/>
+        <location filename="../../source/MainWindow.cpp" line="2747"/>
         <source>Export Complete</source>
         <translation type="unfinished">导出成功</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="6782"/>
+        <location filename="../../source/MainWindow.cpp" line="6797"/>
         <source>File Not Found</source>
         <translation type="unfinished">找不到文件</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="424"/>
+        <location filename="../../source/MainWindow.cpp" line="425"/>
         <source>Notice</source>
         <translation type="unfinished">警告</translation>
     </message>
     <message>
-        <location filename="../../source/MainWindow.cpp" line="425"/>
+        <location filename="../../source/MainWindow.cpp" line="426"/>
         <source>At least one tab must remain open.</source>
         <translation type="unfinished">至少保留一个选项卡。</translation>
     </message>
@@ -3300,64 +3316,64 @@ Quit anyway?</source>
 <context>
     <name>MuPdfExporter</name>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="83"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="702"/>
         <source>No document set for export</source>
         <translation type="unfinished">没有可以导出的文档</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="89"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="708"/>
         <source>No output path specified</source>
         <translation type="unfinished">输出路径未确认</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="97"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="716"/>
         <source>Invalid page range</source>
         <translation type="unfinished">无效的页面范围</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="115"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="734"/>
         <source>Failed to initialize PDF engine</source>
         <translation type="unfinished">无法初始化PDF引擎</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="126"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="745"/>
         <source>Failed to open source PDF</source>
         <translation type="unfinished">无法打开源PDF</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="138"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="757"/>
         <source>Export cancelled</source>
         <translation type="unfinished">导出已取消</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="178"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="797"/>
         <source>Failed to export page %1</source>
         <translation type="unfinished">无法导出第%1页</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="200"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="819"/>
         <source>Failed to save PDF file</source>
         <translation type="unfinished">无法保存PDF文件</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="424"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="1043"/>
         <source>Source PDF file not found: %1</source>
         <translation type="unfinished">找不到源PDF文件: %1</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="438"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="1057"/>
         <source>Cannot export password-protected PDF.
 Please remove the password and try again.</source>
         <translation type="unfinished">无法导出加密的PDF.
 请删除密码之后再试一次。</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="448"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="1067"/>
         <source>Source file is not a valid PDF document.</source>
         <translation type="unfinished">源文件不是一个有效的PDF文档。</translation>
     </message>
     <message>
-        <location filename="../../source/pdf/MuPdfExporter.cpp" line="458"/>
+        <location filename="../../source/pdf/MuPdfExporter.cpp" line="1077"/>
         <source>Failed to open source PDF: %1</source>
         <translation type="unfinished">无法打开源PDF: %1</translation>
     </message>
@@ -4013,7 +4029,7 @@ https://www.libreoffice.org/download/download/</source>
     <message>
         <location filename="../../source/batch/BatchOperations.cpp" line="183"/>
         <location filename="../../source/batch/BatchOperations.cpp" line="355"/>
-        <location filename="../../source/batch/BatchOperations.cpp" line="594"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="595"/>
         <source>Cancelled</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4051,34 +4067,34 @@ https://www.libreoffice.org/download/download/</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="565"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="566"/>
         <location filename="../../source/sharing/NotebookExporter.cpp" line="63"/>
         <location filename="../../source/sharing/NotebookImporter.cpp" line="43"/>
         <source>Failed to create destination directory: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="602"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="603"/>
         <source>Importing...</source>
         <translation type="unfinished">导入中...</translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="608"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="609"/>
         <source>File not found</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="627"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="628"/>
         <source>Would import to: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="639"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="640"/>
         <source>Failed to remove existing notebook for overwrite</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="664"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="665"/>
         <source>Imported but could not add .snb extension</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4128,7 +4144,7 @@ https://www.libreoffice.org/download/download/</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/batch/BatchOperations.cpp" line="547"/>
+        <location filename="../../source/batch/BatchOperations.cpp" line="548"/>
         <location filename="../../source/sharing/NotebookImporter.cpp" line="36"/>
         <source>No destination directory specified</source>
         <translation type="unfinished"></translation>

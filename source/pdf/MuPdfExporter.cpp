@@ -26,6 +26,7 @@
 #include <algorithm> // for std::sort
 #include <cmath>     // for cosf, sinf, M_PI
 #include <map>       // for ExtGState alpha cache
+#include <vector>    // for content stream tokenizer
 
 // Forward declarations for static helper functions defined later in this file
 static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
@@ -50,6 +51,624 @@ static bool addImageToPage(fz_context* ctx, pdf_document* outputDoc,
  * Scale = 72/96 = 0.75
  */
 static constexpr float SN_TO_PDF_SCALE = 72.0f / 96.0f;
+
+// ============================================================================
+// Content Stream Color Rewriting (for vector-preserving dark mode export)
+// ============================================================================
+
+namespace {
+
+// How many color operands a given color space requires for sc/SC/scn/SCN.
+// Returns -1 if unknown (leave the color unchanged).
+static int colorSpaceComponentCount(fz_context* ctx, pdf_obj* csObj)
+{
+    if (!csObj) return -1;
+
+    if (pdf_name_eq(ctx, csObj, PDF_NAME(DeviceGray)) ||
+        pdf_name_eq(ctx, csObj, PDF_NAME(CalGray)))
+        return 1;
+    if (pdf_name_eq(ctx, csObj, PDF_NAME(DeviceRGB)) ||
+        pdf_name_eq(ctx, csObj, PDF_NAME(CalRGB)))
+        return 3;
+    if (pdf_name_eq(ctx, csObj, PDF_NAME(DeviceCMYK)))
+        return 4;
+
+    // Array form: [/ICCBased <stream>], [/CalGray ...], etc.
+    if (pdf_is_array(ctx, csObj)) {
+        pdf_obj* csName = pdf_array_get(ctx, csObj, 0);
+        if (pdf_name_eq(ctx, csName, PDF_NAME(DeviceGray)) ||
+            pdf_name_eq(ctx, csName, PDF_NAME(CalGray)))
+            return 1;
+        if (pdf_name_eq(ctx, csName, PDF_NAME(DeviceRGB)) ||
+            pdf_name_eq(ctx, csName, PDF_NAME(CalRGB)))
+            return 3;
+        if (pdf_name_eq(ctx, csName, PDF_NAME(DeviceCMYK)))
+            return 4;
+        if (pdf_name_eq(ctx, csName, PDF_NAME(ICCBased))) {
+            pdf_obj* profile = pdf_array_get(ctx, csObj, 1);
+            if (profile) {
+                int n = pdf_dict_get_int(ctx, profile, PDF_NAME(N));
+                if (n >= 1 && n <= 4) return n;
+            }
+        }
+    }
+    return -1;
+}
+
+// Resolve a color space name to its definition in Resources/ColorSpace.
+static pdf_obj* resolveColorSpace(fz_context* ctx, pdf_obj* resources, const char* name)
+{
+    if (!resources || !name) return nullptr;
+
+    // Check for built-in names first
+    if (strcmp(name, "DeviceGray") == 0 || strcmp(name, "G") == 0)
+        return PDF_NAME(DeviceGray);
+    if (strcmp(name, "DeviceRGB") == 0 || strcmp(name, "RGB") == 0)
+        return PDF_NAME(DeviceRGB);
+    if (strcmp(name, "DeviceCMYK") == 0 || strcmp(name, "CMYK") == 0)
+        return PDF_NAME(DeviceCMYK);
+
+    pdf_obj* csDict = pdf_dict_get(ctx, resources, PDF_NAME(ColorSpace));
+    if (!csDict) return nullptr;
+
+    pdf_obj* nameObj = pdf_new_name(ctx, name);
+    pdf_obj* result = pdf_dict_get(ctx, csDict, nameObj);
+    pdf_drop_obj(ctx, nameObj);
+    return result;
+}
+
+// Invert a grayscale value (0..1).
+static inline float invertGray(float g)
+{
+    return 1.0f - std::clamp(g, 0.0f, 1.0f);
+}
+
+// Invert an RGB triplet via HSL lightness inversion.
+static void invertRgbHsl(float& r, float& g, float& b)
+{
+    QColor c = QColor::fromRgbF(std::clamp(r, 0.0f, 1.0f),
+                                std::clamp(g, 0.0f, 1.0f),
+                                std::clamp(b, 0.0f, 1.0f));
+    QColor inv = DarkModeUtils::invertColorLightness(c);
+    r = static_cast<float>(inv.redF());
+    g = static_cast<float>(inv.greenF());
+    b = static_cast<float>(inv.blueF());
+}
+
+// Invert a CMYK quadruplet via RGB HSL round-trip.
+static void invertCmykHsl(float& c, float& m, float& y, float& k)
+{
+    // CMYK to RGB (simple formula, adequate for display-intent inversion)
+    float r = (1.0f - c) * (1.0f - k);
+    float g = (1.0f - m) * (1.0f - k);
+    float b = (1.0f - y) * (1.0f - k);
+    invertRgbHsl(r, g, b);
+    // RGB back to CMYK
+    float kk = 1.0f - std::max({r, g, b});
+    if (kk >= 1.0f) {
+        c = m = y = 0.0f;
+        k = 1.0f;
+    } else {
+        c = (1.0f - r - kk) / (1.0f - kk);
+        m = (1.0f - g - kk) / (1.0f - kk);
+        y = (1.0f - b - kk) / (1.0f - kk);
+        k = kk;
+    }
+}
+
+// A simple token from a PDF content stream.
+struct CsToken {
+    enum Type { Number, Name, LiteralString, HexString, Operator, Other };
+    Type type;
+    QByteArray raw;       // original bytes exactly as they appeared
+    float numericValue;   // valid when type == Number
+};
+
+// Tokenize a PDF content stream into a list of tokens.
+// This is intentionally minimal: it recognises numbers, names, strings,
+// operators, and inline images (BI...ID...EI) which are preserved verbatim.
+static std::vector<CsToken> tokenizeContentStream(const unsigned char* data, size_t len)
+{
+    std::vector<CsToken> tokens;
+    tokens.reserve(len / 4);
+
+    size_t i = 0;
+    auto skipWhitespace = [&]() {
+        while (i < len) {
+            unsigned char ch = data[i];
+            if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || ch == '\0' || ch == '\f')
+                ++i;
+            else if (ch == '%') {
+                // Skip comment to end of line
+                while (i < len && data[i] != '\n' && data[i] != '\r') ++i;
+            } else break;
+        }
+    };
+
+    while (i < len) {
+        skipWhitespace();
+        if (i >= len) break;
+
+        unsigned char ch = data[i];
+
+        // Number: optional sign, digits, optional decimal point
+        if (ch == '+' || ch == '-' || ch == '.' || (ch >= '0' && ch <= '9')) {
+            size_t start = i;
+            if (ch == '+' || ch == '-') ++i;
+            bool hasDot = false;
+            while (i < len) {
+                unsigned char c = data[i];
+                if (c >= '0' && c <= '9') { ++i; continue; }
+                if (c == '.' && !hasDot) { hasDot = true; ++i; continue; }
+                break;
+            }
+            if (i == start || (i == start + 1 && (data[start] == '+' || data[start] == '-'))) {
+                // Not a valid number (lone sign) — treat as operator
+                CsToken tok;
+                tok.type = CsToken::Operator;
+                tok.raw = QByteArray(reinterpret_cast<const char*>(data + start), static_cast<int>(i - start));
+                tok.numericValue = 0;
+                tokens.push_back(tok);
+                continue;
+            }
+            CsToken tok;
+            tok.type = CsToken::Number;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + start), static_cast<int>(i - start));
+            tok.numericValue = tok.raw.toFloat();
+            tokens.push_back(tok);
+            continue;
+        }
+
+        // Name: /SomeName
+        if (ch == '/') {
+            size_t start = i;
+            ++i;
+            while (i < len) {
+                unsigned char c = data[i];
+                if (c <= ' ' || c == '/' || c == '(' || c == ')' || c == '<' || c == '>' ||
+                    c == '[' || c == ']' || c == '{' || c == '}' || c == '%')
+                    break;
+                ++i;
+            }
+            CsToken tok;
+            tok.type = CsToken::Name;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + start), static_cast<int>(i - start));
+            tok.numericValue = 0;
+            tokens.push_back(tok);
+            continue;
+        }
+
+        // Literal string: (...)
+        if (ch == '(') {
+            size_t start = i;
+            ++i;
+            int depth = 1;
+            while (i < len && depth > 0) {
+                if (data[i] == '\\') { i = std::min(i + 2, len); continue; }
+                if (data[i] == '(') ++depth;
+                else if (data[i] == ')') --depth;
+                ++i;
+            }
+            CsToken tok;
+            tok.type = CsToken::LiteralString;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + start), static_cast<int>(i - start));
+            tok.numericValue = 0;
+            tokens.push_back(tok);
+            continue;
+        }
+
+        // Hex string: <...>  (but not dictionary << >>)
+        if (ch == '<' && (i + 1 >= len || data[i + 1] != '<')) {
+            size_t start = i;
+            ++i;
+            while (i < len && data[i] != '>') ++i;
+            if (i < len) ++i; // consume '>'
+            CsToken tok;
+            tok.type = CsToken::HexString;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + start), static_cast<int>(i - start));
+            tok.numericValue = 0;
+            tokens.push_back(tok);
+            continue;
+        }
+
+        // Dictionary delimiters << >> and array delimiters [ ]
+        if ((ch == '<' && i + 1 < len && data[i + 1] == '<') ||
+            (ch == '>' && i + 1 < len && data[i + 1] == '>')) {
+            CsToken tok;
+            tok.type = CsToken::Other;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + i), 2);
+            tok.numericValue = 0;
+            tokens.push_back(tok);
+            i += 2;
+            continue;
+        }
+        if (ch == '[' || ch == ']' || ch == '>' || ch == '{' || ch == '}') {
+            CsToken tok;
+            tok.type = CsToken::Other;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + i), 1);
+            tok.numericValue = 0;
+            tokens.push_back(tok);
+            ++i;
+            continue;
+        }
+
+        // Operator or keyword (alphabetic sequence, possibly with *)
+        {
+            size_t start = i;
+            while (i < len) {
+                unsigned char c = data[i];
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    c == '\'' || c == '"' || c == '*')
+                    ++i;
+                else break;
+            }
+            if (i == start) {
+                // Unknown byte, skip it
+                ++i;
+                continue;
+            }
+            CsToken tok;
+            tok.type = CsToken::Operator;
+            tok.raw = QByteArray(reinterpret_cast<const char*>(data + start), static_cast<int>(i - start));
+            tok.numericValue = 0;
+
+            // Handle inline images: BI <key-value pairs> ID <binary data> EI
+            if (tok.raw == "BI") {
+                // Scan forward to find "ID" operator, then binary data until "EI"
+                size_t biStart = start;
+                // Find ID: scan tokens until we hit the ID keyword
+                while (i < len) {
+                    skipWhitespace();
+                    if (i >= len) break;
+                    if (i + 1 < len && data[i] == 'I' && data[i + 1] == 'D') {
+                        i += 2;
+                        if (i < len && (data[i] == ' ' || data[i] == '\n' ||
+                                        data[i] == '\r' || data[i] == '\t'))
+                            ++i;
+                        break;
+                    }
+                    // Skip this token (key or value)
+                    size_t tokenStart = i;
+                    if (data[i] == '/') {
+                        ++i;
+                        while (i < len && data[i] > ' ' && data[i] != '/' && data[i] != '(' &&
+                               data[i] != ')' && data[i] != '<' && data[i] != '>' &&
+                               data[i] != '[' && data[i] != ']') ++i;
+                    } else if (data[i] == '(') {
+                        ++i;
+                        int d = 1;
+                        while (i < len && d > 0) {
+                            if (data[i] == '\\') { i = std::min(i + 2, len); continue; }
+                            if (data[i] == '(') ++d;
+                            else if (data[i] == ')') --d;
+                            ++i;
+                        }
+                    } else if (data[i] == '<') {
+                        ++i;
+                        while (i < len && data[i] != '>') ++i;
+                        if (i < len) ++i;
+                    } else if (data[i] == '[') {
+                        ++i;
+                        while (i < len && data[i] != ']') ++i;
+                        if (i < len) ++i;
+                    } else {
+                        while (i < len && data[i] > ' ' && data[i] != '/' && data[i] != '(' &&
+                               data[i] != '<' && data[i] != '[') ++i;
+                    }
+                    if (i == tokenStart) ++i; // safety: always advance
+                }
+                // Now scan for EI (must be preceded by whitespace and followed by whitespace/EOF)
+                while (i < len) {
+                    if (i + 1 < len && data[i] == 'E' && data[i + 1] == 'I') {
+                        bool prevWs = (i > 0 && (data[i - 1] == ' ' || data[i - 1] == '\n' ||
+                                                  data[i - 1] == '\r' || data[i - 1] == '\t'));
+                        bool nextWs = (i + 2 >= len || data[i + 2] == ' ' || data[i + 2] == '\n' ||
+                                       data[i + 2] == '\r' || data[i + 2] == '\t' ||
+                                       data[i + 2] == '%');
+                        if (prevWs && nextWs) {
+                            i += 2; // consume EI
+                            break;
+                        }
+                    }
+                    ++i;
+                }
+                // Capture the entire BI...EI block as one opaque token
+                tok.raw = QByteArray(reinterpret_cast<const char*>(data + biStart), static_cast<int>(i - biStart));
+            }
+
+            tokens.push_back(tok);
+        }
+    }
+    return tokens;
+}
+
+// Rewrite color operators in a tokenized content stream with HSL lightness inversion.
+// Uses a pending-operand approach: number tokens are buffered until we see an
+// operator, then either written with inverted values (color op) or verbatim.
+// Writes into the caller-provided fz_buffer (which must already be allocated).
+static void rewriteContentStreamColors(fz_context* ctx, pdf_obj* resources,
+                                       const unsigned char* data, size_t len,
+                                       fz_buffer* out)
+{
+    std::vector<CsToken> tokens = tokenizeContentStream(data, len);
+
+    int fillComponents = -1;
+    int strokeComponents = -1;
+
+    auto writeFloat = [&](float v) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%.6g", static_cast<double>(v));
+        fz_append_string(ctx, out, buf);
+    };
+
+    // Flush a token to the output exactly as it appeared
+    auto writeToken = [&](const CsToken& t) {
+        fz_append_data(ctx, out, reinterpret_cast<const unsigned char*>(t.raw.constData()),
+                       t.raw.size());
+    };
+
+    // Pending operand stack: indices into the tokens array
+    std::vector<size_t> pending;
+
+    auto flushPending = [&]() {
+        for (size_t idx : pending) {
+            writeToken(tokens[idx]);
+            fz_append_byte(ctx, out, ' ');
+        }
+        pending.clear();
+    };
+
+    for (size_t ti = 0; ti < tokens.size(); ++ti) {
+        const CsToken& tok = tokens[ti];
+
+        // Accumulate numbers on the pending stack
+        if (tok.type == CsToken::Number) {
+            pending.push_back(ti);
+            continue;
+        }
+
+        // Non-operator, non-number tokens: flush pending, write this token
+        if (tok.type != CsToken::Operator) {
+            flushPending();
+            writeToken(tok);
+            fz_append_byte(ctx, out, ' ');
+            continue;
+        }
+
+        // --- Operator token ---
+
+        // Color space tracking: cs / CS
+        if (tok.raw == "cs" || tok.raw == "CS") {
+            // The last pending token should be a name; but names aren't numbers,
+            // so look at the token just before us in the original stream.
+            // Actually, the /Name token was already flushed (it's not a Number).
+            // We just need to extract the color space name from it.
+            if (ti >= 1 && tokens[ti - 1].type == CsToken::Name) {
+                const char* csNameStr = tokens[ti - 1].raw.constData() + 1;
+                pdf_obj* csObj = resolveColorSpace(ctx, resources, csNameStr);
+                int n = colorSpaceComponentCount(ctx, csObj);
+                if (tok.raw == "cs") fillComponents = n;
+                else strokeComponents = n;
+            }
+            flushPending();
+            writeToken(tok);
+            fz_append_byte(ctx, out, '\n');
+            continue;
+        }
+
+        // DeviceGray: g / G (1 number operand)
+        if ((tok.raw == "g" || tok.raw == "G") && pending.size() >= 1) {
+            size_t last = pending.size() - 1;
+            float gray = tokens[pending[last]].numericValue;
+            gray = invertGray(gray);
+
+            // Write all pending except the last one verbatim
+            for (size_t j = 0; j < last; ++j) {
+                writeToken(tokens[pending[j]]);
+                fz_append_byte(ctx, out, ' ');
+            }
+            pending.clear();
+            writeFloat(gray);
+            fz_append_byte(ctx, out, ' ');
+            writeToken(tok);
+            fz_append_byte(ctx, out, '\n');
+            if (tok.raw == "g") fillComponents = 1;
+            else strokeComponents = 1;
+            continue;
+        }
+
+        // DeviceRGB: rg / RG (3 number operands)
+        if ((tok.raw == "rg" || tok.raw == "RG") && pending.size() >= 3) {
+            size_t base = pending.size() - 3;
+            float r = tokens[pending[base]].numericValue;
+            float g = tokens[pending[base + 1]].numericValue;
+            float b = tokens[pending[base + 2]].numericValue;
+            invertRgbHsl(r, g, b);
+
+            for (size_t j = 0; j < base; ++j) {
+                writeToken(tokens[pending[j]]);
+                fz_append_byte(ctx, out, ' ');
+            }
+            pending.clear();
+            writeFloat(r); fz_append_byte(ctx, out, ' ');
+            writeFloat(g); fz_append_byte(ctx, out, ' ');
+            writeFloat(b); fz_append_byte(ctx, out, ' ');
+            writeToken(tok);
+            fz_append_byte(ctx, out, '\n');
+            if (tok.raw == "rg") fillComponents = 3;
+            else strokeComponents = 3;
+            continue;
+        }
+
+        // DeviceCMYK: k / K (4 number operands)
+        if ((tok.raw == "k" || tok.raw == "K") && pending.size() >= 4) {
+            size_t base = pending.size() - 4;
+            float c = tokens[pending[base]].numericValue;
+            float m = tokens[pending[base + 1]].numericValue;
+            float y = tokens[pending[base + 2]].numericValue;
+            float kk = tokens[pending[base + 3]].numericValue;
+            invertCmykHsl(c, m, y, kk);
+
+            for (size_t j = 0; j < base; ++j) {
+                writeToken(tokens[pending[j]]);
+                fz_append_byte(ctx, out, ' ');
+            }
+            pending.clear();
+            writeFloat(c); fz_append_byte(ctx, out, ' ');
+            writeFloat(m); fz_append_byte(ctx, out, ' ');
+            writeFloat(y); fz_append_byte(ctx, out, ' ');
+            writeFloat(kk); fz_append_byte(ctx, out, ' ');
+            writeToken(tok);
+            fz_append_byte(ctx, out, '\n');
+            if (tok.raw == "k") fillComponents = 4;
+            else strokeComponents = 4;
+            continue;
+        }
+
+        // Generic color: sc / SC / scn / SCN
+        if (tok.raw == "sc" || tok.raw == "SC" || tok.raw == "scn" || tok.raw == "SCN") {
+            bool isFill = (tok.raw == "sc" || tok.raw == "scn");
+            int nComp = isFill ? fillComponents : strokeComponents;
+
+            // For scn/SCN, the last operand might be a pattern name (not in pending)
+            // If the token immediately before the operator is a Name, skip inversion.
+            bool hasPatternName = false;
+            if ((tok.raw == "scn" || tok.raw == "SCN") && ti >= 1 &&
+                tokens[ti - 1].type == CsToken::Name) {
+                hasPatternName = true;
+            }
+
+            if (nComp > 0 && !hasPatternName &&
+                pending.size() >= static_cast<size_t>(nComp)) {
+                size_t base = pending.size() - static_cast<size_t>(nComp);
+
+                std::vector<float> vals(nComp);
+                for (int j = 0; j < nComp; ++j)
+                    vals[j] = tokens[pending[base + j]].numericValue;
+
+                if (nComp == 1) vals[0] = invertGray(vals[0]);
+                else if (nComp == 3) invertRgbHsl(vals[0], vals[1], vals[2]);
+                else if (nComp == 4) invertCmykHsl(vals[0], vals[1], vals[2], vals[3]);
+
+                for (size_t j = 0; j < base; ++j) {
+                    writeToken(tokens[pending[j]]);
+                    fz_append_byte(ctx, out, ' ');
+                }
+                pending.clear();
+                for (int j = 0; j < nComp; ++j) {
+                    writeFloat(vals[j]);
+                    fz_append_byte(ctx, out, ' ');
+                }
+                writeToken(tok);
+                fz_append_byte(ctx, out, '\n');
+                continue;
+            }
+        }
+
+        // Default: flush pending as-is, write operator
+        flushPending();
+        writeToken(tok);
+        fz_append_byte(ctx, out, '\n');
+    }
+
+    // Flush any remaining pending tokens (shouldn't normally happen)
+    flushPending();
+}
+
+// Recursively invert colors in a Form XObject and its child Form XObjects.
+// Image XObjects (/Subtype /Image) are left untouched.
+// For the top-level XObject (isRoot=true), a dark background fill and
+// inverted default colors are prepended to handle the implicit white
+// page background and the default black graphics state.
+static void invertXObjectColors(fz_context* ctx, pdf_document* doc, pdf_obj* xobj,
+                                QSet<int>& visited, bool isRoot = false)
+{
+    if (!xobj) return;
+
+    int objNum = pdf_to_num(ctx, xobj);
+    if (objNum == 0 || visited.contains(objNum)) return;
+    visited.insert(objNum);
+
+    // Only process Form XObjects
+    pdf_obj* subtype = pdf_dict_get(ctx, xobj, PDF_NAME(Subtype));
+    if (!pdf_name_eq(ctx, subtype, PDF_NAME(Form))) return;
+
+    pdf_obj* resources = pdf_dict_get(ctx, xobj, PDF_NAME(Resources));
+
+    // Load, rewrite, and store the content stream
+    fz_buffer* contentBuf = nullptr;
+    fz_buffer* rewritten = nullptr;
+    fz_buffer* finalBuf = nullptr;
+    fz_try(ctx) {
+        contentBuf = pdf_load_stream(ctx, xobj);
+        if (contentBuf) {
+            unsigned char* data = nullptr;
+            size_t dataLen = fz_buffer_storage(ctx, contentBuf, &data);
+            if (data && dataLen > 0) {
+                rewritten = fz_new_buffer(ctx, dataLen + dataLen / 8 + 256);
+                rewriteContentStreamColors(ctx, resources, data, dataLen, rewritten);
+
+                if (isRoot) {
+                    // Prepend dark background fill and inverted default colors.
+                    // PDF's implicit page background is white and the default
+                    // graphics state uses black (0) for both fill and stroke.
+                    // Neither appears as an explicit color operator, so the
+                    // rewriter cannot invert them. We fix this by:
+                    //  1. Filling the BBox with black (inverted white background).
+                    //  2. Setting fill/stroke to 1 (inverted default black).
+                    pdf_obj* bboxObj = pdf_dict_get(ctx, xobj, PDF_NAME(BBox));
+                    fz_rect bbox = bboxObj ? pdf_to_rect(ctx, bboxObj) : fz_make_rect(0, 0, 612, 792);
+                    float bw = bbox.x1 - bbox.x0;
+                    float bh = bbox.y1 - bbox.y0;
+
+                    finalBuf = fz_new_buffer(ctx, 256 + fz_buffer_storage(ctx, rewritten, nullptr));
+                    char preamble[256];
+                    snprintf(preamble, sizeof(preamble),
+                             "q\n0 g\n%.4f %.4f %.4f %.4f re f\nQ\n"
+                             "1 g 1 G 1 1 1 rg 1 1 1 RG\n",
+                             bbox.x0, bbox.y0, bw, bh);
+                    fz_append_string(ctx, finalBuf, preamble);
+
+                    unsigned char* rwData = nullptr;
+                    size_t rwLen = fz_buffer_storage(ctx, rewritten, &rwData);
+                    fz_append_data(ctx, finalBuf, rwData, rwLen);
+
+                    pdf_update_stream(ctx, doc, xobj, finalBuf, 0);
+                } else {
+                    pdf_update_stream(ctx, doc, xobj, rewritten, 0);
+                }
+            }
+        }
+    }
+    fz_always(ctx) {
+        if (contentBuf) fz_drop_buffer(ctx, contentBuf);
+        if (rewritten) fz_drop_buffer(ctx, rewritten);
+        if (finalBuf) fz_drop_buffer(ctx, finalBuf);
+    }
+    fz_catch(ctx) {
+        qWarning() << "[MuPdfExporter] invertXObjectColors: failed to rewrite stream for obj"
+                   << objNum << ":" << fz_caught_message(ctx);
+        return;
+    }
+
+    // Recurse into child Form XObjects
+    if (resources) {
+        pdf_obj* xobjDict = pdf_dict_get(ctx, resources, PDF_NAME(XObject));
+        if (xobjDict) {
+            int n = pdf_dict_len(ctx, xobjDict);
+            for (int i = 0; i < n; ++i) {
+                pdf_obj* child = pdf_dict_get_val(ctx, xobjDict, i);
+                if (!child) continue;
+                pdf_obj* childSubtype = pdf_dict_get(ctx, child, PDF_NAME(Subtype));
+                if (pdf_name_eq(ctx, childSubtype, PDF_NAME(Form))) {
+                    invertXObjectColors(ctx, doc, child, visited);
+                }
+            }
+        }
+    }
+}
+
+} // anonymous namespace
 
 // ============================================================================
 // Construction / Destruction
@@ -164,7 +783,7 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
         } else if (m_sourcePdf && currentPage->pdfPageNumber >= 0) {
             // Unmodified page with PDF
             if (m_options.darkModeBackground) {
-                // Dark mode export requires rasterize+invert, can't byte-copy
+                // Dark mode export requires color rewriting, can't byte-copy
                 pageSuccess = renderModifiedPage(pageIndex);
             } else {
                 pageSuccess = graftPage(pageIndex);
@@ -569,10 +1188,19 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
     pdf_obj* bgXObject = nullptr;
     bool bgIsRasterDarkMode = false;  // true when background is a dark-mode raster image
     if (!m_options.annotationsOnly) {
-        if (m_options.darkModeBackground) {
-            // Dark mode export: rasterize source page, invert lightness, embed as image XObject
+        if (m_options.darkModeBackground && m_options.skipImageMasking) {
+            // skipImageMasking: user wants images inverted too, fall back to raster path
             bgIsRasterDarkMode = true;
-            // bgXObject will be set inside the fz_try block below (needs MuPDF calls)
+        } else if (m_options.darkModeBackground) {
+            // Vector-preserving dark mode: import as XObject, rewrite colors
+            bgXObject = importPageAsXObject(pdfPageNum);
+            if (bgXObject) {
+                QSet<int> visited;
+                invertXObjectColors(m_ctx, m_outputDoc, bgXObject, visited, true);
+            } else {
+                qWarning() << "[MuPdfExporter] Failed to import PDF page as XObject for dark mode, falling back to raster";
+                bgIsRasterDarkMode = true;
+            }
         } else {
             // Normal: import the source PDF page as a vector XObject
             bgXObject = importPageAsXObject(pdfPageNum);
@@ -598,7 +1226,10 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         if (bgIsRasterDarkMode && m_sourceDoc) {
             QImage bgImage = m_document->renderPdfPageToImage(pdfPageNum, static_cast<qreal>(m_options.dpi));
             if (!bgImage.isNull()) {
-                QVector<QRect> imgRegions = m_document->pdfImageRegions(pdfPageNum, static_cast<qreal>(m_options.dpi));
+                QVector<QRect> imgRegions;
+                if (!m_options.skipImageMasking) {
+                    imgRegions = m_document->pdfImageRegions(pdfPageNum, static_cast<qreal>(m_options.dpi));
+                }
                 DarkModeUtils::invertImageLightness(bgImage, imgRegions);
 
                 QByteArray compressed = compressImage(bgImage, false,

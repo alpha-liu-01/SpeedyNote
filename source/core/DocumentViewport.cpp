@@ -482,6 +482,19 @@ void DocumentViewport::setPdfDarkModeEnabled(bool enabled)
     update();
 }
 
+void DocumentViewport::setSkipImageMasking(bool skip)
+{
+    if (m_skipImageMasking == skip) {
+        return;
+    }
+    m_skipImageMasking = skip;
+
+    if (m_isDarkMode && m_pdfDarkModeEnabled) {
+        invalidatePdfCache();
+        update();
+    }
+}
+
 // ===== Layout =====
 
 void DocumentViewport::setLayoutMode(LayoutMode mode)
@@ -3479,9 +3492,12 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
         return QPixmap();
     }
 
-    // Apply HSL lightness inversion for PDF dark mode, skipping raster images
+    // Apply HSL lightness inversion for PDF dark mode
     if (m_isDarkMode && m_pdfDarkModeEnabled) {
-        QVector<QRect> imgRegions = m_document->pdfImageRegions(pageIndex, dpi);
+        QVector<QRect> imgRegions;
+        if (!m_skipImageMasking) {
+            imgRegions = m_document->pdfImageRegions(pageIndex, dpi);
+        }
         DarkModeUtils::invertImageLightness(pdfImage, imgRegions);
     }
     
@@ -3623,9 +3639,12 @@ void DocumentViewport::doAsyncPdfPreload()
                 return;
             }
 
-            // Apply HSL lightness inversion for PDF dark mode, skipping raster images
+            // Apply HSL lightness inversion for PDF dark mode
             if (m_isDarkMode && m_pdfDarkModeEnabled) {
-                QVector<QRect> imgRegions = m_document->pdfImageRegions(pdfPageNum, dpi);
+                QVector<QRect> imgRegions;
+                if (!m_skipImageMasking) {
+                    imgRegions = m_document->pdfImageRegions(pdfPageNum, dpi);
+                }
                 DarkModeUtils::invertImageLightness(pdfImage, imgRegions);
             }
 

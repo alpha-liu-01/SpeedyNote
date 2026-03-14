@@ -147,7 +147,7 @@ private:
      * @return Snapshot with all render data, or invalid snapshot on failure.
      */
     static ThumbnailSnapshot createSnapshot(Document* doc, int pageIndex, int width, qreal dpr,
-                                               bool pdfDarkMode = false);
+                                               bool pdfDarkMode = false, bool skipImageMasking = false);
     
     /**
      * @brief Render a thumbnail from a snapshot (called in worker thread).

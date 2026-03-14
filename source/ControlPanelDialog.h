@@ -96,6 +96,7 @@ private:
     QPushButton *accentColorButton;
     QColor selectedAccentColor;
     QCheckBox *pdfDarkModeCheckbox;
+    QCheckBox *skipImageMaskingCheckbox;
     void createThemeTab();
 
     // === Language tab ===
