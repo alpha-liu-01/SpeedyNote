@@ -35,6 +35,7 @@
 #include <QFileDialog>
 #include <QApplication>
 #include <QScrollBar>
+#include <QCloseEvent>
 #include <QMenu>
 #include <QMessageBox>
 #include <QInputDialog>
@@ -721,10 +722,23 @@ void Launcher::setFadeOpacity(qreal opacity)
     setWindowOpacity(opacity);
 }
 
+void Launcher::closeEvent(QCloseEvent* event)
+{
+    MainWindow* mw = MainWindow::findExistingMainWindow();
+    if (mw && mw->tabCount() > 0) {
+        mw->show();
+        mw->raise();
+        if (!mw->close()) {
+            event->ignore();
+            return;
+        }
+    }
+    event->accept();
+}
+
 void Launcher::paintEvent(QPaintEvent* event)
 {
     QMainWindow::paintEvent(event);
-    // Custom painting can be added here for background effects
 }
 
 void Launcher::resizeEvent(QResizeEvent* event)

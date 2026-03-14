@@ -102,6 +102,7 @@ signals:
     void returnToMainWindowRequested();
 
 protected:
+    void closeEvent(QCloseEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;

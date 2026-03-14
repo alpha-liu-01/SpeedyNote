@@ -207,6 +207,8 @@ public:
     // InkCanvas* currentCanvas();  // MW1.4: Stub - returns nullptr, use currentViewport()
     DocumentViewport* currentViewport() const; // Phase 3.1.4: New accessor for DocumentViewport
     int tabCount() const;  // Returns number of open tabs (used by Launcher for Escape handling)
+    void switchToTabIndex(int index);  // Switch to a specific tab by index
+    void saveSessionTabs();  // Persist open tab paths to QSettings for session restore
 
     void switchPage(int pageNumber); // Made public for RecentNotebooksDialog
     // REMOVED MW7.7: switchPageWithDirection stub removed - replaced with switchPage calls

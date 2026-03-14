@@ -3690,6 +3690,12 @@ int MainWindow::tabCount() const {
     return 0;
 }
 
+void MainWindow::switchToTabIndex(int index) {
+    if (m_tabBar && index >= 0 && index < m_tabBar->count()) {
+        m_tabBar->setCurrentIndex(index);
+    }
+}
+
 
 void MainWindow::toggleFullscreen() {
     bool goingFullscreen = !isFullScreen();
@@ -6464,6 +6470,38 @@ void MainWindow::dropEvent(QDropEvent *event)
 
 #endif // !Q_OS_ANDROID && !Q_OS_IOS
 
+void MainWindow::saveSessionTabs()
+{
+    QSettings settings("SpeedyNote", "App");
+
+    if (!m_tabManager || !m_documentManager || m_tabManager->tabCount() == 0) {
+        settings.remove("session/lastOpenTabs");
+        settings.remove("session/activeTabIndex");
+        return;
+    }
+
+    QStringList paths;
+    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+        Document* doc = m_tabManager->documentAt(i);
+        if (!doc) continue;
+
+        QString docPath = m_documentManager->documentPath(doc);
+        if (!docPath.isEmpty() && !m_documentManager->isUsingTempBundle(doc)) {
+            paths.append(QFileInfo(docPath).absoluteFilePath());
+        } else if (!doc->pdfPath().isEmpty()) {
+            paths.append(QFileInfo(doc->pdfPath()).absoluteFilePath());
+        }
+    }
+
+    if (paths.isEmpty()) {
+        settings.remove("session/lastOpenTabs");
+        settings.remove("session/activeTabIndex");
+    } else {
+        settings.setValue("session/lastOpenTabs", paths);
+        settings.setValue("session/activeTabIndex", m_tabManager->currentIndex());
+    }
+}
+
 void MainWindow::closeEvent(QCloseEvent *event) {
     // ========== UPDATE POSITIONS FOR ALL DOCUMENTS ==========
     // Before checking for unsaved changes, update positions for all documents
@@ -6547,6 +6585,9 @@ void MainWindow::closeEvent(QCloseEvent *event) {
         // REMOVED MW7.4: Save bookmarks removed - bookmark implementation deleted
         // saveBookmarks();
     
+    // Save session tabs for restore on next launch
+    saveSessionTabs();
+
     // Flush NotebookLibrary to disk before exiting
     // This ensures any pending addToRecent() calls are persisted, even if
     // the debounced save timer hasn't fired yet. Critical for new documents
