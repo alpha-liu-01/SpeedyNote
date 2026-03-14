@@ -412,7 +412,7 @@ If SpeedyNote helps you, consider:
 - Starring this repository
 - Purchasing the Android version on Google Play
 - Reporting bugs and suggesting improvements
-- Contributing translations
+- [Contributing translations](./docs/TRANSLATION_GUIDE.md)
 
 ---
 

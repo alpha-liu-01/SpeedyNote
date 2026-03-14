@@ -2088,6 +2088,17 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // Note: objectSelectionChanged has no bool parameter, so we wrap it
     m_objectSelectionForActionBarConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
                                                 this, [this, viewport]() {
+        // Update image-specific state BEFORE notifying the container,
+        // so button visibility is correct when the container computes its size.
+        if (m_objectSelectActionBar) {
+            const auto& sel = viewport->selectedObjects();
+            if (!sel.isEmpty() && sel.size() == 1 && sel.first()->type() == "image") {
+                auto* img = dynamic_cast<ImageObject*>(sel.first());
+                m_objectSelectActionBar->updateImageSelection(true, img ? img->maintainAspectRatio : true);
+            } else {
+                m_objectSelectActionBar->updateImageSelection(false, false);
+            }
+        }
         if (m_actionBarContainer) {
             bool hasSelection = !viewport->selectedObjects().isEmpty();
             m_actionBarContainer->onObjectSelectionChanged(hasSelection);
@@ -2114,6 +2125,17 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         
         // Sync all selection/clipboard states
         m_actionBarContainer->onLassoSelectionChanged(viewport->hasLassoSelection());
+
+        // Sync image-specific state before object selection so button count is correct
+        if (m_objectSelectActionBar) {
+            const auto& sel = viewport->selectedObjects();
+            if (!sel.isEmpty() && sel.size() == 1 && sel.first()->type() == "image") {
+                auto* img = dynamic_cast<ImageObject*>(sel.first());
+                m_objectSelectActionBar->updateImageSelection(true, img ? img->maintainAspectRatio : true);
+            } else {
+                m_objectSelectActionBar->updateImageSelection(false, false);
+            }
+        }
         m_actionBarContainer->onObjectSelectionChanged(viewport->hasSelectedObjects());
         m_actionBarContainer->onTextSelectionChanged(viewport->hasTextSelection());
         m_actionBarContainer->onStrokeClipboardChanged(viewport->hasStrokesInClipboard());
@@ -4552,6 +4574,11 @@ void MainWindow::setupActionBars()
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::cancelRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->cancelObjectSelectAction();
+        }
+    });
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::aspectRatioLockRequested, this, [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->toggleImageAspectRatioLock();
         }
     });
     

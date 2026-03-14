@@ -11,6 +11,17 @@ ObjectSelectActionBar::ObjectSelectActionBar(QWidget* parent)
 
 void ObjectSelectActionBar::setupButtons()
 {
+    // === Aspect ratio lock (image-only, placed at top) ===
+    m_aspectLockButton = new ActionBarButton(this);
+    m_aspectLockButton->setIconName("lock");
+    m_aspectLockButton->setToolTip(tr("Lock/Unlock Aspect Ratio"));
+    m_aspectLockButton->setCheckable(true);
+    addButton(m_aspectLockButton);
+    connect(m_aspectLockButton, &ActionBarButton::clicked, this, [this]() {
+        m_aspectLockButton->setChecked(!m_aspectLockButton->isChecked());
+        emit aspectRatioLockRequested();
+    });
+    
     // === Clipboard operations ===
     
     // Create Copy button
@@ -89,6 +100,11 @@ void ObjectSelectActionBar::setupButtons()
 
 void ObjectSelectActionBar::updateButtonStates()
 {
+    // Aspect lock: visible only when a single ImageObject is selected
+    if (m_aspectLockButton) {
+        m_aspectLockButton->setVisible(m_hasSelection && m_isImageSelected);
+    }
+    
     // Copy, Delete, and layer ordering buttons: visible only when selection exists
     if (m_copyButton) {
         m_copyButton->setVisible(m_hasSelection);
@@ -144,12 +160,24 @@ void ObjectSelectActionBar::setHasSelection(bool hasSelection)
     }
 }
 
+void ObjectSelectActionBar::updateImageSelection(bool isImage, bool aspectLocked)
+{
+    m_isImageSelected = isImage;
+    if (m_aspectLockButton) {
+        m_aspectLockButton->setChecked(aspectLocked);
+    }
+    updateButtonStates();
+}
+
 void ObjectSelectActionBar::setDarkMode(bool darkMode)
 {
     // Call base class implementation (updates background, shadow, separators)
     ActionBar::setDarkMode(darkMode);
     
     // Propagate to all buttons
+    if (m_aspectLockButton) {
+        m_aspectLockButton->setDarkMode(darkMode);
+    }
     if (m_copyButton) {
         m_copyButton->setDarkMode(darkMode);
     }

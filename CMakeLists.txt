@@ -576,12 +576,10 @@ include_directories(${CMAKE_SOURCE_DIR}/thirdparty/miniz)
 
 # ============================================================================
 # Translation Files
+# Auto-discover all app_*.ts files so new community-contributed languages are
+# picked up automatically without requiring changes to this file.
 # ============================================================================
-set(TS_FILES
-        ${CMAKE_SOURCE_DIR}/resources/translations/app_zh.ts
-        ${CMAKE_SOURCE_DIR}/resources/translations/app_es.ts
-        ${CMAKE_SOURCE_DIR}/resources/translations/app_fr.ts
-)
+file(GLOB TS_FILES "${CMAKE_SOURCE_DIR}/resources/translations/app_*.ts")
 
 # ============================================================================
 # QMarkdownTextEdit (bundled library)
