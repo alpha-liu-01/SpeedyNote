@@ -140,7 +140,15 @@ void setupParser(QCommandLineParser& parser, Command cmd)
             parser.addOption(QCommandLineOption(
                 QStringLiteral("annotations-only"),
                 QCoreApplication::translate("CLI", "Export strokes only (blank background)")));
-            
+
+            parser.addOption(QCommandLineOption(
+                QStringLiteral("dark-background"),
+                QCoreApplication::translate("CLI", "Apply dark mode lightness inversion to PDF backgrounds")));
+
+            parser.addOption(QCommandLineOption(
+                QStringLiteral("darken-strokes"),
+                QCoreApplication::translate("CLI", "Darken light-coloured strokes for printing")));
+
             parser.addOption(QCommandLineOption(
                 QStringLiteral("overwrite"),
                 QCoreApplication::translate("CLI", "Overwrite existing output files")));
@@ -331,6 +339,8 @@ void showHelp(const QCommandLineParser& parser, Command cmd)
             "                          Common values: 96 (screen), 150 (draft), 300 (print)\n"
             "  --pages <RANGE>         Page range, e.g., \"1-10,15,20-25\"\n"
             "  --annotations-only      Export strokes only (blank background, no PDF/grid)\n"
+            "  --dark-background      Apply dark mode lightness inversion to PDF backgrounds\n"
+            "  --darken-strokes       Darken light-coloured strokes for printing\n"
             "  --no-metadata           Don't preserve PDF metadata\n"
             "  --no-outline            Don't preserve PDF bookmarks/outline\n"
             "\n"

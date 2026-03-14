@@ -95,6 +95,7 @@ private:
     QCheckBox *useCustomAccentCheckbox;
     QPushButton *accentColorButton;
     QColor selectedAccentColor;
+    QCheckBox *pdfDarkModeCheckbox;
     void createThemeTab();
 
     // === Language tab ===

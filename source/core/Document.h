@@ -814,7 +814,15 @@ public:
      * @return Rendered pixmap, or null pixmap if not available.
      */
     QPixmap renderPdfPageToPixmap(int pageIndex, qreal dpi = 96.0) const;
-    
+
+    /**
+     * @brief Get bounding rectangles of raster images on a PDF page.
+     * @param pageIndex 0-based page index.
+     * @param dpi Resolution (rects are in pixel coords at this DPI).
+     * @return List of image bounding rects, empty if no PDF or no images.
+     */
+    QVector<QRect> pdfImageRegions(int pageIndex, qreal dpi = 96.0) const;
+
     /**
      * @brief Get the number of pages in the PDF.
      * @return Page count, or 0 if no PDF is loaded.

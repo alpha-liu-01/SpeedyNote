@@ -343,7 +343,17 @@ public:
      * @return True if dark mode is active.
      */
     bool isDarkMode() const { return m_isDarkMode; }
-    
+
+    /**
+     * @brief Enable/disable PDF dark mode (lightness inversion on PDF backgrounds).
+     *
+     * When enabled and dark mode is active, rendered PDF pages have their
+     * lightness inverted (HSL) so white backgrounds become dark and dark text
+     * becomes light, while preserving hue and saturation.
+     */
+    void setPdfDarkModeEnabled(bool enabled);
+    bool isPdfDarkModeEnabled() const { return m_pdfDarkModeEnabled; }
+
     // ===== View State Getters =====
     
     /**
@@ -1726,6 +1736,7 @@ private:
     
     // ===== Theme / Dark Mode =====
     bool m_isDarkMode = true;  ///< Cached dark mode state (default: dark)
+    bool m_pdfDarkModeEnabled = true;  ///< Invert PDF lightness when dark mode is active
     QColor m_backgroundColor = QColor(64, 64, 64);  ///< Cached background color
     
     // ===== View State =====

@@ -131,6 +131,8 @@ struct ExportPdfOptions {
     bool preserveMetadata = true;   ///< Preserve PDF metadata from source
     bool preserveOutline = true;    ///< Preserve PDF outline/bookmarks from source
     bool annotationsOnly = false;   ///< Export strokes only on blank background
+    bool darkModeBackground = false; ///< Apply HSL lightness inversion to PDF background
+    bool darkenStrokes = false;      ///< Darken light-coloured strokes for printing
     bool overwrite = false;         ///< Overwrite existing output files
     bool dryRun = false;            ///< Preview only, don't create files
 };

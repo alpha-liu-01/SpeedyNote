@@ -38,6 +38,8 @@ struct PdfExportOptions {
     bool preserveMetadata = true;   ///< Copy metadata from source PDF
     bool preserveOutline = true;    ///< Copy outline/bookmarks from source PDF
     bool annotationsOnly = false;   ///< Export strokes only on blank background (no PDF/grid/lines)
+    bool darkModeBackground = false; ///< Apply HSL lightness inversion to PDF background (dark mode)
+    bool darkenStrokes = false;      ///< Darken light-coloured strokes for printing (L>0.5 → 1-L)
 };
 
 /**

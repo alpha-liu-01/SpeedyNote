@@ -376,6 +376,84 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
 }
 
 // ============================================================================
+// Image Region Detection (for dark-mode inversion masking)
+// ============================================================================
+
+// Minimal fz_device that records bounding boxes of raster images.
+// All other callbacks (text, paths, shading) are left as defaults (no-ops).
+
+struct ImageCollector {
+    fz_device super;            // must be first member
+    QVector<QRect>* rects;
+};
+
+static void img_collect_fill_image(fz_context*, fz_device* dev_,
+    fz_image*, fz_matrix ctm, float, fz_color_params)
+{
+    auto* dev = reinterpret_cast<ImageCollector*>(dev_);
+    fz_rect r = fz_transform_rect(fz_unit_rect, ctm);
+    dev->rects->append(QRect(
+        static_cast<int>(r.x0), static_cast<int>(r.y0),
+        static_cast<int>(r.x1 - r.x0 + 0.5f),
+        static_cast<int>(r.y1 - r.y0 + 0.5f)));
+}
+
+static void img_collect_fill_image_mask(fz_context*, fz_device* dev_,
+    fz_image*, fz_matrix ctm, fz_colorspace*, const float*, float, fz_color_params)
+{
+    auto* dev = reinterpret_cast<ImageCollector*>(dev_);
+    fz_rect r = fz_transform_rect(fz_unit_rect, ctm);
+    dev->rects->append(QRect(
+        static_cast<int>(r.x0), static_cast<int>(r.y0),
+        static_cast<int>(r.x1 - r.x0 + 0.5f),
+        static_cast<int>(r.y1 - r.y0 + 0.5f)));
+}
+
+QVector<QRect> MuPdfProvider::imageRegions(int pageIndex, qreal dpi) const
+{
+    QMutexLocker locker(&m_mutex);
+    QVector<QRect> result;
+
+    if (!isValid() || pageIndex < 0 || pageIndex >= m_pageCount)
+        return result;
+
+    float scale = dpi / 72.0f;
+    fz_matrix ctm = fz_scale(scale, scale);
+    fz_page* page = nullptr;
+
+    // fz_new_derived_device macro internally references a bare 'ctx' variable
+    fz_context* ctx = m_ctx;
+
+    fz_device* dev = nullptr;
+
+    fz_try(ctx) {
+        page = fz_load_page(ctx, m_doc, pageIndex);
+
+        // Create a lightweight device that only records image positions
+        ImageCollector* collector =
+            fz_new_derived_device(ctx, ImageCollector);
+        collector->super.fill_image      = img_collect_fill_image;
+        collector->super.fill_image_mask = img_collect_fill_image_mask;
+        collector->rects = &result;
+
+        dev = &collector->super;
+        fz_run_page(ctx, page, dev, ctm, nullptr);
+        fz_close_device(ctx, dev);
+    }
+    fz_always(ctx) {
+        if (dev) fz_drop_device(ctx, dev);
+        if (page) fz_drop_page(ctx, page);
+    }
+    fz_catch(ctx) {
+        qWarning() << "MuPdfProvider: imageRegions failed for page" << pageIndex
+                   << "-" << fz_caught_message(ctx);
+        result.clear();
+    }
+
+    return result;
+}
+
+// ============================================================================
 // Text Selection
 // ============================================================================
 

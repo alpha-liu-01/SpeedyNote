@@ -99,6 +99,16 @@ public:
     bool annotationsOnly() const;
     
     /**
+     * @brief Check if dark mode background inversion is enabled.
+     */
+    bool darkModeBackground() const;
+    
+    /**
+     * @brief Check if light strokes should be darkened for printing.
+     */
+    bool darkenStrokes() const;
+    
+    /**
      * @brief Check if PDF metadata should be preserved.
      */
     bool includeMetadata() const;
@@ -180,6 +190,8 @@ private:
     
     // UI elements - Options
     QCheckBox* m_annotationsOnlyCheckbox = nullptr;
+    QCheckBox* m_darkModeBgCheckbox = nullptr;
+    QCheckBox* m_darkenStrokesCheckbox = nullptr;
     QCheckBox* m_includeMetadataCheckbox = nullptr;
     QCheckBox* m_includeOutlineCheckbox = nullptr;
     

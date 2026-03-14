@@ -232,6 +232,14 @@ QPixmap Document::renderPdfPageToPixmap(int pageIndex, qreal dpi) const
     return m_pdfProvider->renderPageToPixmap(pageIndex, dpi);
 }
 
+QVector<QRect> Document::pdfImageRegions(int pageIndex, qreal dpi) const
+{
+    if (!isPdfLoaded()) {
+        return {};
+    }
+    return m_pdfProvider->imageRegions(pageIndex, dpi);
+}
+
 int Document::pdfPageCount() const
 {
     if (!isPdfLoaded()) {

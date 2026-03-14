@@ -65,6 +65,7 @@ public:
     
     // ===== Rendering =====
     QImage renderPageToImage(int pageIndex, qreal dpi) const override;
+    QVector<QRect> imageRegions(int pageIndex, qreal dpi) const override;
     
     // ===== Text Selection =====
     QVector<PdfTextBox> textBoxes(int pageIndex) const override;

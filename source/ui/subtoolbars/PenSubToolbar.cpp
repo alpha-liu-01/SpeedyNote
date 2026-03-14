@@ -2,6 +2,7 @@
 #include "../widgets/ColorPresetButton.h"
 #include "../widgets/ThicknessPresetButton.h"
 
+#include <QPalette>
 #include <QSettings>
 #include <QColorDialog>
 
@@ -10,6 +11,12 @@ const QColor PenSubToolbar::DEFAULT_COLORS[NUM_PRESETS] = {
     QColor(0xFF, 0x00, 0x00),  // Red
     QColor(0x00, 0x00, 0xFF),  // Blue
     QColor(0x00, 0x00, 0x00)   // Black
+};
+
+const QColor PenSubToolbar::DEFAULT_COLORS_DARK[NUM_PRESETS] = {
+    QColor(0xFF, 0x77, 0x55),  // Warm orange-red
+    QColor(0x66, 0xCC, 0xFF),  // Light blue
+    QColor(0xFF, 0xFF, 0xFF)   // White
 };
 
 const QString PenSubToolbar::SETTINGS_GROUP = "pen";
@@ -79,11 +86,18 @@ void PenSubToolbar::loadFromSettings()
     QSettings settings;
     settings.beginGroup(SETTINGS_GROUP);
     
-    // Load colors
+    // Choose defaults based on dark mode
+    bool darkMode = palette().color(QPalette::Window).lightness() < 128;
+    const QColor* defaults = darkMode ? DEFAULT_COLORS_DARK : DEFAULT_COLORS;
+    
+    // Load colors (use mode-appropriate defaults only when no user override)
     for (int i = 0; i < NUM_PRESETS; ++i) {
         QString key = KEY_COLOR_PREFIX + QString::number(i + 1);
-        QColor color = settings.value(key, DEFAULT_COLORS[i]).value<QColor>();
-        m_colorButtons[i]->setColor(color);
+        if (settings.contains(key)) {
+            m_colorButtons[i]->setColor(settings.value(key).value<QColor>());
+        } else {
+            m_colorButtons[i]->setColor(defaults[i]);
+        }
     }
     
     // Load thicknesses
@@ -93,9 +107,10 @@ void PenSubToolbar::loadFromSettings()
         m_thicknessButtons[i]->setThickness(thickness);
     }
     
-    // Load selections
-    m_selectedColorIndex = settings.value(KEY_SELECTED_COLOR, 2).toInt();  // Default: black
-    m_selectedThicknessIndex = settings.value(KEY_SELECTED_THICKNESS, 0).toInt();  // Default: thin
+    // Load selections (in dark mode, default to index 2 = white instead of black)
+    int defaultColorIdx = darkMode ? 2 : 2;
+    m_selectedColorIndex = settings.value(KEY_SELECTED_COLOR, defaultColorIdx).toInt();
+    m_selectedThicknessIndex = settings.value(KEY_SELECTED_THICKNESS, 0).toInt();
     
     settings.endGroup();
     

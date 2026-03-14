@@ -135,6 +135,7 @@ public:
                                  const QColor& gridColor, int gridSpacing, int lineSpacing);
 
     QColor getDefaultPenColor();
+    void setPdfDarkModeEnabled(bool enabled);
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     SDLControllerManager *controllerManager = nullptr;

@@ -1,9 +1,13 @@
 #include "ThumbnailRenderer.h"
+#include "../core/DarkModeUtils.h"
 #include "../core/Document.h"
 #include "../core/Page.h"
 #include "../layers/VectorLayer.h"
 
 #include <QPainter>
+#include <QPalette>
+#include <QGuiApplication>
+#include <QSettings>
 #include <QtConcurrent>
 #include <QDebug>
 
@@ -39,9 +43,14 @@ void ThumbnailRenderer::requestThumbnail(Document* doc, int pageIndex, int width
     
     locker.unlock();
     
+    // Resolve dark mode state once per request (avoids QSettings per-pixel overhead)
+    bool darkMode = QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
+    bool pdfDarkMode = darkMode &&
+        QSettings("SpeedyNote", "App").value("display/pdfDarkMode", true).toBool();
+
     // Create snapshot on main thread (thread-safe copy of page data)
     // This MUST happen before we start the async task
-    ThumbnailSnapshot snapshot = createSnapshot(doc, pageIndex, width, dpr);
+    ThumbnailSnapshot snapshot = createSnapshot(doc, pageIndex, width, dpr, pdfDarkMode);
     if (!snapshot.valid) {
         return;  // Failed to create snapshot (page unavailable)
     }
@@ -174,7 +183,7 @@ void ThumbnailRenderer::onRenderFinished()
 }
 
 ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
-    Document* doc, int pageIndex, int width, qreal dpr)
+    Document* doc, int pageIndex, int width, qreal dpr, bool pdfDarkMode)
 {
     ThumbnailSnapshot snapshot;
     snapshot.pageIndex = pageIndex;
@@ -215,6 +224,10 @@ ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
         
         QImage pdfImage = doc->renderPdfPageToImage(page->pdfPageNumber, pdfDpi);
         if (!pdfImage.isNull()) {
+            if (pdfDarkMode) {
+                QVector<QRect> imgRegions = doc->pdfImageRegions(page->pdfPageNumber, pdfDpi);
+                DarkModeUtils::invertImageLightness(pdfImage, imgRegions);
+            }
             snapshot.pdfBackground = QPixmap::fromImage(pdfImage);
         }
     }

@@ -623,6 +623,7 @@ set(CORE_SOURCES
     source/core/TouchGestureHandler.cpp
     source/core/MarkdownNote.cpp
     source/core/ShortcutManager.cpp
+    source/core/DarkModeUtils.cpp
 )
 
 # Inserted objects (images, links, etc.)
