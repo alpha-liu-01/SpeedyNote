@@ -48,6 +48,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QEventLoop>
 #include <QTimer>
@@ -1651,6 +1652,8 @@ void Launcher::showPdfExportDialog(const QStringList& bundlePaths)
             options.annotationsOnly = dialog.annotationsOnly();
             options.darkModeBackground = dialog.darkModeBackground();
             options.darkenStrokes = dialog.darkenStrokes();
+            options.skipImageMasking = QSettings("SpeedyNote", "App")
+                .value("display/skipImageMasking", false).toBool();
             options.preserveMetadata = dialog.includeMetadata();
             options.preserveOutline = dialog.includeOutline();
             

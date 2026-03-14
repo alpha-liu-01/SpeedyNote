@@ -201,6 +201,7 @@ void ControlPanelDialog::loadSettings()
     
     // Load PDF dark mode setting (defaults to true)
     pdfDarkModeCheckbox->setChecked(settings.value("display/pdfDarkMode", true).toBool());
+    skipImageMaskingCheckbox->setChecked(settings.value("display/skipImageMasking", false).toBool());
     
     // Load language settings
     bool useSystemLang = settings.value("useSystemLanguage", true).toBool();
@@ -253,10 +254,14 @@ void ControlPanelDialog::applyChanges()
         mainWindowRef->setCustomAccentColor(selectedAccentColor);
     }
     
-    // Apply PDF dark mode setting
+    // Apply PDF dark mode settings
     bool pdfDarkMode = pdfDarkModeCheckbox->isChecked();
     settings.setValue("display/pdfDarkMode", pdfDarkMode);
     mainWindowRef->setPdfDarkModeEnabled(pdfDarkMode);
+
+    bool skipMasking = skipImageMaskingCheckbox->isChecked();
+    settings.setValue("display/skipImageMasking", skipMasking);
+    mainWindowRef->setSkipImageMasking(skipMasking);
     
     // Apply language settings
     settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
@@ -1314,7 +1319,7 @@ void ControlPanelDialog::createThemeTab() {
     // PDF dark mode (lightness inversion)
     pdfDarkModeCheckbox = new QCheckBox(tr("Invert PDF Lightness in Dark Mode"), themeTab);
     layout->addWidget(pdfDarkModeCheckbox);
-    
+
     QLabel *pdfDarkModeNote = new QLabel(tr("When enabled and dark mode is active, PDF page backgrounds are darkened "
         "by inverting lightness (HSL). White pages become dark and dark text becomes "
         "light, while colours keep their hue. Disable this if you prefer the original "
@@ -1322,6 +1327,27 @@ void ControlPanelDialog::createThemeTab() {
     pdfDarkModeNote->setWordWrap(true);
     pdfDarkModeNote->setStyleSheet("color: gray; font-size: 10px;");
     layout->addWidget(pdfDarkModeNote);
+
+    layout->addSpacing(5);
+
+    // Image region detection bypass (sub-option of PDF dark mode)
+    skipImageMaskingCheckbox = new QCheckBox(tr("Invert entire page including images"), themeTab);
+    layout->addWidget(skipImageMaskingCheckbox);
+
+    QLabel *skipImageMaskingNote = new QLabel(tr("By default, embedded photos and figures are detected and excluded from "
+        "inversion. Enable this to invert every pixel on the page. Useful for PDFs "
+        "that consist mainly of black-and-white diagrams or graphs."), themeTab);
+    skipImageMaskingNote->setWordWrap(true);
+    skipImageMaskingNote->setStyleSheet("color: gray; font-size: 10px;");
+    layout->addWidget(skipImageMaskingNote);
+
+    // Only enable the sub-option when PDF dark mode is checked
+    auto updateSkipEnabled = [this]() {
+        bool on = pdfDarkModeCheckbox->isChecked();
+        skipImageMaskingCheckbox->setEnabled(on);
+    };
+    connect(pdfDarkModeCheckbox, &QCheckBox::toggled, this, updateSkipEnabled);
+    updateSkipEnabled();
 
     layout->addStretch();
     

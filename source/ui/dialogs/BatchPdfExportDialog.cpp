@@ -270,6 +270,15 @@ void BatchPdfExportDialog::setupUi()
         tr("Apply lightness inversion to the PDF background, producing a dark page similar "
            "to the on-canvas dark mode appearance."));
     optionsLayout->addWidget(m_darkModeBgCheckbox);
+
+    connect(m_annotationsOnlyCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) m_darkModeBgCheckbox->setChecked(false);
+        m_darkModeBgCheckbox->setEnabled(!checked);
+    });
+    connect(m_darkModeBgCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) m_annotationsOnlyCheckbox->setChecked(false);
+        m_annotationsOnlyCheckbox->setEnabled(!checked);
+    });
     
     m_darkenStrokesCheckbox = new QCheckBox(tr("Darken light-coloured strokes for printing"));
     m_darkenStrokesCheckbox->setToolTip(

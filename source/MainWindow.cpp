@@ -269,6 +269,7 @@ MainWindow::MainWindow(QWidget *parent)
             vp->setDarkMode(isDarkMode());
             QSettings s("SpeedyNote", "App");
             vp->setPdfDarkModeEnabled(s.value("display/pdfDarkMode", true).toBool());
+            vp->setSkipImageMasking(s.value("display/skipImageMasking", false).toBool());
         }
         
         // Phase 5.1 Task 4: Update LayerPanel when tab changes
@@ -2715,6 +2716,8 @@ void MainWindow::showPdfExportDialog()
         options.annotationsOnly = dialog.annotationsOnly();
         options.darkModeBackground = dialog.darkModeBackground();
         options.darkenStrokes = dialog.darkenStrokes();
+        options.skipImageMasking = QSettings("SpeedyNote", "App")
+            .value("display/skipImageMasking", false).toBool();
         
         // Create exporter and export
         MuPdfExporter exporter;
@@ -3942,6 +3945,16 @@ void MainWindow::setPdfDarkModeEnabled(bool enabled) {
     }
 }
 
+void MainWindow::setSkipImageMasking(bool skip) {
+    if (m_tabManager) {
+        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
+            if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
+                vp->setSkipImageMasking(skip);
+            }
+        }
+    }
+}
+
 QColor MainWindow::getAccentColor() const {
     if (useCustomAccentColor && customAccentColor.isValid()) {
         return customAccentColor;
@@ -4072,10 +4085,12 @@ void MainWindow::updateTheme() {
     if (m_tabManager) {
         QSettings s("SpeedyNote", "App");
         bool pdfDarkMode = s.value("display/pdfDarkMode", true).toBool();
+        bool skipMasking = s.value("display/skipImageMasking", false).toBool();
         for (int i = 0; i < m_tabManager->tabCount(); ++i) {
             if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
                 vp->setDarkMode(darkMode);
                 vp->setPdfDarkModeEnabled(pdfDarkMode);
+                vp->setSkipImageMasking(skipMasking);
             }
         }
     }

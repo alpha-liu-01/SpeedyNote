@@ -353,6 +353,8 @@ public:
      */
     void setPdfDarkModeEnabled(bool enabled);
     bool isPdfDarkModeEnabled() const { return m_pdfDarkModeEnabled; }
+    void setSkipImageMasking(bool skip);
+    bool skipImageMasking() const { return m_skipImageMasking; }
 
     // ===== View State Getters =====
     
@@ -1737,6 +1739,7 @@ private:
     // ===== Theme / Dark Mode =====
     bool m_isDarkMode = true;  ///< Cached dark mode state (default: dark)
     bool m_pdfDarkModeEnabled = true;  ///< Invert PDF lightness when dark mode is active
+    bool m_skipImageMasking = false;   ///< Bypass image-region detection (invert everything)
     QColor m_backgroundColor = QColor(64, 64, 64);  ///< Cached background color
     
     // ===== View State =====
