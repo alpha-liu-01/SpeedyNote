@@ -11,22 +11,27 @@
 
 #include <QColor>
 #include <QImage>
+#include <QRect>
+#include <QVector>
 
 namespace DarkModeUtils {
 
 /**
- * @brief Invert the lightness of every pixel in an image (in-place).
+ * @brief Invert the lightness of an image, skipping raster-image regions.
  *
- * For each pixel, the HSL lightness is replaced with (1 - L) while hue
- * and saturation are preserved.  White backgrounds become black, black
- * text becomes white, and colours keep their hue.
+ * Performs pure HSL lightness inversion (L' = 1-L) on every pixel that
+ * is NOT inside one of the supplied @p imageRegions.  Hue and saturation
+ * are preserved, avoiding the crude colour shifts of full RGB inversion.
  *
- * Alpha channel is preserved unchanged.
+ * Pixels that fall inside any rectangle in @p imageRegions are left
+ * completely untouched, so that photos and screenshots embedded in PDFs
+ * are not colour-mangled.
  *
- * @param image  Must be Format_ARGB32 or Format_ARGB32_Premultiplied.
- *               Converted automatically if needed.
+ * @param image         Must be Format_ARGB32 or similar; converted if needed.
+ * @param imageRegions  Bounding rectangles of raster images (pixel coords).
+ *                      Pass an empty vector to apply inversion everywhere.
  */
-void invertImageLightness(QImage& image);
+void invertImageLightness(QImage& image, const QVector<QRect>& imageRegions = {});
 
 /**
  * @brief Invert the lightness of a single colour.

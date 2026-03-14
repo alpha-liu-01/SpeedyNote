@@ -4041,6 +4041,11 @@ void MainWindow::applyBackgroundSettings(Page::BackgroundType type, const QColor
     // Mark document as modified and trigger redraw
     doc->markModified();
     viewport->update();
+
+    // Refresh page panel thumbnails so they reflect the new colours
+    if (m_pagePanel) {
+        m_pagePanel->invalidateAllThumbnails();
+    }
 }
 
 void MainWindow::updateTheme() {
@@ -5462,7 +5467,7 @@ QPixmap MainWindow::renderPage0Thumbnail(Document* doc)
     if (doc->isPdfLoaded() && page->pdfPageNumber >= 0) {
         qreal pdfDpi = (THUMBNAIL_WIDTH * dpr) / (pageSize.width() / 72.0);
         pdfDpi = qMin(pdfDpi, 150.0);  // Cap at 150 DPI
-        
+
         QImage pdfImage = doc->renderPdfPageToImage(page->pdfPageNumber, pdfDpi);
         if (!pdfImage.isNull()) {
             pdfBackground = QPixmap::fromImage(pdfImage);

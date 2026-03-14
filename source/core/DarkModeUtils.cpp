@@ -88,7 +88,7 @@ static void hslToRgb(const HSL& hsl, int& r, int& g, int& b)
 // Public API
 // ---------------------------------------------------------------------------
 
-void invertImageLightness(QImage& image)
+void invertImageLightness(QImage& image, const QVector<QRect>& imageRegions)
 {
     if (image.isNull()) return;
 
@@ -100,19 +100,49 @@ void invertImageLightness(QImage& image)
     const int w = image.width();
     const int h = image.height();
 
+    // Build a per-scanline skip mask so that pixels inside raster-image
+    // bounding boxes are left untouched.  For each row we store a sorted
+    // list of (x_start, x_end) spans.
+    // For pages without images this is empty and costs almost nothing.
+    QVector<QVector<std::pair<int,int>>> skipSpans(h);
+    for (const QRect& r : imageRegions) {
+        int y0 = std::clamp(r.top(),    0, h - 1);
+        int y1 = std::clamp(r.bottom(), 0, h - 1);
+        int x0 = std::clamp(r.left(),   0, w - 1);
+        int x1 = std::clamp(r.right(),  0, w - 1);
+        for (int y = y0; y <= y1; ++y) {
+            skipSpans[y].append({x0, x1});
+        }
+    }
+
+    // Pure HSL lightness inversion for non-image pixels.
+    // Image regions are skipped entirely (structural masking via MuPDF).
     for (int y = 0; y < h; ++y) {
         auto* scanline = reinterpret_cast<QRgb*>(image.scanLine(y));
+        const auto& spans = skipSpans[y];
+
         for (int x = 0; x < w; ++x) {
+            // Skip pixels inside image regions
+            bool inImage = false;
+            for (const auto& span : spans) {
+                if (x >= span.first && x <= span.second) {
+                    inImage = true;
+                    x = span.second;
+                    break;
+                }
+            }
+            if (inImage) continue;
+
             QRgb px = scanline[x];
             int a = qAlpha(px);
-            if (a == 0) continue;   // fully transparent – skip
+            if (a == 0) continue;
 
             int r = qRed(px);
             int g = qGreen(px);
             int b = qBlue(px);
 
             HSL hsl = rgbToHsl(r, g, b);
-            hsl.l = 255 - hsl.l;           // invert lightness
+            hsl.l = 255 - hsl.l;
             hslToRgb(hsl, r, g, b);
 
             scanline[x] = qRgba(r, g, b, a);

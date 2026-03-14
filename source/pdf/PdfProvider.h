@@ -19,6 +19,7 @@
 
 #include <QString>
 #include <QSizeF>
+#include <QRect>
 #include <QRectF>
 #include <QPointF>
 #include <QImage>
@@ -201,6 +202,23 @@ public:
         return img.isNull() ? QPixmap() : QPixmap::fromImage(img);
     }
     
+    // ===== Image Region Detection (for dark-mode inversion masking) =====
+
+    /**
+     * @brief Get bounding rectangles of raster images on a page.
+     * @param pageIndex 0-based page index.
+     * @param dpi Rendering DPI (rects are returned in pixel coordinates at this DPI).
+     * @return List of image bounding rectangles in pixel coordinates.
+     *
+     * Used by the dark-mode lightness inversion to skip image regions so
+     * that photos / screenshots are not colour-mangled.
+     * Default implementation returns an empty list (no masking).
+     */
+    virtual QVector<QRect> imageRegions(int pageIndex, qreal dpi) const {
+        Q_UNUSED(pageIndex); Q_UNUSED(dpi);
+        return {};
+    }
+
     // ===== Text Selection =====
     
     /**

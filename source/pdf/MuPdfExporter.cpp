@@ -162,8 +162,13 @@ PdfExportResult MuPdfExporter::exportPdf(const PdfExportOptions& options)
                 pageSuccess = renderBlankPage(pageIndex);
             }
         } else if (m_sourcePdf && currentPage->pdfPageNumber >= 0) {
-            // Unmodified page with PDF - graft directly
-            pageSuccess = graftPage(pageIndex);
+            // Unmodified page with PDF
+            if (m_options.darkModeBackground) {
+                // Dark mode export requires rasterize+invert, can't byte-copy
+                pageSuccess = renderModifiedPage(pageIndex);
+            } else {
+                pageSuccess = graftPage(pageIndex);
+            }
         } else {
             // Unmodified blank page - still need to render
             pageSuccess = renderBlankPage(pageIndex);
@@ -593,7 +598,8 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
         if (bgIsRasterDarkMode && m_sourceDoc) {
             QImage bgImage = m_document->renderPdfPageToImage(pdfPageNum, static_cast<qreal>(m_options.dpi));
             if (!bgImage.isNull()) {
-                DarkModeUtils::invertImageLightness(bgImage);
+                QVector<QRect> imgRegions = m_document->pdfImageRegions(pdfPageNum, static_cast<qreal>(m_options.dpi));
+                DarkModeUtils::invertImageLightness(bgImage, imgRegions);
 
                 QByteArray compressed = compressImage(bgImage, false,
                     QSizeF(widthPt, heightPt), m_options.dpi);
@@ -826,14 +832,15 @@ bool MuPdfExporter::renderModifiedPage(int pageIndex)
  */
 static fz_buffer* buildBackgroundContentStream(fz_context* ctx, const Page* page,
                                                 float widthPt, float heightPt,
-                                                bool darkMode = false)
+                                                bool invertColors = false)
 {
     if (!ctx || !page) return nullptr;
     
-    // Resolve colours, applying lightness inversion for dark mode export
+    // Resolve colours, applying lightness inversion when the caller needs
+    // the background flipped (e.g. darkenStrokes exports a dark bg as light)
     QColor bgColor = page->backgroundColor;
     QColor gColor  = page->gridColor;
-    if (darkMode) {
+    if (invertColors) {
         bgColor = DarkModeUtils::invertColorLightness(bgColor);
         gColor  = DarkModeUtils::invertColorLightness(gColor);
     }
@@ -937,9 +944,13 @@ bool MuPdfExporter::renderBlankPage(int pageIndex)
     
     // Build background content stream (color, grid, lines)
     // Skip background in annotations-only mode
+    //
+    // Dark mode logic for non-PDF pages:
+    //   darkModeBackground alone → DON'T invert (user already set a dark bg)
+    //   darkenStrokes → DO invert (user wants light export with darkened strokes)
     fz_buffer* backgroundContent = nullptr;
     if (!m_options.annotationsOnly) {
-        backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt, m_options.darkModeBackground);
+        backgroundContent = buildBackgroundContentStream(m_ctx, page, widthPt, heightPt, m_options.darkenStrokes);
     }
     
     // Check if page has images to add
