@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="1.3.0"
+PKGVER="1.3.1"
 PKGREL="1"
 PKGARCH=$(uname -m)
 MAINTAINER="SpeedyNote Team <info@speedynote.org>"
