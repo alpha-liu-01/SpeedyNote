@@ -32,18 +32,21 @@ public:
 
     /**
      * @brief Restore per-tab state when switching to a tab.
+     * @param tabId Unique tab identifier (from TabManager::tabIdAt()).
      */
-    virtual void restoreTabState(int tabIndex) = 0;
+    virtual void restoreTabState(int tabId) = 0;
 
     /**
      * @brief Save per-tab state before switching away from a tab.
+     * @param tabId Unique tab identifier (from TabManager::tabIdAt()).
      */
-    virtual void saveTabState(int tabIndex) = 0;
+    virtual void saveTabState(int tabId) = 0;
 
     /**
      * @brief Clear per-tab state when a tab is closed.
+     * @param tabId Unique tab identifier (from TabManager::tabIdAt()).
      */
-    virtual void clearTabState(int tabIndex) { Q_UNUSED(tabIndex); }
+    virtual void clearTabState(int tabId) { Q_UNUSED(tabId); }
 
     /**
      * @brief Sync shared state from QSettings.

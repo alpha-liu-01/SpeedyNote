@@ -304,32 +304,32 @@ void Toolbar::setStraightLineMode(bool enabled)
     m_straightLineButton->blockSignals(false);
 }
 
-void Toolbar::onTabChanged(int newTabIndex, int oldTabIndex)
+void Toolbar::onTabChanged(int newTabId, int oldTabId)
 {
     // Save state for old tab across all subtoolbars
-    if (oldTabIndex >= 0) {
-        m_penSubToolbar->saveTabState(oldTabIndex);
-        m_markerSubToolbar->saveTabState(oldTabIndex);
-        m_highlighterSubToolbar->saveTabState(oldTabIndex);
-        m_eraserSubToolbar->saveTabState(oldTabIndex);
-        m_objectSelectSubToolbar->saveTabState(oldTabIndex);
+    if (oldTabId >= 0) {
+        m_penSubToolbar->saveTabState(oldTabId);
+        m_markerSubToolbar->saveTabState(oldTabId);
+        m_highlighterSubToolbar->saveTabState(oldTabId);
+        m_eraserSubToolbar->saveTabState(oldTabId);
+        m_objectSelectSubToolbar->saveTabState(oldTabId);
     }
 
     // Restore state for new tab across all subtoolbars
-    if (newTabIndex >= 0) {
-        m_penSubToolbar->restoreTabState(newTabIndex);
-        m_markerSubToolbar->restoreTabState(newTabIndex);
-        m_highlighterSubToolbar->restoreTabState(newTabIndex);
-        m_eraserSubToolbar->restoreTabState(newTabIndex);
-        m_objectSelectSubToolbar->restoreTabState(newTabIndex);
+    if (newTabId >= 0) {
+        m_penSubToolbar->restoreTabState(newTabId);
+        m_markerSubToolbar->restoreTabState(newTabId);
+        m_highlighterSubToolbar->restoreTabState(newTabId);
+        m_eraserSubToolbar->restoreTabState(newTabId);
+        m_objectSelectSubToolbar->restoreTabState(newTabId);
     }
 }
 
-void Toolbar::clearTabState(int tabIndex)
+void Toolbar::clearTabState(int tabId)
 {
-    m_penSubToolbar->clearTabState(tabIndex);
-    m_markerSubToolbar->clearTabState(tabIndex);
-    m_highlighterSubToolbar->clearTabState(tabIndex);
-    m_eraserSubToolbar->clearTabState(tabIndex);
-    m_objectSelectSubToolbar->clearTabState(tabIndex);
+    m_penSubToolbar->clearTabState(tabId);
+    m_markerSubToolbar->clearTabState(tabId);
+    m_highlighterSubToolbar->clearTabState(tabId);
+    m_eraserSubToolbar->clearTabState(tabId);
+    m_objectSelectSubToolbar->clearTabState(tabId);
 }

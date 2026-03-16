@@ -8,6 +8,8 @@
 #include "../core/DocumentViewport.h"
 #include "../core/Document.h"
 
+int TabManager::s_nextTabId = 0;
+
 // ============================================================================
 // Constructor / Destructor
 // ============================================================================
@@ -69,6 +71,7 @@ int TabManager::createTab(Document* doc, const QString& title)
     m_viewports.append(viewport);
     m_baseTitles.append(title);
     m_modifiedFlags.append(false);
+    m_tabIds.append(s_nextTabId++);
     
     // Make the new tab active (still blocked, so no signal yet)
     m_tabBar->setCurrentIndex(index);
@@ -109,6 +112,7 @@ void TabManager::closeTab(int index)
     m_viewports.removeAt(index);
     m_baseTitles.removeAt(index);
     m_modifiedFlags.removeAt(index);
+    m_tabIds.removeAt(index);
     
     // Delete the viewport (we own it)
     delete viewport;
@@ -131,6 +135,69 @@ void TabManager::closeCurrentTab()
     if (m_tabBar) {
         closeTab(m_tabBar->currentIndex());
     }
+}
+
+TabManager::DetachedTab TabManager::detachTab(int index)
+{
+    DetachedTab result;
+    if (!m_tabBar || !m_viewportStack || index < 0 || index >= m_viewports.size()) {
+        return result;
+    }
+
+    result.viewport = m_viewports.at(index);
+    result.title = m_baseTitles.at(index);
+    result.modified = m_modifiedFlags.at(index);
+    result.tabId = m_tabIds.at(index);
+
+    m_tabBar->blockSignals(true);
+    m_tabBar->removeTab(index);
+    m_tabBar->blockSignals(false);
+
+    m_viewportStack->removeWidget(result.viewport);
+
+    m_viewports.removeAt(index);
+    m_baseTitles.removeAt(index);
+    m_modifiedFlags.removeAt(index);
+    m_tabIds.removeAt(index);
+
+    // Sync stacked widget with tab bar
+    if (m_viewportStack && m_tabBar) {
+        int newIndex = m_tabBar->currentIndex();
+        if (newIndex >= 0 && newIndex < m_viewportStack->count()) {
+            m_viewportStack->setCurrentIndex(newIndex);
+        }
+    }
+
+    emit currentViewportChanged(currentViewport());
+
+    return result;
+}
+
+int TabManager::attachTab(DocumentViewport* viewport, const QString& title,
+                          bool modified, int tabId)
+{
+    if (!m_tabBar || !m_viewportStack || !viewport) {
+        return -1;
+    }
+
+    m_tabBar->blockSignals(true);
+
+    QString displayTitle = modified ? (QStringLiteral("* ") + title) : title;
+    int index = m_tabBar->addTab(displayTitle);
+    m_viewportStack->addWidget(viewport);
+
+    m_viewports.append(viewport);
+    m_baseTitles.append(title);
+    m_modifiedFlags.append(modified);
+    m_tabIds.append(tabId >= 0 ? tabId : s_nextTabId++);
+
+    m_tabBar->setCurrentIndex(index);
+    m_tabBar->blockSignals(false);
+
+    m_viewportStack->setCurrentIndex(index);
+    emit currentViewportChanged(viewport);
+
+    return index;
 }
 
 void TabManager::switchToNextTab()
@@ -192,6 +259,19 @@ int TabManager::currentIndex() const
 int TabManager::tabCount() const
 {
     return static_cast<int>(m_viewports.size());
+}
+
+int TabManager::tabIdAt(int index) const
+{
+    if (index < 0 || index >= m_tabIds.size()) {
+        return -1;
+    }
+    return m_tabIds.at(index);
+}
+
+int TabManager::currentTabId() const
+{
+    return m_tabBar ? tabIdAt(m_tabBar->currentIndex()) : -1;
 }
 
 // ============================================================================

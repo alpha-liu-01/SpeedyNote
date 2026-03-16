@@ -2,6 +2,8 @@
 #include "StyleLoader.h"
 #include <QGuiApplication>
 #include <QPalette>
+#include <QMenu>
+#include <QContextMenuEvent>
 
 // macOS native style (QMacStyle) ignores QSS for QTabBar::close-button,
 // rendering it with Cocoa drawing instead.  Applying Fusion to the tab bar
@@ -57,6 +59,35 @@ void TabBar::tabInserted(int index)
 #ifdef Q_OS_ANDROID
     installCloseButton(index);
 #endif
+}
+
+void TabBar::setSplitEnabled(bool enabled) { m_splitEnabled = enabled; }
+void TabBar::setMergeEnabled(bool enabled) { m_mergeEnabled = enabled; }
+
+void TabBar::contextMenuEvent(QContextMenuEvent* event)
+{
+    int tabIndex = tabAt(event->pos());
+    if (tabIndex < 0)
+        return;
+
+    QMenu menu(this);
+
+    if (m_splitEnabled) {
+        QAction* splitAction = menu.addAction(tr("Split"));
+        connect(splitAction, &QAction::triggered, this, [this, tabIndex]() {
+            emit splitRequested(tabIndex);
+        });
+    }
+
+    if (m_mergeEnabled) {
+        QAction* mergeAction = menu.addAction(tr("Merge All to Left"));
+        connect(mergeAction, &QAction::triggered, this, [this]() {
+            emit mergeAllRequested();
+        });
+    }
+
+    if (!menu.isEmpty())
+        menu.exec(event->globalPos());
 }
 
 void TabBar::updateTheme(bool darkMode, const QColor &accentColor)

@@ -37,9 +37,9 @@ public:
     void setRedoEnabled(bool enabled);
     void setStraightLineMode(bool enabled);
 
-    // Per-tab state management (replaces SubToolbarContainer duties)
-    void onTabChanged(int newTabIndex, int oldTabIndex);
-    void clearTabState(int tabIndex);
+    // Per-tab state management keyed by unique tab IDs (from TabManager)
+    void onTabChanged(int newTabId, int oldTabId);
+    void clearTabState(int tabId);
 
     // Subtoolbar accessors for MainWindow signal wiring
     PenSubToolbar* penSubToolbar() const { return m_penSubToolbar; }

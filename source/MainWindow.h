@@ -31,9 +31,7 @@
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QSharedMemory>
 #endif
-// Phase C.1.5: QTabWidget removed - using QTabBar + QStackedWidget
-// Phase C.2: Using custom TabBar class
-#include "ui/TabBar.h"
+// Phase SV: Tab bars and viewport stacks managed by SplitViewManager
 #include <QStackedWidget>
 
 // Phase 3.1: New architecture includes
@@ -87,6 +85,7 @@ namespace Poppler {
 
 // Forward declarations
 class LauncherWindow;
+class SplitViewManager;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -353,6 +352,15 @@ private slots:
  
 private:
 
+    /**
+     * @brief Convenience accessor for the active pane's TabManager.
+     *
+     * Most MainWindow code that used m_tabManager now uses this instead.
+     * For operations that span both panes (iteration, search), use
+     * m_splitViewManager->forEachTabManager() or leftTabManager()/rightTabManager().
+     */
+    inline TabManager* tabManager() const;
+
     // Note: returnToLauncher() removed - obsolete, replaced by toggleLauncher()
     
     /**
@@ -478,11 +486,8 @@ private:
     // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances
     
     // Phase C.1.5: New tab system (QTabBar + QStackedWidget via TabManager)
-    // Phase C.2: Using custom TabBar class for theming
-    TabManager *m_tabManager = nullptr;     // Manages tabs and DocumentViewports
+    SplitViewManager *m_splitViewManager = nullptr;  // Manages split-view panes, tab bars, and viewports
     DocumentManager *m_documentManager = nullptr;  // Manages Document lifecycle
-    TabBar *m_tabBar = nullptr;            // Custom tab bar with built-in theming
-    QStackedWidget *m_viewportStack = nullptr;  // Viewport container
     
     // Toolbar extraction: NavigationBar (Phase A)
     NavigationBar *m_navigationBar = nullptr;
@@ -491,8 +496,9 @@ private:
     Toolbar *m_toolbar = nullptr;
     
     QWidget *m_canvasContainer = nullptr;
-    int m_previousTabIndex = -1;  // Track previous tab for per-tab state management
-    QHash<int, int> m_sidebarTabStates;  // Per-document-tab sidebar tab index
+    int m_previousTabId = -1;  // Track previous tab ID for per-tab state management
+    int m_previousPaneId = 0;  // Track previous active pane (0=Left, 1=Right)
+    QHash<int, int> m_sidebarTabStates;  // Per-tab sidebar tab index, keyed by unique tab ID
     
     // Action Bar system
     ActionBarContainer *m_actionBarContainer = nullptr;

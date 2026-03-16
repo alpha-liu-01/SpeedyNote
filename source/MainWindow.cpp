@@ -50,6 +50,9 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include "core/ToolType.h" // Include the header file where ToolType is defined
+#include "ui/SplitViewManager.h"
+#include "ui/TabManager.h"
+#include "ui/TabBar.h"
 #include <QFileDialog>
 #include <QDateTime>
 #include <QDir>
@@ -229,20 +232,14 @@ MainWindow::MainWindow(QWidget *parent)
         QSize logicalSize = screen->availableGeometry().size() * 0.89;
         resize(logicalSize);
     }
-    // Phase C.1.1: Create new tab system (QTabBar + QStackedWidget)
-    // Phase C.2: Using custom TabBar class (handles configuration and initial styling)
-    m_tabBar = new TabBar(this);
-    
-    m_viewportStack = new QStackedWidget(this);
-    m_viewportStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    
-    // Phase 3.1.1: Initialize DocumentManager and TabManager
+    // Phase SV: SplitViewManager owns tab bars, viewport stacks, and TabManagers
+    m_splitViewManager = new SplitViewManager(this);
+
+    // Phase 3.1.1: Initialize DocumentManager
     m_documentManager = new DocumentManager(this);
-    // Phase C.1.2: TabManager now uses QTabBar + QStackedWidget
-    m_tabManager = new TabManager(m_tabBar, m_viewportStack, this);
     
-    // Connect TabManager signals
-    connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
+    // Connect SplitViewManager signals (routes through active pane)
+    connect(m_splitViewManager, &SplitViewManager::activeViewportChanged, this, [this](DocumentViewport* vp) {
         // Phase 6.1: Hide PDF search bar when switching tabs to prevent stale state
         if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
             hidePdfSearchBar();
@@ -250,18 +247,18 @@ MainWindow::MainWindow(QWidget *parent)
         
         // Save/restore left sidebar tab selection per document tab
         // IMPORTANT: Must be FIRST, before updatePagePanelForViewport() which modifies sidebar tabs
-        int newIndex = m_tabManager->currentIndex();
-        if (m_leftSidebar && newIndex != m_previousTabIndex) {
+        int newTabId = tabManager() ? tabManager()->currentTabId() : -1;
+        if (m_leftSidebar && newTabId != m_previousTabId) {
             // Save current sidebar tab for previous document tab
-            if (m_previousTabIndex >= 0) {
-                m_sidebarTabStates[m_previousTabIndex] = m_leftSidebar->currentIndex();
+            if (m_previousTabId >= 0) {
+                m_sidebarTabStates[m_previousTabId] = m_leftSidebar->currentIndex();
             }
         }
         
         // Task 7.2: Save PagePanel scroll position for previous document tab
         // MUST be before updatePagePanelForViewport() which resets scroll via setDocument()
-        if (m_pagePanel && m_previousTabIndex >= 0 && newIndex != m_previousTabIndex) {
-            m_pagePanel->saveTabState(m_previousTabIndex);
+        if (m_pagePanel && m_previousTabId >= 0 && newTabId != m_previousTabId) {
+            m_pagePanel->saveTabState(m_previousTabId);
         }
         
         // Phase 3.3: Connect scroll signals from current viewport
@@ -317,41 +314,43 @@ MainWindow::MainWindow(QWidget *parent)
         
         // Restore left sidebar tab selection for new document tab
         // IMPORTANT: Must be AFTER updatePagePanelForViewport() which modifies sidebar tabs
-        if (m_leftSidebar && newIndex != m_previousTabIndex) {
-            if (m_sidebarTabStates.contains(newIndex)) {
-                m_leftSidebar->setCurrentIndex(m_sidebarTabStates[newIndex]);
+        if (m_leftSidebar && newTabId != m_previousTabId) {
+            if (m_sidebarTabStates.contains(newTabId)) {
+                m_leftSidebar->setCurrentIndex(m_sidebarTabStates[newTabId]);
             }
         }
         
         // Task 7.2: Restore PagePanel scroll position for new document tab
         // MUST be after updatePagePanelForViewport() which sets the new document
-        if (m_pagePanel && newIndex != m_previousTabIndex) {
-            m_pagePanel->restoreTabState(newIndex);
+        if (m_pagePanel && newTabId != m_previousTabId) {
+            m_pagePanel->restoreTabState(newTabId);
         }
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
-    // TabManager::closeTab() emits this signal before deleting the viewport
-    connect(m_tabManager, &TabManager::tabCloseRequested, this, [this](int index, DocumentViewport* vp) {
+    // SplitViewManager forwards this from both panes with the unique tab ID
+    connect(m_splitViewManager, &SplitViewManager::tabCloseRequested, this, [this](int tabId, DocumentViewport* vp, SplitViewManager::Pane) {
         // Phase 6.2: Cancel search if the document being closed has an active search
         if (vp && m_searchEngine && vp == currentViewport()) {
             if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
                 hidePdfSearchBar();  // This also cancels and clears the cache
             }
         }
-        
+
         // Clean up subtoolbar per-tab state to prevent memory leak
-        if (m_toolbar) {
-            m_toolbar->clearTabState(index);
+        if (m_toolbar && tabId >= 0) {
+            m_toolbar->clearTabState(tabId);
         }
         
         // Task 7.2: Clean up PagePanel scroll state for closed tab
-        if (m_pagePanel) {
-            m_pagePanel->clearTabState(index);
+        if (m_pagePanel && tabId >= 0) {
+            m_pagePanel->clearTabState(tabId);
         }
         
         // Clean up sidebar tab state for closed tab
-        m_sidebarTabStates.remove(index);
+        if (tabId >= 0) {
+            m_sidebarTabStates.remove(tabId);
+        }
         
         if (vp && m_documentManager) {
             Document* doc = vp->document();
@@ -419,13 +418,27 @@ MainWindow::MainWindow(QWidget *parent)
     // ========== EDGELESS SAVE PROMPT (A2: Prompt save before closing) ==========
     // Connect tabCloseAttempted to check for unsaved edgeless documents.
     // The tab is NOT automatically closed - we must call closeTab() explicitly.
-    connect(m_tabManager, &TabManager::tabCloseAttempted, this, [this](int index, DocumentViewport* vp) {
-        if (!vp || !m_documentManager || !m_tabManager) {
+    connect(m_splitViewManager, &SplitViewManager::tabCloseAttempted, this, [this](int tabId, DocumentViewport* vp, SplitViewManager::Pane pane) {
+        Q_UNUSED(tabId);
+        if (!vp || !m_documentManager) {
             return;
         }
+
+        // Determine which TabManager owns this tab
+        TabManager* tm = (pane == SplitViewManager::Left)
+            ? m_splitViewManager->leftTabManager()
+            : m_splitViewManager->rightTabManager();
+        if (!tm) return;
+
+        // Find the index of this viewport in its pane
+        int index = -1;
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            if (tm->viewportAt(i) == vp) { index = i; break; }
+        }
+        if (index < 0) return;
         
-        // Prevent closing the last tab (same behavior as old InkCanvas)
-        if (m_tabManager->tabCount() <= 1) {
+        // Prevent closing the last tab across all panes
+        if (m_splitViewManager->totalTabCount() <= 1) {
             QMessageBox::information(this, tr("Notice"), 
                 tr("At least one tab must remain open."));
             return;
@@ -433,18 +446,13 @@ MainWindow::MainWindow(QWidget *parent)
         
         Document* doc = vp->document();
         if (!doc) {
-            // No document, just close
-            m_tabManager->closeTab(index);
+            tm->closeTab(index);
             return;
         }
         
-        // FEATURE-DOC-001: Update lastAccessedPage/edgeless position
-        // This ensures the position is saved even if no other edits were made
         bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
         bool positionChanged = syncDocumentPosition(doc, vp);
         
-        // FEATURE-DOC-001: Auto-save if only position changed (no content changes)
-        // This is a silent save - no prompt needed for just navigation
         if (positionChanged && !isUsingTemp && !doc->modified) {
             QString existingPath = m_documentManager->documentPath(doc);
             if (!existingPath.isEmpty()) {
@@ -452,26 +460,20 @@ MainWindow::MainWindow(QWidget *parent)
                 qDebug() << "tabCloseAttempted: Auto-saving to persist position";
 #endif
                 m_documentManager->saveDocument(doc);
-                // Don't show error dialog - this is a best-effort save for position only
             }
         }
         
-        // Check if this document has unsaved changes
         bool needsSavePrompt = false;
         
         if (doc->isEdgeless()) {
-            // Edgeless: check if modified OR (in temp bundle with tiles)
-            // BUG FIX: Also check doc->modified for position history changes
             bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
             needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
         } else {
-            // Paged: check if modified OR (in temp bundle with pages)
             bool hasContent = doc->pageCount() > 0;
             needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
         }
         
         if (needsSavePrompt) {
-            // Prompt user to save
             QString docType = doc->isEdgeless() ? tr("canvas") : tr("document");
             QMessageBox::StandardButton reply = QMessageBox::question(
                 this,
@@ -482,43 +484,40 @@ MainWindow::MainWindow(QWidget *parent)
             );
             
             if (reply == QMessageBox::Cancel) {
-                // User cancelled - don't close
                 return;
             }
             
             if (reply == QMessageBox::Save) {
-                // Note: lastAccessedPage was already updated above (before needsSavePrompt check)
-                
-                // Check if document already has a permanent save path
                 QString existingPath = m_documentManager->documentPath(doc);
                 bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
                 
                 if (canSaveInPlace) {
-                    // Save in-place to existing location
                     if (!m_documentManager->saveDocument(doc)) {
                         QMessageBox::critical(this, tr("Save Error"),
                             tr("Failed to save document to:\n%1").arg(existingPath));
-                        return;  // Don't close if save failed
+                        return;
                     }
                 } else {
-                    // New document - use Android-aware save dialog
                     if (!saveNewDocumentWithDialog(doc)) {
-                        return;  // User cancelled or save failed - don't close
+                        return;
                     }
                 }
                 
-                // Update tab title and NavigationBar
-                m_tabManager->setTabTitle(index, doc->displayName());
-                m_tabManager->markTabModified(index, false);
+                tm->setTabTitle(index, doc->displayName());
+                tm->markTabModified(index, false);
                 if (m_navigationBar) {
                     m_navigationBar->setFilename(doc->displayName());
                 }
             }
-            // If Discard, fall through to close
         }
         
-        // Close the tab
-        m_tabManager->closeTab(index);
+        tm->closeTab(index);
+
+        // If the right pane is now empty, auto-merge
+        if (m_splitViewManager->isSplit() && m_splitViewManager->rightTabManager()
+            && m_splitViewManager->rightTabManager()->tabCount() == 0) {
+            m_splitViewManager->mergePanes();
+        }
     });
     // ===========================================================================
     
@@ -893,10 +892,9 @@ void MainWindow::setupUi() {
     QWidget *canvasContainer = m_canvasContainer;  // Local alias for existing code
     QVBoxLayout *canvasLayout = new QVBoxLayout(canvasContainer);
     canvasLayout->setContentsMargins(0, 0, 0, 0);
-    
-    // Phase C.1.2: Use m_viewportStack instead of m_tabWidget
-    // m_viewportStack was created in constructor, just add to layout here
-    canvasLayout->addWidget(m_viewportStack);
+
+    // Phase SV: Use SplitViewManager's splitter instead of single viewport stack
+    canvasLayout->addWidget(m_splitViewManager->viewportSplitter());
     // ------------------ End of viewport stack layout ------------------
 
     // ========================================
@@ -984,8 +982,9 @@ void MainWindow::setupUi() {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "NavigationBar: Filename clicked - toggle tabs";
 #endif
-        if (m_tabBar) {
-            m_tabBar->setVisible(!m_tabBar->isVisible());
+        if (m_splitViewManager && m_splitViewManager->tabBarContainer()) {
+            QWidget* tbc = m_splitViewManager->tabBarContainer();
+            tbc->setVisible(!tbc->isVisible());
         }
     });
     connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this]() {
@@ -1109,10 +1108,7 @@ void MainWindow::setupUi() {
     // =========================================================================
     // Phase C: TabBar (Toolbar Extraction)
     // =========================================================================
-    // m_tabBar was created in constructor, just add to layout here
-    mainLayout->addWidget(m_tabBar);
-    // Note: TabBar signals are connected via TabManager (created in constructor)
-    // ------------------ End of TabBar setup ------------------
+    mainLayout->addWidget(m_splitViewManager->tabBarContainer());
 
     // =========================================================================
     // Phase B: Toolbar (Toolbar Extraction)
@@ -1348,6 +1344,24 @@ void MainWindow::setupManagedShortcuts()
             m_navigationBar->setRightSidebarChecked(newState);
         }
     });
+    createShortcut("view.split_right", [this]() {
+        if (m_splitViewManager && tabManager() && tabManager()->tabCount() > 1) {
+            m_splitViewManager->splitTab(tabManager()->currentIndex(),
+                                         m_splitViewManager->activePane());
+        }
+    });
+    createShortcut("view.merge_panes", [this]() {
+        if (m_splitViewManager && m_splitViewManager->isSplit()) {
+            m_splitViewManager->mergePanes();
+        }
+    });
+    createShortcut("view.focus_left_pane", [this]() {
+        if (m_splitViewManager) m_splitViewManager->setActivePane(SplitViewManager::Left);
+    });
+    createShortcut("view.focus_right_pane", [this]() {
+        if (m_splitViewManager && m_splitViewManager->isSplit())
+            m_splitViewManager->setActivePane(SplitViewManager::Right);
+    });
     
     // ===== Application =====
     createShortcut("app.settings", [this]() { 
@@ -1505,22 +1519,22 @@ void MainWindow::setupManagedShortcuts()
     
     // ===== Tab Navigation =====
     createShortcut("navigation.next_tab", [this]() {
-        if (m_tabManager) {
-            m_tabManager->switchToNextTab();
+        if (tabManager()) {
+            tabManager()->switchToNextTab();
         }
     });
     createShortcut("navigation.prev_tab", [this]() {
-        if (m_tabManager) {
-            m_tabManager->switchToPrevTab();
+        if (tabManager()) {
+            tabManager()->switchToPrevTab();
         }
     });
     createShortcut("file.close_tab", [this]() {
         // Use tabCloseAttempted signal flow to properly handle unsaved changes
-        if (m_tabManager && m_tabManager->tabCount() > 0) {
-            int currentIndex = m_tabManager->currentIndex();
-            DocumentViewport* vp = m_tabManager->currentViewport();
+        if (tabManager() && tabManager()->tabCount() > 0) {
+            int currentIndex = tabManager()->currentIndex();
+            DocumentViewport* vp = tabManager()->currentViewport();
             if (vp) {
-                emit m_tabManager->tabCloseAttempted(currentIndex, vp);
+                emit tabManager()->tabCloseAttempted(currentIndex, vp);
             }
         }
     });
@@ -1763,8 +1777,8 @@ MainWindow::~MainWindow() {
     // This prevents "signal during destruction" crash where TabManager emits
     // currentViewportChanged during child deletion, triggering updateDialDisplay
     // on a partially-destroyed MainWindow.
-    if (m_tabManager) {
-        disconnect(m_tabManager, nullptr, this, nullptr);
+    if (m_splitViewManager) {
+        disconnect(m_splitViewManager, nullptr, this, nullptr);
     }
     
     // Phase 3.3: Clean up viewport scroll connections
@@ -2213,29 +2227,24 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // BUG FIX: Connect documentModified to mark document and tab as modified
     // This was missing, causing the save prompt to never show when closing tabs
     // =========================================================================
-    if (viewport && m_tabManager) {
+    if (viewport && m_splitViewManager) {
         m_documentModifiedConn = connect(viewport, &DocumentViewport::documentModified,
                                           this, [this, viewport]() {
-            if (!viewport || !m_tabManager) return;
+            if (!viewport || !m_splitViewManager) return;
             
             Document* doc = viewport->document();
             if (doc) {
-                // Mark document as modified (sets doc->modified = true)
                 doc->markModified();
                 
-                // Find the tab index for this viewport
-                int tabIndex = -1;
-                for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-                    if (m_tabManager->viewportAt(i) == viewport) {
-                        tabIndex = i;
-                        break;
+                // Find which TabManager owns this viewport and mark tab modified
+                m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+                    for (int i = 0; i < tm->tabCount(); ++i) {
+                        if (tm->viewportAt(i) == viewport) {
+                            tm->markTabModified(i, true);
+                            return;
+                        }
                     }
-                }
-                
-                // Mark the tab as modified (shows * in title)
-                if (tabIndex >= 0) {
-                    m_tabManager->markTabModified(tabIndex, true);
-                }
+                });
             }
         });
     }
@@ -2471,9 +2480,9 @@ void MainWindow::centerViewportContent(int tabIndex) {
     // This is called ONCE when a tab is created. User can then pan freely.
     // The DocumentViewport debug overlay will show negative pan X values.
     
-    if (!m_tabManager) return;
+    if (!tabManager()) return;
     
-    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+    DocumentViewport* viewport = tabManager()->viewportAt(tabIndex);
     if (!viewport) return;
     
     // Get content and viewport dimensions in document units
@@ -2998,14 +3007,14 @@ void MainWindow::saveDocument()
     // - If document has existing path: save in-place (no dialog)
     // - If new document: show Save As dialog
     
-    if (!m_documentManager || !m_tabManager) {
+    if (!m_documentManager || !tabManager()) {
         #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "saveDocument: DocumentManager or TabManager not initialized";
         #endif
         return;
     }
 
-    DocumentViewport* viewport = m_tabManager->currentViewport();
+    DocumentViewport* viewport = tabManager()->currentViewport();
     if (!viewport) {
         QMessageBox::warning(this, tr("Save Document"), 
             tr("No document is open."));
@@ -3037,9 +3046,9 @@ void MainWindow::saveDocument()
     }
 
         // Update tab title (clear modified flag)
-        int currentIndex = m_tabManager->currentIndex();
+        int currentIndex = tabManager()->currentIndex();
         if (currentIndex >= 0) {
-            m_tabManager->markTabModified(currentIndex, false);
+            tabManager()->markTabModified(currentIndex, false);
         }
         
         // Phase P.4.6: Save thumbnail to NotebookLibrary
@@ -3083,10 +3092,10 @@ void MainWindow::saveDocument()
     }
     
     // Update tab title and NavigationBar
-    int currentIndex = m_tabManager->currentIndex();
+    int currentIndex = tabManager()->currentIndex();
     if (currentIndex >= 0) {
-        m_tabManager->setTabTitle(currentIndex, doc->name);
-        m_tabManager->markTabModified(currentIndex, false);
+        tabManager()->setTabTitle(currentIndex, doc->name);
+        tabManager()->markTabModified(currentIndex, false);
     }
     if (m_navigationBar) {
         m_navigationBar->setFilename(doc->name);
@@ -3098,7 +3107,7 @@ void MainWindow::loadDocument()
     // Phase doc-1.2: Load document from JSON file via file dialog
     // Uses DocumentManager for proper document ownership
     
-    if (!m_documentManager || !m_tabManager) {
+    if (!m_documentManager || !tabManager()) {
         qWarning() << "loadDocument: DocumentManager or TabManager not initialized";
                 return;
             }
@@ -3178,7 +3187,7 @@ void MainWindow::loadDocument()
         }
         
     // Create new tab with the loaded document
-    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
+    int tabIndex = tabManager()->createTab(doc, doc->displayName());
     
     if (tabIndex >= 0) {
         // Center the viewport content
@@ -3195,14 +3204,14 @@ void MainWindow::addPageToDocument()
     // Phase doc-1.0: Add new page at end of document
     // Required for multi-page save/load testing
     
-    if (!m_tabManager) {
+    if (!tabManager()) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: No tab manager";
 #endif
         return;
     }
     
-    DocumentViewport* viewport = m_tabManager->currentViewport();
+    DocumentViewport* viewport = tabManager()->currentViewport();
     if (!viewport) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "addPageToDocument: No current viewport";
@@ -3231,9 +3240,9 @@ void MainWindow::addPageToDocument()
         viewport->notifyDocumentStructureChanged();
         
         // Mark tab as modified
-        int currentIndex = m_tabManager->currentIndex();
+        int currentIndex = tabManager()->currentIndex();
         if (currentIndex >= 0) {
-            m_tabManager->markTabModified(currentIndex, true);
+            tabManager()->markTabModified(currentIndex, true);
         }
         
         // Update PagePanel and action bar
@@ -3246,14 +3255,14 @@ void MainWindow::insertPageInDocument()
     // Phase 3: Insert new page after current page
     // Works for both PDF and non-PDF documents (inserted page has no PDF background)
     
-    if (!m_tabManager) {
+    if (!tabManager()) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertPageInDocument: No tab manager";
 #endif
         return;
         }
     
-    DocumentViewport* viewport = m_tabManager->currentViewport();
+    DocumentViewport* viewport = tabManager()->currentViewport();
     if (!viewport) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "insertPageInDocument: No current viewport";
@@ -3289,9 +3298,9 @@ void MainWindow::insertPageInDocument()
         viewport->notifyDocumentStructureChanged();
         
         // Mark tab as modified
-        int tabIndex = m_tabManager->currentIndex();
+        int tabIndex = tabManager()->currentIndex();
         if (tabIndex >= 0) {
-            m_tabManager->markTabModified(tabIndex, true);
+            tabManager()->markTabModified(tabIndex, true);
         }
         
         // Update PagePanel and action bar
@@ -3305,14 +3314,14 @@ void MainWindow::deletePageInDocument()
     // - Non-PDF pages: delete entirely
     // - PDF pages: blocked (use external tool to modify PDF)
     
-    if (!m_tabManager) {
+    if (!tabManager()) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deletePageInDocument: No tab manager";
 #endif
         return;
     }
 
-    DocumentViewport* viewport = m_tabManager->currentViewport();
+    DocumentViewport* viewport = tabManager()->currentViewport();
     if (!viewport) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deletePageInDocument: No current viewport";
@@ -3375,9 +3384,9 @@ void MainWindow::deletePageInDocument()
     viewport->scrollToPage(newPage);
         
     // Mark tab as modified
-    int tabIndex = m_tabManager->currentIndex();
+    int tabIndex = tabManager()->currentIndex();
     if (tabIndex >= 0) {
-        m_tabManager->markTabModified(tabIndex, true);
+        tabManager()->markTabModified(tabIndex, true);
     }
     
     // Update PagePanel and action bar
@@ -3389,7 +3398,7 @@ void MainWindow::openPdfDocument(const QString &filePath)
     // Phase doc-1.4: Open PDF file and create PDF-backed document
     // Uses DocumentManager for proper document ownership
 
-    if (!m_documentManager || !m_tabManager) {
+    if (!m_documentManager || !tabManager()) {
         qWarning() << "openPdfDocument: DocumentManager or TabManager not initialized";
         return;
     }
@@ -3454,7 +3463,7 @@ void MainWindow::openPdfDocument(const QString &filePath)
     }
     
     // Create new tab with the PDF document
-    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
+    int tabIndex = tabManager()->createTab(doc, doc->displayName());
     
     if (tabIndex >= 0) {
         // Note: zoomToWidth() is called automatically by DocumentViewport::setDocument()
@@ -3482,7 +3491,7 @@ void MainWindow::forceUIRefresh() {
     
 void MainWindow::addNewTab() {
     // Phase 3.1.1: Simplified addNewTab using DocumentManager and TabManager
-    if (!m_tabManager || !m_documentManager) {
+    if (!tabManager() || !m_documentManager) {
         qWarning() << "addNewTab: TabManager or DocumentManager not initialized";
         return;
     }
@@ -3539,12 +3548,7 @@ void MainWindow::addNewTab() {
     
     // Create a new tab with DocumentViewport
     QString tabTitle = doc->displayName();
-    int tabIndex = m_tabManager->createTab(doc, tabTitle);
-    
-    // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
-    if (m_tabBar) {
-        m_tabBar->setCurrentIndex(tabIndex);
-    }
+    int tabIndex = tabManager()->createTab(doc, tabTitle);
     
     // Note: zoomToWidth() is called automatically by DocumentViewport::setDocument()
     // for new paged documents, which also handles horizontal centering.
@@ -3553,7 +3557,7 @@ void MainWindow::addNewTab() {
 void MainWindow::addNewEdgelessTab()
 {
     // Phase E7: Create a new edgeless (infinite canvas) document
-    if (!m_tabManager || !m_documentManager) {
+    if (!tabManager() || !m_documentManager) {
         qWarning() << "addNewEdgelessTab: TabManager or DocumentManager not initialized";
         return;
     }
@@ -3587,21 +3591,16 @@ void MainWindow::addNewEdgelessTab()
     
     // Create a new tab with DocumentViewport
     QString tabTitle = doc->displayName();
-    int tabIndex = m_tabManager->createTab(doc, tabTitle);
+    int tabIndex = tabManager()->createTab(doc, tabTitle);
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Created new edgeless tab at index" << tabIndex << "with document:" << tabTitle;
 #endif
     
-    // Switch to the new tab (TabManager::createTab already does this, but ensure it's set)
-    if (m_tabBar) {
-        m_tabBar->setCurrentIndex(tabIndex);
-    }
-    
     // For edgeless, center on origin (0,0)
     QTimer::singleShot(0, this, [this, tabIndex]() {
-        if (m_tabManager) {
-            DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+        if (tabManager()) {
+            DocumentViewport* viewport = tabManager()->viewportAt(tabIndex);
             if (viewport) {
                 // Center on origin - start with a small negative pan so origin is visible
                 viewport->setPanOffset(QPointF(-100, -100));
@@ -3670,29 +3669,26 @@ void MainWindow::loadFolderDocument()
 void MainWindow::removeTabAt(int index) {
     // Phase 3.1.2: Use TabManager to remove tabs
     // Note: Document cleanup happens via tabCloseRequested signal handler (ML-1 fix)
-    if (m_tabManager) {
-        m_tabManager->closeTab(index);
+    if (tabManager()) {
+        tabManager()->closeTab(index);
     }
 }
 
 // Phase 3.1.4: New accessor for DocumentViewport
 DocumentViewport* MainWindow::currentViewport() const {
-    if (m_tabManager) {
-        return m_tabManager->currentViewport();
-    }
-    return nullptr;
+    return m_splitViewManager ? m_splitViewManager->activeViewport() : nullptr;
 }
 
 int MainWindow::tabCount() const {
-    if (m_tabBar) {
-        return m_tabBar->count();
-    }
-    return 0;
+    return m_splitViewManager ? m_splitViewManager->totalTabCount() : 0;
 }
 
 void MainWindow::switchToTabIndex(int index) {
-    if (m_tabBar && index >= 0 && index < m_tabBar->count()) {
-        m_tabBar->setCurrentIndex(index);
+    if (tabManager() && index >= 0 && index < tabManager()->tabCount()) {
+        TabBar* bar = (m_splitViewManager->activePane() == SplitViewManager::Left)
+            ? m_splitViewManager->leftTabBar()
+            : m_splitViewManager->rightTabBar();
+        if (bar) bar->setCurrentIndex(index);
     }
 }
 
@@ -3946,22 +3942,24 @@ QColor MainWindow::getDefaultPenColor() {
 }
 
 void MainWindow::setPdfDarkModeEnabled(bool enabled) {
-    if (m_tabManager) {
-        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-            if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
-                vp->setPdfDarkModeEnabled(enabled);
+    if (m_splitViewManager) {
+        m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+            for (int i = 0; i < tm->tabCount(); ++i) {
+                if (DocumentViewport* vp = tm->viewportAt(i))
+                    vp->setPdfDarkModeEnabled(enabled);
             }
-        }
+        });
     }
 }
 
 void MainWindow::setSkipImageMasking(bool skip) {
-    if (m_tabManager) {
-        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-            if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
-                vp->setSkipImageMasking(skip);
+    if (m_splitViewManager) {
+        m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+            for (int i = 0; i < tm->tabCount(); ++i) {
+                if (DocumentViewport* vp = tm->viewportAt(i))
+                    vp->setSkipImageMasking(skip);
             }
-        }
+        });
     }
 }
 
@@ -4086,23 +4084,25 @@ void MainWindow::updateTheme() {
         m_toolbar->updateTheme(darkMode);
     }
     
-    // Phase C.2: TabBar handles its own theming
-    if (m_tabBar) {
-        m_tabBar->updateTheme(darkMode, accentColor);
+    // Phase SV: SplitViewManager handles theming for all tab bars (current + future)
+    if (m_splitViewManager) {
+        m_splitViewManager->updateTheme(darkMode, accentColor);
     }
     
-    // Update all DocumentViewports
-    if (m_tabManager) {
+    // Update all DocumentViewports across both panes
+    if (m_splitViewManager) {
         QSettings s("SpeedyNote", "App");
         bool pdfDarkMode = s.value("display/pdfDarkMode", true).toBool();
         bool skipMasking = s.value("display/skipImageMasking", false).toBool();
-        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-            if (DocumentViewport* vp = m_tabManager->viewportAt(i)) {
-                vp->setDarkMode(darkMode);
-                vp->setPdfDarkModeEnabled(pdfDarkMode);
-                vp->setSkipImageMasking(skipMasking);
+        m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+            for (int i = 0; i < tm->tabCount(); ++i) {
+                if (DocumentViewport* vp = tm->viewportAt(i)) {
+                    vp->setDarkMode(darkMode);
+                    vp->setPdfDarkModeEnabled(pdfDarkMode);
+                    vp->setSkipImageMasking(skipMasking);
+                }
             }
-        }
+        });
     }
     
     // REMOVED MW5.1: controlBar styling removed - replaced by NavigationBar and Toolbar
@@ -4348,8 +4348,8 @@ void MainWindow::updateScrollbarPositions() {
     // Note: Sliders are children of canvasContainer, NOT the main window, so their
     // coordinates are relative to canvasContainer. The left sidebar is a sibling of
     // canvasContainer in the layout, so we should NOT add sidebar offset here.
-    QWidget *container = m_viewportStack ? m_viewportStack->parentWidget() : nullptr;
-    if (!container || !panXSlider || !panYSlider || !m_viewportStack) return;
+    QWidget *container = m_splitViewManager ? m_splitViewManager->viewportSplitter() : nullptr;
+    if (!container || !panXSlider || !panYSlider || !m_splitViewManager) return;
     
     // Don't position if not visible
     if (!scrollbarsVisible) return;
@@ -4503,18 +4503,24 @@ void MainWindow::connectSubToolbarSignals()
         }
     });
 
-    // Tab changes: per-tab state management via Toolbar
-    connect(m_tabManager, &TabManager::currentViewportChanged, this, [this](DocumentViewport* vp) {
-        int newIndex = m_tabManager->currentIndex();
-        if (newIndex != m_previousTabIndex) {
-            m_toolbar->onTabChanged(newIndex, m_previousTabIndex);
+    // Tab changes: per-tab state management via Toolbar (keyed by unique tab IDs).
+    // Also force refresh when the active pane changes (safety net in case tab IDs
+    // ever collide, though globally unique IDs from Fix 3 prevent that).
+    connect(m_splitViewManager, &SplitViewManager::activeViewportChanged, this, [this](DocumentViewport* vp) {
+        int newTabId = tabManager() ? tabManager()->currentTabId() : -1;
+        int newPaneId = m_splitViewManager ? static_cast<int>(m_splitViewManager->activePane()) : 0;
+        bool paneChanged = (newPaneId != m_previousPaneId);
+
+        if (newTabId != m_previousTabId || paneChanged) {
+            m_toolbar->onTabChanged(newTabId, m_previousTabId);
 
             if (vp) {
                 ToolType currentTool = vp->currentTool();
                 m_toolbar->setCurrentTool(currentTool);
                 applyAllSubToolbarValuesToViewport(vp);
             }
-            m_previousTabIndex = newIndex;
+            m_previousTabId = newTabId;
+            m_previousPaneId = newPaneId;
         }
     });
 
@@ -5146,9 +5152,9 @@ void MainWindow::setupPagePanelActionBar()
             notifyPageStructureChanged(doc, newPage);
             
             // Mark tab as modified (page deleted)
-            int tabIndex = m_tabManager->currentIndex();
+            int tabIndex = tabManager()->currentIndex();
             if (tabIndex >= 0) {
-                m_tabManager->markTabModified(tabIndex, true);
+                tabManager()->markTabModified(tabIndex, true);
             }
         } else {
 #ifdef SPEEDYNOTE_DEBUG
@@ -5316,9 +5322,9 @@ void MainWindow::setupPagePanelConnections()
                     }
                     
                     // Mark tab as modified (page order changed)
-                    int tabIndex = m_tabManager->currentIndex();
+                    int tabIndex = tabManager()->currentIndex();
                     if (tabIndex >= 0) {
-                        m_tabManager->markTabModified(tabIndex, true);
+                        tabManager()->markTabModified(tabIndex, true);
                     }
                     
 #ifdef SPEEDYNOTE_DEBUG
@@ -5335,6 +5341,11 @@ void MainWindow::setupPagePanelConnections()
 }
 
 // REMOVED MW1.4: handleEdgeProximity(InkCanvas*, QPoint&) - InkCanvas obsolete
+
+TabManager* MainWindow::tabManager() const
+{
+    return m_splitViewManager ? m_splitViewManager->activeTabManager() : nullptr;
+}
 
 // Phase P.1: Extracted from LauncherWindow
 MainWindow* MainWindow::findExistingMainWindow()
@@ -5413,24 +5424,20 @@ bool MainWindow::syncDocumentPosition(Document* doc, DocumentViewport* vp)
 
 void MainWindow::syncAllDocumentPositions()
 {
-    // Syncs positions for all documents AND marks them modified.
-    // Used before app exit/background where we want to persist positions.
-    
-    if (!m_tabManager || !m_documentManager) {
+    if (!m_splitViewManager || !m_documentManager)
         return;
-    }
     
-    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-        Document* doc = m_tabManager->documentAt(i);
-        if (!doc) continue;
-        
-        DocumentViewport* vp = m_tabManager->viewportAt(i);
-        if (!vp) continue;
-        
-        if (syncDocumentPosition(doc, vp)) {
-            doc->markModified();  // Mark modified so auto-save will pick it up
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            Document* doc = tm->documentAt(i);
+            if (!doc) continue;
+            DocumentViewport* vp = tm->viewportAt(i);
+            if (!vp) continue;
+            if (syncDocumentPosition(doc, vp)) {
+                doc->markModified();
+            }
         }
-    }
+    });
 }
 
 // ============================================================================
@@ -6023,7 +6030,6 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     // Update action bar position after sidebar visibility change
     updateActionBarPosition();
-    
     // Reposition floating tabs after layout settles
     QTimer::singleShot(0, this, [this]() {
         // REMOVED S1: positionLeftSidebarTabs() removed - floating tabs replaced by LeftSidebarContainer
@@ -6474,31 +6480,33 @@ void MainWindow::saveSessionTabs()
 {
     QSettings settings("SpeedyNote", "App");
 
-    if (!m_tabManager || !m_documentManager || m_tabManager->tabCount() == 0) {
+    if (!m_splitViewManager || !m_documentManager || m_splitViewManager->totalTabCount() == 0) {
         settings.remove("session/lastOpenTabs");
         settings.remove("session/activeTabIndex");
         return;
     }
 
     QStringList paths;
-    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-        Document* doc = m_tabManager->documentAt(i);
-        if (!doc) continue;
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            Document* doc = tm->documentAt(i);
+            if (!doc) continue;
 
-        QString docPath = m_documentManager->documentPath(doc);
-        if (!docPath.isEmpty() && !m_documentManager->isUsingTempBundle(doc)) {
-            paths.append(QFileInfo(docPath).absoluteFilePath());
-        } else if (!doc->pdfPath().isEmpty()) {
-            paths.append(QFileInfo(doc->pdfPath()).absoluteFilePath());
+            QString docPath = m_documentManager->documentPath(doc);
+            if (!docPath.isEmpty() && !m_documentManager->isUsingTempBundle(doc)) {
+                paths.append(QFileInfo(docPath).absoluteFilePath());
+            } else if (!doc->pdfPath().isEmpty()) {
+                paths.append(QFileInfo(doc->pdfPath()).absoluteFilePath());
+            }
         }
-    }
+    });
 
     if (paths.isEmpty()) {
         settings.remove("session/lastOpenTabs");
         settings.remove("session/activeTabIndex");
     } else {
         settings.setValue("session/lastOpenTabs", paths);
-        settings.setValue("session/activeTabIndex", m_tabManager->currentIndex());
+        settings.setValue("session/activeTabIndex", tabManager() ? tabManager()->currentIndex() : 0);
     }
 }
 
@@ -6509,75 +6517,71 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     syncAllDocumentPositions();
     
     // ========== CHECK FOR UNSAVED DOCUMENTS ==========
-    // Iterate through all tabs and prompt for unsaved documents
-    if (m_tabManager && m_documentManager) {
-        for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-            Document* doc = m_tabManager->documentAt(i);
-            if (!doc) continue;
-            
-            // Check if this document has unsaved changes
-            bool needsSavePrompt = false;
-            bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
-            
-            if (doc->isEdgeless()) {
-                // Edgeless: check if modified OR (in temp bundle with tiles)
-                // BUG FIX: Also check doc->modified for position history changes
-                bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
-                needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
-            } else {
-                // Paged: check if modified OR (in temp bundle with pages)
-                bool hasContent = doc->pageCount() > 0;
-                needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
-            }
-            
-            if (needsSavePrompt) {
-                // Switch to this tab so user knows which document we're asking about
-                if (m_tabBar) {
-                    m_tabBar->setCurrentIndex(i);
+    // Iterate through all tabs across both panes and prompt for unsaved documents
+    // Returns false if user cancelled (abort quit)
+    if (m_splitViewManager && m_documentManager) {
+        auto checkPane = [&](TabManager* tm, TabBar* bar) -> bool {
+            if (!tm) return true;
+            for (int i = 0; i < tm->tabCount(); ++i) {
+                Document* doc = tm->documentAt(i);
+                if (!doc) continue;
+                
+                bool needsSavePrompt = false;
+                bool isUsingTemp = m_documentManager->isUsingTempBundle(doc);
+                
+                if (doc->isEdgeless()) {
+                    bool hasContent = doc->tileCount() > 0 || doc->tileIndexCount() > 0;
+                    needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
+                } else {
+                    bool hasContent = doc->pageCount() > 0;
+                    needsSavePrompt = doc->modified || (isUsingTemp && hasContent);
                 }
                 
-                QString docType = doc->isEdgeless() ? tr("canvas") : tr("document");
-                QMessageBox::StandardButton reply = QMessageBox::question(
-                    this,
-                    tr("Save Changes?"),
-                    tr("The %1 \"%2\" has unsaved changes. Do you want to save before quitting?")
-                        .arg(docType)
-                        .arg(doc->displayName()),
-                    QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-                    QMessageBox::Save
-                );
-                
-                if (reply == QMessageBox::Cancel) {
-                    // User cancelled - abort quit
-                    event->ignore();
-                    return;
-                }
-                
-                if (reply == QMessageBox::Save) {
-                    // Note: lastAccessedPage was already updated in the loop at the start of closeEvent()
+                if (needsSavePrompt) {
+                    if (bar) bar->setCurrentIndex(i);
+
+                    QString docType = doc->isEdgeless() ? tr("canvas") : tr("document");
+                    QMessageBox::StandardButton reply = QMessageBox::question(
+                        this,
+                        tr("Save Changes?"),
+                        tr("The %1 \"%2\" has unsaved changes. Do you want to save before quitting?")
+                            .arg(docType)
+                            .arg(doc->displayName()),
+                        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+                        QMessageBox::Save
+                    );
                     
-                    // Check if document already has a permanent save path
-                    QString existingPath = m_documentManager->documentPath(doc);
-                    bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
+                    if (reply == QMessageBox::Cancel) {
+                        return false;
+                    }
                     
-                    if (canSaveInPlace) {
-                        // Save in-place to existing location
-                        if (!m_documentManager->saveDocument(doc)) {
-                            QMessageBox::critical(this, tr("Save Error"),
-                                tr("Failed to save document to:\n%1\n\nQuit anyway?").arg(existingPath));
-                            // Don't abort - let them quit without saving if save failed
-                        }
-                    } else {
-                        // New document - use Android-aware save dialog
-                        if (!saveNewDocumentWithDialog(doc)) {
-                            // User cancelled save dialog - abort quit
-                            event->ignore();
-                            return;
+                    if (reply == QMessageBox::Save) {
+                        QString existingPath = m_documentManager->documentPath(doc);
+                        bool canSaveInPlace = !existingPath.isEmpty() && !isUsingTemp;
+                        
+                        if (canSaveInPlace) {
+                            if (!m_documentManager->saveDocument(doc)) {
+                                QMessageBox::critical(this, tr("Save Error"),
+                                    tr("Failed to save document to:\n%1\n\nQuit anyway?").arg(existingPath));
+                            }
+                        } else {
+                            if (!saveNewDocumentWithDialog(doc)) {
+                                return false;
+                            }
                         }
                     }
                 }
-                // If Discard, continue to next document
             }
+            return true;
+        };
+
+        if (!checkPane(m_splitViewManager->leftTabManager(), m_splitViewManager->leftTabBar())) {
+            event->ignore();
+            return;
+        }
+        if (!checkPane(m_splitViewManager->rightTabManager(), m_splitViewManager->rightTabBar())) {
+            event->ignore();
+            return;
         }
     }
     // ===========================================================
@@ -6840,44 +6844,42 @@ void MainWindow::cleanupSharedResources()
 
 bool MainWindow::closeDocumentById(const QString& documentId, bool discardChanges)
 {
-    // Find the document by ID among open tabs
-    if (!m_tabManager) {
-        return true;  // No tabs, nothing to close
-    }
-    
-    for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-        Document* doc = m_tabManager->documentAt(i);
-        if (doc && doc->id == documentId) {
-            // Found the document
-            
-            if (!discardChanges) {
-                // Save if modified (for rename operations)
-                if (m_documentManager && m_documentManager->hasUnsavedChanges(doc)) {
-                    QString existingPath = m_documentManager->documentPath(doc);
-                    if (!existingPath.isEmpty()) {
-                        // Has existing path - save in place
-                        if (!m_documentManager->saveDocument(doc)) {
-                            QMessageBox::critical(this, tr("Save Error"),
-                                tr("Failed to save document before closing."));
-                            return false;
-                        }
-                    } else {
-                        // No path - use Android-aware save dialog
-                        if (!saveNewDocumentWithDialog(doc)) {
-                            return false;  // User cancelled or save failed
+    if (!m_splitViewManager) return true;
+
+    bool result = true;
+    bool found = false;
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+        if (found) return;
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            Document* doc = tm->documentAt(i);
+            if (doc && doc->id == documentId) {
+                found = true;
+                if (!discardChanges) {
+                    if (m_documentManager && m_documentManager->hasUnsavedChanges(doc)) {
+                        QString existingPath = m_documentManager->documentPath(doc);
+                        if (!existingPath.isEmpty()) {
+                            if (!m_documentManager->saveDocument(doc)) {
+                                QMessageBox::critical(this, tr("Save Error"),
+                                    tr("Failed to save document before closing."));
+                                result = false;
+                                return;
+                            }
+                        } else {
+                            if (!saveNewDocumentWithDialog(doc)) {
+                                result = false;
+                                return;
+                            }
                         }
                     }
                 }
+                // Close the tab via the owning TabManager
+                tm->closeTab(i);
+                return;
             }
-            // else: discardChanges=true - just close without saving (for delete)
-            
-            // Close the tab
-            removeTabAt(i);
-            return true;
         }
-    }
+    });
     
-    return true;  // Document not found = nothing to close = success
+    return result;
 }
 
 void MainWindow::openFileInNewTab(const QString &filePath)
@@ -6897,7 +6899,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         return;
     }
     
-    if (!m_documentManager || !m_tabManager) {
+    if (!m_documentManager || !tabManager()) {
         qWarning() << "openFileInNewTab: DocumentManager or TabManager not initialized";
         return;
     }
@@ -6909,26 +6911,29 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         return;
     }
     
-    // Step 0: Check for duplicate documents (by ID, not path)
-    // This handles the case where a document was renamed in the Launcher
-    // but is still open in a tab. Without this check, we'd open a second tab.
+    // Step 0: Check for duplicate documents (by ID, not path) across both panes
     QString suffix = fileInfo.suffix().toLower();
     if (suffix == "snb" || fileInfo.isDir()) {
         QString docId = Document::peekBundleId(filePath);
-        if (!docId.isEmpty()) {
-            for (int i = 0; i < m_tabManager->tabCount(); ++i) {
-                Document* existingDoc = m_tabManager->documentAt(i);
-                if (existingDoc && existingDoc->id == docId) {
-                    // Document is already open - switch to that tab
-                    if (m_tabBar) {
-                        m_tabBar->setCurrentIndex(i);
+        if (!docId.isEmpty() && m_splitViewManager) {
+            bool found = false;
+            m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane pane) {
+                if (found) return;
+                for (int i = 0; i < tm->tabCount(); ++i) {
+                    Document* existingDoc = tm->documentAt(i);
+                    if (existingDoc && existingDoc->id == docId) {
+                        TabBar* bar = (pane == SplitViewManager::Left)
+                            ? m_splitViewManager->leftTabBar()
+                            : m_splitViewManager->rightTabBar();
+                        if (bar) bar->setCurrentIndex(i);
+                        m_splitViewManager->setActivePane(pane);
+                        m_documentManager->setDocumentPath(existingDoc, filePath);
+                        found = true;
+                        return;
                     }
-                    // Update the document path in case it was renamed
-                    // This keeps DocumentManager's path tracking in sync
-                    m_documentManager->setDocumentPath(existingDoc, filePath);
-                    return;
                 }
-            }
+            });
+            if (found) return;
         }
     }
     
@@ -6951,7 +6956,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
     }
     
     // Step 3: Create new tab (TabManager creates DocumentViewport internally)
-    int tabIndex = m_tabManager->createTab(doc, doc->displayName());
+    int tabIndex = tabManager()->createTab(doc, doc->displayName());
     
     if (tabIndex < 0) {
         QMessageBox::critical(this, tr("Open Error"),
@@ -6959,10 +6964,7 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         return;
     }
     
-    // Step 4: Switch to the new tab
-    if (m_tabBar) {
-        m_tabBar->setCurrentIndex(tabIndex);
-    }
+    // Step 4: createTab already switches to the new tab
     
     // Step 5: Mode-specific initial positioning
     // Use QTimer::singleShot(0) to ensure viewport geometry is ready
@@ -6972,8 +6974,8 @@ void MainWindow::openFileInNewTab(const QString &filePath)
         // Documents with saved positions will have their position restored by DocumentViewport
         if (doc->edgelessLastPosition().isNull()) {
             QTimer::singleShot(0, this, [this, tabIndex]() {
-                if (m_tabManager) {
-                    DocumentViewport* viewport = m_tabManager->viewportAt(tabIndex);
+                if (tabManager()) {
+                    DocumentViewport* viewport = tabManager()->viewportAt(tabIndex);
                     if (viewport) {
                         // New document: center on origin (offset by a small margin)
                         viewport->setPanOffset(QPointF(-100, -100));
@@ -7009,45 +7011,44 @@ void MainWindow::showOpenPdfDialog()
 
 bool MainWindow::hasOpenDocuments() const
 {
-    if (!m_tabManager) {
-        return false;
-    }
-    return m_tabManager->tabCount() > 0;
+    return m_splitViewManager && m_splitViewManager->totalTabCount() > 0;
 }
 
 bool MainWindow::switchToDocument(const QString& bundlePath)
 {
-    if (bundlePath.isEmpty() || !m_tabManager || !m_documentManager) {
+    if (bundlePath.isEmpty() || !m_splitViewManager || !m_documentManager) {
         return false;
     }
     
-    // Normalize path for comparison
     QString normalizedPath = QFileInfo(bundlePath).absoluteFilePath();
     
-    // Search through all open tabs for a matching document path
-    int tabCount = m_tabManager->tabCount();
-    for (int i = 0; i < tabCount; ++i) {
-        Document* doc = m_tabManager->documentAt(i);
-        if (!doc) continue;
-        
-        QString docPath = m_documentManager->documentPath(doc);
-        if (docPath.isEmpty()) continue;
-        
-        // Normalize and compare
-        QString normalizedDocPath = QFileInfo(docPath).absoluteFilePath();
-        if (normalizedDocPath == normalizedPath) {
-            // Found it - switch to this tab
-            if (m_tabBar) {
-                m_tabBar->setCurrentIndex(i);
-            }
+    // Search through all open tabs across both panes
+    bool found = false;
+    m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane pane) {
+        if (found) return;
+        for (int i = 0; i < tm->tabCount(); ++i) {
+            Document* doc = tm->documentAt(i);
+            if (!doc) continue;
+            
+            QString docPath = m_documentManager->documentPath(doc);
+            if (docPath.isEmpty()) continue;
+            
+            if (QFileInfo(docPath).absoluteFilePath() == normalizedPath) {
+                TabBar* bar = (pane == SplitViewManager::Left)
+                    ? m_splitViewManager->leftTabBar()
+                    : m_splitViewManager->rightTabBar();
+                if (bar) bar->setCurrentIndex(i);
+                m_splitViewManager->setActivePane(pane);
 #ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "MainWindow::switchToDocument: Switched to existing tab for" << bundlePath;
+                qDebug() << "MainWindow::switchToDocument: Switched to existing tab for" << bundlePath;
 #endif
-            return true;
+                found = true;
+                return;
+            }
         }
-    }
+    });
     
-    return false;
+    return found;
 }
 
 void MainWindow::bringToFront()

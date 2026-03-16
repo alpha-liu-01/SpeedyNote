@@ -88,21 +88,21 @@ public:
     
     /**
      * @brief Save the scroll position for a tab.
-     * @param tabIndex Tab index.
+     * @param tabId Unique tab identifier (from TabManager::tabIdAt()).
      */
-    void saveTabState(int tabIndex);
+    void saveTabState(int tabId);
     
     /**
      * @brief Restore the scroll position for a tab.
-     * @param tabIndex Tab index.
+     * @param tabId Unique tab identifier (from TabManager::tabIdAt()).
      */
-    void restoreTabState(int tabIndex);
+    void restoreTabState(int tabId);
     
     /**
      * @brief Clear saved state for a closed tab.
-     * @param tabIndex Tab index.
+     * @param tabId Unique tab identifier (from TabManager::tabIdAt()).
      */
-    void clearTabState(int tabIndex);
+    void clearTabState(int tabId);
 
     // =========================================================================
     // Theme
