@@ -69,5 +69,5 @@ modules:
     sources:
       - type: archive
         url: https://github.com/alpha-liu-01/SpeedyNote/archive/refs/tags/v1.3.1.tar.gz
-        sha256: aa49782660b18a51b4df8ddabbcdb1d35263c3eeadead6006ce501de344d2604
+        sha256: f1ae94ac546c1a0e554aba6c0bfe7660e2a7f805302a86dcc087a434fe07ca92
 

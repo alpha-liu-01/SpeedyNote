@@ -164,7 +164,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.3.1"));
+    setWindowTitle(tr("SpeedyNote 1.3.2"));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -6506,7 +6506,16 @@ void MainWindow::saveSessionTabs()
         settings.remove("session/activeTabIndex");
     } else {
         settings.setValue("session/lastOpenTabs", paths);
-        settings.setValue("session/activeTabIndex", tabManager() ? tabManager()->currentIndex() : 0);
+
+        int globalActiveIndex = 0;
+        if (m_splitViewManager->activePane() == SplitViewManager::Right
+            && m_splitViewManager->rightTabManager()) {
+            globalActiveIndex = m_splitViewManager->leftTabManager()->tabCount()
+                              + m_splitViewManager->rightTabManager()->currentIndex();
+        } else if (m_splitViewManager->leftTabManager()) {
+            globalActiveIndex = m_splitViewManager->leftTabManager()->currentIndex();
+        }
+        settings.setValue("session/activeTabIndex", globalActiveIndex);
     }
 }
 

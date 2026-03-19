@@ -100,6 +100,11 @@ void TabBar::showSplitMenu(const QPoint& globalPos, int tabIndex)
 
 void TabBar::contextMenuEvent(QContextMenuEvent* event)
 {
+    // Stop the long-press timer to prevent a duplicate menu on platforms
+    // where Qt synthesizes contextMenuEvent from a long touch press.
+    m_longPressTimer->stop();
+    m_pressTabIndex = -1;
+
     int tabIndex = tabAt(event->pos());
     if (tabIndex < 0)
         return;
