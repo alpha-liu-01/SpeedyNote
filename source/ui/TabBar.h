@@ -3,8 +3,10 @@
 
 #include <QTabBar>
 #include <QColor>
+#include <QPoint>
 
 class QContextMenuEvent;
+class QTimer;
 
 /**
  * @brief Custom TabBar for SpeedyNote's document tabs
@@ -73,6 +75,9 @@ signals:
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
     /**
      * @brief Adjust close button positions after Qt's tab layout pass.
      * 
@@ -87,8 +92,13 @@ protected:
     void tabInserted(int index) override;
 
 private:
+    void showSplitMenu(const QPoint& globalPos, int tabIndex);
+
     bool m_splitEnabled = true;
     bool m_mergeEnabled = false;
+    QTimer* m_longPressTimer = nullptr;
+    QPoint m_pressPos;
+    int m_pressTabIndex = -1;
 
 #ifdef Q_OS_ANDROID
     void installCloseButton(int index);
