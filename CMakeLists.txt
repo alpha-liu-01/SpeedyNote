@@ -643,6 +643,7 @@ set(UI_SOURCES
     source/ui/Toolbar.cpp
     source/ui/StyleLoader.cpp
     source/ui/TabBar.cpp
+    source/ui/SplitViewManager.cpp
     source/ui/PageThumbnailModel.cpp
     source/ui/PageThumbnailDelegate.cpp
     source/ui/ThumbnailRenderer.cpp

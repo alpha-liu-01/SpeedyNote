@@ -80,6 +80,38 @@ public:
      */
     void closeTab(int index);
 
+    struct DetachedTab {
+        DocumentViewport* viewport = nullptr;
+        QString title;
+        bool modified = false;
+        int tabId = -1;
+    };
+
+    /**
+     * @brief Detach a tab without deleting the viewport.
+     * @param index The tab index to detach.
+     * @return Struct with the viewport, title, modified flag, and tab ID.
+     *         viewport is nullptr on failure.
+     *
+     * Removes the viewport from tracking, tab bar, and viewport stack,
+     * but does NOT delete it. Caller takes ownership.
+     * Used for moving tabs between split-view panes.
+     */
+    DetachedTab detachTab(int index);
+
+    /**
+     * @brief Attach an externally-owned viewport as a new tab.
+     * @param viewport The viewport to adopt (takes ownership).
+     * @param title The tab title.
+     * @param modified Whether the tab should be marked as modified.
+     * @param tabId Reuse a specific tab ID (-1 to generate a new one).
+     * @return The index of the new tab.
+     *
+     * Used for receiving tabs moved from another pane in split view.
+     */
+    int attachTab(DocumentViewport* viewport, const QString& title,
+                  bool modified = false, int tabId = -1);
+
     /**
      * @brief Close the currently active tab.
      */
@@ -131,6 +163,19 @@ public:
      * @brief Get the number of open tabs.
      */
     int tabCount() const;
+
+    /**
+     * @brief Get the unique tab ID at a specific index.
+     * @param index The tab index.
+     * @return The unique tab ID, or -1 if index invalid.
+     */
+    int tabIdAt(int index) const;
+
+    /**
+     * @brief Get the unique tab ID of the current tab.
+     * @return The unique tab ID, or -1 if no tabs.
+     */
+    int currentTabId() const;
 
     // =========================================================================
     // Title Management
@@ -204,4 +249,6 @@ private:
     QVector<DocumentViewport*> m_viewports;    // Owned - created by createTab()
     QVector<QString> m_baseTitles;             // Base titles (without * prefix)
     QVector<bool> m_modifiedFlags;             // Track modified state per tab
+    QVector<int> m_tabIds;                     // Unique IDs per tab (collision-safe across panes)
+    static int s_nextTabId;                    // Shared across all TabManager instances
 };

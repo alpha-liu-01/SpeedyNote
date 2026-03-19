@@ -4,6 +4,8 @@
 #include <QTabBar>
 #include <QColor>
 
+class QContextMenuEvent;
+
 /**
  * @brief Custom TabBar for SpeedyNote's document tabs
  * 
@@ -56,7 +58,21 @@ public:
      */
     void updateTheme(bool darkMode, const QColor &accentColor);
 
+    /**
+     * @brief Enable or disable the "Split" context menu action.
+     *
+     * When the split view is already active and this is the right pane,
+     * the label changes to "Split Left"; otherwise "Split Right".
+     */
+    void setSplitEnabled(bool enabled);
+    void setMergeEnabled(bool enabled);
+
+signals:
+    void splitRequested(int tabIndex);
+    void mergeAllRequested();
+
 protected:
+    void contextMenuEvent(QContextMenuEvent* event) override;
     /**
      * @brief Adjust close button positions after Qt's tab layout pass.
      * 
@@ -71,6 +87,9 @@ protected:
     void tabInserted(int index) override;
 
 private:
+    bool m_splitEnabled = true;
+    bool m_mergeEnabled = false;
+
 #ifdef Q_OS_ANDROID
     void installCloseButton(int index);
     void updateCloseButtonIcons();
