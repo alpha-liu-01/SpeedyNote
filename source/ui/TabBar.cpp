@@ -4,6 +4,8 @@
 #include <QPalette>
 #include <QMenu>
 #include <QContextMenuEvent>
+#include <QMouseEvent>
+#include <QTimer>
 
 // macOS native style (QMacStyle) ignores QSS for QTabBar::close-button,
 // rendering it with Cocoa drawing instead.  Applying Fusion to the tab bar
@@ -35,6 +37,16 @@ TabBar::TabBar(QWidget *parent)
     setTabsClosable(true);         // Show close button on each tab (right side, default)
     setUsesScrollButtons(true);    // Show arrows when tabs overflow
     setElideMode(Qt::ElideRight);  // Truncate long titles with "..."
+
+    m_longPressTimer = new QTimer(this);
+    m_longPressTimer->setSingleShot(true);
+    m_longPressTimer->setInterval(500);
+    connect(m_longPressTimer, &QTimer::timeout, this, [this]() {
+        if (m_pressTabIndex >= 0) {
+            showSplitMenu(mapToGlobal(m_pressPos), m_pressTabIndex);
+            m_pressTabIndex = -1;
+        }
+    });
 }
 
 void TabBar::tabLayoutChange()
@@ -64,12 +76,8 @@ void TabBar::tabInserted(int index)
 void TabBar::setSplitEnabled(bool enabled) { m_splitEnabled = enabled; }
 void TabBar::setMergeEnabled(bool enabled) { m_mergeEnabled = enabled; }
 
-void TabBar::contextMenuEvent(QContextMenuEvent* event)
+void TabBar::showSplitMenu(const QPoint& globalPos, int tabIndex)
 {
-    int tabIndex = tabAt(event->pos());
-    if (tabIndex < 0)
-        return;
-
     QMenu menu(this);
 
     if (m_splitEnabled) {
@@ -87,7 +95,44 @@ void TabBar::contextMenuEvent(QContextMenuEvent* event)
     }
 
     if (!menu.isEmpty())
-        menu.exec(event->globalPos());
+        menu.exec(globalPos);
+}
+
+void TabBar::contextMenuEvent(QContextMenuEvent* event)
+{
+    int tabIndex = tabAt(event->pos());
+    if (tabIndex < 0)
+        return;
+
+    showSplitMenu(event->globalPos(), tabIndex);
+}
+
+void TabBar::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_pressPos = event->pos();
+        m_pressTabIndex = tabAt(m_pressPos);
+        if (m_pressTabIndex >= 0)
+            m_longPressTimer->start();
+    }
+    QTabBar::mousePressEvent(event);
+}
+
+void TabBar::mouseReleaseEvent(QMouseEvent* event)
+{
+    m_longPressTimer->stop();
+    m_pressTabIndex = -1;
+    QTabBar::mouseReleaseEvent(event);
+}
+
+void TabBar::mouseMoveEvent(QMouseEvent* event)
+{
+    if (m_longPressTimer->isActive()) {
+        QPoint delta = event->pos() - m_pressPos;
+        if (delta.manhattanLength() > 10)
+            m_longPressTimer->stop();
+    }
+    QTabBar::mouseMoveEvent(event);
 }
 
 void TabBar::updateTheme(bool darkMode, const QColor &accentColor)
