@@ -23,6 +23,10 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/ios/build-sim"
 QT_CMAKE="${HOME}/Qt/6.9.3/ios/bin/qt-cmake"
 MUPDF_DIR="${PROJECT_ROOT}/ios/mupdf-build-sim"
+# Qt 6.9.3's iOS kit has x86_64=IOSSIMULATOR and arm64=IOS (device) in its
+# fat binaries — no arm64-simulator slice. Must target x86_64 even on Apple
+# Silicon (runs under Rosetta in the simulator).
+SIM_ARCH="x86_64"
 
 # ---------- Argument parsing ----------
 CLEAN=false
@@ -43,7 +47,7 @@ for arg in "$@"; do
 done
 
 # ---------- Preflight checks ----------
-echo "=== SpeedyNote iOS Simulator Build ==="
+echo "=== SpeedyNote iOS Simulator Build (${SIM_ARCH}) ==="
 echo ""
 
 if [ ! -f "${QT_CMAKE}" ]; then
@@ -80,6 +84,8 @@ if [ "${REBUILD}" = false ]; then
     cd "${BUILD_DIR}"
     "${QT_CMAKE}" -GXcode \
         -DCMAKE_BUILD_TYPE=Debug \
+        -DCMAKE_OSX_SYSROOT=iphonesimulator \
+        -DCMAKE_OSX_ARCHITECTURES="${SIM_ARCH}" \
         -DMUPDF_INCLUDE_DIR="${MUPDF_DIR}/include" \
         -DMUPDF_LIBRARIES="${MUPDF_DIR}/lib/libmupdf.a;${MUPDF_DIR}/lib/libmupdf-third.a" \
         "${PROJECT_ROOT}"
@@ -95,6 +101,7 @@ cd "${BUILD_DIR}"
 # -allowProvisioningUpdates silenced if no signing identity
 cmake --build . --config Debug -- \
     -sdk iphonesimulator \
+    -arch "${SIM_ARCH}" \
     -quiet
 
 echo ""
