@@ -6506,7 +6506,16 @@ void MainWindow::saveSessionTabs()
         settings.remove("session/activeTabIndex");
     } else {
         settings.setValue("session/lastOpenTabs", paths);
-        settings.setValue("session/activeTabIndex", tabManager() ? tabManager()->currentIndex() : 0);
+
+        int globalActiveIndex = 0;
+        if (m_splitViewManager->activePane() == SplitViewManager::Right
+            && m_splitViewManager->rightTabManager()) {
+            globalActiveIndex = m_splitViewManager->leftTabManager()->tabCount()
+                              + m_splitViewManager->rightTabManager()->currentIndex();
+        } else if (m_splitViewManager->leftTabManager()) {
+            globalActiveIndex = m_splitViewManager->leftTabManager()->currentIndex();
+        }
+        settings.setValue("session/activeTabIndex", globalActiveIndex);
     }
 }
 

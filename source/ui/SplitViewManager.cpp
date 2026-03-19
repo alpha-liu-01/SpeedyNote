@@ -10,7 +10,6 @@
 
 #include <QStackedWidget>
 #include <QMouseEvent>
-#include <QFrame>
 #include <QApplication>
 #include <QTimer>
 
