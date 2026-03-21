@@ -34,5 +34,33 @@ echo "=== Generating iPad app icon from mainicon.svg ==="
 echo "  icon-1024.png  (1024x1024)"
 rsvg-convert -w 1024 -h 1024 "${SVG}" -o "${OUTDIR}/icon-1024.png"
 
+XCASSETS_DIR="${SCRIPT_DIR}/Assets.xcassets"
+
+cat > "${XCASSETS_DIR}/Contents.json" <<'JSON'
+{
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
+JSON
+
+cat > "${OUTDIR}/Contents.json" <<'JSON'
+{
+  "images" : [
+    {
+      "filename" : "icon-1024.png",
+      "idiom" : "universal",
+      "platform" : "ios",
+      "size" : "1024x1024"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
+JSON
+
 echo ""
-echo "=== Done — icon written to ${OUTDIR} ==="
+echo "=== Done — icon and asset catalog written to ${XCASSETS_DIR} ==="

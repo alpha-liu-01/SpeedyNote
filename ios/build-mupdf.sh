@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Cross-compile MuPDF for iOS (device arm64 or simulator x86_64)
+# Cross-compile MuPDF for iOS (device arm64 or simulator)
 # =============================================================================
 # This script builds libmupdf and its dependencies as static libraries
 # for iOS, using Xcode's clang and the appropriate SDK.
@@ -50,7 +50,7 @@ for arg in "$@"; do
         --simulator) BUILD_SIMULATOR=true ;;
         -h|--help)
             echo "Usage: $0 [--simulator]"
-            echo "  --simulator   Build for iOS Simulator (x86_64)"
+            echo "  --simulator   Build for iOS Simulator (x86_64, Rosetta on Apple Silicon)"
             echo "  (default)     Build for iOS device (arm64)"
             exit 0
             ;;
@@ -63,6 +63,10 @@ done
 # =============================================================================
 if [ "${BUILD_SIMULATOR}" = true ]; then
     SDK_NAME="iphonesimulator"
+    # Qt 6.9.3's iOS kit ships fat binaries where the x86_64 slice is tagged
+    # IOSSIMULATOR and the arm64 slice is tagged IOS (device). There is no
+    # arm64-simulator slice, so the simulator build must target x86_64 even on
+    # Apple Silicon (it runs fine under Rosetta).
     ARCH="x86_64"
     MIN_VERSION_FLAG="-mios-simulator-version-min=${IOS_DEPLOYMENT_TARGET}"
     BUILD_DIR="${SCRIPT_DIR}/mupdf-build-sim"

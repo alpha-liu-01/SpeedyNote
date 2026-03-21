@@ -54,6 +54,12 @@ es.AddToPathTask=Agregar SpeedyNote a PATH (habilita el comando 'speedynote' en 
 zh.AddToPathTask=将 SpeedyNote 添加到 PATH（在终端中启用 'speedynote' 命令）
 fr.AddToPathTask=Ajouter SpeedyNote au PATH (active la commande 'speedynote' dans le terminal)
 
+; Uninstall: remove user settings prompt
+en.RemoveSettingsPrompt=Do you also want to remove SpeedyNote user settings (preferences, recent files, session data)?%n%nThese settings are stored in the Windows registry and will persist after uninstallation if not removed.
+es.RemoveSettingsPrompt=¿Desea también eliminar la configuración de usuario de SpeedyNote (preferencias, archivos recientes, datos de sesión)?%n%nEstas configuraciones se almacenan en el registro de Windows y persistirán después de la desinstalación si no se eliminan.
+zh.RemoveSettingsPrompt=是否同时删除 SpeedyNote 用户设置（偏好设置、最近文件、会话数据）？%n%n这些设置存储在 Windows 注册表中，如果不删除将在卸载后保留。
+fr.RemoveSettingsPrompt=Voulez-vous également supprimer les paramètres utilisateur de SpeedyNote (préférences, fichiers récents, données de session) ?%n%nCes paramètres sont stockés dans le registre Windows et persisteront après la désinstallation s'ils ne sont pas supprimés.
+
 [Files]
 Source: ".\build\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 
@@ -121,6 +127,9 @@ Filename: "{app}\speedynote.exe"; Description: "{cm:LaunchProgram,SpeedyNote}"; 
 // Adds/removes SpeedyNote installation directory to/from user PATH
 // This enables 'speedynote' command from any terminal window
 // =============================================================================
+
+var
+  RemoveSettings: Boolean;
 
 const
   EnvironmentKey = 'Environment';
@@ -240,6 +249,15 @@ begin
   end;
 end;
 
+// Called before the uninstall confirmation dialog is accepted.
+// Prompt the user about removing registry-stored user settings.
+function InitializeUninstall(): Boolean;
+begin
+  Result := True;
+  RemoveSettings := MsgBox(CustomMessage('RemoveSettingsPrompt'),
+                           mbConfirmation, MB_YESNO) = IDYES;
+end;
+
 // Called during uninstallation
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
@@ -247,5 +265,9 @@ begin
   begin
     // Always try to remove from PATH on uninstall
     RemoveFromPath(ExpandConstant('{app}'));
+
+    // Remove QSettings registry tree if the user opted in
+    if RemoveSettings then
+      RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, 'SOFTWARE\SpeedyNote');
   end;
 end;
