@@ -188,8 +188,8 @@ void ShortcutManager::registerDefaults()
     registerAction("view.right_sidebar", "Ctrl+Shift+M", tr("Toggle Right Sidebar"), tr("View"));
     registerAction("view.split_right", "Ctrl+\\", tr("Split Tab Right"), tr("View"));
     registerAction("view.merge_panes", "Ctrl+Shift+\\", tr("Merge All to Left"), tr("View"));
-    registerAction("view.focus_left_pane", "Ctrl+Shift+1", tr("Focus Left Pane"), tr("View"));
-    registerAction("view.focus_right_pane", "Ctrl+Shift+2", tr("Focus Right Pane"), tr("View"));
+    registerAction("view.focus_left_pane", "Ctrl+3", tr("Focus Left Pane"), tr("View"));
+    registerAction("view.focus_right_pane", "Ctrl+4", tr("Focus Right Pane"), tr("View"));
     
     // ===== PDF Features =====
     registerAction("pdf.auto_highlight", "Ctrl+H", tr("Toggle Auto-Highlight"), tr("PDF"));
