@@ -1819,9 +1819,13 @@ static inline void transformPoint(float& x, float& y, qreal pageHeightSn)
 }
 
 /**
- * @brief Append a filled polygon to the content stream buffer.
+ * @brief Append a polygon subpath to the content stream buffer.
  * 
- * Writes PDF path operators: m (moveto), l (lineto), h (closepath), f (fill).
+ * Writes PDF path operators: m (moveto), l (lineto), h (closepath).
+ * Does NOT emit f (fill) -- the caller is responsible for emitting a single
+ * f after all subpaths are written, so that overlapping shapes (e.g. polygon
+ * body + round cap circles) are filled as one composite area without
+ * double-compositing semi-transparent alpha.
  */
 static void appendPolygonToBuffer(fz_context* ctx, fz_buffer* buf, 
                                    const QPolygonF& polygon, qreal pageHeightSn)
@@ -1846,15 +1850,16 @@ static void appendPolygonToBuffer(fz_context* ctx, fz_buffer* buf,
         fz_append_string(ctx, buf, cmd);
     }
     
-    // Close and fill (non-zero winding rule for self-intersecting strokes)
-    fz_append_string(ctx, buf, "h f\n");
+    // Close subpath (caller emits a single 'f' after all subpaths are written)
+    fz_append_string(ctx, buf, "h\n");
 }
 
 /**
- * @brief Append a filled circle to the content stream buffer.
+ * @brief Append a circle subpath to the content stream buffer.
  * 
  * Approximates a circle using 4 cubic Bezier curves (standard PDF technique).
- * Uses operators: m (moveto), c (curveto), h (closepath), f (fill).
+ * Uses operators: m (moveto), c (curveto), h (closepath).
+ * Does NOT emit f (fill) -- see appendPolygonToBuffer for rationale.
  */
 static void appendCircleToBuffer(fz_context* ctx, fz_buffer* buf,
                                   const QPointF& center, qreal radius, qreal pageHeightSn)
@@ -1904,8 +1909,8 @@ static void appendCircleToBuffer(fz_context* ctx, fz_buffer* buf,
              cx + r, cy);
     fz_append_string(ctx, buf, cmd);
     
-    // Close and fill
-    fz_append_string(ctx, buf, "h f\n");
+    // Close subpath (caller emits a single 'f' after all subpaths are written)
+    fz_append_string(ctx, buf, "h\n");
 }
 
 // NOTE: This function is currently unused. The implementation uses content stream operators
@@ -2088,6 +2093,7 @@ static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
         if (polyResult.isSinglePoint) {
             appendCircleToBuffer(ctx, buf, polyResult.startCapCenter, 
                                 polyResult.startCapRadius, pageHeightSn);
+            fz_append_string(ctx, buf, "f\n");
         } else if (!polyResult.polygon.isEmpty()) {
             appendPolygonToBuffer(ctx, buf, polyResult.polygon, pageHeightSn);
             
@@ -2097,6 +2103,9 @@ static void appendLayerStrokesToBuffer(fz_context* ctx, pdf_document* outputDoc,
                 appendCircleToBuffer(ctx, buf, polyResult.endCapCenter,
                                     polyResult.endCapRadius, pageHeightSn);
             }
+            // Single fill for all subpaths (polygon + caps) to prevent
+            // double-opacity at cap/body overlap for semi-transparent strokes
+            fz_append_string(ctx, buf, "f\n");
         }
         
         // Restore graphics state if we saved it for transparency
