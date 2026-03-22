@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QColor>
 #include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QTreeWidget>
 
 #include "ui/dialogs/KeyCaptureDialog.h"
@@ -89,6 +90,11 @@ private:
     QColor selectedGridColor;
     void createBackgroundTab();
     void onPageSizePresetChanged(int index);
+
+    // === Tools tab ===
+    QWidget *toolsTab;
+    QDoubleSpinBox *minStrokeWidthSpin;
+    void createToolsTab();
 
     // === Theme tab ===
     QWidget *themeTab;

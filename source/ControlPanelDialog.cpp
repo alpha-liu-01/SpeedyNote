@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "core/Page.h"
 #include "core/ShortcutManager.h"
+#include "layers/VectorLayer.h"
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "ButtonMappingTypes.h"
@@ -10,6 +11,8 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QFormLayout>
+#include <QGroupBox>
 #include <QLabel>
 #include <QCheckBox>
 #include <QSpacerItem>
@@ -51,6 +54,7 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
 
     // === Working Tabs ===
     createBackgroundTab();  // Background settings (first tab for importance)
+    createToolsTab();       // Stroke tool settings
     createShortcutsTab();   // Phase 5.1: Keyboard shortcuts tab
     
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
@@ -263,6 +267,11 @@ void ControlPanelDialog::applyChanges()
     settings.setValue("display/skipImageMasking", skipMasking);
     mainWindowRef->setSkipImageMasking(skipMasking);
     
+    // Apply tools settings
+    qreal minWidth = minStrokeWidthSpin->value();
+    settings.setValue("tools/minStrokeWidth", minWidth);
+    VectorLayer::setMinStrokeWidth(minWidth);
+
     // Apply language settings
     settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
     if (!useSystemLanguageCheckbox->isChecked()) {
@@ -963,6 +972,45 @@ void ControlPanelDialog::createBackgroundTab() {
     onPageSizePresetChanged(pageSizeCombo->currentIndex());
     
     tabWidget->addTab(backgroundTab, tr("Page"));
+}
+
+// ============================================================================
+// Tools Tab
+// ============================================================================
+
+void ControlPanelDialog::createToolsTab()
+{
+    toolsTab = new QWidget(this);
+    QVBoxLayout *layout = new QVBoxLayout(toolsTab);
+
+    // --- Stroke settings group ---
+    QGroupBox *strokeGroup = new QGroupBox(tr("Stroke"), toolsTab);
+    QFormLayout *strokeLayout = new QFormLayout(strokeGroup);
+
+    minStrokeWidthSpin = new QDoubleSpinBox(strokeGroup);
+    minStrokeWidthSpin->setRange(0.0, 2.0);
+    minStrokeWidthSpin->setSingleStep(0.1);
+    minStrokeWidthSpin->setDecimals(1);
+    minStrokeWidthSpin->setSuffix(tr(" px"));
+
+    QSettings settings("SpeedyNote", "App");
+    minStrokeWidthSpin->setValue(settings.value("tools/minStrokeWidth", 0.3).toDouble());
+
+    strokeLayout->addRow(tr("Minimum stroke width:"), minStrokeWidthSpin);
+
+    QLabel *hint = new QLabel(
+        tr("The smallest width a stroke can render at, regardless of pressure. "
+           "Lower values preserve more pressure detail at thin pen sizes. "
+           "Set to 0 for no minimum."),
+        strokeGroup);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color: gray; font-size: 11px;");
+    strokeLayout->addRow(hint);
+
+    layout->addWidget(strokeGroup);
+    layout->addStretch();
+
+    tabWidget->addTab(toolsTab, tr("Tools"));
 }
 
 // ============================================================================
