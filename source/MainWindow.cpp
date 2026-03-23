@@ -240,6 +240,11 @@ MainWindow::MainWindow(QWidget *parent)
     
     // Connect SplitViewManager signals (routes through active pane)
     connect(m_splitViewManager, &SplitViewManager::activeViewportChanged, this, [this](DocumentViewport* vp) {
+        // Smart tool auto-switch: consume override when user activates the overridden viewport
+        if (m_toolOverrideViewport == vp) {
+            m_toolOverrideViewport = nullptr;
+        }
+        
         // Phase 6.1: Hide PDF search bar when switching tabs to prevent stale state
         if (m_pdfSearchBar && m_pdfSearchBar->isVisible()) {
             hidePdfSearchBar();
@@ -325,6 +330,11 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_pagePanel && newTabId != m_previousTabId) {
             m_pagePanel->restoreTabState(newTabId);
         }
+    });
+
+    // Smart tool auto-switch: clear override when split view closes
+    connect(m_splitViewManager, &SplitViewManager::splitStateChanged, this, [this](bool isSplit) {
+        if (!isSplit) clearToolOverride(false);
     });
 
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
@@ -1118,12 +1128,11 @@ void MainWindow::setupUi() {
     
     // Connect Toolbar signals
     connect(m_toolbar, &Toolbar::toolSelected, this, [this](ToolType tool) {
-        // Set tool on current viewport
         if (DocumentViewport* vp = currentViewport()) {
+            if (m_toolOverrideViewport == vp)
+                m_toolOverrideViewport = nullptr;
             vp->setCurrentTool(tool);
         }
-        // REMOVED: updateToolButtonStates call removed - tool button state functionality deleted
-        // qDebug() << "Toolbar: Tool selected:" << static_cast<int>(tool);
     });
     connect(m_toolbar, &Toolbar::straightLineToggled, this, [this](bool enabled) {
         // Straight line mode toggle
@@ -1425,6 +1434,8 @@ void MainWindow::setupManagedShortcuts()
             }
             
             if (DocumentViewport* vp = currentViewport()) {
+                if (m_toolOverrideViewport == vp)
+                    m_toolOverrideViewport = nullptr;
                 vp->setCurrentTool(tool);
             }
         });
@@ -1624,6 +1635,8 @@ void MainWindow::setupManagedShortcuts()
     createShortcut("edit.paste", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->handlePasteAction();
+            if (m_toolOverrideViewport && m_toolOverrideViewport != vp)
+                clearToolOverride(true);
         }
     });
     createShortcut("edit.delete", [this]() {
@@ -1910,6 +1923,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_objectClipboardConn);
         m_objectClipboardConn = {};
     }
+    if (m_strokeClipboardOverrideConn) {
+        disconnect(m_strokeClipboardOverrideConn);
+        m_strokeClipboardOverrideConn = {};
+    }
+    if (m_objectClipboardOverrideConn) {
+        disconnect(m_objectClipboardOverrideConn);
+        m_objectClipboardOverrideConn = {};
+    }
     // Phase E.2: Disconnect outline page tracking connection
     if (m_outlinePageConn) {
         disconnect(m_outlinePageConn);
@@ -2137,6 +2158,18 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // Object clipboard changed (shows/hides Paste button in ObjectSelectActionBar)
     m_objectClipboardConn = connect(viewport, &DocumentViewport::objectClipboardChanged,
                                     m_actionBarContainer, &ActionBarContainer::onObjectClipboardChanged);
+    
+    // Smart tool auto-switch: override inactive viewport's tool on copy/cut
+    m_strokeClipboardOverrideConn = connect(viewport, &DocumentViewport::strokeClipboardChanged,
+                                            this, [this](bool has) {
+        if (has) applyToolOverrideForClipboard(ToolType::Lasso);
+        else clearToolOverride(true);
+    });
+    m_objectClipboardOverrideConn = connect(viewport, &DocumentViewport::objectClipboardChanged,
+                                            this, [this](bool has) {
+        if (has) applyToolOverrideForClipboard(ToolType::ObjectSelect);
+        else clearToolOverride(true);
+    });
     
     // Sync initial action bar state from viewport
     // CR-AB-2 FIX: Sync ALL context states to prevent stale state from previous tab
@@ -4532,6 +4565,48 @@ void MainWindow::connectSubToolbarSignals()
     });
 }
 
+// ============================================================================
+// Smart Tool Auto-Switch (split-view copy/paste assistance)
+// ============================================================================
+
+void MainWindow::applyToolOverrideForClipboard(ToolType requiredTool)
+{
+    if (!m_splitViewManager || !m_splitViewManager->isSplit())
+        return;
+
+    DocumentViewport* inactiveVp = m_splitViewManager->inactiveViewport();
+    if (!inactiveVp)
+        return;
+
+    if (m_toolOverrideViewport == inactiveVp) {
+        if (inactiveVp->currentTool() == requiredTool)
+            return;
+        inactiveVp->setCurrentTool(requiredTool);
+        return;
+    }
+
+    if (m_toolOverrideViewport)
+        clearToolOverride(true);
+
+    if (inactiveVp->currentTool() == requiredTool)
+        return;
+
+    m_toolOverrideSavedTool = inactiveVp->currentTool();
+    m_toolOverrideViewport = inactiveVp;
+    inactiveVp->setCurrentTool(requiredTool);
+}
+
+void MainWindow::clearToolOverride(bool revert)
+{
+    if (!m_toolOverrideViewport)
+        return;
+
+    if (revert)
+        m_toolOverrideViewport->setCurrentTool(m_toolOverrideSavedTool);
+
+    m_toolOverrideViewport = nullptr;
+}
+
 void MainWindow::setupActionBars()
 {
     if (!m_canvasContainer) {
@@ -4581,6 +4656,8 @@ void MainWindow::setupActionBars()
     connect(m_lassoActionBar, &LassoActionBar::pasteRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->pasteLassoSelection();
+            if (m_toolOverrideViewport && m_toolOverrideViewport != vp)
+                clearToolOverride(true);
         }
     });
     connect(m_lassoActionBar, &LassoActionBar::deleteRequested, this, [this]() {
@@ -4598,6 +4675,8 @@ void MainWindow::setupActionBars()
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::pasteRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->pasteForObjectSelect();
+            if (m_toolOverrideViewport && m_toolOverrideViewport != vp)
+                clearToolOverride(true);
         }
     });
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::deleteRequested, this, [this]() {
@@ -4647,6 +4726,8 @@ void MainWindow::setupActionBars()
     connect(m_clipboardActionBar, &ClipboardActionBar::pasteRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->pasteForObjectSelect();
+            if (m_toolOverrideViewport && m_toolOverrideViewport != vp)
+                clearToolOverride(true);
         }
     });
     
