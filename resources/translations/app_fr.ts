@@ -1485,7 +1485,7 @@ This helps prevent accidental palm touches while writing. Only affects Y-Axis On
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1655"/>
-        <source>Version 1.3.2</source>
+        <source>Version 1.3.3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2720,7 +2720,7 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="167"/>
-        <source>SpeedyNote 1.3.2</source>
+        <source>SpeedyNote 1.3.3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

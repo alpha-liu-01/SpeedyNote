@@ -1386,8 +1386,8 @@ This cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1655"/>
-        <source>Version 1.3.2</source>
-        <translation type="unfinished">1.3.2 版</translation>
+        <source>Version 1.3.3</source>
+        <translation type="unfinished">1.3.3 版</translation>
     </message>
     <message>
         <location filename="../../source/ControlPanelDialog.cpp" line="1680"/>
@@ -2832,7 +2832,7 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/MainWindow.cpp" line="167"/>
-        <source>SpeedyNote 1.3.2</source>
+        <source>SpeedyNote 1.3.3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

@@ -80,6 +80,21 @@
 
   <releases>
 
+    <release version="1.3.3" date="2026-03-22">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Adjustable minimum stroke width for the pen tool.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that the caps of exported marker strokes had incorrect opacity.</li>
+          <li>Modified the iPadOS version build script to support building on ARM64 Macs.</li>
+          <li>Fixed the problem that the registry was not cleaned up after uninstalling the app on Windows.</li>
+          <li>Fixed a keyboard shortcut conflict.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.2" date="2026-03-19">
       <description>
         <p>New Features:</p>
