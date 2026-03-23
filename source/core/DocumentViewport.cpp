@@ -85,6 +85,11 @@ static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF 
 // Note: eventMatchesAction() helper was removed - all keyboard shortcuts
 // are now handled by MainWindow's QShortcut system for focus-independent operation.
 
+// Static clipboard storage shared across all DocumentViewport instances
+DocumentViewport::StrokeClipboard DocumentViewport::s_clipboard;
+QList<QJsonObject> DocumentViewport::s_objectClipboard;
+QMap<QString, QPixmap> DocumentViewport::s_objectClipboardAssets;
+
 // ===== Thread-Local PDF Provider Cache =====
 // 
 // Each thread in the QThreadPool keeps its own cached PdfProvider to avoid
@@ -5822,16 +5827,17 @@ void DocumentViewport::cancelObjectSelectAction()
     }
     
     // Step 2: If no objects selected but clipboard has content, clear clipboard
-    if (!m_objectClipboard.isEmpty()) {
+    if (!s_objectClipboard.isEmpty()) {
         clearObjectClipboard();
     }
 }
 
 void DocumentViewport::clearObjectClipboard()
 {
-    if (m_objectClipboard.isEmpty()) return;
+    if (s_objectClipboard.isEmpty()) return;
     
-    m_objectClipboard.clear();
+    s_objectClipboard.clear();
+    s_objectClipboardAssets.clear();
     emit objectClipboardChanged(false);
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "clearObjectClipboard: Object clipboard cleared";
@@ -5905,10 +5911,10 @@ void DocumentViewport::pasteForObjectSelect()
     // System clipboard images should NOT interrupt pasting copied LinkObjects.
     if (m_objectInsertMode == ObjectInsertMode::Link) {
         // Priority 1 (Link mode): Internal object clipboard
-        if (!m_objectClipboard.isEmpty()) {
+        if (!s_objectClipboard.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
             qDebug() << "pasteForObjectSelect (Link mode): Internal clipboard has" 
-                     << m_objectClipboard.size() << "objects";
+                     << s_objectClipboard.size() << "objects";
 #endif
             pasteObjects();
             return;
@@ -5968,10 +5974,10 @@ void DocumentViewport::pasteForObjectSelect()
     
     // Priority 3 (Image mode): Internal object clipboard
     // Even in Image mode, paste internal objects if no system clipboard image
-    if (!m_objectClipboard.isEmpty()) {
+    if (!s_objectClipboard.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "pasteForObjectSelect (Image mode): Internal clipboard has" 
-                 << m_objectClipboard.size() << "objects";
+                 << s_objectClipboard.size() << "objects";
 #endif
         pasteObjects();
         return;
@@ -6441,7 +6447,8 @@ void DocumentViewport::copySelectedObjects()
     }
     
     // Clear previous clipboard contents
-    m_objectClipboard.clear();
+    s_objectClipboard.clear();
+    s_objectClipboardAssets.clear();
     
     // Serialize each selected object to JSON
     for (InsertedObject* obj : m_selectedObjects) {
@@ -6477,7 +6484,7 @@ void DocumentViewport::copySelectedObjects()
                                  << "tileY =" << coord.second
                                  << "targetPosition =" << clone->linkSlots[0].targetPosition;
 #endif
-                        m_objectClipboard.append(clone->toJson());
+                        s_objectClipboard.append(clone->toJson());
                         foundTile = true;
                         break;
                     }
@@ -6487,7 +6494,7 @@ void DocumentViewport::copySelectedObjects()
 #ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "copySelectedObjects (edgeless): tile not found for link->id =" << link->id;
 #endif
-                    m_objectClipboard.append(link->toJson());
+                    s_objectClipboard.append(link->toJson());
                 }
             } else {
                 // Paged mode: use page UUID
@@ -6498,25 +6505,32 @@ void DocumentViewport::copySelectedObjects()
                 }
                 
                 auto clone = link->cloneWithBackLink(sourcePageUuid);
-                m_objectClipboard.append(clone->toJson());
+                s_objectClipboard.append(clone->toJson());
             }
         } else {
-            m_objectClipboard.append(obj->toJson());
+            s_objectClipboard.append(obj->toJson());
+            
+            // Cache image assets for cross-document paste
+            if (auto* img = dynamic_cast<ImageObject*>(obj)) {
+                if (img->isLoaded() && !img->imagePath.isEmpty()) {
+                    s_objectClipboardAssets[img->imagePath] = img->pixmap();
+                }
+            }
         }
     }
     
     #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "copySelectedObjects: Copied" << m_objectClipboard.size() << "objects to internal clipboard";
+    qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
     #endif
     
     // Notify that object clipboard has content (for action bar paste button)
-    emit objectClipboardChanged(!m_objectClipboard.isEmpty());
+    emit objectClipboardChanged(!s_objectClipboard.isEmpty());
 }
 
 void DocumentViewport::pasteObjects()
 {
     // Phase O2.6.3: Paste objects from internal clipboard
-    if (!m_document || m_objectClipboard.isEmpty()) {
+    if (!m_document || s_objectClipboard.isEmpty()) {
         return;
     }
     
@@ -6558,7 +6572,7 @@ void DocumentViewport::pasteObjects()
         pastePagePos = QPointF(PASTE_OFFSET, PASTE_OFFSET);
     }
     
-    for (const QJsonObject& jsonObj : m_objectClipboard) {
+    for (const QJsonObject& jsonObj : s_objectClipboard) {
         // Deserialize object
         std::unique_ptr<InsertedObject> obj = InsertedObject::fromJson(jsonObj);
         if (!obj) {
@@ -6573,10 +6587,19 @@ void DocumentViewport::pasteObjects()
         obj->position = pastePagePos;
         
         // Phase O2.C: Load any external assets (type-agnostic)
+        bool assetLoaded = false;
         if (!m_document->bundlePath().isEmpty()) {
-            if (!obj->loadAssets(m_document->bundlePath())) {
-                qWarning() << "pasteObjects: Failed to load assets for pasted object";
-                // Continue anyway - object will render as empty
+            assetLoaded = obj->loadAssets(m_document->bundlePath());
+        }
+        
+        // Cross-document fallback: use cached pixmap from clipboard
+        if (!assetLoaded) {
+            if (auto* img = dynamic_cast<ImageObject*>(obj.get())) {
+                auto it = s_objectClipboardAssets.find(img->imagePath);
+                if (it != s_objectClipboardAssets.end()) {
+                    img->setPixmap(it.value());
+                    img->imagePath.clear();
+                }
             }
         }
         
@@ -9137,7 +9160,7 @@ bool DocumentViewport::handleEscapeKey()
     
     // Priority 2: Deselect objects or clear object clipboard (ObjectSelect tool only)
     if (m_currentTool == ToolType::ObjectSelect) {
-        if (hasSelectedObjects() || !m_objectClipboard.isEmpty()) {
+        if (hasSelectedObjects() || !s_objectClipboard.isEmpty()) {
             cancelObjectSelectAction();
             return true;
         }
@@ -9205,7 +9228,7 @@ void DocumentViewport::handlePasteAction()
     // Paste behavior depends on current tool
     switch (m_currentTool) {
         case ToolType::Lasso:
-            if (m_clipboard.hasContent) {
+            if (s_clipboard.hasContent) {
                 pasteSelection();
             }
             break;
@@ -9254,7 +9277,7 @@ void DocumentViewport::copySelection()
         return;
     }
     
-    m_clipboard.clear();
+    s_clipboard.clear();
     
     // Get current transform and apply it to strokes before copying
     QTransform transform = buildSelectionTransform();
@@ -9264,10 +9287,10 @@ void DocumentViewport::copySelection()
         transformStrokePoints(transformedStroke, transform);
         // Give new ID to avoid conflicts when pasting
         transformedStroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        m_clipboard.strokes.append(transformedStroke);
+        s_clipboard.strokes.append(transformedStroke);
     }
     
-    m_clipboard.hasContent = true;
+    s_clipboard.hasContent = true;
     
     // Action Bar: Notify that stroke clipboard now has content
     emit strokeClipboardChanged(true);
@@ -9288,13 +9311,13 @@ void DocumentViewport::cutSelection()
 
 void DocumentViewport::pasteSelection()
 {
-    if (!m_clipboard.hasContent || m_clipboard.strokes.isEmpty() || !m_document) {
+    if (!s_clipboard.hasContent || s_clipboard.strokes.isEmpty() || !m_document) {
         return;
     }
     
     // Calculate clipboard bounding box
     QRectF clipboardBounds;
-    for (const VectorStroke& stroke : m_clipboard.strokes) {
+    for (const VectorStroke& stroke : s_clipboard.strokes) {
         if (clipboardBounds.isNull()) {
             clipboardBounds = stroke.boundingBox;
         } else {
@@ -9313,7 +9336,7 @@ void DocumentViewport::pasteSelection()
         undoAction.type = UndoAction::AddStroke;
         undoAction.layerIndex = m_edgelessActiveLayerIndex;
 
-        for (const VectorStroke& stroke : m_clipboard.strokes) {
+        for (const VectorStroke& stroke : s_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
             for (StrokePoint& pt : pastedStroke.points)
                 pt.pos += offset;
@@ -9345,7 +9368,7 @@ void DocumentViewport::pasteSelection()
         QPointF pageCenter = docCenter - pageOrigin;
         offset = pageCenter - clipboardCenter;
 
-        for (const VectorStroke& stroke : m_clipboard.strokes) {
+        for (const VectorStroke& stroke : s_clipboard.strokes) {
             VectorStroke pastedStroke = stroke;
             for (StrokePoint& pt : pastedStroke.points)
                 pt.pos += offset;
