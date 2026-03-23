@@ -1873,62 +1873,62 @@ Error output:
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="1006"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1011"/>
         <source>Target page not found.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2256"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2261"/>
         <source>No document loaded</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6288"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6294"/>
         <source>Insert Image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6290"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6296"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6955"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6978"/>
         <source>Add Position Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6956"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6979"/>
         <source>Add URL Link</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6957"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6980"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6967"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6990"/>
         <source>Add URL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="6967"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="6990"/>
         <source>Enter URL:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7107"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7130"/>
         <source>Cannot create note: please save the document first.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7118"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7141"/>
         <source>Untitled Note</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7126"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7149"/>
         <source>Failed to create note file. Check disk space and permissions.</source>
         <translation type="unfinished"></translation>
     </message>

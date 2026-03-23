@@ -851,7 +851,7 @@ public:
      * 
      * Action Bar: Used to sync state on tab switch.
      */
-    bool hasStrokesInClipboard() const { return m_clipboard.hasContent; }
+    bool hasStrokesInClipboard() const { return s_clipboard.hasContent; }
     
     /**
      * @brief Check if the internal object clipboard has content.
@@ -859,7 +859,7 @@ public:
      * 
      * Action Bar: Used to sync state on tab switch.
      */
-    bool hasObjectsInClipboard() const { return !m_objectClipboard.isEmpty(); }
+    bool hasObjectsInClipboard() const { return !s_objectClipboard.isEmpty(); }
     
     /**
      * @brief Get the current object insert mode.
@@ -1039,14 +1039,14 @@ public:
      * @brief Copy selected objects to internal clipboard.
      * 
      * Phase O2.6: Serializes each selected object to JSON and stores
-     * in m_objectClipboard. Does not modify selection.
+     * in s_objectClipboard. Does not modify selection.
      */
     void copySelectedObjects();
     
     /**
      * @brief Paste objects from internal clipboard.
      * 
-     * Phase O2.6.3: Deserializes objects from m_objectClipboard,
+     * Phase O2.6.3: Deserializes objects from s_objectClipboard,
      * assigns new UUIDs, offsets positions, adds to current page/tile,
      * and selects the pasted objects.
      */
@@ -2021,13 +2021,23 @@ private:
     QSet<int> m_pendingThumbnailPages;
     
     /**
-     * @brief Internal clipboard for copied objects.
+     * @brief Internal clipboard for copied objects (shared across all viewports).
      * 
      * Phase O2.6: Stores serialized objects (via toJson()) for paste.
      * Separate from system clipboard - only for internal object copy/paste.
      * Each entry is a complete JSON representation of an InsertedObject.
+     * Static so cross-viewport and cross-tab paste works.
      */
-    QList<QJsonObject> m_objectClipboard;
+    static QList<QJsonObject> s_objectClipboard;
+    
+    /**
+     * @brief Cached image assets for cross-document object paste.
+     * 
+     * Maps imagePath (filename) to the loaded QPixmap. Populated during
+     * copySelectedObjects() so that pasteObjects() can supply the pixmap
+     * when pasting into a different document whose bundle lacks the file.
+     */
+    static QMap<QString, QPixmap> s_objectClipboardAssets;
     
     // ===== Object Resize State (Phase O3.1) =====
     
@@ -2196,7 +2206,7 @@ private:
             hasContent = false;
         }
     };
-    StrokeClipboard m_clipboard;
+    static StrokeClipboard s_clipboard;
     
     // ----- Performance/Memory Settings -----
     /// CUSTOMIZABLE: PDF cache capacity - higher = more RAM, smoother scrolling (range: 4-16)
@@ -2733,11 +2743,6 @@ private:
      * @brief Delete current selection.
      */
     void deleteSelection();
-    
-    /**
-     * @brief Check if clipboard has content.
-     */
-    bool hasClipboardContent() const { return m_clipboard.hasContent; }
     
     // ===== Highlighter Tool Methods (Phase A) =====
     
