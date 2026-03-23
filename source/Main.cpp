@@ -16,6 +16,7 @@
 #include "MainWindow.h"
 #include "ui/launcher/Launcher.h"
 #include "platform/SystemNotification.h"
+#include "layers/VectorLayer.h"
 
 // CLI support (Desktop only)
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
@@ -765,6 +766,13 @@ int main(int argc, char* argv[])
 
     QTranslator translator;
     loadTranslations(app, translator);
+
+    // ========== Initialize Tool Settings ==========
+    {
+        QSettings toolSettings("SpeedyNote", "App");
+        VectorLayer::setMinStrokeWidth(
+            toolSettings.value("tools/minStrokeWidth", 0.3).toDouble());
+    }
 
     // ========== Initialize System Notifications ==========
     // Step 3.11: Initialize notification system for export/import completion

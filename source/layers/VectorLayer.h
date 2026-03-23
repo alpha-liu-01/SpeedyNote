@@ -164,6 +164,11 @@ public:
         return bounds;
     }
     
+    // ===== Minimum Stroke Width =====
+
+    static void setMinStrokeWidth(qreal w) { s_minStrokeWidth = qBound(0.0, w, 2.0); }
+    static qreal minStrokeWidth() { return s_minStrokeWidth; }
+
     // ===== Rendering =====
     
     /**
@@ -210,9 +215,8 @@ public:
             if (stroke.points.size() == 1) {
                 result.isSinglePoint = true;
                 result.startCapCenter = stroke.points[0].pos;
-                // Apply minimum width (1.0) consistent with multi-point strokes
                 qreal width = stroke.baseThickness * stroke.points[0].pressure;
-                result.startCapRadius = qMax(width, 1.0) / 2.0;
+                result.startCapRadius = qMax(width, s_minStrokeWidth) / 2.0;
             }
             return result;
         }
@@ -229,7 +233,7 @@ public:
         QVector<qreal> halfWidths(n);
         for (int i = 0; i < n; ++i) {
             qreal width = stroke.baseThickness * pts[i].pressure;
-            halfWidths[i] = qMax(width, 1.0) / 2.0;
+            halfWidths[i] = qMax(width, s_minStrokeWidth) / 2.0;
         }
         
         // Build the stroke outline polygon
@@ -624,6 +628,7 @@ public:
     
 private:
     QVector<VectorStroke> m_strokes;  ///< All strokes in this layer
+    static inline qreal s_minStrokeWidth = 0.3;
     
     // ===== Curve Smoothing =====
     
