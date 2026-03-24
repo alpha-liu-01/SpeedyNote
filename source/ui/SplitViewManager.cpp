@@ -109,6 +109,13 @@ DocumentViewport* SplitViewManager::activeViewport() const
     return tm ? tm->currentViewport() : nullptr;
 }
 
+DocumentViewport* SplitViewManager::inactiveViewport() const
+{
+    if (!isSplit()) return nullptr;
+    TabManager* tm = (m_activePane == Left) ? m_rightTabManager : m_leftTabManager;
+    return tm ? tm->currentViewport() : nullptr;
+}
+
 // ============================================================================
 // Split Control
 // ============================================================================

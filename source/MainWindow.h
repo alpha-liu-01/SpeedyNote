@@ -612,6 +612,16 @@ private:
     QMetaObject::Connection m_strokeClipboardConn;
     QMetaObject::Connection m_objectClipboardConn;
     
+    // Smart tool auto-switch: clipboard signals → tool override connections
+    QMetaObject::Connection m_strokeClipboardOverrideConn;
+    QMetaObject::Connection m_objectClipboardOverrideConn;
+    
+    // Smart tool auto-switch state (split-view copy/paste assistance)
+    QPointer<DocumentViewport> m_toolOverrideViewport;
+    ToolType m_toolOverrideSavedTool = ToolType::Pen;
+    void applyToolOverrideForClipboard(ToolType requiredTool);
+    void clearToolOverride(bool revert);
+    
     // Phase 5.1: LayerPanel page change connection
     QMetaObject::Connection m_layerPanelPageConn;
     

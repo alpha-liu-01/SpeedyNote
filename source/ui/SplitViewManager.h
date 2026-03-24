@@ -38,6 +38,7 @@ public:
     Pane activePane() const;
     void setActivePane(Pane pane);
     DocumentViewport* activeViewport() const;
+    DocumentViewport* inactiveViewport() const;
 
     // =========================================================================
     // Split control
