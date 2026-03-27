@@ -15,8 +15,8 @@
 
 namespace Cli {
 
-// Application version (matches CMakeLists.txt project VERSION)
-static const char* APP_VERSION = "1.3.3";
+// APP_VERSION is defined by CMake via target_compile_definitions
+// from the project(VERSION ...) in CMakeLists.txt
 
 // =============================================================================
 // CLI Detection

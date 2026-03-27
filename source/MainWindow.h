@@ -640,6 +640,11 @@ private:
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
     
+    // Pan tool hold (H key spring-loaded activation)
+    bool m_panHoldActive = false;
+    ToolType m_toolBeforePanHold = ToolType::Pen;
+    int m_panHoldKey = 0;
+    
     // Event filter for scrollbar hover detection
     bool eventFilter(QObject *obj, QEvent *event) override;
     

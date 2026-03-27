@@ -279,6 +279,7 @@ QString DebugOverlay::toolName() const
                                  ? "Create" : "Select";
             return QString("Object[%1/%2]").arg(insertMode, actionMode);
         }
+        case ToolType::Pan:         return "Pan";
         default:                    return "Unknown";
     }
 }

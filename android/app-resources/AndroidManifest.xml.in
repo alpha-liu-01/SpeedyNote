@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.speedynote.app"
     android:versionCode="7"
-    android:versionName="1.3.3"
+    android:versionName="@PROJECT_VERSION@"
     android:installLocation="auto">
 
     <!-- Permissions -->
@@ -92,4 +92,3 @@
         </provider>
     </application>
 </manifest>
-

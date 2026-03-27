@@ -578,13 +578,25 @@ public:
         
         if (!m_strokeCache.isNull()) {
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-            // Qt5: cache DPR may be clamped to 1.0 (when zoom*dpr < 1.0),
-            // so its logical size differs from the page size. Draw to an
-            // explicit page-sized target rect for correct mapping.
-            // When DPR >= 1.0 this produces the same result as drawPixmap(0,0).
-            painter.drawPixmap(QRectF(0, 0, size.width(), size.height()),
-                               m_strokeCache,
-                               QRectF(0, 0, m_strokeCache.width(), m_strokeCache.height()));
+            // Qt5: cache DPR is clamped to max(1.0, rawScale). When the
+            // cache DPR was NOT clamped (rawScale >= 1.0), the pixmap's
+            // logical size matches the page/tile size and drawPixmap(0,0)
+            // works correctly. We MUST use this point-draw path rather than
+            // the QRectF overload because the rect-to-rect mapping path in
+            // Qt5's raster engine composites at fractional sub-pixel
+            // positions differently, breaking the sub-pixel snap correction
+            // that aligns the live stroke cache with the layer cache.
+            // Only fall back to the QRectF overload when DPR was clamped
+            // (rawScale < 1.0, i.e. zoomed out) where the logical size
+            // mismatch requires explicit rect mapping.
+            int divisor = computeCacheDivisor(size, zoom, dpr);
+            if (zoom * dpr / divisor >= 1.0) {
+                painter.drawPixmap(0, 0, m_strokeCache);
+            } else {
+                painter.drawPixmap(QRectF(0, 0, size.width(), size.height()),
+                                   m_strokeCache,
+                                   QRectF(0, 0, m_strokeCache.width(), m_strokeCache.height()));
+            }
 #else
             painter.drawPixmap(0, 0, m_strokeCache);
 #endif

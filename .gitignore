@@ -87,3 +87,7 @@ ios/dist/
 ios/Assets.xcassets/
 .aur-work/
 win32/
+
+app_icon.rc
+packaging.iss
+android/app-resources/AndroidManifest.xml

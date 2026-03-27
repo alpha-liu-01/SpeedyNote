@@ -164,7 +164,7 @@ void setupLinuxSignalHandlers() {
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
-    setWindowTitle(tr("SpeedyNote 1.3.3"));
+    setWindowTitle(tr("SpeedyNote %1").arg(APP_VERSION));
     
     // Phase 3.1: Always using new DocumentViewport architecture
 
@@ -243,6 +243,14 @@ MainWindow::MainWindow(QWidget *parent)
         // Smart tool auto-switch: consume override when user activates the overridden viewport
         if (m_toolOverrideViewport == vp) {
             m_toolOverrideViewport = nullptr;
+        }
+        
+        // Clear pan hold when viewport changes - revert old viewport's tool
+        if (m_panHoldActive) {
+            if (m_connectedViewport) {
+                m_connectedViewport->setCurrentTool(m_toolBeforePanHold);
+            }
+            m_panHoldActive = false;
         }
         
         // Phase 6.1: Hide PDF search bar when switching tabs to prevent stale state
@@ -562,8 +570,9 @@ MainWindow::MainWindow(QWidget *parent)
             }
         }
     });
-    qApp->installEventFilter(this);
 #endif
+    
+    qApp->installEventFilter(this);
     
     loadUserSettings();
 
@@ -1128,6 +1137,7 @@ void MainWindow::setupUi() {
     
     // Connect Toolbar signals
     connect(m_toolbar, &Toolbar::toolSelected, this, [this](ToolType tool) {
+        if (m_panHoldActive) m_panHoldActive = false;
         if (DocumentViewport* vp = currentViewport()) {
             if (m_toolOverrideViewport == vp)
                 m_toolOverrideViewport = nullptr;
@@ -1433,6 +1443,7 @@ void MainWindow::setupManagedShortcuts()
                 return;
             }
             
+            if (m_panHoldActive) m_panHoldActive = false;
             if (DocumentViewport* vp = currentViewport()) {
                 if (m_toolOverrideViewport == vp)
                     m_toolOverrideViewport = nullptr;
@@ -1448,6 +1459,18 @@ void MainWindow::setupManagedShortcuts()
     createToolShortcut("tool.highlighter", ToolType::Highlighter);
     createToolShortcut("tool.marker", ToolType::Marker);
     createToolShortcut("tool.object_select", ToolType::ObjectSelect);
+    
+    // Pan tool: H key hold handled via event filter, not QShortcut (need release detection)
+    {
+        QKeySequence panSeq = sm->keySequenceForAction("tool.pan");
+        if (!panSeq.isEmpty()) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            m_panHoldKey = panSeq[0].key();
+#else
+            m_panHoldKey = panSeq[0] & ~Qt::KeyboardModifierMask;
+#endif
+        }
+    }
     
     // ===== Edit (delegated to viewport) =====
     createShortcut("edit.undo", [this]() {
@@ -1772,6 +1795,21 @@ void MainWindow::setupManagedShortcuts()
 
 void MainWindow::onShortcutChanged(const QString& actionId, const QString& newShortcut)
 {
+    // Pan tool hold key is managed separately (not a QShortcut)
+    if (actionId == "tool.pan") {
+        QKeySequence seq(newShortcut);
+        if (seq.isEmpty()) {
+            m_panHoldKey = 0;
+        } else {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            m_panHoldKey = seq[0].key();
+#else
+            m_panHoldKey = seq[0] & ~Qt::KeyboardModifierMask;
+#endif
+        }
+        return;
+    }
+    
     // Update the QShortcut if we manage this action
     auto it = m_managedShortcuts.find(actionId);
     if (it != m_managedShortcuts.end()) {
@@ -3787,6 +3825,42 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         return false;  // Don't consume
     }
 #endif
+
+    // Pan tool hold: cancel if application loses focus (KeyRelease won't arrive)
+    if (m_panHoldActive && event->type() == QEvent::ApplicationDeactivate) {
+        if (auto* vp = currentViewport()) {
+            vp->setCurrentTool(m_toolBeforePanHold);
+        }
+        m_panHoldActive = false;
+    }
+    
+    // Pan tool hold: H key spring-loaded activation
+    // setCurrentTool emits toolChanged which updates the toolbar automatically
+    if (m_panHoldKey && event->type() == QEvent::KeyPress) {
+        auto* ke = static_cast<QKeyEvent*>(event);
+        if (ke->key() == m_panHoldKey && !ke->isAutoRepeat() && !m_panHoldActive) {
+            QWidget* focused = QApplication::focusWidget();
+            if (!qobject_cast<QLineEdit*>(focused) && !qobject_cast<QTextEdit*>(focused)
+                && !qobject_cast<QPlainTextEdit*>(focused)) {
+                if (auto* vp = currentViewport()) {
+                    if (vp->currentTool() != ToolType::Pan) {
+                        m_toolBeforePanHold = vp->currentTool();
+                        m_panHoldActive = true;
+                        vp->setCurrentTool(ToolType::Pan);
+                    }
+                }
+            }
+        }
+    }
+    if (m_panHoldActive && event->type() == QEvent::KeyRelease) {
+        auto* ke = static_cast<QKeyEvent*>(event);
+        if (ke->key() == m_panHoldKey && !ke->isAutoRepeat()) {
+            if (auto* vp = currentViewport()) {
+                vp->setCurrentTool(m_toolBeforePanHold);
+            }
+            m_panHoldActive = false;
+        }
+    }
 
     static bool dragging = false;
     static QPoint lastMousePos;

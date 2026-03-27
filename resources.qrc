@@ -123,6 +123,8 @@
     <file>resources/icons/lock_reversed.png</file>
     <file>resources/icons/edit.png</file>
     <file>resources/icons/edit_reversed.png</file>
+    <file>resources/icons/move.png</file>
+    <file>resources/icons/move_reversed.png</file>
     <file>resources/translations/app_zh.qm</file>
     <file>resources/translations/app_es.qm</file>
     <file>resources/translations/app_fr.qm</file>

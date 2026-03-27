@@ -14,7 +14,11 @@ NC='\033[0m' # No Color
 
 # Configuration
 PKGNAME="speedynote"
-PKGVER="1.3.3"
+PKGVER=$(sed -n 's/^project(SpeedyNote VERSION \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' CMakeLists.txt)
+if [ -z "$PKGVER" ]; then
+    echo "ERROR: Could not extract version from CMakeLists.txt"
+    exit 1
+fi
 PKGREL="1"
 PKGARCH=$(uname -m)
 MAINTAINER="SpeedyNote Team <info@speedynote.org>"

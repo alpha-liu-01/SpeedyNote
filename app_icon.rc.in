@@ -4,12 +4,12 @@
 // Application icon
 // NOTE: mainicon.ico removed — regenerate from mainicon.svg if Windows icon is needed:
 //   magick convert -background none resources/icons/mainicon.svg -define icon:auto-resize=256,128,64,48,32,16 resources/icons/mainicon.ico
-1 ICON "resources/icons/mainicon.ico"
+1 ICON "@CMAKE_SOURCE_DIR@/resources/icons/mainicon.ico"
 
 // Version information
 1 VERSIONINFO
-FILEVERSION 1,3,3,0
-PRODUCTVERSION 1,3,3,0
+FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -22,16 +22,16 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "SpeedyNote"
             VALUE "FileDescription", "SpeedyNote - Fast Digital Note Taking Application"
-            VALUE "FileVersion", "1.3.3.0"
+            VALUE "FileVersion", "@PROJECT_VERSION@.0"
             VALUE "InternalName", "speedynote"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "speedynote.exe"
             VALUE "ProductName", "SpeedyNote"
-            VALUE "ProductVersion", "1.3.3.0"
+            VALUE "ProductVersion", "@PROJECT_VERSION@.0"
         END
     END
     BLOCK "VarFileInfo"
     BEGIN
         VALUE "Translation", 0x409, 1200
     END
-END 
+END
