@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.3.3 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.3.4 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -235,9 +235,13 @@ if(WIN32)
         add_compile_options(-march=nehalem -msse4.2 -O3 -ffast-math -DNDEBUG)
     endif()
 
-    # Windows resources
+    # Windows resources (version substituted from project(VERSION ...))
     enable_language(RC)
-    set(WIN_RESOURCES app_icon.rc)
+    configure_file(app_icon.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app_icon.rc" @ONLY)
+    set(WIN_RESOURCES "${CMAKE_CURRENT_BINARY_DIR}/app_icon.rc")
+
+    # Inno Setup script (version substituted from project(VERSION ...))
+    configure_file(packaging.iss.in "${CMAKE_SOURCE_DIR}/packaging.iss" @ONLY)
 
 elseif(IOS)
     # =========================================================================
@@ -849,8 +853,18 @@ if(ANDROID)
         qt_policy(SET QTP0002 NEW)
     endif()
     
+    # Generate AndroidManifest.xml with version from CMake, then point
+    # the Android deploy tool at the configured copy.
+    set(ANDROID_CONFIGURED_DIR "${CMAKE_CURRENT_BINARY_DIR}/android-configured")
+    file(COPY "${CMAKE_SOURCE_DIR}/android/app-resources/"
+         DESTINATION "${ANDROID_CONFIGURED_DIR}/")
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/android/app-resources/AndroidManifest.xml.in"
+        "${ANDROID_CONFIGURED_DIR}/AndroidManifest.xml"
+        @ONLY)
+
     set_target_properties(speedynote PROPERTIES
-        QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android/app-resources"
+        QT_ANDROID_PACKAGE_SOURCE_DIR "${ANDROID_CONFIGURED_DIR}"
         QT_ANDROID_TARGET_SDK_VERSION 35
         QT_ANDROID_MIN_SDK_VERSION 26
     )
@@ -918,6 +932,16 @@ elseif(IOS)
 else()
     add_executable(speedynote ${APP_SOURCES})
 endif()
+
+# ============================================================================
+# Version Defines (single source of truth: project(VERSION ...) above)
+# ============================================================================
+target_compile_definitions(speedynote PRIVATE
+    APP_VERSION="${PROJECT_VERSION}"
+    APP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    APP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    APP_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+)
 
 # ============================================================================
 # Translation Compilation (.ts -> .qm)
