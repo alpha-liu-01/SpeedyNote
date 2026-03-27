@@ -92,6 +92,13 @@ void Toolbar::setupUi()
     m_toolGroup->addButton(m_textExpandable->toolButton());
     mainLayout->addWidget(m_textExpandable);
 
+    // --- Pan (no subtoolbar) ---
+    m_panButton = new ToolButton(this);
+    m_panButton->setThemedIcon("move");
+    m_panButton->setToolTip(tr("Pan Tool (H)"));
+    m_toolGroup->addButton(m_panButton);
+    mainLayout->addWidget(m_panButton);
+
     mainLayout->addSpacing(16);
 
     // --- Undo / Redo ---
@@ -148,6 +155,10 @@ void Toolbar::connectSignals()
     connect(m_textExpandable->toolButton(), &QPushButton::clicked, this, [this]() {
         expandToolButton(ToolType::Highlighter);
         emit toolSelected(ToolType::Highlighter);
+    });
+    connect(m_panButton, &QPushButton::clicked, this, [this]() {
+        expandToolButton(ToolType::Pan);
+        emit toolSelected(ToolType::Pan);
     });
 
     connect(m_straightLineButton, &ToggleButton::toggled,
@@ -222,6 +233,8 @@ void Toolbar::setCurrentTool(ToolType tool)
         exp->toolButton()->setChecked(true);
     } else if (tool == ToolType::Lasso) {
         m_lassoButton->setChecked(true);
+    } else if (tool == ToolType::Pan) {
+        m_panButton->setChecked(true);
     }
 
     m_toolGroup->blockSignals(false);
@@ -265,6 +278,7 @@ void Toolbar::updateTheme(bool darkMode)
     // Update plain buttons
     m_straightLineButton->setDarkMode(darkMode);
     m_lassoButton->setDarkMode(darkMode);
+    m_panButton->setDarkMode(darkMode);
     m_undoButton->setDarkMode(darkMode);
     m_redoButton->setDarkMode(darkMode);
     m_touchGestureButton->setDarkMode(darkMode);

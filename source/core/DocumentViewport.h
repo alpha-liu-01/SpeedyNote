@@ -1748,6 +1748,14 @@ private:
     int m_currentPageIndex = 0;
     bool m_needsPositionRestore = false;  ///< BUG FIX: Edgeless position needs restore in showEvent
     
+    // ===== Pan Tool State =====
+    bool m_isPanToolDragging = false;
+    QPointF m_panToolLastPos;
+    
+    // ===== Middle Mouse Pan (independent of tool system) =====
+    bool m_isMiddleMousePanning = false;
+    QPointF m_middleMouseLastPos;
+    
     // ===== Touch Gesture Handler =====
     // Touch gesture logic is encapsulated in TouchGestureHandler (see TouchGestureHandler.h)
     TouchGestureHandler* m_touchHandler = nullptr;  ///< Handles touch pan/zoom/tap
@@ -2763,6 +2771,11 @@ private:
      * Finalizes text selection.
      */
     void handlePointerRelease_Highlighter(const PointerEvent& pe);
+    
+    // ----- Pan Tool Handlers -----
+    void handlePointerPress_Pan(const PointerEvent& pe);
+    void handlePointerMove_Pan(const PointerEvent& pe);
+    void handlePointerRelease_Pan(const PointerEvent& pe);
     
     /**
      * @brief Load text boxes from PDF for the specified page.

@@ -19,7 +19,8 @@ enum class ToolType {
     Eraser,     ///< Vector eraser - stroke-based removal
     Highlighter,///< Vector highlighter - highlight blend mode (Phase 2B)
     Lasso,      ///< Selection tool - select and manipulate strokes (Phase 2B)
-    ObjectSelect///< Object selection tool - select and manipulate inserted objects (Phase O2)
+    ObjectSelect,///< Object selection tool - select and manipulate inserted objects (Phase O2)
+    Pan         ///< Hand tool - click-drag to pan the viewport
 };
 
 // Qt5 does not auto-generate qHash for enum class types used as QHash keys.

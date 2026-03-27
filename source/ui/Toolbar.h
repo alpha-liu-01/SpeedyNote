@@ -75,8 +75,9 @@ private:
     ExpandableToolButton *m_objectInsertExpandable;
     ExpandableToolButton *m_textExpandable;
 
-    // Plain tool button (no subtoolbar)
+    // Plain tool buttons (no subtoolbar)
     ToolButton *m_lassoButton;
+    ToolButton *m_panButton;
 
     // Non-exclusive toggle
     ToggleButton *m_straightLineButton;

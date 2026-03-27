@@ -718,6 +718,14 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
+    // Clean up Pan tool state when switching away
+    if (previousTool == ToolType::Pan && tool != ToolType::Pan) {
+        if (m_isPanToolDragging) {
+            endPanGesture();
+            m_isPanToolDragging = false;
+        }
+    }
+    
     // Phase A: Clear text selection when switching away from Highlighter
     if (previousTool == ToolType::Highlighter && tool != ToolType::Highlighter) {
         bool hadTextSelection = m_textSelection.isValid();
@@ -2466,6 +2474,16 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
 {
+    // Middle mouse button: start pan gesture (independent of active tool)
+    if (event->button() == Qt::MiddleButton) {
+        beginPanGesture();
+        m_middleMouseLastPos = SN_MOUSE_POS(event);
+        m_isMiddleMousePanning = true;
+        setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    
     // Only handle left button for drawing
     if (event->button() != Qt::LeftButton) {
         event->ignore();
@@ -2493,6 +2511,16 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
 
 void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
 {
+    // Middle mouse pan (independent of tool system)
+    if (m_isMiddleMousePanning && (event->buttons() & Qt::MiddleButton)) {
+        QPointF delta = SN_MOUSE_POS(event) - m_middleMouseLastPos;
+        QPointF docDelta(-delta.x() / m_zoomLevel, -delta.y() / m_zoomLevel);
+        updatePanGesture(docDelta);
+        m_middleMouseLastPos = SN_MOUSE_POS(event);
+        event->accept();
+        return;
+    }
+    
     // CRITICAL: Reject touch-synthesized mouse events
     if (event->source() == Qt::MouseEventSynthesizedBySystem ||
         event->source() == Qt::MouseEventSynthesizedByQt) {
@@ -2538,6 +2566,15 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
 
 void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
 {
+    // Middle mouse pan release
+    if (event->button() == Qt::MiddleButton && m_isMiddleMousePanning) {
+        endPanGesture();
+        m_isMiddleMousePanning = false;
+        updateHighlighterCursor();
+        event->accept();
+        return;
+    }
+    
     if (event->button() != Qt::LeftButton) {
         event->ignore();
         return;
@@ -4270,6 +4307,8 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     } else if (m_currentTool == ToolType::Highlighter) {
         // Phase A: Text selection / highlighter tool
         handlePointerPress_Highlighter(pe);
+    } else if (m_currentTool == ToolType::Pan) {
+        handlePointerPress_Pan(pe);
     }
 }
 
@@ -4357,6 +4396,11 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
         return;
     }
     
+    if (m_currentTool == ToolType::Pan && m_isPanToolDragging) {
+        handlePointerMove_Pan(pe);
+        return;
+    }
+    
     // For stroke drawing, require an active drawing page
     if (m_activeDrawingPage < 0) {
         return;
@@ -4419,6 +4463,12 @@ void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
     // Phase A: Highlighter tool - finalize text selection
     if (m_currentTool == ToolType::Highlighter) {
         handlePointerRelease_Highlighter(pe);
+        return;
+    }
+    
+    // Pan tool - finalize pan gesture
+    if (m_currentTool == ToolType::Pan && m_isPanToolDragging) {
+        handlePointerRelease_Pan(pe);
         return;
     }
     
@@ -9727,8 +9777,12 @@ void DocumentViewport::setHighlighterColor(const QColor& color)
 
 void DocumentViewport::updateHighlighterCursor()
 {
+    if (m_currentTool == ToolType::Pan) {
+        setCursor(m_isPanToolDragging ? Qt::ClosedHandCursor : Qt::OpenHandCursor);
+        return;
+    }
+    
     if (m_currentTool != ToolType::Highlighter) {
-        // Not in Highlighter mode - restore default cursor
         setCursor(Qt::ArrowCursor);
         return;
     }
@@ -9913,6 +9967,39 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     
     update();
 }
+
+// =============================================================================
+// Pan Tool Handlers
+// =============================================================================
+
+void DocumentViewport::handlePointerPress_Pan(const PointerEvent& pe)
+{
+    beginPanGesture();
+    m_panToolLastPos = pe.viewportPos;
+    m_isPanToolDragging = true;
+    setCursor(Qt::ClosedHandCursor);
+}
+
+void DocumentViewport::handlePointerMove_Pan(const PointerEvent& pe)
+{
+    QPointF delta = pe.viewportPos - m_panToolLastPos;
+    QPointF docDelta(-delta.x() / m_zoomLevel, -delta.y() / m_zoomLevel);
+    updatePanGesture(docDelta);
+    m_panToolLastPos = pe.viewportPos;
+}
+
+void DocumentViewport::handlePointerRelease_Pan(const PointerEvent& pe)
+{
+    Q_UNUSED(pe);
+    endPanGesture();
+    m_isPanToolDragging = false;
+    setCursor(Qt::OpenHandCursor);
+    
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;
+}
+
+// =============================================================================
 
 DocumentViewport::CharacterPosition DocumentViewport::findCharacterAtPoint(const QPointF& pdfPos) const
 {
