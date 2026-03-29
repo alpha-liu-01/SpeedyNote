@@ -2,6 +2,7 @@
 #include "MainWindow.h"
 #include "core/Page.h"
 #include "core/ShortcutManager.h"
+#include "core/DocumentViewport.h"
 #include "layers/VectorLayer.h"
 
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
@@ -271,6 +272,10 @@ void ControlPanelDialog::applyChanges()
     qreal minWidth = minStrokeWidthSpin->value();
     settings.setValue("tools/minStrokeWidth", minWidth);
     VectorLayer::setMinStrokeWidth(minWidth);
+
+    qreal wheelSpeed = wheelScrollSpeedSpin->value();
+    settings.setValue("tools/wheelScrollSpeed", wheelSpeed);
+    DocumentViewport::setWheelScrollSpeed(wheelSpeed);
 
     // Apply language settings
     settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
@@ -1008,6 +1013,30 @@ void ControlPanelDialog::createToolsTab()
     strokeLayout->addRow(hint);
 
     layout->addWidget(strokeGroup);
+
+    // --- Panning settings group ---
+    QGroupBox *panGroup = new QGroupBox(tr("Panning"), toolsTab);
+    QFormLayout *panLayout = new QFormLayout(panGroup);
+
+    wheelScrollSpeedSpin = new QDoubleSpinBox(panGroup);
+    wheelScrollSpeedSpin->setRange(5.0, 200.0);
+    wheelScrollSpeedSpin->setSingleStep(5.0);
+    wheelScrollSpeedSpin->setDecimals(1);
+    wheelScrollSpeedSpin->setSuffix(tr(" px"));
+    wheelScrollSpeedSpin->setValue(settings.value("tools/wheelScrollSpeed", 40.0).toDouble());
+
+    panLayout->addRow(tr("Mouse wheel scroll speed:"), wheelScrollSpeedSpin);
+
+    QLabel *panHint = new QLabel(
+        tr("Distance the viewport moves per mouse wheel click, in document units. "
+           "Applies to vertical panning (wheel / `+wheel) and horizontal panning (Shift+wheel). "
+           "Does not affect touchpad scrolling."),
+        panGroup);
+    panHint->setWordWrap(true);
+    panHint->setStyleSheet("color: gray; font-size: 11px;");
+    panLayout->addRow(panHint);
+
+    layout->addWidget(panGroup);
     layout->addStretch();
 
     tabWidget->addTab(toolsTab, tr("Tools"));

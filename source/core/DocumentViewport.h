@@ -356,6 +356,11 @@ public:
     void setSkipImageMasking(bool skip);
     bool skipImageMasking() const { return m_skipImageMasking; }
 
+    // ===== Mouse Wheel Scroll Speed =====
+
+    static void setWheelScrollSpeed(qreal speed) { s_wheelScrollSpeed = qBound(5.0, speed, 200.0); }
+    static qreal wheelScrollSpeed() { return s_wheelScrollSpeed; }
+
     // ===== View State Getters =====
     
     /**
@@ -1783,6 +1788,9 @@ private:
     static constexpr qreal MIN_ZOOM = 0.1;   // 10%
     /// CUSTOMIZABLE: Maximum zoom level (power user setting, range: 5.0-20.0)
     static constexpr qreal MAX_ZOOM = 10.0;  // 1000%
+
+    // ----- Mouse Wheel Scroll Speed -----
+    static inline qreal s_wheelScrollSpeed = 40.0;  ///< Document units per wheel click
     
     // ----- Tool Defaults -----
     // These are initial values; MainWindow will set them from user preferences.

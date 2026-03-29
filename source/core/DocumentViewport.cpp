@@ -2646,9 +2646,8 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         scrollDelta = QPointF(-pixelDelta.x(), -pixelDelta.y()) / m_zoomLevel;
     } else if (!angleDelta.isNull()) {
         // Mouse wheel: convert degrees to scroll distance
-        // 120 units = one step, scroll by ~40 document units per step
-        // CUSTOMIZABLE: Scroll speed (user preference, range: 10-100)
-        qreal scrollSpeed = 40.0;  // TODO: Load from user settings
+        // 120 units = one step, scroll by s_wheelScrollSpeed document units per step
+        qreal scrollSpeed = s_wheelScrollSpeed;
         scrollDelta.setX(-angleDelta.x() / 120.0 * scrollSpeed);
         scrollDelta.setY(-angleDelta.y() / 120.0 * scrollSpeed);
     }
