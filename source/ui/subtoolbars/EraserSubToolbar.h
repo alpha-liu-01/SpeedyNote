@@ -2,6 +2,7 @@
 #define ERASERSUBTOOLBAR_H
 
 #include "SubToolbar.h"
+#include "../widgets/ModeToggleButton.h"
 #include <QColor>
 #include <QHash>
 
@@ -48,12 +49,29 @@ public:
      */
     qreal currentSize() const;
 
+    /**
+     * @brief Get the current eraser mode index (0 = Normal, 1 = Lasso).
+     */
+    int currentModeIndex() const;
+
+    /**
+     * @brief Set the eraser mode from external source without emitting signal.
+     * @param mode 0 = Normal, 1 = Lasso.
+     */
+    void setModeState(int mode);
+
 signals:
     /**
      * @brief Emitted when the eraser size changes.
      * @param size The new eraser size.
      */
     void eraserSizeChanged(qreal size);
+
+    /**
+     * @brief Emitted when the eraser mode changes.
+     * @param mode 0 = Normal, 1 = Lasso.
+     */
+    void eraserModeChanged(int mode);
 
 private slots:
     void onSizePresetClicked(int index);
@@ -67,10 +85,12 @@ private:
     void selectSizePreset(int index);
 
     // Widgets
+    ModeToggleButton* m_modeToggle = nullptr;
     ThicknessPresetButton* m_sizeButtons[3] = {nullptr, nullptr, nullptr};
     
     // Current state
     int m_selectedSizeIndex = 1;  // Default: medium (index 1)
+    int m_eraserModeIndex = 0;    // 0 = Normal, 1 = Lasso
     
     // Per-tab state storage
     struct TabState {
@@ -93,6 +113,7 @@ private:
     static const QString SETTINGS_GROUP;
     static const QString KEY_SIZE_PREFIX;
     static const QString KEY_SELECTED_SIZE;
+    static const QString KEY_ERASER_MODE;
 };
 
 #endif // ERASERSUBTOOLBAR_H

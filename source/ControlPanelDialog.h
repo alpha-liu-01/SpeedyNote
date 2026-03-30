@@ -94,6 +94,7 @@ private:
     // === Tools tab ===
     QWidget *toolsTab;
     QDoubleSpinBox *minStrokeWidthSpin;
+    QDoubleSpinBox *wheelScrollSpeedSpin;
     void createToolsTab();
 
     // === Theme tab ===

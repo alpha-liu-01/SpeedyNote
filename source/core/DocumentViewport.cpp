@@ -718,6 +718,16 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
+    // Cancel any in-progress eraser lasso when switching away from Eraser
+    if (previousTool == ToolType::Eraser && tool != ToolType::Eraser) {
+        if (m_isDrawingEraserLasso) {
+            m_isDrawingEraserLasso = false;
+            m_eraserLassoPageIndex = -1;
+            m_lassoPath.clear();
+            m_pointerActive = false;
+        }
+    }
+    
     // Clean up Pan tool state when switching away
     if (previousTool == ToolType::Pan && tool != ToolType::Pan) {
         if (m_isPanToolDragging) {
@@ -856,6 +866,25 @@ void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Object action mode changed to:" << (mode == ObjectActionMode::Select ? "Select" : "Create");
 #endif
+}
+
+void DocumentViewport::setEraserMode(EraserMode mode)
+{
+    if (m_eraserMode == mode) {
+        return;
+    }
+
+    // Cancel any in-progress eraser lasso when switching away from Lasso mode
+    if (m_isDrawingEraserLasso) {
+        m_isDrawingEraserLasso = false;
+        m_eraserLassoPageIndex = -1;
+        m_lassoPath.clear();
+        m_pointerActive = false;
+    }
+
+    m_eraserMode = mode;
+    emit eraserModeChanged(mode);
+    update();
 }
 
 // ===== View State Setters =====
@@ -2367,12 +2396,12 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         painter.restore();
     }
     
-    // Task 2.10: Draw lasso selection path while drawing
+    // Task 2.10: Draw lasso selection path while drawing (regular lasso or eraser lasso)
     // P1: Use incremental rendering for O(1) per frame instead of O(n)
-    if (m_isDrawingLasso && m_lassoPath.size() > 1) {
+    if ((m_isDrawingLasso || m_isDrawingEraserLasso) && m_lassoPath.size() > 1) {
         renderLassoPathIncremental(painter);
     }
-    
+
     // Task 2.10.3: Draw lasso selection (selected strokes + bounding box)
     // P5: Skip during background snapshot capture
     if (m_lassoSelection.isValid() && !m_skipSelectionRendering) {
@@ -2646,9 +2675,8 @@ void DocumentViewport::wheelEvent(QWheelEvent* event)
         scrollDelta = QPointF(-pixelDelta.x(), -pixelDelta.y()) / m_zoomLevel;
     } else if (!angleDelta.isNull()) {
         // Mouse wheel: convert degrees to scroll distance
-        // 120 units = one step, scroll by ~40 document units per step
-        // CUSTOMIZABLE: Scroll speed (user preference, range: 10-100)
-        qreal scrollSpeed = 40.0;  // TODO: Load from user settings
+        // 120 units = one step, scroll by s_wheelScrollSpeed document units per step
+        qreal scrollSpeed = s_wheelScrollSpeed;
         scrollDelta.setX(-angleDelta.x() / 120.0 * scrollSpeed);
         scrollDelta.setY(-angleDelta.y() / 120.0 * scrollSpeed);
     }
@@ -4269,15 +4297,33 @@ void DocumentViewport::handlePointerPress(const PointerEvent& pe)
     bool isErasing = m_hardwareEraserActive || m_currentTool == ToolType::Eraser;
     
     if (isErasing) {
-        eraseAt(pe);
-        // CRITICAL FIX: Always update cursor area on press to show the eraser cursor
-        // eraseAt() only updates when strokes are removed, but we need to show cursor immediately
-        // Use elliptical region to match the circular eraser cursor
-        // Use toAlignedRect() to properly round floating-point to integer coords
-        qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
-        QRectF cursorRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
-                           eraserRadius * 2, eraserRadius * 2);
-        update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
+        if (m_eraserMode == EraserMode::Lasso) {
+            // Lasso eraser: start drawing a freeform region
+            m_lassoPath.clear();
+            resetLassoPathCache();
+            
+            QPointF pt;
+            if (m_document->isEdgeless()) {
+                pt = viewportToDocument(pe.viewportPos);
+                m_eraserLassoPageIndex = -1;
+            } else if (pe.pageHit.valid()) {
+                pt = pe.pageHit.pagePoint;
+                m_eraserLassoPageIndex = pe.pageHit.pageIndex;
+            } else {
+                return;
+            }
+            
+            m_lassoPath << pt;
+            m_isDrawingEraserLasso = true;
+            m_pointerActive = true;
+            update();
+        } else {
+            eraseAt(pe);
+            qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
+            QRectF cursorRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
+                               eraserRadius * 2, eraserRadius * 2);
+            update(QRegion(cursorRectF.toAlignedRect(), QRegion::Ellipse));
+        }
     } else if (m_currentTool == ToolType::Pen || m_currentTool == ToolType::Marker) {
         // Task 2.9: Straight line mode - record start point instead of normal stroke
         if (m_straightLineMode) {
@@ -4337,27 +4383,71 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
     // Erasing works in edgeless mode even without a valid drawing page
     // (eraseAtEdgeless uses document coordinates, not page coordinates)
     if (isErasing) {
+        if (m_isDrawingEraserLasso) {
+            // Lasso eraser: append point (mirrors handlePointerMove_Lasso logic)
+            QPointF pt;
+            if (m_document->isEdgeless()) {
+                pt = viewportToDocument(pe.viewportPos);
+            } else if (pe.pageHit.valid() && pe.pageHit.pageIndex == m_eraserLassoPageIndex) {
+                pt = pe.pageHit.pagePoint;
+            } else if (m_eraserLassoPageIndex >= 0) {
+                QPointF docPos = viewportToDocument(pe.viewportPos);
+                QPointF pageOrigin = pagePosition(m_eraserLassoPageIndex);
+                pt = docPos - pageOrigin;
+            } else {
+                return;
+            }
+            
+            // Point decimation: compare against the last ADDED path point in doc coords
+            bool hasLastPoint = !m_lassoPath.isEmpty();
+            QPointF lastPt;
+            if (hasLastPoint) {
+                lastPt = m_lassoPath.last();
+                qreal dx = pt.x() - lastPt.x();
+                qreal dy = pt.y() - lastPt.y();
+                if (dx * dx + dy * dy < 4.0) {
+                    return;
+                }
+            }
+            
+            m_lassoPath << pt;
+            
+            // Dirty rect: convert actual path endpoints to viewport coords
+            if (hasLastPoint) {
+                QPointF vpLast, vpCurrent;
+                if (m_document->isEdgeless()) {
+                    vpLast = documentToViewport(lastPt);
+                    vpCurrent = documentToViewport(pt);
+                } else {
+                    QPointF pageOrigin = pagePosition(m_eraserLassoPageIndex);
+                    vpLast = documentToViewport(lastPt + pageOrigin);
+                    vpCurrent = documentToViewport(pt + pageOrigin);
+                }
+                QRectF dirtyRect = QRectF(vpLast, vpCurrent).normalized();
+                dirtyRect.adjust(-4, -4, 4, 4);
+                update(dirtyRect.toRect());
+            } else {
+                QPointF vpPt = m_document->isEdgeless()
+                    ? documentToViewport(pt)
+                    : documentToViewport(pt + pagePosition(m_eraserLassoPageIndex));
+                QRectF dirtyRect(vpPt.x() - 5, vpPt.y() - 5, 10, 10);
+                update(dirtyRect.toRect());
+            }
+            return;
+        }
+        
         eraseAt(pe);
-        // CRITICAL FIX: eraseAt() only calls update() when strokes are removed!
-        // We must ALWAYS update the cursor area to show cursor movement.
-        // 
-        // FIX: Use QRegion with two separate elliptical regions instead of
-        // their bounding box union. This prevents the "square brush" visual
-        // artifact where the entire bounding rectangle appears refreshed.
-        // Use toAlignedRect() to properly round floating-point to integer coords.
         qreal eraserRadius = m_eraserSize * m_zoomLevel + 5;
         
-        // Create elliptical regions for old and new positions (approximates circles)
         QRectF oldRectF(oldPos.x() - eraserRadius, oldPos.y() - eraserRadius,
                         eraserRadius * 2, eraserRadius * 2);
         QRectF newRectF(pe.viewportPos.x() - eraserRadius, pe.viewportPos.y() - eraserRadius,
                         eraserRadius * 2, eraserRadius * 2);
         
-        // Use elliptical regions for more accurate circular dirty areas
         QRegion dirtyRegion(oldRectF.toAlignedRect(), QRegion::Ellipse);
         dirtyRegion += QRegion(newRectF.toAlignedRect(), QRegion::Ellipse);
         update(dirtyRegion);
-        return;  // Don't fall through to stroke continuation
+        return;
     }
     
     // Task 2.9: Straight line mode - update preview end point
@@ -4414,6 +4504,25 @@ void DocumentViewport::handlePointerMove(const PointerEvent& pe)
 void DocumentViewport::handlePointerRelease(const PointerEvent& pe)
 {
     if (!m_document) return;
+    
+    // Eraser lasso: finalize and delete strokes inside the region
+    if (m_isDrawingEraserLasso) {
+        if (m_lassoPath.size() >= 2) {
+            m_lassoPath << m_lassoPath.first();
+        }
+        finalizeEraserLasso();
+        
+        m_isDrawingEraserLasso = false;
+        m_eraserLassoPageIndex = -1;
+        m_lassoPath.clear();
+        m_pointerActive = false;
+        m_activeSource = PointerEvent::Unknown;
+        m_hardwareEraserActive = false;
+        
+        update();
+        preloadStrokeCaches();
+        return;
+    }
     
     // Task 2.9: Straight line mode - create the actual stroke
     if (m_isDrawingStraightLine) {
@@ -5070,8 +5179,11 @@ void DocumentViewport::renderLassoPathIncremental(QPainter& painter)
         // Determine coordinate conversion based on mode
         bool isEdgeless = m_document && m_document->isEdgeless();
         QPointF pageOrigin;
-        if (!isEdgeless && m_lassoSelection.sourcePageIndex >= 0) {
-            pageOrigin = pagePosition(m_lassoSelection.sourcePageIndex);
+        if (!isEdgeless) {
+            int srcPage = m_isDrawingEraserLasso ? m_eraserLassoPageIndex
+                                                 : m_lassoSelection.sourcePageIndex;
+            if (srcPage >= 0)
+                pageOrigin = pagePosition(srcPage);
         }
         
         // Render each new segment with proper dash offset
@@ -10888,8 +11000,10 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
 
 void DocumentViewport::drawEraserCursor(QPainter& painter)
 {
-    // Show eraser cursor for: selected eraser tool OR active hardware eraser
-    bool showCursor = (m_currentTool == ToolType::Eraser || m_hardwareEraserActive);
+    // Show eraser cursor for: selected eraser tool OR active hardware eraser,
+    // but only in Normal mode (Lasso mode uses the lasso path as feedback)
+    bool showCursor = (m_currentTool == ToolType::Eraser || m_hardwareEraserActive)
+                      && m_eraserMode == EraserMode::Normal;
     
     if (!showCursor) {
         return;
@@ -10916,6 +11030,100 @@ void DocumentViewport::drawEraserCursor(QPainter& painter)
     
     qreal screenRadius = m_eraserSize * m_zoomLevel;
     painter.drawEllipse(m_lastPointerPos, screenRadius, screenRadius);
+}
+
+void DocumentViewport::finalizeEraserLasso()
+{
+    if (!m_document || m_lassoPath.size() < 3) {
+        return;
+    }
+
+    UndoAction undoAction;
+    undoAction.type = UndoAction::RemoveMultiple;
+
+    if (m_document->isEdgeless()) {
+        int layerIdx = m_edgelessActiveLayerIndex;
+        undoAction.layerIndex = layerIdx;
+
+        const QRectF lassoBounds = m_lassoPath.boundingRect();
+
+        auto tiles = m_document->allLoadedTileCoords();
+        for (const auto& coord : tiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile || layerIdx >= tile->layerCount()) continue;
+            VectorLayer* layer = tile->layer(layerIdx);
+            if (!layer || layer->locked || layer->isEmpty()) continue;
+
+            QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                               coord.second * Document::EDGELESS_TILE_SIZE);
+
+            QSet<QString> idsToRemove;
+            const auto& strokes = layer->strokes();
+            for (const VectorStroke& stroke : strokes) {
+                // Quick bounding-box rejection before expensive per-point copy + test
+                QRectF docBBox = stroke.boundingBox.translated(tileOrigin);
+                if (!docBBox.intersects(lassoBounds)) continue;
+
+                VectorStroke docStroke = stroke;
+                for (auto& pt : docStroke.points) {
+                    pt.pos += tileOrigin;
+                }
+                if (strokeIntersectsLasso(docStroke, m_lassoPath)) {
+                    idsToRemove.insert(stroke.id);
+                }
+            }
+
+            if (idsToRemove.isEmpty()) continue;
+
+            QVector<VectorStroke>& layerStrokes = layer->strokes();
+            for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
+                if (idsToRemove.contains(layerStrokes[i].id)) {
+                    UndoAction::StrokeSegment seg;
+                    seg.tileCoord = coord;
+                    seg.stroke = layerStrokes[i];
+                    undoAction.segments.append(seg);
+                    layerStrokes.removeAt(i);
+                }
+            }
+            layer->invalidateStrokeCache();
+            m_document->markTileDirty(coord);
+        }
+    } else {
+        if (m_eraserLassoPageIndex < 0 || m_eraserLassoPageIndex >= m_document->pageCount()) return;
+        Page* page = m_document->page(m_eraserLassoPageIndex);
+        if (!page) return;
+        VectorLayer* layer = page->activeLayer();
+        if (!layer || layer->locked) return;
+
+        undoAction.layerIndex = page->activeLayerIndex;
+
+        QSet<QString> idsToRemove;
+        for (const VectorStroke& stroke : layer->strokes()) {
+            if (strokeIntersectsLasso(stroke, m_lassoPath)) {
+                idsToRemove.insert(stroke.id);
+            }
+        }
+
+        if (!idsToRemove.isEmpty()) {
+            QVector<VectorStroke>& layerStrokes = layer->strokes();
+            for (int i = static_cast<int>(layerStrokes.size()) - 1; i >= 0; --i) {
+                if (idsToRemove.contains(layerStrokes[i].id)) {
+                    UndoAction::StrokeSegment seg;
+                    seg.pageIndex = m_eraserLassoPageIndex;
+                    seg.stroke = layerStrokes[i];
+                    undoAction.segments.append(seg);
+                    layerStrokes.removeAt(i);
+                }
+            }
+            layer->invalidateStrokeCache();
+            m_document->markPageDirty(m_eraserLassoPageIndex);
+        }
+    }
+
+    if (!undoAction.segments.isEmpty()) {
+        pushUndoAction(undoAction);
+        emit documentModified();
+    }
 }
 
 // ===== Undo/Redo System (unified) =====
@@ -11997,9 +12205,9 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         painter.restore();
     }
     
-    // Task 2.10: Draw lasso selection path (edgeless mode)
+    // Task 2.10: Draw lasso selection path (edgeless mode, regular lasso or eraser lasso)
     // P1: Use incremental rendering for O(1) per frame instead of O(n)
-    if (m_isDrawingLasso && m_lassoPath.size() > 1) {
+    if ((m_isDrawingLasso || m_isDrawingEraserLasso) && m_lassoPath.size() > 1) {
         renderLassoPathIncremental(painter);
     }
     

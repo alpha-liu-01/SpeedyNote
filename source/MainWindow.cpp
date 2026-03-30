@@ -2537,9 +2537,12 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
         viewport->setHighlighterColor(m_toolbar->highlighterSubToolbar()->currentColor());
     }
     
-    // Apply eraser size
+    // Apply eraser size and mode
     if (m_toolbar->eraserSubToolbar()) {
         viewport->setEraserSize(m_toolbar->eraserSubToolbar()->currentSize());
+        viewport->setEraserMode(
+            static_cast<DocumentViewport::EraserMode>(
+                m_toolbar->eraserSubToolbar()->currentModeIndex()));
     }
 }
 
@@ -4562,6 +4565,10 @@ void MainWindow::connectSubToolbarSignals()
     // Eraser
     connect(eraserST, &EraserSubToolbar::eraserSizeChanged, this, [this](qreal size) {
         if (DocumentViewport* vp = currentViewport()) vp->setEraserSize(size);
+    });
+    connect(eraserST, &EraserSubToolbar::eraserModeChanged, this, [this](int mode) {
+        if (DocumentViewport* vp = currentViewport())
+            vp->setEraserMode(static_cast<DocumentViewport::EraserMode>(mode));
     });
 
     // LinkObject color

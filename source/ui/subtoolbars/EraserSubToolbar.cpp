@@ -9,6 +9,7 @@ const QColor EraserSubToolbar::PREVIEW_COLOR = QColor(0x80, 0x80, 0x80);  // Gra
 const QString EraserSubToolbar::SETTINGS_GROUP = "eraser";
 const QString EraserSubToolbar::KEY_SIZE_PREFIX = "size";
 const QString EraserSubToolbar::KEY_SELECTED_SIZE = "selectedSize";
+const QString EraserSubToolbar::KEY_ERASER_MODE = "eraserMode";
 
 EraserSubToolbar::EraserSubToolbar(QWidget* parent)
     : SubToolbar(parent)
@@ -20,6 +21,20 @@ EraserSubToolbar::EraserSubToolbar(QWidget* parent)
 
 void EraserSubToolbar::createWidgets()
 {
+    bool dark = isDarkMode();
+
+    // Mode toggle (Normal / Lasso) as the first widget
+    m_modeToggle = new ModeToggleButton(this);
+    m_modeToggle->setModeIconNames("eraser", "rope");
+    m_modeToggle->setDarkMode(dark);
+    m_modeToggle->setModeToolTips(
+        tr("Normal eraser (click to switch to Lasso)"),
+        tr("Lasso eraser (click to switch to Normal)")
+    );
+    addWidget(m_modeToggle);
+
+    addSeparator();
+
     // Create size preset buttons
     for (int i = 0; i < NUM_PRESETS; ++i) {
         m_sizeButtons[i] = new ThicknessPresetButton(this);
@@ -32,6 +47,13 @@ void EraserSubToolbar::createWidgets()
 
 void EraserSubToolbar::setupConnections()
 {
+    // Mode toggle connection
+    connect(m_modeToggle, &ModeToggleButton::modeChanged, this, [this](int mode) {
+        m_eraserModeIndex = mode;
+        saveToSettings();
+        emit eraserModeChanged(mode);
+    });
+
     // Size button connections
     for (int i = 0; i < NUM_PRESETS; ++i) {
         connect(m_sizeButtons[i], &ThicknessPresetButton::clicked, this, [this, i]() {
@@ -61,11 +83,19 @@ void EraserSubToolbar::loadFromSettings()
     int loadedIndex = settings.value(KEY_SELECTED_SIZE, 1).toInt();  // Default: medium (index 1)
     // Clamp to valid range [0, NUM_PRESETS-1] to handle corrupted settings
     m_selectedSizeIndex = qBound(0, loadedIndex, NUM_PRESETS - 1);
+
+    // Load eraser mode (0 = Normal, 1 = Lasso)
+    m_eraserModeIndex = qBound(0, settings.value(KEY_ERASER_MODE, 0).toInt(), 1);
     
     settings.endGroup();
     
     // Apply selection
     selectSizePreset(m_selectedSizeIndex);
+
+    // Apply mode toggle state
+    m_modeToggle->blockSignals(true);
+    m_modeToggle->setCurrentMode(m_eraserModeIndex);
+    m_modeToggle->blockSignals(false);
 }
 
 void EraserSubToolbar::saveToSettings()
@@ -81,6 +111,9 @@ void EraserSubToolbar::saveToSettings()
     
     // Save selection
     settings.setValue(KEY_SELECTED_SIZE, m_selectedSizeIndex);
+
+    // Save eraser mode
+    settings.setValue(KEY_ERASER_MODE, m_eraserModeIndex);
     
     settings.endGroup();
 }
@@ -96,6 +129,20 @@ void EraserSubToolbar::emitCurrentValues()
     if (m_selectedSizeIndex >= 0 && m_selectedSizeIndex < NUM_PRESETS) {
         emit eraserSizeChanged(m_sizeButtons[m_selectedSizeIndex]->thickness());
     }
+    emit eraserModeChanged(m_eraserModeIndex);
+}
+
+int EraserSubToolbar::currentModeIndex() const
+{
+    return m_eraserModeIndex;
+}
+
+void EraserSubToolbar::setModeState(int mode)
+{
+    m_eraserModeIndex = qBound(0, mode, 1);
+    m_modeToggle->blockSignals(true);
+    m_modeToggle->setCurrentMode(m_eraserModeIndex);
+    m_modeToggle->blockSignals(false);
 }
 
 qreal EraserSubToolbar::currentSize() const

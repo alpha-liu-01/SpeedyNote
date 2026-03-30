@@ -276,6 +276,18 @@ public:
         Create   ///< Click creates new object at position
     };
     Q_ENUM(ObjectActionMode)
+
+    /**
+     * @brief Eraser mode for the Eraser tool.
+     *
+     * Normal: point-based stroke eraser (original behavior).
+     * Lasso: draw a freeform region, delete all strokes inside on release.
+     */
+    enum class EraserMode {
+        Normal,  ///< Point-based stroke eraser (default)
+        Lasso    ///< Draw a region, delete all strokes inside on release
+    };
+    Q_ENUM(EraserMode)
     
     // ===== Constructor & Destructor =====
     
@@ -355,6 +367,11 @@ public:
     bool isPdfDarkModeEnabled() const { return m_pdfDarkModeEnabled; }
     void setSkipImageMasking(bool skip);
     bool skipImageMasking() const { return m_skipImageMasking; }
+
+    // ===== Mouse Wheel Scroll Speed =====
+
+    static void setWheelScrollSpeed(qreal speed) { s_wheelScrollSpeed = qBound(5.0, speed, 200.0); }
+    static qreal wheelScrollSpeed() { return s_wheelScrollSpeed; }
 
     // ===== View State Getters =====
     
@@ -892,6 +909,17 @@ public:
      * Phase D: Called from ObjectSelectSubToolbar to change action mode.
      */
     void setObjectActionMode(ObjectActionMode mode);
+
+    /**
+     * @brief Set the eraser mode.
+     * @param mode The new eraser mode (Normal or Lasso).
+     */
+    void setEraserMode(EraserMode mode);
+
+    /**
+     * @brief Get the current eraser mode.
+     */
+    EraserMode eraserMode() const { return m_eraserMode; }
     
     // ===== Object Resize (Phase O3.1) =====
     
@@ -1611,6 +1639,12 @@ signals:
      * existing objects or creating new ones.
      */
     void objectActionModeChanged(ObjectActionMode mode);
+
+    /**
+     * @brief Emitted when the eraser mode changes.
+     * @param mode New eraser mode (Normal or Lasso).
+     */
+    void eraserModeChanged(EraserMode mode);
     
     /**
      * @brief Emitted when lasso selection state changes.
@@ -1783,6 +1817,9 @@ private:
     static constexpr qreal MIN_ZOOM = 0.1;   // 10%
     /// CUSTOMIZABLE: Maximum zoom level (power user setting, range: 5.0-20.0)
     static constexpr qreal MAX_ZOOM = 10.0;  // 1000%
+
+    // ----- Mouse Wheel Scroll Speed -----
+    static inline qreal s_wheelScrollSpeed = 40.0;  ///< Document units per wheel click
     
     // ----- Tool Defaults -----
     // These are initial values; MainWindow will set them from user preferences.
@@ -1790,6 +1827,9 @@ private:
     QColor m_penColor = Qt::black;    ///< CUSTOMIZABLE: Default pen color (user preference)
     qreal m_penThickness = 5.0;       ///< CUSTOMIZABLE: Default pen thickness (range: 1-50 document units)
     qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
+    EraserMode m_eraserMode = EraserMode::Normal;  ///< Current eraser mode
+    bool m_isDrawingEraserLasso = false;            ///< Currently drawing an eraser lasso region
+    int m_eraserLassoPageIndex = -1;                ///< Page index for paged-mode eraser lasso
     
     // Marker tool settings (Task 2.8)
     QColor m_markerColor = QColor(0xE6, 0xFF, 0x6E, 128);  ///< CUSTOMIZABLE: Default marker color (#E6FF6E at 50% opacity)
@@ -2964,6 +3004,12 @@ private:
      * @param painter The QPainter to render to (viewport coordinates).
      */
     void drawEraserCursor(QPainter& painter);
+
+    /**
+     * @brief Finalize the eraser lasso gesture: delete all strokes inside the
+     *        drawn region and push a single undo action.
+     */
+    void finalizeEraserLasso();
     
     // ===== Undo/Redo Helpers (unified) =====
     
