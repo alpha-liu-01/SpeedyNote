@@ -718,6 +718,16 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
+    // Cancel any in-progress eraser lasso when switching away from Eraser
+    if (previousTool == ToolType::Eraser && tool != ToolType::Eraser) {
+        if (m_isDrawingEraserLasso) {
+            m_isDrawingEraserLasso = false;
+            m_eraserLassoPageIndex = -1;
+            m_lassoPath.clear();
+            m_pointerActive = false;
+        }
+    }
+    
     // Clean up Pan tool state when switching away
     if (previousTool == ToolType::Pan && tool != ToolType::Pan) {
         if (m_isPanToolDragging) {
@@ -862,6 +872,14 @@ void DocumentViewport::setEraserMode(EraserMode mode)
 {
     if (m_eraserMode == mode) {
         return;
+    }
+
+    // Cancel any in-progress eraser lasso when switching away from Lasso mode
+    if (m_isDrawingEraserLasso) {
+        m_isDrawingEraserLasso = false;
+        m_eraserLassoPageIndex = -1;
+        m_lassoPath.clear();
+        m_pointerActive = false;
     }
 
     m_eraserMode = mode;
@@ -11027,6 +11045,8 @@ void DocumentViewport::finalizeEraserLasso()
         int layerIdx = m_edgelessActiveLayerIndex;
         undoAction.layerIndex = layerIdx;
 
+        const QRectF lassoBounds = m_lassoPath.boundingRect();
+
         auto tiles = m_document->allLoadedTileCoords();
         for (const auto& coord : tiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
@@ -11040,6 +11060,10 @@ void DocumentViewport::finalizeEraserLasso()
             QSet<QString> idsToRemove;
             const auto& strokes = layer->strokes();
             for (const VectorStroke& stroke : strokes) {
+                // Quick bounding-box rejection before expensive per-point copy + test
+                QRectF docBBox = stroke.boundingBox.translated(tileOrigin);
+                if (!docBBox.intersects(lassoBounds)) continue;
+
                 VectorStroke docStroke = stroke;
                 for (auto& pt : docStroke.points) {
                     pt.pos += tileOrigin;
