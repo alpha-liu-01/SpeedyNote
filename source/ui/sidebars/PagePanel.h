@@ -211,6 +211,10 @@ private:
     QSet<int> m_pendingInvalidations;
     bool m_needsFullRefresh = false;
     
+    // Debounced resize (avoids heavy cancel+re-render per pixel during sidebar drag)
+    QTimer* m_resizeDebounceTimer = nullptr;
+    int m_pendingThumbnailWidth = 0;
+    
     // Per-tab scroll positions
     QHash<int, int> m_tabScrollPositions;
     
@@ -218,6 +222,7 @@ private:
     static constexpr int MIN_THUMBNAIL_WIDTH = 100;
     static constexpr int THUMBNAIL_PADDING = 16;  // Padding on each side
     static constexpr int INVALIDATION_DELAY_MS = 500;
+    static constexpr int RESIZE_DEBOUNCE_MS = 150;
 };
 
 #endif // PAGEPANEL_H

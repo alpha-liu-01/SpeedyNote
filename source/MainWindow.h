@@ -33,6 +33,7 @@
 #endif
 // Phase SV: Tab bars and viewport stacks managed by SplitViewManager
 #include <QStackedWidget>
+#include <QSplitter>
 
 // Phase 3.1: New architecture includes
 #include "ui/TabManager.h"
@@ -526,6 +527,8 @@ private:
     
     // Phase S3: Left Sidebar Container (replaces floating tabs)
     LeftSidebarContainer *m_leftSidebar = nullptr;  // Tabbed container for left panels
+    QSplitter *m_contentSplitter = nullptr;         // Splitter for resizable sidebar
+    QTimer *m_sidebarWidthSaveTimer = nullptr;      // Debounce timer for persisting width
     LayerPanel *m_layerPanel = nullptr;             // Reference to LayerPanel in container
     PagePanel *m_pagePanel = nullptr;               // Reference to PagePanel in container
     // QWidget *m_leftSideContainer = nullptr;       // Container for sidebars + layer panel

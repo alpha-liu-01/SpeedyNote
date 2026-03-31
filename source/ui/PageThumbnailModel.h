@@ -4,7 +4,6 @@
 #include <QAbstractListModel>
 #include <QPixmap>
 #include <QHash>
-#include <QSet>
 
 class Document;
 class ThumbnailRenderer;
@@ -207,7 +206,6 @@ private:
     // Thumbnail cache with LRU eviction
     mutable QHash<int, QPixmap> m_thumbnailCache;
     mutable QList<int> m_cacheAccessOrder;  // LRU: front = oldest, back = newest
-    mutable QSet<int> m_pendingThumbnails;
     
     void touchCache(int pageIndex) const;   // Mark page as recently used
     void evictOldestIfNeeded() const;       // Evict LRU entries if over limit

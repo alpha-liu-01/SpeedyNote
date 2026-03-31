@@ -28,47 +28,35 @@ void ThumbnailRenderer::requestThumbnail(Document* doc, int pageIndex, int width
         return;
     }
     
-    QMutexLocker locker(&m_mutex);
-    
-    // Check if already pending or active
-    if (m_activePages.contains(pageIndex)) {
-        return;  // Already rendering
-    }
-    
-    for (const ThumbnailSnapshot& pending : m_pendingTasks) {
-        if (pending.pageIndex == pageIndex) {
-            return;  // Already queued
-        }
-    }
-    
-    locker.unlock();
-    
-    // Resolve dark mode state once per request (avoids QSettings per-pixel overhead)
+    // Resolve dark mode state once per request
     bool darkMode = QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
     QSettings settings("SpeedyNote", "App");
     bool pdfDarkMode = darkMode && settings.value("display/pdfDarkMode", true).toBool();
     bool skipMasking = settings.value("display/skipImageMasking", false).toBool();
-
-    // Create snapshot on main thread (thread-safe copy of page data)
-    // This MUST happen before we start the async task
-    ThumbnailSnapshot snapshot = createSnapshot(doc, pageIndex, width, dpr, pdfDarkMode, skipMasking);
-    if (!snapshot.valid) {
-        return;  // Failed to create snapshot (page unavailable)
-    }
     
-    locker.relock();
+    QMutexLocker locker(&m_mutex);
     
-    // Double-check after snapshot creation (in case another request came in)
+    // Check if already pending or active
     if (m_activePages.contains(pageIndex)) {
         return;
     }
     
-    // Add to pending queue
-    m_pendingTasks.append(std::move(snapshot));
+    for (const ThumbnailRequest& req : m_pendingRequests) {
+        if (req.pageIndex == pageIndex) {
+            return;
+        }
+    }
+    
+    // Drop oldest requests if queue is full
+    while (m_pendingRequests.size() >= MAX_PENDING_REQUESTS) {
+        m_pendingRequests.removeFirst();
+    }
+    
+    // Store lightweight request (no heavy snapshot data)
+    m_pendingRequests.append({doc, pageIndex, width, dpr, pdfDarkMode, skipMasking});
     
     locker.unlock();
     
-    // Try to start rendering
     startNextTask();
 }
 
@@ -76,8 +64,8 @@ void ThumbnailRenderer::cancelAll()
 {
     QMutexLocker locker(&m_mutex);
     
-    // Clear pending tasks
-    m_pendingTasks.clear();
+    // Clear lightweight pending requests (trivially cheap)
+    m_pendingRequests.clear();
     
     // Cancel active watchers
     for (QFutureWatcher<QPair<int, QPixmap>>* watcher : m_activeWatchers) {
@@ -97,8 +85,8 @@ bool ThumbnailRenderer::isPending(int pageIndex) const
         return true;
     }
     
-    for (const ThumbnailSnapshot& pending : m_pendingTasks) {
-        if (pending.pageIndex == pageIndex) {
+    for (const ThumbnailRequest& req : m_pendingRequests) {
+        if (req.pageIndex == pageIndex) {
             return true;
         }
     }
@@ -116,23 +104,40 @@ void ThumbnailRenderer::startNextTask()
 {
     QMutexLocker locker(&m_mutex);
     
-    // Check if we can start more renders
-    while (m_activeWatchers.size() < m_maxConcurrent && !m_pendingTasks.isEmpty()) {
-        ThumbnailSnapshot snapshot = std::move(m_pendingTasks.takeFirst());
+    while (m_activeWatchers.size() < m_maxConcurrent && !m_pendingRequests.isEmpty()) {
+        ThumbnailRequest req = m_pendingRequests.takeFirst();
         
-        // Mark as active
+        // Unlock while creating the heavy snapshot on the main thread
+        locker.unlock();
+        
+        bool wasLoaded = req.doc->isPageLoaded(req.pageIndex);
+        
+        ThumbnailSnapshot snapshot = createSnapshot(
+            req.doc, req.pageIndex, req.width, req.dpr,
+            req.pdfDarkMode, req.skipImageMasking);
+        
+        // Evict pages loaded only for thumbnail rendering to prevent
+        // m_loadedPages from growing unboundedly during fast panel scrolling
+        if (!wasLoaded && req.doc->isLazyLoadEnabled()
+            && req.doc->isPageLoaded(req.pageIndex)) {
+            req.doc->evictPage(req.pageIndex);
+        }
+        
+        locker.relock();
+        
+        if (!snapshot.valid) {
+            continue;
+        }
+        
         int pageIndex = snapshot.pageIndex;
         m_activePages.insert(pageIndex);
         
-        // Create future watcher
         auto* watcher = new QFutureWatcher<QPair<int, QPixmap>>(this);
         connect(watcher, &QFutureWatcher<QPair<int, QPixmap>>::finished,
                 this, &ThumbnailRenderer::onRenderFinished);
         
         m_activeWatchers.append(watcher);
         
-        // Move snapshot into lambda - background thread owns it now
-        // No live Document/Page access from background thread!
         QFuture<QPair<int, QPixmap>> future = QtConcurrent::run([snapshot = std::move(snapshot)]() {
             QPixmap result = renderFromSnapshot(snapshot);
             return qMakePair(snapshot.pageIndex, result);
@@ -171,8 +176,11 @@ void ThumbnailRenderer::onRenderFinished()
         }
     }
     
-    // Clean up watcher
-    watcher->deleteLater();
+    // Delete watcher immediately to free the QFuture's result QPixmap.
+    // Safe per Qt docs: "always safe to delete a QObject from within a slot
+    // connected to that object's own signal." The watcher has already been
+    // removed from m_activeWatchers and the result extracted above.
+    delete watcher;
     
     // Emit result if not cancelled
     if (!wasCancelled && !result.second.isNull()) {
