@@ -19,7 +19,10 @@
 #include <QIcon>
 #include <QPalette>
 #include <QApplication>
+#include <QResizeEvent>
 #include <algorithm>  // Phase 5.4: for std::sort in merge
+
+static constexpr int COMPACT_WIDTH_THRESHOLD = 220;
 
 // ============================================================================
 // Constructor
@@ -77,69 +80,120 @@ void LayerPanel::setupUI()
     m_layerScrollArea->setWidget(m_layerContainer);
     mainLayout->addWidget(m_layerScrollArea, 1);  // Stretch factor 1
 
-    // Phase L.3: Top row - Pill buttons (96×36px) for All/None and Merge
-    QHBoxLayout* topButtonLayout = new QHBoxLayout();
-    topButtonLayout->setSpacing(4);
-    
+    // Phase L.3: Pill buttons (96×36px) for All/None and Merge
     m_selectAllButton = new LayerPanelPillButton(tr("All/None"), this);
     m_selectAllButton->setToolTip(tr("Toggle select all/none"));
     m_selectAllButton->setDarkMode(m_darkMode);
     connect(m_selectAllButton, &LayerPanelPillButton::clicked, this, &LayerPanel::onSelectAllClicked);
-    topButtonLayout->addWidget(m_selectAllButton);
     
     m_mergeButton = new LayerPanelPillButton(tr("Merge"), this);
     m_mergeButton->setToolTip(tr("Merge selected layers (2+ required)"));
     m_mergeButton->setDarkMode(m_darkMode);
     connect(m_mergeButton, &LayerPanelPillButton::clicked, this, &LayerPanel::onMergeClicked);
-    topButtonLayout->addWidget(m_mergeButton);
-    
-    topButtonLayout->addStretch();
-    mainLayout->addLayout(topButtonLayout);
-    
-    // Add spacing between top and bottom button rows
-    mainLayout->addSpacing(8);
 
-    // Phase L.3: Bottom row - Icon buttons (36×36px) using ActionBarButton
-    QHBoxLayout* bottomButtonLayout = new QHBoxLayout();
-    bottomButtonLayout->setSpacing(4);
-
+    // Phase L.3: Icon buttons (36×36px) using ActionBarButton
     m_addButton = new ActionBarButton(this);
     m_addButton->setIconName("addtab");
     m_addButton->setDarkMode(m_darkMode);
     m_addButton->setToolTip(tr("Add new layer"));
     connect(m_addButton, &ActionBarButton::clicked, this, &LayerPanel::onAddLayerClicked);
-    bottomButtonLayout->addWidget(m_addButton);
 
     m_removeButton = new ActionBarButton(this);
     m_removeButton->setIconName("trash");
     m_removeButton->setDarkMode(m_darkMode);
     m_removeButton->setToolTip(tr("Remove selected layer"));
     connect(m_removeButton, &ActionBarButton::clicked, this, &LayerPanel::onRemoveLayerClicked);
-    bottomButtonLayout->addWidget(m_removeButton);
 
     m_moveUpButton = new ActionBarButton(this);
     m_moveUpButton->setIconName("layer_uparrow");
     m_moveUpButton->setDarkMode(m_darkMode);
     m_moveUpButton->setToolTip(tr("Move layer up"));
     connect(m_moveUpButton, &ActionBarButton::clicked, this, &LayerPanel::onMoveUpClicked);
-    bottomButtonLayout->addWidget(m_moveUpButton);
 
     m_moveDownButton = new ActionBarButton(this);
     m_moveDownButton->setIconName("layer_downarrow");
     m_moveDownButton->setDarkMode(m_darkMode);
     m_moveDownButton->setToolTip(tr("Move layer down"));
     connect(m_moveDownButton, &ActionBarButton::clicked, this, &LayerPanel::onMoveDownClicked);
-    bottomButtonLayout->addWidget(m_moveDownButton);
 
     m_duplicateButton = new ActionBarButton(this);
     m_duplicateButton->setIconName("copy");
     m_duplicateButton->setDarkMode(m_darkMode);
     m_duplicateButton->setToolTip(tr("Duplicate selected layer"));
     connect(m_duplicateButton, &ActionBarButton::clicked, this, &LayerPanel::onDuplicateClicked);
-    bottomButtonLayout->addWidget(m_duplicateButton);
 
-    bottomButtonLayout->addStretch();
-    mainLayout->addLayout(bottomButtonLayout);
+    // Responsive button container (layout built by relayoutButtons)
+    m_buttonContainer = new QWidget(this);
+    mainLayout->addWidget(m_buttonContainer);
+    relayoutButtons();
+}
+
+// ============================================================================
+// Responsive Button Layout
+// ============================================================================
+
+void LayerPanel::relayoutButtons()
+{
+    bool compact = (width() < COMPACT_WIDTH_THRESHOLD);
+    if (compact == m_compactButtonLayout && m_buttonContainer->layout() != nullptr) {
+        return;
+    }
+    m_compactButtonLayout = compact;
+
+    delete m_buttonContainer->layout();
+
+    QVBoxLayout* vbox = new QVBoxLayout(m_buttonContainer);
+    vbox->setContentsMargins(0, 0, 0, 0);
+    vbox->setSpacing(4);
+
+    if (compact) {
+        QHBoxLayout* row1 = new QHBoxLayout();
+        row1->setSpacing(4);
+        row1->addWidget(m_selectAllButton);
+        row1->addWidget(m_addButton);
+        row1->addStretch();
+        vbox->addLayout(row1);
+
+        QHBoxLayout* row2 = new QHBoxLayout();
+        row2->setSpacing(4);
+        row2->addWidget(m_mergeButton);
+        row2->addWidget(m_removeButton);
+        row2->addStretch();
+        vbox->addLayout(row2);
+
+        QHBoxLayout* row3 = new QHBoxLayout();
+        row3->setSpacing(4);
+        row3->addWidget(m_moveUpButton);
+        row3->addWidget(m_moveDownButton);
+        row3->addWidget(m_duplicateButton);
+        row3->addStretch();
+        vbox->addLayout(row3);
+    } else {
+        QHBoxLayout* topRow = new QHBoxLayout();
+        topRow->setSpacing(4);
+        topRow->addWidget(m_selectAllButton);
+        topRow->addWidget(m_mergeButton);
+        topRow->addStretch();
+        vbox->addLayout(topRow);
+
+        vbox->addSpacing(8);
+
+        QHBoxLayout* bottomRow = new QHBoxLayout();
+        bottomRow->setSpacing(4);
+        bottomRow->addWidget(m_addButton);
+        bottomRow->addWidget(m_removeButton);
+        bottomRow->addWidget(m_moveUpButton);
+        bottomRow->addWidget(m_moveDownButton);
+        bottomRow->addWidget(m_duplicateButton);
+        bottomRow->addStretch();
+        vbox->addLayout(bottomRow);
+    }
+}
+
+void LayerPanel::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    relayoutButtons();
 }
 
 // ============================================================================

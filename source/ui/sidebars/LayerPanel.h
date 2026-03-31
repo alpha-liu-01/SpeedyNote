@@ -242,6 +242,9 @@ public:
      */
     void mergeSelectedLayers();
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private slots:
     /**
      * @brief Handle Add Layer button click.
@@ -339,6 +342,10 @@ private:
     LayerPanelPillButton* m_selectAllButton = nullptr;
     LayerPanelPillButton* m_mergeButton = nullptr;
 
+    // Responsive button layout container
+    QWidget* m_buttonContainer = nullptr;
+    bool m_compactButtonLayout = false;
+
     // Flag to prevent recursive updates
     bool m_updatingList = false;
     
@@ -347,6 +354,12 @@ private:
 
     // Setup methods
     void setupUI();
+    
+    /**
+     * @brief Rebuild button layout based on current panel width.
+     * Switches between 2-row (default) and 3-row (compact) arrangements.
+     */
+    void relayoutButtons();
 
     /**
      * @brief Update button enabled states based on current selection.
