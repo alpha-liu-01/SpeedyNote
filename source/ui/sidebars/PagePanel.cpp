@@ -55,6 +55,17 @@ void PagePanel::setupUI()
     m_invalidationTimer->setSingleShot(true);
     m_invalidationTimer->setInterval(INVALIDATION_DELAY_MS);
     
+    // Create resize debounce timer
+    m_resizeDebounceTimer = new QTimer(this);
+    m_resizeDebounceTimer->setSingleShot(true);
+    m_resizeDebounceTimer->setInterval(RESIZE_DEBOUNCE_MS);
+    connect(m_resizeDebounceTimer, &QTimer::timeout, this, [this]() {
+        if (m_pendingThumbnailWidth > 0) {
+            m_model->setThumbnailWidth(m_pendingThumbnailWidth);
+            m_pendingThumbnailWidth = 0;
+        }
+    });
+    
     // Apply initial theme
     applyTheme();
 }
@@ -396,17 +407,18 @@ void PagePanel::onDragRequested(const QModelIndex& index)
 
 void PagePanel::updateThumbnailWidth()
 {
-    // Calculate thumbnail width based on panel width
     int availableWidth = width() - THUMBNAIL_PADDING * 2;
     int thumbnailWidth = qMax(MIN_THUMBNAIL_WIDTH, availableWidth);
     
-    // Get device pixel ratio from screen
     qreal dpr = devicePixelRatioF();
     
-    // Update model and delegate
-    m_model->setThumbnailWidth(thumbnailWidth);
-    m_model->setDevicePixelRatio(dpr);
+    // Update delegate immediately so layout stays responsive
     m_delegate->setThumbnailWidth(thumbnailWidth);
+    
+    // Debounce the heavy model update (cancels renders + clears cache + re-requests)
+    m_pendingThumbnailWidth = thumbnailWidth;
+    m_model->setDevicePixelRatio(dpr);
+    m_resizeDebounceTimer->start();
 }
 
 // ============================================================================

@@ -349,18 +349,25 @@ public:
         
         if (needsAlphaCompositing) {
             // Calculate bounding rect for the temp buffer
-            // Use polygon bounds if stroke.boundingBox is invalid (empty or not updated)
             QRectF bounds = stroke.boundingBox;
             if (bounds.isEmpty() || !bounds.isValid()) {
                 bounds = poly.polygon.boundingRect();
             }
-            // Expand for caps (which may extend beyond the point positions)
             qreal maxRadius = qMax(poly.startCapRadius, poly.endCapRadius);
             bounds.adjust(-maxRadius - 2, -maxRadius - 2, maxRadius + 2, maxRadius + 2);
             
-            // Safety check: ensure bounds are valid and reasonable
-            if (bounds.isEmpty() || bounds.width() > 10000 || bounds.height() > 10000) {
-                // Fallback to direct rendering if bounds are invalid or too large
+            // Map bounds through the painter's transform to get actual output size.
+            // Without this, the buffer uses input-space dimensions (e.g., full page
+            // coords) even when the painter scales down to thumbnail size, wasting
+            // up to 9x memory per semi-transparent stroke.
+            QTransform xform = painter.transform();
+            QRectF mappedBounds = xform.mapRect(bounds);
+            
+            qreal dpr = painter.device() ? painter.device()->devicePixelRatioF() : 1.0;
+            int bufW = static_cast<int>(mappedBounds.width() * dpr) + 2;
+            int bufH = static_cast<int>(mappedBounds.height() * dpr) + 2;
+            
+            if (bufW <= 0 || bufH <= 0 || bufW > 10000 || bufH > 10000) {
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(stroke.color);
                 painter.drawPolygon(poly.polygon, Qt::WindingFill);
@@ -369,35 +376,32 @@ public:
                 return;
             }
             
-            // Create temp buffer (use painter's device pixel ratio for high DPI)
-            qreal dpr = painter.device() ? painter.device()->devicePixelRatioF() : 1.0;
-            QSize bufferSize(static_cast<int>(bounds.width() * dpr) + 1,
-                             static_cast<int>(bounds.height() * dpr) + 1);
-            QPixmap tempBuffer(bufferSize);
+            QPixmap tempBuffer(bufW, bufH);
             tempBuffer.setDevicePixelRatio(dpr);
             tempBuffer.fill(Qt::transparent);
             
-            // Render to temp buffer at full opacity
+            // Transform chain: input coords → device logical coords (xform)
+            //                  → buffer coords (translate by -mappedBounds.topLeft)
             QPainter tempPainter(&tempBuffer);
             tempPainter.setRenderHint(QPainter::Antialiasing, true);
-            tempPainter.translate(-bounds.topLeft());
+            tempPainter.translate(-mappedBounds.topLeft());
+            tempPainter.setTransform(xform, true);
             
             QColor opaqueColor = stroke.color;
             opaqueColor.setAlpha(255);
             tempPainter.setPen(Qt::NoPen);
             tempPainter.setBrush(opaqueColor);
             
-            // Draw polygon and caps at full opacity
             tempPainter.drawPolygon(poly.polygon, Qt::WindingFill);
             tempPainter.drawEllipse(poly.startCapCenter, poly.startCapRadius, poly.startCapRadius);
             tempPainter.drawEllipse(poly.endCapCenter, poly.endCapRadius, poly.endCapRadius);
             tempPainter.end();
             
-            // Blit temp buffer to output with stroke's alpha
-            // Use save/restore to ensure opacity is properly restored even if something fails
+            // Blit in device logical coordinates (bypass the input→output transform)
             painter.save();
+            painter.resetTransform();
             painter.setOpacity(strokeAlpha / 255.0);
-            painter.drawPixmap(bounds.topLeft(), tempBuffer);
+            painter.drawPixmap(mappedBounds.topLeft(), tempBuffer);
             painter.restore();
         } else {
             // Standard rendering for opaque strokes (no alpha compounding issue)

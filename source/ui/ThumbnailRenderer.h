@@ -161,15 +161,33 @@ private:
     static QPixmap renderFromSnapshot(const ThumbnailSnapshot& snapshot);
     
     /**
+     * @brief Lightweight request stored in the pending queue.
+     * 
+     * Unlike ThumbnailSnapshot, this holds no heavy data (no pixmaps,
+     * no stroke copies). The heavy snapshot is created just-in-time
+     * when a worker slot opens in startNextTask().
+     */
+    struct ThumbnailRequest {
+        Document* doc;
+        int pageIndex;
+        int width;
+        qreal dpr;
+        bool pdfDarkMode;
+        bool skipImageMasking;
+    };
+    
+    /**
      * @brief Start the next pending task if slots are available.
      */
     void startNextTask();
     
-    // Pending pages that have been requested but not yet started
-    QList<ThumbnailSnapshot> m_pendingTasks;
+    // Lightweight pending requests (no heavy data)
+    QList<ThumbnailRequest> m_pendingRequests;
     
     // Pages currently being rendered
     QSet<int> m_activePages;
+    
+    static constexpr int MAX_PENDING_REQUESTS = 8;
     
     // Future watchers for active renders
     QList<QFutureWatcher<QPair<int, QPixmap>>*> m_activeWatchers;

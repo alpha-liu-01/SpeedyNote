@@ -1,7 +1,6 @@
 #include "PageThumbnailModel.h"
 #include "ThumbnailRenderer.h"
 #include "../core/Document.h"
-#include "../core/Page.h"
 
 #include <QMimeData>
 #include <QByteArray>
@@ -239,8 +238,7 @@ void PageThumbnailModel::setDocument(Document* doc)
     m_document = doc;
     m_currentPageIndex = 0;
     m_thumbnailCache.clear();
-    m_cacheAccessOrder.clear();  // LRU: clear access order
-    m_pendingThumbnails.clear();
+    m_cacheAccessOrder.clear();
     
     endResetModel();
 }
@@ -313,30 +311,21 @@ QPixmap PageThumbnailModel::thumbnailForPage(int pageIndex) const
 
 void PageThumbnailModel::invalidateThumbnail(int pageIndex)
 {
-    bool hadCache = m_thumbnailCache.contains(pageIndex);
-    bool wasPending = m_pendingThumbnails.contains(pageIndex);
+    m_thumbnailCache.remove(pageIndex);
+    m_cacheAccessOrder.removeAll(pageIndex);
     
-    if (hadCache || wasPending) {
-        m_thumbnailCache.remove(pageIndex);
-        m_cacheAccessOrder.removeAll(pageIndex);  // LRU: remove from access order
-        m_pendingThumbnails.remove(pageIndex);
-        
-        // Notify view that the thumbnail data changed
-        if (m_document && pageIndex >= 0 && pageIndex < m_document->pageCount()) {
-            const QModelIndex modelIndex = createIndex(pageIndex, 0);
-            emit dataChanged(modelIndex, modelIndex, {ThumbnailRole});
-        }
+    if (m_document && pageIndex >= 0 && pageIndex < m_document->pageCount()) {
+        const QModelIndex modelIndex = createIndex(pageIndex, 0);
+        emit dataChanged(modelIndex, modelIndex, {ThumbnailRole});
     }
 }
 
 void PageThumbnailModel::invalidateAllThumbnails()
 {
-    // Cancel all pending renders
     m_renderer->cancelAll();
     
     m_thumbnailCache.clear();
-    m_cacheAccessOrder.clear();  // LRU: clear access order
-    m_pendingThumbnails.clear();
+    m_cacheAccessOrder.clear();
     
     // Notify view that all data changed
     if (m_document && m_document->pageCount() > 0) {
@@ -348,12 +337,7 @@ void PageThumbnailModel::invalidateAllThumbnails()
 
 void PageThumbnailModel::cancelPendingRenders()
 {
-    // Cancel all pending thumbnail renders and wait for completion.
-    // This is used before operations that access Document pages directly
-    // (like MainWindow::renderPage0Thumbnail) to avoid race conditions
-    // with background thumbnail rendering that also accesses Document::page().
     m_renderer->cancelAll();
-    m_pendingThumbnails.clear();
 }
 
 // ============================================================================
@@ -371,8 +355,7 @@ void PageThumbnailModel::onPageCountChanged()
     
     // Clear cache since page indices may have changed
     m_thumbnailCache.clear();
-    m_cacheAccessOrder.clear();  // LRU: clear access order
-    m_pendingThumbnails.clear();
+    m_cacheAccessOrder.clear();
     
     // Clamp current page index
     if (m_document && m_currentPageIndex >= m_document->pageCount()) {
@@ -389,9 +372,6 @@ void PageThumbnailModel::onPageContentChanged(int pageIndex)
 
 void PageThumbnailModel::onThumbnailRendered(int pageIndex, QPixmap thumbnail)
 {
-    // Remove from pending set
-    m_pendingThumbnails.remove(pageIndex);
-    
     // Validate page index is still valid
     if (!m_document || pageIndex < 0 || pageIndex >= m_document->pageCount()) {
         return;
@@ -416,16 +396,10 @@ void PageThumbnailModel::onThumbnailRendered(int pageIndex, QPixmap thumbnail)
 
 void PageThumbnailModel::requestThumbnail(int pageIndex) const
 {
-    // Don't request if already cached or pending
     if (m_thumbnailCache.contains(pageIndex)) {
         return;
     }
     
-    if (m_pendingThumbnails.contains(pageIndex)) {
-        return;
-    }
-    
-    // Validate
     if (!m_document || pageIndex < 0 || pageIndex >= m_document->pageCount()) {
         return;
     }
@@ -434,8 +408,6 @@ void PageThumbnailModel::requestThumbnail(int pageIndex) const
         return;
     }
     
-    // Mark as pending and request from renderer
-    m_pendingThumbnails.insert(pageIndex);
     m_renderer->requestThumbnail(m_document, pageIndex, m_thumbnailWidth, m_devicePixelRatio);
 }
 
@@ -471,12 +443,7 @@ bool PageThumbnailModel::isPdfPage(int pageIndex) const
         return false;
     }
     
-    const Page* p = m_document->page(pageIndex);
-    if (!p) {
-        return false;
-    }
-    
-    return p->backgroundType == Page::BackgroundType::PDF && p->pdfPageNumber >= 0;
+    return m_document->pdfPageIndexForNotebookPage(pageIndex) >= 0;
 }
 
 bool PageThumbnailModel::canDragPage(int pageIndex) const
@@ -507,10 +474,15 @@ void PageThumbnailModel::touchCache(int pageIndex) const
 
 void PageThumbnailModel::evictOldestIfNeeded() const
 {
-    // Evict oldest entries until we're under the limit
     while (m_thumbnailCache.size() > MAX_CACHED_THUMBNAILS && !m_cacheAccessOrder.isEmpty()) {
         int oldestPage = m_cacheAccessOrder.takeFirst();
         m_thumbnailCache.remove(oldestPage);
+    }
+    // Safeguard: if access order ran out but cache is still over limit
+    // (desynchronization), force-clear everything to prevent unbounded growth.
+    if (m_thumbnailCache.size() > MAX_CACHED_THUMBNAILS) {
+        m_thumbnailCache.clear();
+        m_cacheAccessOrder.clear();
     }
 }
 
