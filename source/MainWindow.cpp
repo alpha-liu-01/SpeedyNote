@@ -71,6 +71,7 @@
 #include <QSet>
 #include <QWheelEvent>
 #include <QTimer>
+#include <QSplitter>
 #include <QShortcut>  // Phase doc-1: Application-wide keyboard shortcuts
 #include "core/ShortcutManager.h"  // Keyboard shortcut hub
 #include "compat/qt_compat.h"  // Qt5/Qt6 input device shims
@@ -702,7 +703,8 @@ void MainWindow::setupUi() {
     // 🌟 Phase S3: Left Sidebar Container (replaces floating tabs)
     // ---------------------------------------------------------------------------------------------------------
     m_leftSidebar = new LeftSidebarContainer(this);
-    m_leftSidebar->setFixedWidth(250);  // Match sidebar width
+    m_leftSidebar->setMinimumWidth(180);
+    m_leftSidebar->setMaximumWidth(500);
     m_leftSidebar->setVisible(false);   // Hidden by default, toggled via NavigationBar
     m_layerPanel = m_leftSidebar->layerPanel();  // Get reference for signal connections
     m_pagePanel = m_leftSidebar->pagePanel();    // Page Panel: Task 5.1
@@ -1206,14 +1208,37 @@ void MainWindow::setupUi() {
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
     
-
+    // QSplitter for resizable left sidebar
+    m_contentSplitter = new QSplitter(Qt::Horizontal);
+    m_contentSplitter->setChildrenCollapsible(false);
+    m_contentSplitter->setHandleWidth(3);
+    m_contentSplitter->addWidget(m_leftSidebar);
+    m_contentSplitter->addWidget(canvasContainer);
+    m_contentSplitter->setStretchFactor(0, 0);  // Sidebar: fixed
+    m_contentSplitter->setStretchFactor(1, 1);  // Canvas: stretches
     
-    // Phase S3: Left sidebar container (replaces separate sidebars and floating tabs)
-    contentLayout->addWidget(m_leftSidebar, 0);
-    // Note: m_leftSideContainer kept for now (outline/bookmarks) but hidden
-    // contentLayout->addWidget(m_leftSideContainer, 0);  // Old outline/bookmarks - to be removed
-    contentLayout->addWidget(canvasContainer, 1); // Canvas takes remaining space
-    // MW2.2: Removed dialToolbar from layout
+    // Restore persisted sidebar width
+    {
+        QSettings s("SpeedyNote", "App");
+        int savedWidth = s.value("ui/leftSidebarWidth", 250).toInt();
+        savedWidth = qBound(180, savedWidth, 500);
+        m_contentSplitter->setSizes({savedWidth, 1});
+    }
+    
+    // Debounce timer for saving sidebar width
+    m_sidebarWidthSaveTimer = new QTimer(this);
+    m_sidebarWidthSaveTimer->setSingleShot(true);
+    m_sidebarWidthSaveTimer->setInterval(300);
+    connect(m_sidebarWidthSaveTimer, &QTimer::timeout, this, [this]() {
+        QSettings s("SpeedyNote", "App");
+        s.setValue("ui/leftSidebarWidth", m_leftSidebar->width());
+    });
+    
+    connect(m_contentSplitter, &QSplitter::splitterMoved, this, [this]() {
+        m_sidebarWidthSaveTimer->start();
+    });
+    
+    contentLayout->addWidget(m_contentSplitter, 1);
     contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
     
     QWidget *contentWidget = new QWidget;
@@ -4228,9 +4253,18 @@ void MainWindow::updateTheme() {
     // Update left sidebar container theme
     if (m_leftSidebar) {
         m_leftSidebar->updateTheme(darkMode);
-    }    
+    }
     
-    
+    // Style the resizable sidebar splitter handle
+    if (m_contentSplitter) {
+        QString handleColor = darkMode ? "#4d4d4d" : "#D0D0D0";
+        m_contentSplitter->setStyleSheet(QString(
+            "QSplitter::handle:horizontal {"
+            "  background-color: %1;"
+            "  width: 3px;"
+            "}"
+        ).arg(handleColor));
+    }
     
     // Update ActionBarContainer theme
     if (m_actionBarContainer) {
