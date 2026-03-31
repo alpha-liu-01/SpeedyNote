@@ -220,7 +220,15 @@ QVector<PdfOutlineItem> MuPdfProvider::convertOutline(fz_outline* ol) const
     
     while (ol) {
         PdfOutlineItem item;
-        item.title = QString::fromUtf8(ol->title ? ol->title : "");
+        QString rawTitle = QString::fromUtf8(ol->title ? ol->title : "");
+        QString cleaned;
+        cleaned.reserve(rawTitle.size());
+        for (const QChar ch : rawTitle) {
+            if (ch.isPrint() && ch != QChar(0xFFFD)) {
+                cleaned.append(ch);
+            }
+        }
+        item.title = cleaned.trimmed();
         item.isOpen = ol->is_open;
         
         // Get destination page
