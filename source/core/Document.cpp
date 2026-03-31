@@ -240,6 +240,13 @@ QVector<QRect> Document::pdfImageRegions(int pageIndex, qreal dpi) const
     return m_pdfProvider->imageRegions(pageIndex, dpi);
 }
 
+void Document::trimPdfStore() const
+{
+    if (isPdfLoaded()) {
+        m_pdfProvider->trimStore();
+    }
+}
+
 int Document::pdfPageCount() const
 {
     if (!isPdfLoaded()) {

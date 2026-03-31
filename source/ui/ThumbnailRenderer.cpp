@@ -242,6 +242,7 @@ ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
             }
             snapshot.pdfBackground = QPixmap::fromImage(pdfImage);
         }
+        doc->trimPdfStore();
     }
     
     // Deep copy stroke data from all layers

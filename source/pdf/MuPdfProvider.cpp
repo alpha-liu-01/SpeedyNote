@@ -48,14 +48,16 @@ static fz_locks_context s_mupdfLocksCtx = {
 // Construction / Destruction
 // ============================================================================
 
+static constexpr size_t SN_MUPDF_STORE_MAX = 32 << 20; // 32 MiB
+
 MuPdfProvider::MuPdfProvider(const QString& pdfPath)
     : m_path(pdfPath)
 {
     // Create MuPDF context
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    m_ctx = fz_new_context(nullptr, &s_mupdfLocksCtx, FZ_STORE_DEFAULT);
+    m_ctx = fz_new_context(nullptr, &s_mupdfLocksCtx, SN_MUPDF_STORE_MAX);
 #else
-    m_ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
+    m_ctx = fz_new_context(nullptr, nullptr, SN_MUPDF_STORE_MAX);
 #endif
     if (!m_ctx) {
         qWarning() << "MuPdfProvider: Failed to create MuPDF context";
@@ -381,6 +383,18 @@ QImage MuPdfProvider::renderPageToImage(int pageIndex, qreal dpi) const
     }
     
     return result;
+}
+
+// ============================================================================
+// Store Management
+// ============================================================================
+
+void MuPdfProvider::trimStore() const
+{
+    QMutexLocker locker(&m_mutex);
+    if (m_ctx) {
+        fz_shrink_store(m_ctx, 0);
+    }
 }
 
 // ============================================================================
