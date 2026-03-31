@@ -824,6 +824,11 @@ public:
     QVector<QRect> pdfImageRegions(int pageIndex, qreal dpi = 96.0) const;
 
     /**
+     * @brief Shrink the PDF provider's internal resource cache to free memory.
+     */
+    void trimPdfStore() const;
+
+    /**
      * @brief Get the number of pages in the PDF.
      * @return Page count, or 0 if no PDF is loaded.
      */

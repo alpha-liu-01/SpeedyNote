@@ -3571,6 +3571,8 @@ QPixmap DocumentViewport::getCachedPdfPage(int pageIndex, qreal dpi)
         DarkModeUtils::invertImageLightness(pdfImage, imgRegions);
     }
     
+    m_document->trimPdfStore();
+    
     QPixmap pixmap = QPixmap::fromImage(pdfImage);
     
     // Add to cache (thread-safe)
@@ -3690,14 +3692,17 @@ void DocumentViewport::doAsyncPdfPreload()
             // BUG-A006 FIX: Check if watcher was cancelled (e.g., by invalidatePdfCache)
             // This happens when document/page changes while render is in progress
             m_activePdfWatchers.removeOne(watcher);
-            watcher->deleteLater();
             
-            if (watcher->isCanceled()) {
+            bool wasCancelled = watcher->isCanceled();
+            QImage pdfImage;
+            if (!wasCancelled) {
+                pdfImage = watcher->result();
+            }
+            delete watcher;
+            
+            if (wasCancelled) {
                 return;
             }
-            
-            // Get the rendered image from the background task
-            QImage pdfImage = watcher->result();
             
             // Check if rendering failed
             if (pdfImage.isNull()) {
@@ -3769,9 +3774,9 @@ void DocumentViewport::doAsyncPdfPreload()
                 return QImage();  // Return null image on failure
             }
             
-            // Render page using cached provider
-            // This is the expensive operation (50-200ms) that we're offloading
-            return threadPdf->renderPageToImage(pdfPageNum, dpi);
+            QImage result = threadPdf->renderPageToImage(pdfPageNum, dpi);
+            threadPdf->trimStore();
+            return result;
         });
         
         watcher->setFuture(future);

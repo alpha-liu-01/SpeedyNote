@@ -219,6 +219,17 @@ public:
         return {};
     }
 
+    // ===== Store Management =====
+
+    /**
+     * @brief Shrink the internal resource cache to free memory.
+     *
+     * MuPDF keeps decoded images and fonts in an internal store.  Call this
+     * after rendering to release that memory when the application already
+     * caches the result at a higher level (e.g. QPixmap thumbnail cache).
+     */
+    virtual void trimStore() const {}
+
     // ===== Text Selection =====
     
     /**
