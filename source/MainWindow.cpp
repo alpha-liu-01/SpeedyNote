@@ -4240,6 +4240,13 @@ void MainWindow::updateTheme() {
         });
     }
     
+    // Sync thumbnail renderer dark mode state
+    if (m_pagePanel) {
+        QSettings s("SpeedyNote", "App");
+        bool pdfDarkMode = darkMode && s.value("display/pdfDarkMode", true).toBool();
+        m_pagePanel->setPdfDarkMode(pdfDarkMode);
+    }
+    
     // REMOVED MW5.1: controlBar styling removed - replaced by NavigationBar and Toolbar
     
     // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0

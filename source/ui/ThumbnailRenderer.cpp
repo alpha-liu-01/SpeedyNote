@@ -5,9 +5,6 @@
 #include "../layers/VectorLayer.h"
 
 #include <QPainter>
-#include <QPalette>
-#include <QGuiApplication>
-#include <QSettings>
 #include <QtConcurrent>
 #include <QDebug>
 
@@ -28,12 +25,6 @@ void ThumbnailRenderer::requestThumbnail(Document* doc, int pageIndex, int width
         return;
     }
     
-    // Resolve dark mode state once per request
-    bool darkMode = QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
-    QSettings settings("SpeedyNote", "App");
-    bool pdfDarkMode = darkMode && settings.value("display/pdfDarkMode", true).toBool();
-    bool skipMasking = settings.value("display/skipImageMasking", false).toBool();
-    
     QMutexLocker locker(&m_mutex);
     
     // Check if already pending or active
@@ -52,12 +43,16 @@ void ThumbnailRenderer::requestThumbnail(Document* doc, int pageIndex, int width
         m_pendingRequests.removeFirst();
     }
     
-    // Store lightweight request (no heavy snapshot data)
-    m_pendingRequests.append({doc, pageIndex, width, dpr, pdfDarkMode, skipMasking});
+    m_pendingRequests.append({doc, pageIndex, width, dpr, m_pdfDarkMode});
     
     locker.unlock();
     
     startNextTask();
+}
+
+void ThumbnailRenderer::setPdfDarkMode(bool enabled)
+{
+    m_pdfDarkMode = enabled;
 }
 
 void ThumbnailRenderer::cancelAll()
@@ -114,7 +109,7 @@ void ThumbnailRenderer::startNextTask()
         
         ThumbnailSnapshot snapshot = createSnapshot(
             req.doc, req.pageIndex, req.width, req.dpr,
-            req.pdfDarkMode, req.skipImageMasking);
+            req.pdfDarkMode);
         
         // Evict pages loaded only for thumbnail rendering to prevent
         // m_loadedPages from growing unboundedly during fast panel scrolling
@@ -192,7 +187,7 @@ void ThumbnailRenderer::onRenderFinished()
 }
 
 ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
-    Document* doc, int pageIndex, int width, qreal dpr, bool pdfDarkMode, bool skipImageMasking)
+    Document* doc, int pageIndex, int width, qreal dpr, bool pdfDarkMode)
 {
     ThumbnailSnapshot snapshot;
     snapshot.pageIndex = pageIndex;
@@ -210,7 +205,6 @@ ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
     // This is safe because we're on the main thread
     Page* page = doc->page(pageIndex);
     if (!page) {
-        // Page not available - return invalid snapshot
         return snapshot;
     }
     
@@ -221,28 +215,20 @@ ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
     snapshot.gridSpacing = page->gridSpacing;
     snapshot.lineSpacing = page->lineSpacing;
     
-    // Calculate thumbnail dimensions for PDF rendering
+    // Calculate thumbnail dimensions
     qreal aspectRatio = pageSize.height() / pageSize.width();
     int thumbnailWidth = width;
     int thumbnailHeight = static_cast<int>(width * aspectRatio);
     
-    // Pre-render PDF background on main thread if needed
+    // Store PDF info for deferred rendering in the worker thread.
+    // MuPdfProvider::renderPageToImage() is already mutex-protected,
+    // so calling it from a worker is safe and keeps the main thread responsive.
     if (doc->isPdfLoaded() && page->pdfPageNumber >= 0) {
+        snapshot.doc = doc;
+        snapshot.pdfPageNumber = page->pdfPageNumber;
+        snapshot.pdfDarkMode = pdfDarkMode;
         qreal pdfDpi = (thumbnailWidth * dpr) / (pageSize.width() / 72.0);
-        pdfDpi = qMin(pdfDpi, 150.0);  // Cap at 150 DPI for thumbnails
-        
-        QImage pdfImage = doc->renderPdfPageToImage(page->pdfPageNumber, pdfDpi);
-        if (!pdfImage.isNull()) {
-            if (pdfDarkMode) {
-                QVector<QRect> imgRegions;
-                if (!skipImageMasking) {
-                    imgRegions = doc->pdfImageRegions(page->pdfPageNumber, pdfDpi);
-                }
-                DarkModeUtils::invertImageLightness(pdfImage, imgRegions);
-            }
-            snapshot.pdfBackground = QPixmap::fromImage(pdfImage);
-        }
-        doc->trimPdfStore();
+        snapshot.pdfDpi = qMin(pdfDpi, 96.0);
     }
     
     // Deep copy stroke data from all layers
@@ -252,16 +238,14 @@ ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
             LayerSnapshot layerSnap;
             layerSnap.visible = layer->visible;
             layerSnap.opacity = layer->opacity;
-            // Deep copy strokes - Qt's implicit sharing is thread-safe for reads
             layerSnap.strokes = layer->strokes();
             snapshot.layers.append(std::move(layerSnap));
         }
     }
     
     // Pre-render objects to a pixmap on main thread
-    // Objects may contain QPixmap data that isn't safe to share across threads
+    // Objects may contain QPixmap data that isn't safe to copy across threads
     if (page->objectCount() > 0 && pageSize.width() > 0 && pageSize.height() > 0) {
-        // Calculate physical size for the objects layer
         int physicalWidth = static_cast<int>(thumbnailWidth * dpr);
         int physicalHeight = static_cast<int>(thumbnailHeight * dpr);
         
@@ -278,13 +262,11 @@ ThumbnailRenderer::ThumbnailSnapshot ThumbnailRenderer::createSnapshot(
                     objPainter.setRenderHint(QPainter::Antialiasing, true);
                     objPainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
                     
-                    // Scale to fit page into thumbnail
                     qreal scaleX = static_cast<qreal>(thumbnailWidth) / pageSize.width();
                     qreal scaleY = static_cast<qreal>(thumbnailHeight) / pageSize.height();
                     qreal scale = qMin(scaleX, scaleY);
                     objPainter.scale(scale, scale);
                     
-                    // Render all objects
                     page->renderObjects(objPainter, 1.0);
                     objPainter.end();
                 }
@@ -306,7 +288,6 @@ QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
     qreal dpr = snapshot.dpr;
     QSizeF pageSize = snapshot.pageSize;
     
-    // Safety check: prevent division by zero
     if (pageSize.width() <= 0 || pageSize.height() <= 0) {
         return QPixmap();
     }
@@ -316,33 +297,40 @@ QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
     int thumbnailWidth = width;
     int thumbnailHeight = static_cast<int>(width * aspectRatio);
     
-    // Calculate physical size for high DPI
     int physicalWidth = static_cast<int>(thumbnailWidth * dpr);
     int physicalHeight = static_cast<int>(thumbnailHeight * dpr);
     
-    // Safety check: ensure valid dimensions
     if (physicalWidth <= 0 || physicalHeight <= 0) {
         return QPixmap();
     }
     
-    // Create pixmap
+    // Render PDF background in the worker thread (deferred from createSnapshot)
+    QPixmap pdfBackground;
+    if (snapshot.pdfPageNumber >= 0 && snapshot.doc && snapshot.pdfDpi > 0) {
+        QImage pdfImage = snapshot.doc->renderPdfPageToImage(snapshot.pdfPageNumber, snapshot.pdfDpi);
+        if (!pdfImage.isNull()) {
+            if (snapshot.pdfDarkMode) {
+                DarkModeUtils::invertImageLightness(pdfImage, {});
+            }
+            pdfBackground = QPixmap::fromImage(pdfImage);
+        }
+        snapshot.doc->trimPdfStore();
+    }
+    
     QPixmap thumbnail(physicalWidth, physicalHeight);
     if (thumbnail.isNull()) {
-        // Pixmap creation failed (e.g., out of memory)
         return QPixmap();
     }
     thumbnail.setDevicePixelRatio(dpr);
-    thumbnail.fill(Qt::white);  // Default background
+    thumbnail.fill(Qt::white);
     
     QPainter painter(&thumbnail);
     if (!painter.isActive()) {
-        // Painter failed to initialize
         return QPixmap();
     }
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     
-    // Calculate scale factor
     qreal scaleX = static_cast<qreal>(thumbnailWidth) / pageSize.width();
     qreal scaleY = static_cast<qreal>(thumbnailHeight) / pageSize.height();
     qreal scale = qMin(scaleX, scaleY);
@@ -352,11 +340,9 @@ QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
     // 1. Render background
     QRectF pageRect(0, 0, pageSize.width(), pageSize.height());
     
-    if (!snapshot.pdfBackground.isNull()) {
-        // PDF background - draw scaled to fit
-        painter.drawPixmap(pageRect.toRect(), snapshot.pdfBackground);
+    if (!pdfBackground.isNull()) {
+        painter.drawPixmap(pageRect.toRect(), pdfBackground);
     } else {
-        // Use Page's static helper for background pattern
         Page::renderBackgroundPattern(
             painter,
             pageRect,
@@ -379,7 +365,6 @@ QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
             painter.setOpacity(layerSnap.opacity);
         }
         
-        // Render each stroke using VectorLayer's static method
         for (const VectorStroke& stroke : layerSnap.strokes) {
             VectorLayer::renderStroke(painter, stroke);
         }
@@ -389,7 +374,6 @@ QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
     
     // 3. Render pre-rendered objects layer
     if (snapshot.hasObjects && !snapshot.objectsLayer.isNull()) {
-        // Reset transform to draw the pre-rendered pixmap at 1:1
         painter.resetTransform();
         painter.drawPixmap(0, 0, snapshot.objectsLayer);
     }

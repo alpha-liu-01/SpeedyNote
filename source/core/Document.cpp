@@ -9,6 +9,10 @@
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 
+#ifdef __linux__
+#include <malloc.h>
+#endif
+
 // ===== Constructor & Destructor =====
 
 Document::Document()
@@ -32,6 +36,14 @@ Document::~Document()
              << "pages=" << m_pageOrder.size() << "tiles=" << m_tiles.size();
 #endif
     // Note: m_loadedPages, m_tiles, and m_pdfProvider are unique_ptr, auto-cleaned
+    
+    m_loadedPages.clear();
+    m_tiles.clear();
+    m_pdfProvider.reset();
+    
+#ifdef __linux__
+    malloc_trim(0);
+#endif
 }
 
 // ===== Factory Methods =====

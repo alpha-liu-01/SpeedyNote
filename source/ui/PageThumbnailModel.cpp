@@ -6,6 +6,10 @@
 #include <QByteArray>
 #include <QDataStream>
 
+#ifdef __linux__
+#include <malloc.h>
+#endif
+
 // ============================================================================
 // Constructor / Destructor
 // ============================================================================
@@ -241,6 +245,10 @@ void PageThumbnailModel::setDocument(Document* doc)
     m_cacheAccessOrder.clear();
     
     endResetModel();
+    
+#ifdef __linux__
+    malloc_trim(0);
+#endif
 }
 
 void PageThumbnailModel::setCurrentPageIndex(int index)
@@ -294,6 +302,11 @@ void PageThumbnailModel::setDevicePixelRatio(qreal dpr)
     }
 }
 
+void PageThumbnailModel::setPdfDarkMode(bool enabled)
+{
+    m_renderer->setPdfDarkMode(enabled);
+}
+
 QPixmap PageThumbnailModel::thumbnailForPage(int pageIndex) const
 {
     // Return cached thumbnail if available
@@ -326,6 +339,10 @@ void PageThumbnailModel::invalidateAllThumbnails()
     
     m_thumbnailCache.clear();
     m_cacheAccessOrder.clear();
+    
+#ifdef __linux__
+    malloc_trim(0);
+#endif
     
     // Notify view that all data changed
     if (m_document && m_document->pageCount() > 0) {

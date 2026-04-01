@@ -126,6 +126,12 @@ public:
     void setDevicePixelRatio(qreal dpr);
     
     /**
+     * @brief Set whether PDF thumbnails should use dark-mode inversion.
+     * @param enabled True to invert PDF backgrounds.
+     */
+    void setPdfDarkMode(bool enabled);
+    
+    /**
      * @brief Request thumbnail rendering for visible pages.
      * 
      * Call this when the visible range changes (e.g., on scroll).
