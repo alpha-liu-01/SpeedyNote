@@ -310,7 +310,9 @@ QPixmap ThumbnailRenderer::renderFromSnapshot(const ThumbnailSnapshot& snapshot)
         QImage pdfImage = snapshot.doc->renderPdfPageToImage(snapshot.pdfPageNumber, snapshot.pdfDpi);
         if (!pdfImage.isNull()) {
             if (snapshot.pdfDarkMode) {
-                DarkModeUtils::invertImageLightness(pdfImage, {});
+                QVector<QRect> imgRegions = snapshot.doc->pdfImageRegions(
+                    snapshot.pdfPageNumber, snapshot.pdfDpi);
+                DarkModeUtils::invertImageLightness(pdfImage, imgRegions);
             }
             pdfBackground = QPixmap::fromImage(pdfImage);
         }
