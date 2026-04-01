@@ -6,7 +6,7 @@
 #include <QByteArray>
 #include <QDataStream>
 
-#ifdef __linux__
+#ifdef __GLIBC__
 #include <malloc.h>
 #endif
 
@@ -246,7 +246,7 @@ void PageThumbnailModel::setDocument(Document* doc)
     
     endResetModel();
     
-#ifdef __linux__
+#ifdef __GLIBC__
     malloc_trim(0);
 #endif
 }
@@ -340,7 +340,7 @@ void PageThumbnailModel::invalidateAllThumbnails()
     m_thumbnailCache.clear();
     m_cacheAccessOrder.clear();
     
-#ifdef __linux__
+#ifdef __GLIBC__
     malloc_trim(0);
 #endif
     

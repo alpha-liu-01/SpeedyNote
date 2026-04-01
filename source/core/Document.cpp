@@ -9,7 +9,7 @@
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 
-#ifdef __linux__
+#ifdef __GLIBC__
 #include <malloc.h>
 #endif
 
@@ -41,7 +41,7 @@ Document::~Document()
     m_tiles.clear();
     m_pdfProvider.reset();
     
-#ifdef __linux__
+#ifdef __GLIBC__
     malloc_trim(0);
 #endif
 }
