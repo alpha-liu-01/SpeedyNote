@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================================================================
 option(ENABLE_CONTROLLER_SUPPORT "Enable SDL2 game controller support" OFF)
 option(ENABLE_DEBUG_OUTPUT "Enable verbose debug output (qDebug prints)" OFF)
+option(ENABLE_SANITIZERS "Enable AddressSanitizer + LeakSanitizer for memory debugging" OFF)
 
 message(STATUS "Controller support: ${ENABLE_CONTROLLER_SUPPORT}")
 if(ENABLE_DEBUG_OUTPUT)
@@ -17,6 +18,12 @@ if(ENABLE_DEBUG_OUTPUT)
     message(STATUS "Debug output: ENABLED")
 else()
     message(STATUS "Debug output: DISABLED")
+endif()
+
+if(ENABLE_SANITIZERS)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address)
+    message(STATUS "Sanitizers: AddressSanitizer ENABLED")
 endif()
 
 # ============================================================================

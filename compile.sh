@@ -45,9 +45,11 @@ detect_architecture() {
 # Function to build the project
 build_project() {
     local debug_flag="OFF"
+    local sanitizer_flag="OFF"
     for arg in "$@"; do
         if [[ "$arg" == "--debug" || "$arg" == "-debug" ]]; then
             debug_flag="ON"
+            sanitizer_flag="ON"
         fi
     done
 
@@ -71,8 +73,14 @@ build_project() {
 
     if [[ "$debug_flag" == "ON" ]]; then
         echo -e "${YELLOW}Debug output: ENABLED${NC}"
+        echo -e "${RED}Sanitizers: AddressSanitizer + LeakSanitizer ENABLED (Debug build)${NC}"
     else
         echo -e "${CYAN}Debug output: DISABLED${NC}"
+    fi
+
+    local build_type="Release"
+    if [[ "$debug_flag" == "ON" ]]; then
+        build_type="Debug"
     fi
     
     # Clean and create build directory
@@ -91,9 +99,13 @@ build_project() {
     
     cd build
     
-    # Configure and build with optimizations
-    echo -e "${YELLOW}Configuring build with maximum performance optimizations...${NC}"
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_DEBUG_OUTPUT=$debug_flag ..
+    # Configure and build
+    echo -e "${YELLOW}Configuring build ($build_type)...${NC}"
+    cmake -DCMAKE_BUILD_TYPE=$build_type \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -DENABLE_DEBUG_OUTPUT=$debug_flag \
+          -DENABLE_SANITIZERS=$sanitizer_flag \
+          ..
     
     echo -e "${YELLOW}Compiling with $(nproc) parallel jobs...${NC}"
     make -j$(nproc)
