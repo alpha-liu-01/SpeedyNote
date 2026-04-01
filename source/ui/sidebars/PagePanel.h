@@ -114,6 +114,12 @@ public:
      */
     void setDarkMode(bool dark);
 
+    /**
+     * @brief Set whether PDF thumbnails should be dark-mode inverted.
+     * @param enabled True to invert PDF backgrounds in thumbnails.
+     */
+    void setPdfDarkMode(bool enabled);
+
     // =========================================================================
     // Thumbnail Access
     // =========================================================================

@@ -2,6 +2,7 @@
 #include "PagePanelListView.h"
 #include "../PageThumbnailModel.h"
 #include "../PageThumbnailDelegate.h"
+#include "../ThumbnailRenderer.h"
 #include "../../core/Document.h"
 #include <QVBoxLayout>
 #include <QScrollBar>
@@ -245,6 +246,13 @@ void PagePanel::setDarkMode(bool dark)
         m_delegate->setDarkMode(dark);
         applyTheme();
         m_listView->viewport()->update();
+    }
+}
+
+void PagePanel::setPdfDarkMode(bool enabled)
+{
+    if (m_model) {
+        m_model->setPdfDarkMode(enabled);
     }
 }
 

@@ -8,8 +8,9 @@
 // Emits thumbnailReady signal when rendering completes.
 //
 // Thread Safety (BUG-PERF-003 fix):
-// Page data is snapshot-copied on the main thread before async rendering.
-// Background threads never access live Document/Page objects.
+// Page/stroke data is snapshot-copied on the main thread before async rendering.
+// PDF rendering is deferred to the worker thread via Document::renderPdfPageToImage()
+// which is mutex-protected inside MuPdfProvider.
 // ============================================================================
 
 #include <QObject>
@@ -73,6 +74,8 @@ public:
      */
     void setMaxConcurrentRenders(int max);
     
+    void setPdfDarkMode(bool enabled);
+    
 signals:
     /**
      * @brief Emitted when a thumbnail has been rendered.
@@ -118,8 +121,11 @@ private:
         int gridSpacing = 32;
         int lineSpacing = 32;
         
-        // Pre-rendered PDF background (rendered on main thread)
-        QPixmap pdfBackground;
+        // PDF background info (rendered in worker thread, not on main thread)
+        Document* doc = nullptr;
+        int pdfPageNumber = -1;
+        qreal pdfDpi = 0;
+        bool pdfDarkMode = false;
         
         // Stroke layers (deep copied)
         QVector<LayerSnapshot> layers;
@@ -147,7 +153,7 @@ private:
      * @return Snapshot with all render data, or invalid snapshot on failure.
      */
     static ThumbnailSnapshot createSnapshot(Document* doc, int pageIndex, int width, qreal dpr,
-                                               bool pdfDarkMode = false, bool skipImageMasking = false);
+                                               bool pdfDarkMode = false);
     
     /**
      * @brief Render a thumbnail from a snapshot (called in worker thread).
@@ -173,7 +179,6 @@ private:
         int width;
         qreal dpr;
         bool pdfDarkMode;
-        bool skipImageMasking;
     };
     
     /**
@@ -197,6 +202,9 @@ private:
     
     // Maximum concurrent renders
     int m_maxConcurrent = 2;
+    
+    // Cached dark mode state (set by caller, avoids QSettings per request)
+    bool m_pdfDarkMode = false;
     
     // Flag to track if we're being destroyed
     bool m_shuttingDown = false;

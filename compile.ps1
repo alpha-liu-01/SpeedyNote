@@ -200,12 +200,18 @@ if (Test-Path "$toolchainPath\bin\clang.exe") {
 }
 
 # ✅ Prepare CMake configuration
+if ($debug) {
+    $buildType = "Debug"
+} else {
+    $buildType = "Release"
+}
+
 $cmakeArgs = @(
     "-G", "MinGW Makefiles",
     "-DCMAKE_C_COMPILER=$cCompiler",
     "-DCMAKE_CXX_COMPILER=$cxxCompiler",
     "-DCMAKE_MAKE_PROGRAM=$toolchainPath/bin/mingw32-make.exe",
-    "-DCMAKE_BUILD_TYPE=Release"
+    "-DCMAKE_BUILD_TYPE=$buildType"
 )
 
 if ($qt5) {
@@ -237,7 +243,9 @@ if ($arm64) {
 
 if ($debug) {
     $cmakeArgs += "-DENABLE_DEBUG_OUTPUT=ON"
+    $cmakeArgs += "-DENABLE_SANITIZERS=ON"
     Write-Host "Debug Output: ENABLED" -ForegroundColor Yellow
+    Write-Host "Sanitizers: AddressSanitizer ENABLED (Debug build)" -ForegroundColor Red
 } else {
     $cmakeArgs += "-DENABLE_DEBUG_OUTPUT=OFF"
     Write-Host "Debug Output: DISABLED" -ForegroundColor Gray
