@@ -725,9 +725,11 @@ QJsonObject Page::toJson() const
     }
     obj["layers"] = layersArray;
     
-    // Objects
+    // Objects (skip OcrTextObjects — derived cache, reconstructed from .ocr.json)
     QJsonArray objectsArray;
     for (const auto& object : objects) {
+        if (object->type() == QStringLiteral("ocr_text"))
+            continue;
         objectsArray.append(object->toJson());
     }
     obj["objects"] = objectsArray;
@@ -852,6 +854,53 @@ std::unique_ptr<Page> Page::createForPdf(const QSizeF& pageSize, int pdfPage)
 }
 
 // ===== Utility =====
+
+// ===== OCR Invalidation =====
+
+void Page::invalidateOcrForStroke(const QString& strokeId)
+{
+    if (ocrTextBlocks.isEmpty())
+        return;
+    for (auto& block : ocrTextBlocks) {
+        if (block.sourceStrokeIds.contains(strokeId)) {
+            block.dirty = true;
+        }
+    }
+    ocrDirty = true;
+}
+
+void Page::invalidateOcrInRegion(const QRectF& region)
+{
+    if (ocrTextBlocks.isEmpty())
+        return;
+    for (auto& block : ocrTextBlocks) {
+        if (block.boundingRect.intersects(region)) {
+            block.dirty = true;
+        }
+    }
+    ocrDirty = true;
+}
+
+void Page::clearOcrData()
+{
+    ocrTextBlocks.clear();
+    suppressedStrokeIds.clear();
+    ocrDirty = false;
+}
+
+QVector<OcrTextBlock> Page::ocrBlocksForSearch() const
+{
+    if (!ocrDirty)
+        return ocrTextBlocks;
+
+    QVector<OcrTextBlock> result;
+    result.reserve(ocrTextBlocks.size());
+    for (const auto& block : ocrTextBlocks) {
+        if (!block.dirty)
+            result.append(block);
+    }
+    return result;
+}
 
 bool Page::hasContent() const
 {

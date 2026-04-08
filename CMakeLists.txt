@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ENABLE_CONTROLLER_SUPPORT "Enable SDL2 game controller support" OFF)
 option(ENABLE_DEBUG_OUTPUT "Enable verbose debug output (qDebug prints)" OFF)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer + LeakSanitizer for memory debugging" OFF)
+option(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR "Enable Windows Ink handwriting recognition (requires Windows 10 1703+)" OFF)
 
 message(STATUS "Controller support: ${ENABLE_CONTROLLER_SUPPORT}")
 if(ENABLE_DEBUG_OUTPUT)
@@ -119,6 +120,14 @@ if(WIN32)
         unset(SDL2main CACHE)
         include_directories("${SDL2_ROOT}/include")
         add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
+    endif()
+
+    # Auto-enable Windows Ink OCR on 64-bit Qt6 Windows builds
+    if(NOT USE_QT5 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR ON CACHE BOOL "" FORCE)
+        message(STATUS "Windows Ink OCR: ENABLED (64-bit Qt6 Windows)")
+    else()
+        message(STATUS "Windows Ink OCR: DISABLED (requires 64-bit Qt6)")
     endif()
 
     # MuPDF for PDF export
@@ -642,7 +651,21 @@ set(OBJECT_SOURCES
     source/objects/InsertedObject.cpp
     source/objects/ImageObject.cpp
     source/objects/LinkObject.cpp
+    source/objects/TextBoxObject.cpp
+    source/objects/OcrTextObject.cpp
 )
+
+# OCR engine abstraction and worker
+set(OCR_SOURCES
+    source/ocr/OcrEngine.cpp
+    source/ocr/OcrWorker.cpp
+)
+if(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR)
+    list(APPEND OCR_SOURCES source/ocr/engines/WindowsInkOcrEngine.cpp)
+    # C++/WinRT headers require C++20 for coroutine support
+    set_source_files_properties(source/ocr/engines/WindowsInkOcrEngine.cpp
+        PROPERTIES COMPILE_OPTIONS "-std=c++20")
+endif()
 
 # UI components
 set(UI_SOURCES
@@ -688,6 +711,7 @@ set(UI_SOURCES
     source/ui/subtoolbars/EraserSubToolbar.cpp
     source/ui/subtoolbars/HighlighterSubToolbar.cpp
     source/ui/subtoolbars/ObjectSelectSubToolbar.cpp
+    source/ui/subtoolbars/OcrSubToolbar.cpp
     # Action bars
     source/ui/actionbars/ActionBar.cpp
     source/ui/actionbars/ActionBarContainer.cpp
@@ -832,6 +856,7 @@ set(APP_SOURCES
     source/ui/MarkdownNotesSidebar.cpp
         ${CORE_SOURCES}
     ${OBJECT_SOURCES}
+    ${OCR_SOURCES}
         ${UI_SOURCES}
         ${PDF_SOURCES}
     ${CONTROLLER_SOURCES}
@@ -997,6 +1022,10 @@ if(WIN32)
         message(WARNING "MuPDF not found - PDF features will be unavailable (Qt5 build)")
     else()
         message(FATAL_ERROR "MuPDF is required for PDF support")
+    endif()
+    if(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR)
+        target_compile_definitions(speedynote PRIVATE SPEEDYNOTE_HAS_WINDOWS_INK)
+        list(APPEND PLATFORM_LIBS windowsapp)
     endif()
     target_link_libraries(speedynote ${PLATFORM_LIBS})
 

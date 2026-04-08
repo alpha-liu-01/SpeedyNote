@@ -30,6 +30,10 @@
 #include "sharing/NotebookExporter.h" // Phase 1: Export notebooks as .snbx
 #include "ui/widgets/PdfSearchBar.h"  // PDF text search bar
 #include "pdf/PdfSearchEngine.h"      // PDF text search engine
+#include "ocr/OcrWorker.h"            // OCR background worker
+#include "objects/OcrTextObject.h"     // OCR text objects (Phase 1D)
+#include "ui/subtoolbars/OcrSubToolbar.h"  // OCR subtoolbar
+#include <QMetaObject>                 // OCR queued invocations
 #include "ui/dialogs/BatchPdfExportDialog.h"   // Phase 3: Unified PDF export dialog
 #include "ui/dialogs/BatchSnbxExportDialog.h"  // Phase 3: Unified SNBX export dialog
 #include "pdf/MuPdfExporter.h"                 // Phase 8: PDF export engine
@@ -1192,6 +1196,9 @@ void MainWindow::setupUi() {
     // PDF Search: Setup search bar
     setupPdfSearch();
     
+    // OCR: Setup worker thread and engine
+    setupOcr();
+    
     // Phase E.2: Setup outline panel connections
     setupOutlinePanelConnections();
     
@@ -1874,6 +1881,11 @@ MainWindow::~MainWindow() {
     // Qt will automatically delete all canvases when canvasStack is destroyed
     // Manual deletion here would cause double-delete and segfault!
     
+    if (m_ocrThread && m_ocrThread->isRunning()) {
+        m_ocrThread->quit();
+        m_ocrThread->wait();
+    }
+
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
     // ✅ CRITICAL: Stop controller thread before destruction
     // Qt will abort if a QThread is destroyed while still running
@@ -2042,6 +2054,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (m_pdfRelinkConn) {
         disconnect(m_pdfRelinkConn);
         m_pdfRelinkConn = {};
+    }
+    // OCR: Disconnect strokesChanged connection
+    if (m_strokesChangedConn) {
+        disconnect(m_strokesChangedConn);
+        m_strokesChangedConn = {};
     }
     
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
@@ -2425,6 +2442,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
             }
         });
+
+        // OCR: Restart debounce timer when strokes change
+        m_strokesChangedConn = connect(viewport, &DocumentViewport::strokesChanged, this, [this]() {
+            if (m_autoOcrEnabled && m_ocrDebounceTimer)
+                m_ocrDebounceTimer->start();
+        });
+
+        // OCR: Sync text visibility with the Show Text toggle for the new viewport
+        setOcrTextVisibility(m_toolbar->ocrSubToolbar()->isShowTextEnabled());
     }
     
     // =========================================================================
@@ -4240,6 +4266,11 @@ void MainWindow::updateTheme() {
         });
     }
     
+    // Update OCR text object backgrounds for the new theme
+    if (m_toolbar && m_toolbar->ocrSubToolbar()->isShowTextEnabled()) {
+        setOcrTextVisibility(true);
+    }
+    
     // Sync thumbnail renderer dark mode state
     if (m_pagePanel) {
         QSettings s("SpeedyNote", "App");
@@ -4685,6 +4716,19 @@ void MainWindow::connectSubToolbarSignals()
             applyAllSubToolbarValuesToViewport(vp);
         }
     });
+
+    // OCR subtoolbar
+    auto* ocrST = m_toolbar->ocrSubToolbar();
+    connect(ocrST, &OcrSubToolbar::scanPageClicked, this, &MainWindow::triggerOcrForCurrentPage);
+    connect(ocrST, &OcrSubToolbar::scanAllClicked, this, &MainWindow::triggerOcrForAllPages);
+    connect(ocrST, &OcrSubToolbar::autoOcrToggled, this, [this](bool enabled) {
+        m_autoOcrEnabled = enabled;
+        if (!enabled && m_ocrDebounceTimer)
+            m_ocrDebounceTimer->stop();
+    });
+    connect(ocrST, &OcrSubToolbar::showTextToggled, this, [this](bool enabled) {
+        setOcrTextVisibility(enabled);
+    });
 }
 
 // ============================================================================
@@ -4957,12 +5001,8 @@ void MainWindow::showPdfSearchBar()
         return;
     }
     
-    // Only show for PDF documents
     Document *doc = vp->document();
-    if (!doc || !doc->isPdfLoaded()) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "[MainWindow] Ctrl+F ignored: not a PDF document";
-#endif
+    if (!doc) {
         return;
     }
     
@@ -5015,7 +5055,7 @@ void MainWindow::onSearchNext(const QString& text, bool caseSensitive, bool whol
     }
     
     Document *doc = vp->document();
-    if (!doc || !doc->isPdfLoaded()) {
+    if (!doc) {
         return;
     }
     
@@ -5035,7 +5075,7 @@ void MainWindow::onSearchNext(const QString& text, bool caseSensitive, bool whol
         startMatchIndex = m_searchState->currentMatchIndex;
     } else {
         // New search or text changed - start from current visible page
-        startPage = vp->currentPageIndex();
+        startPage = doc->isEdgeless() ? 0 : vp->currentPageIndex();
         startMatchIndex = -1;
         
         // Reset search state for new search
@@ -5059,7 +5099,7 @@ void MainWindow::onSearchPrev(const QString& text, bool caseSensitive, bool whol
     }
     
     Document *doc = vp->document();
-    if (!doc || !doc->isPdfLoaded()) {
+    if (!doc) {
         return;
     }
     
@@ -5079,7 +5119,7 @@ void MainWindow::onSearchPrev(const QString& text, bool caseSensitive, bool whol
         startMatchIndex = m_searchState->currentMatchIndex;
     } else {
         // New search or text changed - start from current visible page
-        startPage = vp->currentPageIndex();
+        startPage = doc->isEdgeless() ? 0 : vp->currentPageIndex();
         startMatchIndex = -1;
         
         // Reset search state for new search
@@ -5108,25 +5148,11 @@ void MainWindow::onSearchMatchFound(const PdfSearchMatch& match,
         return;
     }
     
-    // Update search state (keep PDF page index for search engine compatibility)
+    // Update search state
     m_searchState->currentPageIndex = match.pageIndex;
     m_searchState->currentMatchIndex = match.matchIndex;
     m_searchState->currentPageMatches = pageMatches;
     
-    // Convert PDF page index to notebook page index for navigation/highlighting
-    // When pages are inserted between PDF pages, these indices differ
-    int notebookPageIndex = doc->notebookPageIndexForPdfPage(match.pageIndex);
-    if (notebookPageIndex < 0) {
-        // PDF page not found in notebook (shouldn't happen, but be safe)
-        qWarning() << "[MainWindow] Search match on PDF page" << match.pageIndex 
-                   << "but no corresponding notebook page found";
-        return;
-    }
-    
-    // Navigate to the notebook page with the match
-    vp->scrollToPage(notebookPageIndex);
-    
-    // Update viewport highlights
     // Find the index of current match within pageMatches
     int currentIdx = -1;
     for (int i = 0; i < pageMatches.size(); ++i) {
@@ -5135,16 +5161,28 @@ void MainWindow::onSearchMatchFound(const PdfSearchMatch& match,
             break;
         }
     }
-    
-    // Pass notebook page index for correct overlay rendering comparison
-    vp->setSearchMatches(pageMatches, currentIdx, notebookPageIndex);
+
+    if (match.source == PdfSearchMatch::OcrTextTile) {
+        // Edgeless OCR match: pan viewport to the tile containing the match
+        int tileSize = Document::EDGELESS_TILE_SIZE;
+        QPointF docCenter(
+            static_cast<qreal>(match.tileX) * tileSize + match.boundingRect.center().x(),
+            static_cast<qreal>(match.tileY) * tileSize + match.boundingRect.center().y());
+        vp->navigateToEdgelessPosition(match.tileX, match.tileY, docCenter);
+        vp->setSearchMatches(pageMatches, currentIdx, match.pageIndex);
+
+    } else {
+        // Paged match (PdfText or OcrText): pageIndex is a notebook page index
+        vp->scrollToPage(match.pageIndex);
+        vp->setSearchMatches(pageMatches, currentIdx, match.pageIndex);
+    }
     
     // Clear any previous "not found" status
     m_pdfSearchBar->clearStatus();
     
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "[MainWindow] Search match found on PDF page" << match.pageIndex 
-             << "(notebook page" << notebookPageIndex << ")"
+    qDebug() << "[MainWindow] Search match found: source=" << static_cast<int>(match.source)
+             << "pageIndex=" << match.pageIndex 
              << "match" << match.matchIndex << "of" << pageMatches.size();
 #endif
 }
@@ -5170,6 +5208,290 @@ void MainWindow::onSearchNotFound(bool wrapped)
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[MainWindow] Search not found, wrapped:" << wrapped;
 #endif
+}
+
+// =========================================================================
+// OCR: Setup, scan actions, debounce, and result handlers
+// =========================================================================
+
+void MainWindow::setupOcr()
+{
+    qRegisterMetaType<QVector<VectorStroke>>("QVector<VectorStroke>");
+    qRegisterMetaType<QVector<QString>>("QVector<QString>");
+    qRegisterMetaType<QSet<QString>>("QSet<QString>");
+    qRegisterMetaType<QVector<QVector<VectorStroke>>>("QVector<QVector<VectorStroke>>");
+    qRegisterMetaType<QVector<QSet<QString>>>("QVector<QSet<QString>>");
+    qRegisterMetaType<QVector<OcrTextBlock>>("QVector<OcrTextBlock>");
+
+    // Start with OCR disabled; the worker thread will report availability after init.
+    // (Avoids creating WinRT COM objects on the main thread.)
+    m_toolbar->setOcrAvailable(false);
+
+    m_ocrWorker = new OcrWorker();
+    m_ocrThread = new QThread(this);
+    m_ocrWorker->moveToThread(m_ocrThread);
+    connect(m_ocrThread, &QThread::finished, m_ocrWorker, &QObject::deleteLater);
+
+    connect(m_ocrThread, &QThread::started, m_ocrWorker, &OcrWorker::initEngine);
+    connect(m_ocrWorker, &OcrWorker::engineReady, this, [this](bool available) {
+        m_toolbar->setOcrAvailable(available);
+    }, Qt::QueuedConnection);
+
+    m_ocrThread->start();
+
+    connect(m_ocrWorker, &OcrWorker::resultsReady,
+            this, &MainWindow::onOcrResultsReady, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::batchFinished,
+            this, &MainWindow::onOcrBatchFinished, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::error,
+            this, &MainWindow::onOcrError, Qt::QueuedConnection);
+
+    m_ocrDebounceTimer = new QTimer(this);
+    m_ocrDebounceTimer->setSingleShot(true);
+    m_ocrDebounceTimer->setInterval(5000);
+    connect(m_ocrDebounceTimer, &QTimer::timeout, this, &MainWindow::onDebounceTimeout);
+}
+
+void MainWindow::triggerOcrForCurrentPage()
+{
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+    if (!doc || !m_ocrWorker) return;
+
+    m_toolbar->ocrSubToolbar()->setStatusText(tr("Scanning..."));
+
+    if (doc->isEdgeless()) {
+        for (auto coord : doc->allLoadedTileCoords()) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            QVector<VectorStroke> strokes = collectPageStrokes(tile);
+            if (!strokes.isEmpty())
+                QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
+                    Q_ARG(QString, tile->uuid),
+                    Q_ARG(QVector<VectorStroke>, strokes),
+                    Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+        }
+    } else {
+        int pageIndex = vp->currentPageIndex();
+        Page* page = doc->page(pageIndex);
+        if (!page) return;
+        QVector<VectorStroke> strokes = collectPageStrokes(page);
+        QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
+            Q_ARG(QString, page->uuid),
+            Q_ARG(QVector<VectorStroke>, strokes),
+            Q_ARG(QSet<QString>, page->suppressedStrokeIds));
+    }
+}
+
+void MainWindow::triggerOcrForAllPages()
+{
+    Document* doc = currentViewport() ? currentViewport()->document() : nullptr;
+    if (!doc || !m_ocrWorker) return;
+
+    m_toolbar->ocrSubToolbar()->setStatusText(tr("Scanning all pages..."));
+
+    QVector<QString> pageIds;
+    QVector<QVector<VectorStroke>> strokeSets;
+    QVector<QSet<QString>> suppressedSets;
+
+    if (doc->isEdgeless()) {
+        for (auto coord : doc->allLoadedTileCoords()) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            pageIds.append(tile->uuid);
+            strokeSets.append(collectPageStrokes(tile));
+            suppressedSets.append(tile->suppressedStrokeIds);
+        }
+    } else {
+        for (int i = 0; i < doc->pageCount(); ++i) {
+            Page* page = doc->page(i);
+            if (!page) continue;
+            pageIds.append(page->uuid);
+            strokeSets.append(collectPageStrokes(page));
+            suppressedSets.append(page->suppressedStrokeIds);
+        }
+    }
+
+    if (!pageIds.isEmpty())
+        QMetaObject::invokeMethod(m_ocrWorker, "processBatch", Qt::QueuedConnection,
+            Q_ARG(QVector<QString>, pageIds),
+            Q_ARG(QVector<QVector<VectorStroke>>, strokeSets),
+            Q_ARG(QVector<QSet<QString>>, suppressedSets));
+}
+
+void MainWindow::onDebounceTimeout()
+{
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+    if (!doc || !m_ocrWorker) return;
+
+    // The debounce timer only fires after strokesChanged, so we know the
+    // current page was edited.  Scan just that page (not the entire document).
+    if (doc->isEdgeless()) {
+        QPointF center = vp->viewportCenterInDocument();
+        auto coord = doc->tileCoordForPoint(center);
+        Page* tile = doc->getTile(coord.first, coord.second);
+        if (!tile) return;
+
+        QVector<VectorStroke> strokes = collectPageStrokes(tile);
+        if (strokes.isEmpty()) return;
+
+        m_toolbar->ocrSubToolbar()->setStatusText(tr("Auto-scanning..."));
+        QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
+            Q_ARG(QString, tile->uuid),
+            Q_ARG(QVector<VectorStroke>, strokes),
+            Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+    } else {
+        int idx = vp->currentPageIndex();
+        Page* page = doc->page(idx);
+        if (!page) return;
+
+        QVector<VectorStroke> strokes = collectPageStrokes(page);
+        if (strokes.isEmpty()) return;
+
+        m_toolbar->ocrSubToolbar()->setStatusText(tr("Auto-scanning..."));
+        QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
+            Q_ARG(QString, page->uuid),
+            Q_ARG(QVector<VectorStroke>, strokes),
+            Q_ARG(QSet<QString>, page->suppressedStrokeIds));
+    }
+}
+
+void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextBlock>& blocks)
+{
+    // Search ALL open documents — the user may have switched tabs since triggering OCR.
+    Page* page = nullptr;
+    Document* doc = nullptr;
+
+    for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+        Document* candidate = m_documentManager->documentAt(d);
+        if (!candidate) continue;
+
+        int idx = candidate->pageIndexByUuid(pageId);
+        if (idx >= 0) {
+            page = candidate->page(idx);
+            doc = candidate;
+            break;
+        }
+
+        if (candidate->isEdgeless()) {
+            for (auto coord : candidate->allLoadedTileCoords()) {
+                Page* tile = candidate->getTile(coord.first, coord.second);
+                if (tile && tile->uuid == pageId) {
+                    page = tile;
+                    doc = candidate;
+                    break;
+                }
+            }
+            if (page) break;
+        }
+    }
+    if (!page || !doc) return;
+
+    page->ocrTextBlocks = blocks;
+    page->ocrDirty = false;
+
+    syncOcrTextObjects(page, blocks);
+
+    doc->savePageOcr(pageId, page);
+
+    int wordCount = 0;
+    for (const auto& b : blocks)
+        if (!b.text.isEmpty()) ++wordCount;
+
+    m_toolbar->ocrSubToolbar()->setStatusText(
+        tr("Done: %1 words").arg(wordCount));
+    m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(5000);
+
+    if (m_toolbar->ocrSubToolbar()->isShowTextEnabled()) {
+        if (DocumentViewport* vp = currentViewport())
+            vp->update();
+    }
+}
+
+void MainWindow::onOcrBatchFinished(int pagesScanned, int pagesWithText)
+{
+    m_toolbar->ocrSubToolbar()->setStatusText(
+        tr("OCR complete: %1 pages scanned, %2 with text")
+            .arg(pagesScanned).arg(pagesWithText));
+    m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(8000);
+}
+
+void MainWindow::onOcrError(const QString& pageId, const QString& message)
+{
+    Q_UNUSED(pageId);
+    m_toolbar->ocrSubToolbar()->setStatusText(tr("OCR error: %1").arg(message));
+    m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(8000);
+}
+
+QVector<VectorStroke> MainWindow::collectPageStrokes(const Page* page) const
+{
+    QVector<VectorStroke> allStrokes;
+    for (const auto& layer : page->vectorLayers) {
+        if (layer && layer->visible)
+            allStrokes.append(layer->strokes());
+    }
+    return allStrokes;
+}
+
+void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks)
+{
+    if (!page) return;
+
+    // Remove existing OcrTextObjects
+    QVector<QString> toRemove;
+    for (const auto& obj : page->objects) {
+        if (obj && obj->type() == QStringLiteral("ocr_text"))
+            toRemove.append(obj->id);
+    }
+    for (const auto& oid : toRemove)
+        page->removeObject(oid);
+
+    bool showText = m_toolbar->ocrSubToolbar()->isShowTextEnabled();
+    bool dark = isDarkMode();
+
+    for (const auto& block : blocks) {
+        if (block.dirty || block.text.isEmpty())
+            continue;
+
+        QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
+        auto obj = OcrTextObject::createFromBlock(block, color, dark);
+        obj->visible = showText;
+        page->addObject(std::move(obj));
+    }
+}
+
+void MainWindow::setOcrTextVisibility(bool visible)
+{
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+    if (!doc) return;
+
+    bool dark = isDarkMode();
+    QColor bg = dark ? QColor(40, 40, 40, 180) : QColor(255, 255, 255, 180);
+
+    auto setOnPage = [visible, bg](Page* page) {
+        if (!page) return;
+        for (const auto& obj : page->objects) {
+            if (obj && obj->type() == QStringLiteral("ocr_text")) {
+                obj->visible = visible;
+                static_cast<TextBoxObject*>(obj.get())->backgroundColor = bg;
+            }
+        }
+    };
+
+    if (doc->isEdgeless()) {
+        for (auto coord : doc->allLoadedTileCoords()) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            setOnPage(tile);
+        }
+    } else {
+        for (int i : doc->loadedPageIndices()) {
+            setOnPage(doc->page(i));
+        }
+    }
+
+    vp->update();
 }
 
 // =========================================================================

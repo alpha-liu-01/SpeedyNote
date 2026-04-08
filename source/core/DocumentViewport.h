@@ -1723,6 +1723,12 @@ signals:
     void userWarning(const QString& message);
 
     /**
+     * @brief Emitted when stroke data changes (add/remove/move/undo/redo).
+     * Used by the OCR debounce timer to trigger re-analysis.
+     */
+    void strokesChanged();
+
+    /**
      * @brief Emitted when user clicks "Locate PDF" on the missing PDF banner.
      * 
      * Phase R.3: MainWindow connects this to show PdfRelinkDialog.
@@ -2921,6 +2927,15 @@ private:
      * @param pageIndex The page being rendered.
      */
     void renderSearchMatchesOverlay(QPainter& painter, int pageIndex);
+
+    /**
+     * @brief Render search match highlights for edgeless mode.
+     * 
+     * Called after tile rendering with the painter already translated to
+     * document space. Draws highlights for OcrTextTile matches, converting
+     * tile-local bounding rects to document coordinates.
+     */
+    void renderSearchMatchesOverlayEdgeless(QPainter& painter);
     
     /**
      * @brief Create a marker-style stroke for a highlight rectangle (Phase B.6).

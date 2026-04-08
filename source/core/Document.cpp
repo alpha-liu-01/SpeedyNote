@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "Document.h"
+#include "../objects/OcrTextObject.h"
 #include <QCryptographicHash>
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
@@ -561,7 +562,12 @@ bool Document::loadPageFromDisk(int index) const
         }
     }
     
+    Page* rawPagePtr = page.get();
     m_loadedPages[uuid] = std::move(page);
+    
+    // Load OCR sidecar data and materialize text objects
+    loadPageOcr(rawPagePtr, uuid);
+    materializeOcrTextObjects(rawPagePtr);
     
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
@@ -599,6 +605,9 @@ bool Document::savePage(int index)
     QJsonDocument jsonDoc(it->second->toJson());
     file.write(jsonDoc.toJson(QJsonDocument::Compact));
     file.close();
+    
+    // Save OCR sidecar file
+    savePageOcr(uuid, it->second.get());
     
     // Clear dirty flag
     m_dirtyPages.erase(uuid);
@@ -1687,6 +1696,9 @@ bool Document::saveTile(TileCoord coord)
     file.write(jsonDoc.toJson(QJsonDocument::Compact));
     file.close();
     
+    // Save OCR sidecar file
+    saveTileOcr(coord);
+    
     // Update state
     m_dirtyTiles.erase(coord);
     m_tileIndex.insert(coord);
@@ -1802,7 +1814,10 @@ bool Document::loadTileFromDisk(TileCoord coord) const
             tile->loadImages(m_bundlePath);
         }
         
+        Page* rawTilePtr = tile.get();
         m_tiles[coord] = std::move(tile);
+        loadTileOcr(rawTilePtr, coord);
+        materializeOcrTextObjects(rawTilePtr);
         
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Loaded tile" << coord.first << "," << coord.second 
@@ -1829,7 +1844,10 @@ bool Document::loadTileFromDisk(TileCoord coord) const
             }
         }
         
+        Page* rawTilePtr = tile.get();
         m_tiles[coord] = std::move(tile);
+        loadTileOcr(rawTilePtr, coord);
+        materializeOcrTextObjects(rawTilePtr);
         
 #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "Loaded tile" << coord.first << "," << coord.second << "from disk (legacy)";
@@ -2225,6 +2243,14 @@ bool Document::saveBundle(const QString& path)
                         qWarning() << "Failed to copy tile" << oldTilePath << "to" << newTilePath;
                     }
                 }
+                
+                // Copy OCR sidecar file if it exists
+                QString ocrFileName = QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
+                QString oldOcrPath = oldBundlePath + "/tiles/" + ocrFileName;
+                QString newOcrPath = path + "/tiles/" + ocrFileName;
+                if (QFile::exists(oldOcrPath)) {
+                    QFile::copy(oldOcrPath, newOcrPath);
+                }
             }
         }
         
@@ -2256,6 +2282,10 @@ bool Document::saveBundle(const QString& path)
                     #endif
                 }
             }
+            // Also delete OCR sidecar
+            QString ocrPath = path + "/tiles/" +
+                QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
+            QFile::remove(ocrPath);
         }
         m_deletedTiles.clear();
         m_dirtyTiles.clear();
@@ -2289,6 +2319,13 @@ bool Document::saveBundle(const QString& path)
                             qDebug() << "Failed to copy page" << oldPagePath << "to" << newPagePath;
                         #endif
                     }
+                }
+                
+                // Copy OCR sidecar file if it exists
+                QString oldOcrPath = oldBundlePath + "/pages/" + uuid + ".ocr.json";
+                QString newOcrPath = path + "/pages/" + uuid + ".ocr.json";
+                if (QFile::exists(oldOcrPath)) {
+                    QFile::copy(oldOcrPath, newOcrPath);
                 }
             }
         }
@@ -2351,6 +2388,9 @@ bool Document::saveBundle(const QString& path)
                     qWarning() << "Failed to delete page file:" << pagePath;
                 }
             }
+            // Also delete OCR sidecar
+            QString ocrPath = path + "/pages/" + uuid + ".ocr.json";
+            QFile::remove(ocrPath);
         }
         m_deletedPages.clear();
         m_dirtyPages.clear();
@@ -3018,4 +3058,192 @@ void Document::setEdgelessActiveLayerIndex(int index)
             tile->activeLayerIndex = index;
         }
     }
+}
+
+// =========================================================================
+// OCR Sidecar File I/O (Phase 1A)
+// =========================================================================
+
+bool Document::savePageOcr(const QString& uuid, const Page* page)
+{
+    if (m_bundlePath.isEmpty() || !page)
+        return false;
+
+    QString ocrPath = m_bundlePath + "/pages/" + uuid + ".ocr.json";
+
+    if (page->ocrTextBlocks.isEmpty() && page->suppressedStrokeIds.isEmpty()) {
+        QFile::remove(ocrPath);
+        return true;
+    }
+
+    QDir().mkpath(m_bundlePath + "/pages");
+
+    QJsonObject root;
+    root["version"] = 1;
+    if (!page->ocrTextBlocks.isEmpty())
+        root["engineId"] = page->ocrTextBlocks.first().engineId;
+
+    QJsonArray blocks;
+    for (const auto& block : page->ocrTextBlocks)
+        blocks.append(block.toJson());
+    root["blocks"] = blocks;
+
+    if (!page->suppressedStrokeIds.isEmpty()) {
+        QJsonArray suppressed;
+        for (const auto& id : page->suppressedStrokeIds)
+            suppressed.append(id);
+        root["suppressedStrokeIds"] = suppressed;
+    }
+
+    QFile file(ocrPath);
+    if (!file.open(QIODevice::WriteOnly))
+        return false;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    return true;
+}
+
+bool Document::loadPageOcr(Page* page, const QString& uuid) const
+{
+    if (m_bundlePath.isEmpty() || !page)
+        return false;
+
+    QString ocrPath = m_bundlePath + "/pages/" + uuid + ".ocr.json";
+    QFile file(ocrPath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return false;
+
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+    if (parseError.error != QJsonParseError::NoError)
+        return false;
+
+    QJsonObject root = jsonDoc.object();
+    if (root.isEmpty())
+        return false;
+
+    page->ocrTextBlocks.clear();
+    page->suppressedStrokeIds.clear();
+
+    for (const auto& val : root["blocks"].toArray())
+        page->ocrTextBlocks.append(OcrTextBlock::fromJson(val.toObject()));
+    for (const auto& val : root["suppressedStrokeIds"].toArray())
+        page->suppressedStrokeIds.insert(val.toString());
+
+    page->ocrDirty = false;
+    return true;
+}
+
+bool Document::saveTileOcr(TileCoord coord)
+{
+    if (m_bundlePath.isEmpty())
+        return false;
+
+    auto it = m_tiles.find(coord);
+    if (it == m_tiles.end())
+        return false;
+
+    const Page* tile = it->second.get();
+    QString ocrPath = m_bundlePath + "/tiles/" +
+        QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
+
+    if (tile->ocrTextBlocks.isEmpty() && tile->suppressedStrokeIds.isEmpty()) {
+        QFile::remove(ocrPath);
+        return true;
+    }
+
+    QDir().mkpath(m_bundlePath + "/tiles");
+
+    QJsonObject root;
+    root["version"] = 1;
+    if (!tile->ocrTextBlocks.isEmpty())
+        root["engineId"] = tile->ocrTextBlocks.first().engineId;
+
+    QJsonArray blocks;
+    for (const auto& block : tile->ocrTextBlocks)
+        blocks.append(block.toJson());
+    root["blocks"] = blocks;
+
+    if (!tile->suppressedStrokeIds.isEmpty()) {
+        QJsonArray suppressed;
+        for (const auto& id : tile->suppressedStrokeIds)
+            suppressed.append(id);
+        root["suppressedStrokeIds"] = suppressed;
+    }
+
+    QFile file(ocrPath);
+    if (!file.open(QIODevice::WriteOnly))
+        return false;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    return true;
+}
+
+bool Document::loadTileOcr(Page* tile, TileCoord coord) const
+{
+    if (m_bundlePath.isEmpty() || !tile)
+        return false;
+
+    QString ocrPath = m_bundlePath + "/tiles/" +
+        QString("%1,%2.ocr.json").arg(coord.first).arg(coord.second);
+
+    QFile file(ocrPath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return false;
+
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+    if (parseError.error != QJsonParseError::NoError)
+        return false;
+
+    QJsonObject root = jsonDoc.object();
+    if (root.isEmpty())
+        return false;
+
+    tile->ocrTextBlocks.clear();
+    tile->suppressedStrokeIds.clear();
+
+    for (const auto& val : root["blocks"].toArray())
+        tile->ocrTextBlocks.append(OcrTextBlock::fromJson(val.toObject()));
+    for (const auto& val : root["suppressedStrokeIds"].toArray())
+        tile->suppressedStrokeIds.insert(val.toString());
+
+    tile->ocrDirty = false;
+    return true;
+}
+
+void Document::materializeOcrTextObjects(Page* page) const
+{
+    if (!page || page->ocrTextBlocks.isEmpty())
+        return;
+
+    for (const auto& block : page->ocrTextBlocks) {
+        if (block.dirty || block.text.isEmpty())
+            continue;
+
+        QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
+        auto obj = OcrTextObject::createFromBlock(block, color);
+        page->addObject(std::move(obj));
+    }
+}
+
+QVector<OcrTextBlock> Document::loadOcrBlocksFromFile(const QString& ocrJsonPath)
+{
+    QVector<OcrTextBlock> result;
+
+    QFile file(ocrJsonPath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly))
+        return result;
+
+    QJsonParseError parseError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+    if (parseError.error != QJsonParseError::NoError)
+        return result;
+
+    QJsonObject root = jsonDoc.object();
+    for (const auto& val : root["blocks"].toArray())
+        result.append(OcrTextBlock::fromJson(val.toObject()));
+
+    return result;
 }

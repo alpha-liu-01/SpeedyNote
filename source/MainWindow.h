@@ -45,11 +45,18 @@
 #include "ui/Toolbar.h"
 #include "ui/sidebars/LeftSidebarContainer.h"  // Phase S3: Left sidebar container
 
+class QThread;
+
 // PDF Search
 class PdfSearchBar;
 class PdfSearchEngine;
 struct PdfSearchMatch;
 struct PdfSearchState;
+
+// OCR
+class OcrWorker;
+class OcrSubToolbar;
+#include "ocr/OcrTextBlock.h"
 
 // Action Bar includes
 class ActionBarContainer;
@@ -514,6 +521,12 @@ private:
     PdfSearchEngine *m_searchEngine = nullptr;
     std::unique_ptr<PdfSearchState> m_searchState;
     
+    // OCR
+    QThread *m_ocrThread = nullptr;
+    OcrWorker *m_ocrWorker = nullptr;
+    QTimer *m_ocrDebounceTimer = nullptr;
+    bool m_autoOcrEnabled = false;
+    
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
     
@@ -642,6 +655,7 @@ private:
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
+    QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
     
     // Pan tool hold (H key spring-loaded activation)
     bool m_panHoldActive = false;
@@ -677,6 +691,18 @@ private:
     void onSearchPrev(const QString& text, bool caseSensitive, bool wholeWord);
     void onSearchMatchFound(const PdfSearchMatch& match, const QVector<PdfSearchMatch>& pageMatches);
     void onSearchNotFound(bool wrapped);
+    
+    // OCR
+    void setupOcr();
+    void triggerOcrForCurrentPage();
+    void triggerOcrForAllPages();
+    void onDebounceTimeout();
+    void onOcrResultsReady(const QString& pageId, const QVector<OcrTextBlock>& blocks);
+    void onOcrBatchFinished(int pagesScanned, int pagesWithText);
+    void onOcrError(const QString& pageId, const QString& message);
+    QVector<VectorStroke> collectPageStrokes(const Page* page) const;
+    void syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks);
+    void setOcrTextVisibility(bool visible);
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

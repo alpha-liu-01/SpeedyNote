@@ -12,6 +12,7 @@
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
+#include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 
 #include <QPainter>
@@ -6478,9 +6479,75 @@ void DocumentViewport::deleteSelectedObjects()
         return;
     }
     
+    // Separate OcrTextObjects (derived cache — no undo) from regular objects
+    QVector<InsertedObject*> regularObjects;
+    QVector<InsertedObject*> ocrObjects;
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        if (obj->type() == QStringLiteral("ocr_text"))
+            ocrObjects.append(obj);
+        else
+            regularObjects.append(obj);
+    }
+    
+    // Handle OcrTextObject deletion (no undo, update suppressedStrokeIds)
+    int ocrDeletedCount = 0;
+    for (InsertedObject* obj : ocrObjects) {
+        auto* ocrObj = static_cast<OcrTextObject*>(obj);
+        
+        auto deleteOcrFromPage = [&](Page* page, const QString& pageId,
+                                     int pageIndex, Document::TileCoord tileCoord) {
+            if (!page || !page->objectById(ocrObj->id))
+                return false;
+            
+            for (const auto& sid : ocrObj->sourceStrokeIds)
+                page->suppressedStrokeIds.insert(sid);
+            
+            // Remove matching OcrTextBlock
+            for (int b = page->ocrTextBlocks.size() - 1; b >= 0; --b) {
+                if (page->ocrTextBlocks[b].id == ocrObj->id) {
+                    page->ocrTextBlocks.removeAt(b);
+                    break;
+                }
+            }
+            
+            page->removeObject(ocrObj->id);
+            
+            if (m_document->isEdgeless()) {
+                m_document->markTileDirty(tileCoord);
+                m_document->saveTileOcr(tileCoord);
+            } else {
+                m_document->markPageDirty(pageIndex);
+                m_document->savePageOcr(pageId, page);
+            }
+            ocrDeletedCount++;
+            return true;
+        };
+        
+        if (m_document->isEdgeless()) {
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && deleteOcrFromPage(tile, tile->uuid, -1, coord))
+                    break;
+            }
+        } else {
+            Page* currentPage = m_document->page(m_currentPageIndex);
+            if (currentPage && deleteOcrFromPage(currentPage, currentPage->uuid,
+                                                  m_currentPageIndex, {})) {
+                // found on current page
+            } else {
+                for (int i : m_document->loadedPageIndices()) {
+                    Page* page = m_document->page(i);
+                    if (page && deleteOcrFromPage(page, page->uuid, i, {}))
+                        break;
+                }
+            }
+        }
+    }
+    
     // Phase M.2: Cascade delete markdown notes linked to LinkObjects
     int noteCount = 0;
-    for (InsertedObject* obj : m_selectedObjects) {
+    for (InsertedObject* obj : regularObjects) {
         if (LinkObject* link = dynamic_cast<LinkObject*>(obj)) {
             for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
                 if (link->linkSlots[i].type == LinkSlot::Type::Markdown) {
@@ -6490,8 +6557,6 @@ void DocumentViewport::deleteSelectedObjects()
         }
     }
     
-    // TODO: Show confirmation dialog if notes will be deleted
-    // "This will delete N linked note(s). Continue?"
     if (noteCount > 0) {
         #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deleteSelectedObjects: Cascade deleting" << noteCount << "markdown note(s)";
@@ -6499,7 +6564,7 @@ void DocumentViewport::deleteSelectedObjects()
     }
     
     // Delete markdown note files before removing LinkObjects
-    for (InsertedObject* obj : m_selectedObjects) {
+    for (InsertedObject* obj : regularObjects) {
         if (LinkObject* link = dynamic_cast<LinkObject*>(obj)) {
             for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
                 if (link->linkSlots[i].type == LinkSlot::Type::Markdown) {
@@ -6516,19 +6581,14 @@ void DocumentViewport::deleteSelectedObjects()
     
     if (m_document->isEdgeless()) {
         // ========== EDGELESS MODE ==========
-        // Find which tile contains each object and remove it
-        for (InsertedObject* obj : m_selectedObjects) {
+        for (InsertedObject* obj : regularObjects) {
             if (!obj) continue;
             
-            // Find the tile containing this object
             bool found = false;
             for (const auto& coord : m_document->allLoadedTileCoords()) {
                 Page* tile = m_document->getTile(coord.first, coord.second);
                 if (tile && tile->objectById(obj->id)) {
-                    // Create undo entry BEFORE removing (object still valid)
                     pushObjectDeleteUndo(obj, -1, coord);
-                    
-                    // Remove object from tile
                     tile->removeObject(obj->id);
                     m_document->markTileDirty(coord);
                     deletedCount++;
@@ -6545,31 +6605,22 @@ void DocumentViewport::deleteSelectedObjects()
         }
     } else {
         // ========== PAGED MODE ==========
-        // Objects on current page (typically where selection was made)
         Page* currentPage = m_document->page(m_currentPageIndex);
         if (currentPage) {
-            for (InsertedObject* obj : m_selectedObjects) {
+            for (InsertedObject* obj : regularObjects) {
                 if (!obj) continue;
                 
-                // Check if object is on current page
                 if (currentPage->objectById(obj->id)) {
-                    // Create undo entry BEFORE removing (object still valid)
                     pushObjectDeleteUndo(obj, m_currentPageIndex, {});
-                    
-                    // Remove object from page
                     currentPage->removeObject(obj->id);
                     m_document->markPageDirty(m_currentPageIndex);
                     deletedCount++;
                 } else {
-                    // Object might be on a different page - search loaded pages only
-                    // PERF FIX: Only search loaded pages to avoid triggering lazy loading
                     bool found = false;
                     for (int i : m_document->loadedPageIndices()) {
-                        Page* page = m_document->page(i);  // Already loaded, no disk I/O
+                        Page* page = m_document->page(i);
                         if (page && page->objectById(obj->id)) {
-                            // Create undo entry BEFORE removing (object still valid)
                             pushObjectDeleteUndo(obj, i, {});
-                            
                             page->removeObject(obj->id);
                             m_document->markPageDirty(i);
                             deletedCount++;
@@ -6594,7 +6645,7 @@ void DocumentViewport::deleteSelectedObjects()
     emit objectSelectionChanged();
     
     // Emit modification signal
-    if (deletedCount > 0) {
+    if (deletedCount > 0 || ocrDeletedCount > 0) {
         emit documentModified();
         emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
     }
@@ -6602,7 +6653,7 @@ void DocumentViewport::deleteSelectedObjects()
     update();
     
     #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "objects";
+    qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "regular +" << ocrDeletedCount << "OCR objects";
     #endif
 }
 
@@ -6620,6 +6671,7 @@ void DocumentViewport::copySelectedObjects()
     // Serialize each selected object to JSON
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
+        if (obj->type() == QStringLiteral("ocr_text")) continue;
         
         // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
         // with a back-link to the original position
@@ -10492,19 +10544,55 @@ void DocumentViewport::renderSearchMatchesOverlay(QPainter& painter, int pageInd
             : m_searchHighlightOther;
         
         painter.setBrush(fillColor);
-        
-        // Convert PDF coords to page coords
-        const QRectF& pdfRect = match.boundingRect;
-        QRectF pageRect(
-            pdfRect.x() * PDF_TO_PAGE_SCALE,
-            pdfRect.y() * PDF_TO_PAGE_SCALE,
-            pdfRect.width() * PDF_TO_PAGE_SCALE,
-            pdfRect.height() * PDF_TO_PAGE_SCALE
-        );
+
+        QRectF pageRect;
+        if (match.source == PdfSearchMatch::PdfText) {
+            // PDF coords (72 DPI) → page coords (96 DPI)
+            const QRectF& r = match.boundingRect;
+            pageRect = QRectF(
+                r.x() * PDF_TO_PAGE_SCALE,
+                r.y() * PDF_TO_PAGE_SCALE,
+                r.width() * PDF_TO_PAGE_SCALE,
+                r.height() * PDF_TO_PAGE_SCALE);
+        } else {
+            // OcrText: already in page coords (96 DPI)
+            pageRect = match.boundingRect;
+        }
         
         painter.drawRect(pageRect);
     }
     
+    painter.restore();
+}
+
+void DocumentViewport::renderSearchMatchesOverlayEdgeless(QPainter& painter)
+{
+    if (m_searchMatches.isEmpty()) return;
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+
+    for (int i = 0; i < m_searchMatches.size(); ++i) {
+        const PdfSearchMatch& match = m_searchMatches[i];
+        if (match.source != PdfSearchMatch::OcrTextTile) continue;
+
+        QColor fillColor = (i == m_currentSearchMatchIndex) 
+            ? m_searchHighlightCurrent 
+            : m_searchHighlightOther;
+        painter.setBrush(fillColor);
+
+        // Convert tile-local rect to document coords
+        QRectF docRect(
+            static_cast<qreal>(match.tileX) * tileSize + match.boundingRect.x(),
+            static_cast<qreal>(match.tileY) * tileSize + match.boundingRect.y(),
+            match.boundingRect.width(),
+            match.boundingRect.height());
+
+        painter.drawRect(docRect);
+    }
+
     painter.restore();
 }
 
@@ -11153,6 +11241,7 @@ void DocumentViewport::pushPageStrokeUndo(int pageIndex, UndoAction::Type type, 
     pushUndoAction(action);
     if (!m_document->isEdgeless())
         emit pageModified(pageIndex);
+    emit strokesChanged();
 }
 
 void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type, const QVector<VectorStroke>& strokes)
@@ -11168,6 +11257,7 @@ void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type,
     pushUndoAction(action);
     if (!m_document->isEdgeless())
         emit pageModified(pageIndex);
+    emit strokesChanged();
 }
 
 void DocumentViewport::clearUndoStacksFrom(int pageIndex)
@@ -11506,6 +11596,9 @@ void DocumentViewport::undo()
     emit documentModified();
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
+    if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection)
+        emit strokesChanged();
     if (!m_document->isEdgeless())
         for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
@@ -11690,6 +11783,9 @@ void DocumentViewport::redo()
     emit documentModified();
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
+    if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection)
+        emit strokesChanged();
     if (!m_document->isEdgeless())
         for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
@@ -12175,6 +12271,9 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         renderEdgelessObjectsWithAffinity(painter, layerIdx, allTiles);
     }
     
+    // Render search match highlights in edgeless mode
+    renderSearchMatchesOverlayEdgeless(painter);
+
     // Draw tile boundary grid (debug)
     if (m_showTileBoundaries) {
         drawTileBoundaries(painter, viewRect);

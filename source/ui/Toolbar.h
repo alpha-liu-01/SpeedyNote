@@ -14,15 +14,17 @@ class MarkerSubToolbar;
 class EraserSubToolbar;
 class HighlighterSubToolbar;
 class ObjectSelectSubToolbar;
+class OcrSubToolbar;
 
 /**
  * Toolbar - Tab-specific tool selection and actions with inline subtoolbars.
  *
  * Layout (center-aligned):
- * [Pen(+presets)][Marker(+presets)][Eraser(+presets)][Shape][Lasso][ObjInsert(+presets)][Text(+presets)]  gap  [Undo][Redo] [Touch]
+ * [Pen(+presets)][Marker(+presets)][Eraser(+presets)][Shape][Lasso][ObjInsert(+presets)][Text(+presets)][OCR(+controls)]  gap  [Undo][Redo] [Touch]
  *
  * When a tool is selected its ExpandableToolButton expands to reveal
  * inline preset buttons (colors, thicknesses, toggles).
+ * The OCR button is independent and coexists with the active tool's subtoolbar.
  */
 class Toolbar : public QWidget {
     Q_OBJECT
@@ -47,6 +49,9 @@ public:
     EraserSubToolbar* eraserSubToolbar() const { return m_eraserSubToolbar; }
     HighlighterSubToolbar* highlighterSubToolbar() const { return m_highlighterSubToolbar; }
     ObjectSelectSubToolbar* objectSelectSubToolbar() const { return m_objectSelectSubToolbar; }
+    OcrSubToolbar* ocrSubToolbar() const { return m_ocrSubToolbar; }
+
+    void setOcrAvailable(bool available);
 
 signals:
     void toolSelected(ToolType tool);
@@ -74,6 +79,7 @@ private:
     ExpandableToolButton *m_eraserExpandable;
     ExpandableToolButton *m_objectInsertExpandable;
     ExpandableToolButton *m_textExpandable;
+    ExpandableToolButton *m_ocrExpandable;
 
     // Plain tool buttons (no subtoolbar)
     ToolButton *m_lassoButton;
@@ -98,6 +104,7 @@ private:
     EraserSubToolbar *m_eraserSubToolbar;
     HighlighterSubToolbar *m_highlighterSubToolbar;
     ObjectSelectSubToolbar *m_objectSelectSubToolbar;
+    OcrSubToolbar *m_ocrSubToolbar;
 
     // State
     bool m_darkMode = false;
