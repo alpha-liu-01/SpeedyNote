@@ -1356,6 +1356,10 @@ QJsonObject Document::toJson() const
     
     // Default background settings
     obj["default_background"] = defaultBackgroundToJson();
+
+    // OCR settings
+    if (!ocrLanguage.isEmpty())
+        obj["ocr_language"] = ocrLanguage;
     
     // Page count (for quick info without loading pages)
     obj["page_count"] = pageCount();
@@ -1415,6 +1419,9 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
         doc->defaultGridSpacing = obj["background_density"].toInt(32);
         doc->defaultLineSpacing = obj["background_density"].toInt(32);
     }
+
+    // OCR settings
+    doc->ocrLanguage = obj["ocr_language"].toString();
     
     // Note: Pages are NOT loaded here - call loadPagesFromJson() separately
     // or use fromFullJson() to load everything

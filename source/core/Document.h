@@ -149,6 +149,9 @@ public:
     int defaultLineSpacing = 32;
     QSizeF defaultPageSize = QSizeF(816, 1056);  ///< Default page size (US Letter at 96 DPI)
     
+    // ===== OCR Settings =====
+    QString ocrLanguage;                ///< Per-document OCR recognizer name (empty = global fallback)
+
     // ===== State =====
     bool modified = false;              ///< True if document has unsaved changes
     int lastAccessedPage = 0;           ///< Last viewed page index (for restoring position)

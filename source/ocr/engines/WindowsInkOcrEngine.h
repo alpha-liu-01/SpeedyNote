@@ -26,12 +26,19 @@ public:
     QString engineId() const override { return QStringLiteral("windows_ink"); }
     bool isAvailable() const override;
 
+    QStringList availableLanguages() const override;
+    void setLanguage(const QString& recognizerName) override;
+    QString language() const override;
+
     void addStrokes(const QVector<VectorStroke>& strokes) override;
     void removeStrokes(const QVector<QString>& strokeIds) override;
     void clearStrokes() override;
     QVector<Result> analyze() override;
 
 private:
+    QVector<Result> analyzeWithInkAnalyzer();
+    QVector<Result> analyzeWithRecognizer();
+
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };

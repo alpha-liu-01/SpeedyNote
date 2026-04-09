@@ -30,9 +30,11 @@ public:
     void setEngine(std::unique_ptr<OcrEngine> engine);
     bool isEngineAvailable() const;
     bool isBusy() const;
+    QStringList availableLanguages() const;
 
 public slots:
     void initEngine();
+    void setLanguage(const QString& recognizerName);
     void processPage(const QString& pageId,
                      const QVector<VectorStroke>& strokes,
                      const QSet<QString>& suppressedStrokeIds);
@@ -49,6 +51,7 @@ public slots:
 
 signals:
     void engineReady(bool available);
+    void languagesAvailable(const QStringList& languages);
     void resultsReady(const QString& pageId,
                       const QVector<OcrTextBlock>& blocks);
     void batchProgress(int completed, int total);

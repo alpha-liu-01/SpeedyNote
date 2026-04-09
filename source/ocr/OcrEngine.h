@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QRectF>
 #include <memory>
@@ -24,6 +25,10 @@ public:
     virtual QString engineId() const = 0;
 
     virtual bool isAvailable() const = 0;
+
+    virtual QStringList availableLanguages() const = 0;
+    virtual void setLanguage(const QString& recognizerName) = 0;
+    virtual QString language() const = 0;
 
     virtual void addStrokes(const QVector<VectorStroke>& strokes) = 0;
     virtual void removeStrokes(const QVector<QString>& strokeIds) = 0;

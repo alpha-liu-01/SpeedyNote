@@ -67,6 +67,10 @@
 #include <QRegularExpression>  // BUG-A002: For filename sanitization on Android
 #include <QSettings>
 #include <QMessageBox>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QDialog>
 #include <QDebug>
 #include <QInputMethod>
 #include <QPropertyAnimation>  // Phase P.4.5: Smooth window transitions
@@ -897,6 +901,11 @@ void MainWindow::setupUi() {
 
     
     overflowMenu->addSeparator();
+
+    QAction *ocrLanguageAction = overflowMenu->addAction(tr("OCR Language..."));
+    connect(ocrLanguageAction, &QAction::triggered, this, [this]() {
+        showOcrLanguageDialog();
+    });
     
     QAction *jumpToPageAction = overflowMenu->addAction(tr("Jump to Page..."));
     connect(jumpToPageAction, &QAction::triggered, this, &MainWindow::showJumpToPageDialog);
@@ -2451,6 +2460,13 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
 
         // OCR: Sync text visibility with the Show Text toggle for the new viewport
         setOcrTextVisibility(m_toolbar->ocrSubToolbar()->isShowTextEnabled());
+
+        // OCR: Sync language for the new document
+        if (m_ocrWorker) {
+            Document* doc = viewport->document();
+            QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
+                Q_ARG(QString, resolveOcrLanguage(doc)));
+        }
     }
     
     // =========================================================================
@@ -5236,6 +5252,9 @@ void MainWindow::setupOcr()
     connect(m_ocrWorker, &OcrWorker::engineReady, this, [this](bool available) {
         m_toolbar->setOcrAvailable(available);
     }, Qt::QueuedConnection);
+    connect(m_ocrWorker, &OcrWorker::languagesAvailable, this, [this](const QStringList& langs) {
+        m_ocrAvailableLanguages = langs;
+    }, Qt::QueuedConnection);
 
     m_ocrThread->start();
 
@@ -5257,6 +5276,9 @@ void MainWindow::triggerOcrForCurrentPage()
     DocumentViewport* vp = currentViewport();
     Document* doc = vp ? vp->document() : nullptr;
     if (!doc || !m_ocrWorker) return;
+
+    QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
+        Q_ARG(QString, resolveOcrLanguage(doc)));
 
     m_toolbar->ocrSubToolbar()->setStatusText(tr("Scanning..."));
 
@@ -5287,6 +5309,9 @@ void MainWindow::triggerOcrForAllPages()
 {
     Document* doc = currentViewport() ? currentViewport()->document() : nullptr;
     if (!doc || !m_ocrWorker) return;
+
+    QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
+        Q_ARG(QString, resolveOcrLanguage(doc)));
 
     m_toolbar->ocrSubToolbar()->setStatusText(tr("Scanning all pages..."));
 
@@ -5324,6 +5349,9 @@ void MainWindow::onDebounceTimeout()
     DocumentViewport* vp = currentViewport();
     Document* doc = vp ? vp->document() : nullptr;
     if (!doc || !m_ocrWorker) return;
+
+    QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
+        Q_ARG(QString, resolveOcrLanguage(doc)));
 
     // The debounce timer only fires after strokesChanged, so we know the
     // current page was edited.  Scan just that page (not the entire document).
@@ -5492,6 +5520,81 @@ void MainWindow::setOcrTextVisibility(bool visible)
     }
 
     vp->update();
+}
+
+QString MainWindow::resolveOcrLanguage(Document* doc) const
+{
+    if (doc && !doc->ocrLanguage.isEmpty())
+        return doc->ocrLanguage;
+    QSettings settings("SpeedyNote", "App");
+    return settings.value("ocrLanguage").toString();
+}
+
+void MainWindow::showOcrLanguageDialog()
+{
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("OCR Language"));
+    dlg.setMinimumWidth(380);
+
+    auto* layout = new QVBoxLayout(&dlg);
+
+    if (doc) {
+        auto* docLabel = new QLabel(tr("Document: %1").arg(doc->name), &dlg);
+        docLabel->setStyleSheet("font-weight: bold;");
+        layout->addWidget(docLabel);
+        layout->addSpacing(8);
+    }
+
+    auto* label = new QLabel(tr("Handwriting recognition language for this document:"), &dlg);
+    label->setWordWrap(true);
+    layout->addWidget(label);
+
+    auto* combo = new QComboBox(&dlg);
+    combo->addItem(tr("Use global setting"), QStringLiteral(""));
+    combo->addItem(tr("Auto-detect (system default)"), QStringLiteral("auto"));
+    for (const auto& lang : m_ocrAvailableLanguages)
+        combo->addItem(lang, lang);
+    layout->addWidget(combo);
+
+    // Pre-select current value
+    if (doc) {
+        int idx = combo->findData(doc->ocrLanguage);
+        if (idx >= 0) combo->setCurrentIndex(idx);
+    }
+
+    layout->addSpacing(8);
+
+    auto* globalNote = new QLabel(
+        tr("\"Use global setting\" inherits from Settings > Language > Handwriting Recognition Language."),
+        &dlg);
+    globalNote->setWordWrap(true);
+    globalNote->setStyleSheet("color: gray; font-size: 11px;");
+    layout->addWidget(globalNote);
+
+    auto* buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    QString chosen = combo->currentData().toString();
+
+    if (doc) {
+        doc->ocrLanguage = chosen;
+        doc->modified = true;
+    }
+
+    QString effective = resolveOcrLanguage(doc);
+    if (m_ocrWorker) {
+        QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
+            Q_ARG(QString, effective));
+    }
 }
 
 // =========================================================================

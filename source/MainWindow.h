@@ -125,6 +125,9 @@ public:
     void setPalmRejectionDelay(int delayMs);
 #endif
 
+    // OCR language query (for ControlPanelDialog and per-document dialog)
+    QStringList ocrAvailableLanguages() const { return m_ocrAvailableLanguages; }
+
     // Theme settings
     QColor customAccentColor;
     bool useCustomAccentColor = false;
@@ -526,6 +529,7 @@ private:
     OcrWorker *m_ocrWorker = nullptr;
     QTimer *m_ocrDebounceTimer = nullptr;
     bool m_autoOcrEnabled = false;
+    QStringList m_ocrAvailableLanguages;
     
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
@@ -703,6 +707,8 @@ private:
     QVector<VectorStroke> collectPageStrokes(const Page* page) const;
     void syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks);
     void setOcrTextVisibility(bool visible);
+    void showOcrLanguageDialog();
+    QString resolveOcrLanguage(Document* doc) const;
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

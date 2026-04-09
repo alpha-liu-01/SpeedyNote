@@ -26,10 +26,31 @@ bool OcrWorker::isBusy() const
     return m_busy.load();
 }
 
+QStringList OcrWorker::availableLanguages() const
+{
+    return m_engine ? m_engine->availableLanguages() : QStringList();
+}
+
 void OcrWorker::initEngine()
 {
     m_engine = OcrEngine::createBest();
-    emit engineReady(m_engine && m_engine->isAvailable());
+    bool ok = m_engine && m_engine->isAvailable();
+    emit engineReady(ok);
+    if (ok)
+        emit languagesAvailable(m_engine->availableLanguages());
+}
+
+void OcrWorker::setLanguage(const QString& recognizerName)
+{
+    if (!m_engine) return;
+
+    QString prev = m_engine->language();
+    m_engine->setLanguage(recognizerName);
+
+    if (m_engine->language() != prev) {
+        m_lastPageId.clear();
+        m_knownStrokeIds.clear();
+    }
 }
 
 void OcrWorker::cancel()
@@ -108,7 +129,13 @@ void OcrWorker::processPageIncremental(const QString& pageId,
                                        const QVector<VectorStroke>& strokes,
                                        const QSet<QString>& suppressedStrokeIds)
 {
-    if (pageId != m_lastPageId || m_knownStrokeIds.isEmpty()) {
+    // Fall back to full rescan when:
+    //  - different page / first scan
+    //  - language override is active: InkRecognizerContainer reads from
+    //    InkStrokeContainer which has no per-stroke removal API, so
+    //    incremental remove+analyze would still see "deleted" strokes
+    if (pageId != m_lastPageId || m_knownStrokeIds.isEmpty()
+        || !m_engine->language().isEmpty()) {
         processPage(pageId, strokes, suppressedStrokeIds);
         return;
     }
