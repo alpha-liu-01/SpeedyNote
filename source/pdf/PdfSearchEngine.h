@@ -24,6 +24,7 @@
 #include <utility>
 
 class Document;
+class Page;
 struct OcrTextBlock;
 
 // ============================================================================
@@ -37,7 +38,9 @@ struct PdfSearchMatch {
     enum Source {
         PdfText,        ///< From PdfProvider::textBoxes (bounding rect in PDF coords, 72 DPI)
         OcrText,        ///< From OcrTextBlock on a paged document (bounding rect in page coords, 96 DPI)
-        OcrTextTile     ///< From OcrTextBlock in an edgeless tile (bounding rect in tile-local coords)
+        OcrTextTile,    ///< From OcrTextBlock in an edgeless tile (bounding rect in tile-local coords)
+        TextBoxObj,     ///< From TextBoxObject or locked OcrTextObject (bounding rect in page coords)
+        TextBoxObjTile  ///< From TextBoxObject/locked OCR in edgeless tile (tile-local coords)
     };
 
     Source source = PdfText;
@@ -45,8 +48,8 @@ struct PdfSearchMatch {
     int matchIndex = -1;     ///< Index within page/tile matches (for cycling)
     QRectF boundingRect;     ///< Bounding rectangle (coordinate space depends on source)
 
-    int tileX = 0;           ///< Edgeless tile X (only meaningful when source == OcrTextTile)
-    int tileY = 0;           ///< Edgeless tile Y (only meaningful when source == OcrTextTile)
+    int tileX = 0;           ///< Edgeless tile X (meaningful for OcrTextTile/TextBoxObjTile)
+    int tileY = 0;           ///< Edgeless tile Y (meaningful for OcrTextTile/TextBoxObjTile)
 
     bool isValid() const { return pageIndex >= 0 && matchIndex >= 0; }
 };
@@ -268,6 +271,19 @@ private:
     QVector<PdfSearchMatch> searchOcrBlocks(
         int pageIndex,
         const QVector<OcrTextBlock>& blocks,
+        const QString& text,
+        bool caseSensitive,
+        bool wholeWord,
+        PdfSearchMatch::Source source,
+        int tileX, int tileY,
+        int matchIndexOffset) const;
+
+    /**
+     * @brief Search TextBoxObject and locked OcrTextObject objects on a page.
+     */
+    QVector<PdfSearchMatch> searchTextBoxObjects(
+        int pageIndex,
+        const Page* page,
         const QString& text,
         bool caseSensitive,
         bool wholeWord,

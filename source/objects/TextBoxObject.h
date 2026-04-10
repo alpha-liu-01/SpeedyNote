@@ -29,9 +29,9 @@ public:
     bool isMarkdown() const;
     void invalidateDocCache() const;
     QTextDocument* cachedDocument() const;
+    QTextDocument* ensureDocCache(qreal width) const;
 
 protected:
-    QTextDocument* ensureDocCache(qreal width) const;
 
     mutable QTextDocument* m_cachedDoc = nullptr;
     mutable qreal m_cachedDocWidth = -1;

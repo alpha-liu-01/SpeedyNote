@@ -75,6 +75,9 @@ static void initEraserJni()
 #include <QFileDialog>    // For insertImageFromDialog (Phase C.0.5)
 #include <QDesktopServices>  // For opening URLs (Phase C.4.3)
 #include <QUrl>              // For URL handling (Phase C.4.3)
+#include <QTextDocument>
+#include <QTextCursor>
+#include <QAbstractTextDocumentLayout>
 #include <QMenu>             // For addLinkToSlot menu (Phase C.5.3 - temporary)
 #include <QInputDialog>      // For URL input dialog (Phase C.5.3 - temporary)
 
@@ -5496,6 +5499,76 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     // Hit test for object
     InsertedObject* hitObject = objectAtPoint(docPoint);
 
+    // Ctrl+Click link following (Phase 2E)
+    if ((pe.modifiers & Qt::ControlModifier) && hitObject) {
+        auto* textBox = dynamic_cast<TextBoxObject*>(hitObject);
+        if (textBox && textBox->isMarkdown()) {
+            constexpr qreal pad = 2.0;
+            bool foundLocal = false;
+            QPointF localPos;
+            if (m_document->isEdgeless()) {
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (!tile) continue;
+                    for (const auto& obj : tile->objects) {
+                        if (obj.get() == hitObject) {
+                            QPointF tileOrigin(
+                                coord.first * Document::EDGELESS_TILE_SIZE,
+                                coord.second * Document::EDGELESS_TILE_SIZE);
+                            localPos = docPoint - tileOrigin - textBox->position
+                                       - QPointF(pad, pad);
+                            foundLocal = true;
+                            break;
+                        }
+                    }
+                    if (foundLocal) break;
+                }
+            } else {
+                int pageIdx = pageAtPoint(docPoint);
+                if (pageIdx >= 0) {
+                    localPos = docPoint - pagePosition(pageIdx) - textBox->position
+                               - QPointF(pad, pad);
+                    foundLocal = true;
+                }
+            }
+
+            if (foundLocal) {
+                qreal docWidth = textBox->size.width() - 2.0 * pad;
+                if (docWidth > 0.0) {
+                    QTextDocument tmpDoc;
+                    tmpDoc.setMarkdown(textBox->text);
+                    tmpDoc.setTextWidth(docWidth);
+
+                    QTextOption opt;
+                    switch (textBox->alignment) {
+                    case TextAlignment::Center: opt.setAlignment(Qt::AlignCenter); break;
+                    case TextAlignment::Right:  opt.setAlignment(Qt::AlignRight);  break;
+                    default:                    opt.setAlignment(Qt::AlignLeft);    break;
+                    }
+                    tmpDoc.setDefaultTextOption(opt);
+
+                    QFont docFont;
+                    if (!textBox->fontFamily.isEmpty())
+                        docFont.setFamily(textBox->fontFamily);
+                    if (textBox->fontSize > 0.0)
+                        docFont.setPixelSize(static_cast<int>(textBox->fontSize));
+                    tmpDoc.setDefaultFont(docFont);
+
+                    int cursorPos = tmpDoc.documentLayout()->hitTest(localPos, Qt::FuzzyHit);
+                    if (cursorPos >= 0) {
+                        QTextCursor cursor(&tmpDoc);
+                        cursor.setPosition(cursorPos);
+                        QString href = cursor.charFormat().anchorHref();
+                        if (!href.isEmpty()) {
+                            QDesktopServices::openUrl(QUrl(href));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Double-click detection for text editing (Phase 2B)
     static QElapsedTimer lastObjClickTimer;
     static QPointF lastObjClickPos;
@@ -6822,6 +6895,20 @@ void DocumentViewport::copySelectedObjects()
     #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
     #endif
+
+    // Put plain text on system clipboard for cross-app paste (Phase 2E)
+    QString plainText;
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        auto* textBox = dynamic_cast<TextBoxObject*>(obj);
+        if (textBox && !textBox->text.isEmpty()) {
+            if (!plainText.isEmpty()) plainText += QLatin1Char('\n');
+            plainText += textBox->text;
+        }
+    }
+    if (!plainText.isEmpty()) {
+        QGuiApplication::clipboard()->setText(plainText);
+    }
     
     // Notify that object clipboard has content (for action bar paste button)
     emit objectClipboardChanged(!s_objectClipboard.isEmpty());
@@ -10747,7 +10834,8 @@ void DocumentViewport::renderSearchMatchesOverlayEdgeless(QPainter& painter)
 
     for (int i = 0; i < m_searchMatches.size(); ++i) {
         const PdfSearchMatch& match = m_searchMatches[i];
-        if (match.source != PdfSearchMatch::OcrTextTile) continue;
+        if (match.source != PdfSearchMatch::OcrTextTile
+            && match.source != PdfSearchMatch::TextBoxObjTile) continue;
 
         QColor fillColor = (i == m_currentSearchMatchIndex) 
             ? m_searchHighlightCurrent 

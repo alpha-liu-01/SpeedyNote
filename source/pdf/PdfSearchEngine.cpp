@@ -3,9 +3,16 @@
 #include "../core/Document.h"
 #include "../core/Page.h"
 #include "../ocr/OcrTextBlock.h"
+#include "../objects/TextBoxObject.h"
+#include "../objects/OcrTextObject.h"
 
 #include <QDebug>
 #include <QDir>
+#include <QTextDocument>
+#include <QTextBlock>
+#include <QTextLayout>
+#include <QTextCursor>
+#include <QAbstractTextDocumentLayout>
 #include <QtConcurrent/QtConcurrent>
 
 // ============================================================================
@@ -227,16 +234,23 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchPage(int pageIndex,
         }
     }
     
-    // --- OCR text search (paged mode) ---
+    // --- OCR text + TextBox / locked OCR object search (paged mode) ---
     if (pageIndex >= 0 && pageIndex < m_document->pageCount()) {
         const Page* page = m_document->page(pageIndex);
-        if (page && !page->ocrTextBlocks.isEmpty()) {
-            QVector<OcrTextBlock> blocks = page->ocrBlocksForSearch();
-            QVector<PdfSearchMatch> ocrMatches = searchOcrBlocks(
-                pageIndex, blocks, text, caseSensitive, wholeWord,
-                PdfSearchMatch::OcrText, 0, 0,
-                matches.size());
-            matches.append(ocrMatches);
+        if (page) {
+            if (!page->ocrTextBlocks.isEmpty()) {
+                QVector<OcrTextBlock> blocks = page->ocrBlocksForSearch();
+                QVector<PdfSearchMatch> ocrMatches = searchOcrBlocks(
+                    pageIndex, blocks, text, caseSensitive, wholeWord,
+                    PdfSearchMatch::OcrText, 0, 0,
+                    matches.size());
+                matches.append(ocrMatches);
+            }
+
+            QVector<PdfSearchMatch> objMatches = searchTextBoxObjects(
+                pageIndex, page, text, caseSensitive, wholeWord,
+                PdfSearchMatch::TextBoxObj, 0, 0, matches.size());
+            matches.append(objMatches);
         }
     }
     
@@ -387,6 +401,166 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchOcrBlocks(
         }
 
         searchPos = foundPos + 1;
+    }
+
+    return matches;
+}
+
+// ============================================================================
+// TextBox / Locked OCR Object Search
+// ============================================================================
+
+QVector<PdfSearchMatch> PdfSearchEngine::searchTextBoxObjects(
+    int pageIndex,
+    const Page* page,
+    const QString& text,
+    bool caseSensitive,
+    bool wholeWord,
+    PdfSearchMatch::Source source,
+    int tileX, int tileY,
+    int matchIndexOffset) const
+{
+    QVector<PdfSearchMatch> matches;
+    if (!page || text.isEmpty()) return matches;
+
+    Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    int matchIndex = matchIndexOffset;
+
+    for (const auto& objPtr : page->objects) {
+        if (!objPtr) continue;
+        const InsertedObject* rawObj = objPtr.get();
+
+        const TextBoxObject* textBox = nullptr;
+        if (rawObj->type() == QLatin1String("textbox")) {
+            textBox = static_cast<const TextBoxObject*>(rawObj);
+        } else if (rawObj->type() == QLatin1String("ocr_text")) {
+            auto* ocrObj = static_cast<const OcrTextObject*>(rawObj);
+            if (ocrObj->ocrLocked)
+                textBox = ocrObj;
+        }
+        if (!textBox || textBox->text.isEmpty()) continue;
+
+        const QString& objText = textBox->text;
+        const QPointF& objPos = textBox->position;
+        const QSizeF& objSize = textBox->size;
+
+        constexpr qreal renderPad = 2.0;
+        const QPointF textOrigin(objPos.x() + renderPad, objPos.y() + renderPad);
+
+        if (textBox->isMarkdown()) {
+            qreal docWidth = objSize.width() - 2.0 * renderPad;
+            if (docWidth < 1.0) continue;
+
+            QTextDocument tmpDoc;
+            tmpDoc.setMarkdown(objText);
+            tmpDoc.setTextWidth(docWidth);
+
+            QTextOption opt;
+            switch (textBox->alignment) {
+            case TextAlignment::Center: opt.setAlignment(Qt::AlignCenter); break;
+            case TextAlignment::Right:  opt.setAlignment(Qt::AlignRight);  break;
+            default:                    opt.setAlignment(Qt::AlignLeft);    break;
+            }
+            tmpDoc.setDefaultTextOption(opt);
+
+            QFont docFont;
+            if (!textBox->fontFamily.isEmpty())
+                docFont.setFamily(textBox->fontFamily);
+            if (textBox->fontSize > 0.0)
+                docFont.setPixelSize(static_cast<int>(textBox->fontSize));
+            tmpDoc.setDefaultFont(docFont);
+
+            QTextDocument::FindFlags findFlags;
+            if (caseSensitive)
+                findFlags |= QTextDocument::FindCaseSensitively;
+            if (wholeWord)
+                findFlags |= QTextDocument::FindWholeWords;
+
+            QTextCursor searchCursor(&tmpDoc);
+            while (true) {
+                searchCursor = tmpDoc.find(text, searchCursor, findFlags);
+                if (searchCursor.isNull()) break;
+
+                QTextCursor startCur(&tmpDoc);
+                startCur.setPosition(searchCursor.selectionStart());
+                QTextCursor endCur(&tmpDoc);
+                endCur.setPosition(searchCursor.selectionEnd());
+
+                QRectF localRect;
+                QTextBlock startBlock = startCur.block();
+                QRectF startBlockRect = tmpDoc.documentLayout()->blockBoundingRect(startBlock);
+
+                if (startCur.block() == endCur.block() && startBlock.layout()) {
+                    QTextLine line = startBlock.layout()->lineForTextPosition(
+                        startCur.positionInBlock());
+                    if (line.isValid()) {
+                        qreal x1 = line.cursorToX(startCur.positionInBlock());
+                        qreal x2 = line.cursorToX(endCur.positionInBlock());
+                        if (x2 <= x1) x2 = x1 + 1;
+                        qreal lineY = startBlockRect.top() + line.y();
+                        localRect = QRectF(x1, lineY, x2 - x1, line.height());
+                    } else {
+                        localRect = startBlockRect;
+                    }
+                } else {
+                    QRectF endBlockRect = tmpDoc.documentLayout()->blockBoundingRect(
+                        endCur.block());
+                    localRect = startBlockRect.united(endBlockRect);
+                }
+
+                PdfSearchMatch match;
+                match.source = source;
+                match.pageIndex = pageIndex;
+                match.matchIndex = matchIndex++;
+                match.boundingRect = localRect.translated(textOrigin);
+                match.tileX = tileX;
+                match.tileY = tileY;
+                matches.append(match);
+            }
+        } else {
+            int searchPos = 0;
+            while (searchPos < objText.length()) {
+                int foundPos = static_cast<int>(objText.indexOf(text, searchPos, cs));
+                if (foundPos < 0) break;
+
+                if (wholeWord) {
+                    if (foundPos > 0) {
+                        QChar before = objText[foundPos - 1];
+                        if (before.isLetterOrNumber() || before == '_') {
+                            searchPos = foundPos + 1;
+                            continue;
+                        }
+                    }
+                    int endPos = foundPos + static_cast<int>(text.length());
+                    if (endPos < objText.length()) {
+                        QChar after = objText[endPos];
+                        if (after.isLetterOrNumber() || after == '_') {
+                            searchPos = foundPos + 1;
+                            continue;
+                        }
+                    }
+                }
+
+                int totalLen = objText.length();
+                qreal textW = objSize.width() - 2.0 * renderPad;
+                if (textW < 1.0) textW = 1.0;
+                qreal charW = (totalLen > 0) ? textW / totalLen : textW;
+                qreal x = textOrigin.x() + charW * foundPos;
+                qreal w = charW * text.length();
+
+                PdfSearchMatch match;
+                match.source = source;
+                match.pageIndex = pageIndex;
+                match.matchIndex = matchIndex++;
+                match.boundingRect = QRectF(x, textOrigin.y(), w,
+                                            objSize.height() - 2.0 * renderPad);
+                match.tileX = tileX;
+                match.tileY = tileY;
+                matches.append(match);
+
+                searchPos = foundPos + 1;
+            }
+        }
     }
 
     return matches;
@@ -703,6 +877,13 @@ void PdfSearchEngine::doSearchEdgeless(int startVirtualPage, int startMatchIndex
             tileMatches = searchOcrBlocks(
                 currentTile, blocks, m_searchText, m_caseSensitive, m_wholeWord,
                 PdfSearchMatch::OcrTextTile, tx, ty, 0);
+
+            if (tile) {
+                QVector<PdfSearchMatch> objMatches = searchTextBoxObjects(
+                    currentTile, tile, m_searchText, m_caseSensitive, m_wholeWord,
+                    PdfSearchMatch::TextBoxObjTile, tx, ty, tileMatches.size());
+                tileMatches.append(objMatches);
+            }
 
             addToCache(currentTile, tileMatches);
         }
