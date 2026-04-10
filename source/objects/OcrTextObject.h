@@ -16,7 +16,7 @@ public:
     bool ocrDirty = false;
     QVector<OcrTextBlock::WordSegment> wordSegments;
 
-    OcrTextObject() { visible = false; }
+    OcrTextObject() { visible = false; showBorder = false; }
 
     QString type() const override { return QStringLiteral("ocr_text"); }
     void render(QPainter& painter, qreal zoom) const override;
