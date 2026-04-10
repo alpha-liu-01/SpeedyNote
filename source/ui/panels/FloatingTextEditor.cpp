@@ -8,6 +8,10 @@
 #include <QKeyEvent>
 #include <QApplication>
 #include <QScreen>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QRegularExpression>
+#include <QTextCursor>
 
 FloatingTextEditor::FloatingTextEditor(QWidget* parent)
     : QWidget(parent)
@@ -92,7 +96,13 @@ void FloatingTextEditor::buildUi()
     m_editor->setLineNumberEnabled(false);
     m_editor->hideSearchWidget(true);
     m_editor->installEventFilter(this);
+    m_editor->viewport()->installEventFilter(this);
     root->addWidget(m_editor, 1);
+
+    // Issue 3 pattern: connect urlClicked signal for link following
+    connect(m_editor, &QMarkdownTextEdit::urlClicked, this, [](const QString &url) {
+        QDesktopServices::openUrl(QUrl(url));
+    });
 
     // Connections (initially disconnected; reconnected in setTarget)
     connect(m_opacitySlider, &QSlider::valueChanged,
@@ -110,7 +120,7 @@ bool FloatingTextEditor::eventFilter(QObject* obj, QEvent* event)
             return true;
         }
         if (ke->key() == Qt::Key_F && (ke->modifiers() & Qt::ControlModifier)) {
-            return true; // block Ctrl+F from reaching QMarkdownTextEdit's search
+            return true;
         }
     }
     return QWidget::eventFilter(obj, event);

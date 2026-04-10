@@ -531,7 +531,7 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
         // track `Ctrl + Click` and `Ctrl + Shift + Click` in the text edit
         if ((obj == this->viewport()) &&
             (mouseEvent->button() == Qt::LeftButton)) {
-            auto modifiers = QGuiApplication::keyboardModifiers();
+            auto modifiers = mouseEvent->modifiers();
 
             // Check for Ctrl+Shift+Click (open in new tab)
             if (modifiers.testFlag(Qt::ControlModifier) &&
@@ -542,8 +542,7 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
                 return true;
             }
             // Check for Ctrl+Click (open in current tab)
-            else if (modifiers == Qt::ControlModifier ||
-                     modifiers == Qt::ExtraButton24) {
+            else if (modifiers.testFlag(Qt::ControlModifier)) {
                 _openLinkInNewTab = false;
                 openLinkAtCursorPosition();
                 return true;

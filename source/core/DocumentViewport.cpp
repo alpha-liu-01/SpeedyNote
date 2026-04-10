@@ -78,6 +78,7 @@ static void initEraserJni()
 #include <QTextDocument>
 #include <QTextCursor>
 #include <QAbstractTextDocumentLayout>
+#include <QRegularExpression>
 #include <QMenu>             // For addLinkToSlot menu (Phase C.5.3 - temporary)
 #include <QInputDialog>      // For URL input dialog (Phase C.5.3 - temporary)
 
@@ -5502,69 +5503,92 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     // Ctrl+Click link following (Phase 2E)
     if ((pe.modifiers & Qt::ControlModifier) && hitObject) {
         auto* textBox = dynamic_cast<TextBoxObject*>(hitObject);
-        if (textBox && textBox->isMarkdown()) {
-            constexpr qreal pad = 2.0;
-            bool foundLocal = false;
-            QPointF localPos;
-            if (m_document->isEdgeless()) {
-                for (const auto& coord : m_document->allLoadedTileCoords()) {
-                    Page* tile = m_document->getTile(coord.first, coord.second);
-                    if (!tile) continue;
-                    for (const auto& obj : tile->objects) {
-                        if (obj.get() == hitObject) {
-                            QPointF tileOrigin(
-                                coord.first * Document::EDGELESS_TILE_SIZE,
-                                coord.second * Document::EDGELESS_TILE_SIZE);
-                            localPos = docPoint - tileOrigin - textBox->position
-                                       - QPointF(pad, pad);
-                            foundLocal = true;
-                            break;
+        if (textBox && !textBox->text.isEmpty()) {
+            QString href;
+
+            // Strategy 1: QTextDocument anchorHref for rendered Markdown links
+            if (textBox->isMarkdown()) {
+                constexpr qreal screenPad = 2.0;
+                qreal pagePad = screenPad / m_zoomLevel;
+                bool foundLocal = false;
+                QPointF localPos;
+                if (m_document->isEdgeless()) {
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (!tile) continue;
+                        for (const auto& obj : tile->objects) {
+                            if (obj.get() == hitObject) {
+                                QPointF tileOrigin(
+                                    coord.first * Document::EDGELESS_TILE_SIZE,
+                                    coord.second * Document::EDGELESS_TILE_SIZE);
+                                localPos = docPoint - tileOrigin - textBox->position
+                                           - QPointF(pagePad, pagePad);
+                                foundLocal = true;
+                                break;
+                            }
+                        }
+                        if (foundLocal) break;
+                    }
+                } else {
+                    int pageIdx = pageAtPoint(docPoint);
+                    if (pageIdx >= 0) {
+                        localPos = docPoint - pagePosition(pageIdx) - textBox->position
+                                   - QPointF(pagePad, pagePad);
+                        foundLocal = true;
+                    }
+                }
+
+                if (foundLocal) {
+                    qreal docWidth = textBox->size.width() - 2.0 * pagePad;
+                    if (docWidth > 0.0) {
+                        QTextDocument* doc = textBox->ensureDocCache(docWidth);
+                        if (doc) {
+                            if (textBox->fontSize <= 0.0 && doc->size().height() > 0.0) {
+                                qreal availHeight = textBox->size.height() - 2.0 * pagePad;
+                                if (doc->size().height() > availHeight && availHeight > 0.0) {
+                                    qreal autoScale = availHeight / doc->size().height();
+                                    localPos /= autoScale;
+                                }
+                            }
+
+                            int cursorPos = doc->documentLayout()->hitTest(localPos, Qt::FuzzyHit);
+                            if (cursorPos >= 0) {
+                                QTextCursor cursor(doc);
+                                cursor.setPosition(cursorPos);
+                                href = cursor.charFormat().anchorHref();
+                                if (href.isEmpty() && cursorPos + 1 <= doc->characterCount()) {
+                                    cursor.setPosition(cursorPos + 1);
+                                    href = cursor.charFormat().anchorHref();
+                                }
+                            }
                         }
                     }
-                    if (foundLocal) break;
-                }
-            } else {
-                int pageIdx = pageAtPoint(docPoint);
-                if (pageIdx >= 0) {
-                    localPos = docPoint - pagePosition(pageIdx) - textBox->position
-                               - QPointF(pad, pad);
-                    foundLocal = true;
                 }
             }
 
-            if (foundLocal) {
-                qreal docWidth = textBox->size.width() - 2.0 * pad;
-                if (docWidth > 0.0) {
-                    QTextDocument tmpDoc;
-                    tmpDoc.setMarkdown(textBox->text);
-                    tmpDoc.setTextWidth(docWidth);
-
-                    QTextOption opt;
-                    switch (textBox->alignment) {
-                    case TextAlignment::Center: opt.setAlignment(Qt::AlignCenter); break;
-                    case TextAlignment::Right:  opt.setAlignment(Qt::AlignRight);  break;
-                    default:                    opt.setAlignment(Qt::AlignLeft);    break;
-                    }
-                    tmpDoc.setDefaultTextOption(opt);
-
-                    QFont docFont;
-                    if (!textBox->fontFamily.isEmpty())
-                        docFont.setFamily(textBox->fontFamily);
-                    if (textBox->fontSize > 0.0)
-                        docFont.setPixelSize(static_cast<int>(textBox->fontSize));
-                    tmpDoc.setDefaultFont(docFont);
-
-                    int cursorPos = tmpDoc.documentLayout()->hitTest(localPos, Qt::FuzzyHit);
-                    if (cursorPos >= 0) {
-                        QTextCursor cursor(&tmpDoc);
-                        cursor.setPosition(cursorPos);
-                        QString href = cursor.charFormat().anchorHref();
-                        if (!href.isEmpty()) {
-                            QDesktopServices::openUrl(QUrl(href));
-                            return;
-                        }
-                    }
+            // Strategy 2: Regex for Markdown [text](url) links
+            if (href.isEmpty()) {
+                static const QRegularExpression mdLinkRx(
+                    QStringLiteral("\\[([^\\]]*)\\]\\(([^)]+)\\)"));
+                QRegularExpressionMatchIterator it = mdLinkRx.globalMatch(textBox->text);
+                if (it.hasNext()) {
+                    href = it.next().captured(2).trimmed();
                 }
+            }
+
+            // Strategy 3: Regex for bare URLs (https://..., http://...)
+            if (href.isEmpty()) {
+                static const QRegularExpression bareUrlRx(
+                    QStringLiteral("\\bhttps?://[^\\s)>]+"));
+                QRegularExpressionMatch m = bareUrlRx.match(textBox->text);
+                if (m.hasMatch()) {
+                    href = m.captured(0).trimmed();
+                }
+            }
+
+            if (!href.isEmpty()) {
+                QDesktopServices::openUrl(QUrl(href));
+                return;
             }
         }
     }
