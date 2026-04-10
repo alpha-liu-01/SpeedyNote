@@ -40,7 +40,7 @@ void TextBoxObject::invalidateDocCache() const
 QTextDocument* TextBoxObject::ensureDocCache(qreal width) const
 {
     if (m_cachedDoc
-        && qFuzzyCompare(m_cachedDocWidth, width)
+        && qFuzzyCompare(1.0 + m_cachedDocWidth, 1.0 + width)
         && m_cachedText == text
         && m_cachedAlignment == alignment) {
         return m_cachedDoc;
@@ -112,6 +112,14 @@ void TextBoxObject::render(QPainter& painter, qreal zoom) const
         return;
 
     painter.save();
+
+    // --- Rotation ---
+    if (rotation != 0.0) {
+        QPointF center = targetRect.center();
+        painter.translate(center);
+        painter.rotate(rotation);
+        painter.translate(-center);
+    }
 
     // --- Background ---
     if (backgroundColor.alpha() > 0) {

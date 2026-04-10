@@ -61,7 +61,8 @@ struct UndoAction {
         ObjectDelete,
         ObjectMove,
         ObjectAffinityChange,
-        ObjectResize
+        ObjectResize,
+        ObjectTextEdit
     };
 
     Type type = AddStroke;
@@ -104,6 +105,14 @@ struct UndoAction {
     qreal objectNewRotation = 0.0;
     bool objectOldAspectLock = true;
     bool objectNewAspectLock = true;
+
+    // ObjectTextEdit fields
+    QString objectOldText;
+    QString objectNewText;
+    int objectOldTextAlignment = 0;
+    int objectNewTextAlignment = 0;
+    int objectOldBgAlpha = 180;
+    int objectNewBgAlpha = 180;
 };
 
 #include <QWidget>
@@ -261,7 +270,8 @@ public:
      */
     enum class ObjectInsertMode {
         Image,  ///< Insert ImageObject (default)
-        Link    ///< Insert LinkObject
+        Link,   ///< Insert LinkObject
+        Text    ///< Insert TextBoxObject
     };
     Q_ENUM(ObjectInsertMode)
     
@@ -593,6 +603,10 @@ public:
                               const QSizeF& oldSize, qreal oldRotation = 0.0,
                               bool oldAspectLock = true);
     void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
+    void pushObjectTextEditUndo(InsertedObject* obj,
+                                const QString& oldText, const QString& newText,
+                                int oldAlignment, int newAlignment,
+                                int oldOpacity, int newOpacity);
     
     // ===== Affinity Helpers (Phase O3.5.3) =====
     
@@ -1137,7 +1151,15 @@ public:
      *                    which tile in edgeless mode - do NOT use QCursor::pos())
      */
     void createLinkObjectAtPosition(int pageIndex, const QPointF& pagePos, const QPointF& viewportPos);
-    
+
+    /**
+     * @brief Create a TextBoxObject at the specified rectangle (Phase 2C).
+     * @param pageIndex The page to create on.
+     * @param rect The rectangle in page-local coordinates.
+     * @param viewportPos A viewport position for tile determination in edgeless mode.
+     */
+    void createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos);
+
     /**
      * @brief Create a LinkObject for a text highlight.
      * @param pageIndex Index of the page containing the highlight.
@@ -1734,6 +1756,8 @@ signals:
      * Phase R.3: MainWindow connects this to show PdfRelinkDialog.
      */
     void requestPdfRelink();
+
+    void openTextEditorRequested(InsertedObject* obj);
     
 protected:
     // ===== Qt Event Overrides =====
@@ -2048,6 +2072,14 @@ private:
      * or creates new ones. Default is Select.
      */
     ObjectActionMode m_objectActionMode = ObjectActionMode::Select;
+    
+    /**
+     * @brief Whether we're currently dragging to create a text box.
+     */
+    bool m_isCreatingTextBox = false;
+    QPointF m_textBoxCreateStartDoc;   // page-local coords of press point
+    QPointF m_textBoxCreateStartVP;    // viewport coords of press point (for rubber band)
+    int m_textBoxCreatePageIndex = -1; // page index where creation started
     
     /**
      * @brief Whether we're currently dragging selected objects.

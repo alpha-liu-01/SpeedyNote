@@ -56,6 +56,9 @@ struct PdfSearchState;
 // OCR
 class OcrWorker;
 class OcrSubToolbar;
+
+// Phase 2B: Floating Text Editor
+class FloatingTextEditor;
 #include "ocr/OcrTextBlock.h"
 
 // Action Bar includes
@@ -531,6 +534,9 @@ private:
     bool m_autoOcrEnabled = false;
     QStringList m_ocrAvailableLanguages;
     
+    // Phase 2B: Floating Text Editor
+    FloatingTextEditor* m_floatingTextEditor = nullptr;
+    
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
     
@@ -660,6 +666,7 @@ private:
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
+    QMetaObject::Connection m_textEditorConn;          // Phase 2B: For openTextEditorRequested
     
     // Pan tool hold (H key spring-loaded activation)
     bool m_panHoldActive = false;
@@ -709,6 +716,10 @@ private:
     void setOcrTextVisibility(bool visible);
     void showOcrLanguageDialog();
     QString resolveOcrLanguage(Document* doc) const;
+    
+    // Phase 2B: Floating Text Editor
+    void openFloatingTextEditor(InsertedObject* obj);
+    void closeFloatingTextEditor();
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

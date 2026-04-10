@@ -15,6 +15,9 @@ class SubToolbarToggle;
 class QLineEdit;
 class QWidget;
 class QPushButton;
+class QToolButton;
+class QMenu;
+class QAction;
 
 /**
  * @brief Subtoolbar for the ObjectSelect tool.
@@ -133,7 +136,7 @@ signals:
     void linkObjectDescriptionChanged(const QString& description);
 
 private slots:
-    void onInsertModeToggled(int mode);
+    void onInsertModeActionTriggered(QAction* action);
     void onActionModeToggled(int mode);
     void onSlotClicked(int index);
     void onSlotDeleteRequested(int index);
@@ -158,8 +161,14 @@ private:
      */
     void setLinkObjectControlsVisible(bool visible);
 
+    void updateInsertModeIcons();
+
     // Widgets
-    ModeToggleButton* m_insertModeToggle = nullptr;
+    QToolButton* m_insertModeButton = nullptr;
+    QMenu* m_insertModeMenu = nullptr;
+    QAction* m_insertImageAction = nullptr;
+    QAction* m_insertLinkAction = nullptr;
+    QAction* m_insertTextAction = nullptr;
     ModeToggleButton* m_actionModeToggle = nullptr;
     ColorPresetButton* m_colorButton = nullptr;  // LinkObject color editor
     SubToolbarToggle* m_descriptionButton = nullptr;  // Toggle description editor

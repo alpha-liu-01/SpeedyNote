@@ -712,6 +712,8 @@ set(UI_SOURCES
     source/ui/subtoolbars/HighlighterSubToolbar.cpp
     source/ui/subtoolbars/ObjectSelectSubToolbar.cpp
     source/ui/subtoolbars/OcrSubToolbar.cpp
+    # Panels
+    source/ui/panels/FloatingTextEditor.cpp
     # Action bars
     source/ui/actionbars/ActionBar.cpp
     source/ui/actionbars/ActionBarContainer.cpp

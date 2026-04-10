@@ -135,6 +135,12 @@
     <file>resources/icons/showtext_reversed.png</file>
     <file>resources/icons/auto.png</file>
     <file>resources/icons/auto_reversed.png</file>
+    <file>resources/icons/alignleft.png</file>
+    <file>resources/icons/alignleft_reversed.png</file>
+    <file>resources/icons/aligncenter.png</file>
+    <file>resources/icons/aligncenter_reversed.png</file>
+    <file>resources/icons/alignright.png</file>
+    <file>resources/icons/alignright_reversed.png</file>
     <file>resources/translations/app_zh.qm</file>
     <file>resources/translations/app_es.qm</file>
     <file>resources/translations/app_fr.qm</file>

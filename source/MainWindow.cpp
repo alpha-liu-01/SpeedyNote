@@ -33,6 +33,8 @@
 #include "ocr/OcrWorker.h"            // OCR background worker
 #include "objects/OcrTextObject.h"     // OCR text objects (Phase 1D)
 #include "ui/subtoolbars/OcrSubToolbar.h"  // OCR subtoolbar
+#include "ui/panels/FloatingTextEditor.h"  // Phase 2B: Floating text editor
+#include "objects/TextBoxObject.h"         // Phase 2B: TextBoxObject for editor
 #include <QMetaObject>                 // OCR queued invocations
 #include "ui/dialogs/BatchPdfExportDialog.h"   // Phase 3: Unified PDF export dialog
 #include "ui/dialogs/BatchSnbxExportDialog.h"  // Phase 3: Unified SNBX export dialog
@@ -1173,11 +1175,13 @@ void MainWindow::setupUi() {
     // Note: m_textButton now emits toolSelected(ToolType::Highlighter) directly
     connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
+            closeFloatingTextEditor();
             vp->undo();
         }
     });
     connect(m_toolbar, &Toolbar::redoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
+            closeFloatingTextEditor();
             vp->redo();
         }
     });
@@ -1358,7 +1362,13 @@ void MainWindow::setupManagedShortcuts()
             hidePdfSearchBar();
             return;
         }
-        
+
+        // Phase 2B: Close floating text editor if open
+        if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
+            m_floatingTextEditor->closeEditor();
+            return;
+        }
+
         // Next, let the current viewport try to handle Escape
         // (cancel lasso selection, deselect objects, cancel text selection)
         if (DocumentViewport* vp = currentViewport()) {
@@ -1516,16 +1526,19 @@ void MainWindow::setupManagedShortcuts()
     // ===== Edit (delegated to viewport) =====
     createShortcut("edit.undo", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
+            closeFloatingTextEditor();
             vp->undo();
         }
     });
     createShortcut("edit.redo", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
+            closeFloatingTextEditor();
             vp->redo();
         }
     });
     createShortcut("edit.redo_alt", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
+            closeFloatingTextEditor();
             vp->redo();
         }
     });
@@ -1775,6 +1788,13 @@ void MainWindow::setupManagedShortcuts()
         if (DocumentViewport* vp = currentViewport()) {
             if (vp->currentTool() == ToolType::ObjectSelect) {
                 vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Link);
+            }
+        }
+    });
+    createShortcut("object.mode_text", [this]() {
+        if (DocumentViewport* vp = currentViewport()) {
+            if (vp->currentTool() == ToolType::ObjectSelect) {
+                vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Text);
             }
         }
     });
@@ -2069,7 +2089,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_strokesChangedConn);
         m_strokesChangedConn = {};
     }
-    
+    if (m_textEditorConn) {
+        disconnect(m_textEditorConn);
+        m_textEditorConn = {};
+    }
+
+    // Close floating text editor when switching viewports (target may belong to old viewport)
+    closeFloatingTextEditor();
+
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
         m_connectedViewport->removeEventFilter(this);
@@ -2234,6 +2261,13 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             bool hasSelection = !viewport->selectedObjects().isEmpty();
             m_actionBarContainer->onObjectSelectionChanged(hasSelection);
         }
+        // Phase 2B: Close floating editor if target was deselected/deleted
+        if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
+            auto* tgt = m_floatingTextEditor->target();
+            if (tgt && !viewport->selectedObjects().contains(tgt)) {
+                m_floatingTextEditor->closeEditor();
+            }
+        }
     });
     
     // Text selection changed (shows/hides TextSelectionActionBar)
@@ -2259,7 +2293,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         if (has) applyToolOverrideForClipboard(ToolType::ObjectSelect);
         else clearToolOverride(true);
     });
-    
+
+    // Phase 2B: Floating text editor
+    m_textEditorConn = connect(viewport, &DocumentViewport::openTextEditorRequested,
+                               this, &MainWindow::openFloatingTextEditor);
+
     // Sync initial action bar state from viewport
     // CR-AB-2 FIX: Sync ALL context states to prevent stale state from previous tab
     if (m_actionBarContainer) {
@@ -4286,7 +4324,12 @@ void MainWindow::updateTheme() {
     if (m_toolbar && m_toolbar->ocrSubToolbar()->isShowTextEnabled()) {
         setOcrTextVisibility(true);
     }
-    
+
+    // Phase 2B: Sync floating text editor theme
+    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
+        m_floatingTextEditor->setDarkMode(darkMode);
+    }
+
     // Sync thumbnail renderer dark mode state
     if (m_pagePanel) {
         QSettings s("SpeedyNote", "App");
@@ -5466,6 +5509,15 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
 {
     if (!page) return;
 
+    // Close floating editor if its target is an OCR text on this page
+    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
+        if (auto* tgt = m_floatingTextEditor->target()) {
+            if (tgt->type() == QLatin1String("ocr_text") && page->objectById(tgt->id)) {
+                m_floatingTextEditor->closeEditor();
+            }
+        }
+    }
+
     // Remove existing OcrTextObjects
     QVector<QString> toRemove;
     for (const auto& obj : page->objects) {
@@ -5594,6 +5646,92 @@ void MainWindow::showOcrLanguageDialog()
     if (m_ocrWorker) {
         QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
             Q_ARG(QString, effective));
+    }
+}
+
+// =========================================================================
+// Phase 2B: Floating Text Editor
+// =========================================================================
+
+void MainWindow::openFloatingTextEditor(InsertedObject* obj)
+{
+    auto* textBox = dynamic_cast<TextBoxObject*>(obj);
+    if (!textBox) return;
+
+    // Close existing session first (pushes undo if changed)
+    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
+        m_floatingTextEditor->closeEditor();
+    }
+
+    // Lazy creation
+    if (!m_floatingTextEditor) {
+        m_floatingTextEditor = new FloatingTextEditor(this);
+        connect(m_floatingTextEditor, &FloatingTextEditor::repaintRequested,
+                this, [this]() {
+            if (DocumentViewport* vp = currentViewport())
+                vp->update();
+        });
+        connect(m_floatingTextEditor, &FloatingTextEditor::editorClosed,
+                this, [this](const QString& objectId,
+                             const QString& oldText, const QString& newText,
+                             int oldAlign, int newAlign,
+                             int oldOpacity, int newOpacity) {
+            DocumentViewport* vp = currentViewport();
+            if (!vp) return;
+            InsertedObject* obj = nullptr;
+            if (Document* doc = vp->document()) {
+                if (doc->isEdgeless()) {
+                    for (const auto& coord : doc->allLoadedTileCoords()) {
+                        Page* tile = doc->getTile(coord.first, coord.second);
+                        if (tile) { obj = tile->objectById(objectId); if (obj) break; }
+                    }
+                } else {
+                    for (int i = 0; i < doc->pageCount(); ++i) {
+                        Page* page = doc->page(i);
+                        if (page) { obj = page->objectById(objectId); if (obj) break; }
+                    }
+                }
+            }
+            if (obj) {
+                vp->pushObjectTextEditUndo(obj, oldText, newText,
+                                           oldAlign, newAlign,
+                                           oldOpacity, newOpacity);
+            }
+        });
+    }
+
+    m_floatingTextEditor->setDarkMode(isDarkMode());
+    m_floatingTextEditor->setTarget(textBox);
+
+    // Position near the text box
+    if (DocumentViewport* vp = currentViewport()) {
+        QPointF vpPt = vp->documentToViewport(textBox->position);
+        QPoint globalPt = vp->mapToGlobal(vpPt.toPoint());
+        QPoint localPt = mapFromGlobal(globalPt);
+
+        int editorW = m_floatingTextEditor->width();
+        int editorH = m_floatingTextEditor->height();
+
+        // Place to the right of the object, or fall back to below
+        int x = localPt.x() + static_cast<int>(textBox->size.width() * vp->zoomLevel()) + 10;
+        int y = localPt.y();
+
+        if (x + editorW > width())
+            x = qMax(0, localPt.x() - editorW - 10);
+        if (y + editorH > height())
+            y = qMax(0, height() - editorH);
+
+        m_floatingTextEditor->move(x, y);
+    }
+
+    m_floatingTextEditor->show();
+    m_floatingTextEditor->raise();
+}
+
+void MainWindow::closeFloatingTextEditor()
+{
+    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
+        m_floatingTextEditor->closeEditor();
     }
 }
 
