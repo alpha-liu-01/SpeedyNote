@@ -18,6 +18,7 @@ public:
     void restoreTabState(int tabId) override;
     void saveTabState(int tabId) override;
     void clearTabState(int tabId) override;
+    void setDarkMode(bool darkMode) override;
 
     void setOcrAvailable(bool available);
     void setStatusText(const QString& text);
@@ -33,6 +34,8 @@ signals:
 private:
     void createWidgets();
     void setupConnections();
+    void updateIcons();
+    void applyButtonStyle();
 
     QPushButton* m_scanPageButton = nullptr;
     QPushButton* m_scanAllButton = nullptr;
@@ -41,12 +44,17 @@ private:
     QLabel* m_statusLabel = nullptr;
     QTimer* m_statusClearTimer = nullptr;
 
+    bool m_darkMode = false;
+
     struct TabState {
         bool autoOcrEnabled = false;
         bool showTextEnabled = false;
         bool initialized = false;
     };
     QHash<int, TabState> m_tabStates;
+
+    static constexpr int BUTTON_SIZE = 28;
+    static constexpr int ICON_SIZE = 18;
 };
 
 #endif // OCRSUBTOOLBAR_H

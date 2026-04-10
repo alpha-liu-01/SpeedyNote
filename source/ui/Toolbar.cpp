@@ -93,13 +93,13 @@ void Toolbar::setupUi()
     m_toolGroup->addButton(m_textExpandable->toolButton());
     mainLayout->addWidget(m_textExpandable);
 
-    // --- OCR (not in tool group, coexists independently) ---
+    // --- OCR (not in tool group, hover-to-expand) ---
     m_ocrSubToolbar = new OcrSubToolbar();
     m_ocrExpandable = new ExpandableToolButton(this);
     m_ocrExpandable->setThemedIcon("ocr");
     m_ocrExpandable->toolButton()->setToolTip(tr("OCR - Text Recognition"));
     m_ocrExpandable->setContentWidget(m_ocrSubToolbar);
-    m_ocrExpandable->toolButton()->setCheckable(true);
+    m_ocrExpandable->setHoverExpand(true);
     mainLayout->addWidget(m_ocrExpandable);
 
     // --- Pan (no subtoolbar) ---
@@ -169,10 +169,6 @@ void Toolbar::connectSignals()
     connect(m_panButton, &QPushButton::clicked, this, [this]() {
         expandToolButton(ToolType::Pan);
         emit toolSelected(ToolType::Pan);
-    });
-
-    connect(m_ocrExpandable->toolButton(), &QPushButton::toggled, this, [this](bool checked) {
-        m_ocrExpandable->setExpanded(checked);
     });
 
     connect(m_straightLineButton, &ToggleButton::toggled,

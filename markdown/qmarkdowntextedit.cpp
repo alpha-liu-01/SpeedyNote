@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2014-2025 Patrizio Bekerle -- <patrizio@bekerle.com>
+ * Copyright (c) 2014-2026 Patrizio Bekerle -- <patrizio@bekerle.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,20 +25,25 @@
 #include "qmarkdowntextedit.h"
 
 #include <QClipboard>
+#include <QCursor>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QLayout>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
 #include <QRegularExpressionMatchIterator>
 #include <QScrollBar>
+#include <QStyleHints>
 #include <QTextBlock>
+#include <QTextLayout>
 #include <QTimer>
+#include <QUrl>
 #include <QWheelEvent>
 #include <utility>
 
@@ -99,18 +104,50 @@ QMarkdownTextEdit::QMarkdownTextEdit(QWidget *parent, bool initHighlighter)
     connect(this, &QPlainTextEdit::cursorPositionChanged, this, [this]() {
         _lineNumArea->update();
 
-        auto oldArea = blockBoundingGeometry(_textCursor.block())
-                           .translated(contentOffset());
+        const QTextBlock oldBlock = _textCursor.block();
+        auto oldArea =
+            blockBoundingGeometry(oldBlock).translated(contentOffset());
         _textCursor = textCursor();
-        auto newArea = blockBoundingGeometry(_textCursor.block())
-                           .translated(contentOffset());
+        const QTextBlock newBlock = _textCursor.block();
+        auto newArea =
+            blockBoundingGeometry(newBlock).translated(contentOffset());
         auto areaToUpdate = oldArea | newArea;
         viewport()->update(areaToUpdate.toRect());
+
+        // Rehighlight old and new blocks when hiding formatting syntax
+        if (_highlighter && _highlighter->hideFormattingSyntax() &&
+            oldBlock.blockNumber() != newBlock.blockNumber()) {
+            _highlighter->setCurrentCursorBlockNumber(newBlock.blockNumber());
+            _highlighter->rehighlightBlock(oldBlock);
+            _highlighter->rehighlightBlock(newBlock);
+        }
     });
     connect(document(), &QTextDocument::blockCountChanged, this,
             &QMarkdownTextEdit::updateLineNumberAreaWidth);
     connect(this, &QPlainTextEdit::updateRequest, this,
             &QMarkdownTextEdit::updateLineNumberArea);
+
+    _hangingCursorRepaintTimer = new QTimer(this);
+    _hangingCursorRepaintTimer->setSingleShot(false);
+    const int cursorFlashTime =
+        QGuiApplication::styleHints()->cursorFlashTime();
+    const int repaintInterval =
+        cursorFlashTime > 0 ? qMax(100, cursorFlashTime / 2) : 500;
+    _hangingCursorRepaintTimer->setInterval(repaintInterval);
+    connect(_hangingCursorRepaintTimer, &QTimer::timeout, this, [this]() {
+        const QRect repaintRect = hangingCursorBlockRepaintRect();
+        if (!repaintRect.isEmpty()) {
+            viewport()->update(repaintRect);
+        }
+    });
+    connect(QGuiApplication::styleHints(), &QStyleHints::cursorFlashTimeChanged,
+            this, [this](int flashTime) {
+                const int interval =
+                    flashTime > 0 ? qMax(100, flashTime / 2) : 500;
+                _hangingCursorRepaintTimer->setInterval(interval);
+            });
+    connect(this, &QPlainTextEdit::cursorPositionChanged, this,
+            [this]() { updateHangingCursorRepaintState(); });
 
     updateSettings();
 
@@ -126,6 +163,10 @@ void QMarkdownTextEdit::setLineNumbersOtherLineColor(QColor color) {
     _lineNumArea->setOtherLineColor(std::move(color));
 }
 
+void QMarkdownTextEdit::setBookmarkLines(const QHash<int, int> &bookmarkLines) {
+    _lineNumArea->setBookmarkLines(bookmarkLines);
+}
+
 void QMarkdownTextEdit::setSearchWidgetDebounceDelay(uint debounceDelay) {
     _debounceDelay = debounceDelay;
     searchWidget()->setDebounceDelay(_debounceDelay);
@@ -135,7 +176,26 @@ void QMarkdownTextEdit::setHighlightCurrentLine(bool set) {
     _highlightCurrentLine = set;
 }
 
+void QMarkdownTextEdit::setHangingIndentEnabled(bool enabled) {
+    _hangingIndentEnabled = enabled;
+
+    if (!_hangingCursorRepaintTimer) {
+        return;
+    }
+
+    if (!enabled) {
+        _hangingCursorRepaintTimer->stop();
+        return;
+    }
+
+    updateHangingCursorRepaintState();
+}
+
 bool QMarkdownTextEdit::highlightCurrentLine() { return _highlightCurrentLine; }
+
+bool QMarkdownTextEdit::hangingIndentEnabled() const {
+    return _hangingIndentEnabled;
+}
 
 void QMarkdownTextEdit::setCurrentLineHighlightColor(const QColor &color) {
     _currentLineHighlightColor = color;
@@ -185,22 +245,12 @@ void QMarkdownTextEdit::adjustRightMargin() {
 
 bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
     // qDebug() << event->type();
-    if (event->type() == QEvent::HoverMove) {
-        auto *mouseEvent = static_cast<QMouseEvent *>(event);
-
-        QWidget *viewPort = this->viewport();
-        // toggle cursor when control key has been pressed or released
-        viewPort->setCursor(
-            mouseEvent->modifiers().testFlag(Qt::ControlModifier)
-                ? Qt::PointingHandCursor
-                : Qt::IBeamCursor);
-    } else if (event->type() == QEvent::KeyPress) {
+    if (event->type() == QEvent::KeyPress) {
         auto *keyEvent = static_cast<QKeyEvent *>(event);
 
-        // set cursor to pointing hand if control key was pressed
-        if (keyEvent->modifiers().testFlag(Qt::ControlModifier)) {
-            QWidget *viewPort = this->viewport();
-            viewPort->setCursor(Qt::PointingHandCursor);
+        if (keyEvent->key() == Qt::Key_Control) {
+            updateLinkCursor(viewport()->mapFromGlobal(QCursor::pos()),
+                             QGuiApplication::keyboardModifiers());
         }
 
         // disallow keys if text edit hasn't focus
@@ -208,7 +258,11 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
             return true;
         }
 
-        if ((keyEvent->key() == Qt::Key_Escape) && _searchWidget->isVisible()) {
+        if ((keyEvent->key() == Qt::Key_Escape) && _blockSelectionActive) {
+            clearBlockSelection();
+            return true;
+        } else if ((keyEvent->key() == Qt::Key_Escape) &&
+                   _searchWidget->isVisible()) {
             _searchWidget->deactivate();
             return true;
         } else if (keyEvent->key() == Qt::Key_Insert &&
@@ -286,6 +340,17 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
         } else if ((keyEvent->key() == Qt::Key_Return ||
                     keyEvent->key() == Qt::Key_Enter) &&
                    !isReadOnly() &&
+                   keyEvent->modifiers().testFlag(Qt::ShiftModifier) &&
+                   keyEvent->modifiers().testFlag(Qt::ControlModifier)) {
+            QTextCursor cursor = this->textCursor();
+            cursor.movePosition(QTextCursor::StartOfBlock);
+            cursor.insertText(QStringLiteral("\n"));
+            cursor.movePosition(QTextCursor::Up);
+            setTextCursor(cursor);
+            return true;
+        } else if ((keyEvent->key() == Qt::Key_Return ||
+                    keyEvent->key() == Qt::Key_Enter) &&
+                   !isReadOnly() &&
                    keyEvent->modifiers().testFlag(Qt::ShiftModifier)) {
             QTextCursor cursor = this->textCursor();
             cursor.insertText("  \n");
@@ -301,6 +366,16 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
             return true;
         } else if (keyEvent == QKeySequence::Copy ||
                    keyEvent == QKeySequence::Cut) {
+            // Handle block (rectangular) selection copy/cut
+            if (_blockSelectionActive && _blockSelStartBlock >= 0) {
+                const QString text = blockSelectionText();
+                if (keyEvent == QKeySequence::Cut) {
+                    removeBlockSelectionText();
+                    clearBlockSelection();
+                }
+                qApp->clipboard()->setText(text);
+                return true;
+            }
             QTextCursor cursor = this->textCursor();
             if (!cursor.hasSelection()) {
                 QString text;
@@ -443,9 +518,9 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
     } else if (event->type() == QEvent::KeyRelease) {
         auto *keyEvent = static_cast<QKeyEvent *>(event);
 
-        // reset cursor if control key was released
         if (keyEvent->key() == Qt::Key_Control) {
-            resetMouseCursor();
+            updateLinkCursor(viewport()->mapFromGlobal(QCursor::pos()),
+                             QGuiApplication::keyboardModifiers());
         }
 
         return QPlainTextEdit::eventFilter(obj, event);
@@ -453,14 +528,26 @@ bool QMarkdownTextEdit::eventFilter(QObject *obj, QEvent *event) {
         _mouseButtonDown = false;
         auto *mouseEvent = static_cast<QMouseEvent *>(event);
 
-        // track `Ctrl + Click` in the text edit
+        // track `Ctrl + Click` and `Ctrl + Shift + Click` in the text edit
         if ((obj == this->viewport()) &&
-            (mouseEvent->button() == Qt::LeftButton) &&
-            (QGuiApplication::keyboardModifiers() == Qt::ExtraButton24)) {
-            // open the link (if any) at the current position
-            // in the noteTextEdit
-            openLinkAtCursorPosition();
-            return true;
+            (mouseEvent->button() == Qt::LeftButton)) {
+            auto modifiers = QGuiApplication::keyboardModifiers();
+
+            // Check for Ctrl+Shift+Click (open in new tab)
+            if (modifiers.testFlag(Qt::ControlModifier) &&
+                modifiers.testFlag(Qt::ShiftModifier)) {
+                _openLinkInNewTab = true;
+                openLinkAtCursorPosition();
+                _openLinkInNewTab = false;
+                return true;
+            }
+            // Check for Ctrl+Click (open in current tab)
+            else if (modifiers == Qt::ControlModifier ||
+                     modifiers == Qt::ExtraButton24) {
+                _openLinkInNewTab = false;
+                openLinkAtCursorPosition();
+                return true;
+            }
         }
     } else if (event->type() == QEvent::MouseButtonPress) {
         _mouseButtonDown = true;
@@ -672,12 +759,45 @@ void QMarkdownTextEdit::resetMouseCursor() const {
     viewPort->setCursor(Qt::IBeamCursor);
 }
 
+bool QMarkdownTextEdit::hasMarkdownUrlAtViewportPosition(
+    const QPoint &position) {
+    QTextCursor cursor = cursorForPosition(position);
+    const int clickedPosition = cursor.position();
+
+    cursor.movePosition(QTextCursor::StartOfBlock);
+    const int positionFromStart = clickedPosition - cursor.position();
+    cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+
+    return !getMarkdownUrlAtPosition(cursor.selectedText(), positionFromStart)
+                .isEmpty();
+}
+
+void QMarkdownTextEdit::updateLinkCursor(const QPoint &position,
+                                         Qt::KeyboardModifiers modifiers) {
+    if (modifiers.testFlag(Qt::ControlModifier) &&
+        hasMarkdownUrlAtViewportPosition(position)) {
+        viewport()->setCursor(Qt::PointingHandCursor);
+        return;
+    }
+
+    resetMouseCursor();
+}
+
 /**
  * Resets the cursor to Qt::IBeamCursor if the widget looses the focus
  */
 void QMarkdownTextEdit::focusOutEvent(QFocusEvent *event) {
+    if (_hangingCursorRepaintTimer) {
+        _hangingCursorRepaintTimer->stop();
+    }
     resetMouseCursor();
     QPlainTextEdit::focusOutEvent(event);
+}
+
+void QMarkdownTextEdit::focusInEvent(QFocusEvent *event) {
+    updateHangingCursorRepaintState();
+
+    QPlainTextEdit::focusInEvent(event);
 }
 
 /**
@@ -1216,17 +1336,48 @@ bool QMarkdownTextEdit::openLinkAtCursorPosition() {
 
     qDebug() << __func__ << " - 'emit urlClicked( urlString )': " << urlString;
 
+    // Check if URL matches any ignored regular expressions
+    for (const QRegularExpression &regex : _ignoredClickUrlRegexps) {
+        if (regex.match(urlString).hasMatch()) {
+            return true;    // URL matches ignored regex, don't open it
+        }
+    }
+
+    // Return false if no URL was found at the cursor position
+    if (urlString.isEmpty()) {
+        return false;
+    }
+
+    // Emit signal to let derived classes handle URL opening
     Q_EMIT urlClicked(urlString);
 
+    // Check if there are signal handlers connected
+    const int numReceivers = receivers(SIGNAL(urlClicked(QString)));
+    qDebug() << __func__
+             << " - number of urlClicked receivers:" << numReceivers;
+    qDebug() << __func__ << " - _openLinkInNewTab:" << _openLinkInNewTab;
+
+    // If signal handlers are connected, they will handle opening the URL
+    // Don't call openUrl() here to avoid duplicate opening
+    if (numReceivers > 0) {
+        qDebug()
+            << __func__
+            << " - Signal handlers present, letting them handle URL opening";
+        return true;
+    }
+
+    // No signal handlers connected, use base class logic (backward
+    // compatibility)
+    qDebug() << __func__ << " - No signal handlers, using base class openUrl";
     if ((url.isValid() && isValidUrl(urlString)) || isRelativeFileUrl ||
+        urlString.startsWith(QStringLiteral("wikilink:")) ||
         isLegacyAttachmentUrl) {
         // ignore some schemata
         if (!(_ignoredClickUrlSchemata.contains(url.scheme()) ||
               isRelativeFileUrl || isLegacyAttachmentUrl)) {
             // open the url
-            openUrl(urlString);
+            openUrl(urlString, _openLinkInNewTab);
         }
-
         return true;
     }
 
@@ -1254,7 +1405,8 @@ bool QMarkdownTextEdit::isValidUrl(const QString &urlString) {
  *   "/path/to/my/file/QOwnNotes.pdf" if the operating system supports that
  *  handler
  */
-void QMarkdownTextEdit::openUrl(const QString &urlString) {
+void QMarkdownTextEdit::openUrl(const QString &urlString, bool openInNewTab) {
+    Q_UNUSED(openInNewTab)
     qDebug() << "QMarkdownTextEdit " << __func__
              << " - 'urlString': " << urlString;
 
@@ -1277,11 +1429,79 @@ QPlainTextEditSearchWidget *QMarkdownTextEdit::searchWidget() {
 
 /**
  * @brief Sets url schemata that will be ignored when clicked on
- * @param urlSchemes
+ * @param ignoredUrlSchemata
  */
 void QMarkdownTextEdit::setIgnoredClickUrlSchemata(
     QStringList ignoredUrlSchemata) {
     _ignoredClickUrlSchemata = std::move(ignoredUrlSchemata);
+}
+
+/**
+ * @brief Sets url regular expressions that will be ignored when clicked on
+ * @param ignoredClickUrlRegexps
+ */
+void QMarkdownTextEdit::setIgnoredClickUrlRegexps(
+    QList<QRegularExpression> ignoredClickUrlRegexps) {
+    _ignoredClickUrlRegexps = std::move(ignoredClickUrlRegexps);
+}
+
+/**
+ * @brief Strips trailing unbalanced bracket characters from a URL string.
+ *
+ * Per RFC 1738, characters like { } [ ] < > are unsafe in URLs and should be
+ * percent-encoded. Parentheses ( ) are technically valid but users commonly
+ * wrap URLs in them. This function strips trailing closing brackets that are
+ * not balanced by corresponding opening brackets within the URL, so that
+ * URLs like http://example.com/wiki/Page_(test) keep their balanced parens
+ * while http://example.com/) strips the trailing ')'.
+ */
+static QString stripTrailingBrackets(const QString &url) {
+    // Bracket pairs: opener -> closer
+    static const QChar pairs[][2] = {
+        {'(', ')'},
+        {'{', '}'},
+        {'[', ']'},
+        {'<', '>'},
+    };
+
+    QString result = url;
+
+    // Repeatedly strip trailing bracket characters that are unbalanced
+    bool changed = true;
+    while (changed && !result.isEmpty()) {
+        changed = false;
+        QChar last = result.at(result.length() - 1);
+
+        for (const auto &pair : pairs) {
+            if (last == pair[1]) {
+                // Count openers and closers in the URL
+                int openers = 0;
+                int closers = 0;
+                for (const QChar &ch : result) {
+                    if (ch == pair[0])
+                        ++openers;
+                    else if (ch == pair[1])
+                        ++closers;
+                }
+
+                // If closers exceed openers, the trailing one is unbalanced
+                if (closers > openers) {
+                    result.chop(1);
+                    changed = true;
+                }
+                break;
+            }
+
+            // Also strip trailing openers (e.g. http://example.com/( )
+            if (last == pair[0]) {
+                result.chop(1);
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    return result;
 }
 
 /**
@@ -1318,11 +1538,11 @@ QMap<QString, QString> QMarkdownTextEdit::parseMarkdownUrlsFromText(
     }
 
     // match urls like this: http://mylink
-    static QRegularExpression regex3(R"(\b\w+?:\/\/[^\s]+[^\s>\)])");
+    static QRegularExpression regex3(R"(\b\w+?:\/\/[^\s]+)");
     iterator = regex3.globalMatch(text);
     while (iterator.hasNext()) {
         QRegularExpressionMatch match = iterator.next();
-        QString url = match.captured(0);
+        QString url = stripTrailingBrackets(match.captured(0));
         urlMap[url] = url;
     }
 
@@ -1331,7 +1551,7 @@ QMap<QString, QString> QMarkdownTextEdit::parseMarkdownUrlsFromText(
     iterator = regex4.globalMatch(text);
     while (iterator.hasNext()) {
         QRegularExpressionMatch match = iterator.next();
-        QString url = match.captured(0);
+        QString url = stripTrailingBrackets(match.captured(0));
         urlMap[url] = QStringLiteral("http://") + url;
     }
 
@@ -1357,6 +1577,20 @@ QMap<QString, QString> QMarkdownTextEdit::parseMarkdownUrlsFromText(
             QString url = urlMatch.captured(1);
             urlMap[linkText] = url;
         }
+    }
+
+    static const QRegularExpression wikiLinkRegex(QStringLiteral(
+        R"(\[\[([^\[\]|]+?(?:#[^\[\]|]+?)?)(?:\|[^\[\]]*?)?\]\])"));
+    iterator = wikiLinkRegex.globalMatch(text);
+    while (iterator.hasNext()) {
+        QRegularExpressionMatch match = iterator.next();
+        const QString fullMatch = match.captured(0);
+        const QString noteName = match.captured(1).trimmed();
+        // Percent-encode the note name so the resulting URL is valid even when
+        // the note name contains spaces or other special characters
+        const QString encodedName = QString::fromUtf8(
+            QUrl::toPercentEncoding(noteName, QByteArrayLiteral("/-#")));
+        urlMap[fullMatch] = QStringLiteral("wikilink:") + encodedName;
     }
 
     return urlMap;
@@ -1733,6 +1967,15 @@ void QMarkdownTextEdit::updateLineNumberArea(const QRect rect, int dy) {
         _lineNumArea->update(0, rect.y(), _lineNumArea->sizeHint().width(),
                              rect.height());
 
+    if (_hangingIndentEnabled && dy == 0 && hasFocus()) {
+        const bool isCaretUpdate =
+            rect.width() <= (cursorWidth() + 4) &&
+            rect.height() <= (fontMetrics().height() + 4);
+        if (isCaretUpdate) {
+            updateHangingCursorRepaintState();
+        }
+    }
+
     updateLineNumAreaGeometry();
 
     if (rect.contains(viewport()->rect())) {
@@ -1740,13 +1983,57 @@ void QMarkdownTextEdit::updateLineNumberArea(const QRect rect, int dy) {
     }
 }
 
+QRect QMarkdownTextEdit::hangingCursorBlockRepaintRect() const {
+    if (!_hangingIndentEnabled || !hasFocus()) {
+        return {};
+    }
+
+    const QTextBlock cursorBlock = textCursor().block();
+    if (!cursorBlock.isValid()) {
+        return {};
+    }
+
+    if (listContentIndentLength(cursorBlock.text()) <= 0) {
+        return {};
+    }
+
+    QTextLayout *layout = cursorBlock.layout();
+    if (!layout || layout->lineCount() <= 1) {
+        return {};
+    }
+
+    // Repaint the full viewport while the caret is in a wrapped list item with
+    // hanging indent. The temporary hanging-indent re-layout can create
+    // additional visual lines compared to the document layout used by Qt for
+    // dirty region tracking, so block-local repaints may miss the caret,
+    // especially on the last visual line.
+    return viewport()->rect();
+}
+
+void QMarkdownTextEdit::updateHangingCursorRepaintState() {
+    if (!_hangingCursorRepaintTimer) {
+        return;
+    }
+
+    const QRect repaintRect = hangingCursorBlockRepaintRect();
+    if (!repaintRect.isEmpty()) {
+        viewport()->update(repaintRect);
+        if (!_hangingCursorRepaintTimer->isActive()) {
+            _hangingCursorRepaintTimer->start();
+        }
+    } else if (_hangingCursorRepaintTimer->isActive()) {
+        _hangingCursorRepaintTimer->stop();
+    }
+}
+
 void QMarkdownTextEdit::updateLineNumberAreaWidth(int) {
     QSignalBlocker blocker(this);
     const auto oldMargins = viewportMargins();
-    const int width =
-        _lineNumArea->isLineNumAreaEnabled()
-            ? _lineNumArea->sizeHint().width() + _lineNumberLeftMarginOffset
-            : oldMargins.left();
+    const int sidebarWidth = _lineNumArea->sizeHint().width();
+    _lineNumArea->setHidden(sidebarWidth <= 0);
+    const int width = sidebarWidth > 0
+                          ? sidebarWidth + _lineNumberLeftMarginOffset
+                          : oldMargins.left();
     const auto newMargins = QMargins{width, oldMargins.top(),
                                      oldMargins.right(), oldMargins.bottom()};
 
@@ -1764,14 +2051,57 @@ void QMarkdownTextEdit::updateLineNumberAreaWidth(int) {
 }
 
 /**
+ * Returns the number of characters that form the list prefix in a Markdown
+ * list line, including leading whitespace, list marker, and trailing space.
+ * Returns 0 if the line is not a list item.
+ *
+ * Examples:
+ *   "- text"       -> 2  (marker "- ")
+ *   "  - text"     -> 4  (2 spaces + "- ")
+ *   "* text"       -> 2
+ *   "+ [ ] text"   -> 6  (marker "+ [ ] ")
+ *   "1. text"      -> 3  (marker "1. ")
+ *   "  10. text"   -> 6  (2 spaces + "10. ")
+ *   "  2) text"    -> 5  (2 spaces + "2) ")
+ *   "not a list"   -> 0
+ */
+int QMarkdownTextEdit::listContentIndentLength(const QString &text) {
+    // Match unordered list items: optional whitespace + [-*+] + optional
+    // checkbox + space(s)
+    static QRegularExpression unorderedRegex(
+        QStringLiteral(R"(^(\s*)[+\-\*](?:\s\[[ x\-]\])?\s)"));
+    QRegularExpressionMatch match = unorderedRegex.match(text);
+    if (match.hasMatch()) {
+        return match.capturedLength(0);
+    }
+
+    // Match ordered list items: optional whitespace + digits + [.)] + space(s)
+    static QRegularExpression orderedRegex(
+        QStringLiteral(R"(^(\s*)\d+[.\)]\s)"));
+    match = orderedRegex.match(text);
+    if (match.hasMatch()) {
+        return match.capturedLength(0);
+    }
+
+    return 0;
+}
+
+/**
  * @param e
- * @details This does two things
+ * @details This does three things:
  * 1. Overrides QPlainTextEdit::paintEvent to fix the RTL bug of QPlainTextEdit
  * 2. Paints a rectangle around code block fences [Code taken from
  * ghostwriter(which in turn is based on QPlaintextEdit::paintEvent() with
  * modifications and minor improvements for our use
+ * 3. Applies hanging indentation to wrapped Markdown list lines so that
+ * continuation lines align with the list content rather than the list marker
  */
 void QMarkdownTextEdit::paintEvent(QPaintEvent *e) {
+    QVector<BlockLayoutBackup> hangingIndentBackups;
+    if (_hangingIndentEnabled) {
+        hangingIndentBackups = applyHangingIndentLayout();
+    }
+
     QTextBlock block = firstVisibleBlock();
 
     QPainter painter(viewport());
@@ -1894,14 +2224,10 @@ void QMarkdownTextEdit::paintEvent(QPaintEvent *e) {
         // Current line highlight
         QTextCursor cursor = textCursor();
         if (highlightCurrentLine() && cursor.block() == block) {
-            QTextLine line =
-                block.layout()->lineForTextPosition(cursor.positionInBlock());
-            QRectF lineRect = line.rect();
-            lineRect.moveTop(lineRect.top() + r.top());
-            lineRect.setLeft(0.);
-            lineRect.setRight(viewportRect.width());
-            painter.fillRect(lineRect.toAlignedRect(),
-                             currentLineHighlightColor());
+            QRect lineRect = cursorRect(cursor);
+            lineRect.setLeft(0);
+            lineRect.setWidth(viewportRect.width());
+            painter.fillRect(lineRect, currentLineHighlightColor());
         }
 
         block = block.next();
@@ -1909,7 +2235,227 @@ void QMarkdownTextEdit::paintEvent(QPaintEvent *e) {
     }
 
     painter.end();
+
     QPlainTextEdit::paintEvent(e);
+
+    // Paint block (rectangular) selection overlay on top of rendered text
+    if (_blockSelectionActive && _blockSelStartBlock >= 0) {
+        QPainter overlayPainter(viewport());
+        paintBlockSelection(overlayPainter);
+        overlayPainter.end();
+    }
+
+    if (_hangingIndentEnabled) {
+        restoreHangingIndentLayout(hangingIndentBackups);
+    }
+}
+
+QVector<QMarkdownTextEdit::BlockLayoutBackup>
+QMarkdownTextEdit::applyHangingIndentLayout() {
+    QVector<BlockLayoutBackup> backups;
+    if (!_hangingIndentEnabled) {
+        return backups;
+    }
+    QTextBlock listBlock = firstVisibleBlock();
+    QPointF listOffset(contentOffset());
+    while (listBlock.isValid()) {
+        const QRectF r = blockBoundingRect(listBlock).translated(listOffset);
+        listOffset.ry() += r.height();
+
+        // Stop once we're past the viewport
+        if (r.top() > viewport()->rect().bottom()) {
+            break;
+        }
+
+        const QString text = listBlock.text();
+        const int indentChars = listContentIndentLength(text);
+
+        // Only process list items that have a prefix and wrap to multiple lines
+        if (indentChars > 0) {
+            QTextLayout *layout = listBlock.layout();
+            const int lineCount = layout->lineCount();
+
+            if (lineCount > 1) {
+                BlockLayoutBackup backup;
+                backup.block = listBlock;
+                for (int i = 0; i < lineCount; ++i) {
+                    QTextLine line = layout->lineAt(i);
+                    LineBackup lb;
+                    lb.position = line.position();
+                    lb.width = line.width();
+                    backup.lines.append(lb);
+                }
+                backups.append(backup);
+
+                const QTextLine firstLine = layout->lineAt(0);
+                const qreal baseX = firstLine.position().x();
+                const qreal indentPixels = firstLine.cursorToX(indentChars);
+                const qreal cursorPadding =
+                    qMax<qreal>(4.0, qreal(cursorWidth()) + 2.0);
+
+                // Use the first line's width as the text area width since
+                // all original lines share the same width
+                const qreal textAreaWidth = backup.lines.first().width;
+                const qreal indentOffset = indentPixels - baseX;
+                const qreal continuationWidth = qMax<qreal>(
+                    0.0, textAreaWidth - indentOffset + cursorPadding);
+
+                // Re-layout the block with hanging indent for continuation
+                // lines. Since narrower continuation lines may cause text
+                // to reflow into more lines than the original layout, we
+                // keep creating lines until all text is consumed.
+                layout->clearLayout();
+                layout->beginLayout();
+                for (int i = 0;; ++i) {
+                    QTextLine line = layout->createLine();
+                    if (!line.isValid()) break;
+
+                    if (i == 0) {
+                        line.setLineWidth(qMax<qreal>(0.0, textAreaWidth));
+                        line.setPosition(
+                            QPointF(baseX, backup.lines[0].position.y()));
+                    } else {
+                        line.setLineWidth(continuationWidth);
+                        // Compute y-position from the previous line
+                        const QTextLine prev = layout->lineAt(i - 1);
+                        const qreal y = prev.position().y() + prev.height();
+                        line.setPosition(QPointF(indentPixels, y));
+                    }
+                }
+                layout->endLayout();
+            }
+        }
+
+        listBlock = listBlock.next();
+    }
+
+    return backups;
+}
+
+void QMarkdownTextEdit::restoreHangingIndentLayout(
+    const QVector<BlockLayoutBackup> &backups) {
+    // Restore original line positions and widths so the document layout
+    // engine is not confused.
+    for (const auto &backup : backups) {
+        QTextLayout *layout = backup.block.layout();
+        layout->clearLayout();
+        layout->beginLayout();
+        for (int i = 0; i < backup.lines.size(); ++i) {
+            QTextLine line = layout->createLine();
+            if (!line.isValid()) break;
+
+            line.setLineWidth(backup.lines[i].width);
+            line.setPosition(backup.lines[i].position);
+        }
+        layout->endLayout();
+    }
+}
+
+void QMarkdownTextEdit::mousePressEvent(QMouseEvent *event) {
+    // Alt + Left click starts block (rectangular) selection
+    if (event->button() == Qt::LeftButton &&
+        event->modifiers().testFlag(Qt::AltModifier)) {
+        _blockSelectionActive = true;
+        _blockSelectionDragging = true;
+        _blockSelectionAnchor = event->pos();
+        _blockSelectionEnd = event->pos();
+        _blockSelStartBlock = -1;
+        _blockSelEndBlock = -1;
+        _blockSelLeftCol = 0;
+        _blockSelRightCol = 0;
+
+        // Place cursor at click position without starting normal selection
+        QTextCursor cursor = cursorForPosition(event->pos());
+        cursor.clearSelection();
+        setTextCursor(cursor);
+        viewport()->update();
+        return;
+    }
+
+    // Any non-Alt click clears block selection
+    if (_blockSelectionActive) {
+        clearBlockSelection();
+    }
+
+    if (_hangingIndentEnabled) {
+        const QVector<BlockLayoutBackup> backups = applyHangingIndentLayout();
+        QPlainTextEdit::mousePressEvent(event);
+        restoreHangingIndentLayout(backups);
+        updateHangingCursorRepaintState();
+    } else {
+        QPlainTextEdit::mousePressEvent(event);
+    }
+}
+
+void QMarkdownTextEdit::keyPressEvent(QKeyEvent *event) {
+    // Clear block selection when a non-modifier key is pressed
+    // (copy/cut are handled separately in eventFilter)
+    if (_blockSelectionActive && event->key() != Qt::Key_Alt &&
+        event->key() != Qt::Key_Shift && event->key() != Qt::Key_Control &&
+        event->key() != Qt::Key_Meta && event->key() != Qt::Key_Escape) {
+        clearBlockSelection();
+    }
+
+    if (_hangingIndentEnabled) {
+        const QVector<BlockLayoutBackup> backups = applyHangingIndentLayout();
+        QPlainTextEdit::keyPressEvent(event);
+        restoreHangingIndentLayout(backups);
+    } else {
+        QPlainTextEdit::keyPressEvent(event);
+    }
+}
+
+void QMarkdownTextEdit::mouseMoveEvent(QMouseEvent *event) {
+    // Update block selection rectangle during Alt+drag
+    if (_blockSelectionDragging && _blockSelectionActive) {
+        _blockSelectionEnd = event->pos();
+        updateBlockSelection();
+        viewport()->update();
+        return;
+    }
+
+    if (_hangingIndentEnabled) {
+        const QVector<BlockLayoutBackup> backups = applyHangingIndentLayout();
+        QPlainTextEdit::mouseMoveEvent(event);
+        restoreHangingIndentLayout(backups);
+    } else {
+        QPlainTextEdit::mouseMoveEvent(event);
+    }
+
+    updateLinkCursor(event->pos(), QGuiApplication::keyboardModifiers());
+}
+
+void QMarkdownTextEdit::mouseReleaseEvent(QMouseEvent *event) {
+    // Finish block selection drag
+    if (_blockSelectionDragging) {
+        _blockSelectionDragging = false;
+        if (_blockSelectionActive) {
+            _blockSelectionEnd = event->pos();
+            updateBlockSelection();
+            viewport()->update();
+        }
+        return;
+    }
+
+    if (_hangingIndentEnabled) {
+        const QVector<BlockLayoutBackup> backups = applyHangingIndentLayout();
+        QPlainTextEdit::mouseReleaseEvent(event);
+        restoreHangingIndentLayout(backups);
+        updateHangingCursorRepaintState();
+    } else {
+        QPlainTextEdit::mouseReleaseEvent(event);
+    }
+}
+
+void QMarkdownTextEdit::mouseDoubleClickEvent(QMouseEvent *event) {
+    if (_hangingIndentEnabled) {
+        const QVector<BlockLayoutBackup> backups = applyHangingIndentLayout();
+        QPlainTextEdit::mouseDoubleClickEvent(event);
+        restoreHangingIndentLayout(backups);
+        updateHangingCursorRepaintState();
+    } else {
+        QPlainTextEdit::mouseDoubleClickEvent(event);
+    }
 }
 
 /**
@@ -1950,6 +2496,300 @@ void QMarkdownTextEdit::updateSettings() {
 
 void QMarkdownTextEdit::setLineNumberLeftMarginOffset(int offset) {
     _lineNumberLeftMarginOffset = offset;
+}
+
+int QMarkdownTextEdit::sidebarAdditionalWidth() const { return 0; }
+
+void QMarkdownTextEdit::paintSidebar(QPainter *painter,
+                                     const QRect &eventRect) {
+    Q_UNUSED(painter)
+    Q_UNUSED(eventRect)
+}
+
+bool QMarkdownTextEdit::sidebarMousePressEvent(QMouseEvent *event) {
+    Q_UNUSED(event)
+    return false;
+}
+
+/**
+ * Updates the block (rectangular) selection from the stored anchor and end
+ * viewport positions.  Computes the block range and pixel x-coordinates
+ * that define the selection rectangle.
+ */
+void QMarkdownTextEdit::updateBlockSelection() {
+    const QTextCursor anchorCursor = cursorForPosition(_blockSelectionAnchor);
+    const QTextCursor endCursor = cursorForPosition(_blockSelectionEnd);
+
+    const int anchorBlock = anchorCursor.blockNumber();
+    const int endBlock = endCursor.blockNumber();
+
+    _blockSelStartBlock = qMin(anchorBlock, endBlock);
+    _blockSelEndBlock = qMax(anchorBlock, endBlock);
+
+    // Use the anchor block as a reference to convert raw pixel x-coordinates
+    // to character column indices.  columnForBlockAtX() extrapolates past the
+    // end of short lines using font metrics, so the selection can be wider than
+    // the anchor line's text content.
+    QTextDocument *doc = document();
+    QTextBlock refBlock = doc->findBlockByNumber(anchorBlock);
+    if (!refBlock.isValid()) {
+        refBlock = doc->findBlockByNumber(_blockSelStartBlock);
+    }
+
+    const int rawLeftX =
+        qMin(_blockSelectionAnchor.x(), _blockSelectionEnd.x());
+    const int rawRightX =
+        qMax(_blockSelectionAnchor.x(), _blockSelectionEnd.x());
+
+    _blockSelLeftCol = columnForBlockAtX(refBlock, rawLeftX);
+    _blockSelRightCol = columnForBlockAtX(refBlock, rawRightX);
+}
+
+/**
+ * Paints the block (rectangular) selection overlay.
+ * Computes per-line x-coordinates from the stored column indices using
+ * xForColumnInBlock() (which uses QTextLayout::cursorToX and extrapolates
+ * past end-of-line with spaceWidth, like Kate does).  With a monospace font
+ * this produces identical x-coordinates on every line, yielding a true
+ * rectangle.
+ */
+void QMarkdownTextEdit::paintBlockSelection(QPainter &painter) {
+    if (_blockSelStartBlock < 0 || _blockSelLeftCol == _blockSelRightCol) {
+        return;
+    }
+
+    QTextDocument *doc = document();
+    const QPointF offset = contentOffset();
+    const QRect vp = viewport()->rect();
+    const QPalette pal = palette();
+    QColor selColor = pal.color(QPalette::Highlight);
+    selColor.setAlpha(128);
+
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+
+    for (int i = _blockSelStartBlock; i <= _blockSelEndBlock; ++i) {
+        QTextBlock block = doc->findBlockByNumber(i);
+        if (!block.isValid()) {
+            continue;
+        }
+
+        const QRectF geom = blockBoundingGeometry(block).translated(offset);
+
+        // Skip blocks outside the viewport
+        if (geom.bottom() < 0 || geom.top() > vp.bottom()) {
+            continue;
+        }
+
+        const qreal leftX = xForColumnInBlock(block, _blockSelLeftCol);
+        const qreal rightX = xForColumnInBlock(block, _blockSelRightCol);
+
+        const int topY = qMax(static_cast<int>(geom.top()), 0);
+        const int bottomY = qMin(static_cast<int>(geom.bottom()), vp.bottom());
+
+        const QRect lineRect(static_cast<int>(leftX), topY,
+                             static_cast<int>(rightX - leftX), bottomY - topY);
+        painter.fillRect(lineRect, selColor);
+    }
+}
+
+/**
+ * Returns the column index in the given block that corresponds to the
+ * given viewport x-coordinate.  Uses the block's QTextLayout for accurate
+ * character-boundary mapping within the line, and extrapolates past the end
+ * of the line using space width so that a rectangular selection can extend
+ * beyond the width of a short line.
+ */
+int QMarkdownTextEdit::columnForBlockAtX(const QTextBlock &block, int x) const {
+    if (!block.isValid()) {
+        return 0;
+    }
+
+    QTextLayout *layout = block.layout();
+    if (!layout || layout->lineCount() == 0) {
+        return 0;
+    }
+
+    const QPointF offset = contentOffset();
+    const QRectF geom = blockBoundingGeometry(block).translated(offset);
+    const int textLen = block.length() - 1;    // Exclude trailing \n
+
+    // Convert viewport x to a local x relative to the block's left edge
+    const qreal localX = x - geom.left();
+
+    // Find the x-coordinate at the end of the line text
+    const qreal endX = layout->lineAt(0).cursorToX(textLen);
+
+    if (localX <= endX) {
+        // Position is within the line text — use precise layout mapping
+        return layout->lineAt(0).xToCursor(localX);
+    }
+
+    // Position is past the end of the line — extrapolate using space width
+    const qreal overX = localX - endX;
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+    const qreal spaceWidth =
+        QFontMetricsF(font()).horizontalAdvance(QLatin1Char(' '));
+#else
+    const qreal spaceWidth = QFontMetricsF(font()).width(QLatin1Char(' '));
+#endif
+    if (spaceWidth <= 0) {
+        return textLen;
+    }
+    const int extra = static_cast<int>(overX / spaceWidth + 0.5);
+    return textLen + extra;
+}
+
+/**
+ * Returns the viewport x-coordinate for the given column in the given block.
+ * Uses QTextLayout::lineAt(0).cursorToX() for pixel-precise mapping.
+ * If the column is past the end of the line's text, the position is
+ * extrapolated using the average character width (like Kate does with
+ * spaceWidth()), so the rectangle extends uniformly past short lines.
+ */
+qreal QMarkdownTextEdit::xForColumnInBlock(const QTextBlock &block,
+                                           int column) const {
+    if (!block.isValid()) {
+        return 0;
+    }
+
+    QTextLayout *layout = block.layout();
+    if (!layout || layout->lineCount() == 0) {
+        return 0;
+    }
+
+    const int textLen = block.length() - 1;    // Exclude trailing \n
+    const QPointF offset = contentOffset();
+    const QRectF geom = blockBoundingGeometry(block).translated(offset);
+
+    if (column <= textLen) {
+        // Column is within the line's text — use precise layout mapping
+        const qreal localX = layout->lineAt(0).cursorToX(column);
+        return geom.left() + localX;
+    }
+
+    // Column is past end of line — extrapolate using space width
+    const qreal endX = layout->lineAt(0).cursorToX(textLen);
+    const int over = column - textLen;
+    // horizontalAdvance() was added in Qt 5.11; use width() on older versions
+#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
+    const qreal spaceWidth =
+        QFontMetricsF(font()).horizontalAdvance(QLatin1Char(' '));
+#else
+    const qreal spaceWidth = QFontMetricsF(font()).width(QLatin1Char(' '));
+#endif
+    return geom.left() + endX + over * spaceWidth;
+}
+
+/**
+ * Clears the block (rectangular) selection state and triggers a repaint
+ */
+void QMarkdownTextEdit::clearBlockSelection() {
+    if (!_blockSelectionActive) {
+        return;
+    }
+
+    _blockSelectionActive = false;
+    _blockSelectionDragging = false;
+    _blockSelStartBlock = -1;
+    _blockSelEndBlock = -1;
+    _blockSelLeftCol = 0;
+    _blockSelRightCol = 0;
+
+    viewport()->update();
+}
+
+/**
+ * Returns the text within the block (rectangular) selection, with each
+ * row on a separate line.  Uses the stored column indices directly so
+ * the extracted text always matches the visual rectangle.
+ */
+QString QMarkdownTextEdit::blockSelectionText() const {
+    if (_blockSelStartBlock < 0) {
+        return {};
+    }
+
+    QTextDocument *doc = document();
+    QStringList lines;
+    for (int i = _blockSelStartBlock; i <= _blockSelEndBlock; ++i) {
+        QTextBlock block = doc->findBlockByNumber(i);
+        if (!block.isValid()) {
+            continue;
+        }
+        const QString text = block.text();
+        const int s = qMin(_blockSelLeftCol, text.length());
+        const int e = qMin(_blockSelRightCol, text.length());
+        lines.append(text.mid(s, e - s));
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+/**
+ * Removes the text within the block (rectangular) selection.
+ * Uses the stored column indices directly.
+ */
+void QMarkdownTextEdit::removeBlockSelectionText() {
+    if (_blockSelStartBlock < 0) {
+        return;
+    }
+
+    QTextDocument *doc = document();
+    QTextCursor editCursor(doc);
+    editCursor.beginEditBlock();
+
+    // Remove in reverse block order to keep earlier positions valid
+    for (int i = _blockSelEndBlock; i >= _blockSelStartBlock; --i) {
+        QTextBlock block = doc->findBlockByNumber(i);
+        if (!block.isValid()) {
+            continue;
+        }
+        const int blockLen = block.length() - 1;
+        const int s = qMin(_blockSelLeftCol, blockLen);
+        const int e = qMin(_blockSelRightCol, blockLen);
+        if (s >= e) {
+            continue;
+        }
+        editCursor.setPosition(block.position() + s);
+        editCursor.setPosition(block.position() + e, QTextCursor::KeepAnchor);
+        editCursor.removeSelectedText();
+    }
+
+    editCursor.endEditBlock();
+}
+
+/**
+ * Replaces the text within the block (rectangular) selection with the
+ * given text. Each line of the input replaces the corresponding row.
+ * Uses the stored column indices directly.
+ */
+void QMarkdownTextEdit::replaceBlockSelectionText(const QString &text) {
+    if (_blockSelStartBlock < 0) {
+        return;
+    }
+
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    QTextDocument *doc = document();
+    QTextCursor editCursor(doc);
+    editCursor.beginEditBlock();
+
+    // Replace in reverse block order to keep earlier positions valid
+    for (int i = _blockSelEndBlock; i >= _blockSelStartBlock; --i) {
+        QTextBlock block = doc->findBlockByNumber(i);
+        if (!block.isValid()) {
+            continue;
+        }
+        const int blockLen = block.length() - 1;
+        const int s = qMin(_blockSelLeftCol, blockLen);
+        const int e = qMin(_blockSelRightCol, blockLen);
+        editCursor.setPosition(block.position() + s);
+        editCursor.setPosition(block.position() + e, QTextCursor::KeepAnchor);
+        const int lineIdx = i - _blockSelStartBlock;
+        const QString &line =
+            lineIdx < lines.size() ? lines.at(lineIdx) : QString();
+        editCursor.insertText(line);
+    }
+
+    editCursor.endEditBlock();
+    clearBlockSelection();
 }
 
 QMargins QMarkdownTextEdit::viewportMargins() {

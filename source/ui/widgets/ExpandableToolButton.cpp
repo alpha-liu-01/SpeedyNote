@@ -3,6 +3,7 @@
 #include <QHBoxLayout>
 #include <QPainter>
 #include <QPainterPath>
+#include <QTimer>
 #include <QVariant>
 
 ExpandableToolButton::ExpandableToolButton(QWidget* parent)
@@ -18,6 +19,13 @@ ExpandableToolButton::ExpandableToolButton(QWidget* parent)
 
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     setFixedHeight(36);
+
+    m_collapseTimer = new QTimer(this);
+    m_collapseTimer->setSingleShot(true);
+    connect(m_collapseTimer, &QTimer::timeout, this, [this]() {
+        if (m_hoverExpand)
+            setExpanded(false);
+    });
 }
 
 void ExpandableToolButton::setContentWidget(QWidget* widget)
@@ -110,6 +118,33 @@ void ExpandableToolButton::paintEvent(QPaintEvent* event)
         painter.setBrush(QColor(255, 255, 255));
     }
     painter.drawPath(path);
+}
+
+void ExpandableToolButton::setHoverExpand(bool enabled)
+{
+    m_hoverExpand = enabled;
+    setAttribute(Qt::WA_Hover, enabled);
+}
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void ExpandableToolButton::enterEvent(QEnterEvent* event)
+#else
+void ExpandableToolButton::enterEvent(QEvent* event)
+#endif
+{
+    if (m_hoverExpand) {
+        m_collapseTimer->stop();
+        setExpanded(true);
+    }
+    QWidget::enterEvent(event);
+}
+
+void ExpandableToolButton::leaveEvent(QEvent* event)
+{
+    if (m_hoverExpand) {
+        m_collapseTimer->start(COLLAPSE_DELAY_MS);
+    }
+    QWidget::leaveEvent(event);
 }
 
 void ExpandableToolButton::updateContentVisibility()

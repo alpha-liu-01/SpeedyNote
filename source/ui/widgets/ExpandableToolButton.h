@@ -5,6 +5,7 @@
 #include "../ToolbarButtons.h"
 
 class QHBoxLayout;
+class QTimer;
 
 /**
  * @brief Composite toolbar widget that expands to reveal inline subtoolbar content.
@@ -40,6 +41,13 @@ public:
     bool isExpanded() const { return m_expanded; }
 
     /**
+     * @brief Enable hover-to-expand mode.
+     * When enabled, the content area is shown on mouse enter
+     * and hidden after the mouse leaves (with a short delay).
+     */
+    void setHoverExpand(bool enabled);
+
+    /**
      * @brief Forward themed icon to the inner ToolButton.
      */
     void setThemedIcon(const QString& baseName);
@@ -57,6 +65,12 @@ signals:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    void enterEvent(QEnterEvent* event) override;
+#else
+    void enterEvent(QEvent* event) override;
+#endif
+    void leaveEvent(QEvent* event) override;
 
 private:
     void updateContentVisibility();
@@ -64,11 +78,14 @@ private:
     ToolButton* m_toolButton = nullptr;
     QWidget* m_contentWidget = nullptr;
     QHBoxLayout* m_mainLayout = nullptr;
+    QTimer* m_collapseTimer = nullptr;
     bool m_expanded = false;
     bool m_darkMode = false;
+    bool m_hoverExpand = false;
 
     static constexpr int BORDER_RADIUS = 6;
     static constexpr int CONTENT_SPACING = 2;
+    static constexpr int COLLAPSE_DELAY_MS = 350;
 };
 
 #endif // EXPANDABLETOOLBUTTON_H

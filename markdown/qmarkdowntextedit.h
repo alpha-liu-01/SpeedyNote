@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2014-2025 Patrizio Bekerle -- <patrizio@bekerle.com>
+ * Copyright (c) 2014-2026 Patrizio Bekerle -- <patrizio@bekerle.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,11 +26,18 @@
 
 #include <QEvent>
 #include <QPlainTextEdit>
+#include <QPoint>
+#include <QPointF>
+#include <QTextBlock>
+#include <QVector>
 
 #include "markdownhighlighter.h"
 #include "qplaintexteditsearchwidget.h"
 
 class LineNumArea;
+class QKeyEvent;
+class QMouseEvent;
+class QTimer;
 
 class QMarkdownTextEdit : public QPlainTextEdit {
     Q_OBJECT
@@ -57,7 +64,9 @@ class QMarkdownTextEdit : public QPlainTextEdit {
     MarkdownHighlighter *highlighter();
     QPlainTextEditSearchWidget *searchWidget();
     void setIgnoredClickUrlSchemata(QStringList ignoredUrlSchemata);
-    virtual void openUrl(const QString &urlString);
+    void setIgnoredClickUrlRegexps(
+        QList<QRegularExpression> ignoredClickUrlRegexps);
+    virtual void openUrl(const QString &urlString, bool openInNewTab = false);
     QString getMarkdownUrlAtPosition(const QString &text, int position);
     void initSearchFrame(QWidget *searchFrame, bool darkMode = false);
     void setAutoTextOptions(AutoTextOptions options);
@@ -72,12 +81,16 @@ class QMarkdownTextEdit : public QPlainTextEdit {
     void setLineNumbersCurrentLineColor(QColor color);
     void setLineNumbersOtherLineColor(QColor color);
     void setSearchWidgetDebounceDelay(uint debounceDelay);
+    void setBookmarkLines(const QHash<int, int> &bookmarkLines);
 
     void setHighlightingEnabled(bool enabled);
     [[nodiscard]] bool highlightingEnabled() const;
 
     void setHighlightCurrentLine(bool set);
     bool highlightCurrentLine();
+
+    void setHangingIndentEnabled(bool enabled);
+    [[nodiscard]] bool hangingIndentEnabled() const;
 
     void setCurrentLineHighlightColor(const QColor &c);
     QColor currentLineHighlightColor();
@@ -100,14 +113,36 @@ class QMarkdownTextEdit : public QPlainTextEdit {
     MarkdownHighlighter *_highlighter = nullptr;
     bool _highlightingEnabled;
     QStringList _ignoredClickUrlSchemata;
+    QList<QRegularExpression> _ignoredClickUrlRegexps;
     QPlainTextEditSearchWidget *_searchWidget;
     QWidget *_searchFrame;
     AutoTextOptions _autoTextOptions;
     bool _mouseButtonDown = false;
     bool _centerCursor = false;
     bool _highlightCurrentLine = false;
+    bool _openLinkInNewTab = false;
+    bool _hangingIndentEnabled = true;
     QColor _currentLineHighlightColor = QColor();
     uint _debounceDelay = 0;
+
+    // Block (rectangular) selection state
+    bool _blockSelectionActive = false;
+    bool _blockSelectionDragging = false;
+    QPoint
+        _blockSelectionAnchor;    // Viewport position where Alt+click started
+    QPoint _blockSelectionEnd;    // Current viewport position during drag
+    int _blockSelStartBlock = -1;    // First block (line) in selection
+    int _blockSelEndBlock = -1;      // Last block (line) in selection
+    int _blockSelLeftCol = 0;        // Left column of rectangle
+    int _blockSelRightCol = 0;       // Right column of rectangle
+    void updateBlockSelection();
+    void clearBlockSelection();
+    void paintBlockSelection(QPainter &painter);
+    int columnForBlockAtX(const QTextBlock &block, int x) const;
+    qreal xForColumnInBlock(const QTextBlock &block, int column) const;
+    QString blockSelectionText() const;
+    void removeBlockSelectionText();
+    void replaceBlockSelectionText(const QString &text);
 
     bool eventFilter(QObject *obj, QEvent *event) override;
     QMargins viewportMargins();
@@ -123,19 +158,47 @@ class QMarkdownTextEdit : public QPlainTextEdit {
     bool bracketClosingCheck(const QChar openingCharacter,
                              QChar closingCharacter);
     bool quotationMarkCheck(const QChar quotationCharacter);
+    void focusInEvent(QFocusEvent *event) override;
     void focusOutEvent(QFocusEvent *event) override;
     void paintEvent(QPaintEvent *e) override;
+    static int listContentIndentLength(const QString &text);
     bool handleCharRemoval(MarkdownHighlighter::RangeType type, int block,
                            int position);
     void resizeEvent(QResizeEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    virtual int sidebarAdditionalWidth() const;
+    virtual void paintSidebar(QPainter *painter, const QRect &eventRect);
+    virtual bool sidebarMousePressEvent(QMouseEvent *event);
     void setLineNumberLeftMarginOffset(int offset);
     int _lineNumberLeftMarginOffset = 0;
     LineNumArea *lineNumberArea() { return _lineNumArea; }
     void updateLineNumAreaGeometry();
     void updateLineNumberArea(const QRect rect, int dy);
     Q_SLOT void updateLineNumberAreaWidth(int);
+    bool hasMarkdownUrlAtViewportPosition(const QPoint &position);
+    void updateLinkCursor(const QPoint &position,
+                          Qt::KeyboardModifiers modifiers);
     bool _handleBracketClosingUsed;
     LineNumArea *_lineNumArea;
+
+   private:
+    struct LineBackup {
+        QPointF position;
+        qreal width;
+    };
+    struct BlockLayoutBackup {
+        QTextBlock block;
+        QVector<LineBackup> lines;
+    };
+    QRect hangingCursorBlockRepaintRect() const;
+    void updateHangingCursorRepaintState();
+    QVector<BlockLayoutBackup> applyHangingIndentLayout();
+    void restoreHangingIndentLayout(const QVector<BlockLayoutBackup> &backups);
+    QTimer *_hangingCursorRepaintTimer = nullptr;
 
    Q_SIGNALS:
     void urlClicked(QString url);

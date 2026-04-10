@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2014-2025 Patrizio Bekerle -- <patrizio@bekerle.com>
+ * Copyright (c) 2014-2026 Patrizio Bekerle -- <patrizio@bekerle.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include <QDebug>
 #include <QEvent>
 #include <QKeyEvent>
+#include <QScrollBar>
 
 #include "ui_qplaintexteditsearchwidget.h"
 
@@ -450,11 +451,23 @@ void QPlainTextEditSearchWidget::activate(bool focus) {
                    SearchMode::PlainTextMode);
     show();
 
-    // preset the selected text as search text if there is any and there is no
-    // other search text
-    const QString selectedText = _textEdit->textCursor().selectedText();
-    if (!selectedText.isEmpty() && ui->searchLineEdit->text().isEmpty()) {
+    const int verticalScrollBarValue = _textEdit->verticalScrollBar()->value();
+    const int horizontalScrollBarValue =
+        _textEdit->horizontalScrollBar()->value();
+
+    // Save the original cursor so we can restore the position after the search
+    // widget initialization (for #3541)
+    const QTextCursor originalCursor = _textEdit->textCursor();
+
+    // Preset the selected text as search text if there is any, replacing any
+    // existing search text. Move the cursor to the start of the selection so
+    // that the first search result is the originally selected text and the view
+    // does not scroll away from the user's current position (for #3541).
+    const QString selectedText = originalCursor.selectedText();
+    bool hasPresetSelection = false;
+    if (!selectedText.isEmpty()) {
         ui->searchLineEdit->setText(selectedText);
+        hasPresetSelection = true;
     }
 
     if (focus) {
@@ -463,7 +476,23 @@ void QPlainTextEditSearchWidget::activate(bool focus) {
 
     ui->searchLineEdit->selectAll();
     updateSearchExtraSelections();
+
+    // If text was preset from a selection, move the cursor one position before
+    // the original selection start. QPlainTextEdit::find() searches strictly
+    // after the cursor position, so placing it one character before the
+    // selection ensures doSearchDown() finds the originally selected word
+    // itself rather than the next occurrence in the document (for #3541).
+    if (hasPresetSelection) {
+        QTextCursor cursor = _textEdit->textCursor();
+        const int pos = originalCursor.selectionStart();
+        cursor.setPosition(pos > 0 ? pos - 1 : 0);
+        _textEdit->setTextCursor(cursor);
+    }
+
     doSearchDown();
+
+    _textEdit->verticalScrollBar()->setValue(verticalScrollBarValue);
+    _textEdit->horizontalScrollBar()->setValue(horizontalScrollBarValue);
 }
 
 void QPlainTextEditSearchWidget::reset() {
