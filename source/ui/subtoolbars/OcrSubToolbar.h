@@ -24,12 +24,14 @@ public:
     void setStatusText(const QString& text);
     void clearStatusAfterDelay(int ms = 5000);
     bool isShowTextEnabled() const;
+    bool isConfidenceEnabled() const;
 
 signals:
     void scanPageClicked();
     void scanAllClicked();
     void autoOcrToggled(bool enabled);
     void showTextToggled(bool enabled);
+    void confidenceToggled(bool enabled);
 
 private:
     void createWidgets();
@@ -41,6 +43,7 @@ private:
     QPushButton* m_scanAllButton = nullptr;
     QPushButton* m_autoOcrButton = nullptr;
     QPushButton* m_showTextButton = nullptr;
+    QPushButton* m_confidenceButton = nullptr;
     QLabel* m_statusLabel = nullptr;
     QTimer* m_statusClearTimer = nullptr;
 
@@ -49,6 +52,7 @@ private:
     struct TabState {
         bool autoOcrEnabled = false;
         bool showTextEnabled = false;
+        bool confidenceEnabled = false;
         bool initialized = false;
     };
     QHash<int, TabState> m_tabStates;

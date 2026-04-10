@@ -908,7 +908,45 @@ void MainWindow::setupUi() {
     connect(ocrLanguageAction, &QAction::triggered, this, [this]() {
         showOcrLanguageDialog();
     });
-    
+
+    QAction *lockAllOcrAction = overflowMenu->addAction(tr("Lock All OCR Text"));
+    connect(lockAllOcrAction, &QAction::triggered, this, [this]() {
+        DocumentViewport* vp = currentViewport();
+        if (!vp || !vp->document()) return;
+
+        auto lockOnPage = [](Page* page) -> QVector<QString> {
+            QVector<QString> ids;
+            if (!page) return ids;
+            for (const auto& obj : page->objects) {
+                if (obj->type() == QStringLiteral("ocr_text")) {
+                    auto* ocr = static_cast<OcrTextObject*>(obj.get());
+                    if (!ocr->ocrLocked) {
+                        ocr->ocrLocked = true;
+                        ids.append(ocr->id);
+                    }
+                }
+            }
+            return ids;
+        };
+
+        QVector<QString> lockedIds;
+        Document* doc = vp->document();
+        if (doc->isEdgeless()) {
+            for (auto coord : doc->allLoadedTileCoords()) {
+                Page* tile = doc->getTile(coord.first, coord.second);
+                lockedIds += lockOnPage(tile);
+            }
+        } else {
+            Page* page = doc->page(vp->currentPageIndex());
+            lockedIds = lockOnPage(page);
+        }
+
+        if (!lockedIds.isEmpty()) {
+            vp->pushOcrLockUndo(lockedIds, true);
+            vp->update();
+        }
+    });
+
     QAction *jumpToPageAction = overflowMenu->addAction(tr("Jump to Page..."));
     connect(jumpToPageAction, &QAction::triggered, this, &MainWindow::showJumpToPageDialog);
     
@@ -2256,6 +2294,12 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             } else {
                 m_objectSelectActionBar->updateImageSelection(false, false);
             }
+            if (!sel.isEmpty() && sel.size() == 1 && sel.first()->type() == QStringLiteral("ocr_text")) {
+                auto* ocr = dynamic_cast<OcrTextObject*>(sel.first());
+                m_objectSelectActionBar->updateOcrLockSelection(true, ocr ? ocr->ocrLocked : false);
+            } else {
+                m_objectSelectActionBar->updateOcrLockSelection(false, false);
+            }
         }
         if (m_actionBarContainer) {
             bool hasSelection = !viewport->selectedObjects().isEmpty();
@@ -2307,7 +2351,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         // Sync all selection/clipboard states
         m_actionBarContainer->onLassoSelectionChanged(viewport->hasLassoSelection());
 
-        // Sync image-specific state before object selection so button count is correct
+        // Sync image/OCR-specific state before object selection so button count is correct
         if (m_objectSelectActionBar) {
             const auto& sel = viewport->selectedObjects();
             if (!sel.isEmpty() && sel.size() == 1 && sel.first()->type() == "image") {
@@ -2315,6 +2359,12 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
                 m_objectSelectActionBar->updateImageSelection(true, img ? img->maintainAspectRatio : true);
             } else {
                 m_objectSelectActionBar->updateImageSelection(false, false);
+            }
+            if (!sel.isEmpty() && sel.size() == 1 && sel.first()->type() == QStringLiteral("ocr_text")) {
+                auto* ocr = dynamic_cast<OcrTextObject*>(sel.first());
+                m_objectSelectActionBar->updateOcrLockSelection(true, ocr ? ocr->ocrLocked : false);
+            } else {
+                m_objectSelectActionBar->updateOcrLockSelection(false, false);
             }
         }
         m_actionBarContainer->onObjectSelectionChanged(viewport->hasSelectedObjects());
@@ -4788,6 +4838,9 @@ void MainWindow::connectSubToolbarSignals()
     connect(ocrST, &OcrSubToolbar::showTextToggled, this, [this](bool enabled) {
         setOcrTextVisibility(enabled);
     });
+    connect(ocrST, &OcrSubToolbar::confidenceToggled, this, [this](bool enabled) {
+        setOcrConfidenceVisibility(enabled);
+    });
 }
 
 // ============================================================================
@@ -4939,7 +4992,20 @@ void MainWindow::setupActionBars()
             vp->toggleImageAspectRatioLock();
         }
     });
-    
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::ocrLockToggleRequested, this, [this]() {
+        DocumentViewport* vp = currentViewport();
+        if (!vp) return;
+        const auto& sel = vp->selectedObjects();
+        if (sel.size() != 1) return;
+        auto* ocr = dynamic_cast<OcrTextObject*>(sel.first());
+        if (!ocr) return;
+        bool newState = !ocr->ocrLocked;
+        ocr->ocrLocked = newState;
+        vp->pushOcrLockUndo(QVector<QString>{ocr->id}, newState);
+        m_objectSelectActionBar->updateOcrLockSelection(true, newState);
+        vp->update();
+    });
+
     // Connect TextSelectionActionBar signals to viewport
     connect(m_textSelectionActionBar, &TextSelectionActionBar::copyRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
@@ -5509,20 +5575,30 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
 {
     if (!page) return;
 
-    // Close floating editor if its target is an OCR text on this page
+    // Close floating editor if its target is an unlocked OCR text on this page
     if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
         if (auto* tgt = m_floatingTextEditor->target()) {
             if (tgt->type() == QLatin1String("ocr_text") && page->objectById(tgt->id)) {
-                m_floatingTextEditor->closeEditor();
+                auto* ocrTgt = static_cast<OcrTextObject*>(tgt);
+                if (!ocrTgt->ocrLocked)
+                    m_floatingTextEditor->closeEditor();
             }
         }
     }
 
-    // Remove existing OcrTextObjects
+    // Collect locked stroke IDs to suppress, and remove only unlocked OCR objects
+    QSet<QString> suppressedStrokeIds;
     QVector<QString> toRemove;
     for (const auto& obj : page->objects) {
-        if (obj && obj->type() == QStringLiteral("ocr_text"))
-            toRemove.append(obj->id);
+        if (obj && obj->type() == QStringLiteral("ocr_text")) {
+            auto* ocr = static_cast<OcrTextObject*>(obj.get());
+            if (ocr->ocrLocked) {
+                for (const auto& sid : ocr->sourceStrokeIds)
+                    suppressedStrokeIds.insert(sid);
+            } else {
+                toRemove.append(obj->id);
+            }
+        }
     }
     for (const auto& oid : toRemove)
         page->removeObject(oid);
@@ -5534,9 +5610,20 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
         if (block.dirty || block.text.isEmpty())
             continue;
 
+        // Skip blocks whose strokes are claimed by locked objects
+        bool suppressed = false;
+        for (const auto& sid : block.sourceStrokeIds) {
+            if (suppressedStrokeIds.contains(sid)) {
+                suppressed = true;
+                break;
+            }
+        }
+        if (suppressed) continue;
+
         QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
         auto obj = OcrTextObject::createFromBlock(block, color, dark);
         obj->visible = showText;
+        obj->showConfidence = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
         page->addObject(std::move(obj));
     }
 }
@@ -5556,6 +5643,35 @@ void MainWindow::setOcrTextVisibility(bool visible)
             if (obj && obj->type() == QStringLiteral("ocr_text")) {
                 obj->visible = visible;
                 static_cast<TextBoxObject*>(obj.get())->backgroundColor = bg;
+            }
+        }
+    };
+
+    if (doc->isEdgeless()) {
+        for (auto coord : doc->allLoadedTileCoords()) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            setOnPage(tile);
+        }
+    } else {
+        for (int i : doc->loadedPageIndices()) {
+            setOnPage(doc->page(i));
+        }
+    }
+
+    vp->update();
+}
+
+void MainWindow::setOcrConfidenceVisibility(bool enabled)
+{
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+    if (!doc) return;
+
+    auto setOnPage = [enabled](Page* page) {
+        if (!page) return;
+        for (const auto& obj : page->objects) {
+            if (obj && obj->type() == QStringLiteral("ocr_text")) {
+                static_cast<OcrTextObject*>(obj.get())->showConfidence = enabled;
             }
         }
     };
@@ -5657,6 +5773,18 @@ void MainWindow::openFloatingTextEditor(InsertedObject* obj)
 {
     auto* textBox = dynamic_cast<TextBoxObject*>(obj);
     if (!textBox) return;
+
+    // If target is an unlocked OcrTextObject, ask user to lock before editing
+    auto* ocrObj = dynamic_cast<OcrTextObject*>(textBox);
+    if (ocrObj && !ocrObj->ocrLocked) {
+        auto result = QMessageBox::question(this, tr("Lock OCR Text"),
+            tr("Lock this OCR text? It will no longer be updated by automatic scanning.\n\nProceed to lock and edit?"),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (result != QMessageBox::Yes) return;
+        ocrObj->ocrLocked = true;
+        if (DocumentViewport* vp = currentViewport())
+            vp->pushOcrLockUndo(QVector<QString>{ocrObj->id}, true);
+    }
 
     // Close existing session first (pushes undo if changed)
     if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {

@@ -11602,7 +11602,8 @@ void DocumentViewport::undo()
                            action.type == UndoAction::ObjectMove ||
                            action.type == UndoAction::ObjectAffinityChange ||
                            action.type == UndoAction::ObjectResize ||
-                           action.type == UndoAction::ObjectTextEdit);
+                           action.type == UndoAction::ObjectTextEdit ||
+                           action.type == UndoAction::OcrLockChange);
 
     if (isObjectAction) {
         switch (action.type) {
@@ -11713,6 +11714,35 @@ void DocumentViewport::undo()
                 }
                 break;
             }
+            case UndoAction::OcrLockChange: {
+                if (m_document->isEdgeless()) {
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (!tile) continue;
+                        bool modified = false;
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = tile->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj)) {
+                                ocr->ocrLocked = !action.ocrLockNewState;
+                                modified = true;
+                            }
+                        }
+                        if (modified)
+                            m_document->markTileDirty(coord);
+                    }
+                } else {
+                    Page* c = m_document->page(action.objectPageIndex);
+                    if (c) {
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = c->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj))
+                                ocr->ocrLocked = !action.ocrLockNewState;
+                        }
+                        m_document->markPageDirty(action.objectPageIndex);
+                    }
+                }
+                break;
+            }
             default: break;
         }
     } else if (action.type == UndoAction::TransformSelection) {
@@ -11801,7 +11831,8 @@ void DocumentViewport::redo()
                            action.type == UndoAction::ObjectMove ||
                            action.type == UndoAction::ObjectAffinityChange ||
                            action.type == UndoAction::ObjectResize ||
-                           action.type == UndoAction::ObjectTextEdit);
+                           action.type == UndoAction::ObjectTextEdit ||
+                           action.type == UndoAction::OcrLockChange);
 
     if (isObjectAction) {
         switch (action.type) {
@@ -11912,6 +11943,35 @@ void DocumentViewport::redo()
                         tbox->invalidateDocCache();
                     }
                     markObjDirty(m_document, action);
+                }
+                break;
+            }
+            case UndoAction::OcrLockChange: {
+                if (m_document->isEdgeless()) {
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (!tile) continue;
+                        bool modified = false;
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = tile->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj)) {
+                                ocr->ocrLocked = action.ocrLockNewState;
+                                modified = true;
+                            }
+                        }
+                        if (modified)
+                            m_document->markTileDirty(coord);
+                    }
+                } else {
+                    Page* c = m_document->page(action.objectPageIndex);
+                    if (c) {
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = c->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj))
+                                ocr->ocrLocked = action.ocrLockNewState;
+                        }
+                        m_document->markPageDirty(action.objectPageIndex);
+                    }
                 }
                 break;
             }
@@ -12147,6 +12207,29 @@ void DocumentViewport::pushObjectTextEditUndo(
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (tile && tile->objectById(obj->id)) {
+                action.objectTileCoord = coord;
+                break;
+            }
+        }
+    } else {
+        action.objectPageIndex = m_currentPageIndex;
+    }
+    pushUndoAction(action);
+    emit documentModified();
+}
+
+void DocumentViewport::pushOcrLockUndo(const QVector<QString>& objectIds, bool newState)
+{
+    if (objectIds.isEmpty()) return;
+
+    UndoAction action;
+    action.type = UndoAction::OcrLockChange;
+    action.ocrLockObjectIds = objectIds;
+    action.ocrLockNewState = newState;
+    if (m_document && m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(objectIds.first())) {
                 action.objectTileCoord = coord;
                 break;
             }

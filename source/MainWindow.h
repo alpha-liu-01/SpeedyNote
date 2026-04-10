@@ -714,6 +714,7 @@ private:
     QVector<VectorStroke> collectPageStrokes(const Page* page) const;
     void syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks);
     void setOcrTextVisibility(bool visible);
+    void setOcrConfidenceVisibility(bool enabled);
     void showOcrLanguageDialog();
     QString resolveOcrLanguage(Document* doc) const;
     

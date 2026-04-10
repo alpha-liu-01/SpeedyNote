@@ -71,6 +71,13 @@ public:
      */
     void updateImageSelection(bool isImage, bool aspectLocked);
 
+    /**
+     * @brief Update OCR text lock button visibility and state.
+     * @param isOcrText True if a single OcrTextObject is selected.
+     * @param isLocked Current ocrLocked state of the object.
+     */
+    void updateOcrLockSelection(bool isOcrText, bool isLocked);
+
 signals:
     /**
      * @brief Emitted when the aspect ratio lock button is clicked.
@@ -122,6 +129,11 @@ signals:
      */
     void cancelRequested();
 
+    /**
+     * @brief Emitted when the OCR lock/unlock button is clicked.
+     */
+    void ocrLockToggleRequested();
+
 private:
     void setupButtons();
     
@@ -142,6 +154,9 @@ private:
     // Aspect ratio lock (image-only)
     ActionBarButton* m_aspectLockButton = nullptr;
     
+    // OCR lock (ocr-text-only)
+    ActionBarButton* m_ocrLockButton = nullptr;
+    
     // Cancel button (for paste-only mode)
     ActionBarButton* m_cancelButton = nullptr;
     
@@ -149,6 +164,7 @@ private:
     bool m_hasObjectInClipboard = false;
     bool m_hasSelection = false;
     bool m_isImageSelected = false;
+    bool m_isOcrTextSelected = false;
 };
 
 #endif // OBJECTSELECTACTIONBAR_H

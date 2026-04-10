@@ -117,7 +117,7 @@ public:
      * - 1: Initial .snb bundle format (2026-01)
      * - 2: Added pdf_relative_path for portable .snbx packages (2026-01)
      */
-    static constexpr int BUNDLE_FORMAT_VERSION = 2;
+    static constexpr int BUNDLE_FORMAT_VERSION = 3;
     
     // ===== Document Mode =====
     

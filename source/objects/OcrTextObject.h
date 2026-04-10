@@ -14,6 +14,8 @@ public:
     float confidence = 0.0f;
     QString engineId;
     bool ocrDirty = false;
+    bool ocrLocked = false;
+    bool showConfidence = false;
     QVector<OcrTextBlock::WordSegment> wordSegments;
 
     OcrTextObject() { visible = false; showBorder = false; }
@@ -36,4 +38,7 @@ public:
      */
     static QColor dominantStrokeColor(const Page* page,
                                       const QVector<QString>& strokeIds);
+
+private:
+    void drawLockBadge(QPainter& painter, const QRectF& rect) const;
 };

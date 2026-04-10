@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QPainter>
+#include <QPixmap>
 #include <QFontMetricsF>
 #include <algorithm>
 
@@ -18,13 +19,47 @@ static bool isCjkChar(QChar ch)
         || (u >= 0x30A0 && u <= 0x30FF);
 }
 
+void OcrTextObject::drawLockBadge(QPainter& painter, const QRectF& rect) const
+{
+    static QPixmap lightIcon(QStringLiteral(":/resources/icons/lock.png"));
+    static QPixmap darkIcon(QStringLiteral(":/resources/icons/lock_reversed.png"));
+
+    constexpr int badgeSize = 18;
+    constexpr int iconSize = 12;
+    constexpr int margin = 2;
+
+    qreal x = rect.right() - badgeSize - margin;
+    qreal y = rect.top() + margin;
+    QRectF badgeRect(x, y, badgeSize, badgeSize);
+
+    painter.save();
+
+    bool dark = backgroundColor.lightness() < 100;
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(dark ? 255 : 0, dark ? 255 : 0, dark ? 255 : 0, 60));
+    painter.drawRoundedRect(badgeRect, 3, 3);
+
+    const QPixmap& icon = dark ? darkIcon : lightIcon;
+    if (!icon.isNull()) {
+        qreal off = (badgeSize - iconSize) / 2.0;
+        painter.drawPixmap(QRectF(x + off, y + off, iconSize, iconSize), icon, QRectF(icon.rect()));
+    }
+
+    painter.restore();
+}
+
 void OcrTextObject::render(QPainter& painter, qreal zoom) const
 {
     if (!visible || text.isEmpty())
         return;
 
-    if (wordSegments.isEmpty()) {
+    if (wordSegments.isEmpty() || ocrLocked) {
         TextBoxObject::render(painter, zoom);
+        if (ocrLocked) {
+            QRectF lr(position.x() * zoom, position.y() * zoom,
+                      size.width() * zoom, size.height() * zoom);
+            drawLockBadge(painter, lr);
+        }
         return;
     }
 
@@ -140,9 +175,19 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
         font.setPixelSize(static_cast<int>(effectivePixelSize));
 
         painter.setFont(font);
-        painter.setPen(fontColor);
+        QColor penColor = fontColor;
+        if (showConfidence && !ocrLocked) {
+            if (confidence < 0.5f)
+                penColor = QColor(220, 60, 60);
+            else if (confidence < 0.8f)
+                penColor = QColor(220, 160, 40);
+        }
+        painter.setPen(penColor);
         painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, run.text);
     }
+
+    if (ocrLocked)
+        drawLockBadge(painter, lineRect);
 
     painter.restore();
 }
@@ -158,6 +203,8 @@ QJsonObject OcrTextObject::toJson() const
     obj["confidence"] = static_cast<double>(confidence);
     obj["engineId"] = engineId;
     obj["ocrDirty"] = ocrDirty;
+    if (ocrLocked)
+        obj["ocrLocked"] = true;
     if (!wordSegments.isEmpty()) {
         QJsonArray words;
         for (const auto& seg : wordSegments) {
@@ -185,6 +232,7 @@ void OcrTextObject::loadFromJson(const QJsonObject& obj)
     confidence = static_cast<float>(obj["confidence"].toDouble(0.0));
     engineId = obj["engineId"].toString();
     ocrDirty = obj["ocrDirty"].toBool(false);
+    ocrLocked = obj["ocrLocked"].toBool(false);
     wordSegments.clear();
     for (const auto& val : obj["words"].toArray()) {
         QJsonObject w = val.toObject();

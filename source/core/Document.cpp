@@ -1682,10 +1682,15 @@ bool Document::saveTile(TileCoord coord)
         tileObj["layers"] = layersArray;
         
         // Phase O2: Save objects to tile (BF.5)
-        // Objects are stored in tile-local coordinates
+        // Objects are stored in tile-local coordinates; skip unlocked OCR objects
         if (!tile->objects.empty()) {
             QJsonArray objectsArray;
             for (const auto& obj : tile->objects) {
+                if (obj->type() == QStringLiteral("ocr_text")) {
+                    auto* ocr = static_cast<OcrTextObject*>(obj.get());
+                    if (!ocr->ocrLocked)
+                        continue;
+                }
                 objectsArray.append(obj->toJson());
             }
             tileObj["objects"] = objectsArray;
@@ -3224,9 +3229,33 @@ void Document::materializeOcrTextObjects(Page* page) const
     if (!page || page->ocrTextBlocks.isEmpty())
         return;
 
+    // Collect stroke IDs claimed by locked OCR objects already on the page
+    QSet<QString> lockedStrokeIds;
+    for (const auto& obj : page->objects) {
+        if (obj->type() == QStringLiteral("ocr_text")) {
+            auto* ocr = static_cast<OcrTextObject*>(obj.get());
+            if (ocr->ocrLocked) {
+                for (const auto& sid : ocr->sourceStrokeIds)
+                    lockedStrokeIds.insert(sid);
+            }
+        }
+    }
+
     for (const auto& block : page->ocrTextBlocks) {
         if (block.dirty || block.text.isEmpty())
             continue;
+
+        // Skip blocks whose strokes are claimed by locked objects
+        bool suppressed = false;
+        if (!lockedStrokeIds.isEmpty()) {
+            for (const auto& sid : block.sourceStrokeIds) {
+                if (lockedStrokeIds.contains(sid)) {
+                    suppressed = true;
+                    break;
+                }
+            }
+        }
+        if (suppressed) continue;
 
         QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
         auto obj = OcrTextObject::createFromBlock(block, color);

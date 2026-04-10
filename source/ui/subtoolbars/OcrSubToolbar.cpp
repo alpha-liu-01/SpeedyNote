@@ -46,6 +46,11 @@ void OcrSubToolbar::createWidgets()
     m_showTextButton->setToolTip(tr("Show Recognized Text"));
     addWidget(m_showTextButton);
 
+    m_confidenceButton = makeIconButton(this, BUTTON_SIZE);
+    m_confidenceButton->setCheckable(true);
+    m_confidenceButton->setToolTip(tr("Show Confidence Colors"));
+    addWidget(m_confidenceButton);
+
     addSeparator();
 
     m_statusLabel = new QLabel(this);
@@ -69,6 +74,7 @@ void OcrSubToolbar::setupConnections()
 
     connect(m_autoOcrButton, &QPushButton::toggled, this, &OcrSubToolbar::autoOcrToggled);
     connect(m_showTextButton, &QPushButton::toggled, this, &OcrSubToolbar::showTextToggled);
+    connect(m_confidenceButton, &QPushButton::toggled, this, &OcrSubToolbar::confidenceToggled);
 }
 
 void OcrSubToolbar::updateIcons()
@@ -84,6 +90,7 @@ void OcrSubToolbar::updateIcons()
     m_scanAllButton->setIcon(load("scanall"));
     m_autoOcrButton->setIcon(load("auto"));
     m_showTextButton->setIcon(load("showtext"));
+    m_confidenceButton->setIcon(load("warning"));
 }
 
 void OcrSubToolbar::applyButtonStyle()
@@ -109,6 +116,7 @@ void OcrSubToolbar::applyButtonStyle()
     m_scanAllButton->setStyleSheet(style);
     m_autoOcrButton->setStyleSheet(style);
     m_showTextButton->setStyleSheet(style);
+    m_confidenceButton->setStyleSheet(style);
 }
 
 void OcrSubToolbar::setDarkMode(bool darkMode)
@@ -141,6 +149,10 @@ void OcrSubToolbar::restoreTabState(int tabId)
     m_showTextButton->blockSignals(true);
     m_showTextButton->setChecked(state.showTextEnabled);
     m_showTextButton->blockSignals(false);
+
+    m_confidenceButton->blockSignals(true);
+    m_confidenceButton->setChecked(state.confidenceEnabled);
+    m_confidenceButton->blockSignals(false);
 }
 
 void OcrSubToolbar::saveTabState(int tabId)
@@ -148,6 +160,7 @@ void OcrSubToolbar::saveTabState(int tabId)
     TabState state;
     state.autoOcrEnabled = m_autoOcrButton->isChecked();
     state.showTextEnabled = m_showTextButton->isChecked();
+    state.confidenceEnabled = m_confidenceButton->isChecked();
     state.initialized = true;
     m_tabStates[tabId] = state;
 }
@@ -163,6 +176,7 @@ void OcrSubToolbar::setOcrAvailable(bool available)
     m_scanAllButton->setEnabled(available);
     m_autoOcrButton->setEnabled(available);
     m_showTextButton->setEnabled(available);
+    m_confidenceButton->setEnabled(available);
 
     if (!available) {
         m_statusLabel->setText(tr("OCR unavailable"));
@@ -185,4 +199,9 @@ void OcrSubToolbar::clearStatusAfterDelay(int ms)
 bool OcrSubToolbar::isShowTextEnabled() const
 {
     return m_showTextButton && m_showTextButton->isChecked();
+}
+
+bool OcrSubToolbar::isConfidenceEnabled() const
+{
+    return m_confidenceButton && m_confidenceButton->isChecked();
 }

@@ -62,7 +62,8 @@ struct UndoAction {
         ObjectMove,
         ObjectAffinityChange,
         ObjectResize,
-        ObjectTextEdit
+        ObjectTextEdit,
+        OcrLockChange
     };
 
     Type type = AddStroke;
@@ -113,6 +114,10 @@ struct UndoAction {
     int objectNewTextAlignment = 0;
     int objectOldBgAlpha = 180;
     int objectNewBgAlpha = 180;
+
+    // OcrLockChange fields
+    QVector<QString> ocrLockObjectIds;
+    bool ocrLockNewState = false;
 };
 
 #include <QWidget>
@@ -607,6 +612,8 @@ public:
                                 const QString& oldText, const QString& newText,
                                 int oldAlignment, int newAlignment,
                                 int oldOpacity, int newOpacity);
+
+    void pushOcrLockUndo(const QVector<QString>& objectIds, bool newState);
     
     // ===== Affinity Helpers (Phase O3.5.3) =====
     
