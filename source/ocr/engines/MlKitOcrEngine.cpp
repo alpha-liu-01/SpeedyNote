@@ -106,27 +106,31 @@ QVector<OcrEngine::Result> MlKitOcrEngine::analyze()
     results.reserve(lineGroups.size());
 
     for (const auto& group : lineGroups) {
-        QVector<VectorStroke> lineStrokes;
-        lineStrokes.reserve(group.strokeIndices.size());
+        const auto subGroups = splitLineByHorizontalGaps(group, m_strokes);
 
-        QVector<QString> sourceIds;
-        sourceIds.reserve(group.strokeIndices.size());
+        for (const auto& sub : subGroups) {
+            QVector<VectorStroke> subStrokes;
+            subStrokes.reserve(sub.strokeIndices.size());
 
-        for (int idx : group.strokeIndices) {
-            lineStrokes.append(m_strokes[idx]);
-            sourceIds.append(m_strokes[idx].id);
+            QVector<QString> sourceIds;
+            sourceIds.reserve(sub.strokeIndices.size());
+
+            for (int idx : sub.strokeIndices) {
+                subStrokes.append(m_strokes[idx]);
+                sourceIds.append(m_strokes[idx].id);
+            }
+
+            const QString text = recognizeStrokesNative(subStrokes);
+            if (text.isEmpty())
+                continue;
+
+            Result r;
+            r.text = text;
+            r.boundingRect = sub.boundingRect;
+            r.confidence = 1.0f;
+            r.sourceStrokeIds = sourceIds;
+            results.append(r);
         }
-
-        const QString text = recognizeStrokesNative(lineStrokes);
-        if (text.isEmpty())
-            continue;
-
-        Result r;
-        r.text = text;
-        r.boundingRect = group.boundingRect;
-        r.confidence = 1.0f;
-        r.sourceStrokeIds = sourceIds;
-        results.append(r);
     }
 
     return results;
