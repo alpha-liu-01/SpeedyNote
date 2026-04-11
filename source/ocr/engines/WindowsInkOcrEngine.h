@@ -33,6 +33,7 @@ public:
     void addStrokes(const QVector<VectorStroke>& strokes) override;
     void removeStrokes(const QVector<QString>& strokeIds) override;
     void clearStrokes() override;
+    bool supportsIncrementalUpdates() const override;
     QVector<Result> analyze() override;
 
 private:

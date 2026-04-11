@@ -33,6 +33,7 @@ public:
     virtual void addStrokes(const QVector<VectorStroke>& strokes) = 0;
     virtual void removeStrokes(const QVector<QString>& strokeIds) = 0;
     virtual void clearStrokes() = 0;
+    virtual bool supportsIncrementalUpdates() const { return true; }
 
     struct Result {
         QString text;

@@ -52,6 +52,7 @@ private:
     QHash<QString, int> m_strokeIndexById;
 
     QString m_languageTag;
+    mutable QStringList m_cachedLanguages;
     bool m_available = false;
 };
 

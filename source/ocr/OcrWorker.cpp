@@ -129,13 +129,8 @@ void OcrWorker::processPageIncremental(const QString& pageId,
                                        const QVector<VectorStroke>& strokes,
                                        const QSet<QString>& suppressedStrokeIds)
 {
-    // Fall back to full rescan when:
-    //  - different page / first scan
-    //  - language override is active: InkRecognizerContainer reads from
-    //    InkStrokeContainer which has no per-stroke removal API, so
-    //    incremental remove+analyze would still see "deleted" strokes
     if (pageId != m_lastPageId || m_knownStrokeIds.isEmpty()
-        || !m_engine->language().isEmpty()) {
+        || !m_engine->supportsIncrementalUpdates()) {
         processPage(pageId, strokes, suppressedStrokeIds);
         return;
     }

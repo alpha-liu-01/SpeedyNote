@@ -155,6 +155,14 @@ QString WindowsInkOcrEngine::language() const
     return m_impl ? m_impl->selectedLanguage : QString();
 }
 
+bool WindowsInkOcrEngine::supportsIncrementalUpdates() const
+{
+    // InkRecognizerContainer reads directly from InkStrokeContainer which has
+    // no per-stroke removal API, so incremental remove+analyze still sees
+    // "deleted" strokes when a non-default recognizer is active.
+    return !m_impl || m_impl->selectedLanguage.isEmpty();
+}
+
 void WindowsInkOcrEngine::addStrokes(const QVector<VectorStroke>& strokes)
 {
     if (!m_impl || !m_impl->available)

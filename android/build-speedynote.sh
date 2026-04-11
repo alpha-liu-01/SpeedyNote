@@ -186,8 +186,9 @@ fi
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-# Clean previous config
-rm -rf CMakeCache.txt CMakeFiles
+# Clean previous config (including Gradle's project-level cache, which can
+# become stale if build.gradle changes between runs)
+rm -rf CMakeCache.txt CMakeFiles android-build
 
 echo "=== Configuring with CMake ==="
 

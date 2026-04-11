@@ -17,9 +17,9 @@
  * Pressure is used to calculate variable-width rendering.
  */
 struct StrokePoint {
-    QPointF pos;          ///< Position in canvas coordinates
-    qreal pressure;       ///< Pen pressure, 0.0 to 1.0
-    qint64 timestamp = 0; ///< Milliseconds since epoch; 0 = not recorded (legacy)
+    QPointF pos;            ///< Position in canvas coordinates
+    qreal pressure = 1.0;  ///< Pen pressure, 0.0 to 1.0
+    qint64 timestamp = 0;  ///< Milliseconds since epoch; 0 = not recorded (legacy)
     
     /**
      * @brief Serialize to JSON.

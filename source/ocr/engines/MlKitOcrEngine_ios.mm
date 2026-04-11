@@ -2,8 +2,8 @@
 
 #if defined(SPEEDYNOTE_HAS_MLKIT_INK) && defined(Q_OS_IOS)
 
-#include <QDateTime>
 #include <QDebug>
+#include <limits>
 
 #import <MLKitDigitalInkRecognition/MLKitDigitalInkRecognition.h>
 
@@ -93,32 +93,30 @@ QString MlKitOcrEngine::recognizeStrokesNative(const QVector<VectorStroke>& stro
         return {};
 
     @autoreleasepool {
-        // Count total points for timestamp synthesis
-        int totalPoints = 0;
-        for (const auto& stroke : strokes)
-            totalPoints += stroke.points.size();
+        // Determine whether timestamps need synthesizing and find the
+        // baseline for normalization (keeps values small & precise).
+        bool needSyntheticTimestamps = false;
+        qint64 baseTimestamp = std::numeric_limits<qint64>::max();
+        for (const auto& stroke : strokes) {
+            for (const auto& pt : stroke.points) {
+                if (pt.timestamp == 0) {
+                    needSyntheticTimestamps = true;
+                    break;
+                }
+                baseTimestamp = qMin(baseTimestamp, pt.timestamp);
+            }
+            if (needSyntheticTimestamps)
+                break;
+        }
 
-        if (totalPoints == 0)
-            return {};
-
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
         int globalPointIdx = 0;
 
-        // Build MLKInk from VectorStroke data
         NSMutableArray<MLKStroke *> *mlkStrokes =
             [NSMutableArray arrayWithCapacity:strokes.size()];
 
         for (const auto& stroke : strokes) {
             NSMutableArray<MLKStrokePoint *> *mlkPoints =
                 [NSMutableArray arrayWithCapacity:stroke.points.size()];
-
-            bool needSyntheticTimestamps = false;
-            for (const auto& pt : stroke.points) {
-                if (pt.timestamp == 0) {
-                    needSyntheticTimestamps = true;
-                    break;
-                }
-            }
 
             for (int j = 0; j < stroke.points.size(); ++j) {
                 const auto& pt = stroke.points[j];
@@ -127,9 +125,9 @@ QString MlKitOcrEngine::recognizeStrokesNative(const QVector<VectorStroke>& stro
                 NSTimeInterval t;
 
                 if (needSyntheticTimestamps) {
-                    t = static_cast<NSTimeInterval>(now - (totalPoints - globalPointIdx) * 15);
+                    t = static_cast<NSTimeInterval>(globalPointIdx * 15);
                 } else {
-                    t = static_cast<NSTimeInterval>(pt.timestamp);
+                    t = static_cast<NSTimeInterval>(pt.timestamp - baseTimestamp);
                 }
 
                 [mlkPoints addObject:[[MLKStrokePoint alloc] initWithX:x y:y t:t]];

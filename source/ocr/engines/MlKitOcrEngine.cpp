@@ -38,7 +38,9 @@ bool MlKitOcrEngine::isAvailable() const
 
 QStringList MlKitOcrEngine::availableLanguages() const
 {
-    return queryLanguagesNative();
+    if (m_cachedLanguages.isEmpty())
+        m_cachedLanguages = queryLanguagesNative();
+    return m_cachedLanguages;
 }
 
 void MlKitOcrEngine::setLanguage(const QString& languageTag)
@@ -48,6 +50,9 @@ void MlKitOcrEngine::setLanguage(const QString& languageTag)
         resolved = localeToMlKitTag(QLocale::system().name());
     else if (resolved.contains(QLatin1Char('_')))
         resolved = localeToMlKitTag(resolved);
+
+    if (resolved == m_languageTag)
+        return;
 
     m_languageTag = resolved;
     ensureModelDownloadedNative(resolved);
