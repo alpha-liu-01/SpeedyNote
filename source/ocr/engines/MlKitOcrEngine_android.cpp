@@ -11,6 +11,8 @@
 
 static const char* HELPER_CLASS = "org/speedynote/app/MlKitDigitalInkHelper";
 
+void MlKitOcrEngine::invalidateNativeRecognizer() {}
+
 // ---------------------------------------------------------------------------
 // checkAvailabilityNative
 // ---------------------------------------------------------------------------

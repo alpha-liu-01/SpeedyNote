@@ -47,6 +47,7 @@ private:
     bool checkAvailabilityNative() const;
     QStringList queryLanguagesNative() const;
     bool ensureModelDownloadedNative(const QString& languageTag);
+    void invalidateNativeRecognizer();
 
     QVector<VectorStroke> m_strokes;
     QHash<QString, int> m_strokeIndexById;
@@ -54,6 +55,11 @@ private:
     QString m_languageTag;
     mutable QStringList m_cachedLanguages;
     bool m_available = false;
+    bool m_modelDownloaded = false;
+
+#if defined(Q_OS_IOS)
+    void *m_iosRecognizer = nullptr; // MLKDigitalInkRecognizer*, opaque to avoid ObjC in header
+#endif
 };
 
 #endif // SPEEDYNOTE_HAS_MLKIT_INK
