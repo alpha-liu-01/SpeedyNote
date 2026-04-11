@@ -5,6 +5,7 @@
 #include "subtoolbars/EraserSubToolbar.h"
 #include "subtoolbars/HighlighterSubToolbar.h"
 #include "subtoolbars/ObjectSelectSubToolbar.h"
+#include "subtoolbars/OcrSubToolbar.h"
 
 #include <QHBoxLayout>
 #include <QGuiApplication>
@@ -91,6 +92,15 @@ void Toolbar::setupUi()
     m_textExpandable->setContentWidget(m_highlighterSubToolbar);
     m_toolGroup->addButton(m_textExpandable->toolButton());
     mainLayout->addWidget(m_textExpandable);
+
+    // --- OCR (not in tool group, hover-to-expand) ---
+    m_ocrSubToolbar = new OcrSubToolbar();
+    m_ocrExpandable = new ExpandableToolButton(this);
+    m_ocrExpandable->setThemedIcon("ocr");
+    m_ocrExpandable->toolButton()->setToolTip(tr("OCR - Text Recognition"));
+    m_ocrExpandable->setContentWidget(m_ocrSubToolbar);
+    m_ocrExpandable->setHoverExpand(true);
+    mainLayout->addWidget(m_ocrExpandable);
 
     // --- Pan (no subtoolbar) ---
     m_panButton = new ToolButton(this);
@@ -267,6 +277,7 @@ void Toolbar::updateTheme(bool darkMode)
     m_eraserExpandable->setDarkMode(darkMode);
     m_objectInsertExpandable->setDarkMode(darkMode);
     m_textExpandable->setDarkMode(darkMode);
+    m_ocrExpandable->setDarkMode(darkMode);
 
     // Update subtoolbars
     m_penSubToolbar->setDarkMode(darkMode);
@@ -274,6 +285,7 @@ void Toolbar::updateTheme(bool darkMode)
     m_eraserSubToolbar->setDarkMode(darkMode);
     m_highlighterSubToolbar->setDarkMode(darkMode);
     m_objectSelectSubToolbar->setDarkMode(darkMode);
+    m_ocrSubToolbar->setDarkMode(darkMode);
 
     // Update plain buttons
     m_straightLineButton->setDarkMode(darkMode);
@@ -327,6 +339,7 @@ void Toolbar::onTabChanged(int newTabId, int oldTabId)
         m_highlighterSubToolbar->saveTabState(oldTabId);
         m_eraserSubToolbar->saveTabState(oldTabId);
         m_objectSelectSubToolbar->saveTabState(oldTabId);
+        m_ocrSubToolbar->saveTabState(oldTabId);
     }
 
     // Restore state for new tab across all subtoolbars
@@ -336,6 +349,7 @@ void Toolbar::onTabChanged(int newTabId, int oldTabId)
         m_highlighterSubToolbar->restoreTabState(newTabId);
         m_eraserSubToolbar->restoreTabState(newTabId);
         m_objectSelectSubToolbar->restoreTabState(newTabId);
+        m_ocrSubToolbar->restoreTabState(newTabId);
     }
 }
 
@@ -346,4 +360,16 @@ void Toolbar::clearTabState(int tabId)
     m_highlighterSubToolbar->clearTabState(tabId);
     m_eraserSubToolbar->clearTabState(tabId);
     m_objectSelectSubToolbar->clearTabState(tabId);
+    m_ocrSubToolbar->clearTabState(tabId);
+}
+
+void Toolbar::setOcrAvailable(bool available)
+{
+    m_ocrExpandable->toolButton()->setEnabled(available);
+    m_ocrSubToolbar->setOcrAvailable(available);
+    if (!available) {
+        m_ocrExpandable->toolButton()->setToolTip(tr("OCR unavailable - requires Windows Ink feature"));
+    } else {
+        m_ocrExpandable->toolButton()->setToolTip(tr("OCR - Text Recognition"));
+    }
 }

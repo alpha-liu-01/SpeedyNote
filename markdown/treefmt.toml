@@ -7,10 +7,7 @@ on-unmatched = "info"
 command = "clang-format"
 
 # Only target the exact directories we want
-includes = [
-  "*.cpp",
-  "*.h",
-]
+includes = ["*.cpp", "*.h"]
 
 [formatter.prettier]
 command = "prettier"

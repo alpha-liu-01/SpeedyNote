@@ -7,6 +7,8 @@
 #include "InsertedObject.h"
 #include "ImageObject.h"
 #include "LinkObject.h"
+#include "TextBoxObject.h"
+#include "OcrTextObject.h"
 
 QJsonObject InsertedObject::toJson() const
 {
@@ -71,13 +73,12 @@ std::unique_ptr<InsertedObject> InsertedObject::fromJson(const QJsonObject& obj)
     else if (objectType == "link") {
         result = std::make_unique<LinkObject>();
     }
-    // Future object types:
-    // else if (objectType == "textbox") {
-    //     result = std::make_unique<TextBoxObject>();
-    // }
-    // else if (objectType == "shape") {
-    //     result = std::make_unique<ShapeObject>();
-    // }
+    else if (objectType == "textbox") {
+        result = std::make_unique<TextBoxObject>();
+    }
+    else if (objectType == "ocr_text") {
+        result = std::make_unique<OcrTextObject>();
+    }
     else {
         // Unknown type - return nullptr
         // Caller should handle this gracefully (skip unknown objects)

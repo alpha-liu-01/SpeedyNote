@@ -117,7 +117,7 @@ public:
      * - 1: Initial .snb bundle format (2026-01)
      * - 2: Added pdf_relative_path for portable .snbx packages (2026-01)
      */
-    static constexpr int BUNDLE_FORMAT_VERSION = 2;
+    static constexpr int BUNDLE_FORMAT_VERSION = 3;
     
     // ===== Document Mode =====
     
@@ -149,6 +149,9 @@ public:
     int defaultLineSpacing = 32;
     QSizeF defaultPageSize = QSizeF(816, 1056);  ///< Default page size (US Letter at 96 DPI)
     
+    // ===== OCR Settings =====
+    QString ocrLanguage;                ///< Per-document OCR recognizer name (empty = global fallback)
+
     // ===== State =====
     bool modified = false;              ///< True if document has unsaved changes
     int lastAccessedPage = 0;           ///< Last viewed page index (for restoring position)
@@ -408,6 +411,55 @@ public:
      * Safe to call on unsaved documents (no-op if bundlePath is empty).
      */
     void cleanupOrphanedAssets();
+    
+    // =========================================================================
+    // OCR Sidecar File I/O (Phase 1A)
+    // =========================================================================
+    
+    /**
+     * @brief Save OCR data for a page to its .ocr.json sidecar file.
+     * @param uuid Page UUID.
+     * @param page Page with OCR data to save.
+     * @return True if saved (or cleaned up empty file).
+     */
+    bool savePageOcr(const QString& uuid, const Page* page);
+    
+    /**
+     * @brief Load OCR data for a page from its .ocr.json sidecar file.
+     * @param page Page to populate with OCR data.
+     * @param uuid Page UUID (used to construct the file path).
+     * @return True if loaded, false if file doesn't exist or parse error.
+     */
+    bool loadPageOcr(Page* page, const QString& uuid) const;
+    
+    /**
+     * @brief Save OCR data for an edgeless tile to its .ocr.json sidecar file.
+     * @param coord Tile coordinate.
+     * @return True if saved.
+     */
+    bool saveTileOcr(TileCoord coord);
+    
+    /**
+     * @brief Load OCR data for an edgeless tile from its .ocr.json sidecar file.
+     * @param tile Tile Page to populate.
+     * @param coord Tile coordinate.
+     * @return True if loaded.
+     */
+    bool loadTileOcr(Page* tile, TileCoord coord) const;
+    
+    /**
+     * @brief Create OcrTextObjects on a page from its ocrTextBlocks.
+     * Called after loadPageOcr/loadTileOcr to materialize the derived cache.
+     * Objects are created with visible = false (Show Text defaults to OFF).
+     */
+    void materializeOcrTextObjects(Page* page) const;
+    
+    /**
+     * @brief Load OCR text blocks from any .ocr.json file path (for disk-based search).
+     * @param ocrJsonPath Full path to the .ocr.json file.
+     * @return Parsed text blocks, or empty vector on error.
+     */
+    static QVector<OcrTextBlock> loadOcrBlocksFromFile(const QString& ocrJsonPath);
     
     /**
      * @brief Check if lazy loading from disk is enabled.

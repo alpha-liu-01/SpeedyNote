@@ -9,6 +9,7 @@
 
 #include "StrokePoint.h"
 
+#include <QMetaType>
 #include <QString>
 #include <QVector>
 #include <QColor>
@@ -158,3 +159,6 @@ private:
         return QLineF(p, closest).length();
     }
 };
+
+Q_DECLARE_METATYPE(VectorStroke)
+Q_DECLARE_METATYPE(QVector<VectorStroke>)

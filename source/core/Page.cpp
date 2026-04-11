@@ -5,6 +5,7 @@
 // ============================================================================
 
 #include "Page.h"
+#include "../objects/OcrTextObject.h"
 #include <QUuid>       // Phase C.0.1: UUID generation for LinkObject position links
 #include <algorithm>
 #include <climits>  // For INT_MIN (Phase O3.5.5: affinity filtering)
@@ -415,8 +416,9 @@ InsertedObject* Page::objectAtPoint(const QPointF& pt, int affinityFilter)
         // If an affinity filter is provided (not INT_MIN), only consider objects
         // with matching affinity. This ensures users can only select objects
         // "tied to" the current layer.
-        if (affinityFilter != INT_MIN && obj->layerAffinity != affinityFilter) {
-            continue;  // Skip objects with non-matching affinity
+        if (affinityFilter != INT_MIN && obj->layerAffinity != affinityFilter
+            && obj->type() != QStringLiteral("ocr_text")) {
+            continue;  // Skip objects with non-matching affinity (OCR text bypasses)
         }
         
         if (obj->visible && obj->containsPoint(pt)) {
@@ -725,9 +727,14 @@ QJsonObject Page::toJson() const
     }
     obj["layers"] = layersArray;
     
-    // Objects
+    // Objects (skip unlocked OcrTextObjects — derived cache, reconstructed from .ocr.json)
     QJsonArray objectsArray;
     for (const auto& object : objects) {
+        if (object->type() == QStringLiteral("ocr_text")) {
+            auto* ocr = static_cast<OcrTextObject*>(object.get());
+            if (!ocr->ocrLocked)
+                continue;
+        }
         objectsArray.append(object->toJson());
     }
     obj["objects"] = objectsArray;
@@ -852,6 +859,53 @@ std::unique_ptr<Page> Page::createForPdf(const QSizeF& pageSize, int pdfPage)
 }
 
 // ===== Utility =====
+
+// ===== OCR Invalidation =====
+
+void Page::invalidateOcrForStroke(const QString& strokeId)
+{
+    if (ocrTextBlocks.isEmpty())
+        return;
+    for (auto& block : ocrTextBlocks) {
+        if (block.sourceStrokeIds.contains(strokeId)) {
+            block.dirty = true;
+        }
+    }
+    ocrDirty = true;
+}
+
+void Page::invalidateOcrInRegion(const QRectF& region)
+{
+    if (ocrTextBlocks.isEmpty())
+        return;
+    for (auto& block : ocrTextBlocks) {
+        if (block.boundingRect.intersects(region)) {
+            block.dirty = true;
+        }
+    }
+    ocrDirty = true;
+}
+
+void Page::clearOcrData()
+{
+    ocrTextBlocks.clear();
+    suppressedStrokeIds.clear();
+    ocrDirty = false;
+}
+
+QVector<OcrTextBlock> Page::ocrBlocksForSearch() const
+{
+    if (!ocrDirty)
+        return ocrTextBlocks;
+
+    QVector<OcrTextBlock> result;
+    result.reserve(ocrTextBlocks.size());
+    for (const auto& block : ocrTextBlocks) {
+        if (!block.dirty)
+            result.append(block);
+    }
+    return result;
+}
 
 bool Page::hasContent() const
 {

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2014-2025 Patrizio Bekerle -- <patrizio@bekerle.com>
+ * Copyright (c) 2014-2026 Patrizio Bekerle -- <patrizio@bekerle.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,6 @@
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
-#include <QWidget>
 
 #ifdef QT_QUICK_LIB
 #include <QQuickTextDocument>
@@ -134,7 +133,7 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
         H5,
         H6,
         BlockQuote,
-        HorizontalRuler = 21,
+        HorizontalRule = 21,
         Table,
         InlineCodeBlock,
         MaskedSyntax,
@@ -145,6 +144,9 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
         CheckBoxUnChecked,
         CheckBoxChecked,
         StUnderline,
+        WikiLink = 32,
+        WikiLinkBroken,
+        LinkInternal,
 
         // code highlighting
         CodeKeyWord = 1000,
@@ -227,9 +229,11 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
     void clearDirtyBlocks();
     void setHighlightingOptions(const HighlightingOptions options);
     void initHighlightingRules();
-    
-    // Dark mode support
-    bool isDarkMode() const;
+
+    void setHideFormattingSyntax(bool hide);
+    void setCurrentCursorBlockNumber(int blockNumber);
+    int currentCursorBlockNumber() const { return _currentCursorBlockNumber; }
+    bool hideFormattingSyntax() const { return _hideFormattingSyntax; }
 
    Q_SIGNALS:
     void highlightingFinished();
@@ -357,8 +361,14 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
 
     QHash<int, QVector<InlineRange>> _ranges;
 
+    QTextCharFormat currentMaskedFormat() const;
+    bool isHidingForCurrentBlock() const;
+
     static QVector<HighlightingRule> _highlightingRules;
     static QHash<HighlighterState, QTextCharFormat> _formats;
     static QHash<QString, HighlighterState> _langStringToEnum;
     static constexpr int tildeOffset = 300;
+
+    int _currentCursorBlockNumber = -1;
+    bool _hideFormattingSyntax = false;
 };

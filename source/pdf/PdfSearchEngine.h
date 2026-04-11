@@ -21,21 +21,36 @@
 #include <QThread>
 #include <QFuture>
 #include <QFutureWatcher>
+#include <utility>
 
 class Document;
+class Page;
+struct OcrTextBlock;
 
 // ============================================================================
 // Data Structures
 // ============================================================================
 
 /**
- * @brief A single search match within a PDF page.
+ * @brief A single search match within a PDF page or OCR text block.
  */
 struct PdfSearchMatch {
-    int pageIndex = -1;      ///< Which page this match is on (0-based)
-    int matchIndex = -1;     ///< Index within page matches (for cycling)
-    QRectF boundingRect;     ///< Bounding rectangle in PDF coordinates (points)
-    
+    enum Source {
+        PdfText,        ///< From PdfProvider::textBoxes (bounding rect in PDF coords, 72 DPI)
+        OcrText,        ///< From OcrTextBlock on a paged document (bounding rect in page coords, 96 DPI)
+        OcrTextTile,    ///< From OcrTextBlock in an edgeless tile (bounding rect in tile-local coords)
+        TextBoxObj,     ///< From TextBoxObject or locked OcrTextObject (bounding rect in page coords)
+        TextBoxObjTile  ///< From TextBoxObject/locked OCR in edgeless tile (tile-local coords)
+    };
+
+    Source source = PdfText;
+    int pageIndex = -1;      ///< Page index (paged) or virtual sequential ID (edgeless)
+    int matchIndex = -1;     ///< Index within page/tile matches (for cycling)
+    QRectF boundingRect;     ///< Bounding rectangle (coordinate space depends on source)
+
+    int tileX = 0;           ///< Edgeless tile X (meaningful for OcrTextTile/TextBoxObjTile)
+    int tileY = 0;           ///< Edgeless tile Y (meaningful for OcrTextTile/TextBoxObjTile)
+
     bool isValid() const { return pageIndex >= 0 && matchIndex >= 0; }
 };
 
@@ -249,7 +264,43 @@ private:
      * @brief Background thread function for pre-caching.
      */
     void doPrecache(int centerPage, int direction);
-    
+
+    /**
+     * @brief Search OCR text blocks for matches.
+     */
+    QVector<PdfSearchMatch> searchOcrBlocks(
+        int pageIndex,
+        const QVector<OcrTextBlock>& blocks,
+        const QString& text,
+        bool caseSensitive,
+        bool wholeWord,
+        PdfSearchMatch::Source source,
+        int tileX, int tileY,
+        int matchIndexOffset) const;
+
+    /**
+     * @brief Search TextBoxObject and locked OcrTextObject objects on a page.
+     */
+    QVector<PdfSearchMatch> searchTextBoxObjects(
+        int pageIndex,
+        const Page* page,
+        const QString& text,
+        bool caseSensitive,
+        bool wholeWord,
+        PdfSearchMatch::Source source,
+        int tileX, int tileY,
+        int matchIndexOffset) const;
+
+    /**
+     * @brief Background thread function for edgeless search (tile-based).
+     */
+    void doSearchEdgeless(int startVirtualPage, int startMatchIndex, int direction);
+
+    /**
+     * @brief Build sorted tile order for edgeless search.
+     */
+    void buildEdgelessTileOrder();
+
     Document *m_document = nullptr;
     std::atomic<bool> m_searchCancelled{false};   ///< Cancellation for main search only
     std::atomic<bool> m_precacheCancelled{false}; ///< Cancellation for pre-cache only
@@ -278,5 +329,9 @@ private:
     
     // Precache state
     std::atomic<bool> m_precaching{false};
+
+    // Edgeless search state
+    QVector<std::pair<int,int>> m_edgelessTileOrder;
+    bool m_edgelessTileOrderBuilt = false;
 };
 

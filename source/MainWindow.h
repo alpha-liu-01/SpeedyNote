@@ -45,11 +45,21 @@
 #include "ui/Toolbar.h"
 #include "ui/sidebars/LeftSidebarContainer.h"  // Phase S3: Left sidebar container
 
+class QThread;
+
 // PDF Search
 class PdfSearchBar;
 class PdfSearchEngine;
 struct PdfSearchMatch;
 struct PdfSearchState;
+
+// OCR
+class OcrWorker;
+class OcrSubToolbar;
+
+// Phase 2B: Floating Text Editor
+class FloatingTextEditor;
+#include "ocr/OcrTextBlock.h"
 
 // Action Bar includes
 class ActionBarContainer;
@@ -117,6 +127,9 @@ public:
     int getPalmRejectionDelay() const;
     void setPalmRejectionDelay(int delayMs);
 #endif
+
+    // OCR language query (for ControlPanelDialog and per-document dialog)
+    QStringList ocrAvailableLanguages() const { return m_ocrAvailableLanguages; }
 
     // Theme settings
     QColor customAccentColor;
@@ -514,6 +527,16 @@ private:
     PdfSearchEngine *m_searchEngine = nullptr;
     std::unique_ptr<PdfSearchState> m_searchState;
     
+    // OCR
+    QThread *m_ocrThread = nullptr;
+    OcrWorker *m_ocrWorker = nullptr;
+    QTimer *m_ocrDebounceTimer = nullptr;
+    bool m_autoOcrEnabled = false;
+    QStringList m_ocrAvailableLanguages;
+    
+    // Phase 2B: Floating Text Editor
+    FloatingTextEditor* m_floatingTextEditor = nullptr;
+    
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
     
@@ -642,6 +665,8 @@ private:
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
+    QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
+    QMetaObject::Connection m_textEditorConn;          // Phase 2B: For openTextEditorRequested
     
     // Pan tool hold (H key spring-loaded activation)
     bool m_panHoldActive = false;
@@ -677,6 +702,25 @@ private:
     void onSearchPrev(const QString& text, bool caseSensitive, bool wholeWord);
     void onSearchMatchFound(const PdfSearchMatch& match, const QVector<PdfSearchMatch>& pageMatches);
     void onSearchNotFound(bool wrapped);
+    
+    // OCR
+    void setupOcr();
+    void triggerOcrForCurrentPage();
+    void triggerOcrForAllPages();
+    void onDebounceTimeout();
+    void onOcrResultsReady(const QString& pageId, const QVector<OcrTextBlock>& blocks);
+    void onOcrBatchFinished(int pagesScanned, int pagesWithText);
+    void onOcrError(const QString& pageId, const QString& message);
+    QVector<VectorStroke> collectPageStrokes(const Page* page) const;
+    void syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks);
+    void setOcrTextVisibility(bool visible);
+    void setOcrConfidenceVisibility(bool enabled);
+    void showOcrLanguageDialog();
+    QString resolveOcrLanguage(Document* doc) const;
+    
+    // Phase 2B: Floating Text Editor
+    void openFloatingTextEditor(InsertedObject* obj);
+    void closeFloatingTextEditor();
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

@@ -22,6 +22,17 @@ void ObjectSelectActionBar::setupButtons()
         emit aspectRatioLockRequested();
     });
     
+    // === OCR lock (ocr-text-only, placed after aspect lock) ===
+    m_ocrLockButton = new ActionBarButton(this);
+    m_ocrLockButton->setIconName("lock");
+    m_ocrLockButton->setToolTip(tr("Lock/Unlock OCR Text"));
+    m_ocrLockButton->setCheckable(true);
+    addButton(m_ocrLockButton);
+    connect(m_ocrLockButton, &ActionBarButton::clicked, this, [this]() {
+        m_ocrLockButton->setChecked(!m_ocrLockButton->isChecked());
+        emit ocrLockToggleRequested();
+    });
+    
     // === Clipboard operations ===
     
     // Create Copy button
@@ -105,6 +116,11 @@ void ObjectSelectActionBar::updateButtonStates()
         m_aspectLockButton->setVisible(m_hasSelection && m_isImageSelected);
     }
     
+    // OCR lock: visible only when a single OcrTextObject is selected
+    if (m_ocrLockButton) {
+        m_ocrLockButton->setVisible(m_hasSelection && m_isOcrTextSelected);
+    }
+    
     // Copy, Delete, and layer ordering buttons: visible only when selection exists
     if (m_copyButton) {
         m_copyButton->setVisible(m_hasSelection);
@@ -169,6 +185,15 @@ void ObjectSelectActionBar::updateImageSelection(bool isImage, bool aspectLocked
     updateButtonStates();
 }
 
+void ObjectSelectActionBar::updateOcrLockSelection(bool isOcrText, bool isLocked)
+{
+    m_isOcrTextSelected = isOcrText;
+    if (m_ocrLockButton) {
+        m_ocrLockButton->setChecked(isLocked);
+    }
+    updateButtonStates();
+}
+
 void ObjectSelectActionBar::setDarkMode(bool darkMode)
 {
     // Call base class implementation (updates background, shadow, separators)
@@ -177,6 +202,9 @@ void ObjectSelectActionBar::setDarkMode(bool darkMode)
     // Propagate to all buttons
     if (m_aspectLockButton) {
         m_aspectLockButton->setDarkMode(darkMode);
+    }
+    if (m_ocrLockButton) {
+        m_ocrLockButton->setDarkMode(darkMode);
     }
     if (m_copyButton) {
         m_copyButton->setDarkMode(darkMode);

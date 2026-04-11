@@ -75,6 +75,7 @@ auto *highlighter = new MarkdownHighlighter(doc);
 - [QOwnNotes](https://github.com/pbek/QOwnNotes)
 - [Notes](https://github.com/nuttyartist/notes)
 - [CuteMarkEd-NG](https://github.com/Waqar144/CuteMarkEd-NG)
+- [DMarked](https://github.com/DMarked/DMarked)
 
 ## Disclaimer
 

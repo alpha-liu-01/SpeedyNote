@@ -110,6 +110,7 @@ private:
     QWidget *languageTab;
     QComboBox *languageCombo;
     QCheckBox *useSystemLanguageCheckbox;
+    QComboBox *ocrLanguageCombo = nullptr;
     void createLanguageTab();
 
     // === Cache tab ===

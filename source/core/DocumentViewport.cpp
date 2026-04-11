@@ -12,6 +12,8 @@
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
+#include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
+#include "../objects/TextBoxObject.h"  // Phase 2B: text edit undo
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 
 #include <QPainter>
@@ -73,6 +75,10 @@ static void initEraserJni()
 #include <QFileDialog>    // For insertImageFromDialog (Phase C.0.5)
 #include <QDesktopServices>  // For opening URLs (Phase C.4.3)
 #include <QUrl>              // For URL handling (Phase C.4.3)
+#include <QTextDocument>
+#include <QTextCursor>
+#include <QAbstractTextDocumentLayout>
+#include <QRegularExpression>
 #include <QMenu>             // For addLinkToSlot menu (Phase C.5.3 - temporary)
 #include <QInputDialog>      // For URL input dialog (Phase C.5.3 - temporary)
 
@@ -306,6 +312,7 @@ void DocumentViewport::setDocument(Document* doc)
     m_hoveredObject = nullptr;
     m_isDraggingObjects = false;
     m_isResizingObject = false;
+    m_isCreatingTextBox = false;
     
     // Clear undo/redo stacks (actions refer to old document)
     bool hadUndo = canUndo();
@@ -711,8 +718,12 @@ void DocumentViewport::setCurrentTool(ToolType tool)
         }
     }
     
-    // Clear object selection when switching away from ObjectSelect tool
+    // Clear object selection and cancel creation when switching away from ObjectSelect tool
     if (previousTool == ToolType::ObjectSelect && tool != ToolType::ObjectSelect) {
+        if (m_isCreatingTextBox) {
+            m_isCreatingTextBox = false;
+            m_pointerActive = false;
+        }
         if (!m_selectedObjects.isEmpty()) {
             deselectAllObjects();
         }
@@ -851,7 +862,7 @@ void DocumentViewport::setObjectInsertMode(ObjectInsertMode mode)
     m_objectInsertMode = mode;
     emit objectInsertModeChanged(mode);
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "Object insert mode changed to:" << (mode == ObjectInsertMode::Image ? "Image" : "Link");
+    qDebug() << "Object insert mode changed to:" << static_cast<int>(mode);
 #endif
 }
 
@@ -4661,6 +4672,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         StrokePoint pt;
         pt.pos = docPt;
         pt.pressure = useFixedPressure ? 1.0 : qBound(0.1, pe.pressure, 1.0);
+        pt.timestamp = pe.timestamp;
         m_currentStroke.points.append(pt);
         return;
     }
@@ -4683,7 +4695,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     // Add first point (in page-local coordinates)
     // Marker uses fixed pressure (1.0) for consistent thickness
     qreal effectivePressure = useFixedPressure ? 1.0 : pe.pressure;
-    addPointToStroke(pe.pageHit.pagePoint, effectivePressure);
+    addPointToStroke(pe.pageHit.pagePoint, effectivePressure, pe.timestamp);
 }
 
 void DocumentViewport::continueStroke(const PointerEvent& pe)
@@ -4719,6 +4731,7 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
         StrokePoint pt;
         pt.pos = docPt;
         pt.pressure = effectivePressure;
+        pt.timestamp = pe.timestamp;
         m_currentStroke.points.append(pt);
         
         // Dirty region update for edgeless (document coords → viewport coords)
@@ -4755,7 +4768,7 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
     }
     
     // Use effective pressure (fixed 1.0 for marker, actual pressure for pen)
-    addPointToStroke(pagePos, effectivePressure);
+    addPointToStroke(pagePos, effectivePressure, pe.timestamp);
 }
 
 void DocumentViewport::finishStroke()
@@ -5412,10 +5425,17 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             // Note: insertImageFromDialog() positions at viewport center for now
             // TODO: Create insertImageAtPosition() for click-to-place
             insertImageFromDialog();
-        } else {
+        } else if (m_objectInsertMode == ObjectInsertMode::Link) {
             // Create empty LinkObject at position
             // Pass viewportPos so edgeless mode can determine correct tile
             createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint, pe.viewportPos);
+        } else if (m_objectInsertMode == ObjectInsertMode::Text) {
+            m_isCreatingTextBox = true;
+            m_textBoxCreateStartDoc = hit.pagePoint;
+            m_textBoxCreateStartVP = pe.viewportPos;
+            m_textBoxCreatePageIndex = hit.pageIndex;
+            m_pointerActive = true;
+            return;
         }
         return;
     }
@@ -5481,7 +5501,123 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     
     // Hit test for object
     InsertedObject* hitObject = objectAtPoint(docPoint);
-    
+
+    // Ctrl+Click link following (Phase 2E)
+    if ((pe.modifiers & Qt::ControlModifier) && hitObject) {
+        auto* textBox = dynamic_cast<TextBoxObject*>(hitObject);
+        if (textBox && !textBox->text.isEmpty()) {
+            QString href;
+
+            // Strategy 1: QTextDocument anchorHref for rendered Markdown links
+            if (textBox->isMarkdown()) {
+                constexpr qreal screenPad = 2.0;
+                qreal pagePad = screenPad / m_zoomLevel;
+                bool foundLocal = false;
+                QPointF localPos;
+                if (m_document->isEdgeless()) {
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (!tile) continue;
+                        for (const auto& obj : tile->objects) {
+                            if (obj.get() == hitObject) {
+                                QPointF tileOrigin(
+                                    coord.first * Document::EDGELESS_TILE_SIZE,
+                                    coord.second * Document::EDGELESS_TILE_SIZE);
+                                localPos = docPoint - tileOrigin - textBox->position
+                                           - QPointF(pagePad, pagePad);
+                                foundLocal = true;
+                                break;
+                            }
+                        }
+                        if (foundLocal) break;
+                    }
+                } else {
+                    int pageIdx = pageAtPoint(docPoint);
+                    if (pageIdx >= 0) {
+                        localPos = docPoint - pagePosition(pageIdx) - textBox->position
+                                   - QPointF(pagePad, pagePad);
+                        foundLocal = true;
+                    }
+                }
+
+                if (foundLocal) {
+                    qreal docWidth = textBox->size.width() - 2.0 * pagePad;
+                    if (docWidth > 0.0) {
+                        QTextDocument* doc = textBox->ensureDocCache(docWidth);
+                        if (doc) {
+                            if (textBox->fontSize <= 0.0 && doc->size().height() > 0.0) {
+                                qreal availHeight = textBox->size.height() - 2.0 * pagePad;
+                                if (doc->size().height() > availHeight && availHeight > 0.0) {
+                                    qreal autoScale = availHeight / doc->size().height();
+                                    localPos /= autoScale;
+                                }
+                            }
+
+                            int cursorPos = doc->documentLayout()->hitTest(localPos, Qt::FuzzyHit);
+                            if (cursorPos >= 0) {
+                                QTextCursor cursor(doc);
+                                cursor.setPosition(cursorPos);
+                                href = cursor.charFormat().anchorHref();
+                                if (href.isEmpty() && cursorPos + 1 <= doc->characterCount()) {
+                                    cursor.setPosition(cursorPos + 1);
+                                    href = cursor.charFormat().anchorHref();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Strategy 2: Regex for Markdown [text](url) links
+            if (href.isEmpty()) {
+                static const QRegularExpression mdLinkRx(
+                    QStringLiteral("\\[([^\\]]*)\\]\\(([^)]+)\\)"));
+                QRegularExpressionMatchIterator it = mdLinkRx.globalMatch(textBox->text);
+                if (it.hasNext()) {
+                    href = it.next().captured(2).trimmed();
+                }
+            }
+
+            // Strategy 3: Regex for bare URLs (https://..., http://...)
+            if (href.isEmpty()) {
+                static const QRegularExpression bareUrlRx(
+                    QStringLiteral("\\bhttps?://[^\\s)>]+"));
+                QRegularExpressionMatch m = bareUrlRx.match(textBox->text);
+                if (m.hasMatch()) {
+                    href = m.captured(0).trimmed();
+                }
+            }
+
+            if (!href.isEmpty()) {
+                QDesktopServices::openUrl(QUrl(href));
+                return;
+            }
+        }
+    }
+
+    // Double-click detection for text editing (Phase 2B)
+    static QElapsedTimer lastObjClickTimer;
+    static QPointF lastObjClickPos;
+    static int objClickCount = 0;
+
+    if (hitObject && lastObjClickTimer.isValid()
+        && lastObjClickTimer.elapsed() < 400
+        && QLineF(lastObjClickPos, pe.viewportPos).length() < 5.0) {
+        objClickCount++;
+    } else {
+        objClickCount = 1;
+    }
+    lastObjClickTimer.restart();
+    lastObjClickPos = pe.viewportPos;
+
+    if (objClickCount == 2 && hitObject) {
+        const QString t = hitObject->type();
+        if (t == QLatin1String("textbox") || t == QLatin1String("ocr_text")) {
+            emit openTextEditorRequested(hitObject);
+            return;
+        }
+    }
+
     bool shiftHeld = (pe.modifiers & Qt::ShiftModifier);
     
     if (hitObject) {
@@ -5534,6 +5670,13 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
 {
     if (!m_document) return;
+
+    // Phase 2C: Rubber-band for text box creation
+    if (m_isCreatingTextBox) {
+        m_lastPointerPos = pe.viewportPos;
+        update();
+        return;
+    }
     
     // Phase O3.1.3: Handle resize drag
     if (m_isResizingObject) {
@@ -5575,7 +5718,44 @@ void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
 
 void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 {
-    Q_UNUSED(pe);
+    // Phase 2C: Finalize text box creation
+    if (m_isCreatingTextBox) {
+        m_isCreatingTextBox = false;
+        m_pointerActive = false;
+
+        PageHit releaseHit = viewportToPage(pe.viewportPos);
+        QPointF releasePagePoint;
+        int pageIndex = m_textBoxCreatePageIndex;
+
+        if (m_document && m_document->isEdgeless()) {
+            QPointF docPos = viewportToDocument(pe.viewportPos);
+            auto coord = m_document->tileCoordForPoint(docPos);
+            releasePagePoint = docPos - QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                                coord.second * Document::EDGELESS_TILE_SIZE);
+        } else {
+            releasePagePoint = (releaseHit.pageIndex == pageIndex && releaseHit.pageIndex >= 0)
+                ? releaseHit.pagePoint : m_textBoxCreateStartDoc;
+        }
+
+        QRectF rect = QRectF(m_textBoxCreateStartDoc, releasePagePoint).normalized();
+
+        static constexpr qreal MIN_W = 40.0;
+        static constexpr qreal MIN_H = 20.0;
+        static constexpr qreal DEFAULT_W = 200.0;
+        static constexpr qreal DEFAULT_H = 40.0;
+
+        if (rect.width() < MIN_W && rect.height() < MIN_H) {
+            rect = QRectF(m_textBoxCreateStartDoc.x() - DEFAULT_W / 2.0,
+                          m_textBoxCreateStartDoc.y() - DEFAULT_H / 2.0,
+                          DEFAULT_W, DEFAULT_H);
+        } else {
+            if (rect.width() < MIN_W) rect.setWidth(MIN_W);
+            if (rect.height() < MIN_H) rect.setHeight(MIN_H);
+        }
+
+        createTextBoxAtRect(pageIndex, rect, pe.viewportPos);
+        return;
+    }
     
     // Phase O3.1.3: Finalize resize/rotate operation
     if (m_isResizingObject) {
@@ -5744,6 +5924,7 @@ void DocumentViewport::clearObjectSelection()
     m_selectedObjects.clear();
     m_hoveredObject = nullptr;
     m_isDraggingObjects = false;
+    m_isCreatingTextBox = false;
     if (hadSelection) {
         for (int p : m_pendingThumbnailPages)
             emit pageModified(p);
@@ -6478,9 +6659,75 @@ void DocumentViewport::deleteSelectedObjects()
         return;
     }
     
+    // Separate OcrTextObjects (derived cache — no undo) from regular objects
+    QVector<InsertedObject*> regularObjects;
+    QVector<InsertedObject*> ocrObjects;
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        if (obj->type() == QStringLiteral("ocr_text"))
+            ocrObjects.append(obj);
+        else
+            regularObjects.append(obj);
+    }
+    
+    // Handle OcrTextObject deletion (no undo, update suppressedStrokeIds)
+    int ocrDeletedCount = 0;
+    for (InsertedObject* obj : ocrObjects) {
+        auto* ocrObj = static_cast<OcrTextObject*>(obj);
+        
+        auto deleteOcrFromPage = [&](Page* page, const QString& pageId,
+                                     int pageIndex, Document::TileCoord tileCoord) {
+            if (!page || !page->objectById(ocrObj->id))
+                return false;
+            
+            for (const auto& sid : ocrObj->sourceStrokeIds)
+                page->suppressedStrokeIds.insert(sid);
+            
+            // Remove matching OcrTextBlock
+            for (int b = page->ocrTextBlocks.size() - 1; b >= 0; --b) {
+                if (page->ocrTextBlocks[b].id == ocrObj->id) {
+                    page->ocrTextBlocks.removeAt(b);
+                    break;
+                }
+            }
+            
+            page->removeObject(ocrObj->id);
+            
+            if (m_document->isEdgeless()) {
+                m_document->markTileDirty(tileCoord);
+                m_document->saveTileOcr(tileCoord);
+            } else {
+                m_document->markPageDirty(pageIndex);
+                m_document->savePageOcr(pageId, page);
+            }
+            ocrDeletedCount++;
+            return true;
+        };
+        
+        if (m_document->isEdgeless()) {
+            for (const auto& coord : m_document->allLoadedTileCoords()) {
+                Page* tile = m_document->getTile(coord.first, coord.second);
+                if (tile && deleteOcrFromPage(tile, tile->uuid, -1, coord))
+                    break;
+            }
+        } else {
+            Page* currentPage = m_document->page(m_currentPageIndex);
+            if (currentPage && deleteOcrFromPage(currentPage, currentPage->uuid,
+                                                  m_currentPageIndex, {})) {
+                // found on current page
+            } else {
+                for (int i : m_document->loadedPageIndices()) {
+                    Page* page = m_document->page(i);
+                    if (page && deleteOcrFromPage(page, page->uuid, i, {}))
+                        break;
+                }
+            }
+        }
+    }
+    
     // Phase M.2: Cascade delete markdown notes linked to LinkObjects
     int noteCount = 0;
-    for (InsertedObject* obj : m_selectedObjects) {
+    for (InsertedObject* obj : regularObjects) {
         if (LinkObject* link = dynamic_cast<LinkObject*>(obj)) {
             for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
                 if (link->linkSlots[i].type == LinkSlot::Type::Markdown) {
@@ -6490,8 +6737,6 @@ void DocumentViewport::deleteSelectedObjects()
         }
     }
     
-    // TODO: Show confirmation dialog if notes will be deleted
-    // "This will delete N linked note(s). Continue?"
     if (noteCount > 0) {
         #ifdef SPEEDYNOTE_DEBUG
         qDebug() << "deleteSelectedObjects: Cascade deleting" << noteCount << "markdown note(s)";
@@ -6499,7 +6744,7 @@ void DocumentViewport::deleteSelectedObjects()
     }
     
     // Delete markdown note files before removing LinkObjects
-    for (InsertedObject* obj : m_selectedObjects) {
+    for (InsertedObject* obj : regularObjects) {
         if (LinkObject* link = dynamic_cast<LinkObject*>(obj)) {
             for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
                 if (link->linkSlots[i].type == LinkSlot::Type::Markdown) {
@@ -6516,19 +6761,14 @@ void DocumentViewport::deleteSelectedObjects()
     
     if (m_document->isEdgeless()) {
         // ========== EDGELESS MODE ==========
-        // Find which tile contains each object and remove it
-        for (InsertedObject* obj : m_selectedObjects) {
+        for (InsertedObject* obj : regularObjects) {
             if (!obj) continue;
             
-            // Find the tile containing this object
             bool found = false;
             for (const auto& coord : m_document->allLoadedTileCoords()) {
                 Page* tile = m_document->getTile(coord.first, coord.second);
                 if (tile && tile->objectById(obj->id)) {
-                    // Create undo entry BEFORE removing (object still valid)
                     pushObjectDeleteUndo(obj, -1, coord);
-                    
-                    // Remove object from tile
                     tile->removeObject(obj->id);
                     m_document->markTileDirty(coord);
                     deletedCount++;
@@ -6545,31 +6785,22 @@ void DocumentViewport::deleteSelectedObjects()
         }
     } else {
         // ========== PAGED MODE ==========
-        // Objects on current page (typically where selection was made)
         Page* currentPage = m_document->page(m_currentPageIndex);
         if (currentPage) {
-            for (InsertedObject* obj : m_selectedObjects) {
+            for (InsertedObject* obj : regularObjects) {
                 if (!obj) continue;
                 
-                // Check if object is on current page
                 if (currentPage->objectById(obj->id)) {
-                    // Create undo entry BEFORE removing (object still valid)
                     pushObjectDeleteUndo(obj, m_currentPageIndex, {});
-                    
-                    // Remove object from page
                     currentPage->removeObject(obj->id);
                     m_document->markPageDirty(m_currentPageIndex);
                     deletedCount++;
                 } else {
-                    // Object might be on a different page - search loaded pages only
-                    // PERF FIX: Only search loaded pages to avoid triggering lazy loading
                     bool found = false;
                     for (int i : m_document->loadedPageIndices()) {
-                        Page* page = m_document->page(i);  // Already loaded, no disk I/O
+                        Page* page = m_document->page(i);
                         if (page && page->objectById(obj->id)) {
-                            // Create undo entry BEFORE removing (object still valid)
                             pushObjectDeleteUndo(obj, i, {});
-                            
                             page->removeObject(obj->id);
                             m_document->markPageDirty(i);
                             deletedCount++;
@@ -6594,7 +6825,7 @@ void DocumentViewport::deleteSelectedObjects()
     emit objectSelectionChanged();
     
     // Emit modification signal
-    if (deletedCount > 0) {
+    if (deletedCount > 0 || ocrDeletedCount > 0) {
         emit documentModified();
         emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
     }
@@ -6602,7 +6833,7 @@ void DocumentViewport::deleteSelectedObjects()
     update();
     
     #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "objects";
+    qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "regular +" << ocrDeletedCount << "OCR objects";
     #endif
 }
 
@@ -6620,6 +6851,7 @@ void DocumentViewport::copySelectedObjects()
     // Serialize each selected object to JSON
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
+        if (obj->type() == QStringLiteral("ocr_text")) continue;
         
         // Phase C.2.3: For LinkObject, use cloneWithBackLink to auto-fill slot 0
         // with a back-link to the original position
@@ -6689,6 +6921,20 @@ void DocumentViewport::copySelectedObjects()
     #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "copySelectedObjects: Copied" << s_objectClipboard.size() << "objects to internal clipboard";
     #endif
+
+    // Put plain text on system clipboard for cross-app paste (Phase 2E)
+    QString plainText;
+    for (InsertedObject* obj : m_selectedObjects) {
+        if (!obj) continue;
+        auto* textBox = dynamic_cast<TextBoxObject*>(obj);
+        if (textBox && !textBox->text.isEmpty()) {
+            if (!plainText.isEmpty()) plainText += QLatin1Char('\n');
+            plainText += textBox->text;
+        }
+    }
+    if (!plainText.isEmpty()) {
+        QGuiApplication::clipboard()->setText(plainText);
+    }
     
     // Notify that object clipboard has content (for action bar paste button)
     emit objectClipboardChanged(!s_objectClipboard.isEmpty());
@@ -6823,6 +7069,11 @@ void DocumentViewport::pasteObjects()
         
         // Update max object extent
         m_document->updateMaxObjectExtent(rawPtr);
+        
+        // Save assets to disk immediately (matches insertImageFromFile/insertImageFromClipboard)
+        if (!m_document->bundlePath().isEmpty()) {
+            rawPtr->saveAssets(m_document->bundlePath());
+        }
         
         // Create undo entry for this pasted object
         pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
@@ -7010,6 +7261,73 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     qDebug() << "createLinkObjectAtPosition: Created LinkObject at" << pagePos;
     }
 #endif
+}
+
+// ===== Phase 2C: Text Box Creation =====
+
+void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos)
+{
+    if (!m_document) return;
+
+    auto textObj = std::make_unique<TextBoxObject>();
+    textObj->position = rect.topLeft();
+    textObj->size = rect.size();
+    textObj->text = QString();
+    textObj->showBorder = true;
+    textObj->visible = true;
+    textObj->backgroundColor = QColor(255, 255, 255, 180);
+
+    TextBoxObject* rawPtr = textObj.get();
+
+    Document::TileCoord insertedTileCoord = {0, 0};
+
+    if (m_document->isEdgeless()) {
+        QPointF docPos = viewportToDocument(viewportPos);
+        auto coord = m_document->tileCoordForPoint(docPos);
+
+        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+        if (!targetTile) {
+            qWarning() << "createTextBoxAtRect: Failed to get/create tile";
+            return;
+        }
+
+        int activeLayer = m_edgelessActiveLayerIndex;
+        int defaultAffinity = activeLayer - 1;
+        textObj->setLayerAffinity(defaultAffinity);
+        textObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
+
+        targetTile->addObject(std::move(textObj));
+        m_document->markTileDirty(coord);
+        insertedTileCoord = coord;
+    } else {
+        Page* page = m_document->page(pageIndex);
+        if (!page) {
+            qWarning() << "createTextBoxAtRect: No page at index" << pageIndex;
+            return;
+        }
+
+        int activeLayer = page->activeLayerIndex;
+        int defaultAffinity = activeLayer - 1;
+        textObj->setLayerAffinity(defaultAffinity);
+        textObj->zOrder = getNextZOrderForAffinity(page, defaultAffinity);
+
+        page->addObject(std::move(textObj));
+        m_document->markPageDirty(pageIndex);
+    }
+
+    pushObjectInsertUndo(rawPtr, pageIndex, insertedTileCoord);
+
+    deselectAllObjects();
+    selectObject(rawPtr, false);
+
+    if (m_objectActionMode == ObjectActionMode::Create) {
+        m_objectActionMode = ObjectActionMode::Select;
+        emit objectActionModeChanged(m_objectActionMode);
+    }
+
+    emit documentModified();
+    update();
+    emit openTextEditorRequested(rawPtr);
 }
 
 // ===== Link Slot Activation (Phase C.4.3) =====
@@ -7860,6 +8178,21 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
         }
     }
     
+    // ===== Phase 2C: Draw rubber-band rectangle for text box creation =====
+    if (m_isCreatingTextBox) {
+        QRectF rubberBand = QRectF(m_textBoxCreateStartVP, m_lastPointerPos).normalized();
+        QPen rbPenWhite(Qt::white, 1, Qt::DashLine);
+        rbPenWhite.setCosmetic(true);
+        QPen rbPenBlack(Qt::black, 1, Qt::DashLine);
+        rbPenBlack.setCosmetic(true);
+        rbPenBlack.setDashOffset(4);
+        painter.setBrush(QColor(0, 120, 215, 30));
+        painter.setPen(rbPenWhite);
+        painter.drawRect(rubberBand);
+        painter.setPen(rbPenBlack);
+        painter.drawRect(rubberBand);
+    }
+
     // ===== Draw selection boxes =====
     if (m_selectedObjects.isEmpty()) {
         painter.restore();
@@ -9325,7 +9658,15 @@ bool DocumentViewport::handleEscapeKey()
         }
     }
     
-    // Priority 2: Deselect objects or clear object clipboard (ObjectSelect tool only)
+    // Priority 2: Cancel in-progress text box creation (ObjectSelect tool)
+    if (m_currentTool == ToolType::ObjectSelect && m_isCreatingTextBox) {
+        m_isCreatingTextBox = false;
+        m_pointerActive = false;
+        update();
+        return true;
+    }
+
+    // Priority 3: Deselect objects or clear object clipboard (ObjectSelect tool only)
     if (m_currentTool == ToolType::ObjectSelect) {
         if (hasSelectedObjects() || !s_objectClipboard.isEmpty()) {
             cancelObjectSelectAction();
@@ -9333,7 +9674,7 @@ bool DocumentViewport::handleEscapeKey()
         }
     }
     
-    // Priority 3: Cancel text selection (Highlighter tool only)
+    // Priority 4: Cancel text selection (Highlighter tool only)
     // Note: Text selection is cleared when switching away from Highlighter tool.
     if (m_currentTool == ToolType::Highlighter) {
         if (m_textSelection.isValid() || m_textSelection.isSelecting) {
@@ -10492,19 +10833,56 @@ void DocumentViewport::renderSearchMatchesOverlay(QPainter& painter, int pageInd
             : m_searchHighlightOther;
         
         painter.setBrush(fillColor);
-        
-        // Convert PDF coords to page coords
-        const QRectF& pdfRect = match.boundingRect;
-        QRectF pageRect(
-            pdfRect.x() * PDF_TO_PAGE_SCALE,
-            pdfRect.y() * PDF_TO_PAGE_SCALE,
-            pdfRect.width() * PDF_TO_PAGE_SCALE,
-            pdfRect.height() * PDF_TO_PAGE_SCALE
-        );
+
+        QRectF pageRect;
+        if (match.source == PdfSearchMatch::PdfText) {
+            // PDF coords (72 DPI) → page coords (96 DPI)
+            const QRectF& r = match.boundingRect;
+            pageRect = QRectF(
+                r.x() * PDF_TO_PAGE_SCALE,
+                r.y() * PDF_TO_PAGE_SCALE,
+                r.width() * PDF_TO_PAGE_SCALE,
+                r.height() * PDF_TO_PAGE_SCALE);
+        } else {
+            // OcrText: already in page coords (96 DPI)
+            pageRect = match.boundingRect;
+        }
         
         painter.drawRect(pageRect);
     }
     
+    painter.restore();
+}
+
+void DocumentViewport::renderSearchMatchesOverlayEdgeless(QPainter& painter)
+{
+    if (m_searchMatches.isEmpty()) return;
+
+    painter.save();
+    painter.setPen(Qt::NoPen);
+
+    int tileSize = Document::EDGELESS_TILE_SIZE;
+
+    for (int i = 0; i < m_searchMatches.size(); ++i) {
+        const PdfSearchMatch& match = m_searchMatches[i];
+        if (match.source != PdfSearchMatch::OcrTextTile
+            && match.source != PdfSearchMatch::TextBoxObjTile) continue;
+
+        QColor fillColor = (i == m_currentSearchMatchIndex) 
+            ? m_searchHighlightCurrent 
+            : m_searchHighlightOther;
+        painter.setBrush(fillColor);
+
+        // Convert tile-local rect to document coords
+        QRectF docRect(
+            static_cast<qreal>(match.tileX) * tileSize + match.boundingRect.x(),
+            static_cast<qreal>(match.tileY) * tileSize + match.boundingRect.y(),
+            match.boundingRect.width(),
+            match.boundingRect.height());
+
+        painter.drawRect(docRect);
+    }
+
     painter.restore();
 }
 
@@ -10640,7 +11018,7 @@ void DocumentViewport::copySelectedTextToClipboard()
     #endif
 }
 
-void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
+void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure, qint64 timestamp)
 {
     // ========== OPTIMIZATION: Point Decimation ==========
     // At 360Hz, consecutive points are often <1 pixel apart.
@@ -10668,6 +11046,7 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
     StrokePoint pt;
     pt.pos = pagePos;
     pt.pressure = qBound(0.1, pressure, 1.0);
+    pt.timestamp = timestamp;
     m_currentStroke.points.append(pt);
     
     // ========== OPTIMIZATION: Dirty Region Update ==========
@@ -11153,6 +11532,7 @@ void DocumentViewport::pushPageStrokeUndo(int pageIndex, UndoAction::Type type, 
     pushUndoAction(action);
     if (!m_document->isEdgeless())
         emit pageModified(pageIndex);
+    emit strokesChanged();
 }
 
 void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type, const QVector<VectorStroke>& strokes)
@@ -11168,6 +11548,7 @@ void DocumentViewport::pushPageStrokesUndo(int pageIndex, UndoAction::Type type,
     pushUndoAction(action);
     if (!m_document->isEdgeless())
         emit pageModified(pageIndex);
+    emit strokesChanged();
 }
 
 void DocumentViewport::clearUndoStacksFrom(int pageIndex)
@@ -11340,7 +11721,9 @@ void DocumentViewport::undo()
                            action.type == UndoAction::ObjectDelete ||
                            action.type == UndoAction::ObjectMove ||
                            action.type == UndoAction::ObjectAffinityChange ||
-                           action.type == UndoAction::ObjectResize);
+                           action.type == UndoAction::ObjectResize ||
+                           action.type == UndoAction::ObjectTextEdit ||
+                           action.type == UndoAction::OcrLockChange);
 
     if (isObjectAction) {
         switch (action.type) {
@@ -11437,6 +11820,49 @@ void DocumentViewport::undo()
                 }
                 break;
             }
+            case UndoAction::ObjectTextEdit: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    InsertedObject* obj = c->objectById(action.objectId);
+                    if (auto* tbox = dynamic_cast<TextBoxObject*>(obj)) {
+                        tbox->text = action.objectOldText;
+                        tbox->alignment = static_cast<TextAlignment>(action.objectOldTextAlignment);
+                        tbox->backgroundColor.setAlpha(action.objectOldBgAlpha);
+                        tbox->invalidateDocCache();
+                    }
+                    markObjDirty(m_document, action);
+                }
+                break;
+            }
+            case UndoAction::OcrLockChange: {
+                if (m_document->isEdgeless()) {
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (!tile) continue;
+                        bool modified = false;
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = tile->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj)) {
+                                ocr->ocrLocked = !action.ocrLockNewState;
+                                modified = true;
+                            }
+                        }
+                        if (modified)
+                            m_document->markTileDirty(coord);
+                    }
+                } else {
+                    Page* c = m_document->page(action.objectPageIndex);
+                    if (c) {
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = c->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj))
+                                ocr->ocrLocked = !action.ocrLockNewState;
+                        }
+                        m_document->markPageDirty(action.objectPageIndex);
+                    }
+                }
+                break;
+            }
             default: break;
         }
     } else if (action.type == UndoAction::TransformSelection) {
@@ -11506,6 +11932,9 @@ void DocumentViewport::undo()
     emit documentModified();
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
+    if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection)
+        emit strokesChanged();
     if (!m_document->isEdgeless())
         for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
@@ -11521,7 +11950,9 @@ void DocumentViewport::redo()
                            action.type == UndoAction::ObjectDelete ||
                            action.type == UndoAction::ObjectMove ||
                            action.type == UndoAction::ObjectAffinityChange ||
-                           action.type == UndoAction::ObjectResize);
+                           action.type == UndoAction::ObjectResize ||
+                           action.type == UndoAction::ObjectTextEdit ||
+                           action.type == UndoAction::OcrLockChange);
 
     if (isObjectAction) {
         switch (action.type) {
@@ -11621,6 +12052,49 @@ void DocumentViewport::redo()
                 }
                 break;
             }
+            case UndoAction::ObjectTextEdit: {
+                Page* c = getObjContainer(m_document, action, false);
+                if (c) {
+                    InsertedObject* obj = c->objectById(action.objectId);
+                    if (auto* tbox = dynamic_cast<TextBoxObject*>(obj)) {
+                        tbox->text = action.objectNewText;
+                        tbox->alignment = static_cast<TextAlignment>(action.objectNewTextAlignment);
+                        tbox->backgroundColor.setAlpha(action.objectNewBgAlpha);
+                        tbox->invalidateDocCache();
+                    }
+                    markObjDirty(m_document, action);
+                }
+                break;
+            }
+            case UndoAction::OcrLockChange: {
+                if (m_document->isEdgeless()) {
+                    for (const auto& coord : m_document->allLoadedTileCoords()) {
+                        Page* tile = m_document->getTile(coord.first, coord.second);
+                        if (!tile) continue;
+                        bool modified = false;
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = tile->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj)) {
+                                ocr->ocrLocked = action.ocrLockNewState;
+                                modified = true;
+                            }
+                        }
+                        if (modified)
+                            m_document->markTileDirty(coord);
+                    }
+                } else {
+                    Page* c = m_document->page(action.objectPageIndex);
+                    if (c) {
+                        for (const auto& oid : action.ocrLockObjectIds) {
+                            InsertedObject* obj = c->objectById(oid);
+                            if (auto* ocr = dynamic_cast<OcrTextObject*>(obj))
+                                ocr->ocrLocked = action.ocrLockNewState;
+                        }
+                        m_document->markPageDirty(action.objectPageIndex);
+                    }
+                }
+                break;
+            }
             default: break;
         }
     } else if (action.type == UndoAction::TransformSelection) {
@@ -11690,6 +12164,9 @@ void DocumentViewport::redo()
     emit documentModified();
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
+    if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection)
+        emit strokesChanged();
     if (!m_document->isEdgeless())
         for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
@@ -11828,6 +12305,60 @@ void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffini
         action.objectPageIndex = m_currentPageIndex;
     }
     pushUndoAction(action);
+}
+
+void DocumentViewport::pushObjectTextEditUndo(
+    InsertedObject* obj, const QString& oldText, const QString& newText,
+    int oldAlign, int newAlign, int oldAlpha, int newAlpha)
+{
+    if (!obj) return;
+
+    UndoAction action;
+    action.type = UndoAction::ObjectTextEdit;
+    action.objectId = obj->id;
+    action.objectData = obj->toJson();
+    action.objectOldText = oldText;
+    action.objectNewText = newText;
+    action.objectOldTextAlignment = oldAlign;
+    action.objectNewTextAlignment = newAlign;
+    action.objectOldBgAlpha = oldAlpha;
+    action.objectNewBgAlpha = newAlpha;
+    if (m_document && m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(obj->id)) {
+                action.objectTileCoord = coord;
+                break;
+            }
+        }
+    } else {
+        action.objectPageIndex = m_currentPageIndex;
+    }
+    pushUndoAction(action);
+    emit documentModified();
+}
+
+void DocumentViewport::pushOcrLockUndo(const QVector<QString>& objectIds, bool newState)
+{
+    if (objectIds.isEmpty()) return;
+
+    UndoAction action;
+    action.type = UndoAction::OcrLockChange;
+    action.ocrLockObjectIds = objectIds;
+    action.ocrLockNewState = newState;
+    if (m_document && m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(objectIds.first())) {
+                action.objectTileCoord = coord;
+                break;
+            }
+        }
+    } else {
+        action.objectPageIndex = m_currentPageIndex;
+    }
+    pushUndoAction(action);
+    emit documentModified();
 }
 
 // -----------------------------------------------------------------------------
@@ -12175,6 +12706,9 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         renderEdgelessObjectsWithAffinity(painter, layerIdx, allTiles);
     }
     
+    // Render search match highlights in edgeless mode
+    renderSearchMatchesOverlayEdgeless(painter);
+
     // Draw tile boundary grid (debug)
     if (m_showTileBoundaries) {
         drawTileBoundaries(painter, viewRect);

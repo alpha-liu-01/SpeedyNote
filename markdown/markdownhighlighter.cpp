@@ -1,7 +1,8 @@
+
 /*
  * MIT License
  *
- * Copyright (c) 2014-2025 Patrizio Bekerle -- <patrizio@bekerle.com>
+ * Copyright (c) 2014-2026 Patrizio Bekerle -- <patrizio@bekerle.com>
  * Copyright (c) 2019-2021 Waqar Ahmed      -- <waqar.17a@gmail.com>
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -27,7 +28,6 @@
 
 #include "markdownhighlighter.h"
 
-#include <QApplication>
 #include <QDebug>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
@@ -192,18 +192,7 @@ void MarkdownHighlighter::initTextFormats(int defaultFontSize) {
 
     // set character formats for headlines
     format = QTextCharFormat();
-    
-    // Detect dark mode by checking if any highlighter instance has a dark background
-    bool isDarkMode = false;
-    if (QApplication::instance()) {
-        // Check the application's default palette
-        QPalette palette = QApplication::palette();
-        isDarkMode = palette.color(QPalette::Window).lightness() < 128;
-    }
-    
-    // Use bright blue for dark mode, dark blue for light mode
-    QColor headingColor = isDarkMode ? QColor(102, 204, 255) : QColor(2, 69, 150);
-    format.setForeground(headingColor);
+    format.setForeground(QColor(2, 69, 150));
     format.setFontWeight(QFont::Bold);
     format.setFontPointSize(defaultFontSize * 1.6);
     _formats[H1] = format;
@@ -223,7 +212,7 @@ void MarkdownHighlighter::initTextFormats(int defaultFontSize) {
     format = QTextCharFormat();
     format.setForeground(Qt::darkGray);
     format.setBackground(Qt::lightGray);
-    _formats[HorizontalRuler] = std::move(format);
+    _formats[HorizontalRule] = std::move(format);
 
     // set character format for lists
     format = QTextCharFormat();
@@ -243,7 +232,10 @@ void MarkdownHighlighter::initTextFormats(int defaultFontSize) {
     format = QTextCharFormat();
     format.setForeground(QColor(0, 128, 255));
     format.setFontUnderline(true);
-    _formats[Link] = std::move(format);
+    _formats[Link] = format;
+
+    // set character format for internal note links (defaults to same as Link)
+    _formats[LinkInternal] = std::move(format);
 
     // set character format for images
     format = QTextCharFormat();
@@ -411,6 +403,42 @@ void MarkdownHighlighter::setTextFormat(HighlighterState state,
     _formats[state] = std::move(format);
 }
 
+void MarkdownHighlighter::setHideFormattingSyntax(bool hide) {
+    _hideFormattingSyntax = hide;
+}
+
+void MarkdownHighlighter::setCurrentCursorBlockNumber(int blockNumber) {
+    _currentCursorBlockNumber = blockNumber;
+}
+
+/**
+ * Returns the MaskedSyntax format, potentially with zero-width formatting
+ * if hiding formatting syntax on non-cursor blocks is enabled.
+ * This makes the formatting characters occupy no visible space by:
+ * 1. Using a near-zero font size to minimize base glyph metrics
+ * 2. Setting letter spacing to 0% which zeros out all glyph advances
+ * 3. Making the foreground fully transparent as a visual safety net
+ */
+QTextCharFormat MarkdownHighlighter::currentMaskedFormat() const {
+    QTextCharFormat fmt = _formats[MaskedSyntax];
+    if (isHidingForCurrentBlock()) {
+        fmt.setFontPointSize(0.01);
+        fmt.setFontLetterSpacingType(QFont::PercentageSpacing);
+        fmt.setFontLetterSpacing(0);
+        fmt.setForeground(QColor(0, 0, 0, 0));
+    }
+    return fmt;
+}
+
+/**
+ * Returns true if formatting syntax should be hidden for the block
+ * currently being highlighted.
+ */
+bool MarkdownHighlighter::isHidingForCurrentBlock() const {
+    return _hideFormattingSyntax &&
+           currentBlock().blockNumber() != _currentCursorBlockNumber;
+}
+
 /**
  * Does the Markdown highlighting
  *
@@ -476,6 +504,19 @@ static bool isParagraph(const QString &text) {
 
     const auto textView = MH_SUBSTR(indent, -1);
     if (textView.isEmpty()) return false;
+
+    // Tab-indented lines (e.g. list subitems like "\t- subitem") are not
+    // paragraphs; strip leading tabs and check for list item prefixes
+    if (text.at(0) == QLatin1Char('\t')) {
+        int i = 0;
+        while (i < text.length() && text.at(i) == QLatin1Char('\t')) ++i;
+        const auto tabStripped = text.mid(i);
+        if (tabStripped.startsWith(QStringLiteral("- ")) ||
+            tabStripped.startsWith(QStringLiteral("+ ")) ||
+            tabStripped.startsWith(QStringLiteral("* "))) {
+            return false;
+        }
+    }
 
     // unordered listtextView
     if (textView.startsWith(QStringLiteral("- ")) ||
@@ -564,8 +605,10 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
 
             // Set styling of the "#"s to "masked syntax", but with the size of
             // the heading
-            auto maskedFormat = _formats[MaskedSyntax];
-            maskedFormat.setFontPointSize(_formats[state].fontPointSize());
+            auto maskedFormat = currentMaskedFormat();
+            if (!isHidingForCurrentBlock()) {
+                maskedFormat.setFontPointSize(_formats[state].fontPointSize());
+            }
             setFormat(0, headingLevel, maskedFormat);
 
             // Set the styling of the rest of the heading
@@ -600,6 +643,11 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
             highlightSubHeadline(text, H1);
             return;
         }
+        if (previousBlockState() == H1) {
+            QTextBlock previousBlock = currentBlock().previous();
+            previousBlock.setUserState(NoState);
+            addDirtyBlock(previousBlock);
+        }
     } else if (text.at(spacesOffset) == QLatin1Char('-') && prevSpaces < 4 &&
                isPrevParagraph) {
         const bool pattern2 =
@@ -608,6 +656,11 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
         if (pattern2) {
             highlightSubHeadline(text, H2);
             return;
+        }
+        if (previousBlockState() == H2) {
+            QTextBlock previousBlock = currentBlock().previous();
+            previousBlock.setUserState(NoState);
+            addDirtyBlock(previousBlock);
         }
     }
 
@@ -639,19 +692,21 @@ void MarkdownHighlighter::highlightHeadline(const QString &text) {
 
 void MarkdownHighlighter::highlightSubHeadline(const QString &text,
                                                HighlighterState state) {
-    const QTextCharFormat &maskedFormat =
-        _formats[HighlighterState::MaskedSyntax];
+    const QTextCharFormat maskedFormat = currentMaskedFormat();
     QTextBlock previousBlock = currentBlock().previous();
 
     // we check for both H1/H2 so that if the user changes his mind, and changes
     // === to ---, changes be reflected immediately
     if (previousBlockState() == H1 || previousBlockState() == H2 ||
         previousBlockState() == NoState) {
-        QTextCharFormat currentMaskedFormat = maskedFormat;
+        QTextCharFormat headingMaskedFormat = maskedFormat;
         // set the font size from the current rule's font format
-        currentMaskedFormat.setFontPointSize(_formats[state].fontPointSize());
+        if (!isHidingForCurrentBlock()) {
+            headingMaskedFormat.setFontPointSize(
+                _formats[state].fontPointSize());
+        }
 
-        setFormat(0, text.length(), currentMaskedFormat);
+        setFormat(0, text.length(), headingMaskedFormat);
         setCurrentBlockState(HeadlineEnd);
 
         // we want to re-highlight the previous block
@@ -727,9 +782,8 @@ void MarkdownHighlighter::highlightCodeBlock(const QString &text,
         if (text.endsWith(QLatin1String("```")) && text.length() > 3) {
             setFormat(3, text.length() - 3,
                       _formats[HighlighterState::InlineCodeBlock]);
-            setFormat(0, 3, _formats[HighlighterState::MaskedSyntax]);
-            setFormat(text.length() - 3, 3,
-                      _formats[HighlighterState::MaskedSyntax]);
+            setFormat(0, 3, currentMaskedFormat());
+            setFormat(text.length() - 3, 3, currentMaskedFormat());
             return;
         }
         if ((previousBlockState() != CodeBlock &&
@@ -758,8 +812,10 @@ void MarkdownHighlighter::highlightCodeBlock(const QString &text,
         }
 
         // set the font size from the current rule's font format
-        QTextCharFormat &maskedFormat = _formats[MaskedSyntax];
-        maskedFormat.setFontPointSize(_formats[CodeBlock].fontPointSize());
+        QTextCharFormat maskedFormat = currentMaskedFormat();
+        if (!isHidingForCurrentBlock()) {
+            maskedFormat.setFontPointSize(_formats[CodeBlock].fontPointSize());
+        }
 
         setFormat(0, text.length(), maskedFormat);
     } else if (isCodeBlock(previousBlockState())) {
@@ -1961,12 +2017,11 @@ void MarkdownHighlighter::highlightFrontmatterBlock(const QString &text) {
         setCurrentBlockState(foundEnd ? HighlighterState::FrontmatterBlockEnd
                                       : HighlighterState::FrontmatterBlock);
 
-        QTextCharFormat &maskedFormat =
-            _formats[HighlighterState::MaskedSyntax];
+        QTextCharFormat maskedFormat = currentMaskedFormat();
         setFormat(0, text.length(), maskedFormat);
     } else if (previousBlockState() == HighlighterState::FrontmatterBlock) {
         setCurrentBlockState(HighlighterState::FrontmatterBlock);
-        setFormat(0, text.length(), _formats[HighlighterState::MaskedSyntax]);
+        setFormat(0, text.length(), currentMaskedFormat());
     }
 }
 
@@ -2031,7 +2086,7 @@ void MarkdownHighlighter::highlightThematicBreak(const QString &text) {
     }
     if (len < 3) return;
 
-    if (hasSameChars) setFormat(0, text.length(), _formats[HorizontalRuler]);
+    if (hasSameChars) setFormat(0, text.length(), _formats[HorizontalRule]);
 }
 
 void MarkdownHighlighter::highlightCheckbox(const QString &text, int curPos) {
@@ -2049,12 +2104,13 @@ void MarkdownHighlighter::highlightCheckbox(const QString &text, int curPos) {
         const int start = curPos + 2;
         constexpr int length = 3;
 
-        const auto fmt = hasXorSpace
-                             ? (midChar == QLatin1Char(' ') ? CheckBoxUnChecked
-                                                            : CheckBoxChecked)
-                             : MaskedSyntax;
-
-        setFormat(start, length, _formats[fmt]);
+        if (hasXorSpace) {
+            const auto fmt = midChar == QLatin1Char(' ') ? CheckBoxUnChecked
+                                                         : CheckBoxChecked;
+            setFormat(start, length, _formats[fmt]);
+        } else {
+            setFormat(start, length, currentMaskedFormat());
+        }
     }
 }
 
@@ -2152,7 +2208,7 @@ void MarkdownHighlighter::setHeadingStyles(HighlighterState rule,
  */
 void MarkdownHighlighter::highlightAdditionalRules(
     const QVector<HighlightingRule> &rules, const QString &text) {
-    const auto &maskedFormat = _formats[HighlighterState::MaskedSyntax];
+    const auto maskedFormat = currentMaskedFormat();
 
     for (const HighlightingRule &rule : rules) {
         // continue if another current block state was already set if
@@ -2175,11 +2231,10 @@ void MarkdownHighlighter::highlightAdditionalRules(
             // everything as MaskedSyntax and highlight capturingGroup
             // with the real format
             if (capturingGroup > 0) {
-                QTextCharFormat currentMaskedFormat = maskedFormat;
+                QTextCharFormat ruleMaskedFormat = maskedFormat;
                 // set the font size from the current rule's font format
-                if (format.fontPointSize() > 0) {
-                    currentMaskedFormat.setFontPointSize(
-                        format.fontPointSize());
+                if (format.fontPointSize() > 0 && !isHidingForCurrentBlock()) {
+                    ruleMaskedFormat.setFontPointSize(format.fontPointSize());
                 }
 
                 if (isHeading(currentBlockState())) {
@@ -2188,7 +2243,7 @@ void MarkdownHighlighter::highlightAdditionalRules(
                 } else {
                     setFormat(match.capturedStart(maskedGroup),
                               match.capturedLength(maskedGroup),
-                              currentMaskedFormat);
+                              ruleMaskedFormat);
                 }
             }
             if (isHeading(currentBlockState())) {
@@ -2250,6 +2305,65 @@ void MarkdownHighlighter::highlightInlineRules(const QString &text) {
     highlightEmAndStrong(text, 0);
 }
 
+/**
+ * @brief Strips trailing unbalanced bracket characters from a URL string.
+ *
+ * Per RFC 1738, characters like { } [ ] < > are unsafe in URLs and should be
+ * percent-encoded. Parentheses ( ) are technically valid but users commonly
+ * wrap URLs in them. This function strips trailing closing brackets that are
+ * not balanced by corresponding opening brackets within the URL, so that
+ * URLs like http://example.com/wiki/Page_(test) keep their balanced parens
+ * while http://example.com/) strips the trailing ')'.
+ */
+static QString stripTrailingBrackets(const QString &url) {
+    // Bracket pairs: opener -> closer
+    static const QChar pairs[][2] = {
+        {'(', ')'},
+        {'{', '}'},
+        {'[', ']'},
+        {'<', '>'},
+    };
+
+    QString result = url;
+
+    // Repeatedly strip trailing bracket characters that are unbalanced
+    bool changed = true;
+    while (changed && !result.isEmpty()) {
+        changed = false;
+        QChar last = result.at(result.length() - 1);
+
+        for (const auto &pair : pairs) {
+            if (last == pair[1]) {
+                // Count openers and closers in the URL
+                int openers = 0;
+                int closers = 0;
+                for (const QChar &ch : result) {
+                    if (ch == pair[0])
+                        ++openers;
+                    else if (ch == pair[1])
+                        ++closers;
+                }
+
+                // If closers exceed openers, the trailing one is unbalanced
+                if (closers > openers) {
+                    result.chop(1);
+                    changed = true;
+                }
+                break;
+            }
+
+            // Also strip trailing openers (e.g. http://example.com/( )
+            if (last == pair[0]) {
+                result.chop(1);
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
 // Helper function for MarkdownHighlighter::highlightLinkOrImage
 bool isLink(const QString &text) {
     static const QLatin1String supportedSchemes[] = {
@@ -2299,9 +2413,11 @@ void MarkdownHighlighter::formatAndMaskRemaining(
     const QTextCharFormat &format) {
     int afterFormat = formatBegin + formatLength;
 
-    auto maskedSyntax = _formats[MaskedSyntax];
-    maskedSyntax.setFontPointSize(
-        QSyntaxHighlighter::format(beginningText).fontPointSize());
+    auto maskedSyntax = currentMaskedFormat();
+    if (!isHidingForCurrentBlock()) {
+        maskedSyntax.setFontPointSize(
+            QSyntaxHighlighter::format(beginningText).fontPointSize());
+    }
 
     // highlight before the link
     setFormat(beginningText, formatBegin - beginningText, maskedSyntax);
@@ -2312,8 +2428,10 @@ void MarkdownHighlighter::formatAndMaskRemaining(
     }
 
     // highlight after the link
-    maskedSyntax.setFontPointSize(
-        QSyntaxHighlighter::format(afterFormat).fontPointSize());
+    if (!isHidingForCurrentBlock()) {
+        maskedSyntax.setFontPointSize(
+            QSyntaxHighlighter::format(afterFormat).fontPointSize());
+    }
     setFormat(afterFormat, endText - afterFormat, maskedSyntax);
 
     _ranges[currentBlock().blockNumber()].append(
@@ -2420,15 +2538,20 @@ int MarkdownHighlighter::highlightLinkOrImage(const QString &text,
             return hrefEnd;
         }
 
-        QString link = text.mid(startIndex, space - startIndex - 1);
+        // Extract the raw URL text up to the space (or end of line)
+        QString link = text.mid(startIndex, space - startIndex);
+
+        // Strip trailing unbalanced brackets from the URL
+        link = stripTrailingBrackets(link);
+
         if (!isLink(link)) return startIndex;
 
         auto linkLength = link.length();
 
         _ranges[currentBlock().blockNumber()].append(
             InlineRange(startIndex, startIndex + linkLength, RangeType::Link));
-        setFormat(startIndex, linkLength + 1, _formats[Link]);
-        return space;
+        setFormat(startIndex, linkLength, _formats[Link]);
+        return startIndex + linkLength;
     }
 
     // Find the index of the closing ']' character to identify the end of link
@@ -2445,10 +2568,28 @@ int MarkdownHighlighter::highlightLinkOrImage(const QString &text,
         if (closingIndex == -1) return startIndex;
         ++closingIndex;
 
+        // Check for optional image dimension attributes like { width=300
+        // height=200 }
+        int endOfImage = closingIndex;
+        int attrPos = closingIndex;
+
+        // Skip optional whitespace between ')' and '{'
+        while (attrPos < text.length() && text.at(attrPos).isSpace()) {
+            ++attrPos;
+        }
+
+        // If we find '{', look for matching '}'
+        if (attrPos < text.length() && text.at(attrPos) == QLatin1Char('{')) {
+            int closingBrace = text.indexOf(QLatin1Char('}'), attrPos);
+            if (closingBrace != -1) {
+                endOfImage = closingBrace + 1;
+            }
+        }
+
         // Apply formatting to highlight the image.
         formatAndMaskRemaining(startIndex + 1, endIndex - startIndex - 1,
-                               startIndex - 1, closingIndex, _formats[Image]);
-        return closingIndex;
+                               startIndex - 1, endOfImage, _formats[Image]);
+        return endOfImage;
     }
     // If the character after the closing ']' is '(', it's a regular link
     else if (text.at(endIndex + 1) == QLatin1Char('(')) {
@@ -2476,9 +2617,38 @@ int MarkdownHighlighter::highlightLinkOrImage(const QString &text,
             return hrefIndex;
         }
 
-        // Apply formatting to highlight the link
-        formatAndMaskRemaining(startIndex + 1, endIndex - startIndex - 1,
-                               startIndex, closingParenIndex, _formats[Link]);
+        // Keep the URL visible in named links while only masking Markdown
+        // delimiters: `[`, `](` and `)`.
+        const int urlStartIndex = endIndex + 2;
+        const int urlLength = closingParenIndex - urlStartIndex - 1;
+        const QTextCharFormat maskedFormat = currentMaskedFormat();
+
+        // Opening `[`.
+        setFormat(startIndex, 1, maskedFormat);
+
+        // Link label text.
+        if (!isHeading(currentBlockState())) {
+            setFormat(startIndex + 1, endIndex - startIndex - 1,
+                      _formats[Link]);
+        }
+
+        // Closing `](`.
+        setFormat(endIndex, 2, maskedFormat);
+
+        // URL inside `(...)` should use masked syntax styling, but remain
+        // visible.
+        if (!isHeading(currentBlockState()) && urlLength > 0) {
+            QTextCharFormat urlFormat = _formats[MaskedSyntax];
+            if (!isHidingForCurrentBlock()) {
+                urlFormat.setFontPointSize(
+                    QSyntaxHighlighter::format(urlStartIndex).fontPointSize());
+            }
+            setFormat(urlStartIndex, urlLength, urlFormat);
+        }
+
+        // Closing `)`.
+        setFormat(closingParenIndex - 1, 1, maskedFormat);
+
         return closingParenIndex;
     }
     // Reference links
@@ -2582,8 +2752,8 @@ int MarkdownHighlighter::highlightInlineSpans(const QString &text,
     setFormat(start + len, next - (start + len), inlineFmt);
 
     // format backticks as masked
-    setFormat(start, len, _formats[MaskedSyntax]);
-    setFormat(next, len, _formats[MaskedSyntax]);
+    setFormat(start, len, currentMaskedFormat());
+    setFormat(next, len, currentMaskedFormat());
 
     i = next + len;
     return i;
@@ -2916,9 +3086,9 @@ void MarkdownHighlighter::highlightEmAndStrong(const QString &text,
 
     // 4. Apply masked syntax
     for (int i = 0; i < masked.length(); ++i) {
-        QTextCharFormat maskedFmt = _formats[MaskedSyntax];
+        QTextCharFormat maskedFmt = currentMaskedFormat();
         auto state = static_cast<HighlighterState>(currentBlockState());
-        if (_formats[state].fontPointSize() > 0)
+        if (_formats[state].fontPointSize() > 0 && !isHidingForCurrentBlock())
             maskedFmt.setFontPointSize(_formats[state].fontPointSize());
         setFormat(masked.at(i).first, masked.at(i).second, maskedFmt);
     }
@@ -2928,20 +3098,5 @@ void MarkdownHighlighter::setHighlightingOptions(
     const HighlightingOptions options) {
     _highlightingOptions = options;
 }
-
-/**
- * Detects if the application is in dark mode by checking the parent widget's palette
- */
-bool MarkdownHighlighter::isDarkMode() const {
-    if (!document()) return false;
-    
-    QWidget *parentWidget = qobject_cast<QWidget*>(document()->parent());
-    if (!parentWidget) return false;
-    
-    // Check if the window background is dark
-    return parentWidget->palette().color(QPalette::Window).lightness() < 128;
-}
-
-
 
 #undef MH_SUBSTR

@@ -283,6 +283,10 @@ void ControlPanelDialog::applyChanges()
         QString selectedLang = languageCombo->currentData().toString();
         settings.setValue("languageOverride", selectedLang);
     }
+
+    // Apply OCR language setting
+    if (ocrLanguageCombo)
+        settings.setValue("ocrLanguage", ocrLanguageCombo->currentData().toString());
 }
 
 /*
@@ -1911,7 +1915,40 @@ void ControlPanelDialog::createLanguageTab() {
     connect(useSystemLanguageCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
         languageCombo->setEnabled(!checked);
     });
-    
+
+    // === Handwriting Recognition Language ===
+    layout->addSpacing(20);
+
+    QLabel *ocrTitle = new QLabel(tr("Handwriting Recognition Language"), languageTab);
+    ocrTitle->setStyleSheet("font-size: 14px; font-weight: bold;");
+    layout->addWidget(ocrTitle);
+
+    layout->addSpacing(5);
+
+    QLabel *ocrDesc = new QLabel(
+        tr("Default language for OCR handwriting recognition. Individual documents can override this in the overflow menu."),
+        languageTab);
+    ocrDesc->setWordWrap(true);
+    ocrDesc->setStyleSheet("color: gray; font-size: 11px; margin-bottom: 10px;");
+    layout->addWidget(ocrDesc);
+
+    ocrLanguageCombo = new QComboBox(languageTab);
+    ocrLanguageCombo->addItem(tr("Auto-detect (system default)"), QString());
+    if (mainWindowRef) {
+        QStringList langs = mainWindowRef->ocrAvailableLanguages();
+        for (const auto& lang : langs)
+            ocrLanguageCombo->addItem(lang, lang);
+    }
+    layout->addWidget(ocrLanguageCombo);
+
+    if (mainWindowRef) {
+        QSettings settings("SpeedyNote", "App");
+        QString savedOcrLang = settings.value("ocrLanguage").toString();
+        int ocrIdx = ocrLanguageCombo->findData(savedOcrLang);
+        if (ocrIdx >= 0)
+            ocrLanguageCombo->setCurrentIndex(ocrIdx);
+    }
+
     // Add stretch to push everything to the top
     layout->addStretch();
     

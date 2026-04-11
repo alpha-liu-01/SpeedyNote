@@ -17,13 +17,14 @@
 #include "../layers/VectorLayer.h"
 #include "../objects/InsertedObject.h"
 #include "../objects/ImageObject.h"
+#include "../ocr/OcrTextBlock.h"
 
 #include <QSizeF>
 #include <QColor>
 #include <QPixmap>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QSet>        // Phase O4.1: For excludeIds parameter
+#include <QSet>
 #include <vector>
 #include <memory>
 #include <map>
@@ -90,6 +91,11 @@ public:
      * Call rebuildAffinityMap() after bulk operations or loading from JSON.
      */
     std::map<int, std::vector<InsertedObject*>> objectsByAffinity;
+    
+    // ===== OCR Data (Phase 1A - derived cache) =====
+    QVector<OcrTextBlock> ocrTextBlocks;    ///< Recognized text blocks (derived from strokes)
+    QSet<QString> suppressedStrokeIds;      ///< Strokes user explicitly excluded from OCR
+    bool ocrDirty = false;                  ///< True if strokes changed since last OCR pass
     
     // ===== Constructors & Rule of Five =====
     
@@ -393,6 +399,32 @@ public:
     void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, 
                                     bool layerVisible = true,
                                     const QSet<QString>* excludeIds = nullptr) const;
+    
+    // ===== OCR Invalidation =====
+    
+    /**
+     * @brief Invalidate OCR blocks that were produced from a specific stroke.
+     * @param strokeId The stroke ID that was removed or changed.
+     * Marks matching blocks as dirty for re-analysis on the next OCR cycle.
+     */
+    void invalidateOcrForStroke(const QString& strokeId);
+    
+    /**
+     * @brief Invalidate OCR blocks overlapping a region (for newly added strokes).
+     * @param region The bounding rect of the new/changed content.
+     */
+    void invalidateOcrInRegion(const QRectF& region);
+    
+    /**
+     * @brief Remove all OCR data and reset dirty state.
+     */
+    void clearOcrData();
+    
+    /**
+     * @brief Get non-dirty OCR blocks suitable for search.
+     * @return Blocks where dirty == false.
+     */
+    QVector<OcrTextBlock> ocrBlocksForSearch() const;
     
     // ===== Serialization =====
     
