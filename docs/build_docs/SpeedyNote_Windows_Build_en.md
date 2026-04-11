@@ -29,6 +29,8 @@ pacman -S mingw-w64-clang-x86_64-toolchain mingw-w64-clang-x86_64-cmake mingw-w6
 # Qt6
 pacman -S mingw-w64-clang-x86_64-qt6-base mingw-w64-clang-x86_64-qt6-tools mingw-w64-clang-x86_64-qt6-declarative mingw-w64-clang-x86_64-qt6-translations mingw-w64-clang-x86_64-qt6-svg
 
+# OCR (Windows Ink handwriting recognition, required for 64-bit builds)
+pacman -S mingw-w64-clang-x86_64-cppwinrt
 
 # PDF (MuPDF and dependencies)
 pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-harfbuzz mingw-w64-clang-x86_64-freetype mingw-w64-clang-x86_64-libjpeg-turbo mingw-w64-clang-x86_64-openjpeg2 mingw-w64-clang-x86_64-gumbo-parser mingw-w64-clang-x86_64-mujs
@@ -39,6 +41,7 @@ pacman -S mingw-w64-clang-x86_64-SDL2
 
 > **Note:** PDF export requires MuPDF. If `mingw-w64-clang-x86_64-mupdf` is not available, PDF export will be disabled on Windows. The app will still function normally for viewing and annotating PDFs.
 > ``mingw-w64-clang-x86_64-pkgconf`` is only used for ``lupdate-qt6.exe`` to parse the new translations.
+> **OCR:** The `cppwinrt` package provides C++/WinRT headers for the Windows Ink handwriting recognition engine. CMake automatically enables OCR (`SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR`) on 64-bit Qt6 Windows builds. This uses the built-in Windows Ink API (available on Windows 10 1703+) and requires no external model downloads.
 
 **For ARM64 systems:** Replace `x86_64` with `aarch64` in the commands above, and use `clangarm64` instead of `clang64` in the paths below. 
 
