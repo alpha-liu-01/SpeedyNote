@@ -29,7 +29,10 @@ MlKitOcrEngine::MlKitOcrEngine()
     m_available = checkAvailabilityNative();
 }
 
-MlKitOcrEngine::~MlKitOcrEngine() = default;
+MlKitOcrEngine::~MlKitOcrEngine()
+{
+    invalidateNativeRecognizer();
+}
 
 bool MlKitOcrEngine::isAvailable() const
 {
@@ -51,11 +54,14 @@ void MlKitOcrEngine::setLanguage(const QString& languageTag)
     else if (resolved.contains(QLatin1Char('_')))
         resolved = localeToMlKitTag(resolved);
 
-    if (resolved == m_languageTag)
+    if (resolved == m_languageTag && m_modelDownloaded)
         return;
 
+    if (resolved != m_languageTag)
+        invalidateNativeRecognizer();
+
     m_languageTag = resolved;
-    ensureModelDownloadedNative(resolved);
+    m_modelDownloaded = ensureModelDownloadedNative(resolved);
 }
 
 QString MlKitOcrEngine::language() const
@@ -66,7 +72,7 @@ QString MlKitOcrEngine::language() const
 void MlKitOcrEngine::addStrokes(const QVector<VectorStroke>& strokes)
 {
     for (const auto& stroke : strokes) {
-        m_strokeIndexById.insert(stroke.id, m_strokes.size());
+        m_strokeIndexById.insert(stroke.id, static_cast<int>(m_strokes.size()));
         m_strokes.append(stroke);
     }
 }

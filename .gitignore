@@ -85,6 +85,7 @@ ios/build-device/
 ios/build-sim/
 ios/dist/
 ios/Assets.xcassets/
+ios/mlkit-build/
 .aur-work/
 win32/
 

@@ -6,8 +6,42 @@
 #include <limits>
 
 #import <MLKitDigitalInkRecognition/MLKitDigitalInkRecognition.h>
+#import <MLKitCommon/MLKitCommon.h>
 
 static const NSTimeInterval kTimeoutSeconds = 30.0;
+
+// ---------------------------------------------------------------------------
+// invalidateNativeRecognizer
+// ---------------------------------------------------------------------------
+
+void MlKitOcrEngine::invalidateNativeRecognizer()
+{
+    if (m_iosRecognizer) {
+        CFRelease(m_iosRecognizer);
+        m_iosRecognizer = nullptr;
+    }
+}
+
+static MLKDigitalInkRecognizer *cachedRecognizer(void *&slot, NSString *langTag)
+{
+    if (slot)
+        return (__bridge MLKDigitalInkRecognizer *)slot;
+
+    MLKDigitalInkRecognitionModelIdentifier *identifier =
+        [MLKDigitalInkRecognitionModelIdentifier modelIdentifierForLanguageTag:langTag];
+    if (!identifier)
+        return nil;
+
+    MLKDigitalInkRecognitionModel *model =
+        [[MLKDigitalInkRecognitionModel alloc] initWithModelIdentifier:identifier];
+    MLKDigitalInkRecognizerOptions *options =
+        [[MLKDigitalInkRecognizerOptions alloc] initWithModel:model];
+    MLKDigitalInkRecognizer *recognizer =
+        [MLKDigitalInkRecognizer digitalInkRecognizerWithOptions:options];
+
+    slot = (void *)CFBridgingRetain(recognizer);
+    return recognizer;
+}
 
 // ---------------------------------------------------------------------------
 // checkAvailabilityNative
@@ -15,7 +49,6 @@ static const NSTimeInterval kTimeoutSeconds = 30.0;
 
 bool MlKitOcrEngine::checkAvailabilityNative() const
 {
-    // ML Kit frameworks are statically linked on iOS; if we got here, they're available
     return true;
 }
 
@@ -46,10 +79,11 @@ bool MlKitOcrEngine::ensureModelDownloadedNative(const QString& languageTag)
 {
     @autoreleasepool {
         NSString *nsTag = languageTag.toNSString();
+
         MLKDigitalInkRecognitionModelIdentifier *identifier =
             [MLKDigitalInkRecognitionModelIdentifier modelIdentifierForLanguageTag:nsTag];
         if (!identifier) {
-            qWarning() << "MlKitOcrEngine: No model for language tag:" << languageTag;
+            qWarning() << "MlKitOcrEngine: No model identifier for language tag:" << languageTag;
             return false;
         }
 
@@ -57,28 +91,64 @@ bool MlKitOcrEngine::ensureModelDownloadedNative(const QString& languageTag)
             [[MLKDigitalInkRecognitionModel alloc] initWithModelIdentifier:identifier];
         MLKModelManager *manager = [MLKModelManager modelManager];
 
-        if ([manager isModelDownloaded:model]) {
+        if ([manager isModelDownloaded:model])
             return true;
-        }
+
+        NSLog(@"MlKitOcrEngine: Downloading model for '%@'...", nsTag);
 
         dispatch_semaphore_t sem = dispatch_semaphore_create(0);
         __block BOOL success = NO;
 
+        NSString *targetTag = identifier.languageTag;
+
+        id successObserver = [[NSNotificationCenter defaultCenter]
+            addObserverForName:MLKModelDownloadDidSucceedNotification
+                       object:nil
+                        queue:[NSOperationQueue mainQueue]
+                   usingBlock:^(NSNotification *note) {
+            MLKRemoteModel *noteModel = note.userInfo[MLKModelDownloadUserInfoKeyRemoteModel];
+            if ([noteModel isKindOfClass:[MLKDigitalInkRecognitionModel class]]) {
+                MLKDigitalInkRecognitionModel *dlModel = (MLKDigitalInkRecognitionModel *)noteModel;
+                if ([dlModel.modelIdentifier.languageTag isEqualToString:targetTag]) {
+                    success = YES;
+                    dispatch_semaphore_signal(sem);
+                }
+            }
+        }];
+
+        id failObserver = [[NSNotificationCenter defaultCenter]
+            addObserverForName:MLKModelDownloadDidFailNotification
+                       object:nil
+                        queue:[NSOperationQueue mainQueue]
+                   usingBlock:^(NSNotification *note) {
+            MLKRemoteModel *noteModel = note.userInfo[MLKModelDownloadUserInfoKeyRemoteModel];
+            if ([noteModel isKindOfClass:[MLKDigitalInkRecognitionModel class]]) {
+                MLKDigitalInkRecognitionModel *dlModel = (MLKDigitalInkRecognitionModel *)noteModel;
+                if ([dlModel.modelIdentifier.languageTag isEqualToString:targetTag]) {
+                    NSError *error = note.userInfo[MLKModelDownloadUserInfoKeyError];
+                    NSLog(@"MlKitOcrEngine: Model download failed for '%@': %@",
+                          targetTag, error.localizedDescription);
+                    dispatch_semaphore_signal(sem);
+                }
+            }
+        }];
+
         MLKModelDownloadConditions *conditions =
             [[MLKModelDownloadConditions alloc] initWithAllowsCellularAccess:YES
                                                  allowsBackgroundDownloading:YES];
-        [manager downloadModel:model
-                    conditions:conditions
-                    completion:^(NSError *error) {
-            success = (error == nil);
-            if (error) {
-                NSLog(@"MlKitOcrEngine: Model download failed: %@", error.localizedDescription);
-            }
-            dispatch_semaphore_signal(sem);
-        }];
+        [manager downloadModel:model conditions:conditions];
 
-        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW,
-                                                   (int64_t)(kTimeoutSeconds * NSEC_PER_SEC)));
+        long waitResult = dispatch_semaphore_wait(
+            sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kTimeoutSeconds * NSEC_PER_SEC)));
+
+        [[NSNotificationCenter defaultCenter] removeObserver:successObserver];
+        [[NSNotificationCenter defaultCenter] removeObserver:failObserver];
+
+        if (waitResult != 0) {
+            NSLog(@"MlKitOcrEngine: Model download timed out for '%@'", nsTag);
+            success = [manager isModelDownloaded:model];
+        }
+
         return success;
     }
 }
@@ -93,8 +163,20 @@ QString MlKitOcrEngine::recognizeStrokesNative(const QVector<VectorStroke>& stro
         return {};
 
     @autoreleasepool {
-        // Determine whether timestamps need synthesizing and find the
-        // baseline for normalization (keeps values small & precise).
+        NSString *langTag = m_languageTag.toNSString();
+
+        if (!m_modelDownloaded) {
+            qWarning() << "MlKitOcrEngine: Model not downloaded for" << m_languageTag;
+            return {};
+        }
+
+        MLKDigitalInkRecognizer *recognizer = cachedRecognizer(m_iosRecognizer, langTag);
+        if (!recognizer) {
+            qWarning() << "MlKitOcrEngine: Could not create recognizer for" << m_languageTag;
+            return {};
+        }
+
+        // Build MLKInk from VectorStroke data
         bool needSyntheticTimestamps = false;
         qint64 baseTimestamp = std::numeric_limits<qint64>::max();
         for (const auto& stroke : strokes) {
@@ -122,12 +204,12 @@ QString MlKitOcrEngine::recognizeStrokesNative(const QVector<VectorStroke>& stro
                 const auto& pt = stroke.points[j];
                 float x = static_cast<float>(pt.pos.x());
                 float y = static_cast<float>(pt.pos.y());
-                NSTimeInterval t;
+                long t;
 
                 if (needSyntheticTimestamps) {
-                    t = static_cast<NSTimeInterval>(globalPointIdx * 15);
+                    t = static_cast<long>(globalPointIdx * 15);
                 } else {
-                    t = static_cast<NSTimeInterval>(pt.timestamp - baseTimestamp);
+                    t = static_cast<long>(pt.timestamp - baseTimestamp);
                 }
 
                 [mlkPoints addObject:[[MLKStrokePoint alloc] initWithX:x y:y t:t]];
@@ -139,38 +221,26 @@ QString MlKitOcrEngine::recognizeStrokesNative(const QVector<VectorStroke>& stro
 
         MLKInk *ink = [[MLKInk alloc] initWithStrokes:mlkStrokes];
 
-        // Build recognizer
-        NSString *langTag = m_languageTag.toNSString();
-        MLKDigitalInkRecognitionModelIdentifier *identifier =
-            [MLKDigitalInkRecognitionModelIdentifier modelIdentifierForLanguageTag:langTag];
-        if (!identifier) {
-            qWarning() << "MlKitOcrEngine: No model for language tag:" << m_languageTag;
-            return {};
-        }
-
-        MLKDigitalInkRecognitionModel *model =
-            [[MLKDigitalInkRecognitionModel alloc] initWithModelIdentifier:identifier];
-        MLKDigitalInkRecognizerOptions *options =
-            [[MLKDigitalInkRecognizerOptions alloc] initWithModel:model];
-        MLKDigitalInkRecognizer *recognizer =
-            [MLKDigitalInkRecognizer digitalInkRecognizerWithOptions:options];
-
-        // Recognize with semaphore blocking
         dispatch_semaphore_t sem = dispatch_semaphore_create(0);
         __block NSString *resultText = nil;
 
-        [recognizer recognizeInk:ink
-                      completion:^(MLKDigitalInkRecognitionResult *result, NSError *error) {
-            if (error) {
-                NSLog(@"MlKitOcrEngine: Recognition failed: %@", error.localizedDescription);
-            } else if (result.candidates.count > 0) {
-                resultText = result.candidates[0].text;
-            }
-            dispatch_semaphore_signal(sem);
-        }];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            [recognizer recognizeInk:ink
+                          completion:^(MLKDigitalInkRecognitionResult *result, NSError *error) {
+                if (error) {
+                    NSLog(@"MlKitOcrEngine: Recognition failed: %@", error.localizedDescription);
+                } else if (result.candidates.count > 0) {
+                    resultText = [result.candidates[0].text copy];
+                }
+                dispatch_semaphore_signal(sem);
+            }];
+        });
 
-        dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW,
-                                                   (int64_t)(kTimeoutSeconds * NSEC_PER_SEC)));
+        long waitResult = dispatch_semaphore_wait(
+            sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kTimeoutSeconds * NSEC_PER_SEC)));
+
+        if (waitResult != 0)
+            NSLog(@"MlKitOcrEngine: Recognition timed out (%d points)", globalPointIdx);
 
         return resultText ? QString::fromNSString(resultText) : QString();
     }

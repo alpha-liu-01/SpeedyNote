@@ -1069,6 +1069,19 @@ elseif(IOS)
                 target_link_libraries(speedynote PRIVATE "${fw}")
             endforeach()
             target_include_directories(speedynote PRIVATE "${MLKIT_DIR}/Frameworks")
+            target_link_libraries(speedynote PRIVATE "-framework Network")
+            target_link_options(speedynote PRIVATE "-ObjC")
+
+            file(GLOB MLKIT_RESOURCE_BUNDLES "${MLKIT_DIR}/Resources/*.bundle")
+            foreach(rb ${MLKIT_RESOURCE_BUNDLES})
+                get_filename_component(rb_name "${rb}" NAME)
+                add_custom_command(TARGET speedynote POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                        "${rb}"
+                        "$<TARGET_BUNDLE_DIR:speedynote>/${rb_name}"
+                    COMMENT "Copying ${rb_name} into app bundle"
+                )
+            endforeach()
         else()
             message(WARNING "ML Kit frameworks not found at ${MLKIT_DIR}/Frameworks. Run ios/fetch-mlkit.sh first.")
             set(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR OFF CACHE BOOL "" FORCE)
