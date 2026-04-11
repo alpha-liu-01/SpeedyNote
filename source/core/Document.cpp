@@ -1987,9 +1987,32 @@ void Document::cleanupOrphanedAssets()
             collectFromPage(tile);
         }
         
-        // Note: Evicted tiles are NOT scanned. If an image is only referenced
-        // by an evicted tile, we don't delete it. This is safe but may leave
-        // some orphans until the tile is loaded and document is closed again.
+        // Scan evicted tiles (on disk but not in memory) by reading their
+        // JSON files directly.  Only the "objects" array is inspected for
+        // imagePath references — no full Page deserialization required.
+        for (const auto& coord : m_tileIndex) {
+            if (m_tiles.find(coord) != m_tiles.end())
+                continue;  // already scanned above
+
+            QString tilePath = m_bundlePath + "/tiles/" +
+                QString("%1,%2.json").arg(coord.first).arg(coord.second);
+            QFile file(tilePath);
+            if (!file.open(QIODevice::ReadOnly))
+                continue;
+
+            QJsonObject tileObj = QJsonDocument::fromJson(file.readAll()).object();
+            file.close();
+
+            QJsonArray objects = tileObj["objects"].toArray();
+            for (const auto& val : objects) {
+                QJsonObject obj = val.toObject();
+                if (obj["type"].toString() == QLatin1String("image")) {
+                    QString path = obj["imagePath"].toString();
+                    if (!path.isEmpty())
+                        referencedFiles.insert(path);
+                }
+            }
+        }
     } else {
         // Paged mode: scan all pages
         // 

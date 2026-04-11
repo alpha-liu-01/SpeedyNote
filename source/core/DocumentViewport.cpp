@@ -7070,6 +7070,11 @@ void DocumentViewport::pasteObjects()
         // Update max object extent
         m_document->updateMaxObjectExtent(rawPtr);
         
+        // Save assets to disk immediately (matches insertImageFromFile/insertImageFromClipboard)
+        if (!m_document->bundlePath().isEmpty()) {
+            rawPtr->saveAssets(m_document->bundlePath());
+        }
+        
         // Create undo entry for this pasted object
         pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
         
