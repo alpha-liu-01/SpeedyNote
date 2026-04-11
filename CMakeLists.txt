@@ -12,6 +12,7 @@ option(ENABLE_CONTROLLER_SUPPORT "Enable SDL2 game controller support" OFF)
 option(ENABLE_DEBUG_OUTPUT "Enable verbose debug output (qDebug prints)" OFF)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer + LeakSanitizer for memory debugging" OFF)
 option(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR "Enable Windows Ink handwriting recognition (requires Windows 10 1703+)" OFF)
+option(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR "Enable ML Kit Digital Ink OCR (Android/iOS)" OFF)
 
 message(STATUS "Controller support: ${ENABLE_CONTROLLER_SUPPORT}")
 if(ENABLE_DEBUG_OUTPUT)
@@ -54,6 +55,12 @@ set(CMAKE_AUTOUIC ON)
 # Define IOS early so it can be tested before APPLE (which is true for both macOS and iOS).
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(IOS TRUE)
+endif()
+
+# Auto-enable ML Kit Digital Ink OCR on Android/iOS
+if(ANDROID OR IOS)
+    set(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR ON CACHE BOOL "" FORCE)
+    message(STATUS "ML Kit Digital Ink OCR: ENABLED (${CMAKE_SYSTEM_NAME})")
 endif()
 
 if(WIN32)
@@ -666,6 +673,16 @@ if(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR)
     set_source_files_properties(source/ocr/engines/WindowsInkOcrEngine.cpp
         PROPERTIES COMPILE_OPTIONS "-std=c++20")
 endif()
+if(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR)
+    list(APPEND OCR_SOURCES source/ocr/engines/MlKitOcrEngine.cpp)
+    if(ANDROID)
+        list(APPEND OCR_SOURCES source/ocr/engines/MlKitOcrEngine_android.cpp)
+    elseif(IOS)
+        list(APPEND OCR_SOURCES source/ocr/engines/MlKitOcrEngine_ios.mm)
+        set_source_files_properties(source/ocr/engines/MlKitOcrEngine_ios.mm
+            PROPERTIES LANGUAGE OBJCXX)
+    endif()
+endif()
 
 # UI components
 set(UI_SOURCES
@@ -976,6 +993,9 @@ target_compile_definitions(speedynote PRIVATE
     APP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     APP_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
+if(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR)
+    target_compile_definitions(speedynote PRIVATE SPEEDYNOTE_HAS_MLKIT_INK)
+endif()
 
 # ============================================================================
 # Translation Compilation (.ts -> .qm)
@@ -1041,6 +1061,19 @@ elseif(IOS)
         "-framework CoreGraphics"
         "-framework UniformTypeIdentifiers"
     )
+    if(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR)
+        set(MLKIT_DIR "${CMAKE_SOURCE_DIR}/ios/mlkit-build")
+        if(EXISTS "${MLKIT_DIR}/Frameworks")
+            file(GLOB MLKIT_FRAMEWORKS "${MLKIT_DIR}/Frameworks/*.xcframework")
+            foreach(fw ${MLKIT_FRAMEWORKS})
+                target_link_libraries(speedynote PRIVATE "${fw}")
+            endforeach()
+            target_include_directories(speedynote PRIVATE "${MLKIT_DIR}/Frameworks")
+        else()
+            message(WARNING "ML Kit frameworks not found at ${MLKIT_DIR}/Frameworks. Run ios/fetch-mlkit.sh first.")
+            set(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR OFF CACHE BOOL "" FORCE)
+        endif()
+    endif()
 
 elseif(APPLE)
     set(PLATFORM_LIBS

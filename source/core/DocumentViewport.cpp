@@ -4672,6 +4672,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         StrokePoint pt;
         pt.pos = docPt;
         pt.pressure = useFixedPressure ? 1.0 : qBound(0.1, pe.pressure, 1.0);
+        pt.timestamp = pe.timestamp;
         m_currentStroke.points.append(pt);
         return;
     }
@@ -4694,7 +4695,7 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
     // Add first point (in page-local coordinates)
     // Marker uses fixed pressure (1.0) for consistent thickness
     qreal effectivePressure = useFixedPressure ? 1.0 : pe.pressure;
-    addPointToStroke(pe.pageHit.pagePoint, effectivePressure);
+    addPointToStroke(pe.pageHit.pagePoint, effectivePressure, pe.timestamp);
 }
 
 void DocumentViewport::continueStroke(const PointerEvent& pe)
@@ -4730,6 +4731,7 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
         StrokePoint pt;
         pt.pos = docPt;
         pt.pressure = effectivePressure;
+        pt.timestamp = pe.timestamp;
         m_currentStroke.points.append(pt);
         
         // Dirty region update for edgeless (document coords → viewport coords)
@@ -4766,7 +4768,7 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
     }
     
     // Use effective pressure (fixed 1.0 for marker, actual pressure for pen)
-    addPointToStroke(pagePos, effectivePressure);
+    addPointToStroke(pagePos, effectivePressure, pe.timestamp);
 }
 
 void DocumentViewport::finishStroke()
@@ -11011,7 +11013,7 @@ void DocumentViewport::copySelectedTextToClipboard()
     #endif
 }
 
-void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
+void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure, qint64 timestamp)
 {
     // ========== OPTIMIZATION: Point Decimation ==========
     // At 360Hz, consecutive points are often <1 pixel apart.
@@ -11039,6 +11041,7 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure)
     StrokePoint pt;
     pt.pos = pagePos;
     pt.pressure = qBound(0.1, pressure, 1.0);
+    pt.timestamp = timestamp;
     m_currentStroke.points.append(pt);
     
     // ========== OPTIMIZATION: Dirty Region Update ==========

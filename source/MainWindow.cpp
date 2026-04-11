@@ -70,6 +70,7 @@
 #include <QSettings>
 #include <QMessageBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QDialog>
@@ -78,6 +79,7 @@
 #include <QPropertyAnimation>  // Phase P.4.5: Smooth window transitions
 #include <QWindow>             // For windowHandle()->setWindowState() in transitions
 #include <QInputMethodEvent>
+#include <QLocale>
 #include <QSet>
 #include <QWheelEvent>
 #include <QTimer>
@@ -5723,8 +5725,53 @@ void MainWindow::showOcrLanguageDialog()
     auto* combo = new QComboBox(&dlg);
     combo->addItem(tr("Use global setting"), QStringLiteral(""));
     combo->addItem(tr("Auto-detect (system default)"), QStringLiteral("auto"));
-    for (const auto& lang : m_ocrAvailableLanguages)
-        combo->addItem(lang, lang);
+
+    // Partition languages: common first, then the rest sorted by display name
+    static const QStringList commonTags = {
+        QStringLiteral("en-US"), QStringLiteral("en-GB"),
+        QStringLiteral("zh-Hani-CN"), QStringLiteral("zh-Hani-TW"),
+        QStringLiteral("ja"), QStringLiteral("ko"),
+        QStringLiteral("es-ES"), QStringLiteral("fr-FR"),
+        QStringLiteral("de-DE"), QStringLiteral("pt-BR"),
+        QStringLiteral("it-IT"), QStringLiteral("ru"), QStringLiteral("ar"),
+    };
+
+    auto displayNameForTag = [](const QString& tag) -> QString {
+        QLocale locale(QString(tag).replace(QLatin1Char('-'), QLatin1Char('_')));
+        QString name = locale.nativeLanguageName();
+        if (name.isEmpty() || name == QLatin1String("C"))
+            return tag;
+        return QStringLiteral("%1 (%2)").arg(name, tag);
+    };
+
+    QStringList common, rest;
+    for (const auto& lang : m_ocrAvailableLanguages) {
+        if (commonTags.contains(lang))
+            common.append(lang);
+        else
+            rest.append(lang);
+    }
+
+    // Sort rest alphabetically by display name
+    std::sort(rest.begin(), rest.end(), [&](const QString& a, const QString& b) {
+        return displayNameForTag(a).toLower() < displayNameForTag(b).toLower();
+    });
+
+    // Preserve the order of commonTags for the common section
+    for (const auto& tag : commonTags) {
+        if (common.contains(tag))
+            combo->addItem(displayNameForTag(tag), tag);
+    }
+    if (!common.isEmpty() && !rest.isEmpty())
+        combo->insertSeparator(combo->count());
+    for (const auto& tag : rest)
+        combo->addItem(displayNameForTag(tag), tag);
+
+    combo->setEditable(true);
+    combo->setInsertPolicy(QComboBox::NoInsert);
+    if (combo->completer())
+        combo->completer()->setFilterMode(Qt::MatchContains);
+
     layout->addWidget(combo);
 
     // Pre-select current value

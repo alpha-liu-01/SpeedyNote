@@ -3013,7 +3013,7 @@ private:
      * @param pagePos Point position in page-local coordinates.
      * @param pressure Pressure value (0.0 to 1.0).
      */
-    void addPointToStroke(const QPointF& pagePos, qreal pressure);
+    void addPointToStroke(const QPointF& pagePos, qreal pressure, qint64 timestamp = 0);
     
     // ===== Incremental Stroke Rendering (Task 2.3) =====
     
