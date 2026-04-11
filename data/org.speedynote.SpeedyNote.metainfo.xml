@@ -79,6 +79,19 @@
 
 
   <releases type="embedded">
+    <release version="1.4.0" date="2026-04-11">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>New on-canvas text box feature that supports markdown rich text editing. Ctrl+F shortcut to search for text in the text box.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that the image assets might be deleted randomly in edgeless mode.</li>
+          <li>Fixed another thumbnail renderer memory leak.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.3.5" date="2026-03-26">
       <description>
         <p>New Features:</p>

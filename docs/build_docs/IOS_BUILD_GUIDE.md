@@ -1,7 +1,7 @@
 # SpeedyNote iPadOS Build Guide
 
-**Document Version:** 1.0  
-**Date:** February 2026  
+**Document Version:** 1.1  
+**Date:** April 2026  
 **Status:** VERIFIED WORKING
 
 ---
@@ -14,10 +14,11 @@ This guide provides step-by-step instructions for building SpeedyNote for iPadOS
 
 - **Target:** iPadOS arm64 (device), x86_64 (Intel Simulator)
 - **PDF Backend:** MuPDF 1.24.10 (cross-compiled, statically linked)
+- **OCR Backend:** Google ML Kit Digital Ink Recognition (statically linked)
 - **UI Framework:** Qt 6.9.3 for iOS (statically linked)
 - **Minimum Deployment:** iPadOS 16.0
 
-All dependencies (Qt, MuPDF, Noto fonts) are statically linked into a single binary. There are no dynamic library dependencies beyond Apple system frameworks.
+All dependencies (Qt, MuPDF, ML Kit, Noto fonts) are statically linked into a single binary. There are no dynamic library dependencies beyond Apple system frameworks.
 
 ---
 
@@ -36,6 +37,7 @@ All dependencies (Qt, MuPDF, Noto fonts) are statically linked into a single bin
 |------------|---------|---------|
 | Qt 6.9.3 for iOS | Qt Online Installer or `aqtinstall` | All builds |
 | Xcode CLI tools | `xcode-select --install` | All builds |
+| CocoaPods | `brew install cocoapods` | ML Kit OCR (fetching frameworks) |
 | librsvg | `brew install librsvg` | Icon generation |
 | ldid | `brew install ldid` | Ad-hoc device builds only |
 | dpkg | `brew install dpkg` | `.deb` packaging only |
@@ -61,6 +63,9 @@ aqt install-qt mac ios 6.9.3
 # Cross-compile MuPDF for Simulator (first time only)
 ./ios/build-mupdf.sh --simulator
 
+# Fetch ML Kit OCR frameworks (first time only, requires CocoaPods)
+./ios/fetch-mlkit.sh
+
 # Generate app icon (first time only)
 ./ios/generate-icons.sh
 
@@ -75,6 +80,9 @@ aqt install-qt mac ios 6.9.3
 # Cross-compile MuPDF for device (first time only)
 ./ios/build-mupdf.sh
 
+# Fetch ML Kit OCR frameworks (first time only, requires CocoaPods)
+./ios/fetch-mlkit.sh
+
 # Build, install, and run
 ./ios/build-device.sh YOUR_TEAM_ID
 ./ios/run-device.sh
@@ -85,6 +93,9 @@ aqt install-qt mac ios 6.9.3
 ```bash
 # Cross-compile MuPDF for device (first time only)
 ./ios/build-mupdf.sh
+
+# Fetch ML Kit OCR frameworks (first time only, requires CocoaPods)
+./ios/fetch-mlkit.sh
 
 # Build Release, fake-sign with ldid
 ./ios/build-device.sh
@@ -143,6 +154,33 @@ Output:
 - `ios/mupdf-build/include/mupdf/*.h`
 
 **Note:** The Simulator and device builds use different architectures (x86_64 vs arm64) and SDKs. If you need both, run the script twice with and without `--simulator`. The source tarball is shared and only downloaded once.
+
+---
+
+### Phase 2.5: Fetch ML Kit OCR Frameworks
+
+Google ML Kit Digital Ink Recognition provides stroke-based handwriting recognition (OCR). The frameworks must be fetched via CocoaPods and converted into `.xcframework` bundles for static linking.
+
+```bash
+./ios/fetch-mlkit.sh
+```
+
+Requires `pod` (`brew install cocoapods`).
+
+This script:
+1. Creates a temporary CocoaPods project with `GoogleMLKit/DigitalInkRecognition` as a dependency
+2. Runs `pod install` to download all ML Kit pods
+3. Builds each pod's source into a static library using `xcodebuild`
+4. Packages the resulting binaries (for both `iphoneos` and `iphonesimulator`) into `.xcframework` bundles using `xcodebuild -create-xcframework`
+5. Copies ML Kit resource bundles (e.g. `DigitalInkRecognition_resource.bundle`)
+
+Output:
+- `ios/mlkit-build/xcframeworks/*.xcframework` — Static frameworks for all ML Kit components
+- `ios/mlkit-build/resource_bundles/*.bundle` — ML Kit resource bundles
+
+**Note:** This only needs to be done once (or when upgrading ML Kit). The `ios/mlkit-build/` directory is gitignored.
+
+CMake automatically detects the xcframeworks at configure time and enables OCR support (`SPEEDYNOTE_ENABLE_MLKIT_OCR`). If the xcframeworks are not found, the build proceeds without OCR.
 
 ---
 
@@ -295,6 +333,7 @@ All scripts are in the `ios/` directory and should be run from the SpeedyNote pr
 |--------|-------------|
 | `ios/generate-icons.sh` | Render SVG icon to 1024x1024 PNG for Asset Catalog |
 | `ios/build-mupdf.sh [--simulator]` | Cross-compile MuPDF for device (default) or Simulator |
+| `ios/fetch-mlkit.sh` | Fetch ML Kit OCR frameworks via CocoaPods and build xcframeworks |
 | `ios/build-sim.sh [--clean] [--rebuild]` | Configure and build for iOS Simulator |
 | `ios/build-device.sh [TEAM_ID] [--clean] [--rebuild] [--release]` | Configure and build for device |
 | `ios/run-sim.sh [--list] [DEVICE_NAME]` | Install and launch in Simulator |
@@ -318,6 +357,7 @@ SpeedyNote/
 │   │
 │   ├── generate-icons.sh           # Icon generator
 │   ├── build-mupdf.sh             # MuPDF cross-compiler
+│   ├── fetch-mlkit.sh             # ML Kit framework fetcher (CocoaPods)
 │   ├── build-sim.sh               # Simulator build
 │   ├── build-device.sh            # Device build (provisioned or ad-hoc)
 │   ├── run-sim.sh                 # Simulator runner
@@ -328,16 +368,23 @@ SpeedyNote/
 │   ├── mupdf-src/                 # MuPDF source (downloaded, gitignored)
 │   ├── mupdf-build/               # MuPDF device libs (generated)
 │   ├── mupdf-build-sim/           # MuPDF Simulator libs (generated)
+│   ├── mlkit-build/               # ML Kit xcframeworks + resources (generated)
+│   │   ├── xcframeworks/          # .xcframework bundles
+│   │   └── resource_bundles/      # ML Kit resource bundles
 │   ├── build-sim/                 # Simulator CMake/Xcode build (generated)
 │   ├── build-device/              # Device CMake/Xcode build (generated)
 │   └── dist/                      # Packaged .deb and .ipa (generated)
 │
 ├── source/
-│   └── ios/
-│       ├── IOSPlatformHelper.h/mm  # Dark mode, fonts, gesture fixes
-│       ├── IOSShareHelper.h/mm     # Share sheet (export)
-│       ├── PdfPickerIOS.h/mm       # Native PDF file picker
-│       └── SnbxPickerIOS.h/mm      # Native SNBX file picker
+│   ├── ios/
+│   │   ├── IOSPlatformHelper.h/mm  # Dark mode, fonts, gesture fixes
+│   │   ├── IOSShareHelper.h/mm     # Share sheet (export)
+│   │   ├── PdfPickerIOS.h/mm       # Native PDF file picker
+│   │   └── SnbxPickerIOS.h/mm      # Native SNBX file picker
+│   └── ocr/engines/
+│       ├── MlKitOcrEngine.h         # ML Kit OCR engine (shared header)
+│       ├── MlKitOcrEngine.cpp       # ML Kit OCR engine (shared logic)
+│       └── MlKitOcrEngine_ios.mm    # iOS Objective-C++ bridge
 │
 ├── resources/icons/
 │   └── mainicon.svg                # Source icon
@@ -354,8 +401,9 @@ SpeedyNote/
 Qt for iOS is always statically linked (Apple policy for third-party frameworks). This means:
 - The entire Qt runtime is compiled into the single `speedynote` binary
 - No `.framework` or `.dylib` files need to be shipped in the `.app` bundle
-- The binary links only against Apple system frameworks (UIKit, CoreGraphics, Metal, etc.)
+- The binary links only against Apple system frameworks (UIKit, CoreGraphics, Metal, Network, etc.)
 - MuPDF and its embedded Noto fonts are also statically linked
+- ML Kit OCR frameworks are statically linked; resource bundles are copied into the `.app` bundle
 
 ### HarfBuzz Conflict
 
@@ -387,6 +435,15 @@ Features disabled on iOS:
 - `QProcess::startDetached` (not available on iOS)
 - SDL2 game controller support
 - SpeedyNote CLI (iOS has no terminal)
+
+### OCR (ML Kit Digital Ink Recognition)
+
+When `ios/mlkit-build/xcframeworks/` contains the required `.xcframework` bundles, CMake sets `SPEEDYNOTE_ENABLE_MLKIT_OCR=ON` and compiles the Objective-C++ bridge (`MlKitOcrEngine_ios.mm`). The build automatically:
+- Links all ML Kit xcframeworks and Apple's `Network.framework`
+- Passes the `-ObjC` linker flag (required for Objective-C categories in static libraries)
+- Copies ML Kit resource bundles into the `.app` bundle
+
+At runtime, ML Kit downloads language models on-demand (requires network access on first use per language). The downloaded models are cached locally by ML Kit in the app's data directory.
 
 ---
 
@@ -446,6 +503,41 @@ Use `--clean` to force a full reconfigure if you switched targets:
 ./ios/build-device.sh --clean
 ```
 
+### ML Kit: CocoaPods not found
+
+**Error:** `pod: command not found`
+
+**Fix:** Install CocoaPods:
+```bash
+brew install cocoapods
+```
+
+### ML Kit: fetch-mlkit.sh copies 0 frameworks
+
+**Error:** The script runs but produces no `.xcframework` output.
+
+**Fix:** Ensure CocoaPods can download dependencies (requires internet access). Delete the temporary work directory and retry:
+```bash
+rm -rf ios/mlkit-build
+./ios/fetch-mlkit.sh
+```
+
+### ML Kit: OCR not enabled in build
+
+**Symptom:** SpeedyNote builds but the OCR/scan button is not available.
+
+**Fix:** CMake could not find ML Kit xcframeworks. Run `ios/fetch-mlkit.sh` and then rebuild with `--clean`:
+```bash
+./ios/fetch-mlkit.sh
+./ios/build-device.sh --clean   # or ./ios/build-sim.sh --clean
+```
+
+### ML Kit: `doesNotRecognizeSelector` crash
+
+**Error:** `___forwarding___` crash in ML Kit code at runtime.
+
+**Fix:** This is caused by Objective-C categories not being loaded from static libraries. Ensure the `-ObjC` linker flag is set in `CMakeLists.txt` (it should be set automatically when ML Kit is enabled). Rebuild with `--clean`.
+
 ---
 
 ## Clean Build
@@ -459,9 +551,13 @@ rm -rf ios/build-sim ios/build-device ios/dist
 # Optionally remove MuPDF build (requires recompilation)
 rm -rf ios/mupdf-build ios/mupdf-build-sim
 
+# Optionally remove ML Kit build (requires re-fetching)
+rm -rf ios/mlkit-build
+
 # Rebuild from scratch
 ./ios/build-mupdf.sh --simulator   # if targeting Simulator
 ./ios/build-mupdf.sh               # if targeting device
+./ios/fetch-mlkit.sh               # fetch ML Kit frameworks
 ./ios/build-sim.sh --clean          # or ./ios/build-device.sh --clean
 ```
 

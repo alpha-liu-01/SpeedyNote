@@ -1,7 +1,7 @@
 # SpeedyNote Android Build Guide
 
-**Document Version:** 1.0  
-**Date:** January 15, 2026  
+**Document Version:** 1.1  
+**Date:** April 2026  
 **Status:** ✅ VERIFIED WORKING
 
 ---
@@ -14,6 +14,7 @@ This guide provides step-by-step instructions for building SpeedyNote for Androi
 
 - **Target:** Android arm64-v8a (64-bit ARM)
 - **PDF Backend:** MuPDF (cross-compiled)
+- **OCR Backend:** Google ML Kit Digital Ink Recognition (downloaded via Gradle)
 - **UI Framework:** Qt 6.9.3 for Android
 - **Minimum API:** 26 (Android 8.0)
 - **Target API:** 34 (Android 14)
@@ -136,10 +137,12 @@ Still inside the Docker container:
 
 This script:
 1. Configures CMake with Qt Android toolchain
-2. Compiles all C++ source files
+2. Compiles all C++ source files (including the ML Kit JNI bridge)
 3. Links with MuPDF and Qt libraries
-4. Runs `androiddeployqt` to create the APK
+4. Runs `androiddeployqt` to create the APK (Gradle downloads ML Kit dependencies automatically)
 5. Signs the APK with a debug key
+
+**Note:** The first build requires internet access inside the Docker container, as Gradle downloads the ML Kit Digital Ink Recognition library and its transitive dependencies from Google's Maven repository. Subsequent builds use the Gradle cache.
 
 #### 3.2 Build output
 
@@ -285,12 +288,17 @@ SpeedyNote/
 │   ├── build-speedynote.sh     # Build full APK
 │   ├── app-resources/          # Android app resources
 │   │   ├── AndroidManifest.xml # App manifest
+│   │   ├── build.gradle        # Gradle build (includes ML Kit dependency)
 │   │   ├── res/
 │   │   │   └── xml/
 │   │   │       └── file_paths.xml  # FileProvider paths
 │   │   └── src/org/speedynote/app/  # Java source files
-│   │       ├── SpeedyNoteActivity.java  # Custom Activity
-│   │       └── PdfFileHelper.java       # PDF picker with SAF handling
+│   │       ├── SpeedyNoteActivity.java     # Custom Activity
+│   │       ├── PdfFileHelper.java          # PDF picker with SAF handling
+│   │       ├── MlKitDigitalInkHelper.java  # ML Kit OCR bridge (JNI)
+│   │       ├── NotificationHelper.java     # Notification support
+│   │       ├── ShareHelper.java            # Share sheet support
+│   │       └── ImportHelper.java           # File import support
 │   ├── mupdf-build/            # Built MuPDF (generated)
 │   │   ├── include/
 │   │   └── lib/
@@ -298,11 +306,15 @@ SpeedyNote/
 │   ├── SpeedyNote.apk          # Final APK (generated, --apk or --both)
 │   └── SpeedyNote.aab          # Final AAB (generated, --aab or --both)
 ├── source/
-│   └── pdf/
-│       ├── PdfProvider.h       # Abstract PDF interface
-│       ├── PdfProviderFactory.cpp  # Platform selection
-│       ├── MuPdfProvider.cpp   # Android: MuPDF backend
-│       └── PopplerPdfProvider.cpp  # Desktop: Poppler backend
+│   ├── pdf/
+│   │   ├── PdfProvider.h       # Abstract PDF interface
+│   │   ├── PdfProviderFactory.cpp  # Platform selection
+│   │   ├── MuPdfProvider.cpp   # Android: MuPDF backend
+│   │   └── PopplerPdfProvider.cpp  # Desktop: Poppler backend
+│   └── ocr/engines/
+│       ├── MlKitOcrEngine.h         # ML Kit OCR engine (shared header)
+│       ├── MlKitOcrEngine.cpp       # ML Kit OCR engine (shared logic)
+│       └── MlKitOcrEngine_android.cpp  # Android JNI bridge
 └── CMakeLists.txt              # Build configuration
 ```
 
@@ -349,6 +361,18 @@ void setupLinuxSignalHandlers() { ... }
 #include "ui/ToolbarButtonTests.h"
 #endif
 ```
+
+### OCR (ML Kit Digital Ink Recognition)
+
+SpeedyNote uses Google ML Kit Digital Ink Recognition for stroke-based handwriting OCR on Android. The dependency is declared in `android/app-resources/build.gradle`:
+
+```gradle
+implementation 'com.google.mlkit:digital-ink-recognition:19.0.0'
+```
+
+Gradle downloads the library automatically during the APK/AAB build. The C++ side communicates with ML Kit through JNI via `MlKitDigitalInkHelper.java`, which handles model downloading, stroke conversion, and recognition. CMake enables OCR on Android builds automatically (`SPEEDYNOTE_ENABLE_MLKIT_OCR=ON`).
+
+At runtime, ML Kit downloads language models on-demand (requires network access on first use per language). A Kotlin stdlib version resolution strategy in `build.gradle` prevents duplicate-class errors from transitive dependencies.
 
 ### PDF File Picker (BUG-A003)
 
@@ -545,6 +569,7 @@ export RELEASE_STORE_PASS=your_secure_password
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-15 | Initial Android port with MuPDF backend |
+| 1.1 | 2026-04-11 | Added ML Kit Digital Ink Recognition OCR, updated directory structure |
 
 ---
 

@@ -46,13 +46,15 @@
 //   QNativeGestureEvent → localPos() (QPointF)
 // ============================================================================
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#  define SN_MOUSE_POS(event)    (event)->position()   // QMouseEvent
-#  define SN_EVENT_POS(event)    (event)->position()   // QTabletEvent
-#  define SN_NGE_POS(event)     (event)->position()   // QNativeGestureEvent
+#  define SN_MOUSE_POS(event)    (event)->position()           // QMouseEvent local pos
+#  define SN_MOUSE_GLOBAL_POS(event) (event)->globalPosition().toPoint() // QMouseEvent → QPoint
+#  define SN_EVENT_POS(event)    (event)->position()           // QTabletEvent
+#  define SN_NGE_POS(event)     (event)->position()           // QNativeGestureEvent
 #else
-#  define SN_MOUSE_POS(event)    (event)->localPos()   // QMouseEvent::localPos() → QPointF
-#  define SN_EVENT_POS(event)    (event)->posF()       // QTabletEvent::posF() → QPointF
-#  define SN_NGE_POS(event)     (event)->localPos()   // QNativeGestureEvent::localPos()
+#  define SN_MOUSE_POS(event)    (event)->localPos()           // QMouseEvent::localPos() → QPointF
+#  define SN_MOUSE_GLOBAL_POS(event) (event)->globalPos()      // QMouseEvent → QPoint
+#  define SN_EVENT_POS(event)    (event)->posF()               // QTabletEvent::posF() → QPointF
+#  define SN_NGE_POS(event)     (event)->localPos()           // QNativeGestureEvent::localPos()
 #endif
 // QWheelEvent::position() exists since Qt 5.14, so works in both Qt5.15 and Qt6.
 // Use this instead of SN_EVENT_POS for wheel events to avoid the posF() warning.
