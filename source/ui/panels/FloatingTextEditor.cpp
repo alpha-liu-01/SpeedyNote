@@ -1,5 +1,6 @@
 #include "FloatingTextEditor.h"
 #include "../../../markdown/qmarkdowntextedit.h"
+#include "../../compat/qt_compat.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -266,7 +267,7 @@ void FloatingTextEditor::mousePressEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton && e->pos().y() < TITLE_BAR_HEIGHT) {
         m_dragging = true;
-        m_dragOffset = e->globalPosition().toPoint() - frameGeometry().topLeft();
+        m_dragOffset = SN_MOUSE_GLOBAL_POS(e) - frameGeometry().topLeft();
         e->accept();
         return;
     }
@@ -276,7 +277,7 @@ void FloatingTextEditor::mousePressEvent(QMouseEvent* e)
 void FloatingTextEditor::mouseMoveEvent(QMouseEvent* e)
 {
     if (m_dragging) {
-        move(e->globalPosition().toPoint() - m_dragOffset);
+        move(SN_MOUSE_GLOBAL_POS(e) - m_dragOffset);
         e->accept();
         return;
     }
