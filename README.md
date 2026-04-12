@@ -43,7 +43,7 @@
 ### Professional Drawing Tools
 
 - **Pressure-sensitive inking** with Pen, Marker, and Highlighter tools
-- **Vector-based strokes** - zoom infinitely without pixelation
+- **Vector-based strokes** - always sharp at non-extreme zoom levels
 - **Multi-layer editing** (SAI2-style) - add, delete, reorder, merge layers
 - **Stroke eraser** with full undo/redo support
 - **Touch gestures** - two-finger pan, pinch-to-zoom, palm rejection
