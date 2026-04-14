@@ -2550,6 +2550,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
 
         // OCR: Sync text visibility with the Show Text toggle for the new viewport
         setOcrTextVisibility(m_toolbar->ocrSubToolbar()->isShowTextEnabled());
+        setOcrConfidenceVisibility(m_toolbar->ocrSubToolbar()->isConfidenceEnabled());
 
         // OCR: Sync language for the new document
         if (m_ocrWorker) {
@@ -4373,6 +4374,11 @@ void MainWindow::updateTheme() {
     }
     
     // Update OCR text object backgrounds for the new theme
+    {
+        DocumentViewport* vp = currentViewport();
+        Document* doc = vp ? vp->document() : nullptr;
+        if (doc) doc->setOcrDarkMode(darkMode);
+    }
     if (m_toolbar && m_toolbar->ocrSubToolbar()->isShowTextEnabled()) {
         setOcrTextVisibility(true);
     }
@@ -5689,6 +5695,8 @@ void MainWindow::setOcrTextVisibility(bool visible)
     if (!doc) return;
 
     bool dark = isDarkMode();
+    doc->setOcrTextVisible(visible);
+    doc->setOcrDarkMode(dark);
     QColor bg = dark ? QColor(40, 40, 40, 180) : QColor(255, 255, 255, 180);
 
     auto setOnPage = [visible, bg](Page* page) {
@@ -5720,6 +5728,8 @@ void MainWindow::setOcrConfidenceVisibility(bool enabled)
     DocumentViewport* vp = currentViewport();
     Document* doc = vp ? vp->document() : nullptr;
     if (!doc) return;
+
+    doc->setOcrShowConfidence(enabled);
 
     auto setOnPage = [enabled](Page* page) {
         if (!page) return;

@@ -3289,7 +3289,9 @@ void Document::materializeOcrTextObjects(Page* page) const
         if (suppressed) continue;
 
         QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
-        auto obj = OcrTextObject::createFromBlock(block, color);
+        auto obj = OcrTextObject::createFromBlock(block, color, m_ocrDarkMode);
+        obj->visible = m_ocrTextVisible;
+        obj->showConfidence = m_ocrShowConfidence;
         page->addObject(std::move(obj));
     }
 }
