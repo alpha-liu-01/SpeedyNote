@@ -3292,6 +3292,7 @@ void Document::materializeOcrTextObjects(Page* page) const
         auto obj = OcrTextObject::createFromBlock(block, color, m_ocrDarkMode);
         obj->visible = m_ocrTextVisible;
         obj->showConfidence = m_ocrShowConfidence;
+        obj->layerAffinity = OcrTextObject::resolveLayerAffinity(page, block.sourceStrokeIds);
         page->addObject(std::move(obj));
     }
 }

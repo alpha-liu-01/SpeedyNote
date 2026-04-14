@@ -39,6 +39,15 @@ public:
     static QColor dominantStrokeColor(const Page* page,
                                       const QVector<QString>& strokeIds);
 
+    /**
+     * @brief Determine the layer affinity from source strokes.
+     * @param page The page containing strokes organized by layer.
+     * @param strokeIds IDs of source strokes for an OCR text block.
+     * @return Layer affinity value (layerIndex - 1), or -1 if no strokes found.
+     */
+    static int resolveLayerAffinity(const Page* page,
+                                    const QVector<QString>& strokeIds);
+
 private:
     void drawLockBadge(QPainter& painter, const QRectF& rect) const;
 };

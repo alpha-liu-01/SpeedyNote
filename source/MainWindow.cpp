@@ -5684,6 +5684,7 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
         auto obj = OcrTextObject::createFromBlock(block, color, dark);
         obj->visible = showText;
         obj->showConfidence = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
+        obj->layerAffinity = OcrTextObject::resolveLayerAffinity(page, block.sourceStrokeIds);
         page->addObject(std::move(obj));
     }
 }
