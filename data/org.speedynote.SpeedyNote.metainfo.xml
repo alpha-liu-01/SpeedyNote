@@ -79,6 +79,23 @@
 
 
   <releases type="embedded">
+    <release version="1.4.1" date="2026-04-13">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Customizable text color of the on-canvas text box.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that auto OCR feature was not responsive.</li>
+          <li>Fixed the problem that the scan all button doesn't scan the pages that are not currently loaded.</li>
+          <li>Fixed the problem that the text box visibility was not updated when the user scrolls the viewport.</li>
+          <li>Corrected the affinity of the OCR text boxes.</li>
+          <li>Fixed a positioning issue when a text box is initially created across multiple tiles in edgeless mode.</li>
+          <li>Fixed the problem that the text editor might not show up properly when the user double clicks on a text box.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.0" date="2026-04-11">
       <description>
         <p>New Features:</p>
