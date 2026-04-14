@@ -11539,9 +11539,9 @@ void DocumentViewport::pushUndoAction(const UndoAction& action)
     emit redoAvailableChanged(false);
 }
 
-QSet<QPair<int,int>> DocumentViewport::takeOcrDirtyTiles()
+std::set<Document::TileCoord> DocumentViewport::takeOcrDirtyTiles()
 {
-    QSet<QPair<int,int>> result;
+    std::set<Document::TileCoord> result;
     result.swap(m_ocrDirtyTiles);
     return result;
 }

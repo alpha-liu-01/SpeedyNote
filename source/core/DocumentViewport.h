@@ -619,7 +619,7 @@ public:
 
     void pushOcrLockUndo(const QVector<QString>& objectIds, bool newState);
 
-    QSet<QPair<int,int>> takeOcrDirtyTiles();
+    std::set<Document::TileCoord> takeOcrDirtyTiles();
 
     // ===== Affinity Helpers (Phase O3.5.3) =====
     
@@ -2362,7 +2362,7 @@ private:
     QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
     static constexpr int MAX_UNDO = 100;  ///< Max undo actions
 
-    QSet<QPair<int,int>> m_ocrDirtyTiles;
+    std::set<Document::TileCoord> m_ocrDirtyTiles;
     void markOcrDirtyTiles(const UndoAction& action);
     
     // ===== Edgeless Position History (Phase 4) =====

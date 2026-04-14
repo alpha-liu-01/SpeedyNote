@@ -5428,7 +5428,7 @@ void MainWindow::triggerOcrForAllPages()
     if (!doc || !m_ocrWorker) return;
 
     // Evict any leftover temp tiles from a previous scan-all that may not have finished
-    if (!m_ocrTempLoadedTiles.isEmpty() && m_ocrTempLoadedDoc &&
+    if (!m_ocrTempLoadedTiles.empty() && m_ocrTempLoadedDoc &&
         m_ocrTempLoadedDoc->isEdgeless()) {
         for (const auto& coord : m_ocrTempLoadedTiles)
             m_ocrTempLoadedDoc->evictTile(coord);
@@ -5448,25 +5448,25 @@ void MainWindow::triggerOcrForAllPages()
     if (doc->isEdgeless()) {
         auto allCoords = doc->allKnownTileCoords();
         auto loadedBefore = doc->allLoadedTileCoords();
-        QSet<QPair<int,int>> loadedSet(loadedBefore.begin(), loadedBefore.end());
+        std::set<Document::TileCoord> loadedSet(loadedBefore.begin(), loadedBefore.end());
 
         for (const auto& coord : allCoords) {
             Page* tile = doc->getTile(coord.first, coord.second);
             if (!tile) continue;
             QVector<VectorStroke> strokes = collectPageStrokes(tile);
             if (strokes.isEmpty()) {
-                if (!loadedSet.contains(coord))
+                if (loadedSet.count(coord) == 0)
                     doc->evictTile(coord);
                 continue;
             }
-            if (!loadedSet.contains(coord))
+            if (loadedSet.count(coord) == 0)
                 m_ocrTempLoadedTiles.insert(coord);
             pageIds.append(QString("%1,%2").arg(coord.first).arg(coord.second));
             strokeSets.append(strokes);
             suppressedSets.append(tile->suppressedStrokeIds);
         }
 
-        if (!m_ocrTempLoadedTiles.isEmpty())
+        if (!m_ocrTempLoadedTiles.empty())
             m_ocrTempLoadedDoc = doc;
     } else {
         for (int i = 0; i < doc->pageCount(); ++i) {
@@ -5496,7 +5496,7 @@ void MainWindow::onDebounceTimeout()
 
     if (doc->isEdgeless()) {
         auto dirtyTiles = vp->takeOcrDirtyTiles();
-        if (dirtyTiles.isEmpty()) return;
+        if (dirtyTiles.empty()) return;
 
         bool anyQueued = false;
         for (const auto& coord : dirtyTiles) {
@@ -5606,7 +5606,7 @@ void MainWindow::onOcrBatchFinished(int pagesScanned, int pagesWithText)
             .arg(pagesScanned).arg(pagesWithText));
     m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(8000);
 
-    if (!m_ocrTempLoadedTiles.isEmpty() && m_ocrTempLoadedDoc) {
+    if (!m_ocrTempLoadedTiles.empty() && m_ocrTempLoadedDoc) {
         for (const auto& coord : m_ocrTempLoadedTiles)
             m_ocrTempLoadedDoc->evictTile(coord);
     }
