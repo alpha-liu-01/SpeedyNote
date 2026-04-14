@@ -65,6 +65,9 @@ signals:
 protected:
     void paintEvent(QPaintEvent *event) override;
 
+private slots:
+    void onOcrExpanded(bool expanded);
+
 private:
     void setupUi();
     void connectSignals();

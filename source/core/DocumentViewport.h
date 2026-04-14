@@ -114,6 +114,8 @@ struct UndoAction {
     int objectNewTextAlignment = 0;
     int objectOldBgAlpha = 180;
     int objectNewBgAlpha = 180;
+    QColor objectOldFontColor = QColor(60, 60, 60);
+    QColor objectNewFontColor = QColor(60, 60, 60);
 
     // OcrLockChange fields
     QVector<QString> ocrLockObjectIds;
@@ -611,7 +613,9 @@ public:
     void pushObjectTextEditUndo(InsertedObject* obj,
                                 const QString& oldText, const QString& newText,
                                 int oldAlignment, int newAlignment,
-                                int oldOpacity, int newOpacity);
+                                int oldOpacity, int newOpacity,
+                                const QColor& oldFontColor = QColor(60, 60, 60),
+                                const QColor& newFontColor = QColor(60, 60, 60));
 
     void pushOcrLockUndo(const QVector<QString>& objectIds, bool newState);
 

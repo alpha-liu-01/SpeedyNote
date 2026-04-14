@@ -3,6 +3,8 @@
 #include <QFontMetricsF>
 #include <QTextDocument>
 #include <QTextOption>
+#include <QTextCursor>
+#include <QTextCharFormat>
 #include <QPen>
 #include <qmath.h>
 
@@ -42,7 +44,8 @@ QTextDocument* TextBoxObject::ensureDocCache(qreal width) const
     if (m_cachedDoc
         && qFuzzyCompare(1.0 + m_cachedDocWidth, 1.0 + width)
         && m_cachedText == text
-        && m_cachedAlignment == alignment) {
+        && m_cachedAlignment == alignment
+        && m_cachedFontColor == fontColor) {
         return m_cachedDoc;
     }
 
@@ -50,6 +53,13 @@ QTextDocument* TextBoxObject::ensureDocCache(qreal width) const
         m_cachedDoc = new QTextDocument();
 
     m_cachedDoc->setMarkdown(text);
+
+    QTextCursor cursor(m_cachedDoc);
+    cursor.select(QTextCursor::Document);
+    QTextCharFormat fmt;
+    fmt.setForeground(QBrush(fontColor));
+    cursor.mergeCharFormat(fmt);
+
     m_cachedDoc->setTextWidth(width);
 
     QTextOption opt;
@@ -70,6 +80,7 @@ QTextDocument* TextBoxObject::ensureDocCache(qreal width) const
     m_cachedDocWidth = width;
     m_cachedText = text;
     m_cachedAlignment = alignment;
+    m_cachedFontColor = fontColor;
     return m_cachedDoc;
 }
 

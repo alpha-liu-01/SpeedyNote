@@ -26,6 +26,20 @@ ExpandableToolButton::ExpandableToolButton(QWidget* parent)
         if (m_hoverExpand)
             setExpanded(false);
     });
+
+    m_expandTimer = new QTimer(this);
+    m_expandTimer->setSingleShot(true);
+    connect(m_expandTimer, &QTimer::timeout, this, [this]() {
+        if (m_hoverExpand)
+            setExpanded(true);
+    });
+
+    connect(m_toolButton, &ToolButton::clicked, this, [this]() {
+        if (m_hoverExpand) {
+            m_expandTimer->stop();
+            setExpanded(!m_expanded);
+        }
+    });
 }
 
 void ExpandableToolButton::setContentWidget(QWidget* widget)
@@ -134,7 +148,7 @@ void ExpandableToolButton::enterEvent(QEvent* event)
 {
     if (m_hoverExpand) {
         m_collapseTimer->stop();
-        setExpanded(true);
+        m_expandTimer->start(EXPAND_DELAY_MS);
     }
     QWidget::enterEvent(event);
 }
@@ -142,6 +156,7 @@ void ExpandableToolButton::enterEvent(QEvent* event)
 void ExpandableToolButton::leaveEvent(QEvent* event)
 {
     if (m_hoverExpand) {
+        m_expandTimer->stop();
         m_collapseTimer->start(COLLAPSE_DELAY_MS);
     }
     QWidget::leaveEvent(event);
