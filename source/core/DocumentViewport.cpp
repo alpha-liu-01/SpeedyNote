@@ -5437,7 +5437,11 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint, pe.viewportPos);
         } else if (m_objectInsertMode == ObjectInsertMode::Text) {
             m_isCreatingTextBox = true;
-            m_textBoxCreateStartDoc = hit.pagePoint;
+            if (m_document && m_document->isEdgeless()) {
+                m_textBoxCreateStartDoc = viewportToDocument(pe.viewportPos);
+            } else {
+                m_textBoxCreateStartDoc = hit.pagePoint;
+            }
             m_textBoxCreateStartVP = pe.viewportPos;
             m_textBoxCreatePageIndex = hit.pageIndex;
             m_pointerActive = true;
@@ -5734,10 +5738,7 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         int pageIndex = m_textBoxCreatePageIndex;
 
         if (m_document && m_document->isEdgeless()) {
-            QPointF docPos = viewportToDocument(pe.viewportPos);
-            auto coord = m_document->tileCoordForPoint(docPos);
-            releasePagePoint = docPos - QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
-                                                coord.second * Document::EDGELESS_TILE_SIZE);
+            releasePagePoint = viewportToDocument(pe.viewportPos);
         } else {
             releasePagePoint = (releaseHit.pageIndex == pageIndex && releaseHit.pageIndex >= 0)
                 ? releaseHit.pagePoint : m_textBoxCreateStartDoc;
@@ -7281,6 +7282,7 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
     textObj->text = QString();
     textObj->showBorder = true;
     textObj->visible = true;
+    textObj->fontColor = m_penColor;
     textObj->backgroundColor = QColor(255, 255, 255, 180);
 
     TextBoxObject* rawPtr = textObj.get();
@@ -7288,14 +7290,18 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
     Document::TileCoord insertedTileCoord = {0, 0};
 
     if (m_document->isEdgeless()) {
-        QPointF docPos = viewportToDocument(viewportPos);
-        auto coord = m_document->tileCoordForPoint(docPos);
+        auto coord = m_document->tileCoordForPoint(rect.topLeft());
 
         Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
         if (!targetTile) {
             qWarning() << "createTextBoxAtRect: Failed to get/create tile";
             return;
         }
+
+        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                           coord.second * Document::EDGELESS_TILE_SIZE);
+        textObj->position = rect.topLeft() - tileOrigin;
+        textObj->size = rect.size();
 
         int activeLayer = m_edgelessActiveLayerIndex;
         int defaultAffinity = activeLayer - 1;
@@ -11858,6 +11864,7 @@ void DocumentViewport::undo()
                         tbox->text = action.objectOldText;
                         tbox->alignment = static_cast<TextAlignment>(action.objectOldTextAlignment);
                         tbox->backgroundColor.setAlpha(action.objectOldBgAlpha);
+                        tbox->fontColor = action.objectOldFontColor;
                         tbox->invalidateDocCache();
                     }
                     markObjDirty(m_document, action);
@@ -12092,6 +12099,7 @@ void DocumentViewport::redo()
                         tbox->text = action.objectNewText;
                         tbox->alignment = static_cast<TextAlignment>(action.objectNewTextAlignment);
                         tbox->backgroundColor.setAlpha(action.objectNewBgAlpha);
+                        tbox->fontColor = action.objectNewFontColor;
                         tbox->invalidateDocCache();
                     }
                     markObjDirty(m_document, action);
@@ -12343,7 +12351,8 @@ void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffini
 
 void DocumentViewport::pushObjectTextEditUndo(
     InsertedObject* obj, const QString& oldText, const QString& newText,
-    int oldAlign, int newAlign, int oldAlpha, int newAlpha)
+    int oldAlign, int newAlign, int oldAlpha, int newAlpha,
+    const QColor& oldFontColor, const QColor& newFontColor)
 {
     if (!obj) return;
 
@@ -12357,6 +12366,8 @@ void DocumentViewport::pushObjectTextEditUndo(
     action.objectNewTextAlignment = newAlign;
     action.objectOldBgAlpha = oldAlpha;
     action.objectNewBgAlpha = newAlpha;
+    action.objectOldFontColor = oldFontColor;
+    action.objectNewFontColor = newFontColor;
     if (m_document && m_document->isEdgeless()) {
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);
@@ -12365,8 +12376,14 @@ void DocumentViewport::pushObjectTextEditUndo(
                 break;
             }
         }
-    } else {
-        action.objectPageIndex = m_currentPageIndex;
+    } else if (m_document) {
+        for (int i = 0; i < m_document->pageCount(); ++i) {
+            Page* page = m_document->page(i);
+            if (page && page->objectById(obj->id)) {
+                action.objectPageIndex = i;
+                break;
+            }
+        }
     }
     pushUndoAction(action);
     emit documentModified();

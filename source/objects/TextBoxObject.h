@@ -37,4 +37,5 @@ protected:
     mutable qreal m_cachedDocWidth = -1;
     mutable QString m_cachedText;
     mutable TextAlignment m_cachedAlignment = TextAlignment::Left;
+    mutable QColor m_cachedFontColor;
 };

@@ -79,6 +79,7 @@ private:
     QWidget* m_contentWidget = nullptr;
     QHBoxLayout* m_mainLayout = nullptr;
     QTimer* m_collapseTimer = nullptr;
+    QTimer* m_expandTimer = nullptr;
     bool m_expanded = false;
     bool m_darkMode = false;
     bool m_hoverExpand = false;
@@ -86,6 +87,7 @@ private:
     static constexpr int BORDER_RADIUS = 6;
     static constexpr int CONTENT_SPACING = 2;
     static constexpr int COLLAPSE_DELAY_MS = 350;
+    static constexpr int EXPAND_DELAY_MS = 1000;
 };
 
 #endif // EXPANDABLETOOLBUTTON_H

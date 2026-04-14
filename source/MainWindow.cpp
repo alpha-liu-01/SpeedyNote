@@ -5913,7 +5913,8 @@ void MainWindow::openFloatingTextEditor(InsertedObject* obj)
                 this, [this](const QString& objectId,
                              const QString& oldText, const QString& newText,
                              int oldAlign, int newAlign,
-                             int oldOpacity, int newOpacity) {
+                             int oldOpacity, int newOpacity,
+                             const QColor& oldFontColor, const QColor& newFontColor) {
             DocumentViewport* vp = currentViewport();
             if (!vp) return;
             InsertedObject* obj = nullptr;
@@ -5933,7 +5934,8 @@ void MainWindow::openFloatingTextEditor(InsertedObject* obj)
             if (obj) {
                 vp->pushObjectTextEditUndo(obj, oldText, newText,
                                            oldAlign, newAlign,
-                                           oldOpacity, newOpacity);
+                                           oldOpacity, newOpacity,
+                                           oldFontColor, newFontColor);
             }
         });
     }
@@ -5943,7 +5945,31 @@ void MainWindow::openFloatingTextEditor(InsertedObject* obj)
 
     // Position near the text box
     if (DocumentViewport* vp = currentViewport()) {
-        QPointF vpPt = vp->documentToViewport(textBox->position);
+        QPointF docPos = textBox->position;
+
+        if (Document* doc = vp->document()) {
+            if (doc->isEdgeless()) {
+                for (const auto& coord : doc->allLoadedTileCoords()) {
+                    Page* tile = doc->getTile(coord.first, coord.second);
+                    if (tile && tile->objectById(textBox->id)) {
+                        docPos = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                         coord.second * Document::EDGELESS_TILE_SIZE)
+                                 + textBox->position;
+                        break;
+                    }
+                }
+            } else {
+                for (int i = 0; i < doc->pageCount(); ++i) {
+                    Page* page = doc->page(i);
+                    if (page && page->objectById(textBox->id)) {
+                        docPos = vp->pageToDocument(i, textBox->position);
+                        break;
+                    }
+                }
+            }
+        }
+
+        QPointF vpPt = vp->documentToViewport(docPos);
         QPoint globalPt = vp->mapToGlobal(vpPt.toPoint());
         QPoint localPt = mapFromGlobal(globalPt);
 

@@ -7,6 +7,9 @@
 #include <QButtonGroup>
 #include <QSlider>
 #include <QLabel>
+#include <QColor>
+
+class ColorPresetButton;
 
 class QMarkdownTextEdit;
 
@@ -25,7 +28,8 @@ signals:
     void editorClosed(const QString& objectId,
                       const QString& oldText, const QString& newText,
                       int oldAlignment, int newAlignment,
-                      int oldOpacity, int newOpacity);
+                      int oldOpacity, int newOpacity,
+                      const QColor& oldFontColor, const QColor& newFontColor);
 
 private:
     void buildUi();
@@ -33,6 +37,7 @@ private:
     void onTextChanged();
     void onAlignmentChanged(int id);
     void onOpacityChanged(int value);
+    void onColorButtonClicked();
 
     bool eventFilter(QObject* obj, QEvent* event) override;
     void mousePressEvent(QMouseEvent* e) override;
@@ -48,6 +53,7 @@ private:
     QPushButton* m_alignCenter = nullptr;
     QPushButton* m_alignRight = nullptr;
     QButtonGroup* m_alignGroup = nullptr;
+    ColorPresetButton* m_colorButton = nullptr;
     QSlider* m_opacitySlider = nullptr;
     QLabel* m_opacityLabel = nullptr;
     QPushButton* m_closeButton = nullptr;
@@ -58,6 +64,7 @@ private:
     QString m_originalText;
     TextAlignment m_originalAlignment = TextAlignment::Left;
     int m_originalOpacity = 180;
+    QColor m_originalFontColor = QColor(60, 60, 60);
     bool m_darkMode = false;
 
     QPoint m_dragOffset;

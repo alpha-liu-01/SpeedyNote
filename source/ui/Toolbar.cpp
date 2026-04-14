@@ -100,6 +100,8 @@ void Toolbar::setupUi()
     m_ocrExpandable->toolButton()->setToolTip(tr("OCR - Text Recognition"));
     m_ocrExpandable->setContentWidget(m_ocrSubToolbar);
     m_ocrExpandable->setHoverExpand(true);
+    connect(m_ocrExpandable, &ExpandableToolButton::expandedChanged,
+            this, &Toolbar::onOcrExpanded);
     mainLayout->addWidget(m_ocrExpandable);
 
     // --- Pan (no subtoolbar) ---
@@ -220,6 +222,17 @@ void Toolbar::collapseAllToolButtons()
     m_eraserExpandable->setExpanded(false);
     m_objectInsertExpandable->setExpanded(false);
     m_textExpandable->setExpanded(false);
+}
+
+void Toolbar::onOcrExpanded(bool expanded)
+{
+    ExpandableToolButton* toolExp = expandableForTool(m_currentTool);
+    if (!toolExp) return;
+
+    if (expanded)
+        toolExp->setExpanded(false);
+    else
+        toolExp->setExpanded(true);
 }
 
 ExpandableToolButton* Toolbar::expandableForTool(ToolType tool) const

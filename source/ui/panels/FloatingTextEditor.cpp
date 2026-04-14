@@ -1,4 +1,5 @@
 #include "FloatingTextEditor.h"
+#include "../widgets/ColorPresetButton.h"
 #include "../../../markdown/qmarkdowntextedit.h"
 #include "../../compat/qt_compat.h"
 
@@ -13,6 +14,7 @@
 #include <QUrl>
 #include <QRegularExpression>
 #include <QTextCursor>
+#include <QColorDialog>
 
 FloatingTextEditor::FloatingTextEditor(QWidget* parent)
     : QWidget(parent)
@@ -82,6 +84,14 @@ void FloatingTextEditor::buildUi()
 
     tbLayout->addSpacing(8);
 
+    m_colorButton = new ColorPresetButton(toolbar);
+    m_colorButton->setColor(QColor(60, 60, 60));
+    m_colorButton->setSelected(true);
+    m_colorButton->setToolTip(tr("Text Color (click to change)"));
+    tbLayout->addWidget(m_colorButton);
+
+    tbLayout->addSpacing(8);
+
     m_opacityLabel = new QLabel(tr("Opacity:"), toolbar);
     tbLayout->addWidget(m_opacityLabel);
 
@@ -110,6 +120,8 @@ void FloatingTextEditor::buildUi()
             this, &FloatingTextEditor::onOpacityChanged);
     connect(m_alignGroup, &QButtonGroup::idClicked,
             this, &FloatingTextEditor::onAlignmentChanged);
+    connect(m_colorButton, &ColorPresetButton::clicked,
+            this, &FloatingTextEditor::onColorButtonClicked);
 }
 
 bool FloatingTextEditor::eventFilter(QObject* obj, QEvent* event)
@@ -139,8 +151,10 @@ void FloatingTextEditor::setTarget(TextBoxObject* obj)
     m_originalText = obj->text;
     m_originalAlignment = obj->alignment;
     m_originalOpacity = obj->backgroundColor.alpha();
+    m_originalFontColor = obj->fontColor;
 
     m_editor->setPlainText(obj->text);
+    m_colorButton->setColor(obj->fontColor);
 
     int alignId = 0;
     if (obj->alignment == TextAlignment::Center) alignId = 1;
@@ -173,10 +187,12 @@ void FloatingTextEditor::closeEditor()
     if (currentAlignId == 1) currentAlignment = TextAlignment::Center;
     else if (currentAlignId == 2) currentAlignment = TextAlignment::Right;
     int currentOpacity = m_opacitySlider->value();
+    QColor currentFontColor = m_colorButton->color();
 
     bool changed = (currentText != m_originalText)
                  || (currentAlignment != m_originalAlignment)
-                 || (currentOpacity != m_originalOpacity);
+                 || (currentOpacity != m_originalOpacity)
+                 || (currentFontColor != m_originalFontColor);
 
     if (changed) {
         emit editorClosed(m_targetId,
@@ -184,7 +200,9 @@ void FloatingTextEditor::closeEditor()
                           static_cast<int>(m_originalAlignment),
                           static_cast<int>(currentAlignment),
                           m_originalOpacity,
-                          currentOpacity);
+                          currentOpacity,
+                          m_originalFontColor,
+                          currentFontColor);
     }
 
     m_target = nullptr;
@@ -259,6 +277,20 @@ void FloatingTextEditor::onOpacityChanged(int value)
     bg.setAlpha(value);
     m_target->backgroundColor = bg;
     emit repaintRequested();
+}
+
+void FloatingTextEditor::onColorButtonClicked()
+{
+    QColor current = m_colorButton->color();
+    QColor chosen = QColorDialog::getColor(current, this, tr("Select Text Color"));
+    if (!chosen.isValid() || chosen == current) return;
+
+    m_colorButton->setColor(chosen);
+    if (m_target) {
+        m_target->fontColor = chosen;
+        m_target->invalidateDocCache();
+        emit repaintRequested();
+    }
 }
 
 // --- Drag support ---
