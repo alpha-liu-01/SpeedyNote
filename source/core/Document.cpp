@@ -1622,6 +1622,14 @@ QVector<Document::TileCoord> Document::allLoadedTileCoords() const
     return coords;
 }
 
+QVector<Document::TileCoord> Document::allKnownTileCoords() const
+{
+    std::set<TileCoord> all = m_tileIndex;
+    for (const auto& pair : m_tiles)
+        all.insert(pair.first);
+    return QVector<TileCoord>(all.begin(), all.end());
+}
+
 void Document::markTileDirty(TileCoord coord)
 {
     m_dirtyTiles.insert(coord);
@@ -3281,7 +3289,10 @@ void Document::materializeOcrTextObjects(Page* page) const
         if (suppressed) continue;
 
         QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
-        auto obj = OcrTextObject::createFromBlock(block, color);
+        auto obj = OcrTextObject::createFromBlock(block, color, m_ocrDarkMode);
+        obj->visible = m_ocrTextVisible;
+        obj->showConfidence = m_ocrShowConfidence;
+        obj->layerAffinity = OcrTextObject::resolveLayerAffinity(page, block.sourceStrokeIds);
         page->addObject(std::move(obj));
     }
 }

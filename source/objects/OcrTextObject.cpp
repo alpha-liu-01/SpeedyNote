@@ -265,7 +265,6 @@ std::unique_ptr<OcrTextObject> OcrTextObject::createFromBlock(
     obj->backgroundColor = darkMode ? QColor(40, 40, 40, 180)
                                     : QColor(255, 255, 255, 180);
     obj->visible = false;
-    obj->layerAffinity = 0;
     return obj;
 }
 
@@ -301,4 +300,33 @@ QColor OcrTextObject::dominantStrokeColor(const Page* page,
         }
     }
     return QColor::fromRgb(best);
+}
+
+int OcrTextObject::resolveLayerAffinity(const Page* page,
+                                        const QVector<QString>& strokeIds)
+{
+    if (!page || strokeIds.isEmpty())
+        return -1;
+
+    QSet<QString> idSet(strokeIds.begin(), strokeIds.end());
+    int bestLayerIdx = 0;
+    int bestCount = 0;
+
+    for (int i = 0; i < static_cast<int>(page->vectorLayers.size()); ++i) {
+        const auto& layer = page->vectorLayers[i];
+        if (!layer) continue;
+        int count = 0;
+        for (const auto& stroke : layer->strokes()) {
+            if (idSet.contains(stroke.id))
+                ++count;
+        }
+        if (count > bestCount) {
+            bestCount = count;
+            bestLayerIdx = i;
+        }
+    }
+
+    // affinity = layerIndex - 1: objects with affinity K have their visibility
+    // controlled by Layer K+1, so to tie to Layer N we use affinity N-1.
+    return bestLayerIdx - 1;
 }

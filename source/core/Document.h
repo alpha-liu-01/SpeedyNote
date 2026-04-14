@@ -304,7 +304,13 @@ public:
      * @return Vector of tile coordinates that are in m_tiles.
      */
     QVector<TileCoord> allLoadedTileCoords() const;
-    
+
+    /**
+     * @brief Get all tile coordinates that exist (union of in-memory and disk index).
+     * @return Vector of tile coordinates from both m_tiles and m_tileIndex.
+     */
+    QVector<TileCoord> allKnownTileCoords() const;
+
     // =========================================================================
     // Object Extent Tracking (Phase O1.5)
     // =========================================================================
@@ -460,7 +466,14 @@ public:
      * @return Parsed text blocks, or empty vector on error.
      */
     static QVector<OcrTextBlock> loadOcrBlocksFromFile(const QString& ocrJsonPath);
-    
+
+    void setOcrTextVisible(bool visible) { m_ocrTextVisible = visible; }
+    bool ocrTextVisible() const { return m_ocrTextVisible; }
+    void setOcrDarkMode(bool dark) { m_ocrDarkMode = dark; }
+    bool ocrDarkMode() const { return m_ocrDarkMode; }
+    void setOcrShowConfidence(bool show) { m_ocrShowConfidence = show; }
+    bool ocrShowConfidence() const { return m_ocrShowConfidence; }
+
     /**
      * @brief Check if lazy loading from disk is enabled.
      */
@@ -1382,7 +1395,11 @@ private:
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
     std::set<TileCoord> m_deletedTiles;             ///< Tiles to delete from disk on next save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
-    
+
+    bool m_ocrTextVisible = false;
+    bool m_ocrDarkMode = false;
+    bool m_ocrShowConfidence = false;
+
     // ===== Object Extent Tracking (Phase O1.5) =====
     /// Maximum extent (largest dimension) of any object in the document.
     /// Used to calculate extra tile loading margin in edgeless mode.
