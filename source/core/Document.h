@@ -304,7 +304,13 @@ public:
      * @return Vector of tile coordinates that are in m_tiles.
      */
     QVector<TileCoord> allLoadedTileCoords() const;
-    
+
+    /**
+     * @brief Get all tile coordinates that exist (union of in-memory and disk index).
+     * @return Vector of tile coordinates from both m_tiles and m_tileIndex.
+     */
+    QVector<TileCoord> allKnownTileCoords() const;
+
     // =========================================================================
     // Object Extent Tracking (Phase O1.5)
     // =========================================================================

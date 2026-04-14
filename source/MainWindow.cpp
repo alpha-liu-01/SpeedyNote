@@ -5400,7 +5400,7 @@ void MainWindow::triggerOcrForCurrentPage()
             QVector<VectorStroke> strokes = collectPageStrokes(tile);
             if (!strokes.isEmpty())
                 QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
-                    Q_ARG(QString, tile->uuid),
+                    Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
                     Q_ARG(QVector<VectorStroke>, strokes),
                     Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
         }
@@ -5421,6 +5421,15 @@ void MainWindow::triggerOcrForAllPages()
     Document* doc = currentViewport() ? currentViewport()->document() : nullptr;
     if (!doc || !m_ocrWorker) return;
 
+    // Evict any leftover temp tiles from a previous scan-all that may not have finished
+    if (!m_ocrTempLoadedTiles.isEmpty() && m_ocrTempLoadedDoc &&
+        m_ocrTempLoadedDoc->isEdgeless()) {
+        for (const auto& coord : m_ocrTempLoadedTiles)
+            m_ocrTempLoadedDoc->evictTile(coord);
+    }
+    m_ocrTempLoadedTiles.clear();
+    m_ocrTempLoadedDoc = nullptr;
+
     QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
         Q_ARG(QString, resolveOcrLanguage(doc)));
 
@@ -5431,13 +5440,28 @@ void MainWindow::triggerOcrForAllPages()
     QVector<QSet<QString>> suppressedSets;
 
     if (doc->isEdgeless()) {
-        for (auto coord : doc->allLoadedTileCoords()) {
+        auto allCoords = doc->allKnownTileCoords();
+        auto loadedBefore = doc->allLoadedTileCoords();
+        QSet<QPair<int,int>> loadedSet(loadedBefore.begin(), loadedBefore.end());
+
+        for (const auto& coord : allCoords) {
             Page* tile = doc->getTile(coord.first, coord.second);
             if (!tile) continue;
-            pageIds.append(tile->uuid);
-            strokeSets.append(collectPageStrokes(tile));
+            QVector<VectorStroke> strokes = collectPageStrokes(tile);
+            if (strokes.isEmpty()) {
+                if (!loadedSet.contains(coord))
+                    doc->evictTile(coord);
+                continue;
+            }
+            if (!loadedSet.contains(coord))
+                m_ocrTempLoadedTiles.insert(coord);
+            pageIds.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+            strokeSets.append(strokes);
             suppressedSets.append(tile->suppressedStrokeIds);
         }
+
+        if (!m_ocrTempLoadedTiles.isEmpty())
+            m_ocrTempLoadedDoc = doc;
     } else {
         for (int i = 0; i < doc->pageCount(); ++i) {
             Page* page = doc->page(i);
@@ -5464,22 +5488,25 @@ void MainWindow::onDebounceTimeout()
     QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
         Q_ARG(QString, resolveOcrLanguage(doc)));
 
-    // The debounce timer only fires after strokesChanged, so we know the
-    // current page was edited.  Scan just that page (not the entire document).
     if (doc->isEdgeless()) {
-        QPointF center = vp->viewportCenterInDocument();
-        auto coord = doc->tileCoordForPoint(center);
-        Page* tile = doc->getTile(coord.first, coord.second);
-        if (!tile) return;
+        auto dirtyTiles = vp->takeOcrDirtyTiles();
+        if (dirtyTiles.isEmpty()) return;
 
-        QVector<VectorStroke> strokes = collectPageStrokes(tile);
-        if (strokes.isEmpty()) return;
-
-        m_toolbar->ocrSubToolbar()->setStatusText(tr("Auto-scanning..."));
-        QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
-            Q_ARG(QString, tile->uuid),
-            Q_ARG(QVector<VectorStroke>, strokes),
-            Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+        bool anyQueued = false;
+        for (const auto& coord : dirtyTiles) {
+            Page* tile = doc->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            QVector<VectorStroke> strokes = collectPageStrokes(tile);
+            if (strokes.isEmpty()) continue;
+            if (!anyQueued) {
+                m_toolbar->ocrSubToolbar()->setStatusText(tr("Auto-scanning..."));
+                anyQueued = true;
+            }
+            QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
+                Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
+                Q_ARG(QVector<VectorStroke>, strokes),
+                Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+        }
     } else {
         int idx = vp->currentPageIndex();
         Page* page = doc->page(idx);
@@ -5498,31 +5525,46 @@ void MainWindow::onDebounceTimeout()
 
 void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextBlock>& blocks)
 {
-    // Search ALL open documents — the user may have switched tabs since triggering OCR.
     Page* page = nullptr;
     Document* doc = nullptr;
+    Document::TileCoord tileCoord{0, 0};
+    bool tileCoordResolved = false;
 
-    for (int d = 0; d < m_documentManager->documentCount(); ++d) {
-        Document* candidate = m_documentManager->documentAt(d);
-        if (!candidate) continue;
-
-        int idx = candidate->pageIndexByUuid(pageId);
-        if (idx >= 0) {
-            page = candidate->page(idx);
-            doc = candidate;
-            break;
-        }
-
-        if (candidate->isEdgeless()) {
-            for (auto coord : candidate->allLoadedTileCoords()) {
-                Page* tile = candidate->getTile(coord.first, coord.second);
-                if (tile && tile->uuid == pageId) {
-                    page = tile;
-                    doc = candidate;
-                    break;
+    // Try coord-keyed lookup first (edgeless tiles use "tx,ty" as pageId)
+    QStringList parts = pageId.split(',');
+    if (parts.size() == 2) {
+        bool okX, okY;
+        int tx = parts[0].toInt(&okX);
+        int ty = parts[1].toInt(&okY);
+        if (okX && okY) {
+            for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+                Document* candidate = m_documentManager->documentAt(d);
+                if (candidate && candidate->isEdgeless()) {
+                    Page* tile = candidate->getTile(tx, ty);
+                    if (tile) {
+                        page = tile;
+                        doc = candidate;
+                        tileCoord = {tx, ty};
+                        tileCoordResolved = true;
+                        break;
+                    }
                 }
             }
-            if (page) break;
+        }
+    }
+
+    // Fallback: UUID-based lookup (paged mode)
+    if (!page) {
+        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+            Document* candidate = m_documentManager->documentAt(d);
+            if (!candidate) continue;
+
+            int idx = candidate->pageIndexByUuid(pageId);
+            if (idx >= 0) {
+                page = candidate->page(idx);
+                doc = candidate;
+                break;
+            }
         }
     }
     if (!page || !doc) return;
@@ -5532,7 +5574,10 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
 
     syncOcrTextObjects(page, blocks);
 
-    doc->savePageOcr(pageId, page);
+    if (tileCoordResolved)
+        doc->saveTileOcr(tileCoord);
+    else
+        doc->savePageOcr(pageId, page);
 
     int wordCount = 0;
     for (const auto& b : blocks)
@@ -5554,6 +5599,13 @@ void MainWindow::onOcrBatchFinished(int pagesScanned, int pagesWithText)
         tr("OCR complete: %1 pages scanned, %2 with text")
             .arg(pagesScanned).arg(pagesWithText));
     m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(8000);
+
+    if (!m_ocrTempLoadedTiles.isEmpty() && m_ocrTempLoadedDoc) {
+        for (const auto& coord : m_ocrTempLoadedTiles)
+            m_ocrTempLoadedDoc->evictTile(coord);
+    }
+    m_ocrTempLoadedTiles.clear();
+    m_ocrTempLoadedDoc = nullptr;
 }
 
 void MainWindow::onOcrError(const QString& pageId, const QString& message)

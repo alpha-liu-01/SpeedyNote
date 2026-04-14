@@ -614,7 +614,9 @@ public:
                                 int oldOpacity, int newOpacity);
 
     void pushOcrLockUndo(const QVector<QString>& objectIds, bool newState);
-    
+
+    QSet<QPair<int,int>> takeOcrDirtyTiles();
+
     // ===== Affinity Helpers (Phase O3.5.3) =====
     
     /**
@@ -2355,6 +2357,9 @@ private:
     QStack<UndoAction> m_undoStack;   ///< Global undo stack (both paged and edgeless)
     QStack<UndoAction> m_redoStack;   ///< Global redo stack (both paged and edgeless)
     static constexpr int MAX_UNDO = 100;  ///< Max undo actions
+
+    QSet<QPair<int,int>> m_ocrDirtyTiles;
+    void markOcrDirtyTiles(const UndoAction& action);
     
     // ===== Edgeless Position History (Phase 4) =====
     QList<QPointF> m_edgelessPositionHistory;         ///< Previous viewport positions (oldest first)

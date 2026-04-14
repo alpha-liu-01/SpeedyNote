@@ -533,6 +533,8 @@ private:
     QTimer *m_ocrDebounceTimer = nullptr;
     bool m_autoOcrEnabled = false;
     QStringList m_ocrAvailableLanguages;
+    QSet<QPair<int,int>> m_ocrTempLoadedTiles;
+    Document* m_ocrTempLoadedDoc = nullptr;
     
     // Phase 2B: Floating Text Editor
     FloatingTextEditor* m_floatingTextEditor = nullptr;

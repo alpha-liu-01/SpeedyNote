@@ -4898,8 +4898,10 @@ void DocumentViewport::finishStrokeEdgeless()
             seg.tileCoord = pair.first;
             seg.stroke = pair.second;
             undoAction.segments.append(seg);
+            m_ocrDirtyTiles.insert(pair.first);
         }
         pushUndoAction(undoAction);
+        emit strokesChanged();
     }
     
     // Clear stroke state
@@ -5062,7 +5064,9 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                 seg.tileCoord = startTile;
                 seg.stroke = localStroke;
                 undoAction.segments.append(seg);
+                m_ocrDirtyTiles.insert(startTile);
                 pushUndoAction(undoAction);
+                emit strokesChanged();
             }
         } else {
             // Line crosses tile boundaries - sample points along the line
@@ -5130,8 +5134,10 @@ void DocumentViewport::createStraightLineStroke(const QPointF& start, const QPoi
                     seg.tileCoord = pair.first;
                     seg.stroke = pair.second;
                     undoAction.segments.append(seg);
+                    m_ocrDirtyTiles.insert(pair.first);
                 }
                 pushUndoAction(undoAction);
+                emit strokesChanged();
             }
         }
     } else {
@@ -9621,7 +9627,9 @@ void DocumentViewport::applySelectionTransform()
     }
 
     if (!undoAction.removedSegments.isEmpty() || !undoAction.addedSegments.isEmpty()) {
+        markOcrDirtyTiles(undoAction);
         pushUndoAction(undoAction);
+        emit strokesChanged();
     }
     
     clearLassoSelection();
@@ -11370,7 +11378,9 @@ void DocumentViewport::eraseAtEdgeless(QPointF viewportPos)
     }
 
     if (!undoAction.segments.isEmpty()) {
+        markOcrDirtyTiles(undoAction);
         pushUndoAction(undoAction);
+        emit strokesChanged();
         emit documentModified();
         
         // Dirty region update - use elliptical region to match circular eraser
@@ -11505,7 +11515,9 @@ void DocumentViewport::finalizeEraserLasso()
     }
 
     if (!undoAction.segments.isEmpty()) {
+        markOcrDirtyTiles(undoAction);
         pushUndoAction(undoAction);
+        emit strokesChanged();
         emit documentModified();
     }
 }
@@ -11519,6 +11531,24 @@ void DocumentViewport::pushUndoAction(const UndoAction& action)
     m_redoStack.clear();
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(false);
+}
+
+QSet<QPair<int,int>> DocumentViewport::takeOcrDirtyTiles()
+{
+    QSet<QPair<int,int>> result;
+    result.swap(m_ocrDirtyTiles);
+    return result;
+}
+
+void DocumentViewport::markOcrDirtyTiles(const UndoAction& action)
+{
+    if (!m_document || !m_document->isEdgeless()) return;
+    for (const auto& seg : action.segments)
+        m_ocrDirtyTiles.insert(seg.tileCoord);
+    for (const auto& seg : action.removedSegments)
+        m_ocrDirtyTiles.insert(seg.tileCoord);
+    for (const auto& seg : action.addedSegments)
+        m_ocrDirtyTiles.insert(seg.tileCoord);
 }
 
 void DocumentViewport::pushPageStrokeUndo(int pageIndex, UndoAction::Type type, const VectorStroke& stroke)
@@ -11933,8 +11963,10 @@ void DocumentViewport::undo()
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
     if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
-        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection)
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection) {
+        markOcrDirtyTiles(action);
         emit strokesChanged();
+    }
     if (!m_document->isEdgeless())
         for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();
@@ -12165,8 +12197,10 @@ void DocumentViewport::redo()
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
         emit linkObjectListMayHaveChanged();
     if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
-        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection)
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection) {
+        markOcrDirtyTiles(action);
         emit strokesChanged();
+    }
     if (!m_document->isEdgeless())
         for (int p : collectAffectedPages(action)) emit pageModified(p);
     update();

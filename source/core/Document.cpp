@@ -1622,6 +1622,14 @@ QVector<Document::TileCoord> Document::allLoadedTileCoords() const
     return coords;
 }
 
+QVector<Document::TileCoord> Document::allKnownTileCoords() const
+{
+    std::set<TileCoord> all = m_tileIndex;
+    for (const auto& pair : m_tiles)
+        all.insert(pair.first);
+    return QVector<TileCoord>(all.begin(), all.end());
+}
+
 void Document::markTileDirty(TileCoord coord)
 {
     m_dirtyTiles.insert(coord);
