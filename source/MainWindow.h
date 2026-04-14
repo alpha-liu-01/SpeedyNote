@@ -11,6 +11,7 @@
 #include <QTimer>
 #include <QPointer>
 #include <QScrollBar>
+#include <set>
 #include <QSpinBox>
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "SDLControllerManager.h"
@@ -533,7 +534,7 @@ private:
     QTimer *m_ocrDebounceTimer = nullptr;
     bool m_autoOcrEnabled = false;
     QStringList m_ocrAvailableLanguages;
-    QSet<QPair<int,int>> m_ocrTempLoadedTiles;
+    std::set<std::pair<int,int>> m_ocrTempLoadedTiles;
     Document* m_ocrTempLoadedDoc = nullptr;
     
     // Phase 2B: Floating Text Editor
