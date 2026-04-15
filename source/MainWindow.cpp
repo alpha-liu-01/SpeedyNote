@@ -2552,6 +2552,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         setOcrTextVisibility(m_toolbar->ocrSubToolbar()->isShowTextEnabled());
         setOcrConfidenceVisibility(m_toolbar->ocrSubToolbar()->isConfidenceEnabled());
 
+        // OCR: Restore snap toggle from document's persisted state
+        if (Document* doc = viewport->document()) {
+            OcrSubToolbar* ocrST = m_toolbar->ocrSubToolbar();
+            ocrST->blockSignals(true);
+            ocrST->setSnapToGridChecked(doc->ocrSnapToBackground);
+            ocrST->blockSignals(false);
+        }
+
         // OCR: Sync language for the new document
         if (m_ocrWorker) {
             Document* doc = viewport->document();
@@ -4849,6 +4857,14 @@ void MainWindow::connectSubToolbarSignals()
     connect(ocrST, &OcrSubToolbar::confidenceToggled, this, [this](bool enabled) {
         setOcrConfidenceVisibility(enabled);
     });
+    connect(ocrST, &OcrSubToolbar::snapToGridToggled, this, [this](bool enabled) {
+        DocumentViewport* vp = currentViewport();
+        Document* doc = vp ? vp->document() : nullptr;
+        if (doc) {
+            doc->ocrSnapToBackground = enabled;
+            doc->modified = true;
+        }
+    });
 }
 
 // ============================================================================
@@ -5355,6 +5371,8 @@ void MainWindow::setupOcr()
     qRegisterMetaType<QVector<QVector<VectorStroke>>>("QVector<QVector<VectorStroke>>");
     qRegisterMetaType<QVector<QSet<QString>>>("QVector<QSet<QString>>");
     qRegisterMetaType<QVector<OcrTextBlock>>("QVector<OcrTextBlock>");
+    qRegisterMetaType<OcrSnapParams>("OcrSnapParams");
+    qRegisterMetaType<QVector<OcrSnapParams>>("QVector<OcrSnapParams>");
 
     // Start with OCR disabled; the worker thread will report availability after init.
     // (Avoids creating WinRT COM objects on the main thread.)
@@ -5408,7 +5426,8 @@ void MainWindow::triggerOcrForCurrentPage()
                 QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
                     Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
                     Q_ARG(QVector<VectorStroke>, strokes),
-                    Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+                    Q_ARG(QSet<QString>, tile->suppressedStrokeIds),
+                    Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, tile)));
         }
     } else {
         int pageIndex = vp->currentPageIndex();
@@ -5418,7 +5437,8 @@ void MainWindow::triggerOcrForCurrentPage()
         QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
             Q_ARG(QString, page->uuid),
             Q_ARG(QVector<VectorStroke>, strokes),
-            Q_ARG(QSet<QString>, page->suppressedStrokeIds));
+            Q_ARG(QSet<QString>, page->suppressedStrokeIds),
+            Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, page)));
     }
 }
 
@@ -5444,6 +5464,7 @@ void MainWindow::triggerOcrForAllPages()
     QVector<QString> pageIds;
     QVector<QVector<VectorStroke>> strokeSets;
     QVector<QSet<QString>> suppressedSets;
+    QVector<OcrSnapParams> snapParamsVec;
 
     if (doc->isEdgeless()) {
         auto allCoords = doc->allKnownTileCoords();
@@ -5464,6 +5485,7 @@ void MainWindow::triggerOcrForAllPages()
             pageIds.append(QString("%1,%2").arg(coord.first).arg(coord.second));
             strokeSets.append(strokes);
             suppressedSets.append(tile->suppressedStrokeIds);
+            snapParamsVec.append(buildOcrSnapParams(doc, tile));
         }
 
         if (!m_ocrTempLoadedTiles.empty())
@@ -5475,6 +5497,7 @@ void MainWindow::triggerOcrForAllPages()
             pageIds.append(page->uuid);
             strokeSets.append(collectPageStrokes(page));
             suppressedSets.append(page->suppressedStrokeIds);
+            snapParamsVec.append(buildOcrSnapParams(doc, page));
         }
     }
 
@@ -5482,7 +5505,8 @@ void MainWindow::triggerOcrForAllPages()
         QMetaObject::invokeMethod(m_ocrWorker, "processBatch", Qt::QueuedConnection,
             Q_ARG(QVector<QString>, pageIds),
             Q_ARG(QVector<QVector<VectorStroke>>, strokeSets),
-            Q_ARG(QVector<QSet<QString>>, suppressedSets));
+            Q_ARG(QVector<QSet<QString>>, suppressedSets),
+            Q_ARG(QVector<OcrSnapParams>, snapParamsVec));
 }
 
 void MainWindow::onDebounceTimeout()
@@ -5511,7 +5535,8 @@ void MainWindow::onDebounceTimeout()
             QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
                 Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
                 Q_ARG(QVector<VectorStroke>, strokes),
-                Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+                Q_ARG(QSet<QString>, tile->suppressedStrokeIds),
+                Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, tile)));
         }
     } else {
         int idx = vp->currentPageIndex();
@@ -5525,7 +5550,8 @@ void MainWindow::onDebounceTimeout()
         QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
             Q_ARG(QString, page->uuid),
             Q_ARG(QVector<VectorStroke>, strokes),
-            Q_ARG(QSet<QString>, page->suppressedStrokeIds));
+            Q_ARG(QSet<QString>, page->suppressedStrokeIds),
+            Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, page)));
     }
 }
 
@@ -5664,7 +5690,28 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
         page->removeObject(oid);
 
     bool showText = m_toolbar->ocrSubToolbar()->isShowTextEnabled();
+    bool showConf = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
     bool dark = isDarkMode();
+
+    // Pre-compute snap rendering state once for all blocks
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+    bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
+    bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
+    bool pageSnap = doc && doc->ocrSnapToBackground && (isGrid || isLines);
+    int snapSpacing = isGrid ? page->gridSpacing : page->lineSpacing;
+    bool pageCjk = false;
+    if (pageSnap && isGrid) {
+        QSettings settings("SpeedyNote", "App");
+        if (settings.value("ocrCjkGridMode", false).toBool()) {
+            QString lang = resolveOcrLanguage(doc);
+            pageCjk = lang.isEmpty()
+                || lang == QLatin1String("auto")
+                || lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)
+                || lang.startsWith(QLatin1String("ja"), Qt::CaseInsensitive)
+                || lang.startsWith(QLatin1String("ko"), Qt::CaseInsensitive);
+        }
+    }
 
     for (const auto& block : blocks) {
         if (block.dirty || block.text.isEmpty())
@@ -5683,8 +5730,12 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
         QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
         auto obj = OcrTextObject::createFromBlock(block, color, dark);
         obj->visible = showText;
-        obj->showConfidence = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
+        obj->showConfidence = showConf;
         obj->layerAffinity = OcrTextObject::resolveLayerAffinity(page, block.sourceStrokeIds);
+        obj->ocrSnapEnabled = pageSnap;
+        obj->ocrGridSpacing = snapSpacing;
+        obj->ocrCjkGridMode = pageCjk;
+
         page->addObject(std::move(obj));
     }
 }
@@ -5700,12 +5751,38 @@ void MainWindow::setOcrTextVisibility(bool visible)
     doc->setOcrDarkMode(dark);
     QColor bg = dark ? QColor(40, 40, 40, 180) : QColor(255, 255, 255, 180);
 
-    auto setOnPage = [visible, bg](Page* page) {
+    bool snapEnabled = doc->ocrSnapToBackground;
+    bool cjkGlobal = false;
+    if (snapEnabled) {
+        QSettings snapSettings("SpeedyNote", "App");
+        cjkGlobal = snapSettings.value("ocrCjkGridMode", false).toBool();
+    }
+
+    auto setOnPage = [this, visible, bg, doc, snapEnabled, cjkGlobal](Page* page) {
         if (!page) return;
+
+        bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
+        bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
+        bool pageSnap = snapEnabled && (isGrid || isLines);
+        int spacing = isGrid ? page->gridSpacing : page->lineSpacing;
+        bool pageCjk = false;
+        if (pageSnap && cjkGlobal && isGrid) {
+            QString lang = resolveOcrLanguage(doc);
+            pageCjk = lang.isEmpty()
+                || lang == QLatin1String("auto")
+                || lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)
+                || lang.startsWith(QLatin1String("ja"), Qt::CaseInsensitive)
+                || lang.startsWith(QLatin1String("ko"), Qt::CaseInsensitive);
+        }
+
         for (const auto& obj : page->objects) {
             if (obj && obj->type() == QStringLiteral("ocr_text")) {
                 obj->visible = visible;
-                static_cast<TextBoxObject*>(obj.get())->backgroundColor = bg;
+                auto* ocr = static_cast<OcrTextObject*>(obj.get());
+                ocr->backgroundColor = bg;
+                ocr->ocrSnapEnabled = pageSnap;
+                ocr->ocrGridSpacing = spacing;
+                ocr->ocrCjkGridMode = pageCjk;
             }
         }
     };
@@ -5761,6 +5838,21 @@ QString MainWindow::resolveOcrLanguage(Document* doc) const
         return doc->ocrLanguage;
     QSettings settings("SpeedyNote", "App");
     return settings.value("ocrLanguage").toString();
+}
+
+OcrSnapParams MainWindow::buildOcrSnapParams(Document* doc, Page* page) const
+{
+    OcrSnapParams snap;
+    if (!doc || !page) return snap;
+
+    snap.enabled = doc->ocrSnapToBackground;
+    QSettings settings("SpeedyNote", "App");
+    snap.cjkGridMode = settings.value("ocrCjkGridMode", false).toBool();
+    snap.gridSpacing = page->gridSpacing;
+    snap.lineSpacing = page->lineSpacing;
+    snap.backgroundIsGrid = (page->backgroundType == Page::BackgroundType::Grid);
+    snap.backgroundIsLines = (page->backgroundType == Page::BackgroundType::Lines);
+    return snap;
 }
 
 void MainWindow::showOcrLanguageDialog()

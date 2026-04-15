@@ -21,6 +21,15 @@
 
 class VectorStroke;
 
+struct OcrSnapParams {
+    bool enabled = false;
+    bool cjkGridMode = false;
+    int gridSpacing = 32;
+    int lineSpacing = 32;
+    bool backgroundIsGrid = false;
+    bool backgroundIsLines = false;
+};
+
 class OcrWorker : public QObject {
     Q_OBJECT
 public:
@@ -37,15 +46,18 @@ public slots:
     void setLanguage(const QString& recognizerName);
     void processPage(const QString& pageId,
                      const QVector<VectorStroke>& strokes,
-                     const QSet<QString>& suppressedStrokeIds);
+                     const QSet<QString>& suppressedStrokeIds,
+                     const OcrSnapParams& snap = OcrSnapParams());
 
     void processPageIncremental(const QString& pageId,
                                 const QVector<VectorStroke>& strokes,
-                                const QSet<QString>& suppressedStrokeIds);
+                                const QSet<QString>& suppressedStrokeIds,
+                                const OcrSnapParams& snap = OcrSnapParams());
 
     void processBatch(const QVector<QString>& pageIds,
                       const QVector<QVector<VectorStroke>>& strokeSets,
-                      const QVector<QSet<QString>>& suppressedSets);
+                      const QVector<QSet<QString>>& suppressedSets,
+                      const QVector<OcrSnapParams>& snapParams = QVector<OcrSnapParams>());
 
     void cancel();
 
@@ -68,3 +80,6 @@ private:
     QString m_lastPageId;
     QSet<QString> m_knownStrokeIds;
 };
+
+Q_DECLARE_METATYPE(OcrSnapParams)
+Q_DECLARE_METATYPE(QVector<OcrSnapParams>)

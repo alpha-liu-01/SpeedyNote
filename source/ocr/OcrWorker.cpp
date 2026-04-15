@@ -1,4 +1,5 @@
 #include "OcrWorker.h"
+#include "OcrLineGrouper.h"
 #include "../strokes/VectorStroke.h"
 
 #include <QHash>
@@ -83,7 +84,8 @@ QVector<OcrTextBlock> OcrWorker::buildBlocks(const QVector<OcrEngine::Result>& r
 
 void OcrWorker::processPage(const QString& pageId,
                             const QVector<VectorStroke>& strokes,
-                            const QSet<QString>& suppressedStrokeIds)
+                            const QSet<QString>& suppressedStrokeIds,
+                            const OcrSnapParams& snap)
 {
     if (!m_engine || !m_engine->isAvailable()) {
         emit error(pageId, QStringLiteral("OCR engine not available"));
@@ -93,8 +95,6 @@ void OcrWorker::processPage(const QString& pageId,
     m_busy = true;
     m_cancelled = false;
 
-    m_engine->clearStrokes();
-
     QVector<VectorStroke> filtered;
     filtered.reserve(strokes.size());
     for (const auto& stroke : strokes) {
@@ -102,36 +102,82 @@ void OcrWorker::processPage(const QString& pageId,
             filtered.append(stroke);
     }
 
-    m_engine->addStrokes(filtered);
+    bool useSnap = snap.enabled && (snap.backgroundIsGrid || snap.backgroundIsLines);
 
-    if (m_cancelled) {
+    if (useSnap) {
+        QVector<StrokeLineGroup> groups;
+        if (snap.cjkGridMode && snap.backgroundIsGrid) {
+            groups = groupStrokesByGridCells(filtered, snap.gridSpacing);
+        } else if (snap.backgroundIsLines) {
+            groups = groupStrokesByLineBands(filtered, snap.lineSpacing);
+        } else {
+            groups = groupStrokesByLineBands(filtered, snap.gridSpacing);
+        }
+
+        QVector<OcrEngine::Result> allResults;
+
+        for (const auto& group : groups) {
+            if (m_cancelled) break;
+
+            m_engine->clearStrokes();
+
+            QVector<VectorStroke> groupStrokes;
+            groupStrokes.reserve(group.strokeIndices.size());
+            for (int idx : group.strokeIndices)
+                groupStrokes.append(filtered[idx]);
+
+            m_engine->addStrokes(groupStrokes);
+            auto groupResults = m_engine->analyze();
+
+            for (auto& r : groupResults)
+                r.boundingRect = group.boundingRect;
+
+            allResults.append(groupResults);
+        }
+
+        if (m_cancelled) { m_busy = false; return; }
+
+        m_lastPageId = pageId;
+        m_knownStrokeIds.clear();
+        for (const auto& s : filtered)
+            m_knownStrokeIds.insert(s.id);
+
         m_busy = false;
-        return;
-    }
+        emit resultsReady(pageId, buildBlocks(allResults));
+    } else {
+        m_engine->clearStrokes();
+        m_engine->addStrokes(filtered);
 
-    QVector<OcrEngine::Result> results = m_engine->analyze();
+        if (m_cancelled) { m_busy = false; return; }
 
-    if (m_cancelled) {
+        QVector<OcrEngine::Result> results = m_engine->analyze();
+
+        if (m_cancelled) { m_busy = false; return; }
+
+        m_lastPageId = pageId;
+        m_knownStrokeIds.clear();
+        for (const auto& s : filtered)
+            m_knownStrokeIds.insert(s.id);
+
         m_busy = false;
-        return;
+        emit resultsReady(pageId, buildBlocks(results));
     }
-
-    m_lastPageId = pageId;
-    m_knownStrokeIds.clear();
-    for (const auto& s : filtered)
-        m_knownStrokeIds.insert(s.id);
-
-    m_busy = false;
-    emit resultsReady(pageId, buildBlocks(results));
 }
 
 void OcrWorker::processPageIncremental(const QString& pageId,
                                        const QVector<VectorStroke>& strokes,
-                                       const QSet<QString>& suppressedStrokeIds)
+                                       const QSet<QString>& suppressedStrokeIds,
+                                       const OcrSnapParams& snap)
 {
+    // When snap is enabled, always do a full re-scan (pre-grouping invalidates incremental state)
+    if (snap.enabled && (snap.backgroundIsGrid || snap.backgroundIsLines)) {
+        processPage(pageId, strokes, suppressedStrokeIds, snap);
+        return;
+    }
+
     if (pageId != m_lastPageId || m_knownStrokeIds.isEmpty()
         || !m_engine->supportsIncrementalUpdates()) {
-        processPage(pageId, strokes, suppressedStrokeIds);
+        processPage(pageId, strokes, suppressedStrokeIds, snap);
         return;
     }
 
@@ -200,7 +246,8 @@ void OcrWorker::processPageIncremental(const QString& pageId,
 
 void OcrWorker::processBatch(const QVector<QString>& pageIds,
                              const QVector<QVector<VectorStroke>>& strokeSets,
-                             const QVector<QSet<QString>>& suppressedSets)
+                             const QVector<QSet<QString>>& suppressedSets,
+                             const QVector<OcrSnapParams>& snapParams)
 {
     if (!m_engine || !m_engine->isAvailable()) {
         for (const auto& pid : pageIds)
@@ -214,6 +261,7 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
     int pagesWithText = 0;
 
     static const QSet<QString> emptySet;
+    static const OcrSnapParams defaultSnap;
 
     m_busy = true;
     m_cancelled = false;
@@ -224,8 +272,8 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
 
         const QSet<QString>& suppressed = (i < suppressedSets.size())
             ? suppressedSets[i] : emptySet;
-
-        m_engine->clearStrokes();
+        const OcrSnapParams& snap = (i < snapParams.size())
+            ? snapParams[i] : defaultSnap;
 
         QVector<VectorStroke> filtered;
         const auto& strokes = strokeSets[i];
@@ -235,12 +283,46 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
                 filtered.append(stroke);
         }
 
-        m_engine->addStrokes(filtered);
+        bool useSnap = snap.enabled && (snap.backgroundIsGrid || snap.backgroundIsLines);
 
-        if (m_cancelled)
-            break;
+        QVector<OcrEngine::Result> results;
 
-        QVector<OcrEngine::Result> results = m_engine->analyze();
+        if (useSnap) {
+            QVector<StrokeLineGroup> groups;
+            if (snap.cjkGridMode && snap.backgroundIsGrid) {
+                groups = groupStrokesByGridCells(filtered, snap.gridSpacing);
+            } else if (snap.backgroundIsLines) {
+                groups = groupStrokesByLineBands(filtered, snap.lineSpacing);
+            } else {
+                groups = groupStrokesByLineBands(filtered, snap.gridSpacing);
+            }
+
+            for (const auto& group : groups) {
+                if (m_cancelled) break;
+
+                m_engine->clearStrokes();
+
+                QVector<VectorStroke> groupStrokes;
+                groupStrokes.reserve(group.strokeIndices.size());
+                for (int idx : group.strokeIndices)
+                    groupStrokes.append(filtered[idx]);
+
+                m_engine->addStrokes(groupStrokes);
+                auto groupResults = m_engine->analyze();
+
+                for (auto& r : groupResults)
+                    r.boundingRect = group.boundingRect;
+
+                results.append(groupResults);
+            }
+        } else {
+            m_engine->clearStrokes();
+            m_engine->addStrokes(filtered);
+
+            if (m_cancelled) break;
+
+            results = m_engine->analyze();
+        }
 
         if (m_cancelled)
             break;
@@ -256,7 +338,6 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
         emit batchProgress(completed, total);
     }
 
-    // Batch processes multiple pages; engine state is indeterminate afterward
     m_lastPageId.clear();
     m_knownStrokeIds.clear();
 

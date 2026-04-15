@@ -57,6 +57,7 @@ struct PdfSearchState;
 // OCR
 class OcrWorker;
 class OcrSubToolbar;
+struct OcrSnapParams;
 
 // Phase 2B: Floating Text Editor
 class FloatingTextEditor;
@@ -720,6 +721,7 @@ private:
     void setOcrConfidenceVisibility(bool enabled);
     void showOcrLanguageDialog();
     QString resolveOcrLanguage(Document* doc) const;
+    OcrSnapParams buildOcrSnapParams(Document* doc, Page* page) const;
     
     // Phase 2B: Floating Text Editor
     void openFloatingTextEditor(InsertedObject* obj);

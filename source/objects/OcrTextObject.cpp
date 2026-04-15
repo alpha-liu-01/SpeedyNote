@@ -91,90 +91,16 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
     std::sort(sorted.begin(), sorted.end(),
               [](const Seg& a, const Seg& b) { return a.rect.x() < b.rect.x(); });
 
-    // --- Step 2: compute average segment height for gap threshold ---
-    qreal totalH = 0;
-    for (const auto& s : sorted)
-        totalH += s.rect.height();
-    qreal avgH = totalH / sorted.size();
-    qreal gapThreshold = avgH * 1.0;
+    if (ocrSnapEnabled && !sorted.isEmpty()) {
+        // ===== Snap-aware per-segment rendering =====
+        painter.save();
 
-    // --- Step 3: group into runs by horizontal proximity ---
-    struct Run {
-        QString text;
-        QRectF rect;
-    };
-    QVector<Run> runs;
-    Run cur;
-    cur.text = sorted[0].text;
-    cur.rect = sorted[0].rect;
-
-    for (int i = 1; i < sorted.size(); ++i) {
-        qreal gap = sorted[i].rect.left() - cur.rect.right();
-        if (gap < gapThreshold) {
-            // Merge: decide separator
-            bool needSpace = true;
-            if (!cur.text.isEmpty() && !sorted[i].text.isEmpty()) {
-                if (isCjkChar(cur.text.back()) || isCjkChar(sorted[i].text.front()))
-                    needSpace = false;
-            }
-            if (needSpace)
-                cur.text += QLatin1Char(' ');
-            cur.text += sorted[i].text;
-            cur.rect = cur.rect.united(sorted[i].rect);
-        } else {
-            runs.append(cur);
-            cur.text = sorted[i].text;
-            cur.rect = sorted[i].rect;
+        if (backgroundColor.alpha() > 0) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(backgroundColor);
+            painter.drawRect(lineRect);
         }
-    }
-    runs.append(cur);
 
-    // --- Step 4: draw background for the full line rect ---
-    painter.save();
-
-    if (backgroundColor.alpha() > 0) {
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(backgroundColor);
-        painter.drawRect(lineRect);
-    }
-
-    // --- Step 5: render each run with TextBoxObject-style font sizing ---
-    for (const auto& run : runs) {
-        QRectF runScreenRect(
-            run.rect.x() * zoom,
-            run.rect.y() * zoom,
-            run.rect.width() * zoom,
-            run.rect.height() * zoom
-        );
-
-        if (runScreenRect.width() < 1.0 || runScreenRect.height() < 1.0)
-            continue;
-
-        constexpr qreal pad = 2.0;
-        QRectF textRect = runScreenRect.adjusted(pad, pad, -pad, -pad);
-        if (textRect.width() < 1.0 || textRect.height() < 1.0)
-            textRect = runScreenRect;
-
-        qreal effectivePixelSize = run.rect.height() * zoom * 0.75;
-        if (effectivePixelSize > 1.0) {
-            QFont probe;
-            if (!fontFamily.isEmpty())
-                probe.setFamily(fontFamily);
-            probe.setPixelSize(static_cast<int>(effectivePixelSize));
-            QFontMetricsF fm(probe);
-            qreal textW = fm.horizontalAdvance(run.text);
-            if (textW > textRect.width() && textW > 0.0)
-                effectivePixelSize *= textRect.width() / textW;
-        }
-        if (effectivePixelSize < 1.0)
-            effectivePixelSize = 1.0;
-
-        QFont font;
-        if (!fontFamily.isEmpty())
-            font.setFamily(fontFamily);
-        font.setPixelSize(static_cast<int>(effectivePixelSize));
-
-        painter.setFont(font);
         QColor penColor = fontColor;
         if (showConfidence && !ocrLocked) {
             if (confidence < 0.5f)
@@ -183,13 +109,161 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
                 penColor = QColor(220, 160, 40);
         }
         painter.setPen(penColor);
-        painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, run.text);
+
+        qreal baseFontSize = ocrGridSpacing * zoom * 0.72;
+        if (baseFontSize < 1.0)
+            baseFontSize = 1.0;
+
+        QFont font;
+        if (!fontFamily.isEmpty())
+            font.setFamily(fontFamily);
+
+        if (ocrCjkGridMode) {
+            font.setPixelSize(qMax(1, static_cast<int>(baseFontSize)));
+            painter.setFont(font);
+
+            for (const auto& seg : sorted) {
+                int cellCol = static_cast<int>(seg.rect.center().x()) / ocrGridSpacing;
+                int cellRow = static_cast<int>(seg.rect.center().y()) / ocrGridSpacing;
+                for (int ci = 0; ci < seg.text.length(); ++ci) {
+                    QRectF cellRect((cellCol + ci) * ocrGridSpacing * zoom,
+                                    cellRow * ocrGridSpacing * zoom,
+                                    ocrGridSpacing * zoom,
+                                    ocrGridSpacing * zoom);
+                    painter.drawText(cellRect, Qt::AlignHCenter | Qt::AlignVCenter,
+                                     QString(seg.text.at(ci)));
+                }
+            }
+        } else {
+            int basePx = qMax(1, static_cast<int>(baseFontSize));
+            font.setPixelSize(basePx);
+
+            for (const auto& seg : sorted) {
+                QRectF segRect(seg.rect.x() * zoom, seg.rect.y() * zoom,
+                               seg.rect.width() * zoom, seg.rect.height() * zoom);
+
+                if (segRect.width() < 1.0 || segRect.height() < 1.0)
+                    continue;
+
+                QFontMetricsF fm(font);
+                qreal textW = fm.horizontalAdvance(seg.text);
+                if (textW > segRect.width() && textW > 0.0) {
+                    int shrunkPx = qMax(1, static_cast<int>(baseFontSize * segRect.width() / textW));
+                    font.setPixelSize(shrunkPx);
+                    painter.setFont(font);
+                    painter.drawText(segRect, Qt::AlignHCenter | Qt::AlignVCenter, seg.text);
+                    font.setPixelSize(basePx);
+                } else {
+                    painter.setFont(font);
+                    painter.drawText(segRect, Qt::AlignHCenter | Qt::AlignVCenter, seg.text);
+                }
+            }
+        }
+
+        if (ocrLocked)
+            drawLockBadge(painter, lineRect);
+
+        painter.restore();
+    } else {
+        // ===== Original run-merging path (snap disabled) =====
+
+        // --- Step 2: compute average segment height for gap threshold ---
+        qreal totalH = 0;
+        for (const auto& s : sorted)
+            totalH += s.rect.height();
+        qreal avgH = totalH / sorted.size();
+        qreal gapThreshold = avgH * 1.0;
+
+        // --- Step 3: group into runs by horizontal proximity ---
+        struct Run {
+            QString text;
+            QRectF rect;
+        };
+        QVector<Run> runs;
+        Run cur;
+        cur.text = sorted[0].text;
+        cur.rect = sorted[0].rect;
+
+        for (int i = 1; i < sorted.size(); ++i) {
+            qreal gap = sorted[i].rect.left() - cur.rect.right();
+            if (gap < gapThreshold) {
+                bool needSpace = true;
+                if (!cur.text.isEmpty() && !sorted[i].text.isEmpty()) {
+                    if (isCjkChar(cur.text.back()) || isCjkChar(sorted[i].text.front()))
+                        needSpace = false;
+                }
+                if (needSpace)
+                    cur.text += QLatin1Char(' ');
+                cur.text += sorted[i].text;
+                cur.rect = cur.rect.united(sorted[i].rect);
+            } else {
+                runs.append(cur);
+                cur.text = sorted[i].text;
+                cur.rect = sorted[i].rect;
+            }
+        }
+        runs.append(cur);
+
+        // --- Step 4: draw background for the full line rect ---
+        painter.save();
+
+        if (backgroundColor.alpha() > 0) {
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(backgroundColor);
+            painter.drawRect(lineRect);
+        }
+
+        // --- Step 5: render each run with TextBoxObject-style font sizing ---
+        QColor penColor = fontColor;
+        if (showConfidence && !ocrLocked) {
+            if (confidence < 0.5f)
+                penColor = QColor(220, 60, 60);
+            else if (confidence < 0.8f)
+                penColor = QColor(220, 160, 40);
+        }
+        painter.setPen(penColor);
+
+        QFont font;
+        if (!fontFamily.isEmpty())
+            font.setFamily(fontFamily);
+
+        for (const auto& run : runs) {
+            QRectF runScreenRect(
+                run.rect.x() * zoom,
+                run.rect.y() * zoom,
+                run.rect.width() * zoom,
+                run.rect.height() * zoom
+            );
+
+            if (runScreenRect.width() < 1.0 || runScreenRect.height() < 1.0)
+                continue;
+
+            constexpr qreal pad = 2.0;
+            QRectF textRect = runScreenRect.adjusted(pad, pad, -pad, -pad);
+            if (textRect.width() < 1.0 || textRect.height() < 1.0)
+                textRect = runScreenRect;
+
+            qreal effectivePixelSize = run.rect.height() * zoom * 0.75;
+            if (effectivePixelSize > 1.0) {
+                font.setPixelSize(static_cast<int>(effectivePixelSize));
+                QFontMetricsF fm(font);
+                qreal textW = fm.horizontalAdvance(run.text);
+                if (textW > textRect.width() && textW > 0.0)
+                    effectivePixelSize *= textRect.width() / textW;
+            }
+            if (effectivePixelSize < 1.0)
+                effectivePixelSize = 1.0;
+
+            font.setPixelSize(static_cast<int>(effectivePixelSize));
+            painter.setFont(font);
+            painter.drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, run.text);
+        }
+
+        if (ocrLocked)
+            drawLockBadge(painter, lineRect);
+
+        painter.restore();
     }
-
-    if (ocrLocked)
-        drawLockBadge(painter, lineRect);
-
-    painter.restore();
 }
 
 QJsonObject OcrTextObject::toJson() const

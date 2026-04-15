@@ -51,6 +51,11 @@ void OcrSubToolbar::createWidgets()
     m_confidenceButton->setToolTip(tr("Show Confidence Colors"));
     addWidget(m_confidenceButton);
 
+    m_snapButton = makeIconButton(this, BUTTON_SIZE);
+    m_snapButton->setCheckable(true);
+    m_snapButton->setToolTip(tr("Snap OCR to Grid/Lines"));
+    addWidget(m_snapButton);
+
     addSeparator();
 
     m_statusLabel = new QLabel(this);
@@ -75,6 +80,7 @@ void OcrSubToolbar::setupConnections()
     connect(m_autoOcrButton, &QPushButton::toggled, this, &OcrSubToolbar::autoOcrToggled);
     connect(m_showTextButton, &QPushButton::toggled, this, &OcrSubToolbar::showTextToggled);
     connect(m_confidenceButton, &QPushButton::toggled, this, &OcrSubToolbar::confidenceToggled);
+    connect(m_snapButton, &QPushButton::toggled, this, &OcrSubToolbar::snapToGridToggled);
 }
 
 void OcrSubToolbar::updateIcons()
@@ -91,6 +97,7 @@ void OcrSubToolbar::updateIcons()
     m_autoOcrButton->setIcon(load("auto"));
     m_showTextButton->setIcon(load("showtext"));
     m_confidenceButton->setIcon(load("warning"));
+    m_snapButton->setIcon(load("straightLine"));
 }
 
 void OcrSubToolbar::applyButtonStyle()
@@ -117,6 +124,7 @@ void OcrSubToolbar::applyButtonStyle()
     m_autoOcrButton->setStyleSheet(style);
     m_showTextButton->setStyleSheet(style);
     m_confidenceButton->setStyleSheet(style);
+    m_snapButton->setStyleSheet(style);
 }
 
 void OcrSubToolbar::setDarkMode(bool darkMode)
@@ -153,6 +161,10 @@ void OcrSubToolbar::restoreTabState(int tabId)
     m_confidenceButton->blockSignals(true);
     m_confidenceButton->setChecked(state.confidenceEnabled);
     m_confidenceButton->blockSignals(false);
+
+    m_snapButton->blockSignals(true);
+    m_snapButton->setChecked(state.snapToGridEnabled);
+    m_snapButton->blockSignals(false);
 }
 
 void OcrSubToolbar::saveTabState(int tabId)
@@ -161,6 +173,7 @@ void OcrSubToolbar::saveTabState(int tabId)
     state.autoOcrEnabled = m_autoOcrButton->isChecked();
     state.showTextEnabled = m_showTextButton->isChecked();
     state.confidenceEnabled = m_confidenceButton->isChecked();
+    state.snapToGridEnabled = m_snapButton->isChecked();
     state.initialized = true;
     m_tabStates[tabId] = state;
 }
@@ -177,6 +190,7 @@ void OcrSubToolbar::setOcrAvailable(bool available)
     m_autoOcrButton->setEnabled(available);
     m_showTextButton->setEnabled(available);
     m_confidenceButton->setEnabled(available);
+    m_snapButton->setEnabled(available);
 
     if (!available) {
         m_statusLabel->setText(tr("OCR unavailable"));
@@ -204,4 +218,15 @@ bool OcrSubToolbar::isShowTextEnabled() const
 bool OcrSubToolbar::isConfidenceEnabled() const
 {
     return m_confidenceButton && m_confidenceButton->isChecked();
+}
+
+bool OcrSubToolbar::isSnapToGridEnabled() const
+{
+    return m_snapButton && m_snapButton->isChecked();
+}
+
+void OcrSubToolbar::setSnapToGridChecked(bool checked)
+{
+    if (m_snapButton)
+        m_snapButton->setChecked(checked);
 }

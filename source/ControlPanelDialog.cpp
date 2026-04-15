@@ -277,6 +277,9 @@ void ControlPanelDialog::applyChanges()
     settings.setValue("tools/wheelScrollSpeed", wheelSpeed);
     DocumentViewport::setWheelScrollSpeed(wheelSpeed);
 
+    if (ocrCjkGridModeCheck)
+        settings.setValue("ocrCjkGridMode", ocrCjkGridModeCheck->isChecked());
+
     // Apply language settings
     settings.setValue("useSystemLanguage", useSystemLanguageCheckbox->isChecked());
     if (!useSystemLanguageCheckbox->isChecked()) {
@@ -1041,6 +1044,26 @@ void ControlPanelDialog::createToolsTab()
     panLayout->addRow(panHint);
 
     layout->addWidget(panGroup);
+
+    // --- OCR settings group ---
+    QGroupBox *ocrGroup = new QGroupBox(tr("OCR (Handwriting Recognition)"), toolsTab);
+    QVBoxLayout *ocrLayout = new QVBoxLayout(ocrGroup);
+
+    ocrCjkGridModeCheck = new QCheckBox(tr("CJK grid-cell mode (box-by-box character detection)"), ocrGroup);
+    ocrCjkGridModeCheck->setChecked(settings.value("ocrCjkGridMode", false).toBool());
+    ocrLayout->addWidget(ocrCjkGridModeCheck);
+
+    QLabel *ocrHint = new QLabel(
+        tr("When \"Snap OCR to Grid/Lines\" is enabled on the OCR toolbar and the "
+           "background is a grid, this option makes each grid cell detect one CJK "
+           "character. Adjacent characters are merged into sentences. "
+           "Leave unchecked for line-based detection (suitable for most languages)."),
+        ocrGroup);
+    ocrHint->setWordWrap(true);
+    ocrHint->setStyleSheet("color: gray; font-size: 11px;");
+    ocrLayout->addWidget(ocrHint);
+
+    layout->addWidget(ocrGroup);
     layout->addStretch();
 
     tabWidget->addTab(toolsTab, tr("Tools"));

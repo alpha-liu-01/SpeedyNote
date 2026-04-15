@@ -7,6 +7,7 @@
 #include "Document.h"
 #include "../objects/OcrTextObject.h"
 #include <QCryptographicHash>
+#include <QSettings>
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 
@@ -1360,6 +1361,8 @@ QJsonObject Document::toJson() const
     // OCR settings
     if (!ocrLanguage.isEmpty())
         obj["ocr_language"] = ocrLanguage;
+    if (ocrSnapToBackground)
+        obj["ocr_snap_to_background"] = true;
     
     // Page count (for quick info without loading pages)
     obj["page_count"] = pageCount();
@@ -1422,6 +1425,7 @@ std::unique_ptr<Document> Document::fromJson(const QJsonObject& obj)
 
     // OCR settings
     doc->ocrLanguage = obj["ocr_language"].toString();
+    doc->ocrSnapToBackground = obj["ocr_snap_to_background"].toBool(false);
     
     // Note: Pages are NOT loaded here - call loadPagesFromJson() separately
     // or use fromFullJson() to load everything
@@ -3263,12 +3267,32 @@ void Document::materializeOcrTextObjects(Page* page) const
     // Collect stroke IDs claimed by locked OCR objects already on the page
     QSet<QString> lockedStrokeIds;
     for (const auto& obj : page->objects) {
-        if (obj->type() == QStringLiteral("ocr_text")) {
+        if (obj && obj->type() == QStringLiteral("ocr_text")) {
             auto* ocr = static_cast<OcrTextObject*>(obj.get());
             if (ocr->ocrLocked) {
                 for (const auto& sid : ocr->sourceStrokeIds)
                     lockedStrokeIds.insert(sid);
             }
+        }
+    }
+
+    // Pre-compute snap rendering state once for all blocks on this page
+    bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
+    bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
+    bool pageSnap = ocrSnapToBackground && (isGrid || isLines);
+    int snapSpacing = isGrid ? page->gridSpacing : page->lineSpacing;
+    bool pageCjk = false;
+    if (pageSnap && isGrid) {
+        QSettings settings("SpeedyNote", "App");
+        if (settings.value("ocrCjkGridMode", false).toBool()) {
+            QString lang = ocrLanguage.isEmpty()
+                ? settings.value("ocrLanguage").toString()
+                : ocrLanguage;
+            pageCjk = lang.isEmpty()
+                || lang == QLatin1String("auto")
+                || lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)
+                || lang.startsWith(QLatin1String("ja"), Qt::CaseInsensitive)
+                || lang.startsWith(QLatin1String("ko"), Qt::CaseInsensitive);
         }
     }
 
@@ -3293,6 +3317,10 @@ void Document::materializeOcrTextObjects(Page* page) const
         obj->visible = m_ocrTextVisible;
         obj->showConfidence = m_ocrShowConfidence;
         obj->layerAffinity = OcrTextObject::resolveLayerAffinity(page, block.sourceStrokeIds);
+        obj->ocrSnapEnabled = pageSnap;
+        obj->ocrGridSpacing = snapSpacing;
+        obj->ocrCjkGridMode = pageCjk;
+
         page->addObject(std::move(obj));
     }
 }

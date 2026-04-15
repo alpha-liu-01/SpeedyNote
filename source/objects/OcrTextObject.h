@@ -16,6 +16,9 @@ public:
     bool ocrDirty = false;
     bool ocrLocked = false;
     bool showConfidence = false;
+    bool ocrSnapEnabled = false;
+    bool ocrCjkGridMode = false;
+    int ocrGridSpacing = 32;
     QVector<OcrTextBlock::WordSegment> wordSegments;
 
     OcrTextObject() { visible = false; showBorder = false; }

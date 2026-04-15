@@ -25,6 +25,8 @@ public:
     void clearStatusAfterDelay(int ms = 5000);
     bool isShowTextEnabled() const;
     bool isConfidenceEnabled() const;
+    bool isSnapToGridEnabled() const;
+    void setSnapToGridChecked(bool checked);
 
 signals:
     void scanPageClicked();
@@ -32,6 +34,7 @@ signals:
     void autoOcrToggled(bool enabled);
     void showTextToggled(bool enabled);
     void confidenceToggled(bool enabled);
+    void snapToGridToggled(bool enabled);
 
 private:
     void createWidgets();
@@ -44,6 +47,7 @@ private:
     QPushButton* m_autoOcrButton = nullptr;
     QPushButton* m_showTextButton = nullptr;
     QPushButton* m_confidenceButton = nullptr;
+    QPushButton* m_snapButton = nullptr;
     QLabel* m_statusLabel = nullptr;
     QTimer* m_statusClearTimer = nullptr;
 
@@ -53,6 +57,7 @@ private:
         bool autoOcrEnabled = false;
         bool showTextEnabled = false;
         bool confidenceEnabled = false;
+        bool snapToGridEnabled = false;
         bool initialized = false;
     };
     QHash<int, TabState> m_tabStates;

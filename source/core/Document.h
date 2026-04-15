@@ -151,6 +151,7 @@ public:
     
     // ===== OCR Settings =====
     QString ocrLanguage;                ///< Per-document OCR recognizer name (empty = global fallback)
+    bool ocrSnapToBackground = false;   ///< Snap OCR grouping to grid/line spacing
 
     // ===== State =====
     bool modified = false;              ///< True if document has unsaved changes
