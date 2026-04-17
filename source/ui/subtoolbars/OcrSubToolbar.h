@@ -53,11 +53,19 @@ private:
 
     bool m_darkMode = false;
 
+    // Per-tab UI state cache.
+    //
+    // NOTE: The "snap to grid/lines" toggle is intentionally NOT cached here.
+    // It is authoritative on Document::ocrSnapToBackground (persisted to the
+    // notebook JSON), and MainWindow::connectViewportScrollSignals() syncs the
+    // toggle to that value on every viewport switch. Caching it per-tab would
+    // create two competing sources of truth and race with that sync (the
+    // save-old/restore-new pass runs after the doc-based sync, so it would
+    // capture the already-overwritten button state for the outgoing tab).
     struct TabState {
         bool autoOcrEnabled = false;
         bool showTextEnabled = false;
         bool confidenceEnabled = false;
-        bool snapToGridEnabled = false;
         bool initialized = false;
     };
     QHash<int, TabState> m_tabStates;

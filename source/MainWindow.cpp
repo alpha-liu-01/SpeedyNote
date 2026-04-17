@@ -174,6 +174,72 @@ void setupLinuxSignalHandlers() {
 }
 #endif
 
+// ----------------------------------------------------------------------------
+// CJK detection for the OCR language tag stored on the document / global setting
+//
+// Why this is non-trivial: different OCR backends report languages in different
+// string shapes.
+//
+//   * ML Kit (Android, macOS) reports BCP-47 tags: "zh-Hani-CN", "ja", "ko-KR", ...
+//   * Windows Ink reports the localized display name of each InkRecognizer, e.g.
+//       "Microsoft Chinese (Simplified) Handwriting Recognizer"   (EN Windows)
+//       "Microsoft 中文（简体）手写识别器"                         (ZH Windows)
+//       "Microsoft Japanese Handwriting Recognizer"
+//       "Microsoft 日本語手書き認識エンジン"                       (JP Windows)
+//       "Microsoft 日语手写识别器"                                 (JP on ZH Windows)
+//       "Microsoft 한국어 필기 인식기"                             (KO Windows)
+//
+// The original check only looked for BCP-47 prefixes ("zh"/"ja"/"ko"), which
+// meant the CJK grid-mode override never fired on Windows: a tag like
+// "Microsoft 中文（简体）手写识别器" starts with "Microsoft", not "zh".
+//
+// This helper handles both formats by combining:
+//   1. A BCP-47 pattern "^(zh|ja|ko)([-_].*)?$" (word-boundary on the subtag).
+//   2. A set of CJK marker substrings that appear in localized recognizer names
+//      across the common Windows UI languages (EN / ZH / JA / KO).
+// ----------------------------------------------------------------------------
+static bool isCjkOcrLanguage(const QString& lang)
+{
+    // Empty or explicit "auto" = unknown. Preserve the user's global toggle
+    // (the caller has already verified ocrCjkGridMode is enabled), so return
+    // true here to keep the previous behaviour for system-default languages.
+    if (lang.isEmpty() || lang.compare(QLatin1String("auto"), Qt::CaseInsensitive) == 0)
+        return true;
+
+    // BCP-47: "zh", "ja", "ko", optionally followed by script/region subtags.
+    static const QRegularExpression kBcp47Cjk(
+        QStringLiteral("^(zh|ja|ko)(?:[-_].*)?$"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (kBcp47Cjk.match(lang).hasMatch())
+        return true;
+
+    // Localized InkRecognizer display names. Covers the common display-language
+    // permutations; the English tokens cover EN Windows, the CJK tokens cover
+    // ZH / JA / KO Windows regardless of which recognizer's name we're reading.
+    static const QString kCjkMarkers[] = {
+        // English tokens (EN Windows UI)
+        QStringLiteral("Chinese"),
+        QStringLiteral("Japanese"),
+        QStringLiteral("Korean"),
+        // Chinese tokens
+        QStringLiteral("中文"),    // Chinese (ZH name)
+        QStringLiteral("中国"),    // China / Chinese
+        QStringLiteral("日语"),    // Japanese (ZH name)
+        QStringLiteral("韩国"),    // Korea (ZH name, simplified)
+        QStringLiteral("韓国"),    // Korea (JP / traditional)
+        // Japanese / Korean tokens
+        QStringLiteral("日本"),    // Japan / Japanese (JP & ZH)
+        QStringLiteral("한국"),    // Korea / Korean (KO)
+        QStringLiteral("한글"),    // Hangul script (KO)
+        QStringLiteral("조선"),    // Korean (alt.)
+    };
+    for (const auto& marker : kCjkMarkers) {
+        if (lang.contains(marker, Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
@@ -2033,6 +2099,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_autoHighlightConn);
         m_autoHighlightConn = {};
     }
+    // Disconnect highlighter-mode (PDF/OCR) sync connection
+    if (m_highlighterModeConn) {
+        disconnect(m_highlighterModeConn);
+        m_highlighterModeConn = {};
+    }
     // Phase D: Disconnect object mode sync connections
     if (m_insertModeConn) {
         disconnect(m_insertModeConn);
@@ -2242,7 +2313,26 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (m_toolbar->highlighterSubToolbar()) {
         m_toolbar->highlighterSubToolbar()->setAutoHighlightState(viewport->isAutoHighlightEnabled());
     }
-    
+
+    // Connect highlighter-mode (PDF/OCR) sync (viewport -> subtoolbar)
+    m_highlighterModeConn = connect(viewport, &DocumentViewport::highlighterModeChanged,
+                                    this, [this](DocumentViewport::HighlighterMode mode) {
+        if (m_toolbar && m_toolbar->highlighterSubToolbar()) {
+            auto src = (mode == DocumentViewport::HighlighterMode::Ocr)
+                           ? HighlighterSubToolbar::SelectionSource::Ocr
+                           : HighlighterSubToolbar::SelectionSource::Pdf;
+            m_toolbar->highlighterSubToolbar()->setSelectionSourceState(src);
+        }
+    });
+
+    // Also sync the current highlighter mode to the subtoolbar
+    if (m_toolbar->highlighterSubToolbar()) {
+        auto src = (viewport->highlighterMode() == DocumentViewport::HighlighterMode::Ocr)
+                       ? HighlighterSubToolbar::SelectionSource::Ocr
+                       : HighlighterSubToolbar::SelectionSource::Pdf;
+        m_toolbar->highlighterSubToolbar()->setSelectionSourceState(src);
+    }
+
     // Phase D: Connect object mode state sync (viewport → subtoolbar)
     // When Ctrl+< / Ctrl+> / Ctrl+6 / Ctrl+7 changes the mode, update the subtoolbar
     m_insertModeConn = connect(viewport, &DocumentViewport::objectInsertModeChanged,
@@ -4742,6 +4832,15 @@ void MainWindow::connectSubToolbarSignals()
     connect(highlighterST, &HighlighterSubToolbar::autoHighlightChanged, this, [this](bool enabled) {
         if (DocumentViewport* vp = currentViewport()) vp->setAutoHighlightEnabled(enabled);
     });
+    connect(highlighterST, &HighlighterSubToolbar::selectionSourceChanged, this,
+            [this](HighlighterSubToolbar::SelectionSource src) {
+        if (DocumentViewport* vp = currentViewport()) {
+            auto mode = (src == HighlighterSubToolbar::SelectionSource::Ocr)
+                            ? DocumentViewport::HighlighterMode::Ocr
+                            : DocumentViewport::HighlighterMode::Pdf;
+            vp->setHighlighterMode(mode);
+        }
+    });
 
     // ObjectSelect
     connect(objectST, &ObjectSelectSubToolbar::insertModeChanged, this,
@@ -5606,6 +5705,23 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
 
     syncOcrTextObjects(page, blocks);
 
+    // Invalidate the Highlighter's OCR-block cache on any viewport currently
+    // showing this document, so a new drag will see the refreshed OCR data.
+    // For tiles we can't cheaply compute a "page index" - invalidate wholesale.
+    if (m_splitViewManager) {
+        const int pageIdx = tileCoordResolved ? -1 : doc->pageIndexByUuid(pageId);
+        m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+            if (!tm) return;
+            const int n = tm->tabCount();
+            for (int i = 0; i < n; ++i) {
+                DocumentViewport* vp = tm->viewportAt(i);
+                if (vp && vp->document() == doc) {
+                    vp->invalidateOcrBlockCache(pageIdx);
+                }
+            }
+        });
+    }
+
     if (tileCoordResolved)
         doc->saveTileOcr(tileCoord);
     else
@@ -5704,12 +5820,7 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
     if (pageSnap && isGrid) {
         QSettings settings("SpeedyNote", "App");
         if (settings.value("ocrCjkGridMode", false).toBool()) {
-            QString lang = resolveOcrLanguage(doc);
-            pageCjk = lang.isEmpty()
-                || lang == QLatin1String("auto")
-                || lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)
-                || lang.startsWith(QLatin1String("ja"), Qt::CaseInsensitive)
-                || lang.startsWith(QLatin1String("ko"), Qt::CaseInsensitive);
+            pageCjk = isCjkOcrLanguage(resolveOcrLanguage(doc));
         }
     }
 
@@ -5767,12 +5878,7 @@ void MainWindow::setOcrTextVisibility(bool visible)
         int spacing = isGrid ? page->gridSpacing : page->lineSpacing;
         bool pageCjk = false;
         if (pageSnap && cjkGlobal && isGrid) {
-            QString lang = resolveOcrLanguage(doc);
-            pageCjk = lang.isEmpty()
-                || lang == QLatin1String("auto")
-                || lang.startsWith(QLatin1String("zh"), Qt::CaseInsensitive)
-                || lang.startsWith(QLatin1String("ja"), Qt::CaseInsensitive)
-                || lang.startsWith(QLatin1String("ko"), Qt::CaseInsensitive);
+            pageCjk = isCjkOcrLanguage(resolveOcrLanguage(doc));
         }
 
         for (const auto& obj : page->objects) {

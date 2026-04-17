@@ -7,6 +7,7 @@
 
 class ColorPresetButton;
 class SubToolbarToggle;
+class ModeToggleButton;
 
 /**
  * @brief Subtoolbar for the Highlighter (text selection) tool.
@@ -32,6 +33,14 @@ class HighlighterSubToolbar : public SubToolbar {
     Q_OBJECT
 
 public:
+    /**
+     * @brief Which layer the Highlighter tool extracts text from.
+     *
+     * Mirrors DocumentViewport::HighlighterMode but declared locally so the
+     * subtoolbar does not need to include the viewport header.
+     */
+    enum class SelectionSource { Pdf = 0, Ocr = 1 };
+
     explicit HighlighterSubToolbar(QWidget* parent = nullptr);
     
     // SubToolbar interface
@@ -64,6 +73,20 @@ public:
      * This updates the UI without emitting the autoHighlightChanged signal to avoid loops.
      */
     void setAutoHighlightState(bool enabled);
+
+    /**
+     * @brief Set the selection-source toggle state from outside.
+     * @param src The new selection source (PDF or OCR).
+     *
+     * Used to sync the toggle when the active viewport's mode changes (tab switch,
+     * programmatic change). Updates UI without emitting selectionSourceChanged.
+     */
+    void setSelectionSourceState(SelectionSource src);
+
+    /**
+     * @brief Get the currently selected source (PDF or OCR).
+     */
+    SelectionSource currentSelectionSource() const { return m_selectionSource; }
     
     /**
      * @brief Emit the currently selected preset values.
@@ -92,10 +115,17 @@ signals:
      */
     void autoHighlightChanged(bool enabled);
 
+    /**
+     * @brief Emitted when the selection source (PDF vs OCR) changes via the toggle.
+     * @param src The new source.
+     */
+    void selectionSourceChanged(SelectionSource src);
+
 private slots:
     void onColorPresetClicked(int index);
     void onColorEditRequested(int index);
     void onAutoHighlightToggled(bool checked);
+    void onSelectionSourceToggled(int mode);
 
 private:
     void createWidgets();
@@ -103,15 +133,18 @@ private:
     void loadFromSettings();
     void saveColorsToSettings();
     void saveAutoHighlightToSettings();
+    void saveSelectionSourceToSettings();
     void selectColorPreset(int index);
 
     // Widgets
     ColorPresetButton* m_colorButtons[3] = {nullptr, nullptr, nullptr};
     SubToolbarToggle* m_autoHighlightToggle = nullptr;
+    ModeToggleButton* m_selectionSourceToggle = nullptr;
     
     // Current state
     int m_selectedColorIndex = 0;  // Default: first color
     bool m_autoHighlightEnabled = false;
+    SelectionSource m_selectionSource = SelectionSource::Pdf;
     
     // Per-tab state storage
     // NOTE: autoHighlightEnabled is NOT stored here - DocumentViewport is the source of truth.
@@ -138,6 +171,7 @@ private:
     static const QString KEY_COLOR_PREFIX;
     static const QString KEY_SELECTED_COLOR;
     static const QString KEY_AUTO_HIGHLIGHT;
+    static const QString KEY_SELECTION_SOURCE;
 };
 
 #endif // HIGHLIGHTERSUBTOOLBAR_H

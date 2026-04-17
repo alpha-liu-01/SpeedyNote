@@ -557,7 +557,41 @@ public:
      * @brief Check if auto-highlight mode is enabled.
      */
     bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
-    
+
+    // ===== Highlighter Selection Source (PDF vs OCR) =====
+
+    /**
+     * @brief What layer the Highlighter tool extracts text from.
+     *
+     * - Pdf: selects embedded PDF text (requires a PDF background).
+     * - Ocr: selects per-character text from OCR blocks attached to the page
+     *        (works for any page that has OCR results, regardless of whether
+     *        the "show recognized text" overlay is visible).
+     */
+    enum class HighlighterMode { Pdf = 0, Ocr = 1 };
+
+    /**
+     * @brief Get the current highlighter selection source.
+     */
+    HighlighterMode highlighterMode() const { return m_highlighterMode; }
+
+    /**
+     * @brief Set the highlighter selection source.
+     *
+     * Any in-flight text selection is cleared when the mode changes.
+     * Emits highlighterModeChanged() only if the value actually changed.
+     */
+    void setHighlighterMode(HighlighterMode mode);
+
+    /**
+     * @brief Invalidate cached OCR text blocks for (optionally) one page.
+     *
+     * Called by external code (e.g. MainWindow after an OCR rescan rewrites
+     * Page::ocrTextBlocks) to make sure the next highlighter drag sees the
+     * fresh data. @p pageIndex < 0 means "invalidate unconditionally".
+     */
+    void invalidateOcrBlockCache(int pageIndex = -1);
+
     /**
      * @brief Set the highlighter color (used for text highlight strokes).
      * @param color The new highlighter color (alpha controls opacity).
@@ -1740,6 +1774,14 @@ signals:
      * @param enabled New auto-highlight state.
      */
     void autoHighlightEnabledChanged(bool enabled);
+
+    /**
+     * @brief Emitted when the highlighter selection source (PDF vs OCR) changes.
+     *
+     * MainWindow routes this back to HighlighterSubToolbar so the per-viewport
+     * mode toggle stays in sync on tab switches.
+     */
+    void highlighterModeChanged(HighlighterMode mode);
     
     /**
      * @brief Emitted when a markdown note should be opened in sidebar.
@@ -1995,19 +2037,31 @@ private:
      * The selection flows character-by-character, not as a rectangle.
      */
     struct TextSelection {
+        /**
+         * @brief Which cache the box indices below reference.
+         *
+         * - Pdf: indices refer to m_textBoxCache (PDF text boxes).
+         *        highlightRects are in PDF coordinates and must be scaled by
+         *        PDF_TO_PAGE_SCALE when rendering or creating strokes.
+         * - Ocr: indices refer to m_ocrBlockCache (OCR blocks). highlightRects
+         *        are already in page coordinates.
+         */
+        enum class Source { Pdf = 0, Ocr = 1 };
+        Source source = Source::Pdf;
+
         int pageIndex = -1;                     ///< Page being selected from (-1 = none)
         
         // Start position (anchor) - where selection began
-        int startBoxIndex = -1;                 ///< Index into m_textBoxCache
+        int startBoxIndex = -1;                 ///< Index into m_textBoxCache / m_ocrBlockCache
         int startCharIndex = -1;                ///< Character index within that box (-1 = end of box)
         
         // End position (cursor) - current selection endpoint
-        int endBoxIndex = -1;                   ///< Index into m_textBoxCache
+        int endBoxIndex = -1;                   ///< Index into m_textBoxCache / m_ocrBlockCache
         int endCharIndex = -1;                  ///< Character index within that box
         
         // Computed from start/end positions
         QString selectedText;                   ///< All characters from start to end
-        QVector<QRectF> highlightRects;         ///< Per-line highlight rectangles (PDF coords)
+        QVector<QRectF> highlightRects;         ///< Per-line highlight rectangles (PDF or page coords, see `source`)
         
         bool isSelecting = false;               ///< Currently dragging?
         
@@ -2021,6 +2075,7 @@ private:
         }
         
         void clear() {
+            source = Source::Pdf;
             pageIndex = -1;
             startBoxIndex = startCharIndex = -1;
             endBoxIndex = endCharIndex = -1;
@@ -2039,10 +2094,44 @@ private:
     // Link cache (loaded on-demand for current page) - Phase D.1
     QVector<PdfLink> m_linkCache;
     int m_linkCachePageIndex = -1;
-    
+
+    // ============================================================================
+    // OCR Highlighter Cache (parallel to PDF text-box cache)
+    // ============================================================================
+
+    /**
+     * @brief Cached per-character bounding boxes for one OCR block.
+     *
+     * OCR blocks (OcrTextBlock) expose either per-word segments or a single
+     * bounding rect for the whole block. To mirror the PDF selection experience
+     * we precompute a per-character bounding rect for every character in the
+     * block's logical text, using proportional splitting within each word
+     * segment (same approach as PdfSearchEngine::searchOcrBlocks).
+     *
+     * All rectangles are in **page-local (page) coordinates**, which is what
+     * OcrTextBlock exposes directly - no PDF_TO_PAGE_SCALE conversion needed.
+     */
+    struct OcrBlockRef {
+        QString text;                   ///< Concatenated reading-order text of the block
+        QRectF blockRect;               ///< Block bounding rect (page coords)
+        QVector<QRectF> charRects;      ///< Per-character rects, size == text.size() (page coords)
+        QVector<int> lineBreaks;        ///< Indices (into text) where a new visual line begins (sorted)
+    };
+
+    QVector<OcrBlockRef> m_ocrBlockCache;
+    int m_ocrBlockCachePageIndex = -1;
+    mutable int m_lastOcrHitBlockIndex = -1;  ///< PERF: spatial locality hint for findOcrCharAtPoint
+
+    /// Rebuild m_ocrBlockCache for the given page if not already cached.
+    void loadOcrBlocksForPage(int pageIndex);
+
+    /// Find which OCR block/char (if any) is under the given page-local point.
+    CharacterPosition findOcrCharAtPoint(const QPointF& pagePoint) const;
+
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
     bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
+    HighlighterMode m_highlighterMode = HighlighterMode::Pdf;  ///< PDF vs OCR text selection source
     
     // ===== PDF Search Highlighting =====
     QVector<PdfSearchMatch> m_searchMatches;       ///< All matches on current page
@@ -2933,9 +3022,16 @@ private:
     
     /**
      * @brief Update selected text and highlight rects from start/end positions.
-     * Called after changing startBoxIndex/endBoxIndex etc.
+     * Called after changing startBoxIndex/endBoxIndex etc. Dispatches to the
+     * PDF or OCR variant based on m_textSelection.source.
      */
     void updateSelectedTextAndRects();
+
+    /// PDF-mode body of updateSelectedTextAndRects (reads m_textBoxCache, PDF coords).
+    void updateSelectedTextAndRects_Pdf();
+
+    /// OCR-mode body of updateSelectedTextAndRects (reads m_ocrBlockCache, page coords).
+    void updateSelectedTextAndRects_Ocr();
     
     /**
      * @brief Finalize the current text selection.

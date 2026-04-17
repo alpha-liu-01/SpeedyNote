@@ -97,7 +97,7 @@ void OcrSubToolbar::updateIcons()
     m_autoOcrButton->setIcon(load("auto"));
     m_showTextButton->setIcon(load("showtext"));
     m_confidenceButton->setIcon(load("warning"));
-    m_snapButton->setIcon(load("straightLine"));
+    m_snapButton->setIcon(load("aligncenter"));
 }
 
 void OcrSubToolbar::applyButtonStyle()
@@ -162,9 +162,9 @@ void OcrSubToolbar::restoreTabState(int tabId)
     m_confidenceButton->setChecked(state.confidenceEnabled);
     m_confidenceButton->blockSignals(false);
 
-    m_snapButton->blockSignals(true);
-    m_snapButton->setChecked(state.snapToGridEnabled);
-    m_snapButton->blockSignals(false);
+    // Snap-to-grid is NOT restored here. It lives on the Document
+    // (doc->ocrSnapToBackground) and is synced by
+    // MainWindow::connectViewportScrollSignals() on every viewport switch.
 }
 
 void OcrSubToolbar::saveTabState(int tabId)
@@ -173,7 +173,7 @@ void OcrSubToolbar::saveTabState(int tabId)
     state.autoOcrEnabled = m_autoOcrButton->isChecked();
     state.showTextEnabled = m_showTextButton->isChecked();
     state.confidenceEnabled = m_confidenceButton->isChecked();
-    state.snapToGridEnabled = m_snapButton->isChecked();
+    // Snap-to-grid intentionally not saved; see TabState comment.
     state.initialized = true;
     m_tabStates[tabId] = state;
 }

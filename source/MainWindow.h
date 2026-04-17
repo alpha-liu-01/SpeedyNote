@@ -629,7 +629,10 @@ private:
     
     // Phase D: Auto-highlight sync connection (subtoolbar ↔ viewport)
     QMetaObject::Connection m_autoHighlightConn;
-    
+
+    // Highlighter selection-source sync connection (viewport -> subtoolbar)
+    QMetaObject::Connection m_highlighterModeConn;
+
     // Phase D: Object mode sync connections (subtoolbar ↔ viewport)
     QMetaObject::Connection m_insertModeConn;
     QMetaObject::Connection m_actionModeConn;

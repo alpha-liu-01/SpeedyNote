@@ -282,17 +282,8 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchOcrBlocks(
     // Build concatenated text with character-to-block mapping.
     // CJK scripts don't use inter-word spaces, so we only insert a space
     // separator when the trailing char of the previous block AND the leading
-    // char of the current block are both non-CJK.
-    auto isCJK = [](QChar ch) -> bool {
-        ushort u = ch.unicode();
-        return (u >= 0x2E80 && u <= 0x9FFF)   // CJK Radicals..Unified Ideographs
-            || (u >= 0xF900 && u <= 0xFAFF)    // CJK Compatibility Ideographs
-            || (u >= 0xFE30 && u <= 0xFE4F)    // CJK Compatibility Forms
-            || (u >= 0x3000 && u <= 0x303F)    // CJK Symbols and Punctuation
-            || (u >= 0x3040 && u <= 0x30FF)    // Hiragana + Katakana
-            || (u >= 0x31F0 && u <= 0x31FF)    // Katakana Phonetic Extensions
-            || (u >= 0xFF00 && u <= 0xFFEF);   // Fullwidth Forms
-    };
+    // char of the current block are both non-CJK. Range definitions are
+    // shared via isCjkLikeChar() in OcrTextBlock.h.
 
     QString fullText;
     QVector<int> charToBlockIndex;
@@ -306,7 +297,7 @@ QVector<PdfSearchMatch> PdfSearchEngine::searchOcrBlocks(
 
         if (hasPrev) {
             QChar leadChar = block.text.at(0);
-            bool needsSpace = !isCJK(prevTrailingChar) && !isCJK(leadChar);
+            bool needsSpace = !isCjkLikeChar(prevTrailingChar) && !isCjkLikeChar(leadChar);
             if (needsSpace) {
                 fullText += ' ';
                 charToBlockIndex.append(-1);

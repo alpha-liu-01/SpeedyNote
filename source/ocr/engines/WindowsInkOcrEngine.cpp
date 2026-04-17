@@ -1,6 +1,7 @@
 #ifdef SPEEDYNOTE_HAS_WINDOWS_INK
 
 #include "WindowsInkOcrEngine.h"
+#include "../OcrTextBlock.h"
 #include "../../strokes/VectorStroke.h"
 
 #include <QDebug>
@@ -256,16 +257,8 @@ void WindowsInkOcrEngine::clearStrokes()
     }
 }
 
-static bool isCjkChar(QChar ch)
-{
-    ushort u = ch.unicode();
-    return (u >= 0x4E00 && u <= 0x9FFF)
-        || (u >= 0x3400 && u <= 0x4DBF)
-        || (u >= 0xF900 && u <= 0xFAFF)
-        || (u >= 0x3000 && u <= 0x303F)
-        || (u >= 0x3040 && u <= 0x309F)
-        || (u >= 0x30A0 && u <= 0x30FF);
-}
+// CJK detection for the space-joining logic is shared via isCjkLikeChar
+// (OcrTextBlock.h) so all OCR paths use the same range definitions.
 
 QVector<OcrEngine::Result> WindowsInkOcrEngine::analyzeWithRecognizer()
 {
@@ -386,7 +379,7 @@ QVector<OcrEngine::Result> WindowsInkOcrEngine::analyzeWithRecognizer()
 
                 if (!r.text.isEmpty()) {
                     bool needSpace = true;
-                    if (isCjkChar(r.text.back()) || isCjkChar(w.text.front()))
+                    if (isCjkLikeChar(r.text.back()) || isCjkLikeChar(w.text.front()))
                         needSpace = false;
                     if (needSpace)
                         r.text += QLatin1Char(' ');

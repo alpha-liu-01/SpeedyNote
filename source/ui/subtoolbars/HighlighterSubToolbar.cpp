@@ -1,6 +1,7 @@
 #include "HighlighterSubToolbar.h"
 #include "../widgets/ColorPresetButton.h"
 #include "../widgets/ToggleButton.h"  // Contains SubToolbarToggle
+#include "../widgets/ModeToggleButton.h"
 
 #include <QSettings>
 #include <QColorDialog>
@@ -19,6 +20,7 @@ const QString HighlighterSubToolbar::SETTINGS_GROUP_HIGHLIGHTER = "highlighter";
 const QString HighlighterSubToolbar::KEY_COLOR_PREFIX = "color";
 const QString HighlighterSubToolbar::KEY_SELECTED_COLOR = "selectedColor";
 const QString HighlighterSubToolbar::KEY_AUTO_HIGHLIGHT = "autoHighlight";
+const QString HighlighterSubToolbar::KEY_SELECTION_SOURCE = "selectionSource";
 
 HighlighterSubToolbar::HighlighterSubToolbar(QWidget* parent)
     : SubToolbar(parent)
@@ -48,6 +50,17 @@ void HighlighterSubToolbar::createWidgets()
     m_autoHighlightToggle->setIconName("marker");
     m_autoHighlightToggle->setDarkMode(isDarkMode());
     addWidget(m_autoHighlightToggle);
+
+    // Separator + selection source toggle (PDF text ↔ OCR text)
+    addSeparator();
+    m_selectionSourceToggle = new ModeToggleButton(this);
+    m_selectionSourceToggle->setModeIconNames("selection_pdf", "selection_ocr");
+    m_selectionSourceToggle->setDarkMode(isDarkMode());
+    m_selectionSourceToggle->setModeToolTips(
+        tr("PDF text selection (click to switch to OCR text)"),
+        tr("OCR text selection (click to switch to PDF text)")
+    );
+    addWidget(m_selectionSourceToggle);
 }
 
 void HighlighterSubToolbar::setupConnections()
@@ -65,6 +78,10 @@ void HighlighterSubToolbar::setupConnections()
     // Auto-highlight toggle connection
     connect(m_autoHighlightToggle, &SubToolbarToggle::toggled, 
             this, &HighlighterSubToolbar::onAutoHighlightToggled);
+
+    // Selection-source toggle connection (PDF vs OCR)
+    connect(m_selectionSourceToggle, &ModeToggleButton::modeChanged,
+            this, &HighlighterSubToolbar::onSelectionSourceToggled);
 }
 
 void HighlighterSubToolbar::loadFromSettings()
@@ -88,12 +105,21 @@ void HighlighterSubToolbar::loadFromSettings()
     
     // Load auto-highlight state
     m_autoHighlightEnabled = settings.value(KEY_AUTO_HIGHLIGHT, false).toBool();
+
+    // Load selection source (PDF vs OCR)
+    int srcInt = qBound(0, settings.value(KEY_SELECTION_SOURCE, 0).toInt(), 1);
+    m_selectionSource = static_cast<SelectionSource>(srcInt);
     
     settings.endGroup();
     
     // Apply settings
     selectColorPreset(m_selectedColorIndex);
     m_autoHighlightToggle->setChecked(m_autoHighlightEnabled);
+    if (m_selectionSourceToggle) {
+        m_selectionSourceToggle->blockSignals(true);
+        m_selectionSourceToggle->setCurrentMode(static_cast<int>(m_selectionSource));
+        m_selectionSourceToggle->blockSignals(false);
+    }
 }
 
 void HighlighterSubToolbar::saveColorsToSettings()
@@ -116,6 +142,14 @@ void HighlighterSubToolbar::saveAutoHighlightToSettings()
     settings.beginGroup(SETTINGS_GROUP_HIGHLIGHTER);
     settings.setValue(KEY_SELECTED_COLOR, m_selectedColorIndex);
     settings.setValue(KEY_AUTO_HIGHLIGHT, m_autoHighlightEnabled);
+    settings.endGroup();
+}
+
+void HighlighterSubToolbar::saveSelectionSourceToSettings()
+{
+    QSettings settings;
+    settings.beginGroup(SETTINGS_GROUP_HIGHLIGHTER);
+    settings.setValue(KEY_SELECTION_SOURCE, static_cast<int>(m_selectionSource));
     settings.endGroup();
 }
 
@@ -233,6 +267,17 @@ void HighlighterSubToolbar::onAutoHighlightToggled(bool checked)
     emit autoHighlightChanged(checked);
 }
 
+void HighlighterSubToolbar::onSelectionSourceToggled(int mode)
+{
+    SelectionSource src = (mode == 1) ? SelectionSource::Ocr : SelectionSource::Pdf;
+    if (src == m_selectionSource) {
+        return;
+    }
+    m_selectionSource = src;
+    saveSelectionSourceToSettings();
+    emit selectionSourceChanged(src);
+}
+
 void HighlighterSubToolbar::selectColorPreset(int index)
 {
     // Allow index = -1 for "no selection"
@@ -255,6 +300,17 @@ void HighlighterSubToolbar::setAutoHighlightState(bool enabled)
     m_autoHighlightToggle->blockSignals(true);
     m_autoHighlightToggle->setChecked(enabled);
     m_autoHighlightToggle->blockSignals(false);
+}
+
+void HighlighterSubToolbar::setSelectionSourceState(SelectionSource src)
+{
+    m_selectionSource = src;
+    if (!m_selectionSourceToggle) {
+        return;
+    }
+    m_selectionSourceToggle->blockSignals(true);
+    m_selectionSourceToggle->setCurrentMode(static_cast<int>(src));
+    m_selectionSourceToggle->blockSignals(false);
 }
 
 void HighlighterSubToolbar::emitCurrentValues()
@@ -286,6 +342,9 @@ void HighlighterSubToolbar::setDarkMode(bool darkMode)
 
     if (m_autoHighlightToggle) {
         m_autoHighlightToggle->setDarkMode(darkMode);
+    }
+    if (m_selectionSourceToggle) {
+        m_selectionSourceToggle->setDarkMode(darkMode);
     }
 }
 

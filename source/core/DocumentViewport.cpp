@@ -6691,11 +6691,18 @@ void DocumentViewport::deleteSelectedObjects()
                 page->suppressedStrokeIds.insert(sid);
             
             // Remove matching OcrTextBlock
+            bool removedBlock = false;
             for (int b = page->ocrTextBlocks.size() - 1; b >= 0; --b) {
                 if (page->ocrTextBlocks[b].id == ocrObj->id) {
                     page->ocrTextBlocks.removeAt(b);
+                    removedBlock = true;
                     break;
                 }
+            }
+
+            // Keep the Highlighter's OCR cache in sync for this page/tile.
+            if (removedBlock) {
+                invalidateOcrBlockCache(pageIndex);
             }
             
             page->removeObject(ocrObj->id);
@@ -7114,62 +7121,97 @@ void DocumentViewport::createLinkObjectForHighlight(int pageIndex)
     if (!m_document || m_textSelection.highlightRects.isEmpty()) {
         return;
     }
-    
-    Page* page = m_document->page(pageIndex);
-    if (!page) {
-        return;
-    }
-    
-    // Create LinkObject
-    auto linkObj = std::make_unique<LinkObject>();
-    
-    // Position to the LEFT of the first highlight rect (in the margin)
-    // This avoids overlapping with the highlight strokes
+
+    const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
+    const bool edgeless = m_document->isEdgeless();
+
+    // Resolve the anchor position in DOCUMENT-space (for edgeless) or
+    // PAGE-space (for paged).
     QRectF firstRect = m_textSelection.highlightRects[0];
-    qreal firstRectX = firstRect.x() * PDF_TO_PAGE_SCALE;
-    qreal firstRectY = firstRect.y() * PDF_TO_PAGE_SCALE;
-    
-    // Place icon to the left with padding, but clamp to avoid negative coords
+    qreal firstRectX;
+    qreal firstRectY;
+    if (ocrSelection) {
+        firstRectX = firstRect.x();
+        firstRectY = firstRect.y();
+    } else {
+        firstRectX = firstRect.x() * PDF_TO_PAGE_SCALE;
+        firstRectY = firstRect.y() * PDF_TO_PAGE_SCALE;
+    }
+
+    // Place icon to the LEFT of the first highlight rect (in the margin).
+    // In paged mode we clamp to the page's left edge so the icon stays on
+    // the page; in edgeless the canvas is infinite (negative coords are
+    // legal), so no clamping is needed.
     constexpr qreal MARGIN_PADDING = 4.0;
     qreal iconX = firstRectX - LinkObject::ICON_SIZE - MARGIN_PADDING;
-    if (iconX < MARGIN_PADDING) {
-        iconX = MARGIN_PADDING;  // Keep small margin from page edge
+    if (!edgeless && iconX < MARGIN_PADDING) {
+        iconX = MARGIN_PADDING;
     }
-    
-    linkObj->position = QPointF(iconX, firstRectY);
-    
-    // Set description to extracted text
+
+    auto linkObj = std::make_unique<LinkObject>();
     linkObj->description = m_textSelection.selectedText;
-    
-    // Use a DARKER version of highlighter color for visibility on white pages
-    // Light colors like yellow become hard to see, so we darken by ~50%
+
+    // Use a DARKER version of highlighter color for visibility on white pages.
     QColor darkened = m_highlighterColor;
     darkened.setRed(darkened.red() * 0.5);
     darkened.setGreen(darkened.green() * 0.5);
     darkened.setBlue(darkened.blue() * 0.5);
-    darkened.setAlpha(255);  // Full opacity for visibility
+    darkened.setAlpha(255);
     linkObj->iconColor = darkened;
-    
-    // Set default affinity (activeLayer - 1, so it appears below strokes)
+
+    if (edgeless) {
+        // Find the tile containing the anchor point. In edgeless, positions
+        // are stored tile-local, and the object's hit tests are done in
+        // document space (tileOrigin + obj.position).
+        QPointF docAnchor(iconX, firstRectY);
+        auto coord = m_document->tileCoordForPoint(docAnchor);
+        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
+        if (!targetTile) {
+            return;
+        }
+
+        QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
+                           coord.second * Document::EDGELESS_TILE_SIZE);
+        linkObj->position = docAnchor - tileOrigin;
+
+        int activeLayer = m_edgelessActiveLayerIndex;
+        int defaultAffinity = activeLayer - 1;
+        linkObj->setLayerAffinity(defaultAffinity);
+        linkObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
+
+        LinkObject* rawPtr = linkObj.get();
+        targetTile->addObject(std::move(linkObj));
+        m_document->markTileDirty(coord);
+
+        pushObjectInsertUndo(rawPtr, pageIndex, coord);
+
+#ifdef QT_DEBUG
+        qDebug() << "Created LinkObject for highlight on edgeless tile"
+                 << coord.first << coord.second
+                 << "description:" << rawPtr->description.left(30);
+#endif
+        return;
+    }
+
+    // ---------- Paged path (original behavior) ----------
+    Page* page = m_document->page(pageIndex);
+    if (!page) {
+        return;
+    }
+
+    linkObj->position = QPointF(iconX, firstRectY);
+
     int activeLayer = page->activeLayerIndex;
     int defaultAffinity = activeLayer - 1;
     linkObj->setLayerAffinity(defaultAffinity);
-    
-    // Set zOrder so new object appears on top of existing objects with same affinity
     linkObj->zOrder = getNextZOrderForAffinity(page, defaultAffinity);
-    
-    // Store raw pointer BEFORE std::move
+
     LinkObject* rawPtr = linkObj.get();
-    
-    // Add to page
     page->addObject(std::move(linkObj));
-    
-    // Mark page dirty for save
     m_document->markPageDirty(pageIndex);
-    
-    // Push undo action (empty tile coord for paged mode)
+
     pushObjectInsertUndo(rawPtr, pageIndex, {});
-    
+
 #ifdef QT_DEBUG
     qDebug() << "Created LinkObject for highlight on page" << pageIndex
              << "description:" << rawPtr->description.left(30);
@@ -10196,35 +10238,63 @@ void DocumentViewport::activatePdfLink(const PdfLink& link)
 void DocumentViewport::updateLinkCursor(const QPointF& viewportPos)
 {
     if (m_currentTool != ToolType::Highlighter) return;
-    
+    if (!m_document) {
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
+
+    const bool ocrMode = (m_highlighterMode == HighlighterMode::Ocr);
+
+    // Edgeless: no PDF pages, and hit testing is done against tiles.
+    // OCR mode is always available (blocks may live on any tile), PDF mode
+    // is not applicable.
+    if (m_document->isEdgeless()) {
+        setCursor(ocrMode ? Qt::IBeamCursor : Qt::ForbiddenCursor);
+        return;
+    }
+
     PageHit hit = viewportToPage(viewportPos);
     if (!hit.valid()) {
         setCursor(Qt::ArrowCursor);
         return;
     }
-    
-    // Optimization: viewportToPage already validated the page exists,
-    // so we only need to check the background type
+
     Page* page = m_document->page(hit.pageIndex);
-    if (page->backgroundType != Page::BackgroundType::PDF) {
+    if (!page) {
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
+
+    // OCR mode works on any page; PDF mode needs a PDF background.
+    if (!ocrMode && page->backgroundType != Page::BackgroundType::PDF) {
         setCursor(Qt::ForbiddenCursor);
         return;
     }
-    
-    // Check if hovering over a link (loadLinksForPage is called inside)
-    const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
-    if (link && link->type != PdfLinkType::None) {
-        setCursor(Qt::PointingHandCursor);
-    } else {
-        setCursor(Qt::IBeamCursor);  // Text selection cursor
+
+    // PDF links are only relevant in PDF mode.
+    if (!ocrMode) {
+        const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
+        if (link && link->type != PdfLinkType::None) {
+            setCursor(Qt::PointingHandCursor);
+            return;
+        }
     }
+
+    setCursor(Qt::IBeamCursor);  // Text selection cursor
 }
 
 bool DocumentViewport::isHighlighterEnabled() const
 {
     if (!m_document) return false;
-    
-    // Check if current page has PDF
+    // In OCR mode the highlighter is always enabled (OCR blocks can exist on
+    // any background type / tile). In PDF mode it only applies to PDF pages,
+    // which don't exist in edgeless documents.
+    if (m_highlighterMode == HighlighterMode::Ocr) {
+        return true;
+    }
+    if (m_document->isEdgeless()) {
+        return false;  // No PDF background in edgeless mode
+    }
     Page* page = m_document->page(m_currentPageIndex);
     return page && page->backgroundType == Page::BackgroundType::PDF;
 }
@@ -10240,6 +10310,238 @@ void DocumentViewport::setAutoHighlightEnabled(bool enabled)
     #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Auto-highlight mode:" << (enabled ? "ON" : "OFF");
     #endif
+}
+
+void DocumentViewport::setHighlighterMode(HighlighterMode mode)
+{
+    if (m_highlighterMode == mode) {
+        return;
+    }
+
+    m_highlighterMode = mode;
+
+    // Clear any in-flight selection because its cache reference is about to
+    // point at the "wrong" cache. Signal listeners so action bar / UI updates.
+    bool hadSelection = m_textSelection.isValid();
+    m_textSelection.clear();
+    m_lastHitBoxIndex = -1;
+    m_lastOcrHitBlockIndex = -1;
+    if (hadSelection) {
+        emit textSelectionChanged(false);
+    }
+
+    emit highlighterModeChanged(mode);
+    update();
+
+    #ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "Highlighter selection source:"
+             << (mode == HighlighterMode::Pdf ? "PDF" : "OCR");
+    #endif
+}
+
+// ============================================================================
+// OCR Highlighter Cache
+// ============================================================================
+
+void DocumentViewport::loadOcrBlocksForPage(int pageIndex)
+{
+    if (!m_document) {
+        m_ocrBlockCache.clear();
+        m_ocrBlockCachePageIndex = -1;
+        m_lastOcrHitBlockIndex = -1;
+        return;
+    }
+
+    // Shared block-to-OcrBlockRef builder. Computes per-character rects by
+    // proportional splitting of the block's bounding rect. This mirrors
+    // PdfSearchEngine::searchOcrBlocks so that text-selection highlights
+    // line up with search highlights. Returns false if the block is empty
+    // or has an invalid bounding rect (caller should skip).
+    auto buildRef = [](const OcrTextBlock& block, QPointF originOffset,
+                       OcrBlockRef& outRef) -> bool {
+        if (block.text.isEmpty() || !block.boundingRect.isValid()) return false;
+        outRef.text = block.text;
+        outRef.blockRect = originOffset.isNull()
+            ? block.boundingRect
+            : block.boundingRect.translated(originOffset);
+
+        const int n = outRef.text.length();
+        if (n > 0) {
+            outRef.charRects.resize(n);
+            const qreal charW = outRef.blockRect.width() / n;
+            const qreal top = outRef.blockRect.top();
+            const qreal left = outRef.blockRect.left();
+            const qreal height = outRef.blockRect.height();
+            for (int i = 0; i < n; ++i) {
+                outRef.charRects[i] = QRectF(left + i * charW, top, charW, height);
+            }
+        }
+        return true;
+    };
+
+    // Edgeless mode: tiles can be loaded/unloaded as the user pans, so we
+    // rebuild the cache on every request rather than caching by pageIndex.
+    // All block rects are converted to DOCUMENT-space coordinates (by adding
+    // each tile's origin) so hit testing & rendering line up with the
+    // edgeless view transform. Callers pass pageIndex == 0 in edgeless mode
+    // (since pagePosition(0) == (0,0) in edgeless).
+    if (m_document->isEdgeless()) {
+        m_ocrBlockCache.clear();
+        m_lastOcrHitBlockIndex = -1;
+
+        const int tileSize = Document::EDGELESS_TILE_SIZE;
+        const QVector<Document::TileCoord> loadedTiles = m_document->allLoadedTileCoords();
+
+        // Pre-size: one tile pass to estimate total block count. Cheap
+        // compared to the full iteration and avoids repeated reallocation.
+        int estimated = 0;
+        for (const auto& coord : loadedTiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile) estimated += tile->ocrBlocksForSearch().size();
+        }
+        m_ocrBlockCache.reserve(estimated);
+
+        for (const auto& coord : loadedTiles) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile) continue;
+            QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
+            const QVector<OcrTextBlock> blocks = tile->ocrBlocksForSearch();
+            for (const OcrTextBlock& block : blocks) {
+                OcrBlockRef ref;
+                if (buildRef(block, tileOrigin, ref)) {
+                    m_ocrBlockCache.append(std::move(ref));
+                }
+            }
+        }
+
+        // Sort in reading order (top-to-bottom, then left-to-right) so
+        // drag-selection across tile boundaries produces sensible ranges.
+        std::sort(m_ocrBlockCache.begin(), m_ocrBlockCache.end(),
+                  [](const OcrBlockRef& a, const OcrBlockRef& b) {
+                      constexpr qreal lineThreshold = 8.0;
+                      const qreal ay = a.blockRect.center().y();
+                      const qreal by = b.blockRect.center().y();
+                      if (qAbs(ay - by) > lineThreshold) return ay < by;
+                      return a.blockRect.left() < b.blockRect.left();
+                  });
+
+        // pageIndex == 0 in edgeless means "loaded"; a negative index (as
+        // sent by invalidateOcrBlockCache) will clear the cache normally.
+        m_ocrBlockCachePageIndex = 0;
+        return;
+    }
+
+    // --- Paged mode ---
+    if (pageIndex == m_ocrBlockCachePageIndex) {
+        return;  // Already cached (may legitimately be empty)
+    }
+
+    m_ocrBlockCache.clear();
+    m_ocrBlockCachePageIndex = -1;
+    m_lastOcrHitBlockIndex = -1;
+
+    if (pageIndex < 0 || pageIndex >= m_document->pageCount()) {
+        return;
+    }
+
+    Page* page = m_document->page(pageIndex);
+    if (!page) {
+        return;
+    }
+
+    // Use "search"-quality blocks (excludes dirty / stale ones). Unlike the
+    // PDF text cache, OCR data is available on any background type.
+    const QVector<OcrTextBlock> blocks = page->ocrBlocksForSearch();
+    m_ocrBlockCache.reserve(blocks.size());
+
+    for (const OcrTextBlock& block : blocks) {
+        OcrBlockRef ref;
+        if (buildRef(block, QPointF(), ref)) {
+            m_ocrBlockCache.append(std::move(ref));
+        }
+    }
+
+    m_ocrBlockCachePageIndex = pageIndex;
+}
+
+void DocumentViewport::invalidateOcrBlockCache(int pageIndex)
+{
+    // pageIndex < 0 means "invalidate unconditionally"; otherwise only if the
+    // cache currently refers to that page.
+    if (pageIndex < 0 || pageIndex == m_ocrBlockCachePageIndex) {
+        m_ocrBlockCache.clear();
+        m_ocrBlockCachePageIndex = -1;
+        m_lastOcrHitBlockIndex = -1;
+    }
+}
+
+DocumentViewport::CharacterPosition DocumentViewport::findOcrCharAtPoint(const QPointF& pagePoint) const
+{
+    CharacterPosition result;
+
+    if (m_ocrBlockCache.isEmpty()) {
+        return result;
+    }
+
+    auto checkBlock = [&](int blockIdx) -> bool {
+        const OcrBlockRef& ref = m_ocrBlockCache[blockIdx];
+        if (!ref.blockRect.contains(pagePoint)) {
+            return false;
+        }
+        if (ref.charRects.isEmpty()) {
+            result.boxIndex = blockIdx;
+            result.charIndex = 0;
+            m_lastOcrHitBlockIndex = blockIdx;
+            return true;
+        }
+
+        // Exact hit first.
+        for (int c = 0; c < ref.charRects.size(); ++c) {
+            if (ref.charRects[c].contains(pagePoint)) {
+                result.boxIndex = blockIdx;
+                result.charIndex = c;
+                m_lastOcrHitBlockIndex = blockIdx;
+                return true;
+            }
+        }
+
+        // In block but between chars: pick the char whose horizontal center
+        // is closest to the pointer (matches PDF behavior).
+        qreal bestDist = std::numeric_limits<qreal>::max();
+        int bestIdx = 0;
+        for (int c = 0; c < ref.charRects.size(); ++c) {
+            qreal d = qAbs(pagePoint.x() - ref.charRects[c].center().x());
+            if (d < bestDist) {
+                bestDist = d;
+                bestIdx = c;
+            }
+        }
+        result.boxIndex = blockIdx;
+        result.charIndex = bestIdx;
+        m_lastOcrHitBlockIndex = blockIdx;
+        return true;
+    };
+
+    // Locality hint: last hit block first, then its neighbors.
+    if (m_lastOcrHitBlockIndex >= 0 && m_lastOcrHitBlockIndex < m_ocrBlockCache.size()) {
+        if (checkBlock(m_lastOcrHitBlockIndex)) return result;
+        if (m_lastOcrHitBlockIndex + 1 < m_ocrBlockCache.size() &&
+            checkBlock(m_lastOcrHitBlockIndex + 1)) return result;
+        if (m_lastOcrHitBlockIndex > 0 &&
+            checkBlock(m_lastOcrHitBlockIndex - 1)) return result;
+    }
+
+    for (int i = 0; i < m_ocrBlockCache.size(); ++i) {
+        if (m_lastOcrHitBlockIndex >= 0 &&
+            (i == m_lastOcrHitBlockIndex ||
+             i == m_lastOcrHitBlockIndex + 1 ||
+             i == m_lastOcrHitBlockIndex - 1)) {
+            continue;
+        }
+        if (checkBlock(i)) return result;
+    }
+
+    return result;
 }
 
 void DocumentViewport::setHighlighterColor(const QColor& color)
@@ -10267,43 +10569,77 @@ void DocumentViewport::updateHighlighterCursor()
 
 void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
 {
-    // Check if highlighter is enabled on this page
-    PageHit hit = viewportToPage(pe.viewportPos);
-    if (!hit.valid()) {
-        bool hadSelection = m_textSelection.isValid();
-        m_textSelection.clear();
-        if (hadSelection) {
-            emit textSelectionChanged(false);
-        }
-        m_pointerActive = false;  // Reset so hover works
+    if (!m_document) {
         return;
     }
-    
-    Page* page = m_document->page(hit.pageIndex);
-    if (!page || page->backgroundType != Page::BackgroundType::PDF) {
-        // Not a PDF page - highlighter disabled
+
+    const bool ocrMode = (m_highlighterMode == HighlighterMode::Ocr);
+    const bool edgeless = m_document->isEdgeless();
+
+    // Shared bail-out: drop any in-flight selection, notify listeners once,
+    // and reset m_pointerActive so hover updates still work.
+    auto bailOut = [this]() {
         bool hadSelection = m_textSelection.isValid();
         m_textSelection.clear();
-        if (hadSelection) {
-            emit textSelectionChanged(false);
-        }
-        m_pointerActive = false;  // Reset so hover works
-        return;
-    }
-    
-    // Phase D.1: Check for PDF link click (priority over text selection)
-    const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
-    if (link && link->type != PdfLinkType::None) {
-        activatePdfLink(*link);
-        // Reset pointer state since link click doesn't involve dragging
+        if (hadSelection) emit textSelectionChanged(false);
         m_pointerActive = false;
-        updateHighlighterCursor();
-        return;  // Don't start text selection
+    };
+
+    // Compute a PageHit in a way that works uniformly for paged and edgeless:
+    // - Paged: viewportToPage() gives a real page index + page-local point.
+    // - Edgeless: there are no PDF pages, so synthesize pageIndex = 0 with
+    //   the document-space coordinate as "page point". (pagePosition(0) is
+    //   always (0,0) in edgeless, so this is the natural equivalent.)
+    PageHit hit;
+    if (edgeless) {
+        if (!ocrMode) {
+            // PDF text selection is not applicable to edgeless documents.
+            bailOut();
+            return;
+        }
+        hit.pageIndex = 0;
+        hit.pagePoint = viewportToDocument(pe.viewportPos);
+    } else {
+        hit = viewportToPage(pe.viewportPos);
+        if (!hit.valid()) {
+            bailOut();
+            return;
+        }
+
+        Page* page = m_document->page(hit.pageIndex);
+        if (!page) {
+            bailOut();
+            return;
+        }
+
+        // PDF mode requires a PDF background page; OCR mode works on any
+        // page (the underlying OCR blocks are attached to the page
+        // regardless of background type, and don't require the "show
+        // recognized text" overlay).
+        if (!ocrMode && page->backgroundType != Page::BackgroundType::PDF) {
+            bailOut();
+            return;
+        }
     }
-    
-    // Load text boxes for this page if not cached
-    loadTextBoxesForPage(hit.pageIndex);
-    
+
+    // PDF links are a PDF-only concept; skip the lookup when selecting OCR text.
+    if (!ocrMode) {
+        const PdfLink* link = findLinkAtPoint(hit.pagePoint, hit.pageIndex);
+        if (link && link->type != PdfLinkType::None) {
+            activatePdfLink(*link);
+            m_pointerActive = false;
+            updateHighlighterCursor();
+            return;
+        }
+    }
+
+    // Load the appropriate cache for this page.
+    if (ocrMode) {
+        loadOcrBlocksForPage(hit.pageIndex);
+    } else {
+        loadTextBoxesForPage(hit.pageIndex);
+    }
+
     // Check for double-click (word selection) and triple-click (line selection)
     // Using static variables for timing - thread-safe for single UI thread
     // Note: QElapsedTimer::isValid() returns false until first restart(), which
@@ -10335,14 +10671,20 @@ void DocumentViewport::handlePointerPress_Highlighter(const PointerEvent& pe)
         clickCount = 0;  // Reset
         return;
     }
-    
-    // Single click: start text-flow selection at character position
-    // Convert page coords to PDF coords
-    QPointF pdfPos(hit.pagePoint.x() * PAGE_TO_PDF_SCALE, hit.pagePoint.y() * PAGE_TO_PDF_SCALE);
-    
-    CharacterPosition charPos = findCharacterAtPoint(pdfPos);
-    
+
+    // Single click: start text-flow selection at character position.
+    CharacterPosition charPos;
+    if (ocrMode) {
+        charPos = findOcrCharAtPoint(hit.pagePoint);
+    } else {
+        QPointF pdfPos(hit.pagePoint.x() * PAGE_TO_PDF_SCALE,
+                       hit.pagePoint.y() * PAGE_TO_PDF_SCALE);
+        charPos = findCharacterAtPoint(pdfPos);
+    }
+
     m_textSelection.clear();
+    m_textSelection.source = ocrMode ? TextSelection::Source::Ocr
+                                     : TextSelection::Source::Pdf;
     m_textSelection.pageIndex = hit.pageIndex;
     
     if (charPos.isValid()) {
@@ -10369,18 +10711,33 @@ void DocumentViewport::handlePointerMove_Highlighter(const PointerEvent& pe)
     if (!m_textSelection.isSelecting) {
         return;
     }
-    
-    PageHit hit = viewportToPage(pe.viewportPos);
-    if (!hit.valid() || hit.pageIndex != m_textSelection.pageIndex) {
-        // Moved off the page - for now, just ignore moves outside the page
+    if (!m_document) {
         return;
     }
-    
-    // Convert page coords to PDF coords
-    QPointF pdfPos(hit.pagePoint.x() * PAGE_TO_PDF_SCALE, hit.pagePoint.y() * PAGE_TO_PDF_SCALE);
-    
-    CharacterPosition charPos = findCharacterAtPoint(pdfPos);
-    
+
+    PageHit hit;
+    if (m_document->isEdgeless()) {
+        // Edgeless: selection spans the whole document canvas. Synthesize
+        // pageIndex=0 with a document-space coordinate.
+        hit.pageIndex = 0;
+        hit.pagePoint = viewportToDocument(pe.viewportPos);
+    } else {
+        hit = viewportToPage(pe.viewportPos);
+        if (!hit.valid() || hit.pageIndex != m_textSelection.pageIndex) {
+            // Moved off the page - for now, just ignore moves outside the page
+            return;
+        }
+    }
+
+    CharacterPosition charPos;
+    if (m_textSelection.source == TextSelection::Source::Ocr) {
+        charPos = findOcrCharAtPoint(hit.pagePoint);
+    } else {
+        QPointF pdfPos(hit.pagePoint.x() * PAGE_TO_PDF_SCALE,
+                       hit.pagePoint.y() * PAGE_TO_PDF_SCALE);
+        charPos = findCharacterAtPoint(pdfPos);
+    }
+
     if (charPos.isValid()) {
         // PERF: Only update if position actually changed
         // This avoids expensive string/rect rebuilding on every mouse move
@@ -10560,6 +10917,15 @@ DocumentViewport::CharacterPosition DocumentViewport::findCharacterAtPoint(const
 
 void DocumentViewport::updateSelectedTextAndRects()
 {
+    if (m_textSelection.source == TextSelection::Source::Ocr) {
+        updateSelectedTextAndRects_Ocr();
+    } else {
+        updateSelectedTextAndRects_Pdf();
+    }
+}
+
+void DocumentViewport::updateSelectedTextAndRects_Pdf()
+{
     m_textSelection.selectedText.clear();
     m_textSelection.highlightRects.clear();
     
@@ -10665,6 +11031,106 @@ void DocumentViewport::updateSelectedTextAndRects()
     m_textSelection.selectedText = selectedText;
 }
 
+void DocumentViewport::updateSelectedTextAndRects_Ocr()
+{
+    m_textSelection.selectedText.clear();
+    m_textSelection.highlightRects.clear();
+
+    if (m_ocrBlockCache.isEmpty() ||
+        m_textSelection.startBoxIndex < 0 ||
+        m_textSelection.endBoxIndex < 0) {
+        return;
+    }
+
+    // Normalize selection direction.
+    int fromBlock, fromChar, toBlock, toChar;
+    if (m_textSelection.startBoxIndex < m_textSelection.endBoxIndex ||
+        (m_textSelection.startBoxIndex == m_textSelection.endBoxIndex &&
+         m_textSelection.startCharIndex <= m_textSelection.endCharIndex)) {
+        fromBlock = m_textSelection.startBoxIndex;
+        fromChar  = m_textSelection.startCharIndex;
+        toBlock   = m_textSelection.endBoxIndex;
+        toChar    = m_textSelection.endCharIndex;
+    } else {
+        fromBlock = m_textSelection.endBoxIndex;
+        fromChar  = m_textSelection.endCharIndex;
+        toBlock   = m_textSelection.startBoxIndex;
+        toChar    = m_textSelection.startCharIndex;
+    }
+
+    // Line-grouping threshold in PAGE coordinates (px). OCR blocks are usually
+    // short (single word / phrase), so we regroup consecutive blocks within
+    // the same horizontal band into one highlight rect.
+    const qreal lineThreshold = 8.0;
+
+    QString selectedText;
+    qreal currentLineY = -1;
+    QRectF currentLineRect;
+    QChar prevTrailingChar;
+    bool hasPrevChar = false;
+
+    for (int bIdx = fromBlock; bIdx <= toBlock && bIdx < m_ocrBlockCache.size(); ++bIdx) {
+        const OcrBlockRef& ref = m_ocrBlockCache[bIdx];
+        if (ref.text.isEmpty()) {
+            continue;
+        }
+
+        const int maxCharIdx = ref.text.length() - 1;
+        int startChar = (bIdx == fromBlock) ? fromChar : 0;
+        int endChar   = (bIdx == toBlock)   ? toChar   : maxCharIdx;
+        startChar = qBound(0, startChar, maxCharIdx);
+        endChar   = qBound(0, endChar,   maxCharIdx);
+        if (startChar > endChar) {
+            continue;
+        }
+
+        // Text joining with CJK-aware spacing between blocks.
+        QString blockText = ref.text.mid(startChar, endChar - startChar + 1);
+        if (!blockText.isEmpty()) {
+            if (hasPrevChar) {
+                QChar leadChar = blockText.at(0);
+                if (!isCjkLikeChar(prevTrailingChar) && !isCjkLikeChar(leadChar)) {
+                    selectedText += QLatin1Char(' ');
+                }
+            }
+            selectedText += blockText;
+            prevTrailingChar = blockText.at(blockText.length() - 1);
+            hasPrevChar = true;
+        }
+
+        // Build the per-character rect for this block's selection range.
+        QRectF charRect;
+        if (!ref.charRects.isEmpty()) {
+            for (int c = startChar; c <= endChar && c < ref.charRects.size(); ++c) {
+                if (charRect.isNull()) charRect = ref.charRects[c];
+                else                   charRect = charRect.united(ref.charRects[c]);
+            }
+        } else {
+            charRect = ref.blockRect;
+        }
+        if (charRect.isNull()) {
+            continue;
+        }
+
+        qreal boxCenterY = charRect.center().y();
+        if (currentLineY < 0 || qAbs(boxCenterY - currentLineY) > lineThreshold) {
+            if (!currentLineRect.isNull()) {
+                m_textSelection.highlightRects.append(currentLineRect);
+            }
+            currentLineRect = charRect;
+            currentLineY = boxCenterY;
+        } else {
+            currentLineRect = currentLineRect.united(charRect);
+        }
+    }
+
+    if (!currentLineRect.isNull()) {
+        m_textSelection.highlightRects.append(currentLineRect);
+    }
+
+    m_textSelection.selectedText = selectedText;
+}
+
 void DocumentViewport::finalizeTextSelection()
 {
     if (!m_textSelection.isValid()) {
@@ -10708,24 +11174,46 @@ void DocumentViewport::clearSearchMatches()
 
 void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
 {
+    const bool ocrMode = (m_highlighterMode == HighlighterMode::Ocr);
+
+    if (ocrMode) {
+        loadOcrBlocksForPage(pageIndex);
+        for (int bIdx = 0; bIdx < m_ocrBlockCache.size(); ++bIdx) {
+            const OcrBlockRef& ref = m_ocrBlockCache[bIdx];
+            if (ref.text.isEmpty()) continue;
+            if (!ref.blockRect.contains(pagePos)) continue;
+
+            m_textSelection.clear();
+            m_textSelection.source = TextSelection::Source::Ocr;
+            m_textSelection.pageIndex = pageIndex;
+            m_textSelection.startBoxIndex = bIdx;
+            m_textSelection.startCharIndex = 0;
+            m_textSelection.endBoxIndex = bIdx;
+            m_textSelection.endCharIndex = ref.text.length() - 1;
+
+            updateSelectedTextAndRects();
+            finalizeTextSelection();
+            update();
+            return;
+        }
+        return;
+    }
+
+    // PDF mode (original implementation)
     loadTextBoxesForPage(pageIndex);
-    
-    // Convert to PDF coords
     QPointF pdfPos(pagePos.x() * PAGE_TO_PDF_SCALE, pagePos.y() * PAGE_TO_PDF_SCALE);
     
-    // Find text box containing point
     for (int boxIdx = 0; boxIdx < m_textBoxCache.size(); ++boxIdx) {
         const PdfTextBox& box = m_textBoxCache[boxIdx];
         if (box.boundingBox.contains(pdfPos)) {
-            // Skip empty text boxes
             if (box.text.isEmpty()) {
                 continue;
             }
             
             m_textSelection.clear();
+            m_textSelection.source = TextSelection::Source::Pdf;
             m_textSelection.pageIndex = pageIndex;
             
-            // Select entire word (box)
             m_textSelection.startBoxIndex = boxIdx;
             m_textSelection.startCharIndex = 0;
             m_textSelection.endBoxIndex = boxIdx;
@@ -10741,12 +11229,56 @@ void DocumentViewport::selectWordAtPoint(const QPointF& pagePos, int pageIndex)
 
 void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
 {
+    const bool ocrMode = (m_highlighterMode == HighlighterMode::Ocr);
+
+    if (ocrMode) {
+        loadOcrBlocksForPage(pageIndex);
+        int clickedIdx = -1;
+        for (int i = 0; i < m_ocrBlockCache.size(); ++i) {
+            if (m_ocrBlockCache[i].blockRect.contains(pagePos)) {
+                clickedIdx = i;
+                break;
+            }
+        }
+        if (clickedIdx < 0) {
+            return;
+        }
+
+        // Page-coord threshold ≈ slightly larger than PDF one because OCR
+        // block Y-centers can be noisier than embedded PDF text.
+        const qreal lineThreshold = 10.0;
+        qreal targetY = m_ocrBlockCache[clickedIdx].blockRect.center().y();
+
+        int firstOnLine = clickedIdx;
+        int lastOnLine  = clickedIdx;
+        for (int i = 0; i < m_ocrBlockCache.size(); ++i) {
+            qreal y = m_ocrBlockCache[i].blockRect.center().y();
+            if (qAbs(y - targetY) <= lineThreshold) {
+                if (i < firstOnLine) firstOnLine = i;
+                if (i > lastOnLine)  lastOnLine  = i;
+            }
+        }
+
+        m_textSelection.clear();
+        m_textSelection.source = TextSelection::Source::Ocr;
+        m_textSelection.pageIndex = pageIndex;
+        m_textSelection.startBoxIndex = firstOnLine;
+        m_textSelection.startCharIndex = 0;
+        m_textSelection.endBoxIndex = lastOnLine;
+
+        const OcrBlockRef& lastRef = m_ocrBlockCache[lastOnLine];
+        m_textSelection.endCharIndex = lastRef.text.isEmpty() ? 0 : lastRef.text.length() - 1;
+
+        updateSelectedTextAndRects();
+        finalizeTextSelection();
+        update();
+        return;
+    }
+
+    // PDF mode (original implementation)
     loadTextBoxesForPage(pageIndex);
-    
-    // Convert to PDF coords
     QPointF pdfPos(pagePos.x() * PAGE_TO_PDF_SCALE, pagePos.y() * PAGE_TO_PDF_SCALE);
     
-    // Find text box containing point
     int clickedBoxIdx = -1;
     for (int i = 0; i < m_textBoxCache.size(); ++i) {
         if (m_textBoxCache[i].boundingBox.contains(pdfPos)) {
@@ -10756,13 +11288,12 @@ void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
     }
     
     if (clickedBoxIdx < 0) {
-        return;  // No text box at point
+        return;
     }
     
     const qreal lineThreshold = 5.0;  // PDF points
     qreal targetY = m_textBoxCache[clickedBoxIdx].boundingBox.center().y();
     
-    // Find all boxes on the same line (similar Y coordinate)
     int firstBoxOnLine = clickedBoxIdx;
     int lastBoxOnLine = clickedBoxIdx;
     
@@ -10774,15 +11305,14 @@ void DocumentViewport::selectLineAtPoint(const QPointF& pagePos, int pageIndex)
         }
     }
     
-    // Set selection to span entire line
     m_textSelection.clear();
+    m_textSelection.source = TextSelection::Source::Pdf;
     m_textSelection.pageIndex = pageIndex;
     m_textSelection.startBoxIndex = firstBoxOnLine;
     m_textSelection.startCharIndex = 0;
     m_textSelection.endBoxIndex = lastBoxOnLine;
     
     const PdfTextBox& lastBox = m_textBoxCache[lastBoxOnLine];
-    // Safety: handle empty text boxes
     m_textSelection.endCharIndex = lastBox.text.isEmpty() ? 0 : static_cast<int>(lastBox.text.length() - 1);
     
     updateSelectedTextAndRects();
@@ -10800,9 +11330,12 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
     if (m_textSelection.highlightRects.isEmpty() && !m_textSelection.isSelecting) {
         return;
     }
-    
-    // Only render on the page being selected
-    if (m_textSelection.pageIndex != pageIndex) {
+
+    // Edgeless selections use document-space coordinates and span tiles, so
+    // skip the page-index match test. Paged rendering only draws the overlay
+    // on the page that actually has the selection.
+    const bool edgelessRender = (pageIndex < 0);
+    if (!edgelessRender && m_textSelection.pageIndex != pageIndex) {
         return;
     }
     
@@ -10813,14 +11346,21 @@ void DocumentViewport::renderTextSelectionOverlay(QPainter& painter, int pageInd
     painter.setBrush(selectionColor);
     painter.setPen(Qt::NoPen);
     
-    // Draw highlight rectangles (per-line segments, in PDF coords → convert to page coords)
-    for (const QRectF& pdfRect : m_textSelection.highlightRects) {
-        QRectF pageRect(
-            pdfRect.x() * PDF_TO_PAGE_SCALE,
-            pdfRect.y() * PDF_TO_PAGE_SCALE,
-            pdfRect.width() * PDF_TO_PAGE_SCALE,
-            pdfRect.height() * PDF_TO_PAGE_SCALE
-        );
+    // Highlight rectangles are stored in PDF coords for PDF-source selections
+    // (need scaling) and in page coords for OCR-source selections (no scaling).
+    const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
+    for (const QRectF& rect : m_textSelection.highlightRects) {
+        QRectF pageRect;
+        if (ocrSelection) {
+            pageRect = rect;
+        } else {
+            pageRect = QRectF(
+                rect.x() * PDF_TO_PAGE_SCALE,
+                rect.y() * PDF_TO_PAGE_SCALE,
+                rect.width() * PDF_TO_PAGE_SCALE,
+                rect.height() * PDF_TO_PAGE_SCALE
+            );
+        }
         painter.drawRect(pageRect);
     }
     
@@ -10944,35 +11484,95 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
     if (!m_document) {
         return createdIds;
     }
-    
-    // Get the page where selection exists
-    int pageIndex = m_textSelection.pageIndex;
+
+    const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
+    const bool edgeless = m_document->isEdgeless();
+    const int pageIndex = m_textSelection.pageIndex;
+
+    // ---------- Edgeless path: strokes are split across tiles ----------
+    if (edgeless) {
+        // Only OCR selections reach here in edgeless (PDF mode is disabled).
+        if (!ocrSelection) {
+            m_textSelection.clear();
+            return createdIds;
+        }
+
+        // Emit one UndoAction per highlight rect (line) so the undo
+        // granularity matches the paged path. A single logical highlight
+        // stroke may be split across multiple tiles; those segments are
+        // grouped into the same UndoAction so they undo together.
+        for (const QRectF& srcRect : m_textSelection.highlightRects) {
+            if (srcRect.width() < 0.1 || srcRect.height() < 0.1) continue;
+
+            // OCR selection rects are already in document-space for edgeless
+            // (see loadOcrBlocksForPage edgeless branch).
+            VectorStroke stroke = createHighlightStroke(srcRect, m_highlighterColor);
+
+            // Split across tiles. addStrokeToEdgelessTiles takes document-space
+            // points and emits tile-local segments, marking tiles dirty.
+            auto addedSegments = addStrokeToEdgelessTiles(stroke, m_edgelessActiveLayerIndex);
+            if (addedSegments.isEmpty()) continue;
+
+            UndoAction undoAction;
+            undoAction.type = UndoAction::AddStroke;
+            undoAction.layerIndex = m_edgelessActiveLayerIndex;
+            undoAction.segments.reserve(addedSegments.size());
+            for (const auto& pair : addedSegments) {
+                UndoAction::StrokeSegment seg;
+                seg.tileCoord = pair.first;
+                seg.stroke = pair.second;
+                undoAction.segments.append(seg);
+                createdIds.append(pair.second.id);
+            }
+            pushUndoAction(undoAction);
+        }
+
+        // Create LinkObject on the tile containing the first highlight rect.
+        if (!createdIds.isEmpty()) {
+            createLinkObjectForHighlight(pageIndex);
+        }
+
+        m_textSelection.clear();
+
+        if (!createdIds.isEmpty()) {
+            emit documentModified();
+            update();
+        }
+        return createdIds;
+    }
+
+    // ---------- Paged path ----------
     Page* page = m_document->page(pageIndex);
     if (!page) {
         return createdIds;
     }
-    
+
     // Get the active layer for this page
     VectorLayer* layer = page->activeLayer();
     if (!layer) {
         return createdIds;
     }
     
-    // Convert each highlight rect to a stroke
-    // highlightRects are in PDF coordinates, need to convert to page coordinates
-    for (const QRectF& pdfRect : m_textSelection.highlightRects) {
+    // Convert each highlight rect to a stroke.
+    // PDF-source rects are in PDF coords (72 DPI) and need scaling to page
+    // coords (96 DPI). OCR-source rects are already in page coords.
+    for (const QRectF& srcRect : m_textSelection.highlightRects) {
         // Skip degenerate rectangles (zero width or height)
-        if (pdfRect.width() < 0.1 || pdfRect.height() < 0.1) {
+        if (srcRect.width() < 0.1 || srcRect.height() < 0.1) {
             continue;
         }
-        
-        // Convert from PDF coords (72 DPI) to page coords (96 DPI)
-        QRectF pageRect(
-            pdfRect.x() * PDF_TO_PAGE_SCALE,
-            pdfRect.y() * PDF_TO_PAGE_SCALE,
-            pdfRect.width() * PDF_TO_PAGE_SCALE,
-            pdfRect.height() * PDF_TO_PAGE_SCALE
-        );
+
+        QRectF pageRect;
+        if (ocrSelection) {
+            pageRect = srcRect;
+        } else {
+            pageRect = QRectF(
+                srcRect.x() * PDF_TO_PAGE_SCALE,
+                srcRect.y() * PDF_TO_PAGE_SCALE,
+                srcRect.width() * PDF_TO_PAGE_SCALE,
+                srcRect.height() * PDF_TO_PAGE_SCALE
+            );
+        }
         
         // Create the stroke
         VectorStroke stroke = createHighlightStroke(pageRect, m_highlighterColor);
@@ -12757,6 +13357,13 @@ void DocumentViewport::renderEdgelessMode(QPainter& painter)
         renderEdgelessObjectsWithAffinity(painter, layerIdx, allTiles);
     }
     
+    // Render text selection overlay (Highlighter tool) in edgeless mode.
+    // Cache holds document-space rects, so the active view transform maps
+    // them to the screen correctly. pageIndex = -1 signals edgeless.
+    if (m_currentTool == ToolType::Highlighter) {
+        renderTextSelectionOverlay(painter, -1);
+    }
+
     // Render search match highlights in edgeless mode
     renderSearchMatchesOverlayEdgeless(painter);
 

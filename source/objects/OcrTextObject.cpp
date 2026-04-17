@@ -7,17 +7,10 @@
 #include <QPixmap>
 #include <QFontMetricsF>
 #include <algorithm>
+#include <cmath>
 
-static bool isCjkChar(QChar ch)
-{
-    ushort u = ch.unicode();
-    return (u >= 0x4E00 && u <= 0x9FFF)
-        || (u >= 0x3400 && u <= 0x4DBF)
-        || (u >= 0xF900 && u <= 0xFAFF)
-        || (u >= 0x3000 && u <= 0x303F)
-        || (u >= 0x3040 && u <= 0x309F)
-        || (u >= 0x30A0 && u <= 0x30FF);
-}
+// CJK detection shared with PdfSearchEngine / WindowsInkOcrEngine / DocumentViewport:
+// see isCjkLikeChar in OcrTextBlock.h (reached transitively via OcrTextObject.h).
 
 void OcrTextObject::drawLockBadge(QPainter& painter, const QRectF& rect) const
 {
@@ -122,9 +115,38 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
             font.setPixelSize(qMax(1, static_cast<int>(baseFontSize)));
             painter.setFont(font);
 
+            // Derive the starting cell from the FIRST CHARACTER'S center, not
+            // the segment's center.
+            //
+            // The original formula `floor(center.x() / gs)` only happened to
+            // work when each segment was exactly one character wide (as the
+            // auto-detect InkAnalyzer path produces for CJK ink). Language-
+            // aware InkRecognizer results group strokes into multi-character
+            // phrases, so `center.x()` points at the middle of the phrase and
+            // the first character ends up floor(W/2) cells too far to the
+            // right.
+            //
+            // An earlier attempted fix used `seg.rect.left() / gs` directly,
+            // which was also wrong: for single-character punctuation whose ink
+            // doesn't fill its cell (e.g. "。" sitting in the bottom-right of a
+            // cell), `left` / `top` can land past the cell's mid-point and
+            // rounding pushed the glyph one cell off.
+            //
+            // The robust rule: if the segment is W characters wide and
+            // horizontally centered at `cx`, the first character is centered at
+            // `cx - (W-1)*gs/2`. Flooring that / gs gives the correct starting
+            // cell for any W and any sub-cell ink placement. W == 1 recovers
+            // the original `floor(center.x() / gs)` exactly, so auto-detect
+            // behaviour is preserved bit-for-bit.
+            //
+            // The row formula stays center-based because the snap grouper
+            // guarantees seg height == one grid row.
+            const qreal gs = static_cast<qreal>(ocrGridSpacing);
             for (const auto& seg : sorted) {
-                int cellCol = static_cast<int>(seg.rect.center().x()) / ocrGridSpacing;
-                int cellRow = static_cast<int>(seg.rect.center().y()) / ocrGridSpacing;
+                const int W = qMax(1, seg.text.length());
+                const qreal firstCharCx = seg.rect.center().x() - (W - 1) * gs * 0.5;
+                int cellCol = static_cast<int>(std::floor(firstCharCx / gs));
+                int cellRow = static_cast<int>(std::floor(seg.rect.center().y() / gs));
                 for (int ci = 0; ci < seg.text.length(); ++ci) {
                     QRectF cellRect((cellCol + ci) * ocrGridSpacing * zoom,
                                     cellRow * ocrGridSpacing * zoom,
@@ -189,7 +211,7 @@ void OcrTextObject::render(QPainter& painter, qreal zoom) const
             if (gap < gapThreshold) {
                 bool needSpace = true;
                 if (!cur.text.isEmpty() && !sorted[i].text.isEmpty()) {
-                    if (isCjkChar(cur.text.back()) || isCjkChar(sorted[i].text.front()))
+                    if (isCjkLikeChar(cur.text.back()) || isCjkLikeChar(sorted[i].text.front()))
                         needSpace = false;
                 }
                 if (needSpace)
