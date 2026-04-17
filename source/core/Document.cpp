@@ -41,6 +41,7 @@ Document::~Document()
     
     m_loadedPages.clear();
     m_tiles.clear();
+    ++m_tileLoadVersion;
     m_pdfProvider.reset();
     
 #ifdef __GLIBC__
@@ -1054,7 +1055,8 @@ Page* Document::getOrCreateTile(int tx, int ty)
     }
     
     auto [insertIt, inserted] = m_tiles.emplace(coord, std::move(tile));
-    
+    ++m_tileLoadVersion;
+
     // Mark new tile as dirty (needs saving)
     m_dirtyTiles.insert(coord);
     markModified();
@@ -1113,7 +1115,8 @@ void Document::removeTileIfEmpty(int tx, int ty)
     if (!tile->hasContent()) {
         // Remove from memory
         m_tiles.erase(it);
-        
+        ++m_tileLoadVersion;
+
         // Remove from dirty tracking (don't need to save an empty tile)
         m_dirtyTiles.erase(coord);
         
@@ -1840,6 +1843,7 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         
         Page* rawTilePtr = tile.get();
         m_tiles[coord] = std::move(tile);
+        ++m_tileLoadVersion;
         loadTileOcr(rawTilePtr, coord);
         materializeOcrTextObjects(rawTilePtr);
         
@@ -1870,6 +1874,7 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         
         Page* rawTilePtr = tile.get();
         m_tiles[coord] = std::move(tile);
+        ++m_tileLoadVersion;
         loadTileOcr(rawTilePtr, coord);
         materializeOcrTextObjects(rawTilePtr);
         
@@ -1898,7 +1903,8 @@ void Document::evictTile(TileCoord coord)
     
     // Remove from memory
     m_tiles.erase(it);
-    
+    ++m_tileLoadVersion;
+
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Evicted tile" << coord.first << "," << coord.second << "from memory";
 #endif

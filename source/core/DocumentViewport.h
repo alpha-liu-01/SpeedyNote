@@ -2120,6 +2120,10 @@ private:
 
     QVector<OcrBlockRef> m_ocrBlockCache;
     int m_ocrBlockCachePageIndex = -1;
+    /// In edgeless mode, records Document::tileLoadVersion() at cache-build
+    /// time so subsequent presses can skip the rebuild when the loaded tile
+    /// set is unchanged. Unused by paged mode.
+    quint64 m_ocrBlockCacheTileVersion = 0;
     mutable int m_lastOcrHitBlockIndex = -1;  ///< PERF: spatial locality hint for findOcrCharAtPoint
 
     /// Rebuild m_ocrBlockCache for the given page if not already cached.

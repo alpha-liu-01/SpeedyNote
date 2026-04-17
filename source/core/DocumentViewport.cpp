@@ -10380,12 +10380,18 @@ void DocumentViewport::loadOcrBlocksForPage(int pageIndex)
     };
 
     // Edgeless mode: tiles can be loaded/unloaded as the user pans, so we
-    // rebuild the cache on every request rather than caching by pageIndex.
+    // cache against Document::tileLoadVersion() rather than a page index.
     // All block rects are converted to DOCUMENT-space coordinates (by adding
     // each tile's origin) so hit testing & rendering line up with the
     // edgeless view transform. Callers pass pageIndex == 0 in edgeless mode
     // (since pagePosition(0) == (0,0) in edgeless).
     if (m_document->isEdgeless()) {
+        const quint64 currentVersion = m_document->tileLoadVersion();
+        if (m_ocrBlockCachePageIndex == 0 &&
+            m_ocrBlockCacheTileVersion == currentVersion) {
+            return;  // Cache still valid: loaded tile set unchanged since last build.
+        }
+
         m_ocrBlockCache.clear();
         m_lastOcrHitBlockIndex = -1;
 
@@ -10428,6 +10434,7 @@ void DocumentViewport::loadOcrBlocksForPage(int pageIndex)
         // pageIndex == 0 in edgeless means "loaded"; a negative index (as
         // sent by invalidateOcrBlockCache) will clear the cache normally.
         m_ocrBlockCachePageIndex = 0;
+        m_ocrBlockCacheTileVersion = currentVersion;
         return;
     }
 
@@ -10471,6 +10478,9 @@ void DocumentViewport::invalidateOcrBlockCache(int pageIndex)
     if (pageIndex < 0 || pageIndex == m_ocrBlockCachePageIndex) {
         m_ocrBlockCache.clear();
         m_ocrBlockCachePageIndex = -1;
+        // Force edgeless rebuilds on the next press even if the loaded tile
+        // set happens to be unchanged (OCR content itself was invalidated).
+        m_ocrBlockCacheTileVersion = 0;
         m_lastOcrHitBlockIndex = -1;
     }
 }

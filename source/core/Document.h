@@ -312,6 +312,14 @@ public:
      */
     QVector<TileCoord> allKnownTileCoords() const;
 
+    /**
+     * @brief Monotonically-increasing counter bumped on every m_tiles mutation
+     * (insert, erase, clear). Used by consumers that cache data derived from
+     * the full loaded-tile set (e.g. the Highlighter's OCR-block cache) to
+     * cheaply detect when the set has changed without hashing its contents.
+     */
+    quint64 tileLoadVersion() const { return m_tileLoadVersion; }
+
     // =========================================================================
     // Object Extent Tracking (Phase O1.5)
     // =========================================================================
@@ -1389,6 +1397,10 @@ private:
     /// Uses std::map instead of QMap because QMap requires copyable values,
     /// but unique_ptr is move-only.
     mutable std::map<std::pair<int,int>, std::unique_ptr<Page>> m_tiles;
+
+    /// Bumped on every m_tiles insert/erase/clear (see tileLoadVersion()).
+    /// Mutable because const paths (getTile) trigger lazy-load inserts.
+    mutable quint64 m_tileLoadVersion = 0;
     
     // ===== Tile Persistence (Phase E5) =====
     QString m_bundlePath;                           ///< Path to .snb bundle directory
