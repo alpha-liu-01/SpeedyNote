@@ -343,6 +343,11 @@ void DocumentViewport::setDocument(Document* doc)
     }
     clearTextBoxCache();
     clearLinkCache();  // Phase D.1
+    // Drop OCR block cache so hit-testing doesn't reuse stale rects from the
+    // previous document (also resets m_ocrBlockCacheTileVersion so the next
+    // edgeless press forces a fresh rebuild against the new document's
+    // tileLoadVersion stream).
+    invalidateOcrBlockCache();
     
     // Reset view state
     m_zoomLevel = 1.0;
@@ -10398,23 +10403,33 @@ void DocumentViewport::loadOcrBlocksForPage(int pageIndex)
         const int tileSize = Document::EDGELESS_TILE_SIZE;
         const QVector<Document::TileCoord> loadedTiles = m_document->allLoadedTileCoords();
 
-        // Pre-size: one tile pass to estimate total block count. Cheap
-        // compared to the full iteration and avoids repeated reallocation.
+        // Stage blocks from every loaded tile in a single pass, remembering
+        // each tile's document-space origin. This lets us pre-size
+        // m_ocrBlockCache exactly while calling ocrBlocksForSearch() at most
+        // once per tile (it can be O(n) to copy when a page is ocrDirty).
+        struct StagedTile {
+            QPointF origin;
+            QVector<OcrTextBlock> blocks;
+        };
+        QVector<StagedTile> staged;
+        staged.reserve(loadedTiles.size());
         int estimated = 0;
         for (const auto& coord : loadedTiles) {
             Page* tile = m_document->getTile(coord.first, coord.second);
-            if (tile) estimated += tile->ocrBlocksForSearch().size();
+            if (!tile) continue;
+            QVector<OcrTextBlock> blocks = tile->ocrBlocksForSearch();
+            if (blocks.isEmpty()) continue;
+            estimated += blocks.size();
+            staged.append({QPointF(coord.first * tileSize,
+                                   coord.second * tileSize),
+                           std::move(blocks)});
         }
         m_ocrBlockCache.reserve(estimated);
 
-        for (const auto& coord : loadedTiles) {
-            Page* tile = m_document->getTile(coord.first, coord.second);
-            if (!tile) continue;
-            QPointF tileOrigin(coord.first * tileSize, coord.second * tileSize);
-            const QVector<OcrTextBlock> blocks = tile->ocrBlocksForSearch();
-            for (const OcrTextBlock& block : blocks) {
+        for (const StagedTile& s : staged) {
+            for (const OcrTextBlock& block : s.blocks) {
                 OcrBlockRef ref;
-                if (buildRef(block, tileOrigin, ref)) {
+                if (buildRef(block, s.origin, ref)) {
                     m_ocrBlockCache.append(std::move(ref));
                 }
             }
