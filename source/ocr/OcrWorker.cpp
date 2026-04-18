@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QUuid>
+#include <cmath>
 
 // Ensures the result has at least one wordSegment so OcrTextObject::render()
 // can take the snap-aware rendering path. Engines like ML Kit Digital Ink
@@ -20,6 +21,42 @@ static void ensureWordSegment(OcrEngine::Result& r)
     ws.text = r.text;
     ws.boundingRect = r.boundingRect;
     r.wordSegments.append(ws);
+}
+
+// When the engine splits a single snap group into multiple chunks (long-line
+// chunker in MlKitOcrEngine), each chunk needs its own snapped sub-rect
+// inside the group so the renderer doesn't stack chunks on top of each other.
+// CJK grid mode: snap the chunk's horizontal span to whole grid cells inside
+// the group's cell range. Line-band mode: preserve the chunk's horizontal
+// extent, keep the group's vertical band.
+static QRectF snapChunkRect(const QRectF& engineSub,
+                            const QRectF& groupRect,
+                            const OcrSnapParams& snap)
+{
+    if (snap.cjkGridMode && snap.backgroundIsGrid && snap.gridSpacing > 0) {
+        const qreal gs = static_cast<qreal>(snap.gridSpacing);
+        const int groupStart = qRound(groupRect.left()  / gs);
+        const int groupEnd   = qRound(groupRect.right() / gs) - 1;
+        const int row        = qRound(groupRect.top()   / gs);
+
+        int cellStart = static_cast<int>(std::floor(engineSub.left() / gs));
+        int cellEnd   = static_cast<int>(std::floor((engineSub.right() - 1e-3) / gs));
+        cellStart = qBound(groupStart, cellStart, groupEnd);
+        cellEnd   = qBound(cellStart,  cellEnd,   groupEnd);
+
+        return QRectF(cellStart * gs,
+                      row * gs,
+                      (cellEnd - cellStart + 1) * gs,
+                      gs);
+    }
+
+    qreal left  = qMax(engineSub.left(),  groupRect.left());
+    qreal right = qMin(engineSub.right(), groupRect.right());
+    if (right <= left) {
+        left  = groupRect.left();
+        right = groupRect.right();
+    }
+    return QRectF(left, groupRect.top(), right - left, groupRect.height());
 }
 
 OcrWorker::OcrWorker(QObject* parent)
@@ -146,9 +183,18 @@ void OcrWorker::processPage(const QString& pageId,
             m_engine->addStrokes(groupStrokes);
             auto groupResults = m_engine->analyze();
 
-            for (auto& r : groupResults) {
-                r.boundingRect = group.boundingRect;
-                ensureWordSegment(r);
+            if (groupResults.size() == 1) {
+                groupResults[0].boundingRect = group.boundingRect;
+                ensureWordSegment(groupResults[0]);
+            } else {
+                // Engine split this group into multiple chunks (MlKit long-line
+                // chunker). Give each chunk its own snapped sub-rect so the
+                // CJK cell / line-band placement stays correct and chunks do
+                // not stack on top of each other.
+                for (auto& r : groupResults) {
+                    r.boundingRect = snapChunkRect(r.boundingRect, group.boundingRect, snap);
+                    ensureWordSegment(r);
+                }
             }
 
             allResults.append(groupResults);
@@ -335,9 +381,14 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
                 m_engine->addStrokes(groupStrokes);
                 auto groupResults = m_engine->analyze();
 
-                for (auto& r : groupResults) {
-                    r.boundingRect = group.boundingRect;
-                    ensureWordSegment(r);
+                if (groupResults.size() == 1) {
+                    groupResults[0].boundingRect = group.boundingRect;
+                    ensureWordSegment(groupResults[0]);
+                } else {
+                    for (auto& r : groupResults) {
+                        r.boundingRect = snapChunkRect(r.boundingRect, group.boundingRect, snap);
+                        ensureWordSegment(r);
+                    }
                 }
 
                 results.append(groupResults);
