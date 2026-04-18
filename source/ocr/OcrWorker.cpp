@@ -5,6 +5,23 @@
 #include <QHash>
 #include <QUuid>
 
+// Ensures the result has at least one wordSegment so OcrTextObject::render()
+// can take the snap-aware rendering path. Engines like ML Kit Digital Ink
+// return plain text with no per-word geometry; in snap mode the worker has
+// already replaced r.boundingRect with the snapped group rect, so a single
+// segment covering that rect is exactly what the CJK/line-band renderer
+// expects. No-op for Windows Ink and any other engine that already provides
+// word-level segments.
+static void ensureWordSegment(OcrEngine::Result& r)
+{
+    if (!r.wordSegments.isEmpty() || r.text.isEmpty() || !r.boundingRect.isValid())
+        return;
+    OcrEngine::Result::WordSegment ws;
+    ws.text = r.text;
+    ws.boundingRect = r.boundingRect;
+    r.wordSegments.append(ws);
+}
+
 OcrWorker::OcrWorker(QObject* parent)
     : QObject(parent)
 {
@@ -129,8 +146,10 @@ void OcrWorker::processPage(const QString& pageId,
             m_engine->addStrokes(groupStrokes);
             auto groupResults = m_engine->analyze();
 
-            for (auto& r : groupResults)
+            for (auto& r : groupResults) {
                 r.boundingRect = group.boundingRect;
+                ensureWordSegment(r);
+            }
 
             allResults.append(groupResults);
         }
@@ -153,6 +172,9 @@ void OcrWorker::processPage(const QString& pageId,
         QVector<OcrEngine::Result> results = m_engine->analyze();
 
         if (m_cancelled) { m_busy = false; return; }
+
+        for (auto& r : results)
+            ensureWordSegment(r);
 
         m_lastPageId = pageId;
         m_knownStrokeIds.clear();
@@ -238,6 +260,9 @@ void OcrWorker::processPageIncremental(const QString& pageId,
         return;
     }
 
+    for (auto& r : results)
+        ensureWordSegment(r);
+
     m_knownStrokeIds = currentIds;
 
     m_busy = false;
@@ -310,8 +335,10 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
                 m_engine->addStrokes(groupStrokes);
                 auto groupResults = m_engine->analyze();
 
-                for (auto& r : groupResults)
+                for (auto& r : groupResults) {
                     r.boundingRect = group.boundingRect;
+                    ensureWordSegment(r);
+                }
 
                 results.append(groupResults);
             }
@@ -322,6 +349,9 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
             if (m_cancelled) break;
 
             results = m_engine->analyze();
+
+            for (auto& r : results)
+                ensureWordSegment(r);
         }
 
         if (m_cancelled)
