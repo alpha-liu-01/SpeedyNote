@@ -5516,6 +5516,8 @@ void MainWindow::triggerOcrForCurrentPage()
 
     m_toolbar->ocrSubToolbar()->setStatusText(tr("Scanning..."));
 
+    const QString docTag = doc->sessionId();
+
     if (doc->isEdgeless()) {
         for (auto coord : doc->allLoadedTileCoords()) {
             Page* tile = doc->getTile(coord.first, coord.second);
@@ -5523,7 +5525,8 @@ void MainWindow::triggerOcrForCurrentPage()
             QVector<VectorStroke> strokes = collectPageStrokes(tile);
             if (!strokes.isEmpty())
                 QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
-                    Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
+                    Q_ARG(QString, docTag + QStringLiteral("|") +
+                                   QString("%1,%2").arg(coord.first).arg(coord.second)),
                     Q_ARG(QVector<VectorStroke>, strokes),
                     Q_ARG(QSet<QString>, tile->suppressedStrokeIds),
                     Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, tile)));
@@ -5534,7 +5537,7 @@ void MainWindow::triggerOcrForCurrentPage()
         if (!page) return;
         QVector<VectorStroke> strokes = collectPageStrokes(page);
         QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
-            Q_ARG(QString, page->uuid),
+            Q_ARG(QString, docTag + QStringLiteral("|") + page->uuid),
             Q_ARG(QVector<VectorStroke>, strokes),
             Q_ARG(QSet<QString>, page->suppressedStrokeIds),
             Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, page)));
@@ -5565,6 +5568,8 @@ void MainWindow::triggerOcrForAllPages()
     QVector<QSet<QString>> suppressedSets;
     QVector<OcrSnapParams> snapParamsVec;
 
+    const QString docTag = doc->sessionId();
+
     if (doc->isEdgeless()) {
         auto allCoords = doc->allKnownTileCoords();
         auto loadedBefore = doc->allLoadedTileCoords();
@@ -5581,7 +5586,8 @@ void MainWindow::triggerOcrForAllPages()
             }
             if (loadedSet.count(coord) == 0)
                 m_ocrTempLoadedTiles.insert(coord);
-            pageIds.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+            pageIds.append(docTag + QStringLiteral("|") +
+                           QString("%1,%2").arg(coord.first).arg(coord.second));
             strokeSets.append(strokes);
             suppressedSets.append(tile->suppressedStrokeIds);
             snapParamsVec.append(buildOcrSnapParams(doc, tile));
@@ -5593,7 +5599,7 @@ void MainWindow::triggerOcrForAllPages()
         for (int i = 0; i < doc->pageCount(); ++i) {
             Page* page = doc->page(i);
             if (!page) continue;
-            pageIds.append(page->uuid);
+            pageIds.append(docTag + QStringLiteral("|") + page->uuid);
             strokeSets.append(collectPageStrokes(page));
             suppressedSets.append(page->suppressedStrokeIds);
             snapParamsVec.append(buildOcrSnapParams(doc, page));
@@ -5617,6 +5623,8 @@ void MainWindow::onDebounceTimeout()
     QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
         Q_ARG(QString, resolveOcrLanguage(doc)));
 
+    const QString docTag = doc->sessionId();
+
     if (doc->isEdgeless()) {
         auto dirtyTiles = vp->takeOcrDirtyTiles();
         if (dirtyTiles.empty()) return;
@@ -5632,7 +5640,8 @@ void MainWindow::onDebounceTimeout()
                 anyQueued = true;
             }
             QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
-                Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
+                Q_ARG(QString, docTag + QStringLiteral("|") +
+                               QString("%1,%2").arg(coord.first).arg(coord.second)),
                 Q_ARG(QVector<VectorStroke>, strokes),
                 Q_ARG(QSet<QString>, tile->suppressedStrokeIds),
                 Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, tile)));
@@ -5647,7 +5656,7 @@ void MainWindow::onDebounceTimeout()
 
         m_toolbar->ocrSubToolbar()->setStatusText(tr("Auto-scanning..."));
         QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
-            Q_ARG(QString, page->uuid),
+            Q_ARG(QString, docTag + QStringLiteral("|") + page->uuid),
             Q_ARG(QVector<VectorStroke>, strokes),
             Q_ARG(QSet<QString>, page->suppressedStrokeIds),
             Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, page)));
@@ -5661,40 +5670,84 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     Document::TileCoord tileCoord{0, 0};
     bool tileCoordResolved = false;
 
-    // Try coord-keyed lookup first (edgeless tiles use "tx,ty" as pageId)
-    QStringList parts = pageId.split(',');
+    // Split the tag prefix (docSessionId|localId). The docTag ties this result
+    // back to the exact Document that queued it, so sibling edgeless notebooks
+    // with the same tile coords can never receive each other's OCR output.
+    QString docTag;
+    QString localId = pageId;
+    const int sep = pageId.indexOf(QLatin1Char('|'));
+    if (sep > 0) {
+        docTag  = pageId.left(sep);
+        localId = pageId.mid(sep + 1);
+    }
+
+    Document* targetDoc = nullptr;
+    if (!docTag.isEmpty()) {
+        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+            Document* candidate = m_documentManager->documentAt(d);
+            if (candidate && candidate->sessionId() == docTag) {
+                targetDoc = candidate;
+                break;
+            }
+        }
+        // Owning document was closed between queue and response -> drop.
+        if (!targetDoc) return;
+    }
+
+    // Edgeless tile lookup ("tx,ty"). When tagged, restrict to targetDoc;
+    // when untagged (legacy), fall back to the first match across all docs.
+    QStringList parts = localId.split(',');
     if (parts.size() == 2) {
         bool okX, okY;
         int tx = parts[0].toInt(&okX);
         int ty = parts[1].toInt(&okY);
         if (okX && okY) {
-            for (int d = 0; d < m_documentManager->documentCount(); ++d) {
-                Document* candidate = m_documentManager->documentAt(d);
-                if (candidate && candidate->isEdgeless()) {
-                    Page* tile = candidate->getTile(tx, ty);
-                    if (tile) {
+            if (targetDoc) {
+                if (targetDoc->isEdgeless()) {
+                    if (Page* tile = targetDoc->getTile(tx, ty)) {
                         page = tile;
-                        doc = candidate;
+                        doc = targetDoc;
                         tileCoord = {tx, ty};
                         tileCoordResolved = true;
-                        break;
+                    }
+                }
+            } else {
+                for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+                    Document* candidate = m_documentManager->documentAt(d);
+                    if (candidate && candidate->isEdgeless()) {
+                        Page* tile = candidate->getTile(tx, ty);
+                        if (tile) {
+                            page = tile;
+                            doc = candidate;
+                            tileCoord = {tx, ty};
+                            tileCoordResolved = true;
+                            break;
+                        }
                     }
                 }
             }
         }
     }
 
-    // Fallback: UUID-based lookup (paged mode)
+    // Fallback: UUID-based lookup (paged mode).
     if (!page) {
-        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
-            Document* candidate = m_documentManager->documentAt(d);
-            if (!candidate) continue;
-
-            int idx = candidate->pageIndexByUuid(pageId);
+        if (targetDoc) {
+            int idx = targetDoc->pageIndexByUuid(localId);
             if (idx >= 0) {
-                page = candidate->page(idx);
-                doc = candidate;
-                break;
+                page = targetDoc->page(idx);
+                doc = targetDoc;
+            }
+        } else {
+            for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+                Document* candidate = m_documentManager->documentAt(d);
+                if (!candidate) continue;
+
+                int idx = candidate->pageIndexByUuid(localId);
+                if (idx >= 0) {
+                    page = candidate->page(idx);
+                    doc = candidate;
+                    break;
+                }
             }
         }
     }
@@ -5709,7 +5762,7 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     // showing this document, so a new drag will see the refreshed OCR data.
     // For tiles we can't cheaply compute a "page index" - invalidate wholesale.
     if (m_splitViewManager) {
-        const int pageIdx = tileCoordResolved ? -1 : doc->pageIndexByUuid(pageId);
+        const int pageIdx = tileCoordResolved ? -1 : doc->pageIndexByUuid(localId);
         m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
             if (!tm) return;
             const int n = tm->tabCount();
@@ -5725,7 +5778,7 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     if (tileCoordResolved)
         doc->saveTileOcr(tileCoord);
     else
-        doc->savePageOcr(pageId, page);
+        doc->savePageOcr(localId, page);
 
     int wordCount = 0;
     for (const auto& b : blocks)

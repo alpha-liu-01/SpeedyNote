@@ -365,6 +365,16 @@ public:
      * @return Path to the .snb directory, or empty if not set.
      */
     QString bundlePath() const { return m_bundlePath; }
+
+    /**
+     * @brief Get this Document instance's per-session id.
+     *
+     * Non-persistent, generated on construction and unique across the app's
+     * lifetime. Used to tag OCR requests so asynchronous results can be
+     * routed back to exactly the Document that queued them (and dropped if
+     * that Document has been closed in the meantime). Not stored on disk.
+     */
+    QString sessionId() const { return m_sessionId; }
     
     /**
      * @brief Get the path to the assets directory.
@@ -1412,6 +1422,11 @@ private:
     bool m_ocrTextVisible = false;
     bool m_ocrDarkMode = false;
     bool m_ocrShowConfidence = false;
+
+    /// Per-instance session id used to tag OCR requests so asynchronous
+    /// results can be routed back to the exact Document that queued them.
+    /// Generated on construction, never persisted.
+    QString m_sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
     // ===== Object Extent Tracking (Phase O1.5) =====
     /// Maximum extent (largest dimension) of any object in the document.

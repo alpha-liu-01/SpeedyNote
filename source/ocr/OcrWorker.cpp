@@ -59,6 +59,54 @@ static QRectF snapChunkRect(const QRectF& engineSub,
     return QRectF(left, groupRect.top(), right - left, groupRect.height());
 }
 
+// Collapses the N chunks of one snap group (ML Kit long-line chunker) into a
+// single Result. This produces ONE OcrTextObject per line band, which draws
+// ONE gray background over the full band and then renders each chunk's text
+// at its own snapped sub-rect via wordSegments. Without this merge, adjacent
+// chunks would each draw their own full-height gray rect, and their
+// horizontally-overlapping stroke bounding boxes would make the gray of one
+// chunk paint over a word of its neighbour.
+static OcrEngine::Result mergeChunkedGroup(QVector<OcrEngine::Result> chunks,
+                                           const QRectF& groupRect,
+                                           const OcrSnapParams& snap)
+{
+    std::sort(chunks.begin(), chunks.end(),
+              [](const OcrEngine::Result& a, const OcrEngine::Result& b) {
+                  return a.boundingRect.left() < b.boundingRect.left();
+              });
+
+    OcrEngine::Result merged;
+    merged.boundingRect = groupRect;
+
+    const bool cjk = snap.cjkGridMode;
+    float confSum = 0.0f;
+    int   confCount = 0;
+    QStringList parts;
+    parts.reserve(chunks.size());
+
+    for (const auto& c : chunks) {
+        const QRectF snapped = snapChunkRect(c.boundingRect, groupRect, snap);
+
+        OcrEngine::Result::WordSegment ws;
+        ws.text = c.text;
+        ws.boundingRect = snapped;
+        merged.wordSegments.append(ws);
+
+        if (!c.text.isEmpty())
+            parts.append(c.text);
+
+        for (const auto& sid : c.sourceStrokeIds)
+            merged.sourceStrokeIds.append(sid);
+
+        confSum  += c.confidence;
+        confCount += 1;
+    }
+
+    merged.text = parts.join(cjk ? QStringLiteral("") : QStringLiteral(" "));
+    merged.confidence = confCount ? confSum / static_cast<float>(confCount) : 0.0f;
+    return merged;
+}
+
 OcrWorker::OcrWorker(QObject* parent)
     : QObject(parent)
 {
@@ -186,18 +234,16 @@ void OcrWorker::processPage(const QString& pageId,
             if (groupResults.size() == 1) {
                 groupResults[0].boundingRect = group.boundingRect;
                 ensureWordSegment(groupResults[0]);
-            } else {
+                allResults.append(groupResults[0]);
+            } else if (!groupResults.isEmpty()) {
                 // Engine split this group into multiple chunks (MlKit long-line
-                // chunker). Give each chunk its own snapped sub-rect so the
-                // CJK cell / line-band placement stays correct and chunks do
-                // not stack on top of each other.
-                for (auto& r : groupResults) {
-                    r.boundingRect = snapChunkRect(r.boundingRect, group.boundingRect, snap);
-                    ensureWordSegment(r);
-                }
+                // chunker). Collapse them into ONE Result with per-chunk
+                // wordSegments so the renderer draws a single unified
+                // background over the whole band (no more overlapping gray
+                // rects covering word edges).
+                allResults.append(mergeChunkedGroup(std::move(groupResults),
+                                                   group.boundingRect, snap));
             }
-
-            allResults.append(groupResults);
         }
 
         if (m_cancelled) { m_busy = false; return; }
@@ -384,14 +430,11 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
                 if (groupResults.size() == 1) {
                     groupResults[0].boundingRect = group.boundingRect;
                     ensureWordSegment(groupResults[0]);
-                } else {
-                    for (auto& r : groupResults) {
-                        r.boundingRect = snapChunkRect(r.boundingRect, group.boundingRect, snap);
-                        ensureWordSegment(r);
-                    }
+                    results.append(groupResults[0]);
+                } else if (!groupResults.isEmpty()) {
+                    results.append(mergeChunkedGroup(std::move(groupResults),
+                                                     group.boundingRect, snap));
                 }
-
-                results.append(groupResults);
             }
         } else {
             m_engine->clearStrokes();
