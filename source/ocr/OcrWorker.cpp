@@ -107,6 +107,90 @@ static OcrEngine::Result mergeChunkedGroup(QVector<OcrEngine::Result> chunks,
     return merged;
 }
 
+// Char count used by the CJK self-heal check. QString::size() is UTF-16 code
+// units; adequate for the BMP-CJK characters handled by ML Kit Digital Ink.
+// Rare SIP characters (surrogate pairs) will falsely trigger per-cell re-run,
+// which still produces a correct result - just with a few extra recognize calls.
+static int countCjkCharsForSelfHeal(const QString& text)
+{
+    return text.size();
+}
+
+// When the single per-group ML Kit recognition returned a char count that does
+// not match the occupied-cell count, fall back to one ML Kit call per cell.
+// Each cell is recognized in isolation from its own strokes (bucketed by the
+// same stroke-center rule groupStrokesByGridCells uses), then the per-cell
+// Results are fed through mergeChunkedGroup so the output has the exact same
+// shape as the existing fast path: one Result per row, one wordSegment per
+// occupied cell, text joined CJK-style.
+static OcrEngine::Result rerunPerCell(const StrokeLineGroup& group,
+                                      const QVector<VectorStroke>& filtered,
+                                      OcrEngine* engine,
+                                      const OcrSnapParams& snap)
+{
+    OcrEngine::Result empty;
+    if (!engine || snap.gridSpacing <= 0 || group.strokeIndices.isEmpty())
+        return empty;
+
+    const qreal gs = static_cast<qreal>(snap.gridSpacing);
+    const int row       = qRound(group.boundingRect.top()   / gs);
+    const int runStart  = qRound(group.boundingRect.left()  / gs);
+    const int cellCount = qRound(group.boundingRect.width() / gs);
+    const int runEnd    = runStart + cellCount - 1;
+
+    QHash<int, QVector<VectorStroke>> byCol;
+    for (int idx : group.strokeIndices) {
+        if (idx < 0 || idx >= filtered.size()) continue;
+        const auto& s = filtered[idx];
+        if (s.points.isEmpty() || s.boundingBox.isNull()) continue;
+        int col = static_cast<int>(s.boundingBox.center().x() / gs);
+        byCol[col].append(s);
+    }
+
+    QVector<OcrEngine::Result> cellResults;
+    cellResults.reserve(cellCount);
+
+    for (int col = runStart; col <= runEnd; ++col) {
+        auto it = byCol.constFind(col);
+        if (it == byCol.constEnd() || it->isEmpty())
+            continue;
+
+        engine->clearStrokes();
+        engine->addStrokes(*it);
+        auto r = engine->analyze();
+        if (r.isEmpty())
+            continue;
+
+        QString txt;
+        float confSum = 0.0f;
+        int   confCount = 0;
+        QVector<QString> sids;
+        for (const auto& subR : r) {
+            if (!subR.text.isEmpty())
+                txt += subR.text;
+            confSum  += subR.confidence;
+            confCount += 1;
+            for (const auto& sid : subR.sourceStrokeIds)
+                sids.append(sid);
+        }
+
+        if (txt.isEmpty())
+            continue;
+
+        OcrEngine::Result cellR;
+        cellR.text = txt;
+        cellR.boundingRect = QRectF(col * gs, row * gs, gs, gs);
+        cellR.confidence = confCount ? confSum / static_cast<float>(confCount) : 0.0f;
+        cellR.sourceStrokeIds = sids;
+        cellResults.append(std::move(cellR));
+    }
+
+    if (cellResults.isEmpty())
+        return empty;
+
+    return mergeChunkedGroup(std::move(cellResults), group.boundingRect, snap);
+}
+
 OcrWorker::OcrWorker(QObject* parent)
     : QObject(parent)
 {
@@ -231,19 +315,41 @@ void OcrWorker::processPage(const QString& pageId,
             m_engine->addStrokes(groupStrokes);
             auto groupResults = m_engine->analyze();
 
+            OcrEngine::Result merged;
             if (groupResults.size() == 1) {
-                groupResults[0].boundingRect = group.boundingRect;
-                ensureWordSegment(groupResults[0]);
-                allResults.append(groupResults[0]);
+                merged = groupResults[0];
+                merged.boundingRect = group.boundingRect;
+                ensureWordSegment(merged);
             } else if (!groupResults.isEmpty()) {
                 // Engine split this group into multiple chunks (MlKit long-line
                 // chunker). Collapse them into ONE Result with per-chunk
                 // wordSegments so the renderer draws a single unified
                 // background over the whole band (no more overlapping gray
                 // rects covering word edges).
-                allResults.append(mergeChunkedGroup(std::move(groupResults),
-                                                   group.boundingRect, snap));
+                merged = mergeChunkedGroup(std::move(groupResults),
+                                           group.boundingRect, snap);
+            } else {
+                continue;
             }
+
+            // CJK grid-mode self-heal: when ML Kit drops or merges chars
+            // mid-row, the recognized length stops matching the occupied cell
+            // count. Re-run per cell only for those mismatched rows so the
+            // renderer sees one char per cell and the row stays aligned.
+            if (snap.cjkGridMode && snap.backgroundIsGrid && snap.gridSpacing > 0) {
+                const int occupiedCells = qRound(group.boundingRect.width()
+                                                 / static_cast<qreal>(snap.gridSpacing));
+                const int charCount = countCjkCharsForSelfHeal(merged.text);
+
+                if (occupiedCells >= 2 && charCount != occupiedCells) {
+                    OcrEngine::Result healed = rerunPerCell(group, filtered,
+                                                            m_engine.get(), snap);
+                    if (!healed.wordSegments.isEmpty())
+                        merged = std::move(healed);
+                }
+            }
+
+            allResults.append(std::move(merged));
         }
 
         if (m_cancelled) { m_busy = false; return; }
@@ -427,14 +533,33 @@ void OcrWorker::processBatch(const QVector<QString>& pageIds,
                 m_engine->addStrokes(groupStrokes);
                 auto groupResults = m_engine->analyze();
 
+                OcrEngine::Result merged;
                 if (groupResults.size() == 1) {
-                    groupResults[0].boundingRect = group.boundingRect;
-                    ensureWordSegment(groupResults[0]);
-                    results.append(groupResults[0]);
+                    merged = groupResults[0];
+                    merged.boundingRect = group.boundingRect;
+                    ensureWordSegment(merged);
                 } else if (!groupResults.isEmpty()) {
-                    results.append(mergeChunkedGroup(std::move(groupResults),
-                                                     group.boundingRect, snap));
+                    merged = mergeChunkedGroup(std::move(groupResults),
+                                               group.boundingRect, snap);
+                } else {
+                    continue;
                 }
+
+                // CJK grid-mode self-heal (see processPage for the rationale).
+                if (snap.cjkGridMode && snap.backgroundIsGrid && snap.gridSpacing > 0) {
+                    const int occupiedCells = qRound(group.boundingRect.width()
+                                                     / static_cast<qreal>(snap.gridSpacing));
+                    const int charCount = countCjkCharsForSelfHeal(merged.text);
+
+                    if (occupiedCells >= 2 && charCount != occupiedCells) {
+                        OcrEngine::Result healed = rerunPerCell(group, filtered,
+                                                                m_engine.get(), snap);
+                        if (!healed.wordSegments.isEmpty())
+                            merged = std::move(healed);
+                    }
+                }
+
+                results.append(std::move(merged));
             }
         } else {
             m_engine->clearStrokes();
