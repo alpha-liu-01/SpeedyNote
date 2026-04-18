@@ -5811,7 +5811,29 @@ void MainWindow::onOcrBatchFinished(int pagesScanned, int pagesWithText)
 
 void MainWindow::onOcrError(const QString& pageId, const QString& message)
 {
-    Q_UNUSED(pageId);
+    // Drop errors whose owning Document has been closed, and silence errors
+    // from a non-current document so user doesn't see A's failure on B's
+    // toolbar after switching tabs. Legacy untagged pageIds (no '|') fall
+    // through and always surface (backwards-compat safety net).
+    const int sep = pageId.indexOf(QLatin1Char('|'));
+    if (sep > 0) {
+        const QString docTag = pageId.left(sep);
+        Document* owningDoc = nullptr;
+        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+            Document* candidate = m_documentManager->documentAt(d);
+            if (candidate && candidate->sessionId() == docTag) {
+                owningDoc = candidate;
+                break;
+            }
+        }
+        if (!owningDoc)
+            return;
+
+        DocumentViewport* vp = currentViewport();
+        if (!vp || vp->document() != owningDoc)
+            return;
+    }
+
     m_toolbar->ocrSubToolbar()->setStatusText(tr("OCR error: %1").arg(message));
     m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(8000);
 }
