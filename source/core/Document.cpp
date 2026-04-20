@@ -6,6 +6,7 @@
 
 #include "Document.h"
 #include "../objects/OcrTextObject.h"
+#include "../objects/LinkObject.h"
 #include <QCryptographicHash>
 #include <QSettings>
 #include <cmath>
@@ -2097,6 +2098,68 @@ bool Document::deleteNoteFile(const QString& noteId)
         return QFile::remove(filePath);
     }
     return true;  // File didn't exist, consider it successfully "deleted"
+}
+
+// ============================================================================
+// enumerateLinkOutline — cheap walk over LinkObjects, no file I/O.
+// ============================================================================
+//
+// Used by the right-sidebar NotesTreePanel to build its 3-level tree.
+//
+// Paged  : iterate loaded pages (0..pageCount-1), store pageIndex.
+// Edgeless: iterate currently-loaded tiles only; docPos is computed in
+//           doc-space so the panel can order & group by tileY.  Matches
+//           the policy of loadNotesForCurrentPage() so the hidden-tiles
+//           warning in the sidebar stays in sync.
+// ============================================================================
+QVector<LinkOutlineEntry> Document::enumerateLinkOutline() const
+{
+    QVector<LinkOutlineEntry> out;
+
+    auto appendFromPage = [&out](const Page* page, int pageIdx, int tx, int ty, bool edgeless) {
+        if (!page) return;
+        const QPointF tileOrigin = edgeless
+            ? QPointF(tx * static_cast<qreal>(EDGELESS_TILE_SIZE),
+                      ty * static_cast<qreal>(EDGELESS_TILE_SIZE))
+            : QPointF();
+        for (const auto& objPtr : page->objects) {
+            const LinkObject* link = dynamic_cast<const LinkObject*>(objPtr.get());
+            if (!link) continue;
+
+            LinkOutlineEntry entry;
+            entry.markdownSlots.reserve(LinkObject::SLOT_COUNT);
+            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+                const LinkSlot& s = link->linkSlots[i];
+                if (s.type != LinkSlot::Type::Markdown) continue;
+                if (s.markdownNoteId.isEmpty()) continue;
+                entry.markdownSlots.push_back({ i, s.markdownNoteId });
+            }
+            if (entry.markdownSlots.isEmpty()) continue;  // skip zero-markdown links
+
+            entry.linkObjectId = link->id;
+            entry.description  = link->description;
+            entry.iconColor    = link->iconColor;
+            entry.pageIndex    = edgeless ? -1 : pageIdx;
+            entry.tileX        = tx;
+            entry.tileY        = ty;
+            entry.docPos       = edgeless ? (tileOrigin + link->position)
+                                          : link->position;
+            out.push_back(std::move(entry));
+        }
+    };
+
+    if (isEdgeless()) {
+        for (const auto& coord : allLoadedTileCoords()) {
+            const Page* tile = getTile(coord.first, coord.second);
+            appendFromPage(tile, -1, coord.first, coord.second, /*edgeless=*/true);
+        }
+    } else {
+        const int count = pageCount();
+        for (int i = 0; i < count; ++i) {
+            appendFromPage(page(i), i, 0, 0, /*edgeless=*/false);
+        }
+    }
+    return out;
 }
 
 bool Document::saveBundle(const QString& path)

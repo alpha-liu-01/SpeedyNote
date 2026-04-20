@@ -1,229 +1,221 @@
 #include "MarkdownNotesSidebar.h"
-#include <QPalette>
+
+#include "sidebars/NotesTreePanel.h"
+
 #include <QApplication>
 #include <QDebug>
 #include <QFile>
+#include <QPalette>
 
-MarkdownNotesSidebar::MarkdownNotesSidebar(QWidget *parent)
+// ============================================================================
+// Construction
+// ============================================================================
+
+MarkdownNotesSidebar::MarkdownNotesSidebar(QWidget* parent)
     : QWidget(parent)
 {
     isDarkMode = palette().color(QPalette::Window).lightness() < 128;
-    setupUI();
+    setupUi();
     applyStyle();
 }
 
 MarkdownNotesSidebar::~MarkdownNotesSidebar() = default;
 
-void MarkdownNotesSidebar::setupUI() {
+// ============================================================================
+// UI construction
+// ============================================================================
+
+void MarkdownNotesSidebar::setupUi()
+{
     mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
-    
-    // Setup search UI first (at top)
-    setupSearchUI();
-    
-    // Scroll area for notes
+
+    setupSearchUi();
+
+    // Hidden-tiles warning (edgeless only).
+    hiddenTilesWarningLabel = new QLabel(this);
+    hiddenTilesWarningLabel->setObjectName("HiddenTilesWarning");
+    hiddenTilesWarningLabel->setAlignment(Qt::AlignCenter);
+    hiddenTilesWarningLabel->setWordWrap(true);
+    hiddenTilesWarningLabel->setVisible(false);
+
+    // Outline view (tree).
+    notesTreePanel = new NotesTreePanel(this);
+    connect(notesTreePanel, &NotesTreePanel::navigateToPage,
+            this, &MarkdownNotesSidebar::navigateToPage);
+    connect(notesTreePanel, &NotesTreePanel::navigateToTileRow,
+            this, &MarkdownNotesSidebar::navigateToTileRow);
+    connect(notesTreePanel, &NotesTreePanel::navigateToLinkObject,
+            this, &MarkdownNotesSidebar::linkObjectClicked);
+    connect(notesTreePanel, &NotesTreePanel::noteContentSaved,
+            this, &MarkdownNotesSidebar::noteContentSaved);
+    connect(notesTreePanel, &NotesTreePanel::noteDeletedWithLink,
+            this, &MarkdownNotesSidebar::noteDeletedWithLink);
+
+    // Search-results view (flat).  Initially hidden.
     scrollArea = new QScrollArea(this);
     scrollArea->setObjectName("NotesScrollArea");
     scrollArea->setWidgetResizable(true);
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scrollArea->setFrameShape(QFrame::NoFrame);
-    
+
     scrollContent = new QWidget();
     scrollLayout = new QVBoxLayout(scrollContent);
     scrollLayout->setContentsMargins(12, 12, 12, 12);
     scrollLayout->setSpacing(8);
-    scrollLayout->addStretch(); // Push notes to top
-    
+    scrollLayout->addStretch();
     scrollArea->setWidget(scrollContent);
-    
-    // Empty state label
+    scrollArea->hide();
+
     emptyLabel = new QLabel(tr("No notes on this page"), this);
     emptyLabel->setObjectName("EmptyLabel");
     emptyLabel->setAlignment(Qt::AlignCenter);
     emptyLabel->setWordWrap(true);
-    
-    // M.7.2: Warning label for hidden tiles in edgeless mode
-    hiddenTilesWarningLabel = new QLabel(this);
-    hiddenTilesWarningLabel->setObjectName("HiddenTilesWarning");
-    hiddenTilesWarningLabel->setAlignment(Qt::AlignCenter);
-    hiddenTilesWarningLabel->setWordWrap(true);
-    hiddenTilesWarningLabel->setVisible(false);
-    hiddenTilesWarningLabel->setStyleSheet(
-        "QLabel {"
-        "  background-color: #fff3cd;"
-        "  color: #856404;"
-        "  border: 1px solid #ffc107;"
-        "  border-radius: 12px;"
-        "  padding: 8px 12px;"
-        "  margin: 8px 12px;"
-        "  font-size: 12px;"
-        "}"
-    );
-    
+    emptyLabel->hide();
+
     mainLayout->addWidget(searchContainer);
     mainLayout->addWidget(hiddenTilesWarningLabel);
-    mainLayout->addWidget(scrollArea, 1); // Give scroll area stretch priority
+    mainLayout->addWidget(notesTreePanel, 1);
+    mainLayout->addWidget(scrollArea, 1);
     mainLayout->addWidget(emptyLabel);
-    mainLayout->addStretch(); // Push everything to the top when scroll area is hidden
-    
-    emptyLabel->show();
-    scrollArea->hide();
 }
 
-void MarkdownNotesSidebar::setupSearchUI() {
+void MarkdownNotesSidebar::setupSearchUi()
+{
     searchContainer = new QWidget(this);
     searchLayout = new QVBoxLayout(searchContainer);
     searchLayout->setContentsMargins(12, 12, 12, 8);
     searchLayout->setSpacing(8);
-    
-    // Search bar row with pill-shaped elements
-    searchBarLayout = new QHBoxLayout();
+
+    auto* searchBarLayout = new QHBoxLayout();
     searchBarLayout->setSpacing(8);
-    
+
     searchInput = new QLineEdit(searchContainer);
     searchInput->setObjectName("SearchInput");
     searchInput->setPlaceholderText(tr("Search notes..."));
     searchInput->setClearButtonEnabled(true);
     searchInput->setMinimumHeight(36);
-    connect(searchInput, &QLineEdit::returnPressed, this, &MarkdownNotesSidebar::onSearchButtonClicked);
-    
+    connect(searchInput, &QLineEdit::returnPressed,
+            this, &MarkdownNotesSidebar::onSearchButtonClicked);
+
     searchButton = new QPushButton(searchContainer);
     searchButton->setObjectName("SearchButton");
     searchButton->setFixedSize(36, 36);
     searchButton->setToolTip(tr("Search"));
-    // Use zoom icon with dark/light mode support
-    QString zoomIconPath = isDarkMode ? ":/resources/icons/zoom_reversed.png" : ":/resources/icons/zoom.png";
+    const QString zoomIconPath = isDarkMode
+        ? QStringLiteral(":/resources/icons/zoom_reversed.png")
+        : QStringLiteral(":/resources/icons/zoom.png");
     searchButton->setIcon(QIcon(zoomIconPath));
     searchButton->setIconSize(QSize(20, 20));
-    connect(searchButton, &QPushButton::clicked, this, &MarkdownNotesSidebar::onSearchButtonClicked);
-    
-    exitSearchButton = new QPushButton("×", searchContainer);
+    connect(searchButton, &QPushButton::clicked,
+            this, &MarkdownNotesSidebar::onSearchButtonClicked);
+
+    exitSearchButton = new QPushButton(QStringLiteral("\u00D7"), searchContainer);
     exitSearchButton->setObjectName("ExitSearchButton");
     exitSearchButton->setFixedSize(36, 36);
     exitSearchButton->setToolTip(tr("Exit search mode"));
     exitSearchButton->setVisible(false);
-    connect(exitSearchButton, &QPushButton::clicked, this, &MarkdownNotesSidebar::onExitSearchClicked);
-    
+    connect(exitSearchButton, &QPushButton::clicked,
+            this, &MarkdownNotesSidebar::onExitSearchClicked);
+
     searchBarLayout->addWidget(searchInput);
     searchBarLayout->addWidget(searchButton);
     searchBarLayout->addWidget(exitSearchButton);
-    
-    // Page range row (wrapped in container so it can be hidden for edgeless docs)
+
     pageRangeContainer = new QWidget(searchContainer);
     pageRangeContainer->setObjectName("PageRangeContainer");
     pageRangeLayout = new QHBoxLayout(pageRangeContainer);
     pageRangeLayout->setContentsMargins(0, 0, 0, 0);
     pageRangeLayout->setSpacing(6);
-    
+
     pageRangeLabel = new QLabel(tr("Pages:"), pageRangeContainer);
     pageRangeLabel->setObjectName("PageRangeLabel");
-    
+
     fromPageSpinBox = new QSpinBox(pageRangeContainer);
     fromPageSpinBox->setObjectName("PageSpinBox");
     fromPageSpinBox->setMinimum(1);
     fromPageSpinBox->setMaximum(9999);
     fromPageSpinBox->setValue(1);
     fromPageSpinBox->setMinimumHeight(32);
-    
+
     toLabel = new QLabel(tr("to"), pageRangeContainer);
     toLabel->setObjectName("ToLabel");
-    
+
     toPageSpinBox = new QSpinBox(pageRangeContainer);
     toPageSpinBox->setObjectName("PageSpinBox");
     toPageSpinBox->setMinimum(1);
     toPageSpinBox->setMaximum(9999);
     toPageSpinBox->setValue(10);
     toPageSpinBox->setMinimumHeight(32);
-    
+
     searchAllPagesCheckBox = new QCheckBox(tr("All"), pageRangeContainer);
     searchAllPagesCheckBox->setObjectName("SearchAllCheckbox");
     searchAllPagesCheckBox->setToolTip(tr("Search all pages in the notebook"));
     searchAllPagesCheckBox->setMinimumHeight(32);
-    connect(searchAllPagesCheckBox, &QCheckBox::toggled, this, &MarkdownNotesSidebar::onSearchAllPagesToggled);
-    
+    connect(searchAllPagesCheckBox, &QCheckBox::toggled,
+            this, &MarkdownNotesSidebar::onSearchAllPagesToggled);
+
+    // Edgeless: live-filter the outline as spinboxes change.  In paged mode
+    // these connections are harmless no-ops (isEdgeless gate inside the slot).
+    auto applyEdgelessFilterFromSpinboxes = [this]() {
+        if (!isEdgeless) return;
+        if (searchAllPagesCheckBox->isChecked()) {
+            clearRangeFilter();
+        } else {
+            const int from = fromPageSpinBox->value() - 1;  // 1-based → 0-based
+            const int to   = toPageSpinBox->value() - 1;
+            setRangeFilter(from, to);
+        }
+    };
+    connect(fromPageSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [applyEdgelessFilterFromSpinboxes](int){ applyEdgelessFilterFromSpinboxes(); });
+    connect(toPageSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [applyEdgelessFilterFromSpinboxes](int){ applyEdgelessFilterFromSpinboxes(); });
+
     pageRangeLayout->addWidget(pageRangeLabel);
     pageRangeLayout->addWidget(fromPageSpinBox);
     pageRangeLayout->addWidget(toLabel);
     pageRangeLayout->addWidget(toPageSpinBox);
     pageRangeLayout->addWidget(searchAllPagesCheckBox);
     pageRangeLayout->addStretch();
-    
-    // Search status label
+
     searchStatusLabel = new QLabel(searchContainer);
     searchStatusLabel->setObjectName("SearchStatusLabel");
     searchStatusLabel->setVisible(false);
-    
+
     searchLayout->addLayout(searchBarLayout);
     searchLayout->addWidget(pageRangeContainer);
     searchLayout->addWidget(searchStatusLabel);
 }
 
-void MarkdownNotesSidebar::applyStyle() {
-    // Load QSS from resource file
-    QString qssPath = isDarkMode 
-        ? ":/resources/styles/markdown_sidebar_dark.qss"
-        : ":/resources/styles/markdown_sidebar.qss";
-    
+// ============================================================================
+// Theme
+// ============================================================================
+
+void MarkdownNotesSidebar::applyStyle()
+{
+    const QString qssPath = isDarkMode
+        ? QStringLiteral(":/resources/styles/markdown_sidebar_dark.qss")
+        : QStringLiteral(":/resources/styles/markdown_sidebar.qss");
+
     QFile qssFile(qssPath);
     if (qssFile.open(QFile::ReadOnly | QFile::Text)) {
-        QString styleSheet = qssFile.readAll();
-        setStyleSheet(styleSheet);
+        setStyleSheet(qssFile.readAll());
         qssFile.close();
-    } else {
-        #ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "MarkdownNotesSidebar: Failed to load QSS from" << qssPath;
-        #endif
     }
-    
-    // Update search button icon for theme
-    QString zoomIconPath = isDarkMode 
-        ? ":/resources/icons/zoom_reversed.png" 
-        : ":/resources/icons/zoom.png";
-    searchButton->setIcon(QIcon(zoomIconPath));
-}
 
-void MarkdownNotesSidebar::setDarkMode(bool darkMode) {
-    if (isDarkMode != darkMode) {
-        isDarkMode = darkMode;
-        applyStyle();
-    }
-}
+    const QString zoomIconPath = isDarkMode
+        ? QStringLiteral(":/resources/icons/zoom_reversed.png")
+        : QStringLiteral(":/resources/icons/zoom.png");
+    if (searchButton) searchButton->setIcon(QIcon(zoomIconPath));
 
-void MarkdownNotesSidebar::setEdgelessMode(bool edgeless) {
-    if (isEdgeless != edgeless) {
-        isEdgeless = edgeless;
-        
-        // Hide page range controls for edgeless documents (they have no pages)
-        pageRangeContainer->setVisible(!edgeless);
-        
-        // In edgeless mode, force "search all" behavior
-        if (edgeless) {
-            searchAllPagesCheckBox->setChecked(true);
-        }
-        
-        // Hide warning when switching modes
-        if (hiddenTilesWarningLabel) {
-            hiddenTilesWarningLabel->setVisible(false);
-        }
-    }
-}
-
-void MarkdownNotesSidebar::setHiddenTilesWarning(bool hasHiddenTiles, int loadedCount, int totalCount) {
-    if (!hiddenTilesWarningLabel) return;
-    
-    if (hasHiddenTiles && isEdgeless) {
-        // Show warning with tile counts
-        QString warningText = tr("⚠️ Showing notes from %1 of %2 tiles. "
-                                  "Pan around to load more tiles and see their notes.")
-                              .arg(loadedCount).arg(totalCount);
-        hiddenTilesWarningLabel->setText(warningText);
-        hiddenTilesWarningLabel->setVisible(true);
-        
-        // Update style for dark mode
-        if (isDarkMode) {
-            hiddenTilesWarningLabel->setStyleSheet(
+    // Edgeless warning pill.
+    if (hiddenTilesWarningLabel) {
+        hiddenTilesWarningLabel->setStyleSheet(
+            isDarkMode
+            ? QStringLiteral(
                 "QLabel {"
                 "  background-color: #3d3520;"
                 "  color: #ffc107;"
@@ -232,10 +224,8 @@ void MarkdownNotesSidebar::setHiddenTilesWarning(bool hasHiddenTiles, int loaded
                 "  padding: 8px 12px;"
                 "  margin: 8px 12px;"
                 "  font-size: 12px;"
-                "}"
-            );
-        } else {
-            hiddenTilesWarningLabel->setStyleSheet(
+                "}")
+            : QStringLiteral(
                 "QLabel {"
                 "  background-color: #fff3cd;"
                 "  color: #856404;"
@@ -244,217 +234,293 @@ void MarkdownNotesSidebar::setHiddenTilesWarning(bool hasHiddenTiles, int loaded
                 "  padding: 8px 12px;"
                 "  margin: 8px 12px;"
                 "  font-size: 12px;"
-                "}"
-            );
+                "}")
+        );
+    }
+
+    if (notesTreePanel) notesTreePanel->setDarkMode(isDarkMode);
+}
+
+void MarkdownNotesSidebar::setDarkMode(bool darkMode)
+{
+    if (isDarkMode == darkMode) return;
+    isDarkMode = darkMode;
+    applyStyle();
+}
+
+// ============================================================================
+// Outline / notes-dir / search API
+// ============================================================================
+
+void MarkdownNotesSidebar::setNotesDir(const QString& notesDir)
+{
+    if (notesTreePanel) notesTreePanel->setNotesDir(notesDir);
+}
+
+void MarkdownNotesSidebar::setOutline(const QVector<LinkOutlineEntry>& entries,
+                                      bool edgeless)
+{
+    if (!notesTreePanel) return;
+    notesTreePanel->setOutline(entries, edgeless);
+
+    if (!searchMode) {
+        showOutlineView();
+        // Show the "no notes" hint only when the outline is genuinely empty.
+        if (entries.isEmpty()) {
+            notesTreePanel->hide();
+            emptyLabel->setText(edgeless
+                                ? tr("No notes in this document")
+                                : tr("No notes in this document"));
+            emptyLabel->show();
+        } else {
+            emptyLabel->hide();
+            notesTreePanel->show();
         }
+    }
+}
+
+void MarkdownNotesSidebar::updateLinkObject(const QString& linkObjectId,
+                                             const QString& description,
+                                             const QColor&  iconColor)
+{
+    if (notesTreePanel) {
+        notesTreePanel->updateLinkObject(linkObjectId, description, iconColor);
+    }
+}
+
+void MarkdownNotesSidebar::openNote(const QString& linkObjectId, int slotIndex)
+{
+    if (searchMode) exitSearchMode();
+    showOutlineView();
+    if (notesTreePanel) notesTreePanel->openNote(linkObjectId, slotIndex);
+}
+
+void MarkdownNotesSidebar::openNoteById(const QString& linkObjectId,
+                                         const QString& noteId)
+{
+    if (searchMode) exitSearchMode();
+    showOutlineView();
+    if (notesTreePanel) notesTreePanel->openNoteById(linkObjectId, noteId);
+}
+
+void MarkdownNotesSidebar::highlightPage(int pageIndex)
+{
+    if (notesTreePanel) notesTreePanel->highlightPage(pageIndex);
+}
+
+void MarkdownNotesSidebar::setEdgelessMode(bool edgeless)
+{
+    if (isEdgeless == edgeless) return;
+    isEdgeless = edgeless;
+
+    // Range container is useful in both modes now:
+    //  - Paged:    "Pages:"  (controls search range; outline filter is a no-op).
+    //  - Edgeless: "Rows:"   (controls L1-group filter on the outline *and*
+    //                         the row band for the flat search).
+    pageRangeContainer->setVisible(true);
+    pageRangeLabel->setText(edgeless ? tr("Rows:") : tr("Pages:"));
+
+    // Entering edgeless: start with "All" on and no filter; let the user
+    // opt into a band.
+    if (edgeless) {
+        searchAllPagesCheckBox->setChecked(true);
+        clearRangeFilter();
+    } else {
+        // Leaving edgeless: make sure no stale filter hangs around.
+        clearRangeFilter();
+    }
+
+    if (hiddenTilesWarningLabel) {
+        hiddenTilesWarningLabel->setVisible(false);
+    }
+}
+
+void MarkdownNotesSidebar::setHiddenTilesWarning(bool hasHiddenTiles,
+                                                  int loadedCount,
+                                                  int totalCount)
+{
+    if (!hiddenTilesWarningLabel) return;
+    if (hasHiddenTiles && isEdgeless) {
+        hiddenTilesWarningLabel->setText(
+            tr("\u26A0\uFE0F Showing notes from %1 of %2 tiles. "
+               "Pan around to load more tiles and see their notes.")
+                .arg(loadedCount).arg(totalCount));
+        hiddenTilesWarningLabel->setVisible(true);
     } else {
         hiddenTilesWarningLabel->setVisible(false);
     }
 }
 
-void MarkdownNotesSidebar::removeNote(const QString &noteId) {
-    for (int i = 0; i < noteEntries.size(); ++i) {
-        if (noteEntries[i]->getNoteId() == noteId) {
-            MarkdownNoteEntry *entry = noteEntries.takeAt(i);
-            scrollLayout->removeWidget(entry);
-            entry->deleteLater();
-            break;
-        }
-    }
-    
-    // Update visibility
-    if (noteEntries.isEmpty()) {
-        scrollArea->hide();
-        emptyLabel->show();
-    }
-}
-
-void MarkdownNotesSidebar::clearNotes() {
-    for (MarkdownNoteEntry *entry : noteEntries) {
-        scrollLayout->removeWidget(entry);
-        entry->deleteLater();
-    }
-    noteEntries.clear();
-    
-    scrollArea->hide();
-    emptyLabel->show();
-}
-
-// Load notes from LinkObject-based NoteDisplayData
-void MarkdownNotesSidebar::loadNotesForPage(const QList<NoteDisplayData>& notes)
+void MarkdownNotesSidebar::setRangeFilter(int fromIndex, int toIndex)
 {
-    // Clear existing notes
-    clearNotes();
-    
-    // Add each note with the new NoteDisplayData constructor
-    for (const NoteDisplayData& data : notes) {
-        // Create entry using the new constructor
-        MarkdownNoteEntry* entry = new MarkdownNoteEntry(data, scrollContent);
-        
-        // Connect signals
-        connect(entry, &MarkdownNoteEntry::contentChanged, this, &MarkdownNotesSidebar::onNoteContentChanged);
-        connect(entry, &MarkdownNoteEntry::linkObjectClicked, this, &MarkdownNotesSidebar::onLinkObjectClicked);
-        connect(entry, &MarkdownNoteEntry::deleteWithLinkRequested, this, &MarkdownNotesSidebar::onNoteDeletedWithLink);
-        
-        noteEntries.append(entry);
-        
-        // Insert before the stretch
-        scrollLayout->insertWidget(scrollLayout->count() - 1, entry);
-    }
-    
-    // Update visibility
-    if (noteEntries.isEmpty()) {
-        scrollArea->hide();
-        emptyLabel->setText(tr("No notes on this page"));
-        emptyLabel->show();
-    } else {
-        emptyLabel->hide();
-        scrollArea->show();
+    if (notesTreePanel && isEdgeless) {
+        notesTreePanel->setEdgelessRangeFilter(fromIndex, toIndex);
     }
 }
 
-MarkdownNoteEntry* MarkdownNotesSidebar::findNoteEntry(const QString &noteId) {
-    for (MarkdownNoteEntry *entry : noteEntries) {
-        if (entry->getNoteId() == noteId) {
-            return entry;
-        }
-    }
-    return nullptr;
+void MarkdownNotesSidebar::clearRangeFilter()
+{
+    if (notesTreePanel) notesTreePanel->setEdgelessRangeFilter(-1, -1);
 }
 
-void MarkdownNotesSidebar::setCurrentPageInfo(int page, int total) {
+void MarkdownNotesSidebar::setCurrentPageInfo(int page, int total)
+{
     currentPage = page;
-    totalPages = total;
-    
-    // Update spinbox maximums
-    fromPageSpinBox->setMaximum(total);
-    toPageSpinBox->setMaximum(total);
-    
-    // Update default range (previous 4, current, next 5 = 10 pages)
-    if (!searchMode) {
-        updateSearchRangeDefaults();
-    }
+    totalPages = qMax(1, total);
+    fromPageSpinBox->setMaximum(totalPages);
+    toPageSpinBox->setMaximum(totalPages);
+    if (!searchMode) updateSearchRangeDefaults();
 }
 
-void MarkdownNotesSidebar::updateSearchRangeDefaults() {
-    // Default: previous 4 pages, current page, next 5 pages
-    int fromPage = qMax(1, currentPage + 1 - 4);  // +1 for 1-based display
-    int toPage = qMin(totalPages, currentPage + 1 + 5);
-    
+void MarkdownNotesSidebar::updateSearchRangeDefaults()
+{
+    const int fromPage = qMax(1, currentPage + 1 - 4);
+    const int toPage   = qMin(totalPages, currentPage + 1 + 5);
     fromPageSpinBox->setValue(fromPage);
     toPageSpinBox->setValue(toPage);
 }
 
-void MarkdownNotesSidebar::exitSearchMode() {
+// ============================================================================
+// Outline / search mode switching
+// ============================================================================
+
+void MarkdownNotesSidebar::showOutlineView()
+{
+    if (notesTreePanel && notesTreePanel->hasOutline()) {
+        emptyLabel->hide();
+        notesTreePanel->show();
+    } else if (emptyLabel) {
+        notesTreePanel->hide();
+        emptyLabel->setText(tr("No notes in this document"));
+        emptyLabel->show();
+    }
+    if (scrollArea) scrollArea->hide();
+    if (searchStatusLabel) searchStatusLabel->setVisible(false);
+}
+
+void MarkdownNotesSidebar::showSearchResultsView()
+{
+    if (notesTreePanel) notesTreePanel->hide();
+    if (scrollArea) scrollArea->show();
+}
+
+void MarkdownNotesSidebar::exitSearchMode()
+{
     if (!searchMode) return;
-    
     searchMode = false;
     lastSearchQuery.clear();
-    
-    // Update UI
     exitSearchButton->setVisible(false);
     searchStatusLabel->setVisible(false);
     searchInput->clear();
-    
-    // Request MainWindow to reload notes for current page
+
+    // Dump the flat results list.
+    for (MarkdownNoteEntry* entry : searchResultEntries) {
+        scrollLayout->removeWidget(entry);
+        entry->deleteLater();
+    }
+    searchResultEntries.clear();
+
+    showOutlineView();
     emit reloadNotesRequested();
 }
 
-void MarkdownNotesSidebar::onNewNoteCreated() {
-    // Auto-exit search mode when a new note is created
-    // so the user can see and edit the new note
-    if (searchMode) {
-        exitSearchMode();
+void MarkdownNotesSidebar::clearNotes()
+{
+    // Tree
+    if (notesTreePanel) notesTreePanel->clear();
+
+    // Flat scroll area (search results).
+    for (MarkdownNoteEntry* entry : searchResultEntries) {
+        scrollLayout->removeWidget(entry);
+        entry->deleteLater();
     }
+    searchResultEntries.clear();
+
+    if (emptyLabel) emptyLabel->hide();
+    if (scrollArea) scrollArea->hide();
+    if (notesTreePanel) notesTreePanel->hide();
 }
 
-void MarkdownNotesSidebar::onNoteContentChanged(const QString &noteId) {
-    MarkdownNoteEntry *entry = findNoteEntry(noteId);
-    if (entry) {
-        emit noteContentSaved(noteId, entry->getTitle(), entry->getContent());
-    }
-}
+// ============================================================================
+// Search
+// ============================================================================
 
-// Handle jump to LinkObject
-void MarkdownNotesSidebar::onLinkObjectClicked(const QString& linkObjectId) {
-    emit linkObjectClicked(linkObjectId);
-}
+void MarkdownNotesSidebar::onSearchButtonClicked() { performSearch(); }
 
-// Phase M.3: Handle note deletion with LinkObject reference
-void MarkdownNotesSidebar::onNoteDeletedWithLink(const QString& noteId, const QString& linkObjectId) {
-    removeNote(noteId);
-    emit noteDeletedWithLink(noteId, linkObjectId);
-}
+void MarkdownNotesSidebar::onExitSearchClicked() { exitSearchMode(); }
 
-void MarkdownNotesSidebar::onSearchButtonClicked() {
-    performSearch();
-}
-
-void MarkdownNotesSidebar::onExitSearchClicked() {
-    exitSearchMode();
-}
-
-void MarkdownNotesSidebar::onSearchAllPagesToggled(bool checked) {
+void MarkdownNotesSidebar::onSearchAllPagesToggled(bool checked)
+{
     fromPageSpinBox->setEnabled(!checked);
     toPageSpinBox->setEnabled(!checked);
+
+    // Mirror the checkbox onto the outline filter in edgeless mode: "All" =
+    // no filter, unchecked = band defined by the spinboxes.  In paged mode
+    // this is a no-op because NotesTreePanel ignores the filter when
+    // !m_edgeless.
+    if (isEdgeless) {
+        if (checked) {
+            clearRangeFilter();
+        } else {
+            setRangeFilter(fromPageSpinBox->value() - 1,
+                           toPageSpinBox->value() - 1);
+        }
+    }
 }
 
-void MarkdownNotesSidebar::performSearch() {
-    QString query = searchInput->text().trimmed();
-    
+void MarkdownNotesSidebar::performSearch()
+{
+    const QString query = searchInput->text().trimmed();
     if (query.isEmpty()) {
-        // Empty query - exit search mode
         exitSearchMode();
         return;
     }
-    
-    // Enter search mode
+
     searchMode = true;
     lastSearchQuery = query;
     exitSearchButton->setVisible(true);
-    
-    // Determine page range
-    int fromPage = 0; // 0-based internally
-    int toPage = totalPages - 1;
-    
+
+    int fromPage = 0;
+    int toPage   = totalPages - 1;
     if (!searchAllPagesCheckBox->isChecked()) {
-        fromPage = fromPageSpinBox->value() - 1; // Convert to 0-based
-        toPage = toPageSpinBox->value() - 1;
+        fromPage = fromPageSpinBox->value() - 1;
+        toPage   = toPageSpinBox->value() - 1;
     }
-    
-    // Phase M.4: Emit signal for MainWindow to handle search
     emit searchRequested(query, fromPage, toPage);
 }
 
-// Display search results using NoteDisplayData
-void MarkdownNotesSidebar::displaySearchResults(const QList<NoteDisplayData>& results) {
-    // Clear current notes
-    clearNotes();
-    
-    // Update status label
-    if (results.isEmpty()) {
-        searchStatusLabel->setText(tr("No results found for \"%1\"").arg(lastSearchQuery));
-    } else {
-        searchStatusLabel->setText(tr("%n result(s) found", "", static_cast<int>(results.size())));
+void MarkdownNotesSidebar::displaySearchResults(
+    const QList<NoteDisplayData>& results)
+{
+    // Rebuild the flat list.
+    for (MarkdownNoteEntry* entry : searchResultEntries) {
+        scrollLayout->removeWidget(entry);
+        entry->deleteLater();
     }
+    searchResultEntries.clear();
+
+    searchStatusLabel->setText(
+        results.isEmpty()
+            ? tr("No results found for \"%1\"").arg(lastSearchQuery)
+            : tr("%n result(s) found", "", static_cast<int>(results.size())));
     searchStatusLabel->setVisible(true);
-    
-    // Add search results using new format
+
     for (const NoteDisplayData& data : results) {
-        MarkdownNoteEntry* entry = new MarkdownNoteEntry(data, scrollContent);
+        auto* entry = new MarkdownNoteEntry(data, scrollContent);
         scrollLayout->insertWidget(scrollLayout->count() - 1, entry);
-        noteEntries.append(entry);
-        
-        // Connect signals for LinkObject-based entries
+        searchResultEntries.append(entry);
+
         connect(entry, &MarkdownNoteEntry::linkObjectClicked,
-                this, &MarkdownNotesSidebar::onLinkObjectClicked);
+                this,  &MarkdownNotesSidebar::linkObjectClicked);
         connect(entry, &MarkdownNoteEntry::deleteWithLinkRequested,
-                this, &MarkdownNotesSidebar::onNoteDeletedWithLink);
+                this,  &MarkdownNotesSidebar::noteDeletedWithLink);
         connect(entry, &MarkdownNoteEntry::contentChanged,
-                this, &MarkdownNotesSidebar::onNoteContentChanged);
+                this, [this, entry](const QString& id) {
+            emit noteContentSaved(id, entry->getTitle(), entry->getContent());
+        });
     }
-    
-    // Update visibility
+
+    showSearchResultsView();
     if (results.isEmpty()) {
         scrollArea->hide();
         emptyLabel->setText(tr("No matching notes found"));
@@ -462,27 +528,5 @@ void MarkdownNotesSidebar::displaySearchResults(const QList<NoteDisplayData>& re
     } else {
         emptyLabel->hide();
         scrollArea->show();
-    }
-}
-
-// Phase M.5: Scroll to a specific note entry
-void MarkdownNotesSidebar::scrollToNote(const QString& noteId)
-{
-    for (MarkdownNoteEntry* entry : noteEntries) {
-        if (entry->getNoteId() == noteId) {
-            scrollArea->ensureWidgetVisible(entry);
-            return;
-        }
-    }
-}
-
-// Phase M.5: Set note to edit or preview mode
-void MarkdownNotesSidebar::setNoteEditMode(const QString& noteId, bool editMode)
-{
-    for (MarkdownNoteEntry* entry : noteEntries) {
-        if (entry->getNoteId() == noteId) {
-            entry->setPreviewMode(!editMode);
-            return;
-        }
     }
 }

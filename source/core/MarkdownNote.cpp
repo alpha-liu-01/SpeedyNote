@@ -114,3 +114,80 @@ MarkdownNote MarkdownNote::loadFromFile(const QString& filePath)
     return note;
 }
 
+// ----------------------------------------------------------------------------
+// loadPreviewFromFile
+// ----------------------------------------------------------------------------
+//
+// Streams a small prefix from disk instead of `readAll()`-ing the whole note,
+// parses the optional YAML front matter for the title, and then extracts the
+// first non-blank body line (truncated) as the snippet.
+//
+// This is the hot path for populating the NotesTreePanel when an L2 row is
+// expanded.  On low-RAM targets a notebook can easily hold dozens of notes
+// per LinkObject, so we:
+//   - read at most ~4 KB (enough for any reasonable front matter + a line)
+//     even when the caller asks for a smaller maxBodyBytes;
+//   - never hold more than a tiny QString per note in memory.
+// ----------------------------------------------------------------------------
+MarkdownNotePreview MarkdownNote::loadPreviewFromFile(const QString& filePath,
+                                                     int maxBodyBytes)
+{
+    MarkdownNotePreview preview;
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return preview;  // invalid (id empty)
+    }
+
+    QFileInfo info(filePath);
+    preview.id = info.baseName();
+
+    // Read a bounded prefix: room for front matter + enough body to slice a
+    // snippet.  4 KB upper bound ensures we never stall on a huge one-liner.
+    constexpr qint64 kMaxPrefixBytes = 4096;
+    const qint64 readLimit = qMin<qint64>(kMaxPrefixBytes,
+                                          qMax(maxBodyBytes, 0) + 2048);
+    const QByteArray rawBytes = file.read(readLimit);
+    const QString raw = QString::fromUtf8(rawBytes);
+
+    QString body;
+
+    // Parse the same front matter format as loadFromFile().
+    if (raw.startsWith(QLatin1String("---\n"))) {
+        const qsizetype endMarker = raw.indexOf(QLatin1String("\n---\n"), 4);
+        if (endMarker != -1) {
+            const QString frontMatter = raw.mid(4, endMarker - 4);
+            body = raw.mid(endMarker + 5);
+
+            static QRegularExpression titleRe(
+                QStringLiteral("title:\\s*\"(.*)\""),
+                QRegularExpression::InvertedGreedinessOption);
+            const QRegularExpressionMatch match = titleRe.match(frontMatter);
+            if (match.hasMatch()) {
+                preview.title = match.captured(1);
+                preview.title.replace(QLatin1String("\\\""), QLatin1String("\""));
+                preview.title.replace(QLatin1String("\\\\"), QLatin1String("\\"));
+            }
+        } else {
+            body = raw;  // malformed front matter — treat all as body
+        }
+    } else {
+        body = raw;      // no front matter
+    }
+
+    // First non-blank line of body, trimmed & length-capped.
+    const QStringList lines = body.split(QLatin1Char('\n'));
+    for (const QString& line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.isEmpty()) continue;
+        preview.snippet = trimmed;
+        break;
+    }
+    if (maxBodyBytes > 0 && preview.snippet.size() > maxBodyBytes) {
+        preview.snippet.truncate(maxBodyBytes);
+        preview.snippet.append(QLatin1String("..."));
+    }
+
+    return preview;
+}
+

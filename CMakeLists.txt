@@ -704,6 +704,9 @@ set(UI_SOURCES
     source/ui/sidebars/OutlinePanel.cpp
     source/ui/sidebars/OutlinePanelTreeWidget.cpp
     source/ui/sidebars/OutlineItemDelegate.cpp
+    source/ui/sidebars/NotesTreePanel.cpp
+    source/ui/sidebars/NotesTreeWidget.cpp
+    source/ui/sidebars/NotesTreeDelegate.cpp
     source/ui/sidebars/PagePanel.cpp
     source/ui/sidebars/PagePanelListView.cpp
     # Widgets

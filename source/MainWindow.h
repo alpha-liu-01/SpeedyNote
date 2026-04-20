@@ -462,13 +462,16 @@ private:
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
     
     /**
-     * @brief Phase M.3: Load markdown notes for the current page from LinkObjects.
-     * @return List of NoteDisplayData for all markdown notes on current page.
-     * 
-     * Iterates through LinkObjects on the current page, loads markdown note
-     * files for each Markdown-type slot, and returns display data.
+     * @brief Phase M.8: Rebuild the right-sidebar outline tree from the
+     *        current document (no .md file I/O).
+     *
+     * Obtains a fresh `LinkOutlineEntry` vector via
+     * `Document::enumerateLinkOutline()` and forwards it to the sidebar.
+     * Also updates edgeless-mode / hidden-tiles warning / notes directory.
+     * Cheap enough to call from every `linkObjectListMayHaveChanged`
+     * signal path.
      */
-    QList<NoteDisplayData> loadNotesForCurrentPage();
+    void refreshNotesOutline();
     
     /**
      * @brief Phase M.3: Navigate to and select a LinkObject on the current page.

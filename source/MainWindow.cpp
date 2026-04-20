@@ -889,39 +889,59 @@ void MainWindow::setupUi() {
         note.saveToFile(filePath);
     });
     
-    // Handle note deletion from sidebar - delete file and clear LinkSlot
+    // Handle note deletion from sidebar - delete file and clear LinkSlot.
+    // Phase M.8: search across ALL pages/tiles (not just the current page) so
+    // edgeless mode and focused-L3 deletion both find the target LinkObject.
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeletedWithLink,
             this, [this](const QString& noteId, const QString& linkObjectId) {
         DocumentViewport* vp = currentViewport();
         if (!vp || !vp->document()) return;
-        
+
         Document* doc = vp->document();
-        
-        // Delete the note file
         doc->deleteNoteFile(noteId);
-        
-        // Find the LinkObject and clear the slot
-        Page* page = doc->page(vp->currentPageIndex());
-        if (page) {
+
+        auto tryClearSlotIn = [&](Page* page, int pageIdxForDirty) -> bool {
+            if (!page) return false;
             for (const auto& objPtr : page->objects) {
                 LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-                if (link && link->id == linkObjectId) {
-                    for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                        if (link->linkSlots[i].type == LinkSlot::Type::Markdown &&
-                            link->linkSlots[i].markdownNoteId == noteId) {
-                            link->linkSlots[i].clear();
-                            doc->markPageDirty(vp->currentPageIndex());
-                            vp->update();
-                            break;
+                if (!link || link->id != linkObjectId) continue;
+                for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+                    if (link->linkSlots[i].type == LinkSlot::Type::Markdown &&
+                        link->linkSlots[i].markdownNoteId == noteId) {
+                        link->linkSlots[i].clear();
+                        if (pageIdxForDirty >= 0) {
+                            doc->markPageDirty(pageIdxForDirty);
                         }
+                        return true;
                     }
+                }
+                return false;  // matched link but no slot — stop searching this container
+            }
+            return false;
+        };
+
+        bool found = false;
+        if (doc->isEdgeless()) {
+            for (const auto& coord : doc->allLoadedTileCoords()) {
+                Page* tile = doc->getTile(coord.first, coord.second);
+                if (tryClearSlotIn(tile, /*pageIdxForDirty=*/-1)) {
+                    doc->markTileDirty(coord);
+                    found = true;
+                    break;
+                }
+            }
+        } else {
+            const int count = doc->pageCount();
+            for (int i = 0; i < count; ++i) {
+                if (tryClearSlotIn(doc->page(i), i)) {
+                    found = true;
                     break;
                 }
             }
         }
-        
-        // Refresh sidebar
-        markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+
+        if (found) vp->update();
+        refreshNotesOutline();
     });
     
     // Handle jump to LinkObject
@@ -941,7 +961,7 @@ void MainWindow::setupUi() {
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::reloadNotesRequested,
             this, [this]() {
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            refreshNotesOutline();
         }
     });
     
@@ -1226,7 +1246,7 @@ void MainWindow::setupUi() {
             
             // Load notes when sidebar becomes visible
             if (checked) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+                refreshNotesOutline();
             }
             
             // Force layout update and reposition action bar
@@ -2577,54 +2597,43 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     }
     
-    // Phase M.3: Refresh markdown notes sidebar when page changes
+    // Phase M.3 / M.8: Refresh markdown notes sidebar when page changes
     if (markdownNotesSidebar) {
-        // Set edgeless mode (hides page range controls for edgeless documents)
         Document* doc = viewport->document();
         markdownNotesSidebar->setEdgelessMode(doc && doc->isEdgeless());
-        
-        // Set initial page info for search range defaults
+
         if (doc && !doc->isEdgeless()) {
-            markdownNotesSidebar->setCurrentPageInfo(viewport->currentPageIndex(), doc->pageCount());
+            markdownNotesSidebar->setCurrentPageInfo(viewport->currentPageIndex(),
+                                                     doc->pageCount());
         }
-        
+
+        // Page change no longer reloads the outline (loading is O(#links), and
+        // the outline is document-wide); it just moves the L1 highlight.
         m_markdownNotesPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
                 this, [this](int pageIndex) {
             if (!markdownNotesSidebar) return;
-            
-            // Update page info for search range defaults
             DocumentViewport* vp = currentViewport();
             if (vp && vp->document() && !vp->document()->isEdgeless()) {
-                markdownNotesSidebar->setCurrentPageInfo(pageIndex, vp->document()->pageCount());
-            }
-            
-            // Refresh notes display
-            if (markdownNotesSidebar->isVisible()) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+                markdownNotesSidebar->setCurrentPageInfo(pageIndex,
+                                                         vp->document()->pageCount());
+                markdownNotesSidebar->highlightPage(pageIndex);
             }
         });
-        
-        // Load notes for current page if sidebar is visible
+
         if (markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            refreshNotesOutline();
         }
-        
-        // Phase M.5: Handle requestOpenMarkdownNote signal (create/open note)
+
+        // Phase M.5 / M.8: open-note request — expand chain + inflate editor.
         m_markdownNoteOpenConn = connect(viewport, &DocumentViewport::requestOpenMarkdownNote,
-                this, [this](const QString& noteId, const QString& /*linkObjectId*/) {
+                this, [this](const QString& noteId, const QString& linkObjectId) {
             if (!markdownNotesSidebar) return;
-            
-            // Show the markdown notes sidebar if hidden
             if (!markdownNotesSidebar->isVisible()) {
-                toggleMarkdownNotesSidebar();
+                toggleMarkdownNotesSidebar();  // also triggers refreshNotesOutline
+            } else {
+                refreshNotesOutline();
             }
-            
-            // Reload notes to include the new/opened note
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-            
-            // Scroll to the note and set it to edit mode
-            markdownNotesSidebar->scrollToNote(noteId);
-            markdownNotesSidebar->setNoteEditMode(noteId, true);
+            markdownNotesSidebar->openNoteById(linkObjectId, noteId);
         });
         
         m_userWarningConn = connect(viewport, &DocumentViewport::userWarning,
@@ -2636,7 +2645,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_linkObjectListConn = connect(viewport, &DocumentViewport::linkObjectListMayHaveChanged,
                 this, [this]() {
             if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+                refreshNotesOutline();
             }
         });
 
@@ -4531,6 +4540,13 @@ void MainWindow::updateTheme() {
     if (m_actionBarContainer) {
         m_actionBarContainer->setDarkMode(darkMode);
     }
+
+    // Phase M.8: propagate theme into the right-hand markdown notes sidebar
+    // (and through it to NotesTreePanel + NotesTreeDelegate).  Done last so
+    // any stylesheet that depends on the global palette sees the final state.
+    if (markdownNotesSidebar) {
+        markdownNotesSidebar->setDarkMode(darkMode);
+    }
 }
     
 void MainWindow::saveThemeSettings() {
@@ -4896,7 +4912,9 @@ void MainWindow::connectSubToolbarSignals()
         }
         vp->update();
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            // Phase M.8: update just this LinkObject in place (no preview reload,
+            // no collapse of expanded subtrees, no focus loss).
+            markdownNotesSidebar->updateLinkObject(link->id, link->description, color);
         }
     });
 
@@ -4919,7 +4937,7 @@ void MainWindow::connectSubToolbarSignals()
         }
         vp->update();
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            markdownNotesSidebar->updateLinkObject(link->id, description, link->iconColor);
         }
     });
 
@@ -7324,7 +7342,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     // Phase M.3: Load notes when sidebar becomes visible
     if (markdownNotesSidebarVisible) {
-        markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+        refreshNotesOutline();
     }
     
     // Force immediate layout update so canvas repositions correctly
@@ -7350,77 +7368,35 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     });
 }
 
-// Phase M.3: Load markdown notes for current page from LinkObjects
-QList<NoteDisplayData> MainWindow::loadNotesForCurrentPage()
+// Phase M.8: Rebuild right-sidebar outline tree (no .md file I/O).
+// The sidebar stores a compact LinkOutlineEntry per markdown-bearing link;
+// previews and full bodies are loaded lazily by NotesTreePanel.
+void MainWindow::refreshNotesOutline()
 {
-    QList<NoteDisplayData> results;
-    
+    if (!markdownNotesSidebar) return;
+
     DocumentViewport* vp = currentViewport();
-    if (!vp || !vp->document()) return results;
-    
-    Document* doc = vp->document();
-    QString notesDir = doc->notesPath();
-    if (notesDir.isEmpty()) return results;
-    
-    // Helper lambda to extract notes from a page/tile
-    auto extractNotesFromPage = [&](Page* page) {
-        if (!page) return;
-        
-        for (const auto& objPtr : page->objects) {
-            LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-            if (!link) continue;
-            
-            // Check each slot for markdown type
-            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                const LinkSlot& slot = link->linkSlots[i];
-                if (slot.type != LinkSlot::Type::Markdown) continue;
-                
-                // Load the note file
-                QString filePath = notesDir + "/" + slot.markdownNoteId + ".md";
-                MarkdownNote note = MarkdownNote::loadFromFile(filePath);
-                
-                if (!note.isValid()) continue;  // File not found
-                
-                // Build display data
-                NoteDisplayData displayData;
-                displayData.noteId = note.id;
-                displayData.title = note.title;
-                displayData.content = note.content;
-                displayData.linkObjectId = link->id;
-                displayData.color = link->iconColor;
-                displayData.description = link->description;
-                
-                results.append(displayData);
-            }
-        }
-    };
-    
-    if (doc->isEdgeless()) {
-        // Edgeless mode: iterate through all loaded tiles
-        for (const auto& coord : doc->allLoadedTileCoords()) {
-            Page* tile = doc->getTile(coord.first, coord.second);
-            extractNotesFromPage(tile);
-        }
-        
-        // M.7.2: Update hidden tiles warning
-        int loadedCount = doc->tileCount();
-        int totalCount = doc->tileIndexCount();
-        if (markdownNotesSidebar) {
-            markdownNotesSidebar->setHiddenTilesWarning(loadedCount < totalCount, loadedCount, totalCount);
-        }
-    } else {
-        // Paged mode: use current page
-        int pageIndex = vp->currentPageIndex();
-        Page* page = doc->page(pageIndex);
-        extractNotesFromPage(page);
-        
-        // M.7.2: Hide warning for paged mode
-        if (markdownNotesSidebar) {
-            markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
-        }
+    if (!vp || !vp->document()) {
+        markdownNotesSidebar->setNotesDir(QString());
+        markdownNotesSidebar->setOutline({}, /*edgeless=*/false);
+        markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
+        return;
     }
-    
-    return results;
+
+    Document* doc = vp->document();
+    markdownNotesSidebar->setNotesDir(doc->notesPath());
+    markdownNotesSidebar->setEdgelessMode(doc->isEdgeless());
+    markdownNotesSidebar->setOutline(doc->enumerateLinkOutline(),
+                                     doc->isEdgeless());
+
+    if (doc->isEdgeless()) {
+        const int loadedCount = doc->tileCount();
+        const int totalCount  = doc->tileIndexCount();
+        markdownNotesSidebar->setHiddenTilesWarning(loadedCount < totalCount,
+                                                   loadedCount, totalCount);
+    } else {
+        markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
+    }
 }
 
 // Phase M.3: Navigate to and select a LinkObject

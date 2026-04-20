@@ -17,6 +17,7 @@
 
 #include "Page.h"
 #include "../pdf/PdfProvider.h"
+#include "../ui/sidebars/LinkOutlineEntry.h"
 
 #include <QCoreApplication>  // For translate() in displayName()
 #include <QString>
@@ -415,7 +416,23 @@ public:
      * Phase M.1: Used for cascade delete when clearing LinkSlots or deleting LinkObjects.
      */
     bool deleteNoteFile(const QString& noteId);
-    
+
+    /**
+     * @brief Enumerate every LinkObject with at least one markdown slot.
+     *
+     * Walks the document cheaply (no file I/O) and returns a compact
+     * `LinkOutlineEntry` per link.  LinkObjects without any markdown slot
+     * are skipped.  In edgeless mode, only currently-loaded tiles are
+     * considered (same policy as `loadNotesForCurrentPage`).
+     *
+     * Used by the right-sidebar `NotesTreePanel` (Phase M.8) to build the
+     * 3-level tree without having to read any .md file until the user
+     * expands a LinkObject row.
+     *
+     * @return Flat list of entries; sorting/grouping is done by the caller.
+     */
+    QVector<LinkOutlineEntry> enumerateLinkOutline() const;
+
     /**
      * @brief Save all unsaved ImageObjects to the assets folder.
      * @param bundlePath Path to the bundle directory.
