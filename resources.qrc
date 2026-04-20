@@ -145,6 +145,12 @@
     <file>resources/icons/selection_pdf_reversed.png</file>
     <file>resources/icons/selection_ocr.png</file>
     <file>resources/icons/selection_ocr_reversed.png</file>
+    <file>resources/icons/highlight_none.png</file>
+    <file>resources/icons/highlight_none_reversed.png</file>
+    <file>resources/icons/highlight_underline.png</file>
+    <file>resources/icons/highlight_underline_reversed.png</file>
+    <file>resources/icons/highlight_dotted.png</file>
+    <file>resources/icons/highlight_dotted_reversed.png</file>
     <file>resources/translations/app_zh.qm</file>
     <file>resources/translations/app_es.qm</file>
     <file>resources/translations/app_fr.qm</file>

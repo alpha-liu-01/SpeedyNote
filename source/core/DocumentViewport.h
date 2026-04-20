@@ -542,21 +542,42 @@ public:
     bool straightLineMode() const { return m_straightLineMode; }
     
     // ===== Auto-Highlight Mode (Phase D) =====
-    
+
     /**
-     * @brief Enable or disable auto-highlight mode.
-     * @param enabled True to auto-create highlight strokes on selection release.
-     * 
-     * When enabled, releasing mouse after text selection automatically
-     * creates highlight strokes. When disabled, selection remains until
-     * user copies or cancels. Called from HighlighterSubToolbar.
+     * @brief Style of auto-generated highlight stroke.
+     *
+     * - None:            auto-highlight is off; selection remains until copy/cancel.
+     * - Cover:           thick horizontal line covering the text (original behavior).
+     * - Underline:       thin solid line along the bottom of each highlight rect.
+     * - DottedUnderline: sequence of round dots along the bottom of each highlight
+     *                    rect (materialized as tiny solid `VectorStroke` dots
+     *                    grouped into a single `UndoAction` per line).
+     *
+     * Persisted values: None=0, Cover=1, Underline=2, DottedUnderline=3. The 0/1
+     * mapping preserves backward-compat with the pre-existing `autoHighlight`
+     * boolean QSetting (false=>None, true=>Cover).
      */
-    void setAutoHighlightEnabled(bool enabled);
-    
+    enum class HighlightStyle {
+        None = 0,
+        Cover = 1,
+        Underline = 2,
+        DottedUnderline = 3,
+    };
+
     /**
-     * @brief Check if auto-highlight mode is enabled.
+     * @brief Set the auto-highlight style.
+     * @param style New style; HighlightStyle::None disables auto-highlight.
+     *
+     * When set to anything other than None, releasing the pointer after a
+     * text selection automatically creates highlight strokes of the chosen
+     * style. Called from HighlighterSubToolbar.
      */
-    bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
+    void setAutoHighlightStyle(HighlightStyle style);
+
+    /**
+     * @brief Get the current auto-highlight style.
+     */
+    HighlightStyle autoHighlightStyle() const { return m_autoHighlightStyle; }
 
     // ===== Highlighter Selection Source (PDF vs OCR) =====
 
@@ -1768,12 +1789,13 @@ signals:
     void textSelected(const QString& text);
     
     /**
-     * @brief Emitted when auto-highlight mode changes.
-     * 
-     * Phase B: Can be connected to subtoolbar toggle button to sync state.
-     * @param enabled New auto-highlight state.
+     * @brief Emitted when the auto-highlight style changes.
+     *
+     * Routed by MainWindow to the Highlighter subtoolbar so the dropdown
+     * reflects the active viewport's current style on tab switches.
+     * @param style New auto-highlight style.
      */
-    void autoHighlightEnabledChanged(bool enabled);
+    void autoHighlightStyleChanged(HighlightStyle style);
 
     /**
      * @brief Emitted when the highlighter selection source (PDF vs OCR) changes.
@@ -2134,7 +2156,7 @@ private:
 
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
-    bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
+    HighlightStyle m_autoHighlightStyle = HighlightStyle::None;  ///< Style of auto-created highlight strokes (None disables auto-highlight)
     HighlighterMode m_highlighterMode = HighlighterMode::Pdf;  ///< PDF vs OCR text selection source
     
     // ===== PDF Search Highlighting =====
@@ -3086,17 +3108,40 @@ private:
     void renderSearchMatchesOverlayEdgeless(QPainter& painter);
     
     /**
-     * @brief Create a marker-style stroke for a highlight rectangle (Phase B.6).
-     * 
-     * Creates a horizontal stroke through the center of the rectangle,
-     * with width equal to the rectangle height (text line height).
-     * Used to convert text selection highlight rects to VectorStrokes.
-     * 
-     * @param rect Rectangle in page coordinates (96 DPI).
+     * @brief Create a marker-style stroke for a highlight rectangle.
+     *
+     * For HighlightStyle::Cover, produces a horizontal stroke through the
+     * center of the rectangle with thickness equal to the rectangle height
+     * (original cover-the-text behavior). For HighlightStyle::Underline,
+     * produces a thin horizontal stroke along the bottom of the rectangle.
+     *
+     * HighlightStyle::DottedUnderline is handled separately by
+     * createDottedUnderlineStrokes() since it produces multiple strokes.
+     *
+     * @param rect  Rectangle in page coordinates (96 DPI).
      * @param color Highlight color (typically m_highlighterColor).
+     * @param style Either Cover or Underline. (DottedUnderline is routed
+     *              through createDottedUnderlineStrokes() instead.)
      * @return VectorStroke configured as a horizontal marker.
      */
-    VectorStroke createHighlightStroke(const QRectF& rect, const QColor& color) const;
+    VectorStroke createHighlightStroke(const QRectF& rect,
+                                       const QColor& color,
+                                       HighlightStyle style) const;
+
+    /**
+     * @brief Create the sequence of dot strokes that make up a dotted underline.
+     *
+     * Dots are evenly spaced along the bottom edge of @p rect. Dot thickness
+     * scales with @p rect height (~10%), and center-to-center spacing is
+     * 3x the thickness. Each dot is an ordinary single-point `VectorStroke`,
+     * which keeps the renderer, serializer, and exporter unchanged.
+     *
+     * @param rect  Rectangle in page coordinates (96 DPI).
+     * @param color Highlight color.
+     * @return Vector of dot strokes (possibly empty if rect is too narrow).
+     */
+    QVector<VectorStroke> createDottedUnderlineStrokes(const QRectF& rect,
+                                                       const QColor& color) const;
     
     /**
      * @brief Create highlight strokes from current text selection (Phase B.3).

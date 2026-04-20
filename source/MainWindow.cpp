@@ -1946,7 +1946,13 @@ void MainWindow::setupManagedShortcuts()
     createShortcut("pdf.auto_highlight", [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             if (vp->currentTool() == ToolType::Highlighter) {
-                vp->setAutoHighlightEnabled(!vp->isAutoHighlightEnabled());
+                // Preserve the old Ctrl+H semantics: toggle between None
+                // (auto-highlight off) and Cover (the only previously-
+                // reachable "on" state). Users can still pick Underline or
+                // Dotted underline explicitly from the subtoolbar dropdown.
+                using HS = DocumentViewport::HighlightStyle;
+                vp->setAutoHighlightStyle(
+                    vp->autoHighlightStyle() == HS::None ? HS::Cover : HS::None);
             }
         }
     });
@@ -2300,18 +2306,20 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_toolbar->setStraightLineMode(viewport->straightLineMode());
     }
     
-    // Phase D: Connect auto-highlight state sync (viewport → subtoolbar)
-    // When Ctrl+H changes the state, update the subtoolbar toggle to match
-    m_autoHighlightConn = connect(viewport, &DocumentViewport::autoHighlightEnabledChanged, 
-                                  this, [this](bool enabled) {
+    // Phase D: Connect auto-highlight style sync (viewport → subtoolbar)
+    // When Ctrl+H or a tab switch changes the style, update the dropdown to match.
+    m_autoHighlightConn = connect(viewport, &DocumentViewport::autoHighlightStyleChanged,
+                                  this, [this](DocumentViewport::HighlightStyle style) {
         if (m_toolbar->highlighterSubToolbar()) {
-            m_toolbar->highlighterSubToolbar()->setAutoHighlightState(enabled);
+            m_toolbar->highlighterSubToolbar()->setAutoHighlightStyle(
+                static_cast<HighlighterSubToolbar::HighlightStyle>(style));
         }
     });
-    
-    // Also sync the current auto-highlight state to the subtoolbar
+
+    // Also sync the current auto-highlight style to the subtoolbar
     if (m_toolbar->highlighterSubToolbar()) {
-        m_toolbar->highlighterSubToolbar()->setAutoHighlightState(viewport->isAutoHighlightEnabled());
+        m_toolbar->highlighterSubToolbar()->setAutoHighlightStyle(
+            static_cast<HighlighterSubToolbar::HighlightStyle>(viewport->autoHighlightStyle()));
     }
 
     // Connect highlighter-mode (PDF/OCR) sync (viewport -> subtoolbar)
@@ -4829,8 +4837,10 @@ void MainWindow::connectSubToolbarSignals()
     connect(highlighterST, &HighlighterSubToolbar::highlighterColorChanged, this, [this](const QColor& color) {
         if (DocumentViewport* vp = currentViewport()) vp->setHighlighterColor(color);
     });
-    connect(highlighterST, &HighlighterSubToolbar::autoHighlightChanged, this, [this](bool enabled) {
-        if (DocumentViewport* vp = currentViewport()) vp->setAutoHighlightEnabled(enabled);
+    connect(highlighterST, &HighlighterSubToolbar::autoHighlightStyleChanged, this,
+            [this](HighlighterSubToolbar::HighlightStyle style) {
+        if (DocumentViewport* vp = currentViewport())
+            vp->setAutoHighlightStyle(static_cast<DocumentViewport::HighlightStyle>(style));
     });
     connect(highlighterST, &HighlighterSubToolbar::selectionSourceChanged, this,
             [this](HighlighterSubToolbar::SelectionSource src) {

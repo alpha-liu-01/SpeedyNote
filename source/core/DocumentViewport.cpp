@@ -10304,16 +10304,16 @@ bool DocumentViewport::isHighlighterEnabled() const
     return page && page->backgroundType == Page::BackgroundType::PDF;
 }
 
-void DocumentViewport::setAutoHighlightEnabled(bool enabled)
+void DocumentViewport::setAutoHighlightStyle(HighlightStyle style)
 {
-    if (m_autoHighlightEnabled == enabled) {
-        return;  // No change
+    if (m_autoHighlightStyle == style) {
+        return;
     }
-    
-    m_autoHighlightEnabled = enabled;
-    emit autoHighlightEnabledChanged(enabled);
+
+    m_autoHighlightStyle = style;
+    emit autoHighlightStyleChanged(style);
     #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "Auto-highlight mode:" << (enabled ? "ON" : "OFF");
+    qDebug() << "Auto-highlight style:" << static_cast<int>(style);
     #endif
 }
 
@@ -10808,8 +10808,8 @@ void DocumentViewport::handlePointerRelease_Highlighter(const PointerEvent& pe)
     if (m_textSelection.isValid()) {
         finalizeTextSelection();
         
-        // Phase B.4: Auto-create strokes if toggle is ON
-        if (m_autoHighlightEnabled) {
+        // Auto-create strokes if a highlight style is selected
+        if (m_autoHighlightStyle != HighlightStyle::None) {
             createHighlightStrokes();
             // Note: createHighlightStrokes() already clears m_textSelection
         }
@@ -11465,54 +11465,102 @@ void DocumentViewport::renderSearchMatchesOverlayEdgeless(QPainter& painter)
     painter.restore();
 }
 
-VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect, const QColor& color) const
+VectorStroke DocumentViewport::createHighlightStroke(const QRectF& rect,
+                                                     const QColor& color,
+                                                     HighlightStyle style) const
 {
     VectorStroke stroke;
-    
-    // Generate unique ID
     stroke.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    
-    // Set color (should include alpha for semi-transparency)
     stroke.color = color;
-    
-    // Stroke width = rectangle height (text line height)
-    stroke.baseThickness = rect.height();
-    
-    // Create a horizontal line through the center of the rectangle
-    // This is how markers work: a thick line that covers the text area
+
+    // Geometry depends on style:
+    //  - Cover:     horizontal line through the center, thickness = rect height
+    //               (original "marker covers the text" behavior).
+    //  - Underline: thin horizontal line along the bottom edge.
+    //  - DottedUnderline is routed through createDottedUnderlineStrokes() and
+    //    is never passed to this helper; we treat it as Underline just so a
+    //    stray caller still produces something visible rather than a 0-thick
+    //    stroke.
+    qreal y = rect.center().y();
+    qreal thickness = rect.height();
+    if (style == HighlightStyle::Underline || style == HighlightStyle::DottedUnderline) {
+        thickness = qMax(qreal(1.5), rect.height() * qreal(0.10));
+        y = rect.bottom() - thickness * qreal(0.5);
+    }
+    stroke.baseThickness = thickness;
+
     StrokePoint startPoint;
-    startPoint.pos = QPointF(rect.left(), rect.center().y());
-    startPoint.pressure = 1.0;  // Uniform pressure for highlights
-    
+    startPoint.pos = QPointF(rect.left(), y);
+    startPoint.pressure = 1.0;
+
     StrokePoint endPoint;
-    endPoint.pos = QPointF(rect.right(), rect.center().y());
+    endPoint.pos = QPointF(rect.right(), y);
     endPoint.pressure = 1.0;
-    
+
     stroke.points.append(startPoint);
     stroke.points.append(endPoint);
-    
-    // Calculate bounding box
+
     stroke.updateBoundingBox();
-    
     return stroke;
+}
+
+QVector<VectorStroke> DocumentViewport::createDottedUnderlineStrokes(const QRectF& rect,
+                                                                      const QColor& color) const
+{
+    QVector<VectorStroke> dots;
+
+    // Dot thickness scales with text height; center-to-center spacing is 3x
+    // thickness (dot + two-dot gap). Line sits on the bottom edge of the rect.
+    const qreal thickness = qMax(qreal(1.5), rect.height() * qreal(0.10));
+    const qreal step      = thickness * qreal(3.0);
+    const qreal y         = rect.bottom() - thickness * qreal(0.5);
+    const qreal firstX    = rect.left()  + thickness * qreal(0.5);
+    const qreal lastX     = rect.right() - thickness * qreal(0.5);
+    if (lastX < firstX || step <= 0.0) {
+        return dots;  // Rect too narrow for even one dot.
+    }
+
+    dots.reserve(static_cast<int>((lastX - firstX) / step) + 1);
+    for (qreal x = firstX; x <= lastX; x += step) {
+        VectorStroke dot;
+        dot.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        dot.color = color;
+        dot.baseThickness = thickness;
+        StrokePoint p;
+        p.pos = QPointF(x, y);
+        p.pressure = 1.0;
+        dot.points.append(p);
+        dot.updateBoundingBox();
+        dots.append(dot);
+    }
+    return dots;
 }
 
 QVector<QString> DocumentViewport::createHighlightStrokes()
 {
     QVector<QString> createdIds;
-    
+
     // Validate selection
     if (!m_textSelection.isValid() || m_textSelection.highlightRects.isEmpty()) {
         return createdIds;
     }
-    
+
     if (!m_document) {
         return createdIds;
     }
 
+    // Nothing to do if caller reached here with None (defensive; the release
+    // handler guards this, but we stay safe for future call sites).
+    if (m_autoHighlightStyle == HighlightStyle::None) {
+        m_textSelection.clear();
+        return createdIds;
+    }
+
     const bool ocrSelection = (m_textSelection.source == TextSelection::Source::Ocr);
-    const bool edgeless = m_document->isEdgeless();
-    const int pageIndex = m_textSelection.pageIndex;
+    const bool edgeless     = m_document->isEdgeless();
+    const bool dotted       = (m_autoHighlightStyle == HighlightStyle::DottedUnderline);
+    const int pageIndex     = m_textSelection.pageIndex;
+    const HighlightStyle style = m_autoHighlightStyle;
 
     // ---------- Edgeless path: strokes are split across tiles ----------
     if (edgeless) {
@@ -11524,32 +11572,41 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
 
         // Emit one UndoAction per highlight rect (line) so the undo
         // granularity matches the paged path. A single logical highlight
-        // stroke may be split across multiple tiles; those segments are
-        // grouped into the same UndoAction so they undo together.
+        // stroke (or for Dotted, its whole row of dots) may be split across
+        // multiple tiles; those segments are grouped into the same UndoAction
+        // so they undo together with a single Ctrl+Z.
         for (const QRectF& srcRect : m_textSelection.highlightRects) {
             if (srcRect.width() < 0.1 || srcRect.height() < 0.1) continue;
 
             // OCR selection rects are already in document-space for edgeless
             // (see loadOcrBlocksForPage edgeless branch).
-            VectorStroke stroke = createHighlightStroke(srcRect, m_highlighterColor);
-
-            // Split across tiles. addStrokeToEdgelessTiles takes document-space
-            // points and emits tile-local segments, marking tiles dirty.
-            auto addedSegments = addStrokeToEdgelessTiles(stroke, m_edgelessActiveLayerIndex);
-            if (addedSegments.isEmpty()) continue;
+            QVector<VectorStroke> strokesForLine;
+            if (dotted) {
+                strokesForLine = createDottedUnderlineStrokes(srcRect, m_highlighterColor);
+            } else {
+                strokesForLine.append(createHighlightStroke(srcRect, m_highlighterColor, style));
+            }
+            if (strokesForLine.isEmpty()) continue;
 
             UndoAction undoAction;
             undoAction.type = UndoAction::AddStroke;
             undoAction.layerIndex = m_edgelessActiveLayerIndex;
-            undoAction.segments.reserve(addedSegments.size());
-            for (const auto& pair : addedSegments) {
-                UndoAction::StrokeSegment seg;
-                seg.tileCoord = pair.first;
-                seg.stroke = pair.second;
-                undoAction.segments.append(seg);
-                createdIds.append(pair.second.id);
+
+            for (const auto& s : strokesForLine) {
+                auto addedSegments = addStrokeToEdgelessTiles(s, m_edgelessActiveLayerIndex);
+                if (addedSegments.isEmpty()) continue;
+                undoAction.segments.reserve(undoAction.segments.size() + addedSegments.size());
+                for (const auto& pair : addedSegments) {
+                    UndoAction::StrokeSegment seg;
+                    seg.tileCoord = pair.first;
+                    seg.stroke    = pair.second;
+                    undoAction.segments.append(seg);
+                    createdIds.append(pair.second.id);
+                }
             }
-            pushUndoAction(undoAction);
+
+            if (!undoAction.segments.isEmpty())
+                pushUndoAction(undoAction);
         }
 
         // Create LinkObject on the tile containing the first highlight rect.
@@ -11577,12 +11634,11 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
     if (!layer) {
         return createdIds;
     }
-    
-    // Convert each highlight rect to a stroke.
-    // PDF-source rects are in PDF coords (72 DPI) and need scaling to page
-    // coords (96 DPI). OCR-source rects are already in page coords.
+
+    // Convert each highlight rect to one (Cover/Underline) or many (Dotted)
+    // strokes. PDF-source rects are in PDF coords (72 DPI) and need scaling
+    // to page coords (96 DPI). OCR-source rects are already in page coords.
     for (const QRectF& srcRect : m_textSelection.highlightRects) {
-        // Skip degenerate rectangles (zero width or height)
         if (srcRect.width() < 0.1 || srcRect.height() < 0.1) {
             continue;
         }
@@ -11594,48 +11650,54 @@ QVector<QString> DocumentViewport::createHighlightStrokes()
             pageRect = QRectF(
                 srcRect.x() * PDF_TO_PAGE_SCALE,
                 srcRect.y() * PDF_TO_PAGE_SCALE,
-                srcRect.width() * PDF_TO_PAGE_SCALE,
+                srcRect.width()  * PDF_TO_PAGE_SCALE,
                 srcRect.height() * PDF_TO_PAGE_SCALE
             );
         }
-        
-        // Create the stroke
-        VectorStroke stroke = createHighlightStroke(pageRect, m_highlighterColor);
-        
-        // Add to layer
-        layer->addStroke(stroke);
-        
-        // Push individual undo action (each stroke can be undone separately)
-        pushPageStrokeUndo(pageIndex, UndoAction::AddStroke, stroke);
-        
-        createdIds.append(stroke.id);
+
+        if (dotted) {
+            QVector<VectorStroke> dots = createDottedUnderlineStrokes(pageRect, m_highlighterColor);
+            if (dots.isEmpty()) continue;
+
+            // Append dots to the layer and push a single grouped undo per line
+            // so Ctrl+Z removes the whole dotted row at once.
+            for (const auto& d : dots) {
+                layer->addStroke(d);
+                createdIds.append(d.id);
+            }
+            pushPageStrokesUndo(pageIndex, UndoAction::AddStroke, dots);
+        } else {
+            VectorStroke stroke = createHighlightStroke(pageRect, m_highlighterColor, style);
+            layer->addStroke(stroke);
+            pushPageStrokeUndo(pageIndex, UndoAction::AddStroke, stroke);
+            createdIds.append(stroke.id);
+        }
     }
-    
+
     // Invalidate stroke cache for this page
     layer->invalidateStrokeCache();
-    
-    // Mark page dirty for lazy save (BUG FIX: was missing)
+
+    // Mark page dirty for lazy save
     if (!createdIds.isEmpty()) {
         m_document->markPageDirty(pageIndex);
     }
-    
-    // Phase C.3.1: Create LinkObject alongside highlight strokes
+
+    // Create LinkObject alongside highlight strokes
     if (!createdIds.isEmpty() && !m_textSelection.highlightRects.isEmpty()) {
         createLinkObjectForHighlight(pageIndex);
     }
-    
+
     // Clear the text selection
     m_textSelection.clear();
-    
-    // Emit document modified (only if we created strokes)
+
     if (!createdIds.isEmpty()) {
         emit documentModified();
     }
-    
+
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Created" << createdIds.size() << "highlight strokes on page" << pageIndex;
 #endif
-    
+
     return createdIds;
 }
 

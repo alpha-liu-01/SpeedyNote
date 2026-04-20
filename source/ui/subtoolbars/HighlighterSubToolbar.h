@@ -6,26 +6,31 @@
 #include <QHash>
 
 class ColorPresetButton;
-class SubToolbarToggle;
 class ModeToggleButton;
+class QToolButton;
+class QMenu;
+class QAction;
 
 /**
  * @brief Subtoolbar for the Highlighter (text selection) tool.
- * 
+ *
  * Layout:
  * - 3 color preset buttons (SHARED with Marker)
  * - Separator
- * - 1 auto-highlight toggle button
- * 
+ * - Auto-highlight style dropdown (None / Cover / Underline / Dotted underline)
+ * - Separator
+ * - Selection source toggle (PDF text vs OCR text)
+ *
  * Key features:
  * - Colors are SHARED with MarkerSubToolbar via same QSettings keys
- * - Auto-highlight toggle controls automatic highlighting of selected text
+ * - Auto-highlight dropdown selects the style of stroke generated on release
+ *   (HighlightStyle::None disables auto-highlighting entirely)
  * - No thickness controls (highlighter has fixed thickness)
- * 
+ *
  * Features:
  * - Click unselected color preset → select and apply
  * - Click selected color preset → open editor dialog
- * - Toggle auto-highlight mode on/off
+ * - Pick an auto-highlight style from the dropdown
  * - Per-tab state for preset values and selection
  * - Global persistence via QSettings
  */
@@ -40,6 +45,24 @@ public:
      * subtoolbar does not need to include the viewport header.
      */
     enum class SelectionSource { Pdf = 0, Ocr = 1 };
+
+    /**
+     * @brief Style of auto-generated highlight stroke.
+     *
+     * Mirrors DocumentViewport::HighlightStyle (same ordering so a
+     * `static_cast` is safe when marshalling across the two APIs).
+     * Persisted as an int under the existing "autoHighlight" QSettings key
+     * (backward-compat: old bool `true` => Cover, `false` => None).
+     */
+    enum class HighlightStyle {
+        None = 0,
+        Cover = 1,
+        Underline = 2,
+        DottedUnderline = 3,
+    };
+
+    /// Number of entries in @ref HighlightStyle (indices 0..kNumStyles-1).
+    static constexpr int kNumStyles = 4;
 
     explicit HighlighterSubToolbar(QWidget* parent = nullptr);
     
@@ -66,13 +89,20 @@ public:
     void syncSharedColorsFromSettings();
     
     /**
-     * @brief Set the auto-highlight toggle state from outside.
-     * @param enabled The new state.
-     * 
-     * Used to sync the toggle when auto-highlight is changed via keyboard shortcut (Ctrl+H).
-     * This updates the UI without emitting the autoHighlightChanged signal to avoid loops.
+     * @brief Set the auto-highlight style from outside.
+     * @param style The new style.
+     *
+     * Used to sync the dropdown when auto-highlight is changed via keyboard
+     * shortcut (Ctrl+H) or when switching to a viewport with a different
+     * active style. Updates the UI without emitting autoHighlightStyleChanged
+     * to avoid feedback loops.
      */
-    void setAutoHighlightState(bool enabled);
+    void setAutoHighlightStyle(HighlightStyle style);
+
+    /**
+     * @brief Get the currently selected auto-highlight style.
+     */
+    HighlightStyle currentAutoHighlightStyle() const { return m_autoHighlightStyle; }
 
     /**
      * @brief Set the selection-source toggle state from outside.
@@ -110,10 +140,10 @@ signals:
     void highlighterColorChanged(const QColor& color);
     
     /**
-     * @brief Emitted when auto-highlight mode changes.
-     * @param enabled True if auto-highlight is enabled.
+     * @brief Emitted when the auto-highlight style changes via the dropdown.
+     * @param style The new style (HighlightStyle::None disables auto-highlight).
      */
-    void autoHighlightChanged(bool enabled);
+    void autoHighlightStyleChanged(HighlightStyle style);
 
     /**
      * @brief Emitted when the selection source (PDF vs OCR) changes via the toggle.
@@ -124,7 +154,7 @@ signals:
 private slots:
     void onColorPresetClicked(int index);
     void onColorEditRequested(int index);
-    void onAutoHighlightToggled(bool checked);
+    void onAutoHighlightStyleTriggered(QAction* action);
     void onSelectionSourceToggled(int mode);
 
 private:
@@ -136,19 +166,31 @@ private:
     void saveSelectionSourceToSettings();
     void selectColorPreset(int index);
 
+    /// Cheap refresh: updates the trigger-button icon and per-action check state
+    /// to match @ref m_autoHighlightStyle. Called on every style change.
+    void updateAutoHighlightButtonIcon();
+
+    /// One-shot restyling: applies per-action icons and the dark/light stylesheets
+    /// to both the trigger button and the dropdown menu. Only depends on
+    /// @c isDarkMode(), so it is called from construction and @ref setDarkMode(),
+    /// never from per-click style changes.
+    void applyAutoHighlightStyling();
+
     // Widgets
     ColorPresetButton* m_colorButtons[3] = {nullptr, nullptr, nullptr};
-    SubToolbarToggle* m_autoHighlightToggle = nullptr;
-    ModeToggleButton* m_selectionSourceToggle = nullptr;
-    
+    QToolButton*       m_autoHighlightButton = nullptr;
+    QMenu*             m_autoHighlightMenu   = nullptr;
+    QAction*           m_styleActions[kNumStyles] = {};
+    ModeToggleButton*  m_selectionSourceToggle = nullptr;
+
     // Current state
     int m_selectedColorIndex = 0;  // Default: first color
-    bool m_autoHighlightEnabled = false;
+    HighlightStyle m_autoHighlightStyle = HighlightStyle::None;
     SelectionSource m_selectionSource = SelectionSource::Pdf;
     
     // Per-tab state storage
-    // NOTE: autoHighlightEnabled is NOT stored here - DocumentViewport is the source of truth.
-    // The subtoolbar syncs its toggle state from the viewport via setAutoHighlightState().
+    // NOTE: autoHighlightStyle is NOT stored here - DocumentViewport is the source of truth.
+    // The subtoolbar syncs its dropdown state from the viewport via setAutoHighlightStyle().
     struct TabState {
         QColor colors[3];
         int selectedColorIndex;
