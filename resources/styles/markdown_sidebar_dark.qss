@@ -159,7 +159,7 @@ QScrollBar::sub-page:vertical {
 MarkdownNoteEntry {
     background-color: #252525;
     border: 1px solid #353535;
-    border-radius: 12px;
+    border-radius: 0;
     margin: 4px 0px;
 }
 

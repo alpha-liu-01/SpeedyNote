@@ -20,6 +20,15 @@ QSize NotesTreeDelegate::sizeHint(const QStyleOptionViewItem& option,
                                   const QModelIndex& index) const
 {
     Q_UNUSED(option);
+    // Honor any explicit size hint set by the host panel (used for the focused
+    // L3 row, where NotesTreePanel pins the row height to the MarkdownNoteEntry
+    // widget's actual height).  Falling back to the role-aware default keeps
+    // compact L1/L2/L3 rows stable.
+    const QVariant explicitHint = index.data(Qt::SizeHintRole);
+    if (explicitHint.isValid()) {
+        const QSize s = explicitHint.toSize();
+        if (s.isValid() && s.height() > 0) return s;
+    }
     const Kind kind = static_cast<Kind>(index.data(KindRole).toInt());
     const int h = (kind == Kind::Note) ? NOTE_HEIGHT : ROW_HEIGHT;
     return QSize(100, h);
@@ -48,7 +57,7 @@ void NotesTreeDelegate::paint(QPainter* painter,
         stripeFallback = QColor("#6a6e72");
         if (selected)      bg = QColor("#4d4d4d");
         else if (hovered)  bg = QColor("#3a3e42");
-        else               bg = QColor("#2a2e32");
+        else               bg = QColor("#2d2d2d");
     } else {
         text           = QColor("#333333");
         dim            = QColor("#666666");
@@ -59,6 +68,14 @@ void NotesTreeDelegate::paint(QPainter* painter,
     }
 
     painter->fillRect(option.rect, bg);
+
+    // When a persistent editor widget is installed on this row (focused L3),
+    // it fully owns the visual.  Skip custom paint so our stripe + text can't
+    // poke out from under the widget (indentation, margins, any transparency).
+    if (index.data(FocusedRole).toBool()) {
+        painter->restore();
+        return;
+    }
 
     const Kind kind  = static_cast<Kind>(index.data(KindRole).toInt());
     QRect content    = option.rect.adjusted(PADDING, 0, -PADDING, 0);

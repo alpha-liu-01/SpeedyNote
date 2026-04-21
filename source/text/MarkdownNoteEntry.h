@@ -102,6 +102,14 @@ public:
     void setPreviewMode(bool preview);
     bool isPreviewMode() const { return previewMode; }
 
+    // Layout-aware size reporting (Phase M.8.1).
+    // Default QWidget::sizeHint() returns layout()->totalSizeHint(), but only
+    // once the layout has finished activating.  We delegate explicitly to the
+    // layout so callers that query right after `setItemWidget()` see a value
+    // that matches what the layout will actually enforce.
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
 signals:
     void editRequested(const QString &noteId);
     void deleteRequested(const QString &noteId);
@@ -112,6 +120,11 @@ signals:
     // Phase M.3: New signals for LinkObject-based notes
     void linkObjectClicked(const QString &linkObjectId);
     void deleteWithLinkRequested(const QString &noteId, const QString &linkObjectId);
+
+    // Emitted when the entry's intrinsic height may have changed
+    // (preview height resync, preview/edit toggle).  Hosts that cache the
+    // widget's height (e.g. QTreeWidgetItem::setSizeHint) should listen.
+    void layoutMetricsChanged();
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;

@@ -7,6 +7,7 @@
 #include "../../text/MarkdownNoteEntry.h"
 
 #include <QCoreApplication>
+#include <QTimer>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -88,8 +89,8 @@ void NotesTreePanel::setDarkMode(bool dark)
 void NotesTreePanel::applyStyle()
 {
     if (!m_tree) return;
-    // Same chevron & background convention as OutlinePanel.
-    const QString bg  = m_darkMode ? QStringLiteral("#2a2e32") : QStringLiteral("#F5F5F5");
+    // Background matches the rest of the dark markdown sidebar (#2d2d2d).
+    const QString bg  = m_darkMode ? QStringLiteral("#2d2d2d") : QStringLiteral("#F5F5F5");
     const QString rev = m_darkMode ? QStringLiteral("_reversed") : QString();
     m_tree->setStyleSheet(QStringLiteral(R"(
         QTreeWidget {
@@ -323,9 +324,17 @@ void NotesTreePanel::focusNote(QTreeWidgetItem* noteItem)
     // Note: QTreeWidget::removeItemWidget() deletes the widget it owns.
     // We must NOT deleteLater() afterwards, hence the single-path teardown.
     if (m_focusedItem) {
+        // Drop any signal connections back to this panel before the widget
+        // gets destroyed.  Keeps `updateFocusedItemSizeHint()` from firing
+        // against a half-torn-down state.
+        if (m_focusedEntry) {
+            disconnect(m_focusedEntry.data(), nullptr, this, nullptr);
+        }
         m_tree->removeItemWidget(m_focusedItem, 0);
         m_focusedEntry = nullptr;
-        // Restore the compact sizeHint so the row shrinks back.
+        // Restore delegate painting + compact sizeHint so the row renders as
+        // a normal compact L3 again.
+        m_focusedItem->setData(0, NotesTreeDelegate::FocusedRole, false);
         m_focusedItem->setData(0, Qt::SizeHintRole, QVariant());
         m_focusedItem = nullptr;
         m_focusedLinkId.clear();
@@ -381,11 +390,54 @@ void NotesTreePanel::focusNote(QTreeWidgetItem* noteItem)
         emit navigateToLinkObject(lId);
     });
 
+    // Keep the row height in sync with the entry's true layout size.
+    //  * Entry-side `layoutMetricsChanged` fires whenever intrinsic height
+    //    changes (preview auto-resize, preview<->edit swap).
+    //  * An immediate call covers the initial state.
+    //  * A QTimer::singleShot(0, ...) fallback handles the typical case where
+    //    `previewBrowser->viewport()->width()` is still 0 at this point; once
+    //    the first paint lays the widget out, `adjustPreviewHeight` runs and
+    //    will emit the signal again, but the timer guarantees we don't stay
+    //    stuck on a too-small initial hint even for empty notes.
+    connect(m_focusedEntry, &MarkdownNoteEntry::layoutMetricsChanged,
+            this, &NotesTreePanel::updateFocusedItemSizeHint);
+
+    // Tell the delegate to stand down for this row — the widget owns the paint.
+    // Must be set before setItemWidget() so the very first repaint already
+    // skips the built-in stripe.
+    noteItem->setData(0, NotesTreeDelegate::FocusedRole, true);
     m_tree->setItemWidget(noteItem, 0, m_focusedEntry);
-    // Make sure the row sizeHint grows to fit the editor.
-    noteItem->setSizeHint(0, QSize(m_tree->viewport()->width(),
-                                   m_focusedEntry->sizeHint().height()));
+    updateFocusedItemSizeHint();
+    QTimer::singleShot(0, this, &NotesTreePanel::updateFocusedItemSizeHint);
     m_tree->scrollToItem(noteItem, QAbstractItemView::EnsureVisible);
+}
+
+void NotesTreePanel::updateFocusedItemSizeHint()
+{
+    if (!m_focusedItem || !m_focusedEntry || !m_tree) return;
+    const int w = qMax(1, m_tree->viewport()->width());
+    const int h = qMax(m_focusedEntry->minimumSizeHint().height(),
+                       m_focusedEntry->sizeHint().height());
+    const QSize wanted(w, h);
+    if (m_focusedItem->sizeHint(0) != wanted) {
+        // The delegate's overridden sizeHint() honors SizeHintRole, so this
+        // drives the row height directly for compact rows.  For persistent
+        // widgets QTreeView also takes max(delegate, widget.sizeHint) — both
+        // return the same value here, so the row matches the widget exactly.
+        m_focusedItem->setSizeHint(0, wanted);
+    }
+
+    // Force the persistent widget's geometry to the current visual rect.
+    // dataChanged(SizeHintRole) invalidates the row-height cache, but Qt
+    // only re-runs updateEditorGeometries() on the next layout pass, so the
+    // widget can be transiently sized to the *old* row.  Pinning the widget
+    // here guarantees the editor covers the full new row immediately —
+    // critical to stop the delegate's #4d4d4d selection fill from showing
+    // under a not-yet-stretched widget.
+    const QRect r = m_tree->visualItemRect(m_focusedItem);
+    if (r.isValid() && r.height() > 0) {
+        m_focusedEntry->setGeometry(r);
+    }
 }
 
 // ============================================================================

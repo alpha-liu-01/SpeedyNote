@@ -11,6 +11,11 @@
 MarkdownNoteEntry::MarkdownNoteEntry(const MarkdownNoteData &data, QWidget *parent)
     : QFrame(parent), noteData(data)
 {
+    // Custom QFrame subclass: opt in to styled-background painting so the
+    // stylesheet's background-color actually fills the widget rect.  Without
+    // this, Qt may leave the widget transparent and the view delegate's
+    // selection fill (#4d4d4d) bleeds through where the widget is placed.
+    setAttribute(Qt::WA_StyledBackground, true);
     isDarkMode = palette().color(QPalette::Window).lightness() < 128;
     setupUI();
     applyStyle();
@@ -21,7 +26,9 @@ MarkdownNoteEntry::MarkdownNoteEntry(const MarkdownNoteData &data, QWidget *pare
 MarkdownNoteEntry::MarkdownNoteEntry(const NoteDisplayData &data, QWidget *parent)
     : QFrame(parent), m_linkObjectId(data.linkObjectId)
 {
-    // Convert NoteDisplayData to internal MarkdownNoteData format
+    // See legacy ctor — custom QFrame subclasses need this to get a styled
+    // background fill from setStyleSheet().
+    setAttribute(Qt::WA_StyledBackground, true);
     noteData.id = data.noteId;
     noteData.title = data.title;
     noteData.content = data.content;
@@ -148,17 +155,18 @@ void MarkdownNoteEntry::applyStyle() {
     // Styles are now primarily from QSS loaded by parent sidebar
     // Only set dynamic properties here
     // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
-    QString bgColor = isDarkMode ? "#2a2e32" : "#ffffff";
+    QString bgColor = isDarkMode ? "#2d2d2d" : "#ffffff";
     QString borderColor = isDarkMode ? "#4d4d4d" : "#D0D0D0";
     QString textColor = isDarkMode ? "#e6e6e6" : "#1d2939";
     QString deleteHoverBg = isDarkMode ? "#4d2828" : "#ffccc7";
     
-    // Card styling with rounded corners
+    // Card styling — square corners so the card flushes with the sharp
+    // #4d4d4d outer frame painted by the notes-tree delegate.
     setStyleSheet(QString(R"(
         MarkdownNoteEntry {
             background-color: %1;
             border: 1px solid %2;
-            border-radius: 12px;
+            border-radius: 0;
         }
         MarkdownNoteEntry:hover {
             background-color: %3;
@@ -282,7 +290,31 @@ void MarkdownNoteEntry::adjustPreviewHeight() {
         m_adjustingHeight = true;
         previewBrowser->setFixedHeight(target);
         m_adjustingHeight = false;
+        // The preview height just changed => our own sizeHint changed too.
+        // Notify layout parents + any external listeners (notes tree).
+        updateGeometry();
+        emit layoutMetricsChanged();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Size reporting (Phase M.8.1)
+// ---------------------------------------------------------------------------
+
+QSize MarkdownNoteEntry::sizeHint() const {
+    if (mainLayout) {
+        QSize s = mainLayout->sizeHint();
+        if (s.isValid()) return s;
+    }
+    return QFrame::sizeHint();
+}
+
+QSize MarkdownNoteEntry::minimumSizeHint() const {
+    if (mainLayout) {
+        QSize s = mainLayout->minimumSize();
+        if (s.isValid()) return s;
+    }
+    return QFrame::minimumSizeHint();
 }
 
 void MarkdownNoteEntry::setNoteData(const MarkdownNoteData &data) {
@@ -364,6 +396,11 @@ void MarkdownNoteEntry::setPreviewMode(bool preview) {
         editor->setFocus();
         emit editRequested(noteData.id);
     }
+
+    // Swapping which child is visible changes intrinsic height; tell parent
+    // layouts + external listeners (notes tree) to re-query.
+    updateGeometry();
+    emit layoutMetricsChanged();
 }
 
 void MarkdownNoteEntry::onTitleEdited() {

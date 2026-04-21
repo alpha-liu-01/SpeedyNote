@@ -124,6 +124,10 @@ private:
     /// to simply destroy the current one).  Enforces "at most one alive".
     void focusNote(QTreeWidgetItem* noteItem);
 
+    /// Resync the focused L3 row's sizeHint from the entry's current layout.
+    /// Safe to call repeatedly; a no-op if no focused item.
+    void updateFocusedItemSizeHint();
+
     /// Find the L2 item for a given linkObjectId, or nullptr.
     QTreeWidgetItem* linkItem(const QString& linkObjectId) const;
 
