@@ -794,6 +794,37 @@ void DocumentViewport::setPenThickness(qreal thickness)
     m_penThickness = thickness;
 }
 
+void DocumentViewport::setPenMinStrokeWidth(qreal minWidth)
+{
+    // Clamp into a sane range; the preset editor further bounds it to
+    // `[0, thickness]` but guard against malformed external callers.
+    minWidth = qBound(0.0, minWidth, 100.0);
+
+    if (qFuzzyCompare(m_penMinStrokeWidth, minWidth)) {
+        return;
+    }
+
+    m_penMinStrokeWidth = minWidth;
+    // No repaint needed: the floor only affects strokes captured after this
+    // point.  Existing strokes already have their pressure values baked in.
+}
+
+qreal DocumentViewport::applyPenPressureFloor(qreal rawPressure) const
+{
+    // Marker uses a fixed pressure of 1.0; no floor needed and no division
+    // concerns.  Callers still wrap marker handling with useFixedPressure,
+    // but handle it here defensively so the helper is symmetric.
+    if (m_currentTool == ToolType::Marker) {
+        return qBound(0.1, rawPressure, 1.0);
+    }
+
+    const qreal base = m_currentStroke.baseThickness;
+    const qreal minP = (base > 0.0)
+        ? qBound(0.1, m_penMinStrokeWidth / base, 1.0)
+        : 0.1;
+    return qBound(minP, rawPressure, 1.0);
+}
+
 void DocumentViewport::setEraserSize(qreal size)
 {
     // Clamp to reasonable range
@@ -4673,10 +4704,11 @@ void DocumentViewport::startStroke(const PointerEvent& pe)
         m_edgelessDrawingTile = m_document->tileCoordForPoint(docPt);
         
         // Add first point (stored in DOCUMENT coordinates for edgeless)
-        // Marker uses fixed pressure (1.0) for consistent thickness
+        // Marker uses fixed pressure (1.0) for consistent thickness.
+        // Pen applies the preset's min-width floor at capture time.
         StrokePoint pt;
         pt.pos = docPt;
-        pt.pressure = useFixedPressure ? 1.0 : qBound(0.1, pe.pressure, 1.0);
+        pt.pressure = useFixedPressure ? 1.0 : applyPenPressureFloor(pe.pressure);
         pt.timestamp = pe.timestamp;
         m_currentStroke.points.append(pt);
         return;
@@ -4707,14 +4739,15 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
 {
     if (!m_isDrawing || !m_document) return;
     
-    // Task 2.8: Marker uses fixed pressure (1.0) for consistent thickness
+    // Task 2.8: Marker uses fixed pressure (1.0) for consistent thickness.
+    // Pen applies the active preset's min-width floor (baked into pressure).
     bool useFixedPressure = (m_currentTool == ToolType::Marker);
-    qreal effectivePressure = useFixedPressure ? 1.0 : qBound(0.1, pe.pressure, 1.0);
-    
+    qreal effectivePressure = useFixedPressure ? 1.0 : applyPenPressureFloor(pe.pressure);
+
     // For edgeless mode, use document coordinates directly
     if (m_document->isEdgeless()) {
         QPointF docPt = viewportToDocument(pe.viewportPos);
-        
+
         // Point decimation (same logic as addPointToStroke but for document coords)
         // Zoom-aware: threshold is constant in screen pixels, not document space.
         if (!m_currentStroke.points.isEmpty()) {
@@ -4722,17 +4755,19 @@ void DocumentViewport::continueStroke(const PointerEvent& pe)
             qreal dx = docPt.x() - lastPos.x();
             qreal dy = docPt.y() - lastPos.y();
             qreal distSq = dx * dx + dy * dy;
-            
+
             qreal docThreshold = MIN_SCREEN_DISTANCE / m_zoomLevel;
             if (distSq < docThreshold * docThreshold) {
-                // Point too close - but update pressure if higher (only for pen, not marker)
-                if (!useFixedPressure && pe.pressure > m_currentStroke.points.last().pressure) {
-                    m_currentStroke.points.last().pressure = pe.pressure;
+                // Point too close - but update pressure peak if higher.
+                // Compare the floored effective pressure, not the raw reading,
+                // so the stored pressure can never slip below the min-width floor.
+                if (!useFixedPressure && effectivePressure > m_currentStroke.points.last().pressure) {
+                    m_currentStroke.points.last().pressure = effectivePressure;
                 }
                 return;
             }
         }
-        
+
         StrokePoint pt;
         pt.pos = docPt;
         pt.pressure = effectivePressure;
@@ -11759,25 +11794,33 @@ void DocumentViewport::addPointToStroke(const QPointF& pagePos, qreal pressure, 
     // The threshold is zoom-aware: MIN_SCREEN_DISTANCE screen pixels mapped to
     // document space, so decimation granularity stays constant on screen.
     
+    // Apply the pen preset's min-width floor here as well so callers that
+    // forward raw pressure (e.g. paged-mode startStroke) inherit the floor
+    // without every call site having to remember.  For markers this is a
+    // no-op since useFixedPressure already clamps pressure to 1.0 upstream.
+    const qreal flooredPressure = applyPenPressureFloor(pressure);
+
     if (!m_currentStroke.points.isEmpty()) {
         const QPointF& lastPos = m_currentStroke.points.last().pos;
         qreal dx = pagePos.x() - lastPos.x();
         qreal dy = pagePos.y() - lastPos.y();
         qreal distSq = dx * dx + dy * dy;
-        
+
         qreal docThreshold = MIN_SCREEN_DISTANCE / m_zoomLevel;
         if (distSq < docThreshold * docThreshold) {
-            // Point too close - but update pressure if higher (preserve pressure peaks)
-            if (pressure > m_currentStroke.points.last().pressure) {
-                m_currentStroke.points.last().pressure = pressure;
+            // Point too close - but update pressure peak if higher.
+            // Compare the *floored* pressure so the stored peak never slips
+            // below the preset's min-width floor.
+            if (flooredPressure > m_currentStroke.points.last().pressure) {
+                m_currentStroke.points.last().pressure = flooredPressure;
             }
             return;  // Skip this point
         }
     }
-    
+
     StrokePoint pt;
     pt.pos = pagePos;
-    pt.pressure = qBound(0.1, pressure, 1.0);
+    pt.pressure = flooredPressure;
     pt.timestamp = timestamp;
     m_currentStroke.points.append(pt);
     

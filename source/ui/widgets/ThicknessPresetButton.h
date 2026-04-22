@@ -17,15 +17,36 @@ class ThicknessEditDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit ThicknessEditDialog(qreal currentThickness, 
+    /**
+     * @brief Construct the dialog.
+     * @param currentThickness Current thickness value (pt).
+     * @param minThickness Minimum allowed thickness (pt).
+     * @param maxThickness Maximum allowed thickness (pt).
+     * @param currentMinWidth Per-preset minimum stroke width (pt), or a
+     *        negative sentinel (default) to hide the min-width row entirely.
+     *        Marker/Eraser pass the default; only Pen opts in.
+     * @param parent Parent widget.
+     *
+     * When the min-width row is shown, its spinbox is clamped to
+     * `[0.0, currentThickness]` and auto-reclamped whenever the thickness
+     * changes so `minWidth <= thickness` is always preserved.
+     */
+    explicit ThicknessEditDialog(qreal currentThickness,
                                   qreal minThickness = 0.5,
                                   qreal maxThickness = 50.0,
+                                  qreal currentMinWidth = -1.0,
                                   QWidget* parent = nullptr);
-    
+
     /**
      * @brief Get the selected thickness value.
      */
     qreal thickness() const;
+
+    /**
+     * @brief Get the selected per-preset minimum stroke width.
+     * @return Minimum width in pt, or -1.0 if the row is hidden.
+     */
+    qreal minWidth() const;
 
 protected:
     void done(int result) override;  // Android keyboard fix (BUG-A001)
@@ -35,8 +56,15 @@ private slots:
     void onSpinBoxChanged(double value);
 
 private:
+    // Re-clamp the min-width spinbox against a new thickness value.
+    // No-op when the min-width row is hidden (m_minWidthSpinBox == nullptr).
+    // Called from both onSliderChanged and onSpinBoxChanged so dragging either
+    // control keeps `minWidth <= thickness` invariant in the UI.
+    void clampMinWidthToThickness(qreal newThickness);
+
     QSlider* m_slider = nullptr;
     QDoubleSpinBox* m_spinBox = nullptr;
+    QDoubleSpinBox* m_minWidthSpinBox = nullptr;  // nullptr when min-width row hidden
     qreal m_minThickness;
     qreal m_maxThickness;
 };

@@ -12,6 +12,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QDialogButtonBox>
+#include <QSignalBlocker>
 
 // Android/iOS keyboard fix (BUG-A001)
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
@@ -27,6 +28,7 @@
 ThicknessEditDialog::ThicknessEditDialog(qreal currentThickness,
                                          qreal minThickness,
                                          qreal maxThickness,
+                                         qreal currentMinWidth,
                                          QWidget* parent)
     : QDialog(parent)
     , m_minThickness(minThickness)
@@ -35,24 +37,21 @@ ThicknessEditDialog::ThicknessEditDialog(qreal currentThickness,
     setWindowTitle(tr("Edit Thickness"));
     setModal(true);
     setFixedWidth(300);
-    
+
     auto* layout = new QVBoxLayout(this);
-    
-    // Label
+
+    // Thickness label + slider + spinbox row
     auto* label = new QLabel(tr("Thickness (pt):"), this);
     layout->addWidget(label);
-    
-    // Slider + SpinBox row
+
     auto* controlLayout = new QHBoxLayout();
-    
-    // Slider (integer values, will be scaled)
+
     m_slider = new QSlider(Qt::Horizontal, this);
-    m_slider->setRange(static_cast<int>(minThickness * 10), 
+    m_slider->setRange(static_cast<int>(minThickness * 10),
                        static_cast<int>(maxThickness * 10));
     m_slider->setValue(static_cast<int>(currentThickness * 10));
     controlLayout->addWidget(m_slider, 1);
-    
-    // SpinBox
+
     m_spinBox = new QDoubleSpinBox(this);
     m_spinBox->setRange(minThickness, maxThickness);
     m_spinBox->setSingleStep(0.5);
@@ -60,15 +59,36 @@ ThicknessEditDialog::ThicknessEditDialog(qreal currentThickness,
     m_spinBox->setValue(currentThickness);
     m_spinBox->setSuffix(" pt");
     controlLayout->addWidget(m_spinBox);
-    
+
     layout->addLayout(controlLayout);
-    
-    // Connect slider and spinbox
+
     connect(m_slider, &QSlider::valueChanged, this, &ThicknessEditDialog::onSliderChanged);
-    connect(m_spinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), 
+    connect(m_spinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, &ThicknessEditDialog::onSpinBoxChanged);
-    
-    // Buttons
+
+    // Opt-in minimum-width row (pens only).  Negative sentinel hides it
+    // entirely so marker/eraser callers get the single-row dialog.
+    if (currentMinWidth >= 0.0) {
+        auto* minLabel = new QLabel(
+            tr("Minimum width (pt):  (set equal to thickness for uniform strokes)"), this);
+        minLabel->setWordWrap(true);
+        layout->addWidget(minLabel);
+
+        m_minWidthSpinBox = new QDoubleSpinBox(this);
+        m_minWidthSpinBox->setRange(0.0, currentThickness);
+        m_minWidthSpinBox->setSingleStep(0.1);
+        m_minWidthSpinBox->setDecimals(1);
+        m_minWidthSpinBox->setSuffix(" pt");
+        m_minWidthSpinBox->setValue(qBound(0.0, currentMinWidth, currentThickness));
+        layout->addWidget(m_minWidthSpinBox);
+
+        // Re-clamping is driven by onSliderChanged / onSpinBoxChanged calling
+        // clampMinWidthToThickness() directly.  We can't connect the clamp to
+        // m_spinBox::valueChanged here because onSliderChanged blocks the
+        // spinbox signals while syncing the two controls — that would swallow
+        // any lambda we hook up to valueChanged.
+    }
+
     auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttonBox, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -80,23 +100,46 @@ qreal ThicknessEditDialog::thickness() const
     return m_spinBox->value();
 }
 
+qreal ThicknessEditDialog::minWidth() const
+{
+    return m_minWidthSpinBox ? m_minWidthSpinBox->value() : -1.0;
+}
+
 void ThicknessEditDialog::onSliderChanged(int value)
 {
     // Slider uses integer values * 10 for 0.1 precision
-    qreal thickness = value / 10.0;
-    
-    // Block signals to prevent feedback loop
-    m_spinBox->blockSignals(true);
-    m_spinBox->setValue(thickness);
-    m_spinBox->blockSignals(false);
+    const qreal thickness = value / 10.0;
+
+    // Block signals to prevent feedback loop with onSpinBoxChanged
+    {
+        QSignalBlocker blocker(m_spinBox);
+        m_spinBox->setValue(thickness);
+    }
+
+    // Keep the min-width invariant (min <= thickness) in sync.  Done
+    // explicitly here because the spinbox's valueChanged is suppressed above.
+    clampMinWidthToThickness(thickness);
 }
 
 void ThicknessEditDialog::onSpinBoxChanged(double value)
 {
-    // Block signals to prevent feedback loop
-    m_slider->blockSignals(true);
-    m_slider->setValue(static_cast<int>(value * 10));
-    m_slider->blockSignals(false);
+    // Block signals to prevent feedback loop with onSliderChanged
+    {
+        QSignalBlocker blocker(m_slider);
+        m_slider->setValue(static_cast<int>(value * 10));
+    }
+
+    clampMinWidthToThickness(value);
+}
+
+void ThicknessEditDialog::clampMinWidthToThickness(qreal newThickness)
+{
+    if (!m_minWidthSpinBox) return;
+
+    m_minWidthSpinBox->setMaximum(newThickness);
+    if (m_minWidthSpinBox->value() > newThickness) {
+        m_minWidthSpinBox->setValue(newThickness);
+    }
 }
 
 void ThicknessEditDialog::done(int result)

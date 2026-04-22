@@ -487,6 +487,23 @@ public:
      * @brief Get the current pen thickness.
      */
     qreal penThickness() const { return m_penThickness; }
+
+    /**
+     * @brief Set the minimum stroke width for the active pen preset.
+     *
+     * The value is applied at stroke capture time: per-point pressures are
+     * floored so the rendered width never drops below this value. Pass 0
+     * for full pressure sensitivity; pass the preset thickness for uniform
+     * (non-pressure) strokes.  Marker / eraser are unaffected.
+     *
+     * @param minWidth Minimum width in pt.  Clamped into `[0.0, 100.0]`.
+     */
+    void setPenMinStrokeWidth(qreal minWidth);
+
+    /**
+     * @brief Get the current pen minimum stroke width.
+     */
+    qreal penMinStrokeWidth() const { return m_penMinStrokeWidth; }
     
     /**
      * @brief Set the eraser size.
@@ -1933,6 +1950,10 @@ private:
     ToolType m_currentTool = ToolType::Pen;
     QColor m_penColor = Qt::black;    ///< CUSTOMIZABLE: Default pen color (user preference)
     qreal m_penThickness = 5.0;       ///< CUSTOMIZABLE: Default pen thickness (range: 1-50 document units)
+    qreal m_penMinStrokeWidth = 0.3;  ///< Per-preset minimum stroke width (pt) for the active Pen preset.
+                                      ///< Floored into per-point pressure at stroke capture.  0 = full
+                                      ///< pressure sensitivity; equal to m_penThickness = uniform stroke.
+                                      ///< MainWindow keeps this in sync with PenSubToolbar.
     qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
     EraserMode m_eraserMode = EraserMode::Normal;  ///< Current eraser mode
     bool m_isDrawingEraserLasso = false;            ///< Currently drawing an eraser lasso region
@@ -3168,6 +3189,21 @@ private:
      * @param pressure Pressure value (0.0 to 1.0).
      */
     void addPointToStroke(const QPointF& pagePos, qreal pressure, qint64 timestamp = 0);
+
+    /**
+     * @brief Apply the active pen preset's minimum-width floor to a raw
+     *        pressure sample.
+     *
+     * The floor is computed from `m_penMinStrokeWidth / baseThickness`
+     * (clamped to `[0.1, 1.0]`) so it maps correctly into the normalized
+     * `[0, 1]` pressure range used by `VectorStroke`.  Marker strokes return
+     * their raw pressure unchanged — they already use a fixed pressure of 1.0.
+     *
+     * @param rawPressure Original pressure from the pointer device.
+     * @return Pressure value clamped to `[minP, 1.0]` where `minP` reflects
+     *         the current preset's minimum width, or `rawPressure` for markers.
+     */
+    qreal applyPenPressureFloor(qreal rawPressure) const;
     
     // ===== Incremental Stroke Rendering (Task 2.3) =====
     

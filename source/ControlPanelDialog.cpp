@@ -3,8 +3,6 @@
 #include "core/Page.h"
 #include "core/ShortcutManager.h"
 #include "core/DocumentViewport.h"
-#include "layers/VectorLayer.h"
-
 #ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
 #include "ButtonMappingTypes.h"
 #include "SDLControllerManager.h"
@@ -269,10 +267,10 @@ void ControlPanelDialog::applyChanges()
     mainWindowRef->setSkipImageMasking(skipMasking);
     
     // Apply tools settings
-    qreal minWidth = minStrokeWidthSpin->value();
-    settings.setValue("tools/minStrokeWidth", minWidth);
-    VectorLayer::setMinStrokeWidth(minWidth);
-
+    // Note: "minimum stroke width" has moved to per-preset state on each Pen
+    // thickness preset (see PenSubToolbar / ThicknessEditDialog).  The legacy
+    // tools/minStrokeWidth key remains on disk only as a one-shot migration
+    // seed for PenSubToolbar::loadFromSettings.
     qreal wheelSpeed = wheelScrollSpeedSpin->value();
     settings.setValue("tools/wheelScrollSpeed", wheelSpeed);
     DocumentViewport::setWheelScrollSpeed(wheelSpeed);
@@ -995,31 +993,10 @@ void ControlPanelDialog::createToolsTab()
     toolsTab = new QWidget(this);
     QVBoxLayout *layout = new QVBoxLayout(toolsTab);
 
-    // --- Stroke settings group ---
-    QGroupBox *strokeGroup = new QGroupBox(tr("Stroke"), toolsTab);
-    QFormLayout *strokeLayout = new QFormLayout(strokeGroup);
-
-    minStrokeWidthSpin = new QDoubleSpinBox(strokeGroup);
-    minStrokeWidthSpin->setRange(0.0, 2.0);
-    minStrokeWidthSpin->setSingleStep(0.1);
-    minStrokeWidthSpin->setDecimals(1);
-    minStrokeWidthSpin->setSuffix(tr(" px"));
-
     QSettings settings("SpeedyNote", "App");
-    minStrokeWidthSpin->setValue(settings.value("tools/minStrokeWidth", 0.3).toDouble());
 
-    strokeLayout->addRow(tr("Minimum stroke width:"), minStrokeWidthSpin);
-
-    QLabel *hint = new QLabel(
-        tr("The smallest width a stroke can render at, regardless of pressure. "
-           "Lower values preserve more pressure detail at thin pen sizes. "
-           "Set to 0 for no minimum."),
-        strokeGroup);
-    hint->setWordWrap(true);
-    hint->setStyleSheet("color: gray; font-size: 11px;");
-    strokeLayout->addRow(hint);
-
-    layout->addWidget(strokeGroup);
+    // The old global "Minimum stroke width" row has moved to the Pen
+    // thickness-preset editor (each preset owns its own min width now).
 
     // --- Panning settings group ---
     QGroupBox *panGroup = new QGroupBox(tr("Panning"), toolsTab);

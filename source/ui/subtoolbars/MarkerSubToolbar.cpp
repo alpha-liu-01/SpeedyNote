@@ -309,7 +309,8 @@ void MarkerSubToolbar::onThicknessEditRequested(int index)
     if (index < 0 || index >= NUM_PRESETS) return;
     
     // Open thickness edit dialog
-    ThicknessEditDialog dialog(m_thicknessButtons[index]->thickness(), 0.5, 50.0, this);
+    ThicknessEditDialog dialog(m_thicknessButtons[index]->thickness(), 0.5, 50.0,
+                               /*currentMinWidth=*/-1.0, this);
     dialog.setWindowTitle(tr("Edit Marker Thickness"));
     
     if (dialog.exec() == QDialog::Accepted) {

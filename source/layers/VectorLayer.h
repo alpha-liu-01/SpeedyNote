@@ -164,11 +164,6 @@ public:
         return bounds;
     }
     
-    // ===== Minimum Stroke Width =====
-
-    static void setMinStrokeWidth(qreal w) { s_minStrokeWidth = qBound(0.0, w, 2.0); }
-    static qreal minStrokeWidth() { return s_minStrokeWidth; }
-
     // ===== Rendering =====
     
     /**
@@ -215,8 +210,11 @@ public:
             if (stroke.points.size() == 1) {
                 result.isSinglePoint = true;
                 result.startCapCenter = stroke.points[0].pos;
+                // Minimum stroke width is now enforced at capture time in
+                // DocumentViewport (per pen preset), so the stored per-point
+                // pressure already embeds the floor.  No qMax() needed here.
                 qreal width = stroke.baseThickness * stroke.points[0].pressure;
-                result.startCapRadius = qMax(width, s_minStrokeWidth) / 2.0;
+                result.startCapRadius = width / 2.0;
             }
             return result;
         }
@@ -232,8 +230,10 @@ public:
         // Pre-calculate half-widths for each point
         QVector<qreal> halfWidths(n);
         for (int i = 0; i < n; ++i) {
+            // See comment above: minimum-width floor is applied in
+            // DocumentViewport at capture time, not here.
             qreal width = stroke.baseThickness * pts[i].pressure;
-            halfWidths[i] = qMax(width, s_minStrokeWidth) / 2.0;
+            halfWidths[i] = width / 2.0;
         }
         
         // Build the stroke outline polygon
@@ -644,7 +644,6 @@ public:
     
 private:
     QVector<VectorStroke> m_strokes;  ///< All strokes in this layer
-    static inline qreal s_minStrokeWidth = 0.3;
     
     // ===== Curve Smoothing =====
     

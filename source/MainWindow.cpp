@@ -1420,9 +1420,13 @@ void MainWindow::setupUi() {
     m_sidebarWidthSaveTimer->setInterval(300);
     connect(m_sidebarWidthSaveTimer, &QTimer::timeout, this, [this]() {
         QSettings s("SpeedyNote", "App");
-        s.setValue("ui/leftSidebarWidth", m_leftSidebar->width());
-        // Guard against persisting a stale 0 when the panel is hidden
-        // (QSplitter reports width 0 for hidden children).
+        // Guard against persisting a stale 0 when either panel is hidden
+        // (QSplitter reports width 0 for hidden children).  With two splitter
+        // handles, dragging the right handle also fires splitterMoved, which
+        // would otherwise clobber the left width with 0 when it's hidden.
+        if (m_leftSidebar && m_leftSidebar->isVisible()) {
+            s.setValue("ui/leftSidebarWidth", m_leftSidebar->width());
+        }
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
             s.setValue("ui/rightSidebarWidth", markdownNotesSidebar->width());
         }
@@ -2880,6 +2884,7 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
     if (m_toolbar->penSubToolbar()) {
         viewport->setPenColor(m_toolbar->penSubToolbar()->currentColor());
         viewport->setPenThickness(m_toolbar->penSubToolbar()->currentThickness());
+        viewport->setPenMinStrokeWidth(m_toolbar->penSubToolbar()->currentMinStrokeWidth());
     }
     
     // Apply marker settings
@@ -4924,6 +4929,9 @@ void MainWindow::connectSubToolbarSignals()
     });
     connect(penST, &PenSubToolbar::penThicknessChanged, this, [this](qreal thickness) {
         if (DocumentViewport* vp = currentViewport()) vp->setPenThickness(thickness);
+    });
+    connect(penST, &PenSubToolbar::penMinStrokeWidthChanged, this, [this](qreal minWidth) {
+        if (DocumentViewport* vp = currentViewport()) vp->setPenMinStrokeWidth(minWidth);
     });
 
     // Marker

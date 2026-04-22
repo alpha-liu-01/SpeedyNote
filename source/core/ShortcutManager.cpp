@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QDebug>
 #include <QRegularExpression>
+#include <QSet>
 
 // ============================================================================
 // Shortcut Normalization Helper
@@ -462,13 +463,26 @@ void ShortcutManager::loadUserShortcuts()
     
     // Load overrides
     QJsonObject overrides = root.value("overrides").toObject();
-    
+
+    // Action IDs that have been removed in newer versions.  We silently drop
+    // overrides pointing at them so they don't appear as "Unknown" category
+    // ghosts in the Control Panel shortcut tab.  Next saveUserShortcuts()
+    // prunes them from shortcuts.json on disk.
+    static const QSet<QString> kRemovedActionIds = {
+        QStringLiteral("pdf.auto_highlight"),  // replaced by highlighter.style_* actions
+    };
+
     int loadedCount = 0;
     for (auto it = overrides.begin(); it != overrides.end(); ++it) {
         QString actionId = it.key();
+
+        if (kRemovedActionIds.contains(actionId)) {
+            continue;
+        }
+
         // Normalize the shortcut to handle old format (e.g., "Ctrl+Shift+@" → "Ctrl+Shift+2")
         QString shortcut = normalizeShortcut(it.value().toString());
-        
+
         // Only apply if action exists (it may have been registered by now,
         // or will be registered later - we store the override anyway)
         if (m_shortcuts.contains(actionId)) {

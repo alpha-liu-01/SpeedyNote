@@ -207,7 +207,8 @@ void EraserSubToolbar::onSizeEditRequested(int index)
     if (index < 0 || index >= NUM_PRESETS) return;
     
     // Open size edit dialog with eraser range (5-200)
-    ThicknessEditDialog dialog(m_sizeButtons[index]->thickness(), MIN_SIZE, MAX_SIZE, this);
+    ThicknessEditDialog dialog(m_sizeButtons[index]->thickness(), MIN_SIZE, MAX_SIZE,
+                               /*currentMinWidth=*/-1.0, this);
     dialog.setWindowTitle(tr("Edit Eraser Size"));
     
     if (dialog.exec() == QDialog::Accepted) {
