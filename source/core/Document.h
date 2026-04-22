@@ -420,10 +420,12 @@ public:
     /**
      * @brief Enumerate every LinkObject with at least one markdown slot.
      *
-     * Walks the document cheaply (no file I/O) and returns a compact
-     * `LinkOutlineEntry` per link.  LinkObjects without any markdown slot
-     * are skipped.  In edgeless mode, only currently-loaded tiles are
-     * considered (same policy as `loadNotesForCurrentPage`).
+     * Returns a flat snapshot of the persistent outline cache (see
+     * `buildLinkOutlineCache`).  The result is independent of which
+     * pages / tiles are currently resident in RAM: evicted tiles still
+     * contribute their LinkObjects.  No file I/O is performed on the hot
+     * path — the cache is populated on first use and maintained
+     * incrementally by `refreshLinkOutlineFor` / `dropLinkOutlineFor`.
      *
      * Used by the right-sidebar `NotesTreePanel` (Phase M.8) to build the
      * 3-level tree without having to read any .md file until the user
@@ -432,6 +434,59 @@ public:
      * @return Flat list of entries; sorting/grouping is done by the caller.
      */
     QVector<LinkOutlineEntry> enumerateLinkOutline() const;
+
+    // ========================================================================
+    // Link Outline Cache (Phase M.9)
+    // ========================================================================
+    // The outline is a document-level summary of every LinkObject that
+    // references at least one markdown note.  It is expensive to recompute
+    // from disk every refresh and would otherwise be gated by which tiles
+    // are currently resident (edgeless) or force a full page-load of every
+    // page (paged).  We cache it per-container and keep it in sync with
+    // authoritative in-memory / on-disk state through the helpers below.
+    // ========================================================================
+
+    /**
+     * @brief Build (or rebuild) the entire outline cache in one pass.
+     *
+     * Walks loaded pages / tiles for authoritative data; for unloaded
+     * tiles in `m_tileIndex`, peeks the tile JSON on disk via
+     * `peekTileLinkOutlineFromDisk` without constructing a full `Page`.
+     * For paged mode, uses loaded pages directly and falls back to a
+     * page-file peek for unloaded ones.
+     *
+     * Idempotent.  Cheap to call multiple times; clears the cache first.
+     */
+    void buildLinkOutlineCache() const;
+
+    /**
+     * @brief Re-extract the outline contribution for a single tile from
+     *        whatever is most authoritative (in-memory if loaded, else
+     *        disk peek).
+     *
+     * Call after any LinkObject add / remove / edit on the tile, after
+     * `loadTileFromDisk` or `saveTile` has run, and on any external signal
+     * that says "this tile's links may have changed."
+     */
+    void refreshLinkOutlineFor(TileCoord coord) const;
+
+    /**
+     * @brief Re-extract the outline contribution for a single page.
+     *        Paged-mode counterpart of the TileCoord overload.
+     */
+    void refreshLinkOutlineFor(int pageIndex) const;
+
+    /**
+     * @brief Drop a container's contribution from the cache (page/tile
+     *        deletion).  Eviction-from-memory does NOT call this — the
+     *        cache must survive eviction; that is the whole point.
+     */
+    void dropLinkOutlineFor(TileCoord coord) const;
+    void dropLinkOutlineFor(int pageIndex) const;
+
+    /// Clear the outline cache (e.g. bundle close).  Next query will
+    /// rebuild.
+    void clearLinkOutlineCache() const;
 
     /**
      * @brief Save all unsaved ImageObjects to the assets folder.
@@ -1502,4 +1557,57 @@ private:
      * @return Unique pointer to the new page.
      */
     std::unique_ptr<Page> createDefaultPage();
+
+    // ========================================================================
+    // Link Outline Cache — internal state & peek helpers (Phase M.9)
+    // ========================================================================
+
+    /**
+     * @brief Extract a single Page*'s LinkObjects into outline entries.
+     *        Factored out of `enumerateLinkOutline`'s previous lambda so
+     *        both the rebuild path and the refresh path can share it.
+     */
+    static QVector<LinkOutlineEntry>
+    extractLinkOutlineFromPage(const Page* page,
+                                int pageIdx,
+                                int tileX,
+                                int tileY,
+                                bool edgeless);
+
+    /**
+     * @brief Read a tile's JSON on disk and extract just the LinkObject
+     *        summary (id/description/iconColor/position/slots).
+     *
+     * Does NOT construct a `Page`, load strokes, or touch OCR.  Returns
+     * an empty vector on any I/O or parse failure (and does not mutate
+     * `m_tileIndex`).  Safe to call on const paths.
+     */
+    QVector<LinkOutlineEntry>
+    peekTileLinkOutlineFromDisk(TileCoord coord) const;
+
+    /// Paged-mode counterpart of `peekTileLinkOutlineFromDisk`.
+    QVector<LinkOutlineEntry>
+    peekPageLinkOutlineFromDisk(int pageIndex) const;
+
+    /**
+     * @brief Shared JSON → outline-entry walker used by both peek helpers.
+     *        Parses the \c objects array of a container JSON file, filters
+     *        to LinkObjects with at least one markdown slot, and fills
+     *        caller-supplied coordinate fields (pageIndex/tileX/tileY/
+     *        tileOrigin) on each emitted entry.
+     */
+    static QVector<LinkOutlineEntry>
+    extractLinkOutlineFromJsonObjects(const QJsonArray& objects,
+                                       int  pageIndex,
+                                       int  tileX,
+                                       int  tileY,
+                                       const QPointF& tileOrigin);
+
+    /// Cache contents, keyed by container.  Empty vectors are allowed
+    /// and mean "container exists but has no markdown-backed links."
+    /// `mutable` because enumeration is a const operation that may need
+    /// to lazily populate the cache on first use.
+    mutable std::map<int, QVector<LinkOutlineEntry>>       m_pageOutline;
+    mutable std::map<TileCoord, QVector<LinkOutlineEntry>> m_tileOutline;
+    mutable bool m_linkOutlineCacheReady = false;
 };

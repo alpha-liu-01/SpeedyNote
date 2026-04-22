@@ -3375,11 +3375,6 @@ Quit anyway?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../source/ui/MarkdownNotesSidebar.cpp" line="218"/>
-        <source>⚠️ Showing notes from %1 of %2 tiles. Pan around to load more tiles and see their notes.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <location filename="../../source/ui/MarkdownNotesSidebar.cpp" line="436"/>
         <source>No results found for &quot;%1&quot;</source>
         <translation type="unfinished"></translation>

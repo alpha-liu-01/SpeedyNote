@@ -920,22 +920,61 @@ void MainWindow::setupUi() {
             return false;
         };
 
+        // Phase M.9: resolve the owning container from the outline
+        // cache first — this works even when the tile is currently
+        // evicted, whereas the old "iterate allLoadedTileCoords()" loop
+        // silently leaked the slot pointer on evicted tiles.
         bool found = false;
-        if (doc->isEdgeless()) {
-            for (const auto& coord : doc->allLoadedTileCoords()) {
-                Page* tile = doc->getTile(coord.first, coord.second);
-                if (tryClearSlotIn(tile, /*pageIdxForDirty=*/-1)) {
-                    doc->markTileDirty(coord);
-                    found = true;
-                    break;
+        int  foundPageIndex = -1;
+        Document::TileCoord foundTileCoord{0, 0};
+        bool isTile = false;
+        {
+            const QVector<LinkOutlineEntry> outline = doc->enumerateLinkOutline();
+            for (const auto& entry : outline) {
+                if (entry.linkObjectId != linkObjectId) continue;
+                if (doc->isEdgeless()) {
+                    foundTileCoord = Document::TileCoord(entry.tileX, entry.tileY);
+                    isTile = true;
+                } else {
+                    foundPageIndex = entry.pageIndex;
                 }
+                break;
+            }
+        }
+
+        if (isTile) {
+            Page* tile = doc->getTile(foundTileCoord.first, foundTileCoord.second);
+            if (tile && tryClearSlotIn(tile, /*pageIdxForDirty=*/-1)) {
+                doc->markTileDirty(foundTileCoord);
+                doc->refreshLinkOutlineFor(foundTileCoord);
+                found = true;
+            }
+        } else if (foundPageIndex >= 0) {
+            if (tryClearSlotIn(doc->page(foundPageIndex), foundPageIndex)) {
+                doc->refreshLinkOutlineFor(foundPageIndex);
+                found = true;
             }
         } else {
-            const int count = doc->pageCount();
-            for (int i = 0; i < count; ++i) {
-                if (tryClearSlotIn(doc->page(i), i)) {
-                    found = true;
-                    break;
+            // Cache miss (race or out-of-sync): fall back to the legacy
+            // linear scan so we don't silently leak the slot.
+            if (doc->isEdgeless()) {
+                for (const auto& coord : doc->allLoadedTileCoords()) {
+                    Page* tile = doc->getTile(coord.first, coord.second);
+                    if (tryClearSlotIn(tile, /*pageIdxForDirty=*/-1)) {
+                        doc->markTileDirty(coord);
+                        doc->refreshLinkOutlineFor(coord);
+                        found = true;
+                        break;
+                    }
+                }
+            } else {
+                const int count = doc->pageCount();
+                for (int i = 0; i < count; ++i) {
+                    if (tryClearSlotIn(doc->page(i), i)) {
+                        doc->refreshLinkOutlineFor(i);
+                        found = true;
+                        break;
+                    }
                 }
             }
         }
@@ -7379,24 +7418,18 @@ void MainWindow::refreshNotesOutline()
     if (!vp || !vp->document()) {
         markdownNotesSidebar->setNotesDir(QString());
         markdownNotesSidebar->setOutline({}, /*edgeless=*/false);
-        markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
         return;
     }
 
+    // Phase M.9: enumerateLinkOutline() is now a flat snapshot of the
+    // persistent link-outline cache; no force-load of pages/tiles.  The
+    // outline survives tile eviction in edgeless mode — no hidden-tiles
+    // warning is needed because the user never sees an incomplete view.
     Document* doc = vp->document();
     markdownNotesSidebar->setNotesDir(doc->notesPath());
     markdownNotesSidebar->setEdgelessMode(doc->isEdgeless());
     markdownNotesSidebar->setOutline(doc->enumerateLinkOutline(),
                                      doc->isEdgeless());
-
-    if (doc->isEdgeless()) {
-        const int loadedCount = doc->tileCount();
-        const int totalCount  = doc->tileIndexCount();
-        markdownNotesSidebar->setHiddenTilesWarning(loadedCount < totalCount,
-                                                   loadedCount, totalCount);
-    } else {
-        markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
-    }
 }
 
 // Phase M.3: Navigate to and select a LinkObject
@@ -7410,71 +7443,109 @@ void MainWindow::navigateToLinkObject(const QString& linkObjectId)
     InsertedObject* foundObject = nullptr;
     
     if (doc->isEdgeless()) {
-        // Edgeless mode: search through loaded tiles
+        // Phase M.9: Resolve owning tile from the persistent outline
+        // cache — works even when the tile is not currently resident.
         int foundTileX = 0;
         int foundTileY = 0;
-        
-        for (const auto& coord : doc->allLoadedTileCoords()) {
-            Page* tile = doc->getTile(coord.first, coord.second);
-            if (!tile) continue;
-            
+        QPointF cachedDocPos;
+        bool gotFromCache = false;
+
+        const QVector<LinkOutlineEntry> outline = doc->enumerateLinkOutline();
+        for (const auto& entry : outline) {
+            if (entry.linkObjectId == linkObjectId) {
+                foundTileX   = entry.tileX;
+                foundTileY   = entry.tileY;
+                cachedDocPos = entry.docPos;
+                gotFromCache = true;
+                break;
+            }
+        }
+
+        if (!gotFromCache) {
+            qWarning() << "navigateToLinkObject: LinkObject not in outline cache:" << linkObjectId;
+            return;
+        }
+
+        // Lazy-load the owning tile (getTile materializes it if needed).
+        Page* tile = doc->getTile(foundTileX, foundTileY);
+        if (tile) {
             for (const auto& objPtr : tile->objects) {
                 if (objPtr->id == linkObjectId) {
                     foundObject = objPtr.get();
-                    foundTileX = coord.first;
-                    foundTileY = coord.second;
                     break;
                 }
             }
-            if (foundObject) break;
         }
-        
-        if (!foundObject) {
-            qWarning() << "navigateToLinkObject: LinkObject not found in loaded tiles:" << linkObjectId;
-            return;
+
+        // Fallback target: cache position if the tile / object can't
+        // be resolved (e.g. disk file moved).  Navigation still works;
+        // only object selection is skipped.
+        QPointF objectCenter;
+        if (foundObject) {
+            const QPointF tileOrigin(foundTileX * Document::EDGELESS_TILE_SIZE,
+                                      foundTileY * Document::EDGELESS_TILE_SIZE);
+            objectCenter = tileOrigin + foundObject->position +
+                QPointF(foundObject->size.width() / 2.0,
+                        foundObject->size.height() / 2.0);
+        } else {
+            objectCenter = cachedDocPos +
+                QPointF(LinkObject::ICON_SIZE / 2.0,
+                        LinkObject::ICON_SIZE / 2.0);
         }
-        
-        // Calculate document-global position (tile origin + object position)
-        QPointF tileOrigin(foundTileX * Document::EDGELESS_TILE_SIZE,
-                           foundTileY * Document::EDGELESS_TILE_SIZE);
-        QPointF objectCenter = tileOrigin + foundObject->position + 
-            QPointF(foundObject->size.width() / 2.0, foundObject->size.height() / 2.0);
-        
-        // Navigate to the object position (reuses back-link navigation)
+
         vp->navigateToEdgelessPosition(foundTileX, foundTileY, objectCenter);
-        
-        // Select the object
-        vp->selectObject(foundObject);
-        
+        if (foundObject) vp->selectObject(foundObject);
+
     } else {
-        // Paged mode: search through pages
+        // Paged mode: resolve owning page from the outline cache, then
+        // lazy-load only that page (Phase M.9).  Falls back to a full
+        // linear scan if the cache miss ever happens.
         int currentPage = vp->currentPageIndex();
         int foundPageIndex = -1;
-        
-        // Helper lambda to search a page
-        auto searchPage = [&](int pageIdx) -> bool {
-            Page* page = doc->page(pageIdx);
-            if (!page) return false;
-            
-            for (const auto& objPtr : page->objects) {
-                if (objPtr->id == linkObjectId) {
-                    foundObject = objPtr.get();
-                    foundPageIndex = pageIdx;
-                    return true;
-                }
-            }
-            return false;
-        };
-        
-        // Search current page first
-        if (!searchPage(currentPage)) {
-            // Not on current page - search all pages
-            for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
-                if (pageIdx == currentPage) continue;  // Already checked
-                if (searchPage(pageIdx)) break;
+
+        const QVector<LinkOutlineEntry> outline = doc->enumerateLinkOutline();
+        for (const auto& entry : outline) {
+            if (entry.linkObjectId == linkObjectId) {
+                foundPageIndex = entry.pageIndex;
+                break;
             }
         }
-        
+
+        if (foundPageIndex >= 0) {
+            Page* page = doc->page(foundPageIndex);
+            if (page) {
+                for (const auto& objPtr : page->objects) {
+                    if (objPtr->id == linkObjectId) {
+                        foundObject = objPtr.get();
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Legacy fallback: outline cache missing this link for some
+        // reason.  Scan loaded pages + current page so we don't crash.
+        if (!foundObject) {
+            auto searchPage = [&](int pageIdx) -> bool {
+                Page* page = doc->page(pageIdx);
+                if (!page) return false;
+                for (const auto& objPtr : page->objects) {
+                    if (objPtr->id == linkObjectId) {
+                        foundObject = objPtr.get();
+                        foundPageIndex = pageIdx;
+                        return true;
+                    }
+                }
+                return false;
+            };
+            if (!searchPage(currentPage)) {
+                for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
+                    if (pageIdx == currentPage) continue;
+                    if (searchPage(pageIdx)) break;
+                }
+            }
+        }
+
         if (!foundObject) {
             qWarning() << "navigateToLinkObject: LinkObject not found:" << linkObjectId;
             return;

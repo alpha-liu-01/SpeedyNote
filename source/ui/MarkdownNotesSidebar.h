@@ -6,7 +6,6 @@
 // ============================================================================
 // Thin host for the right-sidebar note UI.  It owns:
 //   * a search bar (unchanged),
-//   * an optional "hidden tiles" warning for edgeless mode,
 //   * a NotesTreePanel that renders the 3-level outline (L1/L2/L3),
 //   * a flat QScrollArea shown only in search-results mode.
 //
@@ -78,9 +77,6 @@ public:
     // ---------- Page / range state ----------
     void setCurrentPageInfo(int currentPage, int totalPages);
     void setEdgelessMode(bool edgeless);
-    void setHiddenTilesWarning(bool hasHiddenTiles,
-                               int loadedCount = 0,
-                               int totalCount  = 0);
 
     /// Applied on top of the outline view.  In edgeless mode the from/to
     /// values are treated as tile-row indices (inclusive).  In paged mode the
@@ -156,9 +152,6 @@ private:
     QVBoxLayout* scrollLayout    = nullptr;
     QLabel*      emptyLabel      = nullptr;
     QList<MarkdownNoteEntry*> searchResultEntries;
-
-    // Edgeless warning
-    QLabel* hiddenTilesWarningLabel = nullptr;
 
     bool isDarkMode = false;
     bool isEdgeless = false;

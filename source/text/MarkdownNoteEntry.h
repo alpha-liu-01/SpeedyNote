@@ -103,10 +103,11 @@ public:
     bool isPreviewMode() const { return previewMode; }
 
     // Layout-aware size reporting (Phase M.8.1).
-    // Default QWidget::sizeHint() returns layout()->totalSizeHint(), but only
-    // once the layout has finished activating.  We delegate explicitly to the
-    // layout so callers that query right after `setItemWidget()` see a value
-    // that matches what the layout will actually enforce.
+    // Explicit overrides so the value returned is always the current layout
+    // metric, independent of QWidget::sizeHint()'s margin handling for
+    // top-level widgets.  NotesTreePanel calls these right after
+    // setItemWidget() and again on every layoutMetricsChanged() to keep the
+    // host QTreeWidgetItem's row height in sync with the card's true size.
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override;
 

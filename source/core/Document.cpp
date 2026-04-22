@@ -44,6 +44,11 @@ Document::~Document()
     m_tiles.clear();
     ++m_tileLoadVersion;
     m_pdfProvider.reset();
+
+    // Drop any residual outline cache so subsequent document instances
+    // cannot observe stale state (cache members are per-instance, but
+    // being explicit keeps bundle-reload behavior predictable).
+    clearLinkOutlineCache();
     
 #ifdef __GLIBC__
     malloc_trim(0);
@@ -575,7 +580,10 @@ bool Document::loadPageFromDisk(int index) const
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Loaded page" << index << "(" << uuid.left(8) << ") from disk";
 #endif
-    
+
+    // Outline cache: in-memory page is now authoritative.
+    refreshLinkOutlineFor(index);
+
     return true;
 }
 
@@ -621,7 +629,10 @@ bool Document::savePage(int index)
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Saved page" << index << "(" << uuid.left(8) << ") to disk";
 #endif
-    
+
+    // Outline cache: disk + in-memory agree now; refresh from memory.
+    refreshLinkOutlineFor(index);
+
     return true;
 }
 
@@ -731,7 +742,13 @@ Page* Document::addPage()
     // Mark as dirty
     m_dirtyPages.insert(uuid);
     invalidateUuidCache();
-    
+
+    // Outline cache: new empty page contributes no entries, but keep the
+    // cache consistent by explicitly registering the container.
+    if (m_linkOutlineCacheReady) {
+        m_pageOutline[static_cast<int>(m_pageOrder.size()) - 1] = {};
+    }
+
     markModified();
     return pagePtr;
 }
@@ -759,7 +776,23 @@ Page* Document::insertPage(int index)
     // Mark as dirty
     m_dirtyPages.insert(uuid);
     invalidateUuidCache();
-    
+
+    // Outline cache: shift all entries >= index up by one, then insert
+    // an empty vector at `index` for the newcomer.
+    if (m_linkOutlineCacheReady) {
+        std::map<int, QVector<LinkOutlineEntry>> shifted;
+        for (auto& kv : m_pageOutline) {
+            const int newKey = (kv.first >= index) ? (kv.first + 1) : kv.first;
+            QVector<LinkOutlineEntry> v = std::move(kv.second);
+            if (newKey != kv.first) {
+                for (auto& e : v) e.pageIndex = newKey;
+            }
+            shifted[newKey] = std::move(v);
+        }
+        shifted[index] = {};
+        m_pageOutline = std::move(shifted);
+    }
+
     markModified();
     return pagePtr;
 }
@@ -790,7 +823,11 @@ Page* Document::addPageForPdf(int pdfPageIndex)
     m_loadedPages[uuid] = std::move(newPage);
     m_dirtyPages.insert(uuid);
     invalidateUuidCache();
-    
+
+    if (m_linkOutlineCacheReady) {
+        m_pageOutline[static_cast<int>(m_pageOrder.size()) - 1] = {};
+    }
+
     markModified();
     return pagePtr;
 }
@@ -828,6 +865,11 @@ bool Document::removePage(int index)
     m_deletedPages.insert(uuid);
     
     invalidateUuidCache();
+
+    // Outline cache: drop the page's contribution and renumber subsequent
+    // entries down by 1 (dropLinkOutlineFor does both).
+    dropLinkOutlineFor(index);
+
     markModified();
     return true;
 }
@@ -852,6 +894,35 @@ bool Document::movePage(int from, int to)
     m_pageOrder.insert(to, uuid);
     
     invalidateUuidCache();
+
+    // Outline cache: page indices are re-keyed; rebuild the map by
+    // remapping old → new indices.  Cheap because values are moved, not
+    // recomputed.
+    if (m_linkOutlineCacheReady) {
+        const int lo = qMin(from, to);
+        const int hi = qMax(from, to);
+        std::map<int, QVector<LinkOutlineEntry>> remapped;
+        for (auto& kv : m_pageOutline) {
+            int oldIdx = kv.first;
+            int newIdx = oldIdx;
+            if (oldIdx < lo || oldIdx > hi) {
+                newIdx = oldIdx;
+            } else if (oldIdx == from) {
+                newIdx = to;
+            } else if (from < to) {   // moved forward: pages in (from, to] shift left
+                newIdx = oldIdx - 1;
+            } else {                  // moved backward: pages in [to, from) shift right
+                newIdx = oldIdx + 1;
+            }
+            QVector<LinkOutlineEntry> v = std::move(kv.second);
+            if (newIdx != oldIdx) {
+                for (auto& e : v) e.pageIndex = newIdx;
+            }
+            remapped[newIdx] = std::move(v);
+        }
+        m_pageOutline = std::move(remapped);
+    }
+
     markModified();
     return true;
 }
@@ -910,6 +981,10 @@ void Document::createPagesForPdf()
     m_loadedPages.clear();
     m_dirtyPages.clear();
     invalidateUuidCache();
+
+    // Outline cache is keyed by page index; wiping the order invalidates
+    // every entry, so rebuild from scratch on next enumerate.
+    clearLinkOutlineCache();
     
     if (!isPdfLoaded()) {
         // No PDF loaded, create a single default page
@@ -1127,7 +1202,10 @@ void Document::removeTileIfEmpty(int tx, int ty)
             m_deletedTiles.insert(coord);
             m_tileIndex.erase(coord);
         }
-        
+
+        // Outline cache: tile no longer exists in any form.
+        dropLinkOutlineFor(coord);
+
         markModified();
         
 #ifdef SPEEDYNOTE_DEBUG
@@ -1478,7 +1556,12 @@ int Document::loadPagesFromJson(const QJsonArray& pagesArray)
     m_loadedPages.clear();
     m_dirtyPages.clear();
     invalidateUuidCache();
-    
+
+    // Outline cache is keyed by page index; the incoming pages array
+    // invalidates every key, so drop the cache and lazy-rebuild on next
+    // enumerate.
+    clearLinkOutlineCache();
+
     // Phase O1.5: Reset max object extent when reloading pages
     m_maxObjectExtent = 0;
     
@@ -1730,7 +1813,10 @@ bool Document::saveTile(TileCoord coord)
     // Update state
     m_dirtyTiles.erase(coord);
     m_tileIndex.insert(coord);
-    
+
+    // Outline cache: in-memory tile is authoritative and now saved.
+    refreshLinkOutlineFor(coord);
+
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Saved tile" << coord.first << "," << coord.second << "to" << tilePath;
 #endif
@@ -1883,7 +1969,12 @@ bool Document::loadTileFromDisk(TileCoord coord) const
         qDebug() << "Loaded tile" << coord.first << "," << coord.second << "from disk (legacy)";
 #endif
     }
-    
+
+    // Outline cache: in-memory tile is now authoritative; reconcile with
+    // any prior disk-peek entry.  Safe no-op if the cache hasn't been
+    // built yet (refreshLinkOutlineFor gates on m_linkOutlineCacheReady).
+    refreshLinkOutlineFor(coord);
+
     return true;
 }
 
@@ -2101,65 +2192,298 @@ bool Document::deleteNoteFile(const QString& noteId)
 }
 
 // ============================================================================
-// enumerateLinkOutline — cheap walk over LinkObjects, no file I/O.
+// Link Outline Cache (Phase M.9)
 // ============================================================================
 //
-// Used by the right-sidebar NotesTreePanel to build its 3-level tree.
-//
-// Paged  : iterate loaded pages (0..pageCount-1), store pageIndex.
-// Edgeless: iterate currently-loaded tiles only; docPos is computed in
-//           doc-space so the panel can order & group by tileY.  Matches
-//           the policy of loadNotesForCurrentPage() so the hidden-tiles
-//           warning in the sidebar stays in sync.
+// Design goals:
+//   - Outline survives tile/page eviction: evicting a tile does NOT drop
+//     its entries from the cache.  The sidebar view stays stable while the
+//     user pans in edgeless mode.
+//   - No full-document force-load on refresh: paged mode peeks page-file
+//     JSON when the Page isn't already resident, instead of lazy-loading
+//     it via page(i).
+//   - Authoritative source: in-memory container (if loaded) is always
+//     preferred over the disk copy; refreshLinkOutlineFor is called every
+//     time an in-memory container becomes authoritative or is saved.
 // ============================================================================
-QVector<LinkOutlineEntry> Document::enumerateLinkOutline() const
+
+// -------- Static helper: Page* → QVector<LinkOutlineEntry> -----------------
+
+QVector<LinkOutlineEntry>
+Document::extractLinkOutlineFromPage(const Page* page,
+                                      int pageIdx,
+                                      int tileX,
+                                      int tileY,
+                                      bool edgeless)
 {
     QVector<LinkOutlineEntry> out;
+    if (!page) return out;
 
-    auto appendFromPage = [&out](const Page* page, int pageIdx, int tx, int ty, bool edgeless) {
-        if (!page) return;
-        const QPointF tileOrigin = edgeless
-            ? QPointF(tx * static_cast<qreal>(EDGELESS_TILE_SIZE),
-                      ty * static_cast<qreal>(EDGELESS_TILE_SIZE))
-            : QPointF();
-        for (const auto& objPtr : page->objects) {
-            const LinkObject* link = dynamic_cast<const LinkObject*>(objPtr.get());
-            if (!link) continue;
+    const QPointF tileOrigin = edgeless
+        ? QPointF(tileX * static_cast<qreal>(EDGELESS_TILE_SIZE),
+                  tileY * static_cast<qreal>(EDGELESS_TILE_SIZE))
+        : QPointF();
 
-            LinkOutlineEntry entry;
-            entry.markdownSlots.reserve(LinkObject::SLOT_COUNT);
-            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                const LinkSlot& s = link->linkSlots[i];
-                if (s.type != LinkSlot::Type::Markdown) continue;
-                if (s.markdownNoteId.isEmpty()) continue;
-                entry.markdownSlots.push_back({ i, s.markdownNoteId });
-            }
-            if (entry.markdownSlots.isEmpty()) continue;  // skip zero-markdown links
+    for (const auto& objPtr : page->objects) {
+        const LinkObject* link = dynamic_cast<const LinkObject*>(objPtr.get());
+        if (!link) continue;
 
-            entry.linkObjectId = link->id;
-            entry.description  = link->description;
-            entry.iconColor    = link->iconColor;
-            entry.pageIndex    = edgeless ? -1 : pageIdx;
-            entry.tileX        = tx;
-            entry.tileY        = ty;
-            entry.docPos       = edgeless ? (tileOrigin + link->position)
-                                          : link->position;
-            out.push_back(std::move(entry));
+        LinkOutlineEntry entry;
+        entry.markdownSlots.reserve(LinkObject::SLOT_COUNT);
+        for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+            const LinkSlot& s = link->linkSlots[i];
+            if (s.type != LinkSlot::Type::Markdown) continue;
+            if (s.markdownNoteId.isEmpty()) continue;
+            entry.markdownSlots.push_back({ i, s.markdownNoteId });
         }
-    };
+        if (entry.markdownSlots.isEmpty()) continue;
 
-    if (isEdgeless()) {
-        for (const auto& coord : allLoadedTileCoords()) {
-            const Page* tile = getTile(coord.first, coord.second);
-            appendFromPage(tile, -1, coord.first, coord.second, /*edgeless=*/true);
-        }
-    } else {
-        const int count = pageCount();
-        for (int i = 0; i < count; ++i) {
-            appendFromPage(page(i), i, 0, 0, /*edgeless=*/false);
-        }
+        entry.linkObjectId = link->id;
+        entry.description  = link->description;
+        entry.iconColor    = link->iconColor;
+        entry.pageIndex    = edgeless ? -1 : pageIdx;
+        entry.tileX        = tileX;
+        entry.tileY        = tileY;
+        entry.docPos       = edgeless ? (tileOrigin + link->position)
+                                       : link->position;
+        out.push_back(std::move(entry));
     }
     return out;
+}
+
+// -------- Shared JSON walker for both disk-peek helpers --------------------
+
+QVector<LinkOutlineEntry>
+Document::extractLinkOutlineFromJsonObjects(const QJsonArray& objects,
+                                             int  pageIndex,
+                                             int  tileX,
+                                             int  tileY,
+                                             const QPointF& tileOrigin)
+{
+    QVector<LinkOutlineEntry> out;
+    const QColor kDefaultIcon(100, 100, 100, 180);
+
+    for (const QJsonValue& v : objects) {
+        const QJsonObject o = v.toObject();
+        if (o["type"].toString() != QLatin1String("link")) continue;
+
+        LinkOutlineEntry entry;
+        entry.markdownSlots.reserve(LinkObject::SLOT_COUNT);
+
+        const QJsonArray slotArray = o["slots"].toArray();
+        const int slotMax = qMin(static_cast<int>(slotArray.size()),
+                                  LinkObject::SLOT_COUNT);
+        for (int i = 0; i < slotMax; ++i) {
+            const QJsonObject s = slotArray[i].toObject();
+            if (s["type"].toString() != QLatin1String("markdown")) continue;
+            const QString noteId = s["noteId"].toString();
+            if (noteId.isEmpty()) continue;
+            entry.markdownSlots.push_back({ i, noteId });
+        }
+        if (entry.markdownSlots.isEmpty()) continue;
+
+        entry.linkObjectId = o["id"].toString();
+        entry.description  = o["description"].toString();
+
+        // iconColor is stored by LinkObject::toJson as "#RRGGBB[AA]".
+        // Fall back to LinkObject's default grey on anything unparsable.
+        const QJsonValue iconVal = o.value("iconColor");
+        if (iconVal.isString()) {
+            const QColor c(iconVal.toString());
+            entry.iconColor = c.isValid() ? c : kDefaultIcon;
+        } else {
+            entry.iconColor = kDefaultIcon;
+        }
+
+        entry.pageIndex = pageIndex;
+        entry.tileX     = tileX;
+        entry.tileY     = tileY;
+        const QPointF localPos(o["x"].toDouble(), o["y"].toDouble());
+        entry.docPos    = tileOrigin + localPos;  // tileOrigin == (0,0) in paged
+
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
+// -------- Disk peek: tile JSON → outline entries ---------------------------
+
+QVector<LinkOutlineEntry>
+Document::peekTileLinkOutlineFromDisk(TileCoord coord) const
+{
+    if (m_bundlePath.isEmpty()) return {};
+
+    const QString path = m_bundlePath + "/tiles/"
+        + QString("%1,%2.json").arg(coord.first).arg(coord.second);
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return {};
+
+    QJsonParseError perr;
+    const QJsonDocument jd = QJsonDocument::fromJson(f.readAll(), &perr);
+    f.close();
+    if (perr.error != QJsonParseError::NoError || !jd.isObject()) return {};
+
+    const QPointF tileOrigin(coord.first  * static_cast<qreal>(EDGELESS_TILE_SIZE),
+                              coord.second * static_cast<qreal>(EDGELESS_TILE_SIZE));
+    return extractLinkOutlineFromJsonObjects(
+        jd.object()["objects"].toArray(),
+        /*pageIndex=*/ -1, coord.first, coord.second, tileOrigin);
+}
+
+// -------- Disk peek: page JSON → outline entries ---------------------------
+
+QVector<LinkOutlineEntry>
+Document::peekPageLinkOutlineFromDisk(int pageIndex) const
+{
+    if (m_bundlePath.isEmpty()) return {};
+    if (pageIndex < 0 || pageIndex >= m_pageOrder.size()) return {};
+
+    const QString path = m_bundlePath + "/pages/" + m_pageOrder[pageIndex] + ".json";
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return {};  // e.g. pristine PDF page (no file yet)
+
+    QJsonParseError perr;
+    const QJsonDocument jd = QJsonDocument::fromJson(f.readAll(), &perr);
+    f.close();
+    if (perr.error != QJsonParseError::NoError || !jd.isObject()) return {};
+
+    return extractLinkOutlineFromJsonObjects(
+        jd.object()["objects"].toArray(),
+        pageIndex, /*tileX=*/0, /*tileY=*/0, /*tileOrigin=*/QPointF());
+}
+
+// -------- Cache maintenance -------------------------------------------------
+
+void Document::buildLinkOutlineCache() const
+{
+    m_pageOutline.clear();
+    m_tileOutline.clear();
+
+    if (isEdgeless()) {
+        // Union of in-memory tiles and disk-only tiles.  Deduped via the
+        // m_tileOutline map (in-memory wins by iteration order).
+        std::set<TileCoord> allCoords = m_tileIndex;
+        for (const auto& kv : m_tiles) allCoords.insert(kv.first);
+
+        for (const TileCoord& coord : allCoords) {
+            auto it = m_tiles.find(coord);
+            QVector<LinkOutlineEntry> entries;
+            if (it != m_tiles.end() && it->second) {
+                entries = extractLinkOutlineFromPage(
+                    it->second.get(), -1, coord.first, coord.second, true);
+            } else {
+                entries = peekTileLinkOutlineFromDisk(coord);
+            }
+            // Store even empty vectors so we know the container has been
+            // visited — not strictly required, but makes eviction a no-op
+            // safe (see refreshLinkOutlineFor).
+            m_tileOutline[coord] = std::move(entries);
+        }
+    } else {
+        const int count = static_cast<int>(m_pageOrder.size());
+        for (int i = 0; i < count; ++i) {
+            const QString uuid = m_pageOrder[i];
+            auto it = m_loadedPages.find(uuid);
+            QVector<LinkOutlineEntry> entries;
+            if (it != m_loadedPages.end() && it->second) {
+                entries = extractLinkOutlineFromPage(
+                    it->second.get(), i, 0, 0, false);
+            } else {
+                entries = peekPageLinkOutlineFromDisk(i);
+            }
+            m_pageOutline[i] = std::move(entries);
+        }
+    }
+
+    m_linkOutlineCacheReady = true;
+}
+
+void Document::refreshLinkOutlineFor(TileCoord coord) const
+{
+    if (!m_linkOutlineCacheReady) {
+        // No cache yet — refresh is deferred to first enumerate, which
+        // will build the whole thing.
+        return;
+    }
+    auto it = m_tiles.find(coord);
+    if (it != m_tiles.end() && it->second) {
+        m_tileOutline[coord] = extractLinkOutlineFromPage(
+            it->second.get(), -1, coord.first, coord.second, true);
+    } else if (m_tileIndex.count(coord) > 0) {
+        m_tileOutline[coord] = peekTileLinkOutlineFromDisk(coord);
+    } else {
+        // Neither loaded nor on disk: treat as gone.
+        m_tileOutline.erase(coord);
+    }
+}
+
+void Document::refreshLinkOutlineFor(int pageIndex) const
+{
+    if (!m_linkOutlineCacheReady) return;
+    if (pageIndex < 0 || pageIndex >= m_pageOrder.size()) {
+        m_pageOutline.erase(pageIndex);
+        return;
+    }
+    const QString uuid = m_pageOrder[pageIndex];
+    auto it = m_loadedPages.find(uuid);
+    if (it != m_loadedPages.end() && it->second) {
+        m_pageOutline[pageIndex] = extractLinkOutlineFromPage(
+            it->second.get(), pageIndex, 0, 0, false);
+    } else {
+        m_pageOutline[pageIndex] = peekPageLinkOutlineFromDisk(pageIndex);
+    }
+}
+
+void Document::dropLinkOutlineFor(TileCoord coord) const
+{
+    m_tileOutline.erase(coord);
+}
+
+void Document::dropLinkOutlineFor(int pageIndex) const
+{
+    m_pageOutline.erase(pageIndex);
+    // Re-key higher pages down by 1 — removePage compacts m_pageOrder so
+    // the caller's notion of "pageIndex i" shifts for i > removed index.
+    // This matches how removePage updates m_pageOrder immediately.
+    std::map<int, QVector<LinkOutlineEntry>> shifted;
+    for (auto& kv : m_pageOutline) {
+        const int newKey = (kv.first > pageIndex) ? (kv.first - 1) : kv.first;
+        // Update pageIndex field inside each entry too.
+        QVector<LinkOutlineEntry> v = std::move(kv.second);
+        if (newKey != kv.first) {
+            for (auto& e : v) e.pageIndex = newKey;
+        }
+        shifted[newKey] = std::move(v);
+    }
+    m_pageOutline = std::move(shifted);
+}
+
+void Document::clearLinkOutlineCache() const
+{
+    m_pageOutline.clear();
+    m_tileOutline.clear();
+    m_linkOutlineCacheReady = false;
+}
+
+// -------- Public query: flat snapshot --------------------------------------
+
+QVector<LinkOutlineEntry> Document::enumerateLinkOutline() const
+{
+    if (!m_linkOutlineCacheReady) buildLinkOutlineCache();
+
+    // Two passes on the same map: one to compute the total size for
+    // reserve(), one to flatten.  Map traversal is O(n) and the entries
+    // are small, so the reservation is worth it when the total count
+    // runs into the hundreds.
+    auto flatten = [](const auto& map) {
+        int total = 0;
+        for (const auto& kv : map) total += kv.second.size();
+        QVector<LinkOutlineEntry> out;
+        out.reserve(total);
+        for (const auto& kv : map) out.append(kv.second);
+        return out;
+    };
+    return isEdgeless() ? flatten(m_tileOutline) : flatten(m_pageOutline);
 }
 
 bool Document::saveBundle(const QString& path)

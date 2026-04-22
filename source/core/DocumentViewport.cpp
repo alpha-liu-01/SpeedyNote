@@ -34,6 +34,7 @@
 #include <algorithm>  // For std::remove_if
 #include <limits>
 #include <climits>    // For INT_MIN (Phase O3.5.5: affinity filtering)
+#include <set>        // For touched-container tracking (Phase M.9)
 #include <QDateTime>  // For timestamp
 #include <QUuid>      // For stroke IDs
 #include <QSet>       // For efficient ID lookup in eraseAt
@@ -4164,10 +4165,9 @@ void DocumentViewport::evictDistantTiles()
         emit objectSelectionChanged();
     }
     
-    // M.7.3: Notify that tiles were evicted (sidebar may need refresh)
-    if (evictedCount > 0) {
-        emit linkObjectListMayHaveChanged();
-    }
+    // M.7.3 / Phase M.9: Eviction no longer changes the outline — the
+    // persistent link-outline cache in Document already has every tile
+    // on disk, regardless of memory residency.  No emit needed.
     
 #ifdef SPEEDYNOTE_DEBUG
     if (evictedCount > 0) {
@@ -6777,7 +6777,11 @@ void DocumentViewport::deleteSelectedObjects()
     }
     
     int deletedCount = 0;
-    
+    // Phase M.9: Track containers whose outline contribution may have
+    // changed, so we can refresh the cache without rescanning the world.
+    std::set<Document::TileCoord> touchedTiles;
+    std::set<int>                 touchedPages;
+
     if (m_document->isEdgeless()) {
         // ========== EDGELESS MODE ==========
         for (InsertedObject* obj : regularObjects) {
@@ -6790,6 +6794,7 @@ void DocumentViewport::deleteSelectedObjects()
                     pushObjectDeleteUndo(obj, -1, coord);
                     tile->removeObject(obj->id);
                     m_document->markTileDirty(coord);
+                    touchedTiles.insert(coord);
                     deletedCount++;
                     found = true;
                     break;
@@ -6813,6 +6818,7 @@ void DocumentViewport::deleteSelectedObjects()
                     pushObjectDeleteUndo(obj, m_currentPageIndex, {});
                     currentPage->removeObject(obj->id);
                     m_document->markPageDirty(m_currentPageIndex);
+                    touchedPages.insert(m_currentPageIndex);
                     deletedCount++;
                 } else {
                     bool found = false;
@@ -6822,6 +6828,7 @@ void DocumentViewport::deleteSelectedObjects()
                             pushObjectDeleteUndo(obj, i, {});
                             page->removeObject(obj->id);
                             m_document->markPageDirty(i);
+                            touchedPages.insert(i);
                             deletedCount++;
                             found = true;
                             break;
@@ -6846,6 +6853,10 @@ void DocumentViewport::deleteSelectedObjects()
     // Emit modification signal
     if (deletedCount > 0 || ocrDeletedCount > 0) {
         emit documentModified();
+        // Phase M.9: refresh per-container so the subsequent sidebar
+        // query is O(#entries) not O(total-tiles).
+        for (const auto& c : touchedTiles) m_document->refreshLinkOutlineFor(c);
+        for (int p : touchedPages) m_document->refreshLinkOutlineFor(p);
         emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
     }
     
@@ -6971,6 +6982,10 @@ void DocumentViewport::pasteObjects()
     
     // Track newly pasted objects for selection
     QList<InsertedObject*> pastedObjects;
+    // Phase M.9: containers touched by this paste, for per-container
+    // outline cache refresh below.
+    std::set<Document::TileCoord> touchedTiles;
+    std::set<int>                 touchedPages;
     
     // Calculate paste position based on mouse cursor
     QPoint cursorViewport = mapFromGlobal(QCursor::pos());
@@ -7067,6 +7082,7 @@ void DocumentViewport::pasteObjects()
             targetTile->addObject(std::move(obj));
             m_document->markTileDirty(coord);
             insertedTileCoord = coord;
+            touchedTiles.insert(coord);
         } else {
             // Paged mode: add to current page
             Page* targetPage = m_document->page(m_currentPageIndex);
@@ -7084,6 +7100,7 @@ void DocumentViewport::pasteObjects()
             
             targetPage->addObject(std::move(obj));
             m_document->markPageDirty(m_currentPageIndex);
+            touchedPages.insert(m_currentPageIndex);
         }
         
         // Update max object extent
@@ -7108,6 +7125,9 @@ void DocumentViewport::pasteObjects()
     
     if (!pastedObjects.isEmpty()) {
         emit documentModified();
+        // Phase M.9: refresh outline cache for each touched container.
+        for (const auto& c : touchedTiles) m_document->refreshLinkOutlineFor(c);
+        for (int p : touchedPages) m_document->refreshLinkOutlineFor(p);
         emit linkObjectListMayHaveChanged();  // M.7.3: Refresh sidebar
     }
     
@@ -7702,15 +7722,26 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     qDebug() << "createMarkdownNoteForSlot: Created note" << noteId 
              << "for slot" << slotIndex << "title:" << note.title;
     #endif
-    // Mark page dirty
-    Page* page = findPageContainingObject(link);
+    // Mark page dirty.  Phase M.9: this link just gained a markdown slot,
+    // so its container's outline contribution changed — refresh the
+    // cache entry for that container before refreshNotesOutline runs.
+    // findPageContainingObject's out-tile-coord param avoids a second
+    // linear scan in edgeless mode.
+    Document::TileCoord tileCoord{};
+    Page* page = findPageContainingObject(link, &tileCoord);
     if (page) {
-        int pageIndex = m_document->pageIndexByUuid(page->uuid);
-        if (pageIndex >= 0) {
-            m_document->markPageDirty(pageIndex);
+        if (m_document->isEdgeless()) {
+            m_document->markTileDirty(tileCoord);
+            m_document->refreshLinkOutlineFor(tileCoord);
+        } else {
+            int pageIndex = m_document->pageIndexByUuid(page->uuid);
+            if (pageIndex >= 0) {
+                m_document->markPageDirty(pageIndex);
+                m_document->refreshLinkOutlineFor(pageIndex);
+            }
         }
     }
-    
+
     emit documentModified();
     emit requestOpenMarkdownNote(noteId, link->id);
     
@@ -12654,8 +12685,15 @@ void DocumentViewport::undo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
+    if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
+        // Phase M.9: refresh the single container this action touches.
+        if (m_document->isEdgeless()) {
+            m_document->refreshLinkOutlineFor(action.objectTileCoord);
+        } else if (action.objectPageIndex >= 0) {
+            m_document->refreshLinkOutlineFor(action.objectPageIndex);
+        }
         emit linkObjectListMayHaveChanged();
+    }
     if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
         action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection) {
         markOcrDirtyTiles(action);
@@ -12889,8 +12927,15 @@ void DocumentViewport::redo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete)
+    if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
+        // Phase M.9: refresh the single container this action touches.
+        if (m_document->isEdgeless()) {
+            m_document->refreshLinkOutlineFor(action.objectTileCoord);
+        } else if (action.objectPageIndex >= 0) {
+            m_document->refreshLinkOutlineFor(action.objectPageIndex);
+        }
         emit linkObjectListMayHaveChanged();
+    }
     if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
         action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection) {
         markOcrDirtyTiles(action);

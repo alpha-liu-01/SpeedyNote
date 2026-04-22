@@ -33,13 +33,6 @@ void MarkdownNotesSidebar::setupUi()
 
     setupSearchUi();
 
-    // Hidden-tiles warning (edgeless only).
-    hiddenTilesWarningLabel = new QLabel(this);
-    hiddenTilesWarningLabel->setObjectName("HiddenTilesWarning");
-    hiddenTilesWarningLabel->setAlignment(Qt::AlignCenter);
-    hiddenTilesWarningLabel->setWordWrap(true);
-    hiddenTilesWarningLabel->setVisible(false);
-
     // Outline view (tree).
     notesTreePanel = new NotesTreePanel(this);
     connect(notesTreePanel, &NotesTreePanel::navigateToPage,
@@ -76,7 +69,6 @@ void MarkdownNotesSidebar::setupUi()
     emptyLabel->hide();
 
     mainLayout->addWidget(searchContainer);
-    mainLayout->addWidget(hiddenTilesWarningLabel);
     mainLayout->addWidget(notesTreePanel, 1);
     mainLayout->addWidget(scrollArea, 1);
     mainLayout->addWidget(emptyLabel);
@@ -211,33 +203,6 @@ void MarkdownNotesSidebar::applyStyle()
         : QStringLiteral(":/resources/icons/zoom.png");
     if (searchButton) searchButton->setIcon(QIcon(zoomIconPath));
 
-    // Edgeless warning pill.
-    if (hiddenTilesWarningLabel) {
-        hiddenTilesWarningLabel->setStyleSheet(
-            isDarkMode
-            ? QStringLiteral(
-                "QLabel {"
-                "  background-color: #3d3520;"
-                "  color: #ffc107;"
-                "  border: 1px solid #665c00;"
-                "  border-radius: 12px;"
-                "  padding: 8px 12px;"
-                "  margin: 8px 12px;"
-                "  font-size: 12px;"
-                "}")
-            : QStringLiteral(
-                "QLabel {"
-                "  background-color: #fff3cd;"
-                "  color: #856404;"
-                "  border: 1px solid #ffc107;"
-                "  border-radius: 12px;"
-                "  padding: 8px 12px;"
-                "  margin: 8px 12px;"
-                "  font-size: 12px;"
-                "}")
-        );
-    }
-
     if (notesTreePanel) notesTreePanel->setDarkMode(isDarkMode);
 }
 
@@ -328,26 +293,6 @@ void MarkdownNotesSidebar::setEdgelessMode(bool edgeless)
     } else {
         // Leaving edgeless: make sure no stale filter hangs around.
         clearRangeFilter();
-    }
-
-    if (hiddenTilesWarningLabel) {
-        hiddenTilesWarningLabel->setVisible(false);
-    }
-}
-
-void MarkdownNotesSidebar::setHiddenTilesWarning(bool hasHiddenTiles,
-                                                  int loadedCount,
-                                                  int totalCount)
-{
-    if (!hiddenTilesWarningLabel) return;
-    if (hasHiddenTiles && isEdgeless) {
-        hiddenTilesWarningLabel->setText(
-            tr("\u26A0\uFE0F Showing notes from %1 of %2 tiles. "
-               "Pan around to load more tiles and see their notes.")
-                .arg(loadedCount).arg(totalCount));
-        hiddenTilesWarningLabel->setVisible(true);
-    } else {
-        hiddenTilesWarningLabel->setVisible(false);
     }
 }
 

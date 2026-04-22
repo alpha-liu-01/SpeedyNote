@@ -152,9 +152,10 @@ void MarkdownNoteEntry::setupUI() {
 }
 
 void MarkdownNoteEntry::applyStyle() {
-    // Styles are now primarily from QSS loaded by parent sidebar
-    // Only set dynamic properties here
-    // Unified gray colors: dark #2a2e32/#3a3e42/#4d4d4d, light #F5F5F5/#E8E8E8/#D0D0D0
+    // Styles are primarily loaded from parent sidebar QSS; only dynamic,
+    // per-state properties are set here.  Unified gray palette:
+    //   dark  — base #2d2d2d, hover #3a3e42, frame #4d4d4d
+    //   light — base #F5F5F5, hover #E8E8E8, frame #D0D0D0
     QString bgColor = isDarkMode ? "#2d2d2d" : "#ffffff";
     QString borderColor = isDarkMode ? "#4d4d4d" : "#D0D0D0";
     QString textColor = isDarkMode ? "#e6e6e6" : "#1d2939";

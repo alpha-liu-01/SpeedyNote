@@ -3434,11 +3434,6 @@ Quit anyway?</source>
         <translation type="unfinished">搜索笔记本中所有页面</translation>
     </message>
     <message>
-        <location filename="../../source/ui/MarkdownNotesSidebar.cpp" line="218"/>
-        <source>⚠️ Showing notes from %1 of %2 tiles. Pan around to load more tiles and see their notes.</source>
-        <translation type="unfinished">⚠️ 仅展示%2个图块中的%1个内的笔记。请滑动来读取更多图块和其中的笔记。</translation>
-    </message>
-    <message>
         <location filename="../../source/ui/MarkdownNotesSidebar.cpp" line="436"/>
         <source>No results found for &quot;%1&quot;</source>
         <translation type="unfinished">没有找到含&quot;%1&quot;的结果</translation>

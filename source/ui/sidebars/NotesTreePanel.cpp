@@ -7,6 +7,7 @@
 #include "../../text/MarkdownNoteEntry.h"
 
 #include <QCoreApplication>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
@@ -433,9 +434,11 @@ void NotesTreePanel::updateFocusedItemSizeHint()
     // widget can be transiently sized to the *old* row.  Pinning the widget
     // here guarantees the editor covers the full new row immediately —
     // critical to stop the delegate's #4d4d4d selection fill from showing
-    // under a not-yet-stretched widget.
+    // under a not-yet-stretched widget.  Skip the call when the widget is
+    // already at the right rect to avoid spurious repaints from the flood
+    // of layoutMetricsChanged signals during preview auto-resize.
     const QRect r = m_tree->visualItemRect(m_focusedItem);
-    if (r.isValid() && r.height() > 0) {
+    if (r.isValid() && r.height() > 0 && m_focusedEntry->geometry() != r) {
         m_focusedEntry->setGeometry(r);
     }
 }
@@ -564,11 +567,12 @@ void NotesTreePanel::highlightPage(int pageIndex)
     }
     if (!best) return;
 
-    m_tree->blockSignals(true);
+    // RAII-scoped signal block — unblocks even if anything below throws or
+    // early-returns, unlike the raw blockSignals(true/false) pair.
+    const QSignalBlocker blocker(m_tree);
     m_tree->clearSelection();
     best->setSelected(true);
     m_tree->scrollToItem(best, QAbstractItemView::EnsureVisible);
-    m_tree->blockSignals(false);
 }
 
 void NotesTreePanel::updateLinkObject(const QString& linkObjectId,
