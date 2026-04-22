@@ -174,6 +174,72 @@ void setupLinuxSignalHandlers() {
 }
 #endif
 
+// ----------------------------------------------------------------------------
+// CJK detection for the OCR language tag stored on the document / global setting
+//
+// Why this is non-trivial: different OCR backends report languages in different
+// string shapes.
+//
+//   * ML Kit (Android, macOS) reports BCP-47 tags: "zh-Hani-CN", "ja", "ko-KR", ...
+//   * Windows Ink reports the localized display name of each InkRecognizer, e.g.
+//       "Microsoft Chinese (Simplified) Handwriting Recognizer"   (EN Windows)
+//       "Microsoft 中文（简体）手写识别器"                         (ZH Windows)
+//       "Microsoft Japanese Handwriting Recognizer"
+//       "Microsoft 日本語手書き認識エンジン"                       (JP Windows)
+//       "Microsoft 日语手写识别器"                                 (JP on ZH Windows)
+//       "Microsoft 한국어 필기 인식기"                             (KO Windows)
+//
+// The original check only looked for BCP-47 prefixes ("zh"/"ja"/"ko"), which
+// meant the CJK grid-mode override never fired on Windows: a tag like
+// "Microsoft 中文（简体）手写识别器" starts with "Microsoft", not "zh".
+//
+// This helper handles both formats by combining:
+//   1. A BCP-47 pattern "^(zh|ja|ko)([-_].*)?$" (word-boundary on the subtag).
+//   2. A set of CJK marker substrings that appear in localized recognizer names
+//      across the common Windows UI languages (EN / ZH / JA / KO).
+// ----------------------------------------------------------------------------
+static bool isCjkOcrLanguage(const QString& lang)
+{
+    // Empty or explicit "auto" = unknown. Preserve the user's global toggle
+    // (the caller has already verified ocrCjkGridMode is enabled), so return
+    // true here to keep the previous behaviour for system-default languages.
+    if (lang.isEmpty() || lang.compare(QLatin1String("auto"), Qt::CaseInsensitive) == 0)
+        return true;
+
+    // BCP-47: "zh", "ja", "ko", optionally followed by script/region subtags.
+    static const QRegularExpression kBcp47Cjk(
+        QStringLiteral("^(zh|ja|ko)(?:[-_].*)?$"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (kBcp47Cjk.match(lang).hasMatch())
+        return true;
+
+    // Localized InkRecognizer display names. Covers the common display-language
+    // permutations; the English tokens cover EN Windows, the CJK tokens cover
+    // ZH / JA / KO Windows regardless of which recognizer's name we're reading.
+    static const QString kCjkMarkers[] = {
+        // English tokens (EN Windows UI)
+        QStringLiteral("Chinese"),
+        QStringLiteral("Japanese"),
+        QStringLiteral("Korean"),
+        // Chinese tokens
+        QStringLiteral("中文"),    // Chinese (ZH name)
+        QStringLiteral("中国"),    // China / Chinese
+        QStringLiteral("日语"),    // Japanese (ZH name)
+        QStringLiteral("韩国"),    // Korea (ZH name, simplified)
+        QStringLiteral("韓国"),    // Korea (JP / traditional)
+        // Japanese / Korean tokens
+        QStringLiteral("日本"),    // Japan / Japanese (JP & ZH)
+        QStringLiteral("한국"),    // Korea / Korean (KO)
+        QStringLiteral("한글"),    // Hangul script (KO)
+        QStringLiteral("조선"),    // Korean (alt.)
+    };
+    for (const auto& marker : kCjkMarkers) {
+        if (lang.contains(marker, Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
 MainWindow::MainWindow(QWidget *parent) 
     : QMainWindow(parent), localServer(nullptr) {
 
@@ -801,7 +867,8 @@ void MainWindow::setupUi() {
     
     // 🌟 Markdown Notes Sidebar
     markdownNotesSidebar = new MarkdownNotesSidebar(this);
-    markdownNotesSidebar->setFixedWidth(300);
+    markdownNotesSidebar->setMinimumWidth(220);
+    markdownNotesSidebar->setMaximumWidth(600);
     markdownNotesSidebar->setVisible(false); // Hidden by default
     
     // Phase M.3: Connect new signals for LinkObject-based markdown notes
@@ -823,39 +890,98 @@ void MainWindow::setupUi() {
         note.saveToFile(filePath);
     });
     
-    // Handle note deletion from sidebar - delete file and clear LinkSlot
+    // Handle note deletion from sidebar - delete file and clear LinkSlot.
+    // Phase M.8: search across ALL pages/tiles (not just the current page) so
+    // edgeless mode and focused-L3 deletion both find the target LinkObject.
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::noteDeletedWithLink,
             this, [this](const QString& noteId, const QString& linkObjectId) {
         DocumentViewport* vp = currentViewport();
         if (!vp || !vp->document()) return;
-        
+
         Document* doc = vp->document();
-        
-        // Delete the note file
         doc->deleteNoteFile(noteId);
-        
-        // Find the LinkObject and clear the slot
-        Page* page = doc->page(vp->currentPageIndex());
-        if (page) {
+
+        auto tryClearSlotIn = [&](Page* page, int pageIdxForDirty) -> bool {
+            if (!page) return false;
             for (const auto& objPtr : page->objects) {
                 LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-                if (link && link->id == linkObjectId) {
-                    for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                        if (link->linkSlots[i].type == LinkSlot::Type::Markdown &&
-                            link->linkSlots[i].markdownNoteId == noteId) {
-                            link->linkSlots[i].clear();
-                            doc->markPageDirty(vp->currentPageIndex());
-                            vp->update();
-                            break;
+                if (!link || link->id != linkObjectId) continue;
+                for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
+                    if (link->linkSlots[i].type == LinkSlot::Type::Markdown &&
+                        link->linkSlots[i].markdownNoteId == noteId) {
+                        link->linkSlots[i].clear();
+                        if (pageIdxForDirty >= 0) {
+                            doc->markPageDirty(pageIdxForDirty);
                         }
+                        return true;
                     }
-                    break;
+                }
+                return false;  // matched link but no slot — stop searching this container
+            }
+            return false;
+        };
+
+        // Phase M.9: resolve the owning container from the outline
+        // cache first — this works even when the tile is currently
+        // evicted, whereas the old "iterate allLoadedTileCoords()" loop
+        // silently leaked the slot pointer on evicted tiles.
+        bool found = false;
+        int  foundPageIndex = -1;
+        Document::TileCoord foundTileCoord{0, 0};
+        bool isTile = false;
+        {
+            const QVector<LinkOutlineEntry> outline = doc->enumerateLinkOutline();
+            for (const auto& entry : outline) {
+                if (entry.linkObjectId != linkObjectId) continue;
+                if (doc->isEdgeless()) {
+                    foundTileCoord = Document::TileCoord(entry.tileX, entry.tileY);
+                    isTile = true;
+                } else {
+                    foundPageIndex = entry.pageIndex;
+                }
+                break;
+            }
+        }
+
+        if (isTile) {
+            Page* tile = doc->getTile(foundTileCoord.first, foundTileCoord.second);
+            if (tile && tryClearSlotIn(tile, /*pageIdxForDirty=*/-1)) {
+                doc->markTileDirty(foundTileCoord);
+                doc->refreshLinkOutlineFor(foundTileCoord);
+                found = true;
+            }
+        } else if (foundPageIndex >= 0) {
+            if (tryClearSlotIn(doc->page(foundPageIndex), foundPageIndex)) {
+                doc->refreshLinkOutlineFor(foundPageIndex);
+                found = true;
+            }
+        } else {
+            // Cache miss (race or out-of-sync): fall back to the legacy
+            // linear scan so we don't silently leak the slot.
+            if (doc->isEdgeless()) {
+                for (const auto& coord : doc->allLoadedTileCoords()) {
+                    Page* tile = doc->getTile(coord.first, coord.second);
+                    if (tryClearSlotIn(tile, /*pageIdxForDirty=*/-1)) {
+                        doc->markTileDirty(coord);
+                        doc->refreshLinkOutlineFor(coord);
+                        found = true;
+                        break;
+                    }
+                }
+            } else {
+                const int count = doc->pageCount();
+                for (int i = 0; i < count; ++i) {
+                    if (tryClearSlotIn(doc->page(i), i)) {
+                        doc->refreshLinkOutlineFor(i);
+                        found = true;
+                        break;
+                    }
                 }
             }
         }
-        
-        // Refresh sidebar
-        markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+
+        if (found) vp->update();
+        refreshNotesOutline();
     });
     
     // Handle jump to LinkObject
@@ -875,7 +1001,7 @@ void MainWindow::setupUi() {
     connect(markdownNotesSidebar, &MarkdownNotesSidebar::reloadNotesRequested,
             this, [this]() {
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            refreshNotesOutline();
         }
     });
     
@@ -1160,7 +1286,7 @@ void MainWindow::setupUi() {
             
             // Load notes when sidebar becomes visible
             if (checked) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+                refreshNotesOutline();
             }
             
             // Force layout update and reposition action bar
@@ -1268,38 +1394,49 @@ void MainWindow::setupUi() {
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
     
-    // QSplitter for resizable left sidebar
+    // QSplitter for resizable left + right sidebars (markdownNotesSidebar is
+    // the 3rd child so the same splitter gives us handles on both sides).
     m_contentSplitter = new QSplitter(Qt::Horizontal);
     m_contentSplitter->setChildrenCollapsible(false);
     m_contentSplitter->setHandleWidth(3);
     m_contentSplitter->addWidget(m_leftSidebar);
     m_contentSplitter->addWidget(canvasContainer);
-    m_contentSplitter->setStretchFactor(0, 0);  // Sidebar: fixed
+    m_contentSplitter->addWidget(markdownNotesSidebar);
+    m_contentSplitter->setStretchFactor(0, 0);  // Left sidebar: fixed
     m_contentSplitter->setStretchFactor(1, 1);  // Canvas: stretches
-    
-    // Restore persisted sidebar width
+    m_contentSplitter->setStretchFactor(2, 0);  // Right sidebar: fixed
+
+    // Restore persisted sidebar widths
     {
         QSettings s("SpeedyNote", "App");
-        int savedWidth = s.value("ui/leftSidebarWidth", 250).toInt();
-        savedWidth = qBound(180, savedWidth, 500);
-        m_contentSplitter->setSizes({savedWidth, 1});
+        int leftW  = qBound(180, s.value("ui/leftSidebarWidth",  250).toInt(), 500);
+        int rightW = qBound(220, s.value("ui/rightSidebarWidth", 300).toInt(), 600);
+        m_contentSplitter->setSizes({leftW, /*canvas=*/1, rightW});
     }
-    
-    // Debounce timer for saving sidebar width
+
+    // Debounce timer for saving sidebar widths (shared for both sides)
     m_sidebarWidthSaveTimer = new QTimer(this);
     m_sidebarWidthSaveTimer->setSingleShot(true);
     m_sidebarWidthSaveTimer->setInterval(300);
     connect(m_sidebarWidthSaveTimer, &QTimer::timeout, this, [this]() {
         QSettings s("SpeedyNote", "App");
-        s.setValue("ui/leftSidebarWidth", m_leftSidebar->width());
+        // Guard against persisting a stale 0 when either panel is hidden
+        // (QSplitter reports width 0 for hidden children).  With two splitter
+        // handles, dragging the right handle also fires splitterMoved, which
+        // would otherwise clobber the left width with 0 when it's hidden.
+        if (m_leftSidebar && m_leftSidebar->isVisible()) {
+            s.setValue("ui/leftSidebarWidth", m_leftSidebar->width());
+        }
+        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
+            s.setValue("ui/rightSidebarWidth", markdownNotesSidebar->width());
+        }
     });
-    
+
     connect(m_contentSplitter, &QSplitter::splitterMoved, this, [this]() {
         m_sidebarWidthSaveTimer->start();
     });
-    
+
     contentLayout->addWidget(m_contentSplitter, 1);
-    contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
     
     QWidget *contentWidget = new QWidget;
     contentWidget->setLayout(contentLayout);
@@ -1876,15 +2013,59 @@ void MainWindow::setupManagedShortcuts()
         }
     });
     
-    // ===== PDF/Highlighter Features =====
-    createShortcut("pdf.auto_highlight", [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            if (vp->currentTool() == ToolType::Highlighter) {
-                vp->setAutoHighlightEnabled(!vp->isAutoHighlightEnabled());
-            }
-        }
+    // ===== OCR subtoolbar =====
+    // Each shortcut delegates to a public trigger method on OcrSubToolbar,
+    // which forwards to the same button-click path the UI already uses. This
+    // keeps one source of truth for button state / settings / signal emission.
+    createShortcut("ocr.scan_page", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->triggerScanPage();
     });
-    
+    createShortcut("ocr.scan_all", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->triggerScanAll();
+    });
+    createShortcut("ocr.auto_ocr", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->toggleAutoOcr();
+    });
+    createShortcut("ocr.show_text", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->toggleShowText();
+    });
+    createShortcut("ocr.snap_grid", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->toggleSnapToGrid();
+    });
+
+    // ===== Highlighter subtoolbar =====
+    // Style shortcuts drive the dropdown's QAction::trigger() path so the
+    // existing onAutoHighlightStyleTriggered() slot handles persistence,
+    // check-state, icon refresh, and autoHighlightStyleChanged emission.
+    // No current-tool gate: these set the globally persisted style, so users
+    // can pre-configure before switching to the Highlighter tool.
+    using HS = HighlighterSubToolbar::HighlightStyle;
+    createShortcut("highlighter.style_none", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::None);
+    });
+    createShortcut("highlighter.style_cover", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::Cover);
+    });
+    createShortcut("highlighter.style_underline", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::Underline);
+    });
+    createShortcut("highlighter.style_dotted", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::DottedUnderline);
+    });
+    createShortcut("highlighter.toggle_source", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->toggleSelectionSourceFromShortcut();
+    });
+
     // Connect to ShortcutManager's change signal for dynamic updates
     connect(sm, &ShortcutManager::shortcutChanged,
             this, &MainWindow::onShortcutChanged);
@@ -2032,6 +2213,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     if (m_autoHighlightConn) {
         disconnect(m_autoHighlightConn);
         m_autoHighlightConn = {};
+    }
+    // Disconnect highlighter-mode (PDF/OCR) sync connection
+    if (m_highlighterModeConn) {
+        disconnect(m_highlighterModeConn);
+        m_highlighterModeConn = {};
     }
     // Phase D: Disconnect object mode sync connections
     if (m_insertModeConn) {
@@ -2229,20 +2415,41 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_toolbar->setStraightLineMode(viewport->straightLineMode());
     }
     
-    // Phase D: Connect auto-highlight state sync (viewport → subtoolbar)
-    // When Ctrl+H changes the state, update the subtoolbar toggle to match
-    m_autoHighlightConn = connect(viewport, &DocumentViewport::autoHighlightEnabledChanged, 
-                                  this, [this](bool enabled) {
+    // Phase D: Connect auto-highlight style sync (viewport → subtoolbar)
+    // When Ctrl+H or a tab switch changes the style, update the dropdown to match.
+    m_autoHighlightConn = connect(viewport, &DocumentViewport::autoHighlightStyleChanged,
+                                  this, [this](DocumentViewport::HighlightStyle style) {
         if (m_toolbar->highlighterSubToolbar()) {
-            m_toolbar->highlighterSubToolbar()->setAutoHighlightState(enabled);
+            m_toolbar->highlighterSubToolbar()->setAutoHighlightStyle(
+                static_cast<HighlighterSubToolbar::HighlightStyle>(style));
         }
     });
-    
-    // Also sync the current auto-highlight state to the subtoolbar
+
+    // Also sync the current auto-highlight style to the subtoolbar
     if (m_toolbar->highlighterSubToolbar()) {
-        m_toolbar->highlighterSubToolbar()->setAutoHighlightState(viewport->isAutoHighlightEnabled());
+        m_toolbar->highlighterSubToolbar()->setAutoHighlightStyle(
+            static_cast<HighlighterSubToolbar::HighlightStyle>(viewport->autoHighlightStyle()));
     }
-    
+
+    // Connect highlighter-mode (PDF/OCR) sync (viewport -> subtoolbar)
+    m_highlighterModeConn = connect(viewport, &DocumentViewport::highlighterModeChanged,
+                                    this, [this](DocumentViewport::HighlighterMode mode) {
+        if (m_toolbar && m_toolbar->highlighterSubToolbar()) {
+            auto src = (mode == DocumentViewport::HighlighterMode::Ocr)
+                           ? HighlighterSubToolbar::SelectionSource::Ocr
+                           : HighlighterSubToolbar::SelectionSource::Pdf;
+            m_toolbar->highlighterSubToolbar()->setSelectionSourceState(src);
+        }
+    });
+
+    // Also sync the current highlighter mode to the subtoolbar
+    if (m_toolbar->highlighterSubToolbar()) {
+        auto src = (viewport->highlighterMode() == DocumentViewport::HighlighterMode::Ocr)
+                       ? HighlighterSubToolbar::SelectionSource::Ocr
+                       : HighlighterSubToolbar::SelectionSource::Pdf;
+        m_toolbar->highlighterSubToolbar()->setSelectionSourceState(src);
+    }
+
     // Phase D: Connect object mode state sync (viewport → subtoolbar)
     // When Ctrl+< / Ctrl+> / Ctrl+6 / Ctrl+7 changes the mode, update the subtoolbar
     m_insertModeConn = connect(viewport, &DocumentViewport::objectInsertModeChanged,
@@ -2479,54 +2686,43 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     }
     
-    // Phase M.3: Refresh markdown notes sidebar when page changes
+    // Phase M.3 / M.8: Refresh markdown notes sidebar when page changes
     if (markdownNotesSidebar) {
-        // Set edgeless mode (hides page range controls for edgeless documents)
         Document* doc = viewport->document();
         markdownNotesSidebar->setEdgelessMode(doc && doc->isEdgeless());
-        
-        // Set initial page info for search range defaults
+
         if (doc && !doc->isEdgeless()) {
-            markdownNotesSidebar->setCurrentPageInfo(viewport->currentPageIndex(), doc->pageCount());
+            markdownNotesSidebar->setCurrentPageInfo(viewport->currentPageIndex(),
+                                                     doc->pageCount());
         }
-        
+
+        // Page change no longer reloads the outline (loading is O(#links), and
+        // the outline is document-wide); it just moves the L1 highlight.
         m_markdownNotesPageConn = connect(viewport, &DocumentViewport::currentPageChanged,
                 this, [this](int pageIndex) {
             if (!markdownNotesSidebar) return;
-            
-            // Update page info for search range defaults
             DocumentViewport* vp = currentViewport();
             if (vp && vp->document() && !vp->document()->isEdgeless()) {
-                markdownNotesSidebar->setCurrentPageInfo(pageIndex, vp->document()->pageCount());
-            }
-            
-            // Refresh notes display
-            if (markdownNotesSidebar->isVisible()) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+                markdownNotesSidebar->setCurrentPageInfo(pageIndex,
+                                                         vp->document()->pageCount());
+                markdownNotesSidebar->highlightPage(pageIndex);
             }
         });
-        
-        // Load notes for current page if sidebar is visible
+
         if (markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            refreshNotesOutline();
         }
-        
-        // Phase M.5: Handle requestOpenMarkdownNote signal (create/open note)
+
+        // Phase M.5 / M.8: open-note request — expand chain + inflate editor.
         m_markdownNoteOpenConn = connect(viewport, &DocumentViewport::requestOpenMarkdownNote,
-                this, [this](const QString& noteId, const QString& /*linkObjectId*/) {
+                this, [this](const QString& noteId, const QString& linkObjectId) {
             if (!markdownNotesSidebar) return;
-            
-            // Show the markdown notes sidebar if hidden
             if (!markdownNotesSidebar->isVisible()) {
-                toggleMarkdownNotesSidebar();
+                toggleMarkdownNotesSidebar();  // also triggers refreshNotesOutline
+            } else {
+                refreshNotesOutline();
             }
-            
-            // Reload notes to include the new/opened note
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
-            
-            // Scroll to the note and set it to edit mode
-            markdownNotesSidebar->scrollToNote(noteId);
-            markdownNotesSidebar->setNoteEditMode(noteId, true);
+            markdownNotesSidebar->openNoteById(linkObjectId, noteId);
         });
         
         m_userWarningConn = connect(viewport, &DocumentViewport::userWarning,
@@ -2538,7 +2734,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_linkObjectListConn = connect(viewport, &DocumentViewport::linkObjectListMayHaveChanged,
                 this, [this]() {
             if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-                markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+                refreshNotesOutline();
             }
         });
 
@@ -2551,6 +2747,14 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         // OCR: Sync text visibility with the Show Text toggle for the new viewport
         setOcrTextVisibility(m_toolbar->ocrSubToolbar()->isShowTextEnabled());
         setOcrConfidenceVisibility(m_toolbar->ocrSubToolbar()->isConfidenceEnabled());
+
+        // OCR: Restore snap toggle from document's persisted state
+        if (Document* doc = viewport->document()) {
+            OcrSubToolbar* ocrST = m_toolbar->ocrSubToolbar();
+            ocrST->blockSignals(true);
+            ocrST->setSnapToGridChecked(doc->ocrSnapToBackground);
+            ocrST->blockSignals(false);
+        }
 
         // OCR: Sync language for the new document
         if (m_ocrWorker) {
@@ -2680,6 +2884,7 @@ void MainWindow::applyAllSubToolbarValuesToViewport(DocumentViewport* viewport)
     if (m_toolbar->penSubToolbar()) {
         viewport->setPenColor(m_toolbar->penSubToolbar()->currentColor());
         viewport->setPenThickness(m_toolbar->penSubToolbar()->currentThickness());
+        viewport->setPenMinStrokeWidth(m_toolbar->penSubToolbar()->currentMinStrokeWidth());
     }
     
     // Apply marker settings
@@ -4425,6 +4630,13 @@ void MainWindow::updateTheme() {
     if (m_actionBarContainer) {
         m_actionBarContainer->setDarkMode(darkMode);
     }
+
+    // Phase M.8: propagate theme into the right-hand markdown notes sidebar
+    // (and through it to NotesTreePanel + NotesTreeDelegate).  Done last so
+    // any stylesheet that depends on the global palette sees the final state.
+    if (markdownNotesSidebar) {
+        markdownNotesSidebar->setDarkMode(darkMode);
+    }
 }
     
 void MainWindow::saveThemeSettings() {
@@ -4718,6 +4930,9 @@ void MainWindow::connectSubToolbarSignals()
     connect(penST, &PenSubToolbar::penThicknessChanged, this, [this](qreal thickness) {
         if (DocumentViewport* vp = currentViewport()) vp->setPenThickness(thickness);
     });
+    connect(penST, &PenSubToolbar::penMinStrokeWidthChanged, this, [this](qreal minWidth) {
+        if (DocumentViewport* vp = currentViewport()) vp->setPenMinStrokeWidth(minWidth);
+    });
 
     // Marker
     connect(markerST, &MarkerSubToolbar::markerColorChanged, this, [this](const QColor& color) {
@@ -4731,8 +4946,19 @@ void MainWindow::connectSubToolbarSignals()
     connect(highlighterST, &HighlighterSubToolbar::highlighterColorChanged, this, [this](const QColor& color) {
         if (DocumentViewport* vp = currentViewport()) vp->setHighlighterColor(color);
     });
-    connect(highlighterST, &HighlighterSubToolbar::autoHighlightChanged, this, [this](bool enabled) {
-        if (DocumentViewport* vp = currentViewport()) vp->setAutoHighlightEnabled(enabled);
+    connect(highlighterST, &HighlighterSubToolbar::autoHighlightStyleChanged, this,
+            [this](HighlighterSubToolbar::HighlightStyle style) {
+        if (DocumentViewport* vp = currentViewport())
+            vp->setAutoHighlightStyle(static_cast<DocumentViewport::HighlightStyle>(style));
+    });
+    connect(highlighterST, &HighlighterSubToolbar::selectionSourceChanged, this,
+            [this](HighlighterSubToolbar::SelectionSource src) {
+        if (DocumentViewport* vp = currentViewport()) {
+            auto mode = (src == HighlighterSubToolbar::SelectionSource::Ocr)
+                            ? DocumentViewport::HighlighterMode::Ocr
+                            : DocumentViewport::HighlighterMode::Pdf;
+            vp->setHighlighterMode(mode);
+        }
     });
 
     // ObjectSelect
@@ -4779,7 +5005,9 @@ void MainWindow::connectSubToolbarSignals()
         }
         vp->update();
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            // Phase M.8: update just this LinkObject in place (no preview reload,
+            // no collapse of expanded subtrees, no focus loss).
+            markdownNotesSidebar->updateLinkObject(link->id, link->description, color);
         }
     });
 
@@ -4802,7 +5030,7 @@ void MainWindow::connectSubToolbarSignals()
         }
         vp->update();
         if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
-            markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+            markdownNotesSidebar->updateLinkObject(link->id, description, link->iconColor);
         }
     });
 
@@ -4848,6 +5076,14 @@ void MainWindow::connectSubToolbarSignals()
     });
     connect(ocrST, &OcrSubToolbar::confidenceToggled, this, [this](bool enabled) {
         setOcrConfidenceVisibility(enabled);
+    });
+    connect(ocrST, &OcrSubToolbar::snapToGridToggled, this, [this](bool enabled) {
+        DocumentViewport* vp = currentViewport();
+        Document* doc = vp ? vp->document() : nullptr;
+        if (doc) {
+            doc->ocrSnapToBackground = enabled;
+            doc->modified = true;
+        }
     });
 }
 
@@ -5355,6 +5591,8 @@ void MainWindow::setupOcr()
     qRegisterMetaType<QVector<QVector<VectorStroke>>>("QVector<QVector<VectorStroke>>");
     qRegisterMetaType<QVector<QSet<QString>>>("QVector<QSet<QString>>");
     qRegisterMetaType<QVector<OcrTextBlock>>("QVector<OcrTextBlock>");
+    qRegisterMetaType<OcrSnapParams>("OcrSnapParams");
+    qRegisterMetaType<QVector<OcrSnapParams>>("QVector<OcrSnapParams>");
 
     // Start with OCR disabled; the worker thread will report availability after init.
     // (Avoids creating WinRT COM objects on the main thread.)
@@ -5399,6 +5637,8 @@ void MainWindow::triggerOcrForCurrentPage()
 
     m_toolbar->ocrSubToolbar()->setStatusText(tr("Scanning..."));
 
+    const QString docTag = doc->sessionId();
+
     if (doc->isEdgeless()) {
         for (auto coord : doc->allLoadedTileCoords()) {
             Page* tile = doc->getTile(coord.first, coord.second);
@@ -5406,9 +5646,11 @@ void MainWindow::triggerOcrForCurrentPage()
             QVector<VectorStroke> strokes = collectPageStrokes(tile);
             if (!strokes.isEmpty())
                 QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
-                    Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
+                    Q_ARG(QString, docTag + QStringLiteral("|") +
+                                   QString("%1,%2").arg(coord.first).arg(coord.second)),
                     Q_ARG(QVector<VectorStroke>, strokes),
-                    Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+                    Q_ARG(QSet<QString>, tile->suppressedStrokeIds),
+                    Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, tile)));
         }
     } else {
         int pageIndex = vp->currentPageIndex();
@@ -5416,9 +5658,10 @@ void MainWindow::triggerOcrForCurrentPage()
         if (!page) return;
         QVector<VectorStroke> strokes = collectPageStrokes(page);
         QMetaObject::invokeMethod(m_ocrWorker, "processPage", Qt::QueuedConnection,
-            Q_ARG(QString, page->uuid),
+            Q_ARG(QString, docTag + QStringLiteral("|") + page->uuid),
             Q_ARG(QVector<VectorStroke>, strokes),
-            Q_ARG(QSet<QString>, page->suppressedStrokeIds));
+            Q_ARG(QSet<QString>, page->suppressedStrokeIds),
+            Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, page)));
     }
 }
 
@@ -5444,6 +5687,9 @@ void MainWindow::triggerOcrForAllPages()
     QVector<QString> pageIds;
     QVector<QVector<VectorStroke>> strokeSets;
     QVector<QSet<QString>> suppressedSets;
+    QVector<OcrSnapParams> snapParamsVec;
+
+    const QString docTag = doc->sessionId();
 
     if (doc->isEdgeless()) {
         auto allCoords = doc->allKnownTileCoords();
@@ -5461,9 +5707,11 @@ void MainWindow::triggerOcrForAllPages()
             }
             if (loadedSet.count(coord) == 0)
                 m_ocrTempLoadedTiles.insert(coord);
-            pageIds.append(QString("%1,%2").arg(coord.first).arg(coord.second));
+            pageIds.append(docTag + QStringLiteral("|") +
+                           QString("%1,%2").arg(coord.first).arg(coord.second));
             strokeSets.append(strokes);
             suppressedSets.append(tile->suppressedStrokeIds);
+            snapParamsVec.append(buildOcrSnapParams(doc, tile));
         }
 
         if (!m_ocrTempLoadedTiles.empty())
@@ -5472,9 +5720,10 @@ void MainWindow::triggerOcrForAllPages()
         for (int i = 0; i < doc->pageCount(); ++i) {
             Page* page = doc->page(i);
             if (!page) continue;
-            pageIds.append(page->uuid);
+            pageIds.append(docTag + QStringLiteral("|") + page->uuid);
             strokeSets.append(collectPageStrokes(page));
             suppressedSets.append(page->suppressedStrokeIds);
+            snapParamsVec.append(buildOcrSnapParams(doc, page));
         }
     }
 
@@ -5482,7 +5731,8 @@ void MainWindow::triggerOcrForAllPages()
         QMetaObject::invokeMethod(m_ocrWorker, "processBatch", Qt::QueuedConnection,
             Q_ARG(QVector<QString>, pageIds),
             Q_ARG(QVector<QVector<VectorStroke>>, strokeSets),
-            Q_ARG(QVector<QSet<QString>>, suppressedSets));
+            Q_ARG(QVector<QSet<QString>>, suppressedSets),
+            Q_ARG(QVector<OcrSnapParams>, snapParamsVec));
 }
 
 void MainWindow::onDebounceTimeout()
@@ -5493,6 +5743,8 @@ void MainWindow::onDebounceTimeout()
 
     QMetaObject::invokeMethod(m_ocrWorker, "setLanguage", Qt::QueuedConnection,
         Q_ARG(QString, resolveOcrLanguage(doc)));
+
+    const QString docTag = doc->sessionId();
 
     if (doc->isEdgeless()) {
         auto dirtyTiles = vp->takeOcrDirtyTiles();
@@ -5509,9 +5761,11 @@ void MainWindow::onDebounceTimeout()
                 anyQueued = true;
             }
             QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
-                Q_ARG(QString, QString("%1,%2").arg(coord.first).arg(coord.second)),
+                Q_ARG(QString, docTag + QStringLiteral("|") +
+                               QString("%1,%2").arg(coord.first).arg(coord.second)),
                 Q_ARG(QVector<VectorStroke>, strokes),
-                Q_ARG(QSet<QString>, tile->suppressedStrokeIds));
+                Q_ARG(QSet<QString>, tile->suppressedStrokeIds),
+                Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, tile)));
         }
     } else {
         int idx = vp->currentPageIndex();
@@ -5523,9 +5777,10 @@ void MainWindow::onDebounceTimeout()
 
         m_toolbar->ocrSubToolbar()->setStatusText(tr("Auto-scanning..."));
         QMetaObject::invokeMethod(m_ocrWorker, "processPageIncremental", Qt::QueuedConnection,
-            Q_ARG(QString, page->uuid),
+            Q_ARG(QString, docTag + QStringLiteral("|") + page->uuid),
             Q_ARG(QVector<VectorStroke>, strokes),
-            Q_ARG(QSet<QString>, page->suppressedStrokeIds));
+            Q_ARG(QSet<QString>, page->suppressedStrokeIds),
+            Q_ARG(OcrSnapParams, buildOcrSnapParams(doc, page)));
     }
 }
 
@@ -5536,40 +5791,84 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     Document::TileCoord tileCoord{0, 0};
     bool tileCoordResolved = false;
 
-    // Try coord-keyed lookup first (edgeless tiles use "tx,ty" as pageId)
-    QStringList parts = pageId.split(',');
+    // Split the tag prefix (docSessionId|localId). The docTag ties this result
+    // back to the exact Document that queued it, so sibling edgeless notebooks
+    // with the same tile coords can never receive each other's OCR output.
+    QString docTag;
+    QString localId = pageId;
+    const int sep = pageId.indexOf(QLatin1Char('|'));
+    if (sep > 0) {
+        docTag  = pageId.left(sep);
+        localId = pageId.mid(sep + 1);
+    }
+
+    Document* targetDoc = nullptr;
+    if (!docTag.isEmpty()) {
+        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+            Document* candidate = m_documentManager->documentAt(d);
+            if (candidate && candidate->sessionId() == docTag) {
+                targetDoc = candidate;
+                break;
+            }
+        }
+        // Owning document was closed between queue and response -> drop.
+        if (!targetDoc) return;
+    }
+
+    // Edgeless tile lookup ("tx,ty"). When tagged, restrict to targetDoc;
+    // when untagged (legacy), fall back to the first match across all docs.
+    QStringList parts = localId.split(',');
     if (parts.size() == 2) {
         bool okX, okY;
         int tx = parts[0].toInt(&okX);
         int ty = parts[1].toInt(&okY);
         if (okX && okY) {
-            for (int d = 0; d < m_documentManager->documentCount(); ++d) {
-                Document* candidate = m_documentManager->documentAt(d);
-                if (candidate && candidate->isEdgeless()) {
-                    Page* tile = candidate->getTile(tx, ty);
-                    if (tile) {
+            if (targetDoc) {
+                if (targetDoc->isEdgeless()) {
+                    if (Page* tile = targetDoc->getTile(tx, ty)) {
                         page = tile;
-                        doc = candidate;
+                        doc = targetDoc;
                         tileCoord = {tx, ty};
                         tileCoordResolved = true;
-                        break;
+                    }
+                }
+            } else {
+                for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+                    Document* candidate = m_documentManager->documentAt(d);
+                    if (candidate && candidate->isEdgeless()) {
+                        Page* tile = candidate->getTile(tx, ty);
+                        if (tile) {
+                            page = tile;
+                            doc = candidate;
+                            tileCoord = {tx, ty};
+                            tileCoordResolved = true;
+                            break;
+                        }
                     }
                 }
             }
         }
     }
 
-    // Fallback: UUID-based lookup (paged mode)
+    // Fallback: UUID-based lookup (paged mode).
     if (!page) {
-        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
-            Document* candidate = m_documentManager->documentAt(d);
-            if (!candidate) continue;
-
-            int idx = candidate->pageIndexByUuid(pageId);
+        if (targetDoc) {
+            int idx = targetDoc->pageIndexByUuid(localId);
             if (idx >= 0) {
-                page = candidate->page(idx);
-                doc = candidate;
-                break;
+                page = targetDoc->page(idx);
+                doc = targetDoc;
+            }
+        } else {
+            for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+                Document* candidate = m_documentManager->documentAt(d);
+                if (!candidate) continue;
+
+                int idx = candidate->pageIndexByUuid(localId);
+                if (idx >= 0) {
+                    page = candidate->page(idx);
+                    doc = candidate;
+                    break;
+                }
             }
         }
     }
@@ -5580,10 +5879,27 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
 
     syncOcrTextObjects(page, blocks);
 
+    // Invalidate the Highlighter's OCR-block cache on any viewport currently
+    // showing this document, so a new drag will see the refreshed OCR data.
+    // For tiles we can't cheaply compute a "page index" - invalidate wholesale.
+    if (m_splitViewManager) {
+        const int pageIdx = tileCoordResolved ? -1 : doc->pageIndexByUuid(localId);
+        m_splitViewManager->forEachTabManager([&](TabManager* tm, SplitViewManager::Pane) {
+            if (!tm) return;
+            const int n = tm->tabCount();
+            for (int i = 0; i < n; ++i) {
+                DocumentViewport* vp = tm->viewportAt(i);
+                if (vp && vp->document() == doc) {
+                    vp->invalidateOcrBlockCache(pageIdx);
+                }
+            }
+        });
+    }
+
     if (tileCoordResolved)
         doc->saveTileOcr(tileCoord);
     else
-        doc->savePageOcr(pageId, page);
+        doc->savePageOcr(localId, page);
 
     int wordCount = 0;
     for (const auto& b : blocks)
@@ -5616,7 +5932,29 @@ void MainWindow::onOcrBatchFinished(int pagesScanned, int pagesWithText)
 
 void MainWindow::onOcrError(const QString& pageId, const QString& message)
 {
-    Q_UNUSED(pageId);
+    // Drop errors whose owning Document has been closed, and silence errors
+    // from a non-current document so user doesn't see A's failure on B's
+    // toolbar after switching tabs. Legacy untagged pageIds (no '|') fall
+    // through and always surface (backwards-compat safety net).
+    const int sep = pageId.indexOf(QLatin1Char('|'));
+    if (sep > 0) {
+        const QString docTag = pageId.left(sep);
+        Document* owningDoc = nullptr;
+        for (int d = 0; d < m_documentManager->documentCount(); ++d) {
+            Document* candidate = m_documentManager->documentAt(d);
+            if (candidate && candidate->sessionId() == docTag) {
+                owningDoc = candidate;
+                break;
+            }
+        }
+        if (!owningDoc)
+            return;
+
+        DocumentViewport* vp = currentViewport();
+        if (!vp || vp->document() != owningDoc)
+            return;
+    }
+
     m_toolbar->ocrSubToolbar()->setStatusText(tr("OCR error: %1").arg(message));
     m_toolbar->ocrSubToolbar()->clearStatusAfterDelay(8000);
 }
@@ -5664,7 +6002,23 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
         page->removeObject(oid);
 
     bool showText = m_toolbar->ocrSubToolbar()->isShowTextEnabled();
+    bool showConf = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
     bool dark = isDarkMode();
+
+    // Pre-compute snap rendering state once for all blocks
+    DocumentViewport* vp = currentViewport();
+    Document* doc = vp ? vp->document() : nullptr;
+    bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
+    bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
+    bool pageSnap = doc && doc->ocrSnapToBackground && (isGrid || isLines);
+    int snapSpacing = isGrid ? page->gridSpacing : page->lineSpacing;
+    bool pageCjk = false;
+    if (pageSnap && isGrid) {
+        QSettings settings("SpeedyNote", "App");
+        if (settings.value("ocrCjkGridMode", false).toBool()) {
+            pageCjk = isCjkOcrLanguage(resolveOcrLanguage(doc));
+        }
+    }
 
     for (const auto& block : blocks) {
         if (block.dirty || block.text.isEmpty())
@@ -5683,8 +6037,12 @@ void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blo
         QColor color = OcrTextObject::dominantStrokeColor(page, block.sourceStrokeIds);
         auto obj = OcrTextObject::createFromBlock(block, color, dark);
         obj->visible = showText;
-        obj->showConfidence = m_toolbar->ocrSubToolbar()->isConfidenceEnabled();
+        obj->showConfidence = showConf;
         obj->layerAffinity = OcrTextObject::resolveLayerAffinity(page, block.sourceStrokeIds);
+        obj->ocrSnapEnabled = pageSnap;
+        obj->ocrGridSpacing = snapSpacing;
+        obj->ocrCjkGridMode = pageCjk;
+
         page->addObject(std::move(obj));
     }
 }
@@ -5700,12 +6058,33 @@ void MainWindow::setOcrTextVisibility(bool visible)
     doc->setOcrDarkMode(dark);
     QColor bg = dark ? QColor(40, 40, 40, 180) : QColor(255, 255, 255, 180);
 
-    auto setOnPage = [visible, bg](Page* page) {
+    bool snapEnabled = doc->ocrSnapToBackground;
+    bool cjkGlobal = false;
+    if (snapEnabled) {
+        QSettings snapSettings("SpeedyNote", "App");
+        cjkGlobal = snapSettings.value("ocrCjkGridMode", false).toBool();
+    }
+
+    auto setOnPage = [this, visible, bg, doc, snapEnabled, cjkGlobal](Page* page) {
         if (!page) return;
+
+        bool isGrid = (page->backgroundType == Page::BackgroundType::Grid);
+        bool isLines = (page->backgroundType == Page::BackgroundType::Lines);
+        bool pageSnap = snapEnabled && (isGrid || isLines);
+        int spacing = isGrid ? page->gridSpacing : page->lineSpacing;
+        bool pageCjk = false;
+        if (pageSnap && cjkGlobal && isGrid) {
+            pageCjk = isCjkOcrLanguage(resolveOcrLanguage(doc));
+        }
+
         for (const auto& obj : page->objects) {
             if (obj && obj->type() == QStringLiteral("ocr_text")) {
                 obj->visible = visible;
-                static_cast<TextBoxObject*>(obj.get())->backgroundColor = bg;
+                auto* ocr = static_cast<OcrTextObject*>(obj.get());
+                ocr->backgroundColor = bg;
+                ocr->ocrSnapEnabled = pageSnap;
+                ocr->ocrGridSpacing = spacing;
+                ocr->ocrCjkGridMode = pageCjk;
             }
         }
     };
@@ -5761,6 +6140,21 @@ QString MainWindow::resolveOcrLanguage(Document* doc) const
         return doc->ocrLanguage;
     QSettings settings("SpeedyNote", "App");
     return settings.value("ocrLanguage").toString();
+}
+
+OcrSnapParams MainWindow::buildOcrSnapParams(Document* doc, Page* page) const
+{
+    OcrSnapParams snap;
+    if (!doc || !page) return snap;
+
+    snap.enabled = doc->ocrSnapToBackground;
+    QSettings settings("SpeedyNote", "App");
+    snap.cjkGridMode = settings.value("ocrCjkGridMode", false).toBool();
+    snap.gridSpacing = page->gridSpacing;
+    snap.lineSpacing = page->lineSpacing;
+    snap.backgroundIsGrid = (page->backgroundType == Page::BackgroundType::Grid);
+    snap.backgroundIsLines = (page->backgroundType == Page::BackgroundType::Lines);
+    return snap;
 }
 
 void MainWindow::showOcrLanguageDialog()
@@ -7026,13 +7420,30 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     if (!markdownNotesSidebar) return;
     
     bool isVisible = markdownNotesSidebar->isVisible();
-    
+    bool makeVisible = !isVisible;
+
     // Note: Markdown notes sidebar (right side) is independent of 
     // outline/bookmarks sidebars (left side), so we don't hide them here.
     // The left sidebars are mutually exclusive with each other, but not with markdown notes.
-    
-    markdownNotesSidebar->setVisible(!isVisible);
-    markdownNotesSidebarVisible = !isVisible;
+
+    // When transitioning from hidden → visible, re-apply the persisted
+    // width.  QSplitter would otherwise reopen the panel at whatever
+    // size the splitter last computed for it (often the minimum, if the
+    // canvas got narrow while the panel was hidden).
+    if (makeVisible && m_contentSplitter) {
+        QSettings s("SpeedyNote", "App");
+        int rightW = qBound(220, s.value("ui/rightSidebarWidth", 300).toInt(), 600);
+        QList<int> sizes = m_contentSplitter->sizes();
+        if (sizes.size() == 3) {
+            const int total   = sizes[0] + sizes[1] + sizes[2];
+            const int leftW   = sizes[0];
+            const int canvasW = qMax(1, total - leftW - rightW);
+            m_contentSplitter->setSizes({leftW, canvasW, rightW});
+        }
+    }
+
+    markdownNotesSidebar->setVisible(makeVisible);
+    markdownNotesSidebarVisible = makeVisible;
     
     // Sync NavigationBar button state when sidebar is toggled programmatically
     if (m_navigationBar) {
@@ -7041,7 +7452,7 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     
     // Phase M.3: Load notes when sidebar becomes visible
     if (markdownNotesSidebarVisible) {
-        markdownNotesSidebar->loadNotesForPage(loadNotesForCurrentPage());
+        refreshNotesOutline();
     }
     
     // Force immediate layout update so canvas repositions correctly
@@ -7067,77 +7478,29 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     });
 }
 
-// Phase M.3: Load markdown notes for current page from LinkObjects
-QList<NoteDisplayData> MainWindow::loadNotesForCurrentPage()
+// Phase M.8: Rebuild right-sidebar outline tree (no .md file I/O).
+// The sidebar stores a compact LinkOutlineEntry per markdown-bearing link;
+// previews and full bodies are loaded lazily by NotesTreePanel.
+void MainWindow::refreshNotesOutline()
 {
-    QList<NoteDisplayData> results;
-    
+    if (!markdownNotesSidebar) return;
+
     DocumentViewport* vp = currentViewport();
-    if (!vp || !vp->document()) return results;
-    
-    Document* doc = vp->document();
-    QString notesDir = doc->notesPath();
-    if (notesDir.isEmpty()) return results;
-    
-    // Helper lambda to extract notes from a page/tile
-    auto extractNotesFromPage = [&](Page* page) {
-        if (!page) return;
-        
-        for (const auto& objPtr : page->objects) {
-            LinkObject* link = dynamic_cast<LinkObject*>(objPtr.get());
-            if (!link) continue;
-            
-            // Check each slot for markdown type
-            for (int i = 0; i < LinkObject::SLOT_COUNT; ++i) {
-                const LinkSlot& slot = link->linkSlots[i];
-                if (slot.type != LinkSlot::Type::Markdown) continue;
-                
-                // Load the note file
-                QString filePath = notesDir + "/" + slot.markdownNoteId + ".md";
-                MarkdownNote note = MarkdownNote::loadFromFile(filePath);
-                
-                if (!note.isValid()) continue;  // File not found
-                
-                // Build display data
-                NoteDisplayData displayData;
-                displayData.noteId = note.id;
-                displayData.title = note.title;
-                displayData.content = note.content;
-                displayData.linkObjectId = link->id;
-                displayData.color = link->iconColor;
-                displayData.description = link->description;
-                
-                results.append(displayData);
-            }
-        }
-    };
-    
-    if (doc->isEdgeless()) {
-        // Edgeless mode: iterate through all loaded tiles
-        for (const auto& coord : doc->allLoadedTileCoords()) {
-            Page* tile = doc->getTile(coord.first, coord.second);
-            extractNotesFromPage(tile);
-        }
-        
-        // M.7.2: Update hidden tiles warning
-        int loadedCount = doc->tileCount();
-        int totalCount = doc->tileIndexCount();
-        if (markdownNotesSidebar) {
-            markdownNotesSidebar->setHiddenTilesWarning(loadedCount < totalCount, loadedCount, totalCount);
-        }
-    } else {
-        // Paged mode: use current page
-        int pageIndex = vp->currentPageIndex();
-        Page* page = doc->page(pageIndex);
-        extractNotesFromPage(page);
-        
-        // M.7.2: Hide warning for paged mode
-        if (markdownNotesSidebar) {
-            markdownNotesSidebar->setHiddenTilesWarning(false, 0, 0);
-        }
+    if (!vp || !vp->document()) {
+        markdownNotesSidebar->setNotesDir(QString());
+        markdownNotesSidebar->setOutline({}, /*edgeless=*/false);
+        return;
     }
-    
-    return results;
+
+    // Phase M.9: enumerateLinkOutline() is now a flat snapshot of the
+    // persistent link-outline cache; no force-load of pages/tiles.  The
+    // outline survives tile eviction in edgeless mode — no hidden-tiles
+    // warning is needed because the user never sees an incomplete view.
+    Document* doc = vp->document();
+    markdownNotesSidebar->setNotesDir(doc->notesPath());
+    markdownNotesSidebar->setEdgelessMode(doc->isEdgeless());
+    markdownNotesSidebar->setOutline(doc->enumerateLinkOutline(),
+                                     doc->isEdgeless());
 }
 
 // Phase M.3: Navigate to and select a LinkObject
@@ -7151,71 +7514,109 @@ void MainWindow::navigateToLinkObject(const QString& linkObjectId)
     InsertedObject* foundObject = nullptr;
     
     if (doc->isEdgeless()) {
-        // Edgeless mode: search through loaded tiles
+        // Phase M.9: Resolve owning tile from the persistent outline
+        // cache — works even when the tile is not currently resident.
         int foundTileX = 0;
         int foundTileY = 0;
-        
-        for (const auto& coord : doc->allLoadedTileCoords()) {
-            Page* tile = doc->getTile(coord.first, coord.second);
-            if (!tile) continue;
-            
+        QPointF cachedDocPos;
+        bool gotFromCache = false;
+
+        const QVector<LinkOutlineEntry> outline = doc->enumerateLinkOutline();
+        for (const auto& entry : outline) {
+            if (entry.linkObjectId == linkObjectId) {
+                foundTileX   = entry.tileX;
+                foundTileY   = entry.tileY;
+                cachedDocPos = entry.docPos;
+                gotFromCache = true;
+                break;
+            }
+        }
+
+        if (!gotFromCache) {
+            qWarning() << "navigateToLinkObject: LinkObject not in outline cache:" << linkObjectId;
+            return;
+        }
+
+        // Lazy-load the owning tile (getTile materializes it if needed).
+        Page* tile = doc->getTile(foundTileX, foundTileY);
+        if (tile) {
             for (const auto& objPtr : tile->objects) {
                 if (objPtr->id == linkObjectId) {
                     foundObject = objPtr.get();
-                    foundTileX = coord.first;
-                    foundTileY = coord.second;
                     break;
                 }
             }
-            if (foundObject) break;
         }
-        
-        if (!foundObject) {
-            qWarning() << "navigateToLinkObject: LinkObject not found in loaded tiles:" << linkObjectId;
-            return;
+
+        // Fallback target: cache position if the tile / object can't
+        // be resolved (e.g. disk file moved).  Navigation still works;
+        // only object selection is skipped.
+        QPointF objectCenter;
+        if (foundObject) {
+            const QPointF tileOrigin(foundTileX * Document::EDGELESS_TILE_SIZE,
+                                      foundTileY * Document::EDGELESS_TILE_SIZE);
+            objectCenter = tileOrigin + foundObject->position +
+                QPointF(foundObject->size.width() / 2.0,
+                        foundObject->size.height() / 2.0);
+        } else {
+            objectCenter = cachedDocPos +
+                QPointF(LinkObject::ICON_SIZE / 2.0,
+                        LinkObject::ICON_SIZE / 2.0);
         }
-        
-        // Calculate document-global position (tile origin + object position)
-        QPointF tileOrigin(foundTileX * Document::EDGELESS_TILE_SIZE,
-                           foundTileY * Document::EDGELESS_TILE_SIZE);
-        QPointF objectCenter = tileOrigin + foundObject->position + 
-            QPointF(foundObject->size.width() / 2.0, foundObject->size.height() / 2.0);
-        
-        // Navigate to the object position (reuses back-link navigation)
+
         vp->navigateToEdgelessPosition(foundTileX, foundTileY, objectCenter);
-        
-        // Select the object
-        vp->selectObject(foundObject);
-        
+        if (foundObject) vp->selectObject(foundObject);
+
     } else {
-        // Paged mode: search through pages
+        // Paged mode: resolve owning page from the outline cache, then
+        // lazy-load only that page (Phase M.9).  Falls back to a full
+        // linear scan if the cache miss ever happens.
         int currentPage = vp->currentPageIndex();
         int foundPageIndex = -1;
-        
-        // Helper lambda to search a page
-        auto searchPage = [&](int pageIdx) -> bool {
-            Page* page = doc->page(pageIdx);
-            if (!page) return false;
-            
-            for (const auto& objPtr : page->objects) {
-                if (objPtr->id == linkObjectId) {
-                    foundObject = objPtr.get();
-                    foundPageIndex = pageIdx;
-                    return true;
-                }
-            }
-            return false;
-        };
-        
-        // Search current page first
-        if (!searchPage(currentPage)) {
-            // Not on current page - search all pages
-            for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
-                if (pageIdx == currentPage) continue;  // Already checked
-                if (searchPage(pageIdx)) break;
+
+        const QVector<LinkOutlineEntry> outline = doc->enumerateLinkOutline();
+        for (const auto& entry : outline) {
+            if (entry.linkObjectId == linkObjectId) {
+                foundPageIndex = entry.pageIndex;
+                break;
             }
         }
-        
+
+        if (foundPageIndex >= 0) {
+            Page* page = doc->page(foundPageIndex);
+            if (page) {
+                for (const auto& objPtr : page->objects) {
+                    if (objPtr->id == linkObjectId) {
+                        foundObject = objPtr.get();
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Legacy fallback: outline cache missing this link for some
+        // reason.  Scan loaded pages + current page so we don't crash.
+        if (!foundObject) {
+            auto searchPage = [&](int pageIdx) -> bool {
+                Page* page = doc->page(pageIdx);
+                if (!page) return false;
+                for (const auto& objPtr : page->objects) {
+                    if (objPtr->id == linkObjectId) {
+                        foundObject = objPtr.get();
+                        foundPageIndex = pageIdx;
+                        return true;
+                    }
+                }
+                return false;
+            };
+            if (!searchPage(currentPage)) {
+                for (int pageIdx = 0; pageIdx < doc->pageCount(); ++pageIdx) {
+                    if (pageIdx == currentPage) continue;
+                    if (searchPage(pageIdx)) break;
+                }
+            }
+        }
+
         if (!foundObject) {
             qWarning() << "navigateToLinkObject: LinkObject not found:" << linkObjectId;
             return;

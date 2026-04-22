@@ -487,6 +487,23 @@ public:
      * @brief Get the current pen thickness.
      */
     qreal penThickness() const { return m_penThickness; }
+
+    /**
+     * @brief Set the minimum stroke width for the active pen preset.
+     *
+     * The value is applied at stroke capture time: per-point pressures are
+     * floored so the rendered width never drops below this value. Pass 0
+     * for full pressure sensitivity; pass the preset thickness for uniform
+     * (non-pressure) strokes.  Marker / eraser are unaffected.
+     *
+     * @param minWidth Minimum width in pt.  Clamped into `[0.0, 100.0]`.
+     */
+    void setPenMinStrokeWidth(qreal minWidth);
+
+    /**
+     * @brief Get the current pen minimum stroke width.
+     */
+    qreal penMinStrokeWidth() const { return m_penMinStrokeWidth; }
     
     /**
      * @brief Set the eraser size.
@@ -542,22 +559,77 @@ public:
     bool straightLineMode() const { return m_straightLineMode; }
     
     // ===== Auto-Highlight Mode (Phase D) =====
-    
+
     /**
-     * @brief Enable or disable auto-highlight mode.
-     * @param enabled True to auto-create highlight strokes on selection release.
-     * 
-     * When enabled, releasing mouse after text selection automatically
-     * creates highlight strokes. When disabled, selection remains until
-     * user copies or cancels. Called from HighlighterSubToolbar.
+     * @brief Style of auto-generated highlight stroke.
+     *
+     * - None:            auto-highlight is off; selection remains until copy/cancel.
+     * - Cover:           thick horizontal line covering the text (original behavior).
+     * - Underline:       thin solid line along the bottom of each highlight rect.
+     * - DottedUnderline: sequence of round dots along the bottom of each highlight
+     *                    rect (materialized as tiny solid `VectorStroke` dots
+     *                    grouped into a single `UndoAction` per line).
+     *
+     * Persisted values: None=0, Cover=1, Underline=2, DottedUnderline=3. The 0/1
+     * mapping preserves backward-compat with the pre-existing `autoHighlight`
+     * boolean QSetting (false=>None, true=>Cover).
      */
-    void setAutoHighlightEnabled(bool enabled);
-    
+    enum class HighlightStyle {
+        None = 0,
+        Cover = 1,
+        Underline = 2,
+        DottedUnderline = 3,
+    };
+
     /**
-     * @brief Check if auto-highlight mode is enabled.
+     * @brief Set the auto-highlight style.
+     * @param style New style; HighlightStyle::None disables auto-highlight.
+     *
+     * When set to anything other than None, releasing the pointer after a
+     * text selection automatically creates highlight strokes of the chosen
+     * style. Called from HighlighterSubToolbar.
      */
-    bool isAutoHighlightEnabled() const { return m_autoHighlightEnabled; }
-    
+    void setAutoHighlightStyle(HighlightStyle style);
+
+    /**
+     * @brief Get the current auto-highlight style.
+     */
+    HighlightStyle autoHighlightStyle() const { return m_autoHighlightStyle; }
+
+    // ===== Highlighter Selection Source (PDF vs OCR) =====
+
+    /**
+     * @brief What layer the Highlighter tool extracts text from.
+     *
+     * - Pdf: selects embedded PDF text (requires a PDF background).
+     * - Ocr: selects per-character text from OCR blocks attached to the page
+     *        (works for any page that has OCR results, regardless of whether
+     *        the "show recognized text" overlay is visible).
+     */
+    enum class HighlighterMode { Pdf = 0, Ocr = 1 };
+
+    /**
+     * @brief Get the current highlighter selection source.
+     */
+    HighlighterMode highlighterMode() const { return m_highlighterMode; }
+
+    /**
+     * @brief Set the highlighter selection source.
+     *
+     * Any in-flight text selection is cleared when the mode changes.
+     * Emits highlighterModeChanged() only if the value actually changed.
+     */
+    void setHighlighterMode(HighlighterMode mode);
+
+    /**
+     * @brief Invalidate cached OCR text blocks for (optionally) one page.
+     *
+     * Called by external code (e.g. MainWindow after an OCR rescan rewrites
+     * Page::ocrTextBlocks) to make sure the next highlighter drag sees the
+     * fresh data. @p pageIndex < 0 means "invalidate unconditionally".
+     */
+    void invalidateOcrBlockCache(int pageIndex = -1);
+
     /**
      * @brief Set the highlighter color (used for text highlight strokes).
      * @param color The new highlighter color (alpha controls opacity).
@@ -1734,12 +1806,21 @@ signals:
     void textSelected(const QString& text);
     
     /**
-     * @brief Emitted when auto-highlight mode changes.
-     * 
-     * Phase B: Can be connected to subtoolbar toggle button to sync state.
-     * @param enabled New auto-highlight state.
+     * @brief Emitted when the auto-highlight style changes.
+     *
+     * Routed by MainWindow to the Highlighter subtoolbar so the dropdown
+     * reflects the active viewport's current style on tab switches.
+     * @param style New auto-highlight style.
      */
-    void autoHighlightEnabledChanged(bool enabled);
+    void autoHighlightStyleChanged(HighlightStyle style);
+
+    /**
+     * @brief Emitted when the highlighter selection source (PDF vs OCR) changes.
+     *
+     * MainWindow routes this back to HighlighterSubToolbar so the per-viewport
+     * mode toggle stays in sync on tab switches.
+     */
+    void highlighterModeChanged(HighlighterMode mode);
     
     /**
      * @brief Emitted when a markdown note should be opened in sidebar.
@@ -1869,6 +1950,10 @@ private:
     ToolType m_currentTool = ToolType::Pen;
     QColor m_penColor = Qt::black;    ///< CUSTOMIZABLE: Default pen color (user preference)
     qreal m_penThickness = 5.0;       ///< CUSTOMIZABLE: Default pen thickness (range: 1-50 document units)
+    qreal m_penMinStrokeWidth = 0.3;  ///< Per-preset minimum stroke width (pt) for the active Pen preset.
+                                      ///< Floored into per-point pressure at stroke capture.  0 = full
+                                      ///< pressure sensitivity; equal to m_penThickness = uniform stroke.
+                                      ///< MainWindow keeps this in sync with PenSubToolbar.
     qreal m_eraserSize = 20.0;        ///< CUSTOMIZABLE: Default eraser radius (range: 5-100 document units)
     EraserMode m_eraserMode = EraserMode::Normal;  ///< Current eraser mode
     bool m_isDrawingEraserLasso = false;            ///< Currently drawing an eraser lasso region
@@ -1995,19 +2080,31 @@ private:
      * The selection flows character-by-character, not as a rectangle.
      */
     struct TextSelection {
+        /**
+         * @brief Which cache the box indices below reference.
+         *
+         * - Pdf: indices refer to m_textBoxCache (PDF text boxes).
+         *        highlightRects are in PDF coordinates and must be scaled by
+         *        PDF_TO_PAGE_SCALE when rendering or creating strokes.
+         * - Ocr: indices refer to m_ocrBlockCache (OCR blocks). highlightRects
+         *        are already in page coordinates.
+         */
+        enum class Source { Pdf = 0, Ocr = 1 };
+        Source source = Source::Pdf;
+
         int pageIndex = -1;                     ///< Page being selected from (-1 = none)
         
         // Start position (anchor) - where selection began
-        int startBoxIndex = -1;                 ///< Index into m_textBoxCache
+        int startBoxIndex = -1;                 ///< Index into m_textBoxCache / m_ocrBlockCache
         int startCharIndex = -1;                ///< Character index within that box (-1 = end of box)
         
         // End position (cursor) - current selection endpoint
-        int endBoxIndex = -1;                   ///< Index into m_textBoxCache
+        int endBoxIndex = -1;                   ///< Index into m_textBoxCache / m_ocrBlockCache
         int endCharIndex = -1;                  ///< Character index within that box
         
         // Computed from start/end positions
         QString selectedText;                   ///< All characters from start to end
-        QVector<QRectF> highlightRects;         ///< Per-line highlight rectangles (PDF coords)
+        QVector<QRectF> highlightRects;         ///< Per-line highlight rectangles (PDF or page coords, see `source`)
         
         bool isSelecting = false;               ///< Currently dragging?
         
@@ -2021,6 +2118,7 @@ private:
         }
         
         void clear() {
+            source = Source::Pdf;
             pageIndex = -1;
             startBoxIndex = startCharIndex = -1;
             endBoxIndex = endCharIndex = -1;
@@ -2039,10 +2137,48 @@ private:
     // Link cache (loaded on-demand for current page) - Phase D.1
     QVector<PdfLink> m_linkCache;
     int m_linkCachePageIndex = -1;
-    
+
+    // ============================================================================
+    // OCR Highlighter Cache (parallel to PDF text-box cache)
+    // ============================================================================
+
+    /**
+     * @brief Cached per-character bounding boxes for one OCR block.
+     *
+     * OCR blocks (OcrTextBlock) expose either per-word segments or a single
+     * bounding rect for the whole block. To mirror the PDF selection experience
+     * we precompute a per-character bounding rect for every character in the
+     * block's logical text, using proportional splitting within each word
+     * segment (same approach as PdfSearchEngine::searchOcrBlocks).
+     *
+     * All rectangles are in **page-local (page) coordinates**, which is what
+     * OcrTextBlock exposes directly - no PDF_TO_PAGE_SCALE conversion needed.
+     */
+    struct OcrBlockRef {
+        QString text;                   ///< Concatenated reading-order text of the block
+        QRectF blockRect;               ///< Block bounding rect (page coords)
+        QVector<QRectF> charRects;      ///< Per-character rects, size == text.size() (page coords)
+        QVector<int> lineBreaks;        ///< Indices (into text) where a new visual line begins (sorted)
+    };
+
+    QVector<OcrBlockRef> m_ocrBlockCache;
+    int m_ocrBlockCachePageIndex = -1;
+    /// In edgeless mode, records Document::tileLoadVersion() at cache-build
+    /// time so subsequent presses can skip the rebuild when the loaded tile
+    /// set is unchanged. Unused by paged mode.
+    quint64 m_ocrBlockCacheTileVersion = 0;
+    mutable int m_lastOcrHitBlockIndex = -1;  ///< PERF: spatial locality hint for findOcrCharAtPoint
+
+    /// Rebuild m_ocrBlockCache for the given page if not already cached.
+    void loadOcrBlocksForPage(int pageIndex);
+
+    /// Find which OCR block/char (if any) is under the given page-local point.
+    CharacterPosition findOcrCharAtPoint(const QPointF& pagePoint) const;
+
     // Highlighter tool settings
     QColor m_highlighterColor = QColor(255, 255, 0, 128);  ///< Yellow, 50% alpha
-    bool m_autoHighlightEnabled = false;  ///< When true, releasing selection auto-creates stroke (Phase B)
+    HighlightStyle m_autoHighlightStyle = HighlightStyle::None;  ///< Style of auto-created highlight strokes (None disables auto-highlight)
+    HighlighterMode m_highlighterMode = HighlighterMode::Pdf;  ///< PDF vs OCR text selection source
     
     // ===== PDF Search Highlighting =====
     QVector<PdfSearchMatch> m_searchMatches;       ///< All matches on current page
@@ -2933,9 +3069,16 @@ private:
     
     /**
      * @brief Update selected text and highlight rects from start/end positions.
-     * Called after changing startBoxIndex/endBoxIndex etc.
+     * Called after changing startBoxIndex/endBoxIndex etc. Dispatches to the
+     * PDF or OCR variant based on m_textSelection.source.
      */
     void updateSelectedTextAndRects();
+
+    /// PDF-mode body of updateSelectedTextAndRects (reads m_textBoxCache, PDF coords).
+    void updateSelectedTextAndRects_Pdf();
+
+    /// OCR-mode body of updateSelectedTextAndRects (reads m_ocrBlockCache, page coords).
+    void updateSelectedTextAndRects_Ocr();
     
     /**
      * @brief Finalize the current text selection.
@@ -2986,17 +3129,40 @@ private:
     void renderSearchMatchesOverlayEdgeless(QPainter& painter);
     
     /**
-     * @brief Create a marker-style stroke for a highlight rectangle (Phase B.6).
-     * 
-     * Creates a horizontal stroke through the center of the rectangle,
-     * with width equal to the rectangle height (text line height).
-     * Used to convert text selection highlight rects to VectorStrokes.
-     * 
-     * @param rect Rectangle in page coordinates (96 DPI).
+     * @brief Create a marker-style stroke for a highlight rectangle.
+     *
+     * For HighlightStyle::Cover, produces a horizontal stroke through the
+     * center of the rectangle with thickness equal to the rectangle height
+     * (original cover-the-text behavior). For HighlightStyle::Underline,
+     * produces a thin horizontal stroke along the bottom of the rectangle.
+     *
+     * HighlightStyle::DottedUnderline is handled separately by
+     * createDottedUnderlineStrokes() since it produces multiple strokes.
+     *
+     * @param rect  Rectangle in page coordinates (96 DPI).
      * @param color Highlight color (typically m_highlighterColor).
+     * @param style Either Cover or Underline. (DottedUnderline is routed
+     *              through createDottedUnderlineStrokes() instead.)
      * @return VectorStroke configured as a horizontal marker.
      */
-    VectorStroke createHighlightStroke(const QRectF& rect, const QColor& color) const;
+    VectorStroke createHighlightStroke(const QRectF& rect,
+                                       const QColor& color,
+                                       HighlightStyle style) const;
+
+    /**
+     * @brief Create the sequence of dot strokes that make up a dotted underline.
+     *
+     * Dots are evenly spaced along the bottom edge of @p rect. Dot thickness
+     * scales with @p rect height (~10%), and center-to-center spacing is
+     * 3x the thickness. Each dot is an ordinary single-point `VectorStroke`,
+     * which keeps the renderer, serializer, and exporter unchanged.
+     *
+     * @param rect  Rectangle in page coordinates (96 DPI).
+     * @param color Highlight color.
+     * @return Vector of dot strokes (possibly empty if rect is too narrow).
+     */
+    QVector<VectorStroke> createDottedUnderlineStrokes(const QRectF& rect,
+                                                       const QColor& color) const;
     
     /**
      * @brief Create highlight strokes from current text selection (Phase B.3).
@@ -3023,6 +3189,21 @@ private:
      * @param pressure Pressure value (0.0 to 1.0).
      */
     void addPointToStroke(const QPointF& pagePos, qreal pressure, qint64 timestamp = 0);
+
+    /**
+     * @brief Apply the active pen preset's minimum-width floor to a raw
+     *        pressure sample.
+     *
+     * The floor is computed from `m_penMinStrokeWidth / baseThickness`
+     * (clamped to `[0.1, 1.0]`) so it maps correctly into the normalized
+     * `[0, 1]` pressure range used by `VectorStroke`.  Marker strokes return
+     * their raw pressure unchanged — they already use a fixed pressure of 1.0.
+     *
+     * @param rawPressure Original pressure from the pointer device.
+     * @return Pressure value clamped to `[minP, 1.0]` where `minP` reflects
+     *         the current preset's minimum width, or `rawPressure` for markers.
+     */
+    qreal applyPenPressureFloor(qreal rawPressure) const;
     
     // ===== Incremental Stroke Rendering (Task 2.3) =====
     

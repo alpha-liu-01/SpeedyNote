@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0074 NEW)
 
-project(SpeedyNote VERSION 1.4.1 LANGUAGES C CXX)
+project(SpeedyNote VERSION 1.4.2 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -704,6 +704,9 @@ set(UI_SOURCES
     source/ui/sidebars/OutlinePanel.cpp
     source/ui/sidebars/OutlinePanelTreeWidget.cpp
     source/ui/sidebars/OutlineItemDelegate.cpp
+    source/ui/sidebars/NotesTreePanel.cpp
+    source/ui/sidebars/NotesTreeWidget.cpp
+    source/ui/sidebars/NotesTreeDelegate.cpp
     source/ui/sidebars/PagePanel.cpp
     source/ui/sidebars/PagePanelListView.cpp
     # Widgets

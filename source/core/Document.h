@@ -17,6 +17,7 @@
 
 #include "Page.h"
 #include "../pdf/PdfProvider.h"
+#include "../ui/sidebars/LinkOutlineEntry.h"
 
 #include <QCoreApplication>  // For translate() in displayName()
 #include <QString>
@@ -151,6 +152,7 @@ public:
     
     // ===== OCR Settings =====
     QString ocrLanguage;                ///< Per-document OCR recognizer name (empty = global fallback)
+    bool ocrSnapToBackground = false;   ///< Snap OCR grouping to grid/line spacing
 
     // ===== State =====
     bool modified = false;              ///< True if document has unsaved changes
@@ -311,6 +313,14 @@ public:
      */
     QVector<TileCoord> allKnownTileCoords() const;
 
+    /**
+     * @brief Monotonically-increasing counter bumped on every m_tiles mutation
+     * (insert, erase, clear). Used by consumers that cache data derived from
+     * the full loaded-tile set (e.g. the Highlighter's OCR-block cache) to
+     * cheaply detect when the set has changed without hashing its contents.
+     */
+    quint64 tileLoadVersion() const { return m_tileLoadVersion; }
+
     // =========================================================================
     // Object Extent Tracking (Phase O1.5)
     // =========================================================================
@@ -356,6 +366,16 @@ public:
      * @return Path to the .snb directory, or empty if not set.
      */
     QString bundlePath() const { return m_bundlePath; }
+
+    /**
+     * @brief Get this Document instance's per-session id.
+     *
+     * Non-persistent, generated on construction and unique across the app's
+     * lifetime. Used to tag OCR requests so asynchronous results can be
+     * routed back to exactly the Document that queued them (and dropped if
+     * that Document has been closed in the meantime). Not stored on disk.
+     */
+    QString sessionId() const { return m_sessionId; }
     
     /**
      * @brief Get the path to the assets directory.
@@ -396,7 +416,78 @@ public:
      * Phase M.1: Used for cascade delete when clearing LinkSlots or deleting LinkObjects.
      */
     bool deleteNoteFile(const QString& noteId);
-    
+
+    /**
+     * @brief Enumerate every LinkObject with at least one markdown slot.
+     *
+     * Returns a flat snapshot of the persistent outline cache (see
+     * `buildLinkOutlineCache`).  The result is independent of which
+     * pages / tiles are currently resident in RAM: evicted tiles still
+     * contribute their LinkObjects.  No file I/O is performed on the hot
+     * path — the cache is populated on first use and maintained
+     * incrementally by `refreshLinkOutlineFor` / `dropLinkOutlineFor`.
+     *
+     * Used by the right-sidebar `NotesTreePanel` (Phase M.8) to build the
+     * 3-level tree without having to read any .md file until the user
+     * expands a LinkObject row.
+     *
+     * @return Flat list of entries; sorting/grouping is done by the caller.
+     */
+    QVector<LinkOutlineEntry> enumerateLinkOutline() const;
+
+    // ========================================================================
+    // Link Outline Cache (Phase M.9)
+    // ========================================================================
+    // The outline is a document-level summary of every LinkObject that
+    // references at least one markdown note.  It is expensive to recompute
+    // from disk every refresh and would otherwise be gated by which tiles
+    // are currently resident (edgeless) or force a full page-load of every
+    // page (paged).  We cache it per-container and keep it in sync with
+    // authoritative in-memory / on-disk state through the helpers below.
+    // ========================================================================
+
+    /**
+     * @brief Build (or rebuild) the entire outline cache in one pass.
+     *
+     * Walks loaded pages / tiles for authoritative data; for unloaded
+     * tiles in `m_tileIndex`, peeks the tile JSON on disk via
+     * `peekTileLinkOutlineFromDisk` without constructing a full `Page`.
+     * For paged mode, uses loaded pages directly and falls back to a
+     * page-file peek for unloaded ones.
+     *
+     * Idempotent.  Cheap to call multiple times; clears the cache first.
+     */
+    void buildLinkOutlineCache() const;
+
+    /**
+     * @brief Re-extract the outline contribution for a single tile from
+     *        whatever is most authoritative (in-memory if loaded, else
+     *        disk peek).
+     *
+     * Call after any LinkObject add / remove / edit on the tile, after
+     * `loadTileFromDisk` or `saveTile` has run, and on any external signal
+     * that says "this tile's links may have changed."
+     */
+    void refreshLinkOutlineFor(TileCoord coord) const;
+
+    /**
+     * @brief Re-extract the outline contribution for a single page.
+     *        Paged-mode counterpart of the TileCoord overload.
+     */
+    void refreshLinkOutlineFor(int pageIndex) const;
+
+    /**
+     * @brief Drop a container's contribution from the cache (page/tile
+     *        deletion).  Eviction-from-memory does NOT call this — the
+     *        cache must survive eviction; that is the whole point.
+     */
+    void dropLinkOutlineFor(TileCoord coord) const;
+    void dropLinkOutlineFor(int pageIndex) const;
+
+    /// Clear the outline cache (e.g. bundle close).  Next query will
+    /// rebuild.
+    void clearLinkOutlineCache() const;
+
     /**
      * @brief Save all unsaved ImageObjects to the assets folder.
      * @param bundlePath Path to the bundle directory.
@@ -1388,6 +1479,10 @@ private:
     /// Uses std::map instead of QMap because QMap requires copyable values,
     /// but unique_ptr is move-only.
     mutable std::map<std::pair<int,int>, std::unique_ptr<Page>> m_tiles;
+
+    /// Bumped on every m_tiles insert/erase/clear (see tileLoadVersion()).
+    /// Mutable because const paths (getTile) trigger lazy-load inserts.
+    mutable quint64 m_tileLoadVersion = 0;
     
     // ===== Tile Persistence (Phase E5) =====
     QString m_bundlePath;                           ///< Path to .snb bundle directory
@@ -1399,6 +1494,11 @@ private:
     bool m_ocrTextVisible = false;
     bool m_ocrDarkMode = false;
     bool m_ocrShowConfidence = false;
+
+    /// Per-instance session id used to tag OCR requests so asynchronous
+    /// results can be routed back to the exact Document that queued them.
+    /// Generated on construction, never persisted.
+    QString m_sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
     // ===== Object Extent Tracking (Phase O1.5) =====
     /// Maximum extent (largest dimension) of any object in the document.
@@ -1457,4 +1557,57 @@ private:
      * @return Unique pointer to the new page.
      */
     std::unique_ptr<Page> createDefaultPage();
+
+    // ========================================================================
+    // Link Outline Cache — internal state & peek helpers (Phase M.9)
+    // ========================================================================
+
+    /**
+     * @brief Extract a single Page*'s LinkObjects into outline entries.
+     *        Factored out of `enumerateLinkOutline`'s previous lambda so
+     *        both the rebuild path and the refresh path can share it.
+     */
+    static QVector<LinkOutlineEntry>
+    extractLinkOutlineFromPage(const Page* page,
+                                int pageIdx,
+                                int tileX,
+                                int tileY,
+                                bool edgeless);
+
+    /**
+     * @brief Read a tile's JSON on disk and extract just the LinkObject
+     *        summary (id/description/iconColor/position/slots).
+     *
+     * Does NOT construct a `Page`, load strokes, or touch OCR.  Returns
+     * an empty vector on any I/O or parse failure (and does not mutate
+     * `m_tileIndex`).  Safe to call on const paths.
+     */
+    QVector<LinkOutlineEntry>
+    peekTileLinkOutlineFromDisk(TileCoord coord) const;
+
+    /// Paged-mode counterpart of `peekTileLinkOutlineFromDisk`.
+    QVector<LinkOutlineEntry>
+    peekPageLinkOutlineFromDisk(int pageIndex) const;
+
+    /**
+     * @brief Shared JSON → outline-entry walker used by both peek helpers.
+     *        Parses the \c objects array of a container JSON file, filters
+     *        to LinkObjects with at least one markdown slot, and fills
+     *        caller-supplied coordinate fields (pageIndex/tileX/tileY/
+     *        tileOrigin) on each emitted entry.
+     */
+    static QVector<LinkOutlineEntry>
+    extractLinkOutlineFromJsonObjects(const QJsonArray& objects,
+                                       int  pageIndex,
+                                       int  tileX,
+                                       int  tileY,
+                                       const QPointF& tileOrigin);
+
+    /// Cache contents, keyed by container.  Empty vectors are allowed
+    /// and mean "container exists but has no markdown-backed links."
+    /// `mutable` because enumeration is a const operation that may need
+    /// to lazily populate the cache on first use.
+    mutable std::map<int, QVector<LinkOutlineEntry>>       m_pageOutline;
+    mutable std::map<TileCoord, QVector<LinkOutlineEntry>> m_tileOutline;
+    mutable bool m_linkOutlineCacheReady = false;
 };

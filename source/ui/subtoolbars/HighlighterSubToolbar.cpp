@@ -1,9 +1,13 @@
 #include "HighlighterSubToolbar.h"
 #include "../widgets/ColorPresetButton.h"
-#include "../widgets/ToggleButton.h"  // Contains SubToolbarToggle
+#include "../widgets/ModeToggleButton.h"
 
-#include <QSettings>
+#include <QAction>
 #include <QColorDialog>
+#include <QIcon>
+#include <QMenu>
+#include <QSettings>
+#include <QToolButton>
 
 // Static member definitions
 // Default colors (same as Marker - shared via QSettings)
@@ -19,6 +23,7 @@ const QString HighlighterSubToolbar::SETTINGS_GROUP_HIGHLIGHTER = "highlighter";
 const QString HighlighterSubToolbar::KEY_COLOR_PREFIX = "color";
 const QString HighlighterSubToolbar::KEY_SELECTED_COLOR = "selectedColor";
 const QString HighlighterSubToolbar::KEY_AUTO_HIGHLIGHT = "autoHighlight";
+const QString HighlighterSubToolbar::KEY_SELECTION_SOURCE = "selectionSource";
 
 HighlighterSubToolbar::HighlighterSubToolbar(QWidget* parent)
     : SubToolbar(parent)
@@ -38,16 +43,42 @@ void HighlighterSubToolbar::createWidgets()
         addWidget(m_colorButtons[i]);
     }
     
-    // Add separator before toggle
+    // Add separator before the auto-highlight dropdown
     addSeparator();
-    
-    // Create auto-highlight toggle
-    m_autoHighlightToggle = new SubToolbarToggle(this);
-    m_autoHighlightToggle->setToolTip(tr("Auto-highlight mode (automatically highlight selected text)"));
-    // Use icon base name for dark mode switching support
-    m_autoHighlightToggle->setIconName("marker");
-    m_autoHighlightToggle->setDarkMode(isDarkMode());
-    addWidget(m_autoHighlightToggle);
+
+    // Auto-highlight style dropdown (None / Cover / Underline / Dotted underline)
+    m_autoHighlightButton = new QToolButton(this);
+    m_autoHighlightButton->setPopupMode(QToolButton::InstantPopup);
+    m_autoHighlightButton->setToolTip(tr("Auto-highlight style"));
+    m_autoHighlightButton->setFixedSize(28, 28);
+    m_autoHighlightButton->setIconSize(QSize(20, 20));
+
+    m_autoHighlightMenu = new QMenu(m_autoHighlightButton);
+    m_styleActions[static_cast<int>(HighlightStyle::None)]            = m_autoHighlightMenu->addAction(tr("None"));
+    m_styleActions[static_cast<int>(HighlightStyle::Cover)]           = m_autoHighlightMenu->addAction(tr("Cover text"));
+    m_styleActions[static_cast<int>(HighlightStyle::Underline)]       = m_autoHighlightMenu->addAction(tr("Underline"));
+    m_styleActions[static_cast<int>(HighlightStyle::DottedUnderline)] = m_autoHighlightMenu->addAction(tr("Dotted underline"));
+    for (int i = 0; i < kNumStyles; ++i) {
+        m_styleActions[i]->setData(i);
+        m_styleActions[i]->setCheckable(true);
+    }
+    m_autoHighlightButton->setMenu(m_autoHighlightMenu);
+    // Apply dark/light stylesheet + menu-item icons once; per-click refreshes
+    // only touch the trigger icon + check state.
+    applyAutoHighlightStyling();
+    updateAutoHighlightButtonIcon();
+    addWidget(m_autoHighlightButton);
+
+    // Separator + selection source toggle (PDF text ↔ OCR text)
+    addSeparator();
+    m_selectionSourceToggle = new ModeToggleButton(this);
+    m_selectionSourceToggle->setModeIconNames("selection_pdf", "selection_ocr");
+    m_selectionSourceToggle->setDarkMode(isDarkMode());
+    m_selectionSourceToggle->setModeToolTips(
+        tr("PDF text selection (click to switch to OCR text)"),
+        tr("OCR text selection (click to switch to PDF text)")
+    );
+    addWidget(m_selectionSourceToggle);
 }
 
 void HighlighterSubToolbar::setupConnections()
@@ -62,9 +93,13 @@ void HighlighterSubToolbar::setupConnections()
         });
     }
     
-    // Auto-highlight toggle connection
-    connect(m_autoHighlightToggle, &SubToolbarToggle::toggled, 
-            this, &HighlighterSubToolbar::onAutoHighlightToggled);
+    // Auto-highlight style dropdown connection
+    connect(m_autoHighlightMenu, &QMenu::triggered,
+            this, &HighlighterSubToolbar::onAutoHighlightStyleTriggered);
+
+    // Selection-source toggle connection (PDF vs OCR)
+    connect(m_selectionSourceToggle, &ModeToggleButton::modeChanged,
+            this, &HighlighterSubToolbar::onSelectionSourceToggled);
 }
 
 void HighlighterSubToolbar::loadFromSettings()
@@ -85,15 +120,27 @@ void HighlighterSubToolbar::loadFromSettings()
     
     // Load selection
     m_selectedColorIndex = settings.value(KEY_SELECTED_COLOR, 0).toInt();
-    
-    // Load auto-highlight state
-    m_autoHighlightEnabled = settings.value(KEY_AUTO_HIGHLIGHT, false).toBool();
+
+    // Load auto-highlight style. Stored as int in [0..kNumStyles-1]. Backward-compat:
+    // an older `bool true` value is read via toInt() as 1 => Cover, `false` => None.
+    const int styleInt = qBound(0, settings.value(KEY_AUTO_HIGHLIGHT, 0).toInt(),
+                                kNumStyles - 1);
+    m_autoHighlightStyle = static_cast<HighlightStyle>(styleInt);
+
+    // Load selection source (PDF vs OCR)
+    int srcInt = qBound(0, settings.value(KEY_SELECTION_SOURCE, 0).toInt(), 1);
+    m_selectionSource = static_cast<SelectionSource>(srcInt);
     
     settings.endGroup();
     
     // Apply settings
     selectColorPreset(m_selectedColorIndex);
-    m_autoHighlightToggle->setChecked(m_autoHighlightEnabled);
+    updateAutoHighlightButtonIcon();
+    if (m_selectionSourceToggle) {
+        m_selectionSourceToggle->blockSignals(true);
+        m_selectionSourceToggle->setCurrentMode(static_cast<int>(m_selectionSource));
+        m_selectionSourceToggle->blockSignals(false);
+    }
 }
 
 void HighlighterSubToolbar::saveColorsToSettings()
@@ -115,7 +162,15 @@ void HighlighterSubToolbar::saveAutoHighlightToSettings()
     QSettings settings;
     settings.beginGroup(SETTINGS_GROUP_HIGHLIGHTER);
     settings.setValue(KEY_SELECTED_COLOR, m_selectedColorIndex);
-    settings.setValue(KEY_AUTO_HIGHLIGHT, m_autoHighlightEnabled);
+    settings.setValue(KEY_AUTO_HIGHLIGHT, static_cast<int>(m_autoHighlightStyle));
+    settings.endGroup();
+}
+
+void HighlighterSubToolbar::saveSelectionSourceToSettings()
+{
+    QSettings settings;
+    settings.beginGroup(SETTINGS_GROUP_HIGHLIGHTER);
+    settings.setValue(KEY_SELECTION_SOURCE, static_cast<int>(m_selectionSource));
     settings.endGroup();
 }
 
@@ -163,9 +218,9 @@ void HighlighterSubToolbar::restoreTabState(int tabIndex)
     // Restore selection
     selectColorPreset(state.selectedColorIndex);
     
-    // NOTE: Auto-highlight state is NOT restored here.
-    // DocumentViewport is the source of truth for auto-highlight state (per-viewport).
-    // The toggle is synced from viewport via setAutoHighlightState() in MainWindow.
+    // NOTE: Auto-highlight style is NOT restored here.
+    // DocumentViewport is the source of truth for auto-highlight style (per-viewport).
+    // The dropdown is synced from viewport via setAutoHighlightStyle() in MainWindow.
 }
 
 void HighlighterSubToolbar::saveTabState(int tabIndex)
@@ -226,11 +281,106 @@ void HighlighterSubToolbar::onColorEditRequested(int index)
     }
 }
 
-void HighlighterSubToolbar::onAutoHighlightToggled(bool checked)
+void HighlighterSubToolbar::onAutoHighlightStyleTriggered(QAction* action)
 {
-    m_autoHighlightEnabled = checked;
+    if (!action) return;
+    const int v = qBound(0, action->data().toInt(), kNumStyles - 1);
+    const HighlightStyle s = static_cast<HighlightStyle>(v);
+    if (s == m_autoHighlightStyle) {
+        // Already active; just re-sync the check state in case it drifted.
+        updateAutoHighlightButtonIcon();
+        return;
+    }
+    m_autoHighlightStyle = s;
     saveAutoHighlightToSettings();
-    emit autoHighlightChanged(checked);
+    updateAutoHighlightButtonIcon();
+    emit autoHighlightStyleChanged(s);
+}
+
+// Resource base name of the icon for each HighlightStyle, indexed by enum value.
+// Kept at file scope so it's shared by both the cheap per-click refresh and the
+// one-shot restyling helper.
+namespace {
+constexpr const char* kHighlightStyleIconBases[] = {
+    "highlight_none",       // HighlightStyle::None
+    "marker",               // HighlightStyle::Cover (reuses existing marker icon)
+    "highlight_underline",  // HighlightStyle::Underline
+    "highlight_dotted",     // HighlightStyle::DottedUnderline
+};
+static_assert(sizeof(kHighlightStyleIconBases) / sizeof(kHighlightStyleIconBases[0])
+                  == HighlighterSubToolbar::kNumStyles,
+              "kHighlightStyleIconBases must have kNumStyles entries");
+
+inline QIcon loadHighlightIcon(int styleIndex, bool dark) {
+    const QLatin1String base(kHighlightStyleIconBases[styleIndex]);
+    return QIcon(dark
+        ? QStringLiteral(":/resources/icons/%1_reversed.png").arg(base)
+        : QStringLiteral(":/resources/icons/%1.png").arg(base));
+}
+}  // namespace
+
+void HighlighterSubToolbar::updateAutoHighlightButtonIcon()
+{
+    if (!m_autoHighlightButton) return;
+
+    // Cheap path: only the trigger-button icon and per-action check state
+    // depend on the currently-selected style, so that's all we refresh here.
+    // The dark/light stylesheets and per-action icons live in applyAutoHighlightStyling()
+    // and are rebuilt only when the theme changes.
+    const int activeIdx = static_cast<int>(m_autoHighlightStyle);
+    m_autoHighlightButton->setIcon(loadHighlightIcon(activeIdx, isDarkMode()));
+
+    for (int i = 0; i < kNumStyles; ++i) {
+        if (m_styleActions[i])
+            m_styleActions[i]->setChecked(i == activeIdx);
+    }
+}
+
+void HighlighterSubToolbar::applyAutoHighlightStyling()
+{
+    if (!m_autoHighlightButton) return;
+
+    const bool dark = isDarkMode();
+
+    // Menu-item icons (matches ObjectSelectSubToolbar's dropdown UX).
+    for (int i = 0; i < kNumStyles; ++i) {
+        if (m_styleActions[i])
+            m_styleActions[i]->setIcon(loadHighlightIcon(i, dark));
+    }
+
+    // Style button to match the subtoolbar (black bg in dark, white bg in light).
+    // setStyleSheet() triggers a full unpolish/polish, so we only do this here,
+    // not on every menu click.
+    const QString btnBg  = dark ? QStringLiteral("#000000") : QStringLiteral("#ffffff");
+    const QString btnHov = dark ? QStringLiteral("#333333") : QStringLiteral("#e0e0e0");
+    m_autoHighlightButton->setStyleSheet(QStringLiteral(
+        "QToolButton { background: %1; border: none; border-radius: 4px; }"
+        "QToolButton:hover { background: %2; }"
+        "QToolButton::menu-indicator { image: none; }"
+    ).arg(btnBg, btnHov));
+
+    // Style menu to match the subtoolbar background.
+    if (m_autoHighlightMenu) {
+        const QString menuBg      = dark ? QStringLiteral("#1a1a1a") : QStringLiteral("#ffffff");
+        const QString menuFg      = dark ? QStringLiteral("#e0e0e0") : QStringLiteral("#1a1a1a");
+        const QString menuHoverBg = dark ? QStringLiteral("#333333") : QStringLiteral("#e0e0e0");
+        const QString menuBdr     = dark ? QStringLiteral("#444")    : QStringLiteral("#ccc");
+        m_autoHighlightMenu->setStyleSheet(QStringLiteral(
+            "QMenu { background: %1; color: %2; border: 1px solid %3; }"
+            "QMenu::item:selected { background: %4; }"
+        ).arg(menuBg, menuFg, menuBdr, menuHoverBg));
+    }
+}
+
+void HighlighterSubToolbar::onSelectionSourceToggled(int mode)
+{
+    SelectionSource src = (mode == 1) ? SelectionSource::Ocr : SelectionSource::Pdf;
+    if (src == m_selectionSource) {
+        return;
+    }
+    m_selectionSource = src;
+    saveSelectionSourceToSettings();
+    emit selectionSourceChanged(src);
 }
 
 void HighlighterSubToolbar::selectColorPreset(int index)
@@ -246,15 +396,53 @@ void HighlighterSubToolbar::selectColorPreset(int index)
     m_selectedColorIndex = index;
 }
 
-void HighlighterSubToolbar::setAutoHighlightState(bool enabled)
+void HighlighterSubToolbar::setAutoHighlightStyle(HighlightStyle style)
 {
-    // Update internal state
-    m_autoHighlightEnabled = enabled;
-    
-    // Block signals to avoid feedback loop (external change shouldn't emit back)
-    m_autoHighlightToggle->blockSignals(true);
-    m_autoHighlightToggle->setChecked(enabled);
-    m_autoHighlightToggle->blockSignals(false);
+    if (m_autoHighlightStyle == style) return;
+
+    // UI-only update: no signal emission (viewport is source of truth; this
+    // setter is called when syncing FROM the viewport, so emitting back would
+    // create a feedback loop).
+    m_autoHighlightStyle = style;
+    updateAutoHighlightButtonIcon();
+}
+
+void HighlighterSubToolbar::selectAutoHighlightStyleFromShortcut(HighlightStyle style)
+{
+    const int idx = static_cast<int>(style);
+    if (idx < 0 || idx >= kNumStyles) return;
+    QAction* action = m_styleActions[idx];
+    if (!action) return;
+
+    // Drive the same QAction trigger path the dropdown menu uses so the
+    // onAutoHighlightStyleTriggered() slot handles state update, settings
+    // persistence, icon/check refresh, and the single signal emission.
+    action->trigger();
+}
+
+void HighlighterSubToolbar::toggleSelectionSourceFromShortcut()
+{
+    if (!m_selectionSourceToggle) return;
+
+    const SelectionSource next = (m_selectionSource == SelectionSource::Pdf)
+                                     ? SelectionSource::Ocr
+                                     : SelectionSource::Pdf;
+
+    // setCurrentMode() emits modeChanged on the underlying ModeToggleButton,
+    // which fires onSelectionSourceToggled() for state update, settings save,
+    // and the selectionSourceChanged emission.
+    m_selectionSourceToggle->setCurrentMode(static_cast<int>(next));
+}
+
+void HighlighterSubToolbar::setSelectionSourceState(SelectionSource src)
+{
+    m_selectionSource = src;
+    if (!m_selectionSourceToggle) {
+        return;
+    }
+    m_selectionSourceToggle->blockSignals(true);
+    m_selectionSourceToggle->setCurrentMode(static_cast<int>(src));
+    m_selectionSourceToggle->blockSignals(false);
 }
 
 void HighlighterSubToolbar::emitCurrentValues()
@@ -265,7 +453,7 @@ void HighlighterSubToolbar::emitCurrentValues()
         colorWithOpacity.setAlpha(MARKER_OPACITY);
         emit highlighterColorChanged(colorWithOpacity);
     }
-    // Note: auto-highlight state is synced via setAutoHighlightState() separately
+    // Note: auto-highlight style is synced via setAutoHighlightStyle() separately
 }
 
 QColor HighlighterSubToolbar::currentColor() const
@@ -284,8 +472,14 @@ void HighlighterSubToolbar::setDarkMode(bool darkMode)
 {
     SubToolbar::setDarkMode(darkMode);
 
-    if (m_autoHighlightToggle) {
-        m_autoHighlightToggle->setDarkMode(darkMode);
+    // Dark mode affects both the button/menu stylesheets and the icon variants,
+    // so rebuild everything: first the expensive one-shot styling, then refresh
+    // the trigger icon for the currently-selected style.
+    applyAutoHighlightStyling();
+    updateAutoHighlightButtonIcon();
+
+    if (m_selectionSourceToggle) {
+        m_selectionSourceToggle->setDarkMode(darkMode);
     }
 }
 

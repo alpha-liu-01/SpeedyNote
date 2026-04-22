@@ -57,6 +57,7 @@ struct PdfSearchState;
 // OCR
 class OcrWorker;
 class OcrSubToolbar;
+struct OcrSnapParams;
 
 // Phase 2B: Floating Text Editor
 class FloatingTextEditor;
@@ -461,13 +462,16 @@ private:
     void toggleMarkdownNotesSidebar();  // Toggle markdown notes sidebar
     
     /**
-     * @brief Phase M.3: Load markdown notes for the current page from LinkObjects.
-     * @return List of NoteDisplayData for all markdown notes on current page.
-     * 
-     * Iterates through LinkObjects on the current page, loads markdown note
-     * files for each Markdown-type slot, and returns display data.
+     * @brief Phase M.8: Rebuild the right-sidebar outline tree from the
+     *        current document (no .md file I/O).
+     *
+     * Obtains a fresh `LinkOutlineEntry` vector via
+     * `Document::enumerateLinkOutline()` and forwards it to the sidebar.
+     * Also updates edgeless-mode / hidden-tiles warning / notes directory.
+     * Cheap enough to call from every `linkObjectListMayHaveChanged`
+     * signal path.
      */
-    QList<NoteDisplayData> loadNotesForCurrentPage();
+    void refreshNotesOutline();
     
     /**
      * @brief Phase M.3: Navigate to and select a LinkObject on the current page.
@@ -628,7 +632,10 @@ private:
     
     // Phase D: Auto-highlight sync connection (subtoolbar ↔ viewport)
     QMetaObject::Connection m_autoHighlightConn;
-    
+
+    // Highlighter selection-source sync connection (viewport -> subtoolbar)
+    QMetaObject::Connection m_highlighterModeConn;
+
     // Phase D: Object mode sync connections (subtoolbar ↔ viewport)
     QMetaObject::Connection m_insertModeConn;
     QMetaObject::Connection m_actionModeConn;
@@ -720,6 +727,7 @@ private:
     void setOcrConfidenceVisibility(bool enabled);
     void showOcrLanguageDialog();
     QString resolveOcrLanguage(Document* doc) const;
+    OcrSnapParams buildOcrSnapParams(Document* doc, Page* page) const;
     
     // Phase 2B: Floating Text Editor
     void openFloatingTextEditor(InsertedObject* obj);

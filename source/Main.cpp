@@ -17,8 +17,6 @@
 #include "ui/launcher/Launcher.h"
 #include "platform/SystemNotification.h"
 #include "core/DocumentViewport.h"
-#include "layers/VectorLayer.h"
-
 // CLI support (Desktop only)
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include <QGuiApplication>
@@ -769,10 +767,11 @@ int main(int argc, char* argv[])
     loadTranslations(app, translator);
 
     // ========== Initialize Tool Settings ==========
+    // Note: the old global minimum stroke width has moved to per-preset state
+    // on PenSubToolbar.  The legacy `tools/minStrokeWidth` key is read there
+    // as a one-shot migration seed and requires no bootstrap here.
     {
         QSettings toolSettings("SpeedyNote", "App");
-        VectorLayer::setMinStrokeWidth(
-            toolSettings.value("tools/minStrokeWidth", 0.3).toDouble());
         DocumentViewport::setWheelScrollSpeed(
             toolSettings.value("tools/wheelScrollSpeed", 40.0).toDouble());
     }

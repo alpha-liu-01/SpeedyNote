@@ -18,6 +18,31 @@
 #include <QJsonArray>
 #include <QUuid>
 
+/**
+ * @brief Shared helper: is @p ch a CJK/Japanese-style character?
+ *
+ * Used by OCR text rendering, PDF search, and text selection to decide
+ * whether an inter-word / inter-block space separator should be inserted
+ * when concatenating text. CJK scripts don't use inter-word spaces, so
+ * we only add a space when both surrounding characters are non-CJK.
+ *
+ * Defined inline here so it can be shared across translation units without
+ * pulling in heavier dependencies.
+ */
+inline bool isCjkLikeChar(QChar ch) {
+    ushort u = ch.unicode();
+    // Union of the ranges previously duplicated across PdfSearchEngine,
+    // OcrTextObject and WindowsInkOcrEngine. Used by the text-joining
+    // logic that decides whether to insert a space between adjacent tokens.
+    // Note: 0x2E80-0x9FFF already encompasses CJK Radicals, Kangxi Radicals,
+    // CJK Symbols and Punctuation, Hiragana, Katakana, Katakana Phonetic
+    // Extensions and Unified Ideographs (plus Extension A at 0x3400-0x4DBF).
+    return (u >= 0x2E80 && u <= 0x9FFF)   // CJK Radicals..Unified Ideographs (covers Hiragana/Katakana too)
+        || (u >= 0xF900 && u <= 0xFAFF)    // CJK Compatibility Ideographs
+        || (u >= 0xFE30 && u <= 0xFE4F)    // CJK Compatibility Forms
+        || (u >= 0xFF00 && u <= 0xFFEF);   // Fullwidth forms / halfwidth Katakana
+}
+
 struct OcrTextBlock {
     QString id;
     QString text;
