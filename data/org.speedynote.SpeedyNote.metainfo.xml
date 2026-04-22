@@ -79,6 +79,18 @@
 
 
   <releases type="embedded">
+    <release version="1.4.2" date="2026-04-22">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>Persistent by-page and by-LinkObject markdown note outline on the right sidebar, enabling viewing and navigating to all markdown notes without loading all the pages or tiles.</li>
+          <li>Adjustable right sidebar width.</li>
+          <li>Per-thickness-preset minimum stroke width for the pen tool.</li>
+          <li>New highlighter styles (Cover, Underline, Dotted underline) for the highlighter tool.</li>
+          <li>New keyboard shortcuts for the highlighter tool and the OCR features.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.1" date="2026-04-13">
       <description>
         <p>New Features:</p>
