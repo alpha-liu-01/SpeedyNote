@@ -230,3 +230,33 @@ void OcrSubToolbar::setSnapToGridChecked(bool checked)
     if (m_snapButton)
         m_snapButton->setChecked(checked);
 }
+
+void OcrSubToolbar::triggerScanPage()
+{
+    if (m_scanPageButton && m_scanPageButton->isEnabled())
+        m_scanPageButton->click();
+}
+
+void OcrSubToolbar::triggerScanAll()
+{
+    if (m_scanAllButton && m_scanAllButton->isEnabled())
+        m_scanAllButton->click();
+}
+
+void OcrSubToolbar::toggleAutoOcr()
+{
+    if (m_autoOcrButton && m_autoOcrButton->isEnabled())
+        m_autoOcrButton->toggle();
+}
+
+void OcrSubToolbar::toggleShowText()
+{
+    if (m_showTextButton && m_showTextButton->isEnabled())
+        m_showTextButton->toggle();
+}
+
+void OcrSubToolbar::toggleSnapToGrid()
+{
+    if (m_snapButton && m_snapButton->isEnabled())
+        m_snapButton->toggle();
+}

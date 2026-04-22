@@ -28,6 +28,17 @@ public:
     bool isSnapToGridEnabled() const;
     void setSnapToGridChecked(bool checked);
 
+    // Keyboard-shortcut entry points. Each forwards to the corresponding
+    // private button's click()/toggle(), so the existing signal path
+    // (scanPageClicked, autoOcrToggled, etc.) and all MainWindow wiring
+    // keep working unchanged. Gated by isEnabled() so they respect
+    // setOcrAvailable(false).
+    void triggerScanPage();
+    void triggerScanAll();
+    void toggleAutoOcr();
+    void toggleShowText();
+    void toggleSnapToGrid();
+
 signals:
     void scanPageClicked();
     void scanAllClicked();

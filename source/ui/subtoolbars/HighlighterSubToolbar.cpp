@@ -407,6 +407,33 @@ void HighlighterSubToolbar::setAutoHighlightStyle(HighlightStyle style)
     updateAutoHighlightButtonIcon();
 }
 
+void HighlighterSubToolbar::selectAutoHighlightStyleFromShortcut(HighlightStyle style)
+{
+    const int idx = static_cast<int>(style);
+    if (idx < 0 || idx >= kNumStyles) return;
+    QAction* action = m_styleActions[idx];
+    if (!action) return;
+
+    // Drive the same QAction trigger path the dropdown menu uses so the
+    // onAutoHighlightStyleTriggered() slot handles state update, settings
+    // persistence, icon/check refresh, and the single signal emission.
+    action->trigger();
+}
+
+void HighlighterSubToolbar::toggleSelectionSourceFromShortcut()
+{
+    if (!m_selectionSourceToggle) return;
+
+    const SelectionSource next = (m_selectionSource == SelectionSource::Pdf)
+                                     ? SelectionSource::Ocr
+                                     : SelectionSource::Pdf;
+
+    // setCurrentMode() emits modeChanged on the underlying ModeToggleButton,
+    // which fires onSelectionSourceToggled() for state update, settings save,
+    // and the selectionSourceChanged emission.
+    m_selectionSourceToggle->setCurrentMode(static_cast<int>(next));
+}
+
 void HighlighterSubToolbar::setSelectionSourceState(SelectionSource src)
 {
     m_selectionSource = src;

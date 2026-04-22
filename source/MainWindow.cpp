@@ -2009,21 +2009,59 @@ void MainWindow::setupManagedShortcuts()
         }
     });
     
-    // ===== PDF/Highlighter Features =====
-    createShortcut("pdf.auto_highlight", [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            if (vp->currentTool() == ToolType::Highlighter) {
-                // Preserve the old Ctrl+H semantics: toggle between None
-                // (auto-highlight off) and Cover (the only previously-
-                // reachable "on" state). Users can still pick Underline or
-                // Dotted underline explicitly from the subtoolbar dropdown.
-                using HS = DocumentViewport::HighlightStyle;
-                vp->setAutoHighlightStyle(
-                    vp->autoHighlightStyle() == HS::None ? HS::Cover : HS::None);
-            }
-        }
+    // ===== OCR subtoolbar =====
+    // Each shortcut delegates to a public trigger method on OcrSubToolbar,
+    // which forwards to the same button-click path the UI already uses. This
+    // keeps one source of truth for button state / settings / signal emission.
+    createShortcut("ocr.scan_page", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->triggerScanPage();
     });
-    
+    createShortcut("ocr.scan_all", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->triggerScanAll();
+    });
+    createShortcut("ocr.auto_ocr", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->toggleAutoOcr();
+    });
+    createShortcut("ocr.show_text", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->toggleShowText();
+    });
+    createShortcut("ocr.snap_grid", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->ocrSubToolbar() : nullptr)
+            st->toggleSnapToGrid();
+    });
+
+    // ===== Highlighter subtoolbar =====
+    // Style shortcuts drive the dropdown's QAction::trigger() path so the
+    // existing onAutoHighlightStyleTriggered() slot handles persistence,
+    // check-state, icon refresh, and autoHighlightStyleChanged emission.
+    // No current-tool gate: these set the globally persisted style, so users
+    // can pre-configure before switching to the Highlighter tool.
+    using HS = HighlighterSubToolbar::HighlightStyle;
+    createShortcut("highlighter.style_none", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::None);
+    });
+    createShortcut("highlighter.style_cover", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::Cover);
+    });
+    createShortcut("highlighter.style_underline", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::Underline);
+    });
+    createShortcut("highlighter.style_dotted", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->selectAutoHighlightStyleFromShortcut(HS::DottedUnderline);
+    });
+    createShortcut("highlighter.toggle_source", [this]() {
+        if (auto* st = m_toolbar ? m_toolbar->highlighterSubToolbar() : nullptr)
+            st->toggleSelectionSourceFromShortcut();
+    });
+
     // Connect to ShortcutManager's change signal for dynamic updates
     connect(sm, &ShortcutManager::shortcutChanged,
             this, &MainWindow::onShortcutChanged);

@@ -192,9 +192,23 @@ void ShortcutManager::registerDefaults()
     registerAction("view.focus_left_pane", "Ctrl+3", tr("Focus Left Pane"), tr("View"));
     registerAction("view.focus_right_pane", "Ctrl+4", tr("Focus Right Pane"), tr("View"));
     
-    // ===== PDF Features =====
-    registerAction("pdf.auto_highlight", "Ctrl+H", tr("Toggle Auto-Highlight"), tr("PDF"));
-    
+    // ===== OCR =====
+    registerAction("ocr.scan_page",  "F5",       tr("Scan Page"),               tr("OCR"));
+    registerAction("ocr.scan_all",   "Shift+F5", tr("Scan All Pages"),          tr("OCR"));
+    registerAction("ocr.auto_ocr",   "Ctrl+F5",  tr("Toggle Auto OCR"),         tr("OCR"));
+    registerAction("ocr.show_text",  "F6",       tr("Toggle Recognized Text"),  tr("OCR"));
+    registerAction("ocr.snap_grid",  "F7",       tr("Toggle OCR Snap to Grid"), tr("OCR"));
+
+    // ===== Highlighter =====
+    // Explicit style-selection shortcuts replace the old pdf.auto_highlight
+    // toggle: each auto-highlight dropdown option is now a first-class
+    // shortcut. Ctrl+H migrates to highlighter.style_cover for muscle memory.
+    registerAction("highlighter.style_none",      "Ctrl+Shift+H", tr("Auto-Highlight: None"),             tr("Highlighter"));
+    registerAction("highlighter.style_cover",     "Ctrl+H",       tr("Auto-Highlight: Cover Text"),       tr("Highlighter"));
+    registerAction("highlighter.style_underline", "Ctrl+U",       tr("Auto-Highlight: Underline"),        tr("Highlighter"));
+    registerAction("highlighter.style_dotted",    "Ctrl+Shift+U", tr("Auto-Highlight: Dotted Underline"), tr("Highlighter"));
+    registerAction("highlighter.toggle_source",   "Ctrl+Alt+T",   tr("Toggle Highlighter Source (PDF/OCR)"), tr("Highlighter"));
+
     // ===== Application =====
     registerAction("app.settings", "Ctrl+K", tr("Settings"), tr("Application"));
     registerAction("app.keyboard_shortcuts", "Ctrl+Alt+Shift+K", tr("Keyboard Shortcuts"), tr("Application"));

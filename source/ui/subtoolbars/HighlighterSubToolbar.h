@@ -117,6 +117,24 @@ public:
      * @brief Get the currently selected source (PDF or OCR).
      */
     SelectionSource currentSelectionSource() const { return m_selectionSource; }
+
+    /**
+     * @brief Shortcut-driven style selection.
+     *
+     * Reuses the existing menu-click path (QAction::trigger() on the matching
+     * dropdown action) so settings persistence, check-state, icon refresh,
+     * and the single `autoHighlightStyleChanged` emission all happen through
+     * one code path. No-op when @p style already matches the current style.
+     */
+    void selectAutoHighlightStyleFromShortcut(HighlightStyle style);
+
+    /**
+     * @brief Shortcut-driven source toggle.
+     *
+     * Flips PDF <-> OCR by driving the underlying ModeToggleButton so the
+     * normal `selectionSourceChanged` signal fires through `onSelectionSourceToggled`.
+     */
+    void toggleSelectionSourceFromShortcut();
     
     /**
      * @brief Emit the currently selected preset values.
