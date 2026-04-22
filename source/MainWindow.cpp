@@ -867,7 +867,8 @@ void MainWindow::setupUi() {
     
     // 🌟 Markdown Notes Sidebar
     markdownNotesSidebar = new MarkdownNotesSidebar(this);
-    markdownNotesSidebar->setFixedWidth(300);
+    markdownNotesSidebar->setMinimumWidth(220);
+    markdownNotesSidebar->setMaximumWidth(600);
     markdownNotesSidebar->setVisible(false); // Hidden by default
     
     // Phase M.3: Connect new signals for LinkObject-based markdown notes
@@ -1393,38 +1394,45 @@ void MainWindow::setupUi() {
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(0);
     
-    // QSplitter for resizable left sidebar
+    // QSplitter for resizable left + right sidebars (markdownNotesSidebar is
+    // the 3rd child so the same splitter gives us handles on both sides).
     m_contentSplitter = new QSplitter(Qt::Horizontal);
     m_contentSplitter->setChildrenCollapsible(false);
     m_contentSplitter->setHandleWidth(3);
     m_contentSplitter->addWidget(m_leftSidebar);
     m_contentSplitter->addWidget(canvasContainer);
-    m_contentSplitter->setStretchFactor(0, 0);  // Sidebar: fixed
+    m_contentSplitter->addWidget(markdownNotesSidebar);
+    m_contentSplitter->setStretchFactor(0, 0);  // Left sidebar: fixed
     m_contentSplitter->setStretchFactor(1, 1);  // Canvas: stretches
-    
-    // Restore persisted sidebar width
+    m_contentSplitter->setStretchFactor(2, 0);  // Right sidebar: fixed
+
+    // Restore persisted sidebar widths
     {
         QSettings s("SpeedyNote", "App");
-        int savedWidth = s.value("ui/leftSidebarWidth", 250).toInt();
-        savedWidth = qBound(180, savedWidth, 500);
-        m_contentSplitter->setSizes({savedWidth, 1});
+        int leftW  = qBound(180, s.value("ui/leftSidebarWidth",  250).toInt(), 500);
+        int rightW = qBound(220, s.value("ui/rightSidebarWidth", 300).toInt(), 600);
+        m_contentSplitter->setSizes({leftW, /*canvas=*/1, rightW});
     }
-    
-    // Debounce timer for saving sidebar width
+
+    // Debounce timer for saving sidebar widths (shared for both sides)
     m_sidebarWidthSaveTimer = new QTimer(this);
     m_sidebarWidthSaveTimer->setSingleShot(true);
     m_sidebarWidthSaveTimer->setInterval(300);
     connect(m_sidebarWidthSaveTimer, &QTimer::timeout, this, [this]() {
         QSettings s("SpeedyNote", "App");
         s.setValue("ui/leftSidebarWidth", m_leftSidebar->width());
+        // Guard against persisting a stale 0 when the panel is hidden
+        // (QSplitter reports width 0 for hidden children).
+        if (markdownNotesSidebar && markdownNotesSidebar->isVisible()) {
+            s.setValue("ui/rightSidebarWidth", markdownNotesSidebar->width());
+        }
     });
-    
+
     connect(m_contentSplitter, &QSplitter::splitterMoved, this, [this]() {
         m_sidebarWidthSaveTimer->start();
     });
-    
+
     contentLayout->addWidget(m_contentSplitter, 1);
-    contentLayout->addWidget(markdownNotesSidebar, 0); // Fixed width markdown notes sidebar
     
     QWidget *contentWidget = new QWidget;
     contentWidget->setLayout(contentLayout);
@@ -7366,13 +7374,30 @@ void MainWindow::toggleMarkdownNotesSidebar() {
     if (!markdownNotesSidebar) return;
     
     bool isVisible = markdownNotesSidebar->isVisible();
-    
+    bool makeVisible = !isVisible;
+
     // Note: Markdown notes sidebar (right side) is independent of 
     // outline/bookmarks sidebars (left side), so we don't hide them here.
     // The left sidebars are mutually exclusive with each other, but not with markdown notes.
-    
-    markdownNotesSidebar->setVisible(!isVisible);
-    markdownNotesSidebarVisible = !isVisible;
+
+    // When transitioning from hidden → visible, re-apply the persisted
+    // width.  QSplitter would otherwise reopen the panel at whatever
+    // size the splitter last computed for it (often the minimum, if the
+    // canvas got narrow while the panel was hidden).
+    if (makeVisible && m_contentSplitter) {
+        QSettings s("SpeedyNote", "App");
+        int rightW = qBound(220, s.value("ui/rightSidebarWidth", 300).toInt(), 600);
+        QList<int> sizes = m_contentSplitter->sizes();
+        if (sizes.size() == 3) {
+            const int total   = sizes[0] + sizes[1] + sizes[2];
+            const int leftW   = sizes[0];
+            const int canvasW = qMax(1, total - leftW - rightW);
+            m_contentSplitter->setSizes({leftW, canvasW, rightW});
+        }
+    }
+
+    markdownNotesSidebar->setVisible(makeVisible);
+    markdownNotesSidebarVisible = makeVisible;
     
     // Sync NavigationBar button state when sidebar is toggled programmatically
     if (m_navigationBar) {
