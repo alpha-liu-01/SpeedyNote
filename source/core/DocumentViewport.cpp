@@ -7517,17 +7517,13 @@ void DocumentViewport::activateLinkSlot(int slotIndex)
             if (!QFile::exists(notePath)) {
                 qWarning() << "activateLinkSlot: Markdown note file not found, clearing broken reference:" << notePath;
                 link->linkSlots[slotIndex].clear();
-                
-                // Mark page dirty
-                Page* page = findPageContainingObject(link);
-                if (page) {
-                    int pageIndex = m_document->pageIndexByUuid(page->uuid);
-                    if (pageIndex >= 0) {
-                        m_document->markPageDirty(pageIndex);
-                    }
-                }
-                
+
+                // Mark page/tile dirty and refresh the outline cache so the
+                // right sidebar drops the now-broken slot reference.
+                markLinkContainerDirtyAndRefreshOutline(link);
+
                 emit documentModified();
+                emit linkObjectListMayHaveChanged();   // M.7.3: refresh the right sidebar
                 update();
                 // TODO: Notify user that note was missing
                 return;
@@ -7674,15 +7670,13 @@ void DocumentViewport::clearLinkSlot(int slotIndex)
     qDebug() << "clearLinkSlot: Cleared slot" << slotIndex 
              << "(was type" << static_cast<int>(oldType) << ")";
     #endif
-    // Mark page dirty
-    Page* page = findPageContainingObject(link);
-    if (page) {
-        int pageIndex = m_document->pageIndexByUuid(page->uuid);
-        if (pageIndex >= 0) {
-            m_document->markPageDirty(pageIndex);
-        }
-    }
-    
+    // Mark page/tile dirty and refresh the outline cache so the right
+    // sidebar drops the cleared slot instead of rendering it as
+    // "(missing note)" on its next lazy populate.
+    markLinkContainerDirtyAndRefreshOutline(link);
+
+    emit documentModified();
+    emit linkObjectListMayHaveChanged();   // M.7.3: refresh the right sidebar
     update();
 }
 
@@ -7757,25 +7751,11 @@ void DocumentViewport::createMarkdownNoteForSlot(int slotIndex)
     qDebug() << "createMarkdownNoteForSlot: Created note" << noteId 
              << "for slot" << slotIndex << "title:" << note.title;
     #endif
-    // Mark page dirty.  Phase M.9: this link just gained a markdown slot,
-    // so its container's outline contribution changed — refresh the
-    // cache entry for that container before refreshNotesOutline runs.
-    // findPageContainingObject's out-tile-coord param avoids a second
-    // linear scan in edgeless mode.
-    Document::TileCoord tileCoord{};
-    Page* page = findPageContainingObject(link, &tileCoord);
-    if (page) {
-        if (m_document->isEdgeless()) {
-            m_document->markTileDirty(tileCoord);
-            m_document->refreshLinkOutlineFor(tileCoord);
-        } else {
-            int pageIndex = m_document->pageIndexByUuid(page->uuid);
-            if (pageIndex >= 0) {
-                m_document->markPageDirty(pageIndex);
-                m_document->refreshLinkOutlineFor(pageIndex);
-            }
-        }
-    }
+    // Phase M.9: this link just gained a markdown slot, so its container's
+    // outline contribution changed — mark the container dirty and refresh
+    // the outline cache entry for that container before refreshNotesOutline
+    // runs.
+    markLinkContainerDirtyAndRefreshOutline(link);
 
     emit documentModified();
     emit requestOpenMarkdownNote(noteId, link->id);
@@ -13209,6 +13189,34 @@ Page* DocumentViewport::findPageContainingObject(InsertedObject* obj, Document::
         // Paged mode: object should be on current page
         if (outTileCoord) *outTileCoord = {0, 0};
         return m_document->page(m_currentPageIndex);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// markLinkContainerDirtyAndRefreshOutline
+// Centralised dirty-mark + outline-cache-refresh used by every code path that
+// mutates a LinkObject's markdown slots. Keeping this in one helper prevents
+// the "(missing note)" sidebar drift that previously occurred when one path
+// (clearLinkSlot) forgot to refresh the outline cache after the others did.
+// -----------------------------------------------------------------------------
+void DocumentViewport::markLinkContainerDirtyAndRefreshOutline(LinkObject* link)
+{
+    if (!link || !m_document) return;
+
+    Document::TileCoord tileCoord{};
+    Page* page = findPageContainingObject(link, &tileCoord);
+    if (!page) return;
+
+    if (m_document->isEdgeless()) {
+        m_document->markTileDirty(tileCoord);
+        m_document->refreshLinkOutlineFor(tileCoord);
+    } else {
+        // Use cached UUID→index lookup (O(1) from Phase C.0.2)
+        int pageIndex = m_document->pageIndexByUuid(page->uuid);
+        if (pageIndex >= 0) {
+            m_document->markPageDirty(pageIndex);
+            m_document->refreshLinkOutlineFor(pageIndex);
+        }
     }
 }
 

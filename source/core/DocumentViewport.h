@@ -142,6 +142,7 @@ class QTabletEvent;
 class QWheelEvent;
 class TouchGestureHandler;
 class MissingPdfBanner;
+class LinkObject;
 
 /**
  * @brief Layout mode for page arrangement.
@@ -702,7 +703,24 @@ public:
      * @return Pointer to the Page, or nullptr if not found.
      */
     Page* findPageContainingObject(InsertedObject* obj, Document::TileCoord* outTileCoord = nullptr);
-    
+
+    /**
+     * @brief Mark the page/tile that contains @p link as dirty AND refresh
+     *        its persistent link-outline cache entry.
+     *
+     * Centralises the dirty-mark + outline-cache-refresh sequence used by
+     * every code path that mutates a LinkObject's markdown slot
+     * (createMarkdownNoteForSlot, clearLinkSlot, activateLinkSlot's broken-
+     * reference auto-clear). Keeping these three steps in one place prevents
+     * the "(missing note)" sidebar drift that occurred when one code path
+     * forgot to refresh the outline cache.
+     *
+     * No-op if @p link, m_document, or the containing page cannot be
+     * resolved. Does NOT emit any signals — callers decide whether to emit
+     * documentModified() / linkObjectListMayHaveChanged().
+     */
+    void markLinkContainerDirtyAndRefreshOutline(LinkObject* link);
+
     /**
      * @brief Get the maximum valid affinity value.
      * @return layerCount - 1 for the current document mode.
