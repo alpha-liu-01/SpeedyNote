@@ -378,10 +378,13 @@ void Toolbar::clearTabState(int tabId)
 
 void Toolbar::setOcrAvailable(bool available)
 {
-    m_ocrExpandable->toolButton()->setEnabled(available);
+    // Always keep the expandable trigger enabled so users can access cached
+    // OCR text even on platforms without an OCR engine.
+    m_ocrExpandable->toolButton()->setEnabled(true);
     m_ocrSubToolbar->setOcrAvailable(available);
     if (!available) {
-        m_ocrExpandable->toolButton()->setToolTip(tr("OCR unavailable - requires Windows Ink feature"));
+        m_ocrExpandable->toolButton()->setToolTip(
+            tr("OCR - View cached text (engine unavailable on this platform)"));
     } else {
         m_ocrExpandable->toolButton()->setToolTip(tr("OCR - Text Recognition"));
     }

@@ -75,8 +75,9 @@ signals:
 protected:
     /**
      * @brief Add a vertical separator line between button groups.
+     * @return Pointer to the created separator (so callers can show/hide it).
      */
-    void addSeparator();
+    QFrame* addSeparator();
 
     /**
      * @brief Add a widget to the subtoolbar layout.

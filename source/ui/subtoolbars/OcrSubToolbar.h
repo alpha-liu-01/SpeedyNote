@@ -7,6 +7,7 @@
 class QPushButton;
 class QLabel;
 class QTimer;
+class QFrame;
 
 class OcrSubToolbar : public SubToolbar {
     Q_OBJECT
@@ -59,6 +60,7 @@ private:
     QPushButton* m_showTextButton = nullptr;
     QPushButton* m_confidenceButton = nullptr;
     QPushButton* m_snapButton = nullptr;
+    QFrame* m_scanSeparator = nullptr;
     QLabel* m_statusLabel = nullptr;
     QTimer* m_statusClearTimer = nullptr;
 
