@@ -79,6 +79,16 @@
 
 
   <releases type="embedded">
+    <release version="1.4.3" date="2026-04-30">
+      <description>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that deleting a markdown note of a LinkObject resulted in a "missing note" placeholder on the right sidebar.</li>
+          <li>Enabled the cached OCR text boxes on unsupported systems.</li>
+          <li>Updated the tab bar sizing and auto-hide behavior.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.2" date="2026-04-22">
       <description>
         <p>New Features:</p>
