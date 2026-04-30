@@ -399,6 +399,21 @@ void SplitViewManager::destroyRightPane()
 
     updateActivePaneIndicator();
     emit splitStateChanged(false);
+
+    // Title refresh: setActivePane() short-circuits when the new pane equals
+    // the old (we set m_activePane=Left above), so subscribers like the
+    // navigation bar would otherwise miss the post-merge viewport switch
+    // (the last activeViewportChanged could be nullptr from the right pane
+    // emptying while it was still the active pane).
+    emit activeViewportChanged(activeViewport());
+
+    // Tab-bar autohide refresh: when the right pane is destroyed with 0 tabs
+    // (e.g., user closed the last right tab while left has only 1 tab), the
+    // surviving left TabBar's count never changed so it emits no tabCountChanged,
+    // and the right TabBar's deferred tabCountChanged is dropped because we
+    // disconnected it above. Without this explicit emit, MainWindow's autohide
+    // handler would never re-evaluate after the merge.
+    emit totalTabCountChanged(totalTabCount());
 }
 
 void SplitViewManager::updateTabBarContainerLayout()
