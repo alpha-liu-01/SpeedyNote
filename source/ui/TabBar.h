@@ -34,6 +34,11 @@ class TabBar : public QTabBar
     Q_OBJECT
 
 public:
+    /// Minimum width below which a single tab is not allowed to shrink.
+    /// When N * kMinTabWidth would exceed the bar width, Qt's scroll
+    /// buttons take over (setUsesScrollButtons(true)).
+    static constexpr int kMinTabWidth = 80;
+
     /**
      * @brief Construct a new TabBar
      * @param parent Parent widget
@@ -73,6 +78,14 @@ signals:
     void splitRequested(int tabIndex);
     void mergeAllRequested();
 
+    /**
+     * @brief Emitted after a tab is inserted or removed.
+     *
+     * Lets observers (e.g. SplitViewManager) react to any count change
+     * without having to manually emit at every mutation call site.
+     */
+    void tabCountChanged(int newCount);
+
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -88,8 +101,27 @@ protected:
     
     /**
      * @brief Replace close button when a new tab is inserted (Android).
+     *
+     * Also requests a layout update so equal-width sizing rebalances.
      */
     void tabInserted(int index) override;
+
+    /**
+     * @brief Request a layout update when a tab is removed so widths rebalance.
+     */
+    void tabRemoved(int index) override;
+
+    /**
+     * @brief Re-query tab size hints when the bar is resized (split drag,
+     *        window resize) so each tab tracks barWidth / max(N, 2).
+     */
+    void resizeEvent(QResizeEvent* event) override;
+
+    /**
+     * @brief Equal-width sizing: each tab takes barWidth / max(count(), 2),
+     *        clamped to a minimum of kMinTabWidth.
+     */
+    QSize tabSizeHint(int index) const override;
 
 private:
     void showSplitMenu(const QPoint& globalPos, int tabIndex);
