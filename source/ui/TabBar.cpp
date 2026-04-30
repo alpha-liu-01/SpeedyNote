@@ -5,6 +5,7 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QMouseEvent>
+#include <QResizeEvent>
 #include <QTimer>
 
 // macOS native style (QMacStyle) ignores QSS for QTabBar::close-button,
@@ -71,6 +72,50 @@ void TabBar::tabInserted(int index)
 #ifdef Q_OS_ANDROID
     installCloseButton(index);
 #endif
+    // Rebalance equal-width tab sizing now that count() has changed.
+    updateGeometry();
+    // Defer the emit: TabManager::createTab() temporarily calls
+    // blockSignals(true) around addTab(), which would silently swallow
+    // a synchronous emit here. Posting via singleShot(0) lets us fire
+    // after the surrounding code re-enables signals.
+    QTimer::singleShot(0, this, [this]() {
+        emit tabCountChanged(count());
+    });
+}
+
+void TabBar::tabRemoved(int index)
+{
+    QTabBar::tabRemoved(index);
+    // Rebalance equal-width tab sizing now that count() has changed.
+    updateGeometry();
+    // Same deferral as tabInserted - some callers may have signals blocked.
+    QTimer::singleShot(0, this, [this]() {
+        emit tabCountChanged(count());
+    });
+}
+
+void TabBar::resizeEvent(QResizeEvent* event)
+{
+    QTabBar::resizeEvent(event);
+    // Bar width changed (window resize / splitter drag); re-query
+    // every tabSizeHint so tabs reflow to barWidth / max(N, 2).
+    updateGeometry();
+}
+
+QSize TabBar::tabSizeHint(int index) const
+{
+    QSize base = QTabBar::tabSizeHint(index);
+
+    // Equal-width rule: 1 tab still uses half-width (other half empty),
+    // 2 tabs each take half, 3 each take a third, etc.
+    const int n = qMax(count(), 2);
+    const int barWidth = width();
+    if (barWidth <= 0)
+        return base;
+
+    const int target = barWidth / n;
+    const int finalW = qMax(target, kMinTabWidth);
+    return QSize(finalW, base.height());
 }
 
 void TabBar::setSplitEnabled(bool enabled) { m_splitEnabled = enabled; }

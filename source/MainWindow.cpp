@@ -424,6 +424,18 @@ MainWindow::MainWindow(QWidget *parent)
         if (!isSplit) clearToolOverride(false);
     });
 
+    // Auto-hide the tab bar container when only one notebook is open.
+    // The filename click in NavigationBar still toggles visibility as a
+    // manual override (last interaction wins until the next count transition).
+    if (QWidget* tbc = m_splitViewManager->tabBarContainer()) {
+        tbc->setVisible(false);
+    }
+    connect(m_splitViewManager, &SplitViewManager::totalTabCountChanged, this, [this](int total) {
+        if (QWidget* tbc = m_splitViewManager ? m_splitViewManager->tabBarContainer() : nullptr) {
+            tbc->setVisible(total >= 2);
+        }
+    });
+
     // ML-1 FIX: Connect tabCloseRequested to clean up Document when tab closes
     // SplitViewManager forwards this from both panes with the unique tab ID
     connect(m_splitViewManager, &SplitViewManager::tabCloseRequested, this, [this](int tabId, DocumentViewport* vp, SplitViewManager::Pane) {

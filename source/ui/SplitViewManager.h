@@ -123,6 +123,14 @@ signals:
     void tabCloseAttempted(int tabId, DocumentViewport* viewport, Pane pane);
     void splitStateChanged(bool isSplit);
 
+    /**
+     * @brief Emitted whenever the total number of tabs across both panes changes.
+     *
+     * Used by MainWindow to auto-hide the tab bar container when only one
+     * notebook is open.
+     */
+    void totalTabCountChanged(int total);
+
 private slots:
     void onLeftViewportChanged(DocumentViewport* vp);
     void onRightViewportChanged(DocumentViewport* vp);

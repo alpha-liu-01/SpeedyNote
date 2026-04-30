@@ -67,6 +67,11 @@ SplitViewManager::SplitViewManager(QWidget* parent)
         mergePanes();
     });
 
+    // Forward left-pane tab count changes to the unified totalTabCountChanged signal.
+    connect(m_leftTabBar, &TabBar::tabCountChanged, this, [this](int) {
+        emit totalTabCountChanged(totalTabCount());
+    });
+
     // Application-level event filter catches mouse/tablet/touch on ANY
     // descendant widget (viewports, tab bars, etc.) for pane activation.
     QApplication::instance()->installEventFilter(this);
@@ -340,6 +345,11 @@ void SplitViewManager::createRightPane()
     });
     connect(m_rightTabBar, &TabBar::mergeAllRequested, this, [this]() {
         mergePanes();
+    });
+
+    // Forward right-pane tab count changes to the unified totalTabCountChanged signal.
+    connect(m_rightTabBar, &TabBar::tabCountChanged, this, [this](int) {
+        emit totalTabCountChanged(totalTabCount());
     });
 
     // Apply cached theme to new tab bar

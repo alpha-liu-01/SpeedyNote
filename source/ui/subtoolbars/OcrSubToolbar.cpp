@@ -4,6 +4,7 @@
 #include <QLabel>
 #include <QTimer>
 #include <QIcon>
+#include <QFrame>
 
 OcrSubToolbar::OcrSubToolbar(QWidget* parent)
     : SubToolbar(parent)
@@ -34,7 +35,7 @@ void OcrSubToolbar::createWidgets()
     m_scanAllButton->setToolTip(tr("Scan All Pages"));
     addWidget(m_scanAllButton);
 
-    addSeparator();
+    m_scanSeparator = addSeparator();
 
     m_autoOcrButton = makeIconButton(this, BUTTON_SIZE);
     m_autoOcrButton->setCheckable(true);
@@ -185,15 +186,20 @@ void OcrSubToolbar::clearTabState(int tabId)
 
 void OcrSubToolbar::setOcrAvailable(bool available)
 {
-    m_scanPageButton->setEnabled(available);
-    m_scanAllButton->setEnabled(available);
-    m_autoOcrButton->setEnabled(available);
-    m_showTextButton->setEnabled(available);
-    m_confidenceButton->setEnabled(available);
-    m_snapButton->setEnabled(available);
+    // Engine-dependent controls: hidden when no engine is available
+    m_scanPageButton->setVisible(available);
+    m_scanAllButton->setVisible(available);
+    m_autoOcrButton->setVisible(available);
+    if (m_scanSeparator)
+        m_scanSeparator->setVisible(available);
+
+    // Display-only controls: always enabled (work on cached OCR data)
+    m_showTextButton->setEnabled(true);
+    m_confidenceButton->setEnabled(true);
+    m_snapButton->setEnabled(true);
 
     if (!available) {
-        m_statusLabel->setText(tr("OCR unavailable"));
+        m_statusLabel->setText(tr("Cached text only"));
     } else {
         m_statusLabel->clear();
     }

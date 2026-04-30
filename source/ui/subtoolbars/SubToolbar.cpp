@@ -21,7 +21,7 @@ SubToolbar::SubToolbar(QWidget* parent)
     setStyleSheet("#SubToolbarWidget { background: transparent; }");
 }
 
-void SubToolbar::addSeparator()
+QFrame* SubToolbar::addSeparator()
 {
     QFrame* separator = new QFrame(this);
     separator->setFrameShape(QFrame::VLine);
@@ -36,6 +36,7 @@ void SubToolbar::addSeparator()
     }
 
     m_layout->addWidget(separator, 0, Qt::AlignVCenter);
+    return separator;
 }
 
 void SubToolbar::addWidget(QWidget* widget)
