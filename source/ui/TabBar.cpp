@@ -54,16 +54,21 @@ void TabBar::tabLayoutChange()
 {
     QTabBar::tabLayoutChange();
 
-#ifdef Q_OS_MACOS
-    // Fusion + QStyleSheetStyle positions close buttons flush at the tab edge.
-    // Nudge each close button inward after Qt finishes its layout pass.
-    static constexpr int kCloseButtonInset = 6;
+    // Re-position the close button uniformly on every platform/style.
+    // Qt's per-style SE_TabBarTabRightButton placement is inconsistent
+    // (e.g. Fusion places it flush at the right edge, native Windows
+    // adds an inset, Flatpak environments inherit Fusion-like behavior).
+    // Computing absolute coords from tabRect() gives equal gap to
+    // top/bottom/right regardless of QStyle.
+    static constexpr int kCloseButtonRightGap = 6;
     for (int i = 0; i < count(); ++i) {
         QWidget *btn = tabButton(i, QTabBar::RightSide);
-        if (btn)
-            btn->move(btn->x() - kCloseButtonInset, btn->y());
+        if (!btn) continue;
+        const QRect tab = tabRect(i);
+        const int x = tab.right() - btn->width() - kCloseButtonRightGap + 1;
+        const int y = tab.top() + (tab.height() - btn->height()) / 2;
+        btn->move(x, y);
     }
-#endif
 }
 
 void TabBar::tabInserted(int index)
