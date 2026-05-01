@@ -486,7 +486,11 @@ static Launcher* createLauncherForColdStart()
     connectLauncherSignals(launcher);
 #ifdef Q_OS_MACOS
     launcher->show();
-    QApplication::processEvents();
+    // Exclude user-input events: at this point in main() the only events
+    // we want to process are the ones that realize the NSWindow / activate
+    // NSApp. We don't want the launcher to spuriously react to a stray
+    // mouse or key event delivered during the priming tick.
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 #endif
     return launcher;
 }
@@ -954,12 +958,44 @@ int main(int argc, char* argv[])
     }
 
     // ========== Launch Application ==========
-    int exitCode = 0;
-
     // Always create the Launcher upfront. On macOS this also show()s it
     // briefly to prime NSApp activation; on other platforms it's hidden
     // until a branch decides to surface it. See createLauncherForColdStart.
     auto* launcher = createLauncherForColdStart();
+
+    // Local helpers fold the per-branch platform-conditional registration
+    // into one place. fileOpenFilter / inboxWatcher are local-to-main and
+    // platform-conditional themselves, hence the lambdas (a free function
+    // would force ifdef'd parameters).
+    auto registerMainWindowWithPlatform = [&](MainWindow* w) {
+#if defined(Q_OS_MACOS)
+        fileOpenFilter.setMainWindow(w);
+#elif defined(Q_OS_IOS)
+        inboxWatcher.setMainWindow(w);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
+        (void)w;
+    };
+    auto registerLauncherWithPlatform = [&](Launcher* l) {
+#if defined(Q_OS_MACOS)
+        fileOpenFilter.setLauncher(l);
+#elif defined(Q_OS_IOS)
+        inboxWatcher.setLauncher(l);
+        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
+#endif
+        (void)l;
+    };
+
+    // Parent for the session-restore prompt in the no-file branch.
+    // On macOS the launcher is visible (priming pass), so we get a real
+    // sheet/window-modal dialog. On other platforms the launcher is
+    // hidden, so a hidden parent would weaken modality - keep nullptr
+    // (preserves the original application-modal behavior).
+#ifdef Q_OS_MACOS
+    QWidget* sessionPromptParent = launcher;
+#else
+    QWidget* sessionPromptParent = nullptr;
+#endif
 
     if (!inputFile.isEmpty()) {
         // File argument provided - open in MainWindow.
@@ -984,18 +1020,10 @@ int main(int argc, char* argv[])
             }
         }
 
-#if defined(Q_OS_MACOS)
-        fileOpenFilter.setMainWindow(w);
-#elif defined(Q_OS_IOS)
-        inboxWatcher.setMainWindow(w);
-        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
-#endif
-        exitCode = app.exec();
+        registerMainWindowWithPlatform(w);
     } else if (!sessionTabs.isEmpty()) {
         // No file, but previous session exists - ask to restore.
-        // Parent the prompt to launcher (visible on macOS, hidden elsewhere)
-        // so it isn't an orphan top-level dialog at cold start.
-        auto reply = QMessageBox::question(launcher,
+        auto reply = QMessageBox::question(sessionPromptParent,
             QObject::tr("Restore Previous Session"),
             QObject::tr("You had %1 tab(s) open last time. Restore them?")
                 .arg(sessionTabs.size()),
@@ -1010,35 +1038,19 @@ int main(int argc, char* argv[])
             if (sessionActiveIndex >= 0 && sessionActiveIndex < w->tabCount())
                 w->switchToTabIndex(sessionActiveIndex);
 
-#if defined(Q_OS_MACOS)
-            fileOpenFilter.setMainWindow(w);
-#elif defined(Q_OS_IOS)
-            inboxWatcher.setMainWindow(w);
-            QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
-#endif
-            exitCode = app.exec();
+            registerMainWindowWithPlatform(w);
         } else {
             // User declined - land on the Launcher.
             showLauncherAtColdStart(launcher);
-#if defined(Q_OS_MACOS)
-            fileOpenFilter.setLauncher(launcher);
-#elif defined(Q_OS_IOS)
-            inboxWatcher.setLauncher(launcher);
-            QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
-#endif
-            exitCode = app.exec();
+            registerLauncherWithPlatform(launcher);
         }
     } else {
         // No file, no session - land on the Launcher.
         showLauncherAtColdStart(launcher);
-#if defined(Q_OS_MACOS)
-        fileOpenFilter.setLauncher(launcher);
-#elif defined(Q_OS_IOS)
-        inboxWatcher.setLauncher(launcher);
-        QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
-#endif
-        exitCode = app.exec();
+        registerLauncherWithPlatform(launcher);
     }
+
+    int exitCode = app.exec();
 
     SPEEDYNOTE_SDL_QUIT();
     return exitCode;
