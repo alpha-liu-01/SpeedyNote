@@ -11,6 +11,7 @@
 #include <QStandardPaths>
 #include <QLibraryInfo>
 #include <QFont>
+#include <QTimer>
 #include <algorithm>
 
 #include "MainWindow.h"
@@ -407,6 +408,28 @@ static void loadTranslations(QApplication& app, QTranslator& translator)
 // ============================================================================
 // Launcher Setup
 // ============================================================================
+
+// macOS-critical: pair show() with deferred raise() + activateWindow() so
+// NSApp transitions to active and the new NSWindow becomes "key". Without
+// this, QMenu popups (Add / Overflow), the fullscreen toggle, and the
+// back-to-Launcher button all misbehave on cold-start until the user
+// manually activates the app via the dock icon. The Launcher-only branches
+// don't need this because Launcher is a lightweight widget that realizes
+// synchronously and Cocoa auto-promotes it to key; MainWindow's heavyweight
+// construction (toolbars, viewport, sidebars, opening session tabs) doesn't
+// reliably get auto-promoted.
+//
+// Deferred via QTimer::singleShot(0, ...) so the activation runs AFTER the
+// surrounding tab-restore loop finishes synchronously and Qt has finished
+// realizing the NSWindow. Harmless no-op on Windows / Linux (their window
+// managers already foreground the first shown window).
+static void activateMainWindowAfterShow(MainWindow* w)
+{
+    QTimer::singleShot(0, w, [w]() {
+        w->raise();
+        w->activateWindow();
+    });
+}
 
 static void connectLauncherSignals(Launcher* launcher)
 {
@@ -939,6 +962,7 @@ int main(int argc, char* argv[])
         inboxWatcher.setMainWindow(w);
         QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
+        activateMainWindowAfterShow(w);
         exitCode = app.exec();
     } else if (!sessionTabs.isEmpty()) {
         // No file, but previous session exists - ask to restore
@@ -968,6 +992,7 @@ int main(int argc, char* argv[])
             inboxWatcher.setMainWindow(w);
             QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
+            activateMainWindowAfterShow(w);
             exitCode = app.exec();
         } else {
             // User declined - show Launcher normally
