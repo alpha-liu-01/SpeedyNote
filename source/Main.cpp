@@ -11,7 +11,6 @@
 #include <QStandardPaths>
 #include <QLibraryInfo>
 #include <QFont>
-#include <QTimer>
 #include <algorithm>
 
 #include "MainWindow.h"
@@ -409,28 +408,6 @@ static void loadTranslations(QApplication& app, QTranslator& translator)
 // Launcher Setup
 // ============================================================================
 
-// macOS-critical: pair show() with deferred raise() + activateWindow() so
-// NSApp transitions to active and the new NSWindow becomes "key". Without
-// this, QMenu popups (Add / Overflow), the fullscreen toggle, and the
-// back-to-Launcher button all misbehave on cold-start until the user
-// manually activates the app via the dock icon. The Launcher-only branches
-// don't need this because Launcher is a lightweight widget that realizes
-// synchronously and Cocoa auto-promotes it to key; MainWindow's heavyweight
-// construction (toolbars, viewport, sidebars, opening session tabs) doesn't
-// reliably get auto-promoted.
-//
-// Deferred via QTimer::singleShot(0, ...) so the activation runs AFTER the
-// surrounding tab-restore loop finishes synchronously and Qt has finished
-// realizing the NSWindow. Harmless no-op on Windows / Linux (their window
-// managers already foreground the first shown window).
-static void activateMainWindowAfterShow(MainWindow* w)
-{
-    QTimer::singleShot(0, w, [w]() {
-        w->raise();
-        w->activateWindow();
-    });
-}
-
 static void connectLauncherSignals(Launcher* launcher)
 {
     // Helper to get or create MainWindow
@@ -490,6 +467,57 @@ static void connectLauncherSignals(Launcher* launcher)
         }
         // Otherwise, do nothing (stay on Launcher)
     });
+}
+
+// Pre-create the Launcher used for the entire app lifetime. On macOS,
+// also show() it immediately and run one event-loop tick so NSApp
+// transitions to .regular activation before the heavyweight MainWindow
+// is shown on top. Without this priming, on macOS 26 NSApp stays in a
+// half-active state where QMenu popups (Add / Overflow), the fullscreen
+// toggle, and the back-to-Launcher button all misbehave until the user
+// manually activates the app via the dock icon.
+//
+// On Windows / Linux / iOS / Android this is a no-op (Launcher created
+// but not shown), preserving today's behavior on those platforms.
+static Launcher* createLauncherForColdStart()
+{
+    auto* launcher = new Launcher();
+    launcher->setAttribute(Qt::WA_DeleteOnClose);
+    connectLauncherSignals(launcher);
+#ifdef Q_OS_MACOS
+    launcher->show();
+    QApplication::processEvents();
+#endif
+    return launcher;
+}
+
+// Show MainWindow at cold start. On macOS this routes through the
+// already-visible Launcher using the exact sequence that the proven-
+// working Launcher::notebookSelected click uses (preserveWindowState +
+// bringToFront + launcher->hide()). On other platforms it just calls
+// show().
+static void showMainWindowAtColdStart(MainWindow* w, Launcher* launcher)
+{
+#ifdef Q_OS_MACOS
+    w->preserveWindowState(launcher, /*existing*/false);
+    w->bringToFront();
+    launcher->hide();
+#else
+    (void)launcher;
+    w->show();
+#endif
+}
+
+// Make Launcher visible at cold start for branches that want to land on
+// the Launcher. On macOS the Launcher is already visible from
+// createLauncherForColdStart(), so this is a no-op there.
+static void showLauncherAtColdStart(Launcher* launcher)
+{
+#ifndef Q_OS_MACOS
+    launcher->show();
+#else
+    (void)launcher;
+#endif
 }
 
 // ============================================================================
@@ -928,11 +956,16 @@ int main(int argc, char* argv[])
     // ========== Launch Application ==========
     int exitCode = 0;
 
+    // Always create the Launcher upfront. On macOS this also show()s it
+    // briefly to prime NSApp activation; on other platforms it's hidden
+    // until a branch decides to surface it. See createLauncherForColdStart.
+    auto* launcher = createLauncherForColdStart();
+
     if (!inputFile.isEmpty()) {
-        // File argument provided - open directly in MainWindow
+        // File argument provided - open in MainWindow.
         auto* w = new MainWindow();
         w->setAttribute(Qt::WA_DeleteOnClose);
-        w->show();
+        showMainWindowAtColdStart(w, launcher);
         w->openFileInNewTab(inputFile);
 
         if (!sessionTabs.isEmpty()) {
@@ -951,22 +984,18 @@ int main(int argc, char* argv[])
             }
         }
 
-        // Create a hidden Launcher so toggleLauncher() can find it
-        auto* launcher = new Launcher();
-        launcher->setAttribute(Qt::WA_DeleteOnClose);
-        connectLauncherSignals(launcher);
-
 #if defined(Q_OS_MACOS)
         fileOpenFilter.setMainWindow(w);
 #elif defined(Q_OS_IOS)
         inboxWatcher.setMainWindow(w);
         QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
-        activateMainWindowAfterShow(w);
         exitCode = app.exec();
     } else if (!sessionTabs.isEmpty()) {
-        // No file, but previous session exists - ask to restore
-        auto reply = QMessageBox::question(nullptr,
+        // No file, but previous session exists - ask to restore.
+        // Parent the prompt to launcher (visible on macOS, hidden elsewhere)
+        // so it isn't an orphan top-level dialog at cold start.
+        auto reply = QMessageBox::question(launcher,
             QObject::tr("Restore Previous Session"),
             QObject::tr("You had %1 tab(s) open last time. Restore them?")
                 .arg(sessionTabs.size()),
@@ -975,16 +1004,11 @@ int main(int argc, char* argv[])
         if (reply == QMessageBox::Yes) {
             auto* w = new MainWindow();
             w->setAttribute(Qt::WA_DeleteOnClose);
-            w->show();
+            showMainWindowAtColdStart(w, launcher);
             for (const QString& path : sessionTabs)
                 w->openFileInNewTab(path);
             if (sessionActiveIndex >= 0 && sessionActiveIndex < w->tabCount())
                 w->switchToTabIndex(sessionActiveIndex);
-
-            // Create a hidden Launcher so toggleLauncher() can find it
-            auto* launcher = new Launcher();
-            launcher->setAttribute(Qt::WA_DeleteOnClose);
-            connectLauncherSignals(launcher);
 
 #if defined(Q_OS_MACOS)
             fileOpenFilter.setMainWindow(w);
@@ -992,14 +1016,10 @@ int main(int argc, char* argv[])
             inboxWatcher.setMainWindow(w);
             QTimer::singleShot(0, []{ IOSPlatformHelper::disableEditMenuOverlay(); });
 #endif
-            activateMainWindowAfterShow(w);
             exitCode = app.exec();
         } else {
-            // User declined - show Launcher normally
-            auto* launcher = new Launcher();
-            launcher->setAttribute(Qt::WA_DeleteOnClose);
-            connectLauncherSignals(launcher);
-            launcher->show();
+            // User declined - land on the Launcher.
+            showLauncherAtColdStart(launcher);
 #if defined(Q_OS_MACOS)
             fileOpenFilter.setLauncher(launcher);
 #elif defined(Q_OS_IOS)
@@ -1009,11 +1029,8 @@ int main(int argc, char* argv[])
             exitCode = app.exec();
         }
     } else {
-        // No file, no session - show Launcher
-        auto* launcher = new Launcher();
-        launcher->setAttribute(Qt::WA_DeleteOnClose);
-        connectLauncherSignals(launcher);
-        launcher->show();
+        // No file, no session - land on the Launcher.
+        showLauncherAtColdStart(launcher);
 #if defined(Q_OS_MACOS)
         fileOpenFilter.setLauncher(launcher);
 #elif defined(Q_OS_IOS)
