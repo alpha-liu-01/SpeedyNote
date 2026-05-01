@@ -6,6 +6,7 @@
 #include <QContextMenuEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
+#include <QEvent>
 #include <QTimer>
 
 // macOS native style (QMacStyle) ignores QSS for QTabBar::close-button,
@@ -88,7 +89,15 @@ void TabBar::repositionCloseButtons()
         const QRect tab = tabRect(i);
         const int x = tab.right() - btn->width() - kCloseButtonRightGap + 1;
         const int y = tab.top() + (tab.height() - btn->height()) / 2;
-        btn->move(x, y);
+        const QPoint target(x, y);
+        // Idempotency check: we install an event filter on each close button
+        // that schedules a reposition on Move events. An unconditional move()
+        // would itself fire a Move event, which would re-schedule, which would
+        // move() again - infinite ping-pong. Comparing first makes the
+        // steady-state move() a no-op so the loop terminates after one pass.
+        if (btn->pos() != target) {
+            btn->move(target);
+        }
     }
 }
 
@@ -108,6 +117,13 @@ void TabBar::tabInserted(int index)
 #ifdef Q_OS_ANDROID
     installCloseButton(index);
 #endif
+    // Watch the close button for Move/Resize so we can re-apply our inset
+    // whenever Qt's style or QStyleSheetStyle::polish() repositions it
+    // (notably on tab switch on macOS Fusion). tabLayoutChange() is not
+    // reliably the last writer in those flows.
+    if (QWidget *btn = tabButton(index, QTabBar::RightSide)) {
+        btn->installEventFilter(this);
+    }
     // Rebalance equal-width tab sizing now that count() has changed.
     updateGeometry();
     // Defer the emit: TabManager::createTab() temporarily calls
@@ -117,6 +133,24 @@ void TabBar::tabInserted(int index)
     QTimer::singleShot(0, this, [this]() {
         emit tabCountChanged(count());
     });
+}
+
+bool TabBar::eventFilter(QObject* obj, QEvent* event)
+{
+    // Only react to geometry changes, and only from a widget that is
+    // currently one of our close buttons. The linear scan is bounded by
+    // tab count (typically <= 10) and only runs on Move/Resize events,
+    // so cost is negligible.
+    const QEvent::Type t = event->type();
+    if (t == QEvent::Move || t == QEvent::Resize) {
+        for (int i = 0; i < count(); ++i) {
+            if (tabButton(i, QTabBar::RightSide) == obj) {
+                scheduleCloseButtonReposition();
+                break;
+            }
+        }
+    }
+    return QTabBar::eventFilter(obj, event);
 }
 
 void TabBar::tabRemoved(int index)

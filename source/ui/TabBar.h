@@ -92,6 +92,21 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     /**
+     * @brief Catch Move/Resize events on close-button widgets.
+     *
+     * On macOS Fusion + QStyleSheetStyle, switching tabs causes Qt to
+     * re-apply SE_TabBarTabRightButton (and possibly re-polish the button
+     * via the :selected pseudo-state) AFTER our deferred reposition has
+     * already run. tabLayoutChange() is not always the last writer in
+     * that case. Watching the buttons directly lets us re-apply our inset
+     * whenever any external code mutates their geometry.
+     *
+     * Idempotency in repositionCloseButtons() (it skips move() when the
+     * button is already at the target position) breaks the otherwise
+     * infinite Move-event ping-pong our own move() would create.
+     */
+    bool eventFilter(QObject* obj, QEvent* event) override;
+    /**
      * @brief Adjust close button positions after Qt's tab layout pass.
      * 
      * On macOS, Fusion + QStyleSheetStyle places close buttons flush at
