@@ -622,10 +622,19 @@ MainWindow::MainWindow(QWidget *parent)
         
         tm->closeTab(index);
 
-        // If the right pane is now empty, auto-merge
-        if (m_splitViewManager->isSplit() && m_splitViewManager->rightTabManager()
-            && m_splitViewManager->rightTabManager()->tabCount() == 0) {
-            m_splitViewManager->mergePanes();
+        // If split is active and either pane is now empty, collapse back
+        // to a single-pane layout (avoids a blank left/right pane).
+        // mergePanes() moves any remaining right-pane tabs to the left and
+        // destroys the right pane, so it works for both "right empty" and
+        // "left empty" cases.
+        if (m_splitViewManager->isSplit()) {
+            TabManager* leftTm  = m_splitViewManager->leftTabManager();
+            TabManager* rightTm = m_splitViewManager->rightTabManager();
+            const bool leftEmpty  = leftTm  && leftTm->tabCount()  == 0;
+            const bool rightEmpty = rightTm && rightTm->tabCount() == 0;
+            if (leftEmpty || rightEmpty) {
+                m_splitViewManager->mergePanes();
+            }
         }
     });
     // ===========================================================================

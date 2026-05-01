@@ -6,6 +6,7 @@
 #include <QContextMenuEvent>
 #include <QMouseEvent>
 #include <QResizeEvent>
+#include <QEvent>
 #include <QTimer>
 
 // macOS native style (QMacStyle) ignores QSS for QTabBar::close-button,
@@ -54,16 +55,62 @@ void TabBar::tabLayoutChange()
 {
     QTabBar::tabLayoutChange();
 
-#ifdef Q_OS_MACOS
-    // Fusion + QStyleSheetStyle positions close buttons flush at the tab edge.
-    // Nudge each close button inward after Qt finishes its layout pass.
-    static constexpr int kCloseButtonInset = 6;
+    // Defense in depth. The primary mechanism is the eventFilter() on each
+    // close button, which converts Qt's per-button setGeometry calls
+    // (Move + Resize) into a scheduled reposition. These two calls are a
+    // safety net for any platform/Qt version that suppresses those events
+    // (e.g. on a no-op setGeometry):
+    //   - Sync pass: cheap on platforms where the button is already sized
+    //     and at the right position (idempotency check no-ops the move()).
+    //     Avoids one event-loop tick of "wrong position" on first paint.
+    //   - Deferred pass: catches macOS, where the button is sized via
+    //     polish() AFTER tabLayoutChange returns and the sync pass would
+    //     skip it (width()==0 guard).
+    // Both are coalesced through m_closeBtnRepositionPending, so the
+    // eventFilter scheduling and these calls collapse into one reposition.
+    repositionCloseButtons();
+    scheduleCloseButtonReposition();
+}
+
+void TabBar::repositionCloseButtons()
+{
+    // Place each close button at the same inset from its tab's right edge,
+    // vertically centered. Computing absolute coords from tabRect() makes us
+    // immune to whichever placement Qt's active QStyle picks for
+    // SE_TabBarTabRightButton (Fusion: flush right; Windows native: small
+    // inset; Plasma Breeze: small inset; Flatpak: Fusion-like flush right).
+    static constexpr int kCloseButtonRightGap = 6;
     for (int i = 0; i < count(); ++i) {
         QWidget *btn = tabButton(i, QTabBar::RightSide);
-        if (btn)
-            btn->move(btn->x() - kCloseButtonInset, btn->y());
+        // Skip unsized buttons. On macOS QStyleSheetStyle::polish has not
+        // applied the QSS width/height yet on a fresh CloseButton, so
+        // btn->size() is 0x0. Using width()==0 here would put the button's
+        // top-left near the tab's right edge, and once polish resizes it to
+        // 20x20 it would extend past the edge and look flush-right.
+        if (!btn || btn->width() <= 0 || btn->height() <= 0) continue;
+        const QRect tab = tabRect(i);
+        const int x = tab.right() - btn->width() - kCloseButtonRightGap + 1;
+        const int y = tab.top() + (tab.height() - btn->height()) / 2;
+        const QPoint target(x, y);
+        // Idempotency check: we install an event filter on each close button
+        // that schedules a reposition on Move events. An unconditional move()
+        // would itself fire a Move event, which would re-schedule, which would
+        // move() again - infinite ping-pong. Comparing first makes the
+        // steady-state move() a no-op so the loop terminates after one pass.
+        if (btn->pos() != target) {
+            btn->move(target);
+        }
     }
-#endif
+}
+
+void TabBar::scheduleCloseButtonReposition()
+{
+    if (m_closeBtnRepositionPending) return;
+    m_closeBtnRepositionPending = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_closeBtnRepositionPending = false;
+        repositionCloseButtons();
+    });
 }
 
 void TabBar::tabInserted(int index)
@@ -72,6 +119,13 @@ void TabBar::tabInserted(int index)
 #ifdef Q_OS_ANDROID
     installCloseButton(index);
 #endif
+    // Watch the close button for Move/Resize so we can re-apply our inset
+    // whenever Qt's style or QStyleSheetStyle::polish() repositions it
+    // (notably on tab switch on macOS Fusion). tabLayoutChange() is not
+    // reliably the last writer in those flows.
+    if (QWidget *btn = tabButton(index, QTabBar::RightSide)) {
+        btn->installEventFilter(this);
+    }
     // Rebalance equal-width tab sizing now that count() has changed.
     updateGeometry();
     // Defer the emit: TabManager::createTab() temporarily calls
@@ -81,6 +135,24 @@ void TabBar::tabInserted(int index)
     QTimer::singleShot(0, this, [this]() {
         emit tabCountChanged(count());
     });
+}
+
+bool TabBar::eventFilter(QObject* obj, QEvent* event)
+{
+    // Only react to geometry changes, and only from a widget that is
+    // currently one of our close buttons. The linear scan is bounded by
+    // tab count (typically <= 10) and only runs on Move/Resize events,
+    // so cost is negligible.
+    const QEvent::Type t = event->type();
+    if (t == QEvent::Move || t == QEvent::Resize) {
+        for (int i = 0; i < count(); ++i) {
+            if (tabButton(i, QTabBar::RightSide) == obj) {
+                scheduleCloseButtonReposition();
+                break;
+            }
+        }
+    }
+    return QTabBar::eventFilter(obj, event);
 }
 
 void TabBar::tabRemoved(int index)

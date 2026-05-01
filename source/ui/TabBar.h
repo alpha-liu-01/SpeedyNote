@@ -92,10 +92,29 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     /**
-     * @brief Adjust close button positions after Qt's tab layout pass.
-     * 
-     * On macOS, Fusion + QStyleSheetStyle places close buttons flush at
-     * the tab edge.  This override nudges them inward for proper spacing.
+     * @brief Catch Move/Resize events on close-button widgets.
+     *
+     * On macOS Fusion + QStyleSheetStyle, switching tabs causes Qt to
+     * re-apply SE_TabBarTabRightButton (and possibly re-polish the button
+     * via the :selected pseudo-state) AFTER our deferred reposition has
+     * already run. tabLayoutChange() is not always the last writer in
+     * that case. Watching the buttons directly lets us re-apply our inset
+     * whenever any external code mutates their geometry.
+     *
+     * Idempotency in repositionCloseButtons() (it skips move() when the
+     * button is already at the target position) breaks the otherwise
+     * infinite Move-event ping-pong our own move() would create.
+     */
+    bool eventFilter(QObject* obj, QEvent* event) override;
+    /**
+     * @brief Defense-in-depth reposition trigger after Qt's tab layout.
+     *
+     * The primary mechanism for keeping close buttons inset is the
+     * eventFilter() above, which reacts whenever Qt's style or
+     * QStyleSheetStyle::polish() moves/resizes a button. tabLayoutChange()
+     * just adds a synchronous + deferred reposition pass at known layout
+     * boundaries, in case some platform suppresses the per-button
+     * Move/Resize events (e.g. for a no-op setGeometry).
      */
     void tabLayoutChange() override;
     
@@ -126,11 +145,35 @@ protected:
 private:
     void showSplitMenu(const QPoint& globalPos, int tabIndex);
 
+    /// Reposition every close button to the same inset (kCloseButtonRightGap)
+    /// from the right edge of its tab, vertically centered. Two safeties:
+    ///  - Skips buttons whose size has not yet been resolved by
+    ///    QStyleSheetStyle::polish (size() is 0x0 on a freshly-created
+    ///    CloseButton on macOS, where polish runs AFTER tabLayoutChange);
+    ///    the deferred pass picks them up next event-loop tick.
+    ///  - Skips move() when the button is already at the target position.
+    ///    Without this, the eventFilter() install on each button would turn
+    ///    our own move() into an infinite Move-event ping-pong.
+    void repositionCloseButtons();
+
+    /// Post a deferred (next event-loop tick) call to repositionCloseButtons().
+    /// Coalesced via m_closeBtnRepositionPending so a burst of triggers
+    /// (eventFilter callbacks + tabLayoutChange + nested setGeometry)
+    /// produces at most one extra reposition pass per tick.
+    /// Needed because:
+    ///  - macOS Fusion polishes the close button AFTER tabLayoutChange,
+    ///    so a synchronous move() against width()==0 is wrong.
+    ///  - macOS / Flatpak Fusion re-apply SE_TabBarTabRightButton on tab
+    ///    switch (and possibly on :selected re-polish), overwriting our
+    ///    inset; the deferred pass runs after that and corrects.
+    void scheduleCloseButtonReposition();
+
     bool m_splitEnabled = true;
     bool m_mergeEnabled = false;
     QTimer* m_longPressTimer = nullptr;
     QPoint m_pressPos;
     int m_pressTabIndex = -1;
+    bool m_closeBtnRepositionPending = false;
 
 #ifdef Q_OS_ANDROID
     void installCloseButton(int index);
