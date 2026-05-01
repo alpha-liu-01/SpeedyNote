@@ -55,18 +55,20 @@ void TabBar::tabLayoutChange()
 {
     QTabBar::tabLayoutChange();
 
-    // Sync pass: wins on platforms that already size the close button
-    // synchronously (Windows native, Linux KDE/Plasma). repositionCloseButtons()
-    // skips any button whose size is still 0, so a freshly-created button
-    // on macOS is left alone here and handled by the deferred pass below.
+    // Defense in depth. The primary mechanism is the eventFilter() on each
+    // close button, which converts Qt's per-button setGeometry calls
+    // (Move + Resize) into a scheduled reposition. These two calls are a
+    // safety net for any platform/Qt version that suppresses those events
+    // (e.g. on a no-op setGeometry):
+    //   - Sync pass: cheap on platforms where the button is already sized
+    //     and at the right position (idempotency check no-ops the move()).
+    //     Avoids one event-loop tick of "wrong position" on first paint.
+    //   - Deferred pass: catches macOS, where the button is sized via
+    //     polish() AFTER tabLayoutChange returns and the sync pass would
+    //     skip it (width()==0 guard).
+    // Both are coalesced through m_closeBtnRepositionPending, so the
+    // eventFilter scheduling and these calls collapse into one reposition.
     repositionCloseButtons();
-
-    // Deferred pass: on macOS (Fusion + QStyleSheetStyle), the close button
-    // is sized via polish() AFTER tabLayoutChange returns, and tab-switches
-    // re-polish (which would reset geometry to flush-right). Posting via
-    // QTimer::singleShot(0, ...) lets us run after the next event-loop tick,
-    // by which time the button has its 20x20 QSS-driven size and any
-    // post-tabLayoutChange Qt internals have settled. Last writer wins.
     scheduleCloseButtonReposition();
 }
 
