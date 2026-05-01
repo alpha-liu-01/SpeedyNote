@@ -126,11 +126,26 @@ protected:
 private:
     void showSplitMenu(const QPoint& globalPos, int tabIndex);
 
+    /// Reposition every close button to the same inset (kCloseButtonRightGap)
+    /// from the right edge of its tab, vertically centered. Skips buttons
+    /// whose width/height has not yet been resolved by QStyleSheetStyle::polish
+    /// (size() is 0x0 on a freshly-created CloseButton on macOS, for example).
+    void repositionCloseButtons();
+
+    /// Post a deferred reposition via QTimer::singleShot(0, ...). Required on
+    /// macOS Fusion + QStyleSheetStyle, where the close button is sized via
+    /// polish() AFTER our tabLayoutChange() returns; without the deferral our
+    /// synchronous move() runs against a still-zero-sized widget. Coalesced
+    /// via m_closeBtnRepositionPending so back-to-back tabLayoutChange calls
+    /// produce only one extra event-loop trip.
+    void scheduleCloseButtonReposition();
+
     bool m_splitEnabled = true;
     bool m_mergeEnabled = false;
     QTimer* m_longPressTimer = nullptr;
     QPoint m_pressPos;
     int m_pressTabIndex = -1;
+    bool m_closeBtnRepositionPending = false;
 
 #ifdef Q_OS_ANDROID
     void installCloseButton(int index);

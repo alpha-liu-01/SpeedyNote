@@ -54,21 +54,52 @@ void TabBar::tabLayoutChange()
 {
     QTabBar::tabLayoutChange();
 
-    // Re-position the close button uniformly on every platform/style.
-    // Qt's per-style SE_TabBarTabRightButton placement is inconsistent
-    // (e.g. Fusion places it flush at the right edge, native Windows
-    // adds an inset, Flatpak environments inherit Fusion-like behavior).
-    // Computing absolute coords from tabRect() gives equal gap to
-    // top/bottom/right regardless of QStyle.
+    // Sync pass: wins on platforms that already size the close button
+    // synchronously (Windows native, Linux KDE/Plasma). repositionCloseButtons()
+    // skips any button whose size is still 0, so a freshly-created button
+    // on macOS is left alone here and handled by the deferred pass below.
+    repositionCloseButtons();
+
+    // Deferred pass: on macOS (Fusion + QStyleSheetStyle), the close button
+    // is sized via polish() AFTER tabLayoutChange returns, and tab-switches
+    // re-polish (which would reset geometry to flush-right). Posting via
+    // QTimer::singleShot(0, ...) lets us run after the next event-loop tick,
+    // by which time the button has its 20x20 QSS-driven size and any
+    // post-tabLayoutChange Qt internals have settled. Last writer wins.
+    scheduleCloseButtonReposition();
+}
+
+void TabBar::repositionCloseButtons()
+{
+    // Place each close button at the same inset from its tab's right edge,
+    // vertically centered. Computing absolute coords from tabRect() makes us
+    // immune to whichever placement Qt's active QStyle picks for
+    // SE_TabBarTabRightButton (Fusion: flush right; Windows native: small
+    // inset; Plasma Breeze: small inset; Flatpak: Fusion-like flush right).
     static constexpr int kCloseButtonRightGap = 6;
     for (int i = 0; i < count(); ++i) {
         QWidget *btn = tabButton(i, QTabBar::RightSide);
-        if (!btn) continue;
+        // Skip unsized buttons. On macOS QStyleSheetStyle::polish has not
+        // applied the QSS width/height yet on a fresh CloseButton, so
+        // btn->size() is 0x0. Using width()==0 here would put the button's
+        // top-left near the tab's right edge, and once polish resizes it to
+        // 20x20 it would extend past the edge and look flush-right.
+        if (!btn || btn->width() <= 0 || btn->height() <= 0) continue;
         const QRect tab = tabRect(i);
         const int x = tab.right() - btn->width() - kCloseButtonRightGap + 1;
         const int y = tab.top() + (tab.height() - btn->height()) / 2;
         btn->move(x, y);
     }
+}
+
+void TabBar::scheduleCloseButtonReposition()
+{
+    if (m_closeBtnRepositionPending) return;
+    m_closeBtnRepositionPending = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_closeBtnRepositionPending = false;
+        repositionCloseButtons();
+    });
 }
 
 void TabBar::tabInserted(int index)
