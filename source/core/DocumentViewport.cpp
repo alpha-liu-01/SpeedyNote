@@ -5467,10 +5467,26 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         }
         
         if (m_objectInsertMode == ObjectInsertMode::Image) {
+            // Re-entrancy guard: see m_objectInsertDialogActive comment in
+            // DocumentViewport.h. Without this, stylus presses leaked into
+            // the modal QFileDialog's nested event loop on ChromeOS Crostini /
+            // KDE Plasma 6 Wayland re-trigger this branch and open another
+            // dialog (stack-of-dialogs crash).
+            if (m_objectInsertDialogActive) {
+                return;
+            }
+            m_objectInsertDialogActive = true;
             // Open file dialog and insert image
             // Note: insertImageFromDialog() positions at viewport center for now
             // TODO: Create insertImageAtPosition() for click-to-place
-            insertImageFromDialog();
+            insertImageFromDialog();   // blocking modal
+            // Defer clearing the guard by one event-loop tick so any tablet
+            // events delivered during the modal (and still queued when it
+            // closes) are drained and rejected by the guard before we accept
+            // a fresh canvas tap.
+            QTimer::singleShot(0, this, [this]() {
+                m_objectInsertDialogActive = false;
+            });
         } else if (m_objectInsertMode == ObjectInsertMode::Link) {
             // Create empty LinkObject at position
             // Pass viewportPos so edgeless mode can determine correct tile
@@ -6683,9 +6699,14 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
 
 void DocumentViewport::insertImageFromDialog()
 {
-    // Phase C.0.5: Open file dialog to select an image
+    // Phase C.0.5: Open file dialog to select an image.
+    // Parent to the top-level window (not `this`) so Qt applies its
+    // strongest available modal grab; on platforms that respect it this
+    // helps suppress stray tablet events leaking to widgets behind the
+    // dialog. The m_objectInsertDialogActive guard is the actual safety
+    // net for platforms that ignore the grab.
     QString filePath = QFileDialog::getOpenFileName(
-        this,
+        window(),
         tr("Insert Image"),
         QString(),
         tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)")
