@@ -2495,6 +2495,14 @@ private:
     bool m_hardwareEraserActive = false; ///< True when stylus eraser end is being used
     bool m_pointerInViewport = false;   ///< True when pointer is hovering inside viewport (for eraser cursor)
     QTimer* m_tabletHoverTimer = nullptr; ///< Timer to detect when tablet stylus leaves (no events = left)
+
+    // Re-entrancy guard for modal dialogs opened from canvas press handlers.
+    // On ChromeOS Crostini and KDE Plasma 6 Wayland, QTabletEvents leak into
+    // the modal QFileDialog's nested event loop (the modal grab does not
+    // suppress tablet events the way it does mouse events). Without this
+    // guard, every leaked stylus press re-enters handlePointerPress_ObjectSelect
+    // and opens another file dialog, stacking until the app crashes.
+    bool m_objectInsertDialogActive = false;
     
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
