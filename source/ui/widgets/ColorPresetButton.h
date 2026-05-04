@@ -24,8 +24,27 @@ class ColorPresetButton : public QWidget {
     Q_PROPERTY(bool selected READ isSelected WRITE setSelected NOTIFY selectedChanged)
 
 public:
-    explicit ColorPresetButton(QWidget* parent = nullptr);
-    
+    /// Default round-button diameter in logical pixels. Used by the pen /
+    /// marker / highlighter / object-select subtoolbars and the floating
+    /// text editor. Pass a different size to the constructor (e.g. 36 for
+    /// the lasso action bar) to match a different UI metric while keeping
+    /// the widget fully round.
+    static constexpr int kDefaultButtonSize = 24;
+
+    explicit ColorPresetButton(QWidget* parent = nullptr,
+                               int buttonSize = kDefaultButtonSize);
+
+    /**
+     * @brief Resize the round swatch in place. Stays fully round.
+     * @param size New diameter in logical pixels (must be > 0).
+     */
+    void setButtonSize(int size);
+
+    /**
+     * @brief Get the current button diameter.
+     */
+    int buttonSize() const { return m_buttonSize; }
+
     /**
      * @brief Get the current color of this preset.
      */
@@ -107,9 +126,8 @@ private:
     bool m_selected = false;
     bool m_pressed = false;
     bool m_hovered = false;
-    
-    static constexpr int BUTTON_SIZE = 24;
-    static constexpr int BORDER_RADIUS = BUTTON_SIZE / 2;
+    int m_buttonSize = kDefaultButtonSize;  ///< Current diameter (set by ctor / setButtonSize)
+
     static constexpr int BORDER_WIDTH_NORMAL = 1;
     static constexpr int BORDER_WIDTH_SELECTED = 2;
 };

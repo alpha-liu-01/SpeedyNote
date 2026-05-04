@@ -643,6 +643,12 @@ private:
     
     // Action Bar: Selection state connections (viewport → action bar container)
     QMetaObject::Connection m_lassoSelectionConn;
+    /// Lasso swatch sync: re-seeds LassoActionBar's recolor swatch from the
+    /// current pen color whenever a fresh selection appears on the active
+    /// viewport. Tracked separately from m_lassoSelectionConn so it can be
+    /// disconnected on viewport switch (otherwise duplicates accumulate per
+    /// switch and stale viewports keep firing the lambda).
+    QMetaObject::Connection m_lassoSwatchSyncConn;
     QMetaObject::Connection m_objectSelectionForActionBarConn;
     QMetaObject::Connection m_textSelectionConn;
     QMetaObject::Connection m_strokeClipboardConn;

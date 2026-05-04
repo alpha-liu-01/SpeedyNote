@@ -8,15 +8,24 @@
 // ColorPresetButton
 // ============================================================================
 
-ColorPresetButton::ColorPresetButton(QWidget* parent)
+ColorPresetButton::ColorPresetButton(QWidget* parent, int buttonSize)
     : QWidget(parent)
+    , m_buttonSize(buttonSize > 0 ? buttonSize : kDefaultButtonSize)
 {
-    setFixedSize(BUTTON_SIZE, BUTTON_SIZE);
+    setFixedSize(m_buttonSize, m_buttonSize);
     setCursor(Qt::PointingHandCursor);
     setAttribute(Qt::WA_Hover, true);
-    
+
     // Set tooltip
     setToolTip(tr("Click to select, click again to edit"));
+}
+
+void ColorPresetButton::setButtonSize(int size)
+{
+    if (size <= 0 || size == m_buttonSize) return;
+    m_buttonSize = size;
+    setFixedSize(m_buttonSize, m_buttonSize);
+    update();
 }
 
 QColor ColorPresetButton::color() const
@@ -49,12 +58,12 @@ void ColorPresetButton::setSelected(bool selected)
 
 QSize ColorPresetButton::sizeHint() const
 {
-    return QSize(BUTTON_SIZE, BUTTON_SIZE);
+    return QSize(m_buttonSize, m_buttonSize);
 }
 
 QSize ColorPresetButton::minimumSizeHint() const
 {
-    return QSize(BUTTON_SIZE, BUTTON_SIZE);
+    return QSize(m_buttonSize, m_buttonSize);
 }
 
 void ColorPresetButton::paintEvent(QPaintEvent* event)
@@ -64,15 +73,18 @@ void ColorPresetButton::paintEvent(QPaintEvent* event)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    // Border (only when selected)
+    // Border (only when selected). Radius follows current widget size so the
+    // swatch stays a perfect circle at any diameter (24px subtoolbar swatch
+    // or 36px lasso-action-bar swatch alike).
     if (m_selected) {
         const qreal bw = BORDER_WIDTH_SELECTED / 2.0;
         QRectF outerRect = QRectF(rect()).adjusted(bw, bw, -bw, -bw);
+        const qreal outerRadius = outerRect.width() / 2.0;
         QPen borderPen(borderColor());
         borderPen.setWidthF(BORDER_WIDTH_SELECTED);
         painter.setPen(borderPen);
         painter.setBrush(Qt::NoBrush);
-        painter.drawRoundedRect(outerRect, BORDER_RADIUS, BORDER_RADIUS);
+        painter.drawRoundedRect(outerRect, outerRadius, outerRadius);
     }
 
     // Color fill (inset more when selected to leave room for border)
