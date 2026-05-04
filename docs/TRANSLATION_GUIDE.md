@@ -4,6 +4,8 @@ Thank you for your interest in translating SpeedyNote! This guide explains how t
 
 SpeedyNote uses Qt's Linguist toolchain: strings in the C++ source are marked with `tr()`, extracted into `.ts` XML files, translated using Qt Linguist, and compiled into binary `.qm` files that the app loads at runtime.
 
+> **Tip:** for a quick first pass you can run `scripts/translate_auto.py`, which fills in every entry using an LLM (default: Google Gemini 2.5 Flash, free tier) with the English source and Chinese translation as references. See [Step 3½](#step-3½-optional--machine-translate-with-an-llm) below. Human review in Qt Linguist is still recommended afterwards.
+
 ---
 
 ## Language support status
@@ -107,6 +109,104 @@ Alternatively, you can run `lupdate` directly:
 # Windows (MSYS2 clang64)
 C:\msys64\clang64\bin\lupdate.exe source/ -ts resources/translations/app_de.ts
 ```
+
+---
+
+## Step 3½ (optional) — Machine-translate with an LLM
+
+SpeedyNote ships a small Python helper, `scripts/translate_auto.py`, that fills in every `<translation>` in a `.ts` file by asking an LLM. It uses the English `<source>` as the primary input and the Chinese translation from `app_zh.ts` as a second reference, which significantly improves accuracy on short/ambiguous UI strings ("Open", "Save", "Insert", etc.).
+
+This is handy when:
+
+- You want to bootstrap a brand-new language quickly, then fine-tune only the entries that look wrong in Qt Linguist.
+- You want to keep a partially-translated language in sync after a new release adds many strings at once.
+
+### Install dependencies (once)
+
+```
+pip install -r scripts/requirements.txt
+```
+
+Works identically on Windows (PowerShell) and WSL / Linux / macOS.
+
+### Get an API key
+
+The default provider is **Google Gemini 2.5 Flash**, whose free tier is enough to translate the whole file several times over. Get a key at <https://aistudio.google.com/app/apikey>.
+
+Any OpenAI-compatible provider also works — see "Alternative providers" below.
+
+### Run it
+
+Windows (PowerShell):
+
+```powershell
+$env:GEMINI_API_KEY = "<your-key>"
+python scripts/translate_auto.py --lang es
+python scripts/translate_auto.py --lang fr
+```
+
+Linux / macOS / WSL:
+
+```bash
+export GEMINI_API_KEY="<your-key>"
+python3 scripts/translate_auto.py --lang es
+python3 scripts/translate_auto.py --lang fr
+```
+
+For a new language, first copy `app_zh.ts` to `app_<lang>.ts`, update the `<TS language="...">` attribute, clear the translations, run `translate.ps1` / `translate.sh` to sync it against the source, then run:
+
+```
+python scripts/translate_auto.py --lang de
+```
+
+### What the script does
+
+- Walks every `<message>` in `resources/translations/app_<lang>.ts`.
+- For each, sends the English source + the matching zh translation + the Qt context class name to the model.
+- Writes the result back into the `<translation>` element and removes the `type="unfinished"` attribute so Qt Linguist treats it as finished.
+- Handles plural forms (`<message numerus="yes">`) by translating each `<numerusform>` separately.
+- Preserves `%1`, `%2`, `%n`, `&`-accelerators, HTML tags, and trailing ellipses.
+- Deduplicates repeated strings so each unique one costs only one LLM call.
+
+### Useful flags
+
+| Flag | Purpose |
+|---|---|
+| `--lang es` / `--lang fr` / `--lang de` | Target language (ISO 639-1 code). Maps to `resources/translations/app_<lang>.ts`. |
+| `--ts-file <path>` | Override the target path. |
+| `--model gemini-2.5-flash` | LLM model (default). Try `gemini-2.5-pro` for higher quality. |
+| `--no-overwrite` | Only fill empty entries; leave existing translations alone. |
+| `--limit 20` | Translate only the first 20 unique strings — good for a cheap sanity check. |
+| `--dry-run` | Print sample results instead of writing the file. |
+| `--batch-size 25` | Number of strings per LLM request. |
+| `--save-every 10` | Flush partial progress to disk every N batches (default 10). |
+
+Typical sanity-check workflow:
+
+```
+python scripts/translate_auto.py --lang es --limit 20 --dry-run
+```
+
+### Alternative providers
+
+The script targets any OpenAI-compatible endpoint. Set `OPENAI_API_KEY` and `OPENAI_BASE_URL` (or pass `--base-url`) and point `--model` at whatever the provider uses.
+
+| Provider | Env vars | Example model |
+|---|---|---|
+| Google Gemini *(default)* | `GEMINI_API_KEY` | `--model gemini-2.5-flash` |
+| DeepSeek | `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://api.deepseek.com/v1` | `--model deepseek-chat` |
+| OpenAI | `OPENAI_API_KEY` | `--model gpt-4o-mini` |
+| Groq | `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://api.groq.com/openai/v1` | `--model llama-3.3-70b-versatile` |
+| Local Ollama | `OPENAI_API_KEY=ollama`, `OPENAI_BASE_URL=http://localhost:11434/v1` | `--model qwen2.5:14b` |
+
+### After machine translation
+
+Always open the file in Qt Linguist afterwards to spot-check — machine translation is a starting point, not a finish line. Pay special attention to:
+
+- **Menu items** (look for missing `&` accelerators)
+- **Button labels** (should be short)
+- **Keyboard-shortcut strings** (e.g. "Ctrl+Shift+S" must stay unchanged)
+- **Plural forms** (verify singular/plural each read naturally)
 
 ---
 

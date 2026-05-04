@@ -36,12 +36,123 @@
 #include <QFileInfo>
 #include <QSvgRenderer>
 #include <QPainter>
+#include <QCoreApplication>
+#include <QLocale>
+#include <QRegularExpression>
+#include <QHash>
+#include <QSet>
+#include <QColor>
+#include <algorithm>
 
 // Android/iOS keyboard fix (BUG-A001)
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
 #include <QGuiApplication>
 #include <QInputMethod>
 #endif
+
+namespace {
+
+struct LanguageEntry {
+    QString code;         // "en", "es", "fr", "zh", "de", ...
+    QString displayName;  // "English", "Español (Spanish)", "中文 (Chinese Simplified)", ...
+    bool installed;       // false => saved-but-missing, label gets "(not installed)" suffix
+};
+
+// Small override map for cases where QLocale's defaults are unhelpful:
+//  - "en": Qt < 6.7 returns "American English" from nativeLanguageName() (QTBUG-94460),
+//          producing "American English (English)". We want just "English".
+//  - "zh": bare "zh" doesn't disambiguate Simplified vs Traditional.
+//  - "pt": bare "pt" defaults to European Portuguese names, but our translation
+//          targets Brazilian Portuguese.
+QString overrideDisplayName(const QString& code) {
+    static const QHash<QString, QString> overrides = {
+        {QStringLiteral("en"), QStringLiteral("English")},
+        {QStringLiteral("zh"), QStringLiteral("中文 (Chinese Simplified)")},
+        {QStringLiteral("pt"), QStringLiteral("Português (Portuguese, Brazil)")},
+    };
+    return overrides.value(code);
+}
+
+QString buildDisplayName(const QString& code) {
+    const QString override = overrideDisplayName(code);
+    if (!override.isEmpty()) return override;
+
+    const QLocale locale(code);
+    QString native  = locale.nativeLanguageName();
+    const QString english = QLocale::languageToString(locale.language());
+
+    // QLocale returns lowercase native names for some languages (e.g. "español").
+    if (!native.isEmpty()) native[0] = native[0].toUpper();
+
+    // Fall back cascade: native+english > native > english > raw code.
+    if (native.isEmpty() && english.isEmpty()) return code;
+    if (native.isEmpty())                      return english;
+    if (english.isEmpty() || english == native) return native;
+    return QStringLiteral("%1 (%2)").arg(native, english);
+}
+
+QStringList translationSearchPaths() {
+    return {
+        QCoreApplication::applicationDirPath(),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/translations"),
+        QStringLiteral("/usr/share/speedynote/translations"),
+        QStringLiteral("/usr/local/share/speedynote/translations"),
+        QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                               QStringLiteral("speedynote/translations"),
+                               QStandardPaths::LocateDirectory),
+        QStringLiteral(":/resources/translations"),
+    };
+}
+
+QList<LanguageEntry> discoverAvailableLanguages(const QString& savedOverrideCode) {
+    QSet<QString> codes;
+    QList<LanguageEntry> entries;
+
+    // English is always available — it's the source language, no .qm needed.
+    entries.append({QStringLiteral("en"), buildDisplayName(QStringLiteral("en")), true});
+    codes.insert(QStringLiteral("en"));
+
+    static const QRegularExpression qmRegex(
+        QStringLiteral("^app_([A-Za-z]{2,3}(?:_[A-Za-z]{2,4})?)\\.qm$"));
+
+    for (const QString& path : translationSearchPaths()) {
+        if (path.isEmpty()) continue;
+        QDir dir(path);
+        if (!dir.exists()) continue;
+        const QFileInfoList files = dir.entryInfoList(
+            {QStringLiteral("app_*.qm")}, QDir::Files);
+        for (const QFileInfo& fi : files) {
+            const auto m = qmRegex.match(fi.fileName());
+            if (!m.hasMatch()) continue;
+            QString raw  = m.captured(1);
+            QString code = raw.section('_', 0, 0).toLower();  // "zh_CN" -> "zh"
+            if (codes.contains(code)) continue;
+            codes.insert(code);
+            entries.append({code, buildDisplayName(code), true});
+        }
+    }
+
+    // Sort: English first, rest alphabetical by display name (locale-aware).
+    if (entries.size() > 1) {
+        std::sort(entries.begin() + 1, entries.end(),
+            [](const LanguageEntry& a, const LanguageEntry& b) {
+                return a.displayName.localeAwareCompare(b.displayName) < 0;
+            });
+    }
+
+    // If the saved override points at a language we didn't find, surface it
+    // anyway marked "(not installed)" so the user sees their saved choice.
+    if (!savedOverrideCode.isEmpty() && !codes.contains(savedOverrideCode)) {
+        entries.append({
+            savedOverrideCode,
+            QStringLiteral("%1 (not installed)").arg(buildDisplayName(savedOverrideCode)),
+            false
+        });
+    }
+    return entries;
+}
+
+} // namespace
 
 ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
     : QDialog(parent), mainWindowRef(mainWindow) {
@@ -1863,11 +1974,27 @@ void ControlPanelDialog::createLanguageTab() {
     manualLabel->setStyleSheet("font-weight: bold;");
     layout->addWidget(manualLabel);
     
+    // Read saved language settings once — used both for combo population (so
+    // a saved-but-uninstalled language still appears) and for initial state.
+    QSettings settings(QStringLiteral("SpeedyNote"), QStringLiteral("App"));
+    const bool useSystemLang   = settings.value(QStringLiteral("useSystemLanguage"), true).toBool();
+    const QString overrideLang = settings.value(QStringLiteral("languageOverride"),
+                                                QStringLiteral("en")).toString();
+
     languageCombo = new QComboBox(languageTab);
-    languageCombo->addItem(tr("English"), "en");
-    languageCombo->addItem(tr("Español (Spanish)"), "es");
-    languageCombo->addItem(tr("Français (French)"), "fr");
-    languageCombo->addItem(tr("中文 (Chinese Simplified)"), "zh");
+    for (const auto& lang : discoverAvailableLanguages(overrideLang)) {
+        languageCombo->addItem(lang.displayName, lang.code);
+        if (!lang.installed) {
+            // Grey out the "not installed" entry but still allow selection so the
+            // user can see their saved choice and can change it.
+            const int idx = languageCombo->count() - 1;
+            languageCombo->setItemData(idx, QColor(Qt::gray), Qt::ForegroundRole);
+        }
+    }
+    useSystemLanguageCheckbox->setChecked(useSystemLang);
+    languageCombo->setEnabled(!useSystemLang);
+    const int savedIdx = languageCombo->findData(overrideLang);
+    if (savedIdx >= 0) languageCombo->setCurrentIndex(savedIdx);
     layout->addWidget(languageCombo);
     
     QLabel *manualNote = new QLabel(tr("Select a specific language to override the system setting. Changes take effect after restarting the application."), languageTab);
@@ -1881,35 +2008,16 @@ void ControlPanelDialog::createLanguageTab() {
     layout->addWidget(statusLabel);
     
     // Show current language
-    QString currentLocale = QLocale::system().name();
-    QString currentLangCode = currentLocale.section('_', 0, 0);
-    QString currentLangName;
-    if (currentLangCode == "es") currentLangName = tr("Spanish");
-    else if (currentLangCode == "fr") currentLangName = tr("French");
-    else if (currentLangCode == "zh") currentLangName = tr("Chinese Simplified");
-    else currentLangName = tr("English");
+    const QString currentLocale = QLocale::system().name();
+    const QString currentLangCode = currentLocale.section('_', 0, 0);
+    QString currentLangName = buildDisplayName(currentLangCode);
+    if (currentLangName == currentLangCode) {
+        currentLangName = tr("Unknown");
+    }
     
     QLabel *currentLabel = new QLabel(tr("System Language: %1 (%2)").arg(currentLangName).arg(currentLocale), languageTab);
     currentLabel->setStyleSheet("margin-left: 10px;");
     layout->addWidget(currentLabel);
-    
-    // Load current settings
-    if (mainWindowRef) {
-        QSettings settings("SpeedyNote", "App");
-        bool useSystemLang = settings.value("useSystemLanguage", true).toBool();
-        QString overrideLang = settings.value("languageOverride", "en").toString();
-        
-        useSystemLanguageCheckbox->setChecked(useSystemLang);
-        languageCombo->setEnabled(!useSystemLang);
-        
-        // Set combo to current override language
-        for (int i = 0; i < languageCombo->count(); ++i) {
-            if (languageCombo->itemData(i).toString() == overrideLang) {
-                languageCombo->setCurrentIndex(i);
-                break;
-            }
-        }
-    }
     
     // Connect checkbox to enable/disable combo
     connect(useSystemLanguageCheckbox, &QCheckBox::toggled, this, [this](bool checked) {
