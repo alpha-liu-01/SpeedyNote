@@ -79,6 +79,20 @@
 
 
   <releases type="embedded">
+  <release version="1.4.4" date="2026-05-04">
+      <description>
+        <p>New Features:</p>
+        <ul>
+          <li>New French, Spanish, German and Portuguese translations.</li>
+          <li>Color override option for the lasso tool.</li>
+        </ul>
+        <p>Bug Fixes and Improvements:</p>
+        <ul>
+          <li>Fixed the problem that closing one panel of the viewport split resulted in the pane being blank instead of merging with the other pane.</li>
+          <li>Fixed the problem that a lot of file pickers were opened (resulting a crash) when inserting an image with a stylus on ChromeOS Crostini.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.4.3" date="2026-04-30">
       <description>
         <p>Bug Fixes and Improvements:</p>
