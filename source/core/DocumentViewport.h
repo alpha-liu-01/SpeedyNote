@@ -55,6 +55,7 @@ struct UndoAction {
         RemoveStroke,
         RemoveMultiple,
         TransformSelection,
+        RecolorStrokes,         ///< In-place color change for a set of strokes (preserves z-order, alpha)
 
         // ===== Object types =====
         ObjectInsert,
@@ -86,6 +87,12 @@ struct UndoAction {
     // TransformSelection compound actions
     QVector<StrokeSegment> removedSegments;
     QVector<StrokeSegment> addedSegments;
+
+    // RecolorStrokes: target color. Each per-segment stroke snapshot in
+    // `segments` carries the OLD color; redo applies `recolorNewColor` while
+    // preserving each stroke's existing alpha (so marker / highlighter
+    // opacity is kept).
+    QColor recolorNewColor;
 
     // ===== Object fields =====
     int objectPageIndex = -1;                      ///< Container page (paged mode)
@@ -1663,6 +1670,18 @@ public slots:
      * Action Bar: Called by LassoActionBar::deleteRequested.
      */
     void deleteLassoSelection();
+
+    /**
+     * @brief Apply @p newColor to every stroke in the current lasso selection.
+     *
+     * Each stroke's existing alpha is preserved (so marker / highlighter
+     * opacity stays intact). Mutates strokes in place to keep their layer
+     * z-order, and pushes a single @ref UndoAction::RecolorStrokes onto the
+     * undo stack. No-op if there is no active selection.
+     *
+     * Action Bar: Called by LassoActionBar::recolorRequested.
+     */
+    void recolorLassoSelection(const QColor& newColor);
     
     /**
      * @brief Copy selected PDF text to system clipboard.

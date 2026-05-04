@@ -25,6 +25,16 @@ for ts_file in "${ts_files[@]}"; do
     mv -f "$temp_file" "$ts_file"
 done
 
+# Optional: auto-translate Spanish/French (and any other languages) with an LLM,
+# using the English source + Chinese translation as references.
+#
+#   pip install -r scripts/requirements.txt
+#   export GEMINI_API_KEY="<your key from https://aistudio.google.com/app/apikey>"
+#   python3 scripts/translate_auto.py --lang es
+#   python3 scripts/translate_auto.py --lang fr
+#
+# See docs/TRANSLATION_GUIDE.md for details and other provider options.
+
 # Open Qt Linguist for each .ts file that has unfinished translations.
 # By default only app_zh.ts is opened; uncomment or add lines for other languages.
 "$QT6_BIN/linguist" resources/translations/app_zh.ts

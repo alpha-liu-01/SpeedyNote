@@ -10121,6 +10121,107 @@ void DocumentViewport::deleteLassoSelection()
     deleteSelection();
 }
 
+void DocumentViewport::recolorLassoSelection(const QColor& newColor)
+{
+    if (!m_lassoSelection.isValid() || !m_document || !newColor.isValid()) {
+        return;
+    }
+
+    // Build the set of selected stroke IDs once for O(1) lookup per layer
+    // stroke (the existing selection stores strokes by value, not just by id).
+    const QSet<QString>& selectedIds = m_lassoSelection.getSelectedIds();
+
+    UndoAction action;
+    action.type = UndoAction::RecolorStrokes;
+    action.layerIndex = m_lassoSelection.sourceLayerIndex;
+    action.recolorNewColor = newColor;
+
+    // Apply NEW color to one stroke, preserving its existing alpha so marker /
+    // highlighter opacity is kept. Snapshots the old stroke into action.segments
+    // first so undo() can restore the previous color.
+    auto patchStroke = [&](VectorStroke& stroke,
+                           int pageIndex,
+                           Document::TileCoord coord) {
+        UndoAction::StrokeSegment seg;
+        seg.pageIndex = pageIndex;
+        seg.tileCoord = coord;
+        seg.stroke    = stroke;             // OLD color baked in here
+        action.segments.append(seg);
+
+        QColor c = newColor;
+        c.setAlpha(stroke.color.alpha());
+        stroke.color = c;
+    };
+
+    // Walk one container's layer, patch every stroke whose id is selected,
+    // and invalidate the layer cache if anything changed. Returns true iff
+    // at least one stroke was patched, so the caller can mark just the
+    // affected page/tile dirty.
+    auto applyToLayer = [&](VectorLayer* layer,
+                            int pageIndex,
+                            Document::TileCoord coord) -> bool {
+        if (!layer) return false;
+        QVector<VectorStroke>& strokes = layer->strokes();
+        bool modified = false;
+        for (int i = 0; i < strokes.size(); ++i) {
+            if (selectedIds.contains(strokes[i].id)) {
+                patchStroke(strokes[i], pageIndex, coord);
+                modified = true;
+            }
+        }
+        if (modified) layer->invalidateStrokeCache();
+        return modified;
+    };
+
+    if (m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (!tile || action.layerIndex >= tile->layerCount()) continue;
+            if (applyToLayer(tile->layer(action.layerIndex), -1, coord))
+                m_document->markTileDirty(coord);
+        }
+    } else {
+        int srcPage = m_lassoSelection.sourcePageIndex;
+        if (srcPage < 0 || srcPage >= m_document->pageCount()) return;
+        Page* page = m_document->page(srcPage);
+        if (!page) return;
+        if (applyToLayer(page->layer(action.layerIndex), srcPage, {0, 0}))
+            m_document->markPageDirty(srcPage);
+    }
+
+    if (action.segments.isEmpty()) {
+        return;
+    }
+
+    // Also patch the selection's own cached stroke copies so subsequent
+    // recolors / transforms see the up-to-date colors. This keeps the
+    // selection stroke cache (rendered overlay) consistent with the layer.
+    for (VectorStroke& s : m_lassoSelection.selectedStrokes) {
+        QColor c = newColor;
+        c.setAlpha(s.color.alpha());
+        s.color = c;
+    }
+
+    pushUndoAction(action);
+    // No markOcrDirtyTiles call: stroke color does not affect OCR text content.
+    emit strokesChanged();
+    emit documentModified();
+
+    // Selection stays active so the user can re-recolor or transform.
+    // Invalidate the selection overlay cache so the new color paints.
+    m_selectionStrokeCache = QPixmap();
+    m_selectionCacheDirty = true;
+    update();
+
+    if (!m_document->isEdgeless()) {
+        QSet<int> pages;
+        for (const auto& s : action.segments) {
+            if (s.pageIndex >= 0) pages.insert(s.pageIndex);
+        }
+        for (int p : pages) emit pageModified(p);
+    }
+}
+
 void DocumentViewport::copyTextSelection()
 {
     copySelectedTextToClipboard();
@@ -12684,6 +12785,47 @@ void DocumentViewport::undo()
             if (layer) layer->addStroke(seg.stroke);
             markSegDirty(m_document, seg);
         }
+    } else if (action.type == UndoAction::RecolorStrokes) {
+        // In-place restore of each stroke's OLD color (the snapshot in
+        // seg.stroke carries the pre-recolor color verbatim, alpha included).
+        for (const auto& seg : action.segments) {
+            Page* c = getContainer(m_document, seg, /*createIfMissing*/false);
+            if (!c) continue;
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (!layer) continue;
+            QVector<VectorStroke>& strokes = layer->strokes();
+            for (VectorStroke& s : strokes) {
+                if (s.id == seg.stroke.id) {
+                    s.color = seg.stroke.color;
+                    break;
+                }
+            }
+            layer->invalidateStrokeCache();
+            markSegDirty(m_document, seg);
+        }
+        // Keep the lasso selection overlay in sync with the layer. The
+        // recolor flow intentionally leaves the selection alive (so the user
+        // can re-recolor / transform), which means its cached stroke copies
+        // and rasterized overlay would otherwise still paint the post-recolor
+        // color even after undo restored the underlying layer to OLD colors.
+        if (m_lassoSelection.isValid() && !m_lassoSelection.selectedStrokes.isEmpty()) {
+            QHash<QString, QColor> oldById;
+            oldById.reserve(action.segments.size());
+            for (const auto& seg : action.segments)
+                oldById.insert(seg.stroke.id, seg.stroke.color);
+            bool patched = false;
+            for (VectorStroke& s : m_lassoSelection.selectedStrokes) {
+                auto it = oldById.constFind(s.id);
+                if (it != oldById.constEnd()) {
+                    s.color = it.value();
+                    patched = true;
+                }
+            }
+            if (patched) {
+                m_selectionStrokeCache = QPixmap();
+                m_selectionCacheDirty = true;
+            }
+        }
     } else {
         for (const auto& seg : action.segments) {
             Page* c = getContainer(m_document, seg,
@@ -12739,8 +12881,13 @@ void DocumentViewport::undo()
         emit linkObjectListMayHaveChanged();
     }
     if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
-        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection) {
-        markOcrDirtyTiles(action);
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection ||
+        action.type == UndoAction::RecolorStrokes) {
+        // RecolorStrokes leaves the stroke set unchanged (only colours move),
+        // so it gets the strokesChanged repaint but skips OCR dirty-marking
+        // (text content is unaffected by colour).
+        if (action.type != UndoAction::RecolorStrokes)
+            markOcrDirtyTiles(action);
         emit strokesChanged();
     }
     if (!m_document->isEdgeless())
@@ -12926,6 +13073,47 @@ void DocumentViewport::redo()
             if (layer) layer->addStroke(seg.stroke);
             markSegDirty(m_document, seg);
         }
+    } else if (action.type == UndoAction::RecolorStrokes) {
+        // In-place re-apply of the stored target color, preserving each
+        // stroke's existing alpha (matches recolorLassoSelection's policy).
+        QSet<QString> actionIds;
+        actionIds.reserve(action.segments.size());
+        for (const auto& seg : action.segments) {
+            actionIds.insert(seg.stroke.id);
+            Page* c = getContainer(m_document, seg, /*createIfMissing*/false);
+            if (!c) continue;
+            VectorLayer* layer = c->layer(action.layerIndex);
+            if (!layer) continue;
+            QVector<VectorStroke>& strokes = layer->strokes();
+            for (VectorStroke& s : strokes) {
+                if (s.id == seg.stroke.id) {
+                    QColor cnew = action.recolorNewColor;
+                    cnew.setAlpha(s.color.alpha());
+                    s.color = cnew;
+                    break;
+                }
+            }
+            layer->invalidateStrokeCache();
+            markSegDirty(m_document, seg);
+        }
+        // Mirror the layer patch into the lasso selection overlay (see undo()
+        // for the full rationale). Single colour source here, alpha kept per-
+        // stroke to preserve marker / highlighter opacity.
+        if (m_lassoSelection.isValid() && !m_lassoSelection.selectedStrokes.isEmpty()) {
+            bool patched = false;
+            for (VectorStroke& s : m_lassoSelection.selectedStrokes) {
+                if (actionIds.contains(s.id)) {
+                    QColor cnew = action.recolorNewColor;
+                    cnew.setAlpha(s.color.alpha());
+                    s.color = cnew;
+                    patched = true;
+                }
+            }
+            if (patched) {
+                m_selectionStrokeCache = QPixmap();
+                m_selectionCacheDirty = true;
+            }
+        }
     } else {
         for (const auto& seg : action.segments) {
             Page* c = getContainer(m_document, seg,
@@ -12981,8 +13169,13 @@ void DocumentViewport::redo()
         emit linkObjectListMayHaveChanged();
     }
     if (action.type == UndoAction::AddStroke || action.type == UndoAction::RemoveStroke ||
-        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection) {
-        markOcrDirtyTiles(action);
+        action.type == UndoAction::RemoveMultiple || action.type == UndoAction::TransformSelection ||
+        action.type == UndoAction::RecolorStrokes) {
+        // RecolorStrokes leaves the stroke set unchanged (only colours move),
+        // so it gets the strokesChanged repaint but skips OCR dirty-marking
+        // (text content is unaffected by colour).
+        if (action.type != UndoAction::RecolorStrokes)
+            markOcrDirtyTiles(action);
         emit strokesChanged();
     }
     if (!m_document->isEdgeless())

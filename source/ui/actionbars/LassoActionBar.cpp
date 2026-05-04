@@ -1,5 +1,6 @@
 #include "LassoActionBar.h"
 #include "../widgets/ActionBarButton.h"
+#include "../widgets/ColorPresetButton.h"
 
 LassoActionBar::LassoActionBar(QWidget* parent)
     : ActionBar(parent)
@@ -9,7 +10,23 @@ LassoActionBar::LassoActionBar(QWidget* parent)
 
 void LassoActionBar::setupButtons()
 {
-    // Create Cut button (top)
+    // Recolor swatch (top): sized to match the 36px ActionBarButtons.
+    // ColorPresetButton already implements the click-once-then-edit pattern
+    // we want (clicked() always, editRequested() only when already selected),
+    // so we just toggle the selected state ourselves to switch click 1 vs
+    // click 2 semantics.
+    m_recolorButton = new ColorPresetButton(this, /*buttonSize*/ 36);
+    m_recolorButton->setToolTip(tr("Recolor selection (click again to pick color)"));
+    addButton(m_recolorButton);
+    connect(m_recolorButton, &ColorPresetButton::clicked, this, [this]() {
+        emit recolorRequested(m_recolorButton->color());
+        // Mark "selected" so the next click is interpreted as edit by the widget.
+        m_recolorButton->setSelected(true);
+    });
+    connect(m_recolorButton, &ColorPresetButton::editRequested,
+            this, &LassoActionBar::recolorEditRequested);
+
+    // Create Cut button
     // Note: Using cross icon as cut icon is not available
     m_cutButton = new ActionBarButton(this);
     m_cutButton->setIconName("cut");
@@ -42,7 +59,15 @@ void LassoActionBar::setupButtons()
 
 void LassoActionBar::updateButtonStates()
 {
-    // Cut, Copy, Delete buttons: visible only when selection exists
+    // Recolor swatch, Cut, Copy, Delete: visible only when selection exists
+    if (m_recolorButton) {
+        m_recolorButton->setVisible(m_hasSelection);
+        // When the selection goes away, drop the "selected" state so the
+        // next selection starts fresh (click 1 = apply, not edit).
+        if (!m_hasSelection) {
+            m_recolorButton->setSelected(false);
+        }
+    }
     if (m_cutButton) {
         m_cutButton->setVisible(m_hasSelection);
     }
@@ -52,15 +77,24 @@ void LassoActionBar::updateButtonStates()
     if (m_deleteButton) {
         m_deleteButton->setVisible(m_hasSelection);
     }
-    
+
     // Paste button: visible when clipboard has strokes
     if (m_pasteButton) {
         m_pasteButton->setVisible(m_hasStrokesInClipboard);
     }
-    
+
     // Trigger re-layout to adjust height
     adjustSize();
     updateGeometry();
+}
+
+void LassoActionBar::setOverrideColor(const QColor& color)
+{
+    if (!color.isValid()) return;
+    m_overrideColor = color;
+    if (m_recolorButton) {
+        m_recolorButton->setColor(color);
+    }
 }
 
 void LassoActionBar::setHasStrokesInClipboard(bool hasStrokes)

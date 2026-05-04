@@ -2258,6 +2258,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_lassoSelectionConn);
         m_lassoSelectionConn = {};
     }
+    if (m_lassoSwatchSyncConn) {
+        disconnect(m_lassoSwatchSyncConn);
+        m_lassoSwatchSyncConn = {};
+    }
     if (m_objectSelectionForActionBarConn) {
         disconnect(m_objectSelectionForActionBarConn);
         m_objectSelectionForActionBarConn = {};
@@ -2509,6 +2513,21 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // Lasso selection changed (shows/hides LassoActionBar)
     m_lassoSelectionConn = connect(viewport, &DocumentViewport::lassoSelectionChanged,
                                    m_actionBarContainer, &ActionBarContainer::onLassoSelectionChanged);
+
+    // Sync the recolor swatch on the LassoActionBar to the current pen color
+    // every time a fresh selection appears, so the "default" target color
+    // tracks what the user is currently drawing with. Tracked in
+    // m_lassoSwatchSyncConn so disconnectViewportSignals() can drop it
+    // (otherwise we'd accumulate one duplicate per viewport switch and
+    // stale viewports would keep stomping the swatch).
+    m_lassoSwatchSyncConn = connect(viewport, &DocumentViewport::lassoSelectionChanged,
+            this, [this](bool hasSelection) {
+        if (hasSelection && m_lassoActionBar && m_toolbar
+            && m_toolbar->penSubToolbar()) {
+            m_lassoActionBar->setOverrideColor(
+                m_toolbar->penSubToolbar()->currentColor());
+        }
+    });
     
     // Object selection changed (shows/hides ObjectSelectActionBar)
     // Note: objectSelectionChanged has no bool parameter, so we wrap it
@@ -4947,6 +4966,9 @@ void MainWindow::connectSubToolbarSignals()
     // Pen
     connect(penST, &PenSubToolbar::penColorChanged, this, [this](const QColor& color) {
         if (DocumentViewport* vp = currentViewport()) vp->setPenColor(color);
+        // Also keep the lasso recolor swatch in sync. Cheap setter; safe to
+        // call even when the lasso action bar is hidden.
+        if (m_lassoActionBar) m_lassoActionBar->setOverrideColor(color);
     });
     connect(penST, &PenSubToolbar::penThicknessChanged, this, [this](qreal thickness) {
         if (DocumentViewport* vp = currentViewport()) vp->setPenThickness(thickness);
@@ -5206,6 +5228,29 @@ void MainWindow::setupActionBars()
     connect(m_lassoActionBar, &LassoActionBar::deleteRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->deleteLassoSelection();
+        }
+    });
+    connect(m_lassoActionBar, &LassoActionBar::recolorRequested,
+            this, [this](const QColor& color) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->recolorLassoSelection(color);
+        }
+    });
+    connect(m_lassoActionBar, &LassoActionBar::recolorEditRequested,
+            this, [this]() {
+        if (!m_lassoActionBar) return;
+        const QColor current = m_lassoActionBar->overrideColor();
+        const QColor picked = QColorDialog::getColor(
+            current.isValid() ? current : Qt::black,
+            this,
+            tr("Pick recolor target"),
+            QColorDialog::ShowAlphaChannel);
+        if (!picked.isValid()) return;     // user cancelled
+        m_lassoActionBar->setOverrideColor(picked);
+        // Re-apply to the still-active selection. The viewport ignores the
+        // dialog's alpha and preserves each stroke's existing alpha.
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->recolorLassoSelection(picked);
         }
     });
     

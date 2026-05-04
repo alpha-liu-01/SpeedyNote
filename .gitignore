@@ -88,6 +88,7 @@ ios/Assets.xcassets/
 ios/mlkit-build/
 .aur-work/
 win32/
+scripts/
 
 app_icon.rc
 packaging.iss

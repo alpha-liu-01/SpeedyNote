@@ -3,7 +3,10 @@
 
 #include "ActionBar.h"
 
+#include <QColor>
+
 class ActionBarButton;
+class ColorPresetButton;
 
 /**
  * @brief Action bar for lasso selection operations.
@@ -60,6 +63,22 @@ public:
      */
     void setDarkMode(bool darkMode) override;
 
+    /**
+     * @brief Push a new color into the recolor swatch.
+     *
+     * Called by MainWindow whenever the pen color changes or whenever
+     * a new lasso selection appears (so the swatch's "default" tracks
+     * the current pen color). Does NOT emit @ref recolorRequested.
+     *
+     * @param color New swatch color.
+     */
+    void setOverrideColor(const QColor& color);
+
+    /**
+     * @brief Get the current swatch color.
+     */
+    QColor overrideColor() const { return m_overrideColor; }
+
 signals:
     /**
      * @brief Emitted when Copy button is clicked.
@@ -81,14 +100,29 @@ signals:
      */
     void deleteRequested();
 
+    /**
+     * @brief Emitted on first click of the recolor swatch, or after the
+     *        user picks a color via the editor (re-apply with new color).
+     * @param color The swatch color to apply to every selected stroke.
+     */
+    void recolorRequested(const QColor& color);
+
+    /**
+     * @brief Emitted when the recolor swatch is clicked while already
+     *        selected (request to open the color customization dialog).
+     */
+    void recolorEditRequested();
+
 private:
     void setupButtons();
-    
+
+    ColorPresetButton* m_recolorButton = nullptr;
     ActionBarButton* m_copyButton = nullptr;
     ActionBarButton* m_cutButton = nullptr;
     ActionBarButton* m_pasteButton = nullptr;
     ActionBarButton* m_deleteButton = nullptr;
-    
+
+    QColor m_overrideColor;        ///< Last color pushed into the swatch (pen color or dialog result)
     bool m_hasStrokesInClipboard = false;
     bool m_hasSelection = false;
 };
