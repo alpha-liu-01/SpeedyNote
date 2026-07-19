@@ -731,8 +731,12 @@ void SplitViewManager::syncPageWheelVisibility(Pane pane)
     // either (they have no meaningful page position). It is also suppressed when
     // the left-docked page-panel action bar (which hosts its own wheel) is shown
     // and the vertical bar is on the left, to avoid a duplicate/overlap (SP3).
+    // That action bar only overlaps the left pane, so in split view the right
+    // pane's wheel is exempt from the conflict.
+    const bool rightPaneInSplit = isSplit() && (pane == Right);
     const bool actionBarConflict =
-        m_pagePanelActionBarShown && (m_vEdge == ViewportScrollBar::DockEdge::Left);
+        m_pagePanelActionBarShown && (m_vEdge == ViewportScrollBar::DockEdge::Left)
+        && !rightPaneInSplit;
     const bool visible = b.vBar && b.vBar->isVisible()
                       && !paneIsEdgeless(pane) && !actionBarConflict;
     if (visible) {
