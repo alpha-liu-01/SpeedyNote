@@ -13,8 +13,9 @@
 # (QA Q11.3) -- GPU EPs are vendor-specific and not bundled.
 #
 # Usage (from the SpeedyNote project root):
-#   ./linux/fetch-onnxruntime.sh            # x86_64 (default)
-#   ORT_ARCH=aarch64 ./linux/fetch-onnxruntime.sh
+#   ./linux/fetch-onnxruntime.sh            # auto-detects the host arch
+#   ORT_ARCH=aarch64 ./linux/fetch-onnxruntime.sh   # force ARM64
+#   ORT_ARCH=x64     ./linux/fetch-onnxruntime.sh   # force x86_64
 #
 # To refresh: delete linux/onnxruntime-build/ and re-run.
 # =============================================================================
@@ -27,7 +28,19 @@ OUTPUT_DIR="${SCRIPT_DIR}/onnxruntime-build"
 
 # --- Pinned version ---------------------------------------------------------
 ORT_VERSION="1.20.1"
-ORT_ARCH="${ORT_ARCH:-x64}"   # x64 | aarch64
+
+# Default to the host architecture so a bare `./linux/fetch-onnxruntime.sh`
+# does the right thing on both x86_64 and ARM64. Override with ORT_ARCH.
+# (A hardcoded x64 default previously vendored an x86_64 .so on ARM boxes,
+#  which then failed at link time with "file in wrong format".)
+_host_ort_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64)  echo "x64" ;;
+        aarch64|arm64) echo "aarch64" ;;
+        *)             echo "x64" ;;
+    esac
+}
+ORT_ARCH="${ORT_ARCH:-$(_host_ort_arch)}"   # x64 | aarch64
 
 # Integrity pin (SHA256 of the release .tgz). Microsoft does not publish a
 # per-asset SHA256 in a machine-readable form, so these must be filled in by

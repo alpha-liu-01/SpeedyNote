@@ -565,6 +565,26 @@ ocr_deps_present() {
         && ls linux/onnxruntime-build/lib/libonnxruntime.so* >/dev/null 2>&1
 }
 
+# True when the vendored ONNX Runtime .so matches the host architecture.
+# The prebuilt runtime is arch-specific, so a stale copy from another arch
+# (e.g. the x64 default fetched by hand on an ARM box) would otherwise link
+# and fail at ld with "file in wrong format". Returns 0 (ok) when we cannot
+# tell (no objdump, unknown host) so we never block a legitimate build.
+ort_vendored_arch_ok() {
+    command -v objdump >/dev/null 2>&1 || return 0
+    local lib elf
+    lib=$(ls linux/onnxruntime-build/lib/libonnxruntime.so.* 2>/dev/null | head -1)
+    [[ -n "$lib" ]] || lib=$(ls linux/onnxruntime-build/lib/libonnxruntime.so 2>/dev/null | head -1)
+    [[ -n "$lib" ]] || return 0
+    elf=$(objdump -f "$lib" 2>/dev/null | sed -n 's/^architecture: *\([^,]*\).*/\1/p')
+    [[ -n "$elf" ]] || return 0
+    case "$(uname -m)" in
+        x86_64|amd64)  [[ "$elf" == *x86-64* ]] ;;
+        aarch64|arm64) [[ "$elf" == *aarch64* ]] ;;
+        *)             return 0 ;;
+    esac
+}
+
 # Fetch the vendored ONNX Runtime + recognition models that PaddleOcrEngine
 # needs. Both fetch scripts are idempotent (they skip when already present),
 # but we still short-circuit here to avoid noisy re-runs. Used only for the
@@ -583,6 +603,11 @@ ensure_ocr_deps() {
     chmod +x linux/fetch-onnxruntime.sh linux/fetch-ocr-models.sh 2>/dev/null || true
 
     if [[ ! -f linux/onnxruntime-build/include/onnxruntime_cxx_api.h ]]; then
+        ORT_ARCH="$ort_arch" ./linux/fetch-onnxruntime.sh
+    elif ! ort_vendored_arch_ok; then
+        echo -e "${YELLOW}Vendored ONNX Runtime is for a different architecture than"
+        echo -e "the host ($(uname -m)); re-fetching the $ort_arch build.${NC}"
+        rm -rf linux/onnxruntime-build
         ORT_ARCH="$ort_arch" ./linux/fetch-onnxruntime.sh
     else
         echo -e "${CYAN}ONNX Runtime already vendored.${NC}"
