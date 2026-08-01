@@ -584,6 +584,10 @@ public:
         runTest(testObjectGroupContainment, "testObjectGroupContainment");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
+        // The caller goes on to open a window and block in the event loop, so
+        // without an explicit flush these results sit in the buffer and are
+        // lost whenever the GUI phase is killed rather than closed normally.
+        fflush(stdout);
         
         return failed == 0;
     }

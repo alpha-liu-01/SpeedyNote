@@ -15,6 +15,8 @@
 #include "Page.h"
 #include "../objects/ImageObject.h"
 #include <QDebug>
+#include <QDir>
+#include <QFile>
 #include <QJsonDocument>
 #include <cassert>
 
@@ -418,8 +420,11 @@ inline bool runAllTests()
     allPass &= testObjectManagement();
     qDebug() << "";
     
-    // Optional: Render to PNG
-    renderTestPageToPng("test_page_render.png");
+    // Smoke test for Page::render(). Written to a temporary file and removed
+    // again so a test run leaves nothing behind in the working directory.
+    const QString renderPath = QDir::temp().filePath("speedynote_test_page_render.png");
+    allPass &= renderTestPageToPng(renderPath);
+    QFile::remove(renderPath);
     
     qDebug() << "\n========================================";
     if (allPass) {

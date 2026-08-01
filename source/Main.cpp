@@ -352,9 +352,16 @@ static void applyWindowsPalette(QApplication& app)
 static void enableDebugConsole()
 {
 #ifdef SPEEDYNOTE_DEBUG
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
+    // Only attach a console when stdout has nowhere to go. Reopening the
+    // standard streams on CONOUT$ points them at the console device, which
+    // would discard any pipe or file redirection the caller set up, making
+    // test-suite output impossible to capture.
+    const HANDLE existingStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (existingStdOut == nullptr || existingStdOut == INVALID_HANDLE_VALUE) {
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
 #else
     FreeConsole();
 #endif
@@ -595,11 +602,7 @@ static void showLauncherAtColdStart(Launcher* launcher)
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 static int runTests(const QString& testType)
 {
-#ifdef Q_OS_WIN
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
-#endif
+    // Windows console setup already happened in enableDebugConsole().
 
     bool success = false;
 
