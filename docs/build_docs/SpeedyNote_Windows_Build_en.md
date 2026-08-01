@@ -34,9 +34,6 @@ pacman -S mingw-w64-clang-x86_64-cppwinrt
 
 # PDF (MuPDF and dependencies)
 pacman -S mingw-w64-clang-x86_64-mupdf mingw-w64-clang-x86_64-harfbuzz mingw-w64-clang-x86_64-freetype mingw-w64-clang-x86_64-libjpeg-turbo mingw-w64-clang-x86_64-openjpeg2 mingw-w64-clang-x86_64-gumbo-parser mingw-w64-clang-x86_64-mujs
-
-# Controller support (optional)
-pacman -S mingw-w64-clang-x86_64-SDL2
 ```
 
 > **Note:** PDF export requires MuPDF. If `mingw-w64-clang-x86_64-mupdf` is not available, PDF export will be disabled on Windows. The app will still function normally for viewing and annotating PDFs.

@@ -14,10 +14,6 @@
 
 #include "ui/dialogs/KeyCaptureDialog.h"
 
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include "ControllerMappingDialog.h"
-#endif
-
 // Forward declarations
 class MainWindow;
 
@@ -29,8 +25,6 @@ class MainWindow;
  * - Language: Language selection
  * - Cache: Cache management (TODO: integrate with NotebookLibrary)
  * - About: Application info
- * 
- * Controller-related tabs are conditionally compiled with SPEEDYNOTE_CONTROLLER_SUPPORT.
  */
 class ControlPanelDialog : public QDialog {
     Q_OBJECT
@@ -62,11 +56,6 @@ private slots:
     void chooseBackgroundColor();
     void chooseGridColor();
     void loadSettings();
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    void openControllerMapping();
-    void reconnectController();
-#endif
 
 private:
     MainWindow *mainWindowRef;
@@ -134,16 +123,6 @@ private:
     void onResetAllShortcuts();
     void onOpenConfigFolder();
     void updateShortcutDisplay(QTreeWidgetItem* item, const QString& actionId);
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    // === Controller Mapping tab (conditional) ===
-    QWidget *controllerMappingTab;
-    QPushButton *reconnectButton;
-    QLabel *controllerStatusLabel;
-    
-    void createControllerMappingTab();
-    void updateControllerStatus();
-#endif
 
 #ifdef Q_OS_LINUX
     // === Stylus tab (Linux only) ===

@@ -385,7 +385,6 @@ iOS 特定代码用 `Q_OS_IOS` 进行保护：
 在 iOS 上禁用的功能：
 - `QLocalServer` 单实例锁（iOS 沙箱不支持）  
 - `QProcess::startDetached`（在 iOS 上不可用）  
-- SDL2 手柄支持  
 - SpeedyNote CLI（iOS 上无终端）
 
 ---

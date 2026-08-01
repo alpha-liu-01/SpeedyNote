@@ -433,7 +433,6 @@ iOS-specific code is guarded with `Q_OS_IOS`:
 Features disabled on iOS:
 - `QLocalServer` single-instance locking (not supported in iOS sandbox)
 - `QProcess::startDetached` (not available on iOS)
-- SDL2 game controller support
 - SpeedyNote CLI (iOS has no terminal)
 
 ### OCR (ML Kit Digital Ink Recognition)

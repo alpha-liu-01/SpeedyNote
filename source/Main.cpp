@@ -29,14 +29,6 @@
 #include <shlobj.h>
 #endif
 
-// Controller support
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include <SDL2/SDL.h>
-#define SPEEDYNOTE_SDL_QUIT() SDL_Quit()
-#else
-#define SPEEDYNOTE_SDL_QUIT() ((void)0)
-#endif
-
 // Platform helpers
 #ifdef Q_OS_ANDROID
 #include <QDebug>
@@ -360,9 +352,16 @@ static void applyWindowsPalette(QApplication& app)
 static void enableDebugConsole()
 {
 #ifdef SPEEDYNOTE_DEBUG
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
+    // Only attach a console when stdout has nowhere to go. Reopening the
+    // standard streams on CONOUT$ points them at the console device, which
+    // would discard any pipe or file redirection the caller set up, making
+    // test-suite output impossible to capture.
+    const HANDLE existingStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (existingStdOut == nullptr || existingStdOut == INVALID_HANDLE_VALUE) {
+        AllocConsole();
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
 #else
     FreeConsole();
 #endif
@@ -603,11 +602,7 @@ static void showLauncherAtColdStart(Launcher* launcher)
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 static int runTests(const QString& testType)
 {
-#ifdef Q_OS_WIN
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    freopen("CONOUT$", "w", stderr);
-#endif
+    // Windows console setup already happened in enableDebugConsole().
 
     bool success = false;
 
@@ -635,7 +630,6 @@ static int runTests(const QString& testType)
         return QTest::qExec(new ToolbarButtonTests());
     }
 
-    SPEEDYNOTE_SDL_QUIT();
     return success ? 0 : 1;
 }
 #endif
@@ -866,12 +860,6 @@ int main(int argc, char* argv[])
 #endif
 
     // ========== GUI Mode ==========
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
-    SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
-#endif
-
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
@@ -982,7 +970,6 @@ int main(int argc, char* argv[])
 
     if (runViewportTests) {
         int result = DocumentViewportTests::runVisualTest();
-        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
 
@@ -991,7 +978,6 @@ int main(int argc, char* argv[])
         testWidget->setAttribute(Qt::WA_DeleteOnClose);
         testWidget->show();
         int result = app.exec();
-        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
 #endif
@@ -1004,11 +990,9 @@ int main(int argc, char* argv[])
                 : inputFile;
 
             if (MainWindow::sendToExistingInstance(command)) {
-                SPEEDYNOTE_SDL_QUIT();
                 return 0;
             }
         }
-        SPEEDYNOTE_SDL_QUIT();
         return 0;
     }
 
@@ -1149,6 +1133,5 @@ int main(int argc, char* argv[])
 
     int exitCode = app.exec();
 
-    SPEEDYNOTE_SDL_QUIT();
     return exitCode;
 }

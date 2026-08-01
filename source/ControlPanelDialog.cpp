@@ -3,10 +3,6 @@
 #include "core/Page.h"
 #include "core/ShortcutManager.h"
 #include "core/DocumentViewport.h"
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include "ButtonMappingTypes.h"
-#include "SDLControllerManager.h"
-#endif
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -167,11 +163,6 @@ ControlPanelDialog::ControlPanelDialog(MainWindow *mainWindow, QWidget *parent)
     createBackgroundTab();  // Background settings (first tab for importance)
     createToolsTab();       // Stroke tool settings
     createShortcutsTab();   // Phase 5.1: Keyboard shortcuts tab
-    
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    // Note: createButtonMappingTab() removed - dial system was deleted (MW7.2)
-    createControllerMappingTab();
-#endif
 
     createThemeTab();
     createLanguageTab();
@@ -1685,132 +1676,6 @@ void ControlPanelDialog::removeKeyboardMapping() {
     }
 }
 */
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-void ControlPanelDialog::createControllerMappingTab() {
-    controllerMappingTab = new QWidget(this);
-    QVBoxLayout *layout = new QVBoxLayout(controllerMappingTab);
-    
-    // Instructions
-    QLabel *instructionLabel = new QLabel(tr("Configure physical controller button mappings for your Joy-Con or other controller:"), controllerMappingTab);
-    instructionLabel->setWordWrap(true);
-    layout->addWidget(instructionLabel);
-    
-    QLabel *noteLabel = new QLabel(tr("Note: This maps your physical controller buttons to the logical Joy-Con functions used by the application. "
-                                     "After setting up the physical mapping, you can configure what actions each logical button performs in the 'Button Mapping' tab."), controllerMappingTab);
-    noteLabel->setWordWrap(true);
-    noteLabel->setStyleSheet("color: gray; font-size: 10px; margin-bottom: 10px;");
-    layout->addWidget(noteLabel);
-    
-    // Button to open controller mapping dialog
-    QPushButton *openMappingButton = new QPushButton(tr("Configure Controller Mapping"), controllerMappingTab);
-    openMappingButton->setMinimumHeight(40);
-    connect(openMappingButton, &QPushButton::clicked, this, &ControlPanelDialog::openControllerMapping);
-    layout->addWidget(openMappingButton);
-    
-    // Button to reconnect controller
-    reconnectButton = new QPushButton(tr("Reconnect Controller"), controllerMappingTab);
-    reconnectButton->setMinimumHeight(40);
-    reconnectButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }");
-    connect(reconnectButton, &QPushButton::clicked, this, &ControlPanelDialog::reconnectController);
-    layout->addWidget(reconnectButton);
-    
-    // Status information
-    QLabel *statusLabel = new QLabel(tr("Current controller status:"), controllerMappingTab);
-    statusLabel->setStyleSheet("font-weight: bold; margin-top: 20px;");
-    layout->addWidget(statusLabel);
-    
-    // Dynamic status label
-    controllerStatusLabel = new QLabel(controllerMappingTab);
-    updateControllerStatus();
-    layout->addWidget(controllerStatusLabel);
-    
-    layout->addStretch();
-    
-    tabWidget->addTab(controllerMappingTab, tr("Controller Mapping"));
-}
-
-void ControlPanelDialog::openControllerMapping() {
-    if (!mainWindowRef) {
-        QMessageBox::warning(this, tr("Error"), tr("MainWindow reference not available."));
-        return;
-    }
-    
-    SDLControllerManager *controllerManager = mainWindowRef->getControllerManager();
-    if (!controllerManager) {
-        QMessageBox::warning(this, tr("Controller Not Available"), 
-            tr("Controller manager is not available. Please ensure a controller is connected and restart the application."));
-        return;
-    }
-    
-    if (!controllerManager->getJoystick()) {
-        QMessageBox::warning(this, tr("No Controller Detected"), 
-            tr("No controller is currently connected. Please connect your controller and restart the application."));
-        return;
-    }
-    
-    ControllerMappingDialog dialog(controllerManager, this);
-    dialog.exec();
-}
-
-void ControlPanelDialog::reconnectController() {
-    if (!mainWindowRef) {
-        QMessageBox::warning(this, tr("Error"), tr("MainWindow reference not available."));
-        return;
-    }
-    
-    SDLControllerManager *controllerManager = mainWindowRef->getControllerManager();
-    if (!controllerManager) {
-        QMessageBox::warning(this, tr("Controller Not Available"), 
-            tr("Controller manager is not available."));
-        return;
-    }
-    
-    // Show reconnecting message
-    controllerStatusLabel->setText(tr("🔄 Reconnecting..."));
-    controllerStatusLabel->setStyleSheet("color: orange;");
-    
-    // Force the UI to update immediately
-    QApplication::processEvents();
-    
-    // Attempt to reconnect using thread-safe method
-    QMetaObject::invokeMethod(controllerManager, "reconnect", Qt::BlockingQueuedConnection);
-    
-    // Update status after reconnection attempt
-    updateControllerStatus();
-    
-    // Show result message
-    if (controllerManager->getJoystick()) {
-        // Reconnect the controller signals in MainWindow
-        mainWindowRef->reconnectControllerSignals();
-        
-        QMessageBox::information(this, tr("Reconnection Successful"), 
-            tr("Controller has been successfully reconnected!"));
-    } else {
-        QMessageBox::warning(this, tr("Reconnection Failed"), 
-            tr("Failed to reconnect controller. Please ensure your controller is powered on and in pairing mode, then try again."));
-    }
-}
-
-void ControlPanelDialog::updateControllerStatus() {
-    if (!mainWindowRef || !controllerStatusLabel) return;
-    
-    SDLControllerManager *controllerManager = mainWindowRef->getControllerManager();
-    if (!controllerManager) {
-        controllerStatusLabel->setText(tr("✗ Controller manager not available"));
-        controllerStatusLabel->setStyleSheet("color: red;");
-        return;
-    }
-    
-    if (controllerManager->getJoystick()) {
-        controllerStatusLabel->setText(tr("✓ Controller connected"));
-        controllerStatusLabel->setStyleSheet("color: green; font-weight: bold;");
-    } else {
-        controllerStatusLabel->setText(tr("✗ No controller detected"));
-        controllerStatusLabel->setStyleSheet("color: red; font-weight: bold;");
-    }
-}
-#endif
-
 
 void ControlPanelDialog::createAboutTab() {
     aboutTab = new QWidget(this);

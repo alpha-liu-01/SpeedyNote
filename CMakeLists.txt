@@ -8,7 +8,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ============================================================================
 # Build Options
 # ============================================================================
-option(ENABLE_CONTROLLER_SUPPORT "Enable SDL2 game controller support" OFF)
 option(ENABLE_DEBUG_OUTPUT "Enable verbose debug output (qDebug prints)" OFF)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer + LeakSanitizer for memory debugging" OFF)
 option(SPEEDYNOTE_ENABLE_WINDOWS_INK_OCR "Enable Windows Ink handwriting recognition (requires Windows 10 1703+)" OFF)
@@ -16,7 +15,6 @@ option(SPEEDYNOTE_ENABLE_MLKIT_INK_OCR "Enable ML Kit Digital Ink OCR (Android/i
 option(SPEEDYNOTE_ENABLE_VISION_OCR "Enable Apple Vision OCR (macOS)" OFF)
 option(SPEEDYNOTE_ENABLE_PADDLE_OCR "Enable PaddleOCR raster OCR (Linux, via vendored ONNX Runtime)" OFF)
 
-message(STATUS "Controller support: ${ENABLE_CONTROLLER_SUPPORT}")
 if(ENABLE_DEBUG_OUTPUT)
     add_compile_definitions(SPEEDYNOTE_DEBUG)
     # Absolute source dir so debug-only golden-image tests can locate baselines
@@ -115,17 +113,11 @@ if(WIN32)
         if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
             set(QT_PATH "C:/msys64/clangarm64" CACHE PATH "Path to Qt installation")
         endif()
-        if(NOT DEFINED SDL2_ROOT OR SDL2_ROOT STREQUAL "")
-            set(SDL2_ROOT "C:/msys64/clangarm64" CACHE PATH "Path to SDL2")
-        endif()
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-aarch64")
         message(STATUS "Detected ARM64 Windows - using clangarm64 toolchain")
     elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
         if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
             set(QT_PATH "C:/Qt/5.15.2/mingw81_32" CACHE PATH "Path to Qt installation")
-        endif()
-        if(NOT DEFINED SDL2_ROOT OR SDL2_ROOT STREQUAL "")
-            set(SDL2_ROOT "${QT_PATH}" CACHE PATH "Path to SDL2")
         endif()
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-i686")
         message(STATUS "Detected x86 (32-bit) Windows - using standalone Qt5 SDK")
@@ -133,20 +125,16 @@ if(WIN32)
         if(NOT DEFINED QT_PATH OR QT_PATH STREQUAL "")
             set(QT_PATH "C:/msys64/clang64" CACHE PATH "Path to Qt installation")
         endif()
-        if(NOT DEFINED SDL2_ROOT OR SDL2_ROOT STREQUAL "")
-            set(SDL2_ROOT "C:/msys64/clang64" CACHE PATH "Path to SDL2")
-        endif()
         set(MSYS2_PACKAGE_PREFIX "mingw-w64-clang-x86_64")
         message(STATUS "Detected x86_64 Windows - using clang64 toolchain")
     endif()
     
     # Convert paths to forward slashes to avoid escaping issues with backslashes
     file(TO_CMAKE_PATH "${QT_PATH}" QT_PATH)
-    file(TO_CMAKE_PATH "${SDL2_ROOT}" SDL2_ROOT)
     message(STATUS "QT_PATH: ${QT_PATH}")
 
     # CMake paths
-    set(CMAKE_PREFIX_PATH "${QT_PATH}/lib/cmake" "${SDL2_ROOT}/lib/cmake")
+    set(CMAKE_PREFIX_PATH "${QT_PATH}/lib/cmake")
     include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
     # Find dependencies
@@ -161,13 +149,6 @@ if(WIN32)
         find_package(PkgConfig REQUIRED)
     endif()
     # Poppler removed - using MuPDF exclusively for PDF rendering
-    
-    if(ENABLE_CONTROLLER_SUPPORT)
-        find_package(SDL2 REQUIRED CONFIG)
-        unset(SDL2main CACHE)
-        include_directories("${SDL2_ROOT}/include")
-        add_compile_definitions(SDL_MAIN_HANDLED SPEEDYNOTE_CONTROLLER_SUPPORT)
-    endif()
 
     # Auto-enable Windows Ink OCR on 64-bit Qt6 Windows builds
     if(NOT USE_QT5 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -343,8 +324,6 @@ elseif(IOS)
     add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
     message(STATUS "✅ MuPDF PDF export enabled for iPadOS")
     
-    # No controller support on iOS
-    set(ENABLE_CONTROLLER_SUPPORT OFF)
     set(WIN_RESOURCES "")
 
 elseif(APPLE)
@@ -378,7 +357,7 @@ elseif(APPLE)
         find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui Widgets Concurrent Xml Network Svg)
     endif()
     find_package(PkgConfig REQUIRED)
-    # macOS uses MuPDF exclusively for PDF rendering and export (no Poppler, no SDL2)
+    # macOS uses MuPDF exclusively for PDF rendering and export (no Poppler)
     
     # MuPDF for PDF rendering and export (via Homebrew)
     # Homebrew may install MuPDF in different locations depending on version/linking
@@ -517,8 +496,6 @@ elseif(ANDROID)
     add_compile_definitions(SPEEDYNOTE_MUPDF_EXPORT)
     message(STATUS "✅ MuPDF PDF export enabled for Android")
     
-    # No controller support on Android
-    set(ENABLE_CONTROLLER_SUPPORT OFF)
     set(WIN_RESOURCES "")
     
 elseif(UNIX)
@@ -539,11 +516,6 @@ elseif(UNIX)
     endif()
     find_package(PkgConfig REQUIRED)
     # Poppler removed - using MuPDF exclusively for PDF rendering
-
-    if(ENABLE_CONTROLLER_SUPPORT)
-        pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
-        add_compile_definitions(SPEEDYNOTE_CONTROLLER_SUPPORT)
-    endif()
 
     # MuPDF for PDF export (prefer dynamic linking)
     # Search in standard paths: /usr/lib, /usr/lib64 (Fedora), /usr/lib/x86_64-linux-gnu (Debian)
@@ -951,15 +923,6 @@ set(PDF_SOURCES
 )
 message(STATUS "   PDF provider: MuPDF (all platforms)")
 
-# Controller support (optional)
-set(CONTROLLER_SOURCES "")
-if(ENABLE_CONTROLLER_SUPPORT)
-    set(CONTROLLER_SOURCES
-        source/SDLControllerManager.cpp
-        source/ControllerMappingDialog.cpp
-    )
-endif()
-
 # Sharing module (cross-platform .snbx package export/import)
 # Uses miniz library for ZIP creation/extraction (MIT license, thirdparty/miniz/)
 set(SHARING_SOURCES
@@ -1067,7 +1030,6 @@ set(APP_SOURCES
     ${OCR_SOURCES}
         ${UI_SOURCES}
         ${PDF_SOURCES}
-    ${CONTROLLER_SOURCES}
     ${SHARING_SOURCES}
     ${BATCH_SOURCES}
     ${CLI_SOURCES}
@@ -1222,9 +1184,6 @@ if(WIN32)
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt${QT_VERSION_MAJOR}::Test)
     endif()
-    if(ENABLE_CONTROLLER_SUPPORT)
-        list(APPEND PLATFORM_LIBS SDL2::SDL2)
-    endif()
     
     # MuPDF for PDF rendering and export
     if(MUPDF_FOUND)
@@ -1321,9 +1280,6 @@ elseif(UNIX)
     endif()
     if(ENABLE_DEBUG_OUTPUT)
         list(APPEND PLATFORM_LIBS Qt${QT_VERSION_MAJOR}::Test)
-    endif()
-    if(ENABLE_CONTROLLER_SUPPORT)
-        list(APPEND PLATFORM_LIBS PkgConfig::SDL2)
     endif()
     # PaddleOCR raster OCR: vendored ONNX Runtime (CPU EP). ONNXRUNTIME_ROOT was
     # set during the configure-time gating above.

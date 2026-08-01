@@ -33,7 +33,6 @@ sudo apt install libmupdf-dev libharfbuzz-dev libfreetype-dev libjpeg-dev libope
 | **Qt6**         | `qt6-base-dev qt6-tools-dev`                                                            | UI framework                       |
 | **MuPDF**       | `libmupdf-dev`                                                                          | PDF viewing and export             |
 | **MuPDF deps**  | `libharfbuzz-dev libfreetype-dev libjpeg-dev libopenjp2-7-dev libgumbo-dev libmujs-dev` | MuPDF dependencies                 |
-| **SDL2**        | `libsdl2-dev`                                                                           | Game controller support (optional) |
 | **OCR**         | `curl tar coreutils` (+ vendored ONNX Runtime & models, see below)                      | Handwriting OCR (optional)         |
 
 ---
@@ -54,15 +53,14 @@ cd build && ./speedynote
 
 #### Build Options
 
-| Option                      | Default | Description                               |
-| --------------------------- | ------- | ----------------------------------------- |
-| `ENABLE_CONTROLLER_SUPPORT` | OFF     | Enable SDL2 game controller support (TBD) |
-| `ENABLE_DEBUG_OUTPUT`       | OFF     | Enable verbose debug output               |
+| Option                | Default | Description                 |
+| --------------------- | ------- | --------------------------- |
+| `ENABLE_DEBUG_OUTPUT` | OFF     | Enable verbose debug output |
 
 Example with options:
 
 ```bash
-cmake .. -DENABLE_CONTROLLER_SUPPORT=ON -DENABLE_DEBUG_OUTPUT=ON
+cmake .. -DENABLE_DEBUG_OUTPUT=ON
 ```
 
 ---

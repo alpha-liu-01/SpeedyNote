@@ -81,35 +81,52 @@ inline bool testDocumentCreation()
     // Test 2: Create edgeless document
     {
         auto doc = Document::createNew("Edgeless Canvas", Document::Mode::Edgeless);
+        bool ok = true;
         
         if (doc->mode != Document::Mode::Edgeless) {
             qDebug() << "FAIL: mode should be Edgeless";
-            success = false;
+            ok = false;
         }
         
         if (!doc->isEdgeless()) {
             qDebug() << "FAIL: isEdgeless() should return true";
-            success = false;
+            ok = false;
         }
         
-        if (doc->pageCount() != 1) {
-            qDebug() << "FAIL: edgeless doc should have 1 page";
-            success = false;
+        // Edgeless documents are tile-backed: creation allocates nothing, and
+        // tiles come into existence only when something touches the canvas.
+        if (doc->pageCount() != 0) {
+            qDebug() << "FAIL: edgeless doc should have no pages";
+            ok = false;
+        }
+        
+        if (doc->tileCount() != 0) {
+            qDebug() << "FAIL: edgeless doc should start with no tiles";
+            ok = false;
         }
         
         Page* ePage = doc->edgelessPage();
         if (!ePage) {
             qDebug() << "FAIL: edgelessPage() should return non-null";
-            success = false;
+            ok = false;
+        }
+        
+        if (doc->tileCount() != 1) {
+            qDebug() << "FAIL: edgelessPage() should create the origin tile on demand";
+            ok = false;
         }
         
         // Edgeless page should have large default size
         if (ePage && ePage->size.width() < 1000) {
             qDebug() << "FAIL: edgeless page should have large size";
-            success = false;
+            ok = false;
         }
         
-        qDebug() << "  - Edgeless document creation: OK";
+        if (ok) {
+            qDebug() << "  - Edgeless document creation: OK";
+        } else {
+            success = false;
+        }
     }
     
     // Test 3: Default values
