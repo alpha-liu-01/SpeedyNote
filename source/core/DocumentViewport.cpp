@@ -1895,7 +1895,8 @@ int DocumentViewport::pageAtPoint(QPointF documentPt) const
 
 int DocumentViewport::nearestPageToPoint(QPointF documentPt) const
 {
-    if (!m_document || m_document->pageCount() == 0) {
+    // Edgeless documents have no page layout to search
+    if (!m_document || m_document->isEdgeless() || m_document->pageCount() == 0) {
         return -1;
     }
     
@@ -1970,6 +1971,11 @@ QPointF DocumentViewport::clampObjectPositionToPage(int pageIndex, QPointF pageP
 
 QVector<int> DocumentViewport::loadedPagesNear(const QPointF& docPoint, int excludePageIndex) const
 {
+    // An object can only overhang its page by its own extent, so only pages
+    // adjacent to the point are plausible owners. Ordered nearest-first, and
+    // limited to loaded pages so hover never triggers lazy page loading.
+    const int SEARCH_RADIUS = 2;
+    
     QVector<int> result;
     if (!m_document || m_document->isEdgeless()) {
         return result;
@@ -1980,10 +1986,7 @@ QVector<int> DocumentViewport::loadedPagesNear(const QPointF& docPoint, int excl
         return result;
     }
     
-    // An object can only overhang its page by its own extent, so only pages
-    // adjacent to the point are plausible owners. Ordered nearest-first, and
-    // limited to loaded pages so hover never triggers lazy page loading.
-    const int SEARCH_RADIUS = 2;
+    result.reserve(2 * SEARCH_RADIUS + 1);
     const int pageCount = m_document->pageCount();
     
     auto consider = [&](int index) {
@@ -2077,6 +2080,12 @@ InsertedObject* DocumentViewport::objectAtPoint(const QPointF& docPoint) const
         // objects contained, but documents saved before that could not. Without
         // this sweep such an object is visible yet impossible to select, since
         // the point it occupies belongs to no page (or to a different one).
+        // Skipped entirely for documents that hold no objects at all, which is
+        // the common case for a pointer move that hit nothing.
+        if (m_document->maxObjectExtent() <= 0) {
+            return nullptr;
+        }
+        
         for (int neighbour : loadedPagesNear(docPoint, pageIdx)) {
             Page* page = m_document->page(neighbour);
             if (!page) continue;
@@ -2373,16 +2382,18 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     qreal maxScaleX = 10.0;
     qreal maxScaleY = 10.0;
     
-    // Paged mode: cap the scale so the object cannot grow past the page edge.
-    // Capping the scale rather than the resulting rect is what keeps this
-    // compatible with the aspect-ratio lock above - a locked image shrinks
-    // uniformly at the page edge instead of distorting.
+    // Paged mode: cap the scale so the object cannot grow larger than the page.
+    // The cap depends only on the page size, not on where the object sits: an
+    // object flush against an edge still grows, and the position clamp below
+    // slides it inward. Capping the scale rather than the resulting rect keeps
+    // this compatible with the aspect-ratio lock above, so a locked image
+    // shrinks uniformly instead of distorting.
     if (m_document && !m_document->isEdgeless() && m_resizeObjectPageIndex >= 0) {
         QSizeF pageSize = m_document->pageSizeAt(m_resizeObjectPageIndex);
-        qreal pageLimitX = ObjectConstraints::maxScaleForCenterFixedResize(
-            center.x(), m_resizeOriginalSize.width(), pageSize.width());
-        qreal pageLimitY = ObjectConstraints::maxScaleForCenterFixedResize(
-            center.y(), m_resizeOriginalSize.height(), pageSize.height());
+        qreal pageLimitX = ObjectConstraints::maxScaleToFitPage(
+            m_resizeOriginalSize.width(), pageSize.width());
+        qreal pageLimitY = ObjectConstraints::maxScaleToFitPage(
+            m_resizeOriginalSize.height(), pageSize.height());
         
         // A locked aspect ratio scales both axes together, so the tighter of
         // the two limits has to apply to both.
@@ -2416,8 +2427,9 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     // Position is top-left corner, which is center - half of new size
     QPointF newPos = center - QPointF(newSize.width() / 2.0, newSize.height() / 2.0);
     
-    // The minimum-size floor above can push the rect past an edge the scale cap
-    // was respecting, so clamp the final position too.
+    // Growth is symmetric about the centre, so an object near an edge would
+    // spill over it. Sliding the result back in lets it keep growing away from
+    // the edge instead of refusing to resize at all.
     newPos = clampObjectPositionToPage(m_resizeObjectPageIndex, newPos, newSize);
     
     // Apply to object
@@ -6656,17 +6668,18 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     }
                     oldTile = newTile;
                 } else {
-                    // Find which page currently holds this object (may have been relocated)
+                    // Per-object origin recorded at drag start. The cached
+                    // m_dragObjectPageIndex only covers single selections, so
+                    // a multi-select drag across pages used to record the
+                    // wrong source page in the undo entry.
                     int srcPage = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
-                    oldPageIdx = srcPage;
-                    newPageIdx = srcPage;
-                    for (int p = 0; p < m_document->pageCount(); ++p) {
-                        Page* pg = m_document->page(p);
-                        if (pg && pg->objectById(obj->id)) {
-                            newPageIdx = p;
-                            break;
-                        }
-                    }
+                    oldPageIdx = m_objectOriginalPageIndices.value(obj->id, srcPage);
+                    
+                    // Where it ended up (relocation may have moved it). Loaded
+                    // pages only - Document::page() loads from disk on demand,
+                    // so a full sweep would page in the whole notebook.
+                    newPageIdx = pageIndexForObject(obj);
+                    if (newPageIdx < 0) newPageIdx = oldPageIdx;
                 }
 
                 if (oldPos != obj->position || oldPageIdx != newPageIdx) {
@@ -6819,31 +6832,21 @@ QVector<DocumentViewport::PageRelocation> DocumentViewport::relocateObjectsToCor
     if (!m_document || m_document->isEdgeless() || m_selectedObjects.isEmpty())
         return result;
 
-    int pageCount = m_document->pageCount();
-
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
 
-        // Find which page currently owns this object
-        int currentPage = -1;
-        for (int p = 0; p < pageCount; ++p) {
-            Page* page = m_document->page(p);
-            if (page && page->objectById(obj->id)) {
-                currentPage = p;
-                break;
-            }
-        }
+        // Find which page currently owns this object. Loaded pages only:
+        // Document::page() loads from disk on demand, so walking every index
+        // would pull an entire notebook into memory on each drag release.
+        int currentPage = pageIndexForObject(obj);
         if (currentPage < 0) continue;
 
         QPointF pageOrigin = pagePosition(currentPage);
         QPointF docCenter = pageOrigin + obj->position + QPointF(obj->size.width() / 2.0,
                                                                   obj->size.height() / 2.0);
-        int targetPage = pageAtPoint(docCenter);
-        if (targetPage < 0) {
-            // In a page gap -- snap to nearest page
-            targetPage = nearestPageToPoint(docCenter);
-            if (targetPage < 0) targetPage = currentPage;
-        }
+        // Resolved by centre; points in a page gap snap to the nearest page
+        int targetPage = nearestPageToPoint(docCenter);
+        if (targetPage < 0) targetPage = currentPage;
 
         if (targetPage == currentPage) continue;
 
@@ -7038,16 +7041,17 @@ void DocumentViewport::updateObjectDrag(const QPointF& totalDelta)
         return;
     }
     
-    // Correction that keeps the selection inside a page. Stays zero in
-    // edgeless mode, which has no edges to clamp against.
-    QPointF correction;
+    // Unclamped ("free") bounding box of the whole selection, in document
+    // coordinates. Objects still hold their origin page's local coordinates --
+    // ownership only changes on release.
+    QRectF freeGroupRect;
+    bool haveGroupRect = false;
+    int sharedOriginPage = -1;
+    bool oneOriginPage = true;
     
-    if (m_document && !m_document->isEdgeless()) {
-        // Unclamped ("free") bounding box of the whole selection, in document
-        // coordinates. Objects still hold their origin page's local
-        // coordinates -- ownership only changes on release.
-        QRectF freeGroupRect;
-        bool haveGroupRect = false;
+    const bool paged = m_document && !m_document->isEdgeless();
+    
+    if (paged) {
         for (InsertedObject* obj : m_selectedObjects) {
             if (!obj) continue;
             auto posIt = m_objectOriginalPositions.constFind(obj->id);
@@ -7056,19 +7060,43 @@ void DocumentViewport::updateObjectDrag(const QPointF& totalDelta)
             int originPage = m_objectOriginalPageIndices.value(obj->id, -1);
             if (originPage < 0) continue;
             
+            if (sharedOriginPage < 0) {
+                sharedOriginPage = originPage;
+            } else if (sharedOriginPage != originPage) {
+                oneOriginPage = false;
+            }
+            
             QRectF objRect(pagePosition(originPage) + *posIt + totalDelta, obj->size);
             freeGroupRect = haveGroupRect ? freeGroupRect.united(objRect) : objRect;
             haveGroupRect = true;
         }
+    }
+    
+    if (paged && !oneOriginPage) {
+        // A selection spanning several pages has no single target page, and its
+        // bounding box is larger than any page. Clamping that box would yank
+        // the whole group to a page centre, so clamp each object against the
+        // page it came from instead. The trade-off is that such a selection
+        // cannot be carried onto another page in one drag.
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj) continue;
+            auto posIt = m_objectOriginalPositions.constFind(obj->id);
+            if (posIt == m_objectOriginalPositions.constEnd()) continue;
+            
+            obj->position = clampObjectPositionToPage(
+                m_objectOriginalPageIndices.value(obj->id, -1),
+                *posIt + totalDelta, obj->size);
+        }
+    } else {
+        // Correction that keeps the selection inside a page. Stays zero in
+        // edgeless mode, which has no edges to clamp against.
+        QPointF correction;
         
         if (haveGroupRect) {
             // Resolve the target page from the FREE centre, not the clamped
             // one: that is what lets a drag carry the selection across a page
             // gap onto the next page instead of sticking at the edge.
-            int targetPage = pageAtPoint(freeGroupRect.center());
-            if (targetPage < 0) {
-                targetPage = nearestPageToPoint(freeGroupRect.center());
-            }
+            int targetPage = nearestPageToPoint(freeGroupRect.center());
             
             if (targetPage >= 0) {
                 QRectF localRect = freeGroupRect.translated(-pagePosition(targetPage));
@@ -7076,14 +7104,14 @@ void DocumentViewport::updateObjectDrag(const QPointF& totalDelta)
                     localRect, m_document->pageSizeAt(targetPage));
             }
         }
-    }
-    
-    const QPointF appliedDelta = totalDelta + correction;
-    for (InsertedObject* obj : m_selectedObjects) {
-        if (!obj) continue;
-        auto posIt = m_objectOriginalPositions.constFind(obj->id);
-        if (posIt == m_objectOriginalPositions.constEnd()) continue;
-        obj->position = *posIt + appliedDelta;
+        
+        const QPointF appliedDelta = totalDelta + correction;
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj) continue;
+            auto posIt = m_objectOriginalPositions.constFind(obj->id);
+            if (posIt == m_objectOriginalPositions.constEnd()) continue;
+            obj->position = *posIt + appliedDelta;
+        }
     }
     
     // Note: Page/tile dirty marking is done on drag release (O2.3.2)
@@ -9031,6 +9059,10 @@ void DocumentViewport::toggleImageAspectRatioLock()
             if (pageIndex >= 0) {
                 img->size = ObjectConstraints::shrinkToFit(
                     img->size, m_document->pageSizeAt(pageIndex));
+                // Re-derive from the centre: fitting the size would otherwise
+                // pin the top-left and undo the centring above
+                img->position = oldCenter - QPointF(img->size.width() / 2.0,
+                                                    img->size.height() / 2.0);
                 clampObjectToPage(img, pageIndex);
             }
         }

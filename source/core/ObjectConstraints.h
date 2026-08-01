@@ -72,46 +72,41 @@ inline QPointF correctionToPage(const QRectF& rect, const QSizeF& pageSize)
 }
 
 /**
- * @brief Largest scale factor keeping a center-fixed resize inside the page.
- * @param center Page-local center of the object (fixed during resize).
+ * @brief Largest scale factor keeping a resized extent within the page.
  * @param origExtent Original extent (width or height) on the axis.
  * @param pageExtent Page extent on the same axis.
  *
- * Resizing grows the object symmetrically around its center, so the usable
- * half-extent is the distance from the center to the nearest page edge.
- * Returns a large value when the extent is degenerate so callers fall back to
- * their own maximum.
+ * Deliberately independent of where the object sits. Resizing grows an object
+ * symmetrically about its centre, so limiting growth by the distance to the
+ * nearest edge would stop an object flush against that edge from growing at
+ * all. Callers cap the size here and clamp the resulting position separately,
+ * which lets such an object grow away from the edge instead.
+ *
+ * Returns a large value for a degenerate extent so callers fall back to their
+ * own maximum.
  */
-inline qreal maxScaleForCenterFixedResize(qreal center, qreal origExtent, qreal pageExtent)
+inline qreal maxScaleToFitPage(qreal origExtent, qreal pageExtent)
 {
     if (origExtent <= 0.001 || pageExtent <= 0.0) {
         return 1e9;
     }
-    const qreal halfLimit = std::max(0.0, std::min(center, pageExtent - center));
-    return (2.0 * halfLimit) / origExtent;
-}
-
-/**
- * @brief Scale that shrinks a size to fit inside the page, preserving aspect.
- * @return 1.0 when the size already fits, otherwise the shrink factor (< 1).
- */
-inline qreal shrinkToFitScale(const QSizeF& objSize, const QSizeF& pageSize)
-{
-    if (!pageSize.isValid() || pageSize.isEmpty() ||
-        objSize.width() <= 0.0 || objSize.height() <= 0.0) {
-        return 1.0;
-    }
-    const qreal sx = pageSize.width() / objSize.width();
-    const qreal sy = pageSize.height() / objSize.height();
-    return std::min({1.0, sx, sy});
+    return pageExtent / origExtent;
 }
 
 /**
  * @brief Shrink a size to fit inside the page, preserving aspect ratio.
+ * @return The size unchanged when it already fits.
  */
 inline QSizeF shrinkToFit(const QSizeF& objSize, const QSizeF& pageSize)
 {
-    const qreal scale = shrinkToFitScale(objSize, pageSize);
+    if (!pageSize.isValid() || pageSize.isEmpty() ||
+        objSize.width() <= 0.0 || objSize.height() <= 0.0) {
+        return objSize;
+    }
+    
+    const qreal scale = std::min({1.0,
+                                  pageSize.width() / objSize.width(),
+                                  pageSize.height() / objSize.height()});
     if (scale >= 1.0) {
         return objSize;
     }

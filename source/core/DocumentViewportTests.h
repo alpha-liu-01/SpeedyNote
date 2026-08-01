@@ -472,11 +472,14 @@ public:
             return false;
         }
         
-        // Center-fixed resize: an object centered 100pt from the left edge can
-        // only double a 100pt width before hitting it
-        qreal maxScale = ObjectConstraints::maxScaleForCenterFixedResize(100.0, 100.0, 800.0);
-        if (!qFuzzyCompare(maxScale, 2.0)) {
-            printf("FAILED: expected max scale 2.0, got %f\n", maxScale);
+        // Resize cap depends only on the page, so an object flush against an
+        // edge can still grow (the position clamp slides it inward)
+        if (!qFuzzyCompare(ObjectConstraints::maxScaleToFitPage(100.0, 800.0), 8.0)) {
+            printf("FAILED: expected max scale 8.0\n");
+            return false;
+        }
+        if (ObjectConstraints::maxScaleToFitPage(1000.0, 800.0) >= 1.0) {
+            printf("FAILED: an oversized object should be capped below 1.0\n");
             return false;
         }
         
