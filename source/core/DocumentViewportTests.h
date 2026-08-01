@@ -9,6 +9,7 @@
 
 #include "DocumentViewport.h"
 #include "Document.h"
+#include "ObjectConstraints.h"
 #include "Page.h"
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
@@ -412,6 +413,144 @@ public:
         return true;
     }
     
+    /**
+     * @brief Test the page containment geometry used to keep objects on-page.
+     */
+    static bool testObjectPageContainment() {
+        printf("  testObjectPageContainment... ");
+        
+        const QSizeF pageSize(800, 1000);
+        
+        // Already inside: untouched
+        QPointF inside(100, 200);
+        if (ObjectConstraints::clampPosition(inside, QSizeF(50, 50), pageSize) != inside) {
+            printf("FAILED: in-bounds position should not move\n");
+            return false;
+        }
+        
+        // Past each edge: pulled flush against it
+        if (ObjectConstraints::clampPosition(QPointF(-30, -40), QSizeF(50, 50), pageSize)
+                != QPointF(0, 0)) {
+            printf("FAILED: top-left overhang should clamp to origin\n");
+            return false;
+        }
+        if (ObjectConstraints::clampPosition(QPointF(900, 1200), QSizeF(50, 50), pageSize)
+                != QPointF(750, 950)) {
+            printf("FAILED: bottom-right overhang should clamp to page edge\n");
+            return false;
+        }
+        
+        // An object dropped in the gap below the page comes back on
+        if (ObjectConstraints::clampPosition(QPointF(200, 1050), QSizeF(100, 80), pageSize)
+                != QPointF(200, 920)) {
+            printf("FAILED: object below the page should clamp to the bottom edge\n");
+            return false;
+        }
+        
+        // Larger than the page on an axis: centered, since containment is
+        // impossible and an inverted bound would be worse
+        QPointF oversized = ObjectConstraints::clampPosition(QPointF(500, 10),
+                                                             QSizeF(1000, 500), pageSize);
+        if (!qFuzzyCompare(oversized.x(), -100.0)) {
+            printf("FAILED: oversized width should center, got x=%f\n", oversized.x());
+            return false;
+        }
+        if (!qFuzzyCompare(oversized.y(), 10.0)) {
+            printf("FAILED: oversized width should not affect the y axis\n");
+            return false;
+        }
+        
+        // Shrink-to-fit preserves aspect ratio
+        QSizeF fitted = ObjectConstraints::shrinkToFit(QSizeF(1600, 1000), pageSize);
+        if (!qFuzzyCompare(fitted.width(), 800.0) || !qFuzzyCompare(fitted.height(), 500.0)) {
+            printf("FAILED: shrinkToFit should scale uniformly, got %fx%f\n",
+                   fitted.width(), fitted.height());
+            return false;
+        }
+        if (ObjectConstraints::shrinkToFit(QSizeF(100, 100), pageSize) != QSizeF(100, 100)) {
+            printf("FAILED: shrinkToFit should leave a fitting size alone\n");
+            return false;
+        }
+        
+        // Center-fixed resize: an object centered 100pt from the left edge can
+        // only double a 100pt width before hitting it
+        qreal maxScale = ObjectConstraints::maxScaleForCenterFixedResize(100.0, 100.0, 800.0);
+        if (!qFuzzyCompare(maxScale, 2.0)) {
+            printf("FAILED: expected max scale 2.0, got %f\n", maxScale);
+            return false;
+        }
+        
+        printf("PASSED\n");
+        return true;
+    }
+    
+    /**
+     * @brief Test group containment and the DocumentViewport wrappers.
+     */
+    static bool testObjectGroupContainment() {
+        printf("  testObjectGroupContainment... ");
+        
+        const QSizeF pageSize(800, 1000);
+        
+        // Two objects 140pt apart, dragged 60pt past the right edge. The
+        // correction is computed once for the group so the gap survives.
+        QRectF a(760, 100, 100, 50);
+        QRectF b(620, 100, 100, 50);
+        QRectF group = a.united(b);
+        QPointF correction = ObjectConstraints::correctionToPage(group, pageSize);
+        
+        QRectF movedA = a.translated(correction);
+        QRectF movedB = b.translated(correction);
+        if (!qFuzzyCompare(movedA.right(), 800.0)) {
+            printf("FAILED: group should end flush with the right edge\n");
+            return false;
+        }
+        if (!qFuzzyCompare(movedA.left() - movedB.left(), a.left() - b.left())) {
+            printf("FAILED: group clamp should preserve relative layout\n");
+            return false;
+        }
+        
+        // A group already inside needs no correction
+        if (!ObjectConstraints::correctionToPage(QRectF(10, 10, 100, 100), pageSize).isNull()) {
+            printf("FAILED: in-bounds group should need no correction\n");
+            return false;
+        }
+        
+        // Viewport wrapper: clamps in paged mode...
+        DocumentViewport viewport;
+        viewport.resize(800, 600);
+        auto doc = Document::createNew("Containment Test");
+        viewport.setDocument(doc.get());
+        
+        QSizeF docPageSize = doc->pageSizeAt(0);
+        QPointF clamped = viewport.clampObjectPositionToPage(0, QPointF(-50, -50),
+                                                             QSizeF(40, 40));
+        if (clamped != QPointF(0, 0)) {
+            printf("FAILED: paged wrapper should clamp to the page origin\n");
+            return false;
+        }
+        clamped = viewport.clampObjectPositionToPage(
+            0, QPointF(docPageSize.width() + 100, 0), QSizeF(40, 40));
+        if (!qFuzzyCompare(clamped.x(), docPageSize.width() - 40.0)) {
+            printf("FAILED: paged wrapper should clamp to the right edge\n");
+            return false;
+        }
+        
+        // ...and leaves edgeless documents alone, since they have no edges
+        auto edgelessDoc = Document::createNew("Edgeless Test", Document::Mode::Edgeless);
+        viewport.setDocument(edgelessDoc.get());
+        QPointF farOut(-5000, 9000);
+        if (viewport.clampObjectPositionToPage(0, farOut, QSizeF(40, 40)) != farOut) {
+            printf("FAILED: edgeless mode should not clamp\n");
+            return false;
+        }
+        
+        viewport.setDocument(nullptr);
+        
+        printf("PASSED\n");
+        return true;
+    }
+    
     // ===== Run All Unit Tests =====
     
     static bool runUnitTests() {
@@ -438,6 +577,8 @@ public:
         runTest(testScrollFractions, "testScrollFractions");
         runTest(testPdfCache, "testPdfCache");
         runTest(testPointerEvents, "testPointerEvents");
+        runTest(testObjectPageContainment, "testObjectPageContainment");
+        runTest(testObjectGroupContainment, "testObjectGroupContainment");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         
