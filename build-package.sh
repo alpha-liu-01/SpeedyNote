@@ -22,7 +22,7 @@ fi
 PKGREL="1"
 PKGARCH=$(uname -m)
 MAINTAINER="SpeedyNote Team <info@speedynote.org>"
-DESCRIPTION="A fast note-taking application with PDF annotation, PDF export, and controller input"
+DESCRIPTION="A fast note-taking application with PDF annotation and PDF export"
 URL="https://github.com/alpha-liu-01/SpeedyNote"
 LICENSE="GPL-3.0-or-later"
 
@@ -722,8 +722,8 @@ Section: editors
 Priority: optional
 Homepage: $URL
 Description: $DESCRIPTION
- SpeedyNote is a fast and efficient note-taking application with PDF annotation,
- PDF export support, and controller input capabilities.
+ SpeedyNote is a fast and efficient note-taking application with PDF annotation
+ and PDF export support.
 EOF
     
     # Create postinst script for desktop database update
@@ -874,8 +874,8 @@ Requires:       $(get_dependencies rpm)
 ${RPM_OCR_GLOBALS}
 
 %description
-SpeedyNote is a fast and efficient note-taking application with PDF annotation,
-PDF export support, and controller input capabilities.
+SpeedyNote is a fast and efficient note-taking application with PDF annotation
+and PDF export support.
 
 %prep
 %setup -q

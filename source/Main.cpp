@@ -29,14 +29,6 @@
 #include <shlobj.h>
 #endif
 
-// Controller support
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include <SDL2/SDL.h>
-#define SPEEDYNOTE_SDL_QUIT() SDL_Quit()
-#else
-#define SPEEDYNOTE_SDL_QUIT() ((void)0)
-#endif
-
 // Platform helpers
 #ifdef Q_OS_ANDROID
 #include <QDebug>
@@ -635,7 +627,6 @@ static int runTests(const QString& testType)
         return QTest::qExec(new ToolbarButtonTests());
     }
 
-    SPEEDYNOTE_SDL_QUIT();
     return success ? 0 : 1;
 }
 #endif
@@ -866,12 +857,6 @@ int main(int argc, char* argv[])
 #endif
 
     // ========== GUI Mode ==========
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI, "1");
-    SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH, "1");
-    SDL_Init(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
-#endif
-
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
@@ -982,7 +967,6 @@ int main(int argc, char* argv[])
 
     if (runViewportTests) {
         int result = DocumentViewportTests::runVisualTest();
-        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
 
@@ -991,7 +975,6 @@ int main(int argc, char* argv[])
         testWidget->setAttribute(Qt::WA_DeleteOnClose);
         testWidget->show();
         int result = app.exec();
-        SPEEDYNOTE_SDL_QUIT();
         return result;
     }
 #endif
@@ -1004,11 +987,9 @@ int main(int argc, char* argv[])
                 : inputFile;
 
             if (MainWindow::sendToExistingInstance(command)) {
-                SPEEDYNOTE_SDL_QUIT();
                 return 0;
             }
         }
-        SPEEDYNOTE_SDL_QUIT();
         return 0;
     }
 
@@ -1149,6 +1130,5 @@ int main(int argc, char* argv[])
 
     int exitCode = app.exec();
 
-    SPEEDYNOTE_SDL_QUIT();
     return exitCode;
 }

@@ -16,9 +16,6 @@
 #include <set>
 #include <QSpinBox>
 #include "pdf/PdfSearchEngine.h"  // SBS2: PdfSearchMatch complete type for scan aggregate
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include "SDLControllerManager.h"
-#endif
 #include <QResizeEvent>
 #include <QKeyEvent>
 #include <QMenu>
@@ -192,11 +189,6 @@ public:
     bool resolvePdfInvertIncludeImages(Document* doc) const;
     void refreshPdfDisplaySettingsForDocument(Document* doc);
 
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    SDLControllerManager *controllerManager = nullptr;
-    QThread *controllerThread = nullptr;
-#endif
-
 
     
     // Single instance functionality
@@ -279,12 +271,6 @@ public:
     
     // New: Keyboard mapping methods (made public for ControlPanelDialog)
     // REMOVED MW7.6: addKeyboardMapping, removeKeyboardMapping, and getKeyboardMappings removed - old mapping system deleted
-    
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    // Controller access
-    SDLControllerManager* getControllerManager() const { return controllerManager; }
-    void reconnectControllerSignals(); // Reconnect controller signals after reconnection
-#endif
 
     void addNewTab();
     

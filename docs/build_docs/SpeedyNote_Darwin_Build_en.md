@@ -18,7 +18,6 @@ Install these packages:
 ```zsh
 brew install qt@6
 brew install poppler
-brew install sdl2
 
 ```
 ##### Additional libraries

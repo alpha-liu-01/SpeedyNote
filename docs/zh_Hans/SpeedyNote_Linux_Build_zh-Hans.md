@@ -50,15 +50,14 @@ cd build && ./speedynote
 
 #### 构建选项
 
-| 选项                          | Default | Description          |
-| --------------------------- | ------- | -------------------- |
-| `ENABLE_CONTROLLER_SUPPORT` | OFF     | 启用SDL2手柄支持（可能不一定提供了） |
-| `ENABLE_DEBUG_OUTPUT`       | OFF     | 启用debug prints       |
+| 选项                    | Default | Description    |
+| --------------------- | ------- | -------------- |
+| `ENABLE_DEBUG_OUTPUT` | OFF     | 启用debug prints |
 
 举例:
 
 ```bash
-cmake .. -DENABLE_CONTROLLER_SUPPORT=ON -DENABLE_DEBUG_OUTPUT=ON
+cmake .. -DENABLE_DEBUG_OUTPUT=ON
 ```
 
 ---

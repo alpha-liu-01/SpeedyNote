@@ -51,7 +51,6 @@ jobs:
             qt6-base-dev \
             qt6-tools-dev \
             libqt6svg6-dev \
-            libsdl2-dev \
             libasound2-dev \
             libmupdf-dev \
             libharfbuzz-dev \
@@ -260,7 +259,6 @@ jobs:
             qt6-base-dev \
             qt6-tools-dev \
             libqt6svg6-dev \
-            libsdl2-dev \
             libasound2-dev \
             libmupdf-dev \
             libharfbuzz-dev \
@@ -442,7 +440,6 @@ jobs:
             qt6-qtbase-devel \
             qt6-qttools-devel \
             qt6-qtsvg-devel \
-            SDL2-devel \
             alsa-lib-devel \
             mupdf-devel \
             harfbuzz-devel \

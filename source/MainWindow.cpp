@@ -125,9 +125,6 @@
 #include "ControlPanelDialog.h"  // Phase CP.1: Re-enabled with cleaned up tabs
 #include "ui/dialogs/DocumentSettingsDialog.h"  // Per-document override panel
 #include "ui/dialogs/CopyPagesToDocDialog.h"  // Plan D1: cross-document page copy
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-#include "SDLControllerManager.h"
-#endif
 // #include "LauncherWindow.h" // Phase 3.1: Disconnected - LauncherWindow will be re-linked later
 
 // #include "DocumentConverter.h" // Added for PowerPoint conversion
@@ -700,19 +697,6 @@ MainWindow::MainWindow(QWidget *parent)
     // ===========================================================================
     
     setupUi();    // ✅ Move all UI setup here
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    controllerManager = new SDLControllerManager();
-    controllerThread = new QThread(this);
-
-    controllerManager->moveToThread(controllerThread);
-    
-    // MW2.2: Removed mouse dial control system
-    connect(controllerThread, &QThread::started, controllerManager, &SDLControllerManager::start);
-    connect(controllerThread, &QThread::finished, controllerManager, &SDLControllerManager::deleteLater);
-
-    controllerThread->start();
-#endif
 
     // toggleFullscreen(); // ✅ Toggle fullscreen to adjust layout
 
@@ -2305,15 +2289,6 @@ MainWindow::~MainWindow() {
         m_ocrThread->quit();
         m_ocrThread->wait();
     }
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-    // ✅ CRITICAL: Stop controller thread before destruction
-    // Qt will abort if a QThread is destroyed while still running
-    if (controllerThread && controllerThread->isRunning()) {
-        controllerThread->quit();
-        controllerThread->wait();  // Wait for thread to finish
-    }
-#endif
     
     // Phase 3.1: LauncherWindow disconnected
     // if (sharedLauncher) {
@@ -8990,18 +8965,6 @@ QVariant MainWindow::inputMethodQuery(Qt::InputMethodQuery query) const {
 }
 
 
-
-#ifdef SPEEDYNOTE_CONTROLLER_SUPPORT
-// MW2.2: reconnectControllerSignals simplified - dial system removed
-void MainWindow::reconnectControllerSignals() {
-    if (!controllerManager) {
-        return;
-    }
-    
-    // Disconnect all existing connections to avoid duplicates
-    disconnect(controllerManager, nullptr, this, nullptr);
-}
-#endif // SPEEDYNOTE_CONTROLLER_SUPPORT
 
 #ifdef Q_OS_WIN
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
