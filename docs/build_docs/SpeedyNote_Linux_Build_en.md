@@ -78,9 +78,11 @@ Before building, fetch the vendored ONNX Runtime and the recognition models into
 `linux/`:
 
 ```bash
-# ONNX Runtime (CPU). x86_64 is the default; for ARM64 set ORT_ARCH=aarch64.
+# ONNX Runtime (CPU). Auto-detects the host arch (x86_64 or ARM64/aarch64).
 ./linux/fetch-onnxruntime.sh
-# ORT_ARCH=aarch64 ./linux/fetch-onnxruntime.sh   # ARM64
+# Override only when cross-fetching for another arch:
+# ORT_ARCH=aarch64 ./linux/fetch-onnxruntime.sh   # force ARM64
+# ORT_ARCH=x64     ./linux/fetch-onnxruntime.sh   # force x86_64
 
 # PP-OCRv5 mobile recognition models (~tens of MB total)
 ./linux/fetch-ocr-models.sh
@@ -153,6 +155,21 @@ sudo apt install qt6-base-dev qt6-tools-dev
 ./linux/fetch-onnxruntime.sh
 ./linux/fetch-ocr-models.sh
 rm -rf build && ./compile.sh   # reconfigure so CMake re-detects the files
+```
+
+#### Link fails with `libonnxruntime.so: file in wrong format`
+
+**Cause:** The vendored ONNX Runtime under `linux/onnxruntime-build/` is for a
+different CPU architecture than the machine you're building on (e.g. an x86_64
+runtime fetched by hand, then reused on an ARM64/aarch64 box). The linker refuses
+to combine it with the ARM64 objects.
+
+**Fix:** Delete the stale runtime and rebuild — the fetch scripts auto-detect the
+host architecture:
+
+```bash
+rm -rf linux/onnxruntime-build build
+./build-package.sh -deb        # or ./compile.sh
 ```
 
 ---

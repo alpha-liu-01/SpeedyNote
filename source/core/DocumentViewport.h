@@ -896,6 +896,49 @@ public:
     int pageAtPoint(QPointF documentPt) const;
     
     /**
+     * @brief Find the page closest to a point in document coordinates.
+     * @param documentPt Point in document coordinates.
+     * @return Page index, or -1 if the document has no pages.
+     *
+     * Unlike pageAtPoint(), this always resolves to a page: points in a page
+     * gap or past the ends of the document snap to the vertically nearest page.
+     */
+    int nearestPageToPoint(QPointF documentPt) const;
+    
+    // ===== Page Containment (paged mode) =====
+    
+    /**
+     * @brief Clamp a page-local position so the object stays inside the page.
+     * @param pageIndex Page the object belongs to.
+     * @param pagePos Page-local top-left of the object.
+     * @param size Object bounding size.
+     * @return Clamped page-local position (unchanged in edgeless mode).
+     *
+     * Objects outside a page are unreachable by objectAtPoint(), which resolves
+     * the page under the cursor first, so containment is what keeps them
+     * selectable.
+     */
+    QPointF clampObjectPositionToPage(int pageIndex, QPointF pagePos, QSizeF size) const;
+    
+    /**
+     * @brief Clamp an object's position in place against the page it sits on.
+     * @param obj Object to clamp (page-local position).
+     * @param pageIndex Page the object belongs to.
+     * @return True if the position changed.
+     */
+    bool clampObjectToPage(InsertedObject* obj, int pageIndex) const;
+    
+    /**
+     * @brief Loaded pages near a document point, nearest first.
+     * @param docPoint Point in document coordinates.
+     * @param excludePageIndex Page to omit (typically one already searched).
+     *
+     * Used to hit-test objects that hang outside their page, which no longer
+     * happens for new edits but can exist in documents saved by older builds.
+     */
+    QVector<int> loadedPagesNear(const QPointF& docPoint, int excludePageIndex = -1) const;
+    
+    /**
      * @brief Find an inserted object at a point in document coordinates.
      * @param docPoint Point in document coordinates.
      * @return Pointer to the topmost object at the point, or nullptr if none.
@@ -964,8 +1007,19 @@ public:
      * 
      * Phase O2.3.3: Moves objects and triggers viewport update.
      * Does NOT mark pages dirty (caller handles that on drag end).
+     * In paged mode the selection is clamped so it stays within its page.
      */
     void moveSelectedObjects(const QPointF& delta);
+    
+    /**
+     * @brief Find the index of the page holding an object.
+     * @param obj The object to locate.
+     * @return Page index, or -1 if not found (always -1 in edgeless mode).
+     *
+     * Uses the drag-time cached page index when available, otherwise searches
+     * only loaded pages so hover/hit-testing never triggers lazy page loads.
+     */
+    int pageIndexForObject(InsertedObject* obj) const;
     
     /**
      * @brief Get the list of currently selected objects.
@@ -2445,6 +2499,10 @@ private:
     
     /**
      * @brief Document position where object drag started.
+     *
+     * Fixed for the whole drag: positions are recomputed from
+     * m_objectOriginalPositions plus the total delta on every move, so page
+     * clamping can push the selection back without the anchor drifting.
      */
     QPointF m_objectDragStartDoc;
     
@@ -2456,6 +2514,17 @@ private:
      * Cleared when drag ends or is cancelled.
      */
     QMap<QString, QPointF> m_objectOriginalPositions;
+    
+    /**
+     * @brief Page each dragged object belonged to at drag start (paged mode).
+     *
+     * Objects keep their origin page's local coordinates for the duration of
+     * the drag; ownership only changes on release via
+     * relocateObjectsToCorrectPages(). This map converts those coordinates to
+     * document space so the selection can be clamped against the page it is
+     * being dragged onto.
+     */
+    QMap<QString, int> m_objectOriginalPageIndices;
     QSet<int> m_pendingThumbnailPages;
     
     /**
@@ -2535,6 +2604,14 @@ private:
      * coordinates, causing extreme scaling jumps.
      */
     QPointF m_resizeObjectDocCenter;
+    
+    /**
+     * @brief Page holding the object being resized (paged mode, -1 otherwise).
+     *
+     * Cached at resize start so updateObjectResize() can clamp against the
+     * page every frame without searching pages.
+     */
+    int m_resizeObjectPageIndex = -1;
     
     // =========================================================================
     // Phase O4.1: Object Drag/Resize Performance Optimization
@@ -2617,6 +2694,26 @@ private:
      * @brief Pre-render selected objects to cache at current zoom level.
      */
     void cacheSelectedObjectsForDrag();
+    
+    /**
+     * @brief Position the dragged selection for a total drag delta.
+     * @param totalDelta Offset from the drag start position, in document coords.
+     *
+     * Positions are always recomputed from m_objectOriginalPositions rather
+     * than accumulated, so clamping is non-lossy: pushing the selection against
+     * a page edge and dragging back resumes exact cursor tracking.
+     *
+     * In paged mode the whole selection is clamped as one group against the
+     * page under its unclamped centre. Clamping the group instead of each
+     * object preserves relative layout in a multi-selection, and picking the
+     * target page from the unclamped centre keeps cross-page drags possible.
+     */
+    void updateObjectDrag(const QPointF& totalDelta);
+    
+    /**
+     * @brief Record which page each selected object starts a drag on.
+     */
+    void captureObjectDragOriginPages();
     
     // Handle sizes (touch-friendly design)
     static constexpr qreal HANDLE_VISUAL_SIZE = 8.0;   ///< Visual handle size in pixels

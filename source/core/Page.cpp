@@ -406,19 +406,17 @@ std::unique_ptr<InsertedObject> Page::extractObject(const QString& id)
 
 InsertedObject* Page::objectAtPoint(const QPointF& pt, int affinityFilter)
 {
-    // Check in reverse order (topmost first by z-order)
-    // First, create a sorted list by z-order (descending)
-    std::vector<InsertedObject*> sortedObjects;
-    sortedObjects.reserve(objects.size());
-    for (auto& obj : objects) {
-        sortedObjects.push_back(obj.get());
-    }
-    std::sort(sortedObjects.begin(), sortedObjects.end(),
-              [](InsertedObject* a, InsertedObject* b) {
-                  return a->zOrder > b->zOrder;
-              });
+    // Topmost hit wins. Tracked in a single pass rather than by sorting a
+    // temporary copy: this runs on every pointer move while the object tool is
+    // active, so the per-call allocation and sort were pure overhead.
+    InsertedObject* topmost = nullptr;
     
-    for (InsertedObject* obj : sortedObjects) {
+    for (auto& owned : objects) {
+        InsertedObject* obj = owned.get();
+        if (!obj || !obj->visible) {
+            continue;
+        }
+        
         // Phase O3.5.5: Affinity filtering (Option A - Strict)
         // If an affinity filter is provided (not INT_MIN), only consider objects
         // with matching affinity. This ensures users can only select objects
@@ -428,11 +426,16 @@ InsertedObject* Page::objectAtPoint(const QPointF& pt, int affinityFilter)
             continue;  // Skip objects with non-matching affinity (OCR text bypasses)
         }
         
-        if (obj->visible && obj->containsPoint(pt)) {
-            return obj;
+        if (!obj->containsPoint(pt)) {
+            continue;
+        }
+        
+        if (!topmost || obj->zOrder > topmost->zOrder) {
+            topmost = obj;
         }
     }
-    return nullptr;
+    
+    return topmost;
 }
 
 InsertedObject* Page::objectById(const QString& id)
