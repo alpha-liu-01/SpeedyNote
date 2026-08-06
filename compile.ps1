@@ -5,7 +5,8 @@ param(
     [switch]$qt5,        # Build with Qt5 instead of Qt6
     [switch]$win32,      # Build for 32-bit x86 Windows (requires -qt5)
     [switch]$debug,      # Enable verbose debug output (qDebug)
-    [switch]$norun       # Don't run the application after building (for CI/remote builds)
+    [switch]$norun,      # Don't run the application after building (for CI/remote builds)
+    [switch]$dirty       # Preserve build state and reuse deployed dependencies
 )
 
 # ✅ Validate flags
@@ -111,27 +112,93 @@ if ($win32) {
     $cmakeExe = "$toolchainPath\bin\cmake.exe"
 }
 
-# Clean and recreate build folder
+# Build settings are also used to guard dirty builds against incompatible caches.
+$buildType = if ($debug) { "Debug" } else { "Release" }
+$cpuArch = if ($old -or $legacy) { "old" } else { "modern" }
+$qtVersion = if ($qt5) { "Qt5" } else { "Qt6" }
+$requestedProfile = [ordered]@{
+    toolchain = $toolchain
+    qtVersion = $qtVersion
+    cpuArch = if ($arm64 -or $win32) { "default" } else { $cpuArch }
+    buildType = $buildType
+}
+$profilePath = Join-Path (Get-Location) "build\.speedynote-build-profile.json"
+
+function Format-BuildProfile {
+    param($Profile)
+    return "toolchain=$($Profile.toolchain), qt=$($Profile.qtVersion), cpu=$($Profile.cpuArch), type=$($Profile.buildType)"
+}
+
+# Stop the application before either cleaning or relinking speedynote.exe.
 if (Test-Path ".\build" -PathType Container) {
-    # Kill any running speedynote instances that might lock files
     $noteAppProcesses = Get-Process -Name "speedynote" -ErrorAction SilentlyContinue
     if ($noteAppProcesses) {
         Write-Host "Stopping running speedynote instances..." -ForegroundColor Yellow
         $noteAppProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 500
     }
-    
-    # Try to remove the build folder
+}
+
+$needsRuntimeDeployment = $true
+if ($dirty) {
+    $hasBuildFolder = Test-Path ".\build" -PathType Container
+    $hasIncrementalState = $hasBuildFolder -and
+        (Test-Path ".\build\CMakeCache.txt" -PathType Leaf) -and
+        (Test-Path ".\build\Makefile" -PathType Leaf)
+    $hasProfile = Test-Path $profilePath -PathType Leaf
+
+    if ($hasProfile) {
+        try {
+            $existingProfile = Get-Content $profilePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            Write-Host "❌ Cannot read the dirty build profile at $profilePath" -ForegroundColor Red
+            Write-Host "   Run .\compile.ps1 without -dirty to reset the build folder." -ForegroundColor Yellow
+            exit 1
+        }
+
+        $profileMatches =
+            ($existingProfile.toolchain -eq $requestedProfile.toolchain) -and
+            ($existingProfile.qtVersion -eq $requestedProfile.qtVersion) -and
+            ($existingProfile.cpuArch -eq $requestedProfile.cpuArch) -and
+            ($existingProfile.buildType -eq $requestedProfile.buildType)
+
+        if (-not $profileMatches) {
+            Write-Host "❌ Dirty build profile does not match the existing build cache." -ForegroundColor Red
+            Write-Host "   Existing:  $(Format-BuildProfile $existingProfile)" -ForegroundColor Yellow
+            Write-Host "   Requested: $(Format-BuildProfile $requestedProfile)" -ForegroundColor Yellow
+            Write-Host "   Run .\compile.ps1 with the requested options to perform a clean build." -ForegroundColor Yellow
+            exit 1
+        }
+    } elseif ($hasIncrementalState) {
+        Write-Host "❌ Existing CMake state has no SpeedyNote dirty build profile." -ForegroundColor Red
+        Write-Host "   Run .\compile.ps1 without -dirty once to reset the build folder." -ForegroundColor Yellow
+        exit 1
+    }
+
+    if (-not $hasBuildFolder) {
+        New-Item -ItemType Directory -Path ".\build" | Out-Null
+    }
+
+    $hasRuntimeOutput = Test-Path ".\build\speedynote.exe" -PathType Leaf
+    $needsRuntimeDeployment = -not ($hasProfile -and $hasIncrementalState -and $hasRuntimeOutput)
+    Write-Host "⚡ Dirty build enabled: preserving CMake and object files." -ForegroundColor Cyan
+    if ($needsRuntimeDeployment) {
+        Write-Host "   Incremental state is incomplete; runtime dependencies will be deployed once." -ForegroundColor Gray
+    } else {
+        Write-Host "   Existing runtime dependencies will be reused." -ForegroundColor Gray
+    }
+} elseif (Test-Path ".\build" -PathType Container) {
+    # Try to remove the build folder.
     Write-Host "Cleaning build folder..." -ForegroundColor Gray
     Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
-    
-    # If it still exists, try again with a delay
+
+    # If it still exists, try again with a delay.
     if (Test-Path ".\build" -PathType Container) {
         Start-Sleep -Seconds 1
         Remove-Item -Path ".\build" -Recurse -Force -ErrorAction SilentlyContinue
     }
-    
-    # If it STILL exists, at minimum delete CMake cache files to avoid stale config
+
+    # If it STILL exists, at minimum delete CMake cache files to avoid stale config.
     if (Test-Path ".\build" -PathType Container) {
         Write-Host "⚠️  Could not fully clean build folder - cleaning CMake cache..." -ForegroundColor Yellow
         # These files MUST be deleted for a clean CMake configuration
@@ -140,7 +207,7 @@ if (Test-Path ".\build" -PathType Container) {
         Remove-Item -Path ".\build\cmake_install.cmake" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path ".\build\Makefile" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path ".\build\.cmake" -Recurse -Force -ErrorAction SilentlyContinue
-        
+
         # Verify CMake cache is gone
         if (Test-Path ".\build\CMakeCache.txt") {
             Write-Host "❌ FATAL: Cannot delete CMakeCache.txt - please close any programs using the build folder" -ForegroundColor Red
@@ -170,13 +237,38 @@ if ($qt5) {
 }
 
 if ($lreleaseExe) {
-    Write-Host "Compiling translation files using $lreleaseExe..." -ForegroundColor Cyan
     # Discover all translation sources so newly-added languages are compiled automatically.
-    $tsFiles = Get-ChildItem -Path ".\resources\translations\app_*.ts" -ErrorAction SilentlyContinue
-    if ($tsFiles) {
-        & $lreleaseExe @($tsFiles | ForEach-Object { $_.FullName })
+    $tsFiles = @(Get-ChildItem -Path ".\resources\translations\app_*.ts" -ErrorAction SilentlyContinue)
+    $tsFilesToCompile = $tsFiles
+    if ($dirty) {
+        $tsFilesToCompile = @($tsFiles | Where-Object {
+            $qmPath = [System.IO.Path]::ChangeExtension($_.FullName, ".qm")
+            (-not (Test-Path $qmPath -PathType Leaf)) -or
+                ($_.LastWriteTimeUtc -gt (Get-Item $qmPath).LastWriteTimeUtc)
+        })
     }
-    Copy-Item -Path ".\resources\translations\*.qm" -Destination ".\build" -Force
+
+    if ($tsFilesToCompile.Count -gt 0) {
+        Write-Host "Compiling $($tsFilesToCompile.Count) translation file(s) using $lreleaseExe..." -ForegroundColor Cyan
+        & $lreleaseExe @($tsFilesToCompile | ForEach-Object { $_.FullName })
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Translation compilation failed with exit code $LASTEXITCODE." -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
+    } elseif ($dirty) {
+        Write-Host "Translation files are up to date." -ForegroundColor Gray
+    }
+
+    foreach ($qmFile in @(Get-ChildItem -Path ".\resources\translations\*.qm" -ErrorAction SilentlyContinue)) {
+        $qmDestination = Join-Path ".\build" $qmFile.Name
+        $shouldCopyQm = (-not $dirty) -or
+            (-not (Test-Path $qmDestination -PathType Leaf)) -or
+            ($qmFile.Length -ne (Get-Item $qmDestination).Length) -or
+            ($qmFile.LastWriteTimeUtc -gt (Get-Item $qmDestination).LastWriteTimeUtc)
+        if ($shouldCopyQm) {
+            Copy-Item -Path $qmFile.FullName -Destination $qmDestination -Force
+        }
+    }
 } else {
     $qtVer = if ($qt5) { "qt5" } else { "qt6" }
     Write-Host "⚠️  Warning: lrelease not found in $qtBinPath" -ForegroundColor Yellow
@@ -204,12 +296,6 @@ if (Test-Path "$toolchainPath\bin\clang.exe") {
 }
 
 # ✅ Prepare CMake configuration
-if ($debug) {
-    $buildType = "Debug"
-} else {
-    $buildType = "Release"
-}
-
 $cmakeArgs = @(
     "-G", "MinGW Makefiles",
     "-DCMAKE_C_COMPILER=$cCompiler",
@@ -234,10 +320,8 @@ if ($arm64) {
 } elseif ($win32) {
     Write-Host "Target: x86 (32-bit) Windows" -ForegroundColor $archColor
 } else {
-    # x86_64 build - determine CPU architecture target
-    $cpuArch = "modern"
-    if ($old -or $legacy) {
-        $cpuArch = "old"
+    # x86_64 build - use the CPU target recorded in the build profile.
+    if ($cpuArch -eq "old") {
         Write-Host "Target: Older x86_64 CPUs (SSE3/SSSE3 compatible - Core 2 Duo era)" -ForegroundColor Yellow
     } else {
         Write-Host "Target: Modern x86_64 CPUs (SSE4.2 compatible - Core i series)" -ForegroundColor Green
@@ -257,6 +341,12 @@ if ($debug) {
 
 # ✅ Configure and build
 & $cmakeExe @cmakeArgs ..
+if ($LASTEXITCODE -ne 0) {
+    $configureExitCode = $LASTEXITCODE
+    Write-Host "❌ CMake configuration failed with exit code $configureExitCode." -ForegroundColor Red
+    cd ../
+    exit $configureExitCode
+}
 
 # Determine number of parallel jobs based on architecture
 # ARM64 devices often have limited memory/thermal headroom, so use half the cores
@@ -269,14 +359,27 @@ if ($arm64) {
     Write-Host "Using $jobs parallel jobs ($archName`: all $cpuCount cores)" -ForegroundColor Gray
 }
 
-& $cmakeExe --build . --config Release --parallel $jobs
-
-# ✅ Deploy Qt runtime
-if ($qt5) {
-    & "$qtBinPath\windeployqt.exe" "speedynote.exe"
-} else {
-    & "$qtBinPath\windeployqt6.exe" "speedynote.exe"
+& $cmakeExe --build . --config $buildType --parallel $jobs
+if ($LASTEXITCODE -ne 0) {
+    $buildExitCode = $LASTEXITCODE
+    Write-Host "❌ Build failed with exit code $buildExitCode." -ForegroundColor Red
+    cd ../
+    exit $buildExitCode
 }
+
+# ✅ Deploy runtime dependencies on clean builds and dirty-build bootstrap.
+if ($needsRuntimeDeployment) {
+    if ($qt5) {
+        & "$qtBinPath\windeployqt.exe" "speedynote.exe"
+    } else {
+        & "$qtBinPath\windeployqt6.exe" "speedynote.exe"
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $deployExitCode = $LASTEXITCODE
+        Write-Host "❌ Qt runtime deployment failed with exit code $deployExitCode." -ForegroundColor Red
+        cd ../
+        exit $deployExitCode
+    }
 
 # Ship Qt's own translation catalogs for each language the app supports.
 # windeployqt6 drops the legacy aggregated qt_<lang>.qm but NOT the Qt 6
@@ -498,6 +601,19 @@ ldd speedynote.exe 2>/dev/null | grep "/$toolchain/" | awk '{print `$3}'
 Write-Host "✅ Copied $copiedCount DLL(s) from $toolchain" -ForegroundColor Green
 Write-Host "   Note: MuPDF is dynamically linked (libmupdf.dll)" -ForegroundColor Gray
 } # end MSYS2 DLL detection
+} else {
+    Write-Host "⚡ Skipping Qt and DLL deployment; using existing runtime files." -ForegroundColor Cyan
+}
+
+if ($dirty) {
+    try {
+        $requestedProfile | ConvertTo-Json | Set-Content -Path ".\.speedynote-build-profile.json" -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        Write-Host "❌ Could not save dirty build profile: $($_.Exception.Message)" -ForegroundColor Red
+        cd ../
+        exit 1
+    }
+}
 
 # Poppler removed - SpeedyNote uses MuPDF exclusively for PDF rendering and export
 
@@ -507,37 +623,43 @@ Write-Host "   PDF rendering: MuPDF" -ForegroundColor Cyan
 Write-Host "   PDF export: MuPDF" -ForegroundColor Cyan
 Write-Host ""
 
-# ✅ Clean up build artifacts (not needed for packaging)
-Write-Host "Cleaning up build artifacts..." -ForegroundColor Gray
-$cleanupItems = @(
-    ".qt",                    # Qt internal cache
-    "speedynote_autogen",        # CMake Qt autogen (MOC/UIC/RCC)
-    "CMakeFiles",             # CMake internal files
-    "CMakeCache.txt",         # CMake cache
-    "cmake_install.cmake",    # CMake install script
-    "Makefile",               # Generated Makefile
-    "compile_commands.json",  # Clang compilation database
-    "qrc_*.cpp",              # Generated resource files
-    "*.o",                    # Object files
-    "*.obj"                   # Object files (MSVC style)
-)
+# ✅ Preserve incremental state for dirty builds; clean it for packaging otherwise.
+if ($dirty) {
+    Write-Host "⚡ Incremental build state preserved for the next -dirty build." -ForegroundColor Cyan
+    Write-Host "   Run .\compile.ps1 without -dirty before packaging." -ForegroundColor Yellow
+} else {
+    Write-Host "Cleaning up build artifacts..." -ForegroundColor Gray
+    $cleanupItems = @(
+        ".qt",                    # Qt internal cache
+        "speedynote_autogen",     # CMake Qt autogen (MOC/UIC/RCC)
+        "CMakeFiles",             # CMake internal files
+        "CMakeCache.txt",         # CMake cache
+        "cmake_install.cmake",    # CMake install script
+        "Makefile",               # Generated Makefile
+        "compile_commands.json",  # Clang compilation database
+        ".speedynote-build-profile.json", # Dirty-build compatibility metadata
+        "qrc_*.cpp",              # Generated resource files
+        "*.o",                    # Object files
+        "*.obj"                   # Object files (MSVC style)
+    )
 
-$cleanedCount = 0
-foreach ($pattern in $cleanupItems) {
-    $items = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue -Force
-    foreach ($item in $items) {
-        if ($item.PSIsContainer) {
-            Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        } else {
-            Remove-Item -Path $item.FullName -Force -ErrorAction SilentlyContinue
+    $cleanedCount = 0
+    foreach ($pattern in $cleanupItems) {
+        $items = Get-Item -Path $pattern -ErrorAction SilentlyContinue -Force
+        foreach ($item in $items) {
+            if ($item.PSIsContainer) {
+                Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            } else {
+                Remove-Item -Path $item.FullName -Force -ErrorAction SilentlyContinue
+            }
+            $cleanedCount++
         }
-        $cleanedCount++
     }
-}
-Write-Host "   Removed $cleanedCount build artifact(s)" -ForegroundColor Gray
+    Write-Host "   Removed $cleanedCount build artifact(s)" -ForegroundColor Gray
 
-Write-Host ""
-Write-Host "📦 Build folder is ready for packaging with Inno Setup" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "📦 Build folder is ready for packaging with Inno Setup" -ForegroundColor Green
+}
 Write-Host ""
 
 cd ../
