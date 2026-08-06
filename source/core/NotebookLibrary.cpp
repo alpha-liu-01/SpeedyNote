@@ -121,6 +121,55 @@ void NotebookLibrary::addToRecent(const QString& bundlePath)
     markDirty();
 }
 
+bool NotebookLibrary::updateBundlePath(const QString& oldPath, const QString& newPath)
+{
+    if (oldPath.isEmpty() || newPath.isEmpty()) {
+        return false;
+    }
+
+    // A second record at the destination would make the path key ambiguous.
+    if (oldPath != newPath && findNotebook(newPath)) {
+        qWarning() << "NotebookLibrary: Cannot update bundle path; destination is already tracked:"
+                   << newPath;
+        return false;
+    }
+
+    NotebookInfo* notebook = findNotebook(oldPath);
+    if (!notebook) {
+        // The bundle may not have been in the recent library yet. Track it at
+        // its new location so a successful filesystem rename is still visible.
+        addToRecent(newPath);
+        return findNotebook(newPath) != nullptr;
+    }
+
+    notebook->bundlePath = newPath;
+
+    // Refresh only rename-dependent metadata. Library state that is not stored
+    // in document.json (star/folder/access history) and stable document
+    // identity remain attached to the existing NotebookInfo.
+    const QString manifestPath = newPath + "/document.json";
+    QFile manifestFile(manifestPath);
+    if (manifestFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QJsonParseError parseError;
+        const QJsonDocument document =
+            QJsonDocument::fromJson(manifestFile.readAll(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && document.isObject()) {
+            const QJsonValue nameValue = document.object().value("name");
+            if (nameValue.isString()) {
+                notebook->name = nameValue.toString();
+            }
+        } else {
+            qWarning() << "NotebookLibrary: JSON parse error in" << manifestPath;
+        }
+    } else {
+        qWarning() << "NotebookLibrary: Cannot read" << manifestPath;
+    }
+
+    notebook->lastModified = QFileInfo(manifestPath).lastModified();
+    markDirty();
+    return true;
+}
+
 void NotebookLibrary::removeFromRecent(const QString& bundlePath)
 {
     for (int i = 0; i < m_notebooks.size(); ++i) {

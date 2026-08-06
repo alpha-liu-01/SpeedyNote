@@ -1307,10 +1307,13 @@ void Launcher::renameNotebook(const QString& bundlePath)
             }
         }
         
-        // Update library
+        // Update the existing library record in place so launcher-only
+        // metadata (including starred state and folder assignment) survives.
         NotebookLibrary* lib = NotebookLibrary::instance();
-        lib->removeFromRecent(bundlePath);
-        lib->addToRecent(newPath);
+        if (!lib->updateBundlePath(bundlePath, newPath)) {
+            qWarning() << "Launcher::renameNotebook: Failed to migrate library metadata from"
+                       << bundlePath << "to" << newPath;
+        }
     } else {
         QMessageBox::warning(this, tr("Rename Failed"),
                             tr("Could not rename the notebook."));

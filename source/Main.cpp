@@ -260,6 +260,7 @@ static void applyAndroidFonts(QApplication& app)
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && defined(SPEEDYNOTE_DEBUG)
 #include "core/PageTests.h"
 #include "core/DocumentTests.h"
+#include "core/NotebookLibraryTests.h"
 #include "core/DocumentViewportTests.h"
 #include "ui/ToolbarButtonTests.h"
 #include "objects/LinkObjectTests.h"
@@ -610,6 +611,8 @@ static int runTests(const QString& testType)
         success = PageTests::runAllTests();
     } else if (testType == "document") {
         success = DocumentTests::runAllTests();
+    } else if (testType == "notebooklibrary") {
+        success = NotebookLibraryTests::runAllTests();
     } else if (testType == "linkobject") {
         success = LinkObjectTests::runAllTests();
     } else if (testType == "pdfexporter") {
@@ -937,6 +940,8 @@ int main(int argc, char* argv[])
             testToRun = "page";
         } else if (arg == "--test-document") {
             testToRun = "document";
+        } else if (arg == "--test-notebooklibrary") {
+            testToRun = "notebooklibrary";
         } else if (arg == "--test-viewport") {
             runViewportTests = true;
         } else if (arg == "--test-buttons") {
