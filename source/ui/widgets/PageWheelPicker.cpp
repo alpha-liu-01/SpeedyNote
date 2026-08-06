@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QPropertyAnimation>
 #include <QFont>
+#include <QLineF>
 #include <cmath>
 
 // ============================================================================
@@ -33,7 +34,7 @@ PageWheelPicker::PageWheelPicker(QWidget* parent)
     m_snapAnimation->setEasingCurve(QEasingCurve::OutCubic);
     connect(m_snapAnimation, &QPropertyAnimation::finished, this, &PageWheelPicker::onSnapFinished);
     
-    setToolTip(tr("Drag to scroll through pages"));
+    setToolTip(tr("Scroll or drag to change pages\nDouble-click or double-tap to jump to a page"));
 }
 
 PageWheelPicker::~PageWheelPicker()
@@ -50,6 +51,7 @@ void PageWheelPicker::setCurrentPage(int page)
 {
     // Clamp to valid range
     page = qBound(0, page, qMax(0, m_pageCount - 1));
+    m_wheelStepRemainder = 0.0;
     
     if (m_currentPage != page) {
         m_currentPage = page;
@@ -192,6 +194,7 @@ void PageWheelPicker::mousePressEvent(QMouseEvent* event)
         // Stop any ongoing animations
         stopInertia();
         m_snapAnimation->stop();
+        m_wheelStepRemainder = 0.0;
         
         m_dragging = true;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -199,6 +202,8 @@ void PageWheelPicker::mousePressEvent(QMouseEvent* event)
 #else
         m_lastPos = event->localPos();
 #endif
+        m_pressPos = m_lastPos;
+        m_movedPastTapThreshold = false;
         m_velocity = 0.0;
         m_velocityTimer.start();
     }
@@ -214,6 +219,10 @@ void PageWheelPicker::mouseMoveEvent(QMouseEvent* event)
         const QPointF currentPos = event->localPos();
 #endif
         const qreal deltaY = currentPos.y() - m_lastPos.y();
+
+        if (QLineF(m_pressPos, currentPos).length() > TAP_MOVE_THRESHOLD) {
+            m_movedPastTapThreshold = true;
+        }
         
         // Convert pixels to page offset (negative because drag down = previous pages)
         const qreal pagesDelta = -deltaY / ROW_HEIGHT;
@@ -243,41 +252,97 @@ void PageWheelPicker::mouseMoveEvent(QMouseEvent* event)
 void PageWheelPicker::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton && m_dragging) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const QPointF releasePos = event->position();
+#else
+        const QPointF releasePos = event->localPos();
+#endif
         m_dragging = false;
-        
-        // Check if we have significant velocity for inertia
-        if (std::abs(m_velocity) > SNAP_THRESHOLD) {
+
+        // A stationary release may be a synthetic touch tap. Track two nearby
+        // taps as a fallback for platforms that do not synthesize a native
+        // mouseDoubleClickEvent from a double-tap.
+        if (!m_movedPastTapThreshold) {
+            const bool isSecondTap =
+                m_lastTapTimer.isValid()
+                && m_lastTapTimer.elapsed() <= QApplication::doubleClickInterval()
+                && QLineF(m_lastTapPos, releasePos).length() <= TAP_MOVE_THRESHOLD;
+
+            if (isSecondTap) {
+                m_lastTapTimer.invalidate();
+                m_velocity = 0.0;
+                snapToPage();
+                emit jumpToPageRequested();
+            } else {
+                m_lastTapPos = releasePos;
+                m_lastTapTimer.restart();
+                m_velocity = 0.0;
+                snapToPage();
+            }
+        } else if (std::abs(m_velocity) > SNAP_THRESHOLD) {
+            m_lastTapTimer.invalidate();
             startInertia();
         } else {
+            m_lastTapTimer.invalidate();
             snapToPage();
         }
     }
     QWidget::mouseReleaseEvent(event);
 }
 
+void PageWheelPicker::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        stopInertia();
+        m_snapAnimation->stop();
+        m_dragging = false;
+        m_lastTapTimer.invalidate();
+        emit jumpToPageRequested();
+        event->accept();
+        return;
+    }
+
+    QWidget::mouseDoubleClickEvent(event);
+}
+
 void PageWheelPicker::wheelEvent(QWheelEvent* event)
 {
-    // Stop any ongoing animations
+    // Prefer pixel deltas from high-resolution trackpads. Traditional wheels
+    // report angle deltas in eighths of a degree (120 units per notch).
+    qreal stepDelta = 0.0;
+    if (event->pixelDelta().y() != 0) {
+        stepDelta = static_cast<qreal>(event->pixelDelta().y()) / ROW_HEIGHT;
+    } else if (event->angleDelta().y() != 0) {
+        stepDelta = static_cast<qreal>(event->angleDelta().y()) / 120.0;
+    }
+
+    if (qFuzzyIsNull(stepDelta)) {
+        QWidget::wheelEvent(event);
+        return;
+    }
+
+    // Stop any ongoing animations before applying direct wheel input.
     stopInertia();
     m_snapAnimation->stop();
-    
-    // Calculate scroll direction (typically 120 units per notch)
-    // We move by exactly 1 page per wheel notch to avoid rounding issues
-    // (0.5 would land exactly on rounding boundary and cause directional bias)
-    const int notches = event->angleDelta().y() / 120;
-    
-    if (notches != 0) {
-        // Move by whole pages: negative angleDelta = scroll down = increase page
-        const int newPage = qBound(0, m_currentPage - notches, m_pageCount - 1);
-        
+    m_lastTapTimer.invalidate();
+
+    // Retain sub-notch deltas until they add up to a complete page step.
+    m_wheelStepRemainder += stepDelta;
+    const int pageSteps = static_cast<int>(m_wheelStepRemainder);
+    if (pageSteps != 0) {
+        m_wheelStepRemainder -= pageSteps;
+
+        // Positive delta scrolls up to earlier pages; negative scrolls down.
+        const int newPage = qBound(0, m_currentPage - pageSteps, m_pageCount - 1);
         if (newPage != m_currentPage) {
             m_currentPage = newPage;
+            m_lastEmittedPage = newPage;
             m_scrollOffset = static_cast<qreal>(newPage);
             update();
             emit currentPageChanged(m_currentPage);
         }
     }
-    
+
     event->accept();
 }
 

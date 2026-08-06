@@ -117,6 +117,11 @@ signals:
      * @param page The selected page index (0-based).
      */
     void pageSelected(int page);
+
+    /**
+     * @brief Emitted when the wheel picker requests direct page entry.
+     */
+    void jumpToPageRequested();
     
     /**
      * @brief Emitted when Add Page button is clicked.

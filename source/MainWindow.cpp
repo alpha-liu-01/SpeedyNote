@@ -315,6 +315,8 @@ MainWindow::MainWindow(QWidget *parent)
     }
     // Phase SV: SplitViewManager owns tab bars, viewport stacks, and TabManagers
     m_splitViewManager = new SplitViewManager(this);
+    connect(m_splitViewManager, &SplitViewManager::jumpToPageRequested,
+            this, &MainWindow::showJumpToPageDialog);
 
     // Phase 3.1.1: Initialize DocumentManager
     m_documentManager = new DocumentManager(this);
@@ -1037,14 +1039,6 @@ void MainWindow::setupUi() {
     connect(importPagesDebugAction, &QAction::triggered, this, &MainWindow::importPagesFromOtherDocDebug);
 #endif
 
-#ifndef Q_OS_MACOS
-    // MAC.4 / MAC.5: hidden on macOS — the View menu's 'Go to Page...' (added
-    // in MAC.5) is the canonical mouse path; Cmd+G keeps working via
-    // navigation.go_to_page (now dispatched through wireQActionDispatchers()).
-    QAction *jumpToPageAction = overflowMenu->addAction(tr("Jump to Page..."));
-    connect(jumpToPageAction, &QAction::triggered, this, &MainWindow::showJumpToPageDialog);
-#endif
-    
     QAction *openControlPanelAction = overflowMenu->addAction(tr("Settings"));
     connect(openControlPanelAction, &QAction::triggered, this, [this]() {
         // Phase CP.1: Open the cleaned-up Control Panel dialog
@@ -7521,6 +7515,8 @@ void MainWindow::setupPagePanelActionBar()
             vp->scrollToPage(page);
         }
     });
+    connect(m_pagePanelActionBar, &PagePanelActionBar::jumpToPageRequested,
+            this, &MainWindow::showJumpToPageDialog);
     
     // Layout toggle: Switch between 1-column and auto 1/2 column mode
     connect(m_pagePanelActionBar, &PagePanelActionBar::layoutToggleClicked, this, [this]() {

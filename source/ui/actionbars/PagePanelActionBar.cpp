@@ -36,7 +36,8 @@ void PagePanelActionBar::setupUI()
     
     // Page wheel picker
     m_wheelPicker = new PageWheelPicker(this);
-    m_wheelPicker->setToolTip(tr("Drag to scroll through pages"));
+    m_wheelPicker->setToolTip(
+        tr("Scroll or drag to change pages\nDouble-click or double-tap to jump to a page"));
     addButton(m_wheelPicker);
     
     // Page Down button
@@ -113,6 +114,8 @@ void PagePanelActionBar::setupConnections()
     
     connect(m_wheelPicker, &PageWheelPicker::currentPageChanged,
             this, &PagePanelActionBar::onWheelPageChanged);
+    connect(m_wheelPicker, &PageWheelPicker::jumpToPageRequested,
+            this, &PagePanelActionBar::jumpToPageRequested);
     
     // Page management signals
     connect(m_addPageButton, &ActionBarButton::clicked,
