@@ -1,5 +1,7 @@
 #include "SearchModel.h"
 
+#include <QFileInfo>
+
 SearchModel::SearchModel(QObject* parent)
     : QAbstractListModel(parent)
 {
@@ -68,6 +70,9 @@ QVariant SearchModel::data(const QModelIndex& index, int role) const
                 case Qt::DisplayRole:
                 case DisplayNameRole:
                     return item.notebook.displayName();
+
+                case Qt::ToolTipRole:
+                    return QFileInfo(item.notebook.bundlePath).fileName();
                     
                 case NotebookInfoRole:
                     return QVariant::fromValue(item.notebook);

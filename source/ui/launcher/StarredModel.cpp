@@ -1,5 +1,7 @@
 #include "StarredModel.h"
 
+#include <QFileInfo>
+
 StarredModel::StarredModel(QObject* parent)
     : QAbstractListModel(parent)
 {
@@ -34,6 +36,12 @@ QVariant StarredModel::data(const QModelIndex& index, int role) const
             } else {
                 return item.notebook.displayName();
             }
+
+        case Qt::ToolTipRole:
+            if (item.type == NotebookCardItem) {
+                return QFileInfo(item.notebook.bundlePath).fileName();
+            }
+            return QVariant();
             
         case ItemTypeRole:
             return static_cast<int>(item.type);
