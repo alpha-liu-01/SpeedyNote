@@ -3,6 +3,7 @@
 
 #include <QDate>
 #include <QDateTime>
+#include <QFileInfo>
 #include <QLocale>
 #include <QTime>
 
@@ -58,6 +59,12 @@ QVariant TimelineModel::data(const QModelIndex& index, int role) const
             } else {
                 return item.notebook.displayName();
             }
+
+        case Qt::ToolTipRole:
+            if (!item.isHeader) {
+                return QFileInfo(item.notebook.bundlePath).fileName();
+            }
+            return QVariant();
             
         case IsSectionHeaderRole:
             return item.isHeader;

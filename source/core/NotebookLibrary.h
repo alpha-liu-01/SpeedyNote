@@ -99,6 +99,18 @@ public:
      * metadata from document.json and adds to the library.
      */
     void addToRecent(const QString& bundlePath);
+
+    /**
+     * @brief Update a tracked notebook after its bundle directory is renamed.
+     * @param oldPath Previous full path to the .snb bundle.
+     * @param newPath New full path to the .snb bundle.
+     * @return True if the library now tracks the new path.
+     *
+     * Preserves library-only metadata such as starred state, folder assignment,
+     * document identity, and access history while refreshing rename-dependent
+     * metadata from the new bundle path.
+     */
+    bool updateBundlePath(const QString& oldPath, const QString& newPath);
     
     /**
      * @brief Remove a notebook from the library.

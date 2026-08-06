@@ -156,8 +156,11 @@ Download the latest release from **[GitHub Releases](https://github.com/alpha-li
 git clone https://github.com/alpha-liu-01/SpeedyNote.git
 cd SpeedyNote
 
-# Windows (MSYS2 clang64 shell)
+# Windows clean build (packaging-ready)
 ./compile.ps1
+
+# Windows incremental development build
+./compile.ps1 -dirty
 
 # macOS
 ./compile-mac.sh
