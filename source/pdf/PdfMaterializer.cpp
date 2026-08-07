@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 
 #include <algorithm>
 
@@ -43,7 +44,7 @@ bool PdfMaterializer::materialize(const QString& originPath,
     // Need the origin to graft new pages. If it's gone, keep whatever exists.
     if (!QFileInfo::exists(originPath)) {
         setErr(QStringLiteral("Origin PDF unavailable: %1").arg(originPath));
-        return miniExists;
+        return false;
     }
 
     fz_context* ctx = fz_new_context(nullptr, nullptr, FZ_STORE_DEFAULT);
@@ -146,23 +147,45 @@ bool PdfMaterializer::materialize(const QString& originPath,
 
     if (!ok) {
         QFile::remove(tmpPath);
-        // A hard failure while a valid mini-PDF already exists is non-fatal:
-        // the previously mapped pages still render; new ones stay unmapped.
-        return miniExists;
+        // The previous mini-PDF remains intact, but the requested new pages were
+        // not materialized, so the caller must treat finalization as incomplete.
+        return false;
     }
 
-    // Atomically replace the mini-PDF with the freshly written temp file. The
-    // caller must have dropped any provider holding the old file first.
-    if (miniExists && !QFile::remove(bundledAbsPath)) {
+    // Commit through QSaveFile so a failed replacement cannot destroy the
+    // previously valid mini-PDF. MuPDF must write its own temporary path first.
+    QFile generated(tmpPath);
+    QSaveFile target(bundledAbsPath);
+    target.setDirectWriteFallback(false);
+    if (!generated.open(QIODevice::ReadOnly) || !target.open(QIODevice::WriteOnly)) {
+        const QString detail = !generated.isOpen()
+            ? generated.errorString() : target.errorString();
         QFile::remove(tmpPath);
-        setErr(QStringLiteral("Could not replace existing mini-PDF (locked?): %1").arg(bundledAbsPath));
+        setErr(QStringLiteral("Could not prepare mini-PDF replacement: %1").arg(detail));
         return false;
     }
-    if (!QFile::rename(tmpPath, bundledAbsPath)) {
+    constexpr qint64 COPY_CHUNK_SIZE = 1024 * 1024;
+    bool copied = true;
+    while (!generated.atEnd()) {
+        const QByteArray chunk = generated.read(COPY_CHUNK_SIZE);
+        if (chunk.isEmpty() && generated.error() != QFileDevice::NoError) {
+            copied = false;
+            break;
+        }
+        if (target.write(chunk) != chunk.size()) {
+            copied = false;
+            break;
+        }
+    }
+    generated.close();
+    if (!copied || !target.commit()) {
+        const QString detail = target.errorString();
+        target.cancelWriting();
         QFile::remove(tmpPath);
-        setErr(QStringLiteral("Could not finalize mini-PDF: %1").arg(bundledAbsPath));
+        setErr(QStringLiteral("Could not finalize mini-PDF: %1").arg(detail));
         return false;
     }
+    QFile::remove(tmpPath);
 
     pageMap = newMap;
     return true;

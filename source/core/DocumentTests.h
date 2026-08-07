@@ -1110,11 +1110,11 @@ inline bool testMultiPdfSourceRecovery()
         success = false;
     }
 
-    doc->dismissSourceRelink(sourceId);
+    doc->retryPdfSource(sourceId);
     const PdfSource* preserved = doc->pdfSourceById(sourceId);
     if (!preserved || preserved->path != missingPath
         || preserved->hash != QStringLiteral("sha256:missing")) {
-        qDebug() << "FAIL: dismiss must preserve recovery metadata";
+        qDebug() << "FAIL: retry must preserve recovery metadata";
         success = false;
     }
 
@@ -1156,6 +1156,21 @@ inline bool testMultiPdfSourceRecovery()
         success = false;
     }
 
+    doc->retainPdfSourceForUndo(sourceId);
+    doc->removePage(0);
+    if (doc->unreferencedSourceIds().contains(sourceId)) {
+        qDebug() << "FAIL: undo-retained source was eligible for pruning";
+        success = false;
+    }
+    health = doc->pdfSourceHealthSnapshot();
+    auto retainedHealth = std::find_if(
+        health.cbegin(), health.cend(),
+        [&sourceId](const PdfSourceHealth& item) { return item.sourceId == sourceId; });
+    if (retainedHealth == health.cend() || retainedHealth->requiresRepair()) {
+        qDebug() << "FAIL: zero-reference source should not request repair";
+        success = false;
+    }
+
     if (success) qDebug() << "PASS: Multi-PDF recovery tests successful!";
     return success;
 }
@@ -1165,9 +1180,17 @@ inline bool testPdfImportPageRanges()
     const QList<int> all = PageRangeSelectDialog::parseRange(QStringLiteral("all"), 4);
     const QList<int> subset =
         PageRangeSelectDialog::parseRange(QStringLiteral("5, 2-3, 2"), 6);
+    const QList<int> clamped =
+        PageRangeSelectDialog::parseRange(QStringLiteral("0-2000000000"), 3);
+    const QList<int> overflow =
+        PageRangeSelectDialog::parseRange(QStringLiteral("1-999999999999999999999"), 3);
     const QList<int> expectedAll{0, 1, 2, 3};
     const QList<int> expectedSubset{1, 2, 4};
-    const bool success = all == expectedAll && subset == expectedSubset;
+    const QList<int> expectedClamped{0, 1, 2};
+    const bool success = all == expectedAll
+        && subset == expectedSubset
+        && clamped == expectedClamped
+        && overflow.isEmpty();
     if (!success) qDebug() << "FAIL: PDF import page-range parsing/order";
     return success;
 }

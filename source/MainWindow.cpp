@@ -658,7 +658,14 @@ MainWindow::MainWindow(QWidget *parent)
                 // sources into bundled mini-PDFs so the .snb becomes self-contained.
                 // Never on the Discard branch (avoids persisting discarded imports).
                 if (doc->needsMaterialization() && !doc->bundlePath().isEmpty()) {
-                    doc->saveBundle(doc->bundlePath(), /*finalize=*/true);
+                    if (m_searchEngine) m_searchEngine->cancelAndWait();
+                    if (!doc->saveBundle(doc->bundlePath(), /*finalize=*/true)) {
+                        QMessageBox::critical(
+                            this, tr("Save Error"),
+                            tr("PDF sources could not be finalized. Repair the "
+                               "unavailable sources before closing."));
+                        return;
+                    }
                 }
                 
                 tm->setTabTitle(index, doc->displayName());
@@ -675,7 +682,14 @@ MainWindow::MainWindow(QWidget *parent)
             // plain save-then-close leaves the .snb self-contained. Requires a real
             // (non-temp) save location.
             if (!isUsingTemp && doc->needsMaterialization() && !doc->bundlePath().isEmpty()) {
-                doc->saveBundle(doc->bundlePath(), /*finalize=*/true);
+                if (m_searchEngine) m_searchEngine->cancelAndWait();
+                if (!doc->saveBundle(doc->bundlePath(), /*finalize=*/true)) {
+                    QMessageBox::critical(
+                        this, tr("Save Error"),
+                        tr("PDF sources could not be finalized. Repair the "
+                           "unavailable sources before closing."));
+                    return;
+                }
             }
         }
         
@@ -1198,8 +1212,16 @@ void MainWindow::setupUi() {
         QApplication::setOverrideCursor(Qt::WaitCursor);
         // Plan B2: materialize imported PDF sources into bundled mini-PDFs before the
         // recursive zip so the .snbx is self-contained (updates document.json + pdfs/).
+        if (m_searchEngine) m_searchEngine->cancelAndWait();
         if (doc->needsMaterialization()) {
-            doc->saveBundle(bundlePath, /*finalize=*/true);
+            if (!doc->saveBundle(bundlePath, /*finalize=*/true)) {
+                QApplication::restoreOverrideCursor();
+                QMessageBox::warning(
+                    this, tr("Export Failed"),
+                    tr("PDF sources could not be finalized. Repair the unavailable "
+                       "sources and try again."));
+                return;
+            }
         }
         auto result = NotebookExporter::exportPackage(doc, options);
         QApplication::restoreOverrideCursor();
@@ -2804,6 +2826,10 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         } else {
             refreshOutlineAvailability(doc);
         }
+        updatePdfSourceUi(viewport);
+        if (currentViewport() != viewport) {
+            updatePdfSourceUi(currentViewport());
+        }
 
         // Mark the owning tab modified.
         if (m_splitViewManager) {
@@ -3202,15 +3228,41 @@ void MainWindow::showPdfSourcesDialog(DocumentViewport* viewport)
 {
     if (!viewport || !viewport->document()) return;
     Document* doc = viewport->document();
+    const QPointer<DocumentViewport> viewportGuard(viewport);
     PdfSourcesDialog dialog(doc, this);
-    connect(&dialog, &PdfSourcesDialog::sourcesChanged, this, [this, viewport, doc]() {
-        viewport->notifyPdfChanged();
+    connect(viewport, &QObject::destroyed, &dialog, &QDialog::reject);
+    connect(&dialog, &PdfSourcesDialog::sourcesAboutToChange, this, [this, viewportGuard]() {
+        if (m_searchEngine) {
+            m_searchEngine->cancelAndWait();
+            m_searchEngine->clearCache();
+        }
+        if (m_searchScanDebounce) m_searchScanDebounce->stop();
+        if (m_searchMarkerRefresh) m_searchMarkerRefresh->stop();
+        m_searchResultsByPage.clear();
+        m_searchTotalMatches = 0;
+        if (m_searchState) m_searchState->resetMatch();
+        if (viewportGuard) viewportGuard->clearSearchMatches();
+        if (m_splitViewManager && viewportGuard) {
+            m_splitViewManager->clearScrollBarSearchMarkers(viewportGuard);
+        }
+    });
+    connect(&dialog, &PdfSourcesDialog::sourcesChanged, this, [this, viewportGuard, doc]() {
+        if (!viewportGuard || viewportGuard->document() != doc) return;
+        viewportGuard->notifyPdfChanged();
         updateOutlinePanelForDocument(doc);
         if (m_pagePanel) m_pagePanel->invalidateAllThumbnails();
-        updatePdfSourceUi(viewport);
+        updatePdfSourceUi(viewportGuard);
+        if (currentViewport() == viewportGuard && m_pdfSearchBar
+            && m_pdfSearchBar->isVisible()
+            && m_pdfSearchBar->searchText().trimmed().size() >= 2
+            && m_searchScanDebounce) {
+            m_searchScanDebounce->start();
+        }
     });
     dialog.exec();
-    updatePdfSourceUi(viewport);
+    if (viewportGuard && viewportGuard->document() == doc) {
+        updatePdfSourceUi(viewportGuard);
+    }
 }
 
 // ============================================================================
@@ -4367,21 +4419,28 @@ void MainWindow::handlePageTransferDrop(const QString& srcToken,
     refreshDestinationAfterImport(destVp, clampedIndex);
 }
 
-void MainWindow::addPagesFromPdf(const QString& filePath)
+void MainWindow::addPagesFromPdf(const QString& filePath,
+                                 DocumentViewport* targetViewport)
 {
-    DocumentViewport* destination = currentViewport();
+    DocumentViewport* destination = targetViewport ? targetViewport : currentViewport();
     if (!destination || !destination->document()
         || destination->document()->isEdgeless()) {
         return;
     }
+    const QPointer<DocumentViewport> destinationGuard(destination);
+    Document* const destinationDocument = destination->document();
 
     QString pdfPath = filePath;
     if (pdfPath.isEmpty()) {
 #ifdef Q_OS_ANDROID
         pdfPath = PdfPickerAndroid::pickPdfFile();
 #elif defined(Q_OS_IOS)
-        PdfPickerIOS::pickPdfFile([this](const QString& picked) {
-            if (!picked.isEmpty()) addPagesFromPdf(picked);
+        const QPointer<MainWindow> windowGuard(this);
+        const QPointer<DocumentViewport> destinationGuard(destination);
+        PdfPickerIOS::pickPdfFile([windowGuard, destinationGuard](const QString& picked) {
+            if (windowGuard && destinationGuard && !picked.isEmpty()) {
+                windowGuard->addPagesFromPdf(picked, destinationGuard);
+            }
         });
         return;
 #else
@@ -4398,6 +4457,7 @@ void MainWindow::addPagesFromPdf(const QString& filePath)
 #endif
     }
     if (pdfPath.isEmpty()) return;
+    if (!destinationGuard || destinationGuard->document() != destinationDocument) return;
 
     std::unique_ptr<Document> source =
         Document::createForPdf(QFileInfo(pdfPath).completeBaseName(), pdfPath);
@@ -4412,6 +4472,8 @@ void MainWindow::addPagesFromPdf(const QString& filePath)
         source->pageCount(), this, tr("Add Pages from PDF"),
         QFileInfo(pdfPath).fileName(), QStringLiteral("all"));
     if (rangeDialog.exec() != QDialog::Accepted) return;
+    if (!destinationGuard || destinationGuard->document() != destinationDocument) return;
+    destination = destinationGuard.data();
 
     QStringList sourceUuids;
     for (int index : rangeDialog.selectedIndices()) {
@@ -4420,20 +4482,38 @@ void MainWindow::addPagesFromPdf(const QString& filePath)
     }
     if (sourceUuids.isEmpty()) return;
 
-    if (currentViewport() != destination || !destination->document()) return;
     const int insertIndex = qBound(
         0, destination->currentPageIndex() + 1,
-        destination->document()->pageCount());
+        destinationDocument->pageCount());
+    if (m_searchEngine) {
+        m_searchEngine->cancelAndWait();
+        m_searchEngine->clearCache();
+    }
     if (!destination->importPagesWithUndo(source.get(), sourceUuids, insertIndex)) {
         QMessageBox::warning(
             this, tr("PDF Import"),
             tr("The selected PDF pages could not be added to this document."));
+        if (currentViewport() == destination && m_pdfSearchBar
+            && m_pdfSearchBar->isVisible()
+            && m_pdfSearchBar->searchText().trimmed().size() >= 2
+            && m_searchScanDebounce) {
+            m_searchScanDebounce->start();
+        }
         return;
     }
 
     refreshDestinationAfterImport(destination, insertIndex);
     destination->scrollToPage(insertIndex);
     updatePdfSourceUi(destination);
+    if (currentViewport() != destination) {
+        updatePdfSourceUi(currentViewport());
+    }
+    if (currentViewport() == destination && m_pdfSearchBar
+        && m_pdfSearchBar->isVisible()
+        && m_pdfSearchBar->searchText().trimmed().size() >= 2
+        && m_searchScanDebounce) {
+        m_searchScanDebounce->start();
+    }
 }
 
 void MainWindow::openPdfDocument(const QString &filePath)
@@ -4463,9 +4543,10 @@ void MainWindow::openPdfDocument(const QString &filePath)
         // Async: UIDocumentPickerViewController is a remote VC whose result
         // is delivered via XPC — cannot be received in a nested QEventLoop.
         // Re-call openPdfDocument(path) once the user has picked a file.
-        PdfPickerIOS::pickPdfFile([this](const QString& picked) {
-            if (!picked.isEmpty()) {
-                openPdfDocument(picked);
+        const QPointer<MainWindow> windowGuard(this);
+        PdfPickerIOS::pickPdfFile([windowGuard](const QString& picked) {
+            if (windowGuard && !picked.isEmpty()) {
+                windowGuard->openPdfDocument(picked);
             }
         });
         return;
@@ -9128,6 +9209,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     // markModified every edgeless doc and force a prompt for harmless pans.
     // The mobile suspend hook still uses it, where that behavior is needed.)
     if (m_splitViewManager && m_documentManager) {
+        if (m_searchEngine) m_searchEngine->cancelAndWait();
         auto checkPane = [&](TabManager* tm, TabBar* bar) -> bool {
             if (!tm) return true;
             for (int i = 0; i < tm->tabCount(); ++i) {
@@ -9183,7 +9265,13 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                         // Plan B2: materialize imported PDF sources into bundled
                         // mini-PDFs on quit (Save branch only) so the .snb is portable.
                         if (doc->needsMaterialization() && !doc->bundlePath().isEmpty()) {
-                            doc->saveBundle(doc->bundlePath(), /*finalize=*/true);
+                            if (!doc->saveBundle(doc->bundlePath(), /*finalize=*/true)) {
+                                QMessageBox::critical(
+                                    this, tr("Save Error"),
+                                    tr("PDF sources could not be finalized. Repair the "
+                                       "unavailable sources before quitting."));
+                                return false;
+                            }
                         }
                     }
                 } else {
@@ -9191,7 +9279,13 @@ void MainWindow::closeEvent(QCloseEvent *event) {
                     // Ctrl+S then quit without editing). Still finalize imported PDF
                     // sources into bundled mini-PDFs, provided a real save location.
                     if (!isUsingTemp && doc->needsMaterialization() && !doc->bundlePath().isEmpty()) {
-                        doc->saveBundle(doc->bundlePath(), /*finalize=*/true);
+                        if (!doc->saveBundle(doc->bundlePath(), /*finalize=*/true)) {
+                            QMessageBox::critical(
+                                this, tr("Save Error"),
+                                tr("PDF sources could not be finalized. Repair the "
+                                   "unavailable sources before quitting."));
+                            return false;
+                        }
                     }
                 }
             }

@@ -14,6 +14,7 @@ public:
     explicit PdfSourcesDialog(Document* document, QWidget* parent = nullptr);
 
 signals:
+    void sourcesAboutToChange();
     void sourcesChanged();
 
 private slots:

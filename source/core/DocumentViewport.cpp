@@ -484,8 +484,8 @@ void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
     m_missingPdfBanner->setFixedWidth(width());
     m_missingPdfBanner->move(0, 0);
     
-    if (m_dismissedPdfWarningSignature != warningSignature
-        && !m_missingPdfBanner->isVisible()) {
+    if (m_dismissedPdfWarningSignature != warningSignature) {
+        // Also cancels an in-flight hide animation if health changed again.
         m_missingPdfBanner->showAnimated();
     }
 }
@@ -13519,11 +13519,18 @@ bool DocumentViewport::importPagesWithUndo(Document* srcDoc, const QStringList& 
 
     UndoAction action;
     action.type = UndoAction::PageInsert;
+    QSet<QString> retainedSourceIds;
     for (int k = 0; k < result.insertedPageJson.size(); ++k) {
         UndoAction::DeletedPageSnapshot snap;
         snap.index = result.destStartIndex + k;
         snap.pageJson = result.insertedPageJson[k];
         action.deletedPages.append(snap);
+
+        const QString sourceId = snap.pageJson.value(QStringLiteral("pdfSourceId")).toString();
+        if (!sourceId.isEmpty()) retainedSourceIds.insert(sourceId);
+    }
+    for (const QString& sourceId : retainedSourceIds) {
+        m_document->retainPdfSourceForUndo(sourceId);
     }
 
     const int focusIndex = result.destStartIndex >= 0 ? result.destStartIndex : destIndex;

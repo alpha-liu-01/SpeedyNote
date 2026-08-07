@@ -9,12 +9,12 @@
 /**
  * @brief Non-blocking notification banner for unavailable PDF sources.
  * 
- * Appears at the top of the DocumentViewport when a document references
- * a PDF that cannot be found. Offers options to locate the PDF or dismiss.
+ * Appears at the top of the DocumentViewport when one or more referenced PDF
+ * sources cannot serve their pages. Offers source review or session dismissal.
  * 
  * Design:
  * ┌──────────────────────────────────────────────────────────────────┐
- * │ ⚠️ PDF file not found: document.pdf    [Locate PDF] [Dismiss]   │
+ * │ ⚠️ PDF sources unavailable       [Review Sources...] [Dismiss] │
  * └──────────────────────────────────────────────────────────────────┘
  */
 class MissingPdfBanner : public QWidget

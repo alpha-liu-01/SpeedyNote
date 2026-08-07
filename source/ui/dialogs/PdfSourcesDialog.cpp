@@ -8,10 +8,12 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPointer>
 #include <QPushButton>
 #include <QStyle>
 #include <QTreeWidget>
@@ -199,8 +201,9 @@ void PdfSourcesDialog::locateSelectedSource()
     const QString startPath = source ? source->path : QString();
 
 #ifdef Q_OS_IOS
-    PdfPickerIOS::pickPdfFile([this, sourceId](const QString& path) {
-        if (!path.isEmpty()) handleLocatedPath(sourceId, path);
+    const QPointer<PdfSourcesDialog> guard(this);
+    PdfPickerIOS::pickPdfFile([guard, sourceId](const QString& path) {
+        if (guard && !path.isEmpty()) guard->handleLocatedPath(sourceId, path);
     });
 #else
     const QString path = choosePdfFile(startPath);
@@ -211,11 +214,13 @@ void PdfSourcesDialog::locateSelectedSource()
 void PdfSourcesDialog::handleLocatedPath(const QString& sourceId, const QString& path)
 {
     if (!m_document || path.isEmpty()) return;
+    emit sourcesAboutToChange();
     if (!m_document->locateSource(sourceId, path)) {
         QMessageBox::warning(
             this, tr("PDF Source Not Matched"),
             tr("The selected PDF is damaged or does not match the original source. "
                "No document links were changed."));
+        emit sourcesChanged();
         return;
     }
     refreshRows();
@@ -224,6 +229,10 @@ void PdfSourcesDialog::handleLocatedPath(const QString& sourceId, const QString&
 
 void PdfSourcesDialog::retrySelectedSource()
 {
+    if (!m_document || !m_sources || !m_sources->currentItem()) return;
+    const QString sourceId = selectedSourceId();
+    emit sourcesAboutToChange();
+    m_document->retryPdfSource(sourceId);
     refreshRows();
     emit sourcesChanged();
 }
@@ -245,20 +254,29 @@ void PdfSourcesDialog::locateSourcesInFolder()
     const QString folder = QFileDialog::getExistingDirectory(
         this, tr("Locate PDF Sources"), QDir::homePath());
     if (folder.isEmpty()) return;
+    emit sourcesAboutToChange();
 
     const QFileInfoList files = QDir(folder).entryInfoList(
         {QStringLiteral("*.pdf")}, QDir::Files | QDir::Readable);
+    QHash<QString, QString> hashes;
     int repaired = 0;
     const QVector<PdfSourceHealth> health = m_document->pdfSourceHealthSnapshot();
     for (const PdfSourceHealth& item : health) {
         if (!item.requiresRepair()) continue;
         const PdfSource* source = m_document->pdfSourceById(item.sourceId);
-        if (!source) continue;
+        // A folder-wide search must never guess for legacy hashless sources.
+        // Those require explicit single-file selection and user confirmation.
+        if (!source || source->hash.isEmpty()) continue;
         for (const QFileInfo& file : files) {
             if (source->size > 0 && source->size != file.size()) continue;
-            if (!source->hash.isEmpty()
-                && Document::computePdfHash(file.absoluteFilePath()) != source->hash) {
-                continue;
+            if (!source->hash.isEmpty()) {
+                const QString filePath = file.absoluteFilePath();
+                QString fileHash = hashes.value(filePath);
+                if (!hashes.contains(filePath)) {
+                    fileHash = Document::computePdfHash(filePath);
+                    hashes.insert(filePath, fileHash);
+                }
+                if (fileHash != source->hash) continue;
             }
             if (m_document->locateSource(item.sourceId, file.absoluteFilePath())) {
                 ++repaired;
@@ -267,7 +285,7 @@ void PdfSourcesDialog::locateSourcesInFolder()
         }
     }
     refreshRows();
-    if (repaired > 0) emit sourcesChanged();
+    emit sourcesChanged();
     QMessageBox::information(
         this, tr("PDF Source Search"),
         tr("Repaired %1 PDF source(s).").arg(repaired));

@@ -421,7 +421,8 @@ private slots:
     // Shared post-import refresh of a (possibly non-active) destination viewport.
     void refreshDestinationAfterImport(DocumentViewport* destVp, int destIndex);
     void openPdfDocument(const QString &filePath = QString());       // doc-1.4: Open PDF file (Ctrl+Shift+O)
-    void addPagesFromPdf(const QString& filePath = QString());
+    void addPagesFromPdf(const QString& filePath = QString(),
+                         DocumentViewport* targetViewport = nullptr);
     bool isDarkMode();
 
     // MAC.6: promoted from private: to private slots: so MacMenuBar can

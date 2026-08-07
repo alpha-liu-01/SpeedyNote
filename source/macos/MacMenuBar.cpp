@@ -3,6 +3,7 @@
 #ifdef Q_OS_MACOS
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QMenu>
 #include <QMenuBar>
@@ -13,6 +14,8 @@
 #include "AboutDialog.h"
 #include "../ControlPanelDialog.h"
 #include "../MainWindow.h"
+#include "../core/Document.h"
+#include "../core/DocumentViewport.h"
 #include "../core/ShortcutManager.h"
 
 // ============================================================================
@@ -149,15 +152,24 @@ void MacMenuBar::populateFileMenu()
     add(m_fileMenu, "file.save_as");
     m_fileMenu->addSeparator();
 
-    // Group 4: Relink PDF — not in ShortcutManager (no shortcut). Owned by
-    // MacMenuBar; dispatches to the active MainWindow's existing handler.
-    // Per-document text/enable sync (the overflow-menu version flips between
-    // "Relink PDF..." and "Link PDF..." based on doc state and disables when
-    // there is no doc) is intentionally deferred — the menu item stays as
-    // "Relink PDF..." and is always enabled. The underlying dialog handles
-    // both link and relink scenarios, so clicking on a doc with no PDF
-    // reference just opens the link dialog.
+    // Group 4: inspect or repair the active document's PDF source registry.
     QAction* pdfSources = m_fileMenu->addAction(tr("PDF Sources..."));
+    connect(m_fileMenu, &QMenu::aboutToShow, pdfSources, [pdfSources]() {
+        auto* mw = MainWindow::activeMainWindow();
+        DocumentViewport* viewport = mw ? mw->currentViewport() : nullptr;
+        Document* doc = viewport ? viewport->document() : nullptr;
+        const QVector<PdfSourceHealth> health =
+            doc ? doc->pdfSourceHealthSnapshot() : QVector<PdfSourceHealth>();
+        int repairCount = 0;
+        for (const PdfSourceHealth& source : health) {
+            if (source.requiresRepair()) ++repairCount;
+        }
+        pdfSources->setEnabled(!health.isEmpty());
+        pdfSources->setText(repairCount > 0
+            ? QCoreApplication::translate("MainWindow", "Repair PDF Sources... (%1)")
+                  .arg(repairCount)
+            : QCoreApplication::translate("MainWindow", "PDF Sources..."));
+    });
     connect(pdfSources, &QAction::triggered, this, []() {
         if (auto* mw = MainWindow::activeMainWindow()) {
             QMetaObject::invokeMethod(mw, "showPdfSourcesDialog",
