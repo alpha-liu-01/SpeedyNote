@@ -13,7 +13,7 @@
  * 
  * This utility is shared between:
  * - MainWindow (opening PDF documents)
- * - PdfRelinkDialog (relinking missing PDFs)
+ * - PdfSourcesDialog (locating unavailable PDF sources)
  * 
  * Thread-safety: Must be called from the main thread only.
  * Only one picker can be active at a time.

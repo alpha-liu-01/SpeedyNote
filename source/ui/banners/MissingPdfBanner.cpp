@@ -37,8 +37,8 @@ void MissingPdfBanner::setupUi()
     m_messageLabel->setStyleSheet("color: #5a3d00; font-weight: 500;");
     m_messageLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     
-    // Locate PDF button
-    m_locateButton = new QPushButton(tr("Locate PDF"), this);
+    // Review sources button
+    m_locateButton = new QPushButton(tr("Review Sources..."), this);
     m_locateButton->setCursor(Qt::PointingHandCursor);
     m_locateButton->setStyleSheet(R"(
         QPushButton {
@@ -57,7 +57,7 @@ void MissingPdfBanner::setupUi()
             background: #ba4a00;
         }
     )");
-    connect(m_locateButton, &QPushButton::clicked, this, &MissingPdfBanner::locatePdfClicked);
+    connect(m_locateButton, &QPushButton::clicked, this, &MissingPdfBanner::reviewSourcesClicked);
     
     // Dismiss button
     m_dismissButton = new QPushButton(tr("Dismiss"), this);
@@ -91,9 +91,17 @@ void MissingPdfBanner::setupUi()
     layout->addWidget(m_dismissButton);
 }
 
-void MissingPdfBanner::setPdfName(const QString& pdfName)
+void MissingPdfBanner::setSummary(int sourceCount, int affectedPages, const QString& singleSourceName)
 {
-    m_messageLabel->setText(tr("PDF file not found: %1").arg(pdfName));
+    if (sourceCount == 1 && !singleSourceName.isEmpty()) {
+        m_messageLabel->setText(
+            tr("PDF source \"%1\" is unavailable — %2 page background(s) affected.")
+                .arg(singleSourceName).arg(affectedPages));
+    } else {
+        m_messageLabel->setText(
+            tr("%1 PDF source(s) unavailable — %2 page background(s) affected.")
+                .arg(sourceCount).arg(affectedPages));
+    }
 }
 
 void MissingPdfBanner::showAnimated()

@@ -385,16 +385,14 @@ public:
     
     // ===== Missing PDF Banner (Phase R.3) =====
     
-    /**
-     * @brief Show the missing PDF banner at the top of the viewport.
-     * @param pdfName Filename of the missing PDF to display.
-     */
-    void showMissingPdfBanner(const QString& pdfName);
+    void showPdfSourceWarning(int sourceCount, int affectedPages,
+                              const QString& singleSourceName,
+                              const QString& warningSignature);
     
     /**
      * @brief Hide the missing PDF banner.
      */
-    void hideMissingPdfBanner();
+    void hidePdfSourceWarning();
     
     // ===== Theme / Dark Mode =====
     
@@ -2084,12 +2082,7 @@ signals:
      */
     void strokesChanged();
 
-    /**
-     * @brief Emitted when user clicks "Locate PDF" on the missing PDF banner.
-     * 
-     * Phase R.3: MainWindow connects this to show PdfRelinkDialog.
-     */
-    void requestPdfRelink();
+    void requestPdfSources();
 
     void openTextEditorRequested(InsertedObject* obj);
     
@@ -2139,6 +2132,8 @@ private:
     
     // ===== Missing PDF Banner (Phase R.3) =====
     MissingPdfBanner* m_missingPdfBanner = nullptr;
+    QString m_pdfWarningSignature;
+    QString m_dismissedPdfWarningSignature;
     
     // ===== Theme / Dark Mode =====
     bool m_isDarkMode = true;  ///< Cached dark mode state (default: dark)

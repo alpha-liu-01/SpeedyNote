@@ -392,7 +392,8 @@ private slots:
     void refreshOutlineAvailability(Document* doc);  // Plan A2: re-grey outline entries after structure change
     void updatePagePanelForViewport(DocumentViewport* viewport);  // Page Panel: Task 5.1: Update PagePanel
     void notifyPageStructureChanged(Document* doc, int currentPage = -1);  // Helper: Update PagePanel after page add/remove
-    void showPdfRelinkDialog(DocumentViewport* viewport);  // Phase R.4: Unified PDF relink handler
+    void showPdfSourcesDialog(DocumentViewport* viewport);
+    void updatePdfSourceUi(DocumentViewport* viewport);
     void showPdfExportDialog();  // Phase 8: PDF Export dialog
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
@@ -420,11 +421,11 @@ private slots:
     // Shared post-import refresh of a (possibly non-active) destination viewport.
     void refreshDestinationAfterImport(DocumentViewport* destVp, int destIndex);
     void openPdfDocument(const QString &filePath = QString());       // doc-1.4: Open PDF file (Ctrl+Shift+O)
+    void addPagesFromPdf(const QString& filePath = QString());
     bool isDarkMode();
 
     // MAC.6: promoted from private: to private slots: so MacMenuBar can
-    // dispatch to them via QMetaObject::invokeMethod (matches the MAC.3
-    // showPdfRelinkDialog pattern). lockAllOcrText() is a new slot factored
+    // dispatch to them via QMetaObject::invokeMethod. lockAllOcrText() is a slot factored
     // out of the inline lambda previously living in setupUi()'s overflow
     // menu; the overflow now calls it directly so the macOS OCR menu and
     // the overflow menu share one implementation.
@@ -613,7 +614,7 @@ private:
     QList<NoteDisplayData> searchMarkdownNotes(const QString& query, int fromPage, int toPage);
 
     QMenu *overflowMenu;
-    QAction* m_relinkPdfAction = nullptr;  // Phase R.4: Relink PDF menu action
+    QAction* m_pdfSourcesAction = nullptr;
     QAction* m_exportPdfAction = nullptr;  // Phase 8: Export to PDF menu action
 
     // QListWidget *tabList;          // Horizontal tab bar
@@ -792,7 +793,7 @@ private:
     QMetaObject::Connection m_markdownNoteOpenConn;   // Phase M.5: For requestOpenMarkdownNote
     QMetaObject::Connection m_userWarningConn;        // For viewport userWarning → QMessageBox
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
-    QMetaObject::Connection m_pdfRelinkConn;          // Phase R.4: For requestPdfRelink signal
+    QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
     QMetaObject::Connection m_textEditorConn;          // Phase 2B: For openTextEditorRequested
     

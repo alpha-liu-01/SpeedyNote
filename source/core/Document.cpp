@@ -158,32 +158,110 @@ PdfSource* Document::pdfSourceById(const QString& sourceId)
     return nullptr;
 }
 
-// Whether a source can be served from its ORIGINAL external PDF (present on disk).
-// When true, the provider opens the full PDF and original page numbers are valid
-// verbatim; when false, a bundled source falls back to its compact mini-PDF (which
-// only holds referenced pages, remapped through pageMap). pdfPathForSource() and
-// resolveSourcePageIndex() must agree on this so the opened file and the page index
-// passed to it stay consistent.
-static bool sourceUsesOriginalFile(const PdfSource* s)
+void Document::clearCachedPdfProvider(const QString& registryId) const
 {
-    return s && !s->path.isEmpty() && QFileInfo::exists(s->path);
+    m_pdfProviders.erase(registryId);
+    m_pdfProviderPaths.erase(registryId);
+    m_pdfProvidersUsingBundled.remove(registryId);
+    m_pdfProvidersUsingRelative.remove(registryId);
+}
+
+Document::PdfSourceOpenResult Document::openBestPdfSourceCandidate(const PdfSource& source) const
+{
+    PdfSourceOpenResult result;
+    if (!PdfProvider::isAvailable()) {
+        result.failureStatus = PdfSourceHealthStatus::Unreadable;
+        return result;
+    }
+
+    struct Candidate {
+        QString path;
+        bool bundled = false;
+        bool relative = false;
+    };
+    QVector<Candidate> candidates;
+    QSet<QString> seen;
+    auto appendCandidate = [&](const QString& path, bool bundled, bool relative) {
+        if (path.isEmpty()) return;
+        const QString absolute = QFileInfo(path).absoluteFilePath();
+        const QString key = QDir::cleanPath(absolute);
+        if (seen.contains(key)) return;
+        seen.insert(key);
+        candidates.append({absolute, bundled, relative});
+    };
+
+    appendCandidate(source.path, false, false);
+    if (!source.relativePath.isEmpty() && !m_bundlePath.isEmpty()) {
+        appendCandidate(QDir(m_bundlePath).absoluteFilePath(source.relativePath), false, true);
+    }
+    if (source.bundled && !source.bundledFile.isEmpty() && !m_bundlePath.isEmpty()) {
+        appendCandidate(QDir(m_bundlePath).absoluteFilePath(source.bundledFile), true, false);
+    }
+
+    bool foundExisting = false;
+    bool foundIdentityMismatch = false;
+    bool foundUnreadable = false;
+    for (const Candidate& candidate : candidates) {
+        QFileInfo info(candidate.path);
+        if (!info.exists() || !info.isFile()) {
+            continue;
+        }
+        foundExisting = true;
+
+        // A bundled mini-PDF intentionally differs from the original full-file
+        // identity. Only full external candidates are verified against hash+size.
+        if (!candidate.bundled && !source.hash.isEmpty()) {
+            const bool sizeMatches = source.size <= 0 || info.size() == source.size;
+            const bool hashMatches = sizeMatches && computePdfHash(candidate.path) == source.hash;
+            if (!hashMatches) {
+                foundIdentityMismatch = true;
+                continue;
+            }
+        }
+
+        std::unique_ptr<PdfProvider> provider = PdfProvider::create(candidate.path);
+        if (!provider || !provider->isValid()) {
+            foundUnreadable = true;
+            continue;
+        }
+
+        result.provider = std::move(provider);
+        result.path = candidate.path;
+        result.bundled = candidate.bundled;
+        result.relative = candidate.relative;
+        return result;
+    }
+
+    if (foundUnreadable) {
+        result.failureStatus = PdfSourceHealthStatus::Unreadable;
+    } else if (foundIdentityMismatch) {
+        result.failureStatus = PdfSourceHealthStatus::IdentityMismatch;
+    } else if (foundExisting) {
+        result.failureStatus = PdfSourceHealthStatus::Unreadable;
+    } else {
+        result.failureStatus = PdfSourceHealthStatus::Missing;
+    }
+    return result;
 }
 
 QString Document::pdfPathForSource(const QString& sourceId) const
 {
     const PdfSource* s = pdfSourceById(sourceId);
     if (!s) return QString();
-    // Prefer the original external PDF whenever it is present: full fidelity, every
-    // original page number is valid, and no page-map translation is required. The
-    // bundled mini-PDF is only a portability fallback (e.g. the .snb was moved
-    // away from its source PDFs).
-    if (sourceUsesOriginalFile(s)) {
-        return s->path;
-    }
-    if (s->bundled && !s->bundledFile.isEmpty() && !m_bundlePath.isEmpty()) {
-        return QDir(m_bundlePath).absoluteFilePath(s->bundledFile);
-    }
-    return s->path;
+    auto pathIt = m_pdfProviderPaths.find(s->id);
+    if (pathIt != m_pdfProviderPaths.end()) return pathIt->second;
+
+    // Resolve and validate without retaining a provider. Some consumers (notably
+    // MuPdfExporter) intentionally own their own MuPDF context and must not race a
+    // cached Document provider for the same file.
+    PdfSourceOpenResult opened = openBestPdfSourceCandidate(*s);
+    if (!opened.provider) return QString();
+    m_pdfProviderPaths[s->id] = opened.path;
+    if (opened.bundled) m_pdfProvidersUsingBundled.insert(s->id);
+    else m_pdfProvidersUsingBundled.remove(s->id);
+    if (opened.relative) m_pdfProvidersUsingRelative.insert(s->id);
+    else m_pdfProvidersUsingRelative.remove(s->id);
+    return opened.path;
 }
 
 PdfProvider* Document::providerForSource(const QString& sourceId) const
@@ -197,33 +275,105 @@ PdfProvider* Document::providerForSource(const QString& sourceId) const
         return it->second.get();
     }
 
-    // Lazily open from the resolved path.
-    QString path = pdfPathForSource(sourceId);
-    if (path.isEmpty()) {
-        // No reference at all (e.g. the user chose to continue without this source).
-        // Nothing to relink - just render a blank background.
-        return nullptr;
-    }
-    if (!QFileInfo::exists(path) || !PdfProvider::isAvailable()) {
-        // Mark for relink so the UI can offer to locate it. Requires a non-const
-        // pointer into the (mutable) source list.
-        if (PdfSource* mut = const_cast<Document*>(this)->pdfSourceById(s->id)) {
-            mut->needsRelink = true;
+    auto resolvedIt = m_pdfProviderPaths.find(s->id);
+    if (resolvedIt != m_pdfProviderPaths.end()) {
+        std::unique_ptr<PdfProvider> provider = PdfProvider::create(resolvedIt->second);
+        if (provider && provider->isValid()) {
+            PdfProvider* raw = provider.get();
+            m_pdfProviders[s->id] = std::move(provider);
+            if (PdfSource* mutableSource =
+                    const_cast<Document*>(this)->pdfSourceById(s->id)) {
+                mutableSource->needsRelink = false;
+            }
+            return raw;
         }
+        clearCachedPdfProvider(s->id);
+    }
+
+    PdfSourceOpenResult opened = openBestPdfSourceCandidate(*s);
+    PdfSource* mutableSource = const_cast<Document*>(this)->pdfSourceById(s->id);
+    if (!opened.provider) {
+        if (mutableSource) mutableSource->needsRelink = true;
+        clearCachedPdfProvider(s->id);
         return nullptr;
     }
 
-    std::unique_ptr<PdfProvider> provider = PdfProvider::create(path);
-    if (!provider || !provider->isValid()) {
-        if (PdfSource* mut = const_cast<Document*>(this)->pdfSourceById(s->id)) {
-            mut->needsRelink = true;
-        }
-        return nullptr;
+    PdfProvider* raw = opened.provider.get();
+    m_pdfProviders[s->id] = std::move(opened.provider);
+    m_pdfProviderPaths[s->id] = opened.path;
+    if (opened.bundled) m_pdfProvidersUsingBundled.insert(s->id);
+    else m_pdfProvidersUsingBundled.remove(s->id);
+    if (opened.relative) m_pdfProvidersUsingRelative.insert(s->id);
+    else m_pdfProvidersUsingRelative.remove(s->id);
+    if (mutableSource) {
+        // A partial bundled source is handled by the health snapshot below; it is
+        // still useful for every mapped page and must remain open.
+        mutableSource->needsRelink = false;
     }
-
-    PdfProvider* raw = provider.get();
-    m_pdfProviders[s->id] = std::move(provider);
     return raw;
+}
+
+int Document::notebookPageCountForSource(const QString& sourceId) const
+{
+    int count = 0;
+    for (const auto& [uuid, pdfPage] : m_pagePdfIndex) {
+        Q_UNUSED(pdfPage);
+        auto sourceIt = m_pagePdfSource.find(uuid);
+        const QString pageSource = sourceIt != m_pagePdfSource.end()
+            ? sourceIt->second : QString();
+        if (pageSource == sourceId) ++count;
+    }
+    return count;
+}
+
+QVector<PdfSourceHealth> Document::pdfSourceHealthSnapshot() const
+{
+    QVector<PdfSourceHealth> result;
+    result.reserve(static_cast<int>(m_pdfSources.size()));
+    for (const PdfSource& source : m_pdfSources) {
+        const QString sourceId = normalizedPdfSourceId(source);
+        PdfProvider* provider = providerForSource(sourceId);
+
+        PdfSourceHealth health;
+        health.sourceId = sourceId;
+        health.title = sourceDisplayTitle(sourceId);
+        health.referencedPages = notebookPageCountForSource(sourceId);
+
+        auto pathIt = m_pdfProviderPaths.find(source.id);
+        if (pathIt != m_pdfProviderPaths.end()) health.activePath = pathIt->second;
+
+        if (provider && provider->isValid()) {
+            if (m_pdfProvidersUsingBundled.contains(source.id)) {
+                int unavailable = 0;
+                for (const auto& [uuid, originalPage] : m_pagePdfIndex) {
+                    auto sourceIt = m_pagePdfSource.find(uuid);
+                    const QString pageSource = sourceIt != m_pagePdfSource.end()
+                        ? sourceIt->second : QString();
+                    if (pageSource == sourceId && !source.pageMap.contains(originalPage)) {
+                        ++unavailable;
+                    }
+                }
+                health.unavailablePages = unavailable;
+                health.status = unavailable > 0
+                    ? PdfSourceHealthStatus::PartialBundled
+                    : PdfSourceHealthStatus::AvailableBundled;
+            } else {
+                health.status = m_pdfProvidersUsingRelative.contains(source.id)
+                    ? PdfSourceHealthStatus::AvailableRelative
+                    : PdfSourceHealthStatus::AvailableExternal;
+            }
+        } else {
+            PdfSourceOpenResult failure = openBestPdfSourceCandidate(source);
+            health.status = failure.failureStatus;
+            health.unavailablePages = health.referencedPages;
+        }
+        if (PdfSource* mutableSource =
+                const_cast<Document*>(this)->pdfSourceById(source.id)) {
+            mutableSource->needsRelink = health.requiresRepair();
+        }
+        result.append(health);
+    }
+    return result;
 }
 
 QString Document::registerSource(const QString& path, const QString& hash, qint64 size, bool bundled)
@@ -246,6 +396,42 @@ QString Document::registerSource(const QString& path, const QString& hash, qint6
     src.primary = false;  // Registered (imported) sources are never the primary base PDF.
     m_pdfSources.push_back(src);
     return src.id;
+}
+
+bool Document::locateSource(const QString& sourceId, const QString& newPath)
+{
+    PdfSource* source = pdfSourceById(sourceId);
+    if (!source || newPath.isEmpty()) return false;
+
+    QFileInfo info(newPath);
+    if (!info.exists() || !info.isFile() || !PdfProvider::isAvailable()) return false;
+
+    const QString candidateHash = computePdfHash(newPath);
+    if (candidateHash.isEmpty()) return false;
+    if (!source->hash.isEmpty()) {
+        if (candidateHash != source->hash
+            || (source->size > 0 && info.size() != source->size)) {
+            return false;
+        }
+    }
+
+    std::unique_ptr<PdfProvider> provider = PdfProvider::create(newPath);
+    if (!provider || !provider->isValid()) return false;
+
+    if (source->hash.isEmpty()) {
+        source->hash = candidateHash;
+        source->size = info.size();
+    }
+    source->path = info.absoluteFilePath();
+    if (!m_bundlePath.isEmpty()) {
+        source->relativePath = QDir(m_bundlePath).relativeFilePath(source->path);
+    }
+    source->needsRelink = false;
+    clearCachedPdfProvider(source->id);
+    m_pdfProviderPaths[source->id] = source->path;
+    m_pdfProviders[source->id] = std::move(provider);
+    markModified();
+    return true;
 }
 
 bool Document::relinkSource(const QString& sourceId, const QString& newPath)
@@ -272,6 +458,8 @@ bool Document::relinkSource(const QString& sourceId, const QString& newPath)
     if (!m_bundlePath.isEmpty()) {
         s->relativePath = QDir(m_bundlePath).relativeFilePath(newPath);
     }
+    clearCachedPdfProvider(s->id);
+    m_pdfProviderPaths[s->id] = QFileInfo(newPath).absoluteFilePath();
     m_pdfProviders[s->id] = std::move(provider);
 
     markModified();
@@ -284,19 +472,9 @@ void Document::dismissSourceRelink(const QString& sourceId)
     if (!s) {
         return;
     }
-    // Primary: clearing the whole reference matches legacy "continue without PDF".
-    if (primarySource() == s) {
-        clearPdfReference();
-        return;
-    }
-    // Non-primary: drop the file reference and stop prompting for relink.
-    m_pdfProviders.erase(s->id);
-    s->path.clear();
-    s->relativePath.clear();
-    s->bundled = false;
-    s->bundledFile.clear();
+    // Kept for source compatibility with older callers. Dismissal is deliberately
+    // non-destructive: recovery metadata and page mappings remain available.
     s->needsRelink = false;
-    markModified();
 }
 
 QStringList Document::unreferencedSourceIds() const
@@ -337,7 +515,7 @@ int Document::pruneUnreferencedSources()
     // Close cached providers for the sources being removed, and delete any bundled
     // mini-PDF file on disk (Plan B2) so the bundle doesn't keep orphaned PDFs.
     for (const QString& id : stale) {
-        m_pdfProviders.erase(id);
+        clearCachedPdfProvider(id);
         const PdfSource* s = pdfSourceById(id);
         if (s && s->bundled && !s->bundledFile.isEmpty() && !m_bundlePath.isEmpty()) {
             const QString abs = QDir(m_bundlePath).absoluteFilePath(s->bundledFile);
@@ -365,10 +543,8 @@ int Document::resolveSourcePageIndex(const QString& sourceId, int originalPage) 
     if (!s) {
         return originalPage;
     }
-    // Consistent with pdfPathForSource(): when the original PDF is present the
-    // provider opens it and the original page number is used verbatim. Only when we
-    // fall back to a bundled mini-PDF do we remap through the compact page map.
-    if (sourceUsesOriginalFile(s) || !s->bundled) {
+    pdfPathForSource(sourceId);
+    if (!m_pdfProvidersUsingBundled.contains(s->id)) {
         return originalPage;
     }
     auto it = s->pageMap.constFind(originalPage);
@@ -454,7 +630,7 @@ int Document::materializeSources(QString* errorOut)
         }
 
         // Release any cached provider before we overwrite the mini-PDF file.
-        m_pdfProviders.erase(s->id);
+        clearCachedPdfProvider(s->id);
 
         QString err;
         if (PdfMaterializer::materialize(originPath, absFile, pages, s->pageMap, &err)) {
@@ -468,7 +644,7 @@ int Document::materializeSources(QString* errorOut)
             *errorOut = err;
         }
         // Drop the provider again so the next open uses the (now bundled) file.
-        m_pdfProviders.erase(s->id);
+        clearCachedPdfProvider(s->id);
     }
 
     return materialized;
@@ -529,7 +705,7 @@ bool Document::loadPdf(const QString& path)
     PdfSource& primary = ensurePrimarySource();
     
     // Unload any existing primary provider first
-    m_pdfProviders.erase(primary.id);
+    clearCachedPdfProvider(primary.id);
     
     // Store the path regardless of load success (for relink)
     primary.path = path;
@@ -562,6 +738,7 @@ bool Document::loadPdf(const QString& path)
     }
     
     primary.needsRelink = false;
+    m_pdfProviderPaths[primary.id] = QFileInfo(path).absoluteFilePath();
     m_pdfProviders[primary.id] = std::move(provider);
     return true;
 }
@@ -591,13 +768,16 @@ void Document::unloadPdf()
 {
     // Release the primary provider only; the source (path/hash) is preserved for relink.
     if (const PdfSource* s = primarySource()) {
-        m_pdfProviders.erase(s->id);
+        clearCachedPdfProvider(s->id);
     }
 }
 
 void Document::clearPdfReference()
 {
     m_pdfProviders.clear();
+    m_pdfProviderPaths.clear();
+    m_pdfProvidersUsingBundled.clear();
+    m_pdfProvidersUsingRelative.clear();
     m_pdfSources.clear();
     m_pagePdfSource.clear();
     markModified();
@@ -780,9 +960,8 @@ int Document::originalPageForProviderIndex(const QString& sourceId, int provider
         return -1;
     }
     const PdfSource* s = pdfSourceById(sourceId);
-    // External/full-file or non-bundled sources: the provider opens the original
-    // PDF, so the provider index already is the original page number.
-    if (!s || sourceUsesOriginalFile(s) || !s->bundled) {
+    pdfPathForSource(sourceId);
+    if (!s || !m_pdfProvidersUsingBundled.contains(s->id)) {
         return providerPage;
     }
     // Bundled mini-PDF: reverse the original->bundled page map.
@@ -4469,73 +4648,17 @@ std::unique_ptr<Document> Document::loadBundle(const QString& path)
         }
     }
     
-    // ========== RESOLVE & LOAD PDF SOURCES (Phase SHARE: Dual Path Resolution) ==========
-    // Each source stores an absolute path and a bundle-relative path (portable .snbx),
-    // or a bundled file when materialized. The primary source (flagged primary) is
-    // opened eagerly (preserving today's fast path and isPdfLoaded() semantics);
-    // non-primary sources are opened lazily on first render via providerForSource().
+    // ========== RESOLVE & LOAD PDF SOURCES ==========
+    // Probe all referenced sources through the same validated candidate resolver used
+    // by rendering/search/export. This makes missing or corrupt non-primary sources
+    // visible to the UI immediately instead of waiting for their first repaint.
     if (!doc->m_pdfSources.empty()) {
-        QString bundleDir = QFileInfo(manifestPath).absolutePath();
-
-        auto resolveSourcePath = [&](const PdfSource& s) -> QString {
-            // Bundled sources live inside the .snb.
-            if (s.bundled && !s.bundledFile.isEmpty()) {
-                QString bundledPath = QDir(bundleDir).absoluteFilePath(s.bundledFile);
-                if (QFile::exists(bundledPath)) {
-                    return bundledPath;
-                }
+        const QVector<PdfSourceHealth> health = doc->pdfSourceHealthSnapshot();
+        for (const PdfSourceHealth& item : health) {
+            if (item.requiresRepair()) {
+                qWarning() << "loadBundle: PDF source needs repair:"
+                           << item.title << item.activePath;
             }
-            // Absolute path first.
-            if (!s.path.isEmpty() && QFile::exists(s.path)) {
-                return s.path;
-            }
-            // Then bundle-relative path (canonicalized).
-            if (!s.relativePath.isEmpty()) {
-                QString rawPath = QDir(bundleDir).absoluteFilePath(s.relativePath);
-                QFileInfo fi(rawPath);
-                if (fi.exists()) {
-                    return fi.canonicalFilePath();
-                }
-            }
-            return QString();
-        };
-
-        for (size_t i = 0; i < doc->m_pdfSources.size(); ++i) {
-            PdfSource& s = doc->m_pdfSources[i];
-            const bool isPrimary = s.primary;
-
-            const bool hasReference = !s.path.isEmpty() || !s.relativePath.isEmpty()
-                                      || (s.bundled && !s.bundledFile.isEmpty());
-            if (!hasReference) {
-                continue;
-            }
-
-            QString resolved = resolveSourcePath(s);
-            if (resolved.isEmpty()) {
-                s.needsRelink = true;
-                qWarning() << "loadBundle: PDF source not found:" << s.path << "/" << s.relativePath;
-                continue;
-            }
-
-            // Keep members in sync with the resolved location (bundled files keep their
-            // stored path so relative-path recomputation on save stays correct).
-            if (!s.bundled) {
-                s.path = resolved;
-                s.relativePath = QDir(bundleDir).relativeFilePath(resolved);
-            }
-
-            if (isPrimary) {
-                if (!doc->loadPdf(resolved)) {
-                    s.needsRelink = true;
-                    qWarning() << "loadBundle: Failed to load primary PDF:" << resolved;
-                }
-#ifdef SPEEDYNOTE_DEBUG
-                else {
-                    qDebug() << "loadBundle: Loaded primary PDF from:" << resolved;
-                }
-#endif
-            }
-            // Non-primary: opened lazily on demand.
         }
     }
     

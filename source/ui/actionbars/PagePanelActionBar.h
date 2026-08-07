@@ -132,6 +132,11 @@ signals:
      * @brief Emitted when Insert Page button is clicked.
      */
     void insertPageClicked();
+
+    /**
+     * @brief Emitted when Add Pages from PDF is clicked.
+     */
+    void addPdfPagesClicked();
     
     /**
      * @brief Emitted when Delete is first clicked (delete requested).
@@ -202,6 +207,7 @@ private:
     ActionBarButton* m_selectButton = nullptr;        // Multi-select mode toggle
     ActionBarButton* m_addPageButton = nullptr;
     ActionBarButton* m_insertPageButton = nullptr;
+    ActionBarButton* m_addPdfPagesButton = nullptr;
     UndoDeleteButton* m_deleteButton = nullptr;
     
     // State

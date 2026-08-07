@@ -122,6 +122,32 @@ struct PdfSource {
                                 ///< mirrored to legacy pdf_path). Imported sources are non-primary.
 };
 
+enum class PdfSourceHealthStatus {
+    AvailableExternal,
+    AvailableRelative,
+    AvailableBundled,
+    PartialBundled,
+    Missing,
+    Unreadable,
+    IdentityMismatch
+};
+
+struct PdfSourceHealth {
+    QString sourceId;           ///< Empty for the primary source, otherwise the registry UUID
+    QString title;
+    QString activePath;
+    PdfSourceHealthStatus status = PdfSourceHealthStatus::Missing;
+    int referencedPages = 0;
+    int unavailablePages = 0;
+
+    bool requiresRepair() const {
+        return status == PdfSourceHealthStatus::PartialBundled
+            || status == PdfSourceHealthStatus::Missing
+            || status == PdfSourceHealthStatus::Unreadable
+            || status == PdfSourceHealthStatus::IdentityMismatch;
+    }
+};
+
 // ============================================================================
 
 /**
@@ -946,8 +972,7 @@ public:
      * @brief Check if PDF needs to be relinked.
      * @return True if neither absolute nor relative path could locate the PDF.
      * 
-     * Phase SHARE: Set by loadBundle() when PDF path resolution fails.
-     * DocumentManager checks this flag and shows PdfRelinkDialog if true.
+     * Set when the validated source resolver cannot serve every referenced page.
      */
     bool needsPdfRelink() const {
         for (const PdfSource& s : m_pdfSources) { if (s.needsRelink) return true; }
@@ -1123,6 +1148,30 @@ public:
      * @brief Number of registered PDF sources.
      */
     int pdfSourceCount() const { return static_cast<int>(m_pdfSources.size()); }
+
+    /**
+     * @brief Probe every PDF source and return its current runtime health.
+     *
+     * Candidate selection is shared with providerForSource(): a matching external
+     * absolute path, then a matching bundle-relative full PDF, then the bundled
+     * mini-PDF fallback. Providers are opened while probing so corrupt files are
+     * distinguished from merely missing files.
+     */
+    QVector<PdfSourceHealth> pdfSourceHealthSnapshot() const;
+
+    /**
+     * @brief Number of notebook pages backed by a source.
+     * @param sourceId Empty for the primary source.
+     */
+    int notebookPageCountForSource(const QString& sourceId) const;
+
+    /**
+     * @brief Locate a moved source without changing its stored identity.
+     *
+     * When a hash/size is stored the candidate must match. Legacy hashless sources
+     * establish their identity from the first successfully located file.
+     */
+    bool locateSource(const QString& sourceId, const QString& newPath);
 
     /**
      * @brief Look up a source by id. Empty id resolves to the primary.
@@ -1803,6 +1852,10 @@ private:
     /// load; other sources open on first render. Mutable so providerForSource() (used
     /// from const render paths) can populate the cache.
     mutable std::map<QString, std::unique_ptr<PdfProvider>> m_pdfProviders;
+    /// Runtime path and page-number space used by each cached provider.
+    mutable std::map<QString, QString> m_pdfProviderPaths;
+    mutable QSet<QString> m_pdfProvidersUsingBundled;
+    mutable QSet<QString> m_pdfProvidersUsingRelative;
 
     // ===== Private PDF source helpers =====
     /// The primary source (the document's own base PDF, flagged primary), or nullptr
@@ -1818,6 +1871,18 @@ private:
     }
     /// Ensure a primary source exists, creating one (flagged primary) if needed.
     PdfSource& ensurePrimarySource();
+    struct PdfSourceOpenResult {
+        std::unique_ptr<PdfProvider> provider;
+        QString path;
+        PdfSourceHealthStatus failureStatus = PdfSourceHealthStatus::Missing;
+        bool bundled = false;
+        bool relative = false;
+    };
+    PdfSourceOpenResult openBestPdfSourceCandidate(const PdfSource& source) const;
+    void clearCachedPdfProvider(const QString& registryId) const;
+    QString normalizedPdfSourceId(const PdfSource& source) const {
+        return source.primary ? QString() : source.id;
+    }
     /// The primary provider without lazy creation, or nullptr if not open.
     PdfProvider* primaryProvider() const {
         const PdfSource* s = primarySource();

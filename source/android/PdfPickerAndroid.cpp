@@ -21,7 +21,7 @@
 //
 // Originally in MainWindow.cpp (BUG-A003), moved here for reuse by:
 // - MainWindow::openPdfDocument()
-// - PdfRelinkDialog::onLocatePdf()
+// - PdfSourcesDialog source recovery and page import
 // ============================================================================
 
 namespace {

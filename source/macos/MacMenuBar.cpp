@@ -157,13 +157,10 @@ void MacMenuBar::populateFileMenu()
     // "Relink PDF..." and is always enabled. The underlying dialog handles
     // both link and relink scenarios, so clicking on a doc with no PDF
     // reference just opens the link dialog.
-    QAction* relink = m_fileMenu->addAction(tr("Relink PDF..."));
-    connect(relink, &QAction::triggered, this, []() {
+    QAction* pdfSources = m_fileMenu->addAction(tr("PDF Sources..."));
+    connect(pdfSources, &QAction::triggered, this, []() {
         if (auto* mw = MainWindow::activeMainWindow()) {
-            // showPdfRelinkDialog is a private slot. Invoke via the meta-object
-            // system so MacMenuBar (a platform subsystem outside MainWindow's
-            // class boundary) can trigger it without expanding the public API.
-            QMetaObject::invokeMethod(mw, "showPdfRelinkDialog",
+            QMetaObject::invokeMethod(mw, "showPdfSourcesDialog",
                                       Qt::DirectConnection,
                                       Q_ARG(DocumentViewport*, mw->currentViewport()));
         }

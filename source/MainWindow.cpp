@@ -27,7 +27,8 @@
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
 #include "core/NotebookLibrary.h" // Phase P.4.6: For saving thumbnails
-#include "pdf/PdfRelinkDialog.h" // Phase R.4: For PDF relink dialog
+#include "ui/dialogs/PdfSourcesDialog.h"
+#include "ui/dialogs/PageRangeSelectDialog.h"
 #include "sharing/NotebookExporter.h" // Phase 1: Export notebooks as .snbx
 #include "ui/widgets/PdfSearchBar.h"  // PDF text search bar
 #include "pdf/PdfSearchEngine.h"      // PDF text search engine
@@ -1000,11 +1001,10 @@ void MainWindow::setupUi() {
     overflowMenu = new QMenu(this);
     overflowMenu->setObjectName("overflowMenu");
 
-    // Phase R.4: Relink PDF action (enabled only when document has PDF reference)
-    m_relinkPdfAction = overflowMenu->addAction(tr("Relink PDF..."));
-    m_relinkPdfAction->setEnabled(false);  // Initially disabled
-    connect(m_relinkPdfAction, &QAction::triggered, this, [this]() {
-        showPdfRelinkDialog(currentViewport());
+    m_pdfSourcesAction = overflowMenu->addAction(tr("PDF Sources..."));
+    m_pdfSourcesAction->setVisible(false);
+    connect(m_pdfSourcesAction, &QAction::triggered, this, [this]() {
+        showPdfSourcesDialog(currentViewport());
     });
     
     // PDF Export action (Ctrl+P)
@@ -2427,10 +2427,9 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_linkObjectListConn);
         m_linkObjectListConn = {};
     }
-    // Phase R.4: Disconnect PDF relink connection
-    if (m_pdfRelinkConn) {
-        disconnect(m_pdfRelinkConn);
-        m_pdfRelinkConn = {};
+    if (m_pdfSourcesConn) {
+        disconnect(m_pdfSourcesConn);
+        m_pdfSourcesConn = {};
     }
     // OCR: Disconnect strokesChanged connection
     if (m_strokesChangedConn) {
@@ -2935,46 +2934,11 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         }
     }
     
-    // =========================================================================
-    // Phase R.4: PDF Relink - Connect signal and check for missing PDF
-    // =========================================================================
-    
-    m_pdfRelinkConn = connect(viewport, &DocumentViewport::requestPdfRelink,
+    m_pdfSourcesConn = connect(viewport, &DocumentViewport::requestPdfSources,
             this, [this, viewport]() {
-        showPdfRelinkDialog(viewport);
+        showPdfSourcesDialog(viewport);
     });
-    
-    // Check if any PDF source is missing and show banner
-    Document* doc = viewport->document();
-    bool primaryMissing = doc && doc->hasPdfReference() && !doc->isPdfLoaded();
-    if (doc && (primaryMissing || doc->needsPdfRelink())) {
-        // Prefer the primary's filename; otherwise the first source flagged for relink.
-        QString missingName;
-        if (primaryMissing) {
-            missingName = QFileInfo(doc->pdfPath()).fileName();
-        } else {
-            for (const PdfSource& s : doc->pdfSources()) {
-                if (s.needsRelink) {
-                    missingName = QFileInfo(s.path).fileName();
-                    break;
-                }
-            }
-        }
-        viewport->showMissingPdfBanner(missingName);
-    } else if (doc) {
-        // All sources present or no PDF reference - ensure banner is hidden
-        viewport->hideMissingPdfBanner();
-    }
-    
-    // Update Link/Relink PDF menu action
-    if (m_relinkPdfAction) {
-        m_relinkPdfAction->setEnabled(doc != nullptr);
-        if (doc && doc->hasPdfReference()) {
-            m_relinkPdfAction->setText(tr("Relink PDF..."));
-        } else {
-            m_relinkPdfAction->setText(tr("Link PDF..."));
-        }
-    }
+    updatePdfSourceUi(viewport);
 }
 
 void MainWindow::updateLinkSlotButtons(DocumentViewport* viewport)
@@ -3191,80 +3155,62 @@ void MainWindow::updateLayerPanelForViewport(DocumentViewport* viewport) {
     }
 }
 
-// ============================================================================
-// Phase R.4: Unified PDF Relink Handler
-// ============================================================================
-
-void MainWindow::showPdfRelinkDialog(DocumentViewport* viewport)
+void MainWindow::updatePdfSourceUi(DocumentViewport* viewport)
 {
-    if (!viewport) return;
-    
+    Document* doc = viewport ? viewport->document() : nullptr;
+    if (!doc) {
+        if (m_pdfSourcesAction) m_pdfSourcesAction->setVisible(false);
+        return;
+    }
+
+    const QVector<PdfSourceHealth> health = doc->pdfSourceHealthSnapshot();
+    int repairCount = 0;
+    int affectedPages = 0;
+    QString singleName;
+    QStringList signatureParts;
+    for (const PdfSourceHealth& source : health) {
+        if (!source.requiresRepair()) continue;
+        ++repairCount;
+        affectedPages += source.unavailablePages;
+        singleName = source.title;
+        signatureParts.append(
+            QStringLiteral("%1:%2:%3")
+                .arg(source.sourceId)
+                .arg(static_cast<int>(source.status))
+                .arg(source.unavailablePages));
+    }
+
+    if (m_pdfSourcesAction) {
+        m_pdfSourcesAction->setVisible(!health.isEmpty());
+        m_pdfSourcesAction->setEnabled(!health.isEmpty());
+        m_pdfSourcesAction->setText(repairCount > 0
+            ? tr("Repair PDF Sources... (%1)").arg(repairCount)
+            : tr("PDF Sources..."));
+    }
+
+    if (repairCount > 0) {
+        viewport->showPdfSourceWarning(
+            repairCount, affectedPages,
+            repairCount == 1 ? singleName : QString(),
+            signatureParts.join(QLatin1Char('|')));
+    } else {
+        viewport->hidePdfSourceWarning();
+    }
+}
+
+void MainWindow::showPdfSourcesDialog(DocumentViewport* viewport)
+{
+    if (!viewport || !viewport->document()) return;
     Document* doc = viewport->document();
-    if (!doc) return;
-    
-    // Collect the ids of every source that still needs relinking, primary first.
-    // (Snapshot the ids up front because relinking mutates the source list.)
-    QStringList sourceIds;
-    const std::vector<PdfSource>& sources = doc->pdfSources();
-    for (size_t i = 0; i < sources.size(); ++i) {
-        const bool isPrimary = (i == 0);
-        // The primary can be "missing" either via its relink flag or by having a
-        // reference that failed to load (legacy detection).
-        bool missing = sources[i].needsRelink;
-        if (isPrimary && !missing) {
-            missing = doc->hasPdfReference() && !doc->isPdfLoaded();
-        }
-        if (missing) {
-            sourceIds.append(sources[i].id.isEmpty() ? QString() : sources[i].id);
-        }
-    }
-    // Fallback: no flagged source but legacy primary detection triggered the request.
-    if (sourceIds.isEmpty() && doc->hasPdfReference() && !doc->isPdfLoaded()) {
-        sourceIds.append(QString());  // primary
-    }
-
-    bool anyResolved = false;
-    for (const QString& sourceId : sourceIds) {
-        const PdfSource* s = doc->pdfSourceById(sourceId);
-        QString path = s ? s->path : doc->pdfPath();
-        QString hash = s ? s->hash : doc->pdfHash();
-        qint64 size = s ? s->size : doc->pdfSize();
-
-        PdfRelinkDialog dialog(path, hash, size, /*pdfIsLoaded*/ false, this);
-        if (dialog.exec() != QDialog::Accepted) {
-            // Cancel: stop iterating, leave remaining banners in place.
-            break;
-        }
-
-        PdfRelinkDialog::Result result = dialog.getResult();
-        if (result == PdfRelinkDialog::RelinkPdf) {
-            QString newPath = dialog.getNewPdfPath();
-            if (!newPath.isEmpty() && doc->relinkSource(sourceId, newPath)) {
-                anyResolved = true;
-            }
-        } else if (result == PdfRelinkDialog::ContinueWithoutPdf) {
-            doc->dismissSourceRelink(sourceId);
-            anyResolved = true;
-        }
-    }
-
-    if (anyResolved) {
-        if (!doc->needsPdfRelink()) {
-            viewport->hideMissingPdfBanner();
-        }
+    PdfSourcesDialog dialog(doc, this);
+    connect(&dialog, &PdfSourcesDialog::sourcesChanged, this, [this, viewport, doc]() {
         viewport->notifyPdfChanged();
         updateOutlinePanelForDocument(doc);
-        if (m_pagePanel) {
-            m_pagePanel->invalidateAllThumbnails();
-        }
-        if (m_relinkPdfAction) {
-            if (doc->hasPdfReference()) {
-                m_relinkPdfAction->setText(tr("Relink PDF..."));
-            } else {
-                m_relinkPdfAction->setText(tr("Link PDF..."));
-            }
-        }
-    }
+        if (m_pagePanel) m_pagePanel->invalidateAllThumbnails();
+        updatePdfSourceUi(viewport);
+    });
+    dialog.exec();
+    updatePdfSourceUi(viewport);
 }
 
 // ============================================================================
@@ -4419,6 +4365,75 @@ void MainWindow::handlePageTransferDrop(const QString& srcToken,
     }
 
     refreshDestinationAfterImport(destVp, clampedIndex);
+}
+
+void MainWindow::addPagesFromPdf(const QString& filePath)
+{
+    DocumentViewport* destination = currentViewport();
+    if (!destination || !destination->document()
+        || destination->document()->isEdgeless()) {
+        return;
+    }
+
+    QString pdfPath = filePath;
+    if (pdfPath.isEmpty()) {
+#ifdef Q_OS_ANDROID
+        pdfPath = PdfPickerAndroid::pickPdfFile();
+#elif defined(Q_OS_IOS)
+        PdfPickerIOS::pickPdfFile([this](const QString& picked) {
+            if (!picked.isEmpty()) addPagesFromPdf(picked);
+        });
+        return;
+#else
+        QSettings settings(QStringLiteral("SpeedyNote"), QStringLiteral("App"));
+        QString startDir = settings.value(QStringLiteral("FileDialogs/lastOpenDirectory")).toString();
+        if (startDir.isEmpty() || !QDir(startDir).exists()) startDir = QDir::homePath();
+        pdfPath = QFileDialog::getOpenFileName(
+            this, tr("Add Pages from PDF"), startDir,
+            tr("PDF Files (*.pdf);;All Files (*)"));
+        if (!pdfPath.isEmpty()) {
+            settings.setValue(QStringLiteral("FileDialogs/lastOpenDirectory"),
+                              QFileInfo(pdfPath).absolutePath());
+        }
+#endif
+    }
+    if (pdfPath.isEmpty()) return;
+
+    std::unique_ptr<Document> source =
+        Document::createForPdf(QFileInfo(pdfPath).completeBaseName(), pdfPath);
+    if (!source || !source->isPdfLoaded() || source->pdfPageCount() <= 0) {
+        QMessageBox::critical(
+            this, tr("PDF Error"),
+            tr("The selected PDF could not be opened:\n%1").arg(pdfPath));
+        return;
+    }
+
+    PageRangeSelectDialog rangeDialog(
+        source->pageCount(), this, tr("Add Pages from PDF"),
+        QFileInfo(pdfPath).fileName(), QStringLiteral("all"));
+    if (rangeDialog.exec() != QDialog::Accepted) return;
+
+    QStringList sourceUuids;
+    for (int index : rangeDialog.selectedIndices()) {
+        const QString uuid = source->pageUuidAt(index);
+        if (!uuid.isEmpty()) sourceUuids.append(uuid);
+    }
+    if (sourceUuids.isEmpty()) return;
+
+    if (currentViewport() != destination || !destination->document()) return;
+    const int insertIndex = qBound(
+        0, destination->currentPageIndex() + 1,
+        destination->document()->pageCount());
+    if (!destination->importPagesWithUndo(source.get(), sourceUuids, insertIndex)) {
+        QMessageBox::warning(
+            this, tr("PDF Import"),
+            tr("The selected PDF pages could not be added to this document."));
+        return;
+    }
+
+    refreshDestinationAfterImport(destination, insertIndex);
+    destination->scrollToPage(insertIndex);
+    updatePdfSourceUi(destination);
 }
 
 void MainWindow::openPdfDocument(const QString &filePath)
@@ -7556,6 +7571,9 @@ void MainWindow::setupPagePanelActionBar()
             vp->scrollToPage(targetPage);
         }
     });
+
+    connect(m_pagePanelActionBar, &PagePanelActionBar::addPdfPagesClicked,
+            this, [this]() { addPagesFromPdf(); });
     
     // Delete Page (first click): Store index, wait for confirmation
     // BUG-PG-002 FIX: Defer deletion until 5-second timer expires

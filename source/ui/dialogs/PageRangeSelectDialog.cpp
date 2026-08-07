@@ -9,20 +9,30 @@
 #include <QSet>
 #include <algorithm>
 
-PageRangeSelectDialog::PageRangeSelectDialog(int pageCount, QWidget* parent)
+PageRangeSelectDialog::PageRangeSelectDialog(int pageCount,
+                                             QWidget* parent,
+                                             const QString& title,
+                                             const QString& sourceName,
+                                             const QString& defaultRange)
     : QDialog(parent)
     , m_pageCount(pageCount)
 {
-    setWindowTitle(tr("Select Pages by Range"));
+    setWindowTitle(title.isEmpty() ? tr("Select Pages by Range") : title);
     setModal(true);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
 
-    QLabel* prompt = new QLabel(tr("Enter page numbers and/or ranges:"), this);
+    QLabel* prompt = new QLabel(
+        sourceName.isEmpty()
+            ? tr("Enter page numbers and/or ranges:")
+            : tr("Choose pages from %1:").arg(sourceName),
+        this);
     layout->addWidget(prompt);
 
     m_input = new QLineEdit(this);
     m_input->setPlaceholderText(tr("e.g. 3-7, 12"));
+    m_input->setText(defaultRange);
+    m_input->selectAll();
     layout->addWidget(m_input);
 
     QLabel* hint = new QLabel(tr("Valid pages: 1 to %1").arg(qMax(1, m_pageCount)), this);

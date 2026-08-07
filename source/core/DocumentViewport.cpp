@@ -461,35 +461,39 @@ void DocumentViewport::setDocument(Document* doc)
     emitScrollFractions();
 }
 
-// ===== Missing PDF Banner (Phase R.3) =====
+// ===== PDF source warning banner =====
 
-void DocumentViewport::showMissingPdfBanner(const QString& pdfName)
+void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
+                                            const QString& singleSourceName,
+                                            const QString& warningSignature)
 {
     if (!m_missingPdfBanner) {
         m_missingPdfBanner = new MissingPdfBanner(this);
         
-        // Connect signals
-        connect(m_missingPdfBanner, &MissingPdfBanner::locatePdfClicked,
-                this, [this]() { emit requestPdfRelink(); });
+        connect(m_missingPdfBanner, &MissingPdfBanner::reviewSourcesClicked,
+                this, [this]() { emit requestPdfSources(); });
         connect(m_missingPdfBanner, &MissingPdfBanner::dismissed,
-                this, [this]() { /* Banner handles its own hide animation */ });
+                this, [this]() {
+            m_dismissedPdfWarningSignature = m_pdfWarningSignature;
+        });
     }
     
-    m_missingPdfBanner->setPdfName(pdfName);
+    m_pdfWarningSignature = warningSignature;
+    m_missingPdfBanner->setSummary(sourceCount, affectedPages, singleSourceName);
     
-    // Position at top of viewport
     m_missingPdfBanner->setFixedWidth(width());
     m_missingPdfBanner->move(0, 0);
     
-    // Only animate if not already visible (avoid restart on redundant calls)
-    if (!m_missingPdfBanner->isVisible()) {
+    if (m_dismissedPdfWarningSignature != warningSignature
+        && !m_missingPdfBanner->isVisible()) {
         m_missingPdfBanner->showAnimated();
     }
 }
 
-void DocumentViewport::hideMissingPdfBanner()
+void DocumentViewport::hidePdfSourceWarning()
 {
-    // Only hide if banner exists and is visible (avoid redundant animation)
+    m_pdfWarningSignature.clear();
+    m_dismissedPdfWarningSignature.clear();
     if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
         m_missingPdfBanner->hideAnimated();
     }

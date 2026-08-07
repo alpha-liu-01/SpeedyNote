@@ -75,6 +75,11 @@ void PagePanelActionBar::setupUI()
     m_insertPageButton->setIconName("import");
     m_insertPageButton->setToolTip(tr("Insert Page After Current"));
     addButton(m_insertPageButton);
+
+    m_addPdfPagesButton = new ActionBarButton(this);
+    m_addPdfPagesButton->setIconName("pdf");
+    m_addPdfPagesButton->setToolTip(tr("Add Pages from PDF..."));
+    addButton(m_addPdfPagesButton);
     
     // Delete Page button (with undo support)
     m_deleteButton = new UndoDeleteButton(this);
@@ -123,6 +128,9 @@ void PagePanelActionBar::setupConnections()
     
     connect(m_insertPageButton, &ActionBarButton::clicked,
             this, &PagePanelActionBar::insertPageClicked);
+
+    connect(m_addPdfPagesButton, &ActionBarButton::clicked,
+            this, &PagePanelActionBar::addPdfPagesClicked);
     
     // Delete button signals (3-way: request, confirm, undo)
     // Use direct signal-to-signal connections to avoid trivial wrapper slots
@@ -227,6 +235,9 @@ void PagePanelActionBar::setDarkMode(bool darkMode)
     }
     if (m_insertPageButton) {
         m_insertPageButton->setDarkMode(darkMode);
+    }
+    if (m_addPdfPagesButton) {
+        m_addPdfPagesButton->setDarkMode(darkMode);
     }
     if (m_deleteButton) {
         m_deleteButton->setDarkMode(darkMode);

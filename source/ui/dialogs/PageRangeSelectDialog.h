@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QList>
+#include <QString>
 
 class QLineEdit;
 class QLabel;
@@ -23,7 +24,11 @@ public:
      * @param pageCount Total number of pages in the document (>= 1).
      * @param parent Parent widget.
      */
-    explicit PageRangeSelectDialog(int pageCount, QWidget* parent = nullptr);
+    explicit PageRangeSelectDialog(int pageCount,
+                                   QWidget* parent = nullptr,
+                                   const QString& title = QString(),
+                                   const QString& sourceName = QString(),
+                                   const QString& defaultRange = QString());
 
     /**
      * @brief The parsed 0-based page indices (sorted, unique, in-range).

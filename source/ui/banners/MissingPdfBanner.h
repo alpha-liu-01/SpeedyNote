@@ -7,7 +7,7 @@
 #include <QPropertyAnimation>
 
 /**
- * @brief Non-blocking notification banner for missing PDF files.
+ * @brief Non-blocking notification banner for unavailable PDF sources.
  * 
  * Appears at the top of the DocumentViewport when a document references
  * a PDF that cannot be found. Offers options to locate the PDF or dismiss.
@@ -26,10 +26,9 @@ public:
     explicit MissingPdfBanner(QWidget* parent = nullptr);
     
     /**
-     * @brief Set the name of the missing PDF file to display.
-     * @param pdfName Filename (not full path) of the missing PDF.
+     * @brief Set a source-aware warning summary.
      */
-    void setPdfName(const QString& pdfName);
+    void setSummary(int sourceCount, int affectedPages, const QString& singleSourceName = QString());
     
     /**
      * @brief Show the banner with slide-in animation.
@@ -43,9 +42,9 @@ public:
 
 signals:
     /**
-     * @brief Emitted when user clicks "Locate PDF" button.
+     * @brief Emitted when the user asks to review unavailable sources.
      */
-    void locatePdfClicked();
+    void reviewSourcesClicked();
     
     /**
      * @brief Emitted when user clicks "Dismiss" button.
