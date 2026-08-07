@@ -394,7 +394,7 @@ private slots:
     void notifyPageStructureChanged(Document* doc, int currentPage = -1);  // Helper: Update PagePanel after page add/remove
     void showPdfSourcesDialog(DocumentViewport* viewport);
     void updatePdfSourceUi(DocumentViewport* viewport);
-    void showPdfExportDialog();  // Phase 8: PDF Export dialog
+    void showExportDialog();
     void updateLinkSlotButtons(DocumentViewport* viewport);  // Phase D: Update subtoolbar slot buttons
     void applySubToolbarValuesToViewport(ToolType tool);  // Phase D: Apply subtoolbar presets to viewport (via signals)
     void applyAllSubToolbarValuesToViewport(DocumentViewport* viewport);  // Phase D: Apply ALL tool presets directly
@@ -616,7 +616,6 @@ private:
 
     QMenu *overflowMenu;
     QAction* m_pdfSourcesAction = nullptr;
-    QAction* m_exportPdfAction = nullptr;  // Phase 8: Export to PDF menu action
 
     // QListWidget *tabList;          // Horizontal tab bar
     // QStackedWidget *canvasStack;   // Holds multiple InkCanvas instances

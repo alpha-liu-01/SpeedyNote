@@ -38,8 +38,7 @@
 #include "ui/panels/FloatingTextEditor.h"  // Phase 2B: Floating text editor
 #include "objects/TextBoxObject.h"         // Phase 2B: TextBoxObject for editor
 #include <QMetaObject>                 // OCR queued invocations
-#include "ui/dialogs/BatchPdfExportDialog.h"   // Phase 3: Unified PDF export dialog
-#include "ui/dialogs/BatchSnbxExportDialog.h"  // Phase 3: Unified SNBX export dialog
+#include "ui/dialogs/BatchExportDialog.h"
 #include "pdf/MuPdfExporter.h"                 // Phase 8: PDF export engine
 #include <QClipboard>  // For clipboard signal connection
 #include <algorithm>   // Phase M.4: For std::sort in searchMarkdownNotes
@@ -1021,12 +1020,6 @@ void MainWindow::setupUi() {
         showPdfSourcesDialog(currentViewport());
     });
     
-    // PDF Export action (Ctrl+P)
-    m_exportPdfAction = overflowMenu->addAction(tr("Export to PDF..."));
-    m_exportPdfAction->setShortcut(ShortcutManager::instance()->keySequenceForAction("file.export_pdf"));
-    connect(m_exportPdfAction, &QAction::triggered, this, &MainWindow::showPdfExportDialog);
-
-    
     overflowMenu->addSeparator();
 
     // Per-document override panel. Replaces the standalone "OCR Language..."
@@ -1161,105 +1154,8 @@ void MainWindow::setupUi() {
     connect(m_navigationBar, &NavigationBar::fullscreenToggled, this, [this]() {
         toggleFullscreen();
     });
-    connect(m_navigationBar, &NavigationBar::shareClicked, this, [this]() {
-        // Phase 3: Export notebook as .snbx package using unified dialog
-        DocumentViewport* vp = currentViewport();
-        Document* doc = vp ? vp->document() : nullptr;
-        if (!doc) {
-            QMessageBox::warning(this, tr("Export Failed"), 
-                tr("No document is currently open."));
-            return;
-        }
-        
-        // Ensure document is saved before exporting
-        QString bundlePath = doc->bundlePath();
-        if (bundlePath.isEmpty()) {
-            QMessageBox::warning(this, tr("Export Failed"),
-                tr("Please save the document before exporting."));
-            return;
-        }
-        
-        // Show unified SNBX export dialog with current notebook
-        BatchSnbxExportDialog dialog(QStringList{bundlePath}, this);
-        if (dialog.exec() != QDialog::Accepted) {
-            return;
-        }
-        
-        // Single-file export: use direct export for immediate feedback
-        // (ExportQueueManager is for batch exports from Launcher)
-        QString outputDir = dialog.outputDirectory();
-        QString outputPath = outputDir + "/" + doc->name + ".snbx";
-        
-        // Auto-rename if file exists (with safety limit to prevent infinite loop)
-        if (QFile::exists(outputPath)) {
-            int counter = 1;
-            QString baseName = doc->name;
-            const int maxAttempts = 1000;  // Safety limit
-            while (QFile::exists(outputPath) && counter <= maxAttempts) {
-                outputPath = outputDir + "/" + baseName + QString(" (%1).snbx").arg(counter++);
-            }
-            if (counter > maxAttempts) {
-                QMessageBox::warning(this, tr("Export Failed"),
-                    tr("Could not find a unique filename. Please choose a different location."));
-                return;
-            }
-        }
-        
-        NotebookExporter::ExportOptions options;
-        options.includePdf = dialog.includePdf();
-        options.destPath = outputPath;
-        
-        QApplication::setOverrideCursor(Qt::WaitCursor);
-        // Plan B2: materialize imported PDF sources into bundled mini-PDFs before the
-        // recursive zip so the .snbx is self-contained (updates document.json + pdfs/).
-        if (m_searchEngine) m_searchEngine->cancelAndWait();
-        if (doc->needsMaterialization()) {
-            if (!doc->saveBundle(bundlePath, /*finalize=*/true)) {
-                QApplication::restoreOverrideCursor();
-                QMessageBox::warning(
-                    this, tr("Export Failed"),
-                    tr("PDF sources could not be finalized. Repair the unavailable "
-                       "sources and try again."));
-                return;
-            }
-        }
-        auto result = NotebookExporter::exportPackage(doc, options);
-        QApplication::restoreOverrideCursor();
-        
-        if (result.success) {
-#ifdef Q_OS_ANDROID
-            // Android: Share the exported file via share sheet
-            QJniObject activity = QNativeInterface::QAndroidApplication::context();
-            QJniObject::callStaticMethod<void>(
-                "org/speedynote/app/ShareHelper",
-                "shareFile",
-                "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)V",
-                activity.object<jobject>(),
-                QJniObject::fromString(outputPath).object<jstring>(),
-                QJniObject::fromString("application/octet-stream").object<jstring>()
-            );
-#elif defined(Q_OS_IOS)
-            IOSShareHelper::shareFile(outputPath, "application/octet-stream", tr("Share Notebook Package"));
-#else
-            // Desktop: Show success message
-            QString sizeStr;
-            if (result.fileSize < 1024) {
-                sizeStr = tr("%1 bytes").arg(result.fileSize);
-            } else if (result.fileSize < 1024 * 1024) {
-                sizeStr = tr("%1 KB").arg(result.fileSize / 1024);
-            } else {
-                double sizeMB = static_cast<double>(result.fileSize) / (1024.0 * 1024.0);
-                sizeStr = tr("%1 MB").arg(sizeMB, 0, 'f', 1);
-            }
-            QMessageBox::information(this, tr("Export Complete"),
-                tr("Notebook exported successfully.\n\nFile: %1\nSize: %2")
-                    .arg(QFileInfo(outputPath).fileName())
-                    .arg(sizeStr));
-#endif
-        } else {
-            QMessageBox::warning(this, tr("Export Failed"), result.errorMessage);
-        }
-    });
+    connect(m_navigationBar, &NavigationBar::shareClicked,
+            this, &MainWindow::showExportDialog);
     connect(m_navigationBar, &NavigationBar::rightSidebarToggled, this, [this](bool checked) {
         // Toggle markdown notes sidebar
         if (markdownNotesSidebar) {
@@ -1550,7 +1446,7 @@ void MainWindow::wireQActionDispatchers()
     wire("file.export",       [](MainWindow* w){
         if (w->m_navigationBar) emit w->m_navigationBar->shareClicked();
     });
-    wire("file.export_pdf",   [](MainWindow* w){ w->showPdfExportDialog(); });
+    wire("file.export_pdf",   [](MainWindow* w){ w->showExportDialog(); });
     wire("file.close_tab",    [](MainWindow* w){
         if (auto* tm = w->tabManager(); tm && tm->tabCount() > 0) {
             int idx = tm->currentIndex();
@@ -3266,15 +3162,15 @@ void MainWindow::showPdfSourcesDialog(DocumentViewport* viewport)
 }
 
 // ============================================================================
-// Phase 8: PDF Export Dialog
+// Combined PDF / notebook-package export dialog
 // ============================================================================
 
-void MainWindow::showPdfExportDialog()
+void MainWindow::showExportDialog()
 {
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    QString dialogTitle = tr("Share as PDF");
+    const QString dialogTitle = tr("Share Notebook");
 #else
-    QString dialogTitle = tr("Export to PDF");
+    const QString dialogTitle = tr("Export Notebook");
 #endif
     
     DocumentViewport* viewport = currentViewport();
@@ -3299,26 +3195,12 @@ void MainWindow::showPdfExportDialog()
         return;
     }
     
-    // Check if document is paged (PDF export only makes sense for paged documents)
-    // Note: BatchPdfExportDialog also detects edgeless, but we check here for better UX
-    if (doc->isEdgeless()) {
-        QMessageBox::warning(this, dialogTitle,
-                             tr("PDF export is only available for paged documents.\n"
-                                "Edgeless canvas export is not yet supported."));
-        return;
-    }
-    
     // Check for unsaved changes - require saving first
     if (doc->modified) {
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-        QString savePrompt = tr("The document has unsaved changes.\n"
-                                "Please save the document before sharing as PDF.\n\n"
-                                "Would you like to save now?");
-#else
-        QString savePrompt = tr("The document has unsaved changes.\n"
-                                "Please save the document before exporting to PDF.\n\n"
-                                "Would you like to save now?");
-#endif
+        const QString savePrompt = tr(
+            "The document has unsaved changes.\n"
+            "Please save the document before exporting.\n\n"
+            "Would you like to save now?");
         QMessageBox::StandardButton result = QMessageBox::question(
             this, tr("Save Document First"),
             savePrompt,
@@ -3335,14 +3217,72 @@ void MainWindow::showPdfExportDialog()
         }
     }
     
-    // Show the unified PDF export dialog with current notebook
-    BatchPdfExportDialog dialog(QStringList{bundlePath}, this);
+    BatchExportDialog dialog(QStringList{bundlePath}, this);
     if (dialog.exec() == QDialog::Accepted) {
+        if (dialog.selectedFormat() == BatchExportDialog::Snbx) {
+            const QString outputDir = dialog.outputDirectory();
+            QString outputPath = outputDir + "/" + doc->name + ".snbx";
+            int counter = 1;
+            while (QFile::exists(outputPath) && counter <= 1000) {
+                outputPath = outputDir + "/" + doc->name
+                    + QString(" (%1).snbx").arg(counter++);
+            }
+            if (counter > 1000) {
+                QMessageBox::warning(
+                    this, dialogTitle,
+                    tr("Could not find a unique filename. Please choose a different location."));
+                return;
+            }
+
+            NotebookExporter::ExportOptions options;
+            options.includePdf = dialog.includePdf();
+            options.destPath = outputPath;
+
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            if (m_searchEngine) m_searchEngine->cancelAndWait();
+            if (doc->needsMaterialization()
+                && !doc->saveBundle(bundlePath, /*finalize=*/true)) {
+                QApplication::restoreOverrideCursor();
+                QMessageBox::warning(
+                    this, tr("Export Failed"),
+                    tr("PDF sources could not be finalized. Repair the unavailable "
+                       "sources and try again."));
+                return;
+            }
+            const auto result = NotebookExporter::exportPackage(doc, options);
+            QApplication::restoreOverrideCursor();
+
+            if (!result.success) {
+                QMessageBox::warning(this, tr("Export Failed"), result.errorMessage);
+                return;
+            }
+#ifdef Q_OS_ANDROID
+            QJniObject activity = QNativeInterface::QAndroidApplication::context();
+            QJniObject::callStaticMethod<void>(
+                "org/speedynote/app/ShareHelper",
+                "shareFile",
+                "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;)V",
+                activity.object<jobject>(),
+                QJniObject::fromString(outputPath).object<jstring>(),
+                QJniObject::fromString("application/octet-stream").object<jstring>());
+#elif defined(Q_OS_IOS)
+            IOSShareHelper::shareFile(
+                outputPath, "application/octet-stream", tr("Share Notebook Package"));
+#else
+            const double sizeMb =
+                static_cast<double>(result.fileSize) / (1024.0 * 1024.0);
+            QMessageBox::information(
+                this, tr("Export Complete"),
+                tr("Notebook exported successfully.\n\nFile: %1\nSize: %2 MB")
+                    .arg(QFileInfo(outputPath).fileName())
+                    .arg(sizeMb, 0, 'f', 1));
+#endif
+            return;
+        }
+
         // Get valid bundles (dialog filters out edgeless)
-        QStringList validBundles = dialog.validBundles();
+        QStringList validBundles = dialog.validPdfBundles();
         if (validBundles.isEmpty()) {
-            // This shouldn't happen since we checked isEdgeless above,
-            // but handle it gracefully
             return;
         }
         

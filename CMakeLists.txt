@@ -1018,8 +1018,7 @@ set(APP_SOURCES
     source/ui/dialogs/PageRangeSelectDialog.cpp
     source/ui/dialogs/PdfSourcesDialog.cpp
     source/ui/dialogs/CopyPagesToDocDialog.cpp
-    source/ui/dialogs/BatchPdfExportDialog.cpp
-    source/ui/dialogs/BatchSnbxExportDialog.cpp
+    source/ui/dialogs/BatchExportDialog.cpp
     source/ui/dialogs/ExportResultsDialog.cpp
     source/ui/dialogs/DocumentSettingsDialog.cpp
     source/text/MarkdownNoteEntry.cpp

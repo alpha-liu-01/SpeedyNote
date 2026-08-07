@@ -153,6 +153,7 @@ private:
     // === Batch Export Helpers (Phase 3) ===
     void showPdfExportDialog(const QStringList& bundlePaths);
     void showSnbxExportDialog(const QStringList& bundlePaths);
+    void showExportDialog(const QStringList& bundlePaths, bool preferSnbx);
     
     // === Export Progress (Phase 3) ===
     void setupExportProgress();
