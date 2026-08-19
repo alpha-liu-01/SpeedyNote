@@ -180,10 +180,12 @@ void ShortcutManager::registerDefaults()
     registerAction("object.affinity_down", "Alt+[", tr("Decrease Affinity"), tr("Objects"));
     registerAction("object.affinity_background", "Alt+\\", tr("Send to Background"), tr("Objects"));
     
-    // ===== Object tool subtype / action mode =====
-    registerAction("object.mode_image", "I", tr("Image Object Tool"), tr("Objects"));
-    registerAction("object.mode_link", "Ctrl+.", tr("Link Object Tool"), tr("Objects"));
-    registerAction("object.mode_text", "Ctrl+T", tr("Text Object Tool"), tr("Objects"));
+    // ===== Object tool subtypes =====
+    registerAction("object.mode_image", "I", tr("Image Object Tool"), tr("Tools"));
+    registerAction("object.mode_link", "Ctrl+.", tr("Link Object Tool"), tr("Tools"));
+    registerAction("object.mode_text", "Ctrl+T", tr("Text Object Tool"), tr("Tools"));
+
+    // ===== Shared object action mode =====
     registerAction("object.mode_create", "Ctrl+6", tr("Object Add Mode"), tr("Objects"));
     registerAction("object.mode_select", "Ctrl+7", tr("Object Select Mode"), tr("Objects"));
     

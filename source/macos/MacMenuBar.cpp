@@ -390,8 +390,8 @@ void MacMenuBar::populateToolsMenu()
     // before applying the requested mode, matching the main toolbar.
     QMenu* ins = m_toolsMenu->addMenu(tr("Object Mode"));
     add(ins, "object.mode_image");
-    add(ins, "object.mode_text");
     add(ins, "object.mode_link");
+    add(ins, "object.mode_text");
     add(ins, "object.mode_create");
     add(ins, "object.mode_select");
 
