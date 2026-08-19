@@ -3072,8 +3072,8 @@ Esta ação não pode ser desfeita.</translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="380"/>
-        <source>Insert</source>
-        <translation>Inserir</translation>
+        <source>Object Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="390"/>
@@ -4090,6 +4090,16 @@ Remova a senha e tente novamente.</translation>
 </context>
 <context>
     <name>ObjectSelectActionBar</name>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="218"/>
+        <source>Add mode (click to switch to Select) (Ctrl+6)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="219"/>
+        <source>Select mode (click to switch to Add) (Ctrl+7)</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="17"/>
         <source>Lock/Unlock Aspect Ratio</source>
@@ -5297,23 +5307,23 @@ Tente um termo de pesquisa diferente.</translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="184"/>
-        <source>Image Insert Mode</source>
-        <translation>Modo de inserção de imagem</translation>
+        <source>Image Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="185"/>
-        <source>Link Insert Mode</source>
-        <translation>Modo de inserção de link</translation>
+        <source>Link Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="186"/>
-        <source>Text Insert Mode</source>
-        <translation>Modo de inserção de texto</translation>
+        <source>Text Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="187"/>
-        <source>Object Create Mode</source>
-        <translation>Modo de criação de objeto</translation>
+        <source>Object Add Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="188"/>
@@ -5734,6 +5744,16 @@ e selecione &quot;Adicionar estrela&quot; para incluí-lo aqui.</translation>
 <context>
     <name>Toolbar</name>
     <message>
+        <location filename="../../source/ui/Toolbar.cpp" line="91"/>
+        <source>Link Object Tool (Ctrl+.)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/Toolbar.cpp" line="99"/>
+        <source>Text Object Tool (Ctrl+T)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../source/ui/Toolbar.cpp" line="40"/>
         <source>Pen Tool (B)</source>
         <translation>Ferramenta Caneta (B)</translation>
@@ -5760,8 +5780,8 @@ e selecione &quot;Adicionar estrela&quot; para incluí-lo aqui.</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="82"/>
-        <source>Object Select Tool (V)</source>
-        <translation>Ferramenta de Seleção de Objeto (V)</translation>
+        <source>Image Object Tool (I)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="91"/>

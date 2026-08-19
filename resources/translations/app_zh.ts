@@ -2905,8 +2905,8 @@ This action cannot be undone.</source>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="380"/>
-        <source>Insert</source>
-        <translation type="unfinished">插入</translation>
+        <source>Object Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="390"/>
@@ -3920,6 +3920,16 @@ Please remove the password and try again.</source>
 </context>
 <context>
     <name>ObjectSelectActionBar</name>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="218"/>
+        <source>Add mode (click to switch to Select) (Ctrl+6)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="219"/>
+        <source>Select mode (click to switch to Add) (Ctrl+7)</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="17"/>
         <source>Lock/Unlock Aspect Ratio</source>
@@ -5123,23 +5133,23 @@ Try a different search term.</source>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="184"/>
-        <source>Image Insert Mode</source>
-        <translation type="unfinished">图片插入模式</translation>
+        <source>Image Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="185"/>
-        <source>Link Insert Mode</source>
-        <translation type="unfinished">链接插入模式</translation>
+        <source>Link Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="186"/>
-        <source>Text Insert Mode</source>
-        <translation type="unfinished">文字插入模式</translation>
+        <source>Text Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="187"/>
-        <source>Object Create Mode</source>
-        <translation type="unfinished">物品创建模式</translation>
+        <source>Object Add Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="188"/>
@@ -5560,6 +5570,16 @@ and select &quot;Star&quot; to add it here.</source>
 <context>
     <name>Toolbar</name>
     <message>
+        <location filename="../../source/ui/Toolbar.cpp" line="91"/>
+        <source>Link Object Tool (Ctrl+.)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/Toolbar.cpp" line="99"/>
+        <source>Text Object Tool (Ctrl+T)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../source/ui/Toolbar.cpp" line="40"/>
         <source>Pen Tool (B)</source>
         <translation type="unfinished">钢笔工具 (B)</translation>
@@ -5586,8 +5606,8 @@ and select &quot;Star&quot; to add it here.</source>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="82"/>
-        <source>Object Select Tool (V)</source>
-        <translation type="unfinished">物品选中工具 (V)</translation>
+        <source>Image Object Tool (I)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="91"/>

@@ -3072,8 +3072,8 @@ Esta acción no se puede deshacer.</translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="380"/>
-        <source>Insert</source>
-        <translation>Insertar</translation>
+        <source>Object Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/macos/MacMenuBar.cpp" line="390"/>
@@ -4090,6 +4090,16 @@ Elimine la contraseña e inténtelo de nuevo.</translation>
 </context>
 <context>
     <name>ObjectSelectActionBar</name>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="218"/>
+        <source>Add mode (click to switch to Select) (Ctrl+6)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="219"/>
+        <source>Select mode (click to switch to Add) (Ctrl+7)</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <location filename="../../source/ui/actionbars/ObjectSelectActionBar.cpp" line="17"/>
         <source>Lock/Unlock Aspect Ratio</source>
@@ -5297,23 +5307,23 @@ Prueba con otro término de búsqueda.</translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="184"/>
-        <source>Image Insert Mode</source>
-        <translation>Modo de inserción de imagen</translation>
+        <source>Image Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="185"/>
-        <source>Link Insert Mode</source>
-        <translation>Modo de inserción de enlace</translation>
+        <source>Link Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="186"/>
-        <source>Text Insert Mode</source>
-        <translation>Modo de inserción de texto</translation>
+        <source>Text Object Tool</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="187"/>
-        <source>Object Create Mode</source>
-        <translation>Modo de creación de objetos</translation>
+        <source>Object Add Mode</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/core/ShortcutManager.cpp" line="188"/>
@@ -5734,6 +5744,16 @@ y selecciona &quot;Destacar&quot; para añadirlo aquí.</translation>
 <context>
     <name>Toolbar</name>
     <message>
+        <location filename="../../source/ui/Toolbar.cpp" line="91"/>
+        <source>Link Object Tool (Ctrl+.)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/ui/Toolbar.cpp" line="99"/>
+        <source>Text Object Tool (Ctrl+T)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../../source/ui/Toolbar.cpp" line="40"/>
         <source>Pen Tool (B)</source>
         <translation>Herramienta Pluma (B)</translation>
@@ -5760,8 +5780,8 @@ y selecciona &quot;Destacar&quot; para añadirlo aquí.</translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="82"/>
-        <source>Object Select Tool (V)</source>
-        <translation>Herramienta Selección de objetos (V)</translation>
+        <source>Image Object Tool (I)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../../source/ui/Toolbar.cpp" line="91"/>
