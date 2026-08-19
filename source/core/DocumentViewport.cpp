@@ -341,17 +341,12 @@ void DocumentViewport::setDocument(Document* doc)
     }
     m_backtickHeld = false;  // Reset key tracking for new document
     
-    // Clear object selection (pointers refer to old document's objects)
-    // Must be done BEFORE changing m_document to avoid dangling pointer access
+    // Cancel live object previews while their source objects are still valid,
+    // then clear selection before changing m_document to avoid dangling access.
+    cancelObjectPointerGesture();
     bool hadSelection = !m_selectedObjects.isEmpty();
     m_selectedObjects.clear();
     m_hoveredObject = nullptr;
-    m_isDraggingObjects = false;
-    m_isResizingObject = false;
-    m_isCreatingTextBox = false;
-    m_resizeObjectPageIndex = -1;
-    m_objectOriginalPositions.clear();
-    m_objectOriginalPageIndices.clear();
     
     // Clear undo/redo stacks (actions refer to old document)
     bool hadUndo = canUndo();
@@ -931,7 +926,14 @@ void DocumentViewport::setObjectInsertMode(ObjectInsertMode mode)
     if (m_objectInsertMode == mode) {
         return;
     }
-    
+
+    // A mode change must not let an in-flight gesture complete under stale UI
+    // state (most visibly, a Text rubber band creating after Image is chosen).
+    if (m_currentTool == ToolType::ObjectSelect
+        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
+            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+        cancelObjectPointerGesture();
+    }
     m_objectInsertMode = mode;
     emit objectInsertModeChanged(mode);
 #ifdef SPEEDYNOTE_DEBUG
@@ -944,8 +946,16 @@ void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
     if (m_objectActionMode == mode) {
         return;
     }
-    
+
+    // The effective mode is cached at press time. Cancel the active gesture
+    // instead of allowing release to perform the old mode after the toggle.
+    if (m_currentTool == ToolType::ObjectSelect
+        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
+            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+        cancelObjectPointerGesture();
+    }
     m_objectActionMode = mode;
+    m_objectGestureActionMode = mode;
     emit objectActionModeChanged(mode);
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Object action mode changed to:" << (mode == ObjectActionMode::Select ? "Select" : "Create");
@@ -972,6 +982,45 @@ void DocumentViewport::beginObjectPointerGesture(const PointerEvent& pe)
         pe.source == PointerEvent::Mouse ? pe.button : Qt::NoButton;
     m_objectGestureActionMode = effectiveObjectActionModeForPointer(
         m_objectActionMode, pe.source, pe.button);
+}
+
+void DocumentViewport::cancelObjectPointerGesture()
+{
+    // Drag and resize previews mutate the live object. Restore their snapshots
+    // so Escape, a tool switch, or a mode switch is a true cancellation rather
+    // than an untracked document edit with no undo entry or dirty signal.
+    if (m_isDraggingObjects) {
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj) continue;
+            auto it = m_objectOriginalPositions.constFind(obj->id);
+            if (it != m_objectOriginalPositions.constEnd()) {
+                obj->position = *it;
+            }
+        }
+    }
+
+    if (m_isResizingObject && !m_selectedObjects.isEmpty()) {
+        if (InsertedObject* obj = m_selectedObjects.first()) {
+            obj->position = m_resizeOriginalPosition;
+            obj->size = m_resizeOriginalSize;
+            obj->rotation = m_resizeOriginalRotation;
+        }
+    }
+
+    m_isDraggingObjects = false;
+    m_isCreatingTextBox = false;
+    m_isResizingObject = false;
+    m_objectResizeHandle = HandleHit::None;
+    m_resizeObjectPageIndex = -1;
+    m_objectOriginalPositions.clear();
+    m_objectOriginalPageIndices.clear();
+    m_objectDragBackgroundSnapshot = QPixmap();
+    m_dragObjectRenderedCache = QPixmap();
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;
+    m_hardwareEraserActive = false;
+    resetObjectPointerGesture();
+    update();
 }
 
 void DocumentViewport::resetObjectPointerGesture()
@@ -6443,6 +6492,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             }
 
             if (!href.isEmpty()) {
+                cancelObjectPointerGesture();
                 QDesktopServices::openUrl(QUrl(href));
                 return;
             }
@@ -6467,6 +6517,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     if (objClickCount == 2 && hitObject) {
         const QString t = hitObject->type();
         if (t == QLatin1String("textbox") || t == QLatin1String("ocr_text")) {
+            cancelObjectPointerGesture();
             emit openTextEditorRequested(hitObject);
             return;
         }
@@ -6795,22 +6846,11 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 
 void DocumentViewport::clearObjectSelection()
 {
+    cancelObjectPointerGesture();
+
     bool hadSelection = !m_selectedObjects.isEmpty();
     m_selectedObjects.clear();
     m_hoveredObject = nullptr;
-    m_isDraggingObjects = false;
-    m_isCreatingTextBox = false;
-    m_isResizingObject = false;
-    m_objectResizeHandle = HandleHit::None;
-    m_resizeObjectPageIndex = -1;
-    m_objectOriginalPositions.clear();
-    m_objectOriginalPageIndices.clear();
-    m_objectDragBackgroundSnapshot = QPixmap();
-    m_dragObjectRenderedCache = QPixmap();
-    m_pointerActive = false;
-    m_activeSource = PointerEvent::Unknown;
-    m_hardwareEraserActive = false;
-    resetObjectPointerGesture();
     if (hadSelection) {
         for (int p : m_pendingThumbnailPages)
             emit pageModified(p);
@@ -10759,7 +10799,7 @@ bool DocumentViewport::handleEscapeKey()
     // Priority 2: Cancel an in-progress ObjectSelect gesture.
     if (m_currentTool == ToolType::ObjectSelect
         && (m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
-        clearObjectSelection();
+        cancelObjectPointerGesture();
         return true;
     }
 

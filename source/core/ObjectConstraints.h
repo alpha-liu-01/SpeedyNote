@@ -17,6 +17,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QSizeF>
+#include <QtNumeric>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -125,20 +126,29 @@ inline int integerShrinkDivisor(const QSizeF& sourceSize,
                                 const QSizeF& targetSize,
                                 qreal maxFraction = 2.0 / 3.0)
 {
-    if (sourceSize.width() <= 0.0 || sourceSize.height() <= 0.0
-        || targetSize.width() <= 0.0 || targetSize.height() <= 0.0
-        || maxFraction <= 0.0) {
+    const auto finitePositive = [](qreal value) {
+        return qIsFinite(value) && value > 0.0;
+    };
+    if (!finitePositive(sourceSize.width()) || !finitePositive(sourceSize.height())
+        || !finitePositive(targetSize.width()) || !finitePositive(targetSize.height())
+        || !finitePositive(maxFraction)) {
         return 1;
     }
 
     const qreal maxWidth = targetSize.width() * maxFraction;
     const qreal maxHeight = targetSize.height() * maxFraction;
+    if (!finitePositive(maxWidth) || !finitePositive(maxHeight)) {
+        return 1;
+    }
     if (sourceSize.width() <= maxWidth && sourceSize.height() <= maxHeight) {
         return 1;
     }
 
     const qreal required = std::max(sourceSize.width() / maxWidth,
                                     sourceSize.height() / maxHeight);
+    if (!qIsFinite(required)) {
+        return 1;
+    }
     const qreal rounded = std::ceil(required);
     if (rounded >= static_cast<qreal>(std::numeric_limits<int>::max())) {
         return std::numeric_limits<int>::max();

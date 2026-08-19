@@ -3101,6 +3101,7 @@ private:
         Qt::MouseButton button);
 
     void beginObjectPointerGesture(const PointerEvent& pe);
+    void cancelObjectPointerGesture();
     void resetObjectPointerGesture();
     
     /**
