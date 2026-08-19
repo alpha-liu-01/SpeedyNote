@@ -7395,13 +7395,13 @@ void DocumentViewport::insertImageFromClipboard()
         imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
     }
     
-    // 3. Position at viewport center
-    // Paged mode: an image larger than the page could never be contained by
-    // it, so shrink to fit before deciding where the top-left goes.
-    if (!m_document->isEdgeless()) {
-        imgObj->size = ObjectConstraints::shrinkToFit(
-            imgObj->size, m_document->pageSizeAt(m_currentPageIndex));
-    }
+    // 3. Scale by the smallest whole-number divisor that keeps the image
+    // within two-thirds of its page (or one edgeless tile), then center it.
+    const QSizeF insertionBounds = m_document->isEdgeless()
+        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
+        : m_document->pageSizeAt(m_currentPageIndex);
+    imgObj->size = ObjectConstraints::shrinkByIntegerDivisor(
+        imgObj->size, insertionBounds);
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
@@ -7541,13 +7541,13 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
     }
     
-    // 3. Position at viewport center
-    // Paged mode: an image larger than the page could never be contained by
-    // it, so shrink to fit before deciding where the top-left goes.
-    if (!m_document->isEdgeless()) {
-        imgObj->size = ObjectConstraints::shrinkToFit(
-            imgObj->size, m_document->pageSizeAt(m_currentPageIndex));
-    }
+    // 3. Scale by the smallest whole-number divisor that keeps the image
+    // within two-thirds of its page (or one edgeless tile), then center it.
+    const QSizeF insertionBounds = m_document->isEdgeless()
+        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
+        : m_document->pageSizeAt(m_currentPageIndex);
+    imgObj->size = ObjectConstraints::shrinkByIntegerDivisor(
+        imgObj->size, insertionBounds);
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     

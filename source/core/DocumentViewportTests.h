@@ -548,6 +548,71 @@ public:
         printf("PASSED\n");
         return true;
     }
+
+    /**
+     * @brief Test whole-number scaling for freshly inserted images.
+     */
+    static bool testIntegerImageInsertScaling() {
+        printf("  testIntegerImageInsertScaling... ");
+
+        const QSizeF target(900, 1200);  // Two-thirds bounds: 600 x 800
+
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(500, 700), target) != 1
+            || ObjectConstraints::shrinkByIntegerDivisor(QSizeF(500, 700), target)
+                != QSizeF(500, 700)) {
+            printf("FAILED: fitting images should remain unchanged\n");
+            return false;
+        }
+
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(600, 800), target) != 1) {
+            printf("FAILED: exact two-thirds boundary should not shrink\n");
+            return false;
+        }
+
+        QSizeF wide = ObjectConstraints::shrinkByIntegerDivisor(
+            QSizeF(1800, 300), target);
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(1800, 300), target) != 3
+            || wide != QSizeF(600, 100)) {
+            printf("FAILED: width-driven image should use divisor 3\n");
+            return false;
+        }
+
+        QSizeF tall = ObjectConstraints::shrinkByIntegerDivisor(
+            QSizeF(300, 2400), target);
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(300, 2400), target) != 3
+            || tall != QSizeF(100, 800)) {
+            printf("FAILED: height-driven image should use divisor 3\n");
+            return false;
+        }
+
+        const QSizeF bothSource(2400, 2700);
+        QSizeF both = ObjectConstraints::shrinkByIntegerDivisor(bothSource, target);
+        if (ObjectConstraints::integerShrinkDivisor(bothSource, target) != 4
+            || both != QSizeF(600, 675)
+            || !qFuzzyCompare(both.width() / both.height(),
+                              bothSource.width() / bothSource.height())) {
+            printf("FAILED: both-axis scaling should use one aspect-safe divisor\n");
+            return false;
+        }
+
+        const QSizeF edgeless = ObjectConstraints::shrinkByIntegerDivisor(
+            QSizeF(4000, 3000),
+            QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE));
+        if (edgeless != QSizeF(4000.0 / 6.0, 500)) {
+            printf("FAILED: edgeless tile should use divisor 6\n");
+            return false;
+        }
+
+        const QSizeF source(1200, 900);
+        if (ObjectConstraints::shrinkByIntegerDivisor(source, QSizeF()) != source
+            || ObjectConstraints::shrinkByIntegerDivisor(QSizeF(), target) != QSizeF()) {
+            printf("FAILED: invalid dimensions should be left unchanged\n");
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
     
     /**
      * @brief Test group containment and the DocumentViewport wrappers.
@@ -644,6 +709,7 @@ public:
         runTest(testPointerEvents, "testPointerEvents");
         runTest(testObjectAlternateMouseMode, "testObjectAlternateMouseMode");
         runTest(testObjectPageContainment, "testObjectPageContainment");
+        runTest(testIntegerImageInsertScaling, "testIntegerImageInsertScaling");
         runTest(testObjectGroupContainment, "testObjectGroupContainment");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
