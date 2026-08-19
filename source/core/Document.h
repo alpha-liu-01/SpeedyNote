@@ -100,13 +100,14 @@ struct LayerDefinition {
 /**
  * @brief A single PDF source registered with a document.
  *
- * A document owns an ordered list of sources. Index 0 is the "primary" source
- * (the PDF a document was born from), which is mirrored to the legacy top-level
+ * A document owns an ordered list of sources. An explicit flag identifies the
+ * optional primary source (the PDF a document was born from); list position is
+ * not significant. The primary is mirrored to the legacy top-level
  * pdf_path/pdf_hash/pdf_size manifest keys for backward compatibility. A page
  * references its source by id via Page::pdfSourceId (empty id = primary).
  *
- * bundledFile / pageMap are reserved for the mini-PDF materialization step and
- * remain unused until that later phase.
+ * bundledFile / pageMap describe the compact in-bundle fallback generated for
+ * pages imported from non-primary sources.
  */
 struct PdfSource {
     QString id;                 ///< UUID identifying this source within the document
@@ -117,9 +118,35 @@ struct PdfSource {
     bool bundled = false;       ///< True if materialized into the bundle (mini-PDF)
     QString bundledFile;        ///< Relative path of the bundled mini-PDF (when bundled)
     QHash<int,int> pageMap;     ///< Original PDF page -> bundled-file page (when bundled)
-    bool needsRelink = false;   ///< True when the source file could not be located on load
     bool primary = false;       ///< True for the document's own base PDF (never bundled/minified,
                                 ///< mirrored to legacy pdf_path). Imported sources are non-primary.
+};
+
+enum class PdfSourceHealthStatus {
+    AvailableExternal,
+    AvailableRelative,
+    AvailableBundled,
+    PartialBundled,
+    Missing,
+    Unreadable,
+    IdentityMismatch
+};
+
+struct PdfSourceHealth {
+    QString sourceId;           ///< Empty for the primary source, otherwise the registry UUID
+    QString title;
+    QString activePath;
+    PdfSourceHealthStatus status = PdfSourceHealthStatus::Missing;
+    int referencedPages = 0;
+    int unavailablePages = 0;
+
+    bool requiresRepair() const {
+        return unavailablePages > 0
+            && (status == PdfSourceHealthStatus::PartialBundled
+            || status == PdfSourceHealthStatus::Missing
+            || status == PdfSourceHealthStatus::Unreadable
+            || status == PdfSourceHealthStatus::IdentityMismatch);
+    }
 };
 
 // ============================================================================
@@ -943,25 +970,6 @@ public:
     void setPdfRelativePath(const QString& path) { if (PdfSource* s = primarySource()) s->relativePath = path; }
     
     /**
-     * @brief Check if PDF needs to be relinked.
-     * @return True if neither absolute nor relative path could locate the PDF.
-     * 
-     * Phase SHARE: Set by loadBundle() when PDF path resolution fails.
-     * DocumentManager checks this flag and shows PdfRelinkDialog if true.
-     */
-    bool needsPdfRelink() const {
-        for (const PdfSource& s : m_pdfSources) { if (s.needsRelink) return true; }
-        return false;
-    }
-    
-    /**
-     * @brief Clear the PDF relink flag on all sources.
-     * 
-     * Call after successfully relinking or if user chooses to continue without PDF.
-     */
-    void clearNeedsPdfRelink() { for (PdfSource& s : m_pdfSources) s.needsRelink = false; }
-    
-    /**
      * @brief Get the primary PDF provider for advanced operations.
      * @return Pointer to the provider, or nullptr if not loaded.
      * 
@@ -975,24 +983,14 @@ public:
      * @return True if loaded successfully.
      * 
      * If a PDF is already loaded, it will be unloaded first.
-     * Sets the primary source path even if loading fails (for relink functionality).
+     * Sets the primary source path even if loading fails so it can be repaired later.
      */
     bool loadPdf(const QString& path);
     
     /**
-     * @brief Relink to a different PDF file.
-     * @param newPath Path to the new PDF file.
-     * @return True if the new PDF was loaded successfully.
-     * 
-     * Use this when the user locates a moved/renamed PDF.
-     * Marks the document as modified if successful.
-     */
-    bool relinkPdf(const QString& newPath);
-    
-    /**
      * @brief Unload the PDF and clear the reference.
      * 
-     * Releases PDF resources but keeps the path for potential relink.
+     * Releases PDF resources but keeps the source metadata for later recovery.
      */
     void unloadPdf();
     
@@ -1125,6 +1123,36 @@ public:
     int pdfSourceCount() const { return static_cast<int>(m_pdfSources.size()); }
 
     /**
+     * @brief Probe every PDF source and return its current runtime health.
+     *
+     * Candidate selection is shared with providerForSource(): a matching external
+     * absolute path, then a matching bundle-relative full PDF, then the bundled
+     * mini-PDF fallback. Providers are opened while probing so corrupt files are
+     * distinguished from merely missing files.
+     */
+    QVector<PdfSourceHealth> pdfSourceHealthSnapshot() const;
+
+    /**
+     * @brief Number of notebook pages backed by a source.
+     * @param sourceId Empty for the primary source.
+     */
+    int notebookPageCountForSource(const QString& sourceId) const;
+
+    /**
+     * @brief Locate a moved source without changing its stored identity.
+     *
+     * When a hash/size is stored the candidate must match. Legacy hashless sources
+     * establish their identity from the first successfully located file.
+     */
+    bool locateSource(const QString& sourceId, const QString& newPath);
+
+    /**
+     * @brief Clear cached runtime resolution so the next health query retries a source.
+     * @param sourceId Empty for the primary source.
+     */
+    void retryPdfSource(const QString& sourceId) const;
+
+    /**
      * @brief Look up a source by id. Empty id resolves to the primary.
      * @return Pointer into m_pdfSources, or nullptr if not found.
      */
@@ -1158,29 +1186,20 @@ public:
     QString registerSource(const QString& path, const QString& hash, qint64 size, bool bundled = false);
 
     /**
-     * @brief Relink a specific source to a new file path.
-     * @param sourceId Source id (empty = primary source).
-     * @return True if the new file loaded successfully.
-     */
-    bool relinkSource(const QString& sourceId, const QString& newPath);
-
-    /**
-     * @brief Continue without a source: drop its file reference and clear its relink flag.
-     * @param sourceId Source id (empty = primary source).
-     *
-     * For the primary source this is equivalent to clearPdfReference(). For a non-primary
-     * source, its path/relative/bundled reference is cleared so pages backed by it render a
-     * blank background without repeatedly prompting for relink. The source id stays valid.
-     */
-    void dismissSourceRelink(const QString& sourceId);
-
-    /**
      * @brief Ids of sources not referenced by any page (candidates for cleanup).
      *
      * Used by later plans (page delete / save cleanup). Provided here so the
      * registry API is complete.
      */
     QStringList unreferencedSourceIds() const;
+
+    /**
+     * @brief Keep a source alive for this session while undo/redo snapshots refer to it.
+     *
+     * The retention is runtime-only. A later session, which has no matching undo
+     * history, can prune the source normally.
+     */
+    void retainPdfSourceForUndo(const QString& sourceId);
 
     /**
      * @brief Drop PDF sources no page references anymore (Plan A2 / Q7.2).
@@ -1803,6 +1822,14 @@ private:
     /// load; other sources open on first render. Mutable so providerForSource() (used
     /// from const render paths) can populate the cache.
     mutable std::map<QString, std::unique_ptr<PdfProvider>> m_pdfProviders;
+    /// Runtime path and page-number space used by each cached provider.
+    mutable std::map<QString, QString> m_pdfProviderPaths;
+    mutable std::map<QString, qint64> m_pdfProviderPathSizes;
+    mutable std::map<QString, qint64> m_pdfProviderPathModifiedTimes;
+    mutable QSet<QString> m_pdfProvidersUsingBundled;
+    mutable QSet<QString> m_pdfProvidersUsingRelative;
+    mutable std::map<QString, PdfSourceHealthStatus> m_pdfSourceFailures;
+    QSet<QString> m_undoRetainedPdfSourceIds;
 
     // ===== Private PDF source helpers =====
     /// The primary source (the document's own base PDF, flagged primary), or nullptr
@@ -1818,6 +1845,20 @@ private:
     }
     /// Ensure a primary source exists, creating one (flagged primary) if needed.
     PdfSource& ensurePrimarySource();
+    struct PdfSourceOpenResult {
+        std::unique_ptr<PdfProvider> provider;
+        QString path;
+        PdfSourceHealthStatus failureStatus = PdfSourceHealthStatus::Missing;
+        bool bundled = false;
+        bool relative = false;
+    };
+    PdfSourceOpenResult openBestPdfSourceCandidate(const PdfSource& source) const;
+    void cachePdfProviderPath(const QString& registryId, const QString& path) const;
+    bool cachedPdfProviderPathIsCurrent(const QString& registryId) const;
+    void clearCachedPdfProvider(const QString& registryId) const;
+    QString normalizedPdfSourceId(const PdfSource& source) const {
+        return source.primary ? QString() : source.id;
+    }
     /// The primary provider without lazy creation, or nullptr if not open.
     PdfProvider* primaryProvider() const {
         const PdfSource* s = primarySource();

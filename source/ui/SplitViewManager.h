@@ -218,6 +218,13 @@ signals:
      */
     void searchMarkerActivated(DocumentViewport* vp, int pageIndex, qreal normY, int matchIndex);
 
+    /**
+     * @brief Emitted when a floating page wheel requests direct page entry.
+     *
+     * The originating pane is made active before this signal is emitted.
+     */
+    void jumpToPageRequested();
+
 private slots:
     void onLeftViewportChanged(DocumentViewport* vp);
     void onRightViewportChanged(DocumentViewport* vp);

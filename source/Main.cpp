@@ -613,6 +613,8 @@ static int runTests(const QString& testType)
         success = DocumentTests::runAllTests();
     } else if (testType == "notebooklibrary") {
         success = NotebookLibraryTests::runAllTests();
+    } else if (testType == "viewport-unit") {
+        success = DocumentViewportTests::runUnitTests();
     } else if (testType == "linkobject") {
         success = LinkObjectTests::runAllTests();
     } else if (testType == "pdfexporter") {
@@ -942,6 +944,8 @@ int main(int argc, char* argv[])
             testToRun = "document";
         } else if (arg == "--test-notebooklibrary") {
             testToRun = "notebooklibrary";
+        } else if (arg == "--test-viewport-unit") {
+            testToRun = "viewport-unit";
         } else if (arg == "--test-viewport") {
             runViewportTests = true;
         } else if (arg == "--test-buttons") {

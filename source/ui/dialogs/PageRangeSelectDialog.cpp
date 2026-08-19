@@ -9,20 +9,30 @@
 #include <QSet>
 #include <algorithm>
 
-PageRangeSelectDialog::PageRangeSelectDialog(int pageCount, QWidget* parent)
+PageRangeSelectDialog::PageRangeSelectDialog(int pageCount,
+                                             QWidget* parent,
+                                             const QString& title,
+                                             const QString& sourceName,
+                                             const QString& defaultRange)
     : QDialog(parent)
     , m_pageCount(pageCount)
 {
-    setWindowTitle(tr("Select Pages by Range"));
+    setWindowTitle(title.isEmpty() ? tr("Select Pages by Range") : title);
     setModal(true);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
 
-    QLabel* prompt = new QLabel(tr("Enter page numbers and/or ranges:"), this);
+    QLabel* prompt = new QLabel(
+        sourceName.isEmpty()
+            ? tr("Enter page numbers and/or ranges:")
+            : tr("Choose pages from %1:").arg(sourceName),
+        this);
     layout->addWidget(prompt);
 
     m_input = new QLineEdit(this);
     m_input->setPlaceholderText(tr("e.g. 3-7, 12"));
+    m_input->setText(defaultRange);
+    m_input->selectAll();
     layout->addWidget(m_input);
 
     QLabel* hint = new QLabel(tr("Valid pages: 1 to %1").arg(qMax(1, m_pageCount)), this);
@@ -86,24 +96,34 @@ QList<int> PageRangeSelectDialog::parseRange(const QString& text, int pageCount)
     for (const QString& part : parts) {
         const QRegularExpressionMatch rangeMatch = rangePattern.match(part);
         if (rangeMatch.hasMatch()) {
-            int start = rangeMatch.captured(1).toInt();
-            int end = rangeMatch.captured(2).toInt();
+            bool startOk = false;
+            bool endOk = false;
+            qint64 start = rangeMatch.captured(1).toLongLong(&startOk);
+            qint64 end = rangeMatch.captured(2).toLongLong(&endOk);
+            if (!startOk || !endOk) {
+                continue;
+            }
             if (start > end) {
                 std::swap(start, end);
             }
-            for (int p = start; p <= end; ++p) {
-                if (p >= 1 && p <= pageCount) {
-                    seen.insert(p - 1);  // 1-based input -> 0-based index
-                }
+            start = qMax<qint64>(start, 1);
+            end = qMin<qint64>(end, pageCount);
+            if (start > end) {
+                continue;
+            }
+            for (qint64 p = start; ; ++p) {
+                seen.insert(static_cast<int>(p - 1));  // 1-based input -> 0-based index
+                if (p == end) break;
             }
             continue;
         }
 
         const QRegularExpressionMatch singleMatch = singlePattern.match(part);
         if (singleMatch.hasMatch()) {
-            const int p = singleMatch.captured(1).toInt();
-            if (p >= 1 && p <= pageCount) {
-                seen.insert(p - 1);
+            bool ok = false;
+            const qint64 p = singleMatch.captured(1).toLongLong(&ok);
+            if (ok && p >= 1 && p <= pageCount) {
+                seen.insert(static_cast<int>(p - 1));
             }
         }
         // Unparseable parts are ignored.

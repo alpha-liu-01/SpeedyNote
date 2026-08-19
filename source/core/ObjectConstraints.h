@@ -17,7 +17,10 @@
 #include <QPointF>
 #include <QRectF>
 #include <QSizeF>
+#include <QtNumeric>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace ObjectConstraints {
 
@@ -111,6 +114,60 @@ inline QSizeF shrinkToFit(const QSizeF& objSize, const QSizeF& pageSize)
         return objSize;
     }
     return QSizeF(objSize.width() * scale, objSize.height() * scale);
+}
+
+/**
+ * @brief Smallest whole-number divisor that fits a size within a fraction of a target.
+ *
+ * The divisor is always at least 1, so callers never upscale the source.
+ * Invalid dimensions return 1 and leave sizing unchanged.
+ */
+inline int integerShrinkDivisor(const QSizeF& sourceSize,
+                                const QSizeF& targetSize,
+                                qreal maxFraction = 2.0 / 3.0)
+{
+    const auto finitePositive = [](qreal value) {
+        return qIsFinite(value) && value > 0.0;
+    };
+    if (!finitePositive(sourceSize.width()) || !finitePositive(sourceSize.height())
+        || !finitePositive(targetSize.width()) || !finitePositive(targetSize.height())
+        || !finitePositive(maxFraction)) {
+        return 1;
+    }
+
+    const qreal maxWidth = targetSize.width() * maxFraction;
+    const qreal maxHeight = targetSize.height() * maxFraction;
+    if (!finitePositive(maxWidth) || !finitePositive(maxHeight)) {
+        return 1;
+    }
+    if (sourceSize.width() <= maxWidth && sourceSize.height() <= maxHeight) {
+        return 1;
+    }
+
+    const qreal required = std::max(sourceSize.width() / maxWidth,
+                                    sourceSize.height() / maxHeight);
+    if (!qIsFinite(required)) {
+        return 1;
+    }
+    const qreal rounded = std::ceil(required);
+    if (rounded >= static_cast<qreal>(std::numeric_limits<int>::max())) {
+        return std::numeric_limits<int>::max();
+    }
+    return std::max(1, static_cast<int>(rounded));
+}
+
+/**
+ * @brief Uniformly shrink by the smallest integer divisor required to fit.
+ */
+inline QSizeF shrinkByIntegerDivisor(const QSizeF& sourceSize,
+                                     const QSizeF& targetSize,
+                                     qreal maxFraction = 2.0 / 3.0)
+{
+    const int divisor = integerShrinkDivisor(sourceSize, targetSize, maxFraction);
+    if (divisor <= 1) {
+        return sourceSize;
+    }
+    return QSizeF(sourceSize.width() / divisor, sourceSize.height() / divisor);
 }
 
 }  // namespace ObjectConstraints

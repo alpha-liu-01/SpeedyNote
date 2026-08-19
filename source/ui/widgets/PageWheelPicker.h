@@ -96,11 +96,17 @@ signals:
      */
     void pageCountChanged(int count);
 
+    /**
+     * @brief Emitted when the picker is double-clicked or double-tapped.
+     */
+    void jumpToPageRequested();
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
 
 private slots:
@@ -178,9 +184,14 @@ private:
     // Scroll state
     qreal m_scrollOffset = 0.0; // Fractional page offset during drag
     qreal m_velocity = 0.0;     // For inertia (pages per second)
+    qreal m_wheelStepRemainder = 0.0; // Accumulated high-resolution wheel/trackpad input
     QPointF m_lastPos;
+    QPointF m_pressPos;
+    QPointF m_lastTapPos;
     QElapsedTimer m_velocityTimer;
+    QElapsedTimer m_lastTapTimer;
     bool m_dragging = false;
+    bool m_movedPastTapThreshold = false;
     
     // Animation
     QTimer* m_inertiaTimer = nullptr;
@@ -200,6 +211,7 @@ private:
     static constexpr qreal ADJACENT_OPACITY = 0.4;
     static constexpr qreal DECELERATION = 0.92;     // Velocity multiplier per frame
     static constexpr qreal SNAP_THRESHOLD = 0.5;    // Pages per second threshold to start snap
+    static constexpr qreal TAP_MOVE_THRESHOLD = 5.0; // Maximum movement for a tap gesture
     static constexpr int INERTIA_INTERVAL_MS = 16;  // ~60 FPS
     static constexpr int SNAP_DURATION_MS = 150;    // Snap animation duration
     

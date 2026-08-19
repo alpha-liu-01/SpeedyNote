@@ -3,6 +3,7 @@
 #ifdef Q_OS_MACOS
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QMenu>
 #include <QMenuBar>
@@ -13,6 +14,8 @@
 #include "AboutDialog.h"
 #include "../ControlPanelDialog.h"
 #include "../MainWindow.h"
+#include "../core/Document.h"
+#include "../core/DocumentViewport.h"
 #include "../core/ShortcutManager.h"
 
 // ============================================================================
@@ -149,21 +152,27 @@ void MacMenuBar::populateFileMenu()
     add(m_fileMenu, "file.save_as");
     m_fileMenu->addSeparator();
 
-    // Group 4: Relink PDF — not in ShortcutManager (no shortcut). Owned by
-    // MacMenuBar; dispatches to the active MainWindow's existing handler.
-    // Per-document text/enable sync (the overflow-menu version flips between
-    // "Relink PDF..." and "Link PDF..." based on doc state and disables when
-    // there is no doc) is intentionally deferred — the menu item stays as
-    // "Relink PDF..." and is always enabled. The underlying dialog handles
-    // both link and relink scenarios, so clicking on a doc with no PDF
-    // reference just opens the link dialog.
-    QAction* relink = m_fileMenu->addAction(tr("Relink PDF..."));
-    connect(relink, &QAction::triggered, this, []() {
+    // Group 4: inspect or repair the active document's PDF source registry.
+    QAction* pdfSources = m_fileMenu->addAction(tr("PDF Sources..."));
+    connect(m_fileMenu, &QMenu::aboutToShow, pdfSources, [pdfSources]() {
+        auto* mw = MainWindow::activeMainWindow();
+        DocumentViewport* viewport = mw ? mw->currentViewport() : nullptr;
+        Document* doc = viewport ? viewport->document() : nullptr;
+        const QVector<PdfSourceHealth> health =
+            doc ? doc->pdfSourceHealthSnapshot() : QVector<PdfSourceHealth>();
+        int repairCount = 0;
+        for (const PdfSourceHealth& source : health) {
+            if (source.requiresRepair()) ++repairCount;
+        }
+        pdfSources->setEnabled(!health.isEmpty());
+        pdfSources->setText(repairCount > 0
+            ? QCoreApplication::translate("MainWindow", "Repair PDF Sources... (%1)")
+                  .arg(repairCount)
+            : QCoreApplication::translate("MainWindow", "PDF Sources..."));
+    });
+    connect(pdfSources, &QAction::triggered, this, []() {
         if (auto* mw = MainWindow::activeMainWindow()) {
-            // showPdfRelinkDialog is a private slot. Invoke via the meta-object
-            // system so MacMenuBar (a platform subsystem outside MainWindow's
-            // class boundary) can trigger it without expanding the public API.
-            QMetaObject::invokeMethod(mw, "showPdfRelinkDialog",
+            QMetaObject::invokeMethod(mw, "showPdfSourcesDialog",
                                       Qt::DirectConnection,
                                       Q_ARG(DocumentViewport*, mw->currentViewport()));
         }
@@ -376,14 +385,13 @@ void MacMenuBar::populateToolsMenu()
     hl->addSeparator();
     add(hl, "highlighter.toggle_source");
 
-    // Submenu 2: Insert — Object Select tool's insert-mode + action-mode
-    // shortcuts. Inline gate inside each handler ensures these are silent
-    // no-ops when the active tool is not ObjectSelect; we keep them always-
-    // enabled in the menu to keep MAC.7 scope tight (see plan's Out of Scope).
-    QMenu* ins = m_toolsMenu->addMenu(tr("Insert"));
+    // Submenu 2: Object Mode — the three visible object-tool subtypes plus
+    // their shared Add/Select interaction mode. Handlers activate ObjectSelect
+    // before applying the requested mode, matching the main toolbar.
+    QMenu* ins = m_toolsMenu->addMenu(tr("Object Mode"));
     add(ins, "object.mode_image");
-    add(ins, "object.mode_text");
     add(ins, "object.mode_link");
+    add(ins, "object.mode_text");
     add(ins, "object.mode_create");
     add(ins, "object.mode_select");
 

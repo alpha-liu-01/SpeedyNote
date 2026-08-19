@@ -1055,7 +1055,8 @@ bool MuPdfExporter::openSourcePdf()
 {
     if (!m_document) return true;
     
-    QString pdfPath = m_document->pdfPath();  // primary source path
+    // Use the same validated absolute/relative candidate resolver as rendering.
+    QString pdfPath = m_document->pdfPathForSource(QString());
     if (pdfPath.isEmpty()) {
         // No primary source - this is fine for blank notebooks. Cache an empty entry
         // so activateSource("") is a cheap no-op.

@@ -71,7 +71,7 @@ signals:
     
     // Right side
     void fullscreenToggled(bool checked);
-    void shareClicked();  // Stubbed - placeholder
+    void shareClicked();  // Opens the combined PDF/package export dialog
     void rightSidebarToggled(bool checked);  // Markdown notes
     void menuRequested();
 

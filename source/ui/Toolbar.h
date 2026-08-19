@@ -6,6 +6,7 @@
 #include <QColor>
 #include "ToolbarButtons.h"
 #include "../core/ToolType.h"
+#include "../core/DocumentViewport.h"
 
 class QPaintEvent;
 class ExpandableToolButton;
@@ -20,7 +21,7 @@ class OcrSubToolbar;
  * Toolbar - Tab-specific tool selection and actions with inline subtoolbars.
  *
  * Layout (center-aligned):
- * [Pen(+presets)][Marker(+presets)][Eraser(+presets)][Shape][Lasso][ObjInsert(+presets)][Text(+presets)][OCR(+controls)]  gap  [Undo][Redo] [Touch]
+ * [Pen(+presets)][Marker(+presets)][Eraser(+presets)][Lasso][Image][Link(+controls)][ObjectText][Highlighter(+presets)][OCR(+controls)]  gap  [Undo][Redo] [Touch]
  *
  * When a tool is selected its ExpandableToolButton expands to reveal
  * inline preset buttons (colors, thicknesses, toggles).
@@ -33,6 +34,7 @@ public:
     explicit Toolbar(QWidget *parent = nullptr);
 
     void setCurrentTool(ToolType tool);
+    void setObjectInsertMode(DocumentViewport::ObjectInsertMode mode);
     void setTouchGestureMode(int mode);
     void updateTheme(bool darkMode);
     void setUndoEnabled(bool enabled);
@@ -55,9 +57,8 @@ public:
 
 signals:
     void toolSelected(ToolType tool);
+    void objectInsertModeSelected(DocumentViewport::ObjectInsertMode mode);
     void straightLineToggled(bool enabled);
-    void objectInsertClicked();
-    void textClicked();
     void undoClicked();
     void redoClicked();
     void touchGestureModeChanged(int mode);
@@ -80,12 +81,14 @@ private:
     ExpandableToolButton *m_penExpandable;
     ExpandableToolButton *m_markerExpandable;
     ExpandableToolButton *m_eraserExpandable;
-    ExpandableToolButton *m_objectInsertExpandable;
+    ExpandableToolButton *m_objectLinkExpandable;
     ExpandableToolButton *m_textExpandable;
     ExpandableToolButton *m_ocrExpandable;
 
     // Plain tool buttons (no subtoolbar)
     ToolButton *m_lassoButton;
+    ToolButton *m_objectImageButton;
+    ToolButton *m_objectTextButton;
     ToolButton *m_panButton;
 
     // Non-exclusive toggle
@@ -113,6 +116,8 @@ private:
     bool m_darkMode = false;
     QColor m_borderColor;
     ToolType m_currentTool = ToolType::Pen;
+    DocumentViewport::ObjectInsertMode m_objectInsertMode =
+        DocumentViewport::ObjectInsertMode::Image;
 };
 
 #endif // TOOLBAR_H

@@ -10,8 +10,7 @@
 #include "FloatingActionButton.h"
 #include "FolderPickerDialog.h"
 #include "../ThemeColors.h"
-#include "../dialogs/BatchPdfExportDialog.h"
-#include "../dialogs/BatchSnbxExportDialog.h"
+#include "../dialogs/BatchExportDialog.h"
 #include "../dialogs/ExportResultsDialog.h"
 #if !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS)
 #include "../dialogs/BatchImportDialog.h"
@@ -1654,42 +1653,46 @@ void Launcher::onTimelineLongPressed(const QModelIndex& index, const QPoint& glo
 
 void Launcher::showPdfExportDialog(const QStringList& bundlePaths)
 {
-    if (bundlePaths.isEmpty()) return;
-    
-    BatchPdfExportDialog dialog(bundlePaths, this);
-    if (dialog.exec() == QDialog::Accepted) {
-        // Get valid bundles (excludes edgeless notebooks)
-        QStringList validBundles = dialog.validBundles();
-        if (!validBundles.isEmpty()) {
-            BatchOps::ExportPdfOptions options;
-            options.outputPath = dialog.outputDirectory();
-            options.dpi = dialog.dpi();
-            options.pageRange = dialog.pageRange();
-            options.annotationsOnly = dialog.annotationsOnly();
-            options.darkModeBackground = dialog.darkModeBackground();
-            options.darkenStrokes = dialog.darkenStrokes();
-            options.skipImageMasking = QSettings("SpeedyNote", "App")
-                .value("display/skipImageMasking", false).toBool();
-            options.preserveMetadata = dialog.includeMetadata();
-            options.preserveOutline = dialog.includeOutline();
-            
-            ExportQueueManager::instance()->enqueuePdfExport(validBundles, options);
-        }
-    }
+    showExportDialog(bundlePaths, false);
 }
 
 void Launcher::showSnbxExportDialog(const QStringList& bundlePaths)
 {
+    showExportDialog(bundlePaths, true);
+}
+
+void Launcher::showExportDialog(const QStringList& bundlePaths, bool preferSnbx)
+{
     if (bundlePaths.isEmpty()) return;
     
-    BatchSnbxExportDialog dialog(bundlePaths, this);
-    if (dialog.exec() == QDialog::Accepted) {
+    BatchExportDialog dialog(
+        bundlePaths, this,
+        preferSnbx ? BatchExportDialog::Snbx : BatchExportDialog::Pdf);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    if (dialog.selectedFormat() == BatchExportDialog::Snbx) {
         BatchOps::ExportSnbxOptions options;
         options.outputPath = dialog.outputDirectory();
         options.includePdf = dialog.includePdf();
-        
         ExportQueueManager::instance()->enqueueSnbxExport(bundlePaths, options);
+        return;
     }
+
+    const QStringList validBundles = dialog.validPdfBundles();
+    if (validBundles.isEmpty()) return;
+
+    BatchOps::ExportPdfOptions options;
+    options.outputPath = dialog.outputDirectory();
+    options.dpi = dialog.dpi();
+    options.pageRange = dialog.pageRange();
+    options.annotationsOnly = dialog.annotationsOnly();
+    options.darkModeBackground = dialog.darkModeBackground();
+    options.darkenStrokes = dialog.darkenStrokes();
+    options.skipImageMasking = QSettings("SpeedyNote", "App")
+        .value("display/skipImageMasking", false).toBool();
+    options.preserveMetadata = dialog.includeMetadata();
+    options.preserveOutline = dialog.includeOutline();
+    ExportQueueManager::instance()->enqueuePdfExport(validBundles, options);
 }
 
 // =============================================================================

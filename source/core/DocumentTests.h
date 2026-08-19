@@ -15,10 +15,13 @@
 
 #include "Document.h"
 #include "Page.h"
+#include "../ui/dialogs/PageRangeSelectDialog.h"
 #include <QDebug>
 #include <QJsonDocument>
 #include <QFileInfo>
 #include <QImage>
+#include <QTemporaryFile>
+#include <algorithm>
 #include <cassert>
 
 namespace DocumentTests {
@@ -1075,6 +1078,123 @@ inline bool testActualPdfLoad()
     return success;
 }
 
+inline bool testMultiPdfSourceRecovery()
+{
+    qDebug() << "=== Test: Multi-PDF Source Recovery ===";
+    bool success = true;
+    auto doc = Document::createNew("Multi-source recovery");
+
+    const QString missingPath = QDir::temp().absoluteFilePath(
+        QStringLiteral("speedynote-missing-source.pdf"));
+    QFile::remove(missingPath);
+    const QString sourceId = doc->registerSource(
+        missingPath, QStringLiteral("sha256:missing"), 123, false);
+
+    auto pdfPage = Page::createForPdf(QSizeF(800, 1000), 4, sourceId);
+    if (!doc->restorePageFromSnapshot(doc->pageCount(), pdfPage->toJson())) {
+        qDebug() << "FAIL: could not add synthetic imported PDF page";
+        return false;
+    }
+    doc->removePage(0);
+
+    QVector<PdfSourceHealth> health = doc->pdfSourceHealthSnapshot();
+    if (health.size() != 1
+        || health.first().status != PdfSourceHealthStatus::Missing
+        || health.first().referencedPages != 1
+        || health.first().unavailablePages != 1) {
+        qDebug() << "FAIL: missing source health/counts are incorrect";
+        success = false;
+    }
+    if (doc->notebookPageCountForSource(sourceId) != 1) {
+        qDebug() << "FAIL: source page count should be one";
+        success = false;
+    }
+
+    doc->retryPdfSource(sourceId);
+    const PdfSource* preserved = doc->pdfSourceById(sourceId);
+    if (!preserved || preserved->path != missingPath
+        || preserved->hash != QStringLiteral("sha256:missing")) {
+        qDebug() << "FAIL: retry must preserve recovery metadata";
+        success = false;
+    }
+
+    QTemporaryFile corrupt(
+        QDir::temp().absoluteFilePath(QStringLiteral("speedynote-corrupt-XXXXXX.pdf")));
+    if (!corrupt.open()) {
+        qDebug() << "FAIL: could not create corrupt-PDF fixture";
+        return false;
+    }
+    corrupt.write("not a pdf");
+    corrupt.flush();
+    const QString corruptPath = corrupt.fileName();
+    const QString corruptHash = Document::computePdfHash(corruptPath);
+    const qint64 corruptSize = Document::getPdfFileSize(corruptPath);
+    const QString corruptId = doc->registerSource(
+        corruptPath, corruptHash, corruptSize, false);
+    auto corruptPage = Page::createForPdf(QSizeF(800, 1000), 0, corruptId);
+    doc->restorePageFromSnapshot(doc->pageCount(), corruptPage->toJson());
+
+    health = doc->pdfSourceHealthSnapshot();
+    auto corruptHealth = std::find_if(
+        health.cbegin(), health.cend(),
+        [&corruptId](const PdfSourceHealth& item) { return item.sourceId == corruptId; });
+    if (corruptHealth == health.cend()
+        || corruptHealth->status != PdfSourceHealthStatus::Unreadable) {
+        qDebug() << "FAIL: corrupt existing source should be unreadable";
+        success = false;
+    }
+    if (doc->locateSource(sourceId, corruptPath)) {
+        qDebug() << "FAIL: locateSource accepted an identity mismatch";
+        success = false;
+    }
+
+    QJsonObject serialized = doc->toFullJson();
+    auto restored = Document::fromFullJson(serialized);
+    if (!restored || restored->pdfSourceCount() != 2
+        || restored->notebookPageCountForSource(sourceId) != 1) {
+        qDebug() << "FAIL: multi-source recovery metadata did not round-trip";
+        success = false;
+    }
+
+    doc->retainPdfSourceForUndo(sourceId);
+    doc->removePage(0);
+    if (doc->unreferencedSourceIds().contains(sourceId)) {
+        qDebug() << "FAIL: undo-retained source was eligible for pruning";
+        success = false;
+    }
+    health = doc->pdfSourceHealthSnapshot();
+    auto retainedHealth = std::find_if(
+        health.cbegin(), health.cend(),
+        [&sourceId](const PdfSourceHealth& item) { return item.sourceId == sourceId; });
+    if (retainedHealth == health.cend() || retainedHealth->requiresRepair()) {
+        qDebug() << "FAIL: zero-reference source should not request repair";
+        success = false;
+    }
+
+    if (success) qDebug() << "PASS: Multi-PDF recovery tests successful!";
+    return success;
+}
+
+inline bool testPdfImportPageRanges()
+{
+    const QList<int> all = PageRangeSelectDialog::parseRange(QStringLiteral("all"), 4);
+    const QList<int> subset =
+        PageRangeSelectDialog::parseRange(QStringLiteral("5, 2-3, 2"), 6);
+    const QList<int> clamped =
+        PageRangeSelectDialog::parseRange(QStringLiteral("0-2000000000"), 3);
+    const QList<int> overflow =
+        PageRangeSelectDialog::parseRange(QStringLiteral("1-999999999999999999999"), 3);
+    const QList<int> expectedAll{0, 1, 2, 3};
+    const QList<int> expectedSubset{1, 2, 4};
+    const QList<int> expectedClamped{0, 1, 2};
+    const bool success = all == expectedAll
+        && subset == expectedSubset
+        && clamped == expectedClamped
+        && overflow.isEmpty();
+    if (!success) qDebug() << "FAIL: PDF import page-range parsing/order";
+    return success;
+}
+
 /**
  * @brief Test movePage() operations in detail.
  * 
@@ -1383,6 +1503,12 @@ inline bool runAllTests()
     qDebug() << "";
     
     allPass &= testActualPdfLoad();
+    qDebug() << "";
+
+    allPass &= testMultiPdfSourceRecovery();
+    qDebug() << "";
+
+    allPass &= testPdfImportPageRanges();
     qDebug() << "";
     
     qDebug() << "\n========================================";

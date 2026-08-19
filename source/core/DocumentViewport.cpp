@@ -22,6 +22,7 @@
 #include <QRegion>
 #include <QResizeEvent>
 #include <QMouseEvent>
+#include <QContextMenuEvent>
 #include <QTabletEvent>
 #include <QWheelEvent>
 #include <QKeyEvent>
@@ -340,17 +341,12 @@ void DocumentViewport::setDocument(Document* doc)
     }
     m_backtickHeld = false;  // Reset key tracking for new document
     
-    // Clear object selection (pointers refer to old document's objects)
-    // Must be done BEFORE changing m_document to avoid dangling pointer access
+    // Cancel live object previews while their source objects are still valid,
+    // then clear selection before changing m_document to avoid dangling access.
+    cancelObjectPointerGesture();
     bool hadSelection = !m_selectedObjects.isEmpty();
     m_selectedObjects.clear();
     m_hoveredObject = nullptr;
-    m_isDraggingObjects = false;
-    m_isResizingObject = false;
-    m_isCreatingTextBox = false;
-    m_resizeObjectPageIndex = -1;
-    m_objectOriginalPositions.clear();
-    m_objectOriginalPageIndices.clear();
     
     // Clear undo/redo stacks (actions refer to old document)
     bool hadUndo = canUndo();
@@ -461,35 +457,39 @@ void DocumentViewport::setDocument(Document* doc)
     emitScrollFractions();
 }
 
-// ===== Missing PDF Banner (Phase R.3) =====
+// ===== PDF source warning banner =====
 
-void DocumentViewport::showMissingPdfBanner(const QString& pdfName)
+void DocumentViewport::showPdfSourceWarning(int sourceCount, int affectedPages,
+                                            const QString& singleSourceName,
+                                            const QString& warningSignature)
 {
     if (!m_missingPdfBanner) {
         m_missingPdfBanner = new MissingPdfBanner(this);
         
-        // Connect signals
-        connect(m_missingPdfBanner, &MissingPdfBanner::locatePdfClicked,
-                this, [this]() { emit requestPdfRelink(); });
+        connect(m_missingPdfBanner, &MissingPdfBanner::reviewSourcesClicked,
+                this, [this]() { emit requestPdfSources(); });
         connect(m_missingPdfBanner, &MissingPdfBanner::dismissed,
-                this, [this]() { /* Banner handles its own hide animation */ });
+                this, [this]() {
+            m_dismissedPdfWarningSignature = m_pdfWarningSignature;
+        });
     }
     
-    m_missingPdfBanner->setPdfName(pdfName);
+    m_pdfWarningSignature = warningSignature;
+    m_missingPdfBanner->setSummary(sourceCount, affectedPages, singleSourceName);
     
-    // Position at top of viewport
     m_missingPdfBanner->setFixedWidth(width());
     m_missingPdfBanner->move(0, 0);
     
-    // Only animate if not already visible (avoid restart on redundant calls)
-    if (!m_missingPdfBanner->isVisible()) {
+    if (m_dismissedPdfWarningSignature != warningSignature) {
+        // Also cancels an in-flight hide animation if health changed again.
         m_missingPdfBanner->showAnimated();
     }
 }
 
-void DocumentViewport::hideMissingPdfBanner()
+void DocumentViewport::hidePdfSourceWarning()
 {
-    // Only hide if banner exists and is visible (avoid redundant animation)
+    m_pdfWarningSignature.clear();
+    m_dismissedPdfWarningSignature.clear();
     if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
         m_missingPdfBanner->hideAnimated();
     }
@@ -763,13 +763,7 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     
     // Clear object selection and cancel creation when switching away from ObjectSelect tool
     if (previousTool == ToolType::ObjectSelect && tool != ToolType::ObjectSelect) {
-        if (m_isCreatingTextBox) {
-            m_isCreatingTextBox = false;
-            m_pointerActive = false;
-        }
-        if (!m_selectedObjects.isEmpty()) {
-            deselectAllObjects();
-        }
+        clearObjectSelection();
     }
     
     // Cancel any in-progress eraser lasso when switching away from Eraser
@@ -932,7 +926,14 @@ void DocumentViewport::setObjectInsertMode(ObjectInsertMode mode)
     if (m_objectInsertMode == mode) {
         return;
     }
-    
+
+    // A mode change must not let an in-flight gesture complete under stale UI
+    // state (most visibly, a Text rubber band creating after Image is chosen).
+    if (m_currentTool == ToolType::ObjectSelect
+        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
+            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+        cancelObjectPointerGesture();
+    }
     m_objectInsertMode = mode;
     emit objectInsertModeChanged(mode);
 #ifdef SPEEDYNOTE_DEBUG
@@ -945,12 +946,87 @@ void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
     if (m_objectActionMode == mode) {
         return;
     }
-    
+
+    // The effective mode is cached at press time. Cancel the active gesture
+    // instead of allowing release to perform the old mode after the toggle.
+    if (m_currentTool == ToolType::ObjectSelect
+        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
+            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+        cancelObjectPointerGesture();
+    }
     m_objectActionMode = mode;
+    m_objectGestureActionMode = mode;
     emit objectActionModeChanged(mode);
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Object action mode changed to:" << (mode == ObjectActionMode::Select ? "Select" : "Create");
 #endif
+}
+
+DocumentViewport::ObjectActionMode
+DocumentViewport::effectiveObjectActionModeForPointer(
+    ObjectActionMode persistentMode,
+    PointerEvent::Source source,
+    Qt::MouseButton button)
+{
+    if (source == PointerEvent::Mouse && button == Qt::RightButton) {
+        return persistentMode == ObjectActionMode::Select
+            ? ObjectActionMode::Create
+            : ObjectActionMode::Select;
+    }
+    return persistentMode;
+}
+
+void DocumentViewport::beginObjectPointerGesture(const PointerEvent& pe)
+{
+    m_objectGestureButton =
+        pe.source == PointerEvent::Mouse ? pe.button : Qt::NoButton;
+    m_objectGestureActionMode = effectiveObjectActionModeForPointer(
+        m_objectActionMode, pe.source, pe.button);
+}
+
+void DocumentViewport::cancelObjectPointerGesture()
+{
+    // Drag and resize previews mutate the live object. Restore their snapshots
+    // so Escape, a tool switch, or a mode switch is a true cancellation rather
+    // than an untracked document edit with no undo entry or dirty signal.
+    if (m_isDraggingObjects) {
+        for (InsertedObject* obj : m_selectedObjects) {
+            if (!obj) continue;
+            auto it = m_objectOriginalPositions.constFind(obj->id);
+            if (it != m_objectOriginalPositions.constEnd()) {
+                obj->position = *it;
+            }
+        }
+    }
+
+    if (m_isResizingObject && !m_selectedObjects.isEmpty()) {
+        if (InsertedObject* obj = m_selectedObjects.first()) {
+            obj->position = m_resizeOriginalPosition;
+            obj->size = m_resizeOriginalSize;
+            obj->rotation = m_resizeOriginalRotation;
+        }
+    }
+
+    m_isDraggingObjects = false;
+    m_isCreatingTextBox = false;
+    m_isResizingObject = false;
+    m_objectResizeHandle = HandleHit::None;
+    m_resizeObjectPageIndex = -1;
+    m_objectOriginalPositions.clear();
+    m_objectOriginalPageIndices.clear();
+    m_objectDragBackgroundSnapshot = QPixmap();
+    m_dragObjectRenderedCache = QPixmap();
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;
+    m_hardwareEraserActive = false;
+    resetObjectPointerGesture();
+    update();
+}
+
+void DocumentViewport::resetObjectPointerGesture()
+{
+    m_objectGestureButton = Qt::NoButton;
+    m_objectGestureActionMode = m_objectActionMode;
 }
 
 void DocumentViewport::setEraserMode(EraserMode mode)
@@ -3178,8 +3254,12 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         return;
     }
     
-    // Only handle left button for drawing
-    if (event->button() != Qt::LeftButton) {
+    const bool objectAlternateButton =
+        m_currentTool == ToolType::ObjectSelect && event->button() == Qt::RightButton;
+
+    // Drawing tools use left only. ObjectSelect also consumes right as the
+    // temporary alternate action mode.
+    if (event->button() != Qt::LeftButton && !objectAlternateButton) {
         event->ignore();
         return;
     }
@@ -3194,6 +3274,13 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
     
     // Ignore if tablet is active (avoid duplicate events)
     if (m_pointerActive && m_activeSource == PointerEvent::Stylus) {
+        event->accept();
+        return;
+    }
+
+    // Ignore a second mouse button while an ObjectSelect gesture is active.
+    if (m_currentTool == ToolType::ObjectSelect
+        && m_objectGestureButton != Qt::NoButton) {
         event->accept();
         return;
     }
@@ -3229,7 +3316,10 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
     }
     
     // Process move if we have an active pointer or for hover
-    if (m_pointerActive || (event->buttons() & Qt::LeftButton)) {
+    const bool objectRightDrag =
+        m_currentTool == ToolType::ObjectSelect
+        && (event->buttons() & Qt::RightButton);
+    if (m_pointerActive || (event->buttons() & Qt::LeftButton) || objectRightDrag) {
         PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Move);
         handlePointerEvent(pe);
     } else {
@@ -3269,7 +3359,9 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
     
-    if (event->button() != Qt::LeftButton) {
+    const bool objectAlternateButton =
+        m_currentTool == ToolType::ObjectSelect && event->button() == Qt::RightButton;
+    if (event->button() != Qt::LeftButton && !objectAlternateButton) {
         event->ignore();
         return;
     }
@@ -3290,6 +3382,15 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
     PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Release);
     handlePointerEvent(pe);
     event->accept();
+}
+
+void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
+{
+    if (m_currentTool == ToolType::ObjectSelect) {
+        event->accept();
+        return;
+    }
+    QWidget::contextMenuEvent(event);
 }
 
 void DocumentViewport::wheelEvent(QWheelEvent* event)
@@ -4942,6 +5043,7 @@ PointerEvent DocumentViewport::mouseToPointerEvent(QMouseEvent* event, PointerEv
     // Hardware state
     pe.isEraser = false;
     pe.stylusButtons = 0;
+    pe.button = event->button();
     pe.buttons = event->buttons();
     pe.modifiers = event->modifiers();
     pe.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -4999,6 +5101,7 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     // Barrel buttons - Qt provides via buttons()
     // Common mappings: barrel button 1 = Qt::MiddleButton, barrel button 2 = Qt::RightButton
     pe.stylusButtons = static_cast<int>(event->buttons());
+    pe.button = event->button();
     pe.buttons = event->buttons();
     pe.modifiers = event->modifiers();
     pe.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -6162,9 +6265,12 @@ void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& pe)
 void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 {
     if (!m_document) return;
+
+    beginObjectPointerGesture(pe);
     
-    // Phase C.4.4: Create mode - insert object at click position instead of selecting
-    if (m_objectActionMode == ObjectActionMode::Create) {
+    // The right mouse button temporarily uses the opposite action mode without
+    // changing the persistent action-bar state.
+    if (m_objectGestureActionMode == ObjectActionMode::Create) {
         PageHit hit = viewportToPage(pe.viewportPos);
         if (hit.pageIndex < 0) {
             // Click not on any page - ignore in paged mode
@@ -6172,6 +6278,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "handlePointerPress_ObjectSelect: Create mode click not on page";
 #endif
+                m_pointerActive = false;
+                m_activeSource = PointerEvent::Unknown;
+                resetObjectPointerGesture();
                 return;
             }
             // Edgeless: use document coordinates directly
@@ -6189,6 +6298,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             // KDE Plasma 6 Wayland re-trigger this branch and open another
             // dialog (stack-of-dialogs crash).
             if (m_objectInsertDialogActive) {
+                m_pointerActive = false;
+                m_activeSource = PointerEvent::Unknown;
+                resetObjectPointerGesture();
                 return;
             }
             m_objectInsertDialogActive = true;
@@ -6203,10 +6315,16 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             QTimer::singleShot(0, this, [this]() {
                 m_objectInsertDialogActive = false;
             });
+            m_pointerActive = false;
+            m_activeSource = PointerEvent::Unknown;
+            resetObjectPointerGesture();
         } else if (m_objectInsertMode == ObjectInsertMode::Link) {
             // Create empty LinkObject at position
             // Pass viewportPos so edgeless mode can determine correct tile
             createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint, pe.viewportPos);
+            m_pointerActive = false;
+            m_activeSource = PointerEvent::Unknown;
+            resetObjectPointerGesture();
         } else if (m_objectInsertMode == ObjectInsertMode::Text) {
             m_isCreatingTextBox = true;
             if (m_document && m_document->isEdgeless()) {
@@ -6374,6 +6492,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             }
 
             if (!href.isEmpty()) {
+                cancelObjectPointerGesture();
                 QDesktopServices::openUrl(QUrl(href));
                 return;
             }
@@ -6398,6 +6517,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
     if (objClickCount == 2 && hitObject) {
         const QString t = hitObject->type();
         if (t == QLatin1String("textbox") || t == QLatin1String("ocr_text")) {
+            cancelObjectPointerGesture();
             emit openTextEditorRequested(hitObject);
             return;
         }
@@ -6501,10 +6621,22 @@ void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
 
 void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 {
+    if (pe.source == PointerEvent::Mouse
+        && m_objectGestureButton != Qt::NoButton
+        && pe.button != m_objectGestureButton) {
+        return;
+    }
+
+    auto finishGesture = [this]() {
+        m_pointerActive = false;
+        m_activeSource = PointerEvent::Unknown;
+        m_hardwareEraserActive = false;
+        resetObjectPointerGesture();
+    };
+
     // Phase 2C: Finalize text box creation
     if (m_isCreatingTextBox) {
         m_isCreatingTextBox = false;
-        m_pointerActive = false;
 
         PageHit releaseHit = viewportToPage(pe.viewportPos);
         QPointF releasePagePoint;
@@ -6533,6 +6665,7 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
             if (rect.height() < MIN_H) rect.setHeight(MIN_H);
         }
 
+        finishGesture();
         createTextBoxAtRect(pageIndex, rect, pe.viewportPos);
         return;
     }
@@ -6572,7 +6705,7 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         m_isResizingObject = false;
         m_objectResizeHandle = HandleHit::None;
         m_resizeObjectPageIndex = -1;
-        m_pointerActive = false;
+        finishGesture();
         
         // Phase O4.1: Clear background snapshot and object cache, trigger full re-render
         m_objectDragBackgroundSnapshot = QPixmap();
@@ -6708,18 +6841,16 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         update();
     }
     
-    m_pointerActive = false;
+    finishGesture();
 }
 
 void DocumentViewport::clearObjectSelection()
 {
+    cancelObjectPointerGesture();
+
     bool hadSelection = !m_selectedObjects.isEmpty();
     m_selectedObjects.clear();
     m_hoveredObject = nullptr;
-    m_isDraggingObjects = false;
-    m_isCreatingTextBox = false;
-    m_objectOriginalPositions.clear();
-    m_objectOriginalPageIndices.clear();
     if (hadSelection) {
         for (int p : m_pendingThumbnailPages)
             emit pageModified(p);
@@ -6917,6 +7048,8 @@ void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
                 newMode = ObjectInsertMode::Image;
             } else if (selected->type() == "link") {
                 newMode = ObjectInsertMode::Link;
+            } else if (selected->type() == "textbox") {
+                newMode = ObjectInsertMode::Text;
             }
             
             if (newMode != m_objectInsertMode) {
@@ -7302,13 +7435,13 @@ void DocumentViewport::insertImageFromClipboard()
         imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
     }
     
-    // 3. Position at viewport center
-    // Paged mode: an image larger than the page could never be contained by
-    // it, so shrink to fit before deciding where the top-left goes.
-    if (!m_document->isEdgeless()) {
-        imgObj->size = ObjectConstraints::shrinkToFit(
-            imgObj->size, m_document->pageSizeAt(m_currentPageIndex));
-    }
+    // 3. Scale by the smallest whole-number divisor that keeps the image
+    // within two-thirds of its page (or one edgeless tile), then center it.
+    const QSizeF insertionBounds = m_document->isEdgeless()
+        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
+        : m_document->pageSizeAt(m_currentPageIndex);
+    imgObj->size = ObjectConstraints::shrinkByIntegerDivisor(
+        imgObj->size, insertionBounds);
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
@@ -7402,13 +7535,7 @@ void DocumentViewport::insertImageFromClipboard()
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // 9. Auto-switch to Select mode after inserting
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
-    
-    // 10. Emit modification signal
+    // 9. Emit modification signal
     emit documentModified();
     
     update();
@@ -7454,13 +7581,13 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
         imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
     }
     
-    // 3. Position at viewport center
-    // Paged mode: an image larger than the page could never be contained by
-    // it, so shrink to fit before deciding where the top-left goes.
-    if (!m_document->isEdgeless()) {
-        imgObj->size = ObjectConstraints::shrinkToFit(
-            imgObj->size, m_document->pageSizeAt(m_currentPageIndex));
-    }
+    // 3. Scale by the smallest whole-number divisor that keeps the image
+    // within two-thirds of its page (or one edgeless tile), then center it.
+    const QSizeF insertionBounds = m_document->isEdgeless()
+        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
+        : m_document->pageSizeAt(m_currentPageIndex);
+    imgObj->size = ObjectConstraints::shrinkByIntegerDivisor(
+        imgObj->size, insertionBounds);
     QPointF center = viewportCenterInDocument();
     imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
@@ -7550,13 +7677,7 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // 9. Auto-switch to Select mode after inserting
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
-    
-    // 10. Emit modification signal
+    // 9. Emit modification signal
     emit documentModified();
     
     update();
@@ -8246,12 +8367,6 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // Auto-switch to Select mode after inserting
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
-    
     emit documentModified();
     // SB2: a brand-new LinkObject adds a scroll-bar marker. Refresh the outline
     // cache for the owning container and notify listeners (scroll bar + notes).
@@ -8341,11 +8456,6 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
 
     deselectAllObjects();
     selectObject(rawPtr, false);
-
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
 
     emit documentModified();
     update();
@@ -10686,11 +10796,10 @@ bool DocumentViewport::handleEscapeKey()
         }
     }
     
-    // Priority 2: Cancel in-progress text box creation (ObjectSelect tool)
-    if (m_currentTool == ToolType::ObjectSelect && m_isCreatingTextBox) {
-        m_isCreatingTextBox = false;
-        m_pointerActive = false;
-        update();
+    // Priority 2: Cancel an in-progress ObjectSelect gesture.
+    if (m_currentTool == ToolType::ObjectSelect
+        && (m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+        cancelObjectPointerGesture();
         return true;
     }
 
@@ -13515,11 +13624,18 @@ bool DocumentViewport::importPagesWithUndo(Document* srcDoc, const QStringList& 
 
     UndoAction action;
     action.type = UndoAction::PageInsert;
+    QSet<QString> retainedSourceIds;
     for (int k = 0; k < result.insertedPageJson.size(); ++k) {
         UndoAction::DeletedPageSnapshot snap;
         snap.index = result.destStartIndex + k;
         snap.pageJson = result.insertedPageJson[k];
         action.deletedPages.append(snap);
+
+        const QString sourceId = snap.pageJson.value(QStringLiteral("pdfSourceId")).toString();
+        if (!sourceId.isEmpty()) retainedSourceIds.insert(sourceId);
+    }
+    for (const QString& sourceId : retainedSourceIds) {
+        m_document->retainPdfSourceForUndo(sourceId);
     }
 
     const int focusIndex = result.destStartIndex >= 0 ? result.destStartIndex : destIndex;

@@ -204,6 +204,11 @@ public:
      * @brief Cancel any ongoing search.
      */
     void cancel();
+
+    /**
+     * @brief Cancel and join every worker before the document/provider graph changes.
+     */
+    void cancelAndWait();
     
     /**
      * @brief Clear the search cache.

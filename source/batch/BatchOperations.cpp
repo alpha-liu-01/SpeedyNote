@@ -232,8 +232,13 @@ BatchResult exportSnbxBatch(const QStringList& bundlePaths,
         
         // Plan B2: materialize imported PDF sources into bundled mini-PDFs before the
         // recursive zip so the exported .snbx is self-contained.
-        if (doc->needsMaterialization()) {
-            doc->saveBundle(bundlePath, /*finalize=*/true);
+        if (doc->needsMaterialization()
+            && !doc->saveBundle(bundlePath, /*finalize=*/true)) {
+            fr.status = FileStatus::Error;
+            fr.message = QObject::tr("PDF sources could not be finalized");
+            result.errorCount++;
+            emitResult(i, fr);
+            continue;
         }
         
         // Prepare export options

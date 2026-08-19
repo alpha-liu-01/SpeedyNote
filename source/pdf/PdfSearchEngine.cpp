@@ -1211,3 +1211,16 @@ void PdfSearchEngine::cancel()
     m_precacheCancelled.store(true);
 }
 
+void PdfSearchEngine::cancelAndWait()
+{
+    m_searchCancelled.store(true);
+    m_precacheCancelled.store(true);
+    m_scanCancelled.store(true);
+    m_searchWatcher.waitForFinished();
+    m_precacheWatcher.waitForFinished();
+    m_scanWatcher.waitForFinished();
+    m_searchCancelled.store(false);
+    m_precacheCancelled.store(false);
+    m_scanCancelled.store(false);
+}
+

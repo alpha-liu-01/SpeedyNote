@@ -11,10 +11,12 @@
 #include "Document.h"
 #include "ObjectConstraints.h"
 #include "Page.h"
+#include "../objects/ImageObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
 
 #include <QApplication>
+#include <QtNumeric>
 #include <QtMath>
 #include <cstdio>
 #include <memory>
@@ -412,6 +414,140 @@ public:
         printf("PASSED\n");
         return true;
     }
+
+    /**
+     * @brief Test left/current and right/alternate ObjectSelect mode resolution.
+     */
+    static bool testObjectAlternateMouseMode() {
+        printf("  testObjectAlternateMouseMode... ");
+
+        using ActionMode = DocumentViewport::ObjectActionMode;
+        const auto resolve = [](ActionMode persistent,
+                                PointerEvent::Source source,
+                                Qt::MouseButton button) {
+            return DocumentViewport::effectiveObjectActionModeForPointer(
+                persistent, source, button);
+        };
+
+        if (resolve(ActionMode::Select, PointerEvent::Mouse, Qt::LeftButton)
+                != ActionMode::Select
+            || resolve(ActionMode::Create, PointerEvent::Mouse, Qt::LeftButton)
+                != ActionMode::Create
+            || resolve(ActionMode::Select, PointerEvent::Mouse, Qt::RightButton)
+                != ActionMode::Create
+            || resolve(ActionMode::Create, PointerEvent::Mouse, Qt::RightButton)
+                != ActionMode::Select) {
+            printf("FAILED: mouse mode matrix is incorrect\n");
+            return false;
+        }
+
+        // Stylus barrel buttons are deliberately outside this mouse-only UX.
+        if (resolve(ActionMode::Select, PointerEvent::Stylus, Qt::RightButton)
+                != ActionMode::Select
+            || resolve(ActionMode::Create, PointerEvent::Stylus, Qt::RightButton)
+                != ActionMode::Create) {
+            printf("FAILED: stylus mode should remain persistent\n");
+            return false;
+        }
+
+        DocumentViewport viewport;
+        viewport.m_objectActionMode = ActionMode::Select;
+        PointerEvent press;
+        press.type = PointerEvent::Press;
+        press.source = PointerEvent::Mouse;
+        press.button = Qt::RightButton;
+        press.buttons = Qt::RightButton;
+        viewport.beginObjectPointerGesture(press);
+
+        if (viewport.m_objectGestureActionMode != ActionMode::Create
+            || viewport.m_objectActionMode != ActionMode::Select
+            || viewport.m_objectGestureButton != Qt::RightButton) {
+            printf("FAILED: gesture changed persistent mode or cached wrong state\n");
+            return false;
+        }
+
+        viewport.resetObjectPointerGesture();
+        if (viewport.m_objectGestureButton != Qt::NoButton
+            || viewport.m_objectActionMode != ActionMode::Select) {
+            printf("FAILED: gesture reset changed persistent mode\n");
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
+     * @brief Test that cancelling or changing mode rolls back live previews.
+     */
+    static bool testObjectGestureCancellation() {
+        printf("  testObjectGestureCancellation... ");
+
+        DocumentViewport viewport;
+        viewport.m_currentTool = ToolType::ObjectSelect;
+        viewport.m_objectInsertMode = DocumentViewport::ObjectInsertMode::Text;
+        viewport.m_objectActionMode = DocumentViewport::ObjectActionMode::Create;
+
+        PointerEvent press;
+        press.source = PointerEvent::Mouse;
+        press.button = Qt::LeftButton;
+        viewport.beginObjectPointerGesture(press);
+        viewport.m_pointerActive = true;
+        viewport.m_activeSource = PointerEvent::Mouse;
+        viewport.m_isCreatingTextBox = true;
+
+        viewport.setObjectInsertMode(DocumentViewport::ObjectInsertMode::Image);
+        if (viewport.m_isCreatingTextBox || viewport.m_pointerActive
+            || viewport.m_objectGestureButton != Qt::NoButton) {
+            printf("FAILED: insert-mode change did not cancel text creation\n");
+            return false;
+        }
+
+        viewport.beginObjectPointerGesture(press);
+        viewport.m_pointerActive = true;
+        viewport.m_isCreatingTextBox = true;
+        viewport.setObjectActionMode(DocumentViewport::ObjectActionMode::Select);
+        if (viewport.m_isCreatingTextBox || viewport.m_pointerActive
+            || viewport.m_objectGestureButton != Qt::NoButton
+            || viewport.m_objectGestureActionMode
+                != DocumentViewport::ObjectActionMode::Select) {
+            printf("FAILED: action-mode change did not cancel and resync gesture state\n");
+            return false;
+        }
+
+        ImageObject object;
+        const QPointF originalPosition(25, 40);
+        object.position = QPointF(125, 140);
+        viewport.m_selectedObjects.append(&object);
+        viewport.m_objectOriginalPositions.insert(object.id, originalPosition);
+        viewport.m_isDraggingObjects = true;
+        viewport.cancelObjectPointerGesture();
+        if (object.position != originalPosition || viewport.m_isDraggingObjects
+            || viewport.m_selectedObjects.size() != 1) {
+            printf("FAILED: drag cancellation did not restore position and selection\n");
+            return false;
+        }
+
+        const QSizeF originalSize(200, 100);
+        const qreal originalRotation = 15.0;
+        object.position = QPointF(300, 400);
+        object.size = QSizeF(500, 600);
+        object.rotation = 70.0;
+        viewport.m_resizeOriginalPosition = originalPosition;
+        viewport.m_resizeOriginalSize = originalSize;
+        viewport.m_resizeOriginalRotation = originalRotation;
+        viewport.m_isResizingObject = true;
+        viewport.cancelObjectPointerGesture();
+        if (object.position != originalPosition || object.size != originalSize
+            || !qFuzzyCompare(object.rotation, originalRotation)
+            || viewport.m_isResizingObject) {
+            printf("FAILED: resize cancellation did not restore transform\n");
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
     
     /**
      * @brief Test the page containment geometry used to keep objects on-page.
@@ -483,6 +619,86 @@ public:
             return false;
         }
         
+        printf("PASSED\n");
+        return true;
+    }
+
+    /**
+     * @brief Test whole-number scaling for freshly inserted images.
+     */
+    static bool testIntegerImageInsertScaling() {
+        printf("  testIntegerImageInsertScaling... ");
+
+        const QSizeF target(900, 1200);  // Two-thirds bounds: 600 x 800
+
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(500, 700), target) != 1
+            || ObjectConstraints::shrinkByIntegerDivisor(QSizeF(500, 700), target)
+                != QSizeF(500, 700)) {
+            printf("FAILED: fitting images should remain unchanged\n");
+            return false;
+        }
+
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(600, 800), target) != 1) {
+            printf("FAILED: exact two-thirds boundary should not shrink\n");
+            return false;
+        }
+
+        QSizeF wide = ObjectConstraints::shrinkByIntegerDivisor(
+            QSizeF(1800, 300), target);
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(1800, 300), target) != 3
+            || wide != QSizeF(600, 100)) {
+            printf("FAILED: width-driven image should use divisor 3\n");
+            return false;
+        }
+
+        QSizeF tall = ObjectConstraints::shrinkByIntegerDivisor(
+            QSizeF(300, 2400), target);
+        if (ObjectConstraints::integerShrinkDivisor(QSizeF(300, 2400), target) != 3
+            || tall != QSizeF(100, 800)) {
+            printf("FAILED: height-driven image should use divisor 3\n");
+            return false;
+        }
+
+        const QSizeF bothSource(2400, 2700);
+        QSizeF both = ObjectConstraints::shrinkByIntegerDivisor(bothSource, target);
+        if (ObjectConstraints::integerShrinkDivisor(bothSource, target) != 4
+            || both != QSizeF(600, 675)
+            || !qFuzzyCompare(both.width() / both.height(),
+                              bothSource.width() / bothSource.height())) {
+            printf("FAILED: both-axis scaling should use one aspect-safe divisor\n");
+            return false;
+        }
+
+        const QSizeF edgeless = ObjectConstraints::shrinkByIntegerDivisor(
+            QSizeF(4000, 3000),
+            QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE));
+        if (edgeless != QSizeF(4000.0 / 6.0, 500)) {
+            printf("FAILED: edgeless tile should use divisor 6\n");
+            return false;
+        }
+
+        const QSizeF source(1200, 900);
+        if (ObjectConstraints::shrinkByIntegerDivisor(source, QSizeF()) != source
+            || ObjectConstraints::shrinkByIntegerDivisor(QSizeF(), target) != QSizeF()) {
+            printf("FAILED: invalid dimensions should be left unchanged\n");
+            return false;
+        }
+
+        const qreal nan = qQNaN();
+        const qreal inf = qInf();
+        const QSizeF nonFiniteResult =
+            ObjectConstraints::shrinkByIntegerDivisor(QSizeF(nan, 100), target);
+        if (!qIsNaN(nonFiniteResult.width()) || nonFiniteResult.height() != 100
+            || ObjectConstraints::integerShrinkDivisor(
+                   QSizeF(100, 100), QSizeF(inf, 100)) != 1) {
+            printf("FAILED: non-finite dimensions should be treated as invalid "
+                   "(result=%fx%f, divisor=%d)\n",
+                   nonFiniteResult.width(), nonFiniteResult.height(),
+                   ObjectConstraints::integerShrinkDivisor(
+                       QSizeF(100, 100), QSizeF(inf, 100)));
+            return false;
+        }
+
         printf("PASSED\n");
         return true;
     }
@@ -580,7 +796,10 @@ public:
         runTest(testScrollFractions, "testScrollFractions");
         runTest(testPdfCache, "testPdfCache");
         runTest(testPointerEvents, "testPointerEvents");
+        runTest(testObjectAlternateMouseMode, "testObjectAlternateMouseMode");
+        runTest(testObjectGestureCancellation, "testObjectGestureCancellation");
         runTest(testObjectPageContainment, "testObjectPageContainment");
+        runTest(testIntegerImageInsertScaling, "testIntegerImageInsertScaling");
         runTest(testObjectGroupContainment, "testObjectGroupContainment");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);

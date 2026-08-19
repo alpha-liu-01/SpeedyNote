@@ -2,30 +2,21 @@
 #define OBJECTSELECTSUBTOOLBAR_H
 
 #include "SubToolbar.h"
-#include "../../core/DocumentViewport.h"  // For ObjectInsertMode, ObjectActionMode
 #include "../widgets/LinkSlotButton.h"    // For LinkSlotState
-#include <QHash>
 #include <QColor>
-#include <QFrame>
 
-class ModeToggleButton;
 class LinkSlotButton;
 class ColorPresetButton;
 class SubToolbarToggle;
 class QLineEdit;
 class QWidget;
 class QPushButton;
-class QToolButton;
-class QMenu;
-class QAction;
 
 /**
- * @brief Subtoolbar for the ObjectSelect tool.
+ * @brief Expandable controls for the Link object tool.
  * 
  * Layout:
- * - Insert mode toggle (Image ↔ Link)
- * - Action mode toggle (Select ↔ Create)
- * - Separator
+ * - LinkObject color and description editors
  * - 3 LinkSlotButtons for LinkObject slots
  * 
  * Slot buttons:
@@ -33,10 +24,7 @@ class QAction;
  * - Show Empty state if no LinkObject selected
  * - Show actual slot states when LinkObject is selected
  * 
- * Features:
- * - Mode toggles for insert type and action type
- * - Slot buttons for quick LinkObject slot access
- * - Long-press on filled slot triggers delete confirmation
+ * The controls are visible only when a single LinkObject is selected.
  */
 class ObjectSelectSubToolbar : public SubToolbar {
     Q_OBJECT
@@ -80,37 +68,7 @@ public:
      */
     void setLinkObjectDescription(const QString& description, bool enabled);
     
-    /**
-     * @brief Set the insert mode toggle state from outside.
-     * @param mode The new mode.
-     * 
-     * Used to sync the toggle when mode is changed via keyboard shortcut (Ctrl+< / Ctrl+>).
-     * This updates the UI without emitting insertModeChanged to avoid loops.
-     */
-    void setInsertModeState(DocumentViewport::ObjectInsertMode mode);
-    
-    /**
-     * @brief Set the action mode toggle state from outside.
-     * @param mode The new mode.
-     * 
-     * Used to sync the toggle when mode is changed via keyboard shortcut (Ctrl+6 / Ctrl+7).
-     * This updates the UI without emitting actionModeChanged to avoid loops.
-     */
-    void setActionModeState(DocumentViewport::ObjectActionMode mode);
-
 signals:
-    /**
-     * @brief Emitted when insert mode changes.
-     * @param mode The new insert mode (Image or Link).
-     */
-    void insertModeChanged(DocumentViewport::ObjectInsertMode mode);
-    
-    /**
-     * @brief Emitted when action mode changes.
-     * @param mode The new action mode (Select or Create).
-     */
-    void actionModeChanged(DocumentViewport::ObjectActionMode mode);
-    
     /**
      * @brief Emitted when a slot button is clicked.
      * @param index The slot index (0, 1, or 2).
@@ -136,8 +94,6 @@ signals:
     void linkObjectDescriptionChanged(const QString& description);
 
 private slots:
-    void onInsertModeActionTriggered(QAction* action);
-    void onActionModeToggled(int mode);
     void onSlotClicked(int index);
     void onSlotDeleteRequested(int index);
     void onColorButtonClicked();
@@ -149,27 +105,17 @@ private slots:
 private:
     void createWidgets();
     void setupConnections();
-    void loadFromSettings();
-    void saveToSettings();
     bool confirmSlotDelete(int index);
     
     /**
      * @brief Show/hide LinkObject-specific controls.
      * @param visible true to show controls, false to hide them.
      * 
-     * Controls: color button, description button, 3 slot buttons, and the separator.
+     * Controls: color button, description button, and 3 slot buttons.
      */
     void setLinkObjectControlsVisible(bool visible);
 
-    void updateInsertModeIcons();
-
     // Widgets
-    QToolButton* m_insertModeButton = nullptr;
-    QMenu* m_insertModeMenu = nullptr;
-    QAction* m_insertImageAction = nullptr;
-    QAction* m_insertLinkAction = nullptr;
-    QAction* m_insertTextAction = nullptr;
-    ModeToggleButton* m_actionModeToggle = nullptr;
     ColorPresetButton* m_colorButton = nullptr;  // LinkObject color editor
     SubToolbarToggle* m_descriptionButton = nullptr;  // Toggle description editor
     QWidget* m_descriptionPopup = nullptr;       // Popup container
@@ -179,20 +125,6 @@ private:
     QString m_originalDescription;               // For cancel functionality
     bool m_popupClosedByButton = false;          // Prevents double signal emission
     LinkSlotButton* m_slotButtons[3] = {nullptr, nullptr, nullptr};
-    QFrame* m_linkObjectSeparator = nullptr;  // Separator before LinkObject controls
-    
-    // Current state
-    DocumentViewport::ObjectInsertMode m_insertMode = DocumentViewport::ObjectInsertMode::Image;
-    DocumentViewport::ObjectActionMode m_actionMode = DocumentViewport::ObjectActionMode::Select;
-    
-    // BUG-STB-002 FIX: Removed per-tab state storage for modes.
-    // The viewport is the source of truth for insert/action modes.
-    // Subtoolbar syncs FROM viewport via setInsertModeState()/setActionModeState().
-    
-    // QSettings keys
-    static const QString SETTINGS_GROUP;
-    static const QString KEY_INSERT_MODE;
-    static const QString KEY_ACTION_MODE;
     
     static constexpr int NUM_SLOTS = 3;
 };

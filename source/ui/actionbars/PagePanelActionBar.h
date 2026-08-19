@@ -117,6 +117,11 @@ signals:
      * @param page The selected page index (0-based).
      */
     void pageSelected(int page);
+
+    /**
+     * @brief Emitted when the wheel picker requests direct page entry.
+     */
+    void jumpToPageRequested();
     
     /**
      * @brief Emitted when Add Page button is clicked.
@@ -127,6 +132,11 @@ signals:
      * @brief Emitted when Insert Page button is clicked.
      */
     void insertPageClicked();
+
+    /**
+     * @brief Emitted when Add Pages from PDF is clicked.
+     */
+    void addPdfPagesClicked();
     
     /**
      * @brief Emitted when Delete is first clicked (delete requested).
@@ -197,6 +207,7 @@ private:
     ActionBarButton* m_selectButton = nullptr;        // Multi-select mode toggle
     ActionBarButton* m_addPageButton = nullptr;
     ActionBarButton* m_insertPageButton = nullptr;
+    ActionBarButton* m_addPdfPagesButton = nullptr;
     UndoDeleteButton* m_deleteButton = nullptr;
     
     // State

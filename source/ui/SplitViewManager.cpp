@@ -609,6 +609,15 @@ void SplitViewManager::createScrollBars(Pane pane)
     b.wheel = new PageWheelPicker(stack);
     b.wheel->setDarkMode(m_darkMode);
     b.wheel->setVisible(false);
+    connect(b.wheel, &PageWheelPicker::jumpToPageRequested, this, [this, pane]() {
+        PaneBars& bars = m_paneBars[static_cast<int>(pane)];
+        if (!bars.bound) return;
+
+        // The dialog operates on MainWindow's active viewport. Make the pane
+        // containing the activated floating wheel current before forwarding.
+        setActivePane(pane);
+        emit jumpToPageRequested();
+    });
 
     // Independent fade timers so each axis hides on its own inactivity.
     b.vFadeTimer = new QTimer(this);

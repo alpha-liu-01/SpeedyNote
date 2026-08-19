@@ -1,31 +1,21 @@
 #include "ObjectSelectSubToolbar.h"
-#include "../widgets/ModeToggleButton.h"
 #include "../widgets/LinkSlotButton.h"
 #include "../widgets/ColorPresetButton.h"
 #include "../widgets/ToggleButton.h"  // Contains SubToolbarToggle
 
-#include <QSettings>
 #include <QMessageBox>
 #include <QColorDialog>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QToolButton>
-#include <QMenu>
 #include <QIcon>
 #include <QHBoxLayout>
 #include <QEvent>
-
-// Static member definitions
-const QString ObjectSelectSubToolbar::SETTINGS_GROUP = "objectSelect";
-const QString ObjectSelectSubToolbar::KEY_INSERT_MODE = "insertMode";
-const QString ObjectSelectSubToolbar::KEY_ACTION_MODE = "actionMode";
 
 ObjectSelectSubToolbar::ObjectSelectSubToolbar(QWidget* parent)
     : SubToolbar(parent)
 {
     createWidgets();
     setupConnections();
-    loadFromSettings();
 }
 
 ObjectSelectSubToolbar::~ObjectSelectSubToolbar()
@@ -60,46 +50,6 @@ bool ObjectSelectSubToolbar::eventFilter(QObject* watched, QEvent* event)
 void ObjectSelectSubToolbar::createWidgets()
 {
     bool dark = isDarkMode();
-    
-    // Create insert mode dropdown (Image / Link / Text)
-    m_insertModeButton = new QToolButton(this);
-    m_insertModeButton->setPopupMode(QToolButton::InstantPopup);
-    m_insertModeButton->setToolTip(tr("Insert mode"));
-    m_insertModeButton->setFixedSize(28, 28);
-    m_insertModeButton->setIconSize(QSize(20, 20));
-
-    m_insertModeMenu = new QMenu(m_insertModeButton);
-    m_insertImageAction = m_insertModeMenu->addAction(tr("Image"));
-    m_insertLinkAction  = m_insertModeMenu->addAction(tr("Link"));
-    m_insertTextAction  = m_insertModeMenu->addAction(tr("Text"));
-    m_insertModeButton->setMenu(m_insertModeMenu);
-    updateInsertModeIcons();
-    addWidget(m_insertModeButton);
-    
-    // Create action mode toggle (Select ↔ Create)
-    m_actionModeToggle = new ModeToggleButton(this);
-    // Use icon base names for dark mode switching support
-    m_actionModeToggle->setModeIconNames("select", "addtab");  // Mode 0: Select, Mode 1: Create
-    m_actionModeToggle->setDarkMode(dark);
-    m_actionModeToggle->setModeToolTips(
-        tr("Select mode (click to switch to Create)"),
-        tr("Create mode (click to switch to Select)")
-    );
-    addWidget(m_actionModeToggle);
-    
-    // Add separator before LinkObject controls (create manually to track it)
-    m_linkObjectSeparator = new QFrame(this);
-    m_linkObjectSeparator->setFrameShape(QFrame::VLine);
-    m_linkObjectSeparator->setFrameShadow(QFrame::Plain);
-    m_linkObjectSeparator->setFixedWidth(2);
-    m_linkObjectSeparator->setFixedHeight(SEPARATOR_HEIGHT);
-    if (isDarkMode()) {
-        m_linkObjectSeparator->setStyleSheet("background-color: #4d4d4d; border: none;");
-    } else {
-        m_linkObjectSeparator->setStyleSheet("background-color: #D0D0D0; border: none;");
-    }
-    m_linkObjectSeparator->setVisible(false);
-    addWidget(m_linkObjectSeparator);
     
     // Create color button for LinkObject color editing
     m_colorButton = new ColorPresetButton(this);
@@ -180,14 +130,6 @@ void ObjectSelectSubToolbar::createWidgets()
 
 void ObjectSelectSubToolbar::setupConnections()
 {
-    // Insert mode dropdown
-    connect(m_insertModeMenu, &QMenu::triggered,
-            this, &ObjectSelectSubToolbar::onInsertModeActionTriggered);
-    
-    // Action mode toggle
-    connect(m_actionModeToggle, &ModeToggleButton::modeChanged, 
-            this, &ObjectSelectSubToolbar::onActionModeToggled);
-    
     // Color button connections
     connect(m_colorButton, &ColorPresetButton::clicked,
             this, &ObjectSelectSubToolbar::onColorButtonClicked);
@@ -215,60 +157,26 @@ void ObjectSelectSubToolbar::setupConnections()
     }
 }
 
-void ObjectSelectSubToolbar::loadFromSettings()
-{
-    QSettings settings;
-    settings.beginGroup(SETTINGS_GROUP);
-    
-    // Load insert mode (clamp to valid range 0-2)
-    int insertModeInt = qBound(0, settings.value(KEY_INSERT_MODE, 0).toInt(), 2);
-    m_insertMode = static_cast<DocumentViewport::ObjectInsertMode>(insertModeInt);
-    setInsertModeState(m_insertMode);
-    
-    // Load action mode
-    int actionModeInt = settings.value(KEY_ACTION_MODE, 0).toInt();
-    m_actionMode = static_cast<DocumentViewport::ObjectActionMode>(actionModeInt);
-    m_actionModeToggle->setCurrentMode(actionModeInt);
-    
-    settings.endGroup();
-}
-
-void ObjectSelectSubToolbar::saveToSettings()
-{
-    QSettings settings;
-    settings.beginGroup(SETTINGS_GROUP);
-    
-    settings.setValue(KEY_INSERT_MODE, static_cast<int>(m_insertMode));
-    settings.setValue(KEY_ACTION_MODE, static_cast<int>(m_actionMode));
-    
-    settings.endGroup();
-}
-
 void ObjectSelectSubToolbar::refreshFromSettings()
 {
-    loadFromSettings();
+    // LinkObject controls do not have persistent toolbar settings.
 }
 
 void ObjectSelectSubToolbar::restoreTabState(int tabIndex)
 {
-    // BUG-STB-002 FIX: Do NOT restore insert/action modes here.
-    // The viewport is the source of truth for object modes (each viewport
-    // stores its own mode). The subtoolbar is synced FROM the viewport
-    // via setInsertModeState()/setActionModeState() in connectViewportScrollSignals().
-    // Restoring modes here would conflict with the viewport's actual state.
+    // LinkObject editing controls reflect the current selection, not tab state.
     Q_UNUSED(tabIndex);
 }
 
 void ObjectSelectSubToolbar::saveTabState(int tabIndex)
 {
-    // BUG-STB-002 FIX: Do NOT save insert/action modes here.
-    // The viewport stores modes per-document, not the subtoolbar.
+    // LinkObject editing controls have no per-tab state.
     Q_UNUSED(tabIndex);
 }
 
 void ObjectSelectSubToolbar::clearTabState(int tabIndex)
 {
-    // BUG-STB-002 FIX: No per-tab state to clear (modes come from viewport)
+    // LinkObject editing controls have no per-tab state.
     Q_UNUSED(tabIndex);
 }
 
@@ -289,27 +197,6 @@ void ObjectSelectSubToolbar::clearSlotStates()
         m_slotButtons[i]->setState(LinkSlotState::Empty);
         m_slotButtons[i]->setSelected(false);
     }
-}
-
-void ObjectSelectSubToolbar::onInsertModeActionTriggered(QAction* action)
-{
-    DocumentViewport::ObjectInsertMode mode;
-    if (action == m_insertImageAction) mode = DocumentViewport::ObjectInsertMode::Image;
-    else if (action == m_insertLinkAction) mode = DocumentViewport::ObjectInsertMode::Link;
-    else if (action == m_insertTextAction) mode = DocumentViewport::ObjectInsertMode::Text;
-    else return;
-
-    m_insertMode = mode;
-    m_insertModeButton->setIcon(action->icon());
-    saveToSettings();
-    emit insertModeChanged(m_insertMode);
-}
-
-void ObjectSelectSubToolbar::onActionModeToggled(int mode)
-{
-    m_actionMode = static_cast<DocumentViewport::ObjectActionMode>(mode);
-    saveToSettings();
-    emit actionModeChanged(m_actionMode);
 }
 
 void ObjectSelectSubToolbar::onSlotClicked(int index)
@@ -361,78 +248,10 @@ bool ObjectSelectSubToolbar::confirmSlotDelete(int index)
     return result == QMessageBox::Yes;
 }
 
-void ObjectSelectSubToolbar::setInsertModeState(DocumentViewport::ObjectInsertMode mode)
-{
-    m_insertMode = mode;
-    switch (mode) {
-    case DocumentViewport::ObjectInsertMode::Image:
-        m_insertModeButton->setIcon(m_insertImageAction->icon());
-        break;
-    case DocumentViewport::ObjectInsertMode::Link:
-        m_insertModeButton->setIcon(m_insertLinkAction->icon());
-        break;
-    case DocumentViewport::ObjectInsertMode::Text:
-        m_insertModeButton->setIcon(m_insertTextAction->icon());
-        break;
-    }
-}
-
-void ObjectSelectSubToolbar::setActionModeState(DocumentViewport::ObjectActionMode mode)
-{
-    // Update internal state
-    m_actionMode = mode;
-    
-    // Block signals to avoid feedback loop (external change shouldn't emit back)
-    m_actionModeToggle->blockSignals(true);
-    m_actionModeToggle->setCurrentMode(static_cast<int>(mode));
-    m_actionModeToggle->blockSignals(false);
-}
-
-void ObjectSelectSubToolbar::updateInsertModeIcons()
-{
-    bool dark = isDarkMode();
-    auto icon = [dark](const char* baseName) {
-        QString path = dark
-            ? QStringLiteral(":/resources/icons/%1_reversed.png").arg(QLatin1String(baseName))
-            : QStringLiteral(":/resources/icons/%1.png").arg(QLatin1String(baseName));
-        return QIcon(path);
-    };
-
-    m_insertImageAction->setIcon(icon("objectinsert"));
-    m_insertLinkAction->setIcon(icon("linkicon"));
-    m_insertTextAction->setIcon(icon("text"));
-
-    setInsertModeState(m_insertMode);
-
-    // Style button to match the subtoolbar (black bg in dark, white bg in light)
-    QString btnBg  = dark ? QStringLiteral("#000000") : QStringLiteral("#ffffff");
-    QString btnHov = dark ? QStringLiteral("#333333") : QStringLiteral("#e0e0e0");
-    m_insertModeButton->setStyleSheet(QStringLiteral(
-        "QToolButton { background: %1; border: none; border-radius: 4px; }"
-        "QToolButton:hover { background: %2; }"
-        "QToolButton::menu-indicator { image: none; }"
-    ).arg(btnBg, btnHov));
-
-    // Style menu to match the subtoolbar background
-    QString menuBg = dark ? QStringLiteral("#1a1a1a") : QStringLiteral("#ffffff");
-    QString menuFg = dark ? QStringLiteral("#e0e0e0") : QStringLiteral("#1a1a1a");
-    QString menuHoverBg = dark ? QStringLiteral("#333333") : QStringLiteral("#e0e0e0");
-    QString menuBdr = dark ? QStringLiteral("#444") : QStringLiteral("#ccc");
-    m_insertModeMenu->setStyleSheet(QStringLiteral(
-        "QMenu { background: %1; color: %2; border: 1px solid %3; }"
-        "QMenu::item:selected { background: %4; }"
-    ).arg(menuBg, menuFg, menuBdr, menuHoverBg));
-}
-
 void ObjectSelectSubToolbar::setDarkMode(bool darkMode)
 {
     SubToolbar::setDarkMode(darkMode);
 
-    updateInsertModeIcons();
-
-    if (m_actionModeToggle) {
-        m_actionModeToggle->setDarkMode(darkMode);
-    }
     if (m_descriptionButton) {
         m_descriptionButton->setDarkMode(darkMode);
     }
@@ -446,9 +265,6 @@ void ObjectSelectSubToolbar::setDarkMode(bool darkMode)
 void ObjectSelectSubToolbar::setLinkObjectControlsVisible(bool visible)
 {
     // Show/hide all LinkObject-specific controls
-    if (m_linkObjectSeparator) {
-        m_linkObjectSeparator->setVisible(visible);
-    }
     if (m_colorButton) {
         m_colorButton->setVisible(visible);
     }
