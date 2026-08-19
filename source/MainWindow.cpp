@@ -1205,6 +1205,12 @@ void MainWindow::setupUi() {
             vp->setCurrentTool(tool);
         }
     });
+    connect(m_toolbar, &Toolbar::objectInsertModeSelected, this,
+            [this](DocumentViewport::ObjectInsertMode mode) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setObjectInsertMode(mode);
+        }
+    });
     connect(m_toolbar, &Toolbar::straightLineToggled, this, [this](bool enabled) {
         // Straight line mode toggle
         if (DocumentViewport* vp = currentViewport()) {
@@ -1212,11 +1218,6 @@ void MainWindow::setupUi() {
         }
         // qDebug() << "Toolbar: Straight line mode" << (enabled ? "enabled" : "disabled");
     });
-    connect(m_toolbar, &Toolbar::objectInsertClicked, this, [this]() {
-        // Stub - will show object insert menu in future
-        // qDebug() << "Toolbar: Object insert clicked (stub)";
-    });
-    // Note: m_textButton now emits toolSelected(ToolType::Highlighter) directly
     connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             closeFloatingTextEditor();
@@ -1860,10 +1861,9 @@ void MainWindow::wireQActionDispatchers()
     });
 
     // ----- Insert / Object Mode (MAC.7) -----
-    // object.mode_image uses the focus-check guard (single-letter "I"); the
-    // others are modifier-bearing and don't need it. All five auto-switch to
-    // the ObjectSelect tool (via ensureTool) before arming their mode, so they
-    // work regardless of the currently active tool.
+    // All five auto-switch to ObjectSelect before arming their mode. Text-focus
+    // guards keep both single-key and modifier shortcuts from interrupting an
+    // active object-description or text editor.
     wire("object.mode_image", [isTextFocused, ensureTool](MainWindow* w){
         if (isTextFocused()) return;
         if (auto* vp = w->currentViewport()) {
@@ -1871,25 +1871,29 @@ void MainWindow::wireQActionDispatchers()
             vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Image);
         }
     });
-    wire("object.mode_text", [ensureTool](MainWindow* w){
+    wire("object.mode_text", [isTextFocused, ensureTool](MainWindow* w){
+        if (isTextFocused()) return;
         if (auto* vp = w->currentViewport()) {
             ensureTool(w, vp, ToolType::ObjectSelect);
             vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Text);
         }
     });
-    wire("object.mode_link", [ensureTool](MainWindow* w){
+    wire("object.mode_link", [isTextFocused, ensureTool](MainWindow* w){
+        if (isTextFocused()) return;
         if (auto* vp = w->currentViewport()) {
             ensureTool(w, vp, ToolType::ObjectSelect);
             vp->setObjectInsertMode(DocumentViewport::ObjectInsertMode::Link);
         }
     });
-    wire("object.mode_create", [ensureTool](MainWindow* w){
+    wire("object.mode_create", [isTextFocused, ensureTool](MainWindow* w){
+        if (isTextFocused()) return;
         if (auto* vp = w->currentViewport()) {
             ensureTool(w, vp, ToolType::ObjectSelect);
             vp->setObjectActionMode(DocumentViewport::ObjectActionMode::Create);
         }
     });
-    wire("object.mode_select", [ensureTool](MainWindow* w){
+    wire("object.mode_select", [isTextFocused, ensureTool](MainWindow* w){
+        if (isTextFocused()) return;
         if (auto* vp = w->currentViewport()) {
             ensureTool(w, vp, ToolType::ObjectSelect);
             vp->setObjectActionMode(DocumentViewport::ObjectActionMode::Select);
@@ -2455,27 +2459,23 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         m_toolbar->highlighterSubToolbar()->setSelectionSourceState(src);
     }
 
-    // Phase D: Connect object mode state sync (viewport → subtoolbar)
-    // When Ctrl+< / Ctrl+> / Ctrl+6 / Ctrl+7 changes the mode, update the subtoolbar
+    // Keep the three object toolbar buttons and action-bar mode toggle in sync
+    // with per-viewport state (including changes made through shortcuts).
     m_insertModeConn = connect(viewport, &DocumentViewport::objectInsertModeChanged,
                                this, [this](DocumentViewport::ObjectInsertMode mode) {
-        if (m_toolbar->objectSelectSubToolbar()) {
-            m_toolbar->objectSelectSubToolbar()->setInsertModeState(mode);
-        }
+        if (m_toolbar) m_toolbar->setObjectInsertMode(mode);
     });
     
     m_actionModeConn = connect(viewport, &DocumentViewport::objectActionModeChanged,
                                this, [this](DocumentViewport::ObjectActionMode mode) {
-        if (m_toolbar->objectSelectSubToolbar()) {
-            m_toolbar->objectSelectSubToolbar()->setActionModeState(mode);
-        }
+        if (m_objectSelectActionBar)
+            m_objectSelectActionBar->setActionModeState(mode);
     });
     
-    // Also sync the current object modes to the subtoolbar
-    if (m_toolbar->objectSelectSubToolbar()) {
-        m_toolbar->objectSelectSubToolbar()->setInsertModeState(viewport->objectInsertMode());
-        m_toolbar->objectSelectSubToolbar()->setActionModeState(viewport->objectActionMode());
-    }
+    if (m_toolbar)
+        m_toolbar->setObjectInsertMode(viewport->objectInsertMode());
+    if (m_objectSelectActionBar)
+        m_objectSelectActionBar->setActionModeState(viewport->objectActionMode());
     
     // Phase D: Connect object selection changed to update LinkSlot buttons
     m_selectionChangedConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
@@ -5562,15 +5562,7 @@ void MainWindow::connectSubToolbarSignals()
         }
     });
 
-    // ObjectSelect
-    connect(objectST, &ObjectSelectSubToolbar::insertModeChanged, this,
-            [this](DocumentViewport::ObjectInsertMode mode) {
-        if (DocumentViewport* vp = currentViewport()) vp->setObjectInsertMode(mode);
-    });
-    connect(objectST, &ObjectSelectSubToolbar::actionModeChanged, this,
-            [this](DocumentViewport::ObjectActionMode mode) {
-        if (DocumentViewport* vp = currentViewport()) vp->setObjectActionMode(mode);
-    });
+    // LinkObject controls
     connect(objectST, &ObjectSelectSubToolbar::slotActivated, this, [this](int index) {
         if (DocumentViewport* vp = currentViewport()) vp->activateLinkSlot(index);
     });
@@ -5661,6 +5653,9 @@ void MainWindow::connectSubToolbarSignals()
 
             if (vp) {
                 ToolType currentTool = vp->currentTool();
+                m_toolbar->setObjectInsertMode(vp->objectInsertMode());
+                if (m_objectSelectActionBar)
+                    m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
                 m_toolbar->setCurrentTool(currentTool);
                 applyAllSubToolbarValuesToViewport(vp);
             }
@@ -5672,6 +5667,9 @@ void MainWindow::connectSubToolbarSignals()
     // Apply initial preset values to first viewport
     QTimer::singleShot(0, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
+            m_toolbar->setObjectInsertMode(vp->objectInsertMode());
+            if (m_objectSelectActionBar)
+                m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
             applyAllSubToolbarValuesToViewport(vp);
         }
     });
@@ -5855,6 +5853,12 @@ void MainWindow::setupActionBars()
     });
     
     // Connect ObjectSelectActionBar signals to viewport
+    connect(m_objectSelectActionBar, &ObjectSelectActionBar::actionModeChanged,
+            this, [this](DocumentViewport::ObjectActionMode mode) {
+        if (DocumentViewport* vp = currentViewport()) {
+            vp->setObjectActionMode(mode);
+        }
+    });
     connect(m_objectSelectActionBar, &ObjectSelectActionBar::copyRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->copySelectedObjects();
@@ -5915,6 +5919,11 @@ void MainWindow::setupActionBars()
         m_objectSelectActionBar->updateOcrLockSelection(true, newState);
         vp->update();
     });
+
+    if (DocumentViewport* vp = currentViewport()) {
+        m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
+        m_actionBarContainer->onToolChanged(vp->currentTool());
+    }
 
     // Connect TextSelectionActionBar signals to viewport
     connect(m_textSelectionActionBar, &TextSelectionActionBar::copyRequested, this, [this]() {

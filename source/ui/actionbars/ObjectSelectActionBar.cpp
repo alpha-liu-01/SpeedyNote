@@ -11,6 +11,20 @@ ObjectSelectActionBar::ObjectSelectActionBar(QWidget* parent)
 
 void ObjectSelectActionBar::setupButtons()
 {
+    // === Persistent Select / Add mode ===
+    m_actionModeButton = new ActionBarButton(this);
+    m_actionModeButton->setCheckable(true);
+    addButton(m_actionModeButton);
+    updateActionModeButton();
+    connect(m_actionModeButton, &ActionBarButton::clicked, this, [this]() {
+        const auto nextMode =
+            m_actionMode == DocumentViewport::ObjectActionMode::Select
+                ? DocumentViewport::ObjectActionMode::Create
+                : DocumentViewport::ObjectActionMode::Select;
+        setActionModeState(nextMode);
+        emit actionModeChanged(nextMode);
+    });
+
     // === Aspect ratio lock (image-only, placed at top) ===
     m_aspectLockButton = new ActionBarButton(this);
     m_aspectLockButton->setIconName("lock");
@@ -111,6 +125,11 @@ void ObjectSelectActionBar::setupButtons()
 
 void ObjectSelectActionBar::updateButtonStates()
 {
+    // Add/Select is the persistent entry point for ObjectSelect, including idle state.
+    if (m_actionModeButton) {
+        m_actionModeButton->setVisible(true);
+    }
+
     // Aspect lock: visible only when a single ImageObject is selected
     if (m_aspectLockButton) {
         m_aspectLockButton->setVisible(m_hasSelection && m_isImageSelected);
@@ -144,9 +163,9 @@ void ObjectSelectActionBar::updateButtonStates()
         m_decreaseAffinityButton->setVisible(m_hasSelection);
     }
     
-    // Paste button: visible when clipboard has object
+    // Paste button: visible for either the internal object clipboard or a system image.
     if (m_pasteButton) {
-        m_pasteButton->setVisible(m_hasObjectInClipboard);
+        m_pasteButton->setVisible(m_hasObjectInClipboard || m_hasImageInClipboard);
     }
     
     // Cancel button: visible when clipboard has content and no selection (paste-only mode)
@@ -166,6 +185,38 @@ void ObjectSelectActionBar::setHasObjectInClipboard(bool hasObject)
         m_hasObjectInClipboard = hasObject;
         updateButtonStates();
     }
+}
+
+void ObjectSelectActionBar::setHasImageInClipboard(bool hasImage)
+{
+    if (m_hasImageInClipboard != hasImage) {
+        m_hasImageInClipboard = hasImage;
+        updateButtonStates();
+    }
+}
+
+void ObjectSelectActionBar::setActionModeState(DocumentViewport::ObjectActionMode mode)
+{
+    if (m_actionMode == mode)
+        return;
+
+    m_actionMode = mode;
+    updateActionModeButton();
+}
+
+void ObjectSelectActionBar::updateActionModeButton()
+{
+    if (!m_actionModeButton)
+        return;
+
+    const bool createMode = m_actionMode == DocumentViewport::ObjectActionMode::Create;
+    m_actionModeButton->setChecked(createMode);
+    m_actionModeButton->setIconName(createMode ? QStringLiteral("addtab")
+                                               : QStringLiteral("select"));
+    m_actionModeButton->setToolTip(
+        createMode
+            ? tr("Add mode (click to switch to Select) (Ctrl+6)")
+            : tr("Select mode (click to switch to Add) (Ctrl+7)"));
 }
 
 void ObjectSelectActionBar::setHasSelection(bool hasSelection)
@@ -200,6 +251,9 @@ void ObjectSelectActionBar::setDarkMode(bool darkMode)
     ActionBar::setDarkMode(darkMode);
     
     // Propagate to all buttons
+    if (m_actionModeButton) {
+        m_actionModeButton->setDarkMode(darkMode);
+    }
     if (m_aspectLockButton) {
         m_aspectLockButton->setDarkMode(darkMode);
     }

@@ -385,11 +385,10 @@ void MacMenuBar::populateToolsMenu()
     hl->addSeparator();
     add(hl, "highlighter.toggle_source");
 
-    // Submenu 2: Insert — Object Select tool's insert-mode + action-mode
-    // shortcuts. Inline gate inside each handler ensures these are silent
-    // no-ops when the active tool is not ObjectSelect; we keep them always-
-    // enabled in the menu to keep MAC.7 scope tight (see plan's Out of Scope).
-    QMenu* ins = m_toolsMenu->addMenu(tr("Insert"));
+    // Submenu 2: Object Mode — the three visible object-tool subtypes plus
+    // their shared Add/Select interaction mode. Handlers activate ObjectSelect
+    // before applying the requested mode, matching the main toolbar.
+    QMenu* ins = m_toolsMenu->addMenu(tr("Object Mode"));
     add(ins, "object.mode_image");
     add(ins, "object.mode_text");
     add(ins, "object.mode_link");

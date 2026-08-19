@@ -2,14 +2,15 @@
 #define OBJECTSELECTACTIONBAR_H
 
 #include "ActionBar.h"
+#include "../../core/DocumentViewport.h"
 
 class ActionBarButton;
 
 /**
  * @brief Action bar for object selection operations.
  * 
- * Provides quick access to clipboard, delete, and layer ordering operations
- * when object(s) are selected in ObjectSelect tool or clipboard has object.
+ * Provides an always-visible Add/Select mode toggle plus contextual clipboard,
+ * delete, and layer ordering operations while ObjectSelect is active.
  * 
  * Layout (when selection exists):
  * - [Copy]     - Visible when selection exists
@@ -25,8 +26,7 @@ class ActionBarButton;
  * - [Paste]    - Visible when clipboard has object
  * - [Cancel]   - Clears clipboard and dismisses action bar (Esc)
  * 
- * This action bar appears when:
- * - Current tool is ObjectSelect AND (has selection OR clipboard has object)
+ * This action bar appears whenever the current tool is ObjectSelect.
  */
 class ObjectSelectActionBar : public ActionBar {
     Q_OBJECT
@@ -37,7 +37,7 @@ public:
     /**
      * @brief Update button visibility based on current state.
      * 
-     * Currently all buttons are always visible when this action bar is shown.
+     * The Add/Select toggle is always visible; other actions depend on context.
      */
     void updateButtonStates() override;
     
@@ -54,6 +54,8 @@ public:
      * Call this when the object clipboard changes.
      */
     void setHasObjectInClipboard(bool hasObject);
+    void setHasImageInClipboard(bool hasImage);
+    void setActionModeState(DocumentViewport::ObjectActionMode mode);
     
     /**
      * @brief Set whether objects are currently selected.
@@ -79,6 +81,8 @@ public:
     void updateOcrLockSelection(bool isOcrText, bool isLocked);
 
 signals:
+    void actionModeChanged(DocumentViewport::ObjectActionMode mode);
+
     /**
      * @brief Emitted when the aspect ratio lock button is clicked.
      */
@@ -136,6 +140,10 @@ signals:
 
 private:
     void setupButtons();
+    void updateActionModeButton();
+
+    // Persistent interaction mode
+    ActionBarButton* m_actionModeButton = nullptr;
     
     // Clipboard buttons
     ActionBarButton* m_copyButton = nullptr;
@@ -162,9 +170,12 @@ private:
     
     // State tracking
     bool m_hasObjectInClipboard = false;
+    bool m_hasImageInClipboard = false;
     bool m_hasSelection = false;
     bool m_isImageSelected = false;
     bool m_isOcrTextSelected = false;
+    DocumentViewport::ObjectActionMode m_actionMode =
+        DocumentViewport::ObjectActionMode::Select;
 };
 
 #endif // OBJECTSELECTACTIONBAR_H

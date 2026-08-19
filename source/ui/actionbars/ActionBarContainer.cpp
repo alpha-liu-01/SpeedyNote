@@ -38,6 +38,13 @@ void ActionBarContainer::setActionBar(const QString& type, ActionBar* actionBar)
         actionBar->setParent(this);
         actionBar->hide();  // Hidden until context matches
         m_actionBars.insert(type, actionBar);
+        if (type == QLatin1String("objectSelect")) {
+            if (auto* objectBar = qobject_cast<ObjectSelectActionBar*>(actionBar)) {
+                objectBar->setHasSelection(m_hasObjectSelection);
+                objectBar->setHasObjectInClipboard(m_hasObjectsInClipboard);
+                objectBar->setHasImageInClipboard(m_clipboardHasImage);
+            }
+        }
     }
     
     // Re-evaluate visibility in case this affects current state
@@ -403,15 +410,9 @@ void ActionBarContainer::updateVisibility()
             break;
             
         case ToolType::ObjectSelect:
-            // Show ObjectSelectActionBar if:
-            // - Has object selection (full bar)
-            // - OR no selection but internal object clipboard has content (paste-only bar)
-            if (m_hasObjectSelection || m_hasObjectsInClipboard) {
-                typeToShow = "objectSelect";
-            } else if (m_clipboardHasImage) {
-                // No selection and no internal clipboard, but system clipboard has image
-                typeToShow = "clipboard";
-            }
+            // The Add/Select toggle is always available. Contextual object and
+            // clipboard actions are hidden by ObjectSelectActionBar itself.
+            typeToShow = "objectSelect";
             break;
             
         case ToolType::Highlighter:
@@ -595,5 +596,9 @@ void ActionBarContainer::checkClipboardForImage()
     const QMimeData* mimeData = clipboard->mimeData();
     
     m_clipboardHasImage = mimeData && mimeData->hasImage();
+    if (auto* objectBar = qobject_cast<ObjectSelectActionBar*>(
+            m_actionBars.value(QStringLiteral("objectSelect"), nullptr))) {
+        objectBar->setHasImageInClipboard(m_clipboardHasImage);
+    }
 }
 

@@ -18,7 +18,7 @@ class PagePanelActionBar;
  * 
  * Key differences from SubToolbarContainer:
  * - Positioned on the LEFT side of viewport
- * - Visibility depends on selection state, not just tool
+ * - Visibility depends on tool and selection state
  * - Uses string keys for flexibility ("lasso", "objectSelect", etc.)
  * - Supports slide-in animation
  * 
@@ -29,9 +29,9 @@ class PagePanelActionBar;
  * 
  * Visibility logic:
  * - LassoActionBar: Lasso tool + lasso selection exists
- * - ObjectSelectActionBar: ObjectSelect tool + object(s) selected
+ * - ObjectSelectActionBar: whenever ObjectSelect is active
  * - TextSelectionActionBar: Highlighter tool + PDF text selected
- * - ClipboardActionBar: ObjectSelect tool + clipboard has image + no selection
+ * - ClipboardActionBar: available for contexts that need a standalone paste action
  * 
  * Usage:
  * 1. Create container as child of MainWindow (or viewport parent)
@@ -205,9 +205,8 @@ private:
      * 
      * Logic:
      * - Lasso tool + lasso selection → LassoActionBar
-     * - ObjectSelect tool + object selected → ObjectSelectActionBar
+     * - ObjectSelect tool → ObjectSelectActionBar
      * - Highlighter tool + text selected → TextSelectionActionBar
-     * - ObjectSelect tool + clipboard has image + no selection → ClipboardActionBar
      * - Otherwise → hide
      */
     void updateVisibility();

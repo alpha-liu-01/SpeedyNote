@@ -35,6 +35,8 @@ enum class TouchGestureMode {
 #include <QMap>
 #include <QSet>
 
+class QContextMenuEvent;
+
 // ============================================================================
 // UndoAction - Unified undo action for both paged and edgeless modes
 // ============================================================================
@@ -244,6 +246,7 @@ struct PointerEvent {
     // Hardware state
     bool isEraser = false;    ///< True if using eraser end OR eraser button
     int stylusButtons = 0;    ///< Barrel button bitmask
+    Qt::MouseButton button = Qt::NoButton;  ///< Button that caused press/release
     Qt::MouseButtons buttons = Qt::NoButton;  ///< Mouse/stylus buttons
     Qt::KeyboardModifiers modifiers = Qt::NoModifier;  ///< Keyboard modifiers (Ctrl, Shift, etc.)
     
@@ -1140,7 +1143,7 @@ public:
     
     /**
      * @brief Get the current object insert mode.
-     * @return Current insert mode (Image or Link).
+     * @return Current insert mode (Image, Link, or Text).
      * 
      * Phase C.2.4: Used by UI to reflect current mode state.
      */
@@ -1148,9 +1151,9 @@ public:
     
     /**
      * @brief Set the object insert mode.
-     * @param mode The new insert mode (Image or Link).
+     * @param mode The new insert mode (Image, Link, or Text).
      * 
-     * Phase D: Called from ObjectSelectSubToolbar to change insert mode.
+     * Called by the main toolbar and shortcut dispatch.
      */
     void setObjectInsertMode(ObjectInsertMode mode);
     
@@ -1166,7 +1169,7 @@ public:
      * @brief Set the object action mode.
      * @param mode The new action mode (Select or Create).
      * 
-     * Phase D: Called from ObjectSelectSubToolbar to change action mode.
+     * Called by ObjectSelectActionBar and shortcut dispatch.
      */
     void setObjectActionMode(ObjectActionMode mode);
 
@@ -2094,6 +2097,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
@@ -2473,6 +2477,15 @@ private:
      * or creates new ones. Default is Select.
      */
     ObjectActionMode m_objectActionMode = ObjectActionMode::Select;
+
+    /**
+     * @brief Effective mode and initiating button for the active mouse gesture.
+     *
+     * The persistent action-bar mode is never changed by the right-button
+     * alternate gesture.
+     */
+    Qt::MouseButton m_objectGestureButton = Qt::NoButton;
+    ObjectActionMode m_objectGestureActionMode = ObjectActionMode::Select;
     
     /**
      * @brief Whether we're currently dragging to create a text box.
@@ -3075,6 +3088,20 @@ private:
      * @brief Convert QTabletEvent to PointerEvent.
      */
     PointerEvent tabletToPointerEvent(QTabletEvent* event, PointerEvent::Type type);
+
+    /**
+     * @brief Resolve the action mode for a pointer press.
+     *
+     * Real-mouse right clicks invert the persistent mode. All other pointer
+     * sources and buttons use the persistent mode.
+     */
+    static ObjectActionMode effectiveObjectActionModeForPointer(
+        ObjectActionMode persistentMode,
+        PointerEvent::Source source,
+        Qt::MouseButton button);
+
+    void beginObjectPointerGesture(const PointerEvent& pe);
+    void resetObjectPointerGesture();
     
     /**
      * @brief Main pointer event handler.

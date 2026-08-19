@@ -412,6 +412,68 @@ public:
         printf("PASSED\n");
         return true;
     }
+
+    /**
+     * @brief Test left/current and right/alternate ObjectSelect mode resolution.
+     */
+    static bool testObjectAlternateMouseMode() {
+        printf("  testObjectAlternateMouseMode... ");
+
+        using ActionMode = DocumentViewport::ObjectActionMode;
+        const auto resolve = [](ActionMode persistent,
+                                PointerEvent::Source source,
+                                Qt::MouseButton button) {
+            return DocumentViewport::effectiveObjectActionModeForPointer(
+                persistent, source, button);
+        };
+
+        if (resolve(ActionMode::Select, PointerEvent::Mouse, Qt::LeftButton)
+                != ActionMode::Select
+            || resolve(ActionMode::Create, PointerEvent::Mouse, Qt::LeftButton)
+                != ActionMode::Create
+            || resolve(ActionMode::Select, PointerEvent::Mouse, Qt::RightButton)
+                != ActionMode::Create
+            || resolve(ActionMode::Create, PointerEvent::Mouse, Qt::RightButton)
+                != ActionMode::Select) {
+            printf("FAILED: mouse mode matrix is incorrect\n");
+            return false;
+        }
+
+        // Stylus barrel buttons are deliberately outside this mouse-only UX.
+        if (resolve(ActionMode::Select, PointerEvent::Stylus, Qt::RightButton)
+                != ActionMode::Select
+            || resolve(ActionMode::Create, PointerEvent::Stylus, Qt::RightButton)
+                != ActionMode::Create) {
+            printf("FAILED: stylus mode should remain persistent\n");
+            return false;
+        }
+
+        DocumentViewport viewport;
+        viewport.m_objectActionMode = ActionMode::Select;
+        PointerEvent press;
+        press.type = PointerEvent::Press;
+        press.source = PointerEvent::Mouse;
+        press.button = Qt::RightButton;
+        press.buttons = Qt::RightButton;
+        viewport.beginObjectPointerGesture(press);
+
+        if (viewport.m_objectGestureActionMode != ActionMode::Create
+            || viewport.m_objectActionMode != ActionMode::Select
+            || viewport.m_objectGestureButton != Qt::RightButton) {
+            printf("FAILED: gesture changed persistent mode or cached wrong state\n");
+            return false;
+        }
+
+        viewport.resetObjectPointerGesture();
+        if (viewport.m_objectGestureButton != Qt::NoButton
+            || viewport.m_objectActionMode != ActionMode::Select) {
+            printf("FAILED: gesture reset changed persistent mode\n");
+            return false;
+        }
+
+        printf("PASSED\n");
+        return true;
+    }
     
     /**
      * @brief Test the page containment geometry used to keep objects on-page.
@@ -580,6 +642,7 @@ public:
         runTest(testScrollFractions, "testScrollFractions");
         runTest(testPdfCache, "testPdfCache");
         runTest(testPointerEvents, "testPointerEvents");
+        runTest(testObjectAlternateMouseMode, "testObjectAlternateMouseMode");
         runTest(testObjectPageContainment, "testObjectPageContainment");
         runTest(testObjectGroupContainment, "testObjectGroupContainment");
         

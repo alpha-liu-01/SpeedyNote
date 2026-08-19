@@ -22,6 +22,7 @@
 #include <QRegion>
 #include <QResizeEvent>
 #include <QMouseEvent>
+#include <QContextMenuEvent>
 #include <QTabletEvent>
 #include <QWheelEvent>
 #include <QKeyEvent>
@@ -767,13 +768,7 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     
     // Clear object selection and cancel creation when switching away from ObjectSelect tool
     if (previousTool == ToolType::ObjectSelect && tool != ToolType::ObjectSelect) {
-        if (m_isCreatingTextBox) {
-            m_isCreatingTextBox = false;
-            m_pointerActive = false;
-        }
-        if (!m_selectedObjects.isEmpty()) {
-            deselectAllObjects();
-        }
+        clearObjectSelection();
     }
     
     // Cancel any in-progress eraser lasso when switching away from Eraser
@@ -955,6 +950,34 @@ void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Object action mode changed to:" << (mode == ObjectActionMode::Select ? "Select" : "Create");
 #endif
+}
+
+DocumentViewport::ObjectActionMode
+DocumentViewport::effectiveObjectActionModeForPointer(
+    ObjectActionMode persistentMode,
+    PointerEvent::Source source,
+    Qt::MouseButton button)
+{
+    if (source == PointerEvent::Mouse && button == Qt::RightButton) {
+        return persistentMode == ObjectActionMode::Select
+            ? ObjectActionMode::Create
+            : ObjectActionMode::Select;
+    }
+    return persistentMode;
+}
+
+void DocumentViewport::beginObjectPointerGesture(const PointerEvent& pe)
+{
+    m_objectGestureButton =
+        pe.source == PointerEvent::Mouse ? pe.button : Qt::NoButton;
+    m_objectGestureActionMode = effectiveObjectActionModeForPointer(
+        m_objectActionMode, pe.source, pe.button);
+}
+
+void DocumentViewport::resetObjectPointerGesture()
+{
+    m_objectGestureButton = Qt::NoButton;
+    m_objectGestureActionMode = m_objectActionMode;
 }
 
 void DocumentViewport::setEraserMode(EraserMode mode)
@@ -3182,8 +3205,12 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
         return;
     }
     
-    // Only handle left button for drawing
-    if (event->button() != Qt::LeftButton) {
+    const bool objectAlternateButton =
+        m_currentTool == ToolType::ObjectSelect && event->button() == Qt::RightButton;
+
+    // Drawing tools use left only. ObjectSelect also consumes right as the
+    // temporary alternate action mode.
+    if (event->button() != Qt::LeftButton && !objectAlternateButton) {
         event->ignore();
         return;
     }
@@ -3198,6 +3225,13 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
     
     // Ignore if tablet is active (avoid duplicate events)
     if (m_pointerActive && m_activeSource == PointerEvent::Stylus) {
+        event->accept();
+        return;
+    }
+
+    // Ignore a second mouse button while an ObjectSelect gesture is active.
+    if (m_currentTool == ToolType::ObjectSelect
+        && m_objectGestureButton != Qt::NoButton) {
         event->accept();
         return;
     }
@@ -3233,7 +3267,10 @@ void DocumentViewport::mouseMoveEvent(QMouseEvent* event)
     }
     
     // Process move if we have an active pointer or for hover
-    if (m_pointerActive || (event->buttons() & Qt::LeftButton)) {
+    const bool objectRightDrag =
+        m_currentTool == ToolType::ObjectSelect
+        && (event->buttons() & Qt::RightButton);
+    if (m_pointerActive || (event->buttons() & Qt::LeftButton) || objectRightDrag) {
         PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Move);
         handlePointerEvent(pe);
     } else {
@@ -3273,7 +3310,9 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
     
-    if (event->button() != Qt::LeftButton) {
+    const bool objectAlternateButton =
+        m_currentTool == ToolType::ObjectSelect && event->button() == Qt::RightButton;
+    if (event->button() != Qt::LeftButton && !objectAlternateButton) {
         event->ignore();
         return;
     }
@@ -3294,6 +3333,15 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
     PointerEvent pe = mouseToPointerEvent(event, PointerEvent::Release);
     handlePointerEvent(pe);
     event->accept();
+}
+
+void DocumentViewport::contextMenuEvent(QContextMenuEvent* event)
+{
+    if (m_currentTool == ToolType::ObjectSelect) {
+        event->accept();
+        return;
+    }
+    QWidget::contextMenuEvent(event);
 }
 
 void DocumentViewport::wheelEvent(QWheelEvent* event)
@@ -4946,6 +4994,7 @@ PointerEvent DocumentViewport::mouseToPointerEvent(QMouseEvent* event, PointerEv
     // Hardware state
     pe.isEraser = false;
     pe.stylusButtons = 0;
+    pe.button = event->button();
     pe.buttons = event->buttons();
     pe.modifiers = event->modifiers();
     pe.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -5003,6 +5052,7 @@ PointerEvent DocumentViewport::tabletToPointerEvent(QTabletEvent* event, Pointer
     // Barrel buttons - Qt provides via buttons()
     // Common mappings: barrel button 1 = Qt::MiddleButton, barrel button 2 = Qt::RightButton
     pe.stylusButtons = static_cast<int>(event->buttons());
+    pe.button = event->button();
     pe.buttons = event->buttons();
     pe.modifiers = event->modifiers();
     pe.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -6166,9 +6216,12 @@ void DocumentViewport::handlePointerRelease_Lasso(const PointerEvent& pe)
 void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 {
     if (!m_document) return;
+
+    beginObjectPointerGesture(pe);
     
-    // Phase C.4.4: Create mode - insert object at click position instead of selecting
-    if (m_objectActionMode == ObjectActionMode::Create) {
+    // The right mouse button temporarily uses the opposite action mode without
+    // changing the persistent action-bar state.
+    if (m_objectGestureActionMode == ObjectActionMode::Create) {
         PageHit hit = viewportToPage(pe.viewportPos);
         if (hit.pageIndex < 0) {
             // Click not on any page - ignore in paged mode
@@ -6176,6 +6229,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "handlePointerPress_ObjectSelect: Create mode click not on page";
 #endif
+                m_pointerActive = false;
+                m_activeSource = PointerEvent::Unknown;
+                resetObjectPointerGesture();
                 return;
             }
             // Edgeless: use document coordinates directly
@@ -6193,6 +6249,9 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             // KDE Plasma 6 Wayland re-trigger this branch and open another
             // dialog (stack-of-dialogs crash).
             if (m_objectInsertDialogActive) {
+                m_pointerActive = false;
+                m_activeSource = PointerEvent::Unknown;
+                resetObjectPointerGesture();
                 return;
             }
             m_objectInsertDialogActive = true;
@@ -6207,10 +6266,16 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             QTimer::singleShot(0, this, [this]() {
                 m_objectInsertDialogActive = false;
             });
+            m_pointerActive = false;
+            m_activeSource = PointerEvent::Unknown;
+            resetObjectPointerGesture();
         } else if (m_objectInsertMode == ObjectInsertMode::Link) {
             // Create empty LinkObject at position
             // Pass viewportPos so edgeless mode can determine correct tile
             createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint, pe.viewportPos);
+            m_pointerActive = false;
+            m_activeSource = PointerEvent::Unknown;
+            resetObjectPointerGesture();
         } else if (m_objectInsertMode == ObjectInsertMode::Text) {
             m_isCreatingTextBox = true;
             if (m_document && m_document->isEdgeless()) {
@@ -6505,10 +6570,22 @@ void DocumentViewport::handlePointerMove_ObjectSelect(const PointerEvent& pe)
 
 void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 {
+    if (pe.source == PointerEvent::Mouse
+        && m_objectGestureButton != Qt::NoButton
+        && pe.button != m_objectGestureButton) {
+        return;
+    }
+
+    auto finishGesture = [this]() {
+        m_pointerActive = false;
+        m_activeSource = PointerEvent::Unknown;
+        m_hardwareEraserActive = false;
+        resetObjectPointerGesture();
+    };
+
     // Phase 2C: Finalize text box creation
     if (m_isCreatingTextBox) {
         m_isCreatingTextBox = false;
-        m_pointerActive = false;
 
         PageHit releaseHit = viewportToPage(pe.viewportPos);
         QPointF releasePagePoint;
@@ -6537,6 +6614,7 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
             if (rect.height() < MIN_H) rect.setHeight(MIN_H);
         }
 
+        finishGesture();
         createTextBoxAtRect(pageIndex, rect, pe.viewportPos);
         return;
     }
@@ -6576,7 +6654,7 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         m_isResizingObject = false;
         m_objectResizeHandle = HandleHit::None;
         m_resizeObjectPageIndex = -1;
-        m_pointerActive = false;
+        finishGesture();
         
         // Phase O4.1: Clear background snapshot and object cache, trigger full re-render
         m_objectDragBackgroundSnapshot = QPixmap();
@@ -6712,7 +6790,7 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
         update();
     }
     
-    m_pointerActive = false;
+    finishGesture();
 }
 
 void DocumentViewport::clearObjectSelection()
@@ -6722,8 +6800,17 @@ void DocumentViewport::clearObjectSelection()
     m_hoveredObject = nullptr;
     m_isDraggingObjects = false;
     m_isCreatingTextBox = false;
+    m_isResizingObject = false;
+    m_objectResizeHandle = HandleHit::None;
+    m_resizeObjectPageIndex = -1;
     m_objectOriginalPositions.clear();
     m_objectOriginalPageIndices.clear();
+    m_objectDragBackgroundSnapshot = QPixmap();
+    m_dragObjectRenderedCache = QPixmap();
+    m_pointerActive = false;
+    m_activeSource = PointerEvent::Unknown;
+    m_hardwareEraserActive = false;
+    resetObjectPointerGesture();
     if (hadSelection) {
         for (int p : m_pendingThumbnailPages)
             emit pageModified(p);
@@ -6921,6 +7008,8 @@ void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
                 newMode = ObjectInsertMode::Image;
             } else if (selected->type() == "link") {
                 newMode = ObjectInsertMode::Link;
+            } else if (selected->type() == "textbox") {
+                newMode = ObjectInsertMode::Text;
             }
             
             if (newMode != m_objectInsertMode) {
@@ -7406,13 +7495,7 @@ void DocumentViewport::insertImageFromClipboard()
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // 9. Auto-switch to Select mode after inserting
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
-    
-    // 10. Emit modification signal
+    // 9. Emit modification signal
     emit documentModified();
     
     update();
@@ -7554,13 +7637,7 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // 9. Auto-switch to Select mode after inserting
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
-    
-    // 10. Emit modification signal
+    // 9. Emit modification signal
     emit documentModified();
     
     update();
@@ -8250,12 +8327,6 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
     deselectAllObjects();
     selectObject(rawPtr, false);
     
-    // Auto-switch to Select mode after inserting
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
-    
     emit documentModified();
     // SB2: a brand-new LinkObject adds a scroll-bar marker. Refresh the outline
     // cache for the owning container and notify listeners (scroll bar + notes).
@@ -8345,11 +8416,6 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
 
     deselectAllObjects();
     selectObject(rawPtr, false);
-
-    if (m_objectActionMode == ObjectActionMode::Create) {
-        m_objectActionMode = ObjectActionMode::Select;
-        emit objectActionModeChanged(m_objectActionMode);
-    }
 
     emit documentModified();
     update();
@@ -10690,11 +10756,10 @@ bool DocumentViewport::handleEscapeKey()
         }
     }
     
-    // Priority 2: Cancel in-progress text box creation (ObjectSelect tool)
-    if (m_currentTool == ToolType::ObjectSelect && m_isCreatingTextBox) {
-        m_isCreatingTextBox = false;
-        m_pointerActive = false;
-        update();
+    // Priority 2: Cancel an in-progress ObjectSelect gesture.
+    if (m_currentTool == ToolType::ObjectSelect
+        && (m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+        clearObjectSelection();
         return true;
     }
 

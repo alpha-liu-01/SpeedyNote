@@ -272,9 +272,12 @@ QString DebugOverlay::toolName() const
         case ToolType::Highlighter: return "Highlighter";
         case ToolType::Lasso:       return "Lasso";
         case ToolType::ObjectSelect: {
-            // Phase C.4: Show sub-modes for ObjectSelect tool
-            QString insertMode = (m_viewport->objectInsertMode() == DocumentViewport::ObjectInsertMode::Image) 
-                                 ? "Img" : "Link";
+            QString insertMode;
+            switch (m_viewport->objectInsertMode()) {
+            case DocumentViewport::ObjectInsertMode::Image: insertMode = "Img"; break;
+            case DocumentViewport::ObjectInsertMode::Link:  insertMode = "Link"; break;
+            case DocumentViewport::ObjectInsertMode::Text:  insertMode = "Text"; break;
+            }
             QString actionMode = (m_viewport->objectActionMode() == DocumentViewport::ObjectActionMode::Create) 
                                  ? "Create" : "Select";
             return QString("Object[%1/%2]").arg(insertMode, actionMode);

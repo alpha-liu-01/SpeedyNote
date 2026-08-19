@@ -180,11 +180,11 @@ void ShortcutManager::registerDefaults()
     registerAction("object.affinity_down", "Alt+[", tr("Decrease Affinity"), tr("Objects"));
     registerAction("object.affinity_background", "Alt+\\", tr("Send to Background"), tr("Objects"));
     
-    // ===== Object Insert/Action Mode =====
-    registerAction("object.mode_image", "I", tr("Image Insert Mode"), tr("Objects"));
-    registerAction("object.mode_link", "Ctrl+.", tr("Link Insert Mode"), tr("Objects"));
-    registerAction("object.mode_text", "Ctrl+T", tr("Text Insert Mode"), tr("Objects"));
-    registerAction("object.mode_create", "Ctrl+6", tr("Object Create Mode"), tr("Objects"));
+    // ===== Object tool subtype / action mode =====
+    registerAction("object.mode_image", "I", tr("Image Object Tool"), tr("Objects"));
+    registerAction("object.mode_link", "Ctrl+.", tr("Link Object Tool"), tr("Objects"));
+    registerAction("object.mode_text", "Ctrl+T", tr("Text Object Tool"), tr("Objects"));
+    registerAction("object.mode_create", "Ctrl+6", tr("Object Add Mode"), tr("Objects"));
     registerAction("object.mode_select", "Ctrl+7", tr("Object Select Mode"), tr("Objects"));
     
     // ===== Link Slots =====
