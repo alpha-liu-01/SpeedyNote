@@ -515,6 +515,34 @@ public:
             return false;
         }
 
+        viewport.m_objectActionMode = DocumentViewport::ObjectActionMode::Select;
+        press.button = Qt::RightButton;
+        viewport.beginObjectPointerGesture(press);
+        viewport.m_pointerActive = true;
+        viewport.m_activeSource = PointerEvent::Mouse;
+        viewport.m_isCreatingTextBox = true;
+
+        PointerEvent mismatchedRelease;
+        mismatchedRelease.type = PointerEvent::Release;
+        mismatchedRelease.source = PointerEvent::Mouse;
+        mismatchedRelease.button = Qt::LeftButton;
+        mismatchedRelease.buttons = Qt::RightButton;
+        viewport.handlePointerRelease_ObjectSelect(mismatchedRelease);
+        if (!viewport.m_isCreatingTextBox
+            || viewport.m_objectGestureButton != Qt::RightButton) {
+            printf("FAILED: chord release cancelled while initiating button was held\n");
+            return false;
+        }
+
+        mismatchedRelease.buttons = Qt::NoButton;
+        viewport.handlePointerRelease_ObjectSelect(mismatchedRelease);
+        if (viewport.m_isCreatingTextBox || viewport.m_pointerActive
+            || viewport.m_objectGestureButton != Qt::NoButton
+            || viewport.m_objectActionMode != DocumentViewport::ObjectActionMode::Select) {
+            printf("FAILED: lost initiating release left a stuck gesture\n");
+            return false;
+        }
+
         ImageObject object;
         const QPointF originalPosition(25, 40);
         object.position = QPointF(125, 140);
@@ -542,6 +570,29 @@ public:
             || !qFuzzyCompare(object.rotation, originalRotation)
             || viewport.m_isResizingObject) {
             printf("FAILED: resize cancellation did not restore transform\n");
+            return false;
+        }
+
+        object.position = QPointF(900, 900);
+        viewport.m_objectOriginalPositions.insert(object.id, originalPosition);
+        viewport.m_isDraggingObjects = true;
+        viewport.m_pointerActive = true;
+        viewport.deselectAllObjects();
+        if (object.position != originalPosition || !viewport.m_selectedObjects.isEmpty()
+            || viewport.m_isDraggingObjects || viewport.m_pointerActive) {
+            printf("FAILED: deselection did not roll back the live drag\n");
+            return false;
+        }
+
+        viewport.beginObjectPointerGesture(press);
+        viewport.m_pointerActive = true;
+        viewport.m_activeSource = PointerEvent::Mouse;
+        viewport.m_isCreatingTextBox = true;
+        QFocusEvent focusOut(QEvent::FocusOut);
+        viewport.focusOutEvent(&focusOut);
+        if (viewport.m_isCreatingTextBox || viewport.m_pointerActive
+            || viewport.m_objectGestureButton != Qt::NoButton) {
+            printf("FAILED: focus loss did not cancel the object gesture\n");
             return false;
         }
 
@@ -696,6 +747,41 @@ public:
                    nonFiniteResult.width(), nonFiniteResult.height(),
                    ObjectConstraints::integerShrinkDivisor(
                        QSizeF(100, 100), QSizeF(inf, 100)));
+            return false;
+        }
+
+        const QSizeF dprTagged = ObjectConstraints::freshImageInsertSize(
+            QSizeF(2000, 1000), 2.0, 2.0, QSizeF(6000, 6000));
+        const QSizeF ordinaryHiDpi = ObjectConstraints::freshImageInsertSize(
+            QSizeF(2000, 1000), 1.0, 2.0, QSizeF(6000, 6000));
+        if (dprTagged != QSizeF(1000, 500)
+            || ordinaryHiDpi != QSizeF(1000, 500)) {
+            printf("FAILED: image/display DPR normalization is incorrect\n");
+            return false;
+        }
+
+        const QSizeF dprAndIntegerScaled = ObjectConstraints::freshImageInsertSize(
+            QSizeF(4000, 3000), 2.0, 1.0, target);
+        if (dprAndIntegerScaled != QSizeF(500, 375)) {
+            printf("FAILED: DPR normalization must precede integer scaling\n");
+            return false;
+        }
+
+        const QSizeF hugeSource(1e20, 5e19);
+        const QSizeF hugeResult =
+            ObjectConstraints::shrinkByIntegerDivisor(hugeSource, target);
+        if (hugeResult.width() > 600 || hugeResult.height() > 800
+            || !qFuzzyCompare(hugeResult.width() / hugeResult.height(),
+                              hugeSource.width() / hugeSource.height())) {
+            printf("FAILED: divisor overflow fallback did not enforce bounds\n");
+            return false;
+        }
+
+        DocumentViewport noDocumentViewport;
+        ImageObject unplaceableImage;
+        unplaceableImage.setPixmap(QPixmap(100, 100));
+        if (noDocumentViewport.prepareFreshImageForInsertion(unplaceableImage)) {
+            printf("FAILED: image preparation should reject missing insertion bounds\n");
             return false;
         }
 

@@ -929,9 +929,7 @@ void DocumentViewport::setObjectInsertMode(ObjectInsertMode mode)
 
     // A mode change must not let an in-flight gesture complete under stale UI
     // state (most visibly, a Text rubber band creating after Image is chosen).
-    if (m_currentTool == ToolType::ObjectSelect
-        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
-            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+    if (hasActiveObjectPointerGesture()) {
         cancelObjectPointerGesture();
     }
     m_objectInsertMode = mode;
@@ -949,9 +947,7 @@ void DocumentViewport::setObjectActionMode(ObjectActionMode mode)
 
     // The effective mode is cached at press time. Cancel the active gesture
     // instead of allowing release to perform the old mode after the toggle.
-    if (m_currentTool == ToolType::ObjectSelect
-        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
-            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject)) {
+    if (hasActiveObjectPointerGesture()) {
         cancelObjectPointerGesture();
     }
     m_objectActionMode = mode;
@@ -974,6 +970,13 @@ DocumentViewport::effectiveObjectActionModeForPointer(
             : ObjectActionMode::Select;
     }
     return persistentMode;
+}
+
+bool DocumentViewport::hasActiveObjectPointerGesture() const
+{
+    return m_currentTool == ToolType::ObjectSelect
+        && (m_pointerActive || m_objectGestureButton != Qt::NoButton
+            || m_isCreatingTextBox || m_isDraggingObjects || m_isResizingObject);
 }
 
 void DocumentViewport::beginObjectPointerGesture(const PointerEvent& pe)
@@ -3373,8 +3376,10 @@ void DocumentViewport::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
     
-    // Ignore if tablet is active
-    if (m_activeSource == PointerEvent::Stylus) {
+    // Ignore duplicate mouse releases from a stylus gesture, but never swallow
+    // the release of a mouse ObjectSelect gesture if source state was disturbed.
+    if (m_activeSource == PointerEvent::Stylus
+        && m_objectGestureButton == Qt::NoButton) {
         event->accept();
         return;
     }
@@ -3570,6 +3575,10 @@ void DocumentViewport::focusOutEvent(QFocusEvent* event)
             endPanGesture();
         }
     }
+
+    if (hasActiveObjectPointerGesture()) {
+        cancelObjectPointerGesture();
+    }
     
     QWidget::focusOutEvent(event);
 }
@@ -3593,6 +3602,10 @@ void DocumentViewport::hideEvent(QHideEvent* event)
     // This prevents inertia callbacks from accessing invalid widget state
     if (m_touchHandler) {
         m_touchHandler->reset();
+    }
+
+    if (hasActiveObjectPointerGesture()) {
+        cancelObjectPointerGesture();
     }
     
     // Release stroke cache when hidden (reclaim memory while not visible)
@@ -3707,6 +3720,13 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
         default:
             event->ignore();
             return;
+    }
+
+    // Do not let a stylus press preempt a mouse ObjectSelect gesture and erase
+    // its initiating-button/effective-mode state.
+    if (m_pointerActive && m_activeSource == PointerEvent::Mouse) {
+        event->accept();
+        return;
     }
     
     // ===== Tablet Hover Tracking for Eraser Cursor =====
@@ -6278,9 +6298,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 #ifdef SPEEDYNOTE_DEBUG
                 qDebug() << "handlePointerPress_ObjectSelect: Create mode click not on page";
 #endif
-                m_pointerActive = false;
-                m_activeSource = PointerEvent::Unknown;
-                resetObjectPointerGesture();
+                cancelObjectPointerGesture();
                 return;
             }
             // Edgeless: use document coordinates directly
@@ -6298,9 +6316,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             // KDE Plasma 6 Wayland re-trigger this branch and open another
             // dialog (stack-of-dialogs crash).
             if (m_objectInsertDialogActive) {
-                m_pointerActive = false;
-                m_activeSource = PointerEvent::Unknown;
-                resetObjectPointerGesture();
+                cancelObjectPointerGesture();
                 return;
             }
             m_objectInsertDialogActive = true;
@@ -6315,16 +6331,12 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             QTimer::singleShot(0, this, [this]() {
                 m_objectInsertDialogActive = false;
             });
-            m_pointerActive = false;
-            m_activeSource = PointerEvent::Unknown;
-            resetObjectPointerGesture();
+            cancelObjectPointerGesture();
         } else if (m_objectInsertMode == ObjectInsertMode::Link) {
             // Create empty LinkObject at position
             // Pass viewportPos so edgeless mode can determine correct tile
             createLinkObjectAtPosition(hit.pageIndex, hit.pagePoint, pe.viewportPos);
-            m_pointerActive = false;
-            m_activeSource = PointerEvent::Unknown;
-            resetObjectPointerGesture();
+            cancelObjectPointerGesture();
         } else if (m_objectInsertMode == ObjectInsertMode::Text) {
             m_isCreatingTextBox = true;
             if (m_document && m_document->isEdgeless()) {
@@ -6624,6 +6636,11 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
     if (pe.source == PointerEvent::Mouse
         && m_objectGestureButton != Qt::NoButton
         && pe.button != m_objectGestureButton) {
+        if (!(pe.buttons & m_objectGestureButton)) {
+            // The initiating release was lost (for example during input-source
+            // interleaving). Roll back rather than leaving a stuck preview.
+            cancelObjectPointerGesture();
+        }
         return;
     }
 
@@ -7039,7 +7056,10 @@ void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
     if (changed) {
         emit objectSelectionChanged();
         
-        // Phase C.2.4: Auto-switch insert mode based on selected object type
+        // Phase C.2.4: Auto-switch insert mode based on selected object type.
+        // Assign directly rather than calling setObjectInsertMode(): selection
+        // happens during a Select press, and the public setter intentionally
+        // cancels active gestures initiated by an external mode change.
         if (m_selectedObjects.size() == 1) {
             InsertedObject* selected = m_selectedObjects.first();
             ObjectInsertMode newMode = m_objectInsertMode;
@@ -7074,6 +7094,10 @@ void DocumentViewport::deselectObject(InsertedObject* obj)
 
 void DocumentViewport::deselectAllObjects()
 {
+    if (hasActiveObjectPointerGesture()) {
+        cancelObjectPointerGesture();
+    }
+
     if (m_selectedObjects.isEmpty()) return;
 
     m_selectedObjects.clear();
@@ -7284,14 +7308,15 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
 void DocumentViewport::pasteForObjectSelect()
 {
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "pasteForObjectSelect: Called, insertMode =" 
-             << (m_objectInsertMode == ObjectInsertMode::Image ? "Image" : "Link");
+    const char* modeName = m_objectInsertMode == ObjectInsertMode::Image ? "Image"
+        : m_objectInsertMode == ObjectInsertMode::Link ? "Link" : "Text";
+    qDebug() << "pasteForObjectSelect: Called, insertMode =" << modeName;
 #endif
     
     // Phase O2.4.2: Tool-aware paste for ObjectSelect tool
     // Paste priority depends on ObjectInsertMode:
     // - Image mode: System clipboard images take priority, then internal clipboard
-    // - Link mode: Internal clipboard takes priority (ignore system clipboard images)
+    // - Link/Text mode: paste internal objects only
     
     QClipboard* clipboard = QGuiApplication::clipboard();
     if (!clipboard || !clipboard->mimeData()) {
@@ -7303,25 +7328,22 @@ void DocumentViewport::pasteForObjectSelect()
     
     const QMimeData* mimeData = clipboard->mimeData();
     
-    // ===== Link mode: Internal clipboard takes priority =====
-    // When user is in Link mode, they're focused on LinkObjects.
-    // System clipboard images should NOT interrupt pasting copied LinkObjects.
-    if (m_objectInsertMode == ObjectInsertMode::Link) {
-        // Priority 1 (Link mode): Internal object clipboard
+    // ===== Link/Text modes: Internal object clipboard only =====
+    // System images belong to the dedicated Image tool and must not interrupt
+    // pasting copied objects while another subtype is active.
+    if (m_objectInsertMode != ObjectInsertMode::Image) {
         if (!s_objectClipboard.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
-            qDebug() << "pasteForObjectSelect (Link mode): Internal clipboard has" 
+            qDebug() << "pasteForObjectSelect (non-Image mode): Internal clipboard has"
                      << s_objectClipboard.size() << "objects";
 #endif
             pasteObjects();
             return;
         }
-        
-        // Priority 2 (Link mode): Fall through - no internal clipboard content
-        // In Link mode, we don't paste system clipboard images.
-        // User can switch to Image mode if they want to paste an image.
+
 #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pasteForObjectSelect (Link mode): No internal clipboard content, skipping system clipboard";
+        qDebug() << "pasteForObjectSelect (non-Image mode): "
+                    "No internal clipboard content, skipping system image";
 #endif
         return;
     }
@@ -7385,6 +7407,31 @@ void DocumentViewport::pasteForObjectSelect()
 #endif
 }
 
+bool DocumentViewport::prepareFreshImageForInsertion(ImageObject& imageObject)
+{
+    if (!m_document || imageObject.pixmap().isNull()) {
+        return false;
+    }
+
+    const QSizeF insertionBounds = m_document->isEdgeless()
+        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
+        : m_document->pageSizeAt(m_currentPageIndex);
+    if (!insertionBounds.isValid() || insertionBounds.isEmpty()
+        || !qIsFinite(insertionBounds.width()) || !qIsFinite(insertionBounds.height())) {
+        return false;
+    }
+
+    imageObject.size = ObjectConstraints::freshImageInsertSize(
+        QSizeF(imageObject.pixmap().size()),
+        imageObject.pixmap().devicePixelRatio(),
+        devicePixelRatioF(),
+        insertionBounds);
+    const QPointF center = viewportCenterInDocument();
+    imageObject.position = center - QPointF(imageObject.size.width() / 2.0,
+                                             imageObject.size.height() / 2.0);
+    return true;
+}
+
 void DocumentViewport::insertImageFromClipboard()
 {
 #ifdef SPEEDYNOTE_DEBUG
@@ -7426,24 +7473,12 @@ void DocumentViewport::insertImageFromClipboard()
     auto imgObj = std::make_unique<ImageObject>();
     imgObj->setPixmap(QPixmap::fromImage(image));
     // NOTE: id is auto-generated in InsertedObject constructor
-    
-    // Scale size for high DPI displays
-    // The pixmap dimensions are in physical pixels, but document coordinates
-    // are in logical pixels. Dividing by DPR ensures 1:1 pixel mapping on screen.
-    qreal dpr = devicePixelRatioF();
-    if (dpr > 1.0) {
-        imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
+
+    // 3. Normalize high-DPI pixels, apply integer scaling, and center.
+    if (!prepareFreshImageForInsertion(*imgObj)) {
+        qWarning() << "insertImageFromClipboard: Invalid image insertion bounds";
+        return;
     }
-    
-    // 3. Scale by the smallest whole-number divisor that keeps the image
-    // within two-thirds of its page (or one edgeless tile), then center it.
-    const QSizeF insertionBounds = m_document->isEdgeless()
-        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
-        : m_document->pageSizeAt(m_currentPageIndex);
-    imgObj->size = ObjectConstraints::shrinkByIntegerDivisor(
-        imgObj->size, insertionBounds);
-    QPointF center = viewportCenterInDocument();
-    imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
     // Phase O3.5.1: Default affinity based on active layer
     // Formula: activeLayer - 1, so image appears BELOW active layer's strokes
@@ -7572,24 +7607,12 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
     // 2. Create ImageObject with setPixmap()
     auto imgObj = std::make_unique<ImageObject>();
     imgObj->setPixmap(QPixmap::fromImage(image));
-    
-    // Scale size for high DPI displays
-    // The pixmap dimensions are in physical pixels, but document coordinates
-    // are in logical pixels. Dividing by DPR ensures 1:1 pixel mapping on screen.
-    qreal dpr = devicePixelRatioF();
-    if (dpr > 1.0) {
-        imgObj->size = QSizeF(imgObj->size.width() / dpr, imgObj->size.height() / dpr);
+
+    // 3. Normalize high-DPI pixels, apply integer scaling, and center.
+    if (!prepareFreshImageForInsertion(*imgObj)) {
+        qWarning() << "insertImageFromFile: Invalid image insertion bounds";
+        return;
     }
-    
-    // 3. Scale by the smallest whole-number divisor that keeps the image
-    // within two-thirds of its page (or one edgeless tile), then center it.
-    const QSizeF insertionBounds = m_document->isEdgeless()
-        ? QSizeF(Document::EDGELESS_TILE_SIZE, Document::EDGELESS_TILE_SIZE)
-        : m_document->pageSizeAt(m_currentPageIndex);
-    imgObj->size = ObjectConstraints::shrinkByIntegerDivisor(
-        imgObj->size, insertionBounds);
-    QPointF center = viewportCenterInDocument();
-    imgObj->position = center - QPointF(imgObj->size.width() / 2.0, imgObj->size.height() / 2.0);
     
     // Phase O3.5.1: Default affinity based on active layer
     // Formula: activeLayer - 1, so image appears BELOW active layer's strokes

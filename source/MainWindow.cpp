@@ -22,7 +22,6 @@
 #include "ui/actionbars/LassoActionBar.h"
 #include "ui/actionbars/ObjectSelectActionBar.h"
 #include "ui/actionbars/TextSelectionActionBar.h"
-#include "ui/actionbars/ClipboardActionBar.h"
 #include "ui/actionbars/PagePanelActionBar.h"
 #include "objects/LinkObject.h"  // For LinkSlot slot state access
 #include "core/MarkdownNote.h"   // Phase M.3: For loading markdown notes
@@ -2464,18 +2463,24 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     m_insertModeConn = connect(viewport, &DocumentViewport::objectInsertModeChanged,
                                this, [this](DocumentViewport::ObjectInsertMode mode) {
         if (m_toolbar) m_toolbar->setObjectInsertMode(mode);
+        if (isActiveWindow()) syncObjectModeCheckActions();
     });
     
     m_actionModeConn = connect(viewport, &DocumentViewport::objectActionModeChanged,
                                this, [this](DocumentViewport::ObjectActionMode mode) {
         if (m_objectSelectActionBar)
             m_objectSelectActionBar->setActionModeState(mode);
+        if (isActiveWindow()) syncObjectModeCheckActions();
     });
     
-    if (m_toolbar)
+    if (m_toolbar) {
         m_toolbar->setObjectInsertMode(viewport->objectInsertMode());
+        m_toolbar->setCurrentTool(viewport->currentTool());
+    }
     if (m_objectSelectActionBar)
         m_objectSelectActionBar->setActionModeState(viewport->objectActionMode());
+    if (isActiveWindow())
+        syncObjectModeCheckActions();
     
     // Phase D: Connect object selection changed to update LinkSlot buttons
     m_selectionChangedConn = connect(viewport, &DocumentViewport::objectSelectionChanged,
@@ -2846,6 +2851,7 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         // changeEvent re-seeds when focus returns.
         if (isActiveWindow()) {
             syncOcrCheckActions();
+            syncObjectModeCheckActions();
         }
 
         // OCR: Sync language for the new document
@@ -4785,6 +4791,7 @@ void MainWindow::changeEvent(QEvent *event) {
         // on) to window B (auto-OCR off) would leave the menu checkmark
         // showing A's state until B's user toggled something.
         syncOcrCheckActions();
+        syncObjectModeCheckActions();
     }
 
     // Keep the nav bar's fullscreen toggle in sync with the actual window
@@ -5657,6 +5664,7 @@ void MainWindow::connectSubToolbarSignals()
                 if (m_objectSelectActionBar)
                     m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
                 m_toolbar->setCurrentTool(currentTool);
+                syncObjectModeCheckActions();
                 applyAllSubToolbarValuesToViewport(vp);
             }
             m_previousTabId = newTabId;
@@ -5668,8 +5676,10 @@ void MainWindow::connectSubToolbarSignals()
     QTimer::singleShot(0, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             m_toolbar->setObjectInsertMode(vp->objectInsertMode());
+            m_toolbar->setCurrentTool(vp->currentTool());
             if (m_objectSelectActionBar)
                 m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
+            syncObjectModeCheckActions();
             applyAllSubToolbarValuesToViewport(vp);
         }
     });
@@ -5784,17 +5794,11 @@ void MainWindow::setupActionBars()
     m_lassoActionBar = new LassoActionBar();
     m_objectSelectActionBar = new ObjectSelectActionBar();
     m_textSelectionActionBar = new TextSelectionActionBar();
-    m_clipboardActionBar = new ClipboardActionBar();
     
     // Register action bars with container
     m_actionBarContainer->setActionBar("lasso", m_lassoActionBar);
     m_actionBarContainer->setActionBar("objectSelect", m_objectSelectActionBar);
     m_actionBarContainer->setActionBar("textSelection", m_textSelectionActionBar);
-    m_actionBarContainer->setActionBar("clipboard", m_clipboardActionBar);
-    
-    // Connect tool changes from Toolbar to ActionBarContainer
-    connect(m_toolbar, &Toolbar::toolSelected, 
-            m_actionBarContainer, &ActionBarContainer::onToolChanged);
     
     // Connect clipboard changes from system clipboard
     connect(QApplication::clipboard(), &QClipboard::dataChanged,
@@ -5923,21 +5927,13 @@ void MainWindow::setupActionBars()
     if (DocumentViewport* vp = currentViewport()) {
         m_objectSelectActionBar->setActionModeState(vp->objectActionMode());
         m_actionBarContainer->onToolChanged(vp->currentTool());
+        syncObjectModeCheckActions();
     }
 
     // Connect TextSelectionActionBar signals to viewport
     connect(m_textSelectionActionBar, &TextSelectionActionBar::copyRequested, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
             vp->copyTextSelection();
-        }
-    });
-    
-    // Connect ClipboardActionBar signals to viewport
-    connect(m_clipboardActionBar, &ClipboardActionBar::pasteRequested, this, [this]() {
-        if (DocumentViewport* vp = currentViewport()) {
-            vp->pasteForObjectSelect();
-            if (m_toolOverrideViewport && m_toolOverrideViewport != vp)
-                clearToolOverride(true);
         }
     });
     
@@ -7184,6 +7180,29 @@ void MainWindow::syncOcrCheckActions()
         a->setChecked(ocrST->isShowTextEnabled());
     if (auto* a = sm->action(QStringLiteral("ocr.snap_grid")))
         a->setChecked(ocrST->isSnapToGridEnabled());
+}
+
+void MainWindow::syncObjectModeCheckActions()
+{
+#ifdef Q_OS_MACOS
+    DocumentViewport* viewport = currentViewport();
+    auto* sm = ShortcutManager::instance();
+    if (!viewport || !sm) return;
+
+    const auto insertMode = viewport->objectInsertMode();
+    if (auto* a = sm->action(QStringLiteral("object.mode_image")))
+        a->setChecked(insertMode == DocumentViewport::ObjectInsertMode::Image);
+    if (auto* a = sm->action(QStringLiteral("object.mode_link")))
+        a->setChecked(insertMode == DocumentViewport::ObjectInsertMode::Link);
+    if (auto* a = sm->action(QStringLiteral("object.mode_text")))
+        a->setChecked(insertMode == DocumentViewport::ObjectInsertMode::Text);
+
+    const auto actionMode = viewport->objectActionMode();
+    if (auto* a = sm->action(QStringLiteral("object.mode_create")))
+        a->setChecked(actionMode == DocumentViewport::ObjectActionMode::Create);
+    if (auto* a = sm->action(QStringLiteral("object.mode_select")))
+        a->setChecked(actionMode == DocumentViewport::ObjectActionMode::Select);
+#endif
 }
 
 // Refresh both the OS window title (per-platform format with Qt's native

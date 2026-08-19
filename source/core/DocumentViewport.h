@@ -36,6 +36,7 @@ enum class TouchGestureMode {
 #include <QSet>
 
 class QContextMenuEvent;
+class ImageObject;
 
 // ============================================================================
 // UndoAction - Unified undo action for both paged and edgeless modes
@@ -983,7 +984,7 @@ public:
      * - If objects are selected: deselect all objects
      * - If no objects selected but clipboard has content: clear object clipboard
      * 
-     * Used by Escape key handler and ObjectSelectSubToolbar cancel button.
+     * Used by the Escape key handler and ObjectSelectActionBar cancel button.
      */
     void cancelObjectSelectAction();
     
@@ -3100,6 +3101,7 @@ private:
         PointerEvent::Source source,
         Qt::MouseButton button);
 
+    bool hasActiveObjectPointerGesture() const;
     void beginObjectPointerGesture(const PointerEvent& pe);
     void cancelObjectPointerGesture();
     void resetObjectPointerGesture();
@@ -3203,6 +3205,12 @@ private:
      * Finalizes object drag operation.
      */
     void handlePointerRelease_ObjectSelect(const PointerEvent& pe);
+
+    /**
+     * @brief Normalize, constrain, and center a newly supplied raster image.
+     * @return False when the current page/tile has no valid insertion bounds.
+     */
+    bool prepareFreshImageForInsertion(ImageObject& imageObject);
     
     /**
      * @brief Clear the current object selection.

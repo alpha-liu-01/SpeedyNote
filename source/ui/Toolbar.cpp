@@ -423,7 +423,6 @@ void Toolbar::onTabChanged(int newTabId, int oldTabId)
         m_markerSubToolbar->saveTabState(oldTabId);
         m_highlighterSubToolbar->saveTabState(oldTabId);
         m_eraserSubToolbar->saveTabState(oldTabId);
-        m_objectSelectSubToolbar->saveTabState(oldTabId);
         m_ocrSubToolbar->saveTabState(oldTabId);
     }
 
@@ -433,7 +432,6 @@ void Toolbar::onTabChanged(int newTabId, int oldTabId)
         m_markerSubToolbar->restoreTabState(newTabId);
         m_highlighterSubToolbar->restoreTabState(newTabId);
         m_eraserSubToolbar->restoreTabState(newTabId);
-        m_objectSelectSubToolbar->restoreTabState(newTabId);
         m_ocrSubToolbar->restoreTabState(newTabId);
     }
 }
@@ -444,7 +442,6 @@ void Toolbar::clearTabState(int tabId)
     m_markerSubToolbar->clearTabState(tabId);
     m_highlighterSubToolbar->clearTabState(tabId);
     m_eraserSubToolbar->clearTabState(tabId);
-    m_objectSelectSubToolbar->clearTabState(tabId);
     m_ocrSubToolbar->clearTabState(tabId);
 }
 

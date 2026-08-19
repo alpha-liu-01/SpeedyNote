@@ -73,7 +73,6 @@ class ActionBarContainer;
 class LassoActionBar;
 class ObjectSelectActionBar;
 class TextSelectionActionBar;
-class ClipboardActionBar;
 class PagePanelActionBar;
 
 // Phase 3.1.8: TouchGestureMode - extracted from InkCanvas.h for palm rejection
@@ -449,6 +448,10 @@ private slots:
     // disagree must re-seed the menu checkmarks from the now-active window).
     void syncOcrCheckActions();
 
+    // Keep the macOS Object Mode menu checkmarks aligned with the active
+    // viewport's per-tab insert and action modes.
+    void syncObjectModeCheckActions();
+
     /**
      * @brief Refresh the OS window title and NavigationBar filename label.
      *
@@ -640,7 +643,6 @@ private:
     LassoActionBar *m_lassoActionBar = nullptr;
     ObjectSelectActionBar *m_objectSelectActionBar = nullptr;
     TextSelectionActionBar *m_textSelectionActionBar = nullptr;
-    ClipboardActionBar *m_clipboardActionBar = nullptr;
     PagePanelActionBar *m_pagePanelActionBar = nullptr;
     
     // PDF Search
