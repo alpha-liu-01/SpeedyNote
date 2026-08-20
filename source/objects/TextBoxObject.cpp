@@ -28,6 +28,79 @@ bool isMarkdownText(const QString& value)
         || value.contains(QLatin1Char('['));
 }
 
+QString markdownWithPreservedSoftBreaks(const QString& source)
+{
+    QString normalized = source;
+    normalized.replace(QLatin1String("\r\n"), QLatin1String("\n"));
+    normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+    QStringList lines = normalized.split(
+        QLatin1Char('\n'), Qt::KeepEmptyParts);
+
+    bool inFence = false;
+    QChar fenceCharacter;
+    int fenceLength = 0;
+    auto fenceAtStart = [](const QString& line, QChar* character,
+                           int* length) {
+        int offset = 0;
+        while (offset < line.size() && offset < 3
+               && line.at(offset) == QLatin1Char(' ')) {
+            ++offset;
+        }
+        if (offset >= line.size())
+            return false;
+        const QChar candidate = line.at(offset);
+        if (candidate != QLatin1Char('`')
+            && candidate != QLatin1Char('~')) {
+            return false;
+        }
+        int count = 0;
+        while (offset + count < line.size()
+               && line.at(offset + count) == candidate) {
+            ++count;
+        }
+        if (count < 3)
+            return false;
+        *character = candidate;
+        *length = count;
+        return true;
+    };
+
+    for (int i = 0; i + 1 < lines.size(); ++i) {
+        QString& line = lines[i];
+        QChar marker;
+        int markerLength = 0;
+        const bool fenceLine =
+            fenceAtStart(line, &marker, &markerLength);
+        if (fenceLine) {
+            if (!inFence) {
+                inFence = true;
+                fenceCharacter = marker;
+                fenceLength = markerLength;
+            } else if (marker == fenceCharacter
+                       && markerLength >= fenceLength) {
+                inFence = false;
+            }
+            continue;
+        }
+
+        const bool indentedCode =
+            line.startsWith(QLatin1Char('\t'))
+            || line.startsWith(QLatin1String("    "));
+        const bool nextLineHasContent = !lines[i + 1].isEmpty();
+        const bool finalTrailingBreak = i + 1 == lines.size() - 1;
+        if (!inFence && !indentedCode && !line.isEmpty()
+            && (nextLineHasContent || finalTrailingBreak)
+            && !line.endsWith(QLatin1String("  "))
+            && !line.endsWith(QLatin1Char('\\'))
+            && !line.endsWith(QLatin1String("<br>"))
+            && !line.endsWith(QLatin1String("<br/>"))
+            && !line.endsWith(QLatin1String("<br />"))) {
+            line.append(QLatin1String("  "));
+        }
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
 Qt::Alignment horizontalAlignment(TextAlignment alignment)
 {
     switch (alignment) {
@@ -316,7 +389,8 @@ std::unique_ptr<TextBoxLayoutResult> TextBoxObject::buildLayout(
 
     if (result->versioned) {
         result->document->setDefaultFont(baseFont);
-        result->document->setMarkdown(input.text);
+        result->document->setMarkdown(
+            markdownWithPreservedSoftBreaks(input.text));
         applyHeadingSizes(*result->document, baseFont, basePixelSize);
         applyAlignment(*result->document, input.alignment);
         applyFontColor(*result->document, input.fontColor);

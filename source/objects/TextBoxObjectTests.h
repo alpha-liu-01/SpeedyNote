@@ -113,6 +113,29 @@ inline bool testLayoutMeasurementAndCache()
     ok &= require(narrow.height() > wide.height(),
                   "narrow text did not grow vertically");
 
+    TextBoxObject oneLine;
+    configureCurrentBox(oneLine, QStringLiteral("Short"));
+    const qreal oneLineHeight = oneLine.size.height();
+    TextBoxObject explicitBreak;
+    configureCurrentBox(
+        explicitBreak, QStringLiteral("Short\nNext"));
+    const TextBoxLayoutResult* explicitBreakLayout =
+        explicitBreak.ensureLayout();
+    const QTextBlock firstBreakBlock = explicitBreakLayout
+        && explicitBreakLayout->document
+        ? explicitBreakLayout->document->begin()
+        : QTextBlock();
+    const bool renderedAsMultipleLines =
+        explicitBreakLayout && explicitBreakLayout->document
+        && (explicitBreakLayout->document->blockCount() > 1
+            || (firstBreakBlock.isValid()
+                && firstBreakBlock.layout()
+                && firstBreakBlock.layout()->lineCount() > 1));
+    ok &= require(explicitBreak.size.height() > oneLineHeight,
+                  "explicit newline did not grow the text box");
+    ok &= require(renderedAsMultipleLines,
+                  "Markdown collapsed an explicit newline");
+
     const QSizeF beforeRender = box.size;
     QImage image(500, 500, QImage::Format_ARGB32_Premultiplied);
     image.fill(Qt::transparent);
