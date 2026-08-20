@@ -41,13 +41,16 @@ DocumentManager::~DocumentManager()
 {
     // Clean up temp bundles and delete all owned documents
     for (Document* doc : m_documents) {
+        const bool cleanupPersistedAssets = !hasUnsavedChanges(doc);
         // Clean up temp bundle if exists (handles discarded edgeless docs)
         cleanupTempBundle(doc);
         
-        // Phase C.0.4: Clean up orphaned assets before deletion
-        // This is the same cleanup that closeDocument() does, but for
-        // documents still open when the application quits.
-        doc->cleanupOrphanedAssets();
+        // In-memory state is authoritative only after a successful save.
+        // Cleaning from discarded edits can delete assets still referenced by
+        // the last persisted page JSON.
+        if (cleanupPersistedAssets) {
+            doc->cleanupOrphanedAssets();
+        }
         
         delete doc;
     }
@@ -303,6 +306,8 @@ void DocumentManager::closeDocument(Document* doc)
     // via NotebookLibrary::instance()->saveThumbnail(path, thumbnail)
     emit documentClosed(doc);
     
+    const bool cleanupPersistedAssets = !hasUnsavedChanges(doc);
+
     // ========== TEMP BUNDLE CLEANUP ==========
     // If document was using a temp bundle and user didn't save,
     // clean up the temp directory to prevent storage space leak.
@@ -317,9 +322,11 @@ void DocumentManager::closeDocument(Document* doc)
     m_modifiedFlags.remove(doc);
     // Note: m_tempBundlePaths already cleaned by cleanupTempBundle()
     
-    // Phase C.0.4: Clean up orphaned assets before deletion
-    // This deletes image files that are no longer referenced by any object.
-    doc->cleanupOrphanedAssets();
+    // Model-based cleanup is safe only when it matches persisted JSON. If the
+    // user discarded edits, leave the existing bundle untouched.
+    if (cleanupPersistedAssets) {
+        doc->cleanupOrphanedAssets();
+    }
     
     // Delete the document
     delete doc;

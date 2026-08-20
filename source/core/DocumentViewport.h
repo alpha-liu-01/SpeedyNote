@@ -49,7 +49,9 @@ class ImageObject;
  * a stroke may span multiple tiles, producing multiple segments.  The undo/redo
  * loop iterates segments identically regardless of mode.
  *
- * Memory bound: MAX_UNDO actions × ~20KB avg = ~2MB max
+ * Memory bound: MAX_UNDO actions. Most actions are compact; an unpersisted
+ * clipboard image can temporarily retain a shared full-resolution snapshot
+ * so undo/redo remains lossless if its background asset write fails.
  */
 struct UndoAction {
     enum Type {
@@ -2549,14 +2551,19 @@ private:
      */
     static QList<QJsonObject> s_objectClipboard;
     
+    struct ClipboardImageAsset {
+        QPixmap pixmap;
+        QByteArray encodedData;
+        QByteArray format;
+    };
+
     /**
      * @brief Cached image assets for cross-document object paste.
-     * 
-     * Maps imagePath (filename) to the loaded QPixmap. Populated during
-     * copySelectedObjects() so that pasteObjects() can supply the pixmap
-     * when pasting into a different document whose bundle lacks the file.
+     *
+     * Original encoded bytes are retained when reasonably sized so JPEG/WebP
+     * and other source formats do not become PNG merely by crossing documents.
      */
-    static QMap<QString, QPixmap> s_objectClipboardAssets;
+    static QMap<QString, ClipboardImageAsset> s_objectClipboardAssets;
     
     // ===== Object Resize State (Phase O3.1) =====
     
@@ -2811,11 +2818,6 @@ private:
     // and opens another file dialog, stacking until the app crashes.
     bool m_objectInsertDialogActive = false;
 
-    // Debug-stage timing from model insertion until the first paint that can
-    // display the new image. Kept lightweight when debug output is disabled.
-    QElapsedTimer m_pendingImageFirstPaintTimer;
-    QString m_pendingImageFirstPaintId;
-    
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
     bool m_isDrawing = false;                 ///< True while actively drawing a stroke
@@ -3222,7 +3224,6 @@ private:
     void insertPreparedImage(const QImage& image,
                              const QByteArray& encodedData = QByteArray(),
                              const QByteArray& encodedFormat = QByteArray());
-    void logPendingImageFirstPaint();
     
     /**
      * @brief Clear the current object selection.

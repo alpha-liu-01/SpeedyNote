@@ -18,6 +18,7 @@
 #include <QApplication>
 #include <QBuffer>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtNumeric>
 #include <QtMath>
@@ -823,6 +824,7 @@ public:
         auto image = std::make_unique<ImageObject>();
         image->setSourceImage(decoded, jpegBytes, "jpeg");
         if (!image->imagePath.endsWith(".jpg")
+            || QFileInfo(image->imagePath).completeBaseName().size() != 64
             || image->encodedAssetData() != jpegBytes) {
             printf("FAILED: original JPEG payload/extension was not preserved\n");
             return false;
@@ -843,6 +845,54 @@ public:
         if (!asset.open(QIODevice::ReadOnly) || asset.readAll() != jpegBytes
             || !imagePtr->assetPersisted()) {
             printf("FAILED: persisted asset differs from original JPEG bytes\n");
+            return false;
+        }
+
+        // Save As must copy existing original-format assets before scanning for
+        // unsaved images; otherwise it would re-encode this JPEG as a new PNG.
+        const QString originalAssetName = imagePtr->imagePath;
+        QTemporaryDir saveAsBundle;
+        if (!saveAsBundle.isValid() || !doc->saveBundle(saveAsBundle.path())
+            || imagePtr->imagePath != originalAssetName) {
+            printf("FAILED: Save As changed the original image asset identity\n");
+            return false;
+        }
+        QFile copiedAsset(imagePtr->fullPath(saveAsBundle.path()));
+        if (!copiedAsset.open(QIODevice::ReadOnly)
+            || copiedAsset.readAll() != jpegBytes) {
+            printf("FAILED: Save As did not preserve original image bytes\n");
+            return false;
+        }
+        copiedAsset.close();
+
+        // If a persisted original-format asset disappears, recovery changes
+        // the path to PNG. The owning page must be saved with that new path.
+        if (!QFile::remove(imagePtr->fullPath(saveAsBundle.path()))
+            || !doc->saveBundle(saveAsBundle.path())
+            || !imagePtr->imagePath.endsWith(".png")) {
+            printf("FAILED: missing original asset was not recovered as PNG\n");
+            return false;
+        }
+        QFile recoveredPage(saveAsBundle.path() + "/pages/"
+                            + doc->page(0)->uuid + ".json");
+        if (!recoveredPage.open(QIODevice::ReadOnly)) {
+            printf("FAILED: recovered image page JSON was not saved\n");
+            return false;
+        }
+        const QJsonArray recoveredObjects =
+            QJsonDocument::fromJson(recoveredPage.readAll())
+                .object().value("objects").toArray();
+        bool recoveredPathPersisted = false;
+        for (const QJsonValue& value : recoveredObjects) {
+            const QJsonObject object = value.toObject();
+            if (object.value("id").toString() == imagePtr->id
+                && object.value("imagePath").toString() == imagePtr->imagePath) {
+                recoveredPathPersisted = true;
+                break;
+            }
+        }
+        if (!recoveredPathPersisted) {
+            printf("FAILED: recovered image path was not persisted in page JSON\n");
             return false;
         }
 
@@ -867,7 +917,7 @@ public:
             return false;
         }
         if (!doc->flushPendingImageWrites()
-            || !QFile::exists(clipboardPtr->fullPath(bundle.path()))) {
+            || !QFile::exists(clipboardPtr->fullPath(saveAsBundle.path()))) {
             printf("FAILED: 4K clipboard background encode/write failed\n");
             return false;
         }

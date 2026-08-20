@@ -24,7 +24,7 @@ class ImageObject : public InsertedObject {
 public:
     // ===== Image-specific Properties =====
     QString imagePath;              ///< Path to image file (relative to notebook)
-    QString imageHash;              ///< SHA-256 hash for deduplication (optional)
+    QString imageHash;              ///< SHA-256 source-byte or canonical-pixel content ID
     bool maintainAspectRatio = true; ///< If true, preserve aspect ratio on resize
     qreal originalAspectRatio = 1.0; ///< Original width/height ratio
     
@@ -32,6 +32,7 @@ public:
      * @brief Default constructor.
      */
     ImageObject() = default;
+    ~ImageObject() override { clearDisplayCache(); }
     
     /**
      * @brief Constructor with image path.
@@ -204,7 +205,7 @@ public:
      * 
      * Phase O1.6: Hash-based naming for deduplication.
      * - Calculates SHA-256 hash of image data
-     * - Saves to assets/images/{hash16}.png if not exists
+     * - Saves to assets/images/{full-hash}.{source-format} if not exists
      * - Updates imagePath to just the filename
      * 
      * If an image with the same hash already exists, reuses it
@@ -226,9 +227,8 @@ private:
     QByteArray m_encodedAssetData;
     QByteArray m_assetFormat = QByteArrayLiteral("png");
 
-    /// Display-resolution cache; the full pixmap remains available for export.
-    mutable QPixmap m_displayPixmap;
-    mutable QSize m_displayPixmapPixelSize;
+    /// Last key contributed to Qt's globally memory-bounded pixmap cache.
+    mutable QString m_displayCacheKey;
 
     /**
      * @brief Transient flag: true once the image asset is confirmed on disk.

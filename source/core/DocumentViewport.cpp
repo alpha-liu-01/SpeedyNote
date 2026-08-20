@@ -50,6 +50,7 @@
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QBuffer>
 #include <QFile>
+#include <QFileInfo>
 #include <QImageReader>
 #include <QMimeData>      // For clipboard content type check (O2.4)
 #include <QDragEnterEvent> // Plan D2: cross-document page-transfer drops
@@ -106,7 +107,8 @@ static constexpr qreal PAGE_TO_PDF_SCALE = 72.0 / 96.0;  // Page coords → PDF 
 // Static clipboard storage shared across all DocumentViewport instances
 DocumentViewport::StrokeClipboard DocumentViewport::s_clipboard;
 QList<QJsonObject> DocumentViewport::s_objectClipboard;
-QMap<QString, QPixmap> DocumentViewport::s_objectClipboardAssets;
+QMap<QString, DocumentViewport::ClipboardImageAsset>
+    DocumentViewport::s_objectClipboardAssets;
 
 // ===== Thread-Local PDF Provider Cache =====
 // 
@@ -2818,7 +2820,6 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         // Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
         // Toggle with Ctrl+Shift+D
 
-        logPendingImageFirstPaint();
         return;  // Done with edgeless rendering
     }
     
@@ -2942,21 +2943,6 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     
     // Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
     // Toggle with Ctrl+Shift+D
-    logPendingImageFirstPaint();
-}
-
-void DocumentViewport::logPendingImageFirstPaint()
-{
-    if (m_pendingImageFirstPaintId.isEmpty()
-        || !m_pendingImageFirstPaintTimer.isValid()) {
-        return;
-    }
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "[ImageInsert] first paint:" << m_pendingImageFirstPaintTimer.elapsed()
-             << "ms for" << m_pendingImageFirstPaintId;
-#endif
-    m_pendingImageFirstPaintId.clear();
-    m_pendingImageFirstPaintTimer.invalidate();
 }
 
 // ============================================================================
@@ -7369,16 +7355,8 @@ void DocumentViewport::pasteForObjectSelect()
     }
     
     // ===== Image mode: System clipboard takes priority =====
-    // Priority 1 (Image mode): System clipboard has raw image data
-    if (mimeData->hasImage()) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "pasteForObjectSelect (Image mode): Clipboard has raw image";
-#endif
-        insertImageFromClipboard();
-        return;
-    }
-    
-    // Priority 2 (Image mode/BF.1): File URLs (e.g., copied from Windows File Explorer)
+    // Prefer local files because Explorer often advertises both a URL and a
+    // decoded image; the URL preserves the original bytes and format.
     if (mimeData->hasUrls()) {
         QList<QUrl> urls = mimeData->urls();
 #ifdef SPEEDYNOTE_DEBUG
@@ -7392,12 +7370,8 @@ void DocumentViewport::pasteForObjectSelect()
                 qDebug() << "pasteForObjectSelect (Image mode): Checking file:" << filePath;
 #endif
                 
-                // Check if it's an image file
-                QString lower = filePath.toLower();
-                if (lower.endsWith(".png") || lower.endsWith(".jpg") || 
-                    lower.endsWith(".jpeg") || lower.endsWith(".bmp") ||
-                    lower.endsWith(".gif") || lower.endsWith(".webp")) {
-                    
+                QImageReader reader(filePath);
+                if (reader.canRead()) {
 #ifdef SPEEDYNOTE_DEBUG
                     qDebug() << "pasteForObjectSelect (Image mode): Loading image from file:" << filePath;
 #endif
@@ -7410,8 +7384,17 @@ void DocumentViewport::pasteForObjectSelect()
         qDebug() << "pasteForObjectSelect (Image mode): No valid image files in URLs";
 #endif
     }
+
+    // Fall back to raw image data for screenshots and application clipboards.
+    if (mimeData->hasImage()) {
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "pasteForObjectSelect (Image mode): Clipboard has raw image";
+#endif
+        insertImageFromClipboard();
+        return;
+    }
     
-    // Priority 3 (Image mode): Internal object clipboard
+    // Internal object clipboard
     // Even in Image mode, paste internal objects if no system clipboard image
     if (!s_objectClipboard.isEmpty()) {
 #ifdef SPEEDYNOTE_DEBUG
@@ -7484,12 +7467,37 @@ void DocumentViewport::insertImageFromFile(const QString& filePath)
 
     QElapsedTimer timer;
     timer.start();
+    constexpr qint64 MAX_RETAINED_SOURCE_BYTES = 64LL * 1024 * 1024;
+    const qint64 sourceSize = QFileInfo(filePath).size();
+    if (sourceSize < 0 || sourceSize > MAX_RETAINED_SOURCE_BYTES) {
+        // Avoid duplicating arbitrarily large encoded files in RAM. These rare
+        // inputs still get the fast insertion path, but their decoded pixels
+        // are persisted as a background PNG instead of preserving source bytes.
+        QImageReader reader(filePath);
+        QImage image = reader.read();
+        if (image.isNull()) {
+            qWarning() << "insertImageFromFile: Failed to decode" << filePath
+                       << reader.errorString();
+            return;
+        }
+#ifdef SPEEDYNOTE_DEBUG
+        qDebug() << "[ImageInsert] streamed large source:" << sourceSize
+                 << "bytes, decode:" << timer.elapsed() << "ms";
+#endif
+        insertPreparedImage(image);
+        return;
+    }
+
     QFile source(filePath);
     if (!source.open(QIODevice::ReadOnly)) {
         qWarning() << "insertImageFromFile: Failed to open" << filePath;
         return;
     }
     const QByteArray encodedData = source.readAll();
+    if (encodedData.size() != sourceSize) {
+        qWarning() << "insertImageFromFile: Incomplete read from" << filePath;
+        return;
+    }
     source.close();
     const qint64 readMs = timer.elapsed();
 
@@ -7576,15 +7584,14 @@ void DocumentViewport::insertPreparedImage(const QImage& image,
     emit documentModified();
 
     const QRect dirty = objectBoundsInViewport(rawPtr)
-        .adjusted(-24.0, -24.0, 24.0, 24.0).toAlignedRect();
-    m_pendingImageFirstPaintId = rawPtr->id;
-    m_pendingImageFirstPaintTimer.restart();
+        .adjusted(-32.0, -32.0, 32.0, 32.0).toAlignedRect();
     update(dirty);
 
     const qint64 enqueueStart = timer.elapsed();
-    if (!m_document->bundlePath().isEmpty()
-        && !m_document->enqueueImageAssetWrite(rawPtr, image)) {
-        qWarning() << "insertPreparedImage: Background asset write was not queued";
+    if (!m_document->bundlePath().isEmpty()) {
+        if (!m_document->enqueueImageAssetWrite(rawPtr, image)) {
+            qWarning() << "insertPreparedImage: Background asset write was not queued";
+        }
     }
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "[ImageInsert] pixmap:" << pixmapMs << "ms, model:"
@@ -7895,7 +7902,21 @@ void DocumentViewport::copySelectedObjects()
             // Cache image assets for cross-document paste
             if (auto* img = dynamic_cast<ImageObject*>(obj)) {
                 if (img->isLoaded() && !img->imagePath.isEmpty()) {
-                    s_objectClipboardAssets[img->imagePath] = img->pixmap();
+                    ClipboardImageAsset asset;
+                    asset.pixmap = img->pixmap();
+                    asset.encodedData = img->encodedAssetData();
+                    asset.format = img->assetFormat();
+                    constexpr qint64 MAX_CLIPBOARD_SOURCE_BYTES =
+                        64LL * 1024 * 1024;
+                    if (asset.encodedData.isEmpty() && m_document
+                        && !m_document->bundlePath().isEmpty()) {
+                        QFile source(img->fullPath(m_document->bundlePath()));
+                        if (source.size() <= MAX_CLIPBOARD_SOURCE_BYTES
+                            && source.open(QIODevice::ReadOnly)) {
+                            asset.encodedData = source.readAll();
+                        }
+                    }
+                    s_objectClipboardAssets[img->imagePath] = std::move(asset);
                 }
             }
         }
@@ -7995,8 +8016,17 @@ void DocumentViewport::pasteObjects()
             if (auto* img = dynamic_cast<ImageObject*>(obj.get())) {
                 auto it = s_objectClipboardAssets.find(img->imagePath);
                 if (it != s_objectClipboardAssets.end()) {
-                    img->setPixmap(it.value());
-                    img->imagePath.clear();
+                    if (!it->encodedData.isEmpty()) {
+                        QImage source;
+                        source.loadFromData(it->encodedData);
+                        if (!source.isNull()) {
+                            img->setSourceImage(source, it->encodedData, it->format);
+                        } else {
+                            img->setPixmap(it->pixmap);
+                        }
+                    } else {
+                        img->setPixmap(it->pixmap);
+                    }
                 }
             }
         }
@@ -8062,13 +8092,24 @@ void DocumentViewport::pasteObjects()
         // Update max object extent
         m_document->updateMaxObjectExtent(rawPtr);
         
-        // Save assets to disk immediately (matches insertImageFromFile/insertImageFromClipboard)
-        if (!m_document->bundlePath().isEmpty()) {
-            rawPtr->saveAssets(m_document->bundlePath());
-        }
-        
         // Create undo entry for this pasted object
         pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
+
+        // Preserve the responsive insertion path for cross-document images.
+        // Other asset-bearing object types retain their existing synchronous
+        // persistence contract.
+        if (!m_document->bundlePath().isEmpty()) {
+            if (auto* image = dynamic_cast<ImageObject*>(rawPtr)) {
+                const QImage source = image->encodedAssetData().isEmpty()
+                    ? image->pixmap().toImage() : QImage();
+                if (!image->assetPersisted()
+                    && !m_document->enqueueImageAssetWrite(image, source)) {
+                    qWarning() << "pasteObjects: Background image write was not queued";
+                }
+            } else {
+                rawPtr->saveAssets(m_document->bundlePath());
+            }
+        }
         
         // Track for selection
         pastedObjects.append(rawPtr);
@@ -13569,6 +13610,28 @@ void DocumentViewport::trimUndoStack()
     while (m_undoStack.size() > MAX_UNDO_ACTIONS) {
         m_undoStack.remove(0);
     }
+
+    // Count limits alone are unsafe for image history: 100 clipboard 4K
+    // snapshots can retain several GiB. Preserve the newest action while
+    // evicting older history until recovery payloads fit a platform budget.
+    const qint64 imageRecoveryBudget = sizeof(void*) >= 8
+        ? 512LL * 1024 * 1024
+        : 128LL * 1024 * 1024;
+    auto recoveryBytes = [](const UndoAction& action) {
+        return static_cast<qint64>(action.objectImageEncodedData.size())
+            + (action.objectImageSnapshot.isNull()
+                   ? 0
+                   : static_cast<qint64>(
+                         action.objectImageSnapshot.sizeInBytes()));
+    };
+    qint64 retainedBytes = 0;
+    for (const UndoAction& action : m_undoStack) {
+        retainedBytes += recoveryBytes(action);
+    }
+    while (m_undoStack.size() > 1 && retainedBytes > imageRecoveryBudget) {
+        retainedBytes -= recoveryBytes(m_undoStack.first());
+        m_undoStack.remove(0);
+    }
 }
 
 // (undoEdgeless/redoEdgeless/clearEdgelessRedoStack/trimEdgelessUndoStack removed --
@@ -13752,6 +13815,11 @@ void DocumentViewport::undo()
                 if (c) {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
+                        if (dynamic_cast<ImageObject*>(obj.get())
+                            && action.objectImageSnapshot.isNull()
+                            && action.objectImageEncodedData.isEmpty()) {
+                            m_document->flushPendingImageWrites();
+                        }
                         const bool assetLoaded = obj->loadAssets(m_document->bundlePath());
                         if (!assetLoaded) {
                             if (auto* image = dynamic_cast<ImageObject*>(obj.get())) {
@@ -14073,6 +14141,11 @@ void DocumentViewport::redo()
                 if (c) {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
+                        if (dynamic_cast<ImageObject*>(obj.get())
+                            && action.objectImageSnapshot.isNull()
+                            && action.objectImageEncodedData.isEmpty()) {
+                            m_document->flushPendingImageWrites();
+                        }
                         const bool assetLoaded = obj->loadAssets(m_document->bundlePath());
                         if (!assetLoaded) {
                             if (auto* image = dynamic_cast<ImageObject*>(obj.get())) {

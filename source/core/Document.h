@@ -33,6 +33,7 @@
 #include <QFuture>
 #include <QImage>
 #include <QPixmap>
+#include <QThreadPool>
 #include <QSet>
 #include <QHash>
 #include <QVector>
@@ -594,7 +595,7 @@ public:
     /**
      * @brief Save all unsaved ImageObjects to the assets folder.
      * @param bundlePath Path to the bundle directory.
-     * @return Number of images saved.
+     * @return Number of images saved, or -1 if any asset failed.
      * 
      * Phase O2: Called during saveBundle() to ensure all images are persisted.
      * ImageObjects with empty imagePath but valid cachedPixmap are saved.
@@ -1977,6 +1978,7 @@ private:
     mutable std::set<TileCoord> m_dirtyTiles;       ///< Tiles modified since last save
     std::set<TileCoord> m_deletedTiles;             ///< Tiles to delete from disk on next save
     bool m_lazyLoadEnabled = false;                 ///< True after loading from bundle
+    std::unique_ptr<QThreadPool> m_imageWritePool;  ///< Bounded pool isolated from PDF/render jobs
     QVector<PendingImageWrite> m_pendingImageWrites;
 
     bool m_ocrTextVisible = false;
