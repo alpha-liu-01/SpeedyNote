@@ -10,6 +10,7 @@
 // ============================================================================
 
 #include "InsertedObject.h"
+#include <QByteArray>
 #include <QPixmap>
 #include <QImage>
 
@@ -58,6 +59,15 @@ public:
      * @return JSON object containing image data.
      */
     QJsonObject toJson() const override;
+
+    /**
+     * @brief Serialize object metadata without an embedded pixel recovery copy.
+     *
+     * Object undo actions retain original encoded bytes or shared pixels
+     * separately, so fresh-image insertion does not need to synchronously
+     * PNG-encode a multi-megapixel image merely to create its undo record.
+     */
+    QJsonObject toJsonWithoutRecoveryData() const;
     
     /**
      * @brief Deserialize from JSON.
@@ -112,7 +122,10 @@ public:
     /**
      * @brief Clear the cached pixmap to free memory.
      */
-    void unloadImage() { cachedPixmap = QPixmap(); }
+    void unloadImage() {
+        cachedPixmap = QPixmap();
+        clearDisplayCache();
+    }
     
     /**
      * @brief Get the cached pixmap.
@@ -128,6 +141,28 @@ public:
      * imagePath will be empty until the image is saved to disk.
      */
     void setPixmap(const QPixmap& pixmap);
+
+    /**
+     * @brief Set a freshly decoded source image and optional original bytes.
+     *
+     * File imports retain their original encoded payload and format so asset
+     * persistence can copy it without converting to PNG. Clipboard images pass
+     * no encoded payload and are encoded once by the background asset writer.
+     */
+    void setSourceImage(const QImage& image,
+                        const QByteArray& encodedData = QByteArray(),
+                        const QByteArray& encodedFormat = QByteArray());
+
+    const QByteArray& encodedAssetData() const { return m_encodedAssetData; }
+    QByteArray assetFormat() const { return m_assetFormat; }
+    bool assetPersisted() const { return m_assetPersisted; }
+
+    /**
+     * @brief Record that the planned asset exists on disk.
+     *
+     * The transient original-file payload is released after confirmation.
+     */
+    void markAssetPersisted();
     
     /**
      * @brief Calculate and store the SHA-256 hash of the image.
@@ -178,10 +213,25 @@ public:
     bool saveToAssets(const QString& bundlePath);
     
 private:
+    QJsonObject toJsonImpl(bool includeRecoveryData) const;
+    void clearDisplayCache() const;
+
     QPixmap cachedPixmap;  ///< Cached pixmap for rendering
 
     /**
-     * @brief Transient flag: true once the asset PNG is confirmed on disk.
+     * Original encoded bytes for a fresh file import. Retained only until the
+     * background write is confirmed, or until the first save for documents
+     * that do not yet have a bundle path.
+     */
+    QByteArray m_encodedAssetData;
+    QByteArray m_assetFormat = QByteArrayLiteral("png");
+
+    /// Display-resolution cache; the full pixmap remains available for export.
+    mutable QPixmap m_displayPixmap;
+    mutable QSize m_displayPixmapPixelSize;
+
+    /**
+     * @brief Transient flag: true once the image asset is confirmed on disk.
      *
      * NOT serialized. Set by saveToAssets() (after the file is written or its
      * existence is confirmed) and by loadImage() (the file it just read exists).

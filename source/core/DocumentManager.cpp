@@ -661,6 +661,10 @@ void DocumentManager::cleanupTempBundle(Document* doc)
     if (tempPath.isEmpty()) {
         return;
     }
+
+    // Image workers may still be atomically publishing into this temporary
+    // bundle. Join them before recursively deleting the directory.
+    doc->flushPendingImageWrites();
     
     // Remove from tracking
     m_tempBundlePaths.remove(doc);

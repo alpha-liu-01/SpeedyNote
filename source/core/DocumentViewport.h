@@ -126,6 +126,9 @@ struct UndoAction {
     int objectPageIndex = -1;                      ///< Container page (paged mode)
     Document::TileCoord objectTileCoord = {0, 0};  ///< Container tile (edgeless mode)
     QJsonObject objectData;
+    QImage objectImageSnapshot;                       ///< Shared full-resolution recovery pixels
+    QByteArray objectImageEncodedData;                ///< Original file bytes, when available
+    QByteArray objectImageFormat;                     ///< Safe original format/extension
     QString objectId;
     QPointF objectOldPosition;
     QPointF objectNewPosition;
@@ -2807,6 +2810,11 @@ private:
     // guard, every leaked stylus press re-enters handlePointerPress_ObjectSelect
     // and opens another file dialog, stacking until the app crashes.
     bool m_objectInsertDialogActive = false;
+
+    // Debug-stage timing from model insertion until the first paint that can
+    // display the new image. Kept lightweight when debug output is disabled.
+    QElapsedTimer m_pendingImageFirstPaintTimer;
+    QString m_pendingImageFirstPaintId;
     
     // ===== Stroke Drawing State (Task 2.2) =====
     VectorStroke m_currentStroke;             ///< Stroke currently being drawn
@@ -3211,6 +3219,10 @@ private:
      * @return False when the current page/tile has no valid insertion bounds.
      */
     bool prepareFreshImageForInsertion(ImageObject& imageObject);
+    void insertPreparedImage(const QImage& image,
+                             const QByteArray& encodedData = QByteArray(),
+                             const QByteArray& encodedFormat = QByteArray());
+    void logPendingImageFirstPaint();
     
     /**
      * @brief Clear the current object selection.

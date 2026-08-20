@@ -5,12 +5,15 @@
 // ============================================================================
 
 #include "Document.h"
+#include "../objects/ImageObject.h"
 #include "../objects/OcrTextObject.h"
 #include "../objects/LinkObject.h"
 #include "../pdf/PdfMaterializer.h"
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QSaveFile>
 #include <QSettings>
+#include <QtConcurrent>
 #include <cmath>
 #include <algorithm>  // Phase 5.4: for std::sort, std::greater in merge
 #include <functional>
@@ -38,6 +41,10 @@ Document::Document()
 
 Document::~Document()
 {
+    // A worker must never outlive the Document or write into a bundle after
+    // close-time orphan cleanup has completed.
+    flushPendingImageWrites();
+
 #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "Document DESTROYED:" << this << "id=" << id.left(8) 
              << "pages=" << m_pageOrder.size() << "tiles=" << m_tiles.size();
@@ -57,6 +64,15 @@ Document::~Document()
 #ifdef __GLIBC__
     malloc_trim(0);
 #endif
+}
+
+void Document::setBundlePath(const QString& path)
+{
+    if (m_bundlePath == path) {
+        return;
+    }
+    flushPendingImageWrites();
+    m_bundlePath = path;
 }
 
 // ===== Factory Methods =====
@@ -1555,6 +1571,11 @@ bool Document::savePage(int index)
     if (m_bundlePath.isEmpty()) {
         return false;
     }
+
+    // Page JSON must never reference an asset whose background write has not
+    // completed. A failed worker is retried synchronously from in-memory data.
+    flushPendingImageWrites();
+    saveUnsavedImages(m_bundlePath);
     
     if (index < 0 || index >= m_pageOrder.size()) {
         return false;
@@ -3247,6 +3268,9 @@ bool Document::saveTile(TileCoord coord)
         qWarning() << "Cannot save tile: bundle path not set";
         return false;
     }
+
+    flushPendingImageWrites();
+    saveUnsavedImages(m_bundlePath);
     
     auto it = m_tiles.find(coord);
     if (it == m_tiles.end()) {
@@ -3516,6 +3540,143 @@ void Document::evictTile(TileCoord coord)
 #endif
 }
 
+ImageObject* Document::findLoadedImageObject(const QString& objectId) const
+{
+    auto findInPage = [&objectId](Page* page) -> ImageObject* {
+        if (!page) {
+            return nullptr;
+        }
+        for (const auto& object : page->objects) {
+            if (object && object->id == objectId) {
+                return dynamic_cast<ImageObject*>(object.get());
+            }
+        }
+        return nullptr;
+    };
+
+    for (const auto& entry : m_loadedPages) {
+        if (ImageObject* image = findInPage(entry.second.get())) {
+            return image;
+        }
+    }
+    for (const auto& entry : m_tiles) {
+        if (ImageObject* image = findInPage(entry.second.get())) {
+            return image;
+        }
+    }
+    return nullptr;
+}
+
+bool Document::collectFinishedImageWrites(bool waitForAll)
+{
+    bool allSucceeded = true;
+    for (int i = m_pendingImageWrites.size() - 1; i >= 0; --i) {
+        PendingImageWrite& pending = m_pendingImageWrites[i];
+        if (!waitForAll && !pending.future.isFinished()) {
+            continue;
+        }
+        if (waitForAll) {
+            pending.future.waitForFinished();
+        }
+
+        const bool succeeded = pending.future.result() && QFile::exists(pending.fullPath);
+        allSucceeded = allSucceeded && succeeded;
+        if (succeeded) {
+            if (ImageObject* image = findLoadedImageObject(pending.objectId)) {
+                image->markAssetPersisted();
+            }
+        }
+        m_pendingImageWrites.removeAt(i);
+    }
+    return allSucceeded;
+}
+
+void Document::confirmPersistedImageAssets()
+{
+    auto confirmPage = [this](Page* page) {
+        if (!page) {
+            return;
+        }
+        for (const auto& object : page->objects) {
+            auto* image = dynamic_cast<ImageObject*>(object.get());
+            if (image && !image->imagePath.isEmpty()
+                && QFile::exists(image->fullPath(m_bundlePath))) {
+                image->markAssetPersisted();
+            }
+        }
+    };
+
+    for (const auto& entry : m_loadedPages) {
+        confirmPage(entry.second.get());
+    }
+    for (const auto& entry : m_tiles) {
+        confirmPage(entry.second.get());
+    }
+}
+
+bool Document::enqueueImageAssetWrite(ImageObject* imageObject, const QImage& sourceImage)
+{
+    if (!imageObject || sourceImage.isNull() || m_bundlePath.isEmpty()
+        || imageObject->imagePath.isEmpty()) {
+        return false;
+    }
+
+    collectFinishedImageWrites(false);
+
+    const QString assetsDir = m_bundlePath + "/assets/images";
+    if (!QDir().mkpath(assetsDir)) {
+        return false;
+    }
+    const QString fullPath = assetsDir + "/" + imageObject->imagePath;
+    if (QFile::exists(fullPath)) {
+        imageObject->markAssetPersisted();
+        return true;
+    }
+    for (const PendingImageWrite& pending : m_pendingImageWrites) {
+        if (pending.fullPath == fullPath) {
+            return true;
+        }
+    }
+
+    const QByteArray encodedData = imageObject->encodedAssetData();
+    const QImage workerImage = sourceImage;
+    PendingImageWrite pending;
+    pending.objectId = imageObject->id;
+    pending.fullPath = fullPath;
+    pending.future = QtConcurrent::run([fullPath, encodedData, workerImage]() -> bool {
+        QByteArray bytes = encodedData;
+        if (bytes.isEmpty()) {
+            QBuffer buffer(&bytes);
+            if (!buffer.open(QIODevice::WriteOnly)
+                || !workerImage.save(&buffer, "PNG")) {
+                return false;
+            }
+        }
+
+        // Another deduplicated write may have won the race.
+        if (QFile::exists(fullPath)) {
+            return true;
+        }
+
+        QSaveFile output(fullPath);
+        output.setDirectWriteFallback(false);
+        return output.open(QIODevice::WriteOnly)
+            && output.write(bytes) == bytes.size()
+            && output.commit();
+    });
+    m_pendingImageWrites.append(std::move(pending));
+    return true;
+}
+
+bool Document::flushPendingImageWrites()
+{
+    const bool succeeded = collectFinishedImageWrites(true);
+    if (!m_bundlePath.isEmpty()) {
+        confirmPersistedImageAssets();
+    }
+    return succeeded;
+}
+
 int Document::saveUnsavedImages(const QString& bundlePath)
 {
     if (bundlePath.isEmpty()) {
@@ -3604,6 +3765,8 @@ int Document::saveUnsavedImages(const QString& bundlePath)
 
 void Document::cleanupOrphanedAssets()
 {
+    flushPendingImageWrites();
+
     if (m_bundlePath.isEmpty()) {
         return;  // Unsaved document, nothing on disk
     }
@@ -4188,6 +4351,9 @@ bool Document::saveBundle(const QString& path, bool finalize)
 {
     // Save old bundle path before overwriting - needed for copying evicted tiles/pages
     QString oldBundlePath = m_bundlePath;
+    // Complete writes against the old bundle before Save As changes the path
+    // and before any page/tile JSON is serialized.
+    flushPendingImageWrites();
     m_bundlePath = path;
     
     // Phase P.1.1: Write .snb_marker file to identify this as a SpeedyNote bundle

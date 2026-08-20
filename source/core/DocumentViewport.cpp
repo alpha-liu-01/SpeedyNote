@@ -12,6 +12,7 @@
 #include "MarkdownNote.h"           // Phase M.2: For markdown note creation
 #include "../layers/VectorLayer.h"
 #include "../pdf/PdfProvider.h"     // Use abstract interface, not concrete impl
+#include "../objects/ImageObject.h"
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
 #include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
 #include "../objects/TextBoxObject.h"  // Phase 2B: text edit undo
@@ -47,6 +48,9 @@
 #include <QTextEdit>       // For text input focus check
 #include <QPlainTextEdit>  // For text input focus check
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
+#include <QBuffer>
+#include <QFile>
+#include <QImageReader>
 #include <QMimeData>      // For clipboard content type check (O2.4)
 #include <QDragEnterEvent> // Plan D2: cross-document page-transfer drops
 #include <QDragMoveEvent>
@@ -2813,7 +2817,8 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
         
         // Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
         // Toggle with Ctrl+Shift+D
-        
+
+        logPendingImageFirstPaint();
         return;  // Done with edgeless rendering
     }
     
@@ -2937,6 +2942,21 @@ void DocumentViewport::paintEvent(QPaintEvent* event)
     
     // Debug overlay is now handled by DebugOverlay widget (source/ui/DebugOverlay.cpp)
     // Toggle with Ctrl+Shift+D
+    logPendingImageFirstPaint();
+}
+
+void DocumentViewport::logPendingImageFirstPaint()
+{
+    if (m_pendingImageFirstPaintId.isEmpty()
+        || !m_pendingImageFirstPaintTimer.isValid()) {
+        return;
+    }
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[ImageInsert] first paint:" << m_pendingImageFirstPaintTimer.elapsed()
+             << "ms for" << m_pendingImageFirstPaintId;
+#endif
+    m_pendingImageFirstPaintId.clear();
+    m_pendingImageFirstPaintTimer.invalidate();
 }
 
 // ============================================================================
@@ -7434,281 +7454,144 @@ bool DocumentViewport::prepareFreshImageForInsertion(ImageObject& imageObject)
 
 void DocumentViewport::insertImageFromClipboard()
 {
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromClipboard: Called";
-#endif
-    
-    // Phase O2.4.3: Insert image from clipboard as ImageObject
     if (!m_document) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromClipboard: No document!";
-#endif
         return;
     }
-    
-    // 1. Get image from clipboard
+
+    QElapsedTimer timer;
+    timer.start();
     QClipboard* clipboard = QGuiApplication::clipboard();
     if (!clipboard) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromClipboard: No clipboard!";
-#endif
         return;
     }
-    
+
     QImage image = clipboard->image();
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromClipboard: image.isNull() =" << image.isNull() 
-             << "size =" << image.size();
-#endif
-
-    // CRITICAL: This check must be OUTSIDE debug block to prevent crash in release builds
     if (image.isNull()) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromClipboard: No valid image in clipboard";
-#endif
         return;
     }
-    
-    // 2. Create ImageObject with setPixmap()
-    auto imgObj = std::make_unique<ImageObject>();
-    imgObj->setPixmap(QPixmap::fromImage(image));
-    // NOTE: id is auto-generated in InsertedObject constructor
-
-    // 3. Normalize high-DPI pixels, apply integer scaling, and center.
-    if (!prepareFreshImageForInsertion(*imgObj)) {
-        qWarning() << "insertImageFromClipboard: Invalid image insertion bounds";
-        return;
-    }
-    
-    // Phase O3.5.1: Default affinity based on active layer
-    // Formula: activeLayer - 1, so image appears BELOW active layer's strokes
-    // This allows user to immediately annotate the image with the active layer
-    int activeLayer = m_document->isEdgeless() 
-        ? m_edgelessActiveLayerIndex 
-        : (m_document->page(m_currentPageIndex) 
-           ? m_document->page(m_currentPageIndex)->activeLayerIndex 
-           : 0);
-    int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
-    imgObj->setLayerAffinity(defaultAffinity);
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromClipboard: activeLayer =" << activeLayer 
-             << "defaultAffinity =" << defaultAffinity;
+    qDebug() << "[ImageInsert] clipboard transfer:" << timer.elapsed() << "ms"
+             << image.size();
 #endif
-    
-    // CRITICAL: Save raw pointer BEFORE std::move invalidates imgObj
-    InsertedObject* rawPtr = imgObj.get();
-    
-    // Track tile coord for undo (edgeless mode)
-    Document::TileCoord insertedTileCoord = {0, 0};
-    
-    // 4. Add to appropriate page/tile
-    if (m_document->isEdgeless()) {
-        // Edgeless mode: find tile for the center position
-        auto coord = m_document->tileCoordForPoint(imgObj->position);
-        Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
-        if (!targetTile) {
-            qWarning() << "insertImageFromClipboard: Failed to get/create tile";
-            return;
-        }
-        
-        // Set zOrder so new object appears on top of existing objects with same affinity
-        imgObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
-        
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromClipboard: assigned zOrder =" << imgObj->zOrder;
-        #endif
-        
-        // Convert to tile-local coordinates
-        imgObj->position = imgObj->position - QPointF(
-            coord.first * Document::EDGELESS_TILE_SIZE,
-            coord.second * Document::EDGELESS_TILE_SIZE
-        );
-        
-        targetTile->addObject(std::move(imgObj));
-        m_document->markTileDirty(coord);
-        insertedTileCoord = coord;  // Save for undo
-    } else {
-        // Paged mode: add to current page
-        Page* targetPage = m_document->page(m_currentPageIndex);
-        if (!targetPage) {
-            qWarning() << "insertImageFromClipboard: No page at index" << m_currentPageIndex;
-            return;
-        }
-        
-        // Set zOrder so new object appears on top of existing objects with same affinity
-        imgObj->zOrder = getNextZOrderForAffinity(targetPage, defaultAffinity);
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromClipboard: assigned zOrder =" << imgObj->zOrder;
-        #endif
-        
-        // Adjust position to be page-local (subtract page origin), then keep
-        // the image inside the page - the viewport centre can sit in a gap or
-        // past the page edge when zoomed out.
-        QPointF pageOrigin = pagePosition(m_currentPageIndex);
-        imgObj->position = clampObjectPositionToPage(
-            m_currentPageIndex, imgObj->position - pageOrigin, imgObj->size);
-        
-        targetPage->addObject(std::move(imgObj));
-        m_document->markPageDirty(m_currentPageIndex);
-    }
-    
-    // 5. Update max object extent for extended tile loading
-    m_document->updateMaxObjectExtent(rawPtr);
-    
-    // 6. Save to assets folder (hash-based deduplication) - Phase O2.C: type-agnostic
-    if (!m_document->bundlePath().isEmpty()) {
-        if (!rawPtr->saveAssets(m_document->bundlePath())) {
-            qWarning() << "insertImageFromClipboard: Failed to save assets";
-            // Continue anyway - data is in memory and will be saved on document save
-        }
-    }
-    
-    // 7. Create undo entry (BF.6)
-    pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
-    
-    // 8. Select the new object
-    deselectAllObjects();
-    selectObject(rawPtr, false);
-    
-    // 9. Emit modification signal
-    emit documentModified();
-    
-    update();
-    
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromClipboard: Inserted image" << rawPtr->id 
-             << "size" << rawPtr->size << "at" << rawPtr->position;
-#endif
+    insertPreparedImage(image);
 }
 
 void DocumentViewport::insertImageFromFile(const QString& filePath)
 {
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromFile: Called with path:" << filePath;
-#endif
-    
     if (!m_document) {
-#ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromFile: No document!";
-#endif
         return;
     }
-    
-    // 1. Load image from file
-    QImage image(filePath);
-    if (image.isNull()) {
-        qWarning() << "insertImageFromFile: Failed to load image from" << filePath;
-        return;
-    }
-#ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromFile: Loaded image, size =" << image.size();
-#endif
-    
-    // 2. Create ImageObject with setPixmap()
-    auto imgObj = std::make_unique<ImageObject>();
-    imgObj->setPixmap(QPixmap::fromImage(image));
 
-    // 3. Normalize high-DPI pixels, apply integer scaling, and center.
-    if (!prepareFreshImageForInsertion(*imgObj)) {
-        qWarning() << "insertImageFromFile: Invalid image insertion bounds";
+    QElapsedTimer timer;
+    timer.start();
+    QFile source(filePath);
+    if (!source.open(QIODevice::ReadOnly)) {
+        qWarning() << "insertImageFromFile: Failed to open" << filePath;
         return;
     }
-    
-    // Phase O3.5.1: Default affinity based on active layer
-    // Formula: activeLayer - 1, so image appears BELOW active layer's strokes
-    // This allows user to immediately annotate the image with the active layer
-    int activeLayer = m_document->isEdgeless() 
-        ? m_edgelessActiveLayerIndex 
-        : (m_document->page(m_currentPageIndex) 
-           ? m_document->page(m_currentPageIndex)->activeLayerIndex 
-           : 0);
-    int defaultAffinity = activeLayer - 1;  // -1 minimum (background)
-    imgObj->setLayerAffinity(defaultAffinity);
+    const QByteArray encodedData = source.readAll();
+    source.close();
+    const qint64 readMs = timer.elapsed();
+
+    QBuffer sourceBuffer;
+    sourceBuffer.setData(encodedData);
+    sourceBuffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&sourceBuffer);
+    const QByteArray format = reader.format();
+    QImage image = reader.read();
+    if (image.isNull()) {
+        qWarning() << "insertImageFromFile: Failed to decode" << filePath
+                   << reader.errorString();
+        return;
+    }
 #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromFile: activeLayer =" << activeLayer 
-             << "defaultAffinity =" << defaultAffinity;
+    qDebug() << "[ImageInsert] file read:" << readMs << "ms, decode:"
+             << (timer.elapsed() - readMs) << "ms, bytes:" << encodedData.size()
+             << "format:" << format << "pixels:" << image.size();
 #endif
-    
-    // Store raw pointer BEFORE std::move
-    InsertedObject* rawPtr = imgObj.get();
-    
-    // Track tile coord for undo (edgeless mode)
+    insertPreparedImage(image, encodedData, format);
+}
+
+void DocumentViewport::insertPreparedImage(const QImage& image,
+                                           const QByteArray& encodedData,
+                                           const QByteArray& encodedFormat)
+{
+    if (!m_document || image.isNull()) {
+        return;
+    }
+
+    QElapsedTimer timer;
+    timer.start();
+    auto imgObj = std::make_unique<ImageObject>();
+    imgObj->setSourceImage(image, encodedData, encodedFormat);
+    const qint64 pixmapMs = timer.elapsed();
+
+    if (!prepareFreshImageForInsertion(*imgObj)) {
+        qWarning() << "insertPreparedImage: Invalid image insertion bounds";
+        return;
+    }
+
+    const int activeLayer = m_document->isEdgeless()
+        ? m_edgelessActiveLayerIndex
+        : (m_document->page(m_currentPageIndex)
+           ? m_document->page(m_currentPageIndex)->activeLayerIndex : 0);
+    const int defaultAffinity = activeLayer - 1;
+    imgObj->setLayerAffinity(defaultAffinity);
+
+    ImageObject* rawPtr = imgObj.get();
     Document::TileCoord insertedTileCoord = {0, 0};
-    
-    // 4. Add to appropriate page/tile
     if (m_document->isEdgeless()) {
-        auto coord = m_document->tileCoordForPoint(imgObj->position);
+        const auto coord = m_document->tileCoordForPoint(imgObj->position);
         Page* targetTile = m_document->getOrCreateTile(coord.first, coord.second);
         if (!targetTile) {
-            qWarning() << "insertImageFromFile: Failed to get/create tile";
             return;
         }
-        
-        // Set zOrder so new object appears on top of existing objects with same affinity
         imgObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromFile: assigned zOrder =" << imgObj->zOrder;
-        #endif
-        
-        // Convert to tile-local coordinates
-        imgObj->position = imgObj->position - QPointF(
-            coord.first * Document::EDGELESS_TILE_SIZE,
-            coord.second * Document::EDGELESS_TILE_SIZE
-        );
-        
+        imgObj->position -= QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
+                                    coord.second * Document::EDGELESS_TILE_SIZE);
         targetTile->addObject(std::move(imgObj));
         m_document->markTileDirty(coord);
-        insertedTileCoord = coord;  // Save for undo
+        insertedTileCoord = coord;
     } else {
-        // Paged mode: add to current page
         Page* targetPage = m_document->page(m_currentPageIndex);
         if (!targetPage) {
-            qWarning() << "insertImageFromFile: No page at index" << m_currentPageIndex;
             return;
         }
-        
-        // Set zOrder so new object appears on top of existing objects with same affinity
         imgObj->zOrder = getNextZOrderForAffinity(targetPage, defaultAffinity);
-        #ifdef SPEEDYNOTE_DEBUG
-        qDebug() << "insertImageFromFile: assigned zOrder =" << imgObj->zOrder;
-        #endif
-        
-        // Adjust position to be page-local, then keep the image inside the
-        // page - the viewport centre can sit in a gap or past the page edge.
-        QPointF pageOrigin = pagePosition(m_currentPageIndex);
         imgObj->position = clampObjectPositionToPage(
-            m_currentPageIndex, imgObj->position - pageOrigin, imgObj->size);
-        
+            m_currentPageIndex,
+            imgObj->position - pagePosition(m_currentPageIndex),
+            imgObj->size);
         targetPage->addObject(std::move(imgObj));
         m_document->markPageDirty(m_currentPageIndex);
     }
-    
-    // 5. Update max object extent
+
     m_document->updateMaxObjectExtent(rawPtr);
-    
-    // 6. Save to assets folder - Phase O2.C: type-agnostic
-    if (!m_document->bundlePath().isEmpty()) {
-        if (!rawPtr->saveAssets(m_document->bundlePath())) {
-            qWarning() << "insertImageFromFile: Failed to save assets";
-        }
-    }
-    
-    // 7. Create undo entry (BF.6)
+    const qint64 modelMs = timer.elapsed();
+
     pushObjectInsertUndo(rawPtr, m_currentPageIndex, insertedTileCoord);
-    
-    // 8. Select the new object
+    const qint64 undoMs = timer.elapsed();
     deselectAllObjects();
     selectObject(rawPtr, false);
-    
-    // 9. Emit modification signal
     emit documentModified();
-    
-    update();
-    
-    #ifdef SPEEDYNOTE_DEBUG
-    qDebug() << "insertImageFromFile: Inserted image" << rawPtr->id 
-             << "size" << rawPtr->size << "at" << rawPtr->position;
-    #endif
+
+    const QRect dirty = objectBoundsInViewport(rawPtr)
+        .adjusted(-24.0, -24.0, 24.0, 24.0).toAlignedRect();
+    m_pendingImageFirstPaintId = rawPtr->id;
+    m_pendingImageFirstPaintTimer.restart();
+    update(dirty);
+
+    const qint64 enqueueStart = timer.elapsed();
+    if (!m_document->bundlePath().isEmpty()
+        && !m_document->enqueueImageAssetWrite(rawPtr, image)) {
+        qWarning() << "insertPreparedImage: Background asset write was not queued";
+    }
+#ifdef SPEEDYNOTE_DEBUG
+    qDebug() << "[ImageInsert] pixmap:" << pixmapMs << "ms, model:"
+             << (modelMs - pixmapMs) << "ms, undo:" << (undoMs - modelMs)
+             << "ms, enqueue:" << (timer.elapsed() - enqueueStart)
+             << "ms, visible work total:" << undoMs << "ms";
+#endif
 }
 
 void DocumentViewport::insertImageFromDialog()
@@ -13869,7 +13752,20 @@ void DocumentViewport::undo()
                 if (c) {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
-                        obj->loadAssets(m_document->bundlePath());
+                        const bool assetLoaded = obj->loadAssets(m_document->bundlePath());
+                        if (!assetLoaded) {
+                            if (auto* image = dynamic_cast<ImageObject*>(obj.get())) {
+                                QImage recovery = action.objectImageSnapshot;
+                                if (recovery.isNull() && !action.objectImageEncodedData.isEmpty()) {
+                                    recovery.loadFromData(action.objectImageEncodedData);
+                                }
+                                if (!recovery.isNull()) {
+                                    image->setSourceImage(recovery,
+                                                          action.objectImageEncodedData,
+                                                          action.objectImageFormat);
+                                }
+                            }
+                        }
                         m_document->updateMaxObjectExtent(obj.get());
                         c->addObject(std::move(obj));
                         markObjDirty(m_document, action);
@@ -14177,7 +14073,20 @@ void DocumentViewport::redo()
                 if (c) {
                     auto obj = InsertedObject::fromJson(action.objectData);
                     if (obj) {
-                        obj->loadAssets(m_document->bundlePath());
+                        const bool assetLoaded = obj->loadAssets(m_document->bundlePath());
+                        if (!assetLoaded) {
+                            if (auto* image = dynamic_cast<ImageObject*>(obj.get())) {
+                                QImage recovery = action.objectImageSnapshot;
+                                if (recovery.isNull() && !action.objectImageEncodedData.isEmpty()) {
+                                    recovery.loadFromData(action.objectImageEncodedData);
+                                }
+                                if (!recovery.isNull()) {
+                                    image->setSourceImage(recovery,
+                                                          action.objectImageEncodedData,
+                                                          action.objectImageFormat);
+                                }
+                            }
+                        }
                         m_document->updateMaxObjectExtent(obj.get());
                         c->addObject(std::move(obj));
                         markObjDirty(m_document, action);
@@ -14466,7 +14375,16 @@ void DocumentViewport::pushObjectInsertUndo(InsertedObject* obj, int pageIndex,
 
     UndoAction action;
     action.type = UndoAction::ObjectInsert;
-    action.objectData = obj->toJson();
+    if (auto* image = dynamic_cast<ImageObject*>(obj)) {
+        action.objectData = image->toJsonWithoutRecoveryData();
+        action.objectImageEncodedData = image->encodedAssetData();
+        action.objectImageFormat = image->assetFormat();
+        if (action.objectImageEncodedData.isEmpty()) {
+            action.objectImageSnapshot = image->pixmap().toImage();
+        }
+    } else {
+        action.objectData = obj->toJson();
+    }
     action.objectId = obj->id;
     if (m_document && m_document->isEdgeless()) {
         action.objectTileCoord = tileCoord;
@@ -14483,7 +14401,16 @@ void DocumentViewport::pushObjectDeleteUndo(InsertedObject* obj, int pageIndex,
 
     UndoAction action;
     action.type = UndoAction::ObjectDelete;
-    action.objectData = obj->toJson();
+    if (auto* image = dynamic_cast<ImageObject*>(obj)) {
+        action.objectData = image->toJsonWithoutRecoveryData();
+        action.objectImageEncodedData = image->encodedAssetData();
+        action.objectImageFormat = image->assetFormat();
+        if (action.objectImageEncodedData.isEmpty()) {
+            action.objectImageSnapshot = image->pixmap().toImage();
+        }
+    } else {
+        action.objectData = obj->toJson();
+    }
     action.objectId = obj->id;
     if (m_document && m_document->isEdgeless()) {
         action.objectTileCoord = tileCoord;
@@ -14531,7 +14458,11 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
     UndoAction action;
     action.type = UndoAction::ObjectResize;
     action.objectId = obj->id;
-    action.objectData = obj->toJson();
+    if (auto* image = dynamic_cast<ImageObject*>(obj)) {
+        action.objectData = image->toJsonWithoutRecoveryData();
+    } else {
+        action.objectData = obj->toJson();
+    }
     action.objectOldPosition = oldPos;
     action.objectNewPosition = obj->position;
     action.objectOldSize = oldSize;

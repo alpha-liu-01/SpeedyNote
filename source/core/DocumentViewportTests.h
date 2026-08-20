@@ -16,6 +16,9 @@
 #include "../strokes/StrokePoint.h"
 
 #include <QApplication>
+#include <QBuffer>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QtNumeric>
 #include <QtMath>
 #include <cstdio>
@@ -788,6 +791,134 @@ public:
         printf("PASSED\n");
         return true;
     }
+
+    /**
+     * @brief Test original-byte assets, async persistence, and image undo recovery.
+     */
+    static bool testFastImageInsertionPipeline() {
+        printf("  testFastImageInsertionPipeline... ");
+
+        QImage source(96, 64, QImage::Format_ARGB32);
+        source.fill(QColor(25, 90, 180, 255));
+        QByteArray jpegBytes;
+        QBuffer jpegBuffer(&jpegBytes);
+        jpegBuffer.open(QIODevice::WriteOnly);
+        if (!source.save(&jpegBuffer, "JPEG", 90)) {
+            printf("FAILED: could not create JPEG fixture\n");
+            return false;
+        }
+        const QImage decoded = QImage::fromData(jpegBytes);
+        if (decoded.isNull()) {
+            printf("FAILED: could not decode JPEG fixture\n");
+            return false;
+        }
+
+        QTemporaryDir bundle;
+        if (!bundle.isValid()) {
+            printf("FAILED: could not create temporary bundle\n");
+            return false;
+        }
+        auto doc = Document::createNew("Async Image Test");
+        doc->setBundlePath(bundle.path());
+        auto image = std::make_unique<ImageObject>();
+        image->setSourceImage(decoded, jpegBytes, "jpeg");
+        if (!image->imagePath.endsWith(".jpg")
+            || image->encodedAssetData() != jpegBytes) {
+            printf("FAILED: original JPEG payload/extension was not preserved\n");
+            return false;
+        }
+        if (image->toJsonWithoutRecoveryData().contains("embeddedImageData")) {
+            printf("FAILED: metadata-only undo JSON embedded image bytes\n");
+            return false;
+        }
+
+        ImageObject* imagePtr = image.get();
+        doc->page(0)->addObject(std::move(image));
+        if (!doc->enqueueImageAssetWrite(imagePtr, decoded)
+            || !doc->savePage(0)) {
+            printf("FAILED: save boundary did not flush background image write\n");
+            return false;
+        }
+        QFile asset(imagePtr->fullPath(bundle.path()));
+        if (!asset.open(QIODevice::ReadOnly) || asset.readAll() != jpegBytes
+            || !imagePtr->assetPersisted()) {
+            printf("FAILED: persisted asset differs from original JPEG bytes\n");
+            return false;
+        }
+
+        // A representative 4K clipboard payload must enqueue without waiting
+        // for its lossless PNG compression.
+        QImage fourK(3840, 2160, QImage::Format_ARGB32);
+        fourK.fill(QColor(120, 45, 200, 180));
+        auto clipboardImage = std::make_unique<ImageObject>();
+        clipboardImage->setSourceImage(fourK);
+        ImageObject* clipboardPtr = clipboardImage.get();
+        doc->page(0)->addObject(std::move(clipboardImage));
+        QElapsedTimer enqueueTimer;
+        enqueueTimer.start();
+        if (!doc->enqueueImageAssetWrite(clipboardPtr, fourK)) {
+            printf("FAILED: 4K clipboard image was not queued\n");
+            return false;
+        }
+        const qint64 enqueueMs = enqueueTimer.elapsed();
+        if (enqueueMs > 1000) {
+            printf("FAILED: 4K enqueue blocked for %lld ms\n",
+                   static_cast<long long>(enqueueMs));
+            return false;
+        }
+        if (!doc->flushPendingImageWrites()
+            || !QFile::exists(clipboardPtr->fullPath(bundle.path()))) {
+            printf("FAILED: 4K clipboard background encode/write failed\n");
+            return false;
+        }
+
+        // Legacy recovery JSON had no format field and always contained PNG.
+        QByteArray pngBytes;
+        QBuffer pngBuffer(&pngBytes);
+        pngBuffer.open(QIODevice::WriteOnly);
+        source.save(&pngBuffer, "PNG");
+        QJsonObject legacy = imagePtr->toJsonWithoutRecoveryData();
+        legacy["imagePath"] = QString();
+        legacy["embeddedImageData"] = QString::fromLatin1(pngBytes.toBase64());
+        legacy.remove("embeddedImageFormat");
+        ImageObject legacyImage;
+        legacyImage.loadFromJson(legacy);
+        if (!legacyImage.isLoaded()) {
+            printf("FAILED: legacy embedded PNG no longer loads\n");
+            return false;
+        }
+
+        // Unsaved-document undo must retain pixels without PNG/base64 work.
+        auto undoDoc = Document::createNew("Image Undo Test");
+        DocumentViewport viewport;
+        viewport.resize(800, 600);
+        viewport.setDocument(undoDoc.get());
+        viewport.insertPreparedImage(decoded, jpegBytes, "jpeg");
+        if (viewport.m_undoStack.isEmpty()
+            || viewport.m_undoStack.top().objectImageEncodedData != jpegBytes
+            || viewport.m_undoStack.top().objectData.contains("embeddedImageData")) {
+            printf("FAILED: image insertion undo did not retain compact source data\n");
+            return false;
+        }
+        const size_t insertedCount = undoDoc->page(0)->objects.size();
+        viewport.undo();
+        if (undoDoc->page(0)->objects.size() + 1 != insertedCount) {
+            printf("FAILED: image insertion undo did not remove object\n");
+            return false;
+        }
+        viewport.redo();
+        InsertedObject* restored = undoDoc->page(0)->objectById(
+            viewport.m_undoStack.top().objectId);
+        auto* restoredImage = dynamic_cast<ImageObject*>(restored);
+        if (!restoredImage || !restoredImage->isLoaded()) {
+            printf("FAILED: image redo did not restore recovery pixels\n");
+            return false;
+        }
+
+        viewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
     
     /**
      * @brief Test group containment and the DocumentViewport wrappers.
@@ -886,6 +1017,7 @@ public:
         runTest(testObjectGestureCancellation, "testObjectGestureCancellation");
         runTest(testObjectPageContainment, "testObjectPageContainment");
         runTest(testIntegerImageInsertScaling, "testIntegerImageInsertScaling");
+        runTest(testFastImageInsertionPipeline, "testFastImageInsertionPipeline");
         runTest(testObjectGroupContainment, "testObjectGroupContainment");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
