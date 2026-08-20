@@ -6429,65 +6429,37 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         if (textBox && !textBox->text.isEmpty()) {
             QString href;
 
-            // Strategy 1: QTextDocument anchorHref for rendered Markdown links
-            if (textBox->isMarkdown()) {
-                constexpr qreal screenPad = 2.0;
-                qreal pagePad = screenPad / m_zoomLevel;
-                bool foundLocal = false;
-                QPointF localPos;
-                if (m_document->isEdgeless()) {
-                    for (const auto& coord : m_document->allLoadedTileCoords()) {
-                        Page* tile = m_document->getTile(coord.first, coord.second);
-                        if (!tile) continue;
-                        for (const auto& obj : tile->objects) {
-                            if (obj.get() == hitObject) {
-                                QPointF tileOrigin(
-                                    coord.first * Document::EDGELESS_TILE_SIZE,
-                                    coord.second * Document::EDGELESS_TILE_SIZE);
-                                localPos = docPoint - tileOrigin - textBox->position
-                                           - QPointF(pagePad, pagePad);
-                                foundLocal = true;
-                                break;
-                            }
+            // Strategy 1: use the same layout and coordinate transform as
+            // rendering/search. The helper also handles rotated text boxes.
+            bool foundLocal = false;
+            QPointF localPos;
+            if (m_document->isEdgeless()) {
+                for (const auto& coord : m_document->allLoadedTileCoords()) {
+                    Page* tile = m_document->getTile(coord.first, coord.second);
+                    if (!tile) continue;
+                    for (const auto& obj : tile->objects) {
+                        if (obj.get() == hitObject) {
+                            const QPointF tileOrigin(
+                                coord.first * Document::EDGELESS_TILE_SIZE,
+                                coord.second * Document::EDGELESS_TILE_SIZE);
+                            localPos =
+                                docPoint - tileOrigin - textBox->position;
+                            foundLocal = true;
+                            break;
                         }
-                        if (foundLocal) break;
                     }
-                } else {
-                    int pageIdx = pageAtPoint(docPoint);
-                    if (pageIdx >= 0) {
-                        localPos = docPoint - pagePosition(pageIdx) - textBox->position
-                                   - QPointF(pagePad, pagePad);
-                        foundLocal = true;
-                    }
+                    if (foundLocal) break;
                 }
-
-                if (foundLocal) {
-                    qreal docWidth = textBox->size.width() - 2.0 * pagePad;
-                    if (docWidth > 0.0) {
-                        QTextDocument* doc = textBox->ensureDocCache(docWidth);
-                        if (doc) {
-                            if (textBox->fontSize <= 0.0 && doc->size().height() > 0.0) {
-                                qreal availHeight = textBox->size.height() - 2.0 * pagePad;
-                                if (doc->size().height() > availHeight && availHeight > 0.0) {
-                                    qreal autoScale = availHeight / doc->size().height();
-                                    localPos /= autoScale;
-                                }
-                            }
-
-                            int cursorPos = doc->documentLayout()->hitTest(localPos, Qt::FuzzyHit);
-                            if (cursorPos >= 0) {
-                                QTextCursor cursor(doc);
-                                cursor.setPosition(cursorPos);
-                                href = cursor.charFormat().anchorHref();
-                                if (href.isEmpty() && cursorPos + 1 <= doc->characterCount()) {
-                                    cursor.setPosition(cursorPos + 1);
-                                    href = cursor.charFormat().anchorHref();
-                                }
-                            }
-                        }
-                    }
+            } else {
+                const int pageIdx = pageAtPoint(docPoint);
+                if (pageIdx >= 0) {
+                    localPos =
+                        docPoint - pagePosition(pageIdx) - textBox->position;
+                    foundLocal = true;
                 }
             }
+            if (foundLocal)
+                href = textBox->anchorAtLocalPoint(localPos, m_zoomLevel);
 
             // Strategy 2: Regex for Markdown [text](url) links
             if (href.isEmpty()) {

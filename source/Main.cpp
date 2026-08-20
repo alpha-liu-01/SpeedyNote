@@ -264,6 +264,7 @@ static void applyAndroidFonts(QApplication& app)
 #include "core/DocumentViewportTests.h"
 #include "ui/ToolbarButtonTests.h"
 #include "objects/LinkObjectTests.h"
+#include "objects/TextBoxObjectTests.h"
 #include "pdf/MuPdfExporterTests.h"
 #include "ui/ToolbarButtonTestWidget.h"
 #include "ocr/OcrRasterTests.h"
@@ -617,6 +618,8 @@ static int runTests(const QString& testType)
         success = DocumentViewportTests::runUnitTests();
     } else if (testType == "linkobject") {
         success = LinkObjectTests::runAllTests();
+    } else if (testType == "textboxobject") {
+        success = TextBoxObjectTests::runAllTests();
     } else if (testType == "pdfexporter") {
         success = MuPdfExporterTests::runAllTests();
     } else if (testType == "ocr-raster") {
@@ -954,6 +957,8 @@ int main(int argc, char* argv[])
             runButtonVisualTest = true;
         } else if (arg == "--test-linkobject") {
             testToRun = "linkobject";
+        } else if (arg == "--test-textboxobject") {
+            testToRun = "textboxobject";
         } else if (arg == "--test-pdfexporter") {
             testToRun = "pdfexporter";
         } else if (arg == "--test-ocr-raster") {

@@ -331,9 +331,17 @@ if ($arm64) {
 
 if ($debug) {
     $cmakeArgs += "-DENABLE_DEBUG_OUTPUT=ON"
-    $cmakeArgs += "-DENABLE_SANITIZERS=ON"
     Write-Host "Debug Output: ENABLED" -ForegroundColor Yellow
-    Write-Host "Sanitizers: AddressSanitizer ENABLED (Debug build)" -ForegroundColor Red
+    if ($win32) {
+        # The standalone Qt 5.15 MinGW 8.1 32-bit SDK does not ship libasan.
+        # Keep debug-only tests available without producing an un-linkable
+        # -lasan dependency.
+        $cmakeArgs += "-DENABLE_SANITIZERS=OFF"
+        Write-Host "Sanitizers: DISABLED (unsupported by Qt5 MinGW 32-bit)" -ForegroundColor Yellow
+    } else {
+        $cmakeArgs += "-DENABLE_SANITIZERS=ON"
+        Write-Host "Sanitizers: AddressSanitizer ENABLED (Debug build)" -ForegroundColor Red
+    }
 } else {
     $cmakeArgs += "-DENABLE_DEBUG_OUTPUT=OFF"
     Write-Host "Debug Output: DISABLED" -ForegroundColor Gray
