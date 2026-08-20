@@ -14,6 +14,8 @@
 #include "../objects/ImageObject.h"
 #include "../objects/OcrTextObject.h"
 #include "../ui/panels/InlineTextBoxEditor.h"
+#include "../ui/panels/TextBoxFormatBar.h"
+#include "../ui/widgets/ColorPresetButton.h"
 #include "../../markdown/qmarkdowntextedit.h"
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
@@ -22,9 +24,13 @@
 #include <QBuffer>
 #include <QFile>
 #include <QFileInfo>
+#include <QDoubleSpinBox>
+#include <QFontComboBox>
 #include <QTemporaryDir>
 #include <QSignalSpy>
+#include <QSlider>
 #include <QTextCursor>
+#include <QToolButton>
 #include <QtNumeric>
 #include <QtMath>
 #include <cstdio>
@@ -1658,6 +1664,472 @@ public:
         printf("PASSED\n");
         return true;
     }
+
+    static bool testTextBoxFormattingBar() {
+        printf("  testTextBoxFormattingBar... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+        auto doc = Document::createNew("Text formatting");
+        DocumentViewport viewport;
+        viewport.resize(1100, 820);
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing formatting test page");
+
+        auto object = std::make_unique<TextBoxObject>();
+        object->textLayoutVersion =
+            TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+        object->text = QStringLiteral("One\nTwo\nThree");
+        object->fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
+        object->position = QPointF(180.0, 250.0);
+        object->size = QSizeF(240.0, 1.0);
+        object->reflowToWidth(object->size.width());
+        TextBoxObject* box = object.get();
+        page->addObject(std::move(object));
+
+        viewport.selectObject(box, false);
+        if (!viewport.m_textBoxFormatBar
+            || viewport.m_textBoxFormatBar->isHidden()
+            || viewport.m_textBoxFormatBar->parentWidget() != &viewport)
+            return fail("single user text box did not show owned bar");
+        auto* fontControl =
+            viewport.m_textBoxFormatBar
+                ->findChild<QFontComboBox*>();
+        if (!fontControl || fontControl->count() < 2
+            || fontControl->currentFont().family().isEmpty()
+            || !box->fontFamily.isEmpty())
+            return fail("platform font list/default fallback was invalid");
+        int alternateFontIndex = -1;
+        for (int i = 0; i < fontControl->count(); ++i) {
+            if (fontControl->itemText(i).compare(
+                    fontControl->currentFont().family(),
+                    Qt::CaseInsensitive) != 0) {
+                alternateFontIndex = i;
+                break;
+            }
+        }
+        if (alternateFontIndex < 0)
+            return fail("font selector had no alternate family");
+        const QString alternateFamily =
+            fontControl->itemText(alternateFontIndex);
+        fontControl->setCurrentIndex(alternateFontIndex);
+        QMetaObject::invokeMethod(
+            fontControl, "activated", Qt::DirectConnection,
+            Q_ARG(int, alternateFontIndex));
+        QApplication::processEvents();
+        const auto alternateLayout =
+            TextBoxObject::buildLayout(box->layoutInput());
+        if (box->fontFamily.compare(
+                alternateFamily, Qt::CaseInsensitive) != 0
+            || !alternateLayout
+            || alternateLayout->plainFont.family().compare(
+                   alternateFamily, Qt::CaseInsensitive) != 0
+            || alternateLayout->document->defaultFont().family().compare(
+                   alternateFamily, Qt::CaseInsensitive) != 0
+            || viewport.m_undoStack.size() != 1)
+            return fail("font selector reverted instead of applying family");
+        viewport.undo();
+        if (!box->fontFamily.isEmpty())
+            return fail("font-family undo did not restore default family");
+        viewport.m_undoStack.clear();
+        viewport.m_redoStack.clear();
+        if (!QRect(8, 8, viewport.width() - 16,
+                   viewport.height() - 16)
+                 .contains(viewport.m_textBoxFormatBar->geometry()))
+            return fail("format bar was not clamped to viewport");
+
+        viewport.captureObjectDragBackground();
+        if (viewport.m_textBoxFormatBar->isHidden()
+            || viewport.m_objectDragBackgroundSnapshot.isNull())
+            return fail("drag capture did not restore live format bar");
+        viewport.m_textBoxFormatBar->hide();
+        viewport.m_skipSelectedObjectRendering = true;
+        const QPixmap expectedDragBackground = viewport.grab();
+        viewport.m_skipSelectedObjectRendering = false;
+        viewport.m_textBoxFormatBar->show();
+        viewport.updateTextBoxFormatBarGeometry();
+        if (viewport.m_objectDragBackgroundSnapshot.toImage()
+                != expectedDragBackground.toImage())
+            return fail("drag snapshot retained a frozen format bar");
+        viewport.m_objectDragBackgroundSnapshot = QPixmap();
+        viewport.m_dragObjectRenderedCache = QPixmap();
+
+        const QRect initialBarGeometry =
+            viewport.m_textBoxFormatBar->geometry();
+        viewport.setZoomLevel(1.2);
+        if (viewport.m_textBoxFormatBar->geometry()
+                == initialBarGeometry)
+            return fail("format bar did not track zoom");
+        box->rotation = 25.0;
+        viewport.updateTextBoxFormatBarGeometry();
+        if (!QRect(8, 8, viewport.width() - 16,
+                   viewport.height() - 16)
+                 .contains(viewport.m_textBoxFormatBar->geometry()))
+            return fail("rotated format bar placement overflowed");
+
+        const TextBoxState placementState = box->captureState();
+        box->rotation = 0.0;
+        box->position = QPointF(0.0, 0.0);
+        box->size = QSizeF(100.0, page->size.height());
+        viewport.updateTextBoxFormatBarGeometry();
+        if (viewport.m_textBoxFormatBar->geometry().left()
+                < viewport.objectBoundsInViewport(box).right())
+            return fail("format bar did not choose right-side placement");
+        box->position.setX(page->size.width() - box->size.width());
+        viewport.updateTextBoxFormatBarGeometry();
+        if (viewport.m_textBoxFormatBar->geometry().right()
+                > viewport.objectBoundsInViewport(box).left())
+            return fail("format bar did not choose left-side placement");
+        box->position = QPointF(0.0, 0.0);
+        box->size = page->size;
+        viewport.updateTextBoxFormatBarGeometry();
+        if (!QRect(8, 8, viewport.width() - 16,
+                   viewport.height() - 16)
+                 .contains(viewport.m_textBoxFormatBar->geometry()))
+            return fail("least-overflow placement was not clamped");
+        box->applyState(placementState);
+        viewport.updateTextBoxFormatBarGeometry();
+        viewport.resize(480, 820);
+        viewport.updateTextBoxFormatBarGeometry();
+        if (!QRect(8, 8, viewport.width() - 16,
+                   viewport.height() - 16)
+                 .contains(viewport.m_textBoxFormatBar->geometry()))
+            return fail("narrow viewport did not clamp format bar");
+        viewport.resize(1100, 820);
+        viewport.updateTextBoxFormatBarGeometry();
+
+        auto ocr = std::make_unique<OcrTextObject>();
+        ocr->text = QStringLiteral("OCR");
+        OcrTextObject* ocrRaw = ocr.get();
+        page->addObject(std::move(ocr));
+        viewport.selectObject(ocrRaw, false);
+        if (!viewport.m_textBoxFormatBar->isHidden())
+            return fail("OCR object incorrectly showed format bar");
+        viewport.selectObject(box, false);
+        viewport.selectObject(ocrRaw, true);
+        if (!viewport.m_textBoxFormatBar->isHidden())
+            return fail("multi-selection incorrectly showed format bar");
+        viewport.selectObject(box, false);
+
+        QSignalSpy documentSpy(
+            &viewport, &DocumentViewport::documentModified);
+        QSignalSpy pageSpy(
+            &viewport, &DocumentViewport::pageModified);
+        QSignalSpy layoutSpy(
+            &viewport, &DocumentViewport::textBoxLayoutCommitted);
+        viewport.m_undoStack.clear();
+        viewport.m_redoStack.clear();
+
+        const TextBoxState formatStart = box->captureState();
+        auto worldTopLeft = [](const TextBoxState& state) {
+            const QPointF center(
+                state.size.width() / 2.0, state.size.height() / 2.0);
+            const QPointF delta = -center;
+            const qreal radians = qDegreesToRadians(state.rotation);
+            return state.position + center + QPointF(
+                delta.x() * qCos(radians)
+                    - delta.y() * qSin(radians),
+                delta.x() * qSin(radians)
+                    + delta.y() * qCos(radians));
+        };
+        const QPointF anchoredTop = worldTopLeft(formatStart);
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize, 22.0);
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontFamily,
+            QStringLiteral("Arial"));
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::Alignment,
+            static_cast<int>(TextAlignment::Right));
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontColor,
+            QColor(10, 20, 30));
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::BackgroundColor,
+            QColor(210, 200, 190, 170));
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::BackgroundOpacity, 91);
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::Border, false);
+        if (documentSpy.count() || pageSpy.count()
+            || layoutSpy.count() || !viewport.m_undoStack.isEmpty())
+            return fail("format previews emitted persistent invalidation");
+        viewport.finishTextBoxFormatInteraction(true);
+
+        const TextBoxState formatEnd = box->captureState();
+        if (qAbs(formatEnd.fontSize - 22.0) > 0.001
+            || formatEnd.fontFamily != QLatin1String("Arial")
+            || formatEnd.alignment != TextAlignment::Right
+            || formatEnd.fontColor != QColor(10, 20, 30)
+            || formatEnd.backgroundColor.alpha() != 91
+            || formatEnd.showBorder
+            || QLineF(worldTopLeft(formatEnd), anchoredTop).length()
+                > 0.01)
+            return fail("accepted formatting lost values or top anchor");
+        if (viewport.m_undoStack.size() != 1
+            || viewport.m_undoStack.top().type
+                != UndoAction::ObjectTextEdit
+            || !viewport.m_undoStack.top().objectHasTextBoxState
+            || documentSpy.count() != 1 || pageSpy.count() != 1
+            || layoutSpy.count() != 1
+            || !viewport.m_pendingThumbnailPages.contains(0))
+            return fail("format interaction did not coalesce/invalidate once");
+        auto* sizeControl =
+            viewport.m_textBoxFormatBar
+                ->findChild<QDoubleSpinBox*>();
+        if (!sizeControl
+            || qAbs(sizeControl->value() - 22.0) > 0.001)
+            return fail("bar controls did not synchronize accepted state");
+
+        viewport.undo();
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), formatStart))
+            return fail("format undo did not restore complete state");
+        viewport.redo();
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), formatEnd))
+            return fail("format redo did not restore complete state");
+
+        const int undoCount = viewport.m_undoStack.size();
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize, 31.0);
+        viewport.finishTextBoxFormatInteraction(false);
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), formatEnd)
+            || viewport.m_undoStack.size() != undoCount)
+            return fail("cancelled format interaction created history");
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize,
+            formatEnd.fontSize);
+        viewport.finishTextBoxFormatInteraction(true);
+        if (viewport.m_undoStack.size() != undoCount)
+            return fail("net-zero format interaction created history");
+
+        auto* opacityControl =
+            viewport.m_textBoxFormatBar->findChild<QSlider*>();
+        if (!opacityControl)
+            return fail("background opacity control was missing");
+        const int beforeSliderUndo = viewport.m_undoStack.size();
+        QMetaObject::invokeMethod(
+            opacityControl, "sliderPressed", Qt::DirectConnection);
+        opacityControl->setValue(80);
+        opacityControl->setValue(70);
+        opacityControl->setValue(60);
+        QMetaObject::invokeMethod(
+            opacityControl, "sliderReleased", Qt::DirectConnection);
+        if (viewport.m_undoStack.size() != beforeSliderUndo + 1
+            || box->backgroundColor.alpha() != 60)
+            return fail("continuous slider changes did not coalesce");
+        viewport.undo();
+        if (box->backgroundColor.alpha()
+                != formatEnd.backgroundColor.alpha())
+            return fail("slider interaction undo lost opacity");
+        viewport.redo();
+
+        const auto swatches =
+            viewport.m_textBoxFormatBar
+                ->findChildren<ColorPresetButton*>();
+        if (swatches.isEmpty())
+            return fail("format color controls were missing");
+        QMetaObject::invokeMethod(
+            swatches.first(), "editRequested",
+            Qt::DirectConnection);
+        QApplication::processEvents();
+        if (!viewport.m_textBoxFormatBar->hasOpenPopup()
+            || !viewport.m_textBoxFormatTransaction.active)
+            return fail("color popup did not own a format interaction");
+        viewport.selectObject(ocrRaw, false);
+        QApplication::processEvents();
+        if (viewport.m_textBoxFormatBar->hasOpenPopup()
+            || viewport.m_textBoxFormatTransaction.active
+            || !viewport.m_textBoxFormatBar->isHidden())
+            return fail("selection replacement did not tear down popup");
+        viewport.selectObject(box, false);
+
+        const int beforeOverflowUndo = viewport.m_undoStack.size();
+        box->rotation = 0.0;
+        box->position.setY(
+            page->size.height() - box->size.height());
+        const TextBoxState overflowStart = box->captureState();
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize, 144.0);
+        viewport.finishTextBoxFormatInteraction(true);
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), overflowStart)
+            || viewport.m_undoStack.size() != beforeOverflowUndo
+            || viewport.m_objectGeometryFeedbackText.isEmpty())
+            return fail("paged formatting overflow was not atomic");
+
+        box->position = QPointF(160.0, 180.0);
+        const TextBoxState inlineStart = box->captureState();
+        viewport.m_undoStack.clear();
+        documentSpy.clear();
+        pageSpy.clear();
+        layoutSpy.clear();
+        viewport.startInlineTextEdit(box, false);
+        viewport.m_inlineTextBoxEditor->editor()->moveCursor(
+            QTextCursor::End);
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            QStringLiteral("\nInline"));
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize, 19.0);
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::Alignment,
+            static_cast<int>(TextAlignment::Center));
+        viewport.finishTextBoxFormatInteraction(true);
+        if (!viewport.m_undoStack.isEmpty()
+            || documentSpy.count() || layoutSpy.count())
+            return fail("inline formatting committed separately");
+        viewport.commitInlineTextEdit();
+        const TextBoxState inlineEnd = box->captureState();
+        if (viewport.m_undoStack.size() != 1
+            || viewport.m_undoStack.top().type
+                != UndoAction::ObjectTextEdit
+            || inlineEnd.fontSize != 19.0
+            || inlineEnd.alignment != TextAlignment::Center
+            || !inlineEnd.text.endsWith(QStringLiteral("Inline"))
+            || documentSpy.count() != 1
+            || pageSpy.count() != 1
+            || layoutSpy.count() != 1)
+            return fail("inline text/format did not merge into one action");
+        viewport.undo();
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), inlineStart))
+            return fail("merged inline format undo was incomplete");
+        viewport.redo();
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), inlineEnd))
+            return fail("merged inline format redo was incomplete");
+
+        viewport.startInlineTextEdit(box, false);
+        const qreal beforeEscapeSize = box->fontSize;
+        sizeControl->setValue(beforeEscapeSize + 3.0);
+        QKeyEvent formatEscape(
+            QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(sizeControl, &formatEscape);
+        if (!viewport.hasActiveInlineTextEdit()
+            || qAbs(box->fontSize - beforeEscapeSize) > 0.001)
+            return fail("Escape did not cancel only active formatting");
+        QKeyEvent barCommit(
+            QEvent::KeyPress, Qt::Key_Return,
+            Qt::ControlModifier);
+        QApplication::sendEvent(sizeControl, &barCommit);
+        if (viewport.hasActiveInlineTextEdit())
+            return fail("Ctrl+Enter from format bar did not commit inline edit");
+
+        auto legacy = std::make_unique<TextBoxObject>();
+        legacy->text = QStringLiteral("Legacy format");
+        legacy->position = QPointF(40.0, 40.0);
+        legacy->size = QSizeF(180.0, 44.0);
+        TextBoxObject* legacyRaw = legacy.get();
+        page->addObject(std::move(legacy));
+        viewport.selectObject(legacyRaw, false);
+        const TextBoxState legacyStart = legacyRaw->captureState();
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::Border, false);
+        viewport.finishTextBoxFormatInteraction(false);
+        if (!DocumentViewport::textBoxStatesEqual(
+                legacyRaw->captureState(), legacyStart))
+            return fail("cancelled legacy format did not restore version 0");
+        viewport.beginTextBoxFormatInteraction();
+        viewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize, 18.0);
+        viewport.finishTextBoxFormatInteraction(true);
+        if (!legacyRaw->usesCurrentLayout()
+            || viewport.m_undoStack.top().objectOldTextBoxState
+                   .textLayoutVersion != 0)
+            return fail("legacy conversion was not in format undo");
+        viewport.undo();
+        if (!DocumentViewport::textBoxStatesEqual(
+                legacyRaw->captureState(), legacyStart))
+            return fail("legacy format undo did not restore version 0");
+
+        viewport.selectObject(box, false);
+        const QJsonObject formattedJson = box->toJson();
+        std::unique_ptr<InsertedObject> restored =
+            InsertedObject::fromJson(formattedJson);
+        auto* restoredBox =
+            dynamic_cast<TextBoxObject*>(restored.get());
+        if (!restoredBox
+            || restoredBox->fontFamily != box->fontFamily
+            || restoredBox->fontColor != box->fontColor
+            || restoredBox->backgroundColor
+                != box->backgroundColor
+            || restoredBox->alignment != box->alignment
+            || restoredBox->showBorder != box->showBorder
+            || restoredBox->textLayoutVersion
+                != box->textLayoutVersion)
+            return fail("formatted persistence round-trip lost state");
+
+        auto secondDoc = Document::createNew("Second format viewport");
+        DocumentViewport secondViewport;
+        secondViewport.resize(900, 700);
+        secondViewport.setDocument(secondDoc.get());
+        auto secondObject = std::make_unique<TextBoxObject>();
+        secondObject->textLayoutVersion =
+            TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+        secondObject->text = QStringLiteral("Second");
+        secondObject->position = QPointF(100.0, 100.0);
+        secondObject->size = QSizeF(200.0, 1.0);
+        secondObject->reflowToWidth(200.0);
+        TextBoxObject* secondBox = secondObject.get();
+        secondDoc->page(0)->addObject(std::move(secondObject));
+        secondViewport.selectObject(secondBox, false);
+        if (!secondViewport.m_textBoxFormatBar
+            || secondViewport.m_textBoxFormatBar
+                == viewport.m_textBoxFormatBar
+            || secondViewport.m_textBoxFormatBar->parentWidget()
+                != &secondViewport)
+            return fail("split viewports did not isolate format bars");
+
+        auto edgeDoc = Document::createNew(
+            "Edgeless format", Document::Mode::Edgeless);
+        DocumentViewport edgeViewport;
+        edgeViewport.resize(900, 700);
+        edgeViewport.setDocument(edgeDoc.get());
+        Page* edgeTile = edgeDoc->getOrCreateTile(0, 0);
+        auto edgeObject = std::make_unique<TextBoxObject>();
+        edgeObject->textLayoutVersion =
+            TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+        edgeObject->text =
+            QStringLiteral("a\nb\nc\nd\ne\nf\ng\nh");
+        edgeObject->position = QPointF(100.0, 4000.0);
+        edgeObject->size = QSizeF(180.0, 1.0);
+        edgeObject->reflowToWidth(180.0);
+        TextBoxObject* edgeBox = edgeObject.get();
+        edgeTile->addObject(std::move(edgeObject));
+        const TextBoxState edgeStart = edgeBox->captureState();
+        edgeViewport.selectObject(edgeBox, false);
+        edgeViewport.beginTextBoxFormatInteraction();
+        edgeViewport.applyTextBoxFormatPreview(
+            DocumentViewport::TextBoxFormatChange::FontSize, 72.0);
+        edgeViewport.finishTextBoxFormatInteraction(true);
+        if (edgeBox->fontSize != 72.0
+            || edgeBox->size.height() <= edgeStart.size.height()
+            || edgeViewport.m_undoStack.size() != 1)
+            return fail("edgeless formatting growth was capped");
+        edgeViewport.undo();
+        if (!DocumentViewport::textBoxStatesEqual(
+                edgeBox->captureState(), edgeStart))
+            return fail("edgeless formatting undo lost state");
+
+        viewport.setDocument(nullptr);
+        secondViewport.setDocument(nullptr);
+        edgeViewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
     
     // ===== Run All Unit Tests =====
     
@@ -1695,6 +2167,8 @@ public:
                 "testTextBoxCreationAndWidthResize");
         runTest(testInlineTextBoxEditing,
                 "testInlineTextBoxEditing");
+        runTest(testTextBoxFormattingBar,
+                "testTextBoxFormattingBar");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         // The caller goes on to open a window and block in the event loop, so

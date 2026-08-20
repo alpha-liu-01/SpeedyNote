@@ -1480,6 +1480,12 @@ void MainWindow::wireQActionDispatchers()
     // the underlying feature lands.
     wire("edit.undo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->undo();
+                return;
+            }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
                         QApplication::focusWidget())) {
@@ -1493,6 +1499,12 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.redo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->redo();
+                return;
+            }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
                         QApplication::focusWidget())) {
@@ -1509,6 +1521,12 @@ void MainWindow::wireQActionDispatchers()
     // NOT added to the macOS Edit menu (the menu shows the primary edit.redo only).
     wire("edit.redo_alt", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->redo();
+                return;
+            }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
                         QApplication::focusWidget())) {
@@ -1521,6 +1539,13 @@ void MainWindow::wireQActionDispatchers()
         }
     });
     wire("edit.copy", [](MainWindow* w){
+        if (auto* vp = w->currentViewport();
+            vp && vp->textBoxFormatBarHasFocus()) {
+            if (auto* edit = qobject_cast<QLineEdit*>(
+                    QApplication::focusWidget()))
+                edit->copy();
+            return;
+        }
         if (auto* vp = w->currentViewport();
             vp && vp->inlineTextEditorHasFocus()) {
             if (auto* edit = qobject_cast<QPlainTextEdit*>(
@@ -1544,6 +1569,12 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.cut", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->cut();
+                return;
+            }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
                         QApplication::focusWidget())) {
@@ -1556,6 +1587,12 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.paste", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->paste();
+                return;
+            }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
                         QApplication::focusWidget())) {
@@ -1573,6 +1610,12 @@ void MainWindow::wireQActionDispatchers()
     });
     wire("edit.delete", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->textBoxFormatBarHasFocus()) {
+                if (auto* edit = qobject_cast<QLineEdit*>(
+                        QApplication::focusWidget()))
+                    edit->del();
+                return;
+            }
             if (vp->inlineTextEditorHasFocus()) {
                 if (auto* edit = qobject_cast<QPlainTextEdit*>(
                         QApplication::focusWidget())) {
@@ -1804,8 +1847,18 @@ void MainWindow::wireQActionDispatchers()
     // it (modifier-bearing actions don't need this guard).
     auto isTextFocused = []() {
         QWidget* f = QApplication::focusWidget();
-        return qobject_cast<QLineEdit*>(f) || qobject_cast<QTextEdit*>(f)
-            || qobject_cast<QPlainTextEdit*>(f);
+        if (qobject_cast<QLineEdit*>(f) || qobject_cast<QTextEdit*>(f)
+            || qobject_cast<QPlainTextEdit*>(f)) {
+            return true;
+        }
+        for (QWidget* widget = f; widget;
+             widget = widget->parentWidget()) {
+            if (widget->objectName()
+                == QLatin1String("textBoxFormatBar")) {
+                return true;
+            }
+        }
+        return false;
     };
     auto wireToolKey = [&wire, isTextFocused](const QString& id, ToolType tool) {
         wire(id, [tool, isTextFocused](MainWindow* w) {

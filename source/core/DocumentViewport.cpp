@@ -18,6 +18,7 @@
 #include "../objects/TextBoxObject.h"  // Phase 2B: text edit undo
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 #include "../ui/panels/InlineTextBoxEditor.h"
+#include "../ui/panels/TextBoxFormatBar.h"
 #include "../../markdown/qmarkdowntextedit.h"
 
 #include <QPainter>
@@ -206,9 +207,19 @@ DocumentViewport::DocumentViewport(QWidget* parent)
         update(dirty);
     });
     connect(this, &DocumentViewport::zoomChanged, this,
-            [this]() { updateInlineTextEditorGeometry(); });
+            [this]() {
+        updateInlineTextEditorGeometry();
+        updateTextBoxFormatBarGeometry();
+    });
     connect(this, &DocumentViewport::panChanged, this,
-            [this]() { updateInlineTextEditorGeometry(); });
+            [this]() {
+        updateInlineTextEditorGeometry();
+        updateTextBoxFormatBarGeometry();
+    });
+    connect(this, &DocumentViewport::objectSelectionChanged,
+            this, &DocumentViewport::syncTextBoxFormatBar);
+    connect(this, &DocumentViewport::textBoxLayoutCommitted,
+            this, &DocumentViewport::syncTextBoxFormatBar);
 
     // Scroll-settle timer (SP1) - defers heavy housekeeping (preload/evict) until
     // the immediate-pan route (wheel/touchpad/scroll-bar) stops for a beat.
@@ -273,6 +284,8 @@ DocumentViewport::DocumentViewport(QWidget* parent)
 
 DocumentViewport::~DocumentViewport()
 {
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     commitInlineTextEdit();
 
     // Cancel any pending preload requests
@@ -360,6 +373,8 @@ void DocumentViewport::setDocument(Document* doc)
         return;
     }
 
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     commitInlineTextEdit();
     
     // End any active gesture (cached frame is from old document)
@@ -483,6 +498,7 @@ void DocumentViewport::setDocument(Document* doc)
     emit panChanged(m_panOffset);
     emit currentPageChanged(m_currentPageIndex);
     emitScrollFractions();
+    syncTextBoxFormatBar();
 }
 
 // ===== PDF source warning banner =====
@@ -548,6 +564,12 @@ void DocumentViewport::setDarkMode(bool dark)
     if (m_pdfDarkModeEnabled) {
         invalidatePdfCache();
     }
+
+    if (m_textBoxFormatBar)
+        m_textBoxFormatBar->setDarkMode(dark);
+    if (m_inlineTextBoxEditor && m_inlineEditSession.active)
+        updateInlineTextEditorGeometry();
+    updateTextBoxFormatBarGeometry();
 
     // Trigger repaint
     update();
@@ -2414,6 +2436,7 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
             // Rotation leaves position/size alone, but clamp anyway so a
             // rotated object near an edge can never end up unreachable.
             clampObjectToPage(obj, m_resizeObjectPageIndex);
+            updateTextBoxFormatBarGeometry();
             return;  // Don't apply resize logic below
         }
     
@@ -2529,6 +2552,7 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
             showObjectGeometryFeedback(
                 tr("Text box cannot grow beyond the page"),
                 objectBoundsInViewport(textBox));
+            updateTextBoxFormatBarGeometry();
             return;
         }
 
@@ -2541,6 +2565,7 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
                 != m_resizeOriginalTextBoxState.textLayoutVersion
             || !qFuzzyCompare(1.0 + candidate.fontSize,
                               1.0 + m_resizeOriginalTextBoxState.fontSize);
+        updateTextBoxFormatBarGeometry();
         return;
     }
     
@@ -3346,6 +3371,7 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
         
         clampPanOffset();
         updateInlineTextEditorGeometry();
+        updateTextBoxFormatBarGeometry();
         update();
         emitScrollFractions();
         return;
@@ -3392,6 +3418,8 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
     if (m_missingPdfBanner && m_missingPdfBanner->isVisible()) {
         m_missingPdfBanner->setFixedWidth(width());
     }
+    updateInlineTextEditorGeometry();
+    updateTextBoxFormatBarGeometry();
 }
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
@@ -3400,6 +3428,10 @@ void DocumentViewport::mousePressEvent(QMouseEvent* event)
     // canvas is an explicit outside click and commits the current session.
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
+    else {
+        closeTextBoxFormatPopups(true);
+        finishTextBoxFormatInteraction(true);
+    }
 
     // Middle mouse button: start pan gesture (independent of active tool)
     if (event->button() == Qt::MiddleButton) {
@@ -3743,6 +3775,8 @@ void DocumentViewport::hideEvent(QHideEvent* event)
     qDebug() << "[DocumentViewport] hideEvent - clearing gesture state"
              << "wasActive:" << m_gesture.isActive();
 #endif
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
     
@@ -3801,6 +3835,7 @@ void DocumentViewport::showEvent(QShowEvent* event)
     }
     
     QWidget::showEvent(event);
+    syncTextBoxFormatBar();
 }
 
 #if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
@@ -3868,6 +3903,10 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
             peType = PointerEvent::Press;
             if (m_inlineEditSession.active)
                 commitInlineTextEdit();
+            else {
+                closeTextBoxFormatPopups(true);
+                finishTextBoxFormatInteraction(true);
+            }
             break;
         case QEvent::TabletMove:
             peType = PointerEvent::Move;
@@ -7036,6 +7075,8 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
 
 void DocumentViewport::clearObjectSelection()
 {
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     cancelObjectPointerGesture();
 
     bool hadSelection = !m_selectedObjects.isEmpty();
@@ -7227,6 +7268,8 @@ void DocumentViewport::selectObject(InsertedObject* obj, bool addToSelection)
     }
     
     if (changed) {
+        closeTextBoxFormatPopups(true);
+        finishTextBoxFormatInteraction(true);
         emit objectSelectionChanged();
         
         // Phase C.2.4: Auto-switch insert mode based on selected object type.
@@ -7259,6 +7302,10 @@ void DocumentViewport::deselectObject(InsertedObject* obj)
 {
     if (!obj) return;
     
+    if (m_selectedObjects.contains(obj)) {
+        closeTextBoxFormatPopups(true);
+        finishTextBoxFormatInteraction(true);
+    }
     if (m_selectedObjects.removeOne(obj)) {
         emit objectSelectionChanged();
         update();
@@ -7273,6 +7320,8 @@ void DocumentViewport::deselectAllObjects()
 
     if (m_selectedObjects.isEmpty()) return;
 
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     m_selectedObjects.clear();
     for (int p : m_pendingThumbnailPages)
         emit pageModified(p);
@@ -7311,6 +7360,8 @@ void DocumentViewport::deselectObjectById(const QString& objectId)
 {
     for (int i = static_cast<int>(m_selectedObjects.size()) - 1; i >= 0; --i) {
         if (m_selectedObjects[i] && m_selectedObjects[i]->id == objectId) {
+            closeTextBoxFormatPopups(true);
+            finishTextBoxFormatInteraction(true);
             m_selectedObjects.removeAt(i);
             emit objectSelectionChanged();
             update();
@@ -7447,6 +7498,7 @@ void DocumentViewport::updateObjectDrag(const QPointF& totalDelta)
     // Note: Page/tile dirty marking is done on drag release (O2.3.2)
     // to avoid marking dirty on every micro-movement during drag.
     // Tile boundary crossing is handled in O2.3.4.
+    updateTextBoxFormatBarGeometry();
     
     // Phase O4.1.3: Throttle updates to ~60fps
     // High-DPI mice/tablets can send 100s of events per second.
@@ -7470,6 +7522,7 @@ void DocumentViewport::moveSelectedObjects(const QPointF& delta)
         obj->position += delta;
         clampObjectToPage(obj, pageIndexForObject(obj));
     }
+    updateTextBoxFormatBarGeometry();
     
     if (!m_dragUpdateTimer.isValid() || 
         m_dragUpdateTimer.elapsed() >= DRAG_UPDATE_INTERVAL_MS) {
@@ -7797,6 +7850,8 @@ void DocumentViewport::deleteSelectedObjects()
     if (!m_document || m_selectedObjects.isEmpty()) {
         return;
     }
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active) {
         endInlineTextEdit(false, true);
         if (m_selectedObjects.isEmpty())
@@ -8525,6 +8580,440 @@ bool DocumentViewport::inlineTextEditorHasFocus() const
                 QApplication::focusWidget()));
 }
 
+bool DocumentViewport::textBoxFormatBarHasFocus() const
+{
+    return m_textBoxFormatBar && m_textBoxFormatBar->controlHasFocus();
+}
+
+TextBoxObject* DocumentViewport::selectedTextBoxForFormatting() const
+{
+    if (!m_document || m_selectedObjects.size() != 1)
+        return nullptr;
+    InsertedObject* selected = m_selectedObjects.first();
+    if (!selected || selected->type() != QLatin1String("textbox"))
+        return nullptr;
+    auto* textBox = static_cast<TextBoxObject*>(selected);
+    int pageIndex = -1;
+    Document::TileCoord tileCoord = {0, 0};
+    return locateTextBoxObject(textBox, pageIndex, tileCoord)
+        ? textBox : nullptr;
+}
+
+bool DocumentViewport::locateTextBoxObject(
+    TextBoxObject* textBox, int& pageIndex,
+    Document::TileCoord& tileCoord) const
+{
+    pageIndex = -1;
+    tileCoord = {0, 0};
+    if (!m_document || !textBox)
+        return false;
+
+    if (m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(textBox->id) == textBox) {
+                tileCoord = coord;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    pageIndex = pageIndexForObject(textBox);
+    return pageIndex >= 0 && pageIndex < m_document->pageCount();
+}
+
+TextBoxObject* DocumentViewport::resolveTextBoxFormatTarget() const
+{
+    if (!m_textBoxFormatTransaction.active || !m_document
+        || m_textBoxFormatTransaction.document != m_document) {
+        return nullptr;
+    }
+
+    Page* container = nullptr;
+    if (m_document->isEdgeless()) {
+        const auto coord = m_textBoxFormatTransaction.tileCoord;
+        container = m_document->getTile(coord.first, coord.second);
+    } else if (m_textBoxFormatTransaction.pageIndex >= 0
+               && m_textBoxFormatTransaction.pageIndex
+                    < m_document->pageCount()) {
+        container = m_document->page(
+            m_textBoxFormatTransaction.pageIndex);
+    }
+    if (!container)
+        return nullptr;
+    InsertedObject* object = container->objectById(
+        m_textBoxFormatTransaction.objectId);
+    if (!object || object->type() != QLatin1String("textbox"))
+        return nullptr;
+    return static_cast<TextBoxObject*>(object);
+}
+
+void DocumentViewport::ensureTextBoxFormatBar()
+{
+    if (m_textBoxFormatBar)
+        return;
+
+    m_textBoxFormatBar = new TextBoxFormatBar(this);
+    m_textBoxFormatBar->setDarkMode(m_isDarkMode);
+    m_textBoxFormatBar->hide();
+
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::interactionStarted,
+            this, &DocumentViewport::beginTextBoxFormatInteraction);
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::fontSizePreviewRequested,
+            this, [this](qreal value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::FontSize, value);
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::fontFamilyPreviewRequested,
+            this, [this](const QString& value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::FontFamily, value);
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::alignmentPreviewRequested,
+            this, [this](TextAlignment value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::Alignment,
+            static_cast<int>(value));
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::fontColorPreviewRequested,
+            this, [this](const QColor& value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::FontColor, value);
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::backgroundColorPreviewRequested,
+            this, [this](const QColor& value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::BackgroundColor, value);
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::backgroundOpacityPreviewRequested,
+            this, [this](int value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::BackgroundOpacity, value);
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::borderPreviewRequested,
+            this, [this](bool value) {
+        applyTextBoxFormatPreview(
+            TextBoxFormatChange::Border, value);
+    });
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::interactionFinished,
+            this, &DocumentViewport::finishTextBoxFormatInteraction);
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::cancelInlineEditRequested,
+            this, &DocumentViewport::cancelInlineTextEdit);
+    connect(m_textBoxFormatBar,
+            &TextBoxFormatBar::commitInlineEditRequested,
+            this, &DocumentViewport::commitInlineTextEdit);
+}
+
+void DocumentViewport::syncTextBoxFormatBar()
+{
+    TextBoxObject* textBox = selectedTextBoxForFormatting();
+    if (!textBox) {
+        closeTextBoxFormatPopups(true);
+        finishTextBoxFormatInteraction(true);
+        if (m_textBoxFormatBar)
+            m_textBoxFormatBar->hide();
+        return;
+    }
+
+    ensureTextBoxFormatBar();
+    if (!m_textBoxFormatTransaction.active)
+        m_textBoxFormatBar->setValues(textBox->captureState());
+    m_textBoxFormatBar->show();
+    updateTextBoxFormatBarGeometry();
+    m_textBoxFormatBar->raise();
+}
+
+void DocumentViewport::updateTextBoxFormatBarGeometry()
+{
+    if (!m_textBoxFormatBar || m_textBoxFormatBar->isHidden())
+        return;
+    TextBoxObject* textBox = selectedTextBoxForFormatting();
+    if (!textBox) {
+        m_textBoxFormatBar->hide();
+        return;
+    }
+
+    const QRectF objectRect = objectBoundsInViewport(textBox);
+    if (objectRect.isEmpty())
+        return;
+
+    const int inset = 8;
+    const qreal gap = 8.0;
+    const QRectF available = QRectF(rect()).adjusted(
+        inset, inset, -inset, -inset);
+    QSize size = m_textBoxFormatBar->sizeHint();
+    size.setWidth(qMin(size.width(),
+                       qMax(1, available.toAlignedRect().width())));
+    size.setHeight(qMin(size.height(),
+                        qMax(1, available.toAlignedRect().height())));
+
+    const qreal centeredX = objectRect.center().x()
+        - size.width() / 2.0;
+    const qreal centeredY = objectRect.center().y()
+        - size.height() / 2.0;
+    const QVector<QRectF> candidates = {
+        QRectF(centeredX, objectRect.top() - gap - size.height(),
+               size.width(), size.height()),
+        QRectF(centeredX, objectRect.bottom() + gap,
+               size.width(), size.height()),
+        QRectF(objectRect.right() + gap, centeredY,
+               size.width(), size.height()),
+        QRectF(objectRect.left() - gap - size.width(), centeredY,
+               size.width(), size.height())
+    };
+
+    QRectF chosen;
+    for (const QRectF& candidate : candidates) {
+        if (available.contains(candidate)) {
+            chosen = candidate;
+            break;
+        }
+    }
+    if (chosen.isEmpty()) {
+        auto overflowScore = [&available](const QRectF& candidate) {
+            return qMax<qreal>(0.0, available.left() - candidate.left())
+                + qMax<qreal>(0.0, candidate.right() - available.right())
+                + qMax<qreal>(0.0, available.top() - candidate.top())
+                + qMax<qreal>(0.0, candidate.bottom()
+                              - available.bottom());
+        };
+        chosen = candidates.first();
+        qreal bestScore = overflowScore(chosen);
+        for (int i = 1; i < candidates.size(); ++i) {
+            const qreal score = overflowScore(candidates.at(i));
+            if (score < bestScore) {
+                chosen = candidates.at(i);
+                bestScore = score;
+            }
+        }
+        chosen.moveLeft(qBound(available.left(), chosen.left(),
+                               available.right() - chosen.width()));
+        chosen.moveTop(qBound(available.top(), chosen.top(),
+                              available.bottom() - chosen.height()));
+    }
+
+    m_textBoxFormatBar->setGeometry(chosen.toAlignedRect());
+    m_textBoxFormatBar->raise();
+}
+
+void DocumentViewport::beginTextBoxFormatInteraction()
+{
+    if (m_textBoxFormatTransaction.active)
+        return;
+    TextBoxObject* textBox = selectedTextBoxForFormatting();
+    if (!textBox)
+        return;
+
+    TextBoxFormatTransaction transaction;
+    transaction.document = m_document;
+    transaction.objectId = textBox->id;
+    transaction.startState = textBox->captureState();
+    if (!locateTextBoxObject(textBox, transaction.pageIndex,
+                             transaction.tileCoord)) {
+        return;
+    }
+    transaction.attachedToInlineEdit =
+        m_inlineEditSession.active
+        && m_inlineEditSession.document == m_document
+        && m_inlineEditSession.objectId == textBox->id;
+
+    if (textBox->usesLegacyLayout())
+        textBox->upgradeToCurrentLayout();
+    transaction.lastAcceptedState = textBox->captureState();
+    transaction.dirtyViewport = objectBoundsInViewport(textBox);
+    transaction.active = true;
+    m_textBoxFormatTransaction = transaction;
+    if (m_textBoxFormatBar)
+        m_textBoxFormatBar->setValues(transaction.lastAcceptedState);
+}
+
+void DocumentViewport::preserveTextBoxTopAnchor(
+    const TextBoxState& previous, TextBoxState& candidate)
+{
+    auto rotatedPoint = [](const TextBoxState& state,
+                           const QPointF& localPoint) {
+        const QPointF center(
+            state.size.width() / 2.0, state.size.height() / 2.0);
+        const QPointF delta = localPoint - center;
+        const qreal radians = qDegreesToRadians(state.rotation);
+        return state.position + center + QPointF(
+            delta.x() * qCos(radians) - delta.y() * qSin(radians),
+            delta.x() * qSin(radians) + delta.y() * qCos(radians));
+    };
+    const QPointF anchoredTopLeft =
+        rotatedPoint(previous, QPointF(0.0, 0.0));
+    const QPointF candidateCenter(
+        candidate.size.width() / 2.0,
+        candidate.size.height() / 2.0);
+    const QPointF candidateDelta = -candidateCenter;
+    const qreal radians = qDegreesToRadians(candidate.rotation);
+    const QPointF rotatedCandidateDelta(
+        candidateDelta.x() * qCos(radians)
+            - candidateDelta.y() * qSin(radians),
+        candidateDelta.x() * qSin(radians)
+            + candidateDelta.y() * qCos(radians));
+    candidate.position =
+        anchoredTopLeft - candidateCenter - rotatedCandidateDelta;
+}
+
+void DocumentViewport::applyTextBoxFormatPreview(
+    TextBoxFormatChange change, const QVariant& value)
+{
+    if (!m_textBoxFormatTransaction.active)
+        beginTextBoxFormatInteraction();
+    TextBoxObject* textBox = resolveTextBoxFormatTarget();
+    if (!textBox)
+        return;
+
+    const TextBoxState previous =
+        m_textBoxFormatTransaction.lastAcceptedState;
+    const QRectF oldBounds = objectBoundsInViewport(textBox);
+    textBox->applyState(previous);
+
+    switch (change) {
+        case TextBoxFormatChange::FontSize:
+            textBox->fontSize = qMax<qreal>(1.0, value.toReal());
+            break;
+        case TextBoxFormatChange::FontFamily:
+            textBox->fontFamily = value.toString();
+            break;
+        case TextBoxFormatChange::Alignment:
+            textBox->alignment =
+                static_cast<TextAlignment>(value.toInt());
+            break;
+        case TextBoxFormatChange::FontColor:
+            textBox->fontColor = value.value<QColor>();
+            break;
+        case TextBoxFormatChange::BackgroundColor:
+            textBox->backgroundColor = value.value<QColor>();
+            break;
+        case TextBoxFormatChange::BackgroundOpacity: {
+            QColor color = textBox->backgroundColor;
+            color.setAlpha(qBound(0, value.toInt(), 255));
+            textBox->backgroundColor = color;
+            break;
+        }
+        case TextBoxFormatChange::Border:
+            textBox->showBorder = value.toBool();
+            break;
+    }
+
+    textBox->reflowToWidth(previous.size.width());
+    TextBoxState candidate = textBox->captureState();
+    preserveTextBoxTopAnchor(previous, candidate);
+
+    if (!textBoxGeometryProposalAllowed(
+            m_textBoxFormatTransaction.startState, candidate,
+            m_textBoxFormatTransaction.pageIndex)) {
+        textBox->applyState(previous);
+        if (m_textBoxFormatBar)
+            m_textBoxFormatBar->setValues(previous);
+        showObjectGeometryFeedback(
+            tr("Text box cannot grow beyond the page"), oldBounds);
+        updateInlineTextEditorGeometry();
+        updateTextBoxFormatBarGeometry();
+        return;
+    }
+
+    textBox->applyState(candidate);
+    m_textBoxFormatTransaction.lastAcceptedState = candidate;
+    if (m_textBoxFormatTransaction.attachedToInlineEdit)
+        m_inlineEditSession.lastAcceptedState = candidate;
+    m_textBoxFormatTransaction.dirtyViewport =
+        m_textBoxFormatTransaction.dirtyViewport
+            .united(oldBounds)
+            .united(objectBoundsInViewport(textBox));
+    updateInlineTextEditorGeometry();
+    updateTextBoxFormatBarGeometry();
+    update(m_textBoxFormatTransaction.dirtyViewport
+               .adjusted(-10.0, -10.0, 10.0, 10.0)
+               .toAlignedRect());
+}
+
+void DocumentViewport::markTextBoxFormatCommitted(
+    int pageIndex, Document::TileCoord tileCoord)
+{
+    if (!m_document)
+        return;
+    if (m_document->isEdgeless()) {
+        m_document->markTileDirty(tileCoord);
+    } else if (pageIndex >= 0) {
+        m_document->markPageDirty(pageIndex);
+        m_pendingThumbnailPages.insert(pageIndex);
+        emit pageModified(pageIndex);
+    }
+    emit documentModified();
+    emit textBoxLayoutCommitted();
+}
+
+void DocumentViewport::finishTextBoxFormatInteraction(bool accept)
+{
+    if (!m_textBoxFormatTransaction.active)
+        return;
+
+    TextBoxObject* textBox = resolveTextBoxFormatTarget();
+    const TextBoxFormatTransaction transaction =
+        m_textBoxFormatTransaction;
+    m_textBoxFormatTransaction.clear();
+    if (!textBox) {
+        syncTextBoxFormatBar();
+        return;
+    }
+
+    if (!accept) {
+        textBox->applyState(transaction.startState);
+        if (transaction.attachedToInlineEdit)
+            m_inlineEditSession.lastAcceptedState =
+                transaction.startState;
+    } else if (transaction.attachedToInlineEdit) {
+        m_inlineEditSession.lastAcceptedState =
+            textBox->captureState();
+    } else if (!textBoxStatesEqual(
+                   transaction.startState,
+                   textBox->captureState())) {
+        const Document::TileCoord oldTile = transaction.tileCoord;
+        Document::TileCoord newTile = oldTile;
+        if (m_document->isEdgeless()) {
+            relocateObjectsToCorrectTiles();
+            int ignoredPage = -1;
+            locateTextBoxObject(textBox, ignoredPage, newTile);
+        }
+        pushObjectTextEditUndo(
+            textBox, transaction.startState, textBox->captureState(),
+            transaction.pageIndex, oldTile, newTile);
+        if (m_document->isEdgeless() && oldTile != newTile)
+            m_document->markTileDirty(oldTile);
+        markTextBoxFormatCommitted(
+            transaction.pageIndex, newTile);
+    }
+
+    if (m_textBoxFormatBar)
+        m_textBoxFormatBar->setValues(textBox->captureState());
+    updateInlineTextEditorGeometry();
+    updateTextBoxFormatBarGeometry();
+    const QRectF dirty = transaction.dirtyViewport
+        .united(objectBoundsInViewport(textBox))
+        .adjusted(-10.0, -10.0, 10.0, 10.0);
+    update(dirty.toAlignedRect());
+}
+
+void DocumentViewport::closeTextBoxFormatPopups(bool acceptPreview)
+{
+    if (m_textBoxFormatBar)
+        m_textBoxFormatBar->closePopups(acceptPreview);
+}
+
 bool DocumentViewport::textBoxStatesEqual(const TextBoxState& lhs,
                                           const TextBoxState& rhs)
 {
@@ -8683,6 +9172,7 @@ void DocumentViewport::startInlineTextEdit(TextBoxObject* textBox,
     session.lastAcceptedState = textBox->captureState();
     session.active = true;
     m_inlineEditSession = session;
+    syncTextBoxFormatBar();
 
     if (!m_inlineTextBoxEditor) {
         m_inlineTextBoxEditor = new InlineTextBoxEditor(this);
@@ -8704,6 +9194,7 @@ void DocumentViewport::startInlineTextEdit(TextBoxObject* textBox,
     m_inlineTextBoxEditor->show();
     m_inlineTextBoxEditor->raise();
     m_inlineTextBoxEditor->editor()->setFocus(Qt::OtherFocusReason);
+    updateTextBoxFormatBarGeometry();
     update();
 }
 
@@ -8741,30 +9232,7 @@ void DocumentViewport::handleInlineTextSourceChanged(
 
     // Preserve the local top-left point in world/container coordinates while
     // content-derived height changes around the object's rotation center.
-    auto rotatedPoint = [](const TextBoxState& state,
-                           const QPointF& localPoint) {
-        const QPointF center(
-            state.size.width() / 2.0, state.size.height() / 2.0);
-        const QPointF delta = localPoint - center;
-        const qreal radians = qDegreesToRadians(state.rotation);
-        return state.position + center + QPointF(
-            delta.x() * qCos(radians) - delta.y() * qSin(radians),
-            delta.x() * qSin(radians) + delta.y() * qCos(radians));
-    };
-    const QPointF anchoredTopLeft =
-        rotatedPoint(previous, QPointF(0.0, 0.0));
-    const QPointF candidateCenter(
-        candidate.size.width() / 2.0,
-        candidate.size.height() / 2.0);
-    const QPointF candidateDelta = -candidateCenter;
-    const qreal radians = qDegreesToRadians(candidate.rotation);
-    const QPointF rotatedCandidateDelta(
-        candidateDelta.x() * qCos(radians)
-            - candidateDelta.y() * qSin(radians),
-        candidateDelta.x() * qSin(radians)
-            + candidateDelta.y() * qCos(radians));
-    candidate.position =
-        anchoredTopLeft - candidateCenter - rotatedCandidateDelta;
+    preserveTextBoxTopAnchor(previous, candidate);
 
     if (!textBoxGeometryProposalAllowed(
             previous, candidate, m_inlineEditSession.pageIndex)) {
@@ -8791,6 +9259,7 @@ void DocumentViewport::handleInlineTextSourceChanged(
     textBox->applyState(candidate);
     m_inlineEditSession.lastAcceptedState = candidate;
     updateInlineTextEditorGeometry();
+    updateTextBoxFormatBarGeometry();
     const QRectF dirty = oldBounds.united(
         objectBoundsInViewport(textBox))
         .adjusted(-8.0, -8.0, 8.0, 8.0);
@@ -8928,12 +9397,18 @@ void DocumentViewport::endInlineTextEdit(bool commit,
 
 void DocumentViewport::commitInlineTextEdit()
 {
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     endInlineTextEdit(true);
+    syncTextBoxFormatBar();
 }
 
 void DocumentViewport::cancelInlineTextEdit()
 {
+    closeTextBoxFormatPopups(false);
+    finishTextBoxFormatInteraction(false);
     endInlineTextEdit(false);
+    syncTextBoxFormatBar();
 }
 
 QRectF DocumentViewport::proposedTextBoxCreationRect(
@@ -10307,6 +10782,14 @@ void DocumentViewport::captureObjectDragBackground()
     // Phase O4.1.3: Start throttle timer for drag updates
     m_dragUpdateTimer.start();
     
+    // QWidget::grab() includes visible child widgets. The floating format bar
+    // remains live and follows the object during a drag, so including it in
+    // the cached canvas would leave a second, frozen copy at the drag origin.
+    const bool restoreFormatBar =
+        m_textBoxFormatBar && !m_textBoxFormatBar->isHidden();
+    if (restoreFormatBar)
+        m_textBoxFormatBar->hide();
+
     // Temporarily disable selected object rendering
     m_skipSelectedObjectRendering = true;
     
@@ -10316,6 +10799,12 @@ void DocumentViewport::captureObjectDragBackground()
     
     // Re-enable selected object rendering
     m_skipSelectedObjectRendering = false;
+
+    if (restoreFormatBar) {
+        m_textBoxFormatBar->show();
+        updateTextBoxFormatBarGeometry();
+        m_textBoxFormatBar->raise();
+    }
     
     // Phase O4.1.2: Pre-render selected objects to cache at current zoom
     // This is the key optimization - no image scaling needed during drag!
@@ -14482,6 +14971,8 @@ static QSet<int> collectAffectedPages(const UndoAction& action)
 
 void DocumentViewport::undo()
 {
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
     if (m_undoStack.isEmpty() || !m_document) return;
@@ -14935,6 +15426,8 @@ void DocumentViewport::undo()
 
 void DocumentViewport::redo()
 {
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
     if (m_inlineEditSession.active)
         commitInlineTextEdit();
     if (m_redoStack.isEmpty() || !m_document) return;

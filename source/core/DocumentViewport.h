@@ -39,6 +39,7 @@ enum class TouchGestureMode {
 class QContextMenuEvent;
 class ImageObject;
 class InlineTextBoxEditor;
+class TextBoxFormatBar;
 
 // ============================================================================
 // UndoAction - Unified undo action for both paged and edgeless modes
@@ -1053,6 +1054,7 @@ public:
 
     bool hasActiveInlineTextEdit() const;
     bool inlineTextEditorHasFocus() const;
+    bool textBoxFormatBarHasFocus() const;
     void commitInlineTextEdit();
     void cancelInlineTextEdit();
     
@@ -1463,6 +1465,57 @@ public:
     void markInlineTextEditCommitted();
     static bool textBoxStatesEqual(const TextBoxState& lhs,
                                    const TextBoxState& rhs);
+
+    enum class TextBoxFormatChange {
+        FontSize,
+        FontFamily,
+        Alignment,
+        FontColor,
+        BackgroundColor,
+        BackgroundOpacity,
+        Border
+    };
+
+    struct TextBoxFormatTransaction {
+        Document* document = nullptr;
+        QString objectId;
+        int pageIndex = -1;
+        Document::TileCoord tileCoord = {0, 0};
+        TextBoxState startState;
+        TextBoxState lastAcceptedState;
+        QRectF dirtyViewport;
+        bool active = false;
+        bool attachedToInlineEdit = false;
+
+        void clear() {
+            document = nullptr;
+            objectId.clear();
+            pageIndex = -1;
+            tileCoord = {0, 0};
+            startState = TextBoxState();
+            lastAcceptedState = TextBoxState();
+            dirtyViewport = QRectF();
+            active = false;
+            attachedToInlineEdit = false;
+        }
+    };
+
+    TextBoxObject* selectedTextBoxForFormatting() const;
+    TextBoxObject* resolveTextBoxFormatTarget() const;
+    bool locateTextBoxObject(TextBoxObject* textBox, int& pageIndex,
+                             Document::TileCoord& tileCoord) const;
+    void ensureTextBoxFormatBar();
+    void syncTextBoxFormatBar();
+    void updateTextBoxFormatBarGeometry();
+    void beginTextBoxFormatInteraction();
+    void applyTextBoxFormatPreview(TextBoxFormatChange change,
+                                   const QVariant& value);
+    void finishTextBoxFormatInteraction(bool accept);
+    void closeTextBoxFormatPopups(bool acceptPreview);
+    void markTextBoxFormatCommitted(int pageIndex,
+                                    Document::TileCoord tileCoord);
+    static void preserveTextBoxTopAnchor(const TextBoxState& previous,
+                                         TextBoxState& candidate);
 
     QRectF proposedTextBoxCreationRect(const QPointF& startPoint,
                                        const QPointF& currentPoint,
@@ -2570,6 +2623,8 @@ private:
     InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
     InlineTextEditSession m_inlineEditSession;
     bool m_revertingInlineText = false;
+    TextBoxFormatBar* m_textBoxFormatBar = nullptr;
+    TextBoxFormatTransaction m_textBoxFormatTransaction;
     
     /**
      * @brief Whether we're currently dragging selected objects.
