@@ -28,6 +28,7 @@ enum class TouchGestureMode {
 #include "Document.h"
 #include "Page.h"
 #include "ToolType.h"
+#include "../objects/TextBoxObject.h"
 #include "../strokes/VectorStroke.h"
 #include "../pdf/PdfProvider.h"
 #include "../pdf/PdfSearchEngine.h"
@@ -37,6 +38,7 @@ enum class TouchGestureMode {
 
 class QContextMenuEvent;
 class ImageObject;
+class InlineTextBoxEditor;
 
 // ============================================================================
 // UndoAction - Unified undo action for both paged and edgeless modes
@@ -146,6 +148,9 @@ struct UndoAction {
     qreal objectNewRotation = 0.0;
     bool objectOldAspectLock = true;
     bool objectNewAspectLock = true;
+    bool objectHasTextBoxState = false;
+    TextBoxState objectOldTextBoxState;
+    TextBoxState objectNewTextBoxState;
 
     // ObjectTextEdit fields
     QString objectOldText;
@@ -757,7 +762,8 @@ public:
                             int newPageIndex = -1);
     void pushObjectResizeUndo(InsertedObject* obj, const QPointF& oldPos,
                               const QSizeF& oldSize, qreal oldRotation = 0.0,
-                              bool oldAspectLock = true);
+                              bool oldAspectLock = true,
+                              const TextBoxState* oldTextBoxState = nullptr);
     void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
     void pushObjectTextEditUndo(InsertedObject* obj,
                                 const QString& oldText, const QString& newText,
@@ -765,6 +771,11 @@ public:
                                 int oldOpacity, int newOpacity,
                                 const QColor& oldFontColor = QColor(60, 60, 60),
                                 const QColor& newFontColor = QColor(60, 60, 60));
+    void pushObjectTextEditUndo(
+        TextBoxObject* obj, const TextBoxState& oldState,
+        const TextBoxState& newState, int pageIndex,
+        Document::TileCoord oldTile = {0, 0},
+        Document::TileCoord newTile = {0, 0});
 
     void pushOcrLockUndo(const QVector<QString>& objectIds, bool newState);
 
@@ -1039,6 +1050,11 @@ public:
      * @return True if at least one object is selected.
      */
     bool hasSelectedObjects() const { return !m_selectedObjects.isEmpty(); }
+
+    bool hasActiveInlineTextEdit() const;
+    bool inlineTextEditorHasFocus() const;
+    void commitInlineTextEdit();
+    void cancelInlineTextEdit();
     
     /**
      * @brief Check if a lasso selection exists.
@@ -1414,6 +1430,49 @@ public:
      * @param viewportPos A viewport position for tile determination in edgeless mode.
      */
     void createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos);
+
+    struct InlineTextEditSession {
+        Document* document = nullptr;
+        QString objectId;
+        int pageIndex = -1;
+        Document::TileCoord tileCoord = {0, 0};
+        TextBoxState startState;
+        TextBoxState lastAcceptedState;
+        bool active = false;
+        bool newBox = false;
+
+        void clear() {
+            document = nullptr;
+            objectId.clear();
+            pageIndex = -1;
+            tileCoord = {0, 0};
+            startState = TextBoxState();
+            lastAcceptedState = TextBoxState();
+            active = false;
+            newBox = false;
+        }
+    };
+
+    void startInlineTextEdit(TextBoxObject* textBox, bool newBox);
+    TextBoxObject* resolveInlineTextBox() const;
+    QRectF inlineTextEditorRect(TextBoxObject* textBox) const;
+    void updateInlineTextEditorGeometry();
+    void handleInlineTextSourceChanged(const QString& source);
+    void endInlineTextEdit(bool commit, bool targetBeingDeleted = false);
+    void removeUncommittedInlineTextBox();
+    void markInlineTextEditCommitted();
+    static bool textBoxStatesEqual(const TextBoxState& lhs,
+                                   const TextBoxState& rhs);
+
+    QRectF proposedTextBoxCreationRect(const QPointF& startPoint,
+                                       const QPointF& currentPoint,
+                                       int pageIndex) const;
+    QRectF proposedTextBoxCreationRectInViewport() const;
+    bool textBoxGeometryProposalAllowed(const TextBoxState& oldState,
+                                        const TextBoxState& proposedState,
+                                        int pageIndex) const;
+    void showObjectGeometryFeedback(const QString& message,
+                                    const QRectF& anchorViewportRect);
 
     /**
      * @brief Create a LinkObject for a text highlight.
@@ -1905,6 +1964,12 @@ signals:
      * @brief Emitted when a specific page's content changes (for targeted thumbnail refresh).
      */
     void pageModified(int pageIndex);
+
+    /**
+     * Emitted after committed text-box geometry changes so search caches and
+     * visible match rectangles cannot outlive their layout.
+     */
+    void textBoxLayoutCommitted();
 
     /**
      * @brief Emitted when the list of LinkObjects may have changed.
@@ -2498,8 +2563,13 @@ private:
      */
     bool m_isCreatingTextBox = false;
     QPointF m_textBoxCreateStartDoc;   // page-local coords of press point
-    QPointF m_textBoxCreateStartVP;    // viewport coords of press point (for rubber band)
     int m_textBoxCreatePageIndex = -1; // page index where creation started
+    QTimer* m_objectGeometryFeedbackTimer = nullptr;
+    QString m_objectGeometryFeedbackText;
+    QRectF m_objectGeometryFeedbackAnchor;
+    InlineTextBoxEditor* m_inlineTextBoxEditor = nullptr;
+    InlineTextEditSession m_inlineEditSession;
+    bool m_revertingInlineText = false;
     
     /**
      * @brief Whether we're currently dragging selected objects.
@@ -2631,6 +2701,12 @@ private:
      * page every frame without searching pages.
      */
     int m_resizeObjectPageIndex = -1;
+    bool m_hasResizeTextBoxState = false;
+    bool m_textBoxResizeActivated = false;
+    bool m_textBoxResizeChanged = false;
+    TextBoxState m_resizeOriginalTextBoxState;
+    TextBoxState m_resizeBaseTextBoxState;
+    TextBoxState m_resizeLastAcceptedTextBoxState;
     
     // =========================================================================
     // Phase O4.1: Object Drag/Resize Performance Optimization

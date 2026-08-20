@@ -54,6 +54,7 @@
 #include <QTextBrowser>
 #include <QTextEdit>
 #include <QPlainTextEdit>
+#include <QTextCursor>
 #include <QPointer>
 #include "core/ToolType.h" // Include the header file where ToolType is defined
 #include "ui/SplitViewManager.h"
@@ -1479,12 +1480,26 @@ void MainWindow::wireQActionDispatchers()
     // the underlying feature lands.
     wire("edit.undo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->undo();
+                    return;
+                }
+            }
             w->closeFloatingTextEditor();
             vp->undo();
         }
     });
     wire("edit.redo", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->redo();
+                    return;
+                }
+            }
             w->closeFloatingTextEditor();
             vp->redo();
         }
@@ -1494,11 +1509,26 @@ void MainWindow::wireQActionDispatchers()
     // NOT added to the macOS Edit menu (the menu shows the primary edit.redo only).
     wire("edit.redo_alt", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->redo();
+                    return;
+                }
+            }
             w->closeFloatingTextEditor();
             vp->redo();
         }
     });
     wire("edit.copy", [](MainWindow* w){
+        if (auto* vp = w->currentViewport();
+            vp && vp->inlineTextEditorHasFocus()) {
+            if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                    QApplication::focusWidget())) {
+                edit->copy();
+                return;
+            }
+        }
         // Preserve the QTextBrowser focus fallback that pre-MAC.4 had inline:
         // if the markdown notes browser has selected text, Cmd+C copies the
         // browser selection rather than canvas objects. Other text widgets
@@ -1513,10 +1543,26 @@ void MainWindow::wireQActionDispatchers()
         if (auto* vp = w->currentViewport()) vp->handleCopyAction();
     });
     wire("edit.cut", [](MainWindow* w){
-        if (auto* vp = w->currentViewport()) vp->handleCutAction();
+        if (auto* vp = w->currentViewport()) {
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->cut();
+                    return;
+                }
+            }
+            vp->handleCutAction();
+        }
     });
     wire("edit.paste", [](MainWindow* w){
         if (auto* vp = w->currentViewport()) {
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    edit->paste();
+                    return;
+                }
+            }
             vp->handlePasteAction();
             // Pre-MAC.4 behaviour: clear any pen-tool override that targeted a
             // different viewport, so a paste into the active viewport doesn't
@@ -1526,7 +1572,21 @@ void MainWindow::wireQActionDispatchers()
         }
     });
     wire("edit.delete", [](MainWindow* w){
-        if (auto* vp = w->currentViewport()) vp->handleDeleteAction();
+        if (auto* vp = w->currentViewport()) {
+            if (vp->inlineTextEditorHasFocus()) {
+                if (auto* edit = qobject_cast<QPlainTextEdit*>(
+                        QApplication::focusWidget())) {
+                    QTextCursor cursor = edit->textCursor();
+                    if (cursor.hasSelection())
+                        cursor.removeSelectedText();
+                    else
+                        cursor.deleteChar();
+                    edit->setTextCursor(cursor);
+                    return;
+                }
+            }
+            vp->handleDeleteAction();
+        }
     });
 
     // ----- app.find* (MAC.4) -----
@@ -2361,6 +2421,15 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_textEditorConn);
         m_textEditorConn = {};
     }
+    if (m_textBoxLayoutConn) {
+        disconnect(m_textBoxLayoutConn);
+        m_textBoxLayoutConn = {};
+    }
+
+    // End an inline session before another pane/tab becomes active. This
+    // prevents two viewport-owned editors from mutating the same object.
+    if (m_connectedViewport && m_connectedViewport != viewport)
+        m_connectedViewport->commitInlineTextEdit();
 
     // Close floating text editor when switching viewports (target may belong to old viewport)
     closeFloatingTextEditor();
@@ -2582,6 +2651,22 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // Phase 2B: Floating text editor
     m_textEditorConn = connect(viewport, &DocumentViewport::openTextEditorRequested,
                                this, &MainWindow::openFloatingTextEditor);
+    m_textBoxLayoutConn = connect(
+        viewport, &DocumentViewport::textBoxLayoutCommitted,
+        this, [this, viewport]() {
+            if (m_searchEngine) {
+                m_searchEngine->cancelAndWait();
+                m_searchEngine->clearCache();
+            }
+            if (m_searchScanDebounce) m_searchScanDebounce->stop();
+            if (m_searchMarkerRefresh) m_searchMarkerRefresh->stop();
+            m_searchResultsByPage.clear();
+            m_searchTotalMatches = 0;
+            if (m_searchState) m_searchState->resetMatch();
+            if (viewport) viewport->clearSearchMatches();
+            if (m_splitViewManager)
+                m_splitViewManager->clearScrollBarSearchMarkers(viewport);
+        });
 
     // Sync initial action bar state from viewport
     // CR-AB-2 FIX: Sync ALL context states to prevent stale state from previous tab
@@ -3687,6 +3772,8 @@ void MainWindow::saveDocument()
         #endif
         return;
     }
+    if (DocumentViewport* activeViewport = currentViewport())
+        activeViewport->commitInlineTextEdit();
 
     DocumentViewport* viewport = tabManager()->currentViewport();
     if (!viewport) {
@@ -3788,6 +3875,8 @@ void MainWindow::saveDocumentAs()
     if (!m_documentManager || !tabManager()) {
         return;
     }
+    if (DocumentViewport* activeViewport = currentViewport())
+        activeViewport->commitInlineTextEdit();
     DocumentViewport* vp = currentViewport();
     if (!vp) return;
     Document* doc = vp->document();
@@ -7417,8 +7506,13 @@ void MainWindow::openFloatingTextEditor(InsertedObject* obj)
     auto* textBox = dynamic_cast<TextBoxObject*>(obj);
     if (!textBox) return;
 
-    // If target is an unlocked OcrTextObject, ask user to lock before editing
     auto* ocrObj = dynamic_cast<OcrTextObject*>(textBox);
+    // User-created text boxes are edited by their owning viewport. This
+    // MainWindow-owned panel remains only as the stage-3 OCR fallback.
+    if (!ocrObj)
+        return;
+
+    // If target is an unlocked OcrTextObject, ask user to lock before editing
     if (ocrObj && !ocrObj->ocrLocked) {
         auto result = QMessageBox::question(this, tr("Lock OCR Text"),
             tr("Lock this OCR text? It will no longer be updated by automatic scanning.\n\nProceed to lock and edit?"),

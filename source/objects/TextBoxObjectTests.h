@@ -263,6 +263,60 @@ inline bool testSearchAndLinkGeometry()
     return ok;
 }
 
+inline bool testChromeAndSuppressedTextRendering()
+{
+    bool ok = true;
+
+    TextBoxObject empty;
+    configureCurrentBox(empty, QString());
+    empty.position = QPointF(4.0, 4.0);
+    empty.size = QSizeF(100.0, 32.0);
+    empty.backgroundColor = QColor(220, 230, 240, 255);
+    empty.showBorder = true;
+    QImage emptyImage(120, 48, QImage::Format_ARGB32_Premultiplied);
+    emptyImage.fill(Qt::transparent);
+    {
+        QPainter painter(&emptyImage);
+        empty.render(painter, 1.0);
+    }
+    ok &= require(qAlpha(emptyImage.pixel(20, 20)) > 0,
+                  "empty text box did not retain chrome");
+
+    TextBoxObject source;
+    configureCurrentBox(source, QStringLiteral("Visible text"));
+    source.position = QPointF(0.0, 0.0);
+    source.backgroundColor = Qt::transparent;
+    source.showBorder = false;
+    QImage normal(260, 80, QImage::Format_ARGB32_Premultiplied);
+    QImage suppressed(260, 80, QImage::Format_ARGB32_Premultiplied);
+    normal.fill(Qt::transparent);
+    suppressed.fill(Qt::transparent);
+    {
+        QPainter painter(&normal);
+        source.render(painter, 1.0);
+    }
+    {
+        QPainter painter(&suppressed);
+        source.renderWithTextSuppressed(painter, 1.0);
+    }
+    ok &= require(normal != suppressed,
+                  "text-suppressed rendering still drew source text");
+    bool suppressedIsTransparent = true;
+    for (int y = 0; y < suppressed.height() && suppressedIsTransparent; ++y) {
+        const QRgb* row =
+            reinterpret_cast<const QRgb*>(suppressed.constScanLine(y));
+        for (int x = 0; x < suppressed.width(); ++x) {
+            if (qAlpha(row[x]) != 0) {
+                suppressedIsTransparent = false;
+                break;
+            }
+        }
+    }
+    ok &= require(suppressedIsTransparent,
+                  "text-suppressed rendering changed transparent chrome");
+    return ok;
+}
+
 inline bool runAllTests()
 {
     qDebug() << "=== TextBoxObject tests ===";
@@ -271,6 +325,7 @@ inline bool runAllTests()
     ok &= testLayoutMeasurementAndCache();
     ok &= testLegacyUpgradeAndState();
     ok &= testSearchAndLinkGeometry();
+    ok &= testChromeAndSuppressedTextRendering();
     qDebug() << (ok ? "All TextBoxObject tests passed."
                     : "TextBoxObject tests FAILED.");
     return ok;

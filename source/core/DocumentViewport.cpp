@@ -17,6 +17,8 @@
 #include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
 #include "../objects/TextBoxObject.h"  // Phase 2B: text edit undo
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
+#include "../ui/panels/InlineTextBoxEditor.h"
+#include "../../markdown/qmarkdowntextedit.h"
 
 #include <QPainter>
 #include <QPaintEvent>
@@ -47,6 +49,7 @@
 #include <QLineEdit>       // For text input focus check
 #include <QTextEdit>       // For text input focus check
 #include <QPlainTextEdit>  // For text input focus check
+#include <QSignalBlocker>
 #include <QElapsedTimer>  // For double/triple click detection (Phase A)
 #include <QBuffer>
 #include <QFile>
@@ -192,6 +195,21 @@ DocumentViewport::DocumentViewport(QWidget* parent)
     m_pdfPreloadTimer->setSingleShot(true);
     connect(m_pdfPreloadTimer, &QTimer::timeout, this, &DocumentViewport::doAsyncPdfPreload);
 
+    m_objectGeometryFeedbackTimer = new QTimer(this);
+    m_objectGeometryFeedbackTimer->setSingleShot(true);
+    m_objectGeometryFeedbackTimer->setInterval(900);
+    connect(m_objectGeometryFeedbackTimer, &QTimer::timeout, this, [this]() {
+        const QRect dirty = m_objectGeometryFeedbackAnchor
+            .adjusted(-16.0, -16.0, 260.0, 80.0).toAlignedRect();
+        m_objectGeometryFeedbackText.clear();
+        m_objectGeometryFeedbackAnchor = QRectF();
+        update(dirty);
+    });
+    connect(this, &DocumentViewport::zoomChanged, this,
+            [this]() { updateInlineTextEditorGeometry(); });
+    connect(this, &DocumentViewport::panChanged, this,
+            [this]() { updateInlineTextEditorGeometry(); });
+
     // Scroll-settle timer (SP1) - defers heavy housekeeping (preload/evict) until
     // the immediate-pan route (wheel/touchpad/scroll-bar) stops for a beat.
     m_scrollSettleTimer = new QTimer(this);
@@ -255,6 +273,8 @@ DocumentViewport::DocumentViewport(QWidget* parent)
 
 DocumentViewport::~DocumentViewport()
 {
+    commitInlineTextEdit();
+
     // Cancel any pending preload requests
     if (m_pdfPreloadTimer) {
         m_pdfPreloadTimer->stop();
@@ -339,6 +359,8 @@ void DocumentViewport::setDocument(Document* doc)
     if (m_document == doc) {
         return;
     }
+
+    commitInlineTextEdit();
     
     // End any active gesture (cached frame is from old document)
     if (m_gesture.isActive()) {
@@ -746,6 +768,8 @@ void DocumentViewport::setCurrentTool(ToolType tool)
     if (m_currentTool == tool) {
         return;
     }
+
+    commitInlineTextEdit();
     
     ToolType previousTool = m_currentTool;
     m_currentTool = tool;
@@ -1010,9 +1034,15 @@ void DocumentViewport::cancelObjectPointerGesture()
 
     if (m_isResizingObject && !m_selectedObjects.isEmpty()) {
         if (InsertedObject* obj = m_selectedObjects.first()) {
-            obj->position = m_resizeOriginalPosition;
-            obj->size = m_resizeOriginalSize;
-            obj->rotation = m_resizeOriginalRotation;
+            if (m_hasResizeTextBoxState
+                && obj->type() == QLatin1String("textbox")) {
+                static_cast<TextBoxObject*>(obj)->applyState(
+                    m_resizeOriginalTextBoxState);
+            } else {
+                obj->position = m_resizeOriginalPosition;
+                obj->size = m_resizeOriginalSize;
+                obj->rotation = m_resizeOriginalRotation;
+            }
         }
     }
 
@@ -1021,6 +1051,9 @@ void DocumentViewport::cancelObjectPointerGesture()
     m_isResizingObject = false;
     m_objectResizeHandle = HandleHit::None;
     m_resizeObjectPageIndex = -1;
+    m_hasResizeTextBoxState = false;
+    m_textBoxResizeActivated = false;
+    m_textBoxResizeChanged = false;
     m_objectOriginalPositions.clear();
     m_objectOriginalPageIndices.clear();
     m_objectDragBackgroundSnapshot = QPixmap();
@@ -2256,6 +2289,10 @@ DocumentViewport::HandleHit DocumentViewport::objectHandleAtPoint(const QPointF&
     if (!obj) {
         return HandleHit::None;
     }
+    if (m_inlineEditSession.active
+        && obj->id == m_inlineEditSession.objectId) {
+        return HandleHit::None;
+    }
     
     // Get unrotated object bounds in viewport coordinates
     QRectF objRect = objectBoundsInViewport(obj);
@@ -2302,6 +2339,16 @@ DocumentViewport::HandleHit DocumentViewport::objectHandleAtPoint(const QPointF&
     // Check rotation handle first (has priority)
     if (QLineF(viewportPos, rotatePos).length() <= hitRadius) {
         return HandleHit::Rotate;
+    }
+
+    // User text boxes derive height from content, so only expose width
+    // handles. OCR text remains geometry-driven and keeps all handles.
+    if (obj->type() == QLatin1String("textbox")) {
+        if (QLineF(viewportPos, handles[3]).length() <= hitRadius)
+            return HandleHit::Left;
+        if (QLineF(viewportPos, handles[4]).length() <= hitRadius)
+            return HandleHit::Right;
+        return HandleHit::None;
     }
     
     // Check the 8 resize handles
@@ -2401,6 +2448,101 @@ void DocumentViewport::updateObjectResize(const QPointF& currentViewport)
     qreal sinR = qSin(-rotRad);
     qreal localX = dx * cosR - dy * sinR;
     qreal localY = dx * sinR + dy * cosR;
+
+    if (m_hasResizeTextBoxState
+        && (m_objectResizeHandle == HandleHit::Left
+            || m_objectResizeHandle == HandleHit::Right)) {
+        auto* textBox = static_cast<TextBoxObject*>(obj);
+        qreal proposedWidth = m_objectResizeHandle == HandleHit::Right
+            ? localX + halfW
+            : halfW - localX;
+        proposedWidth = qMax(TextBoxObject::MINIMUM_WIDTH, proposedWidth);
+        if (m_document && !m_document->isEdgeless()
+            && m_resizeObjectPageIndex >= 0) {
+            proposedWidth = qMin(
+                proposedWidth,
+                qMax<qreal>(TextBoxObject::MINIMUM_WIDTH,
+                            m_document->pageSizeAt(
+                                m_resizeObjectPageIndex).width()));
+        }
+
+        if (!m_textBoxResizeActivated
+            && qAbs(proposedWidth - m_resizeOriginalSize.width()) < 0.01) {
+            return;
+        }
+
+        if (!m_textBoxResizeActivated) {
+            textBox->applyState(m_resizeOriginalTextBoxState);
+            if (textBox->usesLegacyLayout())
+                textBox->upgradeToCurrentLayout();
+            m_resizeBaseTextBoxState = textBox->captureState();
+            m_resizeLastAcceptedTextBoxState =
+                m_resizeOriginalTextBoxState;
+            m_textBoxResizeActivated = true;
+        }
+
+        textBox->applyState(m_resizeBaseTextBoxState);
+        textBox->reflowToWidth(proposedWidth);
+        TextBoxState candidate = textBox->captureState();
+
+        auto rotatedObjectPoint = [](const TextBoxState& state,
+                                     const QPointF& localPoint) {
+            const QPointF center(
+                state.size.width() / 2.0, state.size.height() / 2.0);
+            const QPointF delta = localPoint - center;
+            const qreal radians = qDegreesToRadians(state.rotation);
+            const QPointF rotated(
+                delta.x() * qCos(radians) - delta.y() * qSin(radians),
+                delta.x() * qSin(radians) + delta.y() * qCos(radians));
+            return state.position + center + rotated;
+        };
+        auto positionForAnchoredPoint = [](const TextBoxState& state,
+                                           const QPointF& localPoint,
+                                           const QPointF& targetPoint) {
+            const QPointF center(
+                state.size.width() / 2.0, state.size.height() / 2.0);
+            const QPointF delta = localPoint - center;
+            const qreal radians = qDegreesToRadians(state.rotation);
+            const QPointF rotated(
+                delta.x() * qCos(radians) - delta.y() * qSin(radians),
+                delta.x() * qSin(radians) + delta.y() * qCos(radians));
+            return targetPoint - center - rotated;
+        };
+
+        const bool resizingRight =
+            m_objectResizeHandle == HandleHit::Right;
+        const QPointF originalAnchor = rotatedObjectPoint(
+            m_resizeOriginalTextBoxState,
+            resizingRight
+                ? QPointF(0.0, 0.0)
+                : QPointF(m_resizeOriginalTextBoxState.size.width(), 0.0));
+        const QPointF candidateLocalAnchor = resizingRight
+            ? QPointF(0.0, 0.0)
+            : QPointF(candidate.size.width(), 0.0);
+        candidate.position = positionForAnchoredPoint(
+            candidate, candidateLocalAnchor, originalAnchor);
+
+        if (!textBoxGeometryProposalAllowed(
+                m_resizeOriginalTextBoxState, candidate,
+                m_resizeObjectPageIndex)) {
+            textBox->applyState(m_resizeLastAcceptedTextBoxState);
+            showObjectGeometryFeedback(
+                tr("Text box cannot grow beyond the page"),
+                objectBoundsInViewport(textBox));
+            return;
+        }
+
+        textBox->applyState(candidate);
+        m_resizeLastAcceptedTextBoxState = candidate;
+        m_textBoxResizeChanged =
+            candidate.size != m_resizeOriginalTextBoxState.size
+            || candidate.position != m_resizeOriginalTextBoxState.position
+            || candidate.textLayoutVersion
+                != m_resizeOriginalTextBoxState.textLayoutVersion
+            || !qFuzzyCompare(1.0 + candidate.fontSize,
+                              1.0 + m_resizeOriginalTextBoxState.fontSize);
+        return;
+    }
     
     // Calculate scale factors based on which handle is being dragged
     qreal scaleX = 1.0;
@@ -3203,6 +3345,7 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
         }
         
         clampPanOffset();
+        updateInlineTextEditorGeometry();
         update();
         emitScrollFractions();
         return;
@@ -3253,6 +3396,11 @@ void DocumentViewport::resizeEvent(QResizeEvent* event)
 
 void DocumentViewport::mousePressEvent(QMouseEvent* event)
 {
+    // Child-widget presses stay in the editor. Any press delivered to the
+    // canvas is an explicit outside click and commits the current session.
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
+
     // Middle mouse button: start pan gesture (independent of active tool)
     if (event->button() == Qt::MiddleButton) {
         beginPanGesture();
@@ -3595,6 +3743,8 @@ void DocumentViewport::hideEvent(QHideEvent* event)
     qDebug() << "[DocumentViewport] hideEvent - clearing gesture state"
              << "wasActive:" << m_gesture.isActive();
 #endif
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
     
     // BUG-A005 v4 FIX: Clear gesture state when viewport is hidden
     // When user goes to launcher and comes back, any stale gesture state
@@ -3716,6 +3866,8 @@ void DocumentViewport::tabletEvent(QTabletEvent* event)
     switch (event->type()) {
         case QEvent::TabletPress:
             peType = PointerEvent::Press;
+            if (m_inlineEditSession.active)
+                commitInlineTextEdit();
             break;
         case QEvent::TabletMove:
             peType = PointerEvent::Move;
@@ -4865,6 +5017,11 @@ void DocumentViewport::preloadStrokeCaches()
         QVector<int> loadedIndices = m_document->loadedPageIndices();
         for (int i : loadedIndices) {
             if (i < keepStart || i > keepEnd) {
+                if (m_inlineEditSession.active
+                    && m_inlineEditSession.document == m_document
+                    && m_inlineEditSession.pageIndex == i) {
+                    continue;
+                }
                 // CR-O1: Clear selection for objects on pages about to be evicted
                 Page* page = m_document->page(i);  // Already loaded, no disk I/O
                 if (page && !page->objects.empty()) {
@@ -4969,6 +5126,11 @@ void DocumentViewport::evictDistantTiles()
     bool selectionChanged = false;
     
     for (const auto& coord : loadedTiles) {
+        if (m_inlineEditSession.active
+            && m_inlineEditSession.document == m_document
+            && m_inlineEditSession.tileCoord == coord) {
+            continue;
+        }
         // Phase 5.6.5: No longer need to protect origin tile - layer structure comes from manifest
         
         QRectF tileRect(coord.first * tileSize, coord.second * tileSize,
@@ -6350,7 +6512,6 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             } else {
                 m_textBoxCreateStartDoc = hit.pagePoint;
             }
-            m_textBoxCreateStartVP = pe.viewportPos;
             m_textBoxCreatePageIndex = hit.pageIndex;
             m_pointerActive = true;
             return;
@@ -6375,6 +6536,17 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             m_resizeOriginalPosition = obj->position;  // Tile-local, for undo
             m_resizeOriginalRotation = obj->rotation;  // Phase O3.1.8.2
             m_resizeObjectPageIndex = -1;              // Resolved by the search below
+            m_hasResizeTextBoxState = false;
+            m_textBoxResizeActivated = false;
+            m_textBoxResizeChanged = false;
+            if (obj->type() == QLatin1String("textbox")
+                && (handle == HandleHit::Left || handle == HandleHit::Right)) {
+                auto* textBox = static_cast<TextBoxObject*>(obj);
+                m_resizeOriginalTextBoxState = textBox->captureState();
+                m_resizeBaseTextBoxState = m_resizeOriginalTextBoxState;
+                m_resizeLastAcceptedTextBoxState = m_resizeOriginalTextBoxState;
+                m_hasResizeTextBoxState = true;
+            }
             m_pointerActive = true;
             
             // BF: Calculate document-global center for scale calculations
@@ -6410,6 +6582,11 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
             
             // Phase O4.1: Capture background for fast resize rendering
             captureObjectDragBackground();
+            if (m_hasResizeTextBoxState) {
+                // Reflow changes line breaks and height; stretching the old
+                // pixmap would visually scale text and contradict the model.
+                m_dragObjectRenderedCache = QPixmap();
+            }
             
             return;  // Don't start object drag
             }
@@ -6506,7 +6683,17 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
 
     if (objClickCount == 2 && hitObject) {
         const QString t = hitObject->type();
-        if (t == QLatin1String("textbox") || t == QLatin1String("ocr_text")) {
+        if (t == QLatin1String("textbox")) {
+            cancelObjectPointerGesture();
+            if (!m_selectedObjects.contains(hitObject)) {
+                deselectAllObjects();
+                selectObject(hitObject, false);
+            }
+            startInlineTextEdit(
+                static_cast<TextBoxObject*>(hitObject), false);
+            return;
+        }
+        if (t == QLatin1String("ocr_text")) {
             cancelObjectPointerGesture();
             emit openTextEditorRequested(hitObject);
             return;
@@ -6644,21 +6831,8 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                 ? releaseHit.pagePoint : m_textBoxCreateStartDoc;
         }
 
-        QRectF rect = QRectF(m_textBoxCreateStartDoc, releasePagePoint).normalized();
-
-        static constexpr qreal MIN_W = 40.0;
-        static constexpr qreal MIN_H = 20.0;
-        static constexpr qreal DEFAULT_W = 200.0;
-        static constexpr qreal DEFAULT_H = 40.0;
-
-        if (rect.width() < MIN_W && rect.height() < MIN_H) {
-            rect = QRectF(m_textBoxCreateStartDoc.x() - DEFAULT_W / 2.0,
-                          m_textBoxCreateStartDoc.y() - DEFAULT_H / 2.0,
-                          DEFAULT_W, DEFAULT_H);
-        } else {
-            if (rect.width() < MIN_W) rect.setWidth(MIN_W);
-            if (rect.height() < MIN_H) rect.setHeight(MIN_H);
-        }
+        const QRectF rect = proposedTextBoxCreationRect(
+            m_textBoxCreateStartDoc, releasePagePoint, pageIndex);
 
         finishGesture();
         createTextBoxAtRect(pageIndex, rect, pe.viewportPos);
@@ -6669,16 +6843,21 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
     if (m_isResizingObject) {
         InsertedObject* obj = m_selectedObjects.isEmpty() ? nullptr : m_selectedObjects.first();
         // Check if any transform property changed (position, size, or rotation)
-        bool changed = obj && (obj->size != m_resizeOriginalSize || 
-                               obj->position != m_resizeOriginalPosition ||
-                               obj->rotation != m_resizeOriginalRotation);  // O3.1.8.3
+        bool changed = m_hasResizeTextBoxState
+            ? m_textBoxResizeChanged
+            : obj && (obj->size != m_resizeOriginalSize ||
+                      obj->position != m_resizeOriginalPosition ||
+                      obj->rotation != m_resizeOriginalRotation);
+        if (m_hasResizeTextBoxState && !changed && obj
+            && obj->type() == QLatin1String("textbox")) {
+            static_cast<TextBoxObject*>(obj)->applyState(
+                m_resizeOriginalTextBoxState);
+        }
         if (changed) {
             // Phase O3.1.5/O3.1.8.3: Create undo entry for resize/rotate
             bool aspectLock = true;
             if (auto* img = dynamic_cast<ImageObject*>(obj))
                 aspectLock = img->maintainAspectRatio;
-            pushObjectResizeUndo(obj, m_resizeOriginalPosition, m_resizeOriginalSize,
-                                 m_resizeOriginalRotation, aspectLock);
             
             // Mark dirty
             if (m_document) {
@@ -6688,18 +6867,34 @@ void DocumentViewport::handlePointerRelease_ObjectSelect(const PointerEvent& pe)
                     // Mark tile dirty - use cached tile coord for efficiency
                     m_document->markTileDirty(m_dragObjectTileCoord);
                 } else {
-                    int pageIdx = (m_dragObjectPageIndex >= 0) ? m_dragObjectPageIndex : m_currentPageIndex;
+                    int pageIdx = m_resizeObjectPageIndex >= 0
+                        ? m_resizeObjectPageIndex
+                        : ((m_dragObjectPageIndex >= 0)
+                            ? m_dragObjectPageIndex
+                            : m_currentPageIndex);
                     m_document->markPageDirty(pageIdx);
                     m_pendingThumbnailPages.insert(pageIdx);
+                    emit pageModified(pageIdx);
                 }
             }
+            pushObjectResizeUndo(obj, m_resizeOriginalPosition,
+                                 m_resizeOriginalSize,
+                                 m_resizeOriginalRotation, aspectLock,
+                                 m_hasResizeTextBoxState
+                                     ? &m_resizeOriginalTextBoxState
+                                     : nullptr);
             
             emit documentModified();
+            if (m_hasResizeTextBoxState)
+                emit textBoxLayoutCommitted();
         }
         
         m_isResizingObject = false;
         m_objectResizeHandle = HandleHit::None;
         m_resizeObjectPageIndex = -1;
+        m_hasResizeTextBoxState = false;
+        m_textBoxResizeActivated = false;
+        m_textBoxResizeChanged = false;
         finishGesture();
         
         // Phase O4.1: Clear background snapshot and object cache, trigger full re-render
@@ -7602,6 +7797,11 @@ void DocumentViewport::deleteSelectedObjects()
     if (!m_document || m_selectedObjects.isEmpty()) {
         return;
     }
+    if (m_inlineEditSession.active) {
+        endInlineTextEdit(false, true);
+        if (m_selectedObjects.isEmpty())
+            return;
+    }
     
     // Separate OcrTextObjects (derived cache — no undo) from regular objects
     QVector<InsertedObject*> regularObjects;
@@ -8312,22 +8512,553 @@ void DocumentViewport::createLinkObjectAtPosition(int pageIndex, const QPointF& 
 
 // ===== Phase 2C: Text Box Creation =====
 
+bool DocumentViewport::hasActiveInlineTextEdit() const
+{
+    return m_inlineEditSession.active;
+}
+
+bool DocumentViewport::inlineTextEditorHasFocus() const
+{
+    return m_inlineTextBoxEditor && m_inlineEditSession.active
+        && (m_inlineTextBoxEditor->hasFocus()
+            || m_inlineTextBoxEditor->isAncestorOf(
+                QApplication::focusWidget()));
+}
+
+bool DocumentViewport::textBoxStatesEqual(const TextBoxState& lhs,
+                                          const TextBoxState& rhs)
+{
+    return lhs.text == rhs.text
+        && lhs.fontFamily == rhs.fontFamily
+        && qAbs(lhs.fontSize - rhs.fontSize) < 0.001
+        && lhs.fontColor == rhs.fontColor
+        && lhs.backgroundColor == rhs.backgroundColor
+        && lhs.alignment == rhs.alignment
+        && lhs.showBorder == rhs.showBorder
+        && lhs.textLayoutVersion == rhs.textLayoutVersion
+        && QLineF(lhs.position, rhs.position).length() < 0.001
+        && qAbs(lhs.size.width() - rhs.size.width()) < 0.001
+        && qAbs(lhs.size.height() - rhs.size.height()) < 0.001
+        && qAbs(lhs.rotation - rhs.rotation) < 0.001;
+}
+
+TextBoxObject* DocumentViewport::resolveInlineTextBox() const
+{
+    if (!m_inlineEditSession.active || !m_document
+        || m_inlineEditSession.document != m_document) {
+        return nullptr;
+    }
+
+    Page* container = nullptr;
+    if (m_document->isEdgeless()) {
+        container = m_document->getTile(
+            m_inlineEditSession.tileCoord.first,
+            m_inlineEditSession.tileCoord.second);
+    } else if (m_inlineEditSession.pageIndex >= 0
+               && m_inlineEditSession.pageIndex
+                    < m_document->pageCount()) {
+        container = m_document->page(m_inlineEditSession.pageIndex);
+    }
+    if (!container)
+        return nullptr;
+
+    InsertedObject* object =
+        container->objectById(m_inlineEditSession.objectId);
+    if (!object || object->type() != QLatin1String("textbox"))
+        return nullptr;
+    return static_cast<TextBoxObject*>(object);
+}
+
+QRectF DocumentViewport::inlineTextEditorRect(TextBoxObject* textBox) const
+{
+    if (!textBox)
+        return QRectF();
+
+    const QRectF outer = objectBoundsInViewport(textBox);
+    if (outer.isEmpty())
+        return QRectF();
+
+    const qreal padding =
+        TextBoxObject::CONTENT_PADDING * m_zoomLevel;
+    QRectF content = outer.adjusted(
+        padding, padding, -padding, -padding);
+    if (content.width() < 4.0)
+        content.setWidth(4.0);
+    if (content.height() < 4.0)
+        content.setHeight(4.0);
+
+    if (qFuzzyIsNull(textBox->rotation))
+        return content;
+
+    const QPointF center = outer.center();
+    const qreal radians = qDegreesToRadians(textBox->rotation);
+    auto rotate = [center, radians](const QPointF& point) {
+        const QPointF delta = point - center;
+        return center + QPointF(
+            delta.x() * qCos(radians)
+                - delta.y() * qSin(radians),
+            delta.x() * qSin(radians)
+                + delta.y() * qCos(radians));
+    };
+    QPolygonF corners;
+    corners << rotate(content.topLeft())
+            << rotate(content.topRight())
+            << rotate(content.bottomRight())
+            << rotate(content.bottomLeft());
+    return corners.boundingRect();
+}
+
+void DocumentViewport::updateInlineTextEditorGeometry()
+{
+    if (!m_inlineTextBoxEditor || !m_inlineEditSession.active)
+        return;
+
+    TextBoxObject* textBox = resolveInlineTextBox();
+    if (!textBox) {
+        m_inlineTextBoxEditor->hide();
+        m_inlineEditSession.clear();
+        const bool hadSelection = !m_selectedObjects.isEmpty();
+        m_selectedObjects.clear();
+        m_hoveredObject = nullptr;
+        if (hadSelection)
+            emit objectSelectionChanged();
+        update();
+        return;
+    }
+
+    m_inlineTextBoxEditor->configure(
+        textBox->captureState(), m_zoomLevel, m_isDarkMode);
+    QRect geometry = inlineTextEditorRect(textBox)
+        .adjusted(-1.0, -1.0, 1.0, 1.0).toAlignedRect();
+    geometry.setWidth(qMax(8, geometry.width()));
+    geometry.setHeight(qMax(8, geometry.height()));
+    m_inlineTextBoxEditor->setGeometry(geometry);
+    m_inlineTextBoxEditor->raise();
+}
+
+void DocumentViewport::startInlineTextEdit(TextBoxObject* textBox,
+                                           bool newBox)
+{
+    if (!textBox || !m_document
+        || textBox->type() != QLatin1String("textbox")) {
+        return;
+    }
+
+    if (m_inlineEditSession.active) {
+        if (m_inlineEditSession.objectId == textBox->id)
+            return;
+        commitInlineTextEdit();
+    }
+    if (!m_selectedObjects.contains(textBox)) {
+        deselectAllObjects();
+        selectObject(textBox, false);
+    }
+
+    InlineTextEditSession session;
+    session.document = m_document;
+    session.objectId = textBox->id;
+    session.newBox = newBox;
+    session.startState = textBox->captureState();
+
+    if (m_document->isEdgeless()) {
+        bool found = false;
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(textBox->id)) {
+                session.tileCoord = coord;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            return;
+    } else {
+        session.pageIndex = pageIndexForObject(textBox);
+        if (session.pageIndex < 0)
+            return;
+    }
+
+    if (textBox->usesLegacyLayout())
+        textBox->upgradeToCurrentLayout();
+    session.lastAcceptedState = textBox->captureState();
+    session.active = true;
+    m_inlineEditSession = session;
+
+    if (!m_inlineTextBoxEditor) {
+        m_inlineTextBoxEditor = new InlineTextBoxEditor(this);
+        connect(m_inlineTextBoxEditor,
+                &InlineTextBoxEditor::sourceChanged,
+                this, &DocumentViewport::handleInlineTextSourceChanged);
+        connect(m_inlineTextBoxEditor,
+                &InlineTextBoxEditor::commitRequested,
+                this, &DocumentViewport::commitInlineTextEdit);
+        connect(m_inlineTextBoxEditor,
+                &InlineTextBoxEditor::cancelRequested,
+                this, &DocumentViewport::cancelInlineTextEdit);
+    }
+
+    m_inlineTextBoxEditor->configure(
+        session.lastAcceptedState, m_zoomLevel, m_isDarkMode);
+    m_inlineTextBoxEditor->setText(session.lastAcceptedState.text);
+    updateInlineTextEditorGeometry();
+    m_inlineTextBoxEditor->show();
+    m_inlineTextBoxEditor->raise();
+    m_inlineTextBoxEditor->editor()->setFocus(Qt::OtherFocusReason);
+    update();
+}
+
+void DocumentViewport::handleInlineTextSourceChanged(
+    const QString& source)
+{
+    if (m_revertingInlineText || !m_inlineEditSession.active
+        || !m_inlineTextBoxEditor) {
+        return;
+    }
+
+    TextBoxObject* textBox = resolveInlineTextBox();
+    if (!textBox) {
+        m_inlineTextBoxEditor->hide();
+        m_inlineEditSession.clear();
+        const bool hadSelection = !m_selectedObjects.isEmpty();
+        m_selectedObjects.clear();
+        m_hoveredObject = nullptr;
+        if (hadSelection)
+            emit objectSelectionChanged();
+        update();
+        return;
+    }
+
+    const QTextCursor cursorBeforeChange =
+        m_inlineTextBoxEditor->takeCursorBeforeLastChange();
+    const QRectF oldBounds = objectBoundsInViewport(textBox);
+    const TextBoxState previous =
+        m_inlineEditSession.lastAcceptedState;
+
+    textBox->applyState(previous);
+    textBox->text = source;
+    textBox->reflowToWidth(previous.size.width());
+    TextBoxState candidate = textBox->captureState();
+
+    // Preserve the local top-left point in world/container coordinates while
+    // content-derived height changes around the object's rotation center.
+    auto rotatedPoint = [](const TextBoxState& state,
+                           const QPointF& localPoint) {
+        const QPointF center(
+            state.size.width() / 2.0, state.size.height() / 2.0);
+        const QPointF delta = localPoint - center;
+        const qreal radians = qDegreesToRadians(state.rotation);
+        return state.position + center + QPointF(
+            delta.x() * qCos(radians) - delta.y() * qSin(radians),
+            delta.x() * qSin(radians) + delta.y() * qCos(radians));
+    };
+    const QPointF anchoredTopLeft =
+        rotatedPoint(previous, QPointF(0.0, 0.0));
+    const QPointF candidateCenter(
+        candidate.size.width() / 2.0,
+        candidate.size.height() / 2.0);
+    const QPointF candidateDelta = -candidateCenter;
+    const qreal radians = qDegreesToRadians(candidate.rotation);
+    const QPointF rotatedCandidateDelta(
+        candidateDelta.x() * qCos(radians)
+            - candidateDelta.y() * qSin(radians),
+        candidateDelta.x() * qSin(radians)
+            + candidateDelta.y() * qCos(radians));
+    candidate.position =
+        anchoredTopLeft - candidateCenter - rotatedCandidateDelta;
+
+    if (!textBoxGeometryProposalAllowed(
+            previous, candidate, m_inlineEditSession.pageIndex)) {
+        textBox->applyState(previous);
+        m_revertingInlineText = true;
+        const int documentLength = previous.text.size();
+        QTextCursor restored(
+            m_inlineTextBoxEditor->editor()->document());
+        const int anchor =
+            qBound(0, cursorBeforeChange.anchor(), documentLength);
+        const int position =
+            qBound(0, cursorBeforeChange.position(), documentLength);
+        restored.setPosition(anchor);
+        restored.setPosition(position, QTextCursor::KeepAnchor);
+        m_inlineTextBoxEditor->setText(previous.text, &restored);
+        m_revertingInlineText = false;
+        showObjectGeometryFeedback(
+            tr("Text box cannot grow beyond the page"),
+            oldBounds);
+        updateInlineTextEditorGeometry();
+        return;
+    }
+
+    textBox->applyState(candidate);
+    m_inlineEditSession.lastAcceptedState = candidate;
+    updateInlineTextEditorGeometry();
+    const QRectF dirty = oldBounds.united(
+        objectBoundsInViewport(textBox))
+        .adjusted(-8.0, -8.0, 8.0, 8.0);
+    update(dirty.toAlignedRect());
+}
+
+void DocumentViewport::markInlineTextEditCommitted()
+{
+    if (!m_document || !m_inlineEditSession.active)
+        return;
+
+    if (m_document->isEdgeless()) {
+        m_document->markTileDirty(m_inlineEditSession.tileCoord);
+    } else if (m_inlineEditSession.pageIndex >= 0) {
+        m_document->markPageDirty(m_inlineEditSession.pageIndex);
+        m_pendingThumbnailPages.insert(
+            m_inlineEditSession.pageIndex);
+        emit pageModified(m_inlineEditSession.pageIndex);
+    }
+    emit documentModified();
+    emit textBoxLayoutCommitted();
+}
+
+void DocumentViewport::removeUncommittedInlineTextBox()
+{
+    if (!m_document || !m_inlineEditSession.active)
+        return;
+
+    TextBoxObject* textBox = resolveInlineTextBox();
+    const QRectF dirty = textBox
+        ? objectBoundsInViewport(textBox)
+            .adjusted(-12.0, -12.0, 12.0, 12.0)
+        : QRectF();
+    const QString objectId = m_inlineEditSession.objectId;
+    m_selectedObjects.removeAll(textBox);
+    if (m_hoveredObject == textBox)
+        m_hoveredObject = nullptr;
+
+    if (m_document->isEdgeless()) {
+        Page* tile = m_document->getTile(
+            m_inlineEditSession.tileCoord.first,
+            m_inlineEditSession.tileCoord.second);
+        if (tile)
+            tile->removeObject(objectId);
+        m_document->removeTileIfEmpty(
+            m_inlineEditSession.tileCoord.first,
+            m_inlineEditSession.tileCoord.second);
+    } else if (m_inlineEditSession.pageIndex >= 0) {
+        Page* page = m_document->page(
+            m_inlineEditSession.pageIndex);
+        if (page)
+            page->removeObject(objectId);
+    }
+    emit objectSelectionChanged();
+    if (!dirty.isEmpty())
+        update(dirty.toAlignedRect());
+    else
+        update();
+}
+
+void DocumentViewport::endInlineTextEdit(bool commit,
+                                         bool targetBeingDeleted)
+{
+    if (!m_inlineEditSession.active)
+        return;
+
+    TextBoxObject* textBox = resolveInlineTextBox();
+    if (!textBox) {
+        if (m_inlineTextBoxEditor)
+            m_inlineTextBoxEditor->hide();
+        m_inlineEditSession.clear();
+        const bool hadSelection = !m_selectedObjects.isEmpty();
+        m_selectedObjects.clear();
+        m_hoveredObject = nullptr;
+        if (hadSelection)
+            emit objectSelectionChanged();
+        update();
+        return;
+    }
+
+    const bool removeEmptyNew =
+        m_inlineEditSession.newBox
+        && textBox->text.trimmed().isEmpty();
+    if (targetBeingDeleted && m_inlineEditSession.newBox) {
+        removeUncommittedInlineTextBox();
+    } else if (targetBeingDeleted) {
+        // The delete action snapshots the current accepted object state.
+    } else if (!commit) {
+        textBox->applyState(m_inlineEditSession.startState);
+        if (m_inlineEditSession.newBox)
+            removeUncommittedInlineTextBox();
+    } else if (removeEmptyNew) {
+        removeUncommittedInlineTextBox();
+    } else {
+        const Document::TileCoord oldTile =
+            m_inlineEditSession.tileCoord;
+        Document::TileCoord newTile = oldTile;
+        if (m_document->isEdgeless()) {
+            relocateObjectsToCorrectTiles();
+            for (const auto& coord :
+                 m_document->allLoadedTileCoords()) {
+                Page* tile =
+                    m_document->getTile(coord.first, coord.second);
+                if (tile && tile->objectById(textBox->id)) {
+                    newTile = coord;
+                    break;
+                }
+            }
+        }
+
+        if (m_inlineEditSession.newBox) {
+            m_inlineEditSession.tileCoord = newTile;
+            pushObjectInsertUndo(
+                textBox, m_inlineEditSession.pageIndex,
+                m_inlineEditSession.tileCoord);
+            markInlineTextEditCommitted();
+        } else if (!textBoxStatesEqual(
+                       m_inlineEditSession.startState,
+                       textBox->captureState())) {
+            pushObjectTextEditUndo(
+                textBox, m_inlineEditSession.startState,
+                textBox->captureState(),
+                m_inlineEditSession.pageIndex,
+                oldTile, newTile);
+            m_inlineEditSession.tileCoord = newTile;
+            markInlineTextEditCommitted();
+        }
+    }
+
+    if (m_inlineTextBoxEditor)
+        m_inlineTextBoxEditor->hide();
+    m_inlineEditSession.clear();
+    update();
+}
+
+void DocumentViewport::commitInlineTextEdit()
+{
+    endInlineTextEdit(true);
+}
+
+void DocumentViewport::cancelInlineTextEdit()
+{
+    endInlineTextEdit(false);
+}
+
+QRectF DocumentViewport::proposedTextBoxCreationRect(
+    const QPointF& startPoint, const QPointF& currentPoint,
+    int pageIndex) const
+{
+    const qreal horizontalDistance =
+        qAbs(currentPoint.x() - startPoint.x());
+    const bool clickCreation =
+        horizontalDistance < TextBoxObject::MINIMUM_WIDTH;
+    qreal width = clickCreation
+        ? TextBoxObject::DEFAULT_CREATION_WIDTH
+        : qMax(TextBoxObject::MINIMUM_WIDTH, horizontalDistance);
+
+    if (m_document && !m_document->isEdgeless() && pageIndex >= 0) {
+        const QSizeF pageSize = m_document->pageSizeAt(pageIndex);
+        if (pageSize.width() > 0.0)
+            width = qMin(width, pageSize.width());
+    }
+    width = qMax<qreal>(1.0, width);
+
+    TextBoxObject probe;
+    probe.textLayoutVersion = TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+    probe.fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
+    probe.fontColor = m_penColor;
+    probe.text.clear();
+    probe.size = QSizeF(width, 1.0);
+    probe.reflowToWidth(width);
+
+    const qreal left = clickCreation
+        ? startPoint.x() - width / 2.0
+        : qMin(startPoint.x(), currentPoint.x());
+    QPointF topLeft(left, startPoint.y() - probe.size.height() / 2.0);
+
+    if (m_document && !m_document->isEdgeless() && pageIndex >= 0) {
+        topLeft = ObjectConstraints::clampPosition(
+            topLeft, probe.size, m_document->pageSizeAt(pageIndex));
+    }
+    return QRectF(topLeft, probe.size);
+}
+
+QRectF DocumentViewport::proposedTextBoxCreationRectInViewport() const
+{
+    if (!m_document || !m_isCreatingTextBox)
+        return QRectF();
+
+    QPointF currentPoint;
+    if (m_document->isEdgeless()) {
+        currentPoint = viewportToDocument(m_lastPointerPos);
+        const QRectF documentRect = proposedTextBoxCreationRect(
+            m_textBoxCreateStartDoc, currentPoint, -1);
+        return QRectF(documentToViewport(documentRect.topLeft()),
+                      documentRect.size() * m_zoomLevel);
+    }
+
+    const PageHit hit = viewportToPage(m_lastPointerPos);
+    currentPoint =
+        hit.pageIndex == m_textBoxCreatePageIndex && hit.pageIndex >= 0
+        ? hit.pagePoint
+        : m_textBoxCreateStartDoc;
+    const QRectF pageRect = proposedTextBoxCreationRect(
+        m_textBoxCreateStartDoc, currentPoint, m_textBoxCreatePageIndex);
+    const QPointF documentTopLeft =
+        pagePosition(m_textBoxCreatePageIndex) + pageRect.topLeft();
+    return QRectF(documentToViewport(documentTopLeft),
+                  pageRect.size() * m_zoomLevel);
+}
+
+bool DocumentViewport::textBoxGeometryProposalAllowed(
+    const TextBoxState& oldState, const TextBoxState& proposedState,
+    int pageIndex) const
+{
+    if (!m_document || m_document->isEdgeless() || pageIndex < 0)
+        return true;
+
+    const QSizeF pageSize = m_document->pageSizeAt(pageIndex);
+    auto overflow = [&pageSize](const TextBoxState& state) {
+        const QRectF rect(state.position, state.size);
+        return QVector<qreal>{
+            qMax<qreal>(0.0, -rect.left()),
+            qMax<qreal>(0.0, -rect.top()),
+            qMax<qreal>(0.0, rect.right() - pageSize.width()),
+            qMax<qreal>(0.0, rect.bottom() - pageSize.height())
+        };
+    };
+
+    const QVector<qreal> oldOverflow = overflow(oldState);
+    const QVector<qreal> proposedOverflow = overflow(proposedState);
+    for (int i = 0; i < proposedOverflow.size(); ++i) {
+        if (proposedOverflow[i] > oldOverflow[i] + 0.01)
+            return false;
+    }
+    return true;
+}
+
+void DocumentViewport::showObjectGeometryFeedback(
+    const QString& message, const QRectF& anchorViewportRect)
+{
+    m_objectGeometryFeedbackText = message;
+    m_objectGeometryFeedbackAnchor = anchorViewportRect;
+    if (m_objectGeometryFeedbackTimer)
+        m_objectGeometryFeedbackTimer->start();
+    update(anchorViewportRect.adjusted(-16.0, -16.0, 260.0, 80.0)
+               .toAlignedRect());
+}
+
 void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, const QPointF& viewportPos)
 {
     if (!m_document) return;
+    Q_UNUSED(viewportPos);
 
     auto textObj = std::make_unique<TextBoxObject>();
     textObj->position = rect.topLeft();
-    textObj->size = rect.size();
+    textObj->size = QSizeF(qMax<qreal>(1.0, rect.width()), 1.0);
     textObj->text = QString();
+    textObj->fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
+    textObj->textLayoutVersion =
+        TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
     textObj->showBorder = true;
     textObj->visible = true;
     textObj->fontColor = m_penColor;
     textObj->backgroundColor = QColor(255, 255, 255, 180);
+    textObj->reflowToWidth(textObj->size.width());
 
     TextBoxObject* rawPtr = textObj.get();
-
-    Document::TileCoord insertedTileCoord = {0, 0};
 
     if (m_document->isEdgeless()) {
         auto coord = m_document->tileCoordForPoint(rect.topLeft());
@@ -8341,7 +9072,6 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
         QPointF tileOrigin(coord.first * Document::EDGELESS_TILE_SIZE,
                            coord.second * Document::EDGELESS_TILE_SIZE);
         textObj->position = rect.topLeft() - tileOrigin;
-        textObj->size = rect.size();
 
         int activeLayer = m_edgelessActiveLayerIndex;
         int defaultAffinity = activeLayer - 1;
@@ -8349,8 +9079,6 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
         textObj->zOrder = getNextZOrderForAffinity(targetTile, defaultAffinity);
 
         targetTile->addObject(std::move(textObj));
-        m_document->markTileDirty(coord);
-        insertedTileCoord = coord;
     } else {
         Page* page = m_document->page(pageIndex);
         if (!page) {
@@ -8363,22 +9091,20 @@ void DocumentViewport::createTextBoxAtRect(int pageIndex, const QRectF& rect, co
         textObj->setLayerAffinity(defaultAffinity);
         textObj->zOrder = getNextZOrderForAffinity(page, defaultAffinity);
 
-        // The rubber band can be dragged past the page edge
-        textObj->size = ObjectConstraints::shrinkToFit(textObj->size, page->size);
-        textObj->position = clampObjectPositionToPage(pageIndex, textObj->position, textObj->size);
+        const qreal pageWidth = qMax<qreal>(1.0, page->size.width());
+        if (textObj->size.width() > pageWidth)
+            textObj->reflowToWidth(pageWidth);
+        textObj->position = clampObjectPositionToPage(
+            pageIndex, textObj->position, textObj->size);
 
         page->addObject(std::move(textObj));
-        m_document->markPageDirty(pageIndex);
     }
-
-    pushObjectInsertUndo(rawPtr, pageIndex, insertedTileCoord);
 
     deselectAllObjects();
     selectObject(rawPtr, false);
 
-    emit documentModified();
     update();
-    emit openTextEditorRequested(rawPtr);
+    startInlineTextEdit(rawPtr, true);
 }
 
 // ===== Link Slot Activation (Phase C.4.3) =====
@@ -9235,7 +9961,7 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     
     // ===== Phase 2C: Draw rubber-band rectangle for text box creation =====
     if (m_isCreatingTextBox) {
-        QRectF rubberBand = QRectF(m_textBoxCreateStartVP, m_lastPointerPos).normalized();
+        const QRectF rubberBand = proposedTextBoxCreationRectInViewport();
         QPen rbPenWhite(Qt::white, 1, Qt::DashLine);
         rbPenWhite.setCosmetic(true);
         QPen rbPenBlack(Qt::black, 1, Qt::DashLine);
@@ -9246,6 +9972,30 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
         painter.drawRect(rubberBand);
         painter.setPen(rbPenBlack);
         painter.drawRect(rubberBand);
+    }
+
+    if (!m_objectGeometryFeedbackText.isEmpty()) {
+        QFont feedbackFont = painter.font();
+        feedbackFont.setBold(true);
+        painter.setFont(feedbackFont);
+        const QFontMetricsF metrics(feedbackFont);
+        const QSizeF textSize(
+            metrics.horizontalAdvance(m_objectGeometryFeedbackText) + 20.0,
+            metrics.height() + 12.0);
+        QPointF topLeft(
+            m_objectGeometryFeedbackAnchor.left(),
+            m_objectGeometryFeedbackAnchor.bottom() + 8.0);
+        topLeft.setX(qBound<qreal>(
+            6.0, topLeft.x(), qMax<qreal>(6.0, width() - textSize.width() - 6.0)));
+        topLeft.setY(qBound<qreal>(
+            6.0, topLeft.y(), qMax<qreal>(6.0, height() - textSize.height() - 6.0)));
+        const QRectF messageRect(topLeft, textSize);
+        painter.setPen(QPen(QColor(180, 40, 40), 1.0));
+        painter.setBrush(QColor(120, 20, 20, 220));
+        painter.drawRoundedRect(messageRect, 5.0, 5.0);
+        painter.setPen(Qt::white);
+        painter.drawText(messageRect.adjusted(10.0, 6.0, -10.0, -6.0),
+                         Qt::AlignCenter, m_objectGeometryFeedbackText);
     }
 
     // ===== Draw selection boxes =====
@@ -9265,6 +10015,9 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     // Draw bounding box for each selected object
     for (InsertedObject* obj : m_selectedObjects) {
         if (!obj) continue;
+        if (m_inlineEditSession.active
+            && obj->id == m_inlineEditSession.objectId)
+            continue;
         
         QPolygonF vpPoly = objectToViewportRect(obj);
         if (vpPoly.isEmpty()) continue;
@@ -9280,7 +10033,8 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
     // ===== Draw handles for single selection =====
     if (m_selectedObjects.size() == 1) {
         InsertedObject* obj = m_selectedObjects.first();
-        if (obj) {
+        if (obj && (!m_inlineEditSession.active
+                    || obj->id != m_inlineEditSession.objectId)) {
             // Get axis-aligned bounding box in viewport coordinates
             // (consistent with objectHandleAtPoint hit testing)
             QRectF vpRect = objectBoundsInViewport(obj);
@@ -9310,13 +10064,18 @@ void DocumentViewport::renderObjectSelection(QPainter& painter)
             QPointF rotatePos = topCenter + rotateOffset;
             handles << rotatePos;  // 8: Rotate
             
-            // Draw scale handles (squares) - rotated with the object
+            // Draw scale handles (squares) - rotated with the object.
+            // User text boxes only expose left/right width handles.
             QPen handlePen(Qt::black, 1);
             painter.setPen(handlePen);
             painter.setBrush(Qt::white);
             
             qreal halfSize = HANDLE_VISUAL_SIZE / 2.0;
+            const bool userTextBox =
+                obj->type() == QLatin1String("textbox");
             for (int i = 0; i < 8; ++i) {
+                if (userTextBox && i != 3 && i != 4)
+                    continue;
                 // Draw rotated rectangles for handles
                 painter.save();
                 painter.translate(handles[i]);
@@ -10704,6 +11463,10 @@ bool DocumentViewport::handleEscapeKey()
     // Handle Escape key for cancelling selections/states.
     // Returns true if something was cancelled, false if nothing to cancel.
     // Called by MainWindow to determine whether to toggle to launcher.
+    if (m_inlineEditSession.active) {
+        cancelInlineTextEdit();
+        return true;
+    }
     
     // Priority 1: Cancel lasso selection or drawing (Lasso tool only)
     // Note: Lasso selection is cleared when switching away from Lasso tool,
@@ -13719,6 +14482,8 @@ static QSet<int> collectAffectedPages(const UndoAction& action)
 
 void DocumentViewport::undo()
 {
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
     if (m_undoStack.isEmpty() || !m_document) return;
 
     UndoAction action = m_undoStack.pop();
@@ -13864,34 +14629,138 @@ void DocumentViewport::undo()
                 break;
             }
             case UndoAction::ObjectResize: {
-                Page* c = getObjContainer(m_document, action, false);
-                if (c) {
-                    InsertedObject* obj = c->objectById(action.objectId);
-                    if (obj) {
+                Page* c = nullptr;
+                const bool crossTile = m_document->isEdgeless()
+                    && action.objectOldTile != action.objectNewTile;
+                std::unique_ptr<InsertedObject> movedObject;
+                Page* sourceTile = nullptr;
+                if (crossTile) {
+                    sourceTile = m_document->getTile(
+                        action.objectNewTile.first,
+                        action.objectNewTile.second);
+                    if (sourceTile)
+                        movedObject =
+                            sourceTile->extractObject(action.objectId);
+                } else {
+                    c = getObjContainer(m_document, action, false);
+                }
+                InsertedObject* obj = movedObject
+                    ? movedObject.get()
+                    : (c ? c->objectById(action.objectId) : nullptr);
+                if (obj) {
+                    if (action.objectHasTextBoxState) {
+                        if (auto* textBox =
+                                dynamic_cast<TextBoxObject*>(obj)) {
+                            textBox->applyState(
+                                action.objectOldTextBoxState);
+                        }
+                    } else {
                         obj->position = action.objectOldPosition;
                         obj->size = action.objectOldSize;
                         obj->rotation = action.objectOldRotation;
-                        if (obj->type() == "image") {
-                            if (auto* img = dynamic_cast<ImageObject*>(obj))
-                                img->maintainAspectRatio = action.objectOldAspectLock;
-                        }
                     }
+                    if (obj->type() == "image") {
+                        if (auto* img = dynamic_cast<ImageObject*>(obj))
+                            img->maintainAspectRatio =
+                                action.objectOldAspectLock;
+                    }
+                }
+                if (movedObject) {
+                    Page* oldTile = m_document->getOrCreateTile(
+                        action.objectOldTile.first,
+                        action.objectOldTile.second);
+                    if (oldTile) {
+                        oldTile->addObject(std::move(movedObject));
+                        m_document->markTileDirty(action.objectOldTile);
+                        m_document->markTileDirty(action.objectNewTile);
+                        m_document->removeTileIfEmpty(
+                            action.objectNewTile.first,
+                            action.objectNewTile.second);
+                    } else if (sourceTile) {
+                        if (action.objectHasTextBoxState) {
+                            if (auto* textBox =
+                                    dynamic_cast<TextBoxObject*>(
+                                        movedObject.get())) {
+                                textBox->applyState(
+                                    action.objectNewTextBoxState);
+                            }
+                        } else {
+                            movedObject->position =
+                                action.objectNewPosition;
+                            movedObject->size = action.objectNewSize;
+                            movedObject->rotation =
+                                action.objectNewRotation;
+                        }
+                        sourceTile->addObject(std::move(movedObject));
+                    }
+                } else if (c) {
                     markObjDirty(m_document, action);
                 }
                 break;
             }
             case UndoAction::ObjectTextEdit: {
-                Page* c = getObjContainer(m_document, action, false);
-                if (c) {
-                    InsertedObject* obj = c->objectById(action.objectId);
-                    if (auto* tbox = dynamic_cast<TextBoxObject*>(obj)) {
-                        tbox->text = action.objectOldText;
-                        tbox->alignment = static_cast<TextAlignment>(action.objectOldTextAlignment);
-                        tbox->backgroundColor.setAlpha(action.objectOldBgAlpha);
-                        tbox->fontColor = action.objectOldFontColor;
-                        tbox->invalidateDocCache();
+                if (action.objectHasTextBoxState
+                    && m_document->isEdgeless()
+                    && action.objectOldTile != action.objectNewTile) {
+                    Page* source = m_document->getTile(
+                        action.objectNewTile.first,
+                        action.objectNewTile.second);
+                    std::unique_ptr<InsertedObject> moved =
+                        source ? source->extractObject(action.objectId)
+                               : nullptr;
+                    if (moved) {
+                        if (auto* textBox =
+                                dynamic_cast<TextBoxObject*>(moved.get())) {
+                            textBox->applyState(
+                                action.objectOldTextBoxState);
+                        }
+                        Page* target = m_document->getOrCreateTile(
+                            action.objectOldTile.first,
+                            action.objectOldTile.second);
+                        if (target) {
+                            target->addObject(std::move(moved));
+                            m_document->markTileDirty(
+                                action.objectOldTile);
+                            m_document->markTileDirty(
+                                action.objectNewTile);
+                            m_document->removeTileIfEmpty(
+                                action.objectNewTile.first,
+                                action.objectNewTile.second);
+                        } else {
+                            if (auto* textBox =
+                                    dynamic_cast<TextBoxObject*>(
+                                        moved.get())) {
+                                textBox->applyState(
+                                    action.objectNewTextBoxState);
+                            }
+                            source->addObject(std::move(moved));
+                        }
                     }
-                    markObjDirty(m_document, action);
+                } else {
+                    Page* c = getObjContainer(
+                        m_document, action, false);
+                    if (c) {
+                        InsertedObject* obj =
+                            c->objectById(action.objectId);
+                        if (auto* tbox =
+                                dynamic_cast<TextBoxObject*>(obj)) {
+                            if (action.objectHasTextBoxState) {
+                                tbox->applyState(
+                                    action.objectOldTextBoxState);
+                            } else {
+                                tbox->text = action.objectOldText;
+                                tbox->alignment =
+                                    static_cast<TextAlignment>(
+                                        action.objectOldTextAlignment);
+                                tbox->backgroundColor.setAlpha(
+                                    action.objectOldBgAlpha);
+                                tbox->fontColor =
+                                    action.objectOldFontColor;
+                                tbox->invalidateDocCache();
+                            }
+                        }
+                        markObjDirty(m_document, action);
+                    }
                 }
                 break;
             }
@@ -14032,6 +14901,11 @@ void DocumentViewport::undo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
+    if ((action.type == UndoAction::ObjectResize
+         || action.type == UndoAction::ObjectTextEdit)
+        && action.objectHasTextBoxState) {
+        emit textBoxLayoutCommitted();
+    }
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
         // Phase M.9: refresh the single container this action touches.
         if (m_document->isEdgeless()) {
@@ -14061,6 +14935,8 @@ void DocumentViewport::undo()
 
 void DocumentViewport::redo()
 {
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
     if (m_redoStack.isEmpty() || !m_document) return;
 
     UndoAction action = m_redoStack.pop();
@@ -14206,34 +15082,138 @@ void DocumentViewport::redo()
                 break;
             }
             case UndoAction::ObjectResize: {
-                Page* c = getObjContainer(m_document, action, false);
-                if (c) {
-                    InsertedObject* obj = c->objectById(action.objectId);
-                    if (obj) {
+                Page* c = nullptr;
+                const bool crossTile = m_document->isEdgeless()
+                    && action.objectOldTile != action.objectNewTile;
+                std::unique_ptr<InsertedObject> movedObject;
+                Page* sourceTile = nullptr;
+                if (crossTile) {
+                    sourceTile = m_document->getTile(
+                        action.objectOldTile.first,
+                        action.objectOldTile.second);
+                    if (sourceTile)
+                        movedObject =
+                            sourceTile->extractObject(action.objectId);
+                } else {
+                    c = getObjContainer(m_document, action, false);
+                }
+                InsertedObject* obj = movedObject
+                    ? movedObject.get()
+                    : (c ? c->objectById(action.objectId) : nullptr);
+                if (obj) {
+                    if (action.objectHasTextBoxState) {
+                        if (auto* textBox =
+                                dynamic_cast<TextBoxObject*>(obj)) {
+                            textBox->applyState(
+                                action.objectNewTextBoxState);
+                        }
+                    } else {
                         obj->position = action.objectNewPosition;
                         obj->size = action.objectNewSize;
                         obj->rotation = action.objectNewRotation;
-                        if (obj->type() == "image") {
-                            if (auto* img = dynamic_cast<ImageObject*>(obj))
-                                img->maintainAspectRatio = action.objectNewAspectLock;
-                        }
                     }
+                    if (obj->type() == "image") {
+                        if (auto* img = dynamic_cast<ImageObject*>(obj))
+                            img->maintainAspectRatio =
+                                action.objectNewAspectLock;
+                    }
+                }
+                if (movedObject) {
+                    Page* newTile = m_document->getOrCreateTile(
+                        action.objectNewTile.first,
+                        action.objectNewTile.second);
+                    if (newTile) {
+                        newTile->addObject(std::move(movedObject));
+                        m_document->markTileDirty(action.objectOldTile);
+                        m_document->markTileDirty(action.objectNewTile);
+                        m_document->removeTileIfEmpty(
+                            action.objectOldTile.first,
+                            action.objectOldTile.second);
+                    } else if (sourceTile) {
+                        if (action.objectHasTextBoxState) {
+                            if (auto* textBox =
+                                    dynamic_cast<TextBoxObject*>(
+                                        movedObject.get())) {
+                                textBox->applyState(
+                                    action.objectOldTextBoxState);
+                            }
+                        } else {
+                            movedObject->position =
+                                action.objectOldPosition;
+                            movedObject->size = action.objectOldSize;
+                            movedObject->rotation =
+                                action.objectOldRotation;
+                        }
+                        sourceTile->addObject(std::move(movedObject));
+                    }
+                } else if (c) {
                     markObjDirty(m_document, action);
                 }
                 break;
             }
             case UndoAction::ObjectTextEdit: {
-                Page* c = getObjContainer(m_document, action, false);
-                if (c) {
-                    InsertedObject* obj = c->objectById(action.objectId);
-                    if (auto* tbox = dynamic_cast<TextBoxObject*>(obj)) {
-                        tbox->text = action.objectNewText;
-                        tbox->alignment = static_cast<TextAlignment>(action.objectNewTextAlignment);
-                        tbox->backgroundColor.setAlpha(action.objectNewBgAlpha);
-                        tbox->fontColor = action.objectNewFontColor;
-                        tbox->invalidateDocCache();
+                if (action.objectHasTextBoxState
+                    && m_document->isEdgeless()
+                    && action.objectOldTile != action.objectNewTile) {
+                    Page* source = m_document->getTile(
+                        action.objectOldTile.first,
+                        action.objectOldTile.second);
+                    std::unique_ptr<InsertedObject> moved =
+                        source ? source->extractObject(action.objectId)
+                               : nullptr;
+                    if (moved) {
+                        if (auto* textBox =
+                                dynamic_cast<TextBoxObject*>(moved.get())) {
+                            textBox->applyState(
+                                action.objectNewTextBoxState);
+                        }
+                        Page* target = m_document->getOrCreateTile(
+                            action.objectNewTile.first,
+                            action.objectNewTile.second);
+                        if (target) {
+                            target->addObject(std::move(moved));
+                            m_document->markTileDirty(
+                                action.objectOldTile);
+                            m_document->markTileDirty(
+                                action.objectNewTile);
+                            m_document->removeTileIfEmpty(
+                                action.objectOldTile.first,
+                                action.objectOldTile.second);
+                        } else {
+                            if (auto* textBox =
+                                    dynamic_cast<TextBoxObject*>(
+                                        moved.get())) {
+                                textBox->applyState(
+                                    action.objectOldTextBoxState);
+                            }
+                            source->addObject(std::move(moved));
+                        }
                     }
-                    markObjDirty(m_document, action);
+                } else {
+                    Page* c = getObjContainer(
+                        m_document, action, false);
+                    if (c) {
+                        InsertedObject* obj =
+                            c->objectById(action.objectId);
+                        if (auto* tbox =
+                                dynamic_cast<TextBoxObject*>(obj)) {
+                            if (action.objectHasTextBoxState) {
+                                tbox->applyState(
+                                    action.objectNewTextBoxState);
+                            } else {
+                                tbox->text = action.objectNewText;
+                                tbox->alignment =
+                                    static_cast<TextAlignment>(
+                                        action.objectNewTextAlignment);
+                                tbox->backgroundColor.setAlpha(
+                                    action.objectNewBgAlpha);
+                                tbox->fontColor =
+                                    action.objectNewFontColor;
+                                tbox->invalidateDocCache();
+                            }
+                        }
+                        markObjDirty(m_document, action);
+                    }
                 }
                 break;
             }
@@ -14374,6 +15354,11 @@ void DocumentViewport::redo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
+    if ((action.type == UndoAction::ObjectResize
+         || action.type == UndoAction::ObjectTextEdit)
+        && action.objectHasTextBoxState) {
+        emit textBoxLayoutCommitted();
+    }
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
         // Phase M.9: refresh the single container this action touches.
         if (m_document->isEdgeless()) {
@@ -14496,7 +15481,8 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
                                             const QPointF& oldPos,
                                             const QSizeF& oldSize,
                                             qreal oldRotation,
-                                            bool oldAspectLock)
+                                            bool oldAspectLock,
+                                            const TextBoxState* oldTextBoxState)
 {
     if (!obj) return;
 
@@ -14515,6 +15501,13 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
     action.objectOldRotation = oldRotation;
     action.objectNewRotation = obj->rotation;
     action.objectOldAspectLock = oldAspectLock;
+    if (oldTextBoxState) {
+        if (auto* textBox = dynamic_cast<TextBoxObject*>(obj)) {
+            action.objectHasTextBoxState = true;
+            action.objectOldTextBoxState = *oldTextBoxState;
+            action.objectNewTextBoxState = textBox->captureState();
+        }
+    }
     if (obj->type() == "image") {
         if (auto* img = dynamic_cast<ImageObject*>(obj))
             action.objectNewAspectLock = img->maintainAspectRatio;
@@ -14522,15 +15515,18 @@ void DocumentViewport::pushObjectResizeUndo(InsertedObject* obj,
         action.objectNewAspectLock = oldAspectLock;
     }
     if (m_document && m_document->isEdgeless()) {
+        action.objectOldTile = m_dragObjectTileCoord;
         for (const auto& coord : m_document->allLoadedTileCoords()) {
             Page* tile = m_document->getTile(coord.first, coord.second);
             if (tile && tile->objectById(obj->id)) {
                 action.objectTileCoord = coord;
+                action.objectNewTile = coord;
                 break;
             }
         }
     } else {
-        action.objectPageIndex = m_currentPageIndex;
+        action.objectPageIndex = m_resizeObjectPageIndex >= 0
+            ? m_resizeObjectPageIndex : m_currentPageIndex;
     }
     pushUndoAction(action);
 }
@@ -14555,6 +15551,28 @@ void DocumentViewport::pushObjectAffinityUndo(InsertedObject* obj, int oldAffini
     } else {
         action.objectPageIndex = m_currentPageIndex;
     }
+    pushUndoAction(action);
+}
+
+void DocumentViewport::pushObjectTextEditUndo(
+    TextBoxObject* obj, const TextBoxState& oldState,
+    const TextBoxState& newState, int pageIndex,
+    Document::TileCoord oldTile, Document::TileCoord newTile)
+{
+    if (!obj)
+        return;
+
+    UndoAction action;
+    action.type = UndoAction::ObjectTextEdit;
+    action.objectId = obj->id;
+    action.objectData = obj->toJson();
+    action.objectHasTextBoxState = true;
+    action.objectOldTextBoxState = oldState;
+    action.objectNewTextBoxState = newState;
+    action.objectPageIndex = pageIndex;
+    action.objectOldTile = oldTile;
+    action.objectNewTile = newTile;
+    action.objectTileCoord = newTile;
     pushUndoAction(action);
 }
 
@@ -14854,8 +15872,16 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
         }
     }
     const QSet<QString>* objectExcludePtr = objectExcludeIds.isEmpty() ? nullptr : &objectExcludeIds;
+    const QString suppressedTextObjectId =
+        m_inlineEditSession.active
+        && m_inlineEditSession.document == m_document
+        && m_inlineEditSession.pageIndex == pageIndex
+            ? m_inlineEditSession.objectId
+            : QString();
     
-    page->renderObjectsWithAffinity(painter, 1.0, -1, layer0Visible, objectExcludePtr);
+    page->renderObjectsWithAffinity(
+        painter, 1.0, -1, layer0Visible, objectExcludePtr,
+        suppressedTextObjectId);
     
     // 4. Render vector layers with ZOOM-AWARE stroke cache, interleaved with objects
     // The cache is built at pageSize * zoom * dpr physical pixels, ensuring
@@ -14914,7 +15940,9 @@ void DocumentViewport::renderPage(QPainter& painter, Page* page, int pageIndex)
         // Objects with affinity K are tied to Layer K+1, so check visibility of Layer K+1
         VectorLayer* nextLayer = page->layer(layerIdx + 1);
         bool nextLayerVisible = nextLayer ? nextLayer->visible : true;  // If no next layer, show objects
-        page->renderObjectsWithAffinity(painter, 1.0, layerIdx, nextLayerVisible, objectExcludePtr);
+        page->renderObjectsWithAffinity(
+            painter, 1.0, layerIdx, nextLayerVisible,
+            objectExcludePtr, suppressedTextObjectId);
     }
     
     // 5. Render text selection overlay (Phase A: Highlighter tool)
@@ -15289,7 +16317,16 @@ void DocumentViewport::renderEdgelessObjectsWithAffinity(
             // If we translate to docPos AND render applies position, position gets doubled!
             painter.save();
             painter.translate(tileOrigin);
-            obj->render(painter, 1.0);  // render() will add obj->position
+            if (m_inlineEditSession.active
+                && m_inlineEditSession.document == m_document
+                && m_inlineEditSession.tileCoord == coord
+                && m_inlineEditSession.objectId == obj->id
+                && obj->type() == QLatin1String("textbox")) {
+                static_cast<TextBoxObject*>(obj)
+                    ->renderWithTextSuppressed(painter, 1.0);
+            } else {
+                obj->render(painter, 1.0);
+            }
             painter.restore();
         }
     }

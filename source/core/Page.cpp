@@ -6,6 +6,7 @@
 
 #include "Page.h"
 #include "../objects/OcrTextObject.h"
+#include "../objects/TextBoxObject.h"
 #include <QUuid>       // Phase C.0.1: UUID generation for LinkObject position links
 #include <algorithm>
 #include <climits>  // For INT_MIN (Phase O3.5.5: affinity filtering)
@@ -662,7 +663,9 @@ void Page::renderObjects(QPainter& painter, qreal zoom) const
 }
 
 void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, 
-                                      bool layerVisible, const QSet<QString>* excludeIds) const
+                                      bool layerVisible,
+                                      const QSet<QString>* excludeIds,
+                                      const QString& suppressTextObjectId) const
 {
     // Phase O3.5.8: If the tied layer is hidden, skip rendering objects
     // Objects with affinity = K are tied to Layer K+1. When that layer is hidden,
@@ -695,7 +698,14 @@ void Page::renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity
         }
         
         if (obj->visible) {
-            obj->render(painter, zoom);
+            if (!suppressTextObjectId.isEmpty()
+                && obj->id == suppressTextObjectId
+                && obj->type() == QLatin1String("textbox")) {
+                static_cast<TextBoxObject*>(obj)
+                    ->renderWithTextSuppressed(painter, zoom);
+            } else {
+                obj->render(painter, zoom);
+            }
         }
     }
 }

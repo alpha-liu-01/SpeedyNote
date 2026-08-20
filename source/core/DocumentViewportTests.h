@@ -12,6 +12,9 @@
 #include "ObjectConstraints.h"
 #include "Page.h"
 #include "../objects/ImageObject.h"
+#include "../objects/OcrTextObject.h"
+#include "../ui/panels/InlineTextBoxEditor.h"
+#include "../../markdown/qmarkdowntextedit.h"
 #include "../strokes/VectorStroke.h"
 #include "../strokes/StrokePoint.h"
 
@@ -20,6 +23,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
+#include <QSignalSpy>
+#include <QTextCursor>
 #include <QtNumeric>
 #include <QtMath>
 #include <cstdio>
@@ -1036,6 +1041,623 @@ public:
         printf("PASSED\n");
         return true;
     }
+
+    static bool testTextBoxCreationAndWidthResize() {
+        printf("  testTextBoxCreationAndWidthResize... ");
+
+        auto doc = Document::createNew("Text geometry");
+        DocumentViewport viewport;
+        viewport.resize(1000, 800);
+        viewport.setDocument(doc.get());
+
+        const QPointF start(300.0, 240.0);
+        const QRectF clickRect = viewport.proposedTextBoxCreationRect(
+            start, QPointF(start.x() + 2.0, start.y() + 500.0), 0);
+        const QRectF clickRectOtherY =
+            viewport.proposedTextBoxCreationRect(
+                start, QPointF(start.x() + 2.0, start.y() - 500.0), 0);
+        if (!qFuzzyCompare(clickRect.width(),
+                           TextBoxObject::DEFAULT_CREATION_WIDTH)
+            || !qFuzzyCompare(clickRect.center().x(), start.x())
+            || !qFuzzyCompare(clickRect.center().y(), start.y())
+            || !qFuzzyCompare(clickRect.height(),
+                              clickRectOtherY.height())) {
+            printf("FAILED: click creation geometry is not centered/measured\n");
+            return false;
+        }
+
+        const QRectF dragRect = viewport.proposedTextBoxCreationRect(
+            start, QPointF(570.0, 740.0), 0);
+        const QRectF dragRectOtherY = viewport.proposedTextBoxCreationRect(
+            start, QPointF(570.0, -400.0), 0);
+        if (!qFuzzyCompare(dragRect.width(), 270.0)
+            || !qFuzzyCompare(dragRect.left(), start.x())
+            || !qFuzzyCompare(dragRect.height(), dragRectOtherY.height())) {
+            printf("FAILED: horizontal drag creation used vertical distance\n");
+            return false;
+        }
+
+        viewport.createTextBoxAtRect(0, clickRect, QPointF());
+        Page* page = doc->page(0);
+        auto* textBox = page && !page->objects.empty()
+            ? dynamic_cast<TextBoxObject*>(page->objects.back().get())
+            : nullptr;
+        if (!textBox
+            || textBox->textLayoutVersion
+                != TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION
+            || !qFuzzyCompare(textBox->fontSize,
+                              TextBoxObject::DEFAULT_BASE_FONT_SIZE)
+            || !qFuzzyCompare(textBox->size.width(),
+                              TextBoxObject::DEFAULT_CREATION_WIDTH)
+            || textBox->size.height() <=
+                TextBoxObject::DEFAULT_BASE_FONT_SIZE) {
+            printf("FAILED: creation did not insert a measured version-1 box\n");
+            return false;
+        }
+
+        viewport.m_selectedObjects = {textBox};
+        textBox->rotation = 0.0;
+        const QRectF bounds = viewport.objectBoundsInViewport(textBox);
+        if (!viewport.hasActiveInlineTextEdit()
+            || !viewport.m_inlineTextBoxEditor
+            || viewport.objectHandleAtPoint(
+                QPointF(bounds.left(), bounds.center().y()))
+                != DocumentViewport::HandleHit::None) {
+            printf("FAILED: new text box did not enter handle-free inline editing\n");
+            return false;
+        }
+        viewport.handleInlineTextSourceChanged(QStringLiteral("Text"));
+        viewport.commitInlineTextEdit();
+        if (viewport.hasActiveInlineTextEdit() || !viewport.canUndo()) {
+            printf("FAILED: new text box edit did not commit one insert action\n");
+            return false;
+        }
+        const QRectF committedBounds =
+            viewport.objectBoundsInViewport(textBox);
+        if (viewport.objectHandleAtPoint(
+                QPointF(committedBounds.left(),
+                        committedBounds.center().y()))
+                != DocumentViewport::HandleHit::Left
+            || viewport.objectHandleAtPoint(
+                QPointF(committedBounds.right(),
+                        committedBounds.center().y()))
+                != DocumentViewport::HandleHit::Right
+            || viewport.objectHandleAtPoint(
+                QPointF(committedBounds.center().x(),
+                        committedBounds.bottom()))
+                != DocumentViewport::HandleHit::None) {
+            printf("FAILED: user text box exposed non-horizontal handles\n");
+            return false;
+        }
+
+        auto ocr = std::make_unique<OcrTextObject>();
+        ocr->position = QPointF(50.0, 50.0);
+        ocr->size = QSizeF(180.0, 80.0);
+        OcrTextObject* ocrRaw = ocr.get();
+        page->addObject(std::move(ocr));
+        viewport.m_selectedObjects = {ocrRaw};
+        const QRectF ocrBounds = viewport.objectBoundsInViewport(ocrRaw);
+        if (viewport.objectHandleAtPoint(
+                QPointF(ocrBounds.center().x(), ocrBounds.bottom()))
+                != DocumentViewport::HandleHit::Bottom) {
+            printf("FAILED: OCR resize handles changed\n");
+            return false;
+        }
+
+        auto prepareResize = [&](TextBoxObject* box,
+                                 DocumentViewport::HandleHit handle) {
+            viewport.m_selectedObjects = {box};
+            viewport.m_isResizingObject = true;
+            viewport.m_objectResizeHandle = handle;
+            viewport.m_resizeOriginalSize = box->size;
+            viewport.m_resizeOriginalPosition = box->position;
+            viewport.m_resizeOriginalRotation = box->rotation;
+            viewport.m_resizeObjectPageIndex = 0;
+            viewport.m_hasResizeTextBoxState = true;
+            viewport.m_textBoxResizeActivated = false;
+            viewport.m_textBoxResizeChanged = false;
+            viewport.m_resizeOriginalTextBoxState = box->captureState();
+            viewport.m_resizeBaseTextBoxState =
+                viewport.m_resizeOriginalTextBoxState;
+            viewport.m_resizeLastAcceptedTextBoxState =
+                viewport.m_resizeOriginalTextBoxState;
+            viewport.m_resizeObjectDocCenter =
+                viewport.pagePosition(0) + box->position
+                + QPointF(box->size.width() / 2.0,
+                          box->size.height() / 2.0);
+        };
+        auto pointerForLocalX = [&](const TextBoxObject* box, qreal localX) {
+            const qreal radians = qDegreesToRadians(box->rotation);
+            const QPointF delta(localX * qCos(radians),
+                                localX * qSin(radians));
+            return viewport.documentToViewport(
+                viewport.m_resizeObjectDocCenter + delta);
+        };
+
+        textBox->text = QStringLiteral(
+            "one two three four five six seven eight nine ten");
+        textBox->position = QPointF(100.0, 120.0);
+        textBox->rotation = 30.0;
+        textBox->reflowToWidth(220.0);
+        const TextBoxState beforeResize = textBox->captureState();
+        prepareResize(textBox, DocumentViewport::HandleHit::Right);
+        viewport.updateObjectResize(pointerForLocalX(textBox, 190.0));
+        const TextBoxState afterResize = textBox->captureState();
+        if (!viewport.m_textBoxResizeChanged
+            || !qFuzzyCompare(afterResize.size.width(), 300.0)
+            || !qFuzzyCompare(afterResize.fontSize, beforeResize.fontSize)) {
+            printf("FAILED: width resize changed font size or wrong width\n");
+            return false;
+        }
+        auto worldPoint = [](const TextBoxState& state,
+                             const QPointF& local) {
+            const QPointF center(state.size.width() / 2.0,
+                                 state.size.height() / 2.0);
+            const QPointF delta = local - center;
+            const qreal radians = qDegreesToRadians(state.rotation);
+            return state.position + center + QPointF(
+                delta.x() * qCos(radians) - delta.y() * qSin(radians),
+                delta.x() * qSin(radians) + delta.y() * qCos(radians));
+        };
+        if (QLineF(worldPoint(beforeResize, QPointF(0.0, 0.0)),
+                   worldPoint(afterResize, QPointF(0.0, 0.0))).length()
+            > 0.01) {
+            printf("FAILED: rotated right resize moved local top-left anchor\n");
+            return false;
+        }
+
+        viewport.cancelObjectPointerGesture();
+        if (textBox->captureState().textLayoutVersion
+                != beforeResize.textLayoutVersion
+            || textBox->position != beforeResize.position
+            || textBox->size != beforeResize.size) {
+            printf("FAILED: resize cancel did not restore complete state\n");
+            return false;
+        }
+
+        int layoutCommitSignals = 0;
+        int pageModifiedSignals = 0;
+        QObject::connect(&viewport,
+                         &DocumentViewport::textBoxLayoutCommitted,
+                         &viewport, [&layoutCommitSignals]() {
+            ++layoutCommitSignals;
+        });
+        QObject::connect(&viewport, &DocumentViewport::pageModified,
+                         &viewport, [&pageModifiedSignals](int) {
+            ++pageModifiedSignals;
+        });
+        prepareResize(textBox, DocumentViewport::HandleHit::Right);
+        viewport.updateObjectResize(pointerForLocalX(textBox, 190.0));
+        const TextBoxState committedResize = textBox->captureState();
+        viewport.pushObjectResizeUndo(
+            textBox, beforeResize.position, beforeResize.size,
+            beforeResize.rotation, true, &beforeResize);
+        viewport.m_isResizingObject = false;
+        viewport.m_hasResizeTextBoxState = false;
+        viewport.undo();
+        if (textBox->position != beforeResize.position
+            || textBox->size != beforeResize.size
+            || textBox->textLayoutVersion
+                != beforeResize.textLayoutVersion) {
+            printf("FAILED: text resize undo did not restore full state\n");
+            return false;
+        }
+        viewport.redo();
+        if (textBox->position != committedResize.position
+            || textBox->size != committedResize.size
+            || textBox->textLayoutVersion
+                != committedResize.textLayoutVersion
+            || layoutCommitSignals != 2
+            || pageModifiedSignals < 2) {
+            printf("FAILED: text resize redo/signals did not restore full state\n");
+            return false;
+        }
+
+        TextBoxState legacy = beforeResize;
+        legacy.textLayoutVersion = 0;
+        legacy.fontSize = 13.0;
+        legacy.size = QSizeF(220.0, 60.0);
+        legacy.position = QPointF(120.0, 140.0);
+        legacy.rotation = 0.0;
+        textBox->applyState(legacy);
+        prepareResize(textBox, DocumentViewport::HandleHit::Right);
+        viewport.updateObjectResize(pointerForLocalX(textBox, 160.0));
+        if (textBox->textLayoutVersion
+            != TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION) {
+            printf("FAILED: legacy box did not convert on width resize\n");
+            return false;
+        }
+        viewport.cancelObjectPointerGesture();
+        if (textBox->textLayoutVersion != 0
+            || !qFuzzyCompare(textBox->fontSize, legacy.fontSize)
+            || textBox->position != legacy.position
+            || textBox->size != legacy.size) {
+            printf("FAILED: legacy conversion did not roll back on cancel\n");
+            return false;
+        }
+
+        // Narrowing a box flush with the page bottom grows its derived height;
+        // the full proposal must be rejected instead of partially applying it.
+        textBox->rotation = 0.0;
+        textBox->text = QString(160, QLatin1Char('x'));
+        textBox->reflowToWidth(500.0);
+        textBox->position = QPointF(
+            50.0, page->size.height() - textBox->size.height());
+        const TextBoxState beforeRejected = textBox->captureState();
+        prepareResize(textBox, DocumentViewport::HandleHit::Right);
+        viewport.updateObjectResize(pointerForLocalX(
+            textBox, TextBoxObject::MINIMUM_WIDTH
+                - beforeRejected.size.width() / 2.0));
+        if (textBox->position != beforeRejected.position
+            || textBox->size != beforeRejected.size
+            || viewport.m_objectGeometryFeedbackText.isEmpty()) {
+            printf("FAILED: page-bottom resize was not atomically rejected\n");
+            return false;
+        }
+        viewport.cancelObjectPointerGesture();
+
+        TextBoxState overflowing = beforeRejected;
+        overflowing.position.setY(page->size.height()
+                                  - overflowing.size.height() + 20.0);
+        TextBoxState lessOverflow = overflowing;
+        lessOverflow.position.ry() -= 10.0;
+        TextBoxState moreOverflow = overflowing;
+        moreOverflow.position.ry() += 10.0;
+        if (!viewport.textBoxGeometryProposalAllowed(
+                overflowing, lessOverflow, 0)
+            || viewport.textBoxGeometryProposalAllowed(
+                overflowing, moreOverflow, 0)) {
+            printf("FAILED: existing overflow policy is not monotonic\n");
+            return false;
+        }
+
+        auto edgeless =
+            Document::createNew("Text edgeless", Document::Mode::Edgeless);
+        viewport.setDocument(edgeless.get());
+        const QRectF uncapped = viewport.proposedTextBoxCreationRect(
+            QPointF(10.0, 20.0), QPointF(5010.0, 9999.0), -1);
+        if (!qFuzzyCompare(uncapped.width(), 5000.0)) {
+            printf("FAILED: edgeless creation width was capped\n");
+            return false;
+        }
+
+        Page* originTile = edgeless->getOrCreateTile(0, 0);
+        auto tileText = std::make_unique<TextBoxObject>();
+        tileText->textLayoutVersion =
+            TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+        tileText->fontSize = TextBoxObject::DEFAULT_BASE_FONT_SIZE;
+        tileText->text = QStringLiteral("tile relocation");
+        tileText->position = QPointF(
+            Document::EDGELESS_TILE_SIZE - 18.0, 80.0);
+        tileText->reflowToWidth(100.0);
+        TextBoxObject* tileTextRaw = tileText.get();
+        originTile->addObject(std::move(tileText));
+        const TextBoxState tileOldState = tileTextRaw->captureState();
+
+        viewport.m_selectedObjects = {tileTextRaw};
+        viewport.m_isResizingObject = true;
+        viewport.m_objectResizeHandle =
+            DocumentViewport::HandleHit::Left;
+        viewport.m_resizeOriginalSize = tileTextRaw->size;
+        viewport.m_resizeOriginalPosition = tileTextRaw->position;
+        viewport.m_resizeOriginalRotation = tileTextRaw->rotation;
+        viewport.m_resizeObjectPageIndex = -1;
+        viewport.m_dragObjectTileCoord = {0, 0};
+        viewport.m_hasResizeTextBoxState = true;
+        viewport.m_textBoxResizeActivated = false;
+        viewport.m_textBoxResizeChanged = false;
+        viewport.m_resizeOriginalTextBoxState = tileOldState;
+        viewport.m_resizeBaseTextBoxState = tileOldState;
+        viewport.m_resizeLastAcceptedTextBoxState = tileOldState;
+        viewport.m_resizeObjectDocCenter =
+            tileTextRaw->position
+            + QPointF(tileTextRaw->size.width() / 2.0,
+                      tileTextRaw->size.height() / 2.0);
+        viewport.updateObjectResize(pointerForLocalX(
+            tileTextRaw,
+            tileOldState.size.width() / 2.0
+                - TextBoxObject::MINIMUM_WIDTH));
+        if (tileTextRaw->position.x()
+            < Document::EDGELESS_TILE_SIZE) {
+            printf("FAILED: left resize did not cross tile boundary\n");
+            return false;
+        }
+        viewport.relocateObjectsToCorrectTiles();
+        const auto newTileCoord =
+            edgeless->tileCoordForPoint(QPointF(
+                Document::EDGELESS_TILE_SIZE + 1.0, 80.0));
+        Page* newTile =
+            edgeless->getTile(newTileCoord.first, newTileCoord.second);
+        if (!newTile || !newTile->objectById(tileTextRaw->id)) {
+            printf("FAILED: edgeless resize did not relocate by top-left\n");
+            return false;
+        }
+        const TextBoxState tileNewState = tileTextRaw->captureState();
+        viewport.pushObjectResizeUndo(
+            tileTextRaw, tileOldState.position, tileOldState.size,
+            tileOldState.rotation, true, &tileOldState);
+        viewport.m_isResizingObject = false;
+        viewport.m_hasResizeTextBoxState = false;
+        viewport.undo();
+        originTile = edgeless->getTile(0, 0);
+        if (!originTile || !originTile->objectById(tileTextRaw->id)
+            || tileTextRaw->position != tileOldState.position) {
+            printf("FAILED: cross-tile resize undo did not restore ownership\n");
+            return false;
+        }
+        viewport.redo();
+        newTile = edgeless->getTile(
+            newTileCoord.first, newTileCoord.second);
+        if (!newTile || !newTile->objectById(tileTextRaw->id)
+            || tileTextRaw->position != tileNewState.position) {
+            printf("FAILED: cross-tile resize redo did not restore ownership\n");
+            return false;
+        }
+
+        viewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
+
+    static bool testInlineTextBoxEditing() {
+        printf("  testInlineTextBoxEditing... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+        auto doc = Document::createNew("Inline text editing");
+        DocumentViewport viewport;
+        viewport.resize(1000, 800);
+        viewport.setDocument(doc.get());
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing test page");
+
+        QSignalSpy documentSpy(
+            &viewport, &DocumentViewport::documentModified);
+        QSignalSpy pageSpy(
+            &viewport, &DocumentViewport::pageModified);
+        QSignalSpy layoutSpy(
+            &viewport, &DocumentViewport::textBoxLayoutCommitted);
+
+        viewport.createTextBoxAtRect(
+            0, QRectF(120.0, 140.0,
+                      TextBoxObject::DEFAULT_CREATION_WIDTH, 1.0),
+            QPointF());
+        auto* box = page->objects.empty()
+            ? nullptr
+            : dynamic_cast<TextBoxObject*>(page->objects.back().get());
+        if (!box || !viewport.hasActiveInlineTextEdit()
+            || !viewport.m_undoStack.isEmpty())
+            return fail("new box was not a deferred inline session");
+
+        const QString boxId = box->id;
+        const qreal initialHeight = box->size.height();
+        const QString initialSource =
+            QStringLiteral("# Heading\nFirst line\nSecond line");
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            initialSource);
+        if (box->text != initialSource
+            || box->size.height() <= initialHeight)
+            return fail("accepted source did not live-reflow");
+        if (documentSpy.count() != 0 || pageSpy.count() != 0
+            || layoutSpy.count() != 0)
+            return fail("live keystrokes emitted commit invalidation");
+
+        const QRect editorGeometry =
+            viewport.m_inlineTextBoxEditor->geometry();
+        box->rotation = 18.0;
+        viewport.updateInlineTextEditorGeometry();
+        const QRect rotatedGeometry =
+            viewport.m_inlineTextBoxEditor->geometry();
+        viewport.setZoomLevel(1.25);
+        if (rotatedGeometry == editorGeometry
+            || viewport.m_inlineTextBoxEditor->geometry()
+                == rotatedGeometry)
+            return fail("editor geometry did not track rotation/zoom");
+
+        const QString beforeLocalUndo = box->text;
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            QStringLiteral(" extra"));
+        viewport.m_inlineTextBoxEditor->editor()->undo();
+        if (box->text != beforeLocalUndo
+            || !viewport.hasActiveInlineTextEdit())
+            return fail("local editor undo escaped the edit session");
+
+        QKeyEvent commitKey(
+            QEvent::KeyPress, Qt::Key_Return,
+            Qt::ControlModifier);
+        QApplication::sendEvent(
+            viewport.m_inlineTextBoxEditor->editor(), &commitKey);
+        if (viewport.hasActiveInlineTextEdit()
+            || viewport.m_undoStack.size() != 1
+            || viewport.m_undoStack.top().type
+                != UndoAction::ObjectInsert
+            || documentSpy.count() != 1
+            || pageSpy.count() != 1
+            || layoutSpy.count() != 1)
+            return fail("Ctrl+Enter did not commit one insert transaction");
+
+        viewport.undo();
+        if (page->objectById(boxId))
+            return fail("new-box insertion undo did not remove object");
+        viewport.redo();
+        box = dynamic_cast<TextBoxObject*>(page->objectById(boxId));
+        if (!box || box->text != beforeLocalUndo)
+            return fail("new-box insertion redo lost final state");
+
+        const TextBoxState editStart = box->captureState();
+        viewport.startInlineTextEdit(box, false);
+        viewport.m_inlineTextBoxEditor->editor()->moveCursor(
+            QTextCursor::End);
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            QStringLiteral("\nThird line"));
+        const TextBoxState editEnd = box->captureState();
+        documentSpy.clear();
+        pageSpy.clear();
+        layoutSpy.clear();
+        viewport.commitInlineTextEdit();
+        if (viewport.m_undoStack.top().type
+                != UndoAction::ObjectTextEdit
+            || !viewport.m_undoStack.top().objectHasTextBoxState
+            || documentSpy.count() != 1
+            || pageSpy.count() != 1
+            || layoutSpy.count() != 1)
+            return fail("existing edit was not one full-state transaction");
+        viewport.undo();
+        box = dynamic_cast<TextBoxObject*>(page->objectById(boxId));
+        if (!box || !DocumentViewport::textBoxStatesEqual(
+                        box->captureState(), editStart))
+            return fail("text edit undo did not restore full state");
+        viewport.redo();
+        box = dynamic_cast<TextBoxObject*>(page->objectById(boxId));
+        if (!box || !DocumentViewport::textBoxStatesEqual(
+                        box->captureState(), editEnd))
+            return fail("text edit redo did not restore full state");
+
+        box->rotation = 0.0;
+        box->position.setY(
+            page->size.height() - box->size.height());
+        const TextBoxState overflowStart = box->captureState();
+        viewport.startInlineTextEdit(box, false);
+        auto* editor = viewport.m_inlineTextBoxEditor->editor();
+        editor->moveCursor(QTextCursor::End);
+        const int caretBeforeReject =
+            editor->textCursor().position();
+        editor->insertPlainText(
+            QStringLiteral("\nRejected line\nRejected line"));
+        if (!DocumentViewport::textBoxStatesEqual(
+                box->captureState(), overflowStart)
+            || editor->toPlainText() != overflowStart.text
+            || editor->textCursor().position()
+                != caretBeforeReject
+            || viewport.m_objectGeometryFeedbackText.isEmpty())
+            return fail("paged overflow was not rejected atomically");
+        viewport.cancelInlineTextEdit();
+
+        viewport.startInlineTextEdit(box, false);
+        viewport.m_inlineTextBoxEditor->editor()->moveCursor(
+            QTextCursor::End);
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            QStringLiteral(" outside"));
+        const QPointF outsidePoint(2.0, 2.0);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        QMouseEvent outsidePress(
+            QEvent::MouseButtonPress, outsidePoint, outsidePoint,
+            QPointF(viewport.mapToGlobal(outsidePoint.toPoint())),
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+#else
+        QMouseEvent outsidePress(
+            QEvent::MouseButtonPress, outsidePoint,
+            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+#endif
+        viewport.mousePressEvent(&outsidePress);
+        if (viewport.hasActiveInlineTextEdit()
+            || viewport.m_undoStack.top().type
+                != UndoAction::ObjectTextEdit)
+            return fail("outside canvas click did not commit");
+
+        auto legacy = std::make_unique<TextBoxObject>();
+        legacy->text = QStringLiteral("Legacy");
+        legacy->position = QPointF(40.0, 40.0);
+        legacy->size = QSizeF(180.0, 44.0);
+        TextBoxObject* legacyRaw = legacy.get();
+        page->addObject(std::move(legacy));
+        const TextBoxState legacyStart = legacyRaw->captureState();
+        viewport.startInlineTextEdit(legacyRaw, false);
+        if (!legacyRaw->usesCurrentLayout())
+            return fail("legacy box did not upgrade on edit entry");
+        viewport.cancelInlineTextEdit();
+        if (!DocumentViewport::textBoxStatesEqual(
+                legacyRaw->captureState(), legacyStart))
+            return fail("legacy edit cancellation did not restore version 0");
+
+        const int undoCountBeforeEmpty =
+            viewport.m_undoStack.size();
+        const int objectCountBeforeEmpty =
+            static_cast<int>(page->objects.size());
+        viewport.createTextBoxAtRect(
+            0, QRectF(300.0, 200.0, 220.0, 1.0), QPointF());
+        QKeyEvent cancelKey(
+            QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(
+            viewport.m_inlineTextBoxEditor->editor(), &cancelKey);
+        if (static_cast<int>(page->objects.size())
+                != objectCountBeforeEmpty
+            || viewport.m_undoStack.size()
+                != undoCountBeforeEmpty)
+            return fail("empty new-box cancellation created history");
+
+        box = dynamic_cast<TextBoxObject*>(page->objectById(boxId));
+        viewport.m_selectedObjects = {box};
+        viewport.startInlineTextEdit(box, false);
+        viewport.m_inlineTextBoxEditor->editor()->moveCursor(
+            QTextCursor::End);
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            QStringLiteral(" draft"));
+        viewport.deleteSelectedObjects();
+        if (viewport.hasActiveInlineTextEdit()
+            || page->objectById(boxId)
+            || viewport.m_undoStack.top().type
+                != UndoAction::ObjectDelete)
+            return fail("deletion did not safely terminate edit session");
+        viewport.undo();
+        box = dynamic_cast<TextBoxObject*>(page->objectById(boxId));
+        if (!box || !box->text.endsWith(QStringLiteral(" draft")))
+            return fail("delete undo lost accepted draft state");
+
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        viewport.startInlineTextEdit(box, false);
+        viewport.m_inlineTextBoxEditor->editor()->moveCursor(
+            QTextCursor::End);
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            QStringLiteral(" tool"));
+        viewport.setCurrentTool(ToolType::Pen);
+        if (viewport.hasActiveInlineTextEdit()
+            || !box->text.endsWith(QStringLiteral(" tool"))
+            || viewport.m_undoStack.top().type
+                != UndoAction::ObjectTextEdit)
+            return fail("tool change did not commit active edit");
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+
+        auto ocr = std::make_unique<OcrTextObject>();
+        ocr->text = QStringLiteral("OCR");
+        OcrTextObject* ocrRaw = ocr.get();
+        page->addObject(std::move(ocr));
+        viewport.startInlineTextEdit(ocrRaw, false);
+        if (viewport.hasActiveInlineTextEdit())
+            return fail("OCR object entered user inline editor");
+
+        viewport.m_selectedObjects.clear();
+        viewport.startInlineTextEdit(box, false);
+        page->removeObject(boxId);
+        viewport.handleInlineTextSourceChanged(
+            QStringLiteral("stale target"));
+        if (viewport.hasActiveInlineTextEdit())
+            return fail("missing target did not tear down safely");
+
+        auto edgeless = Document::createNew(
+            "Inline edgeless", Document::Mode::Edgeless);
+        viewport.setDocument(edgeless.get());
+        viewport.createTextBoxAtRect(
+            -1, QRectF(20.0, 20.0, 100.0, 1.0), QPointF());
+        auto* tileBox = viewport.resolveInlineTextBox();
+        if (!tileBox)
+            return fail("edgeless inline target was not resolvable");
+        const QString manyLines =
+            QStringLiteral("a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl");
+        viewport.m_inlineTextBoxEditor->editor()->insertPlainText(
+            manyLines);
+        if (tileBox->text != manyLines
+            || tileBox->size.height() <= initialHeight)
+            return fail("edgeless growth was incorrectly capped");
+        viewport.cancelInlineTextEdit();
+        viewport.setDocument(nullptr);
+
+        printf("PASSED\n");
+        return true;
+    }
     
     // ===== Run All Unit Tests =====
     
@@ -1069,6 +1691,10 @@ public:
         runTest(testIntegerImageInsertScaling, "testIntegerImageInsertScaling");
         runTest(testFastImageInsertionPipeline, "testFastImageInsertionPipeline");
         runTest(testObjectGroupContainment, "testObjectGroupContainment");
+        runTest(testTextBoxCreationAndWidthResize,
+                "testTextBoxCreationAndWidthResize");
+        runTest(testInlineTextBoxEditing,
+                "testInlineTextBoxEditing");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         // The caller goes on to open a window and block in the event loop, so

@@ -508,7 +508,19 @@ static Qt::Alignment mapAlignment(TextAlignment a)
 
 void TextBoxObject::render(QPainter& painter, qreal zoom) const
 {
-    if (!visible || text.isEmpty())
+    renderInternal(painter, zoom, false);
+}
+
+void TextBoxObject::renderWithTextSuppressed(QPainter& painter,
+                                             qreal zoom) const
+{
+    renderInternal(painter, zoom, true);
+}
+
+void TextBoxObject::renderInternal(QPainter& painter, qreal zoom,
+                                   bool suppressText) const
+{
+    if (!visible)
         return;
 
     QRectF targetRect(
@@ -551,6 +563,11 @@ void TextBoxObject::render(QPainter& painter, qreal zoom) const
         painter.setPen(QPen(borderColor, 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawRect(targetRect);
+    }
+
+    if (suppressText || text.isEmpty()) {
+        painter.restore();
+        return;
     }
 
     if (usesCurrentLayout()) {

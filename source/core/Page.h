@@ -399,7 +399,9 @@ public:
      */
     void renderObjectsWithAffinity(QPainter& painter, qreal zoom, int affinity, 
                                     bool layerVisible = true,
-                                    const QSet<QString>* excludeIds = nullptr) const;
+                                    const QSet<QString>* excludeIds = nullptr,
+                                    const QString& suppressTextObjectId =
+                                        QString()) const;
     
     // ===== OCR Invalidation =====
     

@@ -798,6 +798,7 @@ private:
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
     QMetaObject::Connection m_textEditorConn;          // Phase 2B: For openTextEditorRequested
+    QMetaObject::Connection m_textBoxLayoutConn;       // Text-box commit → search invalidation
     
     // Pan tool hold (H key spring-loaded activation)
     bool m_panHoldActive = false;

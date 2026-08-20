@@ -64,6 +64,8 @@ class TextBoxObject : public InsertedObject {
 public:
     static constexpr int CURRENT_TEXT_LAYOUT_VERSION = 1;
     static constexpr qreal DEFAULT_BASE_FONT_SIZE = 16.0;
+    static constexpr qreal DEFAULT_CREATION_WIDTH = 220.0;
+    static constexpr qreal MINIMUM_WIDTH = 40.0;
     static constexpr qreal CONTENT_PADDING = 6.0;
     static constexpr qreal LEGACY_SCREEN_PADDING = 2.0;
 
@@ -80,6 +82,7 @@ public:
     ~TextBoxObject() override;
 
     void render(QPainter& painter, qreal zoom) const override;
+    void renderWithTextSuppressed(QPainter& painter, qreal zoom) const;
     QString type() const override { return QStringLiteral("textbox"); }
     QJsonObject toJson() const override;
     void loadFromJson(const QJsonObject& obj) override;
@@ -112,6 +115,8 @@ public:
     void invalidateDocCache() const { invalidateLayoutCache(); }
 
 protected:
+    void renderInternal(QPainter& painter, qreal zoom,
+                        bool suppressText) const;
     mutable std::unique_ptr<TextBoxLayoutResult> m_cachedLayout;
     mutable TextBoxLayoutInput m_cachedLayoutInput;
     mutable bool m_hasCachedLayoutInput = false;

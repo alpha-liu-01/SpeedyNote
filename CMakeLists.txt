@@ -877,6 +877,7 @@ set(UI_SOURCES
     source/ui/subtoolbars/OcrSubToolbar.cpp
     # Panels
     source/ui/panels/FloatingTextEditor.cpp
+    source/ui/panels/InlineTextBoxEditor.cpp
     # Action bars
     source/ui/actionbars/ActionBar.cpp
     source/ui/actionbars/ActionBarContainer.cpp
