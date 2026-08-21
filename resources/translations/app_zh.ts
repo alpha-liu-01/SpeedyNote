@@ -84,7 +84,7 @@
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="98"/>
         <source>Notebook Package (.snbx)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">笔记本压缩包 (.snbx)</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/BatchExportDialog.cpp" line="107"/>
@@ -1819,74 +1819,99 @@ This helps prevent accidental palm touches while writing. Only affects Y-Axis On
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="1375"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1376"/>
         <source>Target page not found.</source>
         <translation type="unfinished">找不到目标页。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2553"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="9328"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="9641"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2554"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="9440"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="9753"/>
         <source>Text box cannot grow beyond the page</source>
         <translation type="unfinished">文本框不能放大到页面外。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2973"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2974"/>
         <source>No document loaded</source>
         <translation type="unfinished">没有加载文档</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7868"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3644"/>
+        <source>Cut</source>
+        <translation type="unfinished">剪切</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3651"/>
+        <source>Copy</source>
+        <translation type="unfinished">复制</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3656"/>
+        <source>Paste</source>
+        <translation type="unfinished">粘贴</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3665"/>
+        <source>Edit Text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3674"/>
+        <source>Delete</source>
+        <translation type="unfinished">删除</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7965"/>
         <source>Insert Image</source>
         <translation type="unfinished">插入图片</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7870"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7967"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation type="unfinished">图片  (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;全部文件 (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8337"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8434"/>
         <source>Not enough room on this page to convert this text</source>
         <translation type="unfinished">在此页面上没有足够的空间来容纳这些文本。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10120"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10232"/>
         <source>Add Position Link</source>
         <translation type="unfinished">添加位置链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10121"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10233"/>
         <source>Add URL Link</source>
         <translation type="unfinished">添加URL链接</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10122"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10234"/>
         <source>Add Markdown Note</source>
         <translation type="unfinished">添加Markdown笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10132"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10244"/>
         <source>Add URL</source>
         <translation type="unfinished">添加URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10132"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10244"/>
         <source>Enter URL:</source>
         <translation type="unfinished">输入URL：</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10270"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10382"/>
         <source>Cannot create note: please save the document first.</source>
         <translation type="unfinished">无法创建笔记：请先保存文档。</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10281"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10393"/>
         <source>Untitled Note</source>
         <translation type="unfinished">无标题笔记</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10289"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10401"/>
         <source>Failed to create note file. Check disk space and permissions.</source>
         <translation type="unfinished">创建笔记文件失败：请先检查磁盘空间和权限。</translation>
     </message>
@@ -4166,57 +4191,57 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="36"/>
         <source>Available</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">可用</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="38"/>
         <source>Available (relative copy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">可用（相对副本）</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="40"/>
         <source>Available (embedded copy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">可用（嵌入副本）</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="42"/>
         <source>Embedded copy is incomplete</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">嵌入副本不完整</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="44"/>
         <source>Different file found</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">找到不同的文件</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="46"/>
         <source>Unreadable or damaged</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">不可读或损坏</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="49"/>
         <source>Missing</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">丢失</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="59"/>
         <source>PDF Sources</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">PDF 源</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="65"/>
         <source>PDF-backed pages keep a reference to the file they came from. Locate unavailable sources to restore their page backgrounds.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">有PDF背景的页面存了它们对应的文件是哪来的信息。找到不可用的源来恢复它们的页面背景。</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="74"/>
         <source>Source</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">源</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="74"/>
         <source>Status</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">状态</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="74"/>
@@ -4226,17 +4251,17 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="74"/>
         <source>Location</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">位置</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="85"/>
         <source>Locate...</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">浏览...</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="86"/>
         <source>Retry</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">重试</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="87"/>
@@ -4246,12 +4271,12 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="88"/>
         <source>Locate Folder...</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">浏览文件夹...</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="147"/>
         <source>%1 of %2 unavailable</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">%2个中的%1个不可用</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="148"/>
@@ -4261,7 +4286,7 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="191"/>
         <source>Locate PDF Source</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">浏览PDF源...</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="192"/>
@@ -4271,27 +4296,27 @@ Double-click or double-tap to jump to a page</source>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="220"/>
         <source>PDF Source Not Matched</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">PDF源对不上</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="221"/>
         <source>The selected PDF is damaged or does not match the original source. No document links were changed.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">选中的PDF已损坏或者和原本的PDF对不上。没有文件链接被修改。</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="255"/>
         <source>Locate PDF Sources</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">浏览PDF源</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="290"/>
         <source>PDF Source Search</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">搜索PDF源</translation>
     </message>
     <message>
         <location filename="../../source/ui/dialogs/PdfSourcesDialog.cpp" line="291"/>
         <source>Repaired %1 PDF source(s).</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">已修复%1个PDF源</translation>
     </message>
 </context>
 <context>

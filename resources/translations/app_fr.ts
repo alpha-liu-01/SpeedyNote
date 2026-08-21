@@ -1985,74 +1985,99 @@ Cela permet d&apos;éviter les contacts accidentels de la paume lors de l&apos;�
 <context>
     <name>DocumentViewport</name>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="1375"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="1376"/>
         <source>Target page not found.</source>
         <translation>Page cible introuvable.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2553"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="9328"/>
-        <location filename="../../source/core/DocumentViewport.cpp" line="9641"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2554"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="9440"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="9753"/>
         <source>Text box cannot grow beyond the page</source>
         <translation>La zone de texte ne peut pas dépasser la page</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="2973"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="2974"/>
         <source>No document loaded</source>
         <translation>Aucun document chargé</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7868"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3644"/>
+        <source>Cut</source>
+        <translation type="unfinished">Couper</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3651"/>
+        <source>Copy</source>
+        <translation type="unfinished">Copier</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3656"/>
+        <source>Paste</source>
+        <translation type="unfinished">Coller</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3665"/>
+        <source>Edit Text</source>
+        <translation>Modifier le texte</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="3674"/>
+        <source>Delete</source>
+        <translation type="unfinished">Supprimer</translation>
+    </message>
+    <message>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7965"/>
         <source>Insert Image</source>
         <translation>Insérer une image</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="7870"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="7967"/>
         <source>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All Files (*)</source>
         <translation>Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;Tous les fichiers (*)</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="8337"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="8434"/>
         <source>Not enough room on this page to convert this text</source>
         <translation>Pas assez d&apos;espace sur cette page pour convertir ce texte</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10120"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10232"/>
         <source>Add Position Link</source>
         <translation>Ajouter un lien de position</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10121"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10233"/>
         <source>Add URL Link</source>
         <translation>Ajouter un lien URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10122"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10234"/>
         <source>Add Markdown Note</source>
         <translation>Ajouter une note Markdown</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10132"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10244"/>
         <source>Add URL</source>
         <translation>Ajouter une URL</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10132"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10244"/>
         <source>Enter URL:</source>
         <translation>Saisir l&apos;URL :</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10270"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10382"/>
         <source>Cannot create note: please save the document first.</source>
         <translation>Impossible de créer la note : veuillez d&apos;abord enregistrer le document.</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10281"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10393"/>
         <source>Untitled Note</source>
         <translation>Note sans titre</translation>
     </message>
     <message>
-        <location filename="../../source/core/DocumentViewport.cpp" line="10289"/>
+        <location filename="../../source/core/DocumentViewport.cpp" line="10401"/>
         <source>Failed to create note file. Check disk space and permissions.</source>
         <translation>Échec de la création du fichier de note. Vérifiez l&apos;espace disque et les autorisations.</translation>
     </message>
