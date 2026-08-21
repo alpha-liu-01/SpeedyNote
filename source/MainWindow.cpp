@@ -34,8 +34,7 @@
 #include "ocr/OcrWorker.h"            // OCR background worker
 #include "objects/OcrTextObject.h"     // OCR text objects (Phase 1D)
 #include "ui/subtoolbars/OcrSubToolbar.h"  // OCR subtoolbar
-#include "ui/panels/FloatingTextEditor.h"  // Phase 2B: Floating text editor
-#include "objects/TextBoxObject.h"         // Phase 2B: TextBoxObject for editor
+#include "objects/TextBoxObject.h"
 #include <QMetaObject>                 // OCR queued invocations
 #include "ui/dialogs/BatchExportDialog.h"
 #include "pdf/MuPdfExporter.h"                 // Phase 8: PDF export engine
@@ -1220,13 +1219,11 @@ void MainWindow::setupUi() {
     });
     connect(m_toolbar, &Toolbar::undoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            closeFloatingTextEditor();
             vp->undo();
         }
     });
     connect(m_toolbar, &Toolbar::redoClicked, this, [this]() {
         if (DocumentViewport* vp = currentViewport()) {
-            closeFloatingTextEditor();
             vp->redo();
         }
     });
@@ -1493,7 +1490,6 @@ void MainWindow::wireQActionDispatchers()
                     return;
                 }
             }
-            w->closeFloatingTextEditor();
             vp->undo();
         }
     });
@@ -1512,7 +1508,6 @@ void MainWindow::wireQActionDispatchers()
                     return;
                 }
             }
-            w->closeFloatingTextEditor();
             vp->redo();
         }
     });
@@ -1534,7 +1529,6 @@ void MainWindow::wireQActionDispatchers()
                     return;
                 }
             }
-            w->closeFloatingTextEditor();
             vp->redo();
         }
     });
@@ -2210,10 +2204,6 @@ void MainWindow::setupManagedShortcuts()
                 hidePdfSearchBar();
                 return;
             }
-            if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-                m_floatingTextEditor->closeEditor();
-                return;
-            }
             if (DocumentViewport* vp = currentViewport()) {
                 if (vp->handleEscapeKey()) return;
             }
@@ -2470,9 +2460,9 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         disconnect(m_strokesChangedConn);
         m_strokesChangedConn = {};
     }
-    if (m_textEditorConn) {
-        disconnect(m_textEditorConn);
-        m_textEditorConn = {};
+    if (m_ocrConvertConn) {
+        disconnect(m_ocrConvertConn);
+        m_ocrConvertConn = {};
     }
     if (m_textBoxLayoutConn) {
         disconnect(m_textBoxLayoutConn);
@@ -2483,9 +2473,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
     // prevents two viewport-owned editors from mutating the same object.
     if (m_connectedViewport && m_connectedViewport != viewport)
         m_connectedViewport->commitInlineTextEdit();
-
-    // Close floating text editor when switching viewports (target may belong to old viewport)
-    closeFloatingTextEditor();
 
     // Remove event filter from previous viewport (QPointer auto-nulls if deleted)
     if (m_connectedViewport) {
@@ -2668,13 +2655,6 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
             bool hasSelection = !viewport->selectedObjects().isEmpty();
             m_actionBarContainer->onObjectSelectionChanged(hasSelection);
         }
-        // Phase 2B: Close floating editor if target was deselected/deleted
-        if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-            auto* tgt = m_floatingTextEditor->target();
-            if (tgt && !viewport->selectedObjects().contains(tgt)) {
-                m_floatingTextEditor->closeEditor();
-            }
-        }
     });
     
     // Text selection changed (shows/hides TextSelectionActionBar)
@@ -2701,9 +2681,8 @@ void MainWindow::connectViewportScrollSignals(DocumentViewport* viewport) {
         else clearToolOverride(true);
     });
 
-    // Phase 2B: Floating text editor
-    m_textEditorConn = connect(viewport, &DocumentViewport::openTextEditorRequested,
-                               this, &MainWindow::openFloatingTextEditor);
+    m_ocrConvertConn = connect(viewport, &DocumentViewport::convertOcrTextRequested,
+                               this, &MainWindow::convertOcrTextToTextBox);
     m_textBoxLayoutConn = connect(
         viewport, &DocumentViewport::textBoxLayoutCommitted,
         this, [this, viewport]() {
@@ -5424,11 +5403,6 @@ void MainWindow::updateTheme() {
         setOcrTextVisibility(true);
     }
 
-    // Phase 2B: Sync floating text editor theme
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        m_floatingTextEditor->setDarkMode(darkMode);
-    }
-
     // Sync thumbnail renderer dark mode state (respect the current document's
     // PDF inversion override).
     if (m_pagePanel) {
@@ -6064,6 +6038,14 @@ void MainWindow::setupActionBars()
         vp->pushOcrLockUndo(QVector<QString>{ocr->id}, newState);
         m_objectSelectActionBar->updateOcrLockSelection(true, newState);
         vp->update();
+    });
+    connect(m_objectSelectActionBar,
+            &ObjectSelectActionBar::ocrConvertToTextBoxRequested, this, [this]() {
+        DocumentViewport* vp = currentViewport();
+        if (!vp) return;
+        const auto& sel = vp->selectedObjects();
+        if (sel.size() != 1) return;
+        convertOcrTextToTextBox(sel.first());
     });
 
     if (DocumentViewport* vp = currentViewport()) {
@@ -6970,10 +6952,21 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
     }
     if (!page || !doc) return;
 
-    page->ocrTextBlocks = blocks;
+    // A scan that started before the user deleted or converted a block still
+    // reports that block, because the worker filtered its stroke list before
+    // the suppression was recorded. Drop those results so they cannot come
+    // back through the sidecar, search, or the object overlay.
+    QVector<OcrTextBlock> acceptedBlocks;
+    acceptedBlocks.reserve(blocks.size());
+    for (const auto& block : blocks) {
+        if (!isOcrBlockFullySuppressed(block, page->suppressedStrokeIds))
+            acceptedBlocks.append(block);
+    }
+
+    page->ocrTextBlocks = acceptedBlocks;
     page->ocrDirty = false;
 
-    syncOcrTextObjects(page, blocks);
+    syncOcrTextObjects(page, acceptedBlocks);
 
     // Invalidate the Highlighter's OCR-block cache on any viewport currently
     // showing this document, so a new drag will see the refreshed OCR data.
@@ -6998,7 +6991,7 @@ void MainWindow::onOcrResultsReady(const QString& pageId, const QVector<OcrTextB
         doc->savePageOcr(localId, page);
 
     int wordCount = 0;
-    for (const auto& b : blocks)
+    for (const auto& b : acceptedBlocks)
         if (!b.text.isEmpty()) ++wordCount;
 
     m_toolbar->ocrSubToolbar()->setStatusText(
@@ -7068,17 +7061,6 @@ QVector<VectorStroke> MainWindow::collectPageStrokes(const Page* page) const
 void MainWindow::syncOcrTextObjects(Page* page, const QVector<OcrTextBlock>& blocks)
 {
     if (!page) return;
-
-    // Close floating editor if its target is an unlocked OCR text on this page
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        if (auto* tgt = m_floatingTextEditor->target()) {
-            if (tgt->type() == QLatin1String("ocr_text") && page->objectById(tgt->id)) {
-                auto* ocrTgt = static_cast<OcrTextObject*>(tgt);
-                if (!ocrTgt->ocrLocked)
-                    m_floatingTextEditor->closeEditor();
-            }
-        }
-    }
 
     // Collect locked stroke IDs to suppress, and remove only unlocked OCR objects
     QSet<QString> suppressedStrokeIds;
@@ -7551,132 +7533,36 @@ void MainWindow::applyDocumentOcrLanguage(Document* doc, const QString& lang)
 }
 
 // =========================================================================
-// Phase 2B: Floating Text Editor
+// OCR text conversion
 // =========================================================================
 
-void MainWindow::openFloatingTextEditor(InsertedObject* obj)
+void MainWindow::convertOcrTextToTextBox(InsertedObject* obj)
 {
-    auto* textBox = dynamic_cast<TextBoxObject*>(obj);
-    if (!textBox) return;
-
-    auto* ocrObj = dynamic_cast<OcrTextObject*>(textBox);
-    // User-created text boxes are edited by their owning viewport. This
-    // MainWindow-owned panel remains only as the stage-3 OCR fallback.
+    auto* ocrObj = dynamic_cast<OcrTextObject*>(obj);
     if (!ocrObj)
         return;
 
-    // If target is an unlocked OcrTextObject, ask user to lock before editing
-    if (ocrObj && !ocrObj->ocrLocked) {
-        auto result = QMessageBox::question(this, tr("Lock OCR Text"),
-            tr("Lock this OCR text? It will no longer be updated by automatic scanning.\n\nProceed to lock and edit?"),
-            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-        if (result != QMessageBox::Yes) return;
-        ocrObj->ocrLocked = true;
-        if (DocumentViewport* vp = currentViewport())
-            vp->pushOcrLockUndo(QVector<QString>{ocrObj->id}, true);
-    }
+    QPointer<DocumentViewport> viewport = currentViewport();
+    if (!viewport)
+        return;
+    const QString objectId = ocrObj->id;
 
-    // Close existing session first (pushes undo if changed)
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        m_floatingTextEditor->closeEditor();
-    }
+    auto result = QMessageBox::question(this, tr("Convert OCR Text"),
+        tr("Convert this recognized text into an editable text box?\n\n"
+           "The recognized block is removed and its ink is excluded from "
+           "future scans."),
+        QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (result != QMessageBox::Yes || !viewport)
+        return;
 
-    // Lazy creation
-    if (!m_floatingTextEditor) {
-        m_floatingTextEditor = new FloatingTextEditor(this);
-        connect(m_floatingTextEditor, &FloatingTextEditor::repaintRequested,
-                this, [this]() {
-            if (DocumentViewport* vp = currentViewport())
-                vp->update();
-        });
-        connect(m_floatingTextEditor, &FloatingTextEditor::editorClosed,
-                this, [this](const QString& objectId,
-                             const QString& oldText, const QString& newText,
-                             int oldAlign, int newAlign,
-                             int oldOpacity, int newOpacity,
-                             const QColor& oldFontColor, const QColor& newFontColor) {
-            DocumentViewport* vp = currentViewport();
-            if (!vp) return;
-            InsertedObject* obj = nullptr;
-            if (Document* doc = vp->document()) {
-                if (doc->isEdgeless()) {
-                    for (const auto& coord : doc->allLoadedTileCoords()) {
-                        Page* tile = doc->getTile(coord.first, coord.second);
-                        if (tile) { obj = tile->objectById(objectId); if (obj) break; }
-                    }
-                } else {
-                    for (int i = 0; i < doc->pageCount(); ++i) {
-                        Page* page = doc->page(i);
-                        if (page) { obj = page->objectById(objectId); if (obj) break; }
-                    }
-                }
-            }
-            if (obj) {
-                vp->pushObjectTextEditUndo(obj, oldText, newText,
-                                           oldAlign, newAlign,
-                                           oldOpacity, newOpacity,
-                                           oldFontColor, newFontColor);
-            }
-        });
-    }
+    // The dialog ran an event loop, so an OCR rescan may have replaced the
+    // object in the meantime; resolve it again instead of trusting obj.
+    auto* target =
+        dynamic_cast<OcrTextObject*>(viewport->objectById(objectId));
+    if (!target)
+        return;
 
-    m_floatingTextEditor->setDarkMode(isDarkMode());
-    m_floatingTextEditor->setTarget(textBox);
-
-    // Position near the text box
-    if (DocumentViewport* vp = currentViewport()) {
-        QPointF docPos = textBox->position;
-
-        if (Document* doc = vp->document()) {
-            if (doc->isEdgeless()) {
-                for (const auto& coord : doc->allLoadedTileCoords()) {
-                    Page* tile = doc->getTile(coord.first, coord.second);
-                    if (tile && tile->objectById(textBox->id)) {
-                        docPos = QPointF(coord.first * Document::EDGELESS_TILE_SIZE,
-                                         coord.second * Document::EDGELESS_TILE_SIZE)
-                                 + textBox->position;
-                        break;
-                    }
-                }
-            } else {
-                for (int i = 0; i < doc->pageCount(); ++i) {
-                    Page* page = doc->page(i);
-                    if (page && page->objectById(textBox->id)) {
-                        docPos = vp->pageToDocument(i, textBox->position);
-                        break;
-                    }
-                }
-            }
-        }
-
-        QPointF vpPt = vp->documentToViewport(docPos);
-        QPoint globalPt = vp->mapToGlobal(vpPt.toPoint());
-        QPoint localPt = mapFromGlobal(globalPt);
-
-        int editorW = m_floatingTextEditor->width();
-        int editorH = m_floatingTextEditor->height();
-
-        // Place to the right of the object, or fall back to below
-        int x = localPt.x() + static_cast<int>(textBox->size.width() * vp->zoomLevel()) + 10;
-        int y = localPt.y();
-
-        if (x + editorW > width())
-            x = qMax(0, localPt.x() - editorW - 10);
-        if (y + editorH > height())
-            y = qMax(0, height() - editorH);
-
-        m_floatingTextEditor->move(x, y);
-    }
-
-    m_floatingTextEditor->show();
-    m_floatingTextEditor->raise();
-}
-
-void MainWindow::closeFloatingTextEditor()
-{
-    if (m_floatingTextEditor && m_floatingTextEditor->isVisible()) {
-        m_floatingTextEditor->closeEditor();
-    }
+    viewport->convertOcrTextToTextBox(target, true);
 }
 
 // =========================================================================

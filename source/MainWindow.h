@@ -64,8 +64,6 @@ class OcrWorker;
 class OcrSubToolbar;
 struct OcrSnapParams;
 
-// Phase 2B: Floating Text Editor
-class FloatingTextEditor;
 #include "ocr/OcrTextBlock.h"
 
 // Action Bar includes
@@ -667,9 +665,6 @@ private:
     std::set<std::pair<int,int>> m_ocrTempLoadedTiles;
     Document* m_ocrTempLoadedDoc = nullptr;
     
-    // Phase 2B: Floating Text Editor
-    FloatingTextEditor* m_floatingTextEditor = nullptr;
-    
     // Page Panel: Task 5.3: Pending delete state for undo support
     int m_pendingDeletePageIndex = -1;
     
@@ -797,7 +792,7 @@ private:
     QMetaObject::Connection m_linkObjectListConn;     // M.7.3: For linkObjectListMayHaveChanged
     QMetaObject::Connection m_pdfSourcesConn;
     QMetaObject::Connection m_strokesChangedConn;      // OCR: For strokesChanged → debounce
-    QMetaObject::Connection m_textEditorConn;          // Phase 2B: For openTextEditorRequested
+    QMetaObject::Connection m_ocrConvertConn;          // For convertOcrTextRequested
     QMetaObject::Connection m_textBoxLayoutConn;       // Text-box commit → search invalidation
     
     // Pan tool hold (H key spring-loaded activation)
@@ -859,9 +854,9 @@ private:
     QString resolveOcrLanguage(Document* doc) const;
     OcrSnapParams buildOcrSnapParams(Document* doc, Page* page) const;
     
-    // Phase 2B: Floating Text Editor
-    void openFloatingTextEditor(InsertedObject* obj);
-    void closeFloatingTextEditor();
+    /// Confirms with the user, then asks the viewport to replace a recognized
+    /// OCR block with an editable text box.
+    void convertOcrTextToTextBox(InsertedObject* obj);
     
     // Responsive toolbar management - REMOVED MW4.3: All layout functions and variables removed
     

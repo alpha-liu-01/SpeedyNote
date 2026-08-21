@@ -39,6 +39,7 @@ enum class TouchGestureMode {
 class QContextMenuEvent;
 class ImageObject;
 class InlineTextBoxEditor;
+class OcrTextObject;
 class TextBoxFormatBar;
 
 // ============================================================================
@@ -73,6 +74,7 @@ struct UndoAction {
         ObjectResize,
         ObjectTextEdit,
         OcrLockChange,
+        OcrConvertToTextBox,    ///< One OCR block replaced by an editable text box
 
         // ===== Page-structure types (Plan A2) =====
         PageDelete,             ///< One or more whole pages removed; undo restores them
@@ -149,23 +151,26 @@ struct UndoAction {
     qreal objectNewRotation = 0.0;
     bool objectOldAspectLock = true;
     bool objectNewAspectLock = true;
+    /// ObjectResize only carries a text-box state when the object is one;
+    /// ObjectTextEdit always does.
     bool objectHasTextBoxState = false;
     TextBoxState objectOldTextBoxState;
     TextBoxState objectNewTextBoxState;
 
-    // ObjectTextEdit fields
-    QString objectOldText;
-    QString objectNewText;
-    int objectOldTextAlignment = 0;
-    int objectNewTextAlignment = 0;
-    int objectOldBgAlpha = 180;
-    int objectNewBgAlpha = 180;
-    QColor objectOldFontColor = QColor(60, 60, 60);
-    QColor objectNewFontColor = QColor(60, 60, 60);
-
     // OcrLockChange fields
     QVector<QString> ocrLockObjectIds;
     bool ocrLockNewState = false;
+
+    // ===== OcrConvertToTextBox fields =====
+    // objectData holds the produced text box, objectId its (fresh) id, and the
+    // container fields locate both objects. Everything below restores the OCR
+    // side of the conversion, including the derived-cache state that lives in
+    // the .ocr.json sidecar rather than in page JSON.
+    QJsonObject ocrSourceObjectData;                 ///< OcrTextObject::toJson snapshot
+    QJsonObject ocrSourceBlock;                      ///< Removed OcrTextBlock, when one existed
+    bool ocrSourceBlockValid = false;
+    int ocrSourceBlockIndex = -1;                    ///< Position the block occupied
+    QVector<QString> ocrSuppressedStrokeIdsAdded;    ///< Only the newly suppressed ids
 };
 
 #include <QWidget>
@@ -766,12 +771,6 @@ public:
                               bool oldAspectLock = true,
                               const TextBoxState* oldTextBoxState = nullptr);
     void pushObjectAffinityUndo(InsertedObject* obj, int oldAffinity);
-    void pushObjectTextEditUndo(InsertedObject* obj,
-                                const QString& oldText, const QString& newText,
-                                int oldAlignment, int newAlignment,
-                                int oldOpacity, int newOpacity,
-                                const QColor& oldFontColor = QColor(60, 60, 60),
-                                const QColor& newFontColor = QColor(60, 60, 60));
     void pushObjectTextEditUndo(
         TextBoxObject* obj, const TextBoxState& oldState,
         const TextBoxState& newState, int pageIndex,
@@ -796,6 +795,15 @@ public:
      * @return Pointer to the Page, or nullptr if not found.
      */
     Page* findPageContainingObject(InsertedObject* obj, Document::TileCoord* outTileCoord = nullptr);
+
+    /**
+     * @brief Look up an object by id across the loaded pages/tiles.
+     * @return The object, or nullptr when it no longer exists.
+     *
+     * Callers that let an event loop run (a modal dialog, for instance) must
+     * re-resolve their target this way instead of holding a raw pointer.
+     */
+    InsertedObject* objectById(const QString& objectId) const;
 
     /**
      * @brief Mark the page/tile that contains @p link as dirty AND refresh
@@ -1349,6 +1357,23 @@ public:
      * creates undo entries, marks pages dirty, and clears selection.
      */
     void deleteSelectedObjects();
+
+    /**
+     * @brief Replace a recognized OCR block with an editable user text box.
+     *
+     * OCR objects are derived from ink and cannot be edited. Conversion hands
+     * the recognized text to a normal current-version TextBoxObject, removes
+     * the OCR object and its sidecar block, and suppresses the source strokes
+     * so a later scan does not recreate a duplicate block. The whole exchange
+     * is one undo action.
+     *
+     * @param ocr The OCR object to convert; may be locked or unlocked.
+     * @param startEditing Start an inline edit session on the new text box.
+     * @return True when the conversion happened. A paged conversion that
+     *         cannot fit its reflowed height on the page is rejected and
+     *         leaves the OCR object untouched.
+     */
+    bool convertOcrTextToTextBox(OcrTextObject* ocr, bool startEditing = true);
     
     /**
      * @brief Copy selected objects to internal clipboard.
@@ -1454,6 +1479,19 @@ public:
             newBox = false;
         }
     };
+
+    /**
+     * @brief Find the page/tile holding @p objectId in the current document.
+     *
+     * Object ids are stable while raw pointers are not, so conversion, undo,
+     * and redo each re-resolve their container instead of caching one.
+     */
+    Page* locateObjectContainer(const QString& objectId, int& pageIndex,
+                                Document::TileCoord& tileCoord) const;
+    void applyOcrConversion(const UndoAction& action);
+    void revertOcrConversion(const UndoAction& action);
+    void persistOcrSidecar(Page* container, int pageIndex,
+                           Document::TileCoord tileCoord);
 
     void startInlineTextEdit(TextBoxObject* textBox, bool newBox);
     TextBoxObject* resolveInlineTextBox() const;
@@ -2220,7 +2258,13 @@ signals:
 
     void requestPdfSources();
 
-    void openTextEditorRequested(InsertedObject* obj);
+    /**
+     * @brief A recognized OCR block was double-clicked to be made editable.
+     *
+     * The viewport does not own dialogs, so MainWindow confirms the exchange
+     * before calling convertOcrTextToTextBox().
+     */
+    void convertOcrTextRequested(InsertedObject* obj);
     
 protected:
     // ===== Qt Event Overrides =====

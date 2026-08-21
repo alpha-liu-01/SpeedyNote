@@ -15,7 +15,7 @@
 #include "../objects/ImageObject.h"
 #include "../objects/LinkObject.h"  // Phase C.2.3: For cloneWithBackLink
 #include "../objects/OcrTextObject.h"  // Phase 1D: OCR text object deletion
-#include "../objects/TextBoxObject.h"  // Phase 2B: text edit undo
+#include "../objects/TextBoxObject.h"
 #include "../ui/banners/MissingPdfBanner.h"  // Phase R.3: Missing PDF notification
 #include "../ui/panels/InlineTextBoxEditor.h"
 #include "../ui/panels/TextBoxFormatBar.h"
@@ -6713,7 +6713,7 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         }
     }
 
-    // Double-click detection for text editing (Phase 2B)
+    // Double-click: edit a user text box, or offer to convert OCR text
     static QElapsedTimer lastObjClickTimer;
     static QPointF lastObjClickPos;
     static int objClickCount = 0;
@@ -6742,7 +6742,11 @@ void DocumentViewport::handlePointerPress_ObjectSelect(const PointerEvent& pe)
         }
         if (t == QLatin1String("ocr_text")) {
             cancelObjectPointerGesture();
-            emit openTextEditorRequested(hitObject);
+            if (!m_selectedObjects.contains(hitObject)) {
+                deselectAllObjects();
+                selectObject(hitObject, false);
+            }
+            emit convertOcrTextRequested(hitObject);
             return;
         }
     }
@@ -8060,6 +8064,282 @@ void DocumentViewport::deleteSelectedObjects()
     #ifdef SPEEDYNOTE_DEBUG
     qDebug() << "deleteSelectedObjects: Deleted" << deletedCount << "regular +" << ocrDeletedCount << "OCR objects";
     #endif
+}
+
+// ===== OCR to text box conversion =====
+
+Page* DocumentViewport::locateObjectContainer(
+    const QString& objectId, int& pageIndex,
+    Document::TileCoord& tileCoord) const
+{
+    pageIndex = -1;
+    tileCoord = {0, 0};
+    if (!m_document || objectId.isEmpty())
+        return nullptr;
+
+    if (m_document->isEdgeless()) {
+        for (const auto& coord : m_document->allLoadedTileCoords()) {
+            Page* tile = m_document->getTile(coord.first, coord.second);
+            if (tile && tile->objectById(objectId)) {
+                tileCoord = coord;
+                return tile;
+            }
+        }
+        return nullptr;
+    }
+
+    Page* current = m_document->page(m_currentPageIndex);
+    if (current && current->objectById(objectId)) {
+        pageIndex = m_currentPageIndex;
+        return current;
+    }
+    for (int i : m_document->loadedPageIndices()) {
+        Page* page = m_document->page(i);
+        if (page && page->objectById(objectId)) {
+            pageIndex = i;
+            return page;
+        }
+    }
+    return nullptr;
+}
+
+InsertedObject* DocumentViewport::objectById(const QString& objectId) const
+{
+    int pageIndex = -1;
+    Document::TileCoord tileCoord = {0, 0};
+    Page* container = locateObjectContainer(objectId, pageIndex, tileCoord);
+    return container ? container->objectById(objectId) : nullptr;
+}
+
+void DocumentViewport::persistOcrSidecar(Page* container, int pageIndex,
+                                         Document::TileCoord tileCoord)
+{
+    if (!m_document || !container)
+        return;
+
+    if (m_document->isEdgeless()) {
+        m_document->markTileDirty(tileCoord);
+        m_document->saveTileOcr(tileCoord);
+    } else {
+        if (pageIndex >= 0)
+            m_document->markPageDirty(pageIndex);
+        m_document->savePageOcr(container->uuid, container);
+    }
+    invalidateOcrBlockCache(pageIndex);
+}
+
+void DocumentViewport::applyOcrConversion(const UndoAction& action)
+{
+    if (!m_document)
+        return;
+
+    // The container may have been evicted since the action was recorded, so
+    // reload it the way the other object undo paths do.
+    Page* container = m_document->isEdgeless()
+        ? m_document->getOrCreateTile(action.objectTileCoord.first,
+                                      action.objectTileCoord.second)
+        : m_document->page(action.objectPageIndex);
+    if (!container)
+        return;
+
+    const QString ocrId =
+        action.ocrSourceObjectData.value(QStringLiteral("id")).toString();
+
+    for (const auto& strokeId : action.ocrSuppressedStrokeIdsAdded)
+        container->suppressedStrokeIds.insert(strokeId);
+
+    for (int i = container->ocrTextBlocks.size() - 1; i >= 0; --i) {
+        if (container->ocrTextBlocks[i].id == ocrId) {
+            container->ocrTextBlocks.removeAt(i);
+            break;
+        }
+    }
+
+    if (!ocrId.isEmpty()) {
+        deselectObjectById(ocrId);
+        container->removeObject(ocrId);
+    }
+
+    auto textBox = InsertedObject::fromJson(action.objectData);
+    if (textBox) {
+        m_document->updateMaxObjectExtent(textBox.get());
+        container->addObject(std::move(textBox));
+    }
+
+    m_document->recalculateMaxObjectExtent();
+    persistOcrSidecar(container, action.objectPageIndex,
+                      action.objectTileCoord);
+}
+
+void DocumentViewport::revertOcrConversion(const UndoAction& action)
+{
+    if (!m_document)
+        return;
+
+    Page* container = m_document->isEdgeless()
+        ? m_document->getOrCreateTile(action.objectTileCoord.first,
+                                      action.objectTileCoord.second)
+        : m_document->page(action.objectPageIndex);
+    if (!container)
+        return;
+
+    deselectObjectById(action.objectId);
+    container->removeObject(action.objectId);
+
+    // Only the ids this conversion added: a stroke suppressed by an earlier
+    // OCR deletion must stay suppressed.
+    for (const auto& strokeId : action.ocrSuppressedStrokeIdsAdded)
+        container->suppressedStrokeIds.remove(strokeId);
+
+    if (action.ocrSourceBlockValid) {
+        const int index = qBound(0, action.ocrSourceBlockIndex,
+                                 container->ocrTextBlocks.size());
+        container->ocrTextBlocks.insert(
+            index, OcrTextBlock::fromJson(action.ocrSourceBlock));
+    }
+
+    auto ocrObject = InsertedObject::fromJson(action.ocrSourceObjectData);
+    if (auto* restored = dynamic_cast<OcrTextObject*>(ocrObject.get())) {
+        restored->showConfidence = action.ocrSourceObjectData
+            .value(QStringLiteral("uiShowConfidence")).toBool(false);
+        restored->ocrSnapEnabled = action.ocrSourceObjectData
+            .value(QStringLiteral("uiSnapEnabled")).toBool(false);
+        restored->ocrCjkGridMode = action.ocrSourceObjectData
+            .value(QStringLiteral("uiCjkGridMode")).toBool(false);
+        restored->ocrGridSpacing = action.ocrSourceObjectData
+            .value(QStringLiteral("uiGridSpacing")).toInt(32);
+    }
+    if (ocrObject) {
+        m_document->updateMaxObjectExtent(ocrObject.get());
+        container->addObject(std::move(ocrObject));
+    }
+
+    m_document->recalculateMaxObjectExtent();
+    persistOcrSidecar(container, action.objectPageIndex,
+                      action.objectTileCoord);
+}
+
+bool DocumentViewport::convertOcrTextToTextBox(OcrTextObject* ocr,
+                                               bool startEditing)
+{
+    if (!ocr || !m_document)
+        return false;
+
+    int pageIndex = -1;
+    Document::TileCoord tileCoord = {0, 0};
+    Page* container = locateObjectContainer(ocr->id, pageIndex, tileCoord);
+    if (!container)
+        return false;
+
+    closeTextBoxFormatPopups(true);
+    finishTextBoxFormatInteraction(true);
+    if (m_inlineEditSession.active)
+        commitInlineTextEdit();
+
+    // Build the replacement first: a paged conversion whose reflowed height
+    // does not fit must leave the OCR block and its sidecar untouched.
+    TextBoxObject textBox;
+    textBox.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    textBox.position = ocr->position;
+    textBox.rotation = ocr->rotation;
+    textBox.setLayerAffinity(ocr->getLayerAffinity());
+    textBox.zOrder = getNextZOrderForAffinity(container,
+                                              ocr->getLayerAffinity());
+    textBox.visible = true;
+    textBox.text = ocr->text;
+    textBox.fontFamily = ocr->fontFamily;
+    textBox.fontColor = ocr->fontColor;
+    textBox.backgroundColor = ocr->backgroundColor;
+    textBox.alignment = ocr->alignment;
+    textBox.showBorder = ocr->showBorder;
+    textBox.fontSize = ocr->estimateBaseFontSize();
+    textBox.textLayoutVersion = TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION;
+
+    qreal width = qMax(ocr->size.width(), TextBoxObject::MINIMUM_WIDTH);
+    if (!m_document->isEdgeless() && pageIndex >= 0) {
+        const qreal pageWidth =
+            qMax<qreal>(1.0, m_document->pageSizeAt(pageIndex).width());
+        width = qMin(width, pageWidth);
+    }
+    textBox.size = QSizeF(width, 1.0);
+    textBox.reflowToWidth(width);
+
+    const QRectF ocrBounds = objectBoundsInViewport(ocr);
+    if (!m_document->isEdgeless() && pageIndex >= 0) {
+        const QSizeF pageSize = m_document->pageSizeAt(pageIndex);
+        textBox.position = clampObjectPositionToPage(
+            pageIndex, textBox.position, textBox.size);
+        const QRectF bounds(textBox.position, textBox.size);
+        if (bounds.bottom() > pageSize.height() + 0.01
+            || bounds.right() > pageSize.width() + 0.01) {
+            showObjectGeometryFeedback(
+                tr("Not enough room on this page to convert this text"),
+                ocrBounds);
+            return false;
+        }
+    }
+
+    UndoAction action;
+    action.type = UndoAction::OcrConvertToTextBox;
+    action.objectPageIndex = pageIndex;
+    action.objectTileCoord = tileCoord;
+    action.objectId = textBox.id;
+    action.objectData = textBox.toJson();
+    action.ocrSourceObjectData = ocr->toJson();
+    // Display-only flags are driven by the OCR toolbar and are deliberately
+    // absent from the persisted OCR schema, so carry them in the snapshot.
+    action.ocrSourceObjectData[QStringLiteral("uiShowConfidence")] =
+        ocr->showConfidence;
+    action.ocrSourceObjectData[QStringLiteral("uiSnapEnabled")] =
+        ocr->ocrSnapEnabled;
+    action.ocrSourceObjectData[QStringLiteral("uiCjkGridMode")] =
+        ocr->ocrCjkGridMode;
+    action.ocrSourceObjectData[QStringLiteral("uiGridSpacing")] =
+        ocr->ocrGridSpacing;
+
+    for (int i = 0; i < container->ocrTextBlocks.size(); ++i) {
+        if (container->ocrTextBlocks[i].id == ocr->id) {
+            action.ocrSourceBlock = container->ocrTextBlocks[i].toJson();
+            action.ocrSourceBlockValid = true;
+            action.ocrSourceBlockIndex = i;
+            break;
+        }
+    }
+    for (const auto& strokeId : ocr->sourceStrokeIds) {
+        if (!container->suppressedStrokeIds.contains(strokeId))
+            action.ocrSuppressedStrokeIdsAdded.append(strokeId);
+    }
+
+    // Without stroke ids there is nothing to suppress, so only the removed
+    // block keeps a rescan from recreating this text.
+    const bool nothingSuppressed = ocr->sourceStrokeIds.isEmpty();
+
+    applyOcrConversion(action);
+    pushUndoAction(action);
+
+    InsertedObject* created = container->objectById(action.objectId);
+    deselectAllObjects();
+    if (created)
+        selectObject(created, false);
+
+    if (!m_document->isEdgeless() && pageIndex >= 0) {
+        m_pendingThumbnailPages.insert(pageIndex);
+        emit pageModified(pageIndex);
+    }
+    emit documentModified();
+    emit textBoxLayoutCommitted();
+    update();
+
+    if (nothingSuppressed) {
+        showObjectGeometryFeedback(
+            tr("Converted. This block has no source strokes, "
+               "so a rescan may recognize the ink again."),
+            ocrBounds);
+    }
+
+    if (startEditing && created)
+        startInlineTextEdit(static_cast<TextBoxObject*>(created), false);
+    return true;
 }
 
 void DocumentViewport::copySelectedObjects()
@@ -15040,10 +15320,15 @@ void DocumentViewport::undo()
                            action.type == UndoAction::ObjectAffinityChange ||
                            action.type == UndoAction::ObjectResize ||
                            action.type == UndoAction::ObjectTextEdit ||
-                           action.type == UndoAction::OcrLockChange);
+                           action.type == UndoAction::OcrLockChange ||
+                           action.type == UndoAction::OcrConvertToTextBox);
 
     if (isObjectAction) {
         switch (action.type) {
+            case UndoAction::OcrConvertToTextBox: {
+                revertOcrConversion(action);
+                break;
+            }
             case UndoAction::ObjectInsert: {
                 deselectObjectById(action.objectId);
                 Page* c = getObjContainer(m_document, action, false);
@@ -15209,8 +15494,7 @@ void DocumentViewport::undo()
                 break;
             }
             case UndoAction::ObjectTextEdit: {
-                if (action.objectHasTextBoxState
-                    && m_document->isEdgeless()
+                if (m_document->isEdgeless()
                     && action.objectOldTile != action.objectNewTile) {
                     Page* source = m_document->getTile(
                         action.objectNewTile.first,
@@ -15254,20 +15538,8 @@ void DocumentViewport::undo()
                             c->objectById(action.objectId);
                         if (auto* tbox =
                                 dynamic_cast<TextBoxObject*>(obj)) {
-                            if (action.objectHasTextBoxState) {
-                                tbox->applyState(
-                                    action.objectOldTextBoxState);
-                            } else {
-                                tbox->text = action.objectOldText;
-                                tbox->alignment =
-                                    static_cast<TextAlignment>(
-                                        action.objectOldTextAlignment);
-                                tbox->backgroundColor.setAlpha(
-                                    action.objectOldBgAlpha);
-                                tbox->fontColor =
-                                    action.objectOldFontColor;
-                                tbox->invalidateDocCache();
-                            }
+                            tbox->applyState(
+                                action.objectOldTextBoxState);
                         }
                         markObjDirty(m_document, action);
                     }
@@ -15411,9 +15683,10 @@ void DocumentViewport::undo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    if ((action.type == UndoAction::ObjectResize
-         || action.type == UndoAction::ObjectTextEdit)
-        && action.objectHasTextBoxState) {
+    if (((action.type == UndoAction::ObjectResize
+          || action.type == UndoAction::ObjectTextEdit)
+         && action.objectHasTextBoxState)
+        || action.type == UndoAction::OcrConvertToTextBox) {
         emit textBoxLayoutCommitted();
     }
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
@@ -15492,10 +15765,15 @@ void DocumentViewport::redo()
                            action.type == UndoAction::ObjectAffinityChange ||
                            action.type == UndoAction::ObjectResize ||
                            action.type == UndoAction::ObjectTextEdit ||
-                           action.type == UndoAction::OcrLockChange);
+                           action.type == UndoAction::OcrLockChange ||
+                           action.type == UndoAction::OcrConvertToTextBox);
 
     if (isObjectAction) {
         switch (action.type) {
+            case UndoAction::OcrConvertToTextBox: {
+                applyOcrConversion(action);
+                break;
+            }
             case UndoAction::ObjectInsert: {
                 Page* c = getObjContainer(m_document, action, true);
                 if (c) {
@@ -15664,8 +15942,7 @@ void DocumentViewport::redo()
                 break;
             }
             case UndoAction::ObjectTextEdit: {
-                if (action.objectHasTextBoxState
-                    && m_document->isEdgeless()
+                if (m_document->isEdgeless()
                     && action.objectOldTile != action.objectNewTile) {
                     Page* source = m_document->getTile(
                         action.objectOldTile.first,
@@ -15709,20 +15986,8 @@ void DocumentViewport::redo()
                             c->objectById(action.objectId);
                         if (auto* tbox =
                                 dynamic_cast<TextBoxObject*>(obj)) {
-                            if (action.objectHasTextBoxState) {
-                                tbox->applyState(
-                                    action.objectNewTextBoxState);
-                            } else {
-                                tbox->text = action.objectNewText;
-                                tbox->alignment =
-                                    static_cast<TextAlignment>(
-                                        action.objectNewTextAlignment);
-                                tbox->backgroundColor.setAlpha(
-                                    action.objectNewBgAlpha);
-                                tbox->fontColor =
-                                    action.objectNewFontColor;
-                                tbox->invalidateDocCache();
-                            }
+                            tbox->applyState(
+                                action.objectNewTextBoxState);
                         }
                         markObjDirty(m_document, action);
                     }
@@ -15866,9 +16131,10 @@ void DocumentViewport::redo()
     emit undoAvailableChanged(canUndo());
     emit redoAvailableChanged(canRedo());
     emit documentModified();
-    if ((action.type == UndoAction::ObjectResize
-         || action.type == UndoAction::ObjectTextEdit)
-        && action.objectHasTextBoxState) {
+    if (((action.type == UndoAction::ObjectResize
+          || action.type == UndoAction::ObjectTextEdit)
+         && action.objectHasTextBoxState)
+        || action.type == UndoAction::OcrConvertToTextBox) {
         emit textBoxLayoutCommitted();
     }
     if (action.type == UndoAction::ObjectInsert || action.type == UndoAction::ObjectDelete) {
@@ -16086,46 +16352,6 @@ void DocumentViewport::pushObjectTextEditUndo(
     action.objectNewTile = newTile;
     action.objectTileCoord = newTile;
     pushUndoAction(action);
-}
-
-void DocumentViewport::pushObjectTextEditUndo(
-    InsertedObject* obj, const QString& oldText, const QString& newText,
-    int oldAlign, int newAlign, int oldAlpha, int newAlpha,
-    const QColor& oldFontColor, const QColor& newFontColor)
-{
-    if (!obj) return;
-
-    UndoAction action;
-    action.type = UndoAction::ObjectTextEdit;
-    action.objectId = obj->id;
-    action.objectData = obj->toJson();
-    action.objectOldText = oldText;
-    action.objectNewText = newText;
-    action.objectOldTextAlignment = oldAlign;
-    action.objectNewTextAlignment = newAlign;
-    action.objectOldBgAlpha = oldAlpha;
-    action.objectNewBgAlpha = newAlpha;
-    action.objectOldFontColor = oldFontColor;
-    action.objectNewFontColor = newFontColor;
-    if (m_document && m_document->isEdgeless()) {
-        for (const auto& coord : m_document->allLoadedTileCoords()) {
-            Page* tile = m_document->getTile(coord.first, coord.second);
-            if (tile && tile->objectById(obj->id)) {
-                action.objectTileCoord = coord;
-                break;
-            }
-        }
-    } else if (m_document) {
-        for (int i = 0; i < m_document->pageCount(); ++i) {
-            Page* page = m_document->page(i);
-            if (page && page->objectById(obj->id)) {
-                action.objectPageIndex = i;
-                break;
-            }
-        }
-    }
-    pushUndoAction(action);
-    emit documentModified();
 }
 
 void DocumentViewport::pushOcrLockUndo(const QVector<QString>& objectIds, bool newState)

@@ -455,6 +455,37 @@ std::unique_ptr<OcrTextObject> OcrTextObject::createFromBlock(
     return obj;
 }
 
+qreal OcrTextObject::estimateBaseFontSize() const
+{
+    // Same 0.75 glyph-height factor the run-merging renderer applies.
+    constexpr qreal kGlyphHeightFactor = 0.75;
+    constexpr qreal kMinimumSize = 8.0;
+    constexpr qreal kMaximumSize = 96.0;
+
+    QVector<qreal> heights;
+    heights.reserve(wordSegments.size());
+    for (const auto& segment : wordSegments) {
+        if (segment.boundingRect.height() > 0.0)
+            heights.append(segment.boundingRect.height());
+    }
+
+    qreal reference = 0.0;
+    if (!heights.isEmpty()) {
+        std::sort(heights.begin(), heights.end());
+        reference = heights[heights.size() / 2];
+    } else if (size.height() > 0.0) {
+        reference = size.height();
+    }
+
+    if (reference <= 0.0)
+        return DEFAULT_BASE_FONT_SIZE;
+
+    const qreal estimated = qBound(kMinimumSize,
+                                   reference * kGlyphHeightFactor,
+                                   kMaximumSize);
+    return std::round(estimated * 2.0) / 2.0;
+}
+
 QColor OcrTextObject::dominantStrokeColor(const Page* page,
                                           const QVector<QString>& strokeIds)
 {

@@ -25,6 +25,9 @@
 #include <QColorDialog>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QDoubleSpinBox>
 #include <QFontComboBox>
 #include <QMouseEvent>
@@ -2221,6 +2224,298 @@ public:
         return true;
     }
     
+    static bool testOcrTextBoxConversion() {
+        printf("  testOcrTextBoxConversion... ");
+
+        auto fail = [](const char* message) {
+            printf("FAILED: %s\n", message);
+            return false;
+        };
+
+        auto firstTextBox = [](Page* page) -> TextBoxObject* {
+            for (const auto& object : page->objects) {
+                if (object && object->type() == QLatin1String("textbox"))
+                    return static_cast<TextBoxObject*>(object.get());
+            }
+            return nullptr;
+        };
+
+        auto makeBlock = [](const QString& text, const QRectF& rect,
+                            const QVector<QString>& strokeIds) {
+            OcrTextBlock block = OcrTextBlock::create();
+            block.text = text;
+            block.boundingRect = rect;
+            block.confidence = 0.9f;
+            block.engineId = QStringLiteral("test-engine");
+            block.sourceStrokeIds = strokeIds;
+            OcrTextBlock::WordSegment segment;
+            segment.text = text;
+            segment.boundingRect = rect;
+            block.wordSegments = {segment};
+            return block;
+        };
+
+        // The suppression predicate is shared with the OCR result handler and
+        // with load-time materialization, so check its contract directly.
+        {
+            QSet<QString> suppressed{QStringLiteral("s1"),
+                                     QStringLiteral("s2")};
+            OcrTextBlock all = makeBlock(QStringLiteral("all"),
+                                         QRectF(0, 0, 10, 10),
+                                         {QStringLiteral("s1"),
+                                          QStringLiteral("s2")});
+            OcrTextBlock partial = makeBlock(QStringLiteral("partial"),
+                                             QRectF(0, 0, 10, 10),
+                                             {QStringLiteral("s1"),
+                                              QStringLiteral("s3")});
+            OcrTextBlock none = makeBlock(QStringLiteral("none"),
+                                          QRectF(0, 0, 10, 10), {});
+            if (!isOcrBlockFullySuppressed(all, suppressed)
+                || isOcrBlockFullySuppressed(partial, suppressed)
+                || isOcrBlockFullySuppressed(none, suppressed)
+                || isOcrBlockFullySuppressed(all, QSet<QString>())) {
+                return fail("suppressed-block predicate was wrong");
+            }
+        }
+
+        QTemporaryDir bundle;
+        if (!bundle.isValid())
+            return fail("could not create temporary bundle");
+
+        auto doc = Document::createNew("OCR conversion");
+        doc->setBundlePath(bundle.path());
+        DocumentViewport viewport;
+        viewport.resize(900, 700);
+        viewport.setDocument(doc.get());
+        viewport.setCurrentTool(ToolType::ObjectSelect);
+        Page* page = doc->page(0);
+        if (!page)
+            return fail("missing conversion test page");
+
+        const OcrTextBlock neighbour = makeBlock(
+            QStringLiteral("Neighbour"), QRectF(60.0, 320.0, 120.0, 30.0),
+            {QStringLiteral("s9")});
+        const OcrTextBlock block = makeBlock(
+            QStringLiteral("Recognized ink"), QRectF(60.0, 90.0, 200.0, 40.0),
+            {QStringLiteral("s1"), QStringLiteral("s2")});
+        page->ocrTextBlocks = {neighbour, block};
+        // Pretend an earlier deletion already suppressed one of the strokes.
+        page->suppressedStrokeIds.insert(QStringLiteral("s1"));
+
+        auto ocrObject = OcrTextObject::createFromBlock(
+            block, QColor(20, 40, 60), false);
+        ocrObject->visible = true;
+        ocrObject->ocrLocked = true;
+        ocrObject->showConfidence = true;
+        ocrObject->ocrGridSpacing = 48;
+        OcrTextObject* ocr = ocrObject.get();
+        const QString ocrId = ocr->id;
+        const QColor ocrColor = ocr->fontColor;
+        const qreal expectedFontSize = ocr->estimateBaseFontSize();
+        if (expectedFontSize <= 0.0 || expectedFontSize > 96.0)
+            return fail("estimated OCR base font size was out of range");
+        page->addObject(std::move(ocrObject));
+        viewport.selectObject(ocr, false);
+
+        if (!viewport.convertOcrTextToTextBox(ocr, false))
+            return fail("locked OCR conversion was rejected");
+
+        TextBoxObject* converted = firstTextBox(page);
+        if (!converted)
+            return fail("conversion produced no text box");
+        const QString textBoxId = converted->id;
+        if (textBoxId == ocrId)
+            return fail("converted box reused the OCR block id");
+        if (page->objectById(ocrId))
+            return fail("source OCR object survived conversion");
+        if (converted->text != block.text
+            || converted->fontColor != ocrColor
+            || !converted->visible
+            || converted->fontSize != expectedFontSize
+            || converted->textLayoutVersion
+                != TextBoxObject::CURRENT_TEXT_LAYOUT_VERSION)
+            return fail("converted box lost text or base style");
+        if (qAbs(converted->size.height()
+                 - converted->normalizedSizeForWidth(
+                       converted->size.width()).height()) > 0.01)
+            return fail("converted box height was not normalized");
+        if (!page->suppressedStrokeIds.contains(QStringLiteral("s1"))
+            || !page->suppressedStrokeIds.contains(QStringLiteral("s2")))
+            return fail("conversion did not suppress the source strokes");
+        if (page->ocrTextBlocks.size() != 1
+            || page->ocrTextBlocks.first().id != neighbour.id)
+            return fail("conversion removed the wrong OCR block");
+        if (viewport.m_undoStack.isEmpty()
+            || viewport.m_undoStack.top().type
+                != UndoAction::OcrConvertToTextBox)
+            return fail("conversion did not push one atomic undo action");
+        if (viewport.m_selectedObjects.size() != 1
+            || viewport.m_selectedObjects.first() != converted)
+            return fail("conversion did not select the new text box");
+
+        {
+            QFile sidecar(bundle.path() + "/pages/" + page->uuid
+                          + ".ocr.json");
+            if (!sidecar.open(QIODevice::ReadOnly))
+                return fail("conversion did not write the OCR sidecar");
+            const QJsonObject root =
+                QJsonDocument::fromJson(sidecar.readAll()).object();
+            const QJsonArray savedBlocks =
+                root.value(QStringLiteral("blocks")).toArray();
+            QStringList savedSuppressed;
+            for (const auto& value :
+                 root.value(QStringLiteral("suppressedStrokeIds")).toArray()) {
+                savedSuppressed.append(value.toString());
+            }
+            if (savedBlocks.size() != 1
+                || !savedSuppressed.contains(QStringLiteral("s1"))
+                || !savedSuppressed.contains(QStringLiteral("s2")))
+                return fail("sidecar did not record the conversion");
+        }
+
+        viewport.undo();
+        auto* restored = dynamic_cast<OcrTextObject*>(page->objectById(ocrId));
+        if (!restored)
+            return fail("undo did not restore the OCR object");
+        if (!restored->ocrLocked || !restored->showConfidence
+            || restored->ocrGridSpacing != 48
+            || restored->wordSegments.size() != 1
+            || restored->sourceStrokeIds.size() != 2)
+            return fail("undo lost OCR object state");
+        if (page->objectById(textBoxId))
+            return fail("undo left the converted text box behind");
+        if (!page->suppressedStrokeIds.contains(QStringLiteral("s1")))
+            return fail("undo un-suppressed a previously suppressed stroke");
+        if (page->suppressedStrokeIds.contains(QStringLiteral("s2")))
+            return fail("undo kept the conversion's suppression");
+        if (page->ocrTextBlocks.size() != 2
+            || page->ocrTextBlocks[1].id != block.id
+            || page->ocrTextBlocks[1].text != block.text)
+            return fail("undo did not restore the block at its index");
+
+        viewport.redo();
+        TextBoxObject* redone = firstTextBox(page);
+        if (!redone || redone->id != textBoxId)
+            return fail("redo did not reproduce the same text box id");
+        if (page->objectById(ocrId)
+            || page->ocrTextBlocks.size() != 1
+            || !page->suppressedStrokeIds.contains(QStringLiteral("s2")))
+            return fail("redo left stale OCR state behind");
+        page->removeObject(textBoxId);
+        viewport.m_selectedObjects.clear();
+        viewport.m_undoStack.clear();
+        viewport.m_redoStack.clear();
+
+        // A block with no source strokes can still be converted; there is
+        // simply nothing to suppress.
+        auto orphanObject = OcrTextObject::createFromBlock(
+            makeBlock(QStringLiteral("Orphan"),
+                      QRectF(60.0, 400.0, 140.0, 30.0), {}),
+            QColor(10, 10, 10), false);
+        orphanObject->visible = true;
+        OcrTextObject* orphan = orphanObject.get();
+        const QString orphanId = orphan->id;
+        const int suppressedBefore = page->suppressedStrokeIds.size();
+        page->addObject(std::move(orphanObject));
+        if (!viewport.convertOcrTextToTextBox(orphan, false))
+            return fail("conversion without stroke ids was rejected");
+        if (page->objectById(orphanId)
+            || page->suppressedStrokeIds.size() != suppressedBefore)
+            return fail("stroke-less conversion changed suppression");
+        viewport.undo();
+        if (!page->objectById(orphanId))
+            return fail("undo did not restore the stroke-less OCR object");
+        page->removeObject(orphanId);
+        viewport.m_undoStack.clear();
+        viewport.m_redoStack.clear();
+
+        // A block whose reflow cannot fit the page is rejected outright.
+        QString longText = QStringLiteral("overflow");
+        for (int i = 0; i < 60; ++i)
+            longText += QStringLiteral(" overflow");
+        const OcrTextBlock tallBlock = makeBlock(
+            longText, QRectF(40.0, page->size.height() - 60.0, 60.0, 60.0),
+            {QStringLiteral("s5")});
+        page->ocrTextBlocks.append(tallBlock);
+        auto tallObject = OcrTextObject::createFromBlock(
+            tallBlock, QColor(0, 0, 0), false);
+        OcrTextObject* tall = tallObject.get();
+        const QString tallId = tall->id;
+        const int blocksBefore = page->ocrTextBlocks.size();
+        page->addObject(std::move(tallObject));
+        if (viewport.convertOcrTextToTextBox(tall, false))
+            return fail("overflowing conversion was accepted");
+        if (!page->objectById(tallId)
+            || page->ocrTextBlocks.size() != blocksBefore
+            || page->suppressedStrokeIds.contains(QStringLiteral("s5"))
+            || !viewport.m_undoStack.isEmpty())
+            return fail("rejected conversion still mutated the page");
+        page->removeObject(tallId);
+        page->ocrTextBlocks.removeLast();
+
+        // Conversion started from a double-click also opens the editor.
+        auto editObject = OcrTextObject::createFromBlock(
+            makeBlock(QStringLiteral("Editable"),
+                      QRectF(60.0, 200.0, 160.0, 32.0),
+                      {QStringLiteral("s7")}),
+            QColor(0, 0, 0), false);
+        editObject->visible = true;
+        OcrTextObject* editable = editObject.get();
+        page->addObject(std::move(editObject));
+        if (!viewport.convertOcrTextToTextBox(editable, true))
+            return fail("conversion with editing was rejected");
+        TextBoxObject* editedBox = viewport.resolveInlineTextBox();
+        if (!viewport.hasActiveInlineTextEdit() || !editedBox
+            || editedBox->text != QStringLiteral("Editable"))
+            return fail("conversion did not start inline editing");
+        if (!viewport.m_textBoxFormatBar
+            || viewport.m_textBoxFormatBar->isHidden())
+            return fail("converted box did not get the format bar");
+        viewport.cancelInlineTextEdit();
+
+        // Edgeless conversion keeps the object on its owning tile.
+        auto edgeless = Document::createNew(
+            "OCR edgeless", Document::Mode::Edgeless);
+        DocumentViewport edgeViewport;
+        edgeViewport.resize(900, 700);
+        edgeViewport.setDocument(edgeless.get());
+        edgeViewport.setCurrentTool(ToolType::ObjectSelect);
+        Page* tile = edgeless->getOrCreateTile(1, 2);
+        if (!tile)
+            return fail("could not create conversion tile");
+        const OcrTextBlock tileBlock = makeBlock(
+            QStringLiteral("Tile ink"), QRectF(30.0, 40.0, 150.0, 30.0),
+            {QStringLiteral("t1")});
+        tile->ocrTextBlocks = {tileBlock};
+        auto tileObject = OcrTextObject::createFromBlock(
+            tileBlock, QColor(0, 0, 0), false);
+        tileObject->visible = true;
+        OcrTextObject* tileOcr = tileObject.get();
+        const QString tileOcrId = tileOcr->id;
+        tile->addObject(std::move(tileObject));
+        if (!edgeViewport.convertOcrTextToTextBox(tileOcr, false))
+            return fail("edgeless conversion was rejected");
+        TextBoxObject* tileBox = firstTextBox(tile);
+        if (!tileBox || tile->objectById(tileOcrId)
+            || !tile->ocrTextBlocks.isEmpty()
+            || !tile->suppressedStrokeIds.contains(QStringLiteral("t1")))
+            return fail("edgeless conversion left stale tile state");
+        if (edgeViewport.m_undoStack.isEmpty()
+            || edgeViewport.m_undoStack.top().objectTileCoord
+                != Document::TileCoord(1, 2))
+            return fail("edgeless conversion recorded the wrong tile");
+        edgeViewport.undo();
+        if (!tile->objectById(tileOcrId)
+            || tile->ocrTextBlocks.size() != 1
+            || tile->suppressedStrokeIds.contains(QStringLiteral("t1")))
+            return fail("edgeless undo did not restore the OCR block");
+
+        viewport.setDocument(nullptr);
+        edgeViewport.setDocument(nullptr);
+        printf("PASSED\n");
+        return true;
+    }
+
     // ===== Run All Unit Tests =====
     
     static bool runUnitTests() {
@@ -2259,6 +2554,8 @@ public:
                 "testInlineTextBoxEditing");
         runTest(testTextBoxFormattingBar,
                 "testTextBoxFormattingBar");
+        runTest(testOcrTextBoxConversion,
+                "testOcrTextBoxConversion");
         
         printf("\n=== Results: %d passed, %d failed ===\n\n", passed, failed);
         // The caller goes on to open a window and block in the event loop, so

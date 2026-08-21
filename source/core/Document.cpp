@@ -5718,6 +5718,11 @@ void Document::materializeOcrTextObjects(Page* page) const
         if (block.dirty || block.text.isEmpty())
             continue;
 
+        // A sidecar written before a block was dismissed can still hold it;
+        // its strokes are suppressed, so it must not become an overlay again.
+        if (isOcrBlockFullySuppressed(block, page->suppressedStrokeIds))
+            continue;
+
         // Skip blocks whose strokes are claimed by locked objects
         bool suppressed = false;
         if (!lockedStrokeIds.isEmpty()) {

@@ -365,10 +365,54 @@ inline bool testChromeAndSuppressedTextRendering()
     return ok;
 }
 
+inline bool testOcrBaseFontEstimation()
+{
+    bool ok = true;
+
+    auto segment = [](qreal height) {
+        OcrTextBlock::WordSegment seg;
+        seg.text = QStringLiteral("word");
+        seg.boundingRect = QRectF(0.0, 0.0, 40.0, height);
+        return seg;
+    };
+
+    // Median segment height wins over outliers, scaled the way the OCR
+    // renderer scales glyphs and rounded to a half point.
+    OcrTextObject multi;
+    multi.size = QSizeF(200.0, 200.0);
+    multi.wordSegments = {segment(20.0), segment(24.0), segment(120.0)};
+    ok &= require(qAbs(multi.estimateBaseFontSize() - 18.0) < 0.001,
+                  "multi-segment OCR font estimate ignored the median");
+
+    // A single line without segment geometry falls back to the block height.
+    OcrTextObject singleLine;
+    singleLine.size = QSizeF(180.0, 40.0);
+    ok &= require(qAbs(singleLine.estimateBaseFontSize() - 30.0) < 0.001,
+                  "single-line OCR font estimate ignored block height");
+
+    // Extremes are clamped into a usable editing range.
+    OcrTextObject tiny;
+    tiny.size = QSizeF(20.0, 2.0);
+    OcrTextObject huge;
+    huge.size = QSizeF(400.0, 400.0);
+    ok &= require(qAbs(tiny.estimateBaseFontSize() - 8.0) < 0.001
+                      && qAbs(huge.estimateBaseFontSize() - 96.0) < 0.001,
+                  "OCR font estimate was not clamped");
+
+    // Nothing to measure: keep the standard text box size.
+    OcrTextObject empty;
+    empty.size = QSizeF(0.0, 0.0);
+    ok &= require(qAbs(empty.estimateBaseFontSize()
+                       - TextBoxObject::DEFAULT_BASE_FONT_SIZE) < 0.001,
+                  "empty OCR geometry did not fall back to the default size");
+    return ok;
+}
+
 inline bool runAllTests()
 {
     qDebug() << "=== TextBoxObject tests ===";
     bool ok = true;
+    ok &= testOcrBaseFontEstimation();
     ok &= testPersistenceAndOcrIsolation();
     ok &= testLayoutMeasurementAndCache();
     ok &= testLegacyUpgradeAndState();

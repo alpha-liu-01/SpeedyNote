@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include <QMetaType>
+#include <QSet>
 #include <QString>
 #include <QVector>
 #include <QRectF>
@@ -158,6 +159,26 @@ struct OcrTextBlock {
         return block;
     }
 };
+
+/**
+ * @brief Whether every stroke behind @p block has been suppressed.
+ *
+ * A scan started before the user deleted or converted a block still carries
+ * that block in its results, because the worker filtered its stroke list
+ * before the suppression was recorded. Materializing it again would resurrect
+ * the block the user just dismissed. A block that only partially overlaps the
+ * suppressed set still describes live ink, so it is kept.
+ */
+inline bool isOcrBlockFullySuppressed(const OcrTextBlock& block,
+                                      const QSet<QString>& suppressedStrokeIds) {
+    if (block.sourceStrokeIds.isEmpty() || suppressedStrokeIds.isEmpty())
+        return false;
+    for (const auto& strokeId : block.sourceStrokeIds) {
+        if (!suppressedStrokeIds.contains(strokeId))
+            return false;
+    }
+    return true;
+}
 
 /**
  * @brief Flatten per-character geometry into a @p text-length rect array.
